@@ -1,0 +1,85 @@
+{
+  // Sketch, not a final schema.
+  "SessionState": {
+    "sessionId": "uuid",
+    "gameBuild": "steam-15194255",
+    "modHash": "sha256",
+    "worldId": 0,
+    "roomId": 0,
+    "spawnProgram": { "map": 0, "btl": 0, "evt": 0 },
+    "storyHash": "sha256",
+    "actors": [
+      { "actorId": 0, "slotType": "PLAYER", "ownerPeerId": "peer-a", "archetype": "Sora" },
+      { "actorId": 1, "slotType": "FRIEND_1", "ownerPeerId": "peer-b", "archetype": "Roxas" },
+      { "actorId": 2, "slotType": "FRIEND_2", "ownerPeerId": "peer-c", "archetype": "Riku" }
+    ]
+  },
+  "ClientToHost": {
+    "InputFrame": {
+      "seq": 0,
+      "clientTimeMs": 0,
+      "ownedActorId": 1,
+      "leftStick": { "x": 0.0, "y": 0.0 },
+      "rightStick": { "x": 0.0, "y": 0.0 },
+      "buttons": {
+        "attack": false,
+        "jump": false,
+        "guard": false,
+        "dodge": false,
+        "lockOn": false,
+        "magic1": false,
+        "magic2": false,
+        "special1": false,
+        "special2": false
+      },
+      "targetRequest": null
+    },
+    "Heartbeat": {
+      "rttSampleMs": 0,
+      "lastAckedSnapshot": 0
+    },
+    "TransitionAck": {
+      "transitionId": 0,
+      "ready": true
+    }
+  },
+  "HostToClient": {
+    "ActorSnapshot": {
+      "snapshotId": 0,
+      "actorId": 1,
+      "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
+      "rotationY": 0.0,
+      "velocity": { "x": 0.0, "y": 0.0, "z": 0.0 },
+      "motionId": 0,
+      "actionState": "Idle",
+      "comboStep": 0,
+      "hp": 100,
+      "mp": 100,
+      "drive": 0,
+      "targetEnemyNetId": null,
+      "flags": {
+        "airborne": false,
+        "invuln": false,
+        "staggered": false,
+        "downed": false
+      }
+    },
+    "EnemySnapshot": {
+      "snapshotId": 0,
+      "enemyNetId": 0,
+      "objectId": 0,
+      "spawnGroupId": 0,
+      "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
+      "rotationY": 0.0,
+      "motionId": 0,
+      "aiState": "Idle",
+      "hp": 100,
+      "targetActorId": 0,
+      "alive": true
+    },
+    "Event": {
+      "type": "SpawnGroup",
+      "payload": {}
+    }
+  }
+}
