@@ -96,7 +96,6 @@ private:
     // Peer helpers
     PeerState* findPeer(_ENetPeer* peer);
     PeerState* findPeerById(const std::string& peerId);
-    SlotType nextFreeSlot() const;
     bool isSlotTaken(SlotType slot) const;
     void removePeer(_ENetPeer* peer);
 
