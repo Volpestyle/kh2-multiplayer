@@ -149,16 +149,16 @@ bool GameBridgePC::writeMem(std::uint64_t, T) { return false; }
 
 std::uint64_t GameBridgePC::actorBase(SlotType slot) const {
     using namespace offsets;
-    auto tableBase = readPtr(ACTOR_TABLE_PTR);
-    if (tableBase == 0) return 0;
-    return tableBase + static_cast<std::uint64_t>(slot) * ACTOR_STRIDE;
+    // Unit slot data is at a static address, not behind a pointer.
+    return SLOT0_BASE + static_cast<std::uint64_t>(slot) * SLOT_STRIDE;
 }
 
 std::uint64_t GameBridgePC::enemyBase(std::uint32_t index) const {
     using namespace offsets;
-    auto listBase = readPtr(ENEMY_LIST_PTR);
+    if (enemy::LIST_PTR == 0) return 0;
+    auto listBase = readPtr(enemy::LIST_PTR);
     if (listBase == 0) return 0;
-    return listBase + static_cast<std::uint64_t>(index) * ENEMY_STRIDE;
+    return listBase + static_cast<std::uint64_t>(index) * enemy::STRIDE;
 }
 
 // ==========================================================================
@@ -176,10 +176,10 @@ RoomState GameBridgePC::ReadRoomState() const {
     rs.battleProgram = static_cast<std::uint32_t>(readMem<std::uint16_t>(BATTLE_PROGRAM));
     rs.eventProgram = static_cast<std::uint32_t>(readMem<std::uint16_t>(EVENT_PROGRAM));
 
-    if (IN_TRANSITION != 0)
-        rs.inTransition = readU8(IN_TRANSITION) != 0;
-    if (IN_CUTSCENE != 0)
-        rs.inCutscene = readU8(IN_CUTSCENE) != 0;
+    // Transition/cutscene: use cutscene timer as a proxy.
+    // A non-zero cutscene timer means a cutscene is playing.
+    if (CUTSCENE_TIMER != 0)
+        rs.inCutscene = readU32(CUTSCENE_TIMER) != 0;
 
     return rs;
 }
