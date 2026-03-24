@@ -55,17 +55,27 @@ add_executable(kh2coop_server
 target_link_libraries(kh2coop_server PRIVATE kh2coop_server_core)
 
 # ---------------------------------------------------------------------------
-# kh2coop_runtime_scaffold — placeholder for the injected runtime.
+# kh2coop_runtime — runtime library (GameBridgePC + controllers).
+# Compiles on all platforms; Windows-only code is behind #ifdef _WIN32.
+# ---------------------------------------------------------------------------
+add_library(kh2coop_runtime
+    runtime/src/GameBridgePC.cpp
+)
+
+target_include_directories(kh2coop_runtime PUBLIC
+    runtime/include
+)
+
+target_link_libraries(kh2coop_runtime PUBLIC kh2coop_common)
+
+# ---------------------------------------------------------------------------
+# kh2coop_runtime_scaffold — placeholder entry point for the runtime.
 # ---------------------------------------------------------------------------
 add_executable(kh2coop_runtime_scaffold
     runtime/src/RuntimeMain.cpp
 )
 
-target_include_directories(kh2coop_runtime_scaffold PRIVATE
-    runtime/include
-)
-
-target_link_libraries(kh2coop_runtime_scaffold PRIVATE kh2coop_common)
+target_link_libraries(kh2coop_runtime_scaffold PRIVATE kh2coop_runtime)
 
 # ---------------------------------------------------------------------------
 # kh2coop_fake_sim — end-to-end test: 3 fake clients + server, no KH2.
