@@ -40,7 +40,7 @@ class NetworkClient {
 public:
     NetworkClient(const std::string& hostAddress, std::uint16_t port,
                   const std::string& gameBuild, const std::string& modHash,
-                  const std::string& peerId,
+                  const std::string& peerId, SlotType requestedSlot,
                   ClientCallbacks callbacks = {});
     ~NetworkClient();
 
@@ -77,6 +77,7 @@ private:
     std::string gameBuild_;
     std::string modHash_;
     std::string peerId_;
+    SlotType requestedSlot_;
     ClientCallbacks callbacks_;
 
     _ENetHost* enetHost_{nullptr};

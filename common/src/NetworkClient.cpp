@@ -12,12 +12,14 @@ NetworkClient::NetworkClient(const std::string& hostAddress, std::uint16_t port,
                              const std::string& gameBuild,
                              const std::string& modHash,
                              const std::string& peerId,
+                             SlotType requestedSlot,
                              ClientCallbacks callbacks)
     : hostAddress_(hostAddress),
       port_(port),
       gameBuild_(gameBuild),
       modHash_(modHash),
       peerId_(peerId),
+      requestedSlot_(requestedSlot),
       callbacks_(std::move(callbacks)) {}
 
 NetworkClient::~NetworkClient() { disconnect(); }
@@ -130,10 +132,16 @@ void NetworkClient::onConnect() {
     log("Connected to host. Sending version handshake...");
 
     // Send a SessionState as the version handshake.
+    // Include one actor entry to declare the requested slot.
     SessionState handshake;
     handshake.sessionId = peerId_;
     handshake.gameBuild = gameBuild_;
     handshake.modHash = modHash_;
+    SessionActor self;
+    self.actorId = static_cast<std::uint32_t>(requestedSlot_);
+    self.slot = requestedSlot_;
+    self.ownerPeerId = peerId_;
+    handshake.actors.push_back(self);
     auto pkt = encode(handshake);
     sendPacket(pkt, true /* reliable */);
 

@@ -6,6 +6,30 @@
 
 namespace kh2coop {
 
+namespace {
+
+bool isValidSlot(SlotType slot) {
+    switch (slot) {
+        case SlotType::Player:
+        case SlotType::Friend1:
+        case SlotType::Friend2:
+            return true;
+    }
+
+    return false;
+}
+
+bool tryGetRequestedSlot(const SessionState& handshake, SlotType& requestedSlot) {
+    if (handshake.actors.size() != 1) {
+        return false;
+    }
+
+    requestedSlot = handshake.actors.front().slot;
+    return isValidSlot(requestedSlot);
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Construction / destruction
 // ---------------------------------------------------------------------------
@@ -212,14 +236,38 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     return;
                 }
 
-                // Version OK — assign a slot.
+                SlotType requestedSlot = SlotType::Player;
+                if (!tryGetRequestedSlot(clientSession, requestedSlot)) {
+                    const std::string reason =
+                        "Handshake missing a valid requested slot";
+                    log("Rejecting " + ps->peerId + ": " + reason);
+                    if (callbacks_.onPeerRejected)
+                        callbacks_.onPeerRejected(ps->peerId, reason);
+                    enet_peer_disconnect(peer, 2);
+                    return;
+                }
+
+                if (isSlotTaken(requestedSlot)) {
+                    const std::string reason =
+                        "Requested slot " +
+                        std::to_string(static_cast<int>(requestedSlot)) +
+                        " is already taken";
+                    log("Rejecting " + ps->peerId + ": " + reason);
+                    if (callbacks_.onPeerRejected)
+                        callbacks_.onPeerRejected(ps->peerId, reason);
+                    enet_peer_disconnect(peer, 2);
+                    return;
+                }
+
+                // Version OK — assign the validated requested slot.
                 ps->gameBuild = clientSession.gameBuild;
                 ps->modHash = clientSession.modHash;
                 if (!clientSession.sessionId.empty()) {
                     ps->peerId = clientSession.sessionId; // use as peer name
                 }
+
                 ps->status = PeerStatus::Verified;
-                ps->assignedSlot = nextFreeSlot();
+                ps->assignedSlot = requestedSlot;
 
                 log("Peer verified: " + ps->peerId + " -> slot " +
                     std::to_string(static_cast<int>(ps->assignedSlot)));
@@ -287,14 +335,6 @@ PeerState* SessionHost::findPeerById(const std::string& peerId) {
         if (ps.peerId == peerId) return &ps;
     }
     return nullptr;
-}
-
-SlotType SessionHost::nextFreeSlot() const {
-    if (!isSlotTaken(SlotType::Player)) return SlotType::Player;
-    if (!isSlotTaken(SlotType::Friend1)) return SlotType::Friend1;
-    if (!isSlotTaken(SlotType::Friend2)) return SlotType::Friend2;
-    // Fallback — should not happen with maxPeers=3 enforcement.
-    return SlotType::Player;
 }
 
 bool SessionHost::isSlotTaken(SlotType slot) const {

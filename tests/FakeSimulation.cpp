@@ -192,13 +192,19 @@ static void testNetworkIntegration() {
         return cb;
     };
 
+    // Each client declares its canonical slot per the design doc:
+    // Player A -> Slot 0 (Player), Player B -> Slot 1 (Friend1),
+    // Player C -> Slot 2 (Friend2).
     NetworkClient c0("127.0.0.1", 17782, BUILD, MOD, "player_a",
+                     SlotType::Player,
                      makeCb("P0", sessionStateCount0, actorSnapCount,
                             eventCount));
     NetworkClient c1("127.0.0.1", 17782, BUILD, MOD, "player_b",
+                     SlotType::Friend1,
                      makeCb("P1", sessionStateCount1, actorSnapCount,
                             eventCount));
     NetworkClient c2("127.0.0.1", 17782, BUILD, MOD, "player_c",
+                     SlotType::Friend2,
                      makeCb("P2", sessionStateCount2, actorSnapCount,
                             eventCount));
 
@@ -215,6 +221,29 @@ static void testNetworkIntegration() {
     check(host.verifiedPeerCount() == 3, "host sees 3 verified peers");
     check(host.sessionState().actors.size() == 3,
           "session has 3 actors");
+
+    // Verify canonical slot assignments match the design doc:
+    // player_a -> Player (0), player_b -> Friend1 (1), player_c -> Friend2 (2)
+    {
+        const auto& actors = host.sessionState().actors;
+        bool foundA = false, foundB = false, foundC = false;
+        for (const auto& a : actors) {
+            if (a.ownerPeerId == "player_a") {
+                check(a.slot == SlotType::Player,
+                      "player_a assigned to slot 0 (Player)");
+                foundA = true;
+            } else if (a.ownerPeerId == "player_b") {
+                check(a.slot == SlotType::Friend1,
+                      "player_b assigned to slot 1 (Friend1)");
+                foundB = true;
+            } else if (a.ownerPeerId == "player_c") {
+                check(a.slot == SlotType::Friend2,
+                      "player_c assigned to slot 2 (Friend2)");
+                foundC = true;
+            }
+        }
+        check(foundA && foundB && foundC, "all 3 peers have canonical slots");
+    }
 
     // Each client should have received at least one SessionState.
     check(sessionStateCount0 > 0, "client 0 got session state");
@@ -274,7 +303,7 @@ static void testNetworkIntegration() {
 
     // --- Version mismatch rejection ---
     NetworkClient badClient("127.0.0.1", 17782, "wrong-build", "wrong-mod",
-                            "hacker",
+                            "hacker", SlotType::Player,
                             makeCb("BAD", sessionStateCount0, actorSnapCount,
                                    eventCount));
     badClient.connect();
@@ -285,6 +314,22 @@ static void testNetworkIntegration() {
     check(!badClient.isConnected() || host.verifiedPeerCount() == 3,
           "mismatched client rejected or not verified");
     badClient.disconnect();
+
+    // --- Duplicate slot rejection ---
+    // A client requesting slot 0 (Player) should be rejected because
+    // player_a already owns that slot.
+    NetworkClient dupeClient("127.0.0.1", 17782, BUILD, MOD,
+                             "slot_thief", SlotType::Player,
+                             makeCb("DUPE", sessionStateCount0, actorSnapCount,
+                                    eventCount));
+    dupeClient.connect();
+    for (int i = 0; i < 50; ++i) {
+        host.tick(5);
+        dupeClient.tick(5);
+    }
+    check(host.verifiedPeerCount() == 3,
+          "duplicate slot client rejected (still 3 verified)");
+    dupeClient.disconnect();
 
     // --- Disconnect ---
     c0.disconnect();
