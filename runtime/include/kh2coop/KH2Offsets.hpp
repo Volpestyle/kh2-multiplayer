@@ -4,24 +4,40 @@
 // ==========================================================================
 // KH2 Final Mix PC — Memory Offset Map
 //
-// Target build: Epic Games Store (EOSSDK-Win64-Shipping.dll)
+// Target build: Steam PC (verified)
+// Verified base: process module "KINGDOM HEARTS II FINAL MIX.exe"
 // All offsets are relative to the KH2 executable base address unless noted.
 //
 // STATUS KEY:
-//   [KNOWN]    — confirmed by OpenKH / community RE work
-//   [PROBE]    — needs live verification with Cheat Engine or similar
-//   [UNKNOWN]  — not yet identified, requires RE work
+//   [CONFIRMED] — verified on live Steam build via Cheat Engine
+//   [COMMUNITY] — from KH2FM-Plando-Useful-Codes wiki (PS2 addrs, PC unverified)
+//   [PROBE]     — needs live verification with Cheat Engine
+//   [UNKNOWN]   — not yet identified, requires RE work
 //
-// HOW TO FILL THESE IN:
-//   1. Launch KH2 FM on PC.
-//   2. Attach Cheat Engine to the process.
-//   3. For each [PROBE] offset:
-//      a. Search for the expected value (e.g. Sora's HP = 60 at start).
-//      b. Narrow down by changing the value in-game and re-scanning.
-//      c. Record the address relative to the exe base.
-//      d. Verify it survives room transitions.
-//   4. For pointer chains: follow each level of indirection.
-//   5. Update this file and rebuild.
+// ARCHITECTURE NOTES (learned from live probing session):
+//   - Stats (HP, MP, etc.) are at STATIC offsets in the exe module.
+//   - Entity/position data is HEAP-ALLOCATED (dynamic memory).
+//     Position requires a pointer chain: static ptr -> heap entity struct.
+//   - Camera data is separate from both stats and entity data.
+//   - The game copies position to many temporary locations (stack, render
+//     buffers). The "source" position is the one that teleports the character
+//     when written. Stack/temp copies have no effect when changed.
+//   - The KH2 modding community's kh2lib uses a "Now" pointer for
+//     world/room state and a "Save" pointer for persistent data.
+//     These pointer bases are version-specific (EGS vs Steam differ).
+//
+// COMMUNITY REFERENCE (PS2 addresses from the wiki):
+//   World ID:  PS2 0x032BAE0  (byte)
+//   Room ID:   PS2 0x032BAE1  (byte)
+//   Sora stats: PS2 0x032E020, PC 0x09A9560 (Save+0x24F0)
+//   Save base:  PC ~0x09A7070 (= 0x09A9560 - 0x24F0)
+//   HP in stat block: offset +0x04 (byte), but live HP is 4-byte int elsewhere
+//
+// HOW TO CONTINUE PROBING:
+//   1. Find kh2lib.dll/lua to get the "Now" and "Save" pointer bases.
+//   2. For position: do a pointer scan in Cheat Engine from a known heap
+//      position address to find the static pointer chain.
+//   3. Verify offsets survive room transitions.
 // ==========================================================================
 
 namespace kh2coop {
@@ -32,12 +48,13 @@ namespace offsets {
 // --------------------------------------------------------------------------
 
 // World and room identifiers.
-// [KNOWN] — OpenKH references these in save/state reading.
-constexpr std::uint64_t WORLD_ID       = 0x0714DB8;  // uint8  [PROBE]
-constexpr std::uint64_t ROOM_ID        = 0x0714DB9;  // uint8  [PROBE]
-constexpr std::uint64_t MAP_PROGRAM    = 0x0714DBA;  // uint16 [PROBE]
-constexpr std::uint64_t BATTLE_PROGRAM = 0x0714DBC;  // uint16 [PROBE]
-constexpr std::uint64_t EVENT_PROGRAM  = 0x0714DBE;  // uint16 [PROBE]
+// Community wiki: PS2 0x032BAE0 / 0x032BAE1. PC offset TBD for Steam.
+// The Lua modding community accesses these via "kh2lib.Now + 0x00/0x01".
+constexpr std::uint64_t WORLD_ID       = 0x0;  // uint8  [UNKNOWN] Steam offset TBD
+constexpr std::uint64_t ROOM_ID        = 0x0;  // uint8  [UNKNOWN] Steam offset TBD
+constexpr std::uint64_t MAP_PROGRAM    = 0x0;  // uint16 [UNKNOWN]
+constexpr std::uint64_t BATTLE_PROGRAM = 0x0;  // uint16 [UNKNOWN]
+constexpr std::uint64_t EVENT_PROGRAM  = 0x0;  // uint16 [UNKNOWN]
 
 // Transition / cutscene flags.
 constexpr std::uint64_t IN_TRANSITION  = 0x0;  // bool [UNKNOWN]
@@ -70,8 +87,13 @@ namespace actor {
     constexpr std::uint64_t MOTION_ID   = 0x0;  // uint32 [UNKNOWN]
     constexpr std::uint64_t ACTION      = 0x0;  // uint16 [UNKNOWN]
     constexpr std::uint64_t COMBO_STEP  = 0x0;  // uint32 [UNKNOWN]
-    constexpr std::uint64_t HP          = 0x0;  // int32 [UNKNOWN]
-    constexpr std::uint64_t MAX_HP      = 0x0;  // int32 [UNKNOWN]
+    // NOTE: HP and Max HP below are STATIC addresses (not part of the entity
+    // struct on the heap). They are the live runtime HP, separate from the
+    // save-data stat block at Save+0x24F0. Writing to these changes the
+    // actual in-game HP immediately. These are Sora/Roxas slot 0 only;
+    // party member HP addresses are at different static offsets (TBD).
+    constexpr std::uint64_t HP          = 0x2A23598;  // int32 [CONFIRMED] Sora/Roxas current HP (Steam)
+    constexpr std::uint64_t MAX_HP      = 0x2A2359C;  // int32 [CONFIRMED] Sora/Roxas max HP (Steam)
     constexpr std::uint64_t MP          = 0x0;  // int32 [UNKNOWN]
     constexpr std::uint64_t MAX_MP      = 0x0;  // int32 [UNKNOWN]
     constexpr std::uint64_t DRIVE       = 0x0;  // int32 [UNKNOWN]
