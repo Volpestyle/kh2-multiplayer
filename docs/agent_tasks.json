@@ -1,0 +1,128 @@
+{
+  "project": "KH2 GoA Arena 3P",
+  "milestones": [
+    {
+      "id": "M0",
+      "title": "Environment lock + observability",
+      "owner": "runtime",
+      "depends_on": [],
+      "outputs": [
+        "build_lock.md",
+        "runtime_boot.log",
+        "IGameBridge stub"
+      ]
+    },
+    {
+      "id": "M1",
+      "title": "Pointer map / game bridge",
+      "owner": "runtime",
+      "depends_on": [
+        "M0"
+      ],
+      "outputs": [
+        "pointer_map_v1.md",
+        "ReadActorState",
+        "ReadRoomState",
+        "ReadEnemyStates"
+      ]
+    },
+    {
+      "id": "M2",
+      "title": "Camera retarget",
+      "owner": "client",
+      "depends_on": [
+        "M1"
+      ],
+      "outputs": [
+        "CameraController",
+        "client_role config"
+      ]
+    },
+    {
+      "id": "M3",
+      "title": "Input injection",
+      "owner": "runtime",
+      "depends_on": [
+        "M1"
+      ],
+      "outputs": [
+        "InputInjector",
+        "input overlay"
+      ]
+    },
+    {
+      "id": "M4",
+      "title": "Host-authoritative actor replication",
+      "owner": "server",
+      "depends_on": [
+        "M1",
+        "M2",
+        "M3"
+      ],
+      "outputs": [
+        "SessionHost",
+        "ActorSnapshot stream",
+        "version gate"
+      ]
+    },
+    {
+      "id": "M5",
+      "title": "Enemy replication + shared damage",
+      "owner": "server",
+      "depends_on": [
+        "M4"
+      ],
+      "outputs": [
+        "EnemySnapshot stream",
+        "reliable Event channel"
+      ]
+    },
+    {
+      "id": "M6",
+      "title": "HUD + resync + reconnect",
+      "owner": "client",
+      "depends_on": [
+        "M4",
+        "M5"
+      ],
+      "outputs": [
+        "overlay HUD",
+        "resync banner",
+        "reconnect flow"
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "name": "runtime_re",
+      "primary_outputs": [
+        "pointer_map_v1.md",
+        "IGameBridge implementation"
+      ]
+    },
+    {
+      "name": "server_net",
+      "primary_outputs": [
+        "Protocol.hpp",
+        "SessionHost",
+        "packet logs"
+      ]
+    },
+    {
+      "name": "client_ux",
+      "primary_outputs": [
+        "CameraController",
+        "ReplicaController",
+        "overlay HUD"
+      ]
+    },
+    {
+      "name": "content_test",
+      "primary_outputs": [
+        "GoA test pack",
+        "roster pack",
+        "content hash"
+      ]
+    }
+  ]
+}
