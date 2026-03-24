@@ -5,9 +5,9 @@
 //   1. Starts a SessionHost on localhost.
 //   2. Connects 3 NetworkClients (Player, Friend1, Friend2).
 //   3. Each client sends a version handshake and verifies slot assignment.
-//   4. Each client sends a burst of InputFrames.
-//   5. The host broadcasts fake ActorSnapshots back to all clients.
-//   6. Clients verify they receive the snapshots.
+//   4. The host runs a fake authoritative simulation from client input.
+//   5. The host broadcasts authoritative ActorSnapshots back to all clients.
+//   6. Clients verify they receive consistent snapshots.
 //   7. The host broadcasts a reliable Event (SpawnGroup).
 //   8. Clients verify they receive the event.
 //   9. Clients disconnect. Server shuts down.
@@ -17,9 +17,13 @@
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/SessionHost.hpp"
+#include "kh2coop/SimulationState.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <map>
 #include <enet/enet.h>
 #include <iostream>
 #include <thread>
@@ -49,6 +53,86 @@ static void tickAll(SessionHost& host, NetworkClient& c0, NetworkClient& c1,
         c1.tick(5);
         c2.tick(5);
     }
+}
+
+struct SnapshotTracker {
+    struct SnapshotSet {
+        std::array<ActorSnapshot, 3> actors {};
+        std::array<bool, 3> received {false, false, false};
+    };
+
+    void record(const ActorSnapshot& snapshot) {
+        const auto index = static_cast<std::size_t>(snapshot.actor.slot);
+        auto& set = snapshots[snapshot.snapshotId];
+        set.actors[index] = snapshot;
+        set.received[index] = true;
+    }
+
+    [[nodiscard]] bool hasCompleteSnapshot(std::uint32_t snapshotId) const {
+        const auto it = snapshots.find(snapshotId);
+        if (it == snapshots.end()) {
+            return false;
+        }
+
+        const auto& received = it->second.received;
+        return received[0] && received[1] && received[2];
+    }
+
+    [[nodiscard]] const SnapshotSet* find(std::uint32_t snapshotId) const {
+        const auto it = snapshots.find(snapshotId);
+        if (it == snapshots.end()) {
+            return nullptr;
+        }
+        return &it->second;
+    }
+
+    std::map<std::uint32_t, SnapshotSet> snapshots;
+};
+
+static void tickAuthoritativeFrame(SessionHost& host, SimulationState& sim,
+                                   NetworkClient& c0, NetworkClient& c1,
+                                   NetworkClient& c2,
+                                   float dtSeconds = 1.0f / 60.0f) {
+    c0.tick(0);
+    c1.tick(0);
+    c2.tick(0);
+    host.tick(0);
+
+    for (const auto& peer : host.peers()) {
+        if (peer.status == PeerStatus::Verified) {
+            sim.applyInput(peer.assignedSlot, peer.lastInput);
+        }
+    }
+
+    sim.tick(dtSeconds);
+    host.broadcastActorSnapshots(sim.generateSnapshots());
+
+    host.tick(0);
+    c0.tick(0);
+    c1.tick(0);
+    c2.tick(0);
+}
+
+static std::uint32_t findHighestCommonSnapshotId(const SnapshotTracker& a,
+                                                 const SnapshotTracker& b,
+                                                 const SnapshotTracker& c) {
+    std::uint32_t highest = 0;
+
+    for (const auto& [snapshotId, set] : a.snapshots) {
+        if (!set.received[0] || !set.received[1] || !set.received[2]) {
+            continue;
+        }
+
+        if (b.hasCompleteSnapshot(snapshotId) && c.hasCompleteSnapshot(snapshotId)) {
+            highest = snapshotId;
+        }
+    }
+
+    return highest;
+}
+
+static bool nearlyEqual(float lhs, float rhs, float epsilon = 0.0001f) {
+    return std::fabs(lhs - rhs) <= epsilon;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,19 +258,29 @@ static void testNetworkIntegration() {
     std::atomic<int> sessionStateCount0{0};
     std::atomic<int> sessionStateCount1{0};
     std::atomic<int> sessionStateCount2{0};
-    std::atomic<int> actorSnapCount{0};
-    std::atomic<int> eventCount{0};
+    std::atomic<int> actorSnapCount0{0};
+    std::atomic<int> actorSnapCount1{0};
+    std::atomic<int> actorSnapCount2{0};
+    std::atomic<int> eventCount0{0};
+    std::atomic<int> eventCount1{0};
+    std::atomic<int> eventCount2{0};
+
+    SnapshotTracker tracker0;
+    SnapshotTracker tracker1;
+    SnapshotTracker tracker2;
 
     auto makeCb = [](const std::string& name, std::atomic<int>& ssCount,
                      std::atomic<int>& snapCount,
-                     std::atomic<int>& evtCount) {
+                     std::atomic<int>& evtCount,
+                     SnapshotTracker& tracker) {
         ClientCallbacks cb;
         cb.onLog = [name](const std::string& msg) {
             std::cout << "  [" << name << "] " << msg << "\n";
         };
         cb.onSessionState = [&ssCount](const SessionState&) { ++ssCount; };
-        cb.onActorSnapshot = [&snapCount](const ActorSnapshot&) {
+        cb.onActorSnapshot = [&snapCount, &tracker](const ActorSnapshot& snap) {
             ++snapCount;
+            tracker.record(snap);
         };
         cb.onEvent = [&evtCount](const EventMessage&) { ++evtCount; };
         return cb;
@@ -197,16 +291,16 @@ static void testNetworkIntegration() {
     // Player C -> Slot 2 (Friend2).
     NetworkClient c0("127.0.0.1", 17782, BUILD, MOD, "player_a",
                      SlotType::Player,
-                     makeCb("P0", sessionStateCount0, actorSnapCount,
-                            eventCount));
+                     makeCb("P0", sessionStateCount0, actorSnapCount0,
+                            eventCount0, tracker0));
     NetworkClient c1("127.0.0.1", 17782, BUILD, MOD, "player_b",
                      SlotType::Friend1,
-                     makeCb("P1", sessionStateCount1, actorSnapCount,
-                            eventCount));
+                     makeCb("P1", sessionStateCount1, actorSnapCount1,
+                            eventCount1, tracker1));
     NetworkClient c2("127.0.0.1", 17782, BUILD, MOD, "player_c",
                      SlotType::Friend2,
-                     makeCb("P2", sessionStateCount2, actorSnapCount,
-                            eventCount));
+                     makeCb("P2", sessionStateCount2, actorSnapCount2,
+                            eventCount2, tracker2));
 
     // --- Connect all three ---
     check(c0.connect(), "client 0 connect initiated");
@@ -250,48 +344,83 @@ static void testNetworkIntegration() {
     check(sessionStateCount1 > 0, "client 1 got session state");
     check(sessionStateCount2 > 0, "client 2 got session state");
 
-    // --- Send InputFrames ---
-    for (std::uint32_t seq = 1; seq <= 5; ++seq) {
-        InputFrame f;
-        f.seq = seq;
-        f.ownedActorId = 0;
-        f.leftStickX = 0.5f;
-        f.buttons.attack = (seq % 2 == 0);
-        c0.sendInput(f);
+    // --- Run authoritative simulation for 60 ticks ---
+    constexpr int kSimFrames = 60;
+    constexpr float kExpectedDistance = 4.5f;
 
-        f.ownedActorId = 1;
-        c1.sendInput(f);
+    SimulationState sim;
 
-        f.ownedActorId = 2;
-        c2.sendInput(f);
+    for (std::uint32_t seq = 1; seq <= static_cast<std::uint32_t>(kSimFrames);
+         ++seq) {
+        InputFrame moveRight;
+        moveRight.seq = seq;
+        moveRight.ownedActorId = 0;
+        moveRight.leftStickX = 1.0f;
+        c0.sendInput(moveRight);
+
+        InputFrame idle;
+        idle.seq = seq;
+        idle.ownedActorId = 1;
+        c1.sendInput(idle);
+
+        idle.ownedActorId = 2;
+        c2.sendInput(idle);
+
+        tickAuthoritativeFrame(host, sim, c0, c1, c2);
     }
 
-    for (int i = 0; i < 50; ++i) {
-        tickAll(host, c0, c1, c2, 1);
-    }
-    check(inputCount >= 10, "host received inputs from clients");
+    check(inputCount >= kSimFrames, "host received authoritative inputs");
+    check(sim.snapshotId() == static_cast<std::uint32_t>(kSimFrames),
+          "simulation ticked 60 frames");
+    check(sim.actors()[0].position.x >= kExpectedDistance,
+          "actor 0 moved right in authoritative sim");
+    check(nearlyEqual(sim.actors()[1].position.x, 0.0f),
+          "actor 1 stayed in place in authoritative sim");
+    check(nearlyEqual(sim.actors()[2].position.x, 0.0f),
+          "actor 2 stayed in place in authoritative sim");
 
-    // --- Broadcast actor snapshots ---
-    std::vector<ActorSnapshot> snaps;
-    for (int slot = 0; slot < 3; ++slot) {
-        ActorSnapshot snap;
-        snap.snapshotId = 1;
-        snap.actor.actorId = static_cast<std::uint32_t>(slot);
-        snap.actor.slot = static_cast<SlotType>(slot);
-        snap.actor.position = {10.0f * slot, 0.0f, 0.0f};
-        snap.actor.hp = 100;
-        snaps.push_back(snap);
-    }
-    host.broadcastActorSnapshots(snaps);
+    check(actorSnapCount0 >= kSimFrames, "client 0 received authoritative snapshots");
+    check(actorSnapCount1 >= kSimFrames, "client 1 received authoritative snapshots");
+    check(actorSnapCount2 >= kSimFrames, "client 2 received authoritative snapshots");
 
-    for (int i = 0; i < 50; ++i) {
-        tickAll(host, c0, c1, c2, 1);
+    const std::uint32_t commonSnapshotId =
+        findHighestCommonSnapshotId(tracker0, tracker1, tracker2);
+    check(commonSnapshotId >= 50, "all clients share a late authoritative snapshot");
+
+    const auto* common0 = tracker0.find(commonSnapshotId);
+    const auto* common1 = tracker1.find(commonSnapshotId);
+    const auto* common2 = tracker2.find(commonSnapshotId);
+    check(common0 != nullptr && common1 != nullptr && common2 != nullptr,
+          "common snapshot data exists for all clients");
+
+    if (common0 != nullptr && common1 != nullptr && common2 != nullptr) {
+        for (std::size_t actorIndex = 0; actorIndex < 3; ++actorIndex) {
+            const auto& actor0 = common0->actors[actorIndex].actor;
+            const auto& actor1 = common1->actors[actorIndex].actor;
+            const auto& actor2 = common2->actors[actorIndex].actor;
+
+            check(nearlyEqual(actor0.position.x, actor1.position.x) &&
+                      nearlyEqual(actor1.position.x, actor2.position.x),
+                  "authoritative actor x positions match across clients");
+            check(nearlyEqual(actor0.position.y, actor1.position.y) &&
+                      nearlyEqual(actor1.position.y, actor2.position.y),
+                  "authoritative actor y positions match across clients");
+            check(nearlyEqual(actor0.position.z, actor1.position.z) &&
+                      nearlyEqual(actor1.position.z, actor2.position.z),
+                  "authoritative actor z positions match across clients");
+        }
+
+        check(common0->actors[0].actor.position.x > 0.0f,
+              "shared snapshot shows actor 0 moved right");
+        check(nearlyEqual(common0->actors[1].actor.position.x, 0.0f),
+              "shared snapshot shows actor 1 idle");
+        check(nearlyEqual(common0->actors[2].actor.position.x, 0.0f),
+              "shared snapshot shows actor 2 idle");
     }
-    check(actorSnapCount >= 3, "clients received actor snapshots");
 
     // --- Broadcast a reliable event ---
     EventMessage evt;
-    evt.snapshotId = 2;
+    evt.snapshotId = sim.snapshotId();
     evt.type = EventType::SpawnGroup;
     evt.payloadJson = R"({"group":1,"count":5})";
     host.broadcastEvent(evt);
@@ -299,13 +428,20 @@ static void testNetworkIntegration() {
     for (int i = 0; i < 50; ++i) {
         tickAll(host, c0, c1, c2, 1);
     }
-    check(eventCount >= 3, "clients received reliable event");
+    check(eventCount0 > 0 && eventCount1 > 0 && eventCount2 > 0,
+          "clients received reliable event");
 
     // --- Version mismatch rejection ---
+    std::atomic<int> ignoredSessionStateCount{0};
+    std::atomic<int> ignoredActorSnapCount{0};
+    std::atomic<int> ignoredEventCount{0};
+    SnapshotTracker ignoredTracker;
+
     NetworkClient badClient("127.0.0.1", 17782, "wrong-build", "wrong-mod",
                             "hacker", SlotType::Player,
-                            makeCb("BAD", sessionStateCount0, actorSnapCount,
-                                   eventCount));
+                            makeCb("BAD", ignoredSessionStateCount,
+                                   ignoredActorSnapCount, ignoredEventCount,
+                                   ignoredTracker));
     badClient.connect();
     for (int i = 0; i < 50; ++i) {
         host.tick(5);
@@ -320,8 +456,9 @@ static void testNetworkIntegration() {
     // player_a already owns that slot.
     NetworkClient dupeClient("127.0.0.1", 17782, BUILD, MOD,
                              "slot_thief", SlotType::Player,
-                             makeCb("DUPE", sessionStateCount0, actorSnapCount,
-                                    eventCount));
+                             makeCb("DUPE", ignoredSessionStateCount,
+                                    ignoredActorSnapCount, ignoredEventCount,
+                                    ignoredTracker));
     dupeClient.connect();
     for (int i = 0; i < 50; ++i) {
         host.tick(5);

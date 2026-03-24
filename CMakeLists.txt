@@ -37,6 +37,7 @@ target_link_libraries(kh2coop_common PUBLIC enet)
 # ---------------------------------------------------------------------------
 add_library(kh2coop_server_core
     server/src/SessionHost.cpp
+    server/src/SimulationState.cpp
 )
 
 target_include_directories(kh2coop_server_core PUBLIC

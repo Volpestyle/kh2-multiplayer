@@ -1,9 +1,12 @@
 #include "kh2coop/SessionHost.hpp"
+#include "kh2coop/SimulationState.hpp"
 
+#include <chrono>
 #include <csignal>
 #include <enet/enet.h>
 #include <iostream>
 #include <string>
+#include <thread>
 
 static volatile bool g_running = true;
 
@@ -19,6 +22,9 @@ static void printUsage() {
 }
 
 int main(int argc, char* argv[]) {
+    constexpr auto kTickSleep = std::chrono::milliseconds(16);
+    constexpr float kTickDtSeconds = 1.0f / 60.0f;
+
     // --- Parse args ---
     kh2coop::SessionConfig config;
     config.port = 7782;
@@ -72,8 +78,8 @@ int main(int argc, char* argv[]) {
     };
     callbacks.onInputReceived = [](const std::string& peerId,
                                    const kh2coop::InputFrame& input) {
-        // In a real implementation this would feed into the authoritative sim.
-        // For now, just log at high verbosity if desired.
+        (void)peerId;
+        (void)input;
     };
 
     // --- Start ---
@@ -90,11 +96,20 @@ int main(int argc, char* argv[]) {
     std::cout << "[Server] Running. Press Ctrl+C to stop.\n";
 
     // --- Main loop ---
+    kh2coop::SimulationState sim;
     while (g_running) {
-        host.tick(16 /* ~60 Hz */);
+        host.tick(0);
 
-        // TODO: In the future, run the authoritative simulation here and
-        // broadcast actor/enemy snapshots every tick.
+        for (const auto& peer : host.peers()) {
+            if (peer.status == kh2coop::PeerStatus::Verified) {
+                sim.applyInput(peer.assignedSlot, peer.lastInput);
+            }
+        }
+
+        sim.tick(kTickDtSeconds);
+        host.broadcastActorSnapshots(sim.generateSnapshots());
+
+        std::this_thread::sleep_for(kTickSleep);
     }
 
     host.stop();
