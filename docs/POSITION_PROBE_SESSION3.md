@@ -154,9 +154,9 @@ end
 | `exe+0x456696` | Entity sub-struct position writer (validates + copies XYZW) |
 
 ## Open Questions for Session 4
-1. ~~Is `exe+0x251F290` stable across worlds/room transitions?~~ **NO — address changes per room**
-2. How to efficiently identify the PLAYER's slot in the buffer array (vs NPCs/party members)?
+1. ~~Is `exe+0x251F290` stable across worlds/room transitions?~~ **RESOLVED: NO — address changes per room.** `Tick()` auto-discovers on room change.
+2. ~~How to efficiently identify the PLAYER's slot in the buffer array?~~ **RESOLVED:** Use camera actor pointer chain as primary strategy (most reliable), with vtable+moveState scan as fallback. Implemented in `scanForEntityStruct()`.
 3. Can we automate entity struct discovery with an auto-assemble hook instead of scanning?
-4. Does writing the facing angle (entity struct +0x4C) also rotate the character model?
+4. ~~Does writing the facing angle (entity struct +0x4C) also rotate the character model?~~ **RESOLVED: YES.** `ApplyReplicaActorState()` writes ROT_Y + COS_FACING + SIN_FACING.
 5. What happens when we write during a cutscene or battle?
-6. For multiplayer: should we use a code hook (auto_assemble) for position injection vs continuous Lua writes?
+6. For multiplayer: should we use a code hook (auto_assemble) for position injection vs continuous external writes?

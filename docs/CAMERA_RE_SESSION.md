@@ -75,7 +75,7 @@ Direct writes to the look-at address (`+0x84`) produce visible flicker but are o
 
 ## Open Questions
 
-1. Does the camera pointer get reset during room transitions? (Likely yes — need to re-apply after transition)
+1. ~~Does the camera pointer get reset during room transitions?~~ **RESOLVED:** Yes, it resets. `Tick()` in `GameBridgePC.cpp` re-points the camera each frame if retargeted.
 2. Does changing CAMERA_TYPE affect the pointer behavior?
 3. Are there other camera struct instances for split-screen or battle cameras?
 4. Can we find Friend1/Friend2 actor objects directly instead of using fake allocations?

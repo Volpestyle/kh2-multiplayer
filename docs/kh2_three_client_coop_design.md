@@ -299,40 +299,9 @@ Success condition:
 All three players can enter the same room, see each other, fight the same enemies, and finish one encounter without a fatal desync.
 
 ## Milestones
-### M0 - Telemetry sandbox
-- attach hook
-- read actor transforms
-- write camera follow target
-- send actor transforms over network
-- spawn remote ghost dummies
 
-### M1 - Shared movement room
-- 3 clients in one room
-- owned-slot camera override
-- actor interpolation
-- input path client -> host -> all
-
-### M2 - Shared combat room
-- enemy snapshots
-- host-authoritative damage
-- KO/revive
-- reward sync for one encounter
-
-### M3 - Friend-slot playability
-- direct controls for FRIEND_1 / FRIEND_2
-- custom HUD overlay
-- keyblade-friend archetypes
-
-### M4 - Selected room transitions
-- transition handshake
-- room load ack
-- spawn reconciliation
-- resync after failed load
-
-### M5 - Limited story co-op
-- host-owned story flags
-- selected worlds only
-- cutscene gating and skip policy
+See `IMPLEMENTATION_BACKLOG.md` for the detailed milestone breakdown (M0-M8)
+with task lists, deliverables, exit criteria, and completion status.
 
 ## Biggest technical risks
 1. Friend-slot control and camera override may fight vanilla systems.

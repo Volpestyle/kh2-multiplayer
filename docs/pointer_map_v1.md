@@ -16,126 +16,145 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 
 | Area | Status | Notes |
 |---|---|---|
-| World/room identity | Partial | `WORLD_ID`, `ROOM_ID`, `MAP_PROGRAM`, `BATTLE_PROGRAM`, `EVENT_PROGRAM` present. |
-| Cutscene/transition state | Partial | `CUTSCENE_TIMER` used as runtime proxy for cutscene state. |
-| Unit slot stat block | Partial | `SLOT0_BASE`, `SLOT_STRIDE`, `slot::HP`, `slot::MAX_HP` are mapped. |
-| Actor transform path (pos/rot/vel) | Missing | Entity pointer chain and transform offsets are still `[UNKNOWN]`. |
-| Enemy list root | Missing | `enemy::LIST_PTR`, `enemy::COUNT`, `enemy::STRIDE` are `[UNKNOWN]`. |
-| Camera target override path | Missing | `CAMERA_TYPE` exists, writable follow target path not mapped. |
-| Input injection for slot 1/2 | Missing | Global input address exists, per-slot injection path not mapped. |
-| Replica writeback path | Missing | Actor/enemy replica writes still TODO in runtime bridge. |
+| World/room identity | Done | `WORLD_ID`, `ROOM_ID`, `MAP_PROGRAM`, `BATTLE_PROGRAM`, `EVENT_PROGRAM` confirmed. |
+| Cutscene/transition state | Partial | `CUTSCENE_TIMER` used as proxy. Transition start/end flags not yet mapped. |
+| Unit slot stat block | Partial | `SLOT0_BASE`, `SLOT_STRIDE`, `slot::HP`, `slot::MAX_HP` confirmed. MP offset unknown. |
+| Actor transform (slot 0) | Done | Entity struct layout fully mapped: position, rotation, velocity, airborne flags. |
+| Actor transform (slot 1/2) | Missing | Friend entity struct discovery not yet implemented. |
+| Entity discovery | Done | Two-strategy scan: camera actor pointer chain (primary), vtable+W+moveState heuristic (fallback). Auto-discovers on room transition via `Tick()`. |
+| Position buffer array | Done | Buffer at `exe+0xAD9100`, stride `0x38`. Dual-write for physics-active rooms. |
+| Camera struct | Done | Full camera struct at `exe+0x718C60` with look-at, eye position, actor pointer, distance. |
+| Camera retarget | Done | Fake actor allocation + pointer redirect at `camStruct+0x50`. Implemented in `WriteCameraTarget()` / `RestoreVanillaCamera()`. |
+| Enemy list root | Missing | `enemy::LIST_PTR`, `COUNT`, `STRIDE` still `0x0`. |
+| Input injection | Missing | Global input address known (`0x0BF3120`), per-slot injection path not mapped. |
+| Replica writeback | Partial | `ApplyReplicaActorState()` works for slot 0 (position, rotation, flags, HP) and camera fake actor (all slots). Enemy replica still TODO. |
 
 ---
 
-## Known Offsets (From Current Codebase)
+## Known Offsets
 
-## World / room
+### World / room
 
-- `NOW = 0x0717008` `[CONFIRMED]`
-- `WORLD_ID = 0x0717008` `[CONFIRMED]`
-- `ROOM_ID = 0x0717009` `[CONFIRMED]`
-- `MAP_PROGRAM = 0x071700C` `[KH2LIB]`
-- `BATTLE_PROGRAM = 0x071700E` `[KH2LIB]`
-- `EVENT_PROGRAM = 0x0717010` `[KH2LIB]`
+| Offset | Name | Source |
+|---|---|---|
+| `0x0717008` | `WORLD_ID` | `[CONFIRMED]` |
+| `0x0717009` | `ROOM_ID` | `[CONFIRMED]` |
+| `0x071700C` | `MAP_PROGRAM` | `[KH2LIB]` |
+| `0x071700E` | `BATTLE_PROGRAM` | `[KH2LIB]` |
+| `0x0717010` | `EVENT_PROGRAM` | `[KH2LIB]` |
 
-## Game state and cutscene related
+### Game state
 
-- `PAUSE_STATUS = 0x0ABB7F8` `[KH2LIB]`
-- `BATTLE_STATUS = 0x2A11384` `[KH2LIB]`
-- `BATTLE_END = 0x2A0FC60` `[KH2LIB]`
-- `CONTROLLABLE = 0x2A17168` `[KH2LIB]`
-- `CUTSCENE_TIMER = 0x0B64F18` `[KH2LIB]`
-- `CUTSCENE_LEN = 0x0B64F34` `[KH2LIB]`
-- `CUTSCENE_SKIP = 0x0B64F1C` `[KH2LIB]`
+| Offset | Name | Source |
+|---|---|---|
+| `0x0ABB7F8` | `PAUSE_STATUS` | `[KH2LIB]` |
+| `0x2A11384` | `BATTLE_STATUS` | `[KH2LIB]` |
+| `0x2A0FC60` | `BATTLE_END` | `[KH2LIB]` |
+| `0x2A17168` | `CONTROLLABLE` | `[KH2LIB]` |
+| `0x0B64F18` | `CUTSCENE_TIMER` | `[KH2LIB]` |
+| `0x0B64F34` | `CUTSCENE_LEN` | `[KH2LIB]` |
+| `0x0B64F1C` | `CUTSCENE_SKIP` | `[KH2LIB]` |
+| `0x0717424` | `GAME_SPEED` | `[KH2LIB]` |
 
-## Unit slot stat system
+### Unit slot stat system
 
-- `SLOT0_BASE = 0x2A23518` `[KH2LIB]`
-- `SLOT_STRIDE = 0x278` `[KH2LIB]`
-- `slot::HP = 0x80` `[CONFIRMED]` (relative within slot)
-- `slot::MAX_HP = 0x84` `[CONFIRMED]` (relative within slot)
-- `slot0::HP = 0x2A23598` `[CONFIRMED]`
-- `slot0::MAX_HP = 0x2A2359C` `[CONFIRMED]`
+| Offset | Name | Source |
+|---|---|---|
+| `0x2A23518` | `SLOT0_BASE` | `[KH2LIB]` |
+| `+0x278` | `SLOT_STRIDE` | `[KH2LIB]` |
+| `+0x80` | `slot::HP` (within slot) | `[CONFIRMED]` |
+| `+0x84` | `slot::MAX_HP` (within slot) | `[CONFIRMED]` |
 
-## Camera / input related
+### Entity transform struct (relative to dynamic struct base)
 
-- `CAMERA_TYPE = 0x0718CA8` `[KH2LIB]`
-- `INPUT = 0x0BF3120` `[KH2LIB]`
-- `SOFT_RESET = 0x0ABABDA` `[KH2LIB]`
+| Offset | Name | Source | Notes |
+|---|---|---|---|
+| `+0x00` | `VTABLE_PTR` | `[CONFIRMED]` | QWORD, exe 0x253xxxx range |
+| `+0x08` | `AIRBORNE_FLAG` | `[CONFIRMED]` | DWORD, 0=ground, 1=air |
+| `+0x30` | `POS_X` | `[CONFIRMED]` | float |
+| `+0x34` | `POS_Y` | `[CONFIRMED]` | float (negative = up) |
+| `+0x38` | `POS_Z` | `[CONFIRMED]` | float |
+| `+0x3C` | `POS_W` | `[CONFIRMED]` | float (always 1.0) |
+| `+0x40` | `COS_FACING` | `[CONFIRMED]` | float |
+| `+0x48` | `SIN_FACING` | `[CONFIRMED]` | float |
+| `+0x4C` | `ROT_Y` | `[CONFIRMED]` | float, radians |
+| `+0xA4` | `VEL_Y` | `[CONFIRMED]` | float (airborne Y velocity) |
+| `+0x100` | `MOVE_STATE` | `[CONFIRMED]` | DWORD, 2=ground, 3=air |
+| `+0x104` | `AIRBORNE_SUB` | `[CONFIRMED]` | DWORD, 0=ground, 1=air |
 
-## Unknown placeholders that block live co-op runtime
+### Entity position buffer array
 
-- `entity::POS_X = 0x0` `[UNKNOWN]`
-- `entity::POS_Y = 0x0` `[UNKNOWN]`
-- `entity::POS_Z = 0x0` `[UNKNOWN]`
-- `entity::ROT_Y = 0x0` `[UNKNOWN]`
-- `enemy::LIST_PTR = 0x0` `[UNKNOWN]`
-- `enemy::COUNT = 0x0` `[UNKNOWN]`
-- `enemy::STRIDE = 0x0` `[UNKNOWN]`
+| Offset | Name | Source | Notes |
+|---|---|---|---|
+| `0xAD9100` | `buffer::ARRAY_BASE` | `[CONFIRMED]` | static array |
+| `+0x38` | `buffer::ENTRY_STRIDE` | `[CONFIRMED]` | per entry |
+| `+0x00` | `ENTRY_POS_X` (within entry) | `[CONFIRMED]` | float |
+| `+0x04` | `ENTRY_POS_Y` | `[CONFIRMED]` | float |
+| `+0x08` | `ENTRY_POS_Z` | `[CONFIRMED]` | float |
+| `+0x0C` | `ENTRY_POS_W` | `[CONFIRMED]` | float (1.0) |
+
+### Entity discovery constants
+
+| Value | Name | Notes |
+|---|---|---|
+| `0x2500000..0x2600000` | Scan range | Entity data region in exe |
+| `0x2530000..0x2540000` | Vtable range | Entity vtable pointers fall here |
+| `0x1354E0` | `POS_UPDATE_FUNC` | Code address (stable) |
+| `0x1A8E60` | `MEMCPY_4FLOATS` | Code address (stable) |
+| `0x456696` | `ENTITY_POS_WRITER` | Code address (stable) |
+
+### Camera struct (relative to `exe+0x718C60`)
+
+| Offset | Name | Source | Notes |
+|---|---|---|---|
+| `+0x08` | `SMOOTH_LOOKAT` | `[CONFIRMED]` | Vec4 (X,Y,Z,W) |
+| `+0x18` | `EYE_POS` | `[CONFIRMED]` | Vec4 interpolated |
+| `+0x48` | `CAMERA_TYPE` | `[KH2LIB]` | DWORD camera mode |
+| `+0x50` | `ACTOR_PTR` | `[CONFIRMED]` | QWORD ptr to followed actor |
+| `+0x58` | `DISTANCE` | `[CONFIRMED]` | float (~500) |
+| `+0x64` | `EYE_POS_RAW` | `[CONFIRMED]` | Vec4 |
+| `+0x74` | `EYE_POS_COPY` | `[CONFIRMED]` | Vec4 |
+| `+0x84` | `LOOKAT_RAW` | `[CONFIRMED]` | Vec4 |
+| `+0x94` | `LOOKAT_COPY` | `[CONFIRMED]` | Vec4 |
+| `+0xA4` | `HEIGHT_OFFSET` | `[CONFIRMED]` | float (~1.5) |
+
+Camera actor pointer chain: `camStruct+0x50 -> actorObj+0x640 -> entity+0x30 = position`
+
+### Input / other
+
+| Offset | Name | Source |
+|---|---|---|
+| `0x0718CA8` | `CAMERA_TYPE` (legacy alias) | `[KH2LIB]` |
+| `0x0BF3120` | `INPUT` | `[KH2LIB]` |
+| `0x0ABABDA` | `SOFT_RESET` | `[KH2LIB]` |
+
+### Still unknown (blocks further milestones)
+
+| Name | Needed for |
+|---|---|
+| `enemy::LIST_PTR` | M5 enemy replication |
+| `enemy::COUNT` | M5 enemy replication |
+| `enemy::STRIDE` | M5 enemy replication |
+| Per-slot input injection path | M3 friend-slot control |
+| Friend1/Friend2 entity struct addresses | M1 completion, M3 |
+| Animation ID offset in entity struct | M4 animation sync |
+| MP offset within unit slot | M1 full stats |
 
 ---
 
-## Runtime Bridge Coverage (What Code Actually Uses)
+## Runtime Bridge Coverage
 
 File: `runtime/src/GameBridgePC.cpp`
 
-- `ReadRoomState()` reads world/room/program values and cutscene proxy.
-- `ReadActorState()` is currently placeholder logic.
-- `ReadEnemyStates()` is TODO.
-- `WriteCameraTarget()` / `RestoreVanillaCamera()` are TODO.
-- `InjectOwnedInput()` is TODO.
-- `ApplyReplicaActorState()` / `ApplyReplicaEnemyState()` are TODO.
-
----
-
-## RE Task Checklist (Session Tracker)
-
-## 1) Actor roots and transforms
-
-- [ ] Find canonical pointer chain for slot 0 actor entity
-- [ ] Find canonical pointer chain for slot 1 actor entity
-- [ ] Find canonical pointer chain for slot 2 actor entity
-- [ ] Map actor position (x, y, z)
-- [ ] Map actor rotation (yaw)
-- [ ] Map actor velocity if stable
-- [ ] Map actor motion/action ids if stable
-- [ ] Verify by logging once per frame in a fixed room
-
-## 2) Camera control path
-
-- [ ] Find current camera target pointer/reference
-- [ ] Find safe writable follow target path
-- [ ] Confirm cinematic/cutscene camera override conditions
-- [ ] Verify runtime target swap between slot 0/1/2 without crash
-
-## 3) Input path (slot 1/2 ownership)
-
-- [ ] Identify where vanilla input is consumed
-- [ ] Identify per-slot command/application path
-- [ ] Identify safe write path for slot 1/2 owned input
-- [ ] Verify slot 1/2 movement + attack in offline test
-
-## 4) Enemy list path
-
-- [ ] Find root enemy list pointer
-- [ ] Find enemy count field
-- [ ] Find enemy stride
-- [ ] Map per-enemy position, hp, motion/state
-- [ ] Verify fixed encounter can be enumerated every frame
-
-## 5) Transition/progression reliability
-
-- [ ] Identify transition begin/end flags
-- [ ] Identify stable room/world/program hashable state
-- [ ] Verify boundaries with logs across repeated room transitions
-
----
-
-## Suggested Log Format (Per Probe Tick)
-
-Use one line per slot/enemy probe:
-
-`[frame=<n>] [time=<ms>] [world=<id>] [room=<id>] [slot=<0|1|2>] [pos=<x,y,z>] [rot=<r>] [motion=<id>] [hp=<n>]`
-
-This makes cross-client comparison and desync triage straightforward.
-
+| Method | Status | Notes |
+|---|---|---|
+| `Tick()` | Implemented | Auto-discovers entities on room change, re-points camera |
+| `DiscoverEntityAddresses()` | Implemented | Camera pointer chain (primary) + vtable scan (fallback) |
+| `ReadRoomState()` | Implemented | Reads world/room/program/cutscene state |
+| `ReadActorState(slot)` | Partial | Slot 0: position, rotation, velocity, airborne, HP. Slot 1/2: HP only |
+| `ReadEnemyStates()` | TODO | Needs enemy list offsets |
+| `WriteCameraTarget(slot)` | Implemented | Fake actor allocation + pointer redirect |
+| `RestoreVanillaCamera()` | Implemented | Restores original pointer, frees memory |
+| `InjectOwnedInput(slot, input)` | TODO | Needs per-slot input path RE |
+| `ApplyReplicaActorState(state)` | Partial | Slot 0: dual-write position/rotation/flags. All slots: HP + camera fake actor |
+| `ApplyReplicaEnemyState(state)` | TODO | Needs enemy entity struct discovery |

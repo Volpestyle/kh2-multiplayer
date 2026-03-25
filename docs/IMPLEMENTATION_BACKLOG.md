@@ -1,6 +1,6 @@
 # Implementation Backlog
 
-## Milestone 0 — Environment lock + observability
+## Milestone 0 — Environment lock + observability `[DONE]`
 **Goal:** make the build deterministic and make the runtime inspectable.
 
 ### Tasks
@@ -23,8 +23,9 @@
 
 ---
 
-## Milestone 1 — Pointer map / game bridge
+## Milestone 1 — Pointer map / game bridge `[PARTIAL]`
 **Goal:** identify the minimum live data needed to observe the three-player session.
+**Status:** Slot 0 actor transform, HP, room state, and camera are fully mapped. Friend1/2 entity structs and enemy list are still missing.
 
 ### Tasks
 - Locate the canonical actor records for `PLAYER`, `FRIEND_1`, `FRIEND_2`.
@@ -45,8 +46,9 @@
 
 ---
 
-## Milestone 2 — Local camera retarget
+## Milestone 2 — Local camera retarget `[PARTIAL]`
 **Goal:** each machine can follow its owned actor instead of always following slot 0.
+**Status:** `WriteCameraTarget()` and `RestoreVanillaCamera()` are implemented via fake actor allocation + pointer redirect. Camera retarget verified live. Panic hotkey and cutscene detection not yet implemented.
 
 ### Tasks
 - Add runtime config: owned actor id.
@@ -66,7 +68,7 @@
 
 ---
 
-## Milestone 3 — Local input injection
+## Milestone 3 — Local input injection `[TODO]`
 **Goal:** non-slot-0 players can directly control their own actor locally.
 
 ### Tasks
@@ -86,8 +88,9 @@
 
 ---
 
-## Milestone 4 — Host-authoritative player replication
+## Milestone 4 — Host-authoritative player replication `[PARTIAL]`
 **Goal:** 3 clients can share a room and see each other in motion.
+**Status:** Server lobby, session state, ENet client/server, `SimulationState`, and snapshot broadcast are all implemented and tested (3-client integration test passes). `ApplyReplicaActorState()` implemented for slot 0 position writes. Not yet tested end-to-end with live KH2.
 
 ### Tasks
 - Implement server lobby/session state.
@@ -108,7 +111,7 @@
 
 ---
 
-## Milestone 5 — Enemy replication + shared damage
+## Milestone 5 — Enemy replication + shared damage `[TODO]`
 **Goal:** one room of common enemies can be fought cooperatively.
 
 ### Tasks
@@ -129,7 +132,7 @@
 
 ---
 
-## Milestone 6 — Minimal UX polish
+## Milestone 6 — Minimal UX polish `[TODO]`
 **Goal:** the prototype is playable enough to evaluate, not just technically alive.
 
 ### Tasks
@@ -149,7 +152,7 @@
 
 ---
 
-## Milestone 7 — Controlled transitions
+## Milestone 7 — Controlled transitions `[TODO]`
 **Goal:** move beyond one fixed room without opening the entire campaign.
 
 ### Tasks
@@ -168,7 +171,7 @@
 
 ---
 
-## Milestone 8 — Content expansion
+## Milestone 8 — Content expansion `[TODO]`
 **Goal:** make the prototype resemble the intended fantasy.
 
 ### Tasks

@@ -13,13 +13,15 @@
 
 ### Must hand off
 - symbol / offset notes
-- a stable set of getters:
-  - `ReadActorState(slot)`
-  - `ReadEnemyStates()`
-  - `ReadRoomState()`
-  - `ReadCameraState()`
-  - `WriteCameraTarget(slot)`
-  - `InjectOwnedInput(slot, input)`
+- a stable set of `IGameBridge` methods:
+  - `ReadActorState(slot)` — DONE (slot 0 position/rotation/velocity/HP; slot 1/2 HP only)
+  - `ReadEnemyStates()` — TODO (enemy list offsets unknown)
+  - `ReadRoomState()` — DONE
+  - `WriteCameraTarget(slot)` — DONE (fake actor pointer redirect)
+  - `RestoreVanillaCamera()` — DONE
+  - `InjectOwnedInput(slot, input)` — TODO (per-slot input path not RE'd)
+  - `ApplyReplicaActorState(state)` — DONE (slot 0 dual-write + camera fake actor)
+  - `ApplyReplicaEnemyState(state)` — TODO
 
 ### Success looks like
 The rest of the team can write against `IGameBridge` without doing live memory discovery themselves.
