@@ -5,7 +5,7 @@ This is the shortest list of things the live game bridge must discover before th
 ## 1) Actor roots
 
 Find stable access to:
-- [x] slot 0 actor (`PLAYER`) — DONE: entity struct discovered via camera actor pointer chain + vtable scan. Position, rotation, velocity, airborne flags all mapped. See `POSITION_PROBE_SESSION3.md`.
+- [x] slot 0 actor (`PLAYER`) — DONE: entity struct discovered via camera actor pointer chain + vtable scan. Position, rotation, velocity, airborne flags all mapped. See `archive/POSITION_PROBE_SESSION3.md`.
 - [ ] slot 1 actor (`FRIEND_1`) — TODO: entity struct discovery for friend slots not yet implemented.
 - [ ] slot 2 actor (`FRIEND_2`) — TODO: same as slot 1.
 
@@ -28,7 +28,7 @@ For each actor, identify at least:
 - [x] current camera target pointer or actor reference — DONE: `camStruct+0x50` (ACTOR_PTR), points to followed actor object
 - [x] follow distance / angle — DONE: distance at `camStruct+0x58` (~500)
 - [ ] "forced cinematic" or "event camera" state flag — TODO: `CAMERA_TYPE` at +0x48 exists but behavior during cutscenes not mapped
-- [x] safe way to temporarily override follow target — DONE: allocate fake actor object (0x700 bytes), copy original, write position to +0x640+0x30, point `camStruct+0x50` at it. See `CAMERA_RE_SESSION.md`.
+- [x] safe way to temporarily override follow target — DONE: allocate fake actor object (0x700 bytes), copy original, write position to +0x640+0x30, point `camStruct+0x50` at it. See `../CAMERA_RE_SESSION.md`.
 
 **Success check:** ~~switch follow target between slot 0/1/2~~ DONE — camera retarget verified visually. Implemented in `WriteCameraTarget()` / `RestoreVanillaCamera()`.
 
@@ -50,7 +50,7 @@ For each actor, identify at least:
 - [x] world id — DONE: `0x717008`
 - [x] room id — DONE: `0x717009`
 - [x] spawn / program state — DONE: `MAP_PROGRAM`, `BATTLE_PROGRAM`, `EVENT_PROGRAM`
-- [ ] transition start/end flags — TODO: room transitions detected by world/room change in `Tick()`, but explicit transition flags not mapped
+- [ ] transition start/end flags — TODO: room transitions detected by world/room change in `Tick()`, but explicit transition flags not mapped. **NOW commit** (staging `0x717018` → `axaAppMain+0x3A00`) documented in `../pointer_map_v1.md` (`NOW commit path`).
 - [x] cutscene or event state — DONE: `CUTSCENE_TIMER` at `0x0B64F18`
 - [ ] hashable state for post-transition comparison — TODO
 

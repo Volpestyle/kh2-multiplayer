@@ -1,0 +1,24 @@
+NOW staging write watchpoints (CE MCP)
+
+Timestamp: 2026-03-25
+Action: clear_all_breakpoints (removed prior count: 1), then arm staging bytes per pointer_map NOW commit path.
+
+Watchpoints
+  now_staging_world — write, 1 byte — KINGDOM HEARTS II FINAL MIX.exe+0x717018 (staging world byte)
+  now_staging_room  — write, 1 byte — KINGDOM HEARTS II FINAL MIX.exe+0x717019 (staging room byte)
+
+Resolved VA (this session): 0x7FF713A57018 / 0x7FF713A57019
+Hardware slots: 1 and 2
+
+Next
+  Trigger a room transition (door, map, load). On hit: MCP get_breakpoint_hits(id=...) or copy RIP + stack from CE.
+  Remove when done: remove_breakpoint by id or clear_all_breakpoints.
+
+Resolved (disassembly paste 2026-03-25)
+  True 8-byte write to exe+0x717018:  movsd [exe+0x717018], xmm0  at  axaAppMain+0x387E  (xmm0 from [rdi]).
+  Prior op in same helper:        movsd [exe+0x717120], xmm0  at  +0x37EC ;  mov [exe+0x717128], ax from [rdi+08] at +0x37F8.
+  HW watch on 0x717018 often shows RIP on following  movzx eax,word ptr [rdi+08]  at +0x3886.
+  See docs/pointer_map_v1.md (NOW commit path).
+
+Callers of axaAppMain+0x37B0 (find_call_references, 23 sites, exe+RVA table):
+  documented in pointer_map_v1.md under "Call sites that call axaAppMain+0x37B0".

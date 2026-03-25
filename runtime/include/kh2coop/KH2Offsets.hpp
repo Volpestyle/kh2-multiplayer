@@ -47,10 +47,17 @@ constexpr std::uint64_t SPAWNS         = 0x2AE5CF8;   // [KH2LIB] Spawn data
 // --------------------------------------------------------------------------
 constexpr std::uint64_t WORLD_ID       = 0x0717008;   // uint8  [CONFIRMED] NOW+0x00
 constexpr std::uint64_t ROOM_ID        = 0x0717009;   // uint8  [CONFIRMED] NOW+0x01
+constexpr std::uint64_t NOW_EXTRA      = 0x071700A;   // uint8  [CONFIRMED] NOW+0x02, third byte in NOW block
 // Map/Battle/Event programs are at NOW+0x04, NOW+0x06, NOW+0x08 (uint16 each)
 constexpr std::uint64_t MAP_PROGRAM    = 0x071700C;   // uint16 [KH2LIB] NOW+0x04
 constexpr std::uint64_t BATTLE_PROGRAM = 0x071700E;   // uint16 [KH2LIB] NOW+0x06
 constexpr std::uint64_t EVENT_PROGRAM  = 0x0717010;   // uint16 [KH2LIB] NOW+0x08
+// Staging: filled by axaAppMain+0x37B0 path (movsd [NOW_STAGING_*], xmm0 from [rdi]), then committed by axaAppMain+0x3A00.
+constexpr std::uint64_t NOW_STAGING_BASE = 0x0717018;   // [CONFIRMED] 8 bytes (movsd); → NOW via +0x3A00
+constexpr std::uint64_t NOW_STAGING_XMM_B = 0x0717120;  // [CONFIRMED] alternate branch movsd target (same [rdi] template)
+constexpr std::uint64_t NOW_STAGING_WORD = 0x0717128;   // [CONFIRMED] uint16 from [rdi+08] (mov [exe+717128], ax)
+// "KH2J:" program lookup table (indexed from packed world/room in commit helper).
+constexpr std::uint64_t KH2J_PROGRAM_TABLE = 0x09A98B0; // [CONFIRMED] fills MAP/BATTLE/EVENT programs
 
 // --------------------------------------------------------------------------
 // Game state flags

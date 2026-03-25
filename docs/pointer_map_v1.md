@@ -16,7 +16,7 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 
 | Area | Status | Notes |
 |---|---|---|
-| World/room identity | Done | `WORLD_ID`, `ROOM_ID`, `MAP_PROGRAM`, `BATTLE_PROGRAM`, `EVENT_PROGRAM` confirmed. |
+| World/room identity | Done | Static `NOW` block + **commit path** mapped (staging at `0x717018`, helper `axaAppMain+0x3A00`, `KH2J` table `0x9A98B0`). See [NOW commit path](#now-commit-path-disassembly). |
 | Cutscene/transition state | Partial | `CUTSCENE_TIMER` used as proxy. Transition start/end flags not yet mapped. |
 | Unit slot stat block | Partial | `SLOT0_BASE`, `SLOT_STRIDE`, `slot::HP`, `slot::MAX_HP` confirmed. MP offset unknown. |
 | Actor transform (slot 0) | Done | Entity struct layout fully mapped: position, rotation, velocity, airborne flags. |
@@ -39,9 +39,63 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 |---|---|---|
 | `0x0717008` | `WORLD_ID` | `[CONFIRMED]` |
 | `0x0717009` | `ROOM_ID` | `[CONFIRMED]` |
+| `0x071700A` | `NOW_EXTRA` (byte) | `[CONFIRMED]` third byte in `NOW` block; written by same commit helper as world/room |
 | `0x071700C` | `MAP_PROGRAM` | `[KH2LIB]` |
 | `0x071700E` | `BATTLE_PROGRAM` | `[KH2LIB]` |
 | `0x0717010` | `EVENT_PROGRAM` | `[KH2LIB]` |
+| `0x0717018` | `NOW_STAGING_BASE` | `[CONFIRMED]` **8 bytes** (`movsd`); first bytes become world/room after **`axaAppMain+0x3A00`** commit (see below) |
+| `0x0717120` | `NOW_STAGING_XMM_B` | `[CONFIRMED]` alternate branch: **`movsd [exe+0x717120], xmm0`** from same **`[rdi]`** template |
+| `0x0717128` | `NOW_STAGING_WORD` | `[CONFIRMED]` **`mov [exe+0x717128], ax`** from **`[rdi+08]`** (16-bit field) |
+| `0x09A98B0` | `KH2J_PROGRAM_TABLE` | `[CONFIRMED]` table labeled `"KH2J:"` in CE; indexed from packed world/room to fill map/battle/event programs |
+
+### NOW commit path (disassembly)
+
+Live **Steam Global** build (Cheat Engine symbols). The **authoritative** world/room/program values in the `NOW` block are filled by a helper under the export **`KINGDOM HEARTS II FINAL MIX.axaAppMain`**:
+
+| CE label | Role |
+|---|---|
+| `axaAppMain+0x37B0` | **Staging fill** (prologue **`sub rsp,20`** …). **`rcx`** → **`rdi`** = pointer to a **source** record in RAM. **`r8d`/`edx`/`r9b`** carry packed args (seen as **`esi`/`ebx`/`bpl`** in callee). **Two branches:** (A) **`movsd xmm0,[rdi]`** then **`movsd [exe+0x717120],xmm0`** at **`+0x37EC`**, then **`mov [exe+0x717128], ax`** from **`[rdi+08]`** at **`+0x37F8`**. (B) Other path reaches **`movsd [exe+0x717018], xmm0`** at **`+0x387E`** (same **`xmm0`** from **`[rdi]`**). Next op **`movzx eax,[rdi+08]`** at **`+0x3886`** matches common **hardware-hit `RIP`** when watching **`0x717018`** (fault lines up on the **following** instruction). **Ignore** bogus **`rol byte ptr …`** if your listing starts earlier — align on **`+0x37B0`**. |
+| `axaAppMain+0x3A00` | **Commit to `NOW`:** **`rcx`** = **`exe+0x717018`** (typical **`lea rcx,[exe+0x717018]`**). Reads bytes from staging, writes **`exe+0x717008`** … **`0x717010`**, using **`exe+0x9A98B0`** (`KH2J:`). |
+| `axaAppMain+0x3A28` | **`mov [exe+0x717009], r11b`** — store to **`ROOM_ID`** (watchpoint may show **`RIP` at `+0x3A2F`**). |
+| Callers above `+0x3A00` | **`lea rcx,[exe+0x717018]`** then **`call axaAppMain+0x3A00`** (e.g. **`+0x3994`–`+0x39A2`** region). |
+
+**RE implication:** Trace **callers of `axaAppMain+0x37B0`** (who sets **`rdi`** and the **`r8`/`rdx`/`r9`** args) to find **transition / request** layer. **`rdi`** is the live **location packet**, not the static exe staging slot.
+
+#### Call sites that `call axaAppMain+0x37B0` (staging fill)
+
+Captured **2026-03-25** via Cheat Engine MCP `find_call_references` on the **function entry** at **`axaAppMain+0x37B0`** (same as disassembly prologue at **`+0x37B0`**). **23** distinct **`call`** sites in **`KINGDOM HEARTS II FINAL MIX.exe`**.
+
+**In CE:** go to **`KINGDOM HEARTS II FINAL MIX.axaAppMain+37B0`**, then **Find out what addresses call this address** (e.g. **Ctrl+R**); the list below should match.
+
+RVAs are relative to **`KINGDOM HEARTS II FINAL MIX.exe`** image base (use **`Ctrl+G` → `KINGDOM HEARTS II FINAL MIX.exe+<RVA>`**).
+
+| # | `exe` RVA | Notes |
+|---|-----------|--------|
+| 1 | `+0x15112C` | Near other `axaAppMain` code — good first stop for arg setup |
+| 2 | `+0x154ECC` | Same |
+| 3 | `+0x30A605` | Deeper / map-load style band |
+| 4 | `+0x30BC89` | |
+| 5 | `+0x38F827` | |
+| 6 | `+0x3946E6` | |
+| 7 | `+0x3A49D4` | |
+| 8 | `+0x3F1DD4` | |
+| 9 | `+0x3FCC44` | |
+| 10 | `+0x3FF303` | |
+| 11 | `+0x3FFD55` | |
+| 12 | `+0x42E430` | |
+| 13 | `+0x42E4A2` | |
+| 14 | `+0x434A48` | |
+| 15 | `+0x434CD2` | |
+| 16 | `+0x434D1D` | |
+| 17 | `+0x436E29` | |
+| 18 | `+0x5437C6` | High-RVA cluster (often UI / flow helpers) |
+| 19 | `+0x543A9A` | |
+| 20 | `+0x545CA2` | |
+| 21 | `+0x54648A` | |
+| 22 | `+0x54806A` | |
+| 23 | `+0x549153` | |
+
+Absolute VAs are **ASLR-dependent**; only **RVAs** are stable across runs.
 
 ### Game state
 

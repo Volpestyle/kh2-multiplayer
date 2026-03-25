@@ -23,7 +23,7 @@ That is the right skeleton.
 This is the best part of the repo because it lowers risk later.
 
 #### B. The reverse-engineering work is materially useful
-`docs/pointer_map_v1.md`, `docs/CAMERA_RE_SESSION.md`, and `docs/POSITION_PROBE_SESSION3.md` show real progress, not vague notes. The important win is that you now have:
+`docs/pointer_map_v1.md`, `docs/CAMERA_RE_SESSION.md`, and `docs/probes/archive/POSITION_PROBE_SESSION3.md` show real progress, not vague notes. The important win is that you now have:
 
 - room/world/program reads,
 - slot-0 transform discovery,

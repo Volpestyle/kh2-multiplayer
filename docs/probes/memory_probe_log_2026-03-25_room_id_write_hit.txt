@@ -1,0 +1,40 @@
+Memory Probe Log (CE MCP — room ID write watch)
+
+Timestamp: 2026-03-25
+Process: KINGDOM HEARTS II FINAL MIX.exe (see ping / session for pid)
+Source: user-cheatengine MCP — hardware data breakpoint (write), id "room_id_write"
+
+Context
+  HP write watchpoints on slot 0 (Roxas) were unstable / crashed the machine on load;
+  switched to ROOM_ID (changes on room transition, far fewer writes than HP).
+
+Watchpoint
+  Symbolic: KINGDOM HEARTS II FINAL MIX.exe+0x717009
+  Field:    ROOM_ID (uint8) — see runtime/include/kh2coop/KH2Offsets.hpp (NOW+0x01)
+  Access:   write, size 1 byte
+  MCP id:   room_id_write
+  Resolved VA (this session): 0x7FF713A57009
+
+Trigger
+  User changed rooms in-game (single transition).
+
+Captured hit (count: 1)
+  Watch address:     0x7FF713A57009
+  Breakpoint type:   hardware_data / data_w
+  RIP:               0x7FF713492C0F
+  Bytes at RIP:      0F B6 59 02  (disassembly: movzx ebx, byte ptr [rcx+02])
+  Registers (sample): RCX=0x7FF713A57018  R8=0x7FF713A57018  RDX=0x00000087
+                       RBX=0x7FF713C2E970  RIP=0x7FF713492C0F
+  MCP timestamp:     1774477768
+
+Notes
+  The instruction reported at RIP is a load (movzx), not an obvious store to ROOM_ID.
+  Resolved (full disassembly paste 2026-03-25): true store is
+    mov [exe+0x717009], r11b  at  KINGDOM HEARTS II FINAL MIX.axaAppMain+0x3A28
+  inside helper at axaAppMain+0x3A00 (rcx → staging at exe+0x717018). RIP at +0x3A2F is the
+  next instruction (movzx ebx,[rcx+02]) — matches confusing HW watch hit.
+  See docs/pointer_map_v1.md section "World / room — commit path".
+
+Follow-up
+  Clear hit buffer via MCP get_breakpoint_hits(clear=true) or remove_breakpoint(id=room_id_write)
+  when finished probing.
