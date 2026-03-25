@@ -65,9 +65,44 @@ constexpr std::uint64_t CUTSCENE_SKIP  = 0x0B64F1C;   // [KH2LIB] Cutscene skip 
 constexpr std::uint64_t GAME_SPEED     = 0x0717424;   // [KH2LIB] Game speed
 
 // --------------------------------------------------------------------------
-// Camera
+// Camera  (RE Session — CONFIRMED)
+//
+// The camera struct base is at exe+0x718C60. It contains:
+//   - Configuration (distances, angles, speeds)
+//   - A pointer to the followed actor object at +0x50
+//   - Smoothed look-at, eye position, and raw look-at targets
+//
+// The camera copies the followed actor's position via MEMCPY_4FLOATS
+// (exe+0x1A8E60) each frame. The source is:
+//   [camStruct+0x50] + 0x640 + 0x30  (actor object -> entity transform -> position)
+//
+// RETARGETING: To make the camera follow a different entity, allocate a
+// fake actor object (copy 0x700 bytes from the original), update the
+// entity transform position at +0x640+0x30, and write the fake actor
+// pointer to camStruct+0x50. Must continuously update each frame.
 // --------------------------------------------------------------------------
-constexpr std::uint64_t CAMERA_TYPE    = 0x0718CA8;   // [KH2LIB] Camera type
+constexpr std::uint64_t CAMERA_STRUCT  = 0x0718C60;   // [CONFIRMED] Camera struct base
+
+namespace camera {
+    constexpr std::uint64_t SMOOTH_LOOKAT  = 0x08;    // Vec4 [CONFIRMED] smoothed/interpolated look-at (X,Y,Z,W)
+    constexpr std::uint64_t EYE_POS        = 0x18;    // Vec4 [CONFIRMED] camera eye world position (interpolated)
+    constexpr std::uint64_t CAMERA_TYPE    = 0x48;    // dword [KH2LIB] camera type / mode
+    constexpr std::uint64_t ACTOR_PTR      = 0x50;    // qword [CONFIRMED] pointer to followed actor object
+    constexpr std::uint64_t DISTANCE       = 0x58;    // float [CONFIRMED] camera follow distance (~500)
+    constexpr std::uint64_t EYE_POS_RAW    = 0x64;    // Vec4 [CONFIRMED] camera eye position (raw)
+    constexpr std::uint64_t EYE_POS_COPY   = 0x74;    // Vec4 [CONFIRMED] camera eye position (copy)
+    constexpr std::uint64_t LOOKAT_RAW     = 0x84;    // Vec4 [CONFIRMED] raw look-at target (X,Y,Z,W)
+    constexpr std::uint64_t LOOKAT_COPY    = 0x94;    // Vec4 [CONFIRMED] look-at target copy
+    constexpr std::uint64_t HEIGHT_OFFSET  = 0xA4;    // float [CONFIRMED] look-at Y offset (~1.5)
+
+    // Actor object layout: the pointer at ACTOR_PTR points to an actor
+    // object. The entity transform struct is at actor_object + 0x640.
+    // Position within entity transform is at +0x30 (same as entity::POS_X).
+    constexpr std::uint64_t ACTOR_TO_ENTITY = 0x640;  // [CONFIRMED] offset from actor object to entity transform
+}
+
+// Legacy alias (CAMERA_TYPE was previously at the absolute address)
+constexpr std::uint64_t CAMERA_TYPE    = 0x0718CA8;   // = CAMERA_STRUCT + camera::CAMERA_TYPE
 
 // --------------------------------------------------------------------------
 // Input
@@ -122,24 +157,88 @@ constexpr std::uint64_t GAUGE1         = 0x2A0FAB8;   // [KH2LIB]
 constexpr std::uint64_t GAUGE_STRIDE   = 0x48;         // [KH2LIB]
 
 // --------------------------------------------------------------------------
-// Entity / position data
+// Entity / position data  (Session 3 — CONFIRMED)
 //
-// Entity position (X, Y, Z, rotation) is NOT in the unit slot. It lives
-// in a heap-allocated entity structure managed by the 3D engine.
-// Finding the entity pointer chain is the next RE task.
+// Entity position is NOT in the unit slot. It lives in a struct within the
+// exe data section. The struct base address CHANGES per room transition,
+// but the internal layout is consistent.
 //
-// Approach for next session:
-//   1. Do a float scan for position while walking.
-//   2. When a heap address is found, use "Pointer scan for this address"
-//      in Cheat Engine to find the static pointer chain.
-//   3. Or: look for a pointer within/near the unit slot that points to
-//      the entity object.
+// DISCOVERY: Session 3 confirmed that writing to entity struct + 0x30
+// teleports the player. The copy chain flows:
+//   entity struct (+0x30)  →  buffer array (exe+0xAD9100)  →  render
+//
+// In physics-active rooms, the game recomputes position each frame, so
+// writes to the entity struct alone are overwritten within ~500ms.
+// Reliable writes require continuous dual-write to BOTH the entity struct
+// AND the buffer array entry.
+//
+// DYNAMIC DISCOVERY: The entity struct can be found by scanning the exe
+// data section (0x2500000+) for a QWORD vtable pointer in the 0x253xxxx
+// range, with position W=1.0 at +0x3C from that base.
 // --------------------------------------------------------------------------
 namespace entity {
-    constexpr std::uint64_t POS_X      = 0x0;  // float [UNKNOWN] heap entity + ??
-    constexpr std::uint64_t POS_Y      = 0x0;  // float [UNKNOWN]
-    constexpr std::uint64_t POS_Z      = 0x0;  // float [UNKNOWN]
-    constexpr std::uint64_t ROT_Y      = 0x0;  // float [UNKNOWN]
+    // Offsets within the entity transform struct (relative to struct base)
+    constexpr std::uint64_t VTABLE_PTR     = 0x00;  // qword [CONFIRMED] points to exe 0x253xxxx range
+    constexpr std::uint64_t AIRBORNE_FLAG  = 0x08;  // dword [CONFIRMED] 0=grounded, 1=airborne
+    constexpr std::uint64_t POS_X          = 0x30;  // float [CONFIRMED] horizontal position
+    constexpr std::uint64_t POS_Y          = 0x34;  // float [CONFIRMED] vertical (negative = up)
+    constexpr std::uint64_t POS_Z          = 0x38;  // float [CONFIRMED] depth position
+    constexpr std::uint64_t POS_W          = 0x3C;  // float [CONFIRMED] always 1.0 (homogeneous)
+    constexpr std::uint64_t COS_FACING     = 0x40;  // float [CONFIRMED] cos(facing angle)
+    constexpr std::uint64_t SIN_FACING     = 0x48;  // float [CONFIRMED] sin(facing angle)
+    constexpr std::uint64_t ROT_Y          = 0x4C;  // float [CONFIRMED] facing angle in radians
+    constexpr std::uint64_t VEL_Y          = 0xA4;  // float [CONFIRMED] Y velocity (when airborne)
+    constexpr std::uint64_t MOVE_STATE     = 0x100; // dword [CONFIRMED] 2=grounded, 3=airborne
+    constexpr std::uint64_t AIRBORNE_SUB   = 0x104; // dword [CONFIRMED] 0=grounded, 1=airborne
+}
+
+// --------------------------------------------------------------------------
+// Entity position buffer array  (Session 3 — CONFIRMED)
+//
+// A static array of entity position entries at a fixed exe offset.
+// Each entry is 0x38 bytes: 16 bytes position (X,Y,Z,W) + 40 bytes meta.
+// The player's slot index within this array changes per room.
+//
+// For dual-write teleportation, write to both the entity struct position
+// AND the corresponding buffer array entry.
+// --------------------------------------------------------------------------
+namespace buffer {
+    constexpr std::uint64_t ARRAY_BASE     = 0xAD9100;  // [CONFIRMED] entity position buffer array
+    constexpr std::uint64_t ENTRY_STRIDE   = 0x38;      // [CONFIRMED] bytes per buffer entry
+    // Within each buffer entry, position is at offset 0 (X,Y,Z,W as 4 floats)
+    constexpr std::uint64_t ENTRY_POS_X    = 0x00;      // float
+    constexpr std::uint64_t ENTRY_POS_Y    = 0x04;      // float
+    constexpr std::uint64_t ENTRY_POS_Z    = 0x08;      // float
+    constexpr std::uint64_t ENTRY_POS_W    = 0x0C;      // float (1.0)
+}
+
+// --------------------------------------------------------------------------
+// Entity struct discovery
+//
+// The entity struct base lives in the exe data section and changes per
+// room transition. Known examples:
+//   Room 1 (early Twilight Town): exe+0x251F260, pos at exe+0x251F290
+//   Room 2 (Twilight Town populated): exe+0x25224E0, pos at exe+0x2522510
+//
+// To find dynamically: scan exe range 0x2500000..0x2600000 for a QWORD
+// in the 0x253xxxx range (vtable pointer), then verify +0x3C == 1.0f (W).
+//
+// Key code addresses (stable across rooms):
+//   exe+0x1354E0  — position update function (R9 = buffer entry)
+//   exe+0x1A8E60  — memcpy_4floats (copies between buffers)
+//   exe+0x456696  — entity sub-struct position writer
+// --------------------------------------------------------------------------
+namespace entity_discovery {
+    constexpr std::uint64_t SCAN_START     = 0x2500000;  // start of entity data region
+    constexpr std::uint64_t SCAN_END       = 0x2600000;  // end of entity data region
+    constexpr std::uint64_t VTABLE_RANGE_LO = 0x2530000; // vtable pointers fall in this range
+    constexpr std::uint64_t VTABLE_RANGE_HI = 0x2540000; // (relative to exe base)
+    constexpr float         POS_W_EXPECTED  = 1.0f;      // W component for validation
+
+    // Code addresses (stable, for hooking)
+    constexpr std::uint64_t POS_UPDATE_FUNC  = 0x1354E0; // R9 = buffer entry for current entity
+    constexpr std::uint64_t MEMCPY_4FLOATS   = 0x1A8E60; // copies position between buffers
+    constexpr std::uint64_t ENTITY_POS_WRITER = 0x456696; // validates + copies XYZW to sub-struct
 }
 
 // --------------------------------------------------------------------------
