@@ -32,6 +32,11 @@ target_include_directories(kh2coop_common PUBLIC
 
 target_link_libraries(kh2coop_common PUBLIC enet)
 
+# ENet requires Winsock2 and winmm on Windows.
+if(WIN32)
+    target_link_libraries(kh2coop_common PUBLIC ws2_32 winmm)
+endif()
+
 # ---------------------------------------------------------------------------
 # kh2coop_server_core — session host logic (library so tests can link it).
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 #include "kh2coop/Codec.hpp"
 
+#include <cstdarg>
 #include <cstdio>
 #include <stdexcept>
 
