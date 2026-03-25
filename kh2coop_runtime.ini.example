@@ -1,0 +1,11 @@
+# Minimal runtime scaffold config
+# Slot ownership: 0 = Player, 1 = Friend1, 2 = Friend2
+client_role = 0
+
+# Enable local camera override and allow the F8 panic toggle.
+camera_override = true
+panic_hotkey = true
+
+# Optional local diagnostics.
+log_owned_actor_state = false
+tick_ms = 16

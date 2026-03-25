@@ -222,7 +222,7 @@ std::uint64_t GameBridgePC::enemyBase(std::uint32_t index) const {
 //
 // The player entity struct lives in the exe data section at a room-dependent
 // address. We find it by scanning for the vtable pattern:
-//   - A QWORD in the 0x253xxxx range (relative to exe base)
+//   - A QWORD that points back into the same 0x2500000..0x2600000 module region
 //   - Position W component (float 1.0) at +0x3C from that QWORD
 //
 // After finding the entity struct, we match its position against the buffer
@@ -245,7 +245,7 @@ std::uint64_t GameBridgePC::scanForEntityStruct() const {
             actorPtr < baseAddress_ + 0x3000000) {
             std::uint64_t candidate = actorPtr + camera::ACTOR_TO_ENTITY;
 
-            // Validate: check vtable pointer and W component.
+            // Validate: check vtable pointer, W component, and movement state.
             std::uint64_t vtableVal = readAbs<std::uint64_t>(candidate + entity::VTABLE_PTR);
             float posW = readAbs<float>(candidate + entity::POS_W);
             std::uint32_t moveState = readAbs<std::uint32_t>(candidate + entity::MOVE_STATE);
@@ -261,9 +261,10 @@ std::uint64_t GameBridgePC::scanForEntityStruct() const {
 
     // --- Strategy 2: Scan exe data section (fallback) ---
     // If the camera pointer is unavailable (e.g., during transitions),
-    // fall back to scanning the entity data region for the vtable + W=1.0
-    // pattern. Additional heuristic: moveState must be 2 or 3 to filter
-    // out false positives from metadata structs.
+    // fall back to scanning the entity data region for a vtable that also
+    // points back into that region plus the W=1.0 pattern. Additional
+    // heuristic: moveState must be 2 or 3 to filter out false positives from
+    // metadata structs.
     constexpr std::uint64_t SCAN_STEP = 0x10;  // entity structs are aligned
     constexpr std::uint64_t CHUNK_SIZE = 4096;
 
@@ -428,6 +429,7 @@ RoomState GameBridgePC::ReadRoomState() const {
     rs.mapProgram = static_cast<std::uint32_t>(readMem<std::uint16_t>(MAP_PROGRAM));
     rs.battleProgram = static_cast<std::uint32_t>(readMem<std::uint16_t>(BATTLE_PROGRAM));
     rs.eventProgram = static_cast<std::uint32_t>(readMem<std::uint16_t>(EVENT_PROGRAM));
+    rs.inTransition = (rs.worldId == 0xFFU || rs.roomId == 0xFFU);
 
     // Transition/cutscene: use cutscene timer as a proxy.
     // A non-zero cutscene timer means a cutscene is playing.

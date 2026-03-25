@@ -173,8 +173,10 @@ constexpr std::uint64_t GAUGE_STRIDE   = 0x48;         // [KH2LIB]
 // AND the buffer array entry.
 //
 // DYNAMIC DISCOVERY: The entity struct can be found by scanning the exe
-// data section (0x2500000+) for a QWORD vtable pointer in the 0x253xxxx
-// range, with position W=1.0 at +0x3C from that base.
+// data section (0x2500000+) for a QWORD vtable pointer that also lands in
+// the same 0x2500000..0x2600000 module region, with position W=1.0 at +0x3C
+// from that base. Live validation found player vtables in the 0x251xxxx range,
+// so discovery must not assume only 0x253xxxx values.
 // --------------------------------------------------------------------------
 namespace entity {
     // Offsets within the entity transform struct (relative to struct base)
@@ -219,9 +221,12 @@ namespace buffer {
 // room transition. Known examples:
 //   Room 1 (early Twilight Town): exe+0x251F260, pos at exe+0x251F290
 //   Room 2 (Twilight Town populated): exe+0x25224E0, pos at exe+0x2522510
+//   Roxas Twilight Town live check: actor ptr exe+0x24FE460, entity ptr at
+//                                    exe+0x24FEAA0, vtable at exe+0x2514E00
 //
-// To find dynamically: scan exe range 0x2500000..0x2600000 for a QWORD
-// in the 0x253xxxx range (vtable pointer), then verify +0x3C == 1.0f (W).
+// To find dynamically: scan exe range 0x2500000..0x2600000 for a QWORD that
+// also points back into that same module region (vtable pointer), then verify
+// +0x3C == 1.0f (W).
 //
 // Key code addresses (stable across rooms):
 //   exe+0x1354E0  — position update function (R9 = buffer entry)
@@ -231,8 +236,8 @@ namespace buffer {
 namespace entity_discovery {
     constexpr std::uint64_t SCAN_START     = 0x2500000;  // start of entity data region
     constexpr std::uint64_t SCAN_END       = 0x2600000;  // end of entity data region
-    constexpr std::uint64_t VTABLE_RANGE_LO = 0x2530000; // vtable pointers fall in this range
-    constexpr std::uint64_t VTABLE_RANGE_HI = 0x2540000; // (relative to exe base)
+    constexpr std::uint64_t VTABLE_RANGE_LO = 0x2500000; // vtable pointers observed in this module region
+    constexpr std::uint64_t VTABLE_RANGE_HI = 0x2600000; // (relative to exe base)
     constexpr float         POS_W_EXPECTED  = 1.0f;      // W component for validation
 
     // Code addresses (stable, for hooking)

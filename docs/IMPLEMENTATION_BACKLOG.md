@@ -48,7 +48,7 @@
 
 ## Milestone 2 — Local camera retarget `[PARTIAL]`
 **Goal:** each machine can follow its owned actor instead of always following slot 0.
-**Status:** `WriteCameraTarget()` and `RestoreVanillaCamera()` are implemented via fake actor allocation + pointer redirect. Camera retarget verified live. Panic hotkey and cutscene detection not yet implemented.
+**Status:** `WriteCameraTarget()` and `RestoreVanillaCamera()` are implemented via fake actor allocation + pointer redirect. Camera retarget verified live. The runtime scaffold now loads `kh2coop_runtime.ini`, drives `CameraController`, and exposes an `F8` panic toggle, but stronger transition/cutscene gating and live Friend1/2 validation are still pending.
 
 ### Tasks
 - Add runtime config: owned actor id.
@@ -57,8 +57,8 @@
 - Add panic hotkey to disable custom camera override.
 
 ### Deliverables
-- `CameraController` wired into runtime
-- local config file: `client_role = 0|1|2`
+- `CameraController` wired into the runtime scaffold
+- local config file: `kh2coop_runtime.ini` with `client_role = 0|1|2`
 
 ### Exit criteria
 - Client A follows slot 0.
