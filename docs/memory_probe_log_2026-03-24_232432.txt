@@ -1,0 +1,27 @@
+Memory Probe Log (manual via CE MCP)
+
+Timestamp: 2026-03-24 23:24:32
+Process: KINGDOM HEARTS II FINAL MIX.exe (pid 6472)
+
+World/Room State
+  world_id: 2
+  room_id: 6
+  map_program: 1
+  battle_program: 22
+  event_program: 12
+
+Party Slot References (unit slot stat block)
+  Slot 0 (Player)
+    HP: 20
+    MaxHP: 20
+  Slot 1 (Friend1)
+    HP: 0
+    MaxHP: 1
+  Slot 2 (Friend2)
+    HP: 0
+    MaxHP: 0
+
+Actor/Enemy Count
+  actor_count: not available (not mapped yet in this project)
+  enemy_count: not available (enemy::COUNT offset is still UNKNOWN)
+
