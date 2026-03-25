@@ -103,9 +103,104 @@
 
 ---
 
-## Playtest gate
+## Playtest gate (Track A)
 Do not expand scope beyond GoA Arena 3P until the team can complete:
 - 10 minutes of stable combat,
 - at least one reconnect,
 - at least five successful room transitions,
 - one complete bug report bundle with logs from all peers.
+
+---
+---
+
+## Track B — Refactor for Scale
+
+### B1 — Stable identity types
+**Pass when**
+- `PeerId`, `CharacterId`, `ActorNetId`, `InstanceId` are used in all new code paths.
+- `SlotType` is only referenced inside co-op instance logic, not as durable identity.
+- All existing tests still pass with no regressions.
+
+**Fail when**
+- New code still hardcodes slot indices as player identity.
+
+---
+
+### B2 — Session/instance split
+**Pass when**
+- A session can exist without an active instance (lobby/party-only state).
+- `ClientHello` is used for handshake instead of `SessionState`.
+- Instance creation is an explicit operation, not implicit on connect.
+
+**Fail when**
+- Connecting to the server immediately creates a gameplay instance.
+
+---
+
+### B4 — Runtime mode
+**Pass when**
+- `--mode campaign_coop` and `--mode public_realm` are recognized at startup.
+- Boot log shows the active mode.
+- Mode-specific code paths are cleanly gated.
+
+**Fail when**
+- The runtime crashes or ignores the mode flag.
+
+---
+---
+
+## Track C — Public Realm v1
+
+### C1 — Realm login and character roster
+**Pass when**
+- A client can log in, create a character, select it, and reconnect without losing the character.
+
+**Fail when**
+- Characters are lost on disconnect.
+
+---
+
+### C3 — Public hub instance
+**Pass when**
+- Multiple clients can join a hub room and see each other moving for 5 minutes.
+- No combat, no crashes, no fatal desyncs.
+
+**Fail when**
+- Remote players are invisible or crash the room.
+
+---
+
+### C5 — Party adventure instance
+**Pass when**
+- A formed party enters an adventure instance and completes one encounter together.
+- Rewards persist back to character records.
+
+**Fail when**
+- Party members end up in different instances.
+- Rewards duplicate or vanish.
+
+---
+
+## Track B regression gate
+**CampaignCoop behavior must remain unchanged after scale refactors.**
+
+**Pass when**
+- All existing `FakeSimulation` tests pass with zero regressions after Track B changes.
+- 3-client integration test still connects, assigns slots, exchanges snapshots.
+- Runtime scaffold still attaches to KH2, discovers entities, retargets camera.
+- No Track B type or protocol change alters the v1 wire format.
+
+**Fail when**
+- Any existing test breaks after a Track B commit.
+- A CampaignCoop session behaves differently than it did before the refactor.
+
+This is a **hard gate** -- Track B refactors must not break Track A.
+
+---
+
+## Scope expansion gate
+Do not begin Track C implementation until:
+- Track A playtest gate passes.
+- Track B refactors (B1, B2, B4) are complete.
+- Track B regression gate passes.
+- `ARCHITECTURE_MODES.md` is reviewed and accepted.

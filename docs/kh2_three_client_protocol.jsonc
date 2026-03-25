@@ -1,5 +1,13 @@
 {
-  // Sketch, not a final schema.
+  // Protocol v1 sketch — CampaignCoop session messages.
+  // This schema covers the 3-player co-op mode.
+  //
+  // For the protocol v2 extension supporting both CampaignCoop and PublicRealm
+  // modes (stable IDs, realm service, instance types, party management),
+  // see: docs/kh2_realm_protocol_sketch.jsonc
+  //
+  // The v2 types are also declared in C++ at: common/include/kh2coop/Protocol.hpp
+  // (ClientHello, RealmSeed, CharacterRecord, InstanceDescriptor, ActorBinding, PartyRecord)
   "SessionState": {
     "sessionId": "uuid",
     "gameBuild": "steam-15194255",

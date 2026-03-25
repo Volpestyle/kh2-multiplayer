@@ -6,6 +6,67 @@
 
 namespace kh2coop {
 
+// ---------------------------------------------------------------------------
+// Stable identity types (used across both runtime modes)
+// ---------------------------------------------------------------------------
+
+using PeerId = std::string;
+using CharacterId = std::string;
+using PartyId = std::string;
+using RealmId = std::string;
+using InstanceId = std::string;
+using ActorNetId = std::uint32_t;
+
+// ---------------------------------------------------------------------------
+// Runtime mode — determines which actor model and session shape to use.
+// CampaignCoop: 3-slot canonical party, host KH2 save is authority.
+// PublicRealm:  persistent characters, realm service, instanced rooms.
+// ---------------------------------------------------------------------------
+
+enum class RuntimeMode : std::uint8_t {
+    CampaignCoop = 0,
+    PublicRealm = 1
+};
+
+// ---------------------------------------------------------------------------
+// Instance types — what kind of gameplay room is active.
+// ---------------------------------------------------------------------------
+
+enum class InstanceType : std::uint8_t {
+    CampaignPartyInstance = 0,
+    PublicHubInstance = 1,
+    AdventureInstance = 2,
+    PvpArenaInstance = 3
+};
+
+// ---------------------------------------------------------------------------
+// Authority model for an instance.
+// ---------------------------------------------------------------------------
+
+enum class AuthorityType : std::uint8_t {
+    HostClient = 0,
+    DedicatedWorker = 1
+};
+
+// ---------------------------------------------------------------------------
+// Native role — how an actor maps to the local KH2 engine.
+// CampaignCoop uses LocalPrimary / LocalCompanion1 / LocalCompanion2.
+// PublicRealm uses LocalPrimary + RemoteReplica for other humans.
+// ---------------------------------------------------------------------------
+
+enum class NativeRole : std::uint8_t {
+    LocalPrimary = 0,
+    LocalCompanion1 = 1,
+    LocalCompanion2 = 2,
+    RemoteReplica = 3,
+    RemoteEnemy = 4,
+    RemoteNpc = 5
+};
+
+// ---------------------------------------------------------------------------
+// Canonical party slots (CampaignCoop actor model)
+// ---------------------------------------------------------------------------
+
 enum class SlotType : std::uint8_t {
     Player = 0,
     Friend1 = 1,

@@ -316,3 +316,18 @@ with task lists, deliverables, exit criteria, and completion status.
 3. Prove host-authoritative transform replication for 3 actors in one room.
 4. Freeze or override non-host enemy AI cleanly.
 5. Build the GoA Arena 3P vertical slice.
+
+---
+
+## Relationship to scope expansion
+
+This document describes **Product A: Campaign Co-op** — the 3-player shared-party mode.
+
+The project now also plans **Product B: Public Realm** — a persistent-character, public-hub, instanced-adventure mode. Both products share infrastructure (transport, codec, identity, version gating) but diverge in their actor model and session architecture.
+
+- For the full two-product analysis, see `docs/kh2_multiplayer_scope_expansion_review.md`.
+- For the protocol v2 sketch supporting both modes, see `docs/kh2_realm_protocol_sketch.jsonc`.
+- For the architecture breakdown, see `docs/ARCHITECTURE_MODES.md`.
+- For the expanded milestone tree (Tracks A-D), see `docs/IMPLEMENTATION_BACKLOG.md`.
+
+**Current priority remains this document's scope** — finish the 3-player co-op vertical slice before branching into public-realm work. The stable identity types (`PeerId`, `ActorNetId`, etc.) and runtime mode enum are already in place in `Types.hpp` to support the eventual divergence.

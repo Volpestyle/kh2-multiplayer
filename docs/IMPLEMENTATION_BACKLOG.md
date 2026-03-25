@@ -183,9 +183,232 @@
 ### Exit criteria
 - The vertical slice feels like real co-op combat, not only a networking demo.
 
-## Things to postpone
+## Things to postpone (Track A)
 - full campaign
 - free-roam world divergence
 - deterministic lockstep
 - drive forms, summons, limits, and every command-menu feature
 - netplay across mixed game versions
+
+---
+---
+
+# Track B — Refactor for Scale
+
+Prepare the codebase to support both CampaignCoop and PublicRealm modes.
+Do this **after** Track A reaches a stable 3-player vertical slice, but **before** starting Track C.
+
+See `docs/ARCHITECTURE_MODES.md` for the full mode breakdown and `common/include/kh2coop/Types.hpp` for the type definitions.
+
+---
+
+## B1 — Introduce stable identity types `[DONE]`
+**Goal:** decouple durable player/actor identity from the co-op-specific `SlotType`.
+
+### Tasks
+- [x] Add `PeerId`, `CharacterId`, `ActorNetId`, `InstanceId`, `PartyId`, `RealmId` type aliases to `Types.hpp`
+- [x] Add `RuntimeMode`, `InstanceType`, `AuthorityType`, `NativeRole` enums to `Types.hpp`
+- [ ] Migrate `SessionActor::ownerPeerId` from raw `std::string` to `PeerId` alias
+- [ ] Add `ActorNetId` to `ActorState` as a separate field from `actorId` (currently overloaded)
+
+### Follow-up: strong wrapper types
+The current IDs are type aliases (`using PeerId = std::string`). This gives naming clarity but no compile-time safety against mixing up a `PeerId` with a `CharacterId`. Once the IDs are threaded through codec, state containers, and logs, promote them to strong wrapper types:
+```cpp
+struct PeerId { std::string value; bool operator==(const PeerId&) const = default; };
+```
+This is a follow-up to B1, not a blocker.
+
+### Exit criteria
+- `SlotType` is only used as a mapping inside co-op instances, not as durable identity.
+- All new protocol records reference stable ID types.
+
+---
+
+## B2 — Kill handshake overload + split session from instance `[TODO]`
+**Goal:** separate lobby/party ownership from active gameplay instance. Fix the overloaded handshake.
+
+This is the **highest-priority Track B task** — it's the bridge between the current co-op prototype and the two-product platform.
+
+### Tasks
+- [ ] Implement `ClientHello` codec (encode/decode) — struct already declared in `Protocol.hpp`
+- [ ] Implement `ClientHelloAck` / `ServerHello` response
+- [ ] Replace the current `SessionState`-as-handshake pattern in `NetworkClient::connect()` and `SessionHost::onReceive()`
+- [ ] Stop overloading `sessionId` as the peer name — use `ClientHello::peerId` and `ClientHello::peerName`
+- [ ] Add `requestedMode` to wire handshake so the server knows what mode the client wants
+- [ ] Add `RuntimeMode` / `ProductMode` to `ServerMain` config (`--mode` CLI arg)
+- [ ] Refactor `SessionHost` into `PartySession` (who is grouped) and `InstanceRuntime` (which room is active)
+- [ ] Implement or remove `TransitionAck` codec — currently declared as `PacketType::TransitionAck = 2` but has no encode/decode implementation
+
+### Deliverables
+- `ClientHello` / `ClientHelloAck` on the wire
+- Server knows requested mode from handshake
+- `TransitionAck` either works or is removed from the enum
+- Clear separation between "who is in my party" and "what room are we in"
+
+### Exit criteria
+- A session can exist without an active instance (lobby state).
+- Instance creation/destruction is an explicit operation.
+- All existing CampaignCoop tests still pass (Track B regression gate).
+
+---
+
+## B3 — Add persistence layer interfaces `[TODO]`
+**Goal:** define the data contracts for character and realm persistence without implementing storage.
+
+### Tasks
+- [ ] Define `CharacterRecord` load/save interface
+- [ ] Define `RealmSeed` import interface
+- [ ] Add in-memory stub implementations for testing
+
+### Deliverables
+- `ICharacterStore` interface
+- `IRealmStore` interface
+- In-memory implementations for test harness
+
+### Exit criteria
+- Public-realm code can be written against the interfaces without a real database.
+
+---
+
+## B4 — Add runtime mode to config and startup `[DONE]`
+**Goal:** the runtime and server know which mode they are operating in.
+
+### Tasks
+- [x] Add `RuntimeMode` enum to `Types.hpp`
+- [x] Add `runtime_mode` to INI config and CLI args
+- [ ] Gate mode-specific code paths behind runtime mode checks
+- [ ] Server startup logs the active mode
+
+### Exit criteria
+- `--mode campaign_coop` and `--mode public_realm` are recognized at startup.
+- Code paths that only apply to one mode are clearly gated.
+
+---
+---
+
+# Track C — Public Realm v1
+
+Build the public-realm product on top of the shared infrastructure. Requires Track B to be complete.
+
+See `docs/kh2_multiplayer_scope_expansion_review.md` sections 5-13 and `docs/kh2_realm_protocol_sketch.jsonc`.
+
+---
+
+## C1 — Realm server with login and character roster `[TODO]`
+**Goal:** persistent service that manages accounts and characters.
+
+### Tasks
+- [ ] Implement `RealmService` with login/logout
+- [ ] Implement character creation, roster listing, character selection
+- [ ] Implement session auth token flow
+- [ ] Add `CharacterRecord` persistence (in-memory first, then file/DB)
+
+### Exit criteria
+- A client can log in, create a character, and select it.
+- Character persists across reconnects.
+
+---
+
+## C2 — Save-file to realm-seed importer `[TODO]`
+**Goal:** turn a KH2 save file into a `RealmSeed` that defines accessible content.
+
+### Tasks
+- [ ] Parse KH2 save file structure (reference: OpenKH `SaveDataFinalMix.cs`)
+- [ ] Extract unlocked worlds, warp points, story flags, cleared bosses
+- [ ] Produce `RealmSeed` record
+- [ ] Store realm seed in realm service
+
+### Exit criteria
+- A save file can be imported, and the resulting `RealmSeed` correctly reflects the save's progression.
+
+---
+
+## C3 — Public hub instance `[TODO]`
+**Goal:** safe-zone room where multiple players can see each other without combat.
+
+### Tasks
+- [ ] Implement `PublicHubInstance` type
+- [ ] Spawn remote players as `RemoteReplica` actors
+- [ ] Replicate position/rotation/animation for all visible players
+- [ ] No combat, no enemy spawns
+
+### Exit criteria
+- Multiple clients can join a hub room and see each other moving.
+- No crashes or fatal desyncs in 5 minutes of testing.
+
+---
+
+## C4 — Party forming, joining, follow, warp `[TODO]`
+**Goal:** players can form parties in hubs and move together.
+
+### Tasks
+- [ ] Implement party create/invite/join/leave messages
+- [ ] Implement party follow (auto-warp party members)
+- [ ] Implement party HUD (member list, status)
+
+### Exit criteria
+- Two players can form a party in a hub and follow each other.
+
+---
+
+## C5 — Party-created adventure instances `[TODO]`
+**Goal:** a formed party can enter a combat room together.
+
+### Tasks
+- [ ] Implement `AdventureInstance` creation from a party
+- [ ] Map party members to instance actor bindings
+- [ ] Instance authority handles enemy spawns, combat, rewards
+
+### Exit criteria
+- A party enters an adventure instance and completes one encounter together.
+
+---
+
+## C6 — Persist character rewards back to realm `[TODO]`
+**Goal:** experience, items, and progression from adventure instances write back to the character record.
+
+### Tasks
+- [ ] Define reward writeback messages
+- [ ] Implement instance-exit persistence checkpoint
+- [ ] Validate no duplicate rewards
+
+### Exit criteria
+- A character's level/equipment changes persist after leaving an adventure instance.
+
+---
+---
+
+# Track D — PvP and Advanced Multiplayer
+
+Separate vertical slice for competitive play. Requires stable instance architecture from Track C.
+
+See `docs/kh2_multiplayer_scope_expansion_review.md` section 11.
+
+---
+
+## D1 — Duel request flow `[TODO]`
+- Implement duel challenge/accept/decline in hubs
+- Launch into `PvpArenaInstance` on accept
+
+## D2 — Instanced arena prototype `[TODO]`
+- Curated room list for arenas
+- Fixed kits/archetypes (no arbitrary loadouts in v1)
+- Round-based or timed match format
+
+## D3 — Server-validated hit/damage events `[TODO]`
+- Move damage calculation to instance authority
+- Clients submit attack events, authority confirms/rejects
+- Prevents basic client-side damage cheating
+
+## D4 — Anti-cheat and stronger authority `[TODO]`
+- Dedicated instance workers for PvP
+- State validation and anomaly detection
+- Report/ban system
+
+---
+
+## Sequencing priority
+
+**Current focus: Track A (finish co-op prototype).** Do not switch to Track C/D until Track A reaches a playable vertical slice with 3-player combat in a fixed room.
+
+Track B refactors should be done opportunistically as Track A work stabilizes — the type definitions and runtime mode are already in place (B1 partial, B4 partial).

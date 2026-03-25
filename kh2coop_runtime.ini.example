@@ -1,5 +1,10 @@
 # Minimal runtime scaffold config
+
+# Runtime mode: campaign_coop (default) or public_realm
+runtime_mode = campaign_coop
+
 # Slot ownership: 0 = Player, 1 = Friend1, 2 = Friend2
+# Only used in CampaignCoop mode.
 client_role = 0
 
 # Enable local camera override and allow the F8 panic toggle.

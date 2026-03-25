@@ -1,5 +1,6 @@
 #include "kh2coop/CameraController.hpp"
 #include "kh2coop/GameBridgePC.hpp"
+#include "kh2coop/Types.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -26,6 +27,7 @@ using namespace std::chrono_literals;
 std::atomic_bool g_running {true};
 
 struct RuntimeConfig {
+    kh2coop::RuntimeMode runtimeMode {kh2coop::RuntimeMode::CampaignCoop};
     kh2coop::SlotType ownedSlot {kh2coop::SlotType::Player};
     bool cameraOverrideEnabled {true};
     bool panicHotkeyEnabled {true};
@@ -38,6 +40,7 @@ struct LaunchOptions {
     RuntimeConfig config {};
     std::uint32_t maxTicks {0};
     bool helpRequested {false};
+    std::optional<kh2coop::RuntimeMode> runtimeModeOverride;
     std::optional<kh2coop::SlotType> ownedSlotOverride;
     std::optional<bool> cameraOverrideEnabledOverride;
     std::optional<bool> logOwnedActorStateOverride;
@@ -101,6 +104,31 @@ bool parseSlot(const std::string& value, kh2coop::SlotType& out) {
     return false;
 }
 
+bool parseMode(const std::string& value, kh2coop::RuntimeMode& out) {
+    const auto lower = toLower(trim(value));
+    if (lower == "campaign_coop" || lower == "campaigncoop" || lower == "coop" ||
+        lower == "0") {
+        out = kh2coop::RuntimeMode::CampaignCoop;
+        return true;
+    }
+    if (lower == "public_realm" || lower == "publicrealm" || lower == "realm" ||
+        lower == "1") {
+        out = kh2coop::RuntimeMode::PublicRealm;
+        return true;
+    }
+    return false;
+}
+
+std::string modeToString(kh2coop::RuntimeMode mode) {
+    switch (mode) {
+        case kh2coop::RuntimeMode::CampaignCoop:
+            return "CampaignCoop";
+        case kh2coop::RuntimeMode::PublicRealm:
+            return "PublicRealm";
+    }
+    return "UNKNOWN";
+}
+
 std::string slotToString(kh2coop::SlotType slot) {
     switch (slot) {
         case kh2coop::SlotType::Player:
@@ -118,6 +146,7 @@ void printUsage() {
     std::cout
         << "Usage: kh2coop_runtime_scaffold [options]\n"
         << "  --config <path>       Runtime config file (default kh2coop_runtime.ini)\n"
+        << "  --mode <mode>         Runtime mode: campaign_coop (default) or public_realm\n"
         << "  --role <slot>         Override client role: 0|1|2 or player|friend1|friend2\n"
         << "  --tick-ms <ms>        Loop delay in milliseconds (default 16)\n"
         << "  --max-ticks <count>   Exit after N ticks (default 0 = run until Ctrl+C)\n"
@@ -156,6 +185,15 @@ bool loadConfigFile(const std::string& path, RuntimeConfig& config,
 
         const auto key = toLower(trim(line.substr(0, equalsPos)));
         const auto value = trim(line.substr(equalsPos + 1));
+
+        if (key == "runtime_mode") {
+            if (!parseMode(value, config.runtimeMode)) {
+                error = "Invalid runtime_mode on line " +
+                        std::to_string(lineNumber) + ": " + value;
+                return false;
+            }
+            continue;
+        }
 
         if (key == "client_role") {
             if (!parseSlot(value, config.ownedSlot)) {
@@ -223,6 +261,16 @@ bool parseArgs(int argc, char* argv[], LaunchOptions& options,
 
         if (arg == "--config" && i + 1 < argc) {
             options.configPath = argv[++i];
+            continue;
+        }
+
+        if (arg == "--mode" && i + 1 < argc) {
+            kh2coop::RuntimeMode mode = kh2coop::RuntimeMode::CampaignCoop;
+            if (!parseMode(argv[++i], mode)) {
+                error = "Invalid --mode value";
+                return false;
+            }
+            options.runtimeModeOverride = mode;
             continue;
         }
 
@@ -352,6 +400,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if (options.runtimeModeOverride.has_value()) {
+        options.config.runtimeMode = *options.runtimeModeOverride;
+    }
     if (options.ownedSlotOverride.has_value()) {
         options.config.ownedSlot = *options.ownedSlotOverride;
     }
@@ -373,6 +424,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "[Runtime] Booting runtime scaffold\n";
     std::cout << "[Runtime] config=" << options.configPath
+              << " mode=" << modeToString(options.config.runtimeMode)
               << " role=" << slotToString(options.config.ownedSlot)
               << " camera_override="
               << (options.config.cameraOverrideEnabled ? "on" : "off")

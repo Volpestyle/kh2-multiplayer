@@ -1,7 +1,7 @@
 # Agent Assignments
 
 ## Agent 1 — Runtime / Reverse Engineering
-**Owns:** live memory mapping and the first usable `IGameBridge`.
+**Owns:** live memory mapping and the `IGameBridge` implementation.
 
 ### Responsibilities
 - find actor structures for slot 0/1/2
@@ -9,19 +9,29 @@
 - find input read / consume path for friend slots
 - find room/world/transition/cutscene state
 - find enemy list root and per-enemy state
-- publish `pointer_map_v1.md`
+- maintain `pointer_map_v1.md` and `KH2Offsets.hpp`
 
-### Must hand off
-- symbol / offset notes
-- a stable set of `IGameBridge` methods:
-  - `ReadActorState(slot)` — DONE (slot 0 position/rotation/velocity/HP; slot 1/2 HP only)
-  - `ReadEnemyStates()` — TODO (enemy list offsets unknown)
-  - `ReadRoomState()` — DONE
-  - `WriteCameraTarget(slot)` — DONE (fake actor pointer redirect)
-  - `RestoreVanillaCamera()` — DONE
-  - `InjectOwnedInput(slot, input)` — TODO (per-slot input path not RE'd)
-  - `ApplyReplicaActorState(state)` — DONE (slot 0 dual-write + camera fake actor)
-  - `ApplyReplicaEnemyState(state)` — TODO
+### IGameBridge method status
+| Method | Status | Notes |
+|--------|--------|-------|
+| `Attach()` | DONE | Process name scan + module base resolution |
+| `Tick()` | DONE | Room change detection, entity re-discovery, camera re-point |
+| `DiscoverEntityAddresses()` | DONE | Camera pointer chain (primary) + vtable scan (fallback) |
+| `ReadRoomState()` | DONE | World/room/program/cutscene state |
+| `ReadActorState(slot)` | PARTIAL | Slot 0: position/rotation/velocity/airborne/HP. Slot 1/2: HP only |
+| `ReadEnemyStates()` | TODO | Needs `enemy::LIST_PTR/COUNT/STRIDE` |
+| `WriteCameraTarget(slot)` | DONE | Fake actor allocation + pointer redirect |
+| `RestoreVanillaCamera()` | DONE | Pointer restore + VirtualFreeEx |
+| `InjectOwnedInput(slot, input)` | TODO | Per-slot input path not RE'd |
+| `ApplyReplicaActorState(state)` | PARTIAL | Slot 0: dual-write pos/rot/flags. All slots: HP + camera fake actor |
+| `ApplyReplicaEnemyState(state)` | TODO | Needs enemy entity struct discovery |
+
+### Remaining RE blockers (Track A)
+- [ ] Friend1/Friend2 entity struct addresses
+- [ ] Per-slot input injection path
+- [ ] Enemy list root/count/stride
+- [ ] Animation ID offset in entity struct
+- [ ] MP offset within unit slot
 
 ### Success looks like
 The rest of the team can write against `IGameBridge` without doing live memory discovery themselves.
@@ -31,38 +41,45 @@ The rest of the team can write against `IGameBridge` without doing live memory d
 ## Agent 2 — Networking / Host Server
 **Owns:** session authority, packet schemas, relay logic, version gating.
 
-### Responsibilities
-- server bootstrap
-- session join/leave/reconnect
-- build-hash and mod-hash enforcement
-- packet sequencing / acks / reliable events
-- snapshot cadence
-- packet logging for replay/debug
+### Status
+- `SessionHost`: DONE (lobby, version gate, slot assignment, broadcast, stale-peer eviction)
+- `SimulationState`: DONE (fake physics, movement/gravity/jump/attack/guard/dodge)
+- `ServerMain`: DONE (CLI, 60fps loop, signal handling)
+- `Protocol.hpp`: DONE (v1 structs), UPDATED (v2 forward-looking records declared)
+- `Codec.hpp/cpp`: DONE (all v1 types serialized)
+- `NetworkClient`: DONE (ENet transport, callback dispatch)
+- `FakeSimulation` test harness: DONE (3-client integration passes)
 
-### Must hand off
-- `Protocol.hpp`
-- `SessionHost`
-- test harness that replays fake `InputFrame`s
+### Remaining work (Track A)
+- [ ] Wire `NetworkClient` into the runtime (end-to-end with live KH2)
+- [ ] Packet logging for replay/debug
+- [ ] Reconnect flow with state resync
+- [ ] `TransitionAck` codec implementation (declared but not wired)
+
+### Future work (Track B/C)
+- [ ] `ClientHello` / `ClientHelloAck` codec (replace SessionState-as-handshake)
+- [ ] Session/instance split (`PartySession` + `InstanceRuntime`)
+- [ ] Realm service integration for PublicRealm mode
+- [ ] v2 protocol record codecs (`RealmSeed`, `CharacterRecord`, `InstanceDescriptor`, etc.)
 
 ### Success looks like
-A fake simulation can run without KH2 attached.
+A fake simulation can run without KH2 attached. (Achieved.)
 
 ---
 
 ## Agent 3 — Client Replica / Camera / HUD
 **Owns:** everything the player actually feels on the non-host clients.
 
-### Responsibilities
-- local camera follow override
-- smoothing and correction of remote actors
-- P2/P3 overlay HUD
-- debug overlay for ownership / ping / desync
-- cutscene-safe camera disable / restore
+### Status
+- `CameraController`: DONE (per-slot follow, cutscene/transition safety, F8 panic toggle)
+- `ReplicaController`: DONE (snapshot dedup per-slot actors, per-netId enemies)
+- `RuntimeMain`: DONE (INI config, CLI args, attach loop, mode logging)
 
-### Must hand off
-- `CameraController`
-- `ReplicaController`
-- `OverlayState`
+### Remaining work
+- [ ] P2/P3 overlay HUD
+- [ ] Debug overlay for ownership / ping / desync
+- [ ] Remote actor smoothing and large-divergence correction
+- [ ] Public-realm mode: `RemoteReplica` actor rendering (Track C)
 
 ### Success looks like
 Given snapshots from Agent 2 and actor writes from Agent 1, each client feels locally coherent.
@@ -89,10 +106,27 @@ The team can test netcode without campaign variance.
 
 ---
 
+## Agent 5 — Realm / Scale (Track B/C, future)
+**Owns:** persistent services and public-realm architecture.
+
+### Responsibilities (when activated)
+- `RealmService` implementation
+- Save-file to `RealmSeed` importer
+- Character persistence layer
+- Party management
+- Instance lifecycle (create/join/leave/destroy)
+- Public hub instance
+
+### Prerequisite
+Track A must reach a stable 3-player vertical slice before this agent activates.
+
+---
+
 ## Integration order
-1. Agent 1 and Agent 2 work first.
-2. Agent 3 starts as soon as camera write + packet feed exist.
+1. Agent 1 and Agent 2 work first (current).
+2. Agent 3 starts as soon as camera write + packet feed exist (active).
 3. Agent 4 should avoid expanding scope until Milestone 5 is stable.
+4. Agent 5 activates after Track A vertical slice + Track B refactors.
 
 ## Daily integration contract
 At the end of each day, the shared branch should still support:

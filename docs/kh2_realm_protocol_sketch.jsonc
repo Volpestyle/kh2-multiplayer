@@ -1,0 +1,174 @@
+{
+  // Draft extension on top of the current co-op packet model.
+  // Goal: support two products under one protocol family:
+  //  1) CampaignCoop  (3-player shared party/story)
+  //  2) PublicRealm   (persistent characters + public hubs + party instances)
+
+  "protocolVersion": 2,
+
+  "enums": {
+    "Mode": ["CampaignCoop", "PublicRealm"],
+    "InstanceType": [
+      "CampaignPartyInstance",
+      "PublicHubInstance",
+      "AdventureInstance",
+      "PvpArenaInstance"
+    ],
+    "AuthorityType": ["HostClient", "DedicatedWorker"],
+    "NativeRole": [
+      "LocalPrimary",
+      "LocalCompanion1",
+      "LocalCompanion2",
+      "RemoteReplica",
+      "RemoteEnemy",
+      "RemoteNpc"
+    ]
+  },
+
+  "stableIds": {
+    "PeerId": "string",
+    "CharacterId": "string",
+    "PartyId": "string",
+    "RealmId": "string",
+    "InstanceId": "string",
+    "ActorNetId": "uint32"
+  },
+
+  "records": {
+    "ClientHello": {
+      "protocolVersion": "uint16",
+      "gameBuild": "string",
+      "contentHash": "string",
+      "modHash": "string",
+      "peerName": "string",
+      "requestedMode": "Mode"
+    },
+
+    "RealmSeed": {
+      "realmId": "string",
+      "sourceSaveChecksum": "string",
+      "buildHash": "string",
+      "contentHash": "string",
+      "unlockedWorlds": ["uint16"],
+      "unlockedWarpPoints": ["string"],
+      "storyFlags": ["uint32"],
+      "clearedBossFlags": ["uint32"]
+    },
+
+    "CharacterRecord": {
+      "characterId": "string",
+      "ownerPeerId": "string",
+      "displayName": "string",
+      "archetypeId": "string",
+      "level": "uint16",
+      "equipment": ["string"],
+      "abilities": ["string"],
+      "stats": {
+        "hp": "int32",
+        "mp": "int32",
+        "drive": "int32"
+      }
+    },
+
+    "PartyRecord": {
+      "partyId": "string",
+      "leaderCharacterId": "string",
+      "memberCharacterIds": ["string"],
+      "partyMode": "Mode",
+      "activeInstanceId": "string|null"
+    },
+
+    "InstanceDescriptor": {
+      "instanceId": "string",
+      "instanceType": "InstanceType",
+      "authorityType": "AuthorityType",
+      "authorityPeerId": "string|null",
+      "realmId": "string",
+      "worldId": "uint16",
+      "roomId": "uint16",
+      "mapProgram": "uint16",
+      "battleProgram": "uint16",
+      "eventProgram": "uint16",
+      "maxPlayers": "uint16",
+      "pvpEnabled": "bool"
+    },
+
+    "ActorBinding": {
+      "actorNetId": "uint32",
+      "characterId": "string|null",
+      "ownerPeerId": "string|null",
+      "nativeRole": "NativeRole",
+      "slotType": "uint8|null",
+      "archetypeId": "string",
+      "localOnly": "bool"
+    }
+  },
+
+  "campaignCoop": {
+    "identityModel": {
+      "PeerId": "stable network identity",
+      "CharacterId": "optional in v1; can be inferred from save/slot",
+      "ActorNetId": "unique actor identity even when slot changes",
+      "SlotType": "mapping only inside a given co-op instance"
+    },
+    "notes": [
+      "Keep current canonical slot architecture: PLAYER, FRIEND_1, FRIEND_2.",
+      "Host KH2 process is the gameplay authority.",
+      "Story owner and save owner are the same host peer."
+    ]
+  },
+
+  "publicRealm": {
+    "notes": [
+      "Local player should always map to a local-primary control path on their own client.",
+      "Other humans are remote replicas, not co-op party slots by default.",
+      "Rooms are instanced/sharded. Realm service is not a full battle simulator.",
+      "PvP should be arena-instanced and opt-in."
+    ],
+    "services": {
+      "RealmService": [
+        "login",
+        "character roster",
+        "party membership",
+        "instance registry",
+        "realm seed metadata",
+        "chat/presence"
+      ],
+      "InstanceAuthority": [
+        "player transforms",
+        "enemy state",
+        "spawn events",
+        "room transitions",
+        "reward writeback"
+      ]
+    }
+  },
+
+  "newMessages": {
+    "ClientHello": "client -> server",
+    "ClientHelloAck": "server -> client",
+    "SelectCharacterRequest": "client -> server",
+    "SelectCharacterAck": "server -> client",
+    "CreatePartyRequest": "client -> server",
+    "InvitePartyRequest": "client -> server",
+    "JoinPartyRequest": "client -> server",
+    "LeavePartyRequest": "client -> server",
+    "CreateInstanceRequest": "client -> server",
+    "JoinInstanceRequest": "client -> server",
+    "JoinInstanceAck": "server -> client",
+    "InstanceState": "server -> client",
+    "ActorBindings": "instance authority -> client",
+    "CharacterDelta": "server <-> client",
+    "RealmChat": "server <-> client",
+    "PvpDuelRequest": "client -> server",
+    "PvpDuelAccept": "client -> server"
+  },
+
+  "importantRefactorsNow": [
+    "Stop overloading SessionState as handshake.",
+    "Stop overloading sessionId as peer name.",
+    "Introduce ActorNetId separate from SlotType.",
+    "Split Party/Session ownership from active gameplay Instance ownership.",
+    "Keep CampaignCoop and PublicRealm as explicit runtime modes."
+  ]
+}
