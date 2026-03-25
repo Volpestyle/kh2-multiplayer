@@ -3,6 +3,9 @@
 - Utilize cheat engine MCP when necessary
 - Always write detailed commit messages
 
+### Testing Principle
+**Tests follow stabilization, not implementation.** Write regression tests only after an interface stops changing (e.g., codec is locked, offsets are confirmed via Cheat Engine). Do not write tests while actively discovering memory layouts or prototyping — that's churn. For live KH2 memory code (`GameBridgePC`, `CameraController`, etc.), manual smoke tests against a running game process are the real validation; you cannot meaningfully mock `ReadProcessMemory` against KH2. Reserve unit/integration tests for stabilized boundaries like the codec, protocol, and networking layer.
+
 ### OpenKH Reference (`../openkh`)
 The OpenKH repository is a sibling directory containing a KH2 modding toolkit.
 See `docs/OPENKH_REFERENCE.md` for a full guide. Consult it when:
