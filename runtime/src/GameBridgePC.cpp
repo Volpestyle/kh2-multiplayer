@@ -61,10 +61,20 @@ bool GameBridgePC::Attach() {
 
     MODULEENTRY32 modEntry;
     modEntry.dwSize = sizeof(modEntry);
-    if (Module32First(modSnap, &modEntry)) {
-        baseAddress_ = reinterpret_cast<std::uint64_t>(modEntry.modBaseAddr);
+    if (!Module32First(modSnap, &modEntry)) {
+        // Module enumeration failed — cannot determine base address.
+        CloseHandle(modSnap);
+        CloseHandle(handle);
+        return false;
     }
+    baseAddress_ = reinterpret_cast<std::uint64_t>(modEntry.modBaseAddr);
     CloseHandle(modSnap);
+
+    if (baseAddress_ == 0) {
+        // Base address resolved to zero — unusable.
+        CloseHandle(handle);
+        return false;
+    }
 
     processHandle_ = handle;
     attached_ = true;
@@ -111,10 +121,12 @@ bool GameBridgePC::IsAttached() const { return attached_; }
 template <typename T>
 T GameBridgePC::readMem(std::uint64_t offset) const {
     T value{};
+    if (!processHandle_) return value;
     SIZE_T bytesRead = 0;
-    ReadProcessMemory(static_cast<HANDLE>(processHandle_),
-                      reinterpret_cast<LPCVOID>(baseAddress_ + offset),
-                      &value, sizeof(T), &bytesRead);
+    BOOL ok = ReadProcessMemory(static_cast<HANDLE>(processHandle_),
+                                reinterpret_cast<LPCVOID>(baseAddress_ + offset),
+                                &value, sizeof(T), &bytesRead);
+    if (!ok || bytesRead != sizeof(T)) return T{};
     return value;
 }
 
@@ -129,10 +141,12 @@ bool GameBridgePC::writeMem(std::uint64_t offset, T value) {
 template <typename T>
 T GameBridgePC::readAbs(std::uint64_t absoluteAddr) const {
     T value{};
+    if (!processHandle_) return value;
     SIZE_T bytesRead = 0;
-    ReadProcessMemory(static_cast<HANDLE>(processHandle_),
-                      reinterpret_cast<LPCVOID>(absoluteAddr),
-                      &value, sizeof(T), &bytesRead);
+    BOOL ok = ReadProcessMemory(static_cast<HANDLE>(processHandle_),
+                                reinterpret_cast<LPCVOID>(absoluteAddr),
+                                &value, sizeof(T), &bytesRead);
+    if (!ok || bytesRead != sizeof(T)) return T{};
     return value;
 }
 
@@ -520,13 +534,14 @@ bool GameBridgePC::WriteCameraTarget(SlotType slot) {
                            buf, 0x700, &bytesWritten);
     }
 
-    // Point the camera at the fake actor.
+    // Point the camera at the fake actor and record which slot we're following.
     writeAbs<std::uint64_t>(camStructAddr + camera::ACTOR_PTR, fakeActorAddr_);
     cameraRetargeted_ = true;
+    cameraTargetSlot_ = slot;
 
     // Note: The caller must continuously update the fake entity's position
-    // each frame via UpdateCameraTargetPosition() or equivalent, since the
-    // game re-reads from the actor pointer every frame.
+    // each frame via ApplyReplicaActorState() for the matching slot, since
+    // the game re-reads from the actor pointer every frame.
 
     return true;
 #else
@@ -560,6 +575,7 @@ bool GameBridgePC::RestoreVanillaCamera() {
 
     origCameraActorPtr_ = 0;
     cameraRetargeted_ = false;
+    cameraTargetSlot_ = SlotType::Player;
     return true;
 #else
     return false;
@@ -631,15 +647,20 @@ bool GameBridgePC::ApplyReplicaActorState(const ActorState& state) {
     // actor can be updated (see below).
 
     // --- Write HP to the static unit slot (works for all slots) ---
-    if (state.hp > 0) {
+    // Always write HP, including 0 (KO). Using hp >= 0 rather than > 0
+    // ensures authoritative death can be replicated. Negative HP values
+    // (uninitialized / sentinel) are skipped.
+    if (state.hp >= 0) {
         ok &= writeMem<std::int32_t>(actorBase(state.slot) + slot::HP, state.hp);
     }
 
-    // --- Update camera fake actor if retargeted ---
-    // When the camera is pointed at a fake actor (for Friend1/Friend2 clients),
-    // update the fake entity's position so the camera follows this actor's
-    // replicated state. This works for ALL slots including Friend1/Friend2.
-    if (cameraRetargeted_ && fakeActorAddr_ != 0) {
+    // --- Update camera fake actor if retargeted to THIS slot ---
+    // Only update the fake entity's position when the snapshot matches the
+    // slot the camera is following. Without this check, the last-processed
+    // snapshot from any slot would move the camera, causing it to jump
+    // between actors.
+    if (cameraRetargeted_ && fakeActorAddr_ != 0 &&
+        state.slot == cameraTargetSlot_) {
         std::uint64_t fakeEntity = fakeActorAddr_ + camera::ACTOR_TO_ENTITY;
         ok &= writeAbs<float>(fakeEntity + entity::POS_X, state.position.x);
         ok &= writeAbs<float>(fakeEntity + entity::POS_Y, state.position.y);

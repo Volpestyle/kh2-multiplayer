@@ -119,6 +119,7 @@ private:
     std::uint64_t fakeActorAddr_{0};       // allocated fake actor object (in target process)
     std::uint64_t origCameraActorPtr_{0};  // saved original camera actor pointer for restore
     bool cameraRetargeted_{false};         // true if camera is currently overridden
+    SlotType cameraTargetSlot_{SlotType::Player}; // which slot the camera is following
 
     // The KH2 process name to search for.
     static constexpr const char* KH2_PROCESS_NAME = "KINGDOM HEARTS II FINAL MIX.exe";
