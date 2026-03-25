@@ -39,13 +39,13 @@ ENet is fetched automatically via CMake FetchContent.
 
 ## Current status
 
-The networking layer (Agent 2's domain) is functional: protocol serialization, framed packets, ENet transport, session management, and a test harness that proves 3 clients can connect and exchange data without KH2 attached.
+The networking layer (Agent 2's domain) is functional: protocol serialization, framed packets, ENet transport, session management, idle-peer timeout handling, and a test harness that proves 3 clients can connect and exchange data without KH2 attached.
 
 **What works:**
-- Binary codec for all 11 domain structs + framed packet encode/decode
-- Server: lobby, version gating, canonical slot assignment (Player A=0, B=1, C=2), snapshot/event broadcast
-- Client: connect, version handshake with slot request, receive snapshots/events
-- Test: codec round-trips, 3-client integration, version mismatch rejection, duplicate slot rejection
+- Binary codec for all 11 domain structs with explicit little-endian framing and string length guards
+- Server: lobby, version gating, canonical slot assignment (Player A=0, B=1, C=2), snapshot/event broadcast, stale peer timeout
+- Client: connect, version handshake with slot request, heartbeat support, receive snapshots/events
+- Test: codec round-trips, snapshot ordering, heartbeat timeout, 3-client integration, version mismatch rejection, duplicate slot rejection
 
 **What's next:**
 - Authoritative simulation loop on the server (process InputFrames, update state, broadcast snapshots per tick)

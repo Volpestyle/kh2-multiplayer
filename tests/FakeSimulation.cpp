@@ -16,6 +16,7 @@
 
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/ReplicaController.hpp"
 #include "kh2coop/SessionHost.hpp"
 #include "kh2coop/SimulationState.hpp"
 
@@ -23,6 +24,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <enet/enet.h>
 #include <iostream>
@@ -52,6 +54,14 @@ static void tickAll(SessionHost& host, NetworkClient& c0, NetworkClient& c1,
         c0.tick(5);
         c1.tick(5);
         c2.tick(5);
+    }
+}
+
+static void tickPair(SessionHost& host, NetworkClient& client,
+                     int rounds = 10, std::uint32_t timeoutMs = 5) {
+    for (int i = 0; i < rounds; ++i) {
+        host.tick(timeoutMs);
+        client.tick(timeoutMs);
     }
 }
 
@@ -134,6 +144,36 @@ static std::uint32_t findHighestCommonSnapshotId(const SnapshotTracker& a,
 static bool nearlyEqual(float lhs, float rhs, float epsilon = 0.0001f) {
     return std::fabs(lhs - rhs) <= epsilon;
 }
+
+class RecordingGameBridge final : public IGameBridge {
+public:
+    bool IsAttached() const override { return true; }
+    RoomState ReadRoomState() const override { return {}; }
+    std::optional<ActorState> ReadActorState(SlotType) const override {
+        return std::nullopt;
+    }
+    std::vector<EnemyState> ReadEnemyStates() const override { return {}; }
+    bool WriteCameraTarget(SlotType) override { return true; }
+    bool RestoreVanillaCamera() override { return true; }
+    bool InjectOwnedInput(SlotType, const InputFrame&) override { return true; }
+
+    bool ApplyReplicaActorState(const ActorState& state) override {
+        appliedActors.push_back(state);
+        lastActorBySlot[static_cast<std::size_t>(state.slot)] = state;
+        return true;
+    }
+
+    bool ApplyReplicaEnemyState(const EnemyState& state) override {
+        appliedEnemies.push_back(state);
+        lastEnemyById[state.netId] = state;
+        return true;
+    }
+
+    std::vector<ActorState> appliedActors;
+    std::vector<EnemyState> appliedEnemies;
+    std::array<ActorState, 3> lastActorBySlot {};
+    std::map<std::uint32_t, EnemyState> lastEnemyById;
+};
 
 // ---------------------------------------------------------------------------
 // Codec round-trip test (no networking)
@@ -219,6 +259,149 @@ static void testCodecRoundtrip() {
     auto dbg = toDebugString(orig);
     check(!dbg.empty(), "debug string not empty");
     std::cout << "  Debug: " << dbg << "\n";
+
+    // Wire format should be explicit little-endian, independent of host ABI.
+    ByteWriter endianWriter;
+    endianWriter.writeU16(0x1234);
+    endianWriter.writeU32(0x89ABCDEF);
+    endianWriter.writeI32(-2);
+    endianWriter.writeF32(1.0f);
+    const auto& endianBytes = endianWriter.data();
+    check(endianBytes.size() == 14, "wire format byte count matches");
+    check(endianBytes[0] == 0x34 && endianBytes[1] == 0x12,
+          "u16 encoded little-endian");
+    check(endianBytes[2] == 0xEF && endianBytes[3] == 0xCD &&
+              endianBytes[4] == 0xAB && endianBytes[5] == 0x89,
+          "u32 encoded little-endian");
+    check(endianBytes[6] == 0xFE && endianBytes[7] == 0xFF &&
+              endianBytes[8] == 0xFF && endianBytes[9] == 0xFF,
+          "i32 encoded little-endian");
+    check(endianBytes[10] == 0x00 && endianBytes[11] == 0x00 &&
+              endianBytes[12] == 0x80 && endianBytes[13] == 0x3F,
+          "f32 encoded IEEE little-endian");
+
+    bool caughtOversizeString = false;
+    try {
+        ByteWriter oversizedStringWriter;
+        oversizedStringWriter.writeString(
+            std::string(static_cast<std::size_t>((std::numeric_limits<std::uint16_t>::max)()) + 1U,
+                        'x'));
+    } catch (const std::runtime_error&) {
+        caughtOversizeString = true;
+    }
+    check(caughtOversizeString, "oversized strings are rejected");
+}
+
+static void testReplicaOrdering() {
+    std::cout << "\n=== Replica ordering ===\n";
+
+    RecordingGameBridge game;
+    ReplicaController controller(game);
+
+    ActorSnapshot playerSnap5;
+    playerSnap5.snapshotId = 5;
+    playerSnap5.actor.slot = SlotType::Player;
+    playerSnap5.actor.position.x = 5.0f;
+
+    ActorSnapshot stalePlayerSnap = playerSnap5;
+    stalePlayerSnap.snapshotId = 4;
+    stalePlayerSnap.actor.position.x = 4.0f;
+
+    ActorSnapshot friendSnap4;
+    friendSnap4.snapshotId = 4;
+    friendSnap4.actor.slot = SlotType::Friend1;
+    friendSnap4.actor.position.x = 1.0f;
+
+    ActorSnapshot playerSnap6 = playerSnap5;
+    playerSnap6.snapshotId = 6;
+    playerSnap6.actor.position.x = 6.0f;
+
+    controller.ApplyActorSnapshot(playerSnap5);
+    controller.ApplyActorSnapshot(stalePlayerSnap);
+    controller.ApplyActorSnapshot(friendSnap4);
+    controller.ApplyActorSnapshot(playerSnap6);
+
+    check(game.appliedActors.size() == 3,
+          "stale actor snapshots are ignored per slot");
+    check(nearlyEqual(game.lastActorBySlot[0].position.x, 6.0f),
+          "newer actor snapshot wins for the same slot");
+    check(nearlyEqual(game.lastActorBySlot[1].position.x, 1.0f),
+          "different slots track ordering independently");
+
+    EnemySnapshot enemySnap7;
+    enemySnap7.snapshotId = 7;
+    enemySnap7.enemy.netId = 99;
+    enemySnap7.enemy.hp = 70;
+
+    EnemySnapshot staleEnemySnap = enemySnap7;
+    staleEnemySnap.snapshotId = 6;
+    staleEnemySnap.enemy.hp = 60;
+
+    EnemySnapshot enemySnap8 = enemySnap7;
+    enemySnap8.snapshotId = 8;
+    enemySnap8.enemy.hp = 80;
+
+    controller.ApplyEnemySnapshot(enemySnap7);
+    controller.ApplyEnemySnapshot(staleEnemySnap);
+    controller.ApplyEnemySnapshot(enemySnap8);
+
+    check(game.appliedEnemies.size() == 2,
+          "stale enemy snapshots are ignored per enemy");
+    check(game.lastEnemyById[99].hp == 80,
+          "newer enemy snapshot wins for the same enemy");
+}
+
+static void testHeartbeatTimeout() {
+    std::cout << "\n=== Heartbeat timeout ===\n";
+
+    constexpr std::uint32_t kTimeoutMs = 60;
+    const std::string build = "heartbeat-build";
+    const std::string mod = "heartbeat-mod";
+
+    SessionConfig config;
+    config.port = 17783;
+    config.maxPeers = 1;
+    config.heartbeatTimeoutMs = kTimeoutMs;
+    config.pendingPeerTimeoutMs = kTimeoutMs;
+    config.gameBuild = build;
+    config.modHash = mod;
+    config.sessionId = "heartbeat-test";
+
+    SessionHost host(config, {});
+    check(host.start(), "heartbeat test server starts");
+
+    std::atomic<int> disconnectCount{0};
+    ClientCallbacks callbacks;
+    callbacks.onDisconnected = [&disconnectCount]() { ++disconnectCount; };
+
+    NetworkClient client("127.0.0.1", config.port, build, mod, "heartbeat_peer",
+                         SlotType::Player, std::move(callbacks));
+    check(client.connect(), "heartbeat client connect initiated");
+
+    for (int i = 0; i < 100 && host.verifiedPeerCount() < 1; ++i) {
+        tickPair(host, client, 1, 5);
+    }
+    check(host.verifiedPeerCount() == 1, "heartbeat client verified");
+
+    for (int i = 0; i < 3; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        client.sendHeartbeat();
+        tickPair(host, client, 2, 5);
+    }
+    check(host.verifiedPeerCount() == 1,
+          "heartbeats keep an idle peer connected");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(kTimeoutMs + 30));
+    tickPair(host, client, 10, 5);
+
+    check(host.verifiedPeerCount() == 0, "idle peer timeout releases the slot");
+    check(disconnectCount > 0 || !client.isConnected(),
+          "timed-out client observes disconnect");
+
+    client.disconnect();
+    tickPair(host, client, 5, 5);
+    host.stop();
+    check(!host.isRunning(), "heartbeat test server stopped cleanly");
 }
 
 // ---------------------------------------------------------------------------
@@ -495,7 +678,9 @@ int main() {
     }
 
     testCodecRoundtrip();
+    testReplicaOrdering();
     testNetworkIntegration();
+    testHeartbeatTimeout();
 
     enet_deinitialize();
 

@@ -90,7 +90,7 @@
 
 ## Milestone 4 — Host-authoritative player replication `[PARTIAL]`
 **Goal:** 3 clients can share a room and see each other in motion.
-**Status:** Server lobby, session state, ENet client/server, `SimulationState`, and snapshot broadcast are all implemented and tested (3-client integration test passes). `ApplyReplicaActorState()` implemented for slot 0 position writes. Not yet tested end-to-end with live KH2.
+**Status:** Server lobby, session state, ENet client/server, `SimulationState`, snapshot ordering guards, and stale-peer timeout handling are all implemented and tested (3-client integration test passes). `ApplyReplicaActorState()` implemented for slot 0 position writes. Not yet tested end-to-end with live KH2.
 
 ### Tasks
 - Implement server lobby/session state.

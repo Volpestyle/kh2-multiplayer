@@ -9,6 +9,12 @@ namespace kh2coop {
 
 namespace {
 
+std::uint64_t currentTimeMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 bool isValidSlot(SlotType slot) {
     switch (slot) {
         case SlotType::Player:
@@ -91,6 +97,8 @@ void SessionHost::tick(std::uint32_t timeoutMs) {
         // After first event, poll remaining without blocking.
         timeoutMs = 0;
     }
+
+    expireStalePeers(currentTimeMs());
 }
 
 void SessionHost::stop() {
@@ -180,6 +188,7 @@ void SessionHost::onConnect(ENetPeer* peer) {
     ps.enetPeer = peer;
     ps.peerId = oss.str();
     ps.status = PeerStatus::PendingVersion;
+    ps.lastHeartbeatMs = currentTimeMs();
     peers_.push_back(std::move(ps));
 
     log("Peer connected: " + peers_.back().peerId + " (pending version check)");
@@ -193,17 +202,7 @@ void SessionHost::onDisconnect(ENetPeer* peer) {
         log("Peer disconnected: " + id);
         if (callbacks_.onPeerLeft) callbacks_.onPeerLeft(id);
 
-        // Rebuild the actor list in session state.
-        session_.actors.clear();
-        for (const auto& p : peers_) {
-            if (p.status == PeerStatus::Verified) {
-                SessionActor sa;
-                sa.actorId = static_cast<std::uint32_t>(p.assignedSlot);
-                sa.slot = p.assignedSlot;
-                sa.ownerPeerId = p.peerId;
-                session_.actors.push_back(sa);
-            }
-        }
+        rebuildSessionActors();
         broadcastSessionState();
     }
 }
@@ -218,6 +217,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
         std::size_t payloadSize = 0;
         auto type = decodePacketHeader(data, size, payload, payloadSize);
         ByteReader reader(payload, payloadSize);
+        ps->lastHeartbeatMs = currentTimeMs();
 
         switch (type) {
             case PacketType::SessionState: {
@@ -273,12 +273,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 log("Peer verified: " + ps->peerId + " -> slot " +
                     std::to_string(static_cast<int>(ps->assignedSlot)));
 
-                // Add to session actor list.
-                SessionActor sa;
-                sa.actorId = static_cast<std::uint32_t>(ps->assignedSlot);
-                sa.slot = ps->assignedSlot;
-                sa.ownerPeerId = ps->peerId;
-                session_.actors.push_back(sa);
+                rebuildSessionActors();
 
                 if (callbacks_.onPeerJoined)
                     callbacks_.onPeerJoined(ps->peerId, ps->assignedSlot);
@@ -303,10 +298,6 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
             }
 
             case PacketType::Heartbeat: {
-                ps->lastHeartbeatMs =
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
                 break;
             }
 
@@ -342,6 +333,84 @@ bool SessionHost::isSlotTaken(SlotType slot) const {
     return std::any_of(peers_.begin(), peers_.end(), [slot](const PeerState& ps) {
         return ps.status == PeerStatus::Verified && ps.assignedSlot == slot;
     });
+}
+
+void SessionHost::rebuildSessionActors() {
+    session_.actors.clear();
+    for (const auto& peer : peers_) {
+        if (peer.status != PeerStatus::Verified) {
+            continue;
+        }
+
+        SessionActor actor;
+        actor.actorId = static_cast<std::uint32_t>(peer.assignedSlot);
+        actor.slot = peer.assignedSlot;
+        actor.ownerPeerId = peer.peerId;
+        session_.actors.push_back(std::move(actor));
+    }
+}
+
+void SessionHost::expireStalePeers(std::uint64_t nowMs) {
+    struct ExpiredPeer {
+        ENetPeer* peer{nullptr};
+        std::string peerId;
+        PeerStatus status{PeerStatus::PendingVersion};
+        std::string reason;
+    };
+
+    std::vector<ExpiredPeer> expired;
+    expired.reserve(peers_.size());
+
+    for (const auto& peer : peers_) {
+        const auto timeoutMs =
+            peer.status == PeerStatus::Verified ? config_.heartbeatTimeoutMs
+                                                : config_.pendingPeerTimeoutMs;
+        if (timeoutMs == 0 || peer.lastHeartbeatMs == 0) {
+            continue;
+        }
+
+        if (nowMs - peer.lastHeartbeatMs < timeoutMs) {
+            continue;
+        }
+
+        ExpiredPeer expiredPeer;
+        expiredPeer.peer = peer.enetPeer;
+        expiredPeer.peerId = peer.peerId;
+        expiredPeer.status = peer.status;
+        expiredPeer.reason = peer.status == PeerStatus::Verified
+                                 ? "Heartbeat timed out"
+                                 : "Handshake timed out";
+        expired.push_back(std::move(expiredPeer));
+    }
+
+    bool removedVerifiedPeer = false;
+
+    for (const auto& expiredPeer : expired) {
+        if (expiredPeer.peer) {
+            enet_peer_disconnect(expiredPeer.peer, 3);
+        }
+
+        removePeer(expiredPeer.peer);
+
+        if (expiredPeer.status == PeerStatus::Verified) {
+            removedVerifiedPeer = true;
+            log("Peer timed out: " + expiredPeer.peerId);
+            if (callbacks_.onPeerLeft) {
+                callbacks_.onPeerLeft(expiredPeer.peerId);
+            }
+            continue;
+        }
+
+        log("Rejecting " + expiredPeer.peerId + ": " + expiredPeer.reason);
+        if (callbacks_.onPeerRejected) {
+            callbacks_.onPeerRejected(expiredPeer.peerId, expiredPeer.reason);
+        }
+    }
+
+    if (removedVerifiedPeer) {
+        rebuildSessionActors();
+        broadcastSessionState();
+    }
 }
 
 void SessionHost::removePeer(ENetPeer* peer) {

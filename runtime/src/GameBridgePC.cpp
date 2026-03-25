@@ -1,6 +1,7 @@
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstring>
 
@@ -132,10 +133,12 @@ T GameBridgePC::readMem(std::uint64_t offset) const {
 
 template <typename T>
 bool GameBridgePC::writeMem(std::uint64_t offset, T value) {
+    if (!processHandle_) return false;
     SIZE_T bytesWritten = 0;
-    return WriteProcessMemory(static_cast<HANDLE>(processHandle_),
-                              reinterpret_cast<LPVOID>(baseAddress_ + offset),
-                              &value, sizeof(T), &bytesWritten) != 0;
+    BOOL ok = WriteProcessMemory(static_cast<HANDLE>(processHandle_),
+                                 reinterpret_cast<LPVOID>(baseAddress_ + offset),
+                                 &value, sizeof(T), &bytesWritten);
+    return ok && bytesWritten == sizeof(T);
 }
 
 template <typename T>
@@ -152,10 +155,12 @@ T GameBridgePC::readAbs(std::uint64_t absoluteAddr) const {
 
 template <typename T>
 bool GameBridgePC::writeAbs(std::uint64_t absoluteAddr, T value) {
+    if (!processHandle_) return false;
     SIZE_T bytesWritten = 0;
-    return WriteProcessMemory(static_cast<HANDLE>(processHandle_),
-                              reinterpret_cast<LPVOID>(absoluteAddr),
-                              &value, sizeof(T), &bytesWritten) != 0;
+    BOOL ok = WriteProcessMemory(static_cast<HANDLE>(processHandle_),
+                                 reinterpret_cast<LPVOID>(absoluteAddr),
+                                 &value, sizeof(T), &bytesWritten);
+    return ok && bytesWritten == sizeof(T);
 }
 
 float GameBridgePC::readFloat(std::uint64_t offset) const {
@@ -510,6 +515,9 @@ bool GameBridgePC::WriteCameraTarget(SlotType slot) {
     // Save original camera actor pointer if not already saved.
     if (!cameraRetargeted_) {
         origCameraActorPtr_ = readAbs<std::uint64_t>(camStructAddr + camera::ACTOR_PTR);
+        if (origCameraActorPtr_ == 0) {
+            return false;
+        }
     }
 
     // Allocate fake actor object if needed (0x700 bytes in the target process).
@@ -520,22 +528,38 @@ bool GameBridgePC::WriteCameraTarget(SlotType slot) {
             static_cast<HANDLE>(processHandle_), nullptr, 0x700,
             MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         if (!alloc) return false;
-        fakeActorAddr_ = reinterpret_cast<std::uint64_t>(alloc);
+        const auto allocatedActorAddr = reinterpret_cast<std::uint64_t>(alloc);
 
         // Copy the original actor object's data into the fake one.
-        std::uint8_t buf[0x700];
+        std::array<std::uint8_t, 0x700> buf {};
         SIZE_T bytesRead = 0;
-        ReadProcessMemory(static_cast<HANDLE>(processHandle_),
-                          reinterpret_cast<LPCVOID>(origCameraActorPtr_),
-                          buf, 0x700, &bytesRead);
+        BOOL readOk = ReadProcessMemory(static_cast<HANDLE>(processHandle_),
+                                        reinterpret_cast<LPCVOID>(origCameraActorPtr_),
+                                        buf.data(), buf.size(), &bytesRead);
+        if (!readOk || bytesRead != buf.size()) {
+            VirtualFreeEx(static_cast<HANDLE>(processHandle_), alloc, 0,
+                          MEM_RELEASE);
+            return false;
+        }
+
         SIZE_T bytesWritten = 0;
-        WriteProcessMemory(static_cast<HANDLE>(processHandle_),
-                           reinterpret_cast<LPVOID>(fakeActorAddr_),
-                           buf, 0x700, &bytesWritten);
+        BOOL writeOk = WriteProcessMemory(static_cast<HANDLE>(processHandle_),
+                                          reinterpret_cast<LPVOID>(allocatedActorAddr),
+                                          buf.data(), buf.size(), &bytesWritten);
+        if (!writeOk || bytesWritten != buf.size()) {
+            VirtualFreeEx(static_cast<HANDLE>(processHandle_), alloc, 0,
+                          MEM_RELEASE);
+            return false;
+        }
+
+        fakeActorAddr_ = allocatedActorAddr;
     }
 
     // Point the camera at the fake actor and record which slot we're following.
-    writeAbs<std::uint64_t>(camStructAddr + camera::ACTOR_PTR, fakeActorAddr_);
+    if (!writeAbs<std::uint64_t>(camStructAddr + camera::ACTOR_PTR,
+                                 fakeActorAddr_)) {
+        return false;
+    }
     cameraRetargeted_ = true;
     cameraTargetSlot_ = slot;
 

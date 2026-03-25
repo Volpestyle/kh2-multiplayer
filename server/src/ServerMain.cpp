@@ -15,6 +15,10 @@ static void signalHandler(int) { g_running = false; }
 static void printUsage() {
     std::cout << "Usage: kh2coop_server [options]\n"
               << "  --port <port>       Listen port (default 7782)\n"
+              << "  --heartbeat-timeout-ms <ms>\n"
+              << "                      Drop idle verified peers after this long (default 5000)\n"
+              << "  --pending-timeout-ms <ms>\n"
+              << "                      Drop unverified peers after this long (default 2000)\n"
               << "  --build <hash>      Required game build hash\n"
               << "  --mod <hash>        Required mod hash\n"
               << "  --session <id>      Session identifier\n"
@@ -29,6 +33,8 @@ int main(int argc, char* argv[]) {
     kh2coop::SessionConfig config;
     config.port = 7782;
     config.maxPeers = 3;
+    config.heartbeatTimeoutMs = 5000;
+    config.pendingPeerTimeoutMs = 2000;
     config.gameBuild = "dev";
     config.modHash = "none";
     config.sessionId = "local-test";
@@ -41,6 +47,10 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--port" && i + 1 < argc) {
             config.port = static_cast<std::uint16_t>(std::stoi(argv[++i]));
+        } else if (arg == "--heartbeat-timeout-ms" && i + 1 < argc) {
+            config.heartbeatTimeoutMs = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--pending-timeout-ms" && i + 1 < argc) {
+            config.pendingPeerTimeoutMs = static_cast<std::uint32_t>(std::stoul(argv[++i]));
         } else if (arg == "--build" && i + 1 < argc) {
             config.gameBuild = argv[++i];
         } else if (arg == "--mod" && i + 1 < argc) {

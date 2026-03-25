@@ -90,4 +90,4 @@ add_executable(kh2coop_fake_sim
     tests/FakeSimulation.cpp
 )
 
-target_link_libraries(kh2coop_fake_sim PRIVATE kh2coop_server_core)
+target_link_libraries(kh2coop_fake_sim PRIVATE kh2coop_server_core kh2coop_runtime)

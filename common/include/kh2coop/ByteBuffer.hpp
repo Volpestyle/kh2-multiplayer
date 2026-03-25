@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -12,19 +13,24 @@ class ByteWriter {
 public:
     void writeU8(std::uint8_t v) { buf_.push_back(v); }
 
-    void writeU16(std::uint16_t v) { append(&v, sizeof(v)); }
+    void writeU16(std::uint16_t v) { writeLittleEndian(v); }
 
-    void writeU32(std::uint32_t v) { append(&v, sizeof(v)); }
+    void writeU32(std::uint32_t v) { writeLittleEndian(v); }
 
-    void writeU64(std::uint64_t v) { append(&v, sizeof(v)); }
+    void writeU64(std::uint64_t v) { writeLittleEndian(v); }
 
-    void writeI32(std::int32_t v) { append(&v, sizeof(v)); }
+    void writeI32(std::int32_t v) { writeU32(bitwiseCast<std::uint32_t>(v)); }
 
-    void writeF32(float v) { append(&v, sizeof(v)); }
+    void writeF32(float v) {
+        writeU32(bitwiseCast<std::uint32_t>(v));
+    }
 
     void writeBool(bool v) { writeU8(v ? 1 : 0); }
 
     void writeString(const std::string& s) {
+        if (s.size() > std::numeric_limits<std::uint16_t>::max()) {
+            throw std::runtime_error("ByteWriter: string exceeds 65535-byte limit");
+        }
         auto len = static_cast<std::uint16_t>(s.size());
         writeU16(len);
         if (!s.empty()) {
@@ -39,9 +45,19 @@ public:
     [[nodiscard]] std::size_t size() const { return buf_.size(); }
 
 private:
-    void append(const void* src, std::size_t n) {
-        const auto* p = static_cast<const std::uint8_t*>(src);
-        buf_.insert(buf_.end(), p, p + n);
+    template <typename To, typename From>
+    static To bitwiseCast(const From& value) {
+        static_assert(sizeof(To) == sizeof(From));
+        To out;
+        std::memcpy(&out, &value, sizeof(To));
+        return out;
+    }
+
+    template <typename UInt>
+    void writeLittleEndian(UInt value) {
+        for (std::size_t i = 0; i < sizeof(UInt); ++i) {
+            buf_.push_back(static_cast<std::uint8_t>((value >> (i * 8U)) & 0xFFU));
+        }
     }
 
     std::vector<std::uint8_t> buf_;
@@ -57,17 +73,24 @@ public:
     explicit ByteReader(const std::vector<std::uint8_t>& v)
         : data_(v.data()), size_(v.size()), pos_(0) {}
 
-    std::uint8_t readU8() { return read<std::uint8_t>(); }
+    std::uint8_t readU8() {
+        check(sizeof(std::uint8_t));
+        return data_[pos_++];
+    }
 
-    std::uint16_t readU16() { return read<std::uint16_t>(); }
+    std::uint16_t readU16() { return readLittleEndian<std::uint16_t>(); }
 
-    std::uint32_t readU32() { return read<std::uint32_t>(); }
+    std::uint32_t readU32() { return readLittleEndian<std::uint32_t>(); }
 
-    std::uint64_t readU64() { return read<std::uint64_t>(); }
+    std::uint64_t readU64() { return readLittleEndian<std::uint64_t>(); }
 
-    std::int32_t readI32() { return read<std::int32_t>(); }
+    std::int32_t readI32() {
+        return bitwiseCast<std::int32_t>(readU32());
+    }
 
-    float readF32() { return read<float>(); }
+    float readF32() {
+        return bitwiseCast<float>(readU32());
+    }
 
     bool readBool() { return readU8() != 0; }
 
@@ -84,13 +107,23 @@ public:
     [[nodiscard]] std::size_t remaining() const { return pos_ < size_ ? size_ - pos_ : 0; }
 
 private:
+    template <typename To, typename From>
+    static To bitwiseCast(const From& value) {
+        static_assert(sizeof(To) == sizeof(From));
+        To out;
+        std::memcpy(&out, &value, sizeof(To));
+        return out;
+    }
+
     template <typename T>
-    T read() {
+    T readLittleEndian() {
         check(sizeof(T));
-        T v;
-        std::memcpy(&v, data_ + pos_, sizeof(T));
+        T value = 0;
+        for (std::size_t i = 0; i < sizeof(T); ++i) {
+            value |= static_cast<T>(data_[pos_ + i]) << (i * 8U);
+        }
         pos_ += sizeof(T);
-        return v;
+        return value;
     }
 
     void check(std::size_t n) const {
