@@ -42,16 +42,43 @@ Exit criteria:
 
 ## 3) Confirm spawn path from an existing entity (45 min)
 
-- [ ] Identify a known spawn path used by the current room
-- [ ] For one known spawn, capture:
-  - [ ] object id
-  - [ ] spawn group id
-  - [ ] resulting actor pointer
-  - [ ] initial position/rotation
-- [ ] Repeat/reload and verify the same path is observable
+- [ ] Identify the *known* Roxas spawn in the current room
+- [ ] Pick a "spawn sentinel" value `A` (something that flips when Roxas spawns)
+  - [ ] Prefer simplest values you can observe reliably:
+    - [ ] HP / alive flag (if you can damage Roxas)
+    - [ ] OR position/rotation floats (always change after spawn)
+  - [ ] In CE: find `A` by narrowing:
+    - [ ] Load the room with Roxas already present (or wait until he appears)
+    - [ ] Narrow by a value you can repeat (HP change, or x/y/z change due to a small movement/interaction)
+- [ ] Confirm `A` is Roxas-specific (validation by causing a change that affects only Roxas)
+  - [ ] If you damage Roxas, `A` should change accordingly
+  - [ ] If you teleport/move Roxas, `A` should track that movement
+- [ ] Set a breakpoint/watch on `A` and capture spawn parameters at the moment Roxas is created/activated
+  - [ ] In CE: "Find out what writes to `A`" (or set breakpoint on write if available)
+  - [ ] Reload the room and let Roxas spawn happen again
+  - [ ] When the watch triggers, record:
+    - [ ] the newly created actor/enemy pointer (spawn result pointer)
+    - [ ] `object id` (spawn object/model id) if visible in the breakpoint/register context
+    - [ ] `spawn group id` (the group/script/controller id used for the spawn) if visible
+    - [ ] initial position/rotation for the spawned entity (read nearby floats around the result pointer)
+- [ ] Repeat / reload to verify repeatability
+  - [ ] Roxas spawn should trigger the breakpoint again
+  - [ ] The captured sequence should be consistent:
+    - [ ] same sentinel `A` behavior
+    - [ ] same "result pointer pattern" (new actor pointer changes per reload, but should be consistently produced by the same code path)
+    - [ ] same object id and spawn group id (or extremely stable equivalents)
 
 Exit criteria:
-- You can consistently observe one normal spawn end-to-end.
+- You can consistently observe one normal Roxas spawn end-to-end and produce:
+  - [ ] a reproducible sentinel `A`
+  - [ ] a reproducible spawn-result pointer source
+  - [ ] stable `object id` / `spawn group id` (or the closest stable equivalents visible)
+
+What to send me after each breakpoint hit (so we can deduce the actual spawn surface):
+- `result_actor_ptr` (address/value you identified as the spawned Roxas entity)
+- `object id` (if visible) and `spawn group id` (if visible)
+- `pos/rot x,y,z` read near `result_actor_ptr` (even if offsets are rough/temporary)
+- Any stack/callsite info CE shows (function name/module + the first few frames if available)
 
 ---
 
