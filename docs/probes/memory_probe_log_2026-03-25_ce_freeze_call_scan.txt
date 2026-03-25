@@ -1,0 +1,29 @@
+CE freeze / parent-caller probe (2026-03-25)
+
+Context
+  Continuing RE chain: find callers of parent routine ~exe+0x150CA2 (gate before call exe+0x151000).
+
+MCP / automation
+  find_call_references(function_address) for exe+0x150CA0, 0x150CA2, 0x150D44:
+    All returned count=0 (no callers reported by bridge).
+
+  evaluate_lua: scan entire main module for E8 rel32 calls landing on base+0x150CA2:
+    One attempt returned count=0 (possible: real entry is 0x150CA0, or jmp not E8).
+
+  evaluate_lua: follow-up script scanning multiple targets over full module:
+    Ran long enough to hang Cheat Engine (full byte walk + readByte/readInteger per byte).
+
+Root cause (likely)
+  O(module_size) Lua loop inside CE (~45MB) blocks the UI / script engine → apparent freeze.
+
+Do not repeat
+  Full-module per-byte Lua scans in CE for this project.
+
+Still valid (unchanged)
+  Child exe+0x151000..0x151155; direct parents at 0x150CFE, 0x150E2A, 0x15150C; gate dword [C406B8].
+  See pointer_map_v1.md "Step 1 done" and "Step 2 automation".
+
+Recommended next session
+  Manual CE: Find addresses that call exe+0x150CA2 (or 0x150CA0).
+  Or: find what writes [C406B8] (data breakpoint / find what writes).
+  Or: narrow MCP aob_scan to .text only with limit, not Lua byte walk.

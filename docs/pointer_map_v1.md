@@ -97,6 +97,48 @@ RVAs are relative to **`KINGDOM HEARTS II FINAL MIX.exe`** image base (use **`Ct
 
 Absolute VAs are **ASLR-dependent**; only **RVAs** are stable across runs.
 
+##### Tracing caller #1 (`exe+0x15112C`) — worked example
+
+Disassembly around **`KINGDOM HEARTS II FINAL MIX.exe+0x15112C`** (live MCP capture, Steam Global):
+
+1. **`call` to staging fill** — at **`exe+0x15112C`**: **`call`** → **`axaAppMain+0x37B0`** (VA **`…492990`**).
+
+2. **Register args right before the `call`** (read **upward** a few lines):
+   - **`lea rcx,[rsp+30]`** at **`exe+0x151123`** → **`rcx`** = pointer to a **stack-local “location packet”** (8-byte `movsd` shape + 16-bit field at **`[rsp+38]`**, matching **`[rdi]` / `[rdi+8]`** inside the callee).
+   - **`xor r8d,r8d`** / **`xor r9d,r9d`** on this merge path → then **`lea edx,[r8+1]`** at **`exe+0x151128`** → **`edx = 1`**.
+   - So this path calls staging fill with **packed `edx`/`r8`/`r9`** = **`(1, 0, 0)`** and **`rcx` = packet on stack**.
+
+3. **Where the packet bytes come from** (still **above** the `call`, same function):
+   - One branch: **`call exe+0x3A0520`** (helper just above **`exe+0x15108E`** in this capture), then **`movsd xmm0,[rax]`** / **`movzx` from `[rax+8]`** into **`[rsp+30]`** / **`[rsp+38]`** — so **`rax`** points at an **in-memory source struct** after that helper returns.
+   - Another branch: **`movzx` / `mov`** from **runtime globals** (CE shows absolute **`0x7FF7…C40719`** range — **heap / mutable**, not a fixed `exe+` offset) into **`[rsp+30]`…`[rsp+38]`**.
+
+4. **Next RE step (go up the chain):**
+   - **Who calls *this* function?** Put cursor on **`exe+0x15112C`**, **Find out what addresses call this function** on the **containing routine** (scroll **up** to the **function prologue** — **`push` / `sub rsp`** — first; the first bytes at **`exe+0x151080`** may be **misaligned** in a raw dump).
+   - Then repeat: at the **parent** `call`, note **`rcx`/`rdx`/`r8`/`r9`** and any **`rax`** filled by a child **`call`**.
+
+##### Step 1 done: child function + direct parents (`exe+0x151000`)
+
+| Item | `exe` RVA | Notes |
+|---|---|---|
+| **Child** (builds stack packet → **`call axaAppMain+0x37B0`**) | **`0x151000`–`0x151155`** (~342 B) | Contains **`call`** at **`0x15112C`** into staging fill. |
+| **Parent A** (`call` → child) | **`0x150CFE`** | After **`call exe+0x152940`**, tests **`dword [C406B8]`**; **non-zero** → **`call exe+0x151000`**, then **`call exe+0x3DB640`**. Routine prologue ~**`0x150CA2`** (**`push rbp`**, **`sub rsp,20`**). |
+| **Parent B** | **`0x150E2A`** | Same **`[C406B8]`** gate; **`call exe+0x151000`** then **`mov bpl,1`**. Same **overall task** as A, different branch (longer path from ~**`0x150D44`**: **`r8d=[C40724]`**, table **`lea rdi,[exe+0x5B1510]`**, calls **`624210`/`624680`**, **`6DD400`**, etc.). |
+| **Parent C** | **`0x15150C`** | Same pattern as A: **`call exe+0x152940`**, **`[C406B8]`** gate, **`call exe+0x151000`**, **`call exe+0x3DB640`**. |
+
+**Globals (runtime VAs in CE; names TBD):** **`C406B8`** = “call **`0x151000`**” gate (**`dword`**). **`C406B4`**, **`C40724`**, **`C406B1`**, **`C406B0`**, **`C406C8`/`C406D0`** appear in the same neighborhood.
+
+**Next (step 2 up):** In CE, **Find out what addresses call** the routine at **`exe+0x150CA2`** (or **`0x150D44`** for the wider function). If CE shows **no xrefs**, use **“Find references”** / **AOB** for the **`call`** `E8` sequence or trace **who sets `[C406B8]`**.
+
+##### Step 2 automation (2026-03-25) — MCP + CE freeze
+
+| Attempt | Result |
+|---|---|
+| **`find_call_references`** on **`exe+0x150CA0`**, **`0x150CA2`**, **`0x150D44`** (absolute VAs) | **0 callers** each (bridge/tool may miss tail calls, **`jmp` entries**, or non-standard prologues). |
+| **`evaluate_lua`**: byte-step scan of whole **`KINGDOM HEARTS II FINAL MIX.exe`** for **`E8`** **`rel32`** targeting **`base+0x150CA2`** | First short run: **count = 0** (no **`call`** lands on that **exact** VA — entry may be **`0x150CA0`** only, or **`ff 25` / `jmp`**). |
+| **`evaluate_lua`**: extended scan (multiple targets, full module) | **Aborted**; **Cheat Engine froze** — **do not** loop **`readByte`/`readInteger` over ~45 MB** in Lua inside CE. |
+
+**Safe alternatives:** CE **disassembler** → **Find out what addresses call this address** on **`exe+0x150CA2`**. Or **xref `mov [C406B8]`** / **hardware write watch** on **`C406B8`** (sparse). Or **`aob_scan`** MCP with a **narrow** **`+X`** region, not a Lua per-byte walk.
+
 ### Game state
 
 | Offset | Name | Source |
