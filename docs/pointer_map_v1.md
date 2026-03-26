@@ -20,12 +20,12 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 | Cutscene/transition state | Partial | `CUTSCENE_TIMER` used as proxy. Transition start/end flags not yet mapped. |
 | Unit slot stat block | Partial | `SLOT0_BASE`, `SLOT_STRIDE`, `slot::HP`, `slot::MAX_HP` confirmed. MP offset unknown. |
 | Actor transform (slot 0) | Done | Entity struct layout fully mapped: position, rotation, velocity, airborne flags. |
-| Actor transform (slot 1/2) | Missing | Friend entity struct discovery not yet implemented. |
+| Actor transform (slot 1/2) | Done | Slot1+0x220/+0x228 actor pointers, entity at actor+0x640. Same layout as slot 0. |
 | Entity discovery | Done | Two-strategy scan: camera actor pointer chain (primary), vtable+W+moveState heuristic (fallback). Auto-discovers on room transition via `Tick()`. |
 | Position buffer array | Done | Buffer at `exe+0xAD9100`, stride `0x38`. Dual-write for physics-active rooms. |
 | Camera struct | Done | Full camera struct at `exe+0x718C60` with look-at, eye position, actor pointer, distance. |
 | Camera retarget | Done | Fake actor allocation + pointer redirect at `camStruct+0x50`. Implemented in `WriteCameraTarget()` / `RestoreVanillaCamera()`. |
-| Enemy list root | Missing | `enemy::LIST_PTR`, `COUNT`, `STRIDE` still `0x0`. |
+| Enemy list root | Partial | Stride confirmed (0x6C00/0x72F0 per type), moveState=8/9. Root pointer and count still unknown. |
 | Input injection | Missing | Global input address known (`0x0BF3120`), per-slot injection path not mapped. |
 | Replica writeback | Partial | `ApplyReplicaActorState()` works for slot 0 (position, rotation, flags, HP) and camera fake actor (all slots). Enemy replica still TODO. |
 
@@ -224,15 +224,44 @@ Camera actor pointer chain: `camStruct+0x50 -> actorObj+0x640 -> entity+0x30 = p
 | `0x0BF3120` | `INPUT` | `[KH2LIB]` |
 | `0x0ABABDA` | `SOFT_RESET` | `[KH2LIB]` |
 
+### Friend entity discovery  (RE Session — 2026-03-26, CONFIRMED)
+
+The first friend unit slot (Slot 1, at `SLOT0_BASE + SLOT_STRIDE`) stores actor object pointers to **both** friend party members:
+
+| Offset within Slot 1 | Name | Source | Notes |
+|---|---|---|---|
+| `+0x220` | `slot::FRIEND1_ACTOR_PTR` | `[CONFIRMED]` | QWORD, pointer to Friend 1 actor object |
+| `+0x228` | `slot::FRIEND2_ACTOR_PTR` | `[CONFIRMED]` | QWORD, pointer to Friend 2 actor object |
+
+Entity struct is at `actor + 0x640` (same as Sora). Friends share the **exact same entity struct layout** as the player — position, rotation, velocity, airborne flags all at the same offsets.
+
+**Key differences from player entity:**
+- Friends have `moveState=0` (AI-controlled) vs player `moveState=2` (ground) / `3` (air)
+- Slot 0 and Slot 2 do **not** have actor pointers at `+0x220`/`+0x228` — only Slot 1 stores both
+- Actor addresses are dynamic and change per room transition (re-discover after each transition)
+
+Verified in: TT Room 7, TT Room 8 (Dusk fight), Mysterious Tower Room 25. Friend entities were at different addresses in each room, but the Slot1+0x220/0x228 discovery path worked consistently.
+
+### Enemy entity layout  (RE Session — 2026-03-26, PARTIAL)
+
+Enemy entities use the **same entity struct layout** at `actor + 0x640`. Active enemies have `moveState=8` (or `9` for alt state). Dead/freed enemy slots have garbage data.
+
+Enemies of the same type are allocated in contiguous actor slots:
+
+| Enemy type | Stride | World/Room |
+|---|---|---|
+| Dusk (TT Room 8) | `0x6C00` | World 2 Room 8 |
+| Nobodies (Mysterious Tower Room 25) | `0x72F0` | World 2 Room 25 |
+
+**Stride varies by enemy type.** A fixed stride cannot be assumed. Enemy list root pointer and count are still unknown.
+
 ### Still unknown (blocks further milestones)
 
 | Name | Needed for |
 |---|---|
 | `enemy::LIST_PTR` | M5 enemy replication |
 | `enemy::COUNT` | M5 enemy replication |
-| `enemy::STRIDE` | M5 enemy replication |
 | Per-slot input injection path | M3 friend-slot control |
-| Friend1/Friend2 entity struct addresses | M1 completion, M3 |
 | Animation ID offset in entity struct | M4 animation sync |
 | MP offset within unit slot | M1 full stats |
 
@@ -244,13 +273,13 @@ File: `runtime/src/GameBridgePC.cpp`
 
 | Method | Status | Notes |
 |---|---|---|
-| `Tick()` | Implemented | Auto-discovers entities on room change, re-points camera |
-| `DiscoverEntityAddresses()` | Implemented | Camera pointer chain (primary) + vtable scan (fallback) |
+| `Tick()` | Implemented | Auto-discovers entities (all slots) on room change, re-points camera |
+| `DiscoverEntityAddresses()` | Implemented | Camera chain (slot 0) + Slot1+0x220/0x228 (friends). Re-discovers on room transition. |
 | `ReadRoomState()` | Implemented | Reads world/room/program/cutscene state |
-| `ReadActorState(slot)` | Partial | Slot 0: position, rotation, velocity, airborne, HP. Slot 1/2: HP only |
-| `ReadEnemyStates()` | TODO | Needs enemy list offsets |
+| `ReadActorState(slot)` | Implemented | All slots: position, rotation, velocity, airborne, HP. Friends via Slot1 actor pointers. |
+| `ReadEnemyStates()` | TODO | Needs enemy list root pointer + count |
 | `WriteCameraTarget(slot)` | Implemented | Fake actor allocation + pointer redirect |
 | `RestoreVanillaCamera()` | Implemented | Restores original pointer, frees memory |
 | `InjectOwnedInput(slot, input)` | TODO | Needs per-slot input path RE |
-| `ApplyReplicaActorState(state)` | Partial | Slot 0: dual-write position/rotation/flags. All slots: HP + camera fake actor |
-| `ApplyReplicaEnemyState(state)` | TODO | Needs enemy entity struct discovery |
+| `ApplyReplicaActorState(state)` | Implemented | All slots: position/rotation/flags to entity struct. Slot 0: dual-write to buffer. All: HP + camera fake actor. |
+| `ApplyReplicaEnemyState(state)` | TODO | Needs enemy list root pointer |

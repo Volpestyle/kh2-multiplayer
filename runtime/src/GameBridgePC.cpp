@@ -103,6 +103,8 @@ void GameBridgePC::Detach() {
     attached_ = false;
     baseAddress_ = 0;
     entityStructAddr_ = 0;
+    friend1EntityAddr_ = 0;
+    friend2EntityAddr_ = 0;
     bufferSlotIndex_ = -1;
     lastWorldId_ = 0;
     lastRoomId_ = 0;
@@ -369,6 +371,50 @@ bool GameBridgePC::DiscoverEntityAddresses() {
 
     bufferSlotIndex_ = findBufferSlot(entityStructAddr_);
 
+    // -----------------------------------------------------------------------
+    // Friend entity discovery  (RE Session 2026-03-26)
+    //
+    // The first friend unit slot (Slot 1) stores actor object pointers to
+    // both friend party members at +0x220 and +0x228 within the slot.
+    // Entity struct is at actor + ACTOR_TO_ENTITY (0x640), same layout as
+    // the player entity.
+    //
+    // Friends have moveState=0 (AI-controlled) vs player moveState=2/3.
+    // These pointers are dynamic — they change per room transition.
+    // -----------------------------------------------------------------------
+    friend1EntityAddr_ = 0;
+    friend2EntityAddr_ = 0;
+
+#ifdef _WIN32
+    {
+        using namespace offsets;
+        const std::uint64_t slot1Addr = baseAddress_ + SLOT0_BASE + SLOT_STRIDE;
+
+        // Read Friend 1 actor pointer from Slot1 + 0x220.
+        std::uint64_t f1Actor = readAbs<std::uint64_t>(slot1Addr + slot::FRIEND1_ACTOR_PTR);
+        if (f1Actor != 0 && f1Actor > baseAddress_ &&
+            f1Actor < baseAddress_ + 0x3000000) {
+            std::uint64_t candidate = f1Actor + camera::ACTOR_TO_ENTITY;
+            // Validate: W component should be 1.0 at entity + POS_W.
+            float posW = readAbs<float>(candidate + entity::POS_W);
+            if (std::fabs(posW - entity_discovery::POS_W_EXPECTED) < 0.01f) {
+                friend1EntityAddr_ = candidate;
+            }
+        }
+
+        // Read Friend 2 actor pointer from Slot1 + 0x228.
+        std::uint64_t f2Actor = readAbs<std::uint64_t>(slot1Addr + slot::FRIEND2_ACTOR_PTR);
+        if (f2Actor != 0 && f2Actor > baseAddress_ &&
+            f2Actor < baseAddress_ + 0x3000000) {
+            std::uint64_t candidate = f2Actor + camera::ACTOR_TO_ENTITY;
+            float posW = readAbs<float>(candidate + entity::POS_W);
+            if (std::fabs(posW - entity_discovery::POS_W_EXPECTED) < 0.01f) {
+                friend2EntityAddr_ = candidate;
+            }
+        }
+    }
+#endif
+
     // Update cached room so we know when to re-discover.
     lastWorldId_ = readU8(offsets::WORLD_ID);
     lastRoomId_  = readU8(offsets::ROOM_ID);
@@ -394,6 +440,8 @@ void GameBridgePC::Tick() {
     // World 255 / Room 255 = not in-game (title screen, loading, etc.)
     if (curWorld == 0xFF || curRoom == 0xFF) {
         entityStructAddr_ = 0;
+        friend1EntityAddr_ = 0;
+        friend2EntityAddr_ = 0;
         bufferSlotIndex_ = -1;
         return;
     }
@@ -453,20 +501,30 @@ std::optional<ActorState> GameBridgePC::ReadActorState(SlotType slot) const {
     a.mp = 0;  // TODO: MP offset within slot not yet confirmed
 
     // --- Entity transform data (dynamic, requires discovery) ---
-    // Currently we only have the entity struct for slot 0 (the player).
-    // Friend 1/2 entity discovery is a future RE task.
-    if (slot == SlotType::Player && entityStructAddr_ != 0) {
-        a.position.x = readAbs<float>(entityStructAddr_ + entity::POS_X);
-        a.position.y = readAbs<float>(entityStructAddr_ + entity::POS_Y);
-        a.position.z = readAbs<float>(entityStructAddr_ + entity::POS_Z);
-        a.rotationY  = readAbs<float>(entityStructAddr_ + entity::ROT_Y);
+    // Resolve entity struct address for this slot.
+    std::uint64_t entityAddr = 0;
+    if (slot == SlotType::Player) {
+        entityAddr = entityStructAddr_;
+    } else if (slot == SlotType::Friend1) {
+        entityAddr = friend1EntityAddr_;
+    } else if (slot == SlotType::Friend2) {
+        entityAddr = friend2EntityAddr_;
+    }
+
+    if (entityAddr != 0) {
+        a.position.x = readAbs<float>(entityAddr + entity::POS_X);
+        a.position.y = readAbs<float>(entityAddr + entity::POS_Y);
+        a.position.z = readAbs<float>(entityAddr + entity::POS_Z);
+        a.rotationY  = readAbs<float>(entityAddr + entity::ROT_Y);
 
         // Velocity: only Y is known (airborne vertical velocity).
-        a.velocity.y = readAbs<float>(entityStructAddr_ + entity::VEL_Y);
+        a.velocity.y = readAbs<float>(entityAddr + entity::VEL_Y);
 
         // Airborne state from the entity struct flags.
-        std::uint32_t moveState = readAbs<std::uint32_t>(entityStructAddr_ + entity::MOVE_STATE);
-        std::uint32_t airFlag   = readAbs<std::uint32_t>(entityStructAddr_ + entity::AIRBORNE_FLAG);
+        std::uint32_t moveState = readAbs<std::uint32_t>(entityAddr + entity::MOVE_STATE);
+        std::uint32_t airFlag   = readAbs<std::uint32_t>(entityAddr + entity::AIRBORNE_FLAG);
+        // Player uses moveState 2=ground, 3=air. Friends use moveState 0
+        // (AI-controlled) so we rely on airborne flag for them.
         a.airborne = (moveState == 3) || (airFlag == 1);
 
         // Derive a basic action state from movement flags.
@@ -476,8 +534,8 @@ std::optional<ActorState> GameBridgePC::ReadActorState(SlotType slot) const {
             a.action = ActionState::Idle;
         }
     }
-    // For Friend1/Friend2: position data remains zeroed until their entity
-    // structs are discovered. HP is still read from the static unit slot.
+    // If entity address is 0, position/rotation data remains zeroed.
+    // HP is still read from the static unit slot above.
 
     return a;
 }
@@ -626,38 +684,50 @@ bool GameBridgePC::ApplyReplicaActorState(const ActorState& state) {
 
     bool ok = true;
 
-    // --- Write to the game's entity struct (slot 0 / player only) ---
-    // Entity struct discovery currently only finds the player entity.
-    // For slot 0, write position/rotation/flags to the entity struct and
-    // buffer array (dual-write for physics-active rooms).
-    if (state.slot == SlotType::Player && entityStructAddr_ != 0) {
+    // --- Write to the game's entity struct ---
+    // Resolve entity struct address for this slot.
+    std::uint64_t entityAddr = 0;
+    if (state.slot == SlotType::Player) {
+        entityAddr = entityStructAddr_;
+    } else if (state.slot == SlotType::Friend1) {
+        entityAddr = friend1EntityAddr_;
+    } else if (state.slot == SlotType::Friend2) {
+        entityAddr = friend2EntityAddr_;
+    }
+
+    if (entityAddr != 0) {
         // Write position to entity struct (authoritative source).
-        ok &= writeAbs<float>(entityStructAddr_ + entity::POS_X, state.position.x);
-        ok &= writeAbs<float>(entityStructAddr_ + entity::POS_Y, state.position.y);
-        ok &= writeAbs<float>(entityStructAddr_ + entity::POS_Z, state.position.z);
-        ok &= writeAbs<float>(entityStructAddr_ + entity::POS_W, 1.0f);
+        ok &= writeAbs<float>(entityAddr + entity::POS_X, state.position.x);
+        ok &= writeAbs<float>(entityAddr + entity::POS_Y, state.position.y);
+        ok &= writeAbs<float>(entityAddr + entity::POS_Z, state.position.z);
+        ok &= writeAbs<float>(entityAddr + entity::POS_W, 1.0f);
 
         // Write rotation.
-        ok &= writeAbs<float>(entityStructAddr_ + entity::ROT_Y, state.rotationY);
-        ok &= writeAbs<float>(entityStructAddr_ + entity::COS_FACING, std::cos(state.rotationY));
-        ok &= writeAbs<float>(entityStructAddr_ + entity::SIN_FACING, std::sin(state.rotationY));
+        ok &= writeAbs<float>(entityAddr + entity::ROT_Y, state.rotationY);
+        ok &= writeAbs<float>(entityAddr + entity::COS_FACING, std::cos(state.rotationY));
+        ok &= writeAbs<float>(entityAddr + entity::SIN_FACING, std::sin(state.rotationY));
 
         // Write airborne flags.
+        // Note: friends use moveState=0 normally (AI-controlled). When writing
+        // replicated state, we use moveState 2/3 (player-style) to force the
+        // position. The game's AI will reclaim control on the next frame for
+        // non-owned slots, so continuous writes are needed.
         if (state.airborne) {
-            ok &= writeAbs<std::uint32_t>(entityStructAddr_ + entity::AIRBORNE_FLAG, 1);
-            ok &= writeAbs<std::uint32_t>(entityStructAddr_ + entity::MOVE_STATE, 3);
-            ok &= writeAbs<std::uint32_t>(entityStructAddr_ + entity::AIRBORNE_SUB, 1);
-            ok &= writeAbs<float>(entityStructAddr_ + entity::VEL_Y, state.velocity.y);
+            ok &= writeAbs<std::uint32_t>(entityAddr + entity::AIRBORNE_FLAG, 1);
+            ok &= writeAbs<std::uint32_t>(entityAddr + entity::MOVE_STATE, 3);
+            ok &= writeAbs<std::uint32_t>(entityAddr + entity::AIRBORNE_SUB, 1);
+            ok &= writeAbs<float>(entityAddr + entity::VEL_Y, state.velocity.y);
         } else {
-            ok &= writeAbs<std::uint32_t>(entityStructAddr_ + entity::AIRBORNE_FLAG, 0);
-            ok &= writeAbs<std::uint32_t>(entityStructAddr_ + entity::MOVE_STATE, 2);
-            ok &= writeAbs<std::uint32_t>(entityStructAddr_ + entity::AIRBORNE_SUB, 0);
+            ok &= writeAbs<std::uint32_t>(entityAddr + entity::AIRBORNE_FLAG, 0);
+            ok &= writeAbs<std::uint32_t>(entityAddr + entity::MOVE_STATE, 2);
+            ok &= writeAbs<std::uint32_t>(entityAddr + entity::AIRBORNE_SUB, 0);
         }
 
-        // Dual-write: also write position to the buffer array entry.
+        // Dual-write: also write position to the buffer array entry (slot 0 only).
         // In physics-active rooms, the game recomputes position each frame from
         // the buffer, so we must write to both to prevent overwrite within ~500ms.
-        if (bufferSlotIndex_ >= 0) {
+        // TODO: Find buffer slot indices for Friend1/Friend2.
+        if (state.slot == SlotType::Player && bufferSlotIndex_ >= 0) {
             std::uint64_t bufEntry = baseAddress_ + buffer::ARRAY_BASE +
                 static_cast<std::uint64_t>(bufferSlotIndex_) * buffer::ENTRY_STRIDE;
 
@@ -667,10 +737,6 @@ bool GameBridgePC::ApplyReplicaActorState(const ActorState& state) {
             ok &= writeAbs<float>(bufEntry + buffer::ENTRY_POS_W, 1.0f);
         }
     }
-    // For Friend1/Friend2: entity struct discovery is not yet implemented,
-    // so we cannot write to the game's native entity transforms. However,
-    // HP can still be written to the static unit slot, and the camera fake
-    // actor can be updated (see below).
 
     // --- Write HP to the static unit slot (works for all slots) ---
     // Always write HP, including 0 (KO). Using hp >= 0 rather than > 0

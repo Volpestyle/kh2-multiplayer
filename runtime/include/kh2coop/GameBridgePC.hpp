@@ -105,8 +105,10 @@ private:
 
     // Discovered entity addresses (change per room transition).
     // These are ABSOLUTE addresses (baseAddress_ already included).
-    std::uint64_t entityStructAddr_{0};  // player entity struct base
-    std::int32_t  bufferSlotIndex_{-1};  // player's index in the buffer array
+    std::uint64_t entityStructAddr_{0};   // player (slot 0) entity struct base
+    std::uint64_t friend1EntityAddr_{0};  // friend 1 entity struct base (from Slot1+0x220)
+    std::uint64_t friend2EntityAddr_{0};  // friend 2 entity struct base (from Slot1+0x228)
+    std::int32_t  bufferSlotIndex_{-1};   // player's index in the buffer array
 
     // Cached room ID to detect room transitions and re-discover.
     std::uint8_t lastWorldId_{0};

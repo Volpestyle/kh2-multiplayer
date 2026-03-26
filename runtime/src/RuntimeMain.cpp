@@ -504,7 +504,12 @@ int main(int argc, char* argv[]) {
         const auto now = std::chrono::steady_clock::now();
         if (options.config.logOwnedActorState &&
             now - lastActorLogAt >= 1s) {
-            logOwnedActorState(game, options.config.ownedSlot);
+            // Log all 3 party slots for visibility during testing.
+            for (auto s : {kh2coop::SlotType::Player,
+                           kh2coop::SlotType::Friend1,
+                           kh2coop::SlotType::Friend2}) {
+                logOwnedActorState(game, s);
+            }
             lastActorLogAt = now;
         }
 

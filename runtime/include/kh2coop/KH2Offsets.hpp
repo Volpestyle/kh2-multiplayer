@@ -145,6 +145,18 @@ namespace slot {
     constexpr std::uint64_t MAX_HP     = 0x84;         // int32 [CONFIRMED] Max HP
     // Other fields within the 0x278-byte slot TBD.
     // Known: equipment, abilities, MP, AP, drive gauge are in here.
+
+    // --------------------------------------------------------------------------
+    // Friend actor pointers  (RE Session — 2026-03-26, CONFIRMED)
+    //
+    // The first friend slot (Slot 1) stores actor object pointers to BOTH
+    // friend party members at these offsets. The addresses are dynamic and
+    // change on room transitions. Entity struct is at actor + 0x640.
+    //
+    // Slot 0 and Slot 2 do NOT contain actor pointers at these offsets.
+    // --------------------------------------------------------------------------
+    constexpr std::uint64_t FRIEND1_ACTOR_PTR = 0x220; // qword [CONFIRMED] Slot 1 only — Friend 1 actor object
+    constexpr std::uint64_t FRIEND2_ACTOR_PTR = 0x228; // qword [CONFIRMED] Slot 1 only — Friend 2 actor object
 }
 
 // Convenience: absolute addresses for Slot 0 HP/MaxHP
@@ -254,12 +266,25 @@ namespace entity_discovery {
 }
 
 // --------------------------------------------------------------------------
-// Enemy list — TBD
+// Enemy entities  (RE Session — 2026-03-26, PARTIAL)
+//
+// During a Dusk fight in TT Room 8, enemy entities were found in a
+// contiguous array with stride 0x6C00 per actor slot. Each slot contains
+// an actor object with the entity struct at actor + 0x640 (same as Sora
+// and friends). Active enemies have moveState=8 or 9. Dead/freed slots
+// have garbage data at the entity struct.
+//
+// The array base pointer and enemy count are NOT yet found. Currently
+// enemies can only be discovered via vtable+position scan of the entity
+// data region. The root pointer is needed for M5 enemy replication.
 // --------------------------------------------------------------------------
 namespace enemy {
-    constexpr std::uint64_t LIST_PTR   = 0x0;  // [UNKNOWN]
-    constexpr std::uint64_t COUNT      = 0x0;  // [UNKNOWN]
-    constexpr std::uint64_t STRIDE     = 0x0;  // [UNKNOWN]
+    constexpr std::uint64_t LIST_PTR   = 0x0;     // [UNKNOWN] root pointer to enemy actor array
+    constexpr std::uint64_t COUNT      = 0x0;     // [UNKNOWN] number of active enemies
+    constexpr std::uint64_t STRIDE     = 0x6C00;  // [CONFIRMED] bytes per enemy actor slot
+    // moveState values observed for enemies:
+    constexpr std::uint32_t MS_ACTIVE_GROUND = 8;  // [CONFIRMED] active enemy, grounded
+    constexpr std::uint32_t MS_ACTIVE_ALT    = 9;  // [CONFIRMED] active enemy, alt state (stagger/attack?)
 }
 
 // --------------------------------------------------------------------------

@@ -25,7 +25,7 @@
 
 ## Milestone 1 — Pointer map / game bridge `[PARTIAL]`
 **Goal:** identify the minimum live data needed to observe the three-player session.
-**Status:** Slot 0 actor transform, HP, room state, and camera are fully mapped. Friend1/2 entity structs and enemy list are still missing.
+**Status:** All 3 actor transforms (Slot 0/1/2) fully mapped — position, rotation, velocity, airborne. HP mapped for all slots. Room state and camera done. Enemy entity struct layout confirmed (stride, moveState) but root pointer and count still missing. MP offset unknown.
 
 ### Tasks
 - Locate the canonical actor records for `PLAYER`, `FRIEND_1`, `FRIEND_2`.
