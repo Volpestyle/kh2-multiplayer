@@ -18,6 +18,10 @@ Both modes share the transport layer, protocol primitives, identity system, and 
 | `content/` | **Placeholder** | Notes for the GoA test content pack. |
 | `docs/` | **Active** | Design specs, RE session notes, milestone backlog, architecture modes, scope expansion plan, realm protocol sketch. |
 
+## Getting Started
+
+See **[SETUP.md](SETUP.md)** for the full developer setup guide — prerequisites, sibling repos, RE tools (Cheat Engine + Ghidra), MCP configuration, and build instructions.
+
 ## Building
 
 ```

@@ -1,6 +1,6 @@
 ### General Guidelines
 - Refer to `docs/` as the primary source of truth, and always keep up to date with code changes
-- Utilize cheat engine MCP when necessary
+- Utilize cheat engine MCP and ghidra MCP when necessary
 - Always write detailed commit messages
 
 ### Testing Principle
@@ -30,3 +30,38 @@ A community-maintained collection of KH2 runtime memory addresses for all PC ver
 - **Game version auto-detection** — Signature bytes at `0x566A8E` (Epic), `0x56668E` (Steam Global), `0x56640E` (Steam JP).
 
 Do NOT consult for entity transforms, position data, camera struct details, animation IDs, enemy lists, or friend entity discovery — those require original Cheat Engine RE and are documented in our own `KH2Offsets.hpp`.
+
+### Ghidra + GhidraMCP (`../GhidraMCP`)
+Ghidra (installed at `../ghidra_12.0.4_PUBLIC`) with the GhidraMCP plugin provides static binary analysis of the KH2 executable via MCP. The Ghidra MCP server exposes tools over HTTP (port 8080) and is configured as an MCP server in `.claude.json`. Use it when:
+
+- **Decompiling functions** — get C-like pseudocode for any function address discovered via Cheat Engine.
+- **Tracing cross-references (xrefs)** — "who calls this function?" and "who reads/writes this address?" across the entire binary.
+- **Understanding call chains** — statically trace entity spawn logic, party slot wiring, or animation dispatch without setting breakpoints.
+- **Renaming/annotating** — label discovered functions and data in Ghidra so decompilation output stays readable across sessions.
+
+Use Ghidra for static analysis (understanding code structure). Use Cheat Engine for dynamic analysis (runtime values, breakpoints, AOB scans). Cross-reference both: find addresses in CE, understand them in Ghidra, verify hypotheses back in CE.
+
+### LuaBackend Source (`../kh2-tools/LuaBackend`)
+The LuaBackend source repo (https://github.com/Sirius902/LuaBackend) — a Lua scripting engine that hooks into KH2's frame loop via DLL proxy injection (`DBGHELP.dll`). Consult it when:
+
+- **Understanding the hook mechanism** — `main_dll.cpp` shows how the frame hook is installed via vtable patching after pattern scanning.
+- **Reviewing the Lua API surface** — `LuaBackend.cpp` binds `ReadInt`/`WriteInt`/`ReadFloat`/`WriteFloat`/`GetPointer`/etc. to Lua. These are the same APIs used by community Lua mods.
+- **Considering LuaBackend as a runtime layer** — for multiplayer, Lua scripts could read player state per-frame and feed it to a network layer. Scripts support hot reload (F1) and run at 60/120/240Hz synced to the game loop.
+- **Referencing memory access patterns** — `MemoryLib.h` shows how the game's memory is read/written with proper page protection handling.
+
+Do NOT modify LuaBackend source for our mod without careful consideration — it's an upstream dependency shared with the broader KH2 modding community.
+
+### KHPCPatchManager Source (`../kh2-tools/KHPCPatchManager`)
+The KH2 PC Patch Manager (https://github.com/AntonioDePau/KHPCPatchManager) — tool for creating and applying binary patches to KH2 game files. Consult it when:
+
+- **Understanding how mods are distributed** — patches `00objentry.bin`, `00battle.bin`, `03system.bin`, `memt_0.list`, etc.
+- **Planning mod packaging** — if the multiplayer mod needs to ship ObjEntry or party table changes, this is the distribution mechanism.
+
+### Character Mod Examples (`../kh2-tools/mods/`)
+Three reference mods showing proven character swap/addition techniques:
+
+- **axel-mix** — Binary patching + KH2Moose DLL injection with 1.5GB cache. Shows runtime memory manipulation via DLL.
+- **dual-wield-roxas** — Pure YAML ObjEntry + Skeleton patching. Shows how to define custom PLAYER entities with dual-wield bone attachment (Bone1=172, Bone2=63) and custom ObjectForm types.
+- **vanitas-remaster** — Most comprehensive. Shows `memt_0.list` party composition (18 slots per world), custom PLAYER entities in FRIEND slots, form/moveset mapping, and full stat/bonus configuration.
+
+Key patterns for multiplayer: use `memt_0.list` to spawn Player 2 in a FRIEND slot, define their ObjEntry with PLAYER type, and map to appropriate NeoMoveset/NeoStatus IDs.
