@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(unzip -o GhidraMCP-release-1-4.zip \"GhidraMCP-release-1-4/GhidraMCP-1-4.zip\" -d .)",
+      "Bash(mv GhidraMCP-release-1-4/GhidraMCP-1-4.zip .)",
+      "Bash(unzip -l GhidraMCP-1-4.zip)",
+      "Bash(winget install:*)",
+      "Bash(winget search:*)"
+    ]
+  }
+}

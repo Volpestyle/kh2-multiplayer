@@ -212,11 +212,28 @@ std::uint64_t GameBridgePC::actorBase(SlotType slot) const {
 }
 
 std::uint64_t GameBridgePC::enemyBase(std::uint32_t index) const {
-    using namespace offsets;
-    if (enemy::LIST_PTR == 0) return 0;
-    auto listBase = readPtr(enemy::LIST_PTR);
-    if (listBase == 0) return 0;
-    return listBase + static_cast<std::uint64_t>(index) * enemy::STRIDE;
+    if (!attached_) return 0;
+
+    std::uint64_t actorAddr =
+        readAbs<std::uint64_t>(baseAddress_ + offsets::active_entity_list::HEAD);
+    std::uint32_t enemyIndex = 0;
+
+    for (std::uint32_t iter = 0;
+         actorAddr != 0 && iter < offsets::active_entity_list::MAX_TRAVERSAL;
+         ++iter) {
+        if (isEnemyActor(actorAddr)) {
+            if (enemyIndex == index) {
+                return actorAddr;
+            }
+            ++enemyIndex;
+        }
+
+        const std::uint64_t nextActor = nextLinkedActor(actorAddr);
+        if (nextActor == actorAddr) break;
+        actorAddr = nextActor;
+    }
+
+    return 0;
 }
 
 // ==========================================================================
@@ -363,6 +380,117 @@ std::int32_t GameBridgePC::findBufferSlot(std::uint64_t entityStructAbsAddr) con
     return -1;
 }
 
+std::uint64_t GameBridgePC::resolveActorHandle(std::uint32_t handle) const {
+#ifdef _WIN32
+    using namespace offsets;
+
+    if (!attached_ || handle == 0) return 0;
+
+    const std::uint32_t masked = handle & 0x7fffffffU;
+    const std::uint32_t bucket =
+        masked >> active_entity_list::HANDLE_BUCKET_SHIFT;
+    if (bucket >= active_entity_list::HANDLE_BUCKET_COUNT) return 0;
+
+    const std::uint64_t tableEntryAddr =
+        baseAddress_ + active_entity_list::HANDLE_REGION_TABLE +
+        static_cast<std::uint64_t>(bucket) * sizeof(std::uint64_t);
+    const std::uint64_t regionBase = readAbs<std::uint64_t>(tableEntryAddr);
+    if (regionBase == 0 || regionBase == 0xffffffffffffffffULL) return 0;
+
+    return regionBase | (masked & active_entity_list::HANDLE_LOW_MASK);
+#else
+    (void)handle;
+    return 0;
+#endif
+}
+
+std::uint32_t GameBridgePC::encodeActorHandle(std::uint64_t actorAddr) const {
+#ifdef _WIN32
+    using namespace offsets;
+
+    if (!attached_ || actorAddr == 0) return 0;
+
+    const std::uint64_t regionBase =
+        actorAddr & ~static_cast<std::uint64_t>(active_entity_list::HANDLE_LOW_MASK);
+    const std::uint32_t low =
+        static_cast<std::uint32_t>(actorAddr &
+                                   active_entity_list::HANDLE_LOW_MASK);
+
+    for (std::uint32_t bucket = 0;
+         bucket < active_entity_list::HANDLE_BUCKET_COUNT; ++bucket) {
+        const std::uint64_t tableEntryAddr =
+            baseAddress_ + active_entity_list::HANDLE_REGION_TABLE +
+            static_cast<std::uint64_t>(bucket) * sizeof(std::uint64_t);
+        const std::uint64_t entry = readAbs<std::uint64_t>(tableEntryAddr);
+        if (entry == regionBase) {
+            return 0x80000000U |
+                   (bucket << active_entity_list::HANDLE_BUCKET_SHIFT) |
+                   low;
+        }
+    }
+#else
+    (void)actorAddr;
+#endif
+    return 0;
+}
+
+std::uint64_t GameBridgePC::nextLinkedActor(std::uint64_t actorAddr) const {
+    if (!attached_ || actorAddr == 0) return 0;
+
+    const auto nextHandle =
+        readAbs<std::uint32_t>(actorAddr + offsets::actor::LINKED_NEXT_HANDLE);
+    return resolveActorHandle(nextHandle);
+}
+
+std::uint64_t GameBridgePC::actorObjEntryPtr(std::uint64_t actorAddr) const {
+    if (!attached_ || actorAddr == 0) return 0;
+
+    const std::uint64_t objEntryPtr =
+        readAbs<std::uint64_t>(actorAddr + offsets::actor::OBJENTRY_PTR);
+    if (objEntryPtr <= baseAddress_ || objEntryPtr >= baseAddress_ + 0x3000000ULL) {
+        return 0;
+    }
+
+    return objEntryPtr;
+}
+
+std::uint32_t GameBridgePC::actorObjectId(std::uint64_t actorAddr) const {
+    const std::uint64_t objEntryPtr = actorObjEntryPtr(actorAddr);
+    if (objEntryPtr == 0) return 0;
+
+    return readAbs<std::uint32_t>(objEntryPtr + offsets::objentry::OBJECT_ID);
+}
+
+bool GameBridgePC::hasEnemyObjEntryPrefix(std::uint64_t actorAddr) const {
+    const std::uint64_t objEntryPtr = actorObjEntryPtr(actorAddr);
+    if (objEntryPtr == 0) return false;
+
+    const char prefix =
+        static_cast<char>(readAbs<std::uint8_t>(objEntryPtr + offsets::objentry::NAME));
+    const char separator = static_cast<char>(
+        readAbs<std::uint8_t>(objEntryPtr + offsets::objentry::NAME + 1));
+
+    return separator == '_' && (prefix == 'B' || prefix == 'M');
+}
+
+bool GameBridgePC::isEnemyActor(std::uint64_t actorAddr) const {
+    using namespace offsets;
+
+    if (!attached_ || actorAddr == 0) return false;
+
+    const std::uint64_t entityAddr = actorAddr + actor::ENTITY_TRANSFORM;
+    if (!isValidEntityStruct(entityAddr)) return false;
+
+    const std::uint32_t moveState =
+        readAbs<std::uint32_t>(entityAddr + entity::MOVE_STATE);
+    if (moveState != enemy::MS_ACTIVE_GROUND &&
+        moveState != enemy::MS_ACTIVE_ALT) {
+        return false;
+    }
+
+    return hasEnemyObjEntryPrefix(actorAddr);
+}
+
 bool GameBridgePC::DiscoverEntityAddresses() {
     if (!attached_) return false;
 
@@ -424,6 +552,58 @@ bool GameBridgePC::DiscoverEntityAddresses() {
 
 bool GameBridgePC::HasEntityAddresses() const {
     return entityStructAddr_ != 0;
+}
+
+bool GameBridgePC::isValidEntityStruct(std::uint64_t entityStructAddr) const {
+#ifdef _WIN32
+    using namespace offsets;
+
+    if (!attached_ || entityStructAddr == 0) return false;
+
+    const std::uint64_t vtableVal =
+        readAbs<std::uint64_t>(entityStructAddr + entity::VTABLE_PTR);
+    const float posW = readAbs<float>(entityStructAddr + entity::POS_W);
+
+    return vtableVal >= baseAddress_ + entity_discovery::VTABLE_RANGE_LO &&
+           vtableVal <  baseAddress_ + entity_discovery::VTABLE_RANGE_HI &&
+           std::fabs(posW - entity_discovery::POS_W_EXPECTED) < 0.01f;
+#else
+    (void)entityStructAddr;
+    return false;
+#endif
+}
+
+bool GameBridgePC::canTargetCameraSlot(SlotType slot) const {
+    using namespace offsets;
+
+    switch (slot) {
+        case SlotType::Player:
+            return true;
+        case SlotType::Friend1:
+        case SlotType::Friend2:
+            break;
+    }
+
+    const std::uint64_t slot1Addr = baseAddress_ + SLOT0_BASE + SLOT_STRIDE;
+    const std::uint64_t actorPtrOffset =
+        (slot == SlotType::Friend1) ? slot::FRIEND1_ACTOR_PTR
+                                    : slot::FRIEND2_ACTOR_PTR;
+    const std::uint64_t actorPtr =
+        readAbs<std::uint64_t>(slot1Addr + actorPtrOffset);
+
+    if (actorPtr == 0 || actorPtr <= baseAddress_ ||
+        actorPtr >= baseAddress_ + 0x3000000) {
+        return false;
+    }
+
+    const std::uint64_t liveEntityAddr = actorPtr + camera::ACTOR_TO_ENTITY;
+    if (!isValidEntityStruct(liveEntityAddr)) {
+        return false;
+    }
+
+    const std::uint64_t cachedEntityAddr =
+        (slot == SlotType::Friend1) ? friend1EntityAddr_ : friend2EntityAddr_;
+    return cachedEntityAddr == liveEntityAddr;
 }
 
 // ==========================================================================
@@ -543,10 +723,36 @@ std::optional<ActorState> GameBridgePC::ReadActorState(SlotType slot) const {
 std::vector<EnemyState> GameBridgePC::ReadEnemyStates() const {
     if (!attached_) return {};
 
-    // TODO: Read enemy count, iterate enemy list, populate EnemyState for each.
-    // Requires enemy::LIST_PTR, enemy::COUNT, enemy::STRIDE offsets.
+    using namespace offsets;
 
-    return {};
+    std::vector<EnemyState> enemies;
+    std::uint64_t actorAddr =
+        readAbs<std::uint64_t>(baseAddress_ + active_entity_list::HEAD);
+
+    for (std::uint32_t iter = 0;
+         actorAddr != 0 && iter < active_entity_list::MAX_TRAVERSAL;
+         ++iter) {
+        if (isEnemyActor(actorAddr)) {
+            const std::uint64_t entityAddr = actorAddr + actor::ENTITY_TRANSFORM;
+
+            EnemyState enemyState;
+            enemyState.netId = encodeActorHandle(actorAddr);
+            enemyState.objectId = actorObjectId(actorAddr);
+            enemyState.position.x = readAbs<float>(entityAddr + entity::POS_X);
+            enemyState.position.y = readAbs<float>(entityAddr + entity::POS_Y);
+            enemyState.position.z = readAbs<float>(entityAddr + entity::POS_Z);
+            enemyState.rotationY = readAbs<float>(entityAddr + entity::ROT_Y);
+            enemyState.motionId = readAbs<std::uint32_t>(actorAddr + actor::ANIM_ID);
+            enemyState.alive = true;
+            enemies.push_back(enemyState);
+        }
+
+        const std::uint64_t nextActor = nextLinkedActor(actorAddr);
+        if (nextActor == actorAddr) break;
+        actorAddr = nextActor;
+    }
+
+    return enemies;
 }
 
 // ==========================================================================
@@ -564,6 +770,10 @@ bool GameBridgePC::WriteCameraTarget(SlotType slot) {
     // If targeting slot 0 (player), just restore vanilla — slot 0 is the default.
     if (slot == SlotType::Player) {
         return RestoreVanillaCamera();
+    }
+
+    if (!canTargetCameraSlot(slot)) {
+        return false;
     }
 
     // For Friend1/Friend2: we need that slot's entity position.

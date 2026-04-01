@@ -25,7 +25,7 @@
 
 ## Milestone 1 — Pointer map / game bridge `[PARTIAL]`
 **Goal:** identify the minimum live data needed to observe the three-player session.
-**Status:** All 3 actor transforms (Slot 0/1/2) fully mapped — position, rotation, velocity, airborne. HP mapped for all slots. Room state and camera done. Enemy entity struct layout confirmed (stride, moveState) but root pointer and count still missing. MP offset unknown.
+**Status:** All 3 actor transforms (Slot 0/1/2) fully mapped — position, rotation, velocity, airborne. HP mapped for all slots. Room state and camera done. Enemy entity struct layout confirmed; active entity list root is `exe+0x2A171C8` with next handle at `actor+0xA90`, and `actor+0x918` now exposes the objentry record for stable `objectId` reads. Enemy traversal must use objentry filtering in addition to moveState because non-combat `N_...` actors can also hit moveState `8/9`. Enemy HP/spawn-group fields and MP offset remain unknown.
 
 ### Tasks
 - Locate the canonical actor records for `PLAYER`, `FRIEND_1`, `FRIEND_2`.
@@ -46,9 +46,9 @@
 
 ---
 
-## Milestone 2 — Local camera retarget `[PARTIAL]`
+## Milestone 2 — Local camera retarget `[DONE]`
 **Goal:** each machine can follow its owned actor instead of always following slot 0.
-**Status:** `WriteCameraTarget()` and `RestoreVanillaCamera()` are implemented via fake actor allocation + pointer redirect. Camera retarget verified live. The runtime scaffold now loads `kh2coop_runtime.ini`, drives `CameraController`, and exposes an `F8` panic toggle, but stronger transition/cutscene gating and live Friend1/2 validation are still pending.
+**Status:** `WriteCameraTarget()` and `RestoreVanillaCamera()` are implemented via fake actor allocation + pointer redirect. `CameraController` now yields to cutscenes, active event programs, and room changes, restores vanilla camera during scripted sequences, and waits for Friend1/Friend2 entity rediscovery before re-applying the override. The runtime scaffold loads `kh2coop_runtime.ini`, drives `CameraController`, and exposes an `F8` panic toggle.
 
 ### Tasks
 - Add runtime config: owned actor id.
@@ -68,22 +68,59 @@
 
 ---
 
-## Milestone 3 — Local input injection `[TODO]`
+## Milestone 3 — Local input injection `[PARTIAL]`
 **Goal:** non-slot-0 players can directly control their own actor locally.
+**Status:** DLL injection scaffold complete. `kh2coop_inject.dll` now installs `PerEntityUpdate` plus friend in-process hooks on a fresh process, reads KH2's raw input buffer instead of direct `XInputGetState`, preserves processed-input metadata when suppressing Sora input, and supports F5 solo mode that toggles control between Sora and Friend1. Live smoke tests now show Donald moving on the left stick with corrected facing/movement alignment. The current blocker is residual vanilla friend-follow behavior: Donald is still pulled back toward Sora by a later friend update path even after the main AI callback is suppressed. Hot-swapping a loaded inject DLL is still unreliable, so live validation should use a fresh KH2 launch.
+
+### RE Findings (2026-03-31)
+- Input collector at `exe+0x105810` reads all gamepads, swaps active controller to slot 0
+- Processed button state at `exe+0xBF31A0` (2 entries, stride 0x68)
+- Button mapping table at `exe+0x5C3420`
+- Input context switch at `exe+0x39B580` (called ~30 sites)
+- Friend class hierarchy: `Friend@kn → FRIEND@YS → PARTY@YS → BTLOBJ@YS → STDOBJ@YS → OBJ@YS`
+- Friends use `FriendPersonality@kn` AI, not the input system
+- Animation ID at `actor+0x180` (DWORD) — maps to OpenKH MotionSet enum (IDLE=0, WALK=1, RUN=2, JUMP=3, EX000=151, etc.)
+- Entity update call chain: `EntityUpdateLoop` (`0x3BF5E0`) → `PerEntityUpdate` (`0x3BFD30`) → vtable AI dispatch → `EntityPositionPhysics` (`0x3B89A0`) → `EntityPositionCalc` (`0x3B9090`) → `MEMCPY_4FLOATS` (`0x1A8E60`)
+
+### ~~Strategy A — Puppet Mode~~ (SKIPPED)
+Rejected: external `WriteProcessMemory` to entity fields gives cosmetic-only results. The friend AI overwrites position each frame (write-race), no physics/collision integration, and combat actions are visual-only (no hitboxes, no damage events). Not worth implementing as an intermediate step.
+
+### Strategy B — AI Replacement Hook (implementing directly)
+- DLL injection via Panacea-style hooking (reference: `openkh/OpenKh.Research.Panacea/`)
+- Hook `PerEntityUpdate` at `exe+0x3BFD30` — the per-entity frame update function
+- For friend entities: replace the vtable+0x10 AI decision dispatch with player input from network/local gamepad
+- Current live finding: suppressing only vtable+0x10 is not sufficient; a later friend pre-physics callback at vtable+0x28 appears to keep applying follow/tether steering toward Sora
+- Let `EntityPositionPhysics` (`exe+0x3B89A0`) run normally after our input injection
+- Full game integration — physics, collision, animations, combat all work natively because the game's own action system processes the commands
 
 ### Tasks
-- Capture raw pad/keyboard state before KH2 consumes it.
-- Inject direct movement + jump + attack + guard + dodge into owned slot.
-- For slot 1/2, do not attempt full vanilla command menu parity yet.
-- Add debug overlay showing the resolved input state for the owned actor.
+- [x] Map full input pipeline (raw collection → button mapping → processed state)
+- [x] Confirm friends do not use input system (AI-only)
+- [x] Identify friend class hierarchy and AI architecture
+- [x] Find animation ID offset in actor/entity struct — `actor+0x180`, MotionSet enum
+- [x] Find entity update call chain + hook target — `exe+0x3BFD30` (`PerEntityUpdate`)
+- [x] Build DLL injection scaffold — `inject/` directory, MinHook detours, AOB pattern scan, Panacea plugin exports (`OnInit`/`OnFrame`)
+- [x] Hook `PerEntityUpdate` and identify friend entities at runtime — compares actor ptr against Slot1+0x220/+0x228
+- [x] Replace friend AI dispatch (vtable+0x10) with player input injection — runtime vtable discovery via `ResolveEntityType`, KH2 raw input-buffer reading, velocity/acceleration/facing writes
+- [x] Resolve inject-side input source mismatch — inject now reads KH2 raw input memory with active-slot handling
+- [x] Fix solo-mode processed-input crash — preserve processed-entry metadata tail while suppressing Sora input
+- [x] Validate basic Friend1 solo-mode movement — Donald can be moved locally under F5 solo mode
+- [x] Calibrate left-stick axis/sign mapping and facing alignment
+- [x] Verify F5 solo-mode toggles control cleanly between Sora and Friend1
+- [ ] Suppress residual friend follow/tether behavior after main AI suppression
+- [ ] Validate the friend vtable+0x28 pre-physics hook on a fresh launch
+- [ ] Wire network-received input into the hook (from M4 networking layer)
+- [ ] Test: friend slot attacks land, enemies take damage
+- [x] Verify velocity/acceleration offsets (actor+0xB98/+0xA58) via CE live testing
 
 ### Deliverables
-- `InputInjector`
-- control mapping file
-- on-screen debug overlay
+- `kh2coop_inject.dll` — Panacea-style DLL with `PerEntityUpdate` hook
+- `docs/INPUT_RE_SESSION.md` (done)
+- Updated `KH2Offsets.hpp` with animation + entity update offsets (done)
 
 ### Exit criteria
 - In an offline test build, slot 1 and slot 2 can move and attack on demand.
+- Physics, collision, and combat work natively (not cosmetic-only).
 - No accidental cross-control of the wrong slot.
 
 ---

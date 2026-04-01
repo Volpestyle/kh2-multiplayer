@@ -98,6 +98,16 @@ private:
     // the entity struct and the buffer array entries.
     std::int32_t findBufferSlot(std::uint64_t entityStructAddr) const;
 
+    std::uint64_t resolveActorHandle(std::uint32_t handle) const;
+    std::uint32_t encodeActorHandle(std::uint64_t actorAddr) const;
+    std::uint64_t nextLinkedActor(std::uint64_t actorAddr) const;
+    std::uint64_t actorObjEntryPtr(std::uint64_t actorAddr) const;
+    std::uint32_t actorObjectId(std::uint64_t actorAddr) const;
+    bool hasEnemyObjEntryPrefix(std::uint64_t actorAddr) const;
+    bool isEnemyActor(std::uint64_t actorAddr) const;
+    bool isValidEntityStruct(std::uint64_t entityStructAddr) const;
+    bool canTargetCameraSlot(SlotType slot) const;
+
     // Process state (Windows-only, void* to avoid Win32 headers in the header).
     void* processHandle_{nullptr};
     std::uint64_t baseAddress_{0};

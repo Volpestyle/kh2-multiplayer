@@ -91,3 +91,13 @@ add_executable(kh2coop_fake_sim
 )
 
 target_link_libraries(kh2coop_fake_sim PRIVATE kh2coop_server_core kh2coop_runtime)
+
+# ---------------------------------------------------------------------------
+# kh2coop_inject — in-process DLL for friend AI replacement (Strategy B).
+# Loads into KH2's process and hooks PerEntityUpdate to replace friend AI
+# with player input from XInput gamepads.
+# Only builds on Windows (requires MinHook, XInput, PE headers).
+# ---------------------------------------------------------------------------
+if(WIN32)
+    add_subdirectory(inject)
+endif()

@@ -25,8 +25,10 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 | Position buffer array | Done | Buffer at `exe+0xAD9100`, stride `0x38`. Dual-write for physics-active rooms. |
 | Camera struct | Done | Full camera struct at `exe+0x718C60` with look-at, eye position, actor pointer, distance. |
 | Camera retarget | Done | Fake actor allocation + pointer redirect at `camStruct+0x50`. Implemented in `WriteCameraTarget()` / `RestoreVanillaCamera()`. |
-| Enemy list root | Partial | Stride confirmed (0x6C00/0x72F0 per type), moveState=8/9. Root pointer and count still unknown. |
-| Input injection | Missing | Global input address known (`0x0BF3120`), per-slot injection path not mapped. |
+| Enemy list root | Done | Active-entity list head at `exe+0x2A171C8`; next handle at `actor+0xA90`; handle region table at `exe+0x2B0D720`. Enemy count is derived by traversal + moveState `8/9` plus objentry-name filter (`B_`/`M_`). |
+| Input system | Done | Full pipeline mapped: raw collection (`exe+0x105810`), button mapping (`exe+0x39C720`), processed state (`exe+0xBF31A0`). Friends are AI-only; two injection strategies defined. See [Input system](#input-system--ghidra-re-session--2026-03-31-confirmed). |
+| Animation ID | Done | `actor+0x180` (DWORD), maps to OpenKH MotionSet enum. Verified IDLE/RUN/JUMP/FALL/LAND/ATTACK. |
+| Entity update chain | Done | Full call chain traced: update loop (`0x3BF5E0`) → per-entity update (`0x3BFD30`) → position physics (`0x3B89A0`) → position calc (`0x3B9090`) → MEMCPY_4FLOATS. Strategy B hook target identified; current live M3 work is on suppressing the friend vtable `+0x28` pre-physics callback to remove residual Sora tethering. |
 | Replica writeback | Partial | `ApplyReplicaActorState()` works for slot 0 (position, rotation, flags, HP) and camera fake actor (all slots). Enemy replica still TODO. |
 
 ---
@@ -161,6 +163,23 @@ Disassembly around **`KINGDOM HEARTS II FINAL MIX.exe+0x15112C`** (live MCP capt
 | `+0x80` | `slot::HP` (within slot) | `[CONFIRMED]` |
 | `+0x84` | `slot::MAX_HP` (within slot) | `[CONFIRMED]` |
 
+### Actor object offsets  (CE Dynamic Session — 2026-03-31, CONFIRMED)
+
+| Offset | Name | Source | Notes |
+|---|---|---|---|
+| `+0x180` | `actor::ANIM_ID` | `[CONFIRMED]` | DWORD, current animation/motion ID. Maps to OpenKH MotionSet: IDLE=0, WALK=1, RUN=2, JUMP=3, FALL=4, LAND=5, EX000=151. Verified via CE snapshot diff across all states. |
+| `+0x184` | `actor::ANIM_SUB` | `[CONFIRMED]` | DWORD, animation sub-state / variant index |
+| `+0x640` | `actor::ENTITY_TRANSFORM` | `[CONFIRMED]` | Entity transform struct base (position, rotation, etc.) |
+| `+0x9B8` | `actor::FLAGS` | `[CONFIRMED]` | DWORD, entity flags (OR'd with 0x4000, 0x500 by calc_motion) |
+| `+0x9C0` | `actor::STATE_PTR` | `[CONFIRMED]` | QWORD, state pointer (non-zero = active) |
+| `+0xA90` | `actor::LINKED_NEXT_HANDLE` | `[CONFIRMED]` | DWORD, next active-entity handle used by `EntityUpdateLoop` |
+| `+0xA58` | `actor::ACCEL_X` | `[CONFIRMED]` | Float, read by `EntityPositionPhysics` at `exe+0x3B8C02` (`movups xmm0,[rbx+0xA58]`). |
+| `+0xA5C` | `actor::ACCEL_Y` | `[CONFIRMED]` | Float, part of the acceleration vector consumed from `actor+0xA58`. |
+| `+0xA60` | `actor::ACCEL_Z` | `[CONFIRMED]` | Float, part of the acceleration vector consumed from `actor+0xA58`. |
+| `+0xB98` | `actor::VELOCITY_X` | `[CONFIRMED]` | Float, read by `EntityPositionPhysics` at `exe+0x3B8B85` (`movups xmm0,[rbx+0xB98]`). |
+| `+0xB9C` | `actor::VELOCITY_Y` | `[CONFIRMED]` | Float, part of the velocity vector consumed from `actor+0xB98`. |
+| `+0xBA0` | `actor::VELOCITY_Z` | `[CONFIRMED]` | Float, part of the velocity vector consumed from `actor+0xB98`. |
+
 ### Entity transform struct (relative to dynamic struct base)
 
 | Offset | Name | Source | Notes |
@@ -221,8 +240,106 @@ Camera actor pointer chain: `camStruct+0x50 -> actorObj+0x640 -> entity+0x30 = p
 | Offset | Name | Source |
 |---|---|---|
 | `0x0718CA8` | `CAMERA_TYPE` (legacy alias) | `[KH2LIB]` |
-| `0x0BF3120` | `INPUT` | `[KH2LIB]` |
+| `0x0BF3120` | `INPUT` | `[CONFIRMED]` |
 | `0x0ABABDA` | `SOFT_RESET` | `[KH2LIB]` |
+
+### Input system  (Ghidra RE Session — 2026-03-31, CONFIRMED)
+
+Full input pipeline traced via Ghidra static analysis. See `docs/INPUT_RE_SESSION.md` for the complete disassembly walkthrough.
+
+**Architecture:**
+```
+Hardware (XInput / Steam Input / DXInput)
+  │
+  ▼
+exe+0x105810  — main input collector (FUN_140105810)
+  │  reads raw gamepads/keyboard/mouse
+  │  supports up to 4 XInput + 4 Steam Input controllers
+  │  SWAPS active controller data into slot 0
+  │  writes to raw input slots at struct_base+0x18 + slot*0x44
+  │
+  ▼
+exe+0x39BF00  — game loop input callback (FUN_14039bf00)
+  │  calls exe+0x39C720 per entry — maps raw buttons→game actions
+  │  via mapping table at exe+0x5C3420
+  │  writes processed button bitmask to fixed-address array
+  │
+  ▼
+Processed button state at exe+0xBF31A0 (2 entries, stride 0x68)
+  │  Entry 0: exe+0xBF31A0  (current buttons, new-press, release, repeat, analog)
+  │  Entry 1: exe+0xBF3208
+  │
+  ▼
+~30 game systems read processed state via exe+0x39B580 context switch
+```
+
+#### Input struct pointers
+
+| Offset | Name | Source | Notes |
+|---|---|---|---|
+| `0x079CF00` | `INPUT_STRUCT_PTR` | `[CONFIRMED]` | QWORD ptr to input state struct |
+| `0x0BF3120` | `INPUT` (raw slot 0) | `[CONFIRMED]` | = struct_base + 0x18 |
+| `0x0BF3164` | Raw slot 1 | `[CONFIRMED]` | = struct_base + 0x18 + 0x44 |
+| `0x0BF31A0` | Processed entry 0 | `[CONFIRMED]` | 0x68-byte processed button state |
+| `0x0BF3208` | Processed entry 1 | `[CONFIRMED]` | same layout |
+| `0x05C3420` | Button mapping table | `[CONFIRMED]` | raw pad → game action bits |
+| `0x08BB290` | DXInput struct | `[CONFIRMED]` | keyboard/mouse subsystem state |
+
+#### Raw input slot layout (0x44 bytes per slot, at struct_base + 0x18 + slot * 0x44)
+
+| Offset | Type | Name | Notes |
+|---|---|---|---|
+| `+0x00` | ushort | BUTTONS | Raw button bitmask |
+| `+0x02` | byte | LSTICK_X | Left stick X (0x80=center) |
+| `+0x03` | byte | LSTICK_Y | Left stick Y (0x80=center) |
+| `+0x04` | byte | RSTICK_X | Right stick X (0x80=center) |
+| `+0x05` | byte | RSTICK_Y | Right stick Y (0x80=center) |
+
+#### Processed entry layout (0x68 bytes per entry)
+
+| Offset | Type | Name | Notes |
+|---|---|---|---|
+| `+0x00` | ulonglong | Current buttons | Game action bitmask |
+| `+0x08` | ulonglong | New press | Newly pressed this frame |
+| `+0x10` | ulonglong | Release | Released this frame |
+| `+0x18` | ulonglong | Auto-repeat | Repeat trigger |
+| `+0x20` | 4 floats | Analog data | Left stick |
+| `+0x30` | 4 floats | Analog data 2 | Right stick |
+| `+0x40` | pointer | Context | Mode pointer |
+| `+0x48` | dword | Flags | bit 0=disabled, bit 1=type |
+
+#### Key code addresses (stable)
+
+| `exe` RVA | Name | Notes |
+|---|---|---|
+| `0x105810` | InputCollector | Main per-frame input collection |
+| `0x39BF00` | InputLoopCallback | Registered game loop callback for button processing |
+| `0x39C720` | ButtonMapper | Maps raw pad → game action bitmask |
+| `0x39B580` | ContextSwitch | Input context switch (called ~30 sites) |
+| `0x134FF0` | PerControllerUpdate | Per-controller raw read + dispatch |
+| `0x133970` | GamepadEnumBind | XInput/Steam enumeration and binding |
+| `0x132F90` | DXInputPoll | DXInput keyboard/mouse poll with critical section |
+
+#### Critical finding: friends do not use input
+
+KH2 consolidates all active controller input into **slot 0 only**. Friend characters (Donald/Goofy) are entirely AI-driven. The game swaps whichever controller has activity into slot 0; there is no per-party-slot input buffer.
+
+RTTI class hierarchy for friends:
+```
+Friend@kn → FRIEND@YS → PARTY@YS → BTLOBJ@YS → STDOBJ@YS → OBJ@YS
+```
+
+Related RTTI classes: `FriendPersonality@kn`, `FRIEND_FORMATION@gb`, `ACTION_FRIEND_FLY@kn`.
+
+Debug strings found: `"friend attack:"`, `"gentle friend"`, `" friend1:"`, `" friend2:"`, `" friend3:"`, `"FRIEND RECOV    %3d"`.
+
+#### M3 injection strategies
+
+**Strategy A — Puppet Mode (implement first):**
+Write directly to entity position/rotation/action fields. Already partially working via `ApplyReplicaActorState()`. Needs animation ID offset for visual sync.
+
+**Strategy B — AI Replacement Hook (future):**
+Hook the friend AI tick function via DLL injection (Panacea-style). Replace AI output with player input. Requires finding the `FRIEND@YS` vtable dispatch and the per-frame AI decision function. Use CE hardware write breakpoint on friend entity position to find the callstack.
 
 ### Friend entity discovery  (RE Session — 2026-03-26, CONFIRMED)
 
@@ -253,17 +370,111 @@ Enemies of the same type are allocated in contiguous actor slots:
 | Dusk (TT Room 8) | `0x6C00` | World 2 Room 8 |
 | Nobodies (Mysterious Tower Room 25) | `0x72F0` | World 2 Room 25 |
 
-**Stride varies by enemy type.** A fixed stride cannot be assumed. Enemy list root pointer and count are still unknown.
+**Stride varies by enemy type.** A fixed stride cannot be assumed. The canonical runtime container is not a dedicated enemy array; it is the active-entity linked list headed by `exe+0x2A171C8`.
+
+### Actor objentry descriptor  (CE Session — 2026-03-31, PARTIAL)
+
+`actor+0x918` points into the exe objentry/descriptor table:
+
+| Offset | Meaning | Status | Notes |
+|---|---|---|---|
+| `+0x00` | `objectId` | `[CONFIRMED]` | dword ObjEntry ID |
+| `+0x04` | type/flags | `[PARTIAL]` | dword present, exact bit layout still under RE |
+| `+0x08` | object name | `[CONFIRMED]` | char[32], e.g. `P_EX100`, `P_EX030`, `F_EX030_BB`, `N_BB080_TSURU1` |
+| `+0x28` | mset name | `[CONFIRMED]` | char[32], e.g. `P_EX100.mset` |
+
+Live validation on 2026-03-31 from the current process:
+
+- `P_EX100` -> id `84`
+- `P_EX030` -> id `93`
+- `F_EX030_BB` -> id `321`
+- `N_BB080_TSURU1` -> id `397`
+
+Important caveat: a live non-combat `N_...` actor in the current room had `moveState=8`, so **moveState `8/9` alone is not a safe enemy filter**. Runtime enemy traversal now uses the objentry name prefix and only accepts `B_...` / `M_...` actors after the moveState check.
+
+### Active entity list / handle resolver  (Ghidra + CE Session — 2026-03-31, CONFIRMED)
+
+`EntityUpdateLoop` walks a global linked list of all active actors:
+
+- `exe+0x2A171C8` — head pointer (`DAT_142a171c8`)
+- `exe+0x2A171D0` — tail pointer (`DAT_142a171d0`)
+- `actor+0xA90` — next-link handle for each actor node
+- `exe+0x2B0D720` — 64-entry qword region table used to resolve handles to pointers
+
+Handle resolution from `FUN_1404ad3f0`:
+
+```c
+masked = handle & 0x7fffffff;
+bucket = masked >> 25;
+ptr = HANDLE_REGION_TABLE[bucket] | (masked & 0x01ffffff);
+```
+
+Live CE validation on 2026-03-31:
+
+- Current room: world `5`, room `8`
+- Active-list head read from `exe+0x2A171C8`: `0x7FF6EE0C2F60`
+- First live links resolved cleanly through `actor+0xA90`:
+  - `0x7FF6EE0C2F60` -> handle `0x8403A1B0` -> `0x7FF6EE03A1B0`
+  - `0x7FF6EE03A1B0` -> handle `0x84056FB0` -> `0x7FF6EE056FB0`
+  - `0x7FF6EE056FB0` -> handle `0x8407BA40` -> `0x7FF6EE07BA40`
+- The current room contained `18` active list nodes total and `1` moveState `8/9` false positive (`N_BB080_TSURU1`) in a non-combat room
+- This established that active-list traversal needs an objentry-based class filter in addition to moveState
+
+**Result:** enemy count is derived by traversing the active list, filtering `entity+0x100` for moveState `8`/`9`, then accepting only objentry names with `B_` / `M_` prefixes. No dedicated enemy-only count global has been identified.
+
+### Entity update call chain  (CE + Ghidra Session — 2026-03-31, CONFIRMED)
+
+Traced via hardware write breakpoint on Friend1 entity position Y (`actor+0x640+0x34`). The breakpoint fired at `exe+0x1A8E6F` (inside `MEMCPY_4FLOATS`). Return address analysis + Ghidra xref tracing revealed the full call chain:
+
+```
+exe+0x3BF5E0  Entity Update Loop
+  │  Iterates linked list at DAT_142a171c8 (all active entities)
+  │
+  ├─► exe+0x3BFD30  Per-Entity Update
+  │     │  Dispatches to vtable virtual functions:
+  │     │    vtable+0x08  — early update
+  │     │    vtable+0x10  — main AI / action update (friend AI decision here)
+  │     │    vtable+0x18  — post-main update
+  │     │    vtable+0x20  — conditional update
+  │     │    vtable+0x28  — pre-physics update
+  │     │
+  │     └─► exe+0x3B89A0  Position Physics
+  │           │  Calculates velocity, gravity, applies movement delta
+  │           │  Reads velocity from actor+0xB98, acceleration from actor+0xA58
+  │           │  Live CE execution breakpoints confirmed both reads on Friend1:
+  │           │    exe+0x3B8B85 (velocity) and exe+0x3B8C02 (acceleration)
+  │           │
+  │           └─► exe+0x3B9090  Position Calculator
+  │                 │  Collision detection, final position computation
+  │                 │  Writes to entity transform via MEMCPY_4FLOATS:
+  │                 │    lea rcx,[rsi+0x670]  (entity+0x30 = position)
+  │                 │    lea rdx,[rsi+0x700]  (computed position source)
+  │                 │    call exe+0x1A8E60
+  │                 │
+  │                 └─► exe+0x1A8E60  MEMCPY_4FLOATS
+  │
+  └─► exe+0x3BEEC0  calc_motion (batch animation processing)
+```
+
+| `exe` RVA | Name | Role |
+|---|---|---|
+| `0x3BF5E0` | Entity Update Loop | Iterates all entities, calls per-entity update |
+| `0x3BFD30` | Per-Entity Update | Dispatches vtable calls + calls position physics. **Strategy B hook target.** |
+| `0x3B89A0` | Position Physics | Velocity / gravity / movement delta calculation |
+| `0x3B9090` | Position Calculator | Collision + writes final position to entity transform |
+| `0x3BEEC0` | calc_motion | Batch animation/motion processing for all entities |
+
+`EntityPositionPhysics` consumes the injected velocity/acceleration vectors and then clears the accel block (`actor+0xA48..0xA60`) before returning. That matches the intended "write every frame" model for the inject hook.
+
+**Strategy B hook target:** `exe+0x3BFD30` — intercept for friend entities, replace the vtable AI dispatch (vtable+0x10) with player input processing, then let `exe+0x3B89A0` (physics) run normally for full game integration.
+
+**Live M3 note (2026-04-01):** vtable `+0x10` suppression is enough to hand local movement to Friend1, but not enough to remove all vanilla friend behavior. Left-stick solo control now works in practice, and the remaining Donald→Sora pull is currently attributed to the friend vtable `+0x28` pre-physics callback (`0x1401B0050` on the current build, tail-calling `0x1403D6870`). That callback is now the main tether-removal candidate for the next live retest.
 
 ### Still unknown (blocks further milestones)
 
-| Name | Needed for |
-|---|---|
-| `enemy::LIST_PTR` | M5 enemy replication |
-| `enemy::COUNT` | M5 enemy replication |
-| Per-slot input injection path | M3 friend-slot control |
-| Animation ID offset in entity struct | M4 animation sync |
-| MP offset within unit slot | M1 full stats |
+| Name | Needed for | Notes |
+|---|---|---|
+| MP offset within unit slot | M1 full stats | KH2LIB GoA example suggests Slot+0x180/0x184 |
 
 ---
 
@@ -277,9 +488,9 @@ File: `runtime/src/GameBridgePC.cpp`
 | `DiscoverEntityAddresses()` | Implemented | Camera chain (slot 0) + Slot1+0x220/0x228 (friends). Re-discovers on room transition. |
 | `ReadRoomState()` | Implemented | Reads world/room/program/cutscene state |
 | `ReadActorState(slot)` | Implemented | All slots: position, rotation, velocity, airborne, HP. Friends via Slot1 actor pointers. |
-| `ReadEnemyStates()` | TODO | Needs enemy list root pointer + count |
+| `ReadEnemyStates()` | Partial | Traverses active-entity list head `exe+0x2A171C8`, resolves `actor+0xA90` handles via `exe+0x2B0D720`, reads `objectId` from `actor+0x918`, filters moveState `8/9` plus objentry prefix `B_`/`M_` |
 | `WriteCameraTarget(slot)` | Implemented | Fake actor allocation + pointer redirect |
 | `RestoreVanillaCamera()` | Implemented | Restores original pointer, frees memory |
-| `InjectOwnedInput(slot, input)` | TODO | Needs per-slot input path RE |
+| `InjectOwnedInput(slot, input)` | TODO | Input pipeline fully mapped (see Input System section). Friends are AI-only; injection requires Strategy A (direct entity write) or Strategy B (AI hook). |
 | `ApplyReplicaActorState(state)` | Implemented | All slots: position/rotation/flags to entity struct. Slot 0: dual-write to buffer. All: HP + camera fake actor. |
-| `ApplyReplicaEnemyState(state)` | TODO | Needs enemy list root pointer |
+| `ApplyReplicaEnemyState(state)` | TODO | Enemy traversal + objectId now exist; HP/spawn-group/damage writeback still needs mapping |

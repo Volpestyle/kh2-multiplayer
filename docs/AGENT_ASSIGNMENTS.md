@@ -18,8 +18,8 @@
 | `Tick()` | DONE | Room change detection, entity re-discovery, camera re-point |
 | `DiscoverEntityAddresses()` | DONE | Camera pointer chain (primary) + vtable scan (fallback) |
 | `ReadRoomState()` | DONE | World/room/program/cutscene state |
-| `ReadActorState(slot)` | PARTIAL | Slot 0: position/rotation/velocity/airborne/HP. Slot 1/2: HP only |
-| `ReadEnemyStates()` | TODO | Needs `enemy::LIST_PTR/COUNT/STRIDE` |
+| `ReadActorState(slot)` | DONE | All 3 slots: position/rotation/velocity/airborne/HP via camera discovery + Slot1 actor pointers |
+| `ReadEnemyStates()` | PARTIAL | Traverses active-entity list head `exe+0x2A171C8`, resolves `actor+0xA90` handles via `exe+0x2B0D720`, reads `objectId` from `actor+0x918`, and filters moveState `8/9` plus objentry prefix `B_`/`M_` |
 | `WriteCameraTarget(slot)` | DONE | Fake actor allocation + pointer redirect |
 | `RestoreVanillaCamera()` | DONE | Pointer restore + VirtualFreeEx |
 | `InjectOwnedInput(slot, input)` | TODO | Per-slot input path not RE'd |
@@ -27,10 +27,8 @@
 | `ApplyReplicaEnemyState(state)` | TODO | Needs enemy entity struct discovery |
 
 ### Remaining RE blockers (Track A)
-- [ ] Friend1/Friend2 entity struct addresses
 - [ ] Per-slot input injection path
-- [ ] Enemy list root/count/stride
-- [ ] Animation ID offset in entity struct
+- [ ] Enemy HP/spawn-group mapping for full replication
 - [ ] MP offset within unit slot
 
 ### Success looks like

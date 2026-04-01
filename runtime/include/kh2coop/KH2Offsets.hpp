@@ -112,9 +112,75 @@ namespace camera {
 constexpr std::uint64_t CAMERA_TYPE    = 0x0718CA8;   // = CAMERA_STRUCT + camera::CAMERA_TYPE
 
 // --------------------------------------------------------------------------
-// Input
+// Input system  (Ghidra RE Session — 2026-03-31, CONFIRMED)
+//
+// Architecture overview:
+//   Hardware (XInput/Steam/DXInput)
+//     → FUN_140105810 (exe+0x105810): main input collector
+//       - reads raw gamepads/keyboard/mouse
+//       - supports up to 4 XInput + 4 Steam Input controllers
+//       - SWAPS active controller data into slot 0 (only slot 0 drives player)
+//       - writes to raw input slots at input_struct_base + 0x18 + slot * 0x44
+//     → FUN_14039bf00 (exe+0x39BF00): game loop callback
+//       - maps raw buttons → game action bitmask via table at exe+0x5C3420
+//       - writes processed state to fixed button state array
+//     → ~30 game systems read the processed button state
+//
+// CRITICAL FINDING: Friends do NOT use the input system. They are entirely
+// AI-driven (FRIEND@YS → PARTY@YS → BTLOBJ@YS → STDOBJ@YS → OBJ@YS).
+// There is no per-party-slot input buffer. For M3 multiplayer input injection,
+// the friend AI must be hooked/replaced or entity state written directly.
+//
+// See docs/INPUT_RE_SESSION.md for full Ghidra trace and injection strategies.
 // --------------------------------------------------------------------------
-constexpr std::uint64_t INPUT          = 0x0BF3120;   // [KH2LIB] Input state
+constexpr std::uint64_t INPUT_STRUCT_PTR = 0x079CF00;  // [CONFIRMED] qword ptr to input state struct
+constexpr std::uint64_t INPUT          = 0x0BF3120;    // [CONFIRMED] = input_struct + 0x18 = Slot 0 raw input
+
+namespace input {
+    // Input state struct offsets (relative to value at INPUT_STRUCT_PTR)
+    constexpr std::uint64_t CONTROLLER_COUNT = 0x14;    // [CONFIRMED] int32, active controller count
+    constexpr std::uint64_t RAW_SLOT0        = 0x18;    // [CONFIRMED] first raw input slot
+    constexpr std::uint64_t RAW_SLOT_STRIDE  = 0x44;    // [CONFIRMED] bytes per raw input slot
+    constexpr std::uint64_t ACTIVE_RAW_SLOT_INDEX = 0x129C; // [GHIDRA] original raw slot index swapped into slot 0 this frame
+
+    // Raw input slot layout (0x44 bytes per slot)
+    constexpr std::uint64_t BUTTONS          = 0x00;    // [CONFIRMED] ushort, raw button bitmask
+    constexpr std::uint64_t LSTICK_X         = 0x02;    // [CONFIRMED] byte, left stick X (0x80=center)
+    constexpr std::uint64_t LSTICK_Y         = 0x03;    // [CONFIRMED] byte, left stick Y (0x80=center)
+    constexpr std::uint64_t RSTICK_X         = 0x04;    // [CONFIRMED] byte, right stick X (0x80=center)
+    constexpr std::uint64_t RSTICK_Y         = 0x05;    // [CONFIRMED] byte, right stick Y (0x80=center)
+
+    // Processed button state array (fixed addresses, NOT relative to struct)
+    constexpr std::uint64_t PROCESSED_ENTRY0 = 0x0BF31A0; // [CONFIRMED] processed buttons, slot 0 (0x68 bytes)
+    constexpr std::uint64_t PROCESSED_ENTRY1 = 0x0BF3208; // [CONFIRMED] processed buttons, slot 1
+    constexpr std::uint64_t PROCESSED_STRIDE = 0x68;       // [CONFIRMED] bytes per processed entry
+
+    // Processed entry layout (0x68 bytes per entry)
+    // +0x00: ulonglong — current frame button bitmask (game action bits)
+    // +0x08: ulonglong — newly pressed this frame
+    // +0x10: ulonglong — released this frame
+    // +0x18: ulonglong — auto-repeat trigger
+    // +0x20: 16 bytes  — analog stick data (4 floats)
+    // +0x30: 16 bytes  — secondary analog data
+    // +0x40: pointer   — context/mode pointer
+    // +0x48: dword     — flags (bit 0 = disabled, bit 1 = type flag)
+
+    // Button mapping table (raw pad bits → game action bits)
+    constexpr std::uint64_t BUTTON_MAP_TABLE = 0x05C3420; // [CONFIRMED] input mapping table
+
+    // Input context switch function: called ~30 times during mode changes
+    // (battle start, menu open, cutscene, minigame, etc.)
+    constexpr std::uint64_t CONTEXT_SWITCH_FUNC = 0x039B580; // [CONFIRMED] FUN_14039b580
+
+    // Key code addresses
+    constexpr std::uint64_t INPUT_COLLECTOR_FUNC = 0x0105810; // [CONFIRMED] main input collection
+    constexpr std::uint64_t INPUT_LOOP_FUNC      = 0x039BF00; // [CONFIRMED] game loop input callback
+    constexpr std::uint64_t BUTTON_MAP_FUNC      = 0x039C720; // [CONFIRMED] raw→game button mapper
+
+    // DXInput state struct (keyboard/mouse subsystem)
+    constexpr std::uint64_t DXINPUT_STRUCT   = 0x08BB290; // [CONFIRMED] DXInput global state
+}
+
 constexpr std::uint64_t SOFT_RESET     = 0x0ABABDA;   // [KH2LIB] Soft reset trigger
 
 // --------------------------------------------------------------------------
@@ -197,6 +263,40 @@ constexpr std::uint64_t GAUGE_STRIDE   = 0x48;         // [KH2LIB]
 // from that base. Live validation found player vtables in the 0x251xxxx range,
 // so discovery must not assume only 0x253xxxx values.
 // --------------------------------------------------------------------------
+// --------------------------------------------------------------------------
+// Actor object offsets  (CE Dynamic Session — 2026-03-31, CONFIRMED)
+//
+// The actor object is the parent struct that contains the entity transform
+// at actor+0x640. These offsets are relative to the actor object base.
+//
+// The animation/motion ID at +0x180 maps directly to OpenKH's MotionSet
+// enum: IDLE=0, WALK=1, RUN=2, JUMP=3, FALL=4, LAND=5, EX000=151, etc.
+// Verified live via Cheat Engine snapshot diffing across IDLE/RUN/JUMP/
+// FALL/LAND/ATTACK transitions.
+// --------------------------------------------------------------------------
+namespace actor {
+    constexpr std::uint64_t ENTITY_TRANSFORM = 0x640; // [CONFIRMED] entity transform struct base
+    constexpr std::uint64_t ANIM_ID          = 0x180; // dword [CONFIRMED] current animation/motion ID (MotionSet enum)
+    constexpr std::uint64_t ANIM_SUB         = 0x184; // dword [CONFIRMED] animation sub-state / variant
+    constexpr std::uint64_t OBJENTRY_PTR     = 0x918; // qword [CONFIRMED] pointer to objentry/descriptor record (id + name + mset)
+    constexpr std::uint64_t FLAGS_9B8        = 0x9B8; // dword [CONFIRMED] entity flags (used by calc_motion)
+    constexpr std::uint64_t STATE_PTR_9C0    = 0x9C0; // qword [CONFIRMED] state pointer (non-zero = active)
+    constexpr std::uint64_t LINKED_NEXT_HANDLE = 0xA90; // dword [CONFIRMED] next active-entity handle used by EntityUpdateLoop
+
+    // Movement fields consumed by EntityPositionPhysics (exe+0x3B89A0).
+    // Live CE execution breakpoints on 2026-03-31 hit:
+    //   - exe+0x3B8B85  movups xmm0,[rbx+0xB98]
+    //   - exe+0x3B8C02  movups xmm0,[rbx+0xA58]
+    // with RBX matching the live Friend1 actor object from Slot1+0x220.
+    // The function later clears the accel block (0xA48..0xA60) before return.
+    constexpr std::uint64_t VELOCITY_X       = 0xB98; // float [CONFIRMED] movement velocity X
+    constexpr std::uint64_t VELOCITY_Y       = 0xB9C; // float [CONFIRMED] movement velocity Y
+    constexpr std::uint64_t VELOCITY_Z       = 0xBA0; // float [CONFIRMED] movement velocity Z
+    constexpr std::uint64_t ACCEL_X          = 0xA58; // float [CONFIRMED] acceleration X
+    constexpr std::uint64_t ACCEL_Y          = 0xA5C; // float [CONFIRMED] acceleration Y
+    constexpr std::uint64_t ACCEL_Z          = 0xA60; // float [CONFIRMED] acceleration Z
+}
+
 namespace entity {
     // Offsets within the entity transform struct (relative to struct base)
     constexpr std::uint64_t VTABLE_PTR     = 0x00;  // qword [CONFIRMED] points to exe 0x253xxxx range
@@ -266,7 +366,64 @@ namespace entity_discovery {
 }
 
 // --------------------------------------------------------------------------
-// Enemy entities  (RE Session — 2026-03-26, PARTIAL)
+// Entity update call chain  (CE + Ghidra Session — 2026-03-31, CONFIRMED)
+//
+// Full call chain from game loop to entity position write, traced via
+// hardware write breakpoint on friend entity posY + Ghidra xref analysis.
+//
+// Call chain:
+//   exe+0x3BF5E0  Entity Update Loop (head = exe+0x2A171C8, next = actor+0xA90)
+//     └─► exe+0x3BFD30  Per-Entity Update (dispatches vtable calls + physics)
+//           ├─► vtable+0x10  Main AI/action update (class-specific)
+//           ├─► vtable+0x18  Post-main update
+//           ├─► vtable+0x28  Pre-physics update
+//           └─► exe+0x3B89A0  Position Physics (velocity, gravity, collision)
+//                 └─► exe+0x3B9090  Position Calculator (final write)
+//                       └─► exe+0x1A8E60  MEMCPY_4FLOATS → entity transform
+//     └─► exe+0x3BEEC0  calc_motion (batch motion processing)
+//
+// For Strategy B (AI replacement hook), exe+0x3BFD30 is the ideal hook
+// target: intercept friend entities before physics, replace the vtable
+// AI dispatch with player input, then let physics run normally.
+// --------------------------------------------------------------------------
+namespace entity_update {
+    constexpr std::uint64_t UPDATE_LOOP        = 0x3BF5E0; // [CONFIRMED] iterates all entities
+    constexpr std::uint64_t PER_ENTITY_UPDATE  = 0x3BFD30; // [CONFIRMED] per-entity frame update
+    constexpr std::uint64_t POSITION_PHYSICS   = 0x3B89A0; // [CONFIRMED] velocity + gravity + collision
+    constexpr std::uint64_t POSITION_CALC      = 0x3B9090; // [CONFIRMED] collision + final position write
+    constexpr std::uint64_t CALC_MOTION        = 0x3BEEC0; // [CONFIRMED] batch motion/animation processing
+}
+
+// --------------------------------------------------------------------------
+// Active entity list / handle resolver  (Ghidra + CE — 2026-03-31, CONFIRMED)
+//
+// KH2 keeps all active actors in a linked list:
+//   - head pointer at exe+0x2A171C8
+//   - tail pointer at exe+0x2A171D0
+//   - next link stored as a 32-bit handle at actor+0xA90
+//
+// Handle resolution (FUN_1404ad3f0):
+//   ptr = HANDLE_REGION_TABLE[(handle & 0x7fffffff) >> 25] |
+//         (handle & 0x01ffffff)
+//
+// The region table is populated by FUN_1404ad390/FUN_1404ad2c0 and holds up
+// to 64 high-address buckets. This is the canonical way to walk active
+// enemies externally; there is no dedicated enemy-only array root.
+// --------------------------------------------------------------------------
+namespace active_entity_list {
+    constexpr std::uint64_t HEAD                = 0x2A171C8; // [CONFIRMED] qword head of active actor list
+    constexpr std::uint64_t TAIL                = 0x2A171D0; // [CONFIRMED] qword tail of active actor list
+    constexpr std::uint64_t FREE_HEAD           = 0x2A171D8; // [CONFIRMED] qword deferred-removal list head
+    constexpr std::uint64_t FREE_TAIL           = 0x2A171E0; // [CONFIRMED] qword deferred-removal list tail
+    constexpr std::uint64_t HANDLE_REGION_TABLE = 0x2B0D720; // [CONFIRMED] qword[64] high-address table for handle resolution
+    constexpr std::uint32_t HANDLE_LOW_MASK     = 0x01FFFFFF; // [CONFIRMED] low 25 bits kept directly in handle
+    constexpr std::uint32_t HANDLE_BUCKET_SHIFT = 25;         // [CONFIRMED] bucket index = bits 25..30
+    constexpr std::uint32_t HANDLE_BUCKET_COUNT = 64;         // [CONFIRMED] max buckets in HANDLE_REGION_TABLE
+    constexpr std::uint32_t MAX_TRAVERSAL       = 256;        // safety cap for external traversal
+}
+
+// --------------------------------------------------------------------------
+// Enemy entities  (RE Session — 2026-03-26 / 2026-03-31, PARTIAL)
 //
 // During a Dusk fight in TT Room 8, enemy entities were found in a
 // contiguous array with stride 0x6C00 per actor slot. Each slot contains
@@ -274,17 +431,37 @@ namespace entity_discovery {
 // and friends). Active enemies have moveState=8 or 9. Dead/freed slots
 // have garbage data at the entity struct.
 //
-// The array base pointer and enemy count are NOT yet found. Currently
-// enemies can only be discovered via vtable+position scan of the entity
-// data region. The root pointer is needed for M5 enemy replication.
+// Canonical traversal is now known: start at active_entity_list::HEAD and
+// follow actor::LINKED_NEXT_HANDLE through active_entity_list::HANDLE_REGION_TABLE.
+// Enemy count is derived by traversal + filtering moveState 8/9; no separate
+// dedicated enemy count global has been identified yet.
 // --------------------------------------------------------------------------
 namespace enemy {
-    constexpr std::uint64_t LIST_PTR   = 0x0;     // [UNKNOWN] root pointer to enemy actor array
-    constexpr std::uint64_t COUNT      = 0x0;     // [UNKNOWN] number of active enemies
     constexpr std::uint64_t STRIDE     = 0x6C00;  // [CONFIRMED] bytes per enemy actor slot
     // moveState values observed for enemies:
     constexpr std::uint32_t MS_ACTIVE_GROUND = 8;  // [CONFIRMED] active enemy, grounded
     constexpr std::uint32_t MS_ACTIVE_ALT    = 9;  // [CONFIRMED] active enemy, alt state (stagger/attack?)
+}
+
+// --------------------------------------------------------------------------
+// Objentry / descriptor records  (CE Session — 2026-03-31, PARTIAL)
+//
+// actor+0x918 points into the exe objentry table. Live reads from the current
+// process resolved:
+//   - `P_EX100` -> id 84
+//   - `P_EX030` -> id 93
+//   - `F_EX030_BB` -> id 321
+//   - `N_BB080_TSURU1` -> id 397
+//
+// This gives a stable object ID for actors outside the unit-slot stat system.
+// The name prefix is also useful for filtering active-list false positives:
+// moveState 8/9 alone can match non-combat `N_...` actors in non-battle rooms.
+// --------------------------------------------------------------------------
+namespace objentry {
+    constexpr std::uint64_t OBJECT_ID   = 0x00; // dword [CONFIRMED] ObjEntry/object ID
+    constexpr std::uint64_t TYPE_FLAGS  = 0x04; // dword [PARTIAL] type/flags field; layout still under RE
+    constexpr std::uint64_t NAME        = 0x08; // char[32] [CONFIRMED] object name, e.g. "P_EX100"
+    constexpr std::uint64_t MSET_NAME   = 0x28; // char[32] [CONFIRMED] motion-set name, e.g. "P_EX100.mset"
 }
 
 // --------------------------------------------------------------------------

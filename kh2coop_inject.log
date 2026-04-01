@@ -1,0 +1,6 @@
+=== kh2coop_inject v0.1 ===
+Initializing...
+  exe base: 0x7FF729200000
+  MinHook initialized
+  WARNING: AOB scan failed, using fallback RVA 0x3BFD30
+ERROR: PerEntityUpdate 0x7FF7295BFD30 is outside .text [0x7FF729201000..0x7FF72920B000]
