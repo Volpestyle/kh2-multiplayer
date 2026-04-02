@@ -7,7 +7,8 @@
 //      the known friend actor pointers from Slot1+0x220/+0x228
 //   3. Discovers the friend AI vtable+0x10 function at runtime
 //   4. Hooks the friend AI function to suppress AI and inject player input
-//   5. Reads XInput gamepads for Friend1 (gamepad 1) and Friend2 (gamepad 2)
+//   5. Reads input from network mailbox (if runtime is connected) or
+//      local gamepads for Friend1 (gamepad 1) and Friend2 (gamepad 2)
 //   6. Writes movement velocity/acceleration to actor struct fields
 //      that EntityPositionPhysics reads for movement integration
 //
@@ -26,6 +27,7 @@
 #include "EntityHook.hpp"
 #include "PatternScan.hpp"
 #include "kh2coop/KH2Offsets.hpp"
+#include "kh2coop/InputMailbox.hpp"
 
 #include <Windows.h>
 #include <MinHook.h>
@@ -58,6 +60,32 @@ using PFN_ResolveEntityType = void*(__fastcall*)(uint32_t typeId);
 //   This is the function that makes AI decisions for friend entities.
 using PFN_FriendAI = void(__fastcall*)(void* typeHandler, void* actorObj);
 
+// Follow-steering: void*(void* typeHandler, void* outVec4, void* entity, float dt)
+//   Called via vtable+0x40 from inside EntityPositionPhysics (exe+0x3B89A0).
+//   Returns a pointer to a 4-float follow-steering vector that the physics
+//   pipeline writes directly to actor+0xB98 (velocity). THIS is the tether.
+using PFN_FollowSteering = void*(__fastcall*)(void* typeHandler, void* outVec4,
+                                               void* entity, float dt);
+
+// Motion set functions — the game's own animation trigger API.
+// These are what the friend AI calls every frame to drive animations.
+// Writing directly to actor+0x180 does NOT work because the animation
+// system uses a complex motion playback chain managed by these functions.
+//
+// FUN_1403b6670(actor, motionChannel, flag, param4, param5):
+//   Sets a motion on a specific channel. The friend AI calls this as:
+//     FUN_1403b6670(actor, 2, 1, 0, 0)  — channel 2
+//   Internally reads actor+0x80 (motion set pointer), searches for the
+//   matching channel, creates a motion playback object via FUN_1402c6b30.
+//
+// FUN_1403b6630(actor, motionChannel, flag, param4):
+//   Sets motion on a channel (simpler wrapper). The friend AI calls:
+//     FUN_1403b6630(actor, 1, 1, 0)  — channel 1
+using PFN_SetMotion = uint64_t(__fastcall*)(void* actor, uint32_t motionChannel,
+                                             uint32_t flag, uint32_t param4, int64_t param5);
+using PFN_SetMotionSimple = uint64_t(__fastcall*)(void* actor, uint32_t motionChannel,
+                                                   uint32_t flag, uint32_t param4);
+
 // ============================================================================
 // AOB Signature — PerEntityUpdate prologue
 //
@@ -84,6 +112,10 @@ static constexpr uint64_t RVA_PER_ENTITY_UPDATE =
 // RVA for ResolveEntityType (no AOB scan yet — stable across sessions)
 static constexpr uint64_t RVA_RESOLVE_ENTITY_TYPE = 0x4AD270;
 
+// RVAs for motion set functions (the game's animation trigger API)
+static constexpr uint64_t RVA_SET_MOTION        = 0x3B6670;
+static constexpr uint64_t RVA_SET_MOTION_SIMPLE  = 0x3B6630;
+
 // ============================================================================
 // Movement field offsets within actor object
 //
@@ -97,6 +129,20 @@ static constexpr uint64_t ACTOR_VELOCITY_Z   = 0xBA0;  // float
 static constexpr uint64_t ACTOR_ACCEL_X      = 0xA58;  // float
 static constexpr uint64_t ACTOR_ACCEL_Y      = 0xA5C;  // float
 static constexpr uint64_t ACTOR_ACCEL_Z      = 0xA60;  // float
+// EntityPositionPhysics subtracts frame time from actor+0xBA8 and only calls
+// the friend follow-steering callback when the result goes negative. Holding
+// this timer positive disables the residual vanilla tether to Sora.
+static constexpr uint64_t ACTOR_FOLLOW_TIMER = 0xBA8;  // float
+static constexpr float    DISABLE_FOLLOW_TIMER = 999.0f;
+
+// Animation ID — DWORD at actor+0x180, maps to OpenKH MotionSet enum.
+// Writing this tells the game which animation to play.
+// Confirmed via live CE: the game reads +0x180 for motion playback.
+// +0x184 is the animation sub-state / variant (ANIM_SUB), NOT the motion ID.
+static constexpr uint64_t ACTOR_ANIM_ID      = 0x180;  // DWORD — motion ID (MotionSet enum)
+static constexpr uint32_t ANIM_IDLE          = 0;
+static constexpr uint32_t ANIM_WALK          = 1;
+static constexpr uint32_t ANIM_RUN           = 2;
 
 // ============================================================================
 // Configuration
@@ -122,6 +168,11 @@ static PFN_PerEntityUpdate   g_origPerEntityUpdate  = nullptr;
 static PFN_ResolveEntityType g_resolveEntityType     = nullptr;
 static PFN_FriendAI          g_origFriendAI          = nullptr;
 static PFN_FriendAI          g_origFriendPrePhysics  = nullptr;
+static PFN_FollowSteering   g_origFollowSteering    = nullptr;
+
+// Motion set function pointers (not hooked — called directly)
+static PFN_SetMotion        g_setMotion             = nullptr;
+static PFN_SetMotionSimple  g_setMotionSimple       = nullptr;
 
 // Friend entity tracking — refreshed every PerEntityUpdate call
 static uintptr_t g_friend1Actor = 0;
@@ -140,6 +191,8 @@ static bool  g_friendAIHooked  = false;
 static void* g_hookedAITarget  = nullptr;
 static bool  g_friendPrePhysicsHooked = false;
 static void* g_hookedPrePhysicsTarget = nullptr;
+static bool  g_followSteeringHooked = false;
+static void* g_hookedFollowSteeringTarget = nullptr;
 
 // XInput gamepad state (read once per frame)
 struct GamepadState {
@@ -161,12 +214,35 @@ static int          g_activeInputSlot = -1;
 static bool g_soloTestMode     = false;
 static bool g_f5WasDown        = false;   // edge detection for F5 key
 
+// In-process camera retargeting — points camStruct+0x50 at the friend actor.
+// Much simpler than the runtime process approach (no fake actor allocation)
+// because we can redirect to the REAL friend actor object directly.
+static uintptr_t g_origCameraActorPtr = 0;
+static bool      g_cameraRetargeted   = false;
+
+// Per-frame processed-stick snapshot. Must be captured BEFORE
+// SuppressSoraInput zeros the processed entry.
+static GamepadState g_processedStickSnapshot = {};
+static uint32_t     g_processedStickFrame    = UINT32_MAX;
+
+// (Animation is driven by calling the game's motion set functions every frame,
+// replicating what the original friend AI does. See InjectMovementInput.)
+
+// Sora actor pointer — needed for suppressing Sora's movement at entity level
+static uintptr_t g_soraActor = 0;
+
 // Diagnostics
 static uint32_t g_frameCounter  = 0;
 static bool     g_initialized   = false;
 static FILE*    g_logFile        = nullptr;
 static uint32_t g_lastMovementLogFrame = 0;
-static int      g_lastMovementStick = -1;
+
+// Network input mailbox — shared memory bridge from the runtime process.
+// When available, overrides local gamepad reads with network-received InputFrames.
+static kh2coop::MailboxReader g_mailboxReader;
+static bool     g_mailboxAvailable     = false;
+static uint32_t g_lastMailboxCheckFrame = 0;
+static constexpr uint32_t MAILBOX_RETRY_INTERVAL = 120;  // ~2 sec at 60fps
 
 // ============================================================================
 // Logging
@@ -248,30 +324,39 @@ static float ApplyRadialDeadzone(float* x, float* y) {
     return scale;
 }
 
-struct MovementStick {
-    float x = 0.0f;
-    float y = 0.0f;
-    bool useRightStick = false;
-};
+// SelectMovementStick removed: only left stick drives movement.
+// Right stick is reserved for camera control (handled by the game).
 
-static MovementStick SelectMovementStick(const GamepadState& pad) {
-    MovementStick stick {};
+static float ClampUnit(float value) {
+    if (value > 1.0f) return 1.0f;
+    if (value < -1.0f) return -1.0f;
+    return value;
+}
 
-    const float leftMagnitude = StickMagnitude(pad.leftX, pad.leftY);
-    const float rightMagnitude = StickMagnitude(pad.rightX, pad.rightY);
+static bool TryReadSoloProcessedStick(GamepadState* out) {
+    if (!out) return false;
 
-    stick.x = pad.leftX;
-    stick.y = pad.leftY;
+    using namespace offsets;
 
-    // Prefer the left stick for movement, but fall back to the right stick if
-    // the device path only exposes motion there on this machine.
-    if (leftMagnitude < STICK_DEADZONE && rightMagnitude > STICK_DEADZONE) {
-        stick.x = pad.rightX;
-        stick.y = pad.rightY;
-        stick.useRightStick = true;
+    __try {
+        // KH2's input mapper swaps the stick fields in the processed entry:
+        //   +0x20 ("left" field)  = physical RIGHT stick (camera)
+        //   +0x30 ("right" field) = physical LEFT stick (movement)
+        // Verified via live CE probe: pushing physical left stick shows at +0x30.
+        const auto* physRight = reinterpret_cast<const float*>(
+            g_exeBase + input::PROCESSED_ENTRY0 + 0x20);
+        const auto* physLeft = reinterpret_cast<const float*>(
+            g_exeBase + input::PROCESSED_ENTRY0 + 0x30);
+
+        out->connected = true;
+        out->leftX  = ClampUnit(physLeft[0]);   // movement
+        out->leftY  = ClampUnit(physLeft[1]);
+        out->rightX = ClampUnit(physRight[0]);  // camera
+        out->rightY = ClampUnit(physRight[1]);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
     }
-
-    return stick;
 }
 
 static int ResolveRawSlotForController(int controllerIndex, int activeInputSlot) {
@@ -290,13 +375,89 @@ static int ResolveRawSlotForController(int controllerIndex, int activeInputSlot)
     return controllerIndex;
 }
 
+// ============================================================================
+// Network input mailbox — try to read friend input from the runtime process
+//
+// Called before falling back to local gamepad reads. If the runtime has
+// written fresh InputFrame data to shared memory, we consume it here.
+// Returns true if at least one friend slot was populated from the mailbox.
+// ============================================================================
+
+static bool TryReadMailbox() {
+    if (!g_mailboxAvailable) {
+        // Periodically retry opening the mailbox (runtime may start later)
+        if (g_frameCounter - g_lastMailboxCheckFrame >= MAILBOX_RETRY_INTERVAL) {
+            g_lastMailboxCheckFrame = g_frameCounter;
+            if (g_mailboxReader.Open()) {
+                g_mailboxAvailable = true;
+                Log("Network input mailbox CONNECTED (runtime PID=%lu)",
+                    static_cast<unsigned long>(g_mailboxReader.RuntimePid()));
+            }
+        }
+        if (!g_mailboxAvailable) return false;
+    }
+
+    // Periodic liveness check (~every 2s): verify the runtime process is still
+    // alive. If it died, close the stale mapping and fall back to local gamepads.
+    if (g_frameCounter - g_lastMailboxCheckFrame >= MAILBOX_RETRY_INTERVAL) {
+        g_lastMailboxCheckFrame = g_frameCounter;
+        DWORD rtPid = g_mailboxReader.RuntimePid();
+        if (rtPid != 0) {
+            HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE, rtPid);
+            if (!hProc) {
+                Log("Network input mailbox DISCONNECTED — runtime PID=%lu no longer alive, falling back to local gamepads",
+                    static_cast<unsigned long>(rtPid));
+                g_mailboxReader.Close();
+                g_mailboxAvailable = false;
+                return false;
+            }
+            CloseHandle(hProc);
+        }
+    }
+
+    bool anyRead = false;
+
+    for (int padIdx = 0; padIdx < 2; ++padIdx) {
+        kh2coop::MailboxReadResult result {};
+        if (g_mailboxReader.TryReadSlot(padIdx, result)) {
+            GamepadState& pad = g_gamepad[padIdx];
+            pad.connected = true;
+            // Store packed MailboxButton bitmask. This is NOT KH2's raw input
+            // format — it uses the kh2coop::MailboxButton enum layout. When P2
+            // combat wires button consumption, use UnpackButtons() to decode.
+            pad.buttons   = static_cast<std::uint16_t>(result.buttons & 0xFFFF);
+            pad.leftX     = result.leftStickX;
+            pad.leftY     = result.leftStickY;
+            pad.rightX    = result.rightStickX;
+            pad.rightY    = result.rightStickY;
+            anyRead = true;
+        }
+        // If TryReadSlot returns false, the previous GamepadState is retained
+        // (from a prior mailbox read within this frame's loop iteration).
+    }
+
+    return anyRead;
+}
+
 static void ReadGamepads() {
     using namespace offsets;
 
-    g_gamepad[0] = {};
-    g_gamepad[1] = {};
     g_inputControllerCount = 0;
     g_activeInputSlot = -1;
+
+    // Try network mailbox first — if the runtime is delivering remote input,
+    // skip the local gamepad read entirely. This is the P3 IPC path.
+    // NOTE: Do NOT zero g_gamepad[] before this call. TryReadMailbox() writes
+    // only the slots that have new data; slots without new data retain their
+    // previous values from the prior frame.
+    if (TryReadMailbox()) {
+        return;
+    }
+
+    // Fallback: read from KH2's local raw input buffer (solo/offline mode).
+    // Zero gamepads here (not above) so the mailbox path can retain stale data.
+    g_gamepad[0] = {};
+    g_gamepad[1] = {};
 
     uintptr_t inputStruct = 0;
     __try {
@@ -358,6 +519,17 @@ static void ReadGamepads() {
             g_gamepad[padIdx] = {};
         }
     }
+
+    // In solo mode, prefer the per-frame processed-stick snapshot for pad 0.
+    // It was captured BEFORE SuppressSoraInput zeroed the processed entry, so
+    // it reflects the real physical left/right stick mapping the game uses.
+    if (g_soloTestMode && g_processedStickFrame == g_frameCounter) {
+        auto& snap = g_processedStickSnapshot;
+        if (snap.connected) {
+            snap.buttons = g_gamepad[0].buttons;
+            g_gamepad[0] = snap;
+        }
+    }
 }
 
 #if 0
@@ -377,14 +549,115 @@ static void ReadGamepadsLegacy() {
 }
 #endif
 
-// Suppress Sora's input by clearing the transient state in processed entry 0.
-// Preserve the metadata tail (including the raw-input pointer at +0x48), or
-// the next button-mapper pass will dereference a null pointer and crash.
-static void SuppressSoraInput() {
+// Suppress Sora's MOVEMENT while preserving full camera control.
+//
+// Previous approach zeroed the processed input entry and restored the camera
+// stick — but that killed camera orbit because the camera may read from
+// additional sources or the zero-restore timing was wrong.
+//
+// New approach: leave the processed input entry completely untouched (camera
+// continues to work normally) and instead suppress Sora at the ENTITY level
+// by zeroing his velocity/acceleration fields each frame. This is the same
+// technique we use for de-tethering Donald.
+static void SuppressSoraMovement() {
+    if (g_soraActor == 0) return;
+
+    __try {
+        auto* actor = reinterpret_cast<uint8_t*>(g_soraActor);
+
+        // Zero movement velocity — Sora stands still
+        *reinterpret_cast<float*>(actor + ACTOR_VELOCITY_X) = 0.0f;
+        *reinterpret_cast<float*>(actor + ACTOR_VELOCITY_Y) = 0.0f;
+        *reinterpret_cast<float*>(actor + ACTOR_VELOCITY_Z) = 0.0f;
+
+        // Zero acceleration
+        *reinterpret_cast<float*>(actor + ACTOR_ACCEL_X) = 0.0f;
+        *reinterpret_cast<float*>(actor + ACTOR_ACCEL_Y) = 0.0f;
+        *reinterpret_cast<float*>(actor + ACTOR_ACCEL_Z) = 0.0f;
+
+        // Force idle animation on Sora
+        *reinterpret_cast<uint32_t*>(actor + ACTOR_ANIM_ID) = ANIM_IDLE;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        // Sora actor became invalid
+    }
+}
+
+// Zero just the movement stick in the processed entry to prevent Sora from
+// receiving movement commands. The camera stick (+0x20) and buttons are left
+// intact so camera orbit and menu navigation continue working.
+static void ZeroMovementStickInProcessedEntry() {
     using namespace offsets;
     auto* entry = reinterpret_cast<uint8_t*>(g_exeBase + input::PROCESSED_ENTRY0);
-    static constexpr std::size_t kTransientStateBytes = 0x40;
-    memset(entry, 0, kTransientStateBytes);
+
+    __try {
+        // +0x30 = physical left stick (movement) — zero it
+        memset(entry + 0x30, 0, 16);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+// ============================================================================
+// In-process camera retargeting
+//
+// When controlling a friend entity, redirect the game's camera to follow
+// that friend instead of Sora. Since we're in the game's own process, we
+// can simply swap the actor pointer in the camera struct — no fake actor
+// allocation needed (unlike the external runtime process approach).
+//
+// Camera struct layout (exe+0x718C60):
+//   +0x50: qword — pointer to followed actor object
+//   The game reads actor+0x640+0x30 (entity transform position) each frame.
+// ============================================================================
+
+static void RetargetCameraToFriend() {
+    if (g_friend1Actor == 0) return;
+
+    using namespace offsets;
+    auto camActorPtrAddr = reinterpret_cast<uintptr_t*>(
+        g_exeBase + CAMERA_STRUCT + camera::ACTOR_PTR);
+
+    __try {
+        if (!g_cameraRetargeted) {
+            g_origCameraActorPtr = *camActorPtrAddr;
+            if (g_origCameraActorPtr == 0) return;
+        }
+        *camActorPtrAddr = g_friend1Actor;
+        g_cameraRetargeted = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("EXCEPTION in RetargetCameraToFriend");
+    }
+}
+
+static void RestoreCameraToSora() {
+    if (!g_cameraRetargeted) return;
+
+    using namespace offsets;
+    auto camActorPtrAddr = reinterpret_cast<uintptr_t*>(
+        g_exeBase + CAMERA_STRUCT + camera::ACTOR_PTR);
+
+    __try {
+        // Use Sora's actor (entity list head) as the restore target.
+        // g_origCameraActorPtr may be wrong if the game's camera was already
+        // pointing at a non-Sora entity when we first retargeted.
+        uintptr_t soraPtr = g_soraActor;
+        if (soraPtr == 0) {
+            // Fallback: read entity list head directly
+            soraPtr = *reinterpret_cast<uintptr_t*>(
+                g_exeBase + active_entity_list::HEAD);
+        }
+        if (soraPtr != 0) {
+            *camActorPtrAddr = soraPtr;
+            Log("Camera restored to Sora actor %p", reinterpret_cast<void*>(soraPtr));
+        } else if (g_origCameraActorPtr != 0) {
+            // Last resort: use whatever was saved
+            *camActorPtrAddr = g_origCameraActorPtr;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("EXCEPTION in RestoreCameraToSora");
+    }
+
+    g_origCameraActorPtr = 0;
+    g_cameraRetargeted = false;
 }
 
 // Check F5 key for solo test mode toggle (edge-triggered)
@@ -392,9 +665,30 @@ static void CheckTestModeHotkey() {
     bool f5Down = (GetAsyncKeyState(VK_F5) & 0x8000) != 0;
     if (f5Down && !g_f5WasDown) {
         g_soloTestMode = !g_soloTestMode;
-        Log("Solo test mode %s (F5) — gamepad 0 → Friend1, Sora input %s",
+        Log("Solo test mode %s (F5) — gamepad 0 → Friend1, Sora input %s, camera → %s",
             g_soloTestMode ? "ON" : "OFF",
-            g_soloTestMode ? "suppressed" : "restored");
+            g_soloTestMode ? "suppressed" : "restored",
+            g_soloTestMode ? "Friend1" : "Sora");
+
+        // Toggle camera target with solo mode
+        if (g_soloTestMode) {
+            RetargetCameraToFriend();
+        } else {
+            RestoreCameraToSora();
+
+            // Re-enable vanilla follow behavior immediately when solo mode is
+            // disabled so Donald snaps back to the normal friend AI rules.
+            __try {
+                if (g_friend1Actor != 0) {
+                    *reinterpret_cast<float*>(g_friend1Actor + ACTOR_FOLLOW_TIMER) = 0.0f;
+                }
+                if (g_friend2Actor != 0) {
+                    *reinterpret_cast<float*>(g_friend2Actor + ACTOR_FOLLOW_TIMER) = 0.0f;
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                Log("EXCEPTION resetting friend follow timer on solo-mode exit");
+            }
+        }
     }
     g_f5WasDown = f5Down;
 }
@@ -431,27 +725,65 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
     const GamepadState& pad = g_gamepad[padIdx];
     bool connected = pad.connected;
 
-    // Prefer left-stick movement, but keep a right-stick fallback so solo mode
-    // remains testable on controller paths that surface the wrong raw axes.
+    // Use left stick only for movement. Right stick is for camera (game handles it).
+    // NOTE: Stick Y is inverted — pushing up gives negative Y from the processed
+    // entry, but we want positive Y = forward (toward camera look-at direction).
     float moveX = 0.0f;
     float moveY = 0.0f;
-    bool usingRightStick = false;
     if (connected) {
-        MovementStick movementStick = SelectMovementStick(pad);
-        moveX = movementStick.x;
-        moveY = movementStick.y;
-        usingRightStick = movementStick.useRightStick;
+        moveX = pad.leftX;
+        moveY = -pad.leftY;  // invert Y: stick-up (negative) → forward (positive)
     }
 
     const float magnitude = ApplyRadialDeadzone(&moveX, &moveY);
 
-    // Convert stick to world-space velocity
-    // KH2 world coordinates: X = right, Y = up (negative), Z = forward
-    // Gamepad stick: X = right, Y = forward
+    // ---- Camera-relative stick-to-world transform ----
+    // KH2 world coordinates: Y-negative is up. Movement is on the XZ plane.
+    // The stick input (moveX = right, moveY = forward) must be rotated by
+    // the camera's horizontal angle so movement is relative to what the
+    // player sees on screen, matching how Sora's own movement works.
     float speed = (magnitude > 0.7f) ? RUN_SPEED : WALK_SPEED;
-    float velX = moveX * speed;
+    float velX = 0.0f;
     float velY = 0.0f;
-    float velZ = moveY * speed;
+    float velZ = 0.0f;
+
+    if (magnitude > 0.01f) {
+        using namespace offsets;
+        uintptr_t camBase = g_exeBase + CAMERA_STRUCT;
+
+        // Read camera eye and look-at to compute horizontal direction
+        float eyeX = 0, eyeZ = 0, lookX = 0, lookZ = 0;
+        __try {
+            lookX = *reinterpret_cast<float*>(camBase + camera::SMOOTH_LOOKAT);
+            lookZ = *reinterpret_cast<float*>(camBase + camera::SMOOTH_LOOKAT + 8);
+            eyeX  = *reinterpret_cast<float*>(camBase + camera::EYE_POS);
+            eyeZ  = *reinterpret_cast<float*>(camBase + camera::EYE_POS + 8);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            // Fallback to world-absolute if camera read fails
+        }
+
+        float fwdX = lookX - eyeX;
+        float fwdZ = lookZ - eyeZ;
+        float fwdLen = std::sqrt(fwdX * fwdX + fwdZ * fwdZ);
+
+        if (fwdLen > 0.001f) {
+            fwdX /= fwdLen;
+            fwdZ /= fwdLen;
+
+            // Right direction: 90° clockwise rotation of forward on XZ plane.
+            // forward=(fwdX,fwdZ), right=(fwdZ,-fwdX).
+            // Verified: when camera faces +Z, right = +X. ✓
+            float rightX = fwdZ;
+            float rightZ = -fwdX;
+
+            velX = (moveX * rightX + moveY * fwdX) * speed;
+            velZ = (moveX * rightZ + moveY * fwdZ) * speed;
+        } else {
+            // Camera direction unavailable — fallback to world-absolute
+            velX = moveX * speed;
+            velZ = moveY * speed;
+        }
+    }
 
     // Write velocity
     *reinterpret_cast<float*>(actor + ACTOR_VELOCITY_X) = velX;
@@ -463,26 +795,32 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
     *reinterpret_cast<float*>(actor + ACTOR_ACCEL_Y) = velY;
     *reinterpret_cast<float*>(actor + ACTOR_ACCEL_Z) = velZ;
 
+    // Suppress the residual vanilla follow-steering path. EntityPositionPhysics
+    // only calls the tether callback when this timer goes negative.
+    *reinterpret_cast<float*>(actor + ACTOR_FOLLOW_TIMER) = DISABLE_FOLLOW_TIMER;
+
     if (g_soloTestMode && friendSlot == 1 && connected) {
-        const int stickId = usingRightStick ? 1 : 0;
-        const bool stickChanged = stickId != g_lastMovementStick;
         const bool shouldLogActiveMovement =
             magnitude > 0.01f && (g_frameCounter - g_lastMovementLogFrame) >= 30;
-        if (stickChanged || shouldLogActiveMovement) {
-            Log("[move %u] stick=%s rawL=(%.2f,%.2f) rawR=(%.2f,%.2f) move=(%.2f,%.2f) vel=(%.2f,%.2f)",
+        if (shouldLogActiveMovement) {
+            Log("[move %u] leftStick=(%.2f,%.2f) vel=(%.2f,%.2f) mag=%.2f",
                 g_frameCounter,
-                usingRightStick ? "right-fallback" : "left",
                 pad.leftX, pad.leftY,
-                pad.rightX, pad.rightY,
-                moveX, moveY,
-                velX, velZ);
+                velX, velZ, magnitude);
             g_lastMovementLogFrame = g_frameCounter;
-            g_lastMovementStick = stickId;
         }
     }
 
-    // Update facing direction from the final movement vector so facing and
-    // translation stay in the same space/sign convention.
+    // Update facing direction from the world-space velocity vector.
+    //
+    // KH2 facing convention (verified via CE live read of Sora's entity):
+    //   ROT_Y (+0x4C) = atan2(velX, velZ)
+    //   +0x40 (labeled COS_FACING in offsets) = sin(ROT_Y)  [historically mislabeled]
+    //   +0x48 (labeled SIN_FACING in offsets) = cos(ROT_Y)  [historically mislabeled]
+    //
+    // Previous code used atan2(-velX, -velZ) which adds PI, flipping forward/back.
+    // Left/right worked because the lateral symmetry canceled the PI offset, but
+    // forward/backward was 180° wrong.
     if (magnitude > 0.01f) {
         using namespace offsets;
         uintptr_t entityBase = reinterpret_cast<uintptr_t>(actor) +
@@ -490,9 +828,15 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
 
         float angle = std::atan2(velX, velZ);
         *reinterpret_cast<float*>(entityBase + entity::ROT_Y)      = angle;
-        *reinterpret_cast<float*>(entityBase + entity::COS_FACING)  = std::cos(angle);
-        *reinterpret_cast<float*>(entityBase + entity::SIN_FACING)  = std::sin(angle);
+        // +0x40 stores sin(angle), +0x48 stores cos(angle)
+        // (the offset names COS_FACING/SIN_FACING are swapped relative to math convention)
+        *reinterpret_cast<float*>(entityBase + entity::COS_FACING)  = std::sin(angle);
+        *reinterpret_cast<float*>(entityBase + entity::SIN_FACING)  = std::cos(angle);
     }
+
+    // Animation is handled by the original friend AI (which we no longer
+    // suppress). The AI calls the game's motion set functions every frame,
+    // and the animation system picks idle/walk/run based on entity state.
 }
 
 // ============================================================================
@@ -505,30 +849,56 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
 // ============================================================================
 
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
-    if (g_currentFriendSlot != 0) {
-        // Controlled friend: suppress AI and drive the movement fields
-        // that EntityPositionPhysics consumes later in the same update.
-        InjectMovementInput(actorObj, g_currentFriendSlot);
-        return;
-    }
-
-    // Not a controlled friend — call original AI
+    // ALWAYS call the original AI — it drives the animation system via
+    // the game's motion set functions (FUN_1403b6670/FUN_1403b6630).
+    // Without these calls, the entity has no animation playback at all.
+    //
+    // The original AI also computes follow-steering, but that's intercepted
+    // separately by HookedFollowSteering which returns zeros for controlled
+    // friends. Movement is overridden in the post-physics path of
+    // HookedPerEntityUpdate. So the AI runs for animations only.
     if (g_origFriendAI) {
         g_origFriendAI(typeHandler, actorObj);
     }
 }
 
 static void __fastcall HookedFriendPrePhysics(void* typeHandler, void* actorObj) {
-    if (g_currentFriendSlot != 0) {
-        // Skip the vanilla pre-physics friend steering update and re-apply our
-        // movement just before EntityPositionPhysics consumes it.
-        InjectMovementInput(actorObj, g_currentFriendSlot);
-        return;
-    }
-
+    // Always call original — same reasoning as HookedFriendAI.
     if (g_origFriendPrePhysics) {
         g_origFriendPrePhysics(typeHandler, actorObj);
     }
+}
+
+// ============================================================================
+// Follow-steering hook — intercepts vtable+0x40 (the actual tether)
+//
+// EntityPositionPhysics calls vtable+0x40 on the type handler to compute
+// follow-steering velocity. The result is written directly to actor+0xB98,
+// overriding any velocity we set in the AI or pre-physics hooks. This is
+// the function that makes friends follow Sora — the "magnetism" / tether.
+//
+// For controlled friends: return a zero vector (no follow steering).
+// For other entities: call the original.
+// ============================================================================
+
+static alignas(16) float g_zeroVec4[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+static void* __fastcall HookedFollowSteering(void* typeHandler, void* outVec4,
+                                               void* entity, float dt) {
+    if (g_soloTestMode && g_currentFriendSlot != 0) {
+        // Controlled friend: zero the output so physics gets no follow-steering.
+        // Return pointer to our zero buffer so the caller's MEMCPY_4FLOATS
+        // copies zeroes into the velocity field.
+        memset(outVec4, 0, 16);
+        return outVec4;
+    }
+
+    if (g_origFollowSteering) {
+        return g_origFollowSteering(typeHandler, outVec4, entity, dt);
+    }
+
+    memset(outVec4, 0, 16);
+    return outVec4;
 }
 
 // ============================================================================
@@ -578,6 +948,14 @@ static bool DiscoverAndHookFriendAI(void* actorObj) {
         Log("  vtable+0x28 is null");
         return false;
     }
+
+    // NOTE: vtable+0x40 on handler-from-actor+0x00 is NOT the follow-steering
+    // tether. That callback has signature (handler, actor)->char and is called
+    // from PerEntityUpdate. The ACTUAL follow-steering is at vtable+0x40 on a
+    // DIFFERENT handler resolved from actor+0x0C, called from inside
+    // EntityPositionPhysics with signature (handler, outVec4, entity, dt)->ptr.
+    // Hooking the wrong one with the wrong calling convention corrupts entity
+    // state. De-tethering is handled by holding actor+0xBA8 positive instead.
 
     Log("  Friend hooks discovered: ai=%p prePhysics=%p typeId=%u handler=%p vtable=%p",
         aiFunc, prePhysicsFunc, typeId, typeHandler, reinterpret_cast<void*>(vtable));
@@ -632,6 +1010,10 @@ static bool DiscoverAndHookFriendAI(void* actorObj) {
         g_friendPrePhysicsHooked = true;
     }
 
+    // vtable+0x40 hook removed — see note above about calling convention mismatch.
+    // De-tethering uses follow-timer suppression (actor+0xBA8 = 999.0) instead.
+    g_followSteeringHooked = true;  // mark as "done" so the detection gate doesn't re-fire
+
     return g_friendAIHooked && g_friendPrePhysicsHooked;
 }
 
@@ -645,15 +1027,42 @@ static bool DiscoverAndHookFriendAI(void* actorObj) {
 
 static void __fastcall HookedPerEntityUpdate(void* actorObj) {
     __try {
+        // Detect frame boundary: if this is the entity list head, a new
+        // frame has started. This works even when OnFrame() is never called
+        // (e.g., CE injection without Panacea).
+        uintptr_t addr = reinterpret_cast<uintptr_t>(actorObj);
+        {
+            uintptr_t listHead = 0;
+            __try {
+                listHead = *reinterpret_cast<uintptr_t*>(
+                    g_exeBase + offsets::active_entity_list::HEAD);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+            if (addr == listHead && listHead != 0) {
+                ++g_frameCounter;
+                g_processedStickFrame = UINT32_MAX;  // allow fresh snapshot
+
+                // Track Sora's actor — he's always the entity list head.
+                // Needed for entity-level movement suppression.
+                g_soraActor = addr;
+            }
+        }
+
         // Check hotkey (handles standalone mode where OnFrame isn't called)
         CheckTestModeHotkey();
+
+        // Snapshot the processed stick once per frame, BEFORE we zero the
+        // movement stick. The frame-boundary detection above resets the flag
+        // so this fires exactly once per frame on the first entity.
+        if (g_soloTestMode && g_processedStickFrame != g_frameCounter) {
+            TryReadSoloProcessedStick(&g_processedStickSnapshot);
+            g_processedStickFrame = g_frameCounter;
+        }
 
         // Refresh friend pointers (direct memory dereference, negligible)
         RefreshFriendPointers();
 
         // Identify friend entities
-        uintptr_t addr = reinterpret_cast<uintptr_t>(actorObj);
-
         if (g_friend1Actor != 0 && addr == g_friend1Actor) {
             g_currentFriendSlot = 1;
         } else if (g_friend2Actor != 0 && addr == g_friend2Actor) {
@@ -663,10 +1072,8 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         }
 
         // Log friend detection and install the AI hook once per session.
-        // Keep this path minimal and safe: actorObj is not a C++ vtable root,
-        // and ResolveEntityType expects a type id, not the actor handle.
         if (g_currentFriendSlot != 0 &&
-            (!g_friendAIHooked || !g_friendPrePhysicsHooked)) {
+            (!g_friendAIHooked || !g_friendPrePhysicsHooked || !g_followSteeringHooked)) {
             Log("=== Friend entity detected (slot %d) at actor=%p ===",
                 g_currentFriendSlot, actorObj);
 
@@ -697,9 +1104,17 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             ReadGamepads();
         }
 
-        // In solo test mode, suppress Sora's input continuously
+        // In solo test mode: suppress Sora's movement and keep camera on friend.
+        // IMPORTANT: we only zero the movement stick in the processed entry (+0x30)
+        // and leave the camera stick (+0x20) and buttons untouched. This preserves
+        // full camera orbit control on the right stick.
         if (g_soloTestMode) {
-            SuppressSoraInput();
+            ZeroMovementStickInProcessedEntry();
+            // Camera retarget: apply every frame since the game may reset
+            // camStruct+0x50 during cutscenes, room transitions, or events.
+            if (g_friend1Actor != 0) {
+                RetargetCameraToFriend();
+            }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         Log("EXCEPTION in HookedPerEntityUpdate pre-call, falling through");
@@ -707,7 +1122,27 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
     }
 
     // Always call original — even if our logic crashed, the game must continue.
+    int savedFriendSlot = g_currentFriendSlot;
     g_origPerEntityUpdate(actorObj);
+
+    // POST-PHYSICS overrides — run after EntityPositionPhysics has finished
+    // so we get the last word on velocity for the next frame.
+    __try {
+        if (savedFriendSlot != 0) {
+            // Re-inject movement input after physics overwrites
+            InjectMovementInput(actorObj, savedFriendSlot);
+        }
+
+        // Suppress Sora's movement at the entity level (zero velocity/accel).
+        // This runs after Sora's own physics pass, preventing him from moving
+        // while leaving the input system untouched for camera control.
+        if (g_soloTestMode && g_soraActor != 0 &&
+            reinterpret_cast<uintptr_t>(actorObj) == g_soraActor) {
+            SuppressSoraMovement();
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("EXCEPTION in post-physics override");
+    }
 
     // Reset slot indicator
     g_currentFriendSlot = 0;
@@ -724,7 +1159,7 @@ bool Initialize(uintptr_t exeBase) {
 
     // Open log file in the game directory
     g_logFile = fopen("kh2coop_inject.log", "w");
-    Log("=== kh2coop_inject v0.1 ===");
+    Log("=== kh2coop_inject v0.2 ===");
     Log("Initializing...");
     Log("  exe base: 0x%llX", static_cast<unsigned long long>(exeBase));
 
@@ -753,17 +1188,27 @@ bool Initialize(uintptr_t exeBase) {
             static_cast<unsigned long long>(RVA_PER_ENTITY_UPDATE));
     }
 
-    // Validate: address should be in .text section
+    // Validate: address should be in .text section.
+    // Non-fatal — some PE layouts or protections may report wrong section sizes.
+    // The real KH2 .text is ~5.7MB; if FindTextSection reports < 1MB, the check
+    // is unreliable and we proceed anyway (MH_CreateHook will fail safely if
+    // the address is truly invalid).
     auto textInfo = FindTextSection(exeBase);
     if (textInfo) {
-        if (perEntityUpdateAddr < textInfo->start ||
-            perEntityUpdateAddr >= textInfo->start + textInfo->size) {
-            Log("ERROR: PerEntityUpdate 0x%llX is outside .text [0x%llX..0x%llX]",
+        constexpr size_t MIN_PLAUSIBLE_TEXT_SIZE = 0x100000;  // 1MB
+        if (textInfo->size < MIN_PLAUSIBLE_TEXT_SIZE) {
+            Log("  WARNING: .text section only %llu bytes (expected ~5.7MB) — skipping validation",
+                static_cast<unsigned long long>(textInfo->size));
+        } else if (perEntityUpdateAddr < textInfo->start ||
+                   perEntityUpdateAddr >= textInfo->start + textInfo->size) {
+            Log("  WARNING: PerEntityUpdate 0x%llX is outside .text [0x%llX..0x%llX] — proceeding anyway",
                 static_cast<unsigned long long>(perEntityUpdateAddr),
                 static_cast<unsigned long long>(textInfo->start),
                 static_cast<unsigned long long>(textInfo->start + textInfo->size));
-            MH_Uninitialize();
-            return false;
+        } else {
+            Log("  PerEntityUpdate validated within .text [0x%llX..0x%llX]",
+                static_cast<unsigned long long>(textInfo->start),
+                static_cast<unsigned long long>(textInfo->start + textInfo->size));
         }
     }
 
@@ -772,6 +1217,13 @@ bool Initialize(uintptr_t exeBase) {
         exeBase + RVA_RESOLVE_ENTITY_TYPE);
     Log("  ResolveEntityType: 0x%llX",
         static_cast<unsigned long long>(exeBase + RVA_RESOLVE_ENTITY_TYPE));
+
+    // --- Resolve motion set functions (animation API) ---
+    g_setMotion = reinterpret_cast<PFN_SetMotion>(exeBase + RVA_SET_MOTION);
+    g_setMotionSimple = reinterpret_cast<PFN_SetMotionSimple>(exeBase + RVA_SET_MOTION_SIMPLE);
+    Log("  SetMotion: 0x%llX  SetMotionSimple: 0x%llX",
+        static_cast<unsigned long long>(exeBase + RVA_SET_MOTION),
+        static_cast<unsigned long long>(exeBase + RVA_SET_MOTION_SIMPLE));
 
     // --- Install PerEntityUpdate hook ---
     mhStatus = MH_CreateHook(
@@ -796,8 +1248,18 @@ bool Initialize(uintptr_t exeBase) {
 
     Log("  PerEntityUpdate hook installed");
     Log("Initialization complete — waiting for friend entities...");
-    Log("  Input source: KH2 raw input buffer (XInput/Steam Input aware)");
     Log("  Press F5 to toggle solo test mode (control Friend1 with KH2 controller 0)");
+
+    // Try to open the network input mailbox (runtime may not be running yet).
+    // If not available now, we'll retry periodically in TryReadMailbox().
+    if (g_mailboxReader.Open()) {
+        g_mailboxAvailable = true;
+        Log("  Input source: network mailbox (runtime PID=%lu)",
+            static_cast<unsigned long>(g_mailboxReader.RuntimePid()));
+    } else {
+        Log("  Input source: KH2 raw input buffer (local gamepads)");
+        Log("  Network mailbox not available — will retry periodically");
+    }
 
     g_initialized = true;
     return true;
@@ -808,20 +1270,34 @@ void Shutdown() {
 
     Log("Shutting down...");
 
+    // Restore camera before unhooking (game needs its original pointer back)
+    RestoreCameraToSora();
+
+    // Close network input mailbox
+    if (g_mailboxAvailable) {
+        g_mailboxReader.Close();
+        g_mailboxAvailable = false;
+        Log("  Network input mailbox closed");
+    }
+
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
     g_initialized = false;
     g_friendAIHooked = false;
     g_friendPrePhysicsHooked = false;
+    g_followSteeringHooked = false;
     g_origPerEntityUpdate = nullptr;
     g_origFriendAI = nullptr;
     g_origFriendPrePhysics = nullptr;
+    g_origFollowSteering = nullptr;
     g_resolveEntityType = nullptr;
     g_hookedAITarget = nullptr;
     g_hookedPrePhysicsTarget = nullptr;
+    g_hookedFollowSteeringTarget = nullptr;
     g_friend1Actor = 0;
     g_friend2Actor = 0;
+    g_soraActor = 0;
 
     if (g_logFile) {
         Log("Shutdown complete");
@@ -841,15 +1317,19 @@ void OnFrame() {
     // Read controller samples once per frame (for Panacea plugin mode)
     ReadGamepads();
 
-    // In solo test mode, suppress Sora's input every frame
+    // In solo test mode: zero movement stick and maintain camera every frame
     if (g_soloTestMode) {
-        SuppressSoraInput();
+        ZeroMovementStickInProcessedEntry();
+        RefreshFriendPointers();
+        if (g_friend1Actor != 0) {
+            RetargetCameraToFriend();
+        }
     }
 
     // Periodic status log (~5 seconds at 60fps)
     if (g_frameCounter % 300 == 0) {
         RefreshFriendPointers();
-        Log("[frame %u] f1=%p f2=%p aiHook=%d pad1=%d pad2=%d solo=%d pads=%d active=%d",
+        Log("[frame %u] f1=%p f2=%p aiHook=%d pad1=%d pad2=%d solo=%d sora=%p cam=%d pads=%d active=%d mailbox=%d",
             g_frameCounter,
             reinterpret_cast<void*>(g_friend1Actor),
             reinterpret_cast<void*>(g_friend2Actor),
@@ -857,8 +1337,11 @@ void OnFrame() {
             g_gamepad[0].connected ? 1 : 0,
             g_gamepad[1].connected ? 1 : 0,
             g_soloTestMode ? 1 : 0,
+            reinterpret_cast<void*>(g_soraActor),
+            g_cameraRetargeted ? 1 : 0,
             g_inputControllerCount,
-            g_activeInputSlot);
+            g_activeInputSlot,
+            g_mailboxAvailable ? 1 : 0);
     }
 }
 
