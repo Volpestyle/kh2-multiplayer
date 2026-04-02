@@ -197,6 +197,7 @@ static void* g_hookedFollowSteeringTarget = nullptr;
 // XInput gamepad state (read once per frame)
 struct GamepadState {
     bool          connected = false;
+    bool          worldSpace = false;
     std::uint16_t buttons   = 0;
     float         leftX     = 0.0f;
     float         leftY     = 0.0f;
@@ -422,6 +423,7 @@ static bool TryReadMailbox() {
         if (g_mailboxReader.TryReadSlot(padIdx, result)) {
             GamepadState& pad = g_gamepad[padIdx];
             pad.connected = true;
+            pad.worldSpace = true;
             // Store packed MailboxButton bitmask. This is NOT KH2's raw input
             // format — it uses the kh2coop::MailboxButton enum layout. When P2
             // combat wires button consumption, use UnpackButtons() to decode.
@@ -508,6 +510,7 @@ static void ReadGamepads() {
 
             GamepadState sample {};
             sample.connected = true;
+            sample.worldSpace = false;
             sample.buttons = *reinterpret_cast<const std::uint16_t*>(
                 raw + input::BUTTONS);
             sample.leftX = NormalizeRawStickX(raw[input::LSTICK_X]);
@@ -725,63 +728,71 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
     const GamepadState& pad = g_gamepad[padIdx];
     bool connected = pad.connected;
 
-    // Use left stick only for movement. Right stick is for camera (game handles it).
-    // NOTE: Stick Y is inverted — pushing up gives negative Y from the processed
-    // entry, but we want positive Y = forward (toward camera look-at direction).
-    float moveX = 0.0f;
-    float moveY = 0.0f;
-    if (connected) {
-        moveX = pad.leftX;
-        moveY = -pad.leftY;  // invert Y: stick-up (negative) → forward (positive)
-    }
-
-    const float magnitude = ApplyRadialDeadzone(&moveX, &moveY);
-
-    // ---- Camera-relative stick-to-world transform ----
-    // KH2 world coordinates: Y-negative is up. Movement is on the XZ plane.
-    // The stick input (moveX = right, moveY = forward) must be rotated by
-    // the camera's horizontal angle so movement is relative to what the
-    // player sees on screen, matching how Sora's own movement works.
-    float speed = (magnitude > 0.7f) ? RUN_SPEED : WALK_SPEED;
     float velX = 0.0f;
     float velY = 0.0f;
     float velZ = 0.0f;
+    float magnitude = 0.0f;
 
-    if (magnitude > 0.01f) {
-        using namespace offsets;
-        uintptr_t camBase = g_exeBase + CAMERA_STRUCT;
-
-        // Read camera eye and look-at to compute horizontal direction
-        float eyeX = 0, eyeZ = 0, lookX = 0, lookZ = 0;
-        __try {
-            lookX = *reinterpret_cast<float*>(camBase + camera::SMOOTH_LOOKAT);
-            lookZ = *reinterpret_cast<float*>(camBase + camera::SMOOTH_LOOKAT + 8);
-            eyeX  = *reinterpret_cast<float*>(camBase + camera::EYE_POS);
-            eyeZ  = *reinterpret_cast<float*>(camBase + camera::EYE_POS + 8);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            // Fallback to world-absolute if camera read fails
+    if (connected && pad.worldSpace) {
+        // Mailbox samples come from the runtime's world-space actor velocity,
+        // not from local normalized stick coordinates.
+        velX = pad.leftX;
+        velZ = pad.leftY;
+        magnitude = ClampUnit(StickMagnitude(velX, velZ) / RUN_SPEED);
+    } else {
+        // Use left stick only for movement. Right stick is for camera.
+        // Stick Y is inverted — pushing up gives negative Y from the processed
+        // entry, but we want positive Y = forward.
+        float moveX = 0.0f;
+        float moveY = 0.0f;
+        if (connected) {
+            moveX = pad.leftX;
+            moveY = -pad.leftY;
         }
 
-        float fwdX = lookX - eyeX;
-        float fwdZ = lookZ - eyeZ;
-        float fwdLen = std::sqrt(fwdX * fwdX + fwdZ * fwdZ);
+        magnitude = ApplyRadialDeadzone(&moveX, &moveY);
 
-        if (fwdLen > 0.001f) {
-            fwdX /= fwdLen;
-            fwdZ /= fwdLen;
+        // ---- Camera-relative stick-to-world transform ----
+        // KH2 world coordinates: Y-negative is up. Movement is on the XZ plane.
+        // The stick input (moveX = right, moveY = forward) must be rotated by
+        // the camera's horizontal angle so movement is relative to what the
+        // player sees on screen, matching how Sora's own movement works.
+        const float speed = (magnitude > 0.7f) ? RUN_SPEED : WALK_SPEED;
+        if (magnitude > 0.01f) {
+            using namespace offsets;
+            uintptr_t camBase = g_exeBase + CAMERA_STRUCT;
 
-            // Right direction: 90° clockwise rotation of forward on XZ plane.
-            // forward=(fwdX,fwdZ), right=(fwdZ,-fwdX).
-            // Verified: when camera faces +Z, right = +X. ✓
-            float rightX = fwdZ;
-            float rightZ = -fwdX;
+            // Read camera eye and look-at to compute horizontal direction
+            float eyeX = 0, eyeZ = 0, lookX = 0, lookZ = 0;
+            __try {
+                lookX = *reinterpret_cast<float*>(camBase + camera::SMOOTH_LOOKAT);
+                lookZ = *reinterpret_cast<float*>(camBase + camera::SMOOTH_LOOKAT + 8);
+                eyeX  = *reinterpret_cast<float*>(camBase + camera::EYE_POS);
+                eyeZ  = *reinterpret_cast<float*>(camBase + camera::EYE_POS + 8);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                // Fallback to world-absolute if camera read fails
+            }
 
-            velX = (moveX * rightX + moveY * fwdX) * speed;
-            velZ = (moveX * rightZ + moveY * fwdZ) * speed;
-        } else {
-            // Camera direction unavailable — fallback to world-absolute
-            velX = moveX * speed;
-            velZ = moveY * speed;
+            float fwdX = lookX - eyeX;
+            float fwdZ = lookZ - eyeZ;
+            float fwdLen = std::sqrt(fwdX * fwdX + fwdZ * fwdZ);
+
+            if (fwdLen > 0.001f) {
+                fwdX /= fwdLen;
+                fwdZ /= fwdLen;
+
+                // Right direction: 90° clockwise rotation of forward on XZ plane.
+                // forward=(fwdX,fwdZ), right=(fwdZ,-fwdX).
+                float rightX = fwdZ;
+                float rightZ = -fwdX;
+
+                velX = (moveX * rightX + moveY * fwdX) * speed;
+                velZ = (moveX * rightZ + moveY * fwdZ) * speed;
+            } else {
+                // Camera direction unavailable — fallback to world-absolute
+                velX = moveX * speed;
+                velZ = moveY * speed;
+            }
         }
     }
 

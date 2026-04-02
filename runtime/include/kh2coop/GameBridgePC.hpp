@@ -63,6 +63,9 @@ public:
     // Check if entity addresses have been discovered for the current room.
     bool HasEntityAddresses() const;
 
+    // Get the KH2 process ID (valid only while attached).
+    std::uint32_t ProcessId() const;
+
 private:
     // Low-level memory helpers (Windows-only implementations).
     template <typename T>
@@ -86,6 +89,9 @@ private:
 
     // Resolve unit slot base address for a given slot (HP/MP/stats — static).
     std::uint64_t actorBase(SlotType slot) const;
+
+    // Resolve a live actor object from a discovered entity transform.
+    std::uint64_t actorAddress(SlotType slot) const;
 
     // Resolve enemy base address for a given index.
     std::uint64_t enemyBase(std::uint32_t index) const;

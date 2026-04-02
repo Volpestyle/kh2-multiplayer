@@ -75,6 +75,9 @@ struct ClientHello {
     PeerId peerId;
     std::string peerName;
     RuntimeMode requestedMode {RuntimeMode::CampaignCoop};
+    /// CampaignCoop: which party slot this client requests (0=Player, 1=Friend1, 2=Friend2).
+    /// 0xFF = no preference (server assigns next free slot).
+    std::uint8_t requestedSlot {0xFF};
 };
 
 /// Realm seed — derived from a KH2 save file import.

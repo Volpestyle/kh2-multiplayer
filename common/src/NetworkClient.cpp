@@ -2,6 +2,8 @@
 
 #include <enet/enet.h>
 
+#include <utility>
+
 namespace kh2coop {
 
 // ---------------------------------------------------------------------------
@@ -12,14 +14,22 @@ NetworkClient::NetworkClient(const std::string& hostAddress, std::uint16_t port,
                              const std::string& gameBuild,
                              const std::string& modHash,
                              const std::string& peerId,
-                             SlotType requestedSlot,
-                             ClientCallbacks callbacks)
+                             std::optional<SlotType> requestedSlot,
+                             ClientCallbacks callbacks,
+                             RuntimeMode requestedMode,
+                             std::string contentHash,
+                             std::uint16_t protocolVersion,
+                             std::string peerName)
     : hostAddress_(hostAddress),
       port_(port),
       gameBuild_(gameBuild),
       modHash_(modHash),
+      contentHash_(std::move(contentHash)),
       peerId_(peerId),
+      peerName_(std::move(peerName)),
       requestedSlot_(requestedSlot),
+      requestedMode_(requestedMode),
+      protocolVersion_(protocolVersion),
       callbacks_(std::move(callbacks)) {}
 
 NetworkClient::~NetworkClient() { disconnect(); }
@@ -129,20 +139,22 @@ void NetworkClient::disconnect() {
 
 void NetworkClient::onConnect() {
     connected_ = true;
-    log("Connected to host. Sending version handshake...");
+    log("Connected to host. Sending ClientHello handshake...");
 
-    // Send a SessionState as the version handshake.
-    // Include one actor entry to declare the requested slot.
-    SessionState handshake;
-    handshake.sessionId = peerId_;
-    handshake.gameBuild = gameBuild_;
-    handshake.modHash = modHash_;
-    SessionActor self;
-    self.actorId = static_cast<std::uint32_t>(requestedSlot_);
-    self.slot = requestedSlot_;
-    self.ownerPeerId = peerId_;
-    handshake.actors.push_back(self);
-    auto pkt = encode(handshake);
+    // Send a dedicated ClientHello packet for the version handshake.
+    // This replaces the old SessionState-as-hello pattern (B2 cleanup).
+    ClientHello hello;
+    hello.protocolVersion = protocolVersion_;
+    hello.gameBuild = gameBuild_;
+    hello.contentHash = contentHash_;
+    hello.modHash = modHash_;
+    hello.peerId = peerId_;
+    hello.peerName = peerName_.empty() ? peerId_ : peerName_;
+    hello.requestedMode = requestedMode_;
+    hello.requestedSlot = requestedSlot_.has_value()
+                              ? static_cast<std::uint8_t>(*requestedSlot_)
+                              : 0xFF;
+    auto pkt = encode(hello);
     sendPacket(pkt, true /* reliable */);
 
     if (callbacks_.onConnected) callbacks_.onConnected();

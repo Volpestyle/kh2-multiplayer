@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,8 +41,13 @@ class NetworkClient {
 public:
     NetworkClient(const std::string& hostAddress, std::uint16_t port,
                   const std::string& gameBuild, const std::string& modHash,
-                  const std::string& peerId, SlotType requestedSlot,
-                  ClientCallbacks callbacks = {});
+                  const std::string& peerId,
+                  std::optional<SlotType> requestedSlot,
+                  ClientCallbacks callbacks = {},
+                  RuntimeMode requestedMode = RuntimeMode::CampaignCoop,
+                  std::string contentHash = {},
+                  std::uint16_t protocolVersion = 2,
+                  std::string peerName = {});
     ~NetworkClient();
 
     // Non-copyable
@@ -76,8 +82,12 @@ private:
     std::uint16_t port_;
     std::string gameBuild_;
     std::string modHash_;
+    std::string contentHash_;
     std::string peerId_;
-    SlotType requestedSlot_;
+    std::string peerName_;
+    std::optional<SlotType> requestedSlot_;
+    RuntimeMode requestedMode_{RuntimeMode::CampaignCoop};
+    std::uint16_t protocolVersion_{2};
     ClientCallbacks callbacks_;
 
     _ENetHost* enetHost_{nullptr};

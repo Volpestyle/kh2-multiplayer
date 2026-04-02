@@ -1,6 +1,24 @@
+// WIN32_LEAN_AND_MEAN prevents <Windows.h> from pulling in winsock.h,
+// avoiding conflicts with winsock2.h included by ENet.
+// NOMINMAX prevents the min/max macros from conflicting with <algorithm>.
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#endif
+
 #include "kh2coop/CameraController.hpp"
 #include "kh2coop/GameBridgePC.hpp"
+#include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/ReplicaController.hpp"
 #include "kh2coop/Types.hpp"
+
+#include <enet/enet.h>
+
+// InputMailbox.hpp includes <Windows.h> — must come after WIN32_LEAN_AND_MEAN
+// and after enet.h (which pulls in winsock2.h).
+#ifdef _WIN32
+#include "kh2coop/InputMailbox.hpp"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -10,19 +28,22 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
 
 #ifdef _WIN32
-#define NOMINMAX
 #include <windows.h>
 #endif
 
 namespace {
 
 using namespace std::chrono_literals;
+
+constexpr float kRuntimeSnapshotMaxSpeed = 6.0f;
 
 std::atomic_bool g_running {true};
 
@@ -33,6 +54,17 @@ struct RuntimeConfig {
     bool panicHotkeyEnabled {true};
     bool logOwnedActorState {false};
     std::uint32_t tickMs {16};
+
+    // Networking
+    bool networkingEnabled {false};
+    std::string serverHost {"127.0.0.1"};
+    std::uint16_t serverPort {7946};
+    std::string peerId {"player-1"};
+    std::string gameBuild {"1.0.0.10-steam-global"};
+    std::string contentHash {"none"};
+    std::string modHash;
+    std::uint32_t heartbeatIntervalMs {1000};
+    std::uint32_t snapshotIntervalMs {16};  // send owned actor state at tick rate
 };
 
 struct LaunchOptions {
@@ -45,6 +77,12 @@ struct LaunchOptions {
     std::optional<bool> cameraOverrideEnabledOverride;
     std::optional<bool> logOwnedActorStateOverride;
     std::optional<std::uint32_t> tickMsOverride;
+    // Networking overrides
+    std::optional<bool> networkingEnabledOverride;
+    std::optional<std::string> serverHostOverride;
+    std::optional<std::uint16_t> serverPortOverride;
+    std::optional<std::string> peerIdOverride;
+    std::optional<std::string> contentHashOverride;
 };
 
 void signalHandler(int) {
@@ -67,6 +105,14 @@ std::string toLower(std::string value) {
                        return static_cast<char>(std::tolower(c));
                    });
     return value;
+}
+
+float clampUnit(float value) {
+    return std::clamp(value, -1.0f, 1.0f);
+}
+
+float normalizeVelocityAxis(float value) {
+    return clampUnit(value / kRuntimeSnapshotMaxSpeed);
 }
 
 bool parseBool(const std::string& value, bool& out) {
@@ -152,6 +198,15 @@ void printUsage() {
         << "  --max-ticks <count>   Exit after N ticks (default 0 = run until Ctrl+C)\n"
         << "  --no-camera           Disable camera override on boot\n"
         << "  --log-actor-state     Log the owned actor state once per second\n"
+        << "\n"
+        << "  Networking:\n"
+        << "  --server <host>       Server host address (default 127.0.0.1)\n"
+        << "  --port <port>         Server port (default 7946)\n"
+        << "  --peer-id <id>        Peer identifier (default player-1)\n"
+        << "  --content <hash>      Content hash (default none)\n"
+        << "  --network             Enable networking (connect to server)\n"
+        << "  --no-network          Disable networking (offline mode, default)\n"
+        << "\n"
         << "  --help                Show this message\n";
 }
 
@@ -242,6 +297,77 @@ bool loadConfigFile(const std::string& path, RuntimeConfig& config,
             continue;
         }
 
+        // Networking config keys
+        if (key == "networking" || key == "networking_enabled") {
+            if (!parseBool(value, config.networkingEnabled)) {
+                error = "Invalid networking on line " +
+                        std::to_string(lineNumber) + ": " + value;
+                return false;
+            }
+            continue;
+        }
+
+        if (key == "server_host" || key == "server") {
+            config.serverHost = value;
+            continue;
+        }
+
+        if (key == "server_port" || key == "port") {
+            try {
+                config.serverPort =
+                    static_cast<std::uint16_t>(std::stoul(value));
+            } catch (const std::exception&) {
+                error = "Invalid server_port on line " +
+                        std::to_string(lineNumber) + ": " + value;
+                return false;
+            }
+            continue;
+        }
+
+        if (key == "peer_id") {
+            config.peerId = value;
+            continue;
+        }
+
+        if (key == "game_build") {
+            config.gameBuild = value;
+            continue;
+        }
+
+        if (key == "content_hash") {
+            config.contentHash = value;
+            continue;
+        }
+
+        if (key == "mod_hash") {
+            config.modHash = value;
+            continue;
+        }
+
+        if (key == "heartbeat_interval_ms") {
+            try {
+                config.heartbeatIntervalMs =
+                    static_cast<std::uint32_t>(std::stoul(value));
+            } catch (const std::exception&) {
+                error = "Invalid heartbeat_interval_ms on line " +
+                        std::to_string(lineNumber) + ": " + value;
+                return false;
+            }
+            continue;
+        }
+
+        if (key == "snapshot_interval_ms") {
+            try {
+                config.snapshotIntervalMs =
+                    static_cast<std::uint32_t>(std::stoul(value));
+            } catch (const std::exception&) {
+                error = "Invalid snapshot_interval_ms on line " +
+                        std::to_string(lineNumber) + ": " + value;
+                return false;
+            }
+            continue;
+        }
+
         error = "Unknown config key on line " + std::to_string(lineNumber) +
                 ": " + key;
         return false;
@@ -315,6 +441,43 @@ bool parseArgs(int argc, char* argv[], LaunchOptions& options,
             continue;
         }
 
+        // Networking CLI args
+        if (arg == "--network") {
+            options.networkingEnabledOverride = true;
+            continue;
+        }
+
+        if (arg == "--no-network") {
+            options.networkingEnabledOverride = false;
+            continue;
+        }
+
+        if (arg == "--server" && i + 1 < argc) {
+            options.serverHostOverride = argv[++i];
+            continue;
+        }
+
+        if (arg == "--port" && i + 1 < argc) {
+            try {
+                options.serverPortOverride =
+                    static_cast<std::uint16_t>(std::stoul(argv[++i]));
+            } catch (const std::exception&) {
+                error = "Invalid --port value";
+                return false;
+            }
+            continue;
+        }
+
+        if (arg == "--peer-id" && i + 1 < argc) {
+            options.peerIdOverride = argv[++i];
+            continue;
+        }
+
+        if (arg == "--content" && i + 1 < argc) {
+            options.contentHashOverride = argv[++i];
+            continue;
+        }
+
         error = "Unknown argument: " + arg;
         return false;
     }
@@ -379,6 +542,12 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
+    // ENet must be initialized before any networking calls.
+    if (enet_initialize() != 0) {
+        std::cerr << "[Runtime] ENet initialization failed\n";
+        return 1;
+    }
+
     LaunchOptions options;
     std::string error;
     if (!parseArgs(argc, argv, options, error)) {
@@ -422,6 +591,23 @@ int main(int argc, char* argv[]) {
         options.config.tickMs = 16;
     }
 
+    // Apply networking overrides from CLI
+    if (options.networkingEnabledOverride.has_value()) {
+        options.config.networkingEnabled = *options.networkingEnabledOverride;
+    }
+    if (options.serverHostOverride.has_value()) {
+        options.config.serverHost = *options.serverHostOverride;
+    }
+    if (options.serverPortOverride.has_value()) {
+        options.config.serverPort = *options.serverPortOverride;
+    }
+    if (options.peerIdOverride.has_value()) {
+        options.config.peerId = *options.peerIdOverride;
+    }
+    if (options.contentHashOverride.has_value()) {
+        options.config.contentHash = *options.contentHashOverride;
+    }
+
     std::cout << "[Runtime] Booting runtime scaffold\n";
     std::cout << "[Runtime] config=" << options.configPath
               << " mode=" << modeToString(options.config.runtimeMode)
@@ -431,7 +617,21 @@ int main(int argc, char* argv[]) {
               << " panic_hotkey="
               << (options.config.panicHotkeyEnabled ? "F8" : "disabled")
               << " tick_ms=" << options.config.tickMs
-              << " max_ticks=" << options.maxTicks << "\n";
+              << " max_ticks=" << options.maxTicks
+              << " networking="
+              << (options.config.networkingEnabled ? "on" : "off")
+              << "\n";
+
+    if (options.config.networkingEnabled) {
+        std::cout << "[Runtime] Network: server="
+                  << options.config.serverHost << ":"
+                  << options.config.serverPort
+                  << " peer_id=" << options.config.peerId
+                  << " content=" << options.config.contentHash
+                  << " heartbeat_ms=" << options.config.heartbeatIntervalMs
+                  << " snapshot_ms=" << options.config.snapshotIntervalMs
+                  << "\n";
+    }
 
     std::ifstream configProbe(options.configPath);
     if (!configProbe.is_open()) {
@@ -444,16 +644,193 @@ int main(int argc, char* argv[]) {
     camera.SetOwnedSlot(options.config.ownedSlot);
     camera.SetOverrideEnabled(options.config.cameraOverrideEnabled);
 
+    // Replica controller — applies incoming snapshots to non-owned slots.
+    kh2coop::ReplicaController replica(game);
+
+    // -----------------------------------------------------------------------
+    // InputMailbox — shared memory bridge for runtime→inject InputFrame delivery.
+    // Created after KH2 process attach (needs the KH2 PID).
+    // The inject DLL's MailboxReader will auto-detect and start consuming.
+    // -----------------------------------------------------------------------
+#ifdef _WIN32
+    kh2coop::MailboxWriter mailboxWriter;
+
+    const auto clearMailbox = [&mailboxWriter]() {
+        if (!mailboxWriter.IsOpen()) {
+            return;
+        }
+
+        kh2coop::InputFrame empty {};
+        mailboxWriter.WriteSlot(0, empty);
+        mailboxWriter.WriteSlot(1, empty);
+    };
+
+    const auto closeMailbox = [&mailboxWriter, &clearMailbox]() {
+        if (!mailboxWriter.IsOpen()) {
+            return;
+        }
+
+        clearMailbox();
+        mailboxWriter.Close();
+    };
+#endif
+
+    // -----------------------------------------------------------------------
+    // NetworkClient setup (optional, gated on config.networkingEnabled)
+    // -----------------------------------------------------------------------
+    // The mutex guards ReplicaController calls from the ENet receive path,
+    // which runs inside tick() on the main thread. Currently single-threaded,
+    // but the mutex is cheap insurance for future threading.
+    std::mutex replicaMtx;
+    std::unique_ptr<kh2coop::NetworkClient> netClient;
+    std::atomic_bool netConnected {false};
+
+    if (options.config.networkingEnabled) {
+        kh2coop::ClientCallbacks callbacks;
+
+        callbacks.onConnected = [&netConnected,
+#ifdef _WIN32
+                                 &game,
+                                 &mailboxWriter,
+#endif
+                                 &options]() {
+            netConnected = true;
+            std::cout << "[Runtime] Network: connected to server\n";
+
+#ifdef _WIN32
+            if (options.config.networkingEnabled && game.IsAttached() &&
+                !mailboxWriter.IsOpen() &&
+                mailboxWriter.Create(static_cast<DWORD>(game.ProcessId()))) {
+                std::cout << "[Runtime] Input mailbox created for PID="
+                          << game.ProcessId() << "\n";
+            }
+#endif
+        };
+
+        callbacks.onDisconnected = [&netConnected, &replica, &replicaMtx
+#ifdef _WIN32
+                                    , &closeMailbox
+#endif
+                                    ]() {
+            netConnected = false;
+            std::cout << "[Runtime] Network: disconnected from server\n";
+            std::lock_guard<std::mutex> lock(replicaMtx);
+            replica.Reset();
+
+#ifdef _WIN32
+            closeMailbox();
+#endif
+        };
+
+        callbacks.onSessionState = [](const kh2coop::SessionState& ss) {
+            std::cout << "[Runtime] Network: SessionState session="
+                      << ss.sessionId
+                      << " actors=" << ss.actors.size()
+                      << " room=" << describeRoomState(ss.room) << "\n";
+        };
+
+        callbacks.onActorSnapshot =
+            [&replica, &replicaMtx,
+#ifdef _WIN32
+             &mailboxWriter,
+#endif
+             ownedSlot = options.config.ownedSlot](
+                const kh2coop::ActorSnapshot& snap) {
+                // Skip snapshots for our own slot — we are authoritative.
+                if (snap.actor.slot == ownedSlot) return;
+
+                std::lock_guard<std::mutex> lock(replicaMtx);
+                replica.ApplyActorSnapshot(snap);
+
+#ifdef _WIN32
+                // Write to the input mailbox so the inject DLL can drive
+                // the friend entity through native physics/animation.
+                // Map SlotType → mailbox slot index (Friend1=0, Friend2=1).
+                if (mailboxWriter.IsOpen()) {
+                    int mbSlot = -1;
+                    if (snap.actor.slot == kh2coop::SlotType::Friend1)
+                        mbSlot = 0;
+                    else if (snap.actor.slot == kh2coop::SlotType::Friend2)
+                        mbSlot = 1;
+
+                    if (mbSlot >= 0) {
+                        // The inject DLL interprets mailbox axes as world-space
+                        // velocity, not normalized stick input.
+                        kh2coop::InputFrame synth {};
+                        synth.seq = snap.snapshotId;
+                        synth.clientTimeMs = snap.snapshotId;
+                        synth.ownedActorId = snap.actor.actorId;
+                        synth.leftStickX = snap.actor.velocity.x;
+                        synth.leftStickY = snap.actor.velocity.z;
+                        // Map action state to buttons
+                        synth.buttons.attack =
+                            (snap.actor.action == kh2coop::ActionState::Attack);
+                        synth.buttons.jump =
+                            (snap.actor.action == kh2coop::ActionState::Jump);
+                        synth.buttons.guard =
+                            (snap.actor.action == kh2coop::ActionState::Guard);
+                        synth.buttons.dodge =
+                            (snap.actor.action == kh2coop::ActionState::Dodge);
+                        synth.requestedTargetId = snap.actor.targetId;
+                        mailboxWriter.WriteSlot(mbSlot, synth);
+                    }
+                }
+#endif
+            };
+
+        callbacks.onEnemySnapshot =
+            [&replica, &replicaMtx](const kh2coop::EnemySnapshot& snap) {
+                std::lock_guard<std::mutex> lock(replicaMtx);
+                replica.ApplyEnemySnapshot(snap);
+            };
+
+        callbacks.onEvent = [](const kh2coop::EventMessage& evt) {
+            std::cout << "[Runtime] Network: Event type="
+                      << static_cast<int>(evt.type)
+                      << " payload=" << evt.payloadJson << "\n";
+        };
+
+        callbacks.onLog = [](const std::string& msg) {
+            std::cout << "[Runtime] " << msg << "\n";
+        };
+
+        netClient = std::make_unique<kh2coop::NetworkClient>(
+            options.config.serverHost,
+            options.config.serverPort,
+            options.config.gameBuild,
+            options.config.modHash,
+            options.config.peerId,
+            options.config.ownedSlot,
+            std::move(callbacks),
+            options.config.runtimeMode,
+            options.config.contentHash);
+
+        if (!netClient->connect()) {
+            std::cerr << "[Runtime] Failed to initiate network connection\n";
+            // Continue in offline mode rather than aborting.
+            netClient.reset();
+        }
+    }
+
     bool cameraOverrideEnabled = options.config.cameraOverrideEnabled;
     bool waitingForAttachLogged = false;
     bool attachLogged = false;
     std::optional<bool> lastEntityDiscovered;
     std::optional<kh2coop::RoomState> lastRoomState;
     auto lastActorLogAt = std::chrono::steady_clock::now();
+    auto lastHeartbeatAt = std::chrono::steady_clock::now();
+    auto lastSnapshotAt = std::chrono::steady_clock::now();
+    std::uint32_t snapshotSeq = 0;
 
     for (std::uint32_t tick = 0;
          g_running && (options.maxTicks == 0 || tick < options.maxTicks);
          ++tick) {
+
+        // Pump network events every tick, even before KH2 is attached.
+        if (netClient) {
+            netClient->tick(0);
+        }
+
         if (!game.IsAttached()) {
             if (!waitingForAttachLogged) {
                 std::cout << "[Runtime] Waiting for KH2 process...\n";
@@ -463,7 +840,26 @@ int main(int argc, char* argv[]) {
             if (game.Attach()) {
                 attachLogged = true;
                 waitingForAttachLogged = false;
-                std::cout << "[Runtime] Attached to KH2 process\n";
+                std::cout << "[Runtime] Attached to KH2 process (PID="
+                          << game.ProcessId() << ")\n";
+                // Reset replica ordering guards on fresh attach.
+                std::lock_guard<std::mutex> lock(replicaMtx);
+                replica.Reset();
+
+#ifdef _WIN32
+                // Create the input mailbox shared memory for this KH2 process.
+                // The inject DLL (inside KH2) will open it by its own PID.
+                if (options.config.networkingEnabled && !mailboxWriter.IsOpen()) {
+                    if (mailboxWriter.Create(
+                            static_cast<DWORD>(game.ProcessId()))) {
+                        std::cout << "[Runtime] Input mailbox created for PID="
+                                  << game.ProcessId() << "\n";
+                    } else {
+                        std::cerr
+                            << "[Runtime] Failed to create input mailbox\n";
+                    }
+                }
+#endif
             } else {
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(options.config.tickMs));
@@ -491,6 +887,10 @@ int main(int argc, char* argv[]) {
                       << " entity_discovered="
                       << (entityDiscovered ? "yes" : "no") << "\n";
             lastRoomState = room;
+
+            // Reset replica on room change — stale addresses would corrupt.
+            std::lock_guard<std::mutex> lock(replicaMtx);
+            replica.Reset();
         }
         if (!lastEntityDiscovered.has_value() ||
             entityDiscovered != *lastEntityDiscovered) {
@@ -502,6 +902,59 @@ int main(int argc, char* argv[]) {
         camera.Tick(room);
 
         const auto now = std::chrono::steady_clock::now();
+
+        // ----- Networking: send heartbeat at configured interval -----
+        if (netClient && netConnected) {
+            const auto heartbeatElapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - lastHeartbeatAt)
+                    .count();
+            if (heartbeatElapsed >=
+                static_cast<long long>(options.config.heartbeatIntervalMs)) {
+                netClient->sendHeartbeat();
+                lastHeartbeatAt = now;
+            }
+        }
+
+        // ----- Networking: send owned actor snapshot at configured interval -----
+        if (netClient && netConnected && entityDiscovered) {
+            const auto snapshotElapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - lastSnapshotAt)
+                    .count();
+            if (snapshotElapsed >=
+                static_cast<long long>(options.config.snapshotIntervalMs)) {
+                const auto ownedActor =
+                    game.ReadActorState(options.config.ownedSlot);
+                if (ownedActor.has_value()) {
+                    // Build an InputFrame from the owned actor's current state.
+                    // This is still a placeholder path: we derive coarse input
+                    // intent from live actor velocity until native input capture
+                    // is wired into the runtime.
+                    kh2coop::InputFrame frame;
+                    frame.seq = ++snapshotSeq;
+                    frame.clientTimeMs = static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now.time_since_epoch())
+                            .count());
+                    frame.ownedActorId = ownedActor->actorId;
+                    frame.leftStickX = normalizeVelocityAxis(ownedActor->velocity.x);
+                    frame.leftStickY = normalizeVelocityAxis(ownedActor->velocity.z);
+                    frame.requestedTargetId = ownedActor->targetId;
+                    frame.buttons.attack =
+                        (ownedActor->action == kh2coop::ActionState::Attack);
+                    frame.buttons.jump =
+                        (ownedActor->action == kh2coop::ActionState::Jump);
+                    frame.buttons.guard =
+                        (ownedActor->action == kh2coop::ActionState::Guard);
+                    frame.buttons.dodge =
+                        (ownedActor->action == kh2coop::ActionState::Dodge);
+                    netClient->sendInput(frame);
+                }
+                lastSnapshotAt = now;
+            }
+        }
+
         if (options.config.logOwnedActorState &&
             now - lastActorLogAt >= 1s) {
             // Log all 3 party slots for visibility during testing.
@@ -517,10 +970,25 @@ int main(int argc, char* argv[]) {
             std::chrono::milliseconds(options.config.tickMs));
     }
 
+    // ----- Graceful shutdown -----
+#ifdef _WIN32
+    if (mailboxWriter.IsOpen()) {
+        closeMailbox();
+        std::cout << "[Runtime] Input mailbox closed\n";
+    }
+#endif
+
+    if (netClient) {
+        std::cout << "[Runtime] Disconnecting from server...\n";
+        netClient->disconnect();
+        netClient.reset();
+    }
+
     if (attachLogged) {
         game.RestoreVanillaCamera();
     }
 
+    enet_deinitialize();
     std::cout << "[Runtime] Shutdown\n";
     return 0;
 }

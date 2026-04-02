@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,12 +19,15 @@ namespace kh2coop {
 // ---------------------------------------------------------------------------
 struct SessionConfig {
     std::uint16_t port{7782}; // default listen port
+    std::uint16_t protocolVersion{2};
     std::uint32_t maxPeers{3};
     std::uint32_t heartbeatTimeoutMs{5000};
     std::uint32_t pendingPeerTimeoutMs{2000};
     std::string gameBuild;
+    std::string contentHash;
     std::string modHash;
     std::string sessionId;
+    RuntimeMode runtimeMode{RuntimeMode::CampaignCoop};
 };
 
 // ---------------------------------------------------------------------------
@@ -98,6 +102,7 @@ private:
     // Peer helpers
     PeerState* findPeer(_ENetPeer* peer);
     PeerState* findPeerById(const std::string& peerId);
+    std::optional<SlotType> firstFreeSlot() const;
     bool isSlotTaken(SlotType slot) const;
     void rebuildSessionActors();
     void expireStalePeers(std::uint64_t nowMs);

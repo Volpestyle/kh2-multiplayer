@@ -17,6 +17,7 @@ enum class PacketType : std::uint8_t {
     InputFrame = 1,
     TransitionAck = 2,
     Heartbeat = 3,
+    ClientHello = 4,   // Dedicated handshake (replaces SessionState-as-hello)
 
     // Host -> Client
     SessionState = 10,
@@ -50,12 +51,14 @@ void write(ByteWriter& w, const SessionState& ss);
 void write(ByteWriter& w, const ActorSnapshot& as);
 void write(ByteWriter& w, const EnemySnapshot& es);
 void write(ByteWriter& w, const EventMessage& em);
+void write(ByteWriter& w, const ClientHello& ch);
 
 void read(ByteReader& r, SessionActor& sa);
 void read(ByteReader& r, SessionState& ss);
 void read(ByteReader& r, ActorSnapshot& as);
 void read(ByteReader& r, EnemySnapshot& es);
 void read(ByteReader& r, EventMessage& em);
+void read(ByteReader& r, ClientHello& ch);
 
 // ---------------------------------------------------------------------------
 // Framed packet helpers
@@ -73,6 +76,7 @@ std::vector<std::uint8_t> encode(const SessionState& ss);
 std::vector<std::uint8_t> encode(const ActorSnapshot& as);
 std::vector<std::uint8_t> encode(const EnemySnapshot& es);
 std::vector<std::uint8_t> encode(const EventMessage& em);
+std::vector<std::uint8_t> encode(const ClientHello& ch);
 
 // Read the framed header. Returns the PacketType and sets payloadOut /
 // payloadSizeOut to point into the original buffer (no copy).
@@ -93,5 +97,6 @@ std::string toDebugString(const SessionState& ss);
 std::string toDebugString(const ActorSnapshot& as);
 std::string toDebugString(const EnemySnapshot& es);
 std::string toDebugString(const EventMessage& em);
+std::string toDebugString(const ClientHello& ch);
 
 } // namespace kh2coop

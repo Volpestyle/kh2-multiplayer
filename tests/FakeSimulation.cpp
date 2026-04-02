@@ -26,6 +26,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <optional>
 #include <enet/enet.h>
 #include <iostream>
 #include <thread>
@@ -364,6 +365,7 @@ static void testHeartbeatTimeout() {
     config.heartbeatTimeoutMs = kTimeoutMs;
     config.pendingPeerTimeoutMs = kTimeoutMs;
     config.gameBuild = build;
+    config.contentHash = "heartbeat-content";
     config.modHash = mod;
     config.sessionId = "heartbeat-test";
 
@@ -375,7 +377,8 @@ static void testHeartbeatTimeout() {
     callbacks.onDisconnected = [&disconnectCount]() { ++disconnectCount; };
 
     NetworkClient client("127.0.0.1", config.port, build, mod, "heartbeat_peer",
-                         SlotType::Player, std::move(callbacks));
+                         SlotType::Player, std::move(callbacks),
+                         RuntimeMode::CampaignCoop, config.contentHash);
     check(client.connect(), "heartbeat client connect initiated");
 
     for (int i = 0; i < 100 && host.verifiedPeerCount() < 1; ++i) {
@@ -412,6 +415,7 @@ static void testNetworkIntegration() {
     std::cout << "\n=== Network integration ===\n";
 
     const std::string BUILD = "test-build-v1";
+    const std::string CONTENT = "test-content-xyz";
     const std::string MOD = "test-mod-abc123";
 
     // --- Server setup ---
@@ -419,6 +423,7 @@ static void testNetworkIntegration() {
     serverConfig.port = 17782; // non-default to avoid conflicts
     serverConfig.maxPeers = 3;
     serverConfig.gameBuild = BUILD;
+    serverConfig.contentHash = CONTENT;
     serverConfig.modHash = MOD;
     serverConfig.sessionId = "integration-test";
 
@@ -475,15 +480,18 @@ static void testNetworkIntegration() {
     NetworkClient c0("127.0.0.1", 17782, BUILD, MOD, "player_a",
                      SlotType::Player,
                      makeCb("P0", sessionStateCount0, actorSnapCount0,
-                            eventCount0, tracker0));
+                             eventCount0, tracker0),
+                     RuntimeMode::CampaignCoop, CONTENT);
     NetworkClient c1("127.0.0.1", 17782, BUILD, MOD, "player_b",
                      SlotType::Friend1,
                      makeCb("P1", sessionStateCount1, actorSnapCount1,
-                            eventCount1, tracker1));
+                             eventCount1, tracker1),
+                     RuntimeMode::CampaignCoop, CONTENT);
     NetworkClient c2("127.0.0.1", 17782, BUILD, MOD, "player_c",
                      SlotType::Friend2,
                      makeCb("P2", sessionStateCount2, actorSnapCount2,
-                            eventCount2, tracker2));
+                             eventCount2, tracker2),
+                     RuntimeMode::CampaignCoop, CONTENT);
 
     // --- Connect all three ---
     check(c0.connect(), "client 0 connect initiated");
@@ -624,7 +632,8 @@ static void testNetworkIntegration() {
                             "hacker", SlotType::Player,
                             makeCb("BAD", ignoredSessionStateCount,
                                    ignoredActorSnapCount, ignoredEventCount,
-                                   ignoredTracker));
+                                   ignoredTracker),
+                            RuntimeMode::CampaignCoop, "wrong-content");
     badClient.connect();
     for (int i = 0; i < 50; ++i) {
         host.tick(5);
@@ -634,14 +643,45 @@ static void testNetworkIntegration() {
           "mismatched client rejected or not verified");
     badClient.disconnect();
 
+    NetworkClient badProtocolClient("127.0.0.1", 17782, BUILD, MOD,
+                                    "proto_skew", SlotType::Player,
+                                    makeCb("PROTO", ignoredSessionStateCount,
+                                           ignoredActorSnapCount, ignoredEventCount,
+                                           ignoredTracker),
+                                    RuntimeMode::CampaignCoop, CONTENT, 99);
+    badProtocolClient.connect();
+    for (int i = 0; i < 50; ++i) {
+        host.tick(5);
+        badProtocolClient.tick(5);
+    }
+    check(!badProtocolClient.isConnected() || host.verifiedPeerCount() == 3,
+          "protocol-mismatched client rejected or not verified");
+    badProtocolClient.disconnect();
+
+    NetworkClient badModeClient("127.0.0.1", 17782, BUILD, MOD,
+                                "realm_client", SlotType::Player,
+                                makeCb("MODE", ignoredSessionStateCount,
+                                       ignoredActorSnapCount, ignoredEventCount,
+                                       ignoredTracker),
+                                RuntimeMode::PublicRealm, CONTENT);
+    badModeClient.connect();
+    for (int i = 0; i < 50; ++i) {
+        host.tick(5);
+        badModeClient.tick(5);
+    }
+    check(!badModeClient.isConnected() || host.verifiedPeerCount() == 3,
+          "mode-mismatched client rejected or not verified");
+    badModeClient.disconnect();
+
     // --- Duplicate slot rejection ---
     // A client requesting slot 0 (Player) should be rejected because
     // player_a already owns that slot.
     NetworkClient dupeClient("127.0.0.1", 17782, BUILD, MOD,
                              "slot_thief", SlotType::Player,
                              makeCb("DUPE", ignoredSessionStateCount,
-                                    ignoredActorSnapCount, ignoredEventCount,
-                                    ignoredTracker));
+                                     ignoredActorSnapCount, ignoredEventCount,
+                                     ignoredTracker),
+                             RuntimeMode::CampaignCoop, CONTENT);
     dupeClient.connect();
     for (int i = 0; i < 50; ++i) {
         host.tick(5);
@@ -651,10 +691,48 @@ static void testNetworkIntegration() {
           "duplicate slot client rejected (still 3 verified)");
     dupeClient.disconnect();
 
+    // --- No-preference slot assignment ---
+    c2.disconnect();
+    for (int i = 0; i < 20; ++i) {
+        host.tick(5);
+        c2.tick(5);
+    }
+    check(host.verifiedPeerCount() == 2,
+          "slot 2 released after disconnecting player_c");
+
+    std::atomic<int> autoJoinSessionCount{0};
+    std::atomic<int> autoJoinActorCount{0};
+    std::atomic<int> autoJoinEventCount{0};
+    SnapshotTracker autoJoinTracker;
+    NetworkClient autoSlotClient("127.0.0.1", 17782, BUILD, MOD,
+                                 "auto_slot", std::nullopt,
+                                 makeCb("AUTO", autoJoinSessionCount,
+                                        autoJoinActorCount, autoJoinEventCount,
+                                        autoJoinTracker),
+                                 RuntimeMode::CampaignCoop, CONTENT);
+    autoSlotClient.connect();
+    for (int i = 0; i < 50; ++i) {
+        host.tick(5);
+        autoSlotClient.tick(5);
+    }
+    check(host.verifiedPeerCount() == 3,
+          "no-preference client accepted when a slot is free");
+    {
+        bool foundAuto = false;
+        for (const auto& actor : host.sessionState().actors) {
+            if (actor.ownerPeerId == "auto_slot") {
+                check(actor.slot == SlotType::Friend2,
+                      "no-preference client assigned next free slot");
+                foundAuto = true;
+            }
+        }
+        check(foundAuto, "auto-slot client appears in session state");
+    }
+    autoSlotClient.disconnect();
+
     // --- Disconnect ---
     c0.disconnect();
     c1.disconnect();
-    c2.disconnect();
 
     for (int i = 0; i < 20; ++i) {
         host.tick(5);

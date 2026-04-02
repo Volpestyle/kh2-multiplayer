@@ -115,6 +115,15 @@ void GameBridgePC::Detach() {
 
 bool GameBridgePC::IsAttached() const { return attached_; }
 
+std::uint32_t GameBridgePC::ProcessId() const {
+#ifdef _WIN32
+    if (processHandle_) {
+        return GetProcessId(static_cast<HANDLE>(processHandle_));
+    }
+#endif
+    return 0;
+}
+
 // ==========================================================================
 // Low-level memory access
 // ==========================================================================
@@ -209,6 +218,30 @@ std::uint64_t GameBridgePC::actorBase(SlotType slot) const {
     using namespace offsets;
     // Unit slot data is at a static offset from exe base.
     return SLOT0_BASE + static_cast<std::uint64_t>(slot) * SLOT_STRIDE;
+}
+
+std::uint64_t GameBridgePC::actorAddress(SlotType slot) const {
+    using namespace offsets;
+
+    std::uint64_t entityAddr = 0;
+    if (slot == SlotType::Player) {
+        entityAddr = entityStructAddr_;
+    } else if (slot == SlotType::Friend1) {
+        entityAddr = friend1EntityAddr_;
+    } else if (slot == SlotType::Friend2) {
+        entityAddr = friend2EntityAddr_;
+    }
+
+    if (entityAddr < actor::ENTITY_TRANSFORM) {
+        return 0;
+    }
+
+    const std::uint64_t actorAddr = entityAddr - actor::ENTITY_TRANSFORM;
+    if (actorAddr <= baseAddress_ || actorAddr >= baseAddress_ + 0x3000000ULL) {
+        return 0;
+    }
+
+    return actorAddr;
 }
 
 std::uint64_t GameBridgePC::enemyBase(std::uint32_t index) const {
@@ -690,15 +723,13 @@ std::optional<ActorState> GameBridgePC::ReadActorState(SlotType slot) const {
     } else if (slot == SlotType::Friend2) {
         entityAddr = friend2EntityAddr_;
     }
+    const std::uint64_t actorAddr = actorAddress(slot);
 
     if (entityAddr != 0) {
         a.position.x = readAbs<float>(entityAddr + entity::POS_X);
         a.position.y = readAbs<float>(entityAddr + entity::POS_Y);
         a.position.z = readAbs<float>(entityAddr + entity::POS_Z);
         a.rotationY  = readAbs<float>(entityAddr + entity::ROT_Y);
-
-        // Velocity: only Y is known (airborne vertical velocity).
-        a.velocity.y = readAbs<float>(entityAddr + entity::VEL_Y);
 
         // Airborne state from the entity struct flags.
         std::uint32_t moveState = readAbs<std::uint32_t>(entityAddr + entity::MOVE_STATE);
@@ -712,6 +743,18 @@ std::optional<ActorState> GameBridgePC::ReadActorState(SlotType slot) const {
             a.action = ActionState::Jump;
         } else {
             a.action = ActionState::Idle;
+        }
+    }
+
+    if (actorAddr != 0) {
+        a.motionId = readAbs<std::uint32_t>(actorAddr + actor::ANIM_ID);
+        a.velocity.x = readAbs<float>(actorAddr + actor::VELOCITY_X);
+        a.velocity.y = readAbs<float>(actorAddr + actor::VELOCITY_Y);
+        a.velocity.z = readAbs<float>(actorAddr + actor::VELOCITY_Z);
+
+        if (!a.airborne &&
+            (std::fabs(a.velocity.x) > 0.05f || std::fabs(a.velocity.z) > 0.05f)) {
+            a.action = ActionState::Move;
         }
     }
     // If entity address is 0, position/rotation data remains zeroed.

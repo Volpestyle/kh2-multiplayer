@@ -20,6 +20,7 @@ static void printUsage() {
               << "  --pending-timeout-ms <ms>\n"
               << "                      Drop unverified peers after this long (default 2000)\n"
               << "  --build <hash>      Required game build hash\n"
+              << "  --content <hash>    Required content hash\n"
               << "  --mod <hash>        Required mod hash\n"
               << "  --session <id>      Session identifier\n"
               << "  --max-peers <n>     Max peers (default 3)\n";
@@ -36,6 +37,7 @@ int main(int argc, char* argv[]) {
     config.heartbeatTimeoutMs = 5000;
     config.pendingPeerTimeoutMs = 2000;
     config.gameBuild = "dev";
+    config.contentHash = "none";
     config.modHash = "none";
     config.sessionId = "local-test";
 
@@ -53,6 +55,8 @@ int main(int argc, char* argv[]) {
             config.pendingPeerTimeoutMs = static_cast<std::uint32_t>(std::stoul(argv[++i]));
         } else if (arg == "--build" && i + 1 < argc) {
             config.gameBuild = argv[++i];
+        } else if (arg == "--content" && i + 1 < argc) {
+            config.contentHash = argv[++i];
         } else if (arg == "--mod" && i + 1 < argc) {
             config.modHash = argv[++i];
         } else if (arg == "--session" && i + 1 < argc) {

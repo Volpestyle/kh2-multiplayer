@@ -119,6 +119,17 @@ void write(ByteWriter& w, const EventMessage& em) {
     w.writeString(em.payloadJson);
 }
 
+void write(ByteWriter& w, const ClientHello& ch) {
+    w.writeU16(ch.protocolVersion);
+    w.writeString(ch.gameBuild);
+    w.writeString(ch.contentHash);
+    w.writeString(ch.modHash);
+    w.writeString(ch.peerId);
+    w.writeString(ch.peerName);
+    w.writeU8(static_cast<std::uint8_t>(ch.requestedMode));
+    w.writeU8(ch.requestedSlot);
+}
+
 // ===== Binary read helpers ==================================================
 
 void read(ByteReader& r, Vec3& v) {
@@ -229,6 +240,17 @@ void read(ByteReader& r, EventMessage& em) {
     em.payloadJson = r.readString();
 }
 
+void read(ByteReader& r, ClientHello& ch) {
+    ch.protocolVersion = r.readU16();
+    ch.gameBuild = r.readString();
+    ch.contentHash = r.readString();
+    ch.modHash = r.readString();
+    ch.peerId = r.readString();
+    ch.peerName = r.readString();
+    ch.requestedMode = static_cast<RuntimeMode>(r.readU8());
+    ch.requestedSlot = r.readU8();
+}
+
 // ===== Framed packet helpers ================================================
 
 static constexpr std::size_t kHeaderSize = 3; // 1 type + 2 length
@@ -276,6 +298,12 @@ std::vector<std::uint8_t> encode(const EventMessage& em) {
     ByteWriter w;
     write(w, em);
     return encodePacket(PacketType::EventMessage, w.data());
+}
+
+std::vector<std::uint8_t> encode(const ClientHello& ch) {
+    ByteWriter w;
+    write(w, ch);
+    return encodePacket(PacketType::ClientHello, w.data());
 }
 
 PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
@@ -396,6 +424,21 @@ std::string toDebugString(const EnemySnapshot& es) {
 std::string toDebugString(const EventMessage& em) {
     return fmt("Event{snap=%u type=%s payload=%s}", em.snapshotId,
                eventName(em.type), em.payloadJson.c_str());
+}
+
+static const char* runtimeModeName(RuntimeMode m) {
+    switch (m) {
+        case RuntimeMode::CampaignCoop: return "CampaignCoop";
+        case RuntimeMode::PublicRealm: return "PublicRealm";
+    }
+    return "?";
+}
+
+std::string toDebugString(const ClientHello& ch) {
+    return fmt("ClientHello{proto=%u build=%s peer=%s name=%s mode=%s slot=%u}",
+               ch.protocolVersion, ch.gameBuild.c_str(), ch.peerId.c_str(),
+               ch.peerName.c_str(), runtimeModeName(ch.requestedMode),
+               ch.requestedSlot);
 }
 
 } // namespace kh2coop

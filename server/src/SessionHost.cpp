@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <enet/enet.h>
+#include <optional>
 #include <sstream>
 
 namespace kh2coop {
@@ -24,6 +25,27 @@ bool isValidSlot(SlotType slot) {
     }
 
     return false;
+}
+
+bool isValidRuntimeMode(RuntimeMode mode) {
+    switch (mode) {
+        case RuntimeMode::CampaignCoop:
+        case RuntimeMode::PublicRealm:
+            return true;
+    }
+
+    return false;
+}
+
+const char* runtimeModeName(RuntimeMode mode) {
+    switch (mode) {
+        case RuntimeMode::CampaignCoop:
+            return "campaign_coop";
+        case RuntimeMode::PublicRealm:
+            return "public_realm";
+    }
+
+    return "unknown";
 }
 
 bool tryGetRequestedSlot(const SessionState& handshake, SlotType& requestedSlot) {
@@ -71,7 +93,11 @@ bool SessionHost::start() {
 
     running_ = true;
     log("Session host listening on port " + std::to_string(config_.port) +
-        " (build=" + config_.gameBuild + " mod=" + config_.modHash + ")");
+        " (proto=" + std::to_string(config_.protocolVersion) +
+        " mode=" + runtimeModeName(config_.runtimeMode) +
+        " build=" + config_.gameBuild +
+        " content=" + config_.contentHash +
+        " mod=" + config_.modHash + ")");
     return true;
 }
 
@@ -168,6 +194,16 @@ std::size_t SessionHost::verifiedPeerCount() const {
     });
 }
 
+std::optional<SlotType> SessionHost::firstFreeSlot() const {
+    for (auto slot : {SlotType::Player, SlotType::Friend1, SlotType::Friend2}) {
+        if (!isSlotTaken(slot)) {
+            return slot;
+        }
+    }
+
+    return std::nullopt;
+}
+
 // ---------------------------------------------------------------------------
 // ENet event handlers
 // ---------------------------------------------------------------------------
@@ -220,8 +256,122 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
         ps->lastHeartbeatMs = currentTimeMs();
 
         switch (type) {
+            case PacketType::ClientHello: {
+                // Dedicated handshake packet (B2: replaces SessionState-as-hello).
+                ClientHello hello;
+                read(reader, hello);
+
+                if (hello.protocolVersion != config_.protocolVersion) {
+                    const std::string reason =
+                        "Protocol mismatch: client=" +
+                        std::to_string(hello.protocolVersion) +
+                        " server=" + std::to_string(config_.protocolVersion);
+                    log("Rejecting " + ps->peerId + ": " + reason);
+                    if (callbacks_.onPeerRejected)
+                        callbacks_.onPeerRejected(ps->peerId, reason);
+                    enet_peer_disconnect(peer, 1);
+                    return;
+                }
+
+                if (!isValidRuntimeMode(hello.requestedMode)) {
+                    const std::string reason = "Invalid requested mode";
+                    log("Rejecting " + ps->peerId + ": " + reason);
+                    if (callbacks_.onPeerRejected)
+                        callbacks_.onPeerRejected(ps->peerId, reason);
+                    enet_peer_disconnect(peer, 1);
+                    return;
+                }
+
+                if (hello.requestedMode != config_.runtimeMode) {
+                    const std::string reason =
+                        "Mode mismatch: client=" +
+                        std::string(runtimeModeName(hello.requestedMode)) +
+                        " server=" + runtimeModeName(config_.runtimeMode);
+                    log("Rejecting " + ps->peerId + ": " + reason);
+                    if (callbacks_.onPeerRejected)
+                        callbacks_.onPeerRejected(ps->peerId, reason);
+                    enet_peer_disconnect(peer, 1);
+                    return;
+                }
+
+                if (hello.gameBuild != config_.gameBuild ||
+                    hello.contentHash != config_.contentHash ||
+                    hello.modHash != config_.modHash) {
+                    std::string reason =
+                        "Version mismatch: build=" + hello.gameBuild +
+                        " content=" + hello.contentHash +
+                        " mod=" + hello.modHash;
+                    log("Rejecting " + ps->peerId + ": " + reason);
+                    if (callbacks_.onPeerRejected)
+                        callbacks_.onPeerRejected(ps->peerId, reason);
+                    enet_peer_disconnect(peer, 1);
+                    return;
+                }
+
+                // Resolve requested slot — 0xFF means no preference.
+                std::optional<SlotType> requestedSlot;
+                if (hello.requestedSlot != 0xFF) {
+                    const auto requested =
+                        static_cast<SlotType>(hello.requestedSlot);
+                    if (!isValidSlot(requested)) {
+                        const std::string reason = "Invalid requested slot";
+                        log("Rejecting " + ps->peerId + ": " + reason);
+                        if (callbacks_.onPeerRejected)
+                            callbacks_.onPeerRejected(ps->peerId, reason);
+                        enet_peer_disconnect(peer, 2);
+                        return;
+                    }
+                    requestedSlot = requested;
+                } else {
+                    requestedSlot = firstFreeSlot();
+                    if (!requestedSlot.has_value()) {
+                        const std::string reason = "No free slots available";
+                        log("Rejecting " + ps->peerId + ": " + reason);
+                        if (callbacks_.onPeerRejected)
+                            callbacks_.onPeerRejected(ps->peerId, reason);
+                        enet_peer_disconnect(peer, 2);
+                        return;
+                    }
+                }
+
+                if (isSlotTaken(*requestedSlot)) {
+                    const std::string reason =
+                        "Requested slot " +
+                        std::to_string(static_cast<int>(*requestedSlot)) +
+                        " is already taken";
+                    log("Rejecting " + ps->peerId + ": " + reason);
+                    if (callbacks_.onPeerRejected)
+                        callbacks_.onPeerRejected(ps->peerId, reason);
+                    enet_peer_disconnect(peer, 2);
+                    return;
+                }
+
+                // Version OK — assign the validated requested slot.
+                ps->gameBuild = hello.gameBuild;
+                ps->modHash = hello.modHash;
+                if (!hello.peerId.empty()) {
+                    ps->peerId = hello.peerId;
+                }
+
+                ps->status = PeerStatus::Verified;
+                ps->assignedSlot = *requestedSlot;
+
+                log("Peer verified: " + ps->peerId + " -> slot " +
+                    std::to_string(static_cast<int>(ps->assignedSlot)));
+
+                rebuildSessionActors();
+
+                if (callbacks_.onPeerJoined)
+                    callbacks_.onPeerJoined(ps->peerId, ps->assignedSlot);
+
+                // Send full session state to everyone.
+                broadcastSessionState();
+                break;
+            }
+
             case PacketType::SessionState: {
-                // Client sends a SessionState as its version handshake.
+                // Legacy handshake: client sends SessionState as version check.
+                // Kept for backward compatibility during transition to ClientHello.
                 SessionState clientSession;
                 read(reader, clientSession);
 
@@ -270,7 +420,8 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 ps->status = PeerStatus::Verified;
                 ps->assignedSlot = requestedSlot;
 
-                log("Peer verified: " + ps->peerId + " -> slot " +
+                log("Peer verified (legacy handshake): " + ps->peerId +
+                    " -> slot " +
                     std::to_string(static_cast<int>(ps->assignedSlot)));
 
                 rebuildSessionActors();
