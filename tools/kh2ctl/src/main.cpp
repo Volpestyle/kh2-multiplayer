@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -324,8 +325,16 @@ std::string WindowTitle(HWND hwnd) {
         return {};
     }
 
-    std::wstring wide(buffer, copied);
-    return std::string(wide.begin(), wide.end());
+    const int needed = WideCharToMultiByte(
+        CP_UTF8, 0, buffer, copied, nullptr, 0, nullptr, nullptr);
+    if (needed <= 0) {
+        return {};
+    }
+
+    std::string utf8(static_cast<std::size_t>(needed), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, buffer, copied,
+                        utf8.data(), needed, nullptr, nullptr);
+    return utf8;
 }
 
 bool FocusWindow(HWND hwnd) {
@@ -432,19 +441,97 @@ bool SendKeyPress(const KeySpec& spec, int durationMs) {
     return ok;
 }
 
-std::uint32_t ParseMailboxSlot(const std::string& raw) {
+constexpr std::uint16_t kRawButtonDpadUp = 0x0001;
+constexpr std::uint16_t kRawButtonDpadDown = 0x0002;
+constexpr std::uint16_t kRawButtonDpadLeft = 0x0004;
+constexpr std::uint16_t kRawButtonDpadRight = 0x0008;
+constexpr std::uint16_t kRawButtonStart = 0x0010;
+constexpr std::uint16_t kRawButtonBack = 0x0020;
+constexpr std::uint16_t kRawButtonL3 = 0x0040;
+constexpr std::uint16_t kRawButtonR3 = 0x0080;
+constexpr std::uint16_t kRawButtonL1 = 0x0100;
+constexpr std::uint16_t kRawButtonR1 = 0x0200;
+constexpr std::uint16_t kRawButtonCross = 0x1000;
+constexpr std::uint16_t kRawButtonCircle = 0x2000;
+constexpr std::uint16_t kRawButtonSquare = 0x4000;
+constexpr std::uint16_t kRawButtonTriangle = 0x8000;
+
+std::uint32_t ParseFriendMailboxSlot(const std::string& raw) {
     const auto lower = ToLower(raw);
     if (lower == "friend1" || lower == "friend_1" || lower == "1" ||
         lower == "p2") {
-        return 0;
+        return kh2coop::MAILBOX_SLOT_FRIEND1;
     }
     if (lower == "friend2" || lower == "friend_2" || lower == "2" ||
         lower == "p3") {
-        return 1;
+        return kh2coop::MAILBOX_SLOT_FRIEND2;
     }
 
     throw std::runtime_error(
         "Unsupported slot '" + raw + "'. Use friend1 or friend2.");
+}
+
+void ApplyRawButtonName(std::uint16_t& buttons, const std::string& rawName) {
+    const auto name = ToLower(rawName);
+    if (name.empty()) return;
+    if (name == "cross" || name == "a" || name == "confirm") {
+        buttons |= kRawButtonCross;
+        return;
+    }
+    if (name == "circle" || name == "b" || name == "cancel") {
+        buttons |= kRawButtonCircle;
+        return;
+    }
+    if (name == "square" || name == "x") {
+        buttons |= kRawButtonSquare;
+        return;
+    }
+    if (name == "triangle" || name == "y" || name == "menu") {
+        buttons |= kRawButtonTriangle;
+        return;
+    }
+    if (name == "l1" || name == "lb") {
+        buttons |= kRawButtonL1;
+        return;
+    }
+    if (name == "r1" || name == "rb" || name == "lockon" || name == "lock-on") {
+        buttons |= kRawButtonR1;
+        return;
+    }
+    if (name == "start") {
+        buttons |= kRawButtonStart;
+        return;
+    }
+    if (name == "select" || name == "back") {
+        buttons |= kRawButtonBack;
+        return;
+    }
+    if (name == "l3") {
+        buttons |= kRawButtonL3;
+        return;
+    }
+    if (name == "r3") {
+        buttons |= kRawButtonR3;
+        return;
+    }
+    if (name == "dup" || name == "dpadup" || name == "up") {
+        buttons |= kRawButtonDpadUp;
+        return;
+    }
+    if (name == "ddown" || name == "dpaddown" || name == "down") {
+        buttons |= kRawButtonDpadDown;
+        return;
+    }
+    if (name == "dleft" || name == "dpadleft" || name == "left") {
+        buttons |= kRawButtonDpadLeft;
+        return;
+    }
+    if (name == "dright" || name == "dpadright" || name == "right") {
+        buttons |= kRawButtonDpadRight;
+        return;
+    }
+
+    throw std::runtime_error("Unsupported raw button name: " + rawName);
 }
 
 void ApplyButtonName(InputButtons& buttons, const std::string& rawName) {
@@ -501,6 +588,21 @@ void ApplyButtonsCsv(InputButtons& buttons, const std::string& csv) {
                     token.end());
         if (!token.empty()) {
             ApplyButtonName(buttons, token);
+        }
+    }
+}
+
+void ApplyRawButtonsCsv(std::uint16_t& buttons, const std::string& csv) {
+    std::istringstream input(csv);
+    std::string token;
+    while (std::getline(input, token, ',')) {
+        token.erase(std::remove_if(token.begin(), token.end(),
+                                   [](unsigned char ch) {
+                                       return std::isspace(ch) != 0;
+                                   }),
+                    token.end());
+        if (!token.empty()) {
+            ApplyRawButtonName(buttons, token);
         }
     }
 }
@@ -571,7 +673,8 @@ ProcessCapture RunProcessCapture(const std::wstring& commandLine,
 }
 
 bool WriteMailboxPulse(std::uint32_t mailboxSlot, const InputFrame& frame,
-                       int durationMs, std::uint32_t& pidOut) {
+                       std::uint16_t rawButtons, int durationMs,
+                       std::uint32_t& pidOut) {
     GameBridgePC game;
     if (!WaitForAttach(game, kDefaultAttachTimeoutMs, kDefaultPollMs)) {
         return false;
@@ -585,13 +688,76 @@ bool WriteMailboxPulse(std::uint32_t mailboxSlot, const InputFrame& frame,
 
     InputFrame pulse = frame;
     pulse.clientTimeMs = NowMs();
-    writer.WriteSlot(static_cast<int>(mailboxSlot), pulse);
+    writer.WriteSlot(static_cast<int>(mailboxSlot), pulse, rawButtons);
 
     SleepMs(durationMs);
 
     InputFrame release {};
     release.clientTimeMs = NowMs();
-    writer.WriteSlot(static_cast<int>(mailboxSlot), release);
+    writer.WriteSlot(static_cast<int>(mailboxSlot), release, 0);
+    return true;
+}
+
+ProcessCapture RunRestartScript(bool noBuild, bool killOnly, bool copyDll,
+                                bool steam) {
+    const auto script = RepoRoot() / "scripts" / "restart-kh2.ps1";
+    std::wstring command = L"powershell.exe -ExecutionPolicy Bypass -File \"" +
+                           script.wstring() + L"\"";
+    if (noBuild) command += L" -NoBuild";
+    if (killOnly) command += L" -Kill";
+    if (copyDll) command += L" -CopyDll";
+    if (steam) command += L" -Steam";
+
+    return RunProcessCapture(command, RepoRoot());
+}
+
+bool DriveLoadSaveMenu(GameBridgePC& game, int slot, const KeySpec& confirmSpec,
+                       const KeySpec& downSpec, int wakePresses,
+                       int wakeDelayMs, int stepDelayMs,
+                       int postSelectDelayMs, int finalConfirmPresses,
+                       std::string& error) {
+    const auto hwnd = FindWindowForPid(game.ProcessId());
+    if (!hwnd.has_value()) {
+        error = "Could not find KH2 window for load-save";
+        return false;
+    }
+    if (!FocusWindow(*hwnd)) {
+        error = "Failed to focus KH2 window for load-save";
+        return false;
+    }
+
+    SleepMs(100);
+
+    for (int i = 0; i < wakePresses; ++i) {
+        if (!SendKeyPress(confirmSpec, 60)) {
+            error = "Failed to send wake confirm key";
+            return false;
+        }
+        SleepMs(wakeDelayMs);
+    }
+
+    for (int i = 1; i < slot; ++i) {
+        if (!SendKeyPress(downSpec, 60)) {
+            error = "Failed to send down key while selecting save";
+            return false;
+        }
+        SleepMs(stepDelayMs);
+    }
+
+    if (!SendKeyPress(confirmSpec, 60)) {
+        error = "Failed to send save select confirm key";
+        return false;
+    }
+    SleepMs(postSelectDelayMs);
+
+    for (int i = 0; i < finalConfirmPresses; ++i) {
+        if (!SendKeyPress(confirmSpec, 60)) {
+            error = "Failed to send final confirm key";
+            return false;
+        }
+        SleepMs(postSelectDelayMs);
+    }
+
     return true;
 }
 
@@ -604,15 +770,7 @@ CommandResult CmdRestart(std::vector<std::string> args) {
         throw std::runtime_error("Unexpected argument for restart: " + args.front());
     }
 
-    const auto script = RepoRoot() / "scripts" / "restart-kh2.ps1";
-    std::wstring command = L"powershell.exe -ExecutionPolicy Bypass -File \"" +
-                           script.wstring() + L"\"";
-    if (noBuild) command += L" -NoBuild";
-    if (killOnly) command += L" -Kill";
-    if (copyDll) command += L" -CopyDll";
-    if (steam) command += L" -Steam";
-
-    const auto result = RunProcessCapture(command, RepoRoot());
+    const auto result = RunRestartScript(noBuild, killOnly, copyDll, steam);
     if (!result.launched) {
         return MakeError("Failed to launch restart-kh2.ps1");
     }
@@ -828,40 +986,12 @@ CommandResult CmdLoadSave(std::vector<std::string> args) {
         return MakeAttachTimeout("load-save");
     }
 
-    const auto hwnd = FindWindowForPid(game.ProcessId());
-    if (!hwnd.has_value()) {
-        return MakeError("Could not find KH2 window for load-save");
-    }
-    if (!FocusWindow(*hwnd)) {
-        return MakeError("Failed to focus KH2 window for load-save");
-    }
-
-    SleepMs(100);
-
-    for (int i = 0; i < wakePresses; ++i) {
-        if (!SendKeyPress(*confirmSpec, 60)) {
-            return MakeError("Failed to send wake confirm key");
-        }
-        SleepMs(wakeDelayMs);
-    }
-
-    for (int i = 1; i < slot; ++i) {
-        if (!SendKeyPress(*downSpec, 60)) {
-            return MakeError("Failed to send down key while selecting save");
-        }
-        SleepMs(stepDelayMs);
-    }
-
-    if (!SendKeyPress(*confirmSpec, 60)) {
-        return MakeError("Failed to send save select confirm key");
-    }
-    SleepMs(postSelectDelayMs);
-
-    for (int i = 0; i < finalConfirmPresses; ++i) {
-        if (!SendKeyPress(*confirmSpec, 60)) {
-            return MakeError("Failed to send final confirm key");
-        }
-        SleepMs(postSelectDelayMs);
+    std::string menuError;
+    if (!DriveLoadSaveMenu(game, slot, *confirmSpec, *downSpec,
+                           wakePresses, wakeDelayMs, stepDelayMs,
+                           postSelectDelayMs, finalConfirmPresses,
+                           menuError)) {
+        return MakeError(menuError);
     }
 
     auto result = WaitForRoomState(
@@ -888,13 +1018,146 @@ CommandResult CmdLoadSave(std::vector<std::string> args) {
     return result;
 }
 
+CommandResult CmdBootLoadSave(std::vector<std::string> args) {
+    const auto slotRaw = ConsumeOption(args, "--slot");
+    if (!slotRaw) {
+        throw std::runtime_error("boot-load-save requires --slot");
+    }
+
+    const int slot = ParseNumber<int>(*slotRaw, "--slot");
+    if (slot < 1) {
+        throw std::runtime_error("--slot must be >= 1");
+    }
+
+    const bool noBuild = ConsumeFlag(args, "--no-build");
+    const bool copyDll = ConsumeFlag(args, "--copy-dll");
+    const bool steam = ConsumeFlag(args, "--steam");
+    const std::string confirmKey =
+        ConsumeOption(args, "--confirm-key").value_or("enter");
+    const std::string downKey =
+        ConsumeOption(args, "--down-key").value_or("down");
+    const int titleTimeoutMs = ParseNumber<int>(
+        ConsumeOption(args, "--title-timeout-ms").value_or("60000"),
+        "--title-timeout-ms");
+    const int wakePresses = ParseNumber<int>(
+        ConsumeOption(args, "--wake-presses").value_or("1"),
+        "--wake-presses");
+    const int wakeDelayMs = ParseNumber<int>(
+        ConsumeOption(args, "--wake-delay-ms").value_or("1000"),
+        "--wake-delay-ms");
+    const int stepDelayMs = ParseNumber<int>(
+        ConsumeOption(args, "--step-delay-ms").value_or("250"),
+        "--step-delay-ms");
+    const int postSelectDelayMs = ParseNumber<int>(
+        ConsumeOption(args, "--post-select-delay-ms").value_or("800"),
+        "--post-select-delay-ms");
+    const int finalConfirmPresses = ParseNumber<int>(
+        ConsumeOption(args, "--final-confirm-presses").value_or("1"),
+        "--final-confirm-presses");
+    const int loadTimeoutMs = ParseNumber<int>(
+        ConsumeOption(args, "--load-timeout-ms").value_or("60000"),
+        "--load-timeout-ms");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for boot-load-save: " +
+                                 args.front());
+    }
+
+    const auto restart = RunRestartScript(noBuild, false, copyDll, steam);
+    if (!restart.launched) {
+        return MakeError("Failed to launch restart-kh2.ps1");
+    }
+    if (restart.exitCode != 0) {
+        std::ostringstream out;
+        out << "{"
+            << "\"ok\":false,"
+            << "\"phase\":\"restart\","
+            << "\"exitCode\":" << restart.exitCode << ","
+            << "\"output\":" << JsonString(restart.output)
+            << "}";
+        return {static_cast<int>(restart.exitCode), out.str()};
+    }
+
+    const auto confirmSpec = ParseKeySpec(confirmKey);
+    const auto downSpec = ParseKeySpec(downKey);
+    if (!confirmSpec.has_value()) {
+        return MakeError("Unsupported confirm key: " + confirmKey);
+    }
+    if (!downSpec.has_value()) {
+        return MakeError("Unsupported down key: " + downKey);
+    }
+
+    GameBridgePC game;
+    if (!WaitForAttach(game, titleTimeoutMs, kDefaultPollMs)) {
+        return MakeAttachTimeout("boot-load-save");
+    }
+
+    const auto titleWait = WaitForRoomState(
+        "title/loading screen",
+        [](const RoomState& room) {
+            return room.worldId == 0xFFU && room.roomId == 0xFFU;
+        },
+        titleTimeoutMs, kDefaultPollMs);
+    if (titleWait.exitCode != 0) {
+        std::ostringstream out;
+        out << "{"
+            << "\"ok\":false,"
+            << "\"phase\":\"wait-title\","
+            << "\"restartOutput\":" << JsonString(restart.output) << ","
+            << "\"result\":" << titleWait.json
+            << "}";
+        return {titleWait.exitCode, out.str()};
+    }
+
+    if (!game.Attach()) {
+        return MakeAttachTimeout("boot-load-save after title wait");
+    }
+
+    std::string menuError;
+    if (!DriveLoadSaveMenu(game, slot, *confirmSpec, *downSpec,
+                           wakePresses, wakeDelayMs, stepDelayMs,
+                           postSelectDelayMs, finalConfirmPresses,
+                           menuError)) {
+        return MakeError(menuError);
+    }
+
+    const auto roomWait = WaitForRoomState(
+        "loaded save to enter a room",
+        [](const RoomState& room) {
+            return room.worldId != 0xFFU && room.roomId != 0xFFU &&
+                   !room.inTransition;
+        },
+        loadTimeoutMs, kDefaultPollMs);
+
+    if (roomWait.exitCode != 0) {
+        std::ostringstream out;
+        out << "{"
+            << "\"ok\":false,"
+            << "\"phase\":\"wait-room\","
+            << "\"restartOutput\":" << JsonString(restart.output) << ","
+            << "\"result\":" << roomWait.json
+            << "}";
+        return {roomWait.exitCode, out.str()};
+    }
+
+    std::ostringstream out;
+    out << "{"
+        << "\"ok\":true,"
+        << "\"slot\":" << slot << ","
+        << "\"confirmKey\":" << JsonString(confirmKey) << ","
+        << "\"downKey\":" << JsonString(downKey) << ","
+        << "\"restartOutput\":" << JsonString(restart.output) << ","
+        << "\"result\":" << roomWait.json
+        << "}";
+    return {0, out.str()};
+}
+
 CommandResult CmdInput(std::vector<std::string> args) {
     const auto slotRaw = ConsumeOption(args, "--slot");
     if (!slotRaw) {
         throw std::runtime_error("input requires --slot");
     }
 
-    const std::uint32_t slotIndex = ParseMailboxSlot(*slotRaw);
+    const std::uint32_t slotIndex = ParseFriendMailboxSlot(*slotRaw);
     const int durationMs = ParseNumber<int>(
         ConsumeOption(args, "--duration-ms").value_or("100"),
         "--duration-ms");
@@ -922,7 +1185,7 @@ CommandResult CmdInput(std::vector<std::string> args) {
     }
 
     std::uint32_t pid = 0;
-    if (!WriteMailboxPulse(slotIndex, frame, durationMs, pid)) {
+    if (!WriteMailboxPulse(slotIndex, frame, 0, durationMs, pid)) {
         return MakeError(
             "Failed to publish mailbox input. KH2 may not be running.");
     }
@@ -952,7 +1215,7 @@ CommandResult CmdMove(std::vector<std::string> args) {
         throw std::runtime_error("move requires --slot");
     }
 
-    const std::uint32_t slotIndex = ParseMailboxSlot(*slotRaw);
+    const std::uint32_t slotIndex = ParseFriendMailboxSlot(*slotRaw);
     const int durationMs = ParseNumber<int>(
         ConsumeOption(args, "--duration-ms").value_or("500"),
         "--duration-ms");
@@ -970,7 +1233,7 @@ CommandResult CmdMove(std::vector<std::string> args) {
     frame.leftStickY = y;
 
     std::uint32_t pid = 0;
-    if (!WriteMailboxPulse(slotIndex, frame, durationMs, pid)) {
+    if (!WriteMailboxPulse(slotIndex, frame, 0, durationMs, pid)) {
         return MakeError("Failed to publish mailbox movement");
     }
 
@@ -993,7 +1256,7 @@ CommandResult CmdPress(std::vector<std::string> args) {
         throw std::runtime_error("press requires --slot and --button");
     }
 
-    const std::uint32_t slotIndex = ParseMailboxSlot(*slotRaw);
+    const std::uint32_t slotIndex = ParseFriendMailboxSlot(*slotRaw);
     const int durationMs = ParseNumber<int>(
         ConsumeOption(args, "--duration-ms").value_or("100"),
         "--duration-ms");
@@ -1006,7 +1269,7 @@ CommandResult CmdPress(std::vector<std::string> args) {
     ApplyButtonName(frame.buttons, *buttonRaw);
 
     std::uint32_t pid = 0;
-    if (!WriteMailboxPulse(slotIndex, frame, durationMs, pid)) {
+    if (!WriteMailboxPulse(slotIndex, frame, 0, durationMs, pid)) {
         return MakeError("Failed to publish mailbox button press");
     }
 
@@ -1016,6 +1279,125 @@ CommandResult CmdPress(std::vector<std::string> args) {
         << "\"processId\":" << pid << ","
         << "\"slot\":" << JsonString(*slotRaw) << ","
         << "\"button\":" << JsonString(*buttonRaw) << ","
+        << "\"durationMs\":" << durationMs
+        << "}";
+    return {0, out.str()};
+}
+
+CommandResult CmdPlayerInput(std::vector<std::string> args) {
+    const int durationMs = ParseNumber<int>(
+        ConsumeOption(args, "--duration-ms").value_or("100"),
+        "--duration-ms");
+
+    InputFrame frame {};
+    frame.leftStickX = ParseNumber<float>(
+        ConsumeOption(args, "--lx").value_or("0"), "--lx");
+    frame.leftStickY = ParseNumber<float>(
+        ConsumeOption(args, "--ly").value_or("0"), "--ly");
+    frame.rightStickX = ParseNumber<float>(
+        ConsumeOption(args, "--rx").value_or("0"), "--rx");
+    frame.rightStickY = ParseNumber<float>(
+        ConsumeOption(args, "--ry").value_or("0"), "--ry");
+
+    std::uint16_t rawButtons = 0;
+    if (const auto buttons = ConsumeOption(args, "--buttons")) {
+        ApplyRawButtonsCsv(rawButtons, *buttons);
+    }
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for player-input: " +
+                                 args.front());
+    }
+
+    std::uint32_t pid = 0;
+    if (!WriteMailboxPulse(kh2coop::MAILBOX_SLOT_PLAYER, frame, rawButtons,
+                           durationMs, pid)) {
+        return MakeError("Failed to publish player mailbox input");
+    }
+
+    std::ostringstream out;
+    out << "{"
+        << "\"ok\":true,"
+        << "\"processId\":" << pid << ","
+        << "\"slot\":\"player\","
+        << "\"durationMs\":" << durationMs << ","
+        << "\"rawButtons\":" << rawButtons << ","
+        << "\"leftStick\":{"
+            << "\"x\":" << frame.leftStickX << ","
+            << "\"y\":" << frame.leftStickY
+        << "},"
+        << "\"rightStick\":{"
+            << "\"x\":" << frame.rightStickX << ","
+            << "\"y\":" << frame.rightStickY
+        << "}"
+        << "}";
+    return {0, out.str()};
+}
+
+CommandResult CmdPlayerMove(std::vector<std::string> args) {
+    const int durationMs = ParseNumber<int>(
+        ConsumeOption(args, "--duration-ms").value_or("500"),
+        "--duration-ms");
+    const float x = ParseNumber<float>(
+        ConsumeOption(args, "--x").value_or("0"), "--x");
+    const float y = ParseNumber<float>(
+        ConsumeOption(args, "--y").value_or("1"), "--y");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for player-move: " +
+                                 args.front());
+    }
+
+    InputFrame frame {};
+    frame.leftStickX = x;
+    frame.leftStickY = y;
+
+    std::uint32_t pid = 0;
+    if (!WriteMailboxPulse(kh2coop::MAILBOX_SLOT_PLAYER, frame, 0,
+                           durationMs, pid)) {
+        return MakeError("Failed to publish player mailbox movement");
+    }
+
+    std::ostringstream out;
+    out << "{"
+        << "\"ok\":true,"
+        << "\"processId\":" << pid << ","
+        << "\"slot\":\"player\","
+        << "\"durationMs\":" << durationMs << ","
+        << "\"x\":" << x << ","
+        << "\"y\":" << y
+        << "}";
+    return {0, out.str()};
+}
+
+CommandResult CmdPlayerPress(std::vector<std::string> args) {
+    const auto buttonRaw = ConsumeOption(args, "--button");
+    if (!buttonRaw) {
+        throw std::runtime_error("player-press requires --button");
+    }
+
+    const int durationMs = ParseNumber<int>(
+        ConsumeOption(args, "--duration-ms").value_or("100"),
+        "--duration-ms");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for player-press: " +
+                                 args.front());
+    }
+
+    std::uint16_t rawButtons = 0;
+    ApplyRawButtonName(rawButtons, *buttonRaw);
+
+    std::uint32_t pid = 0;
+    if (!WriteMailboxPulse(kh2coop::MAILBOX_SLOT_PLAYER, InputFrame {},
+                           rawButtons, durationMs, pid)) {
+        return MakeError("Failed to publish player mailbox button press");
+    }
+
+    std::ostringstream out;
+    out << "{"
+        << "\"ok\":true,"
+        << "\"processId\":" << pid << ","
+        << "\"slot\":\"player\","
+        << "\"button\":" << JsonString(*buttonRaw) << ","
+        << "\"rawButtons\":" << rawButtons << ","
         << "\"durationMs\":" << durationMs
         << "}";
     return {0, out.str()};
@@ -1036,6 +1418,16 @@ void PrintUsage() {
         << "            [--wake-presses N] [--wake-delay-ms N]\n"
         << "            [--step-delay-ms N] [--post-select-delay-ms N]\n"
         << "            [--final-confirm-presses N] [--load-timeout-ms N]\n"
+        << "  boot-load-save --slot N [--no-build] [--copy-dll] [--steam]\n"
+        << "                 [--confirm-key KEY] [--down-key KEY]\n"
+        << "                 [--title-timeout-ms N] [--wake-presses N]\n"
+        << "                 [--wake-delay-ms N] [--step-delay-ms N]\n"
+        << "                 [--post-select-delay-ms N]\n"
+        << "                 [--final-confirm-presses N] [--load-timeout-ms N]\n"
+        << "  player-input [--lx X] [--ly Y] [--rx X] [--ry Y]\n"
+        << "               [--buttons cross,circle,...] [--duration-ms N]\n"
+        << "  player-move [--x X] [--y Y] [--duration-ms N]\n"
+        << "  player-press --button NAME [--duration-ms N]\n"
         << "  input --slot friend1|friend2 [--lx X] [--ly Y] [--rx X] [--ry Y]\n"
         << "        [--buttons attack,jump,...] [--target-id N] [--duration-ms N]\n"
         << "  move --slot friend1|friend2 [--x X] [--y Y] [--duration-ms N]\n"
@@ -1078,6 +1470,14 @@ int main(int argc, char* argv[]) {
             result = CmdSendKey(std::move(args), true);
         } else if (command == "load-save") {
             result = CmdLoadSave(std::move(args));
+        } else if (command == "boot-load-save") {
+            result = CmdBootLoadSave(std::move(args));
+        } else if (command == "player-input") {
+            result = CmdPlayerInput(std::move(args));
+        } else if (command == "player-move") {
+            result = CmdPlayerMove(std::move(args));
+        } else if (command == "player-press") {
+            result = CmdPlayerPress(std::move(args));
         } else if (command == "input") {
             result = CmdInput(std::move(args));
         } else if (command == "move") {

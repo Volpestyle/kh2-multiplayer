@@ -99,5 +99,6 @@ target_link_libraries(kh2coop_fake_sim PRIVATE kh2coop_server_core kh2coop_runti
 # Only builds on Windows (requires MinHook, XInput, PE headers).
 # ---------------------------------------------------------------------------
 if(WIN32)
+    add_subdirectory(tools/kh2ctl)
     add_subdirectory(inject)
 endif()

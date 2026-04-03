@@ -6,7 +6,8 @@
 //   2. Identifies friend entities by comparing actor pointers against
 //      the known friend actor pointers from Slot1+0x220/+0x228
 //   3. Discovers the friend AI vtable+0x10 function at runtime
-//   4. Hooks the friend AI function to suppress AI and inject player input
+//   4. Hooks the friend AI function so controlled friend slots can expose
+//      their movement state before the game's own motion-selection calls
 //   5. Reads input from network mailbox (if runtime is connected) or
 //      local gamepads for Friend1 (gamepad 1) and Friend2 (gamepad 2)
 //   6. Writes movement velocity/acceleration to actor struct fields
@@ -15,7 +16,10 @@
 // The game's entity update call chain:
 //   EntityUpdateLoop (exe+0x3BF5E0)
 //     └─► PerEntityUpdate (exe+0x3BFD30) — OUR HOOK
-//           ├─► vtable+0x10 — AI dispatch (suppressed for friends)
+//           ├─► vtable+0x10 — AI dispatch
+//           │     For controlled friends: SKIPPED. We inject movement +
+//           │     animation ourselves (via FUN_1403c6dc0 = SetAnimDirect).
+//           │     For others: original AI runs normally.
 //           ├─► vtable+0x18 — post-main update
 //           ├─► vtable+0x28 — pre-physics update
 //           └─► EntityPositionPhysics (exe+0x3B89A0) — runs normally
@@ -48,6 +52,7 @@ namespace inject {
 //   x64 ABI: RCX = actorObj (the actor/entity object pointer)
 //   Ghidra sig: void PerEntityUpdate(undefined4* param_1)
 using PFN_PerEntityUpdate = void(__fastcall*)(void* actorObj);
+using PFN_InputCollector = void(__fastcall*)(void* inputStruct);
 
 // ResolveEntityType: void*(uint32_t typeId)
 //   x64 ABI: ECX = typeId, returns RAX = type handler pointer
@@ -86,6 +91,40 @@ using PFN_SetMotion = uint64_t(__fastcall*)(void* actor, uint32_t motionChannel,
 using PFN_SetMotionSimple = uint64_t(__fastcall*)(void* actor, uint32_t motionChannel,
                                                    uint32_t flag, uint32_t param4);
 
+// FUN_1403c6dc0 — Motion controller animation setter.
+// Takes the motion controller sub-object (actor+0x158) and an animation ID.
+// Looks up the animation in the entity's motion set and triggers playback.
+// Short-circuits if the requested animation is already playing (safe to call
+// every frame). Both Sora and friends ultimately use this path.
+//
+// Traced via Ghidra + CE data breakpoint on actor+0x188 (motion controller's
+// active animation DWORD at motCtrl+0x30). All animation writes come through
+// FUN_1403c8a40 which is called from FUN_1403c6dc0 → FUN_1403c86a0.
+//
+// x64 calling convention:
+//   RCX  = motionCtrl pointer (actor + 0x158)
+//   EDX  = animation ID (0=IDLE, 1=WALK, 2=RUN, 0x36=friend follow-attack, etc.)
+//   XMM2 = start time (float, usually 0.0)
+//   XMM3 = blend parameter (float, usually 0.0)
+using PFN_SetAnimationDirect = void(__fastcall*)(void* motCtrl, int animId,
+                                                  float startTime, float blendParam);
+
+// FUN_1403d5e50 — Movement dispatch with deceleration handling.
+// This is the function that the friend AI calls through vtable+0xE8
+// to drive movement animation transitions (idle ↔ walk ↔ run).
+// Handles both acceleration (delta > 0) and deceleration (delta < 0).
+// When decelerating past 0, calls FUN_1403d3cf0 → FUN_1403c20a0 which
+// resets the movement state and triggers the idle animation path.
+// When accelerating, updates the motion accumulator and triggers walk/run.
+//
+// x64 calling convention:
+//   RCX = actor pointer
+//   EDX = speed delta (positive=accel, negative=decel)
+//   R8D = channel (0 for movement)
+//   R9B = flag (0 or 1)
+using PFN_MovementDispatch = void(__fastcall*)(void* actor, int speedDelta,
+                                                int channel, uint8_t flag);
+
 // ============================================================================
 // AOB Signature — PerEntityUpdate prologue
 //
@@ -115,6 +154,20 @@ static constexpr uint64_t RVA_RESOLVE_ENTITY_TYPE = 0x4AD270;
 // RVAs for motion set functions (the game's animation trigger API)
 static constexpr uint64_t RVA_SET_MOTION        = 0x3B6670;
 static constexpr uint64_t RVA_SET_MOTION_SIMPLE  = 0x3B6630;
+
+// RVA for the movement dispatch (FUN_1403d5e50).
+// This is the function that drives idle ↔ walk ↔ run animation transitions.
+// Called from the friend AI's behavior timer via vtable+0xE8.
+// We hook it to replace the speed delta for controlled friends so the
+// animation matches stick input instead of follow-distance-to-Sora.
+static constexpr uint64_t RVA_MOVEMENT_DISPATCH = 0x3D5E50;
+
+// RVA for the direct animation setter (FUN_1403c6dc0).
+// Discovered by tracing writes to actor+0x188 (motionCtrl+0x30) via CE
+// data breakpoint → FUN_1403c8a40 → called from FUN_1403c86a0 → called
+// from FUN_1403c6dc0. Both Sora's and friends' movement animation
+// ultimately flows through this function.
+static constexpr uint64_t RVA_SET_ANIMATION_DIRECT = 0x3C6DC0;
 
 // ============================================================================
 // Movement field offsets within actor object
@@ -165,14 +218,21 @@ static uintptr_t g_exeBase = 0;
 
 // Hook trampolines (set by MH_CreateHook)
 static PFN_PerEntityUpdate   g_origPerEntityUpdate  = nullptr;
+static PFN_InputCollector    g_origInputCollector   = nullptr;
 static PFN_ResolveEntityType g_resolveEntityType     = nullptr;
 static PFN_FriendAI          g_origFriendAI          = nullptr;
 static PFN_FriendAI          g_origFriendPrePhysics  = nullptr;
+static PFN_MovementDispatch  g_origMovementDispatch  = nullptr;
 static PFN_FollowSteering   g_origFollowSteering    = nullptr;
 
 // Motion set function pointers (not hooked — called directly)
 static PFN_SetMotion        g_setMotion             = nullptr;
 static PFN_SetMotionSimple  g_setMotionSimple       = nullptr;
+
+// Direct animation setter — FUN_1403c6dc0.
+// Called to set idle/walk/run on controlled friends in place of the vanilla
+// AI's follow-distance-based animation selection.
+static PFN_SetAnimationDirect g_setAnimationDirect  = nullptr;
 
 // Friend entity tracking — refreshed every PerEntityUpdate call
 static uintptr_t g_friend1Actor = 0;
@@ -206,6 +266,9 @@ struct GamepadState {
 };
 
 static GamepadState g_gamepad[2] = {};
+static GamepadState g_mailboxFriendPad[2] = {};
+static GamepadState g_primaryMailboxPad = {};
+static std::uint16_t g_primaryRawButtons = 0;
 static int          g_inputControllerCount = 0;
 static int          g_activeInputSlot = -1;
 
@@ -226,8 +289,14 @@ static bool      g_cameraRetargeted   = false;
 static GamepadState g_processedStickSnapshot = {};
 static uint32_t     g_processedStickFrame    = UINT32_MAX;
 
-// (Animation is driven by calling the game's motion set functions every frame,
-// replicating what the original friend AI does. See InjectMovementInput.)
+// Per-friend cached facing angle. When the stick is released, we keep writing
+// the last known facing so the vanilla AI can't snap the friend toward Sora.
+// Index 0 = Friend1, Index 1 = Friend2.
+static float g_lastFacingAngle[2]  = {0.0f, 0.0f};
+static bool  g_facingAngleValid[2] = {false, false};
+
+// Last stick magnitude per friend — used to select animation in HookedFriendAI.
+static float g_lastStickMagnitude[2] = {0.0f, 0.0f};
 
 // Sora actor pointer — needed for suppressing Sora's movement at entity level
 static uintptr_t g_soraActor = 0;
@@ -334,6 +403,24 @@ static float ClampUnit(float value) {
     return value;
 }
 
+static std::uint8_t EncodeRawStickX(float value) {
+    const float clamped = ClampUnit(value);
+    const int centered = (clamped >= 0.0f)
+        ? static_cast<int>(std::lround(clamped * 127.0f))
+        : -static_cast<int>(std::lround(-clamped * 128.0f));
+    const int raw = 0x80 + centered;
+    return static_cast<std::uint8_t>(std::clamp(raw, 0, 0xFF));
+}
+
+static std::uint8_t EncodeRawStickY(float value) {
+    const float clamped = ClampUnit(value);
+    const int centered = (clamped >= 0.0f)
+        ? static_cast<int>(std::lround(clamped * 127.0f))
+        : -static_cast<int>(std::lround(-clamped * 128.0f));
+    const int raw = 0x80 - centered;
+    return static_cast<std::uint8_t>(std::clamp(raw, 0, 0xFF));
+}
+
 static bool TryReadSoloProcessedStick(GamepadState* out) {
     if (!out) return false;
 
@@ -384,13 +471,21 @@ static int ResolveRawSlotForController(int controllerIndex, int activeInputSlot)
 // Returns true if at least one friend slot was populated from the mailbox.
 // ============================================================================
 
-static bool TryReadMailbox() {
+static void ClearMailboxCachedState() {
+    g_primaryMailboxPad = {};
+    g_primaryRawButtons = 0;
+    g_mailboxFriendPad[0] = {};
+    g_mailboxFriendPad[1] = {};
+}
+
+static bool PollMailbox() {
     if (!g_mailboxAvailable) {
         // Periodically retry opening the mailbox (runtime may start later)
         if (g_frameCounter - g_lastMailboxCheckFrame >= MAILBOX_RETRY_INTERVAL) {
             g_lastMailboxCheckFrame = g_frameCounter;
             if (g_mailboxReader.Open()) {
                 g_mailboxAvailable = true;
+                ClearMailboxCachedState();
                 Log("Network input mailbox CONNECTED (runtime PID=%lu)",
                     static_cast<unsigned long>(g_mailboxReader.RuntimePid()));
             }
@@ -410,15 +505,25 @@ static bool TryReadMailbox() {
                     static_cast<unsigned long>(rtPid));
                 g_mailboxReader.Close();
                 g_mailboxAvailable = false;
+                ClearMailboxCachedState();
                 return false;
             }
             CloseHandle(hProc);
         }
     }
 
-    bool anyRead = false;
+    kh2coop::MailboxReadResult result {};
 
-    for (int padIdx = 0; padIdx < 2; ++padIdx) {
+    if (g_mailboxReader.TryReadSlot(kh2coop::MAILBOX_SLOT_PLAYER, result)) {
+        g_primaryMailboxPad.connected = true;
+        g_primaryMailboxPad.worldSpace = false;
+        g_primaryMailboxPad.buttons = 0;
+        g_primaryMailboxPad.leftX = result.leftStickX;
+        g_primaryMailboxPad.leftY = result.leftStickY;
+        g_primaryMailboxPad.rightX = result.rightStickX;
+        g_primaryMailboxPad.rightY = result.rightStickY;
+        g_primaryRawButtons = result.rawButtons;
+#if 0
         kh2coop::MailboxReadResult result {};
         if (g_mailboxReader.TryReadSlot(padIdx, result)) {
             GamepadState& pad = g_gamepad[padIdx];
@@ -434,11 +539,55 @@ static bool TryReadMailbox() {
             pad.rightY    = result.rightStickY;
             anyRead = true;
         }
+#endif
         // If TryReadSlot returns false, the previous GamepadState is retained
         // (from a prior mailbox read within this frame's loop iteration).
     }
 
-    return anyRead;
+    for (int slotIndex = kh2coop::MAILBOX_SLOT_FRIEND1;
+         slotIndex <= kh2coop::MAILBOX_SLOT_FRIEND2;
+         ++slotIndex) {
+        if (g_mailboxReader.TryReadSlot(slotIndex, result)) {
+            GamepadState& pad =
+                g_mailboxFriendPad[slotIndex - kh2coop::MAILBOX_SLOT_FRIEND1];
+            pad.connected = true;
+            pad.worldSpace = true;
+            pad.buttons = static_cast<std::uint16_t>(result.buttons & 0xFFFF);
+            pad.leftX = result.leftStickX;
+            pad.leftY = result.leftStickY;
+            pad.rightX = result.rightStickX;
+            pad.rightY = result.rightStickY;
+        }
+    }
+
+    return true;
+}
+
+static bool HasPrimaryMailboxOverride() {
+    if (!g_primaryMailboxPad.connected) {
+        return false;
+    }
+
+    return g_primaryRawButtons != 0 ||
+           std::fabs(g_primaryMailboxPad.leftX) > 0.001f ||
+           std::fabs(g_primaryMailboxPad.leftY) > 0.001f ||
+           std::fabs(g_primaryMailboxPad.rightX) > 0.001f ||
+           std::fabs(g_primaryMailboxPad.rightY) > 0.001f;
+}
+
+static void ApplyPrimaryMailboxInput(void* inputStruct) {
+    if (!inputStruct || !HasPrimaryMailboxOverride()) {
+        return;
+    }
+
+    auto* raw = reinterpret_cast<std::uint8_t*>(
+        reinterpret_cast<uintptr_t>(inputStruct) + offsets::input::RAW_SLOT0);
+    *reinterpret_cast<std::uint16_t*>(raw + offsets::input::BUTTONS) =
+        g_primaryRawButtons;
+    raw[offsets::input::LSTICK_X] = EncodeRawStickX(g_primaryMailboxPad.leftX);
+    raw[offsets::input::LSTICK_Y] = EncodeRawStickY(g_primaryMailboxPad.leftY);
+    raw[offsets::input::RSTICK_X] = EncodeRawStickX(g_primaryMailboxPad.rightX);
+    raw[offsets::input::RSTICK_Y] = EncodeRawStickY(g_primaryMailboxPad.rightY);
 }
 
 static void ReadGamepads() {
@@ -449,10 +598,11 @@ static void ReadGamepads() {
 
     // Try network mailbox first — if the runtime is delivering remote input,
     // skip the local gamepad read entirely. This is the P3 IPC path.
-    // NOTE: Do NOT zero g_gamepad[] before this call. TryReadMailbox() writes
-    // only the slots that have new data; slots without new data retain their
-    // previous values from the prior frame.
-    if (TryReadMailbox()) {
+    // NOTE: mailbox-backed control now comes from PollMailbox() and cached
+    // slot state, so we only zero g_gamepad[] on the local fallback path.
+    if (PollMailbox()) {
+        g_gamepad[0] = g_mailboxFriendPad[0];
+        g_gamepad[1] = g_mailboxFriendPad[1];
         return;
     }
 
@@ -523,15 +673,20 @@ static void ReadGamepads() {
         }
     }
 
-    // In solo mode, prefer the per-frame processed-stick snapshot for pad 0.
-    // It was captured BEFORE SuppressSoraInput zeroed the processed entry, so
-    // it reflects the real physical left/right stick mapping the game uses.
-    if (g_soloTestMode && g_processedStickFrame == g_frameCounter) {
-        auto& snap = g_processedStickSnapshot;
-        if (snap.connected) {
-            snap.buttons = g_gamepad[0].buttons;
-            g_gamepad[0] = snap;
-        }
+    // In solo mode, KH2's input mapper swaps the stick fields:
+    //   raw LSTICK = physical right stick (camera)
+    //   raw RSTICK = physical left stick (movement)
+    // The processed entry at +0x30 had the correct mapping but was DIGITAL
+    // (0 or ±1 only). We keep the raw ANALOG values but swap the axes so
+    // physical left stick → g_gamepad[0].leftX/Y (movement).
+    if (g_soloTestMode) {
+        auto& pad = g_gamepad[0];
+        float tmpX = pad.leftX;
+        float tmpY = pad.leftY;
+        pad.leftX  = pad.rightX;
+        pad.leftY  = -pad.rightY;   // raw Y polarity is inverted vs processed
+        pad.rightX = tmpX;
+        pad.rightY = tmpY;
     }
 }
 
@@ -699,8 +854,12 @@ static void CheckTestModeHotkey() {
 // ============================================================================
 // Input injection — write gamepad state to actor movement fields
 //
-// When the friend AI is suppressed, the velocity/acceleration fields retain
-// stale values. We must write something every frame to prevent drift.
+// Controlled friends need their movement state visible in two places:
+//   1. BEFORE the original friend AI runs, so its motion-channel calls can
+//      see the current movement state and pick idle/walk/run correctly.
+//   2. AFTER physics, so our injected velocity wins the final write race.
+//
+// This helper is reused for both phases.
 //
 // The exact format of actor+0xB98 (velocity) and actor+0xA58 (acceleration)
 // is derived from Ghidra analysis of EntityPositionPhysics. These are
@@ -757,7 +916,10 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
         // The stick input (moveX = right, moveY = forward) must be rotated by
         // the camera's horizontal angle so movement is relative to what the
         // player sees on screen, matching how Sora's own movement works.
-        const float speed = (magnitude > 0.7f) ? RUN_SPEED : WALK_SPEED;
+        // Scale speed proportionally to stick magnitude (like Sora).
+        // Blend from WALK_SPEED at low tilt to RUN_SPEED at full tilt.
+        const float t = (magnitude - STICK_DEADZONE) / (1.0f - STICK_DEADZONE);
+        const float speed = WALK_SPEED + (RUN_SPEED - WALK_SPEED) * (t > 1.0f ? 1.0f : t);
         if (magnitude > 0.01f) {
             using namespace offsets;
             uintptr_t camBase = g_exeBase + CAMERA_STRUCT;
@@ -822,6 +984,13 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
         }
     }
 
+    // Store stick magnitude for the caller (HookedFriendAI uses this to
+    // select idle/walk/run animation).
+    int facingIdx = friendSlot - 1;
+    if (facingIdx >= 0 && facingIdx < 2) {
+        g_lastStickMagnitude[facingIdx] = magnitude;
+    }
+
     // Update facing direction from the world-space velocity vector.
     //
     // KH2 facing convention (verified via CE live read of Sora's entity):
@@ -829,25 +998,100 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
     //   +0x40 (labeled COS_FACING in offsets) = sin(ROT_Y)  [historically mislabeled]
     //   +0x48 (labeled SIN_FACING in offsets) = cos(ROT_Y)  [historically mislabeled]
     //
-    // Previous code used atan2(-velX, -velZ) which adds PI, flipping forward/back.
-    // Left/right worked because the lateral symmetry canceled the PI offset, but
-    // forward/backward was 180° wrong.
-    if (magnitude > 0.01f) {
+    // When the stick is active, compute and cache the facing angle.
+    // When the stick is released, keep writing the LAST facing angle so the
+    // game's own AI/physics can't snap the friend back toward Sora.
+    {
         using namespace offsets;
         uintptr_t entityBase = reinterpret_cast<uintptr_t>(actor) +
                                actor::ENTITY_TRANSFORM;
 
-        float angle = std::atan2(velX, velZ);
-        *reinterpret_cast<float*>(entityBase + entity::ROT_Y)      = angle;
-        // +0x40 stores sin(angle), +0x48 stores cos(angle)
-        // (the offset names COS_FACING/SIN_FACING are swapped relative to math convention)
-        *reinterpret_cast<float*>(entityBase + entity::COS_FACING)  = std::sin(angle);
-        *reinterpret_cast<float*>(entityBase + entity::SIN_FACING)  = std::cos(angle);
+        if (magnitude > 0.01f) {
+            float angle = std::atan2(velX, velZ);
+            if (facingIdx >= 0 && facingIdx < 2) {
+                g_lastFacingAngle[facingIdx] = angle;
+                g_facingAngleValid[facingIdx] = true;
+            }
+            *reinterpret_cast<float*>(entityBase + entity::ROT_Y)      = angle;
+            *reinterpret_cast<float*>(entityBase + entity::COS_FACING)  = std::sin(angle);
+            *reinterpret_cast<float*>(entityBase + entity::SIN_FACING)  = std::cos(angle);
+        } else if (facingIdx >= 0 && facingIdx < 2 && g_facingAngleValid[facingIdx]) {
+            // Stick released — persist the last facing direction every frame
+            float angle = g_lastFacingAngle[facingIdx];
+            *reinterpret_cast<float*>(entityBase + entity::ROT_Y)      = angle;
+            *reinterpret_cast<float*>(entityBase + entity::COS_FACING)  = std::sin(angle);
+            *reinterpret_cast<float*>(entityBase + entity::SIN_FACING)  = std::cos(angle);
+        }
+    }
+}
+
+// ============================================================================
+// Movement dispatch hook — intercepts FUN_1403d5e50
+//
+// This is the function that drives idle ↔ walk ↔ run animation transitions.
+// It's called from the friend AI's behavior timer via:
+//   FUN_1403c3bd0 → vtable+0xE8 → FUN_1401b03d0 → FUN_1403d5e50
+// and for Sora via a parallel path through FUN_1403a85f0.
+//
+// For controlled friends: replace the speed delta with a value derived from
+// the player's stick magnitude. This makes the animation system naturally
+// select idle/walk/run to match the player's input, using the exact same
+// deceleration (→ idle) and acceleration (→ run) paths the game uses.
+//
+// For all other entities: pass through to the original unchanged.
+// ============================================================================
+
+static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
+                                               int channel, uint8_t flag) {
+    auto actorAddr = reinterpret_cast<uintptr_t>(actor);
+
+    // Check if this actor is a controlled friend
+    if (g_soloTestMode && channel == 0) {
+        int friendSlot = 0;
+        if (g_friend1Actor != 0 && actorAddr == g_friend1Actor) friendSlot = 1;
+        else if (g_friend2Actor != 0 && actorAddr == g_friend2Actor) friendSlot = 2;
+
+        if (friendSlot != 0) {
+            // Replace the AI's follow-distance delta with our stick-based one.
+            int idx = friendSlot - 1;
+            float mag = (idx >= 0 && idx < 2) ? g_lastStickMagnitude[idx] : 0.0f;
+
+            // Read the motion table max to scale our delta properly
+            int maxVal = 18;  // fallback
+            __try {
+                uintptr_t motTablePtr = *reinterpret_cast<uintptr_t*>(
+                    actorAddr + 0x5C0);
+                if (motTablePtr != 0) {
+                    maxVal = *reinterpret_cast<int*>(motTablePtr + 4);
+                    if (maxVal <= 0) maxVal = 18;
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+            // Map stick magnitude to speed delta:
+            //   idle (mag < deadzone):  large negative → decelerate to idle
+            //   walk (mid tilt):        small positive → walk speed
+            //   run  (full tilt):       large positive → run speed
+            int newDelta;
+            if (mag < STICK_DEADZONE) {
+                newDelta = -maxVal;   // decelerate hard → idle
+            } else {
+                // Scale: deadzone→0, full tilt→maxVal
+                float t = (mag - STICK_DEADZONE) / (1.0f - STICK_DEADZONE);
+                newDelta = static_cast<int>(t * static_cast<float>(maxVal));
+                if (newDelta < 1) newDelta = 1;  // at least walk
+            }
+
+            if (g_origMovementDispatch) {
+                g_origMovementDispatch(actor, newDelta, channel, flag);
+            }
+            return;
+        }
     }
 
-    // Animation is handled by the original friend AI (which we no longer
-    // suppress). The AI calls the game's motion set functions every frame,
-    // and the animation system picks idle/walk/run based on entity state.
+    // All other entities: pass through unchanged
+    if (g_origMovementDispatch) {
+        g_origMovementDispatch(actor, speedDelta, channel, flag);
+    }
 }
 
 // ============================================================================
@@ -855,19 +1099,45 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
 //
 // When PerEntityUpdate processes a friend entity, it sets
 // g_currentFriendSlot before calling the original. The original calls
-// vtable+0x10 (AI dispatch), which lands here. If the entity is a
-// controlled friend, we inject gamepad input and skip AI.
+// vtable+0x10 (AI dispatch), which lands here.
+//
+// The original AI runs for animation playback, and its call to the movement
+// dispatch (FUN_1403d5e50) is intercepted by HookedMovementDispatch above,
+// which replaces the follow-distance speed delta with our stick-based one.
 // ============================================================================
 
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
-    // ALWAYS call the original AI — it drives the animation system via
-    // the game's motion set functions (FUN_1403b6670/FUN_1403b6630).
-    // Without these calls, the entity has no animation playback at all.
-    //
-    // The original AI also computes follow-steering, but that's intercepted
-    // separately by HookedFollowSteering which returns zeros for controlled
-    // friends. Movement is overridden in the post-physics path of
-    // HookedPerEntityUpdate. So the AI runs for animations only.
+    if (g_currentFriendSlot != 0 && g_soloTestMode) {
+        // ---- Controlled friend ----
+        //
+        // Strategy: let the original AI run (it drives the motion playback
+        // chain — without it animations freeze). Sandwich it with our own
+        // velocity/facing writes so we own the final movement state.
+        //
+        // The AI will compute follow-distance animation internally (wrong),
+        // but our de-tethering (follow-timer = 999) prevents its follow-
+        // steering from moving the entity. After the AI, we re-inject
+        // velocity and facing from the player's stick input.
+        //
+        // TODO: override animation selection so idle/walk/run matches
+        // stick magnitude instead of follow-distance. Needs hooking the
+        // movement dispatch (FUN_1403d5e50) called from the AI's behavior
+        // timer path to replace its speed delta with our stick-derived one.
+
+        // PRE-AI: write velocity so the AI's motion calls see movement state
+        InjectMovementInput(actorObj, g_currentFriendSlot);
+
+        // Run original AI for animation playback chain
+        if (g_origFriendAI) {
+            g_origFriendAI(typeHandler, actorObj);
+        }
+
+        // POST-AI: re-inject velocity/facing (AI may have overwritten them)
+        InjectMovementInput(actorObj, g_currentFriendSlot);
+        return;
+    }
+
+    // Non-controlled friend (or solo mode off): run the original AI normally.
     if (g_origFriendAI) {
         g_origFriendAI(typeHandler, actorObj);
     }
@@ -910,6 +1180,20 @@ static void* __fastcall HookedFollowSteering(void* typeHandler, void* outVec4,
 
     memset(outVec4, 0, 16);
     return outVec4;
+}
+
+static void __fastcall HookedInputCollector(void* inputStruct) {
+    if (g_origInputCollector) {
+        g_origInputCollector(inputStruct);
+    }
+
+    __try {
+        if (PollMailbox()) {
+            ApplyPrimaryMailboxInput(inputStruct);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("EXCEPTION in HookedInputCollector post-call");
+    }
 }
 
 // ============================================================================
@@ -1232,9 +1516,36 @@ bool Initialize(uintptr_t exeBase) {
     // --- Resolve motion set functions (animation API) ---
     g_setMotion = reinterpret_cast<PFN_SetMotion>(exeBase + RVA_SET_MOTION);
     g_setMotionSimple = reinterpret_cast<PFN_SetMotionSimple>(exeBase + RVA_SET_MOTION_SIMPLE);
-    Log("  SetMotion: 0x%llX  SetMotionSimple: 0x%llX",
+    g_setAnimationDirect = reinterpret_cast<PFN_SetAnimationDirect>(
+        exeBase + RVA_SET_ANIMATION_DIRECT);
+    Log("  SetMotion: 0x%llX  SetMotionSimple: 0x%llX  SetAnimDirect: 0x%llX",
         static_cast<unsigned long long>(exeBase + RVA_SET_MOTION),
-        static_cast<unsigned long long>(exeBase + RVA_SET_MOTION_SIMPLE));
+        static_cast<unsigned long long>(exeBase + RVA_SET_MOTION_SIMPLE),
+        static_cast<unsigned long long>(exeBase + RVA_SET_ANIMATION_DIRECT));
+
+    const auto inputCollectorAddr =
+        exeBase + offsets::input::INPUT_COLLECTOR_FUNC;
+    Log("  InputCollector: 0x%llX",
+        static_cast<unsigned long long>(inputCollectorAddr));
+
+    mhStatus = MH_CreateHook(
+        reinterpret_cast<void*>(inputCollectorAddr),
+        reinterpret_cast<void*>(&HookedInputCollector),
+        reinterpret_cast<void**>(&g_origInputCollector));
+    if (mhStatus != MH_OK) {
+        Log("ERROR: MH_CreateHook(InputCollector) failed: %d (%s)",
+            mhStatus, MH_StatusToString(mhStatus));
+        MH_Uninitialize();
+        return false;
+    }
+
+    mhStatus = MH_EnableHook(reinterpret_cast<void*>(inputCollectorAddr));
+    if (mhStatus != MH_OK) {
+        Log("ERROR: MH_EnableHook(InputCollector) failed: %d (%s)",
+            mhStatus, MH_StatusToString(mhStatus));
+        MH_Uninitialize();
+        return false;
+    }
 
     // --- Install PerEntityUpdate hook ---
     mhStatus = MH_CreateHook(
@@ -1258,13 +1569,39 @@ bool Initialize(uintptr_t exeBase) {
     }
 
     Log("  PerEntityUpdate hook installed");
+
+    // --- Install MovementDispatch hook (FUN_1403d5e50) ---
+    // This intercepts the animation speed delta for controlled friends.
+    {
+        void* movDispAddr = reinterpret_cast<void*>(exeBase + RVA_MOVEMENT_DISPATCH);
+        mhStatus = MH_CreateHook(
+            movDispAddr,
+            reinterpret_cast<void*>(&HookedMovementDispatch),
+            reinterpret_cast<void**>(&g_origMovementDispatch));
+
+        if (mhStatus == MH_OK) {
+            mhStatus = MH_EnableHook(movDispAddr);
+        }
+
+        if (mhStatus == MH_OK) {
+            Log("  MovementDispatch hook installed at RVA 0x%llX",
+                static_cast<unsigned long long>(RVA_MOVEMENT_DISPATCH));
+        } else {
+            Log("  WARNING: MovementDispatch hook failed: %d (%s) — animation override disabled",
+                mhStatus, MH_StatusToString(mhStatus));
+            // Non-fatal: movement still works, just animation won't match stick
+        }
+    }
+
+    Log("  InputCollector hook installed");
     Log("Initialization complete — waiting for friend entities...");
     Log("  Press F5 to toggle solo test mode (control Friend1 with KH2 controller 0)");
 
     // Try to open the network input mailbox (runtime may not be running yet).
-    // If not available now, we'll retry periodically in TryReadMailbox().
+    // If not available now, we'll retry periodically in PollMailbox().
     if (g_mailboxReader.Open()) {
         g_mailboxAvailable = true;
+        ClearMailboxCachedState();
         Log("  Input source: network mailbox (runtime PID=%lu)",
             static_cast<unsigned long>(g_mailboxReader.RuntimePid()));
     } else {
@@ -1288,6 +1625,7 @@ void Shutdown() {
     if (g_mailboxAvailable) {
         g_mailboxReader.Close();
         g_mailboxAvailable = false;
+        ClearMailboxCachedState();
         Log("  Network input mailbox closed");
     }
 
@@ -1302,6 +1640,7 @@ void Shutdown() {
     g_origFriendAI = nullptr;
     g_origFriendPrePhysics = nullptr;
     g_origFollowSteering = nullptr;
+    g_origMovementDispatch = nullptr;
     g_resolveEntityType = nullptr;
     g_hookedAITarget = nullptr;
     g_hookedPrePhysicsTarget = nullptr;
@@ -1309,6 +1648,10 @@ void Shutdown() {
     g_friend1Actor = 0;
     g_friend2Actor = 0;
     g_soraActor = 0;
+    g_setAnimationDirect = nullptr;
+    g_facingAngleValid[0] = g_facingAngleValid[1] = false;
+    g_lastStickMagnitude[0] = g_lastStickMagnitude[1] = 0.0f;
+    ClearMailboxCachedState();
 
     if (g_logFile) {
         Log("Shutdown complete");

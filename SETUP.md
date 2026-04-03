@@ -75,6 +75,7 @@ ENet (UDP networking library) is fetched automatically via CMake FetchContent.
 | `kh2coop_server` | Host-authoritative relay server |
 | `kh2coop_runtime_scaffold` | Runtime entry point (attaches to live KH2) |
 | `kh2coop_fake_sim` | End-to-end test harness (no KH2 needed) |
+| `kh2ctl` | Local KH2 control CLI for restart, waits, menu input, and mailbox-driven friend control |
 
 ### Quick test (no KH2 required)
 
@@ -162,6 +163,62 @@ args = ["-u", "<path>/GhidraMCP/bridge_mcp_ghidra.py", "--ghidra-server", "http:
 ```
 
 Replace `<path>` with actual absolute paths.
+
+### Optional: KH2 Control MCP
+
+This repo now includes a local KH2 control MCP wrapper on top of `kh2ctl`.
+
+Build the CLI first:
+
+```bash
+cd kh2-multiplayer
+cmake --build build --target kh2ctl --config Release
+```
+
+Then add the MCP server.
+
+**Claude Code** (`~/.claude.json` → `mcpServers`):
+```json
+"kh2ctl": {
+  "type": "stdio",
+  "command": "python",
+  "args": ["<path>/kh2-multiplayer/tools/mcp_kh2ctl/server.py"],
+  "env": {
+    "KH2CTL_BIN": "<path>/kh2-multiplayer/build/tools/kh2ctl/Release/kh2ctl.exe"
+  }
+}
+```
+
+**OpenCode** (`~/.config/opencode/opencode.json` → `mcp`):
+```json
+"kh2ctl": {
+  "type": "local",
+  "command": ["python", "<path>/kh2-multiplayer/tools/mcp_kh2ctl/server.py"],
+  "enabled": true,
+  "environment": {
+    "KH2CTL_BIN": "<path>/kh2-multiplayer/build/tools/kh2ctl/Release/kh2ctl.exe"
+  }
+}
+```
+
+**Codex** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.kh2ctl]
+command = 'python'
+args = ["-u", "<path>/kh2-multiplayer/tools/mcp_kh2ctl/server.py"]
+
+[mcp_servers.kh2ctl.env]
+KH2CTL_BIN = "<path>/kh2-multiplayer/build/tools/kh2ctl/Release/kh2ctl.exe"
+```
+
+Useful first tools:
+
+- `restart_kh2`
+- `boot_load_save`
+- `get_state`
+- `wait_room`
+- `friend_move`
+- `friend_press`
 
 ## Runtime Configuration
 

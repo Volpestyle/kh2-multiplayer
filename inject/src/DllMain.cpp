@@ -6,6 +6,7 @@
 //      mod's dll/ folder. Panacea calls OnInit/OnFrame automatically.
 //   2. Manual injection: use LoadLibrary or any DLL injector. DllMain
 //      spawns an init thread that installs hooks after a short delay.
+//      Explicit unloaders must call OnShutdown() before FreeLibrary.
 //
 // Both methods converge on kh2coop::inject::Initialize() which installs
 // the PerEntityUpdate hook via MinHook.
@@ -24,6 +25,13 @@ HMODULE g_dllModule = nullptr;
 HANDLE g_initThread = nullptr;
 DWORD g_initThreadId = 0;
 HANDLE g_stopEvent = nullptr;
+
+void RequestShutdown() {
+    g_shutdownRequested.store(true, std::memory_order_release);
+    if (g_stopEvent != nullptr) {
+        SetEvent(g_stopEvent);
+    }
+}
 
 bool IsShutdownRequested() {
     if (g_shutdownRequested.load(std::memory_order_acquire)) {
@@ -97,10 +105,7 @@ DWORD WINAPI InitThread(LPVOID /*param*/) {
 }
 
 void StopInitThread() {
-    g_shutdownRequested.store(true, std::memory_order_release);
-    if (g_stopEvent != nullptr) {
-        SetEvent(g_stopEvent);
-    }
+    RequestShutdown();
 
     if (g_initThread != nullptr && g_initThreadId != GetCurrentThreadId()) {
         WaitForSingleObject(g_initThread, INFINITE);
@@ -116,6 +121,16 @@ void StopInitThread() {
         CloseHandle(g_stopEvent);
         g_stopEvent = nullptr;
     }
+}
+
+void ShutdownOutsideLoaderLock() {
+    StopInitThread();
+
+    if (g_initDone.exchange(false, std::memory_order_acq_rel)) {
+        kh2coop::inject::Shutdown();
+    }
+
+    g_initStarted.store(false, std::memory_order_release);
 }
 
 void CloseInitHandles() {
@@ -158,19 +173,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         break;
 
     case DLL_PROCESS_DETACH:
-        g_shutdownRequested.store(true, std::memory_order_release);
-        if (g_stopEvent != nullptr) {
-            SetEvent(g_stopEvent);
-        }
-
-        if (lpReserved == nullptr) {
-            StopInitThread();
-            if (g_initDone.load(std::memory_order_acquire)) {
-                kh2coop::inject::Shutdown();
-            }
-        } else {
-            CloseInitHandles();
-        }
+        // Never wait on worker threads or unhook from inside DllMain.
+        // Explicit unloaders must call OnShutdown() before FreeLibrary.
+        RequestShutdown();
+        CloseInitHandles();
         g_initDone.store(false, std::memory_order_release);
         g_initStarted.store(false, std::memory_order_release);
         break;
@@ -185,6 +191,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
 // If loaded by Panacea (OpenKH mod loader), these are called:
 //   OnInit(modPath) — once at startup, after the game module is loaded
 //   OnFrame()       — every game frame
+//   OnShutdown()    — explicit cleanup path for manual unloaders
 //
 // These also work for standalone loading — OnFrame provides periodic
 // gamepad reading and status logging even without Panacea.
@@ -201,6 +208,10 @@ __declspec(dllexport) void OnFrame() {
     if (g_initDone.load(std::memory_order_acquire)) {
         kh2coop::inject::OnFrame();
     }
+}
+
+__declspec(dllexport) void OnShutdown() {
+    ShutdownOutsideLoaderLock();
 }
 
 } // extern "C"

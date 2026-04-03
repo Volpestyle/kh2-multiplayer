@@ -17,6 +17,7 @@ The critical finding is that **friend characters do not use the input system at 
 
 - `kh2coop_inject.dll` now hooks `PerEntityUpdate` on a fresh KH2 process and discovers the friend type-handler vtable at runtime.
 - The inject path now reads KH2's raw input buffer (`INPUT_STRUCT_PTR` / raw slot layout) instead of calling `XInputGetState()` directly. This fixed the Steam-Input-visible / XInput-invisible controller mismatch on the current machine.
+- The inject path now also hooks the main input collector (`FUN_140105810`) and can overwrite raw slot 0 from the shared mailbox before KH2 maps inputs into processed entry 0. `kh2ctl player-input/player-move/player-press` use this path.
 - F5 solo mode works: it suppresses Sora input, toggles control between Sora and Friend1, and can drive Donald locally.
 - `SuppressSoraInput()` must preserve the processed-entry metadata tail. Zeroing the full processed entry crashes KH2 because the next button-mapper pass dereferences a live raw-input pointer at `processed_entry+0x48`.
 - Left-stick movement and facing alignment were corrected during live smoke tests on 2026-04-01.

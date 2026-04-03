@@ -1,7 +1,48 @@
 ### General Guidelines
 - Refer to `docs/` as the primary source of truth, and always keep up to date with code changes
 - Utilize cheat engine MCP and ghidra MCP when necessary
+- **Before using Cheat Engine MCP tools**, verify CE is attached to the running KH2 process by calling `ping` and `get_process_info`. If the process is not attached or the game is not running, do not proceed with memory reads/writes/scans — prompt the user to launch KH2 and attach CE first.
 - Always write detailed commit messages
+
+### Quick KH2 Restart (`scripts/restart-kh2.ps1`)
+Use this script to kill and relaunch KH2 without going through the Steam collection launcher:
+```powershell
+.\scripts\restart-kh2.ps1           # kill + rebuild inject DLL + relaunch
+.\scripts\restart-kh2.ps1 -NoBuild  # kill + relaunch only
+.\scripts\restart-kh2.ps1 -Kill     # kill only
+.\scripts\restart-kh2.ps1 -CopyDll  # also copy inject DLL to game dir
+```
+Requires `steam_appid.txt` (containing `2552430`) in the game directory to bypass the launcher. Already placed there.
+
+### KH2 Control CLI / MCP
+Use `kh2ctl` as the canonical local control surface for automated KH2 testing. See `docs/KH2_CONTROL_CLI.md` for the full command set and current limitations.
+
+Build:
+```powershell
+cmake --build build --target kh2ctl --config Release
+```
+
+Primary commands:
+```powershell
+.\build\tools\kh2ctl\Release\kh2ctl.exe state
+.\build\tools\kh2ctl\Release\kh2ctl.exe wait-room --world 2 --room 1
+.\build\tools\kh2ctl\Release\kh2ctl.exe load-save --slot 1
+.\build\tools\kh2ctl\Release\kh2ctl.exe boot-load-save --slot 1
+.\build\tools\kh2ctl\Release\kh2ctl.exe player-move --x 0.0 --y 1.0 --duration-ms 500
+.\build\tools\kh2ctl\Release\kh2ctl.exe player-press --button confirm --duration-ms 100
+.\build\tools\kh2ctl\Release\kh2ctl.exe move --slot friend1 --x 0.0 --y 1.0 --duration-ms 500
+.\build\tools\kh2ctl\Release\kh2ctl.exe press --slot friend1 --button attack --duration-ms 100
+```
+
+Rules:
+
+- Prefer `kh2ctl` over ad-hoc PowerShell/UI scripting when testing KH2 flows.
+- Treat the CLI as the implementation source of truth. The MCP wrapper should stay thin and shell out to `kh2ctl`.
+- Use the MCP wrapper (`tools/mcp_kh2ctl/server.py` or `scripts/run-kh2ctl-mcp.ps1`) when the client supports MCP tools and structured game-control calls are more convenient than shelling the CLI.
+- Use `boot-load-save` for "restart KH2 and land in a playable save" workflows instead of manually chaining restart + title wait + menu navigation.
+- Use `player-input/player-move/player-press` for native slot-0 control. These go through the inject DLL's raw input collector hook, not keyboard events.
+- Friend-slot gameplay automation should go through mailbox-backed `kh2ctl input/move/press` commands, not bespoke memory writes.
+- `load-save` / `boot-load-save` are still keyboard-driven macros for now. Native slot-0 gameplay input exists, but the save-menu flow has not been migrated off the keyboard helper yet.
 
 ### Testing Principle
 **Tests follow stabilization, not implementation.** Write regression tests only after an interface stops changing (e.g., codec is locked, offsets are confirmed via Cheat Engine). Do not write tests while actively discovering memory layouts or prototyping — that's churn. For live KH2 memory code (`GameBridgePC`, `CameraController`, etc.), manual smoke tests against a running game process are the real validation; you cannot meaningfully mock `ReadProcessMemory` against KH2. Reserve unit/integration tests for stabilized boundaries like the codec, protocol, and networking layer.

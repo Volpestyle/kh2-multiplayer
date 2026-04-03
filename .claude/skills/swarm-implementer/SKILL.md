@@ -27,26 +27,51 @@ This skill assumes the swarm tools are already mounted. If they are not present,
 
 ## Claim and Execute
 
-When you find a task:
+When you find open tasks:
 
-1. `claim_task` immediately
-2. `update_task` to `in_progress`
-3. `check_file` for every file you plan to edit
-4. `lock_file` before editing, `unlock_file` when done with each file
-5. Do the work
-6. `annotate` important findings on files you touched
-7. `unlock_file` any remaining locks
-8. `update_task` to `done` with a short result
-9. Create a `review` task assigned to the planner (get their ID from `list_instances`)
+1. **Claim the highest-priority task first** — `list_tasks` returns tasks sorted by priority (highest first). Prefer tasks assigned to you, then open tasks matching your `team:` label, then any open task.
+2. `claim_task` immediately
+3. `update_task` to `in_progress`
+4. `check_file` for every file you plan to edit
+5. `lock_file` before editing, `unlock_file` when done with each file
+6. Do the work
+7. `annotate` important findings on files you touched
+8. `unlock_file` any remaining locks
+9. `update_task` to `done` with a structured result (see below)
+10. Create a `review` task assigned to the planner (get their ID from `list_instances`)
+
+### Skip blocked tasks
+
+Tasks with `blocked` status are waiting on dependencies. Do not try to claim them — they will auto-transition to `open` when their dependencies complete.
+
+### Structured Results
+
+When completing a task, include a JSON `result` so the reviewer can assess your work programmatically:
+
+```json
+{
+  "files_changed": ["src/auth/middleware.ts", "src/auth/middleware.test.ts"],
+  "test_status": "pass",
+  "summary": "Added JWT validation middleware with 401 response for invalid tokens."
+}
+```
+
+Fields:
+- `files_changed`: array of file paths you modified
+- `test_status`: `"pass"`, `"fail"`, or `"skipped"` — whether relevant tests pass after your changes
+- `summary`: short description of what you did and why
+
+If you cannot run tests or determine file paths, fall back to a plain string result. A structured result is preferred but not mandatory.
 
 ## Autonomous Loop
 
 After completing a task (or if none were available), enter a continuous work loop:
 
-1. Call `wait_for_activity` (30–60 second timeout)
+1. Call `wait_for_activity` (30-60 second timeout)
 2. Act on what comes back:
-   - **new_messages**: Read and act. `[auto]` messages are system notifications about task assignments. The planner may send context or corrections.
-   - **task_updates**: Claim new `implement` or `fix` tasks assigned to you or open. Start working immediately.
+   - **new_messages**: Read and act. `[auto]` messages are system notifications about task assignments. The planner may send context or corrections. If you receive a `[signal:complete]` broadcast, the planner is signaling all work is done — proceed to shutdown.
+   - **task_updates**: Claim new `implement` or `fix` tasks assigned to you or open. Prefer highest priority. Start working immediately. Ignore `blocked` tasks.
+   - **kv_updates**: Check if the planner updated a plan or progress key relevant to your work.
    - **instance_changes**: If the planner left, check for open tasks you can work on independently.
 3. On timeout: call `list_tasks` for anything missed, then `wait_for_activity` again
 4. Repeat until no more tasks and the planner signals completion
@@ -54,6 +79,15 @@ After completing a task (or if none were available), enter a continuous work loo
 **Do not wait for user prompting between tasks.** Only break the loop if genuinely stuck.
 
 Update your status periodically: `kv_set("progress/<your-instance-id>", ...)`
+
+## Recognize Termination
+
+When you receive a broadcast containing `[signal:complete]`:
+
+1. Finish any task currently in progress (do not abandon mid-edit)
+2. `unlock_file` any remaining locks
+3. `update_task` to `done` for any in-progress work
+4. Call `deregister` to leave the swarm
 
 ## Load References As Needed
 
@@ -68,3 +102,4 @@ Update your status periodically: `kv_set("progress/<your-instance-id>", ...)`
 - Hold locks longer than needed — lock one file, edit, unlock
 - Forget to `update_task` when finished — the planner is waiting
 - Create planning or decomposition tasks — that is the planner's job
+- Try to claim `blocked` tasks — they will become `open` automatically when ready

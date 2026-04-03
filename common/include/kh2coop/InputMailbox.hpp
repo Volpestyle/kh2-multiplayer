@@ -2,9 +2,9 @@
 // ============================================================================
 // InputMailbox — Cross-process shared memory for runtime→inject input delivery
 //
-// The runtime process creates the shared memory and writes InputFrame data
-// received from the network. The inject DLL (inside KH2) opens the same
-// shared memory and reads the latest frame for each friend slot.
+// The runtime / local tooling creates the shared memory and writes input data.
+// The inject DLL (inside KH2) opens the same shared memory and reads the
+// latest frame for the player slot plus each friend slot.
 //
 // Naming: "Local\kh2coop_input_<KH2_PID>"
 //   - The inject DLL uses GetCurrentProcessId() (it IS KH2)
@@ -13,8 +13,9 @@
 //
 // Layout (all POD, cache-line aligned):
 //   MailboxHeader  { magic, version, runtimePid, flags }
-//   MailboxSlot[0] — Friend1 input (64 bytes, cache-line aligned)
-//   MailboxSlot[1] — Friend2 input (64 bytes, cache-line aligned)
+//   MailboxSlot[0] — Player / slot 0 raw input override
+//   MailboxSlot[1] — Friend1 input
+//   MailboxSlot[2] — Friend2 input
 //
 // Synchronization: Seqlock per slot (single writer, single reader).
 //   Writer: increment sequence to odd → write data → increment to even.
@@ -23,8 +24,8 @@
 //   This is lock-free and wait-free for the reader (game thread never blocks).
 //
 // Thread safety:
-//   - ONE writer (runtime network thread) per slot
-//   - ONE reader (KH2 game thread via PerEntityUpdate hook) per slot
+//   - ONE writer per slot
+//   - ONE reader (KH2 game thread via input/entity hooks) per slot
 //   - Multiple slots are independent (no cross-slot synchronization)
 // ============================================================================
 
@@ -47,7 +48,10 @@ static constexpr const char* MAILBOX_NAME_PREFIX = "Local\\kh2coop_input_";
 // Magic value for header validation: "KH2C" as little-endian uint32.
 static constexpr std::uint32_t MAILBOX_MAGIC   = 0x4332484B;
 static constexpr std::uint32_t MAILBOX_VERSION = 1;
-static constexpr int           MAILBOX_MAX_SLOTS = 2;
+static constexpr int           MAILBOX_SLOT_PLAYER  = 0;
+static constexpr int           MAILBOX_SLOT_FRIEND1 = 1;
+static constexpr int           MAILBOX_SLOT_FRIEND2 = 2;
+static constexpr int           MAILBOX_MAX_SLOTS    = 3;
 
 // ============================================================================
 // Button bitmask — POD-safe packing for shared memory
@@ -110,8 +114,8 @@ inline InputButtons UnpackButtons(std::uint32_t packed) {
 // reordering across the sequence read/write boundaries.
 // ============================================================================
 
-// One slot per friend. Cache-line aligned to prevent false sharing between
-// Friend1 and Friend2 data (they may be written/read independently).
+// One slot per controlled mailbox target. Cache-line aligned to prevent false
+// sharing between slot writers/readers.
 struct alignas(64) MailboxSlot {
     volatile std::uint32_t sequence;       // Seqlock: odd = write in progress
     float    leftStickX;                   // -1.0 .. +1.0
@@ -119,10 +123,12 @@ struct alignas(64) MailboxSlot {
     float    rightStickX;                  // -1.0 .. +1.0
     float    rightStickY;                  // -1.0 .. +1.0
     std::uint32_t buttons;                 // Packed MailboxButton bitmask
+    std::uint16_t rawButtons;              // Raw pad bitmask for slot 0 injection
+    std::uint16_t _reserved0;
     std::uint32_t ownedActorId;            // Network actor ID of the input source
     std::uint32_t requestedTargetId;       // Lock-on target
     std::uint64_t clientTimeMs;            // Sender timestamp
-    std::uint8_t  _pad[16];               // Pad to exactly 64 bytes
+    std::uint8_t  _pad[12];                // Pad to exactly 64 bytes
 };
 
 static_assert(sizeof(MailboxSlot) == 64,
@@ -156,6 +162,7 @@ struct MailboxReadResult {
     float         rightStickX;
     float         rightStickY;
     std::uint32_t buttons;                 // Packed MailboxButton bitmask
+    std::uint16_t rawButtons;
     std::uint32_t ownedActorId;
     std::uint32_t requestedTargetId;
     std::uint64_t clientTimeMs;
@@ -168,7 +175,7 @@ struct MailboxReadResult {
 //   MailboxWriter writer;
 //   writer.Create(kh2ProcessId);
 //   // ... in network receive callback:
-//   writer.WriteSlot(0, incomingInputFrame);  // Friend1
+//   writer.WriteSlot(MAILBOX_SLOT_FRIEND1, incomingInputFrame);
 //   // ... on shutdown:
 //   writer.Close();
 // ============================================================================
@@ -196,6 +203,8 @@ public:
             0, static_cast<DWORD>(MAILBOX_SIZE), name);
         if (!hMapping_) return false;
 
+        const DWORD createErr = GetLastError();
+
         view_ = static_cast<MailboxHeader*>(
             MapViewOfFile(hMapping_, FILE_MAP_ALL_ACCESS, 0, 0, MAILBOX_SIZE));
         if (!view_) {
@@ -204,19 +213,29 @@ public:
             return false;
         }
 
-        // Zero-init and write header
-        std::memset(view_, 0, MAILBOX_SIZE);
-        view_->magic      = MAILBOX_MAGIC;
-        view_->version    = MAILBOX_VERSION;
-        view_->runtimePid = GetCurrentProcessId();
-        view_->flags      = 0;
+        if (createErr != ERROR_ALREADY_EXISTS) {
+            // Fresh mapping: zero-init and write header.
+            std::memset(view_, 0, MAILBOX_SIZE);
+            view_->magic      = MAILBOX_MAGIC;
+            view_->version    = MAILBOX_VERSION;
+            view_->runtimePid = GetCurrentProcessId();
+            view_->flags      = 0;
+        } else if (view_->magic != MAILBOX_MAGIC ||
+                   view_->version != MAILBOX_VERSION) {
+            UnmapViewOfFile(view_);
+            CloseHandle(hMapping_);
+            view_ = nullptr;
+            hMapping_ = nullptr;
+            return false;
+        }
 
         return true;
     }
 
-    // Write an InputFrame to a friend slot (0 = Friend1, 1 = Friend2).
-    // Uses seqlock protocol: odd sequence signals write-in-progress.
-    void WriteSlot(int slotIndex, const InputFrame& frame) {
+    // Write input data to a mailbox slot. Uses seqlock protocol:
+    // odd sequence signals write-in-progress.
+    void WriteSlot(int slotIndex, const InputFrame& frame,
+                   std::uint16_t rawButtons = 0) {
         if (!view_ || slotIndex < 0 || slotIndex >= MAILBOX_MAX_SLOTS) return;
 
         volatile MailboxSlot* slot = &view_->slots[slotIndex];
@@ -232,6 +251,7 @@ public:
         slot->rightStickX      = frame.rightStickX;
         slot->rightStickY      = frame.rightStickY;
         slot->buttons           = PackButtons(frame.buttons);
+        slot->rawButtons        = rawButtons;
         slot->ownedActorId      = frame.ownedActorId;
         slot->requestedTargetId = frame.requestedTargetId;
         slot->clientTimeMs      = frame.clientTimeMs;
@@ -266,9 +286,9 @@ private:
 // Usage:
 //   MailboxReader reader;
 //   reader.Open();   // uses GetCurrentProcessId() — we ARE KH2
-//   // ... per frame, for each friend slot:
+//   // ... per frame, for each slot:
 //   MailboxReadResult result;
-//   if (reader.TryReadSlot(0, result)) {
+//   if (reader.TryReadSlot(MAILBOX_SLOT_FRIEND1, result)) {
 //       // New consistent frame available — use result.leftStickX, etc.
 //   } else {
 //       // No new data or torn read — reuse previous frame
@@ -345,6 +365,7 @@ public:
         out.rightStickX      = slot->rightStickX;
         out.rightStickY      = slot->rightStickY;
         out.buttons           = slot->buttons;
+        out.rawButtons        = slot->rawButtons;
         out.ownedActorId      = slot->ownedActorId;
         out.requestedTargetId = slot->requestedTargetId;
         out.clientTimeMs      = slot->clientTimeMs;
@@ -377,8 +398,9 @@ public:
             CloseHandle(hMapping_);
             hMapping_ = nullptr;
         }
-        lastSeq_[0] = 0;
-        lastSeq_[1] = 0;
+        for (auto& seq : lastSeq_) {
+            seq = 0;
+        }
     }
 
 private:

@@ -661,8 +661,9 @@ int main(int argc, char* argv[]) {
         }
 
         kh2coop::InputFrame empty {};
-        mailboxWriter.WriteSlot(0, empty);
-        mailboxWriter.WriteSlot(1, empty);
+        mailboxWriter.WriteSlot(kh2coop::MAILBOX_SLOT_PLAYER, empty);
+        mailboxWriter.WriteSlot(kh2coop::MAILBOX_SLOT_FRIEND1, empty);
+        mailboxWriter.WriteSlot(kh2coop::MAILBOX_SLOT_FRIEND2, empty);
     };
 
     const auto closeMailbox = [&mailboxWriter, &clearMailbox]() {
@@ -745,13 +746,14 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
                 // Write to the input mailbox so the inject DLL can drive
                 // the friend entity through native physics/animation.
-                // Map SlotType → mailbox slot index (Friend1=0, Friend2=1).
+                // Map SlotType → mailbox slot index (Player is reserved for
+                // native slot-0 input automation).
                 if (mailboxWriter.IsOpen()) {
                     int mbSlot = -1;
                     if (snap.actor.slot == kh2coop::SlotType::Friend1)
-                        mbSlot = 0;
+                        mbSlot = kh2coop::MAILBOX_SLOT_FRIEND1;
                     else if (snap.actor.slot == kh2coop::SlotType::Friend2)
-                        mbSlot = 1;
+                        mbSlot = kh2coop::MAILBOX_SLOT_FRIEND2;
 
                     if (mbSlot >= 0) {
                         // The inject DLL interprets mailbox axes as world-space

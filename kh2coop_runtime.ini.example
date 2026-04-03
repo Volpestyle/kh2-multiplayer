@@ -14,3 +14,34 @@ panic_hotkey = true
 # Optional local diagnostics.
 log_owned_actor_state = false
 tick_ms = 16
+
+# ---------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------
+
+# Enable networking (connect to a SessionHost server).
+# Default: false (offline mode — local camera + diagnostics only).
+# Also settable via --network / --no-network CLI flags.
+networking = false
+
+# SessionHost server address and port.
+server_host = 127.0.0.1
+server_port = 7946
+
+# Unique identifier for this peer. Each connected client must use a
+# different peer_id.
+peer_id = player-1
+
+# Game build string sent in the version handshake.
+# Must match the server's expected build for the connection to be accepted.
+game_build = 1.0.0.10-steam-global
+
+# Mod content hash sent in the version handshake (optional).
+# mod_hash =
+
+# How often to send heartbeat packets to the server (ms).
+heartbeat_interval_ms = 1000
+
+# How often to send the owned actor's state snapshot to the server (ms).
+# Lower = smoother remote replication but more bandwidth.
+snapshot_interval_ms = 16

@@ -957,8 +957,8 @@ bool GameBridgePC::ApplyReplicaActorState(const ActorState& state) {
 
         // Write rotation.
         ok &= writeAbs<float>(entityAddr + entity::ROT_Y, state.rotationY);
-        ok &= writeAbs<float>(entityAddr + entity::COS_FACING, std::cos(state.rotationY));
-        ok &= writeAbs<float>(entityAddr + entity::SIN_FACING, std::sin(state.rotationY));
+        ok &= writeAbs<float>(entityAddr + entity::COS_FACING, std::sin(state.rotationY));
+        ok &= writeAbs<float>(entityAddr + entity::SIN_FACING, std::cos(state.rotationY));
 
         // Write airborne flags.
         // Note: friends use moveState=0 normally (AI-controlled). When writing
