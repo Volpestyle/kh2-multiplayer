@@ -70,7 +70,7 @@
 
 ## Milestone 3 — Local input injection `[PARTIAL]`
 **Goal:** non-slot-0 players can directly control their own actor locally.
-**Status:** DLL injection scaffold complete. `kh2coop_inject.dll` now installs `PerEntityUpdate` plus friend in-process hooks on a fresh process, reads KH2's raw input buffer instead of direct `XInputGetState`, preserves processed-input metadata when suppressing Sora input, and supports F5 solo mode that toggles control between Sora and Friend1. Live smoke tests now show Donald moving on the left stick with corrected facing/movement alignment. The current blocker is residual vanilla friend-follow behavior: Donald is still pulled back toward Sora by a later friend update path even after the main AI callback is suppressed. Hot-swapping a loaded inject DLL is still unreliable, so live validation should use a fresh KH2 launch.
+**Status:** DLL injection scaffold complete. `kh2coop_inject.dll` now installs `PerEntityUpdate` plus friend in-process hooks on a fresh process, reads KH2's raw input buffer instead of direct `XInputGetState`, preserves processed-input metadata when suppressing Sora input, and supports F5 solo mode that toggles control between Sora and Friend1. Live smoke tests now show Donald moving on the left stick with corrected facing/movement alignment. The animation/tether bug (Donald being pulled back toward Sora by residual vanilla friend-follow behavior) was resolved as of Session 5 (2026-04-03). Hot-swapping a loaded inject DLL is still unreliable, so live validation should use a fresh KH2 launch.
 
 ### RE Findings (2026-03-31)
 - Input collector at `exe+0x105810` reads all gamepads, swaps active controller to slot 0
@@ -107,8 +107,8 @@ Rejected: external `WriteProcessMemory` to entity fields gives cosmetic-only res
 - [x] Validate basic Friend1 solo-mode movement — Donald can be moved locally under F5 solo mode
 - [x] Calibrate left-stick axis/sign mapping and facing alignment
 - [x] Verify F5 solo-mode toggles control cleanly between Sora and Friend1
-- [ ] Suppress residual friend follow/tether behavior after main AI suppression
-- [ ] Validate the friend vtable+0x28 pre-physics hook on a fresh launch
+- [x] Suppress residual friend follow/tether behavior after main AI suppression
+- [x] Validate the friend vtable+0x28 pre-physics hook on a fresh launch
 - [ ] Wire network-received input into the hook (from M4 networking layer)
 - [ ] Test: friend slot attacks land, enemies take damage
 - [x] Verify velocity/acceleration offsets (actor+0xB98/+0xA58) via CE live testing

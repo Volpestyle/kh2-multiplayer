@@ -109,6 +109,13 @@ using PFN_SetMotionSimple = uint64_t(__fastcall*)(void* actor, uint32_t motionCh
 using PFN_SetAnimationDirect = void(__fastcall*)(void* motCtrl, int animId,
                                                   float startTime, float blendParam);
 
+// FUN_1403c88c0 — Motion chain animation setter.
+// Sets an animation on the motion controller. Called by the motCtrl tick
+// at loop boundaries and by FUN_1403c86a0 for explicit animation changes.
+// Returns 1 on success, 0 on failure (animation not found in motion set).
+using PFN_MotionChainSetAnim = uint8_t(__fastcall*)(void* motCtrl, int animId,
+                                                      float startTime, float blendParam);
+
 // FUN_1403d5e50 — Movement dispatch with deceleration handling.
 // This is the function that the friend AI calls through vtable+0xE8
 // to drive movement animation transitions (idle ↔ walk ↔ run).
@@ -169,6 +176,33 @@ static constexpr uint64_t RVA_MOVEMENT_DISPATCH = 0x3D5E50;
 // ultimately flows through this function.
 static constexpr uint64_t RVA_SET_ANIMATION_DIRECT = 0x3C6DC0;
 
+// RVA for the underlying animation setter (FUN_1403c86a0).
+// This is the ACTUAL animation change function — it clears the motion
+// playback chain and calls FUN_1403c88c0 to set the new animation.
+//
+// FUN_1403c6dc0 (SetAnimationDirect) wraps this but adds a
+// FUN_1403a6420() check that depends on global register state from a
+// prior entity lookup. That check makes FUN_1403c6dc0 fail when called
+// from our hook context. FUN_1403c86a0 skips that check entirely.
+//
+// Used by the game's own FUN_1403c3c30 (friend delta replacement) to
+// transition from animation 0x36 → 0x37 during combat follow-up.
+// Safe to call from hook context.
+static constexpr uint64_t RVA_SET_ANIMATION_UNDERLYING = 0x3C86A0;
+
+// RVA for the motion chain animation setter (FUN_1403c88c0).
+// This is the function that actually writes actor+0x180 (animation ID)
+// and sets up the motion playback object. Called by:
+//   1. FUN_1403c86a0 (underlying setter) — for explicit animation changes
+//   2. FUN_1403c6740 (motCtrl tick) — at animation LOOP boundaries
+//   3. Itself (recursive) — for chained animation transitions
+//
+// Hooking this lets us intercept ALL animation changes, including the
+// tick's loop-boundary re-evaluation. By replacing the animation ID in
+// the hook, we make the tick's own loop logic seamlessly play our
+// desired animation without fighting it every frame.
+static constexpr uint64_t RVA_MOTION_CHAIN_SET_ANIM = 0x3C88C0;
+
 // ============================================================================
 // Movement field offsets within actor object
 //
@@ -224,6 +258,7 @@ static PFN_FriendAI          g_origFriendAI          = nullptr;
 static PFN_FriendAI          g_origFriendPrePhysics  = nullptr;
 static PFN_MovementDispatch  g_origMovementDispatch  = nullptr;
 static PFN_FollowSteering   g_origFollowSteering    = nullptr;
+static PFN_MotionChainSetAnim g_origMotionChainSetAnim = nullptr;
 
 // Motion set function pointers (not hooked — called directly)
 static PFN_SetMotion        g_setMotion             = nullptr;
@@ -233,6 +268,11 @@ static PFN_SetMotionSimple  g_setMotionSimple       = nullptr;
 // Called to set idle/walk/run on controlled friends in place of the vanilla
 // AI's follow-distance-based animation selection.
 static PFN_SetAnimationDirect g_setAnimationDirect  = nullptr;
+
+// Underlying animation setter — FUN_1403c86a0.
+// Bypasses FUN_1403c6dc0's FUN_1403a6420() validation that fails from hook
+// context. This is the function that actually changes the animation.
+static PFN_SetAnimationDirect g_setAnimationUnderlying = nullptr;
 
 // Friend entity tracking — refreshed every PerEntityUpdate call
 static uintptr_t g_friend1Actor = 0;
@@ -297,6 +337,22 @@ static bool  g_facingAngleValid[2] = {false, false};
 
 // Last stick magnitude per friend — used to select animation in HookedFriendAI.
 static float g_lastStickMagnitude[2] = {0.0f, 0.0f};
+
+// Last animation we set via the override — avoids resetting the same animation
+// every frame (which would restart it from frame 0 and look broken).
+// -1 means "not set yet".
+static int g_lastOverrideAnim[2] = {-1, -1};
+
+// Animation override diagnostic counters
+static uint32_t g_animOverrideCount  = 0;
+static uint32_t g_animOverrideLogFrame = 0;
+
+// Guard flag: set to true while OUR code is calling FUN_1403c86a0 to set
+// animation on a controlled friend. This lets HookedMotionChainSetAnim
+// distinguish our intentional animation changes from the game's per-frame
+// FUN_1403c88c0 calls (which reset the animation time and cause the
+// "stuck at frame 0" bug). All calls except ours are blocked.
+static bool g_inOurAnimSet = false;
 
 // Sora actor pointer — needed for suppressing Sora's movement at entity level
 static uintptr_t g_soraActor = 0;
@@ -831,6 +887,11 @@ static void CheckTestModeHotkey() {
         // Toggle camera target with solo mode
         if (g_soloTestMode) {
             RetargetCameraToFriend();
+
+            // Reset animation override tracking so the first frame in solo
+            // mode detects the target as "changed" and calls FUN_1403c86a0.
+            g_lastOverrideAnim[0] = -1;
+            g_lastOverrideAnim[1] = -1;
         } else {
             RestoreCameraToSora();
 
@@ -1041,9 +1102,93 @@ static void InjectMovementInput(void* actorObj, int friendSlot) {
 // For all other entities: pass through to the original unchanged.
 // ============================================================================
 
+// ============================================================================
+// Motion chain animation hook — intercepts FUN_1403c88c0
+//
+// This is the single point where animations are SET on the motion controller.
+// Called by the motCtrl tick (FUN_1403c6740) at animation loop boundaries
+// and by FUN_1403c86a0 for explicit animation changes.
+//
+// For controlled friends: replace the animation ID with our stick-based
+// target. This makes the tick's own loop logic seamlessly play our desired
+// animation without constant fighting/restarting.
+// ============================================================================
+
+static uint32_t g_motionChainOverrides = 0;
+static uint32_t g_motionChainLogFrame  = 0;
+
+static uint8_t __fastcall HookedMotionChainSetAnim(void* motCtrl, int animId,
+                                                     float startTime, float blendParam) {
+    if (g_soloTestMode) {
+        // Derive actor address from motCtrl: actor = motCtrl - 0x158
+        auto actorAddr = reinterpret_cast<uintptr_t>(motCtrl) - 0x158;
+
+        int friendSlot = 0;
+        if (g_friend1Actor != 0 && actorAddr == g_friend1Actor) friendSlot = 1;
+        else if (g_friend2Actor != 0 && actorAddr == g_friend2Actor) friendSlot = 2;
+
+        if (friendSlot != 0) {
+            // Session 5 fix: Block ALL FUN_1403c88c0 calls for controlled
+            // friends EXCEPT our own (from HookedFriendAI via FUN_1403c86a0).
+            //
+            // The game calls FUN_1403c88c0 once per frame for every entity
+            // through a code path outside the AI (likely from the motion
+            // playback system itself). Each call goes through FUN_1403c8cd0
+            // → FUN_1403c8a40, which has a blend path that writes 2.0 to
+            // motCtrl+0x44 (curTime). This resets the animation time every
+            // frame, causing the "stuck at frame 0" appearance.
+            //
+            // By blocking these per-frame calls, the tick can advance time
+            // normally and the animation plays through its full loop.
+            // Our own calls (guarded by g_inOurAnimSet) still go through
+            // to set the initial animation on transitions.
+            if (!g_inOurAnimSet) {
+                ++g_motionChainOverrides;
+                if (g_frameCounter - g_motionChainLogFrame >= 120) {
+                    Log("[motChain BLOCKED %u] friend%d: anim=%d start=%.2f blend=%.2f (blocked=%u)",
+                        g_frameCounter, friendSlot, animId, startTime, blendParam,
+                        g_motionChainOverrides);
+                    g_motionChainLogFrame = g_frameCounter;
+                }
+                return 1;  // Pretend success — don't call original
+            }
+
+            // This is our own call (via FUN_1403c86a0 from HookedFriendAI).
+            // Replace animId with our target and pass through.
+            int friendIdx = friendSlot - 1;
+            float mag = (friendIdx >= 0 && friendIdx < 2)
+                ? g_lastStickMagnitude[friendIdx] : 0.0f;
+
+            int targetAnim;
+            if (mag < STICK_DEADZONE) {
+                targetAnim = 0;   // IDLE
+            } else if (mag < 0.7f) {
+                targetAnim = 1;   // WALK
+            } else {
+                targetAnim = 2;   // RUN
+            }
+
+            if (animId != targetAnim) {
+                animId = targetAnim;
+            }
+        }
+    }
+
+    if (g_origMotionChainSetAnim) {
+        return g_origMotionChainSetAnim(motCtrl, animId, startTime, blendParam);
+    }
+    return 0;
+}
+
+// Diagnostic counters for movement dispatch hook
+static uint32_t g_movDispatchTotalCalls = 0;
+static uint32_t g_movDispatchFriendCalls = 0;
+static uint32_t g_movDispatchLogFrame = 0;
+
 static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
                                                int channel, uint8_t flag) {
     auto actorAddr = reinterpret_cast<uintptr_t>(actor);
+    ++g_movDispatchTotalCalls;
 
     // Check if this actor is a controlled friend
     if (g_soloTestMode && channel == 0) {
@@ -1052,43 +1197,43 @@ static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
         else if (g_friend2Actor != 0 && actorAddr == g_friend2Actor) friendSlot = 2;
 
         if (friendSlot != 0) {
-            // Replace the AI's follow-distance delta with our stick-based one.
-            int idx = friendSlot - 1;
-            float mag = (idx >= 0 && idx < 2) ? g_lastStickMagnitude[idx] : 0.0f;
+            ++g_movDispatchFriendCalls;
 
-            // Read the motion table max to scale our delta properly
-            int maxVal = 18;  // fallback
+            // Diagnostic: read the bit-2 flag that gates both decel and accel
+            // paths for friends. If bit 2 is set, the original function is a
+            // NOP for this entity regardless of our delta replacement.
+            uint32_t flags9B8 = 0;
             __try {
-                uintptr_t motTablePtr = *reinterpret_cast<uintptr_t*>(
-                    actorAddr + 0x5C0);
-                if (motTablePtr != 0) {
-                    maxVal = *reinterpret_cast<int*>(motTablePtr + 4);
-                    if (maxVal <= 0) maxVal = 18;
-                }
+                flags9B8 = *reinterpret_cast<uint32_t*>(actorAddr + 0x9B8);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            bool bit2Set = (flags9B8 >> 2) & 1;
 
-            // Map stick magnitude to speed delta:
-            //   idle (mag < deadzone):  large negative → decelerate to idle
-            //   walk (mid tilt):        small positive → walk speed
-            //   run  (full tilt):       large positive → run speed
-            int newDelta;
-            if (mag < STICK_DEADZONE) {
-                newDelta = -maxVal;   // decelerate hard → idle
-            } else {
-                // Scale: deadzone→0, full tilt→maxVal
-                float t = (mag - STICK_DEADZONE) / (1.0f - STICK_DEADZONE);
-                newDelta = static_cast<int>(t * static_cast<float>(maxVal));
-                if (newDelta < 1) newDelta = 1;  // at least walk
+            // Log periodically (every ~1s at 60fps)
+            if (g_frameCounter - g_movDispatchLogFrame >= 60) {
+                Log("[movDisp %u] friend%d: delta=%d ch=%d flag=%d "
+                    "flags9B8=0x%08X bit2=%d (NOP=%s) totalCalls=%u friendCalls=%u",
+                    g_frameCounter, friendSlot, speedDelta, channel, flag,
+                    flags9B8, bit2Set ? 1 : 0,
+                    bit2Set ? "YES" : "no",
+                    g_movDispatchTotalCalls, g_movDispatchFriendCalls);
+                g_movDispatchLogFrame = g_frameCounter;
             }
 
-            if (g_origMovementDispatch) {
-                g_origMovementDispatch(actor, newDelta, channel, flag);
-            }
-            return;
+            // NOTE: Session 4 RE discovery — the original FUN_1403d5e50 is
+            // gated by actor+0x9B8 bit 2:
+            //   - FUN_1403d3cf0 (decel handler): returns immediately if bit 2 SET
+            //   - FUN_1403d2eb0 (accumulator):   returns 0 if bit 2 SET and delta < 0
+            //   For friends, bit 2 is SET → both paths are NOPs.
+            // The delta replacement below has NO EFFECT on the animation.
+            // Animation is now handled by direct FUN_1403c86a0 calls in
+            // HookedFriendAI (see above). We still pass through to the
+            // original for any other side-effects it may have.
         }
     }
 
-    // All other entities: pass through unchanged
+    // Pass through to original for ALL entities (including friends).
+    // For friends this is effectively a NOP but we don't want to break
+    // any subtle side-effects by skipping it.
     if (g_origMovementDispatch) {
         g_origMovementDispatch(actor, speedDelta, channel, flag);
     }
@@ -1108,32 +1253,77 @@ static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
 
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
     if (g_currentFriendSlot != 0 && g_soloTestMode) {
-        // ---- Controlled friend ----
+        // ---- Controlled friend: SKIP vanilla AI entirely ----
         //
-        // Strategy: let the original AI run (it drives the motion playback
-        // chain — without it animations freeze). Sandwich it with our own
-        // velocity/facing writes so we own the final movement state.
+        // Session 5 fix: The vanilla friend AI calls FUN_1403c86a0 every
+        // frame (through the behavior timer) to set follow-distance-based
+        // animation. Each call creates a NEW motion object at motCtrl+0x18,
+        // resetting the animation to frame 0. This is why every previous
+        // override approach failed — we'd set RUN, then the AI would call
+        // FUN_1403c86a0(IDLE) on the very same frame, and the tick would
+        // process IDLE from time 0. Even our FUN_1403c88c0 hook correctly
+        // replaced the animation ID, but since FUN_1403c86a0 was called
+        // every frame, the animation restarted every frame (stuck on frame 0).
         //
-        // The AI will compute follow-distance animation internally (wrong),
-        // but our de-tethering (follow-timer = 999) prevents its follow-
-        // steering from moving the entity. After the AI, we re-inject
-        // velocity and facing from the player's stick input.
+        // The fix: DON'T call the original AI at all. This prevents the
+        // per-frame FUN_1403c86a0 calls. We call it ourselves ONLY when
+        // the target animation changes (idle↔walk↔run transitions).
+        // The motCtrl tick then loops our animation naturally — it just
+        // advances time and handles loop boundaries without re-deciding
+        // which animation to play.
         //
-        // TODO: override animation selection so idle/walk/run matches
-        // stick magnitude instead of follow-distance. Needs hooking the
-        // movement dispatch (FUN_1403d5e50) called from the AI's behavior
-        // timer path to replace its speed delta with our stick-derived one.
+        // FUN_1403c86a0 writes a QWORD zero at motCtrl+0x50, clearing
+        // both the queue size and queue index. This guarantees the tick
+        // takes the LOOP path (queueIndex == queueSize == 0).
+        //
+        // Tradeoff: skipping the AI loses combat reactions, ability triggers,
+        // and battle targeting. This is acceptable for now — the priority is
+        // fixing movement animation. Combat AI can be re-enabled selectively
+        // in a future session.
 
-        // PRE-AI: write velocity so the AI's motion calls see movement state
+        // Inject movement velocity/facing from player's stick input
         InjectMovementInput(actorObj, g_currentFriendSlot);
 
-        // Run original AI for animation playback chain
-        if (g_origFriendAI) {
-            g_origFriendAI(typeHandler, actorObj);
+        // Compute target animation from stick magnitude
+        int friendIdx = g_currentFriendSlot - 1;
+        if (friendIdx >= 0 && friendIdx < 2) {
+            float mag = g_lastStickMagnitude[friendIdx];
+
+            int targetAnim;
+            if (mag < STICK_DEADZONE) {
+                targetAnim = ANIM_IDLE;   // 0
+            } else if (mag < 0.7f) {
+                targetAnim = ANIM_WALK;   // 1
+            } else {
+                targetAnim = ANIM_RUN;    // 2
+            }
+
+            // Only call FUN_1403c86a0 when the target animation CHANGES.
+            // Calling it every frame would restart the animation from frame 0
+            // each time (the exact problem we're fixing).
+            if (targetAnim != g_lastOverrideAnim[friendIdx]) {
+                auto* motCtrl = reinterpret_cast<void*>(
+                    reinterpret_cast<uintptr_t>(actorObj) + 0x158);
+
+                int oldAnim = g_lastOverrideAnim[friendIdx];
+
+                // Set the guard flag so HookedMotionChainSetAnim knows
+                // this FUN_1403c88c0 call is ours (not the game's per-frame call).
+                g_inOurAnimSet = true;
+                g_setAnimationUnderlying(motCtrl, targetAnim, 0.0f, 0.0f);
+                g_inOurAnimSet = false;
+
+                g_lastOverrideAnim[friendIdx] = targetAnim;
+
+                ++g_animOverrideCount;
+                Log("[animOverride %u] friend%d: %d → %d (mag=%.2f, total=%u)",
+                    g_frameCounter, g_currentFriendSlot,
+                    oldAnim, targetAnim, mag, g_animOverrideCount);
+            }
         }
 
-        // POST-AI: re-inject velocity/facing (AI may have overwritten them)
-        InjectMovementInput(actorObj, g_currentFriendSlot);
+        // Do NOT call the original AI — it would call FUN_1403c86a0
+        // every frame and reset our animation.
         return;
     }
 
@@ -1420,12 +1610,22 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
     int savedFriendSlot = g_currentFriendSlot;
     g_origPerEntityUpdate(actorObj);
 
-    // POST-PHYSICS overrides — run after EntityPositionPhysics has finished
-    // so we get the last word on velocity for the next frame.
+    // POST-UPDATE overrides — run after g_origPerEntityUpdate has finished.
+    // This is AFTER the motion controller tick (FUN_1403c6740) which writes
+    // the animation based on the motion chain. Our override here gets the
+    // LAST WORD on the animation before rendering.
     __try {
         if (savedFriendSlot != 0) {
-            // Re-inject movement input after physics overwrites
+            // Re-inject movement input after physics overwrites.
+            // The motion controller tick (FUN_1403c6740) has already run
+            // by this point, so our velocity/facing here gets the LAST WORD
+            // before rendering.
             InjectMovementInput(actorObj, savedFriendSlot);
+
+            // Animation is handled by the skip-AI approach in HookedFriendAI.
+            // We call FUN_1403c86a0 only on animation transitions, and the
+            // motCtrl tick loops our animation naturally. No POST animation
+            // override needed.
         }
 
         // Suppress Sora's movement at the entity level (zero velocity/accel).
@@ -1436,7 +1636,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             SuppressSoraMovement();
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("EXCEPTION in post-physics override");
+        Log("EXCEPTION in post-update override");
     }
 
     // Reset slot indicator
@@ -1518,10 +1718,14 @@ bool Initialize(uintptr_t exeBase) {
     g_setMotionSimple = reinterpret_cast<PFN_SetMotionSimple>(exeBase + RVA_SET_MOTION_SIMPLE);
     g_setAnimationDirect = reinterpret_cast<PFN_SetAnimationDirect>(
         exeBase + RVA_SET_ANIMATION_DIRECT);
+    g_setAnimationUnderlying = reinterpret_cast<PFN_SetAnimationDirect>(
+        exeBase + RVA_SET_ANIMATION_UNDERLYING);
     Log("  SetMotion: 0x%llX  SetMotionSimple: 0x%llX  SetAnimDirect: 0x%llX",
         static_cast<unsigned long long>(exeBase + RVA_SET_MOTION),
         static_cast<unsigned long long>(exeBase + RVA_SET_MOTION_SIMPLE),
         static_cast<unsigned long long>(exeBase + RVA_SET_ANIMATION_DIRECT));
+    Log("  SetAnimUnderlying: 0x%llX (FUN_1403c86a0 — bypasses FUN_1403a6420 check)",
+        static_cast<unsigned long long>(exeBase + RVA_SET_ANIMATION_UNDERLYING));
 
     const auto inputCollectorAddr =
         exeBase + offsets::input::INPUT_COLLECTOR_FUNC;
@@ -1593,6 +1797,29 @@ bool Initialize(uintptr_t exeBase) {
         }
     }
 
+    // --- Install MotionChainSetAnim hook (FUN_1403c88c0) ---
+    // This intercepts ALL animation changes on the motion controller,
+    // including the motCtrl tick's loop-boundary re-evaluation.
+    {
+        void* motChainAddr = reinterpret_cast<void*>(exeBase + RVA_MOTION_CHAIN_SET_ANIM);
+        mhStatus = MH_CreateHook(
+            motChainAddr,
+            reinterpret_cast<void*>(&HookedMotionChainSetAnim),
+            reinterpret_cast<void**>(&g_origMotionChainSetAnim));
+
+        if (mhStatus == MH_OK) {
+            mhStatus = MH_EnableHook(motChainAddr);
+        }
+
+        if (mhStatus == MH_OK) {
+            Log("  MotionChainSetAnim hook installed at RVA 0x%llX",
+                static_cast<unsigned long long>(RVA_MOTION_CHAIN_SET_ANIM));
+        } else {
+            Log("  WARNING: MotionChainSetAnim hook failed: %d (%s) — animation may not match stick",
+                mhStatus, MH_StatusToString(mhStatus));
+        }
+    }
+
     Log("  InputCollector hook installed");
     Log("Initialization complete — waiting for friend entities...");
     Log("  Press F5 to toggle solo test mode (control Friend1 with KH2 controller 0)");
@@ -1641,6 +1868,7 @@ void Shutdown() {
     g_origFriendPrePhysics = nullptr;
     g_origFollowSteering = nullptr;
     g_origMovementDispatch = nullptr;
+    g_origMotionChainSetAnim = nullptr;
     g_resolveEntityType = nullptr;
     g_hookedAITarget = nullptr;
     g_hookedPrePhysicsTarget = nullptr;
@@ -1649,8 +1877,11 @@ void Shutdown() {
     g_friend2Actor = 0;
     g_soraActor = 0;
     g_setAnimationDirect = nullptr;
+    g_setAnimationUnderlying = nullptr;
     g_facingAngleValid[0] = g_facingAngleValid[1] = false;
     g_lastStickMagnitude[0] = g_lastStickMagnitude[1] = 0.0f;
+    g_lastOverrideAnim[0] = g_lastOverrideAnim[1] = -1;
+    g_animOverrideCount = 0;
     ClearMailboxCachedState();
 
     if (g_logFile) {

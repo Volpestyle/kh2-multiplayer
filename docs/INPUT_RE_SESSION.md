@@ -21,7 +21,7 @@ The critical finding is that **friend characters do not use the input system at 
 - F5 solo mode works: it suppresses Sora input, toggles control between Sora and Friend1, and can drive Donald locally.
 - `SuppressSoraInput()` must preserve the processed-entry metadata tail. Zeroing the full processed entry crashes KH2 because the next button-mapper pass dereferences a live raw-input pointer at `processed_entry+0x48`.
 - Left-stick movement and facing alignment were corrected during live smoke tests on 2026-04-01.
-- Remaining blocker: Donald still gets pulled back toward Sora by residual vanilla friend behavior after the main AI callback is suppressed. Current hypothesis is that the friend pre-physics callback at vtable `+0x28` is still applying follow/tether steering.
+- **Resolved (Session 5, 2026-04-03):** The animation/tether blocker — Donald being pulled back toward Sora by residual vanilla friend behavior after the main AI callback was suppressed — has been fixed. The friend pre-physics callback at vtable `+0x28` was confirmed as the source and is now suppressed alongside the main AI dispatch.
 - Operational note: live unload/reload of the injected DLL is still unstable. Use a fresh KH2 launch for retests instead of hot-swapping the loaded module.
 
 ---
