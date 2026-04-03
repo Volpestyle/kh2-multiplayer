@@ -1,124 +1,94 @@
 # KH2 Multiplayer
 
-Kingdom Hearts II Final Mix multiplayer mod supporting two runtime modes on a shared infrastructure:
+Kingdom Hearts II Final Mix multiplayer mod. Player-controlled friend party members (Donald, Goofy) via in-process DLL injection with full animation, movement, and camera support.
 
-1. **Campaign Co-op** -- up to 3 players share one host-authoritative party/session, each with an independent camera.
-2. **Public Realm** (planned) -- persistent characters, public hubs, party-formed adventure instances, and optional PvP arenas.
+## Start here
 
-Both modes share the transport layer, protocol primitives, identity system, and content hashing. See `docs/ARCHITECTURE_MODES.md` for the full breakdown.
+| What you want | Where to go |
+|---------------|-------------|
+| Understand the project | This file, then `docs/kh2_three_client_coop_design.md` |
+| Build and test the inject DLL | `docs/DEVELOPMENT_WORKFLOW.md` |
+| Navigate the codebase | `docs/CODEBASE_MAP.md` |
+| Continue friend control work | `docs/HANDOFF_FRIEND_CONTROL.md` |
+| Check milestone progress | `docs/IMPLEMENTATION_BACKLOG.md` |
+| Look up memory offsets | `docs/pointer_map_v1.md` + `runtime/include/kh2coop/KH2Offsets.hpp` |
+| Understand RE methodology | `docs/LESSONS_LEARNED.md` |
 
-## Repository layout
+## What works today
 
-| Directory | Status | Contents |
-|-----------|--------|----------|
-| `common/` | **Implemented** | Shared types (`Types.hpp`), protocol structs (`Protocol.hpp`), binary codec (`Codec.hpp/cpp`), `ByteBuffer`, `NetworkClient` (ENet). Stable ID types and forward-looking protocol records for both runtime modes. |
-| `server/` | **Implemented** | `SessionHost` -- lobby, version gating, slot assignment, snapshot/event broadcast, stale-peer timeout. `SimulationState` -- authoritative fake-physics sim for testing. `ServerMain` -- CLI server at 60fps with signal handling. |
-| `runtime/` | **Implemented** | `GameBridgePC` -- attaches to KH2 process, discovers entity structs dynamically, reads room/actor/HP state, retargets camera via fake-actor allocation, dual-writes replica positions. `CameraController`, `ReplicaController`, INI config, CLI scaffold with F8 panic hotkey. |
-| `tests/` | **Implemented** | `FakeSimulation` -- codec round-trips, replica ordering, 3-client network integration, heartbeat timeout, version mismatch rejection, duplicate slot rejection. |
-| `content/` | **Placeholder** | Notes for the GoA test content pack. |
-| `docs/` | **Active** | Design specs, RE session notes, milestone backlog, architecture modes, scope expansion plan, realm protocol sketch. |
+**Friend entity control (M3 — in progress)**
+- Press F5 in-game to take control of Donald (Friend1)
+- Left stick moves Donald with proportional walk/run speed
+- Camera follows Donald, right stick orbits
+- Idle/walk/run animations match stick input (loops correctly at any distance from Sora)
+- Sora frozen in place while controlling Donald
+- Facing persists when stick is released
 
-## Getting Started
+**Networking layer (M0-M2 — complete)**
+- Binary codec for all domain types with little-endian framing
+- Host-authoritative session server: version gating, slot assignment, snapshot broadcast
+- ENet transport with heartbeat, 3-client integration tested
+- Server-side fake physics for protocol testing without KH2
 
-See **[SETUP.md](SETUP.md)** for the full developer setup guide — prerequisites, sibling repos, RE tools (Cheat Engine + Ghidra), MCP configuration, and build instructions.
-
-## Building
-
-```
-cmake -B build -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build
-```
-
-ENet is fetched automatically via CMake FetchContent.
-
-### Build targets
-- `kh2coop_server` -- host-authoritative relay server
-- `kh2coop_runtime_scaffold` -- runtime entry point (attaches to live KH2)
-- `kh2coop_fake_sim` -- end-to-end test harness
-
-### Running the test
-```
-./build/kh2coop_fake_sim
-```
-
-### Running the server
-```
-./build/kh2coop_server --port 7782 --build <hash> --mod <hash>
-```
-
-### Running the runtime
-```
-./build/kh2coop_runtime_scaffold --mode campaign_coop --role 0 --config kh2coop_runtime.ini
-```
-
-## Current status
-
-### What works
-
-**Networking layer (server + common)**
-- Binary codec for all domain structs with explicit little-endian framing and string length guards
-- Server: lobby, version gating, canonical slot assignment (Player=0, Friend1=1, Friend2=2), snapshot/event broadcast, stale-peer timeout with configurable thresholds
-- Client: connect, version handshake with slot request, heartbeat, receive snapshots/events
-- SimulationState: server-side fake physics (movement, gravity, jump, attack/guard/dodge state machine) for protocol testing without KH2
-- Tests: codec round-trips, snapshot ordering, heartbeat timeout, 3-client integration, version mismatch rejection, duplicate slot rejection
-
-**Runtime layer (GameBridgePC)**
-- Attaches to live KH2 process via `ReadProcessMemory`/`WriteProcessMemory`
-- Resolves module base address dynamically
-- Discovers slot-0 entity struct per room transition (camera pointer chain + vtable scan fallback)
-- Reads room state: world ID, room ID, map/battle/event programs, cutscene timer
-- Reads slot-0 position, rotation, velocity, airborne flags from entity struct
-- Reads HP for all 3 slots from static unit slot memory
-- Retargets camera via fake actor allocation + pointer redirect at `camStruct+0x50`
-- Dual-writes replica position to entity struct + buffer array for physics-active rooms
-- INI config system with CLI overrides, F8 panic hotkey to restore vanilla camera
-- Auto-rediscovers entities on room transitions
-
-### What's next (Track A -- finish co-op prototype)
-- Friend1/Friend2 entity struct discovery (slot 0 is done, friends are the blocker)
-- Friend-slot local input injection
-- Native remote avatar spawning / replication beyond slot 0
-- Enemy list discovery and shared combat
-- Room transition protocol tied to live KH2 state
-- Wire `NetworkClient` into the runtime for end-to-end multiplayer
-
-### Future tracks
-- **Track B** -- Refactor for scale: stable IDs, session/instance split, runtime mode enum
-- **Track C** -- Public Realm v1: realm server, save-to-seed import, public hubs, party instances
-- **Track D** -- PvP: arena instances, server-validated damage, anti-cheat
-
-See `docs/IMPLEMENTATION_BACKLOG.md` for the full milestone breakdown.
+**Runtime bridge (M1-M2 — complete)**
+- Attaches to live KH2 via `ReadProcessMemory`/`WriteProcessMemory`
+- Entity discovery, room/actor/HP state reads, camera retargeting
+- Shared-memory IPC (InputMailbox) between runtime and inject DLL
 
 ## Architecture
 
-The project supports two runtime modes sharing one infrastructure:
+Two runtime modes on shared infrastructure:
 
-| Layer | Shared | CampaignCoop | PublicRealm |
-|-------|--------|--------------|-------------|
-| Transport (ENet) | Yes | | |
-| Protocol codec | Yes | | |
-| Identity (PeerId, ActorNetId) | Yes | | |
-| Version/content gating | Yes | | |
-| Session/lobby | | 3-slot canonical party | Realm service + instance registry |
-| Actor model | | PLAYER/FRIEND_1/FRIEND_2 | LocalPrimary + RemoteReplica |
-| Authority | | Host KH2 process | Client-hosted instances (v1) |
-| Persistence | | Host save file | Character + realm persistence |
+1. **Campaign Co-op** — up to 3 players share one host-authoritative session, each controlling a party slot (Sora, Donald, Goofy) with independent cameras.
+2. **Public Realm** (planned) — persistent characters, public hubs, party-formed instances.
 
-See `docs/ARCHITECTURE_MODES.md` and `docs/kh2_multiplayer_scope_expansion_review.md` for details.
+See `docs/ARCHITECTURE_MODES.md` for the full breakdown.
 
-## Recommended development order
-1. Lock a single supported KH2 PC build and one exact mod hash.
-2. Finish the `IGameBridge` pointer map (Friend1/2 entities, enemy list, input path).
-3. Get local camera retargeting working for all 3 slots.
-4. Prove 3 clients in one fixed room before touching transitions.
-5. Only after stable single-room combat should you attempt room travel or story flags.
-6. Refactor protocol IDs for scale (Track B) before branching into public-realm work.
+```
+                    ┌──────────────────┐
+                    │   KH2 Process    │
+                    │  ┌────────────┐  │     shared memory
+                    │  │ inject DLL │◄─┼──── (InputMailbox) ◄── runtime process
+                    │  └────────────┘  │                         │
+                    │   hooks entity   │                         │ ENet
+                    │   update loop    │                    ┌────▼────┐
+                    └──────────────────┘                    │ server  │
+                                                           └─────────┘
+```
 
-## Key documentation
-- `docs/ARCHITECTURE_MODES.md` -- CampaignCoop vs PublicRealm design
-- `docs/kh2_multiplayer_scope_expansion_review.md` -- full scope expansion analysis
-- `docs/kh2_realm_protocol_sketch.jsonc` -- protocol v2 schema sketch
-- `docs/IMPLEMENTATION_BACKLOG.md` -- milestone breakdown (Tracks A-D)
-- `docs/pointer_map_v1.md` -- confirmed memory offsets and runtime bridge coverage
-- `docs/kh2_three_client_coop_design.md` -- original co-op design doc
-- `docs/OPENKH_REFERENCE.md` -- OpenKH resource guide
+## Quick start
+
+```powershell
+# Build everything
+cmake -B build -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build --config Release
+
+# Run E2E test (no KH2 needed)
+.\build\tests\Release\kh2coop_fake_sim.exe
+
+# Build just the inject DLL
+cmake --build build --target kh2coop_inject --config Release
+
+# Restart KH2 + rebuild DLL
+.\scripts\restart-kh2.ps1
+```
+
+See `docs/DEVELOPMENT_WORKFLOW.md` for the full inject/test loop.
+
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| `docs/CODEBASE_MAP.md` | What's in each directory, key source files |
+| `docs/DEVELOPMENT_WORKFLOW.md` | Build/inject/test loop |
+| `docs/HANDOFF_FRIEND_CONTROL.md` | Current state of friend control: hooks, structs, addresses |
+| `docs/LESSONS_LEARNED.md` | Hard-won RE and hooking insights |
+| `docs/IMPLEMENTATION_BACKLOG.md` | Full milestone tracking (M0-M8, Tracks A-D) |
+| `docs/pointer_map_v1.md` | Confirmed memory offsets |
+| `docs/kh2_three_client_coop_design.md` | Original 3-client co-op design |
+| `docs/ARCHITECTURE_MODES.md` | CampaignCoop vs PublicRealm architecture |
+| `docs/INPUT_RE_SESSION.md` | Full Ghidra trace of the KH2 input pipeline |
+| `docs/OPENKH_REFERENCE.md` | Guide to the sibling OpenKH repository |
+| `docs/ACCEPTANCE_TESTS.md` | Pass/fail criteria for each milestone |
+| `docs/KH2_CONTROL_CLI.md` | kh2ctl command reference |
+| `AGENTS.md` | AI agent rules (CE/Ghidra usage, swarm coordination) |

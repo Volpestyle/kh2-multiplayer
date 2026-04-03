@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "kh2ctl": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "${PROJECT_ROOT:-C:/Users/volpe/kh2-multiplayer}/tools/mcp_kh2ctl/server.py"
+      ],
+      "env": {}
+    },
+    "cheatengine": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "${CHEATENGINE_MCP_PATH:-C:/Users/volpe/cheatengine-mcp-bridge/MCP_Server/mcp_cheatengine.py}"
+      ],
+      "env": {}
+    },
+    "ghidra": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "${GHIDRA_MCP_PATH:-C:/Users/volpe/GhidraMCP/bridge_mcp_ghidra.py}",
+        "--ghidra-server",
+        "${GHIDRA_SERVER_URL:-http://127.0.0.1:8080/}"
+      ],
+      "env": {}
+    }
+  }
+}
