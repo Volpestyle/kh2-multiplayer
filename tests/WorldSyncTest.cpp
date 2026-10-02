@@ -10,6 +10,7 @@
 
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/ProgressAllowList.hpp"
 #include "kh2coop/ProgressMirror.hpp"
 #include "kh2coop/SessionHost.hpp"
 
@@ -114,6 +115,17 @@ void testProgressMirror() {
     }
     check(parts.size() >= 3 && parts[0].full && !parts[1].full && total == 130000 && fits,
           "large snapshots split under the packet limit, first part replaces");
+
+    // Policy check on the candidate allow list (D8: per-player state stays off).
+    const auto allow = candidateProgressAllowList();
+    bool sorted = true;
+    for (std::size_t i = 1; i < allow.size(); ++i) {
+        sorted &= allow[i - 1].offset + allow[i - 1].length <= allow[i].offset;
+    }
+    ProgressMirror policy(allow);
+    check(sorted && !policy.allowed(0x24F8) && !policy.allowed(0x353C) &&
+              !policy.allowed(0x3580) && policy.allowed(0x1CFF) && policy.allowed(0x0010),
+          "candidate allow list: no overlaps; stats/party/inventory excluded; story included");
 }
 
 } // namespace

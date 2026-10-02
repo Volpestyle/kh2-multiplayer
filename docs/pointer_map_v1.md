@@ -174,10 +174,18 @@ script). Writing `2` to `PAUSE_STATUS` disables pausing (GoA ROM script).
 | `0x09A98B0` | `SAVE` — live save body; starts with the magic `"KH2J"` (the `KH2J_PROGRAM_TABLE` label above is this block) | Archipelago KH2 client (Steam), matches the live CE label. The KH2 Lua library's Steam table says `0x09A9830` — an older patch; several of its addresses sit `0x80` low (its `Slot1` `0x2A23518` vs Archipelago's `0x2A23598`). Treat other `[KH2LIB]` addresses on this page as unverified until checked live. |
 | `SAVE+0x0C` / `+0x0D` / `+0x0E` | saved world / room / door | `[KH2LIB]` (GoA ROM `Warp`) |
 | `SAVE+0x10 + 0x180*world + 0x6*room` | per-room map / btl / evt program table (3 shorts) | `[KH2LIB]` (GoA ROM `Warp`) |
-| `SAVE+0x3534` | world party table | Expert595 KH2 Online Coop (save-relative; their Epic save body is at RVA `0x09A7070`) |
-| `SAVE+0x353C` | party member bytes — GoA ROM writes `0x12020100` for the full party and `0x12121200` for "Roxas only" | `[KH2LIB]` (GoA ROM) |
+| `SAVE+0x353C` | world party members — GoA ROM writes `0x12020100` for the full party and `0x12121200` for "Roxas only". OpenKH `WorldPartyMembers` `0x3534` and Expert595's "party table at save `+0x3534`" are the same field 8 bytes lower (see note) | `[KH2LIB]` (GoA ROM), OpenKH |
 | `SAVE+0x3524` | current form (`6` = Anti) | `[KH2LIB]` (GoA ROM) |
-| `SAVE+0x3580…` | inventory bytes | `[KH2LIB]` |
+| `SAVE+0x1C98` (20 × `0x20`) | story progress per world (OpenKH `StoryProgress` `0x1C90`); GoA ROM progress checks `+0x1CFF`, `+0x1D2E`, `+0x1EDE` fall inside | OpenKH + 8, unverified |
+| `SAVE+0x2300` (8 × 19) | room-visited flags (OpenKH `RoomVisitedFlag` `0x22F8`) | OpenKH + 8, unverified |
+| `SAVE+0x24F8` (13 × `0x114`) | character stats (OpenKH `Characters` `0x24F0`) | OpenKH + 8, unverified |
+| `SAVE+0x3580…` | inventory bytes (OpenKH `InventoryCount` `0x3580`; this one matches without the +8, so recheck live) | `[KH2LIB]` |
+
+**OpenKH vs in-memory offsets:** OpenKH's `SaveDataFinalMix` offsets read 8
+lower than the in-memory body the GoA ROM addresses (world id OpenKH `0x04` vs
+`SAVE+0x0C`; party members `0x3534` vs `SAVE+0x353C`). The candidate
+progress allow list in `common/include/kh2coop/ProgressAllowList.hpp` uses
+in-memory offsets; verify the shift live before relying on it.
 
 The GoA ROM's `Warp(W,R,D,M,B,E)` writes the `NOW` block (world, room, door,
 programs) and the saved location, but only redirects a transition already in
