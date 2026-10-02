@@ -38,6 +38,10 @@ void NoteActor(uintptr_t actor);
 // not change their HP (the host owns it).
 bool DropLocalEnemyDamage(uintptr_t victim);
 
+// Link quality the runtime publishes (app-level round trip, loss in
+// per-mille). False until a runtime has connected.
+bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille);
+
 void Shutdown();
 
 } // namespace enemysync

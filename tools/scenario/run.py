@@ -478,6 +478,11 @@ def step_crash(ctx: Context, step: dict) -> dict:
     return {}
 
 
+def step_kh2ctl(ctx: Context, step: dict) -> dict:
+    """Any kh2ctl command against one instance, e.g. ["overlay", "on"]."""
+    return kh2ctl(*map(str, step["args"]), pid=ctx.inst(step.get("instance", 0)).pid)
+
+
 def step_hit_all(ctx: Context, step: dict) -> dict:
     """kh2ctl hit damage/kill on every live combat enemy of one instance
     (objentry type 3/4 with stats, not F_). For host-only damage tests."""
@@ -718,6 +723,8 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
     for name, samples in candidates.items():
         errors, lags = [], []
         for t, h, a, p in samples:
+            if t - truth[0][0] < window:
+                continue  # no full lag window of owner history yet
             near = [(math.dist(p, q), t - tq) for tq, hq, q in owner_window(t - window, t)
                     if hq == h]
             if near:
@@ -744,7 +751,8 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "assert": step_assert, "save": step_save, "protect": step_protect,
          "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
-         "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all}
+         "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all,
+         "kh2ctl": step_kh2ctl}
 
 
 # --------------------------------------------------------------------------

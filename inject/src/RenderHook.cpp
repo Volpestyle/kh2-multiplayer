@@ -19,6 +19,7 @@
 // ============================================================================
 
 #include "RenderHook.hpp"
+#include "EnemySync.hpp"
 
 #include "kh2coop/CaptureChannel.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -59,7 +60,7 @@ constexpr int kPresentVtableIndex = 8;
 constexpr int kPresent1VtableIndex = 22;
 constexpr int kExecuteCommandListsVtableIndex = 10;
 constexpr int kRing = 3;
-constexpr UINT kOverlayWidth = 520;
+constexpr UINT kOverlayWidth = 820;
 constexpr UINT kOverlayHeight = 34;
 constexpr UINT kOverlayMargin = 12;
 constexpr UINT64 kOverlayRefreshPresents = 15;
@@ -553,9 +554,15 @@ void RefreshOverlayText(DXGI_FORMAT format) {
     const std::uint8_t room =
         *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::ROOM_ID);
 
-    wchar_t text[128];
-    swprintf_s(text, L"pid %lu  frame %llu  w%02X r%02X  %u fps", GetCurrentProcessId(),
-               static_cast<unsigned long long>(g_presentIndex), world, room, g_fps);
+    wchar_t text[192];
+    int len = swprintf_s(text, L"pid %lu  frame %llu  w%02X r%02X  %u fps", GetCurrentProcessId(),
+                         static_cast<unsigned long long>(g_presentIndex), world, room, g_fps);
+    // Link quality from the runtime (VUH-1493), once one is connected.
+    std::uint32_t rttMs = 0, lossPermille = 0;
+    if (len > 0 && enemysync::NetStats(rttMs, lossPermille)) {
+        swprintf_s(text + len, _countof(text) - len, L"  rtt %u ms  loss %u.%u%%", rttMs,
+                   lossPermille / 10, lossPermille % 10);
+    }
 
     RECT rect {0, 0, static_cast<LONG>(kOverlayWidth), static_cast<LONG>(kOverlayHeight)};
     FillRect(g_overlayDc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));

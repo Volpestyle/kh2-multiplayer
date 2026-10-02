@@ -398,6 +398,8 @@ struct PuppetDriver {
     int lastAnim = -1;           // motion we last set on `actor`
     uint32_t savedTeam = 0;      // `actor`'s team before we zeroed it
     bool teamSaved = false;
+    bool savedNoCollide = false; // `actor`'s no-collision bit before we set it
+    bool noCollideSaved = false;
 };
 static PuppetDriver g_puppets[2];
 static bool g_inPuppetAnimSet = false;
@@ -405,6 +407,12 @@ static bool g_inPuppetAnimSet = false;
 // Team 0 can't be hit: no attack's hit mask includes bit 0 (repos-60's
 // static analysis, VUH-1491). Party members are team 1, enemies team 2.
 static constexpr uintptr_t ACTOR_TEAM = 0x4DC;
+// actor+0x18C bit 6 skips actor separation and terrain collision for this
+// actor only (repos-60, VUH-1502/1492). Puppets set it so the game's per-frame
+// push-out stops fighting the pose we write. The objentry has a similar bit
+// shared by every actor of that model: never touch that one.
+static constexpr uintptr_t ACTOR_COLLISION_FLAGS = 0x18C;
+static constexpr uint8_t ACTOR_NO_COLLIDE = 0x40;
 // Sora's drive gauge (real slot base, Steam Global). Holding it at 0 blocks
 // Drive forms and Summons, which consume or animate party members.
 static constexpr uint64_t SORA_DRIVE_BARS = 0x2A23749;     // u8
@@ -829,10 +837,14 @@ static bool IsDrivenFriend(int friendSlot) {
 // same actor (after a room load the old actor is gone and the new one
 // starts with its own team).
 static void RestorePuppetTeam(PuppetDriver& d, uintptr_t currentActor) {
-    if (d.teamSaved && d.actor != 0 && d.actor == currentActor) {
-        *reinterpret_cast<uint32_t*>(d.actor + ACTOR_TEAM) = d.savedTeam;
+    if (d.actor != 0 && d.actor == currentActor) {
+        if (d.teamSaved) *reinterpret_cast<uint32_t*>(d.actor + ACTOR_TEAM) = d.savedTeam;
+        if (d.noCollideSaved && !d.savedNoCollide) {
+            *reinterpret_cast<uint8_t*>(d.actor + ACTOR_COLLISION_FLAGS) &= ~ACTOR_NO_COLLIDE;
+        }
     }
     d.teamSaved = false;
+    d.noCollideSaved = false;
 }
 
 // Frame start: take new poses, release slots that stopped being puppets,
@@ -842,6 +854,7 @@ static void RestorePuppetTeam(PuppetDriver& d, uintptr_t currentActor) {
 static void ForgetPuppetActor(PuppetDriver& d) {
     d.actor = 0;
     d.teamSaved = false;
+    d.noCollideSaved = false;
     d.lastAnim = -1;
 }
 
@@ -1906,6 +1919,14 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
         d.teamSaved = true;
     }
     *team = 0;
+
+    // Non-colliding while driven; the original bit comes back on release.
+    auto* collision = reinterpret_cast<uint8_t*>(actor + ACTOR_COLLISION_FLAGS);
+    if (d.actor == actor && !d.noCollideSaved) {
+        d.savedNoCollide = (*collision & ACTOR_NO_COLLIDE) != 0;
+        d.noCollideSaved = true;
+    }
+    *collision |= ACTOR_NO_COLLIDE;
 }
 
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {

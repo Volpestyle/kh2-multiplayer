@@ -502,6 +502,15 @@ bool DropLocalEnemyDamage(uintptr_t victim) {
     return g_role == Role::Client && g_inst.live && IsEnemy(victim);
 }
 
+bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille) {
+    if (!g_bridge.IsOpen()) return false;
+    const auto stats = g_bridge.NetStats();
+    if (stats.rttMs == WORLD_NET_UNKNOWN) return false;
+    rttMs = stats.rttMs;
+    lossPermille = stats.lossPermille;
+    return true;
+}
+
 void Shutdown() { g_bridge.Close(); }
 
 } // namespace enemysync

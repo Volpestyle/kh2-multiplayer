@@ -1,0 +1,136 @@
+{
+  "name": "net_wall_hug",
+  "description": "Puppet collision check (VUH-1492 caveat): the owner pushes Sora into the GoA corridor walls; the viewer's puppet (non-colliding via actor+0x18C bit 0x40) must stay on the owner's stream, max error under 50 units, with no per-frame push-out in its trace. Also captures the overlay's rtt/loss line (VUH-1493). Recording starts 1.5 s after the puppet activates: its first ~60 frames carry the companion's leftover motion (decaying 50 -> 13 units), which our write overrides each frame.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "env": {
+        "KH2COOP_PUPPET_TRACE": "1"
+      }
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player",
+      "link": {
+        "latencyMs": 50,
+        "jitterMs": 10,
+        "lossPct": 2
+      }
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1",
+      "link": {
+        "latencyMs": 50,
+        "jitterMs": 10,
+        "lossPct": 2
+      }
+    },
+    {
+      "do": "wait_until",
+      "expr": "(bridge(1).get('puppet0') or {}).get('active')",
+      "timeoutMs": 10000,
+      "pollMs": 500
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "args": [
+        "overlay",
+        "on"
+      ]
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "record",
+      "as": "rec",
+      "instances": [
+        0,
+        1
+      ]
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 3000
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": -1,
+      "ms": 4500
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 2500
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "record_stop",
+      "as": "rec"
+    },
+    {
+      "do": "wait",
+      "ms": 6000
+    },
+    {
+      "do": "capture",
+      "name": "overlay",
+      "instance": 1
+    },
+    {
+      "do": "save",
+      "as": "err_0_on_1",
+      "expr": "puppet_error(saved['rec'], 0, 1)"
+    },
+    {
+      "do": "save",
+      "as": "rtt_log",
+      "expr": "runtime_log(1).count('Net: rtt=')"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_0_on_1'].get('max', 1e9) < 50",
+      "message": "puppet off its owner by 0.5 m+ (wall push-out?)"
+    }
+  ]
+}
