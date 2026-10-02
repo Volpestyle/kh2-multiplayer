@@ -71,6 +71,19 @@ public:
     // Get the KH2 process ID (valid only while attached).
     std::uint32_t ProcessId() const;
 
+    // Every actor on the active entity list, for RE and enemy identification.
+    struct ActorInfo {
+        std::uint64_t address {0};
+        std::uint32_t objectId {0};
+        std::string name;              // objentry model name ("" if none)
+        std::uint32_t objectType {0};  // objentry+0x04 (u8): 3 = boss, 4 = mob (unverified)
+        std::uint32_t team {0};        // actor+0x4DC (unverified)
+        std::uint32_t moveState {0};   // entity+0x100
+        std::uint32_t motionId {0};
+        Vec3 position {};
+    };
+    std::vector<ActorInfo> ListActors() const;
+
 private:
     // Low-level memory helpers (Windows-only implementations).
     template <typename T>

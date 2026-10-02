@@ -518,22 +518,55 @@ bool GameBridgePC::hasEnemyObjEntryPrefix(std::uint64_t actorAddr) const {
     return separator == '_' && (prefix == 'B' || prefix == 'M');
 }
 
+std::vector<GameBridgePC::ActorInfo> GameBridgePC::ListActors() const {
+    using namespace offsets;
+    std::vector<ActorInfo> actors;
+    if (!attached_) return actors;
+
+    std::uint64_t actorAddr = readAbs<std::uint64_t>(baseAddress_ + active_entity_list::HEAD);
+    for (std::uint32_t iter = 0;
+         actorAddr != 0 && iter < active_entity_list::MAX_TRAVERSAL; ++iter) {
+        ActorInfo info;
+        info.address = actorAddr;
+        info.team = readAbs<std::uint32_t>(actorAddr + 0x4DC);
+        info.motionId = readAbs<std::uint32_t>(actorAddr + actor::ANIM_ID);
+        const std::uint64_t entityAddr = actorAddr + actor::ENTITY_TRANSFORM;
+        info.moveState = readAbs<std::uint32_t>(entityAddr + entity::MOVE_STATE);
+        info.position = {readAbs<float>(entityAddr + entity::POS_X),
+                         readAbs<float>(entityAddr + entity::POS_Y),
+                         readAbs<float>(entityAddr + entity::POS_Z)};
+        if (const std::uint64_t obj = actorObjEntryPtr(actorAddr)) {
+            info.objectId = readAbs<std::uint32_t>(obj + objentry::OBJECT_ID);
+            info.objectType = readAbs<std::uint8_t>(obj + objentry::TYPE_FLAGS);
+            for (int i = 0; i < 32; ++i) {
+                const char c = static_cast<char>(readAbs<std::uint8_t>(obj + objentry::NAME + i));
+                if (c == '\0' || c < 0x20 || c > 0x7E) break;
+                info.name.push_back(c);
+            }
+        }
+        actors.push_back(std::move(info));
+
+        const std::uint64_t next = nextLinkedActor(actorAddr);
+        if (next == actorAddr) break;
+        actorAddr = next;
+    }
+    return actors;
+}
+
 bool GameBridgePC::isEnemyActor(std::uint64_t actorAddr) const {
     using namespace offsets;
 
     if (!attached_ || actorAddr == 0) return false;
 
-    const std::uint64_t entityAddr = actorAddr + actor::ENTITY_TRANSFORM;
-    if (!isValidEntityStruct(entityAddr)) return false;
-
-    const std::uint32_t moveState =
-        readAbs<std::uint32_t>(entityAddr + entity::MOVE_STATE);
-    if (moveState != enemy::MS_ACTIVE_GROUND &&
-        moveState != enemy::MS_ACTIVE_ALT) {
-        return false;
-    }
-
-    return hasEnemyObjEntryPrefix(actorAddr);
+    // objentry type: 3 = boss, 4 = mob. Verified live 2026-10-02 in the
+    // Parlor Ambush: eight M_EX020_RAW Shadows are type 4 / team 2. The old
+    // filter (player-style entity struct + moveState 8/9 + B_/M_ name)
+    // missed them: some enemies (M_EX020) don't share the player's entity
+    // layout, so their moveState reads garbage.
+    const std::uint64_t objEntryPtr = actorObjEntryPtr(actorAddr);
+    if (objEntryPtr == 0) return false;
+    const std::uint8_t type = readAbs<std::uint8_t>(objEntryPtr + objentry::TYPE_FLAGS);
+    return type == objentry::TYPE_BOSS || type == objentry::TYPE_MOB;
 }
 
 bool GameBridgePC::DiscoverEntityAddresses() {

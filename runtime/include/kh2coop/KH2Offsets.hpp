@@ -466,7 +466,11 @@ namespace enemy {
 // --------------------------------------------------------------------------
 namespace objentry {
     constexpr std::uint64_t OBJECT_ID   = 0x00; // dword [CONFIRMED] ObjEntry/object ID
-    constexpr std::uint64_t TYPE_FLAGS  = 0x04; // dword [PARTIAL] type/flags field; layout still under RE
+    constexpr std::uint64_t TYPE_FLAGS  = 0x04; // u8 [CONFIRMED] object type (OpenKH ObjectType)
+    // Types seen live: 0 player, 1 party member, 3 boss, 4 mob, 5 weapon,
+    // 7 world point, 8 field object, 20 shop point, 22 prize.
+    constexpr std::uint8_t TYPE_BOSS    = 3;    // [GHIDRA]
+    constexpr std::uint8_t TYPE_MOB     = 4;    // [CONFIRMED] Parlor Ambush Shadows
     constexpr std::uint64_t NAME        = 0x08; // char[32] [CONFIRMED] object name, e.g. "P_EX100"
     constexpr std::uint64_t MSET_NAME   = 0x28; // char[32] [CONFIRMED] motion-set name, e.g. "P_EX100.mset"
 }

@@ -2369,6 +2369,31 @@ CommandResult CmdPeek(std::vector<std::string> args) {
     return {0, out.str()};
 }
 
+// entities: every actor on the active entity list (RE aid, VUH-1486/1499).
+CommandResult CmdEntities(std::vector<std::string> args) {
+    if (!args.empty()) throw std::runtime_error("Unexpected argument for entities: " + args.front());
+    GameBridgePC game;
+    if (!WaitForAttach(game, kDefaultAttachTimeoutMs, kDefaultPollMs)) {
+        return MakeAttachTimeout("entities");
+    }
+    std::ostringstream out;
+    out << "{\"ok\":true,\"processId\":" << game.ProcessId() << ",\"actors\":[";
+    const auto actors = game.ListActors();
+    for (std::size_t i = 0; i < actors.size(); ++i) {
+        const auto& a = actors[i];
+        std::ostringstream addr;
+        addr << "0x" << std::hex << std::uppercase << a.address;
+        out << (i ? "," : "") << "{\"address\":\"" << addr.str() << "\",\"name\":"
+            << JsonString(a.name) << ",\"objectId\":" << a.objectId
+            << ",\"objectType\":" << a.objectType << ",\"team\":" << a.team
+            << ",\"moveState\":" << a.moveState << ",\"motionId\":" << a.motionId
+            << ",\"position\":{\"x\":" << a.position.x << ",\"y\":" << a.position.y
+            << ",\"z\":" << a.position.z << "}}";
+    }
+    out << "]}";
+    return {0, out.str()};
+}
+
 CommandResult CmdFps(std::vector<std::string> args) {
     const int windowMs =
         ParseNumber<int>(ConsumeOption(args, "--window-ms").value_or("2000"), "--window-ms");
@@ -2404,6 +2429,7 @@ void PrintUsage() {
         << "       [--timeout-ms N]     load a room (programs default to the save's)\n"
         << "  peek --rva RVA[:u8|u16|i16|u32|i32|f32|u64][,...] [--samples N]\n"
         << "       [--interval-ms N]    sample exe-relative memory\n"
+        << "  entities                  every actor on the active entity list\n"
         << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"
         << "      LAUNCH_OPTS: [--game-dir DIR] [--dll PATH] [--no-inject]\n"
         << "                   [--window-timeout-ms N] [--settle-ms N]\n"
@@ -2496,6 +2522,8 @@ int main(int argc, char* argv[]) {
             result = CmdWarp(std::move(args));
         } else if (command == "peek") {
             result = CmdPeek(std::move(args));
+        } else if (command == "entities") {
+            result = CmdEntities(std::move(args));
         } else if (command == "restart") {
             result = CmdRestart(std::move(args));
         } else if (command == "state") {

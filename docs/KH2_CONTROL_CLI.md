@@ -187,20 +187,27 @@ thread at the start of a frame. Programs left out (`0xFFFF`) come from the
 save's per-room table. It returns once the room has loaded: the DLL's frame
 counter stalls during the load (~0.55 s) and must resume in the target room
 for 30 frames. World/room in `NOW` change as soon as the request is made, so
-they alone don't show the load finished. Measured 2026-10-02: 50/50 warps
-across 13 rooms in Twilight Town, Hollow Bastion (incl. GoA `04/1A`) and
-Beast's Castle, 1.0–2.8 s each; Sora could move after every one.
+they alone don't show the load finished. Measured 2026-10-02 with the
+safe-state gate: 50/50 warps across 13 rooms in Twilight Town, Hollow
+Bastion (incl. GoA `04/1A`) and Beast's Castle, including two combat rooms
+(`05/00`, `05/06`; 4 enemies each spawned on the first visit), 1.0–3.3 s
+each. Sora could move after every one.
 
 - **Rooms that open on a cutscene** (`05/02`, `05/08` with default
   programs) load, but Sora can't move. Avoid them as fixtures.
-- **Combat rooms:** the battle program alone doesn't spawn enemies. Scripted
-  fights come from event programs: `--world 5 --room 1 --evt 1` (Parlor
-  Ambush) put the game in forced battle (`0x2A11404` = 2) and Sora took
-  damage. `--world 8 --room 0x0C --evt 1` (Attack on the Camp) plays an
-  ~85 s cutscene and, on the test save, no fight followed. The BC courtyard
-  (`05/06`) spawns enemies once Sora runs far enough in. `kh2ctl state`'s enemy
-  list (objentry `B_`/`M_` prefix) reported 0 enemies during the ambush, so
-  it misses these Heartless.
+- **Combat rooms:** the battle program alone doesn't spawn enemies; mob
+  rooms spawn them when Sora walks in. On the BC-first-visit save, the
+  Entrance Hall (`05/00`) and courtyard (`05/06`, doors 0–1) spawn 4–5
+  Heartless after ~2 s of running, and `05/04` spawns 1. Battle state
+  `0x2A11404` reads 1 (regular) or 2 (forced). Scripted fights come from
+  event programs: `--world 5 --room 1 --evt 1` (Parlor Ambush, 8 Shadows,
+  forced battle). `--world 8 --room 0x0C --evt 1` (Attack on the Camp) plays
+  an ~85 s cutscene with no fight on that save. Mob rooms hurt Sora, so
+  don't idle in them.
+- **Enemy detection:** `kh2ctl state` lists actors whose objentry type
+  (`objentry+0x04`) is 3 (boss) or 4 (mob). `kh2ctl entities` lists every
+  actor with name, type, team (`actor+0x4DC`: 1 party, 2 enemy) and move
+  state.
 - **Safe-state gate:** a request is handed over only when nothing is
   frozen (`0x2A171E8` == 0), the room is live (`0x9BA8D0` != 0), no menu is
   open (`0x7435D0` == `0xFF`) and no cutscene timer is running (`0xB64F98`
