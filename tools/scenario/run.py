@@ -544,7 +544,7 @@ def step_runtime(ctx: Context, step: dict) -> dict:
     """Start a runtime bound to one instance (--pid) and connect it to
     the relay. Waits until its log shows it connected."""
     inst = ctx.inst(step.get("instance", 0))
-    cmd = [str(RUNTIME), "--network", "--server", "127.0.0.1", "--port", str(ctx.relay_port),
+    cmd = [str(RUNTIME), "--network", "--server", step.get("server", "127.0.0.1"), "--port", str(ctx.relay_port),
            "--pid", str(inst.pid), "--role", step["role"],
            "--peer-id", step.get("peerId", f"peer{inst.index}"), "--no-camera"]
     # Impairment, applied by the runtime to both directions: owner -> viewer

@@ -1,0 +1,139 @@
+{
+  "name": "net_tailscale_self",
+  "description": "VUH-1493 prep: as net_two_instances, but both runtimes reach the relay through this PC's Tailscale address (100.108.214.60) instead of loopback. Proves the relay is reachable on the Tailscale interface; it is not a second network.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player",
+      "server": "100.108.214.60"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1",
+      "server": "100.108.214.60"
+    },
+    {
+      "do": "save",
+      "as": "bridge0",
+      "expr": "bridge(0)"
+    },
+    {
+      "do": "save",
+      "as": "bridge1",
+      "expr": "bridge(1)"
+    },
+    {
+      "do": "wait_until",
+      "expr": "(bridge(1).get('puppet0') or {}).get('active') and (bridge(0).get('puppet0') or {}).get('active')",
+      "timeoutMs": 15000,
+      "pollMs": 1000
+    },
+    {
+      "do": "record",
+      "as": "rec",
+      "instances": [
+        0,
+        1
+      ]
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": -1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": -1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": -1,
+      "ms": 900
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "record_stop",
+      "as": "rec"
+    },
+    {
+      "do": "capture",
+      "name": "end",
+      "instance": 0
+    },
+    {
+      "do": "capture",
+      "name": "end",
+      "instance": 1
+    },
+    {
+      "do": "save",
+      "as": "err_0_on_1",
+      "expr": "puppet_error(saved['rec'], 0, 1)"
+    },
+    {
+      "do": "save",
+      "as": "err_1_on_0",
+      "expr": "puppet_error(saved['rec'], 1, 0)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_0_on_1'].get('mean', 1e9) < 50",
+      "message": "instance 1's puppet of 0 is off"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_1_on_0'].get('mean', 1e9) < 50",
+      "message": "instance 0's puppet of 1 is off"
+    }
+  ]
+}
