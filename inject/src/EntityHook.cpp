@@ -384,15 +384,30 @@ static kh2coop::AvatarBridge g_avatarBridge;
 // follow timer held so physics can't pull the puppet back toward Sora.
 // ============================================================================
 
+static void Log(const char* fmt, ...);
+
 struct PuppetDriver {
     kh2coop::PuppetPose pose {};
     bool have = false;           // a pose has arrived
     uint32_t poseFrame = 0;      // DLL frame of the latest new pose
     uintptr_t actor = 0;         // actor we last drove (re-resolved per frame)
     int lastAnim = -1;           // motion we last set on `actor`
+    uint32_t savedTeam = 0;      // `actor`'s team before we zeroed it
+    bool teamSaved = false;
 };
 static PuppetDriver g_puppets[2];
 static bool g_inPuppetAnimSet = false;
+
+// Team 0 can't be hit: no attack's hit mask includes bit 0 (repos-60's
+// static analysis, VUH-1491). Party members are team 1, enemies team 2.
+static constexpr uintptr_t ACTOR_TEAM = 0x4DC;
+// Sora's drive gauge (real slot base, Steam Global). Holding it at 0 blocks
+// Drive forms and Summons, which consume or animate party members.
+static constexpr uint64_t SORA_DRIVE_BARS = 0x2A23749;     // u8
+static constexpr uint64_t SORA_DRIVE_PARTIAL = 0x2A23748;  // u8
+static bool g_driveHeld = false;
+static uint8_t g_savedDriveBars = 0;
+static uint8_t g_savedDrivePartial = 0;
 
 // Release a puppet back to its AI when poses stop arriving (the runtime
 // normally clears `active` itself; this covers a dead writer).
@@ -417,16 +432,58 @@ static bool IsDrivenFriend(int friendSlot) {
     return friendSlot != 0 && (g_soloTestMode || IsPuppetSlot(friendSlot));
 }
 
-// Frame start: take any new poses from the bridge.
+// Puts back the team of an actor we stopped driving, if it's still the
+// same actor (after a room load the old actor is gone and the new one
+// starts with its own team).
+static void RestorePuppetTeam(PuppetDriver& d, uintptr_t currentActor) {
+    if (d.teamSaved && d.actor != 0 && d.actor == currentActor) {
+        *reinterpret_cast<uint32_t*>(d.actor + ACTOR_TEAM) = d.savedTeam;
+    }
+    d.teamSaved = false;
+}
+
+// Frame start: take new poses, release slots that stopped being puppets,
+// and hold the drive gauge while any puppet is active.
 static void PollPuppetPoses() {
     if (!g_avatarBridge.IsOpen()) return;
+    const uintptr_t friends[2] = {g_friend1Actor, g_friend2Actor};
+    bool anyActive = false;
     for (int i = 0; i < 2; ++i) {
+        const bool wasActive = IsPuppetSlot(i + 1);
         kh2coop::PuppetPose pose;
         if (g_avatarBridge.TryReadPuppet(i, pose)) {
             g_puppets[i].pose = pose;
             g_puppets[i].have = true;
             g_puppets[i].poseFrame = g_frameCounter;
         }
+        const bool active = IsPuppetSlot(i + 1);
+        if (wasActive && !active) {
+            RestorePuppetTeam(g_puppets[i], friends[i]);
+            g_puppets[i].lastAnim = -1;
+            Log("Puppet %d released", i);
+        } else if (!wasActive && active) {
+            Log("Puppet %d active", i);
+        }
+        anyActive = anyActive || active;
+    }
+
+    auto* bars = reinterpret_cast<uint8_t*>(g_exeBase + SORA_DRIVE_BARS);
+    auto* partial = reinterpret_cast<uint8_t*>(g_exeBase + SORA_DRIVE_PARTIAL);
+    if (anyActive) {
+        if (!g_driveHeld) {
+            g_savedDriveBars = *bars;
+            g_savedDrivePartial = *partial;
+            g_driveHeld = true;
+            Log("Puppets active: holding drive gauge at 0 (was %u bars, %u partial)",
+                g_savedDriveBars, g_savedDrivePartial);
+        }
+        *bars = 0;
+        *partial = 0;
+    } else if (g_driveHeld) {
+        *bars = g_savedDriveBars;
+        *partial = g_savedDrivePartial;
+        g_driveHeld = false;
+        Log("No puppets: drive gauge restored");
     }
 }
 static bool     g_mailboxAvailable     = false;
@@ -1335,6 +1392,7 @@ static void DrivePuppetMotion(void* actorObj, int friendSlot) {
     if (d.actor != actor) {  // new room / reloaded actor
         d.actor = actor;
         d.lastAnim = -1;
+        d.teamSaved = false;
     }
 
     const auto& pose = d.pose.pose;
@@ -1371,6 +1429,16 @@ static void ApplyPuppetTransform(void* actorObj, int friendSlot) {
     *reinterpret_cast<float*>(entity + offsets::entity::ROT_Y) = pose.rotationY;
     std::memset(reinterpret_cast<void*>(actor + ACTOR_VELOCITY), 0, 3 * sizeof(float));
     *reinterpret_cast<float*>(actor + ACTOR_FOLLOW_TIMER) = DISABLE_FOLLOW_TIMER;
+
+    // Untouchable: team 0 is in no attack's hit mask. Re-applied every frame
+    // in case the game resets it; the original team comes back on release.
+    PuppetDriver& d = g_puppets[friendSlot - 1];
+    auto* team = reinterpret_cast<uint32_t*>(actor + ACTOR_TEAM);
+    if (d.actor == actor && !d.teamSaved) {
+        d.savedTeam = *team;
+        d.teamSaved = true;
+    }
+    *team = 0;
 }
 
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {

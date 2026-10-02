@@ -204,6 +204,10 @@ each. Sora could move after every one.
   forced battle). `--world 8 --room 0x0C --evt 1` (Attack on the Camp) plays
   an ~85 s cutscene with no fight on that save. Mob rooms hurt Sora, so
   don't idle in them.
+- **Test fixtures:** `kh2ctl poke --pid N --addr <actor+0x4DC> --type u32
+  --value 0` makes Sora untouchable (team 0 is in no attack's hit mask), so
+  combat-room tests don't end in a game over. `poke` only writes to
+  rig-launched instances.
 - **Enemy detection:** `kh2ctl state` lists actors whose objentry type
   (`objentry+0x04`) is 3 (boss) or 4 (mob). `kh2ctl entities` lists every
   actor with name, type, team (`actor+0x4DC`: 1 party, 2 enemy) and move

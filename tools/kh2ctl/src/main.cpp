@@ -2369,6 +2369,51 @@ CommandResult CmdPeek(std::vector<std::string> args) {
     return {0, out.str()};
 }
 
+// poke: write one value into a rig instance (test fixtures and RE).
+//   kh2ctl poke --pid N (--rva 0x... | --addr 0x...) --type u8|u16|u32|i32|f32 --value V
+CommandResult CmdPoke(std::vector<std::string> args) {
+    const auto rvaRaw = ConsumeOption(args, "--rva");
+    const auto addrRaw = ConsumeOption(args, "--addr");
+    const std::string type = ConsumeOption(args, "--type").value_or("u32");
+    const auto valueRaw = ConsumeOption(args, "--value");
+    if (!args.empty()) throw std::runtime_error("Unexpected argument for poke: " + args.front());
+    if ((rvaRaw.has_value() == addrRaw.has_value()) || !valueRaw) {
+        throw std::runtime_error("poke needs exactly one of --rva/--addr, and --value");
+    }
+    const DWORD pid = ResolveTargetPid();
+    // Writes go only to instances the rig launched.
+    bool owned = false;
+    const auto ownedList = ReadOwned();
+    for (const auto& proc : ListKh2Processes()) {
+        if (proc.pid == pid) owned = IsOwned(proc, ownedList);
+    }
+    if (!owned) return MakeError("poke only writes to rig-launched instances");
+    HANDLE process = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_VM_READ |
+                                 PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (!process) return MakeError("OpenProcess failed for PID " + std::to_string(pid));
+    const std::uint64_t address = rvaRaw ? ModuleBase(process) + std::stoull(*rvaRaw, nullptr, 0)
+                                         : std::stoull(*addrRaw, nullptr, 0);
+    std::uint8_t bytes[4] {};
+    std::size_t size = 4;
+    if (type == "f32") {
+        const float f = std::stof(*valueRaw);
+        std::memcpy(bytes, &f, 4);
+    } else {
+        const auto v = static_cast<std::uint32_t>(std::stoll(*valueRaw, nullptr, 0));
+        std::memcpy(bytes, &v, 4);
+        size = type == "u8" ? 1 : type == "u16" ? 2 : 4;
+    }
+    const BOOL ok = WriteProcessMemory(process, reinterpret_cast<LPVOID>(address), bytes, size,
+                                       nullptr);
+    CloseHandle(process);
+    if (!ok) return MakeError("WriteProcessMemory failed: " + std::to_string(GetLastError()));
+    std::ostringstream out;
+    out << "{\"ok\":true,\"processId\":" << pid << ",\"address\":\"0x" << std::hex
+        << std::uppercase << address << std::dec << "\",\"type\":" << JsonString(type)
+        << ",\"value\":" << JsonString(*valueRaw) << "}";
+    return {0, out.str()};
+}
+
 // entities: every actor on the active entity list (RE aid, VUH-1486/1499).
 CommandResult CmdEntities(std::vector<std::string> args) {
     if (!args.empty()) throw std::runtime_error("Unexpected argument for entities: " + args.front());
@@ -2430,6 +2475,8 @@ void PrintUsage() {
         << "  peek --rva RVA[:u8|u16|i16|u32|i32|f32|u64][,...] [--samples N]\n"
         << "       [--interval-ms N]    sample exe-relative memory\n"
         << "  entities                  every actor on the active entity list\n"
+        << "  poke (--rva R | --addr A) --type u8|u16|u32|i32|f32 --value V\n"
+        << "                            write one value (rig-launched instances only)\n"
         << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"
         << "      LAUNCH_OPTS: [--game-dir DIR] [--dll PATH] [--no-inject]\n"
         << "                   [--window-timeout-ms N] [--settle-ms N]\n"
@@ -2524,6 +2571,8 @@ int main(int argc, char* argv[]) {
             result = CmdPeek(std::move(args));
         } else if (command == "entities") {
             result = CmdEntities(std::move(args));
+        } else if (command == "poke") {
+            result = CmdPoke(std::move(args));
         } else if (command == "restart") {
             result = CmdRestart(std::move(args));
         } else if (command == "state") {
