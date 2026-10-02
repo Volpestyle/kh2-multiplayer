@@ -577,3 +577,16 @@ File: `runtime/src/GameBridgePC.cpp`
 | `InjectOwnedInput(slot, input)` | TODO | Input pipeline fully mapped (see Input System section). Friends are AI-only; injection requires Strategy A (direct entity write) or Strategy B (AI hook). |
 | `ApplyReplicaActorState(state)` | Implemented | All slots: position/rotation/flags to entity struct. Slot 0: dual-write to buffer. All: HP + camera fake actor. |
 | `ApplyReplicaEnemyState(state)` | TODO | Enemy traversal + objectId now exist; HP/spawn-group/damage writeback still needs mapping |
+
+### Limit command gate (`[GHIDRA]`, 2026-10-02, VUH-1491; not yet checked live)
+
+| RVA | Role |
+|---|---|
+| `0x2AE5690` | `limt` table pointer (`03system.bin`, loaded by `0x3F4C30`). `0x40`-byte entries: `+0x09..+0x0B` required partner character ids, `+0x30` u16 command id |
+| `0x2A161E8` | `cmd` table pointer |
+| `0x3E7C30(cmdId)` | plain `limt` lookup by command id |
+| `0x3E7800(cmdId)` | `limt` entry only if usable now (partners present and active via `0x3D5C70` / `0x3BA720`, player-actor bit `+0x6CB`&1, a room flag) |
+| `0x3D88E0(actor, cmd*, state)` | per-command menu state for limits: `5` while a limit runs (`0x2A24CC0`) or MP recharges, `2` when MP is short; `5` read as greyed out |
+| `0x3D8B40` | executes a limit; re-checks `0x3E7800` |
+
+To block limits while puppets are active, hook `0x3D88E0` and return `5` for any command `0x3E7C30` recognises.
