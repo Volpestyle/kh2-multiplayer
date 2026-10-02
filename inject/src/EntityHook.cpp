@@ -373,7 +373,6 @@ static kh2coop::MailboxReader g_mailboxReader;
 
 // Avatar telemetry to the runtime (VUH-1490) and puppet poses back (VUH-1491).
 static kh2coop::AvatarBridge g_avatarBridge;
-static constexpr uintptr_t kSoraMotionTime = 0x19C;  // float, frames in current motion
 static bool     g_mailboxAvailable     = false;
 static uint32_t g_lastMailboxCheckFrame = 0;
 static constexpr uint32_t MAILBOX_RETRY_INTERVAL = 120;  // liveness check, ~2 sec at 60fps
@@ -1637,15 +1636,6 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 *reinterpret_cast<const std::uint32_t*>(g_exeBase + offsets::CUTSCENE_TIMER) != 0;
             AvatarState avatar = captureAvatar(DirectMemory {}, g_exeBase, g_soraActor,
                                                inEvent, false);
-            // Sora's motion clock is inline in his actor, next to the motion
-            // id (+0x180): actor+0x19C, float frames since the motion
-            // started. Verified live 2026-10-02: +1 per frame, 2.0 on each
-            // motion change, wraps with the run loop. actor+0x158 -> +0x44
-            // (the friend motCtrl layout) reads fill bytes for Sora. Speed
-            // isn't mapped for him yet.
-            avatar.motionTime =
-                *reinterpret_cast<const float*>(g_soraActor + kSoraMotionTime);
-            avatar.motionSpeed = 1.0f;
             avatar.seq = g_frameCounter;
             g_avatarBridge.PublishLocal(avatar);
         }
