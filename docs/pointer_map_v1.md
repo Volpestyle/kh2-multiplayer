@@ -590,3 +590,11 @@ File: `runtime/src/GameBridgePC.cpp`
 | `0x3D8B40` | executes a limit; re-checks `0x3E7800` |
 
 To block limits while puppets are active, hook `0x3D88E0` and return `5` for any command `0x3E7C30` recognises.
+
+### Actor behaviour flags `actor+0x18C` (`[GHIDRA]`, 2026-10-02; bit 6 not yet checked live)
+
+| Bit | Effect |
+|---|---|
+| 6 (`0x40`) | Skips collision: actor-vs-actor separation in `EntityPositionPhysics` (`0x3B89A0` → `0x3B81D0`), and terrain collision plus ground snap in the position calculator (`0x3B9090`). Per actor; the objentry-wide equivalent is `objentry+0x0C & 2` (shared by every actor of that type). Use for non-colliding puppets |
+| 14 (`0x4000`) | TakeDamage (`0x3D5E50`) passes reactFlag 0, so no hit reaction |
+| `0x1000020` | Also skips the ground-snap block in `0x3B9090` |
