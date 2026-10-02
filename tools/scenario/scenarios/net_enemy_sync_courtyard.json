@@ -1,6 +1,6 @@
 {
   "name": "net_enemy_sync_courtyard",
-  "description": "VUH-1502: host + 2 clients (roles from the runtimes' session slots) in 05/06. Host-only damage: clients' HP must match the host's; host kills must kill every client copy once through the native path; later waves cleared the same way.",
+  "description": "VUH-1502: host + 2 clients (roles from the runtimes' session slots) in 05/06. Host-only damage: clients' HP must match the host's; host kills must kill every client copy once through the native path; later waves cleared the same way. A client's own combo must not change enemy HP (its hits are dropped; claims are VUH-1501).",
   "steps": [
     {
       "do": "boot",
@@ -155,6 +155,43 @@
       "do": "assert",
       "expr": "saved['after_damage'][0] == saved['after_damage'][1] == saved['after_damage'][2] and saved['after_damage'][0] != saved['before'][0]",
       "message": "client HP doesn't match the host's after host-only damage"
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 600
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "times": 15,
+      "gapMs": 300
+    },
+    {
+      "do": "wait",
+      "ms": 500
+    },
+    {
+      "do": "save",
+      "as": "client_drops",
+      "expr": "log_count('[drop]', 1)"
+    },
+    {
+      "do": "save",
+      "as": "after_client_hits",
+      "expr": "[enemy_hps(k) for k in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['client_drops'] > 0",
+      "message": "the client's combo never landed a hit (test would be vacuous)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_client_hits'][0] == saved['after_client_hits'][1] == saved['after_client_hits'][2]",
+      "message": "a client's own hits changed enemy HP"
     },
     {
       "do": "save",
