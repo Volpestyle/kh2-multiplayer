@@ -109,7 +109,11 @@ std::string JsonString(const std::string& value) {
 
 template <typename T>
 T ParseNumber(const std::string& raw, const char* flagName) {
-    std::istringstream input(raw);
+    // Integers accept a 0x prefix (room ids are usually written in hex).
+    const bool hex = std::is_integral_v<T> && raw.size() > 2 && raw[0] == '0' &&
+                     (raw[1] == 'x' || raw[1] == 'X');
+    std::istringstream input(hex ? raw.substr(2) : raw);
+    if (hex) input >> std::hex;
     T value {};
     input >> value;
     if (!input || !input.eof()) {
