@@ -37,6 +37,7 @@ Rules:
 - `boot-load-save` is known broken (keys land before the title menu exists; see `docs/KH2_CONTROL_CLI.md`). Until it's fixed, load saves with step-by-step `tap-key` and check each step.
 - Use `player-input/player-move/player-press` for native slot-0 control (goes through inject DLL's raw input collector hook).
 - Friend-slot gameplay automation should go through mailbox-backed `kh2ctl input/move/press` commands.
+- `avatarctl` (`build/Release/avatarctl.exe`) drives a KH2 instance's AvatarBridge without a network: `synth` runs a puppet around a circle, `record`/`replay` capture and replay the local avatar stream into a puppet slot, `fake-local` stands in for the DLL, `peek` prints the bridge. Usage is in `tools/avatarctl/main.cpp`.
 
 ### Testing Principle
 **Tests follow stabilization, not implementation.** Write regression tests only after an interface stops changing. For live KH2 memory code (`GameBridgePC`, `CameraController`, etc.), manual smoke tests against a running game process are the real validation. Reserve unit/integration tests for stabilized boundaries like the codec, protocol, and networking layer.

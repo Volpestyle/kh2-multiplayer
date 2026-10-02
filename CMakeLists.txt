@@ -125,6 +125,15 @@ add_executable(kh2coop_bridge_test
 target_link_libraries(kh2coop_bridge_test PRIVATE kh2coop_server_core kh2coop_common)
 
 # ---------------------------------------------------------------------------
+# avatarctl — record/replay/synthesize avatar streams through a KH2
+# instance's AvatarBridge (puppet-driver testing without a network).
+# ---------------------------------------------------------------------------
+if(WIN32)
+    add_executable(avatarctl tools/avatarctl/main.cpp)
+    target_link_libraries(avatarctl PRIVATE kh2coop_common winmm)
+endif()
+
+# ---------------------------------------------------------------------------
 # kh2coop_inject — in-process DLL for friend AI replacement (Strategy B).
 # Loads into KH2's process and hooks PerEntityUpdate to replace friend AI
 # with player input from XInput gamepads.
