@@ -35,6 +35,8 @@ struct ClientCallbacks {
     // Host only: a client's hit claim, attackerSlot stamped by the relay
     std::function<void(const HitClaim&)> onHitClaim;
     std::function<void(const ProgressUpdate&)> onProgressUpdate;
+    // Any world packet (the types above), raw, for forwarding to the DLL.
+    std::function<void(const std::vector<std::uint8_t>&)> onWorldPacket;
     std::function<void(const std::string&)> onLog;
 };
 
@@ -95,6 +97,9 @@ public:
     void sendHitClaim(const HitClaim& m);
     void sendTransitionAck(const TransitionAck& m);
     void sendProgressUpdate(const ProgressUpdate& m); // host only
+
+    // An already-encoded packet (e.g. from the DLL's WorldBridge).
+    void sendRawPacket(const std::vector<std::uint8_t>& packet, bool reliable);
     [[nodiscard]] bool hasClockSync() const { return clockSamples_ > 0; }
     [[nodiscard]] std::uint64_t estimatedServerTimeMs() const;
     [[nodiscard]] std::uint32_t roundTripMs() const { return bestRttMs_; }

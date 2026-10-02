@@ -126,6 +126,24 @@ std::vector<std::uint8_t> encode(const ProgressUpdate& m);
 // PacketType::AvatarRelay (host -> clients); the payload is identical.
 std::vector<std::uint8_t> encode(const AvatarState& a, PacketType type);
 
+// World sync packets (host-authored state, hit claims, acks): the ones the
+// runtime shuttles between the relay and the DLL's WorldBridge.
+inline bool isWorldPacket(PacketType t) {
+    switch (t) {
+        case PacketType::RoomTransition:
+        case PacketType::EventHold:
+        case PacketType::EnemyManifest:
+        case PacketType::EnemyHp:
+        case PacketType::EnemyDeath:
+        case PacketType::ProgressUpdate:
+        case PacketType::HitClaim:
+        case PacketType::TransitionAck:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // Read the framed header. Returns the PacketType and sets payloadOut /
 // payloadSizeOut to point into the original buffer (no copy).
 // Throws on truncated header.

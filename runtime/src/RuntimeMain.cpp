@@ -20,6 +20,7 @@
 #ifdef _WIN32
 #include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/InputMailbox.hpp"
+#include "kh2coop/WorldPump.hpp"
 #endif
 
 #include <algorithm>
@@ -693,6 +694,10 @@ int main(int argc, char* argv[]) {
     kh2coop::AvatarSync avatarSync(options.config.ownedSlot);
 #ifdef _WIN32
     kh2coop::AvatarBridge avatarBridge;
+    // Discrete world events (transitions, enemies, claims, progress) as
+    // encoded packets: DLL -> relay and relay -> DLL.
+    kh2coop::WorldBridge worldBridge;
+    kh2coop::WorldPumpStats worldStats;
 #endif
     std::unique_ptr<kh2coop::NetworkClient> netClient;
     std::atomic_bool netConnected {false};
@@ -803,6 +808,13 @@ int main(int argc, char* argv[]) {
             avatarSync.onRemote(avatar);
         };
 
+#ifdef _WIN32
+        callbacks.onWorldPacket = [&worldBridge, &worldStats](
+                                      const std::vector<std::uint8_t>& packet) {
+            kh2coop::forwardToDll(worldBridge, packet, worldStats);
+        };
+#endif
+
         callbacks.onEvent = [](const kh2coop::EventMessage& evt) {
             std::cout << "[Runtime] Network: Event type="
                       << static_cast<int>(evt.type)
@@ -906,6 +918,12 @@ int main(int argc, char* argv[]) {
         if (netClient && netConnected) {
             if (!avatarBridge.IsOpen()) {
                 avatarBridge.Open(static_cast<DWORD>(game.ProcessId()));
+            }
+            if (!worldBridge.IsOpen()) {
+                worldBridge.Open(static_cast<DWORD>(game.ProcessId()));
+            }
+            if (worldBridge.IsOpen()) {
+                kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
             }
             if (avatarBridge.IsOpen()) {
                 kh2coop::AvatarState local;

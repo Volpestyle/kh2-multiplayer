@@ -175,6 +175,11 @@ void NetworkClient::sendProgressUpdate(const ProgressUpdate& m) {
     if (connected_) sendPacket(encode(m), true);
 }
 
+void NetworkClient::sendRawPacket(const std::vector<std::uint8_t>& packet,
+                                  bool reliable) {
+    if (connected_ && !packet.empty()) sendPacket(packet, reliable);
+}
+
 void NetworkClient::sendClockPing() {
     if (!connected_) return;
     lastPingMs_ = localTimeMs();
@@ -275,6 +280,10 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
         std::size_t payloadSize = 0;
         auto type = decodePacketHeader(data, size, payload, payloadSize);
         ByteReader reader(payload, payloadSize);
+
+        if (isWorldPacket(type) && callbacks_.onWorldPacket) {
+            callbacks_.onWorldPacket(std::vector<std::uint8_t>(data, data + size));
+        }
 
         switch (type) {
             case PacketType::SessionState: {
