@@ -47,7 +47,9 @@ Rules:
 
 **KH2 Lua Library** (`~/kh2-lua-library`) — Community runtime memory addresses for all PC versions. Use for non-Steam-Global builds, unit slot internal offsets, save file structure, game state detection. Do NOT use for entity transforms, camera, or animation RE.
 
-**Ghidra + GhidraMCP** (`~/GhidraMCP`) — Static binary analysis via MCP. Use for decompiling functions, tracing xrefs, understanding call chains, renaming/annotating. Use Ghidra for static analysis, CE for dynamic analysis. Cross-reference both.
+**Ghidra, headless** (`scripts/ghidra.ps1`) — no GUI needed, safe for several agents at once (read-only). `-Setup` builds the fully analyzed project in `build/ghidra/kh2_full` once; then `-Decompile 0xRVA[,0xRVA]` prints the function with its callers/callees, and `-Xrefs 0xRVA [-Window 0x40] [-MaxDecomp 3]` lists every read/write near an address and decompiles the users. RVAs match `pointer_map_v1.md`. Prefer this to `~/kh2.gpr`, which lacks data xrefs.
+
+**Ghidra + GhidraMCP** (`~/GhidraMCP`) — Static binary analysis via MCP against a running Ghidra GUI. Use for renaming/annotating interactively. Use Ghidra for static analysis, CE (or the rig's probes) for dynamic analysis. Cross-reference both.
 
 **LuaBackend** (`~/kh2-tools/LuaBackend`) — Lua scripting engine with frame hook via DLL proxy. Reference for hook mechanisms, Lua API, memory access patterns.
 
