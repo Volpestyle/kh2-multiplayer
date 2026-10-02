@@ -34,6 +34,8 @@
 #include "Warp.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
+#include "kh2coop/AvatarBridge.hpp"
+#include "kh2coop/AvatarCapture.hpp"
 
 #include <Windows.h>
 #include <MinHook.h>
@@ -368,6 +370,10 @@ static uint32_t g_lastMovementLogFrame = 0;
 // Network input mailbox — shared memory bridge from the runtime process.
 // When available, overrides local gamepad reads with network-received InputFrames.
 static kh2coop::MailboxReader g_mailboxReader;
+
+// Avatar telemetry to the runtime (VUH-1490) and puppet poses back (VUH-1491).
+static kh2coop::AvatarBridge g_avatarBridge;
+static constexpr uintptr_t kSoraMotionTime = 0x19C;  // float, frames in current motion
 static bool     g_mailboxAvailable     = false;
 static uint32_t g_lastMailboxCheckFrame = 0;
 static constexpr uint32_t MAILBOX_RETRY_INTERVAL = 120;  // liveness check, ~2 sec at 60fps
@@ -1623,6 +1629,27 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
     // the animation based on the motion chain. Our override here gets the
     // LAST WORD on the animation before rendering.
     __try {
+        // Local avatar for the runtime (VUH-1490): Sora's state after his own
+        // update this frame. seq carries the DLL's game-frame counter so a
+        // recording shows dropped frames; the runtime restamps it to send.
+        if (reinterpret_cast<uintptr_t>(actorObj) == g_soraActor && g_avatarBridge.IsOpen()) {
+            const bool inEvent =
+                *reinterpret_cast<const std::uint32_t*>(g_exeBase + offsets::CUTSCENE_TIMER) != 0;
+            AvatarState avatar = captureAvatar(DirectMemory {}, g_exeBase, g_soraActor,
+                                               inEvent, false);
+            // Sora's motion clock is inline in his actor, next to the motion
+            // id (+0x180): actor+0x19C, float frames since the motion
+            // started. Verified live 2026-10-02: +1 per frame, 2.0 on each
+            // motion change, wraps with the run loop. actor+0x158 -> +0x44
+            // (the friend motCtrl layout) reads fill bytes for Sora. Speed
+            // isn't mapped for him yet.
+            avatar.motionTime =
+                *reinterpret_cast<const float*>(g_soraActor + kSoraMotionTime);
+            avatar.motionSpeed = 1.0f;
+            avatar.seq = g_frameCounter;
+            g_avatarBridge.PublishLocal(avatar);
+        }
+
         if (savedFriendSlot != 0) {
             // Re-inject movement input after physics overwrites.
             // The motion controller tick (FUN_1403c6740) has already run
@@ -1847,6 +1874,11 @@ bool Initialize(uintptr_t exeBase) {
     // keeps working if the renderer can't be hooked.
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
+    if (g_avatarBridge.Open(GetCurrentProcessId())) {
+        Log("  Avatar bridge open (Local\\kh2coop_avatar_%lu)", GetCurrentProcessId());
+    } else {
+        Log("  WARNING: avatar bridge failed to open (%lu)", GetLastError());
+    }
 
     Log("  InputCollector hook installed");
     Log("Initialization complete — waiting for friend entities...");
