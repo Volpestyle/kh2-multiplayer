@@ -221,6 +221,22 @@ garbage (`0xE5E04CA0`). `+0x80` (`0xABB878`) reads 0. `CONTROLLABLE`
 reads `FF`. None of them changed when tested (no menu could be opened by
 script), so they stay unverified.
 
+**Static `+0x80` corrections (`[GHIDRA]`, not yet checked live).** The game's
+code addresses these at the library value `+0x80`:
+
+| RVA | Meaning |
+|---|---|
+| `0x2A11404` (`BATTLE_STATUS`+0x80) | battle type: `0x3AB690` sets `2` (forced battle), `0x3ABAB0` clears it, `0x3ABB20` tests `!= 0` |
+| `0x2A171E8` (`CONTROLLABLE`+0x80) | frozen-entity-group bitset; `0x3BFA40` skips an entity whose group bit is set. `0` = nothing frozen |
+| `0xABB878` (`PAUSE_STATUS`+0x80) | pause-blocker bitmask; the pause watcher `0x1572B0` opens pause only when it is `0`, `0x9BA8D0 != 0` and Start is pressed |
+| `0x9BA8D0` | "in field" byte; the load task `0x152A90` clears it at load start |
+| `0xB64F98` (`CUTSCENE_TIMER`+0x80) | cutscene timer |
+| `0x8EC5C0` (`LOADING_INDICATOR`+0x80) | loading indicator |
+| `0x2AE5D78` (`SPAWNS`+0x80) | **not** an enemy toggle: a rotating 0–7 index for an effect's random spread (`0x3F3FA0`) |
+
+`CURRENT_OPEN_MENU` `0x7435D0` needs no shift. Suggested safe-state gate:
+`0x2A171E8 == 0 && 0x9BA8D0 != 0 && menu == 0xFF && cutscene idle`.
+
 ### Unit slot stat system
 
 | Offset | Name | Source |
