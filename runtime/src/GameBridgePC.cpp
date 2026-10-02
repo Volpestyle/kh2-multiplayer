@@ -47,6 +47,17 @@ bool GameBridgePC::Attach() {
     CloseHandle(snap);
 
     if (pid == 0) return false;
+    return Attach(static_cast<std::uint32_t>(pid));
+#else
+    // Non-Windows stub.
+    return false;
+#endif
+}
+
+bool GameBridgePC::Attach(std::uint32_t pid) {
+#ifdef _WIN32
+    if (attached_) return ProcessId() == pid;
+    if (pid == 0) return false;
 
     HANDLE handle = OpenProcess(PROCESS_VM_READ | PROCESS_VM_WRITE |
                                 PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION,
@@ -62,8 +73,9 @@ bool GameBridgePC::Attach() {
 
     MODULEENTRY32 modEntry;
     modEntry.dwSize = sizeof(modEntry);
-    if (!Module32First(modSnap, &modEntry)) {
-        // Module enumeration failed — cannot determine base address.
+    if (!Module32First(modSnap, &modEntry) ||
+        std::strcmp(modEntry.szModule, KH2_PROCESS_NAME) != 0) {
+        // Module enumeration failed, or the pid isn't KH2.
         CloseHandle(modSnap);
         CloseHandle(handle);
         return false;

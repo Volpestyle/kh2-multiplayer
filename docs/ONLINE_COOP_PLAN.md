@@ -191,13 +191,13 @@ loaded, get several instances into a known room, act, look, and judge.
 - **Hands-free loading.** Launch KH2 suspended, inject, resume. This replaces
   the Cheat Engine step and runs our code before game init, which multi-instance
   support needs. A proxy-DLL loader is the packaging path for players (P4).
-- **Several instances on one PC.** The exe imports `CreateMutexA`, so a
-  single-instance lock is possible; early injection can rename it. Each
-  instance also has to keep running unfocused, mute its audio, read only its
-  own controller (the game merges every pad into slot 0), and accept scripted
-  input through its PID-keyed mailbox, which already supports this. If 2–3
-  instances can't run on one PC, autonomous multiplayer testing needs a second
-  Windows machine — a hardware decision for James.
+- **Several instances on one PC** *(VUH-1484, 2026-10-01: works)*. There is
+  no single-instance lock: three instances ran in-game together for 10
+  minutes, each kept simulating unfocused and was driven separately through
+  its PID-keyed mailbox, and `kh2ctl mute` silences all but one. Still open:
+  each instance reads every physical pad (the game merges them into slot 0),
+  so per-instance controller assignment has to be built before manual
+  multi-instance play.
 - **Eyes.** A swapchain `Present` hook in the DLL returns a screenshot of any
   instance on request, even when occluded, and carries a debug overlay. The
   same hook later draws the co-op HUD.
@@ -334,7 +334,7 @@ loaded, get several instances into a known room, act, look, and judge.
 
 | # | Risk | Likelihood | Impact | Retired by | Fallback |
 |---|---|---|---|---|---|
-| R1 | 2–3 instances can't run on one PC | Low–Medium (Expert595 runs two) | Autonomy | VUH-1484 | Second Windows PC/VM (James decides hardware) |
+| R1 | 2–3 instances can't run on one PC | **Retired 2026-10-01**: 3 instances ran 10 min in-game | Autonomy | VUH-1484 | Second Windows PC/VM (James decides hardware) |
 | R2 | A friend slot can't render and animate Sora's moveset | Low–Medium (Expert595 spawns a native Sora there) | D3 | VUH-1489 | Canonical slots plus friend action injection |
 | R3 | Puppet motions don't fire VFX, SFX or hitboxes | Medium | Medium | VUH-1489, VUH-1500 | Effects as events; host-side hit detection |
 | R4 | Enemy spawns differ between instances | Low–Medium | High | VUH-1499 | Host-commanded spawns (spawn RE) |

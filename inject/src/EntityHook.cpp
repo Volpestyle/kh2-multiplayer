@@ -368,7 +368,10 @@ static uint32_t g_lastMovementLogFrame = 0;
 static kh2coop::MailboxReader g_mailboxReader;
 static bool     g_mailboxAvailable     = false;
 static uint32_t g_lastMailboxCheckFrame = 0;
-static constexpr uint32_t MAILBOX_RETRY_INTERVAL = 120;  // ~2 sec at 60fps
+static constexpr uint32_t MAILBOX_RETRY_INTERVAL = 120;  // liveness check, ~2 sec at 60fps
+// Connect retries are cheap (OpenFileMapping on a missing name) and kh2ctl
+// pulses only keep the mailbox open for their duration, so poll quickly.
+static constexpr uint32_t MAILBOX_CONNECT_INTERVAL = 6;  // ~0.1 sec at 60fps
 
 // ============================================================================
 // Logging
@@ -537,7 +540,7 @@ static void ClearMailboxCachedState() {
 static bool PollMailbox() {
     if (!g_mailboxAvailable) {
         // Periodically retry opening the mailbox (runtime may start later)
-        if (g_frameCounter - g_lastMailboxCheckFrame >= MAILBOX_RETRY_INTERVAL) {
+        if (g_frameCounter - g_lastMailboxCheckFrame >= MAILBOX_CONNECT_INTERVAL) {
             g_lastMailboxCheckFrame = g_frameCounter;
             if (g_mailboxReader.Open()) {
                 g_mailboxAvailable = true;

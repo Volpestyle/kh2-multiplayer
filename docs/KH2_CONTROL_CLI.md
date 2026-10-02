@@ -115,7 +115,35 @@ per-PID log and the hooks that installed:
   `--settle-ms` (wait after the window appears, default 1500),
   `--init-timeout-ms` (wait for the DLL's hooks, default 15000).
 - Injection happens once the window is up, not suspended before game init.
-  Startup hooks or a single-instance mutex rename would need the early path.
+  Startup hooks would need the early path; multi-instance doesn't (below).
+
+### Several instances
+
+KH2 has no single-instance lock: `launch` can be run repeatedly, and three
+instances have run in-game at once (VUH-1484). Each uses ~640 MB of RAM.
+
+- **Pick an instance with `--pid`.** Every game command (`state`, `wait-*`,
+  `focus`, `tap-key`, `player-*`, friend input, …) takes `--pid N`. With more
+  than one KH2 running and no `--pid`, kh2ctl refuses instead of guessing,
+  so it can't drive an instance James is playing.
+- **Unfocused instances keep running** and accept `player-*` / friend input
+  through their own PID-keyed mailbox. Keyboard commands (`tap-key`,
+  `load-save`) focus the target window first, so menus are driven one
+  instance at a time.
+- **Audio.** `kh2ctl mute --pid N` mutes an instance's Windows audio session
+  (`--off` unmutes). The session exists once the game has played sound, so mute
+  after the title screen comes up.
+- **Controllers.** Every instance still reads every physical pad, focused or
+  not. Per-instance pad assignment isn't built yet.
+- `restart` and `boot-load-save` kill **all** rig instances before launching
+  one.
+
+### Mute
+
+```powershell
+kh2ctl mute --pid 1234          # mute
+kh2ctl mute --pid 1234 --off    # unmute
+```
 
 ### Restart
 
@@ -146,6 +174,14 @@ kh2ctl focus
 kh2ctl tap-key --key enter
 kh2ctl hold-key --key down --duration-ms 750
 ```
+
+Keys are sent with their real scan codes (extended flag for arrows and
+navigation keys). KH2 reads scan codes; before 2026-10-01 kh2ctl sent scan
+code 0, so every key, Enter included, reached the game as the same key and
+the menu macros misbehaved.
+
+Title menu (verified 2026-10-01): `down` then `enter` on a clean title opens
+the save list. The save list opens on the most recently used slot, not slot 1.
 
 ### Save-load macro
 
@@ -182,9 +218,15 @@ This is the first end-to-end "get me to a playable room" command. It:
 `0xFF`, which is also true during the boot logos and intro, so the menu keys
 land before the title menu exists. The title menu (NEW GAME / LOAD / BACK)
 also wraps and doesn't always start on NEW GAME, so a fixed key count can't
-reach LOAD reliably. It needs a title-menu-ready signal and the cursor index
-from memory. Until then, drive the menu step by step with `tap-key`. From a
-clean boot, the cursor starts on NEW GAME.
+reach LOAD reliably. The save list opens on the last-used slot, so counting
+`down` presses from slot 1 picks the wrong save. It needs a title-menu-ready
+signal and the cursor indexes from memory (asked of the offline lane on
+VUH-1488). Until then, drive the menu step by step with `tap-key` and check
+each step with a screenshot. From a clean boot, the cursor starts on NEW GAME.
+
+`wait-ingame` has a false positive too: the title's idle demo (the opening
+monologue) reads world 1 / room 1, and that value stays in memory after the
+demo is skipped, so `wait-ingame` can pass at the title.
 
 ## Player Input Commands
 
@@ -205,6 +247,17 @@ Accepted player button names include:
 - `r1`, `rb`, `lockon`
 - `start`, `select`, `back`
 - `dup`, `ddown`, `dleft`, `dright`
+
+**Stick bytes look swapped (2026-10-01, no physical controller attached).**
+`--lx/--ly` turned the camera and `--rx/--ry` moved Sora: `--ry -1` for 3 s
+moved him ~370 units forward. The DLL writes `--lx/--ly` to raw-slot bytes
+`0x02/0x03` (`LSTICK_*` in `KH2Offsets.hpp`, marked confirmed, probably with a
+real pad). Until the layout is rechecked with a controller, move Sora with
+`player-input --rx/--ry`; `player-move` uses the left-stick fields and may
+only turn the camera.
+
+The DLL now retries the mailbox every ~6 frames (was ~120), so short pulses
+are no longer missed.
 
 ### Convenience wrappers
 

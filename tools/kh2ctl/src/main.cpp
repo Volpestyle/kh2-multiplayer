@@ -4,6 +4,8 @@
 
 #include <Windows.h>
 #include <TlHelp32.h>
+#include <audiopolicy.h>
+#include <mmdeviceapi.h>
 
 #include <algorithm>
 #include <array>
@@ -155,18 +157,26 @@ void SleepMs(int durationMs) {
     }
 }
 
+// Instance selected with the global --pid option; empty means "the only KH2
+// running" (main refuses to guess when several are running).
+std::optional<std::uint32_t> g_targetPid;
+
+bool AttachGame(GameBridgePC& game) {
+    return g_targetPid ? game.Attach(*g_targetPid) : game.Attach();
+}
+
 bool WaitForAttach(GameBridgePC& game, int timeoutMs, int pollMs) {
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
 
     do {
-        if (game.Attach()) {
+        if (AttachGame(game)) {
             return true;
         }
         SleepMs(pollMs);
     } while (std::chrono::steady_clock::now() < deadline);
 
-    return game.Attach();
+    return AttachGame(game);
 }
 
 std::string RoomStateToJson(const RoomState& room) {
@@ -721,6 +731,76 @@ void KillOwned(std::optional<DWORD> pid, std::vector<DWORD>& killed,
     PruneOwned();
 }
 
+// Mutes or unmutes every audio session the process owns on the default output
+// device. Returns the number of sessions changed (0 if it hasn't opened one).
+int SetProcessMute(DWORD pid, bool mute, std::string& error) {
+    const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    IMMDeviceEnumerator* enumerator = nullptr;
+    IMMDevice* device = nullptr;
+    IAudioSessionManager2* manager = nullptr;
+    IAudioSessionEnumerator* sessions = nullptr;
+    int changed = 0;
+
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                __uuidof(IMMDeviceEnumerator),
+                                reinterpret_cast<void**>(&enumerator))) ||
+        FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &device)) ||
+        FAILED(device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
+                                reinterpret_cast<void**>(&manager))) ||
+        FAILED(manager->GetSessionEnumerator(&sessions))) {
+        error = "Could not enumerate audio sessions on the default output device";
+    } else {
+        int count = 0;
+        sessions->GetCount(&count);
+        for (int i = 0; i < count; ++i) {
+            IAudioSessionControl* control = nullptr;
+            IAudioSessionControl2* control2 = nullptr;
+            ISimpleAudioVolume* volume = nullptr;
+            DWORD sessionPid = 0;
+            if (SUCCEEDED(sessions->GetSession(i, &control)) &&
+                SUCCEEDED(control->QueryInterface(__uuidof(IAudioSessionControl2),
+                                                  reinterpret_cast<void**>(&control2))) &&
+                SUCCEEDED(control2->GetProcessId(&sessionPid)) && sessionPid == pid &&
+                SUCCEEDED(control->QueryInterface(__uuidof(ISimpleAudioVolume),
+                                                  reinterpret_cast<void**>(&volume))) &&
+                SUCCEEDED(volume->SetMute(mute ? TRUE : FALSE, nullptr))) {
+                ++changed;
+            }
+            if (volume) volume->Release();
+            if (control2) control2->Release();
+            if (control) control->Release();
+        }
+    }
+
+    if (sessions) sessions->Release();
+    if (manager) manager->Release();
+    if (device) device->Release();
+    if (enumerator) enumerator->Release();
+    if (SUCCEEDED(init)) CoUninitialize();
+    return changed;
+}
+
+CommandResult CmdMute(std::vector<std::string> args) {
+    const auto pidRaw = ConsumeOption(args, "--pid");
+    const bool off = ConsumeFlag(args, "--off");
+    if (!pidRaw) throw std::runtime_error("mute requires --pid");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for mute: " + args.front());
+    }
+    const DWORD pid = ParseNumber<DWORD>(*pidRaw, "--pid");
+    std::string error;
+    const int sessions = SetProcessMute(pid, !off, error);
+    if (!error.empty()) return MakeError(error);
+    if (sessions == 0) {
+        return MakeError("No audio session for PID " + std::to_string(pid) +
+                         " (the game opens one once it starts playing audio)");
+    }
+    std::ostringstream out;
+    out << "{\"ok\":true,\"processId\":" << pid << ",\"muted\":" << JsonBool(!off)
+        << ",\"sessions\":" << sessions << "}";
+    return {0, out.str()};
+}
+
 // Kills rig-owned KH2 processes only. Unowned ones (James playing) are left.
 CommandResult CmdKill(std::vector<std::string> args) {
     const auto pidRaw = ConsumeOption(args, "--pid");
@@ -840,11 +920,25 @@ std::optional<KeySpec> ParseKeySpec(const std::string& rawName) {
     return std::nullopt;
 }
 
+bool IsExtendedKey(WORD vk) {
+    switch (vk) {
+    case VK_UP: case VK_DOWN: case VK_LEFT: case VK_RIGHT:
+    case VK_HOME: case VK_END: case VK_PRIOR: case VK_NEXT:
+    case VK_INSERT: case VK_DELETE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// KH2 reads scan codes, so a VK-only event (scan code 0) makes every key look
+// the same to the game. Send the real scan code, flagged extended where needed.
 bool SendVk(WORD vk, DWORD flags) {
     INPUT input {};
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = vk;
-    input.ki.dwFlags = flags;
+    input.ki.wScan = static_cast<WORD>(MapVirtualKeyW(vk, MAPVK_VK_TO_VSC));
+    input.ki.dwFlags = flags | (IsExtendedKey(vk) ? KEYEVENTF_EXTENDEDKEY : 0);
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
@@ -1231,7 +1325,7 @@ CommandResult CmdState(std::vector<std::string> args) {
     }
 
     GameBridgePC game;
-    game.Attach();
+    AttachGame(game);
     return BuildStateJson(game);
 }
 
@@ -1537,7 +1631,7 @@ CommandResult CmdBootLoadSave(std::vector<std::string> args) {
         return {titleWait.exitCode, out.str()};
     }
 
-    if (!game.Attach()) {
+    if (!AttachGame(game)) {
         return MakeAttachTimeout("boot-load-save after title wait");
     }
 
@@ -1835,10 +1929,13 @@ CommandResult CmdPlayerPress(std::vector<std::string> args) {
 void PrintUsage() {
     std::cout
         << "kh2ctl commands:\n"
+        << "  (game commands take --pid N to pick an instance; required when\n"
+        << "   several KH2 instances are running)\n"
         << "  launch [LAUNCH_OPTS]      launch KH2 and inject the current DLL build\n"
         << "  inject --pid N [--dll PATH] [--init-timeout-ms N]\n"
         << "  instances                 list KH2 processes and whether the rig owns them\n"
         << "  kill (--pid N | --all)    kill rig-launched KH2 processes only\n"
+        << "  mute --pid N [--off]      mute (or unmute) one instance's audio\n"
         << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"
         << "      LAUNCH_OPTS: [--game-dir DIR] [--dll PATH] [--no-inject]\n"
         << "                   [--window-timeout-ms N] [--settle-ms N]\n"
@@ -1884,6 +1981,27 @@ int main(int argc, char* argv[]) {
         const std::string command = ToLower(argv[1]);
         std::vector<std::string> args(argv + 2, argv + argc);
 
+        // Rig commands manage processes themselves (inject/kill take their
+        // own --pid). Every other command attaches to one instance: the one
+        // named by --pid, or the only KH2 running.
+        const bool rigCommand = command == "launch" || command == "inject" ||
+                                command == "instances" || command == "kill" ||
+                                command == "mute" ||
+                                command == "restart" ||
+                                command == "boot-load-save";
+        if (!rigCommand && command != "help" && command != "--help" &&
+            command != "-h") {
+            if (const auto pidRaw = ConsumeOption(args, "--pid")) {
+                g_targetPid = ParseNumber<std::uint32_t>(*pidRaw, "--pid");
+            } else if (ListKh2Processes().size() > 1) {
+                const auto error = MakeError(
+                    "Several KH2 instances are running; pass --pid "
+                    "(see kh2ctl instances)");
+                std::cout << error.json << std::endl;
+                return error.exitCode;
+            }
+        }
+
         CommandResult result;
         if (command == "help" || command == "--help" || command == "-h") {
             PrintUsage();
@@ -1896,6 +2014,8 @@ int main(int argc, char* argv[]) {
             result = CmdInstances(std::move(args));
         } else if (command == "kill") {
             result = CmdKill(std::move(args));
+        } else if (command == "mute") {
+            result = CmdMute(std::move(args));
         } else if (command == "restart") {
             result = CmdRestart(std::move(args));
         } else if (command == "state") {

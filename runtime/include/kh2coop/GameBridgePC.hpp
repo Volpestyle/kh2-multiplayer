@@ -24,7 +24,12 @@ public:
 
     // Attempt to find and attach to the KH2 process.
     // Call this once at startup. Returns true if the process was found.
+    // With several KH2 instances running this picks the first one found;
+    // use Attach(pid) to choose.
     bool Attach();
+
+    // Attach to a specific KH2 process. Returns false if it isn't running.
+    bool Attach(std::uint32_t pid);
 
     // Detach from the process.
     void Detach();
