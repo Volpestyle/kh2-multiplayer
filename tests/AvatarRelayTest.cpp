@@ -271,7 +271,6 @@ void testAvatarCapture() {
     namespace o = offsets;
     const std::uint64_t exe = 0x140000000ULL;
     const std::uint64_t actor = 0x7FF600001000ULL;
-    const std::uint64_t motCtrl = 0x7FF600009000ULL;
     FakeMemory m;
     m.put<std::uint8_t>(exe + o::WORLD_ID, 4);
     m.put<std::uint8_t>(exe + o::ROOM_ID, 0x1A);
@@ -286,9 +285,7 @@ void testAvatarCapture() {
     m.put<float>(actor + capture::ACTOR_VELOCITY, 3.0f);
     m.put<float>(actor + capture::ACTOR_VELOCITY + 8, -4.0f);
     m.put<std::uint32_t>(actor + o::actor::ANIM_ID, 151);
-    m.put<std::uint64_t>(actor + capture::ACTOR_MOTCTRL, motCtrl);
-    m.put<float>(motCtrl + capture::MOTCTRL_TIME, 12.5f);
-    m.put<float>(motCtrl + capture::MOTCTRL_SPEED, 1.25f);
+    m.put<float>(actor + capture::ACTOR_MOTION_TIME, 12.5f);
 
     const auto a = captureAvatar(m, exe, actor, false, false);
     check(a.worldId == 4 && a.roomId == 0x1A && a.hp == 87 && a.maxHp == 120,
@@ -296,8 +293,8 @@ void testAvatarCapture() {
     check(a.position.x == 10.0f && a.position.y == -20.0f && a.position.z == 30.0f &&
               a.rotationY == 1.5f && a.velocity.x == 3.0f && a.velocity.z == -4.0f,
           "transform from entity+0x30/+0x4C, velocity from actor+0xB98");
-    check(a.motionId == 151 && a.motionTime == 12.5f && a.motionSpeed == 1.25f,
-          "motion id from actor+0x180, time/speed through the motion controller");
+    check(a.motionId == 151 && a.motionTime == 12.5f && a.motionSpeed == 1.0f,
+          "motion id from actor+0x180, time from actor+0x19C");
     check((a.flags & AvatarAirborne) && !(a.flags & AvatarInCutscene), "airborne flag set");
 
     const auto noActor = captureAvatar(m, exe, 0, false, false);

@@ -18,10 +18,11 @@
 namespace kh2coop {
 
 namespace capture {
-    // Motion controller (Session 5): actor+0x158 -> motCtrl.
-    constexpr std::uint64_t ACTOR_MOTCTRL   = 0x158;  // qword pointer
-    constexpr std::uint64_t MOTCTRL_TIME    = 0x44;   // float, current animation time
-    constexpr std::uint64_t MOTCTRL_SPEED   = 0x150;  // float, playback speed multiplier
+    // The player's motion clock is inline in the actor (verified live,
+    // VUH-1490): float frames since the motion started, +1 per frame, reset on
+    // every motion change. The friend motCtrl (actor+0x158 -> +0x44) holds
+    // fill bytes for Sora. Playback speed isn't mapped for the player; 1.0.
+    constexpr std::uint64_t ACTOR_MOTION_TIME = 0x19C; // float
     // Physics inputs read by EntityPositionPhysics (pointer_map_v1.md).
     constexpr std::uint64_t ACTOR_VELOCITY  = 0xB98;  // 3 floats
 } // namespace capture
@@ -58,12 +59,8 @@ AvatarState captureAvatar(const Reader& mem, std::uint64_t exeBase, std::uint64_
                   mem.template read<float>(actor + capture::ACTOR_VELOCITY + 8)};
     a.motionId = mem.template read<std::uint32_t>(actor + o::actor::ANIM_ID);
 
-    const auto motCtrl = mem.template read<std::uint64_t>(actor + capture::ACTOR_MOTCTRL);
-    if (motCtrl != 0) {
-        a.motionTime = mem.template read<float>(motCtrl + capture::MOTCTRL_TIME);
-        const float speed = mem.template read<float>(motCtrl + capture::MOTCTRL_SPEED);
-        a.motionSpeed = speed > 0.0f ? speed : 1.0f;
-    }
+    a.motionTime = mem.template read<float>(actor + capture::ACTOR_MOTION_TIME);
+    a.motionSpeed = 1.0f;
     return a;
 }
 
