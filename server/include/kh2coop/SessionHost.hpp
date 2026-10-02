@@ -92,6 +92,7 @@ public:
     [[nodiscard]] const std::vector<PeerState>& peers() const { return peers_; }
     [[nodiscard]] std::size_t verifiedPeerCount() const;
     [[nodiscard]] bool isRunning() const { return running_; }
+    [[nodiscard]] std::uint64_t relayedAvatarCount() const { return relayedAvatars_; }
 
 private:
     // ENet event handlers
@@ -124,6 +125,7 @@ private:
     _ENetHost* enetHost_{nullptr};
     bool running_{false};
     std::uint32_t nextSnapshotId_{1};
+    std::uint64_t relayedAvatars_{0};
 };
 
 } // namespace kh2coop

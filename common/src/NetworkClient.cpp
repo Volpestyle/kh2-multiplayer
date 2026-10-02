@@ -2,6 +2,7 @@
 
 #include <enet/enet.h>
 
+#include <chrono>
 #include <utility>
 
 namespace kh2coop {
@@ -72,6 +73,12 @@ bool NetworkClient::connect() {
 void NetworkClient::tick(std::uint32_t timeoutMs) {
     if (!enetHost_) return;
 
+    if (connected_) {
+        // Fast pings until the estimate settles, then a slow refresh.
+        const std::uint64_t interval = clockSamples_ < 5 ? 100 : 2000;
+        if (localTimeMs() - lastPingMs_ >= interval) sendClockPing();
+    }
+
     ENetEvent event;
     while (enet_host_service(enetHost_, &event, timeoutMs) > 0) {
         switch (event.type) {
@@ -82,13 +89,33 @@ void NetworkClient::tick(std::uint32_t timeoutMs) {
                 onDisconnect();
                 break;
             case ENET_EVENT_TYPE_RECEIVE:
-                onReceive(event.packet->data, event.packet->dataLength);
+                if (inbound_.conditions().active()) {
+                    // Channel 0 is reliable; channel 1 may be dropped.
+                    inbound_.enqueue(
+                        localTimeMs(),
+                        std::vector<std::uint8_t>(
+                            event.packet->data,
+                            event.packet->data + event.packet->dataLength),
+                        event.channelID == 0);
+                } else {
+                    onReceive(event.packet->data, event.packet->dataLength);
+                }
                 enet_packet_destroy(event.packet);
                 break;
             case ENET_EVENT_TYPE_NONE:
                 break;
         }
         timeoutMs = 0;
+    }
+
+    flushConditioned();
+}
+
+void NetworkClient::flushConditioned() {
+    const auto now = localTimeMs();
+    for (auto& pkt : outbound_.popDue(now)) sendNow(pkt.bytes, pkt.reliable);
+    for (auto& pkt : inbound_.popDue(now)) {
+        onReceive(pkt.bytes.data(), pkt.bytes.size());
     }
 }
 
@@ -107,6 +134,50 @@ void NetworkClient::sendHeartbeat() {
     // Minimal heartbeat: just the framed header with empty payload.
     auto pkt = encodePacket(PacketType::Heartbeat, {});
     sendPacket(pkt, false);
+}
+
+void NetworkClient::sendAvatar(AvatarState avatar) {
+    if (!connected_) return;
+    if (avatar.seq == 0) avatar.seq = ++avatarSeq_;
+    if (avatar.serverTimeMs == 0) avatar.serverTimeMs = estimatedServerTimeMs();
+    sendPacket(encode(avatar, PacketType::AvatarState), false);
+}
+
+void NetworkClient::sendClockPing() {
+    if (!connected_) return;
+    lastPingMs_ = localTimeMs();
+    sendPacket(encode(ClockPing {lastPingMs_}), false);
+}
+
+std::uint64_t NetworkClient::localTimeMs() const {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    return static_cast<std::uint64_t>(ms + clockSkewMs_);
+}
+
+std::uint64_t NetworkClient::estimatedServerTimeMs() const {
+    return static_cast<std::uint64_t>(
+        static_cast<std::int64_t>(localTimeMs()) + clockOffsetMs_);
+}
+
+void NetworkClient::onClockPong(const ClockPong& pong) {
+    const auto now = localTimeMs();
+    if (pong.clientSendMs > now) return; // stale or bogus
+    const auto rtt = static_cast<std::uint32_t>(now - pong.clientSendMs);
+    // The lowest-RTT sample has the least queuing asymmetry, so trust it.
+    if (clockSamples_ == 0 || rtt <= bestRttMs_) {
+        bestRttMs_ = rtt;
+        clockOffsetMs_ = static_cast<std::int64_t>(pong.serverMs) +
+                         static_cast<std::int64_t>(rtt / 2) -
+                         static_cast<std::int64_t>(now);
+    }
+    ++clockSamples_;
+}
+
+void NetworkClient::setLinkConditions(const LinkConditions& outbound,
+                                      const LinkConditions& inbound) {
+    outbound_.configure(outbound);
+    inbound_.configure(inbound);
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +269,18 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
                 if (callbacks_.onEvent) callbacks_.onEvent(evt);
                 break;
             }
+            case PacketType::AvatarRelay: {
+                AvatarState avatar;
+                read(reader, avatar);
+                if (callbacks_.onAvatarState) callbacks_.onAvatarState(avatar);
+                break;
+            }
+            case PacketType::ClockPong: {
+                ClockPong pong;
+                read(reader, pong);
+                onClockPong(pong);
+                break;
+            }
             default:
                 log("Unknown packet type from host: " +
                     std::to_string(static_cast<int>(type)));
@@ -214,6 +297,15 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
 
 void NetworkClient::sendPacket(const std::vector<std::uint8_t>& packet,
                                bool reliable) {
+    if (outbound_.conditions().active()) {
+        outbound_.enqueue(localTimeMs(), packet, reliable);
+        return;
+    }
+    sendNow(packet, reliable);
+}
+
+void NetworkClient::sendNow(const std::vector<std::uint8_t>& packet,
+                            bool reliable) {
     if (!enetPeer_) return;
     auto* enetPacket = enet_packet_create(
         packet.data(), packet.size(),

@@ -1,5 +1,6 @@
 #pragma once
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/LinkConditioner.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
 
@@ -24,6 +25,7 @@ struct ClientCallbacks {
     std::function<void(const ActorSnapshot&)> onActorSnapshot;
     std::function<void(const EnemySnapshot&)> onEnemySnapshot;
     std::function<void(const EventMessage&)> onEvent;
+    std::function<void(const AvatarState&)> onAvatarState;
     std::function<void(const std::string&)> onLog;
 };
 
@@ -66,6 +68,23 @@ public:
     // Send a heartbeat to the host.
     void sendHeartbeat();
 
+    // Send this client's avatar (unreliable). The host stamps ownerSlot and
+    // relays it to the other peers. Fills seq and serverTimeMs when they are 0.
+    void sendAvatar(AvatarState avatar);
+
+    // Clock sync. tick() pings the host automatically (fast until a few
+    // samples arrive, then every 2 s); the estimate uses the lowest-RTT sample.
+    void sendClockPing();
+    [[nodiscard]] bool hasClockSync() const { return clockSamples_ > 0; }
+    [[nodiscard]] std::uint64_t estimatedServerTimeMs() const;
+    [[nodiscard]] std::uint32_t roundTripMs() const { return bestRttMs_; }
+
+    // Test hooks: simulated network conditions per direction, and a skew
+    // added to this client's clock to mimic a different machine.
+    void setLinkConditions(const LinkConditions& outbound,
+                           const LinkConditions& inbound);
+    void setClockSkewMs(std::int64_t skewMs) { clockSkewMs_ = skewMs; }
+
     // Graceful disconnect.
     void disconnect();
 
@@ -76,6 +95,10 @@ private:
     void onDisconnect();
     void onReceive(const std::uint8_t* data, std::size_t size);
     void sendPacket(const std::vector<std::uint8_t>& packet, bool reliable);
+    void sendNow(const std::vector<std::uint8_t>& packet, bool reliable);
+    void flushConditioned();
+    void onClockPong(const ClockPong& pong);
+    [[nodiscard]] std::uint64_t localTimeMs() const;
     void log(const std::string& msg);
 
     std::string hostAddress_;
@@ -93,6 +116,16 @@ private:
     _ENetHost* enetHost_{nullptr};
     _ENetPeer* enetPeer_{nullptr};
     bool connected_{false};
+
+    LinkConditioner outbound_;
+    LinkConditioner inbound_;
+
+    std::int64_t clockSkewMs_{0};
+    std::int64_t clockOffsetMs_{0}; // serverTime - localTime
+    std::uint32_t bestRttMs_{0};
+    std::uint32_t clockSamples_{0};
+    std::uint64_t lastPingMs_{0};
+    std::uint32_t avatarSeq_{0};
 };
 
 } // namespace kh2coop

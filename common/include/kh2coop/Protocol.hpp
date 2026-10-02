@@ -56,6 +56,17 @@ struct EventMessage {
     std::string payloadJson;
 };
 
+/// Clock sync: the client stamps its send time; the host echoes it with its
+/// own clock so the client can estimate server time (offset + RTT).
+struct ClockPing {
+    std::uint64_t clientSendMs {0};
+};
+
+struct ClockPong {
+    std::uint64_t clientSendMs {0};
+    std::uint64_t serverMs {0};
+};
+
 // ===========================================================================
 // Protocol v2 forward-looking records (declared, not yet wired into codec)
 //

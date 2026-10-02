@@ -132,6 +132,40 @@ struct RoomState {
     bool inCutscene {false};
 };
 
+// ---------------------------------------------------------------------------
+// AvatarState — one player's character, streamed by its owner (plan D2).
+//
+// The owner's machine is authoritative for its own avatar; the relay stamps
+// ownerSlot from the verified peer so a client can't speak for someone else.
+// Receivers render remote avatars as friend-slot puppets (plan D3).
+// ---------------------------------------------------------------------------
+enum AvatarFlags : std::uint8_t {
+    AvatarAirborne = 1 << 0,
+    AvatarDowned = 1 << 1,
+    AvatarInCutscene = 1 << 2, // owner can't be shown (event, load)
+};
+
+struct AvatarState {
+    std::uint32_t seq {0};
+    std::uint64_t serverTimeMs {0}; // owner's estimate of server time at capture
+    SlotType ownerSlot {SlotType::Player}; // set by the relay
+    std::uint8_t character {0};      // roster entry; 0 = Sora
+    std::uint8_t colorVariant {0};
+    std::uint16_t worldId {0};
+    std::uint16_t roomId {0};
+    Vec3 position {};
+    float rotationY {0.0f};
+    Vec3 velocity {};
+    std::uint32_t motionId {0};
+    float motionTime {0.0f};
+    float motionSpeed {1.0f};
+    std::uint8_t flags {0};
+    std::int32_t hp {0};
+    std::int32_t maxHp {0};
+    std::int32_t mp {0};
+    std::int32_t maxMp {0};
+};
+
 struct InputButtons {
     bool attack {false};
     bool jump {false};

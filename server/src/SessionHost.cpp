@@ -452,6 +452,34 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::ClockPing: {
+                ClockPing ping;
+                read(reader, ping);
+                sendTo(peer, encode(ClockPong {ping.clientSendMs, currentTimeMs()}),
+                       false);
+                break;
+            }
+
+            case PacketType::AvatarState: {
+                if (ps->status != PeerStatus::Verified) {
+                    log("Ignoring avatar from unverified peer " + ps->peerId);
+                    return;
+                }
+                AvatarState avatar;
+                read(reader, avatar);
+                // The owner is whoever sent it, never what the packet claims.
+                avatar.ownerSlot = ps->assignedSlot;
+                const auto relay = encode(avatar, PacketType::AvatarRelay);
+                for (auto& other : peers_) {
+                    if (other.enetPeer != peer &&
+                        other.status == PeerStatus::Verified && other.enetPeer) {
+                        sendTo(other.enetPeer, relay, false);
+                    }
+                }
+                ++relayedAvatars_;
+                break;
+            }
+
             default:
                 log("Unknown packet type from " + ps->peerId + ": " +
                     std::to_string(static_cast<int>(type)));

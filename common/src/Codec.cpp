@@ -130,6 +130,34 @@ void write(ByteWriter& w, const ClientHello& ch) {
     w.writeU8(ch.requestedSlot);
 }
 
+void write(ByteWriter& w, const AvatarState& a) {
+    w.writeU32(a.seq);
+    w.writeU64(a.serverTimeMs);
+    w.writeU8(static_cast<std::uint8_t>(a.ownerSlot));
+    w.writeU8(a.character);
+    w.writeU8(a.colorVariant);
+    w.writeU16(a.worldId);
+    w.writeU16(a.roomId);
+    write(w, a.position);
+    w.writeF32(a.rotationY);
+    write(w, a.velocity);
+    w.writeU32(a.motionId);
+    w.writeF32(a.motionTime);
+    w.writeF32(a.motionSpeed);
+    w.writeU8(a.flags);
+    w.writeI32(a.hp);
+    w.writeI32(a.maxHp);
+    w.writeI32(a.mp);
+    w.writeI32(a.maxMp);
+}
+
+void write(ByteWriter& w, const ClockPing& p) { w.writeU64(p.clientSendMs); }
+
+void write(ByteWriter& w, const ClockPong& p) {
+    w.writeU64(p.clientSendMs);
+    w.writeU64(p.serverMs);
+}
+
 // ===== Binary read helpers ==================================================
 
 void read(ByteReader& r, Vec3& v) {
@@ -251,6 +279,34 @@ void read(ByteReader& r, ClientHello& ch) {
     ch.requestedSlot = r.readU8();
 }
 
+void read(ByteReader& r, AvatarState& a) {
+    a.seq = r.readU32();
+    a.serverTimeMs = r.readU64();
+    a.ownerSlot = static_cast<SlotType>(r.readU8());
+    a.character = r.readU8();
+    a.colorVariant = r.readU8();
+    a.worldId = r.readU16();
+    a.roomId = r.readU16();
+    read(r, a.position);
+    a.rotationY = r.readF32();
+    read(r, a.velocity);
+    a.motionId = r.readU32();
+    a.motionTime = r.readF32();
+    a.motionSpeed = r.readF32();
+    a.flags = r.readU8();
+    a.hp = r.readI32();
+    a.maxHp = r.readI32();
+    a.mp = r.readI32();
+    a.maxMp = r.readI32();
+}
+
+void read(ByteReader& r, ClockPing& p) { p.clientSendMs = r.readU64(); }
+
+void read(ByteReader& r, ClockPong& p) {
+    p.clientSendMs = r.readU64();
+    p.serverMs = r.readU64();
+}
+
 // ===== Framed packet helpers ================================================
 
 static constexpr std::size_t kHeaderSize = 3; // 1 type + 2 length
@@ -304,6 +360,27 @@ std::vector<std::uint8_t> encode(const ClientHello& ch) {
     ByteWriter w;
     write(w, ch);
     return encodePacket(PacketType::ClientHello, w.data());
+}
+
+std::vector<std::uint8_t> encode(const ClockPing& p) {
+    ByteWriter w;
+    write(w, p);
+    return encodePacket(PacketType::ClockPing, w.data());
+}
+
+std::vector<std::uint8_t> encode(const ClockPong& p) {
+    ByteWriter w;
+    write(w, p);
+    return encodePacket(PacketType::ClockPong, w.data());
+}
+
+std::vector<std::uint8_t> encode(const AvatarState& a, PacketType type) {
+    if (type != PacketType::AvatarState && type != PacketType::AvatarRelay) {
+        throw std::invalid_argument("encode(AvatarState): bad packet type");
+    }
+    ByteWriter w;
+    write(w, a);
+    return encodePacket(type, w.data());
 }
 
 PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
@@ -439,6 +516,14 @@ std::string toDebugString(const ClientHello& ch) {
                ch.protocolVersion, ch.gameBuild.c_str(), ch.peerId.c_str(),
                ch.peerName.c_str(), runtimeModeName(ch.requestedMode),
                ch.requestedSlot);
+}
+
+std::string toDebugString(const AvatarState& a) {
+    return fmt("Avatar{seq=%u t=%llu slot=%u room=%u/%u pos=%s rot=%.2f motion=%u@%.2f hp=%d/%d}",
+               a.seq, static_cast<unsigned long long>(a.serverTimeMs),
+               static_cast<unsigned>(a.ownerSlot), a.worldId, a.roomId,
+               toDebugString(a.position).c_str(), a.rotationY, a.motionId,
+               a.motionTime, a.hp, a.maxHp);
 }
 
 } // namespace kh2coop
