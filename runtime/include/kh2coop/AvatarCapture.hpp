@@ -51,7 +51,7 @@ AvatarState captureAvatar(const Reader& mem, std::uint64_t exeBase, std::uint64_
                   mem.template read<float>(entity + o::entity::POS_X + 4),
                   mem.template read<float>(entity + o::entity::POS_X + 8)};
     a.rotationY = mem.template read<float>(entity + o::entity::ROT_Y);
-    if (mem.template read<std::uint32_t>(entity + o::entity::AIRBORNE_FLAG) != 0) {
+    if (mem.template read<std::uint32_t>(entity + o::entity::AIRBORNE_SUB) != 0) {
         a.flags |= AvatarAirborne;
     }
     a.velocity = {mem.template read<float>(actor + capture::ACTOR_VELOCITY),

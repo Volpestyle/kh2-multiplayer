@@ -307,7 +307,7 @@ namespace actor {
 namespace entity {
     // Offsets within the entity transform struct (relative to struct base)
     constexpr std::uint64_t VTABLE_PTR     = 0x00;  // qword [CONFIRMED] points to exe 0x253xxxx range
-    constexpr std::uint64_t AIRBORNE_FLAG  = 0x08;  // dword [CONFIRMED] 0=grounded, 1=airborne
+    constexpr std::uint64_t AIRBORNE_FLAG  = 0x08;  // dword: sticky, set at a jump and NOT cleared on landing (VUH-1490 live); use AIRBORNE_SUB
     constexpr std::uint64_t POS_X          = 0x30;  // float [CONFIRMED] horizontal position
     constexpr std::uint64_t POS_Y          = 0x34;  // float [CONFIRMED] vertical (negative = up)
     constexpr std::uint64_t POS_Z          = 0x38;  // float [CONFIRMED] depth position
@@ -317,7 +317,7 @@ namespace entity {
     constexpr std::uint64_t ROT_Y          = 0x4C;  // float [CONFIRMED] facing angle in radians
     constexpr std::uint64_t VEL_Y          = 0xA4;  // float [CONFIRMED] Y velocity (when airborne)
     constexpr std::uint64_t MOVE_STATE     = 0x100; // dword [CONFIRMED] 2=grounded, 3=airborne
-    constexpr std::uint64_t AIRBORNE_SUB   = 0x104; // dword [CONFIRMED] 0=grounded, 1=airborne
+    constexpr std::uint64_t AIRBORNE_SUB   = 0x104; // dword [CONFIRMED] 1 from takeoff to landing (VUH-1490 live)
 }
 
 // --------------------------------------------------------------------------

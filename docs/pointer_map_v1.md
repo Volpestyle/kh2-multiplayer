@@ -268,7 +268,7 @@ code addresses these at the library value `+0x80`:
 | Offset | Name | Source | Notes |
 |---|---|---|---|
 | `+0x00` | `VTABLE_PTR` | `[CONFIRMED]` | QWORD, exe 0x253xxxx range |
-| `+0x08` | `AIRBORNE_FLAG` | `[CONFIRMED]` | DWORD, 0=ground, 1=air |
+| `+0x08` | `AIRBORNE_FLAG` | `[CONFIRMED]` | DWORD, **sticky**: set at a jump, stays 1 after landing. Use `+0x104` for airborne (VUH-1490) |
 | `+0x30` | `POS_X` | `[CONFIRMED]` | float |
 | `+0x34` | `POS_Y` | `[CONFIRMED]` | float (negative = up) |
 | `+0x38` | `POS_Z` | `[CONFIRMED]` | float |

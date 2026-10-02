@@ -281,7 +281,8 @@ void testAvatarCapture() {
     m.put<float>(entity + o::entity::POS_X + 4, -20.0f);
     m.put<float>(entity + o::entity::POS_X + 8, 30.0f);
     m.put<float>(entity + o::entity::ROT_Y, 1.5f);
-    m.put<std::uint32_t>(entity + o::entity::AIRBORNE_FLAG, 1);
+    m.put<std::uint32_t>(entity + o::entity::AIRBORNE_FLAG, 1); // sticky; must not matter
+    m.put<std::uint32_t>(entity + o::entity::AIRBORNE_SUB, 1);
     m.put<float>(actor + capture::ACTOR_VELOCITY, 3.0f);
     m.put<float>(actor + capture::ACTOR_VELOCITY + 8, -4.0f);
     m.put<std::uint32_t>(actor + o::actor::ANIM_ID, 151);
