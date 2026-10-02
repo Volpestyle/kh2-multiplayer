@@ -48,6 +48,7 @@ add_library(kh2coop_inject SHARED
     src/DllMain.cpp
     src/EntityHook.cpp
     src/RenderHook.cpp
+    src/Warp.cpp
 )
 
 target_include_directories(kh2coop_inject PRIVATE

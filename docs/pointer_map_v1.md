@@ -194,6 +194,33 @@ objentry model-name strings before rooms load: with `obj0` = the pointer read
 from `OBJENTRY_POINTER`, `obj0+0x16F0` is Donald's model name and
 `obj0+0x1750` Goofy's.
 
+### Room transition request (cold warp) — verified live 2026-10-02
+
+| RVA | Role | Source |
+|---|---|---|
+| `0x152990` | **`RequestTransition(const LocationPacket*, u32 fadeFlags, int mode, u8 flag, int extra)`**. Starts the room-load task (callback `0x152A90`) and copies the packet into `NOW` staging `0x717018`/`0x717020` (or `0x717120`/`0x717128` when byte `0x9BA8D1` is set). Every room change goes through it: 23 callers, including the room-script Jump handler `0x3A46E0` and the world-map flow `0x154E20` → `0x151000`. | `[GHIDRA]` + `[CONFIRMED]` |
+| `0x3A46E0` | Room-script Jump handler: builds a packet from the script operand and calls `0x152990(&packet, flags, 0 or 2, 0, op[6])`. | `[GHIDRA]` |
+| `0x154E20` | World-map exit: packet with programs `0xFFFF`, then `0x152990(&packet, flags \| 1, 0, 0, 0)`. | `[GHIDRA]` |
+
+`LocationPacket` is the `NOW` layout: `u8 world, u8 room, u16 door, u16 map,
+u16 btl` (8 bytes), then `u16 evt` at `+8`. Programs of `0xFFFF` take the
+save's per-room values. The inject DLL calls `0x152990(&packet, 1, 0, 0, 0)` from
+the PerEntityUpdate hook at the start of a frame (`inject/src/Warp.cpp`,
+`kh2ctl warp`), guarded by the function's first 24 bytes. 50 consecutive
+warps across 13 rooms in three worlds loaded cleanly.
+
+**Load signals.** `NOW` world/room change at request time. `0x9BA928` (the
+load task pointer written by `0x152990`), byte `0x9BA8D1` and
+`LOADING_INDICATOR` `0x8EC540` didn't change when sampled every 50 ms through a
+load. The reliable signal is that entity updates stop for ~0.55 s during a
+load and resume in the new room (the DLL's frame counter).
+
+**`[KH2LIB]` state flags on this build.** `PAUSE_STATUS` `0xABB7F8` reads
+garbage (`0xE5E04CA0`). `+0x80` (`0xABB878`) reads 0. `CONTROLLABLE`
+`0x2A17168` reads 142 in normal play, and `CURRENT_OPEN_MENU` `0x7435D0`
+reads `FF`. None of them changed when tested (no menu could be opened by
+script), so they stay unverified.
+
 ### Unit slot stat system
 
 | Offset | Name | Source |

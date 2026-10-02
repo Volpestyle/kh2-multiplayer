@@ -500,6 +500,43 @@ def get_fps(window_ms: int = 2000) -> dict[str, Any]:
     return _run_kh2ctl("fps", "--window-ms", str(window_ms))
 
 
+@mcp.tool(
+    description=(
+        "Load a room on one KH2 instance (world/room ids as in the NOW block; "
+        "map/btl/evt programs default to the save's per-room values when -1). "
+        "Returns once the room has loaded and is updating."
+    )
+)
+@_with_pid
+def warp_room(
+    world: int,
+    room: int,
+    door: int = 0,
+    map: int = -1,
+    btl: int = -1,
+    evt: int = -1,
+    timeout_ms: int = 30000,
+) -> dict[str, Any]:
+    args = ["warp", "--world", str(world), "--room", str(room), "--door", str(door),
+            "--timeout-ms", str(timeout_ms)]
+    for flag, value in (("--map", map), ("--btl", btl), ("--evt", evt)):
+        if value >= 0:
+            args.extend([flag, str(value)])
+    return _run_kh2ctl(*args)
+
+
+@mcp.tool(
+    description=(
+        "Sample exe-relative memory, e.g. rva='0x717008:u8,0x9BA928:u64'. "
+        "Types: u8 u16 i16 u32 i32 f32 u64."
+    )
+)
+@_with_pid
+def peek_memory(rva: str, samples: int = 1, interval_ms: int = 50) -> dict[str, Any]:
+    return _run_kh2ctl("peek", "--rva", rva, "--samples", str(samples),
+                       "--interval-ms", str(interval_ms))
+
+
 @mcp.tool(description="Mute or unmute one KH2 instance's audio.")
 def mute_kh2(pid: int, mute: bool = True) -> dict[str, Any]:
     return _run_kh2ctl("mute", "--pid", str(pid), *([] if mute else ["--off"]))

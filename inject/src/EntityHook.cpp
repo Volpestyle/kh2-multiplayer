@@ -31,6 +31,7 @@
 #include "EntityHook.hpp"
 #include "PatternScan.hpp"
 #include "RenderHook.hpp"
+#include "Warp.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
 
@@ -1534,6 +1535,9 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 // Track Sora's actor — he's always the entity list head.
                 // Needed for entity-level movement suppression.
                 g_soraActor = addr;
+
+                // Hand pending room warps to the game on its own thread.
+                warp::OnFrameStart(g_frameCounter, addr);
             }
         }
 
@@ -1842,6 +1846,7 @@ bool Initialize(uintptr_t exeBase) {
     // Screenshots, clips and the debug overlay (VUH-1485). Optional: the DLL
     // keeps working if the renderer can't be hooked.
     render::Install(exeBase, &Log);
+    warp::Install(exeBase, &Log);
 
     Log("  InputCollector hook installed");
     Log("Initialization complete — waiting for friend entities...");
@@ -1880,6 +1885,7 @@ void Shutdown() {
     }
 
     render::Shutdown();
+    warp::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 

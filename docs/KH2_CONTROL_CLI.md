@@ -173,6 +173,34 @@ flip model, presents via `Present1`); the D3D11 path isn't implemented.
 - The overlay is drawn into the backbuffer, so it shows on screen and in
   captures. It's off by default.
 
+### Warp (load a room)
+
+```powershell
+kh2ctl warp --pid 1234 --world 4 --room 0x1A               # Garden of Assemblage
+kh2ctl warp --pid 1234 --world 5 --room 6 --btl 2          # override one program
+kh2ctl peek --pid 1234 --rva 0x717008:u8,0x9BA928:u64 --samples 40   # RE aid
+```
+
+`warp` hands the target to the DLL, which calls the game's own transition
+request (the function room-script `Jump`s use, RVA `0x152990`) on the game
+thread at the start of a frame. Programs left out (`0xFFFF`) come from the
+save's per-room table. It returns once the room has loaded: the DLL's frame
+counter stalls during the load (~0.55 s) and must resume in the target room
+for 30 frames. World/room in `NOW` change as soon as the request is made, so
+they alone don't show the load finished. Measured 2026-10-02: 50/50 warps
+across 13 rooms in Twilight Town, Hollow Bastion (incl. GoA `04/1A`) and
+Beast's Castle, 1.0–2.8 s each; Sora could move after every one.
+
+- **Rooms that open on a cutscene** (`05/02`, `05/08` with default
+  programs) load, but Sora can't move. Avoid them as fixtures.
+- **Combat rooms:** none found yet. With this save's programs, and with
+  battle programs 1–8 forced in the BC courtyard, no enemies spawned.
+- **Safe-state gate:** hand-over only happens from the entity-update hook,
+  so never mid-load, and kh2ctl allows one warp at a time. The KH2 Lua
+  library's `PAUSE_STATUS` reads garbage on this build, and its `CONTROLLABLE`
+  / `CURRENT_OPEN_MENU` didn't change in testing, so menu, pause and
+  cutscene gating isn't in yet. Don't warp while a menu is open.
+
 ### Restart
 
 ```powershell

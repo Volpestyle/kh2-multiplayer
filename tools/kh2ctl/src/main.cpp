@@ -1,4 +1,5 @@
 #include "kh2coop/CaptureChannel.hpp"
+#include "kh2coop/WarpChannel.hpp"
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/Types.hpp"
@@ -262,8 +263,17 @@ CommandResult BuildStateJson(GameBridgePC& game) {
             << "\"player\":" << ActorStateToJson(player) << ","
             << "\"friend1\":" << ActorStateToJson(friend1) << ","
             << "\"friend2\":" << ActorStateToJson(friend2)
-        << "}"
-        << "}";
+        << "},"
+        << "\"enemies\":[";
+    // Actors whose objentry name starts with B_ or M_ (GameBridgePC).
+    const auto enemies = game.ReadEnemyStates();
+    for (std::size_t i = 0; i < enemies.size(); ++i) {
+        const auto& e = enemies[i];
+        out << (i ? "," : "") << "{\"objectId\":" << e.objectId
+            << ",\"motionId\":" << e.motionId << ",\"position\":{\"x\":" << e.position.x
+            << ",\"y\":" << e.position.y << ",\"z\":" << e.position.z << "}}";
+    }
+    out << "]}";
     return {0, out.str()};
 }
 
@@ -2117,6 +2127,221 @@ CommandResult CmdOverlay(std::vector<std::string> args) {
     return {0, json.str()};
 }
 
+// ============================================================================
+// Warp (VUH-1486): hand a room target to the DLL, which passes it to the
+// game's own transition request on the game thread.
+// ============================================================================
+
+std::uint32_t ParseProgram(const std::optional<std::string>& raw, const char* name) {
+    if (!raw) return kh2coop::WARP_DEFAULT_PROGRAM;
+    return ParseNumber<std::uint32_t>(*raw, name);
+}
+
+CommandResult CmdWarp(std::vector<std::string> args) {
+    const auto worldRaw = ConsumeOption(args, "--world");
+    const auto roomRaw = ConsumeOption(args, "--room");
+    const std::uint32_t door =
+        ParseNumber<std::uint32_t>(ConsumeOption(args, "--door").value_or("0"), "--door");
+    const std::uint32_t map = ParseProgram(ConsumeOption(args, "--map"), "--map");
+    const std::uint32_t battle = ParseProgram(ConsumeOption(args, "--btl"), "--btl");
+    const std::uint32_t event = ParseProgram(ConsumeOption(args, "--evt"), "--evt");
+    const int timeoutMs = ParseNumber<int>(
+        ConsumeOption(args, "--timeout-ms").value_or("30000"), "--timeout-ms");
+    if (!worldRaw || !roomRaw) throw std::runtime_error("warp requires --world and --room");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for warp: " + args.front());
+    }
+    const std::uint32_t world = ParseNumber<std::uint32_t>(*worldRaw, "--world");
+    const std::uint32_t room = ParseNumber<std::uint32_t>(*roomRaw, "--room");
+
+    const DWORD pid = ResolveTargetPid();
+    const std::wstring name = kh2coop::WARP_NAME_PREFIX + std::to_wstring(pid);
+    HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
+    if (!mapping) {
+        return MakeError("No warp channel for PID " + std::to_string(pid) +
+                         " (inject a DLL build with warp support)");
+    }
+    auto* channel = static_cast<kh2coop::WarpChannel*>(
+        MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(kh2coop::WarpChannel)));
+    if (!channel || channel->magic != kh2coop::WARP_MAGIC) {
+        if (channel) UnmapViewOfFile(channel);
+        CloseHandle(mapping);
+        return MakeError("Warp channel has an unexpected layout");
+    }
+    struct Cleanup {
+        HANDLE mapping;
+        void* view;
+        ~Cleanup() { UnmapViewOfFile(view); CloseHandle(mapping); }
+    } cleanup {mapping, channel};
+
+    if (channel->requestSeq != channel->doneSeq) {
+        return MakeError("A warp is already pending on this instance");
+    }
+    channel->world = world;
+    channel->room = room;
+    channel->door = door;
+    channel->map = map;
+    channel->battle = battle;
+    channel->event = event;
+    channel->fadeFlags = 1;
+    const auto t0 = std::chrono::steady_clock::now();
+    const long seq = InterlockedIncrement(&channel->requestSeq);
+
+    const auto deadline = t0 + std::chrono::milliseconds(timeoutMs);
+    while (channel->doneSeq != seq) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return MakeError("The DLL didn't take the warp (no room is running?)");
+        }
+        SleepMs(10);
+    }
+    const auto status = static_cast<kh2coop::WarpStatus>(channel->status);
+    if (status != kh2coop::WarpStatus::Ok) {
+        return MakeError("Warp refused by the DLL, status " +
+                         std::to_string(channel->status));
+    }
+
+    // World/room in NOW change as soon as the request is staged, so they
+    // don't show the load finished. The DLL's frame counter only advances
+    // while room entities update: it stalls during the load and resumes in
+    // the new room. Arrived = target room + a stall + 30 gameplay frames
+    // since frames resumed.
+    constexpr int kStallMs = 150;
+    constexpr long kSettleFrames = 30;
+    GameBridgePC game;
+    if (!AttachGame(game)) return MakeError("Could not attach to PID " + std::to_string(pid));
+    const long long actorBefore = channel->liveActor;
+    long lastFrame = channel->liveFrame;
+    auto lastChange = std::chrono::steady_clock::now();
+    bool sawStall = false;
+    long resumeFrame = 0;
+    double longestStallMs = 0;
+    double resumeAtMs = -1;
+    RoomState reached {};
+    bool arrived = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto now = std::chrono::steady_clock::now();
+        const long frame = channel->liveFrame;
+        if (frame != lastFrame) {
+            const double gapMs =
+                std::chrono::duration<double, std::milli>(now - lastChange).count();
+            if (gapMs >= kStallMs) {
+                sawStall = true;
+                resumeFrame = frame;
+                resumeAtMs = std::chrono::duration<double, std::milli>(now - t0).count();
+            }
+            longestStallMs = (std::max)(longestStallMs, gapMs);
+            lastFrame = frame;
+            lastChange = now;
+        }
+        reached = game.ReadRoomState();
+        if (sawStall && reached.worldId == world && reached.roomId == room &&
+            !reached.inTransition && frame - resumeFrame >= kSettleFrames) {
+            arrived = true;
+            break;
+        }
+        SleepMs(10);
+    }
+    const double seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    const long long actorAfter = channel->liveActor;
+
+    std::ostringstream out;
+    out << "{\"ok\":" << JsonBool(arrived) << ",\"processId\":" << pid
+        << ",\"target\":{\"world\":" << world << ",\"room\":" << room << ",\"door\":" << door
+        << ",\"map\":" << map << ",\"btl\":" << battle << ",\"evt\":" << event << "}"
+        << ",\"from\":{\"world\":" << channel->fromWorld << ",\"room\":" << channel->fromRoom
+        << "},\"stateAtRequest\":{\"pauseStatus\":" << channel->pauseStatus
+        << ",\"controllable\":" << channel->controllable
+        << ",\"cutsceneTimer\":" << channel->cutsceneTimer
+        << ",\"openMenu\":" << channel->openMenu << "}"
+        << ",\"seconds\":" << seconds << ",\"longestStallMs\":" << longestStallMs
+        << ",\"resumedAtMs\":" << resumeAtMs
+        << ",\"actorChanged\":" << JsonBool(actorAfter != actorBefore)
+        << ",\"room\":" << RoomStateToJson(reached);
+    if (!arrived) out << ",\"error\":\"Timed out before the target room loaded\"";
+    out << "}";
+    return {arrived ? 0 : 1, out.str()};
+}
+
+// ============================================================================
+// peek: sample exe-relative memory over time (RE aid).
+//   kh2ctl peek --rva 0x9BA928:u64,0x8EC540:u32 [--samples N] [--interval-ms N]
+// ============================================================================
+
+std::uint64_t ModuleBase(HANDLE process) {
+    HMODULE module = nullptr;
+    DWORD needed = 0;
+    using EnumModulesFn = BOOL(WINAPI*)(HANDLE, HMODULE*, DWORD, LPDWORD);
+    static const auto enumModules = reinterpret_cast<EnumModulesFn>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "K32EnumProcessModules"));
+    if (!enumModules || !enumModules(process, &module, sizeof(module), &needed)) return 0;
+    return reinterpret_cast<std::uint64_t>(module);
+}
+
+CommandResult CmdPeek(std::vector<std::string> args) {
+    const auto spec = ConsumeOption(args, "--rva");
+    const int samples =
+        ParseNumber<int>(ConsumeOption(args, "--samples").value_or("1"), "--samples");
+    const int intervalMs =
+        ParseNumber<int>(ConsumeOption(args, "--interval-ms").value_or("50"), "--interval-ms");
+    if (!spec) throw std::runtime_error("peek requires --rva RVA[:type][,RVA[:type]...]");
+    if (!args.empty()) throw std::runtime_error("Unexpected argument for peek: " + args.front());
+
+    struct Field { std::uint64_t rva; std::string type; std::size_t size; };
+    std::vector<Field> fields;
+    std::stringstream list(*spec);
+    for (std::string item; std::getline(list, item, ',');) {
+        const auto colon = item.find(':');
+        Field field;
+        field.rva = std::stoull(item.substr(0, colon), nullptr, 0);
+        field.type = colon == std::string::npos ? "u32" : item.substr(colon + 1);
+        if (field.type == "u8") field.size = 1;
+        else if (field.type == "u16" || field.type == "i16") field.size = 2;
+        else if (field.type == "u32" || field.type == "i32" || field.type == "f32") field.size = 4;
+        else if (field.type == "u64") field.size = 8;
+        else throw std::runtime_error("Unknown peek type: " + field.type);
+        fields.push_back(field);
+    }
+
+    const DWORD pid = ResolveTargetPid();
+    HANDLE process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (!process) return MakeError("OpenProcess failed for PID " + std::to_string(pid));
+    const std::uint64_t base = ModuleBase(process);
+
+    std::ostringstream out;
+    out << "{\"ok\":true,\"processId\":" << pid << ",\"samples\":[";
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int s = 0; s < samples; ++s) {
+        if (s) SleepMs(intervalMs);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count();
+        out << (s ? "," : "") << "{\"t\":" << ms;
+        for (const auto& field : fields) {
+            std::uint64_t raw = 0;
+            ReadProcessMemory(process, reinterpret_cast<LPCVOID>(base + field.rva), &raw,
+                              field.size, nullptr);
+            std::ostringstream key;
+            key << "0x" << std::hex << std::uppercase << field.rva;
+            out << ",\"" << key.str() << "\":";
+            if (field.type == "i16") out << static_cast<std::int16_t>(raw);
+            else if (field.type == "i32") out << static_cast<std::int32_t>(raw);
+            else if (field.type == "f32") {
+                float f;
+                std::memcpy(&f, &raw, 4);
+                out << f;
+            } else if (field.type == "u64") {
+                std::ostringstream hex;
+                hex << "\"0x" << std::hex << std::uppercase << raw << "\"";
+                out << hex.str();
+            } else out << raw;
+        }
+        out << "}";
+    }
+    out << "]}";
+    CloseHandle(process);
+    return {0, out.str()};
+}
+
 CommandResult CmdFps(std::vector<std::string> args) {
     const int windowMs =
         ParseNumber<int>(ConsumeOption(args, "--window-ms").value_or("2000"), "--window-ms");
@@ -2148,6 +2373,10 @@ void PrintUsage() {
         << "  clip [--seconds S] [--fps F] [--out x.mp4] [--keep-frames]\n"
         << "  overlay on|off            debug overlay: pid, frame, world/room, fps\n"
         << "  fps [--window-ms N]       game present rate\n"
+        << "  warp --world W --room R [--door D] [--map M --btl B --evt E]\n"
+        << "       [--timeout-ms N]     load a room (programs default to the save's)\n"
+        << "  peek --rva RVA[:u8|u16|i16|u32|i32|f32|u64][,...] [--samples N]\n"
+        << "       [--interval-ms N]    sample exe-relative memory\n"
         << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"
         << "      LAUNCH_OPTS: [--game-dir DIR] [--dll PATH] [--no-inject]\n"
         << "                   [--window-timeout-ms N] [--settle-ms N]\n"
@@ -2236,6 +2465,10 @@ int main(int argc, char* argv[]) {
             result = CmdOverlay(std::move(args));
         } else if (command == "fps") {
             result = CmdFps(std::move(args));
+        } else if (command == "warp") {
+            result = CmdWarp(std::move(args));
+        } else if (command == "peek") {
+            result = CmdPeek(std::move(args));
         } else if (command == "restart") {
             result = CmdRestart(std::move(args));
         } else if (command == "state") {
