@@ -21,6 +21,7 @@
 #include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/WorldPump.hpp"
+#include <timeapi.h> // timeBeginPeriod (winmm)
 #endif
 
 #include <algorithm>
@@ -912,6 +913,39 @@ int main(int argc, char* argv[]) {
     auto lastSnapshotAt = std::chrono::steady_clock::now();
     std::uint32_t snapshotSeq = 0;
 
+#ifdef _WIN32
+    // Avatar exchange: local avatar out, interpolated puppet poses in. It runs
+    // every tick and on a ~1 ms cadence between ticks, so the DLL (which reads
+    // once per 16.7 ms game frame) always finds a fresh pose. A 16 ms loop
+    // sleep rounds to 16-31 ms on Windows and made puppets stop-go (VUH-1492).
+    std::uint16_t pumpWorld = 0;
+    std::uint16_t pumpRoom = 0;
+    const auto pumpAvatars = [&](std::uint16_t worldId, std::uint16_t roomId) {
+        pumpWorld = worldId;
+        pumpRoom = roomId;
+        if (!netClient || !netConnected || !avatarBridge.IsOpen()) return;
+        kh2coop::AvatarState local;
+        if (avatarBridge.TryReadLocal(local)) {
+            local.serverTimeMs = 0; // stamped by sendAvatar
+            netClient->sendAvatar(local);
+        }
+        std::array<kh2coop::PuppetTarget, 2> targets;
+        {
+            std::lock_guard<std::mutex> lock(replicaMtx);
+            targets = avatarSync.sample(netClient->estimatedServerTimeMs(),
+                                        worldId, roomId);
+        }
+        for (int i = 0; i < 2; ++i) {
+            kh2coop::PuppetPose pose;
+            pose.active = targets[i].active ? 1 : 0;
+            pose.pose = targets[i].pose;
+            avatarBridge.PublishPuppet(i, pose);
+        }
+    };
+    // 1 ms sleep granularity for the pump; restored at shutdown.
+    timeBeginPeriod(1);
+#endif
+
     for (std::uint32_t tick = 0;
          g_running && (options.maxTicks == 0 || tick < options.maxTicks);
          ++tick) {
@@ -984,27 +1018,7 @@ int main(int argc, char* argv[]) {
             if (worldBridge.IsOpen()) {
                 kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
             }
-            if (avatarBridge.IsOpen()) {
-                kh2coop::AvatarState local;
-                if (avatarBridge.TryReadLocal(local)) {
-                    local.serverTimeMs = 0; // stamped by sendAvatar
-                    netClient->sendAvatar(local);
-                }
-                std::array<kh2coop::PuppetTarget, 2> targets;
-                {
-                    std::lock_guard<std::mutex> lock(replicaMtx);
-                    targets = avatarSync.sample(
-                        netClient->estimatedServerTimeMs(),
-                        static_cast<std::uint16_t>(room.worldId),
-                        static_cast<std::uint16_t>(room.roomId));
-                }
-                for (int i = 0; i < 2; ++i) {
-                    kh2coop::PuppetPose pose;
-                    pose.active = targets[i].active ? 1 : 0;
-                    pose.pose = targets[i].pose;
-                    avatarBridge.PublishPuppet(i, pose);
-                }
-            }
+            pumpAvatars(room.worldId, room.roomId);
         }
 #endif
         const bool entityDiscovered = game.HasEntityAddresses();
@@ -1092,12 +1106,23 @@ int main(int argc, char* argv[]) {
             lastActorLogAt = now;
         }
 
+#ifdef _WIN32
+        const auto tickEnd = std::chrono::steady_clock::now() +
+                             std::chrono::milliseconds(options.config.tickMs);
+        while (g_running && std::chrono::steady_clock::now() < tickEnd) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (netClient) netClient->tick(0);
+            pumpAvatars(pumpWorld, pumpRoom);
+        }
+#else
         std::this_thread::sleep_for(
             std::chrono::milliseconds(options.config.tickMs));
+#endif
     }
 
     // ----- Graceful shutdown -----
 #ifdef _WIN32
+    timeEndPeriod(1);
     if (mailboxWriter.IsOpen()) {
         closeMailbox();
         std::cout << "[Runtime] Input mailbox closed\n";
