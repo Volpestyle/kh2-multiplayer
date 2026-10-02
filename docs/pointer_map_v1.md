@@ -171,7 +171,7 @@ script). Writing `2` to `PAUSE_STATUS` disables pausing (GoA ROM script).
 
 | Offset | Name | Source |
 |---|---|---|
-| `0x09A9830` | `SAVE` — live save body | `[KH2LIB]` |
+| `0x09A98B0` | `SAVE` — live save body; starts with the magic `"KH2J"` (the `KH2J_PROGRAM_TABLE` label above is this block) | Archipelago KH2 client (Steam), matches the live CE label. The KH2 Lua library's Steam table says `0x09A9830` — an older patch; several of its addresses sit `0x80` low (its `Slot1` `0x2A23518` vs Archipelago's `0x2A23598`). Treat other `[KH2LIB]` addresses on this page as unverified until checked live. |
 | `SAVE+0x0C` / `+0x0D` / `+0x0E` | saved world / room / door | `[KH2LIB]` (GoA ROM `Warp`) |
 | `SAVE+0x10 + 0x180*world + 0x6*room` | per-room map / btl / evt program table (3 shorts) | `[KH2LIB]` (GoA ROM `Warp`) |
 | `SAVE+0x3534` | world party table | Expert595 KH2 Online Coop (save-relative; their Epic save body is at RVA `0x09A7070`) |
