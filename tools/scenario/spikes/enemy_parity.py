@@ -37,6 +37,7 @@ class EnemyLog:
         self.ctx = ctx
         self.first: list[dict[str, dict]] = [{}, {}]   # instance -> address -> record
         self.alive: list[set[str]] = [set(), set()]
+        self.ignore: list[set[str]] = [set(), set()]  # alive when the current wave began
         self.wave = 1
         self.t0 = time.monotonic()
         self._stop = threading.Event()
@@ -55,6 +56,8 @@ class EnemyLog:
                     if not is_enemy(a):
                         continue
                     alive.add(a["address"])
+                    if a["address"] in self.ignore[i]:
+                        continue
                     key = f"{self.wave}:{a['address']}"
                     if key not in self.first[i]:
                         p = a["position"]
@@ -64,6 +67,7 @@ class EnemyLog:
                             "listIndex": index, "pos": (p["x"], p["y"], p["z"]),
                             "t": round(time.monotonic() - self.t0, 2), "maxHp": a.get("maxHp")}
                 self.alive[i] = alive
+                self.ignore[i] &= alive  # a reused slot after a death is a new enemy
             time.sleep(0.05)
 
     def stop(self) -> None:
@@ -159,11 +163,32 @@ def main() -> int:
                         waves.append({"wave": wave, **compare(a, b), "records": [a, b]})
                         if wave == args.waves:
                             break
+                        # End this wave on both sides, and only start counting the
+                        # next one once every killed enemy has left the list.
+                        # Kill rounds until both lists are empty (enemies can be out
+                        # of the list for a moment, e.g. burrowed, and miss a round).
+                        killed: list[set[str]] = [set(), set()]
+                        failures = 0
+                        for _ in range(4):
+                            for i in (0, 1):
+                                for addr in list(log.alive[i]):
+                                    r = run.kh2ctl("hit", "kill", "--victim", addr,
+                                                   pid=ctx.instances[i].pid, check=False)
+                                    if r.get("ok"):
+                                        killed[i].add(addr)
+                                    else:
+                                        failures += 1
+                            ctx.sleep(1.5)
+                            if not log.alive[0] and not log.alive[1]:
+                                break
+                        deadline = time.monotonic() + 8
+                        while time.monotonic() < deadline and any(killed[i] & log.alive[i] for i in (0, 1)):
+                            ctx.sleep(0.25)
+                        waves[-1]["killed"] = [len(killed[0]), len(killed[1])]
+                        waves[-1]["killFailures"] = failures
+                        waves[-1]["stillAlive"] = [len(killed[i] & log.alive[i]) for i in (0, 1)]
+                        log.ignore = [set(log.alive[0]), set(log.alive[1])]  # survivors aren't new
                         log.wave = wave + 1
-                        for i in (0, 1):  # end this wave on both sides
-                            for addr in list(log.alive[i]):
-                                run.kh2ctl("hit", "kill", "--victim", addr, pid=ctx.instances[i].pid,
-                                           check=False)
                         ctx.sleep(8)
                     entry.update(status="ok", waves=waves)
                 finally:

@@ -664,6 +664,11 @@ static void ProcessHitRequest() {
     } else {
         __try {
             ch->hpBefore = ActorHp(victim);
+            // No status block (HP reads -1): not a damageable actor, e.g.
+            // B_MU110 in 08/00 is typed as a boss but has no stats.
+            if (ch->hpBefore < 0) {
+                status = HitStatus::NoStats;
+            } else
             switch (static_cast<HitOp>(ch->op)) {
             case HitOp::Damage:
                 if (!g_origMovementDispatch) { status = HitStatus::Unavailable; break; }

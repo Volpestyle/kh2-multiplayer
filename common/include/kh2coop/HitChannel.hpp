@@ -34,6 +34,7 @@ enum class HitStatus : std::int32_t {
     UnknownVictim = 1,  // not an actor in this frame's entity list
     Unavailable = 2,    // game function not hooked/verified on this build
     BadOp = 3,
+    NoStats = 4,        // actor has no status block (HP reads -1); nothing to damage
 };
 
 #pragma pack(push, 4)

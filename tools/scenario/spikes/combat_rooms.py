@@ -35,6 +35,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--worlds", default="2,4,5,6,7,8,10,11,12,14,16,17,18")
     ap.add_argument("--rooms", default="0-15")
+    ap.add_argument("--btl", default="", help="battle programs to force, e.g. 1-3 (default: the save's)")
     args = ap.parse_args()
 
     lock = run.RigLock()
@@ -57,14 +58,16 @@ def main() -> int:
             ctx.protect.add(0)
 
         fresh()
-        for world in parse_range(args.worlds):
-            for room in parse_range(args.rooms):
-                key = f"{world:02X}/{room:02X}"
+        btls = parse_range(args.btl) if args.btl else [None]
+        for world, room, btl in ((w, r, b) for w in parse_range(args.worlds)
+                                 for r in parse_range(args.rooms) for b in btls):
+                key = f"{world:02X}/{room:02X}" + (f":btl={btl}" if btl is not None else "")
                 if key in results:
                     continue
-                entry = {"world": world, "room": room}
+                entry = {"world": world, "room": room, "btl": btl}
                 try:
-                    data = run.kh2ctl("warp", "--world", str(world), "--room", str(room),
+                    extra = ["--btl", str(btl)] if btl is not None else []
+                    data = run.kh2ctl("warp", "--world", str(world), "--room", str(room), *extra,
                                       "--timeout-ms", "12000", pid=ctx.instances[0].pid, check=False, timeout=60)
                     if not data.get("ok"):
                         entry["status"] = "held" if "gate" in str(data) else "failed"
