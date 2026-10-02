@@ -12,7 +12,9 @@
 // Distance units are KH2 world units (~1 cm), so 50 units ~ 0.5 m.
 // Exit code 0 = all checks passed.
 
+#include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/AvatarInterpolator.hpp"
+#include "kh2coop/AvatarSync.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/LinkConditioner.hpp"
 #include "kh2coop/NetworkClient.hpp"
@@ -172,6 +174,74 @@ void testInterpolator() {
           "motion switch holds the earlier motion until the boundary");
 }
 
+void testAvatarSync() {
+    std::cout << "\n=== AvatarSync ===\n";
+    AvatarSync sync(SlotType::Friend1, {100, 1000});
+    const auto owners = sync.puppetOwners();
+    check(owners[0] == 0 && owners[1] == 2, "friend1's puppets are slots 0 and 2, in order");
+
+    auto snap = [](SlotType owner, std::uint64_t t, float x, std::uint16_t room,
+                   std::uint8_t flags = 0) {
+        AvatarState s;
+        s.ownerSlot = owner;
+        s.serverTimeMs = t;
+        s.position = {x, 0.0f, 0.0f};
+        s.worldId = 4;
+        s.roomId = room;
+        s.flags = flags;
+        return s;
+    };
+    check(!sync.onRemote(snap(SlotType::Friend1, 1000, 0.0f, 26)), "own echo ignored");
+    sync.onRemote(snap(SlotType::Player, 1000, 0.0f, 26));
+    sync.onRemote(snap(SlotType::Player, 1100, 100.0f, 26));
+    sync.onRemote(snap(SlotType::Friend2, 1000, 0.0f, 27));
+    sync.onRemote(snap(SlotType::Friend2, 1100, 0.0f, 27));
+
+    auto t = sync.sample(1150, 4, 26);
+    check(t[0].active && std::abs(t[0].pose.position.x - 50.0f) < 1e-3f &&
+              t[0].pose.ownerSlot == SlotType::Player,
+          "puppet 0 shows the host at render time (server - 100 ms)");
+    check(!t[1].active, "puppet 1 hidden: its owner is in another room");
+
+    t = sync.sample(3000, 4, 26);
+    check(!t[0].active, "puppet hidden once its stream is stale");
+
+    sync.onRemote(snap(SlotType::Player, 3000, 0.0f, 26, AvatarInCutscene));
+    sync.onRemote(snap(SlotType::Player, 3100, 0.0f, 26, AvatarInCutscene));
+    t = sync.sample(3150, 4, 26);
+    check(!t[0].active, "puppet hidden while its owner is in a cutscene");
+}
+
+void testAvatarBridge() {
+    std::cout << "\n=== AvatarBridge (shared memory) ===\n";
+    const DWORD fakePid = 0x7FFF0000u + (GetCurrentProcessId() & 0xFFFFu);
+    AvatarBridge dll, runtime;
+    check(dll.Open(fakePid) && runtime.Open(fakePid), "both sides open the same mapping");
+
+    AvatarState out;
+    check(!runtime.TryReadLocal(out), "no local avatar before the DLL publishes");
+    AvatarState local;
+    local.seq = 7;
+    local.position = {1.0f, 2.0f, 3.0f};
+    local.motionId = 2;
+    dll.PublishLocal(local);
+    check(runtime.TryReadLocal(out) && out.seq == 7 && out.position.z == 3.0f &&
+              out.motionId == 2,
+          "runtime reads the DLL's local avatar");
+    check(!runtime.TryReadLocal(out), "unchanged slot reads as no new data");
+
+    PuppetPose pose;
+    pose.active = 1;
+    pose.pose.ownerSlot = SlotType::Friend2;
+    pose.pose.position = {9.0f, 0.0f, 0.0f};
+    runtime.PublishPuppet(1, pose);
+    PuppetPose got;
+    check(!dll.TryReadPuppet(0, got), "puppet 0 untouched");
+    check(dll.TryReadPuppet(1, got) && got.active == 1 &&
+              got.pose.ownerSlot == SlotType::Friend2 && got.pose.position.x == 9.0f,
+          "DLL reads puppet 1's pose");
+}
+
 // ---------------------------------------------------------------------------
 
 constexpr std::uint16_t kPort = 17795;
@@ -329,6 +399,8 @@ int main() {
     testCodec();
     testLinkConditioner();
     testInterpolator();
+    testAvatarSync();
+    testAvatarBridge();
     testEndToEnd();
     enet_deinitialize();
 

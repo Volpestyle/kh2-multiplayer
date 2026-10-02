@@ -6,6 +6,7 @@
 #define NOMINMAX
 #endif
 
+#include "kh2coop/AvatarSync.hpp"
 #include "kh2coop/CameraController.hpp"
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/NetworkClient.hpp"
@@ -17,10 +18,12 @@
 // InputMailbox.hpp includes <Windows.h> — must come after WIN32_LEAN_AND_MEAN
 // and after enet.h (which pulls in winsock2.h).
 #ifdef _WIN32
+#include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #endif
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cctype>
@@ -683,6 +686,14 @@ int main(int argc, char* argv[]) {
     // which runs inside tick() on the main thread. Currently single-threaded,
     // but the mutex is cheap insurance for future threading.
     std::mutex replicaMtx;
+
+    // Avatar path (plan D2/D9): the DLL publishes the local avatar into the
+    // bridge; we send it to the relay, feed received avatars to AvatarSync and
+    // publish interpolated puppet poses back for the DLL to apply.
+    kh2coop::AvatarSync avatarSync(options.config.ownedSlot);
+#ifdef _WIN32
+    kh2coop::AvatarBridge avatarBridge;
+#endif
     std::unique_ptr<kh2coop::NetworkClient> netClient;
     std::atomic_bool netConnected {false};
 
@@ -786,6 +797,12 @@ int main(int argc, char* argv[]) {
                 replica.ApplyEnemySnapshot(snap);
             };
 
+        callbacks.onAvatarState = [&avatarSync, &replicaMtx](
+                                      const kh2coop::AvatarState& avatar) {
+            std::lock_guard<std::mutex> lock(replicaMtx);
+            avatarSync.onRemote(avatar);
+        };
+
         callbacks.onEvent = [](const kh2coop::EventMessage& evt) {
             std::cout << "[Runtime] Network: Event type="
                       << static_cast<int>(evt.type)
@@ -883,6 +900,36 @@ int main(int argc, char* argv[]) {
         }
 
         const auto room = game.ReadRoomState();
+
+#ifdef _WIN32
+        // ----- Avatars: local out, remote puppets in -----
+        if (netClient && netConnected) {
+            if (!avatarBridge.IsOpen()) {
+                avatarBridge.Open(static_cast<DWORD>(game.ProcessId()));
+            }
+            if (avatarBridge.IsOpen()) {
+                kh2coop::AvatarState local;
+                if (avatarBridge.TryReadLocal(local)) {
+                    local.serverTimeMs = 0; // stamped by sendAvatar
+                    netClient->sendAvatar(local);
+                }
+                std::array<kh2coop::PuppetTarget, 2> targets;
+                {
+                    std::lock_guard<std::mutex> lock(replicaMtx);
+                    targets = avatarSync.sample(
+                        netClient->estimatedServerTimeMs(),
+                        static_cast<std::uint16_t>(room.worldId),
+                        static_cast<std::uint16_t>(room.roomId));
+                }
+                for (int i = 0; i < 2; ++i) {
+                    kh2coop::PuppetPose pose;
+                    pose.active = targets[i].active ? 1 : 0;
+                    pose.pose = targets[i].pose;
+                    avatarBridge.PublishPuppet(i, pose);
+                }
+            }
+        }
+#endif
         const bool entityDiscovered = game.HasEntityAddresses();
         if (!lastRoomState.has_value() || roomStateChanged(room, *lastRoomState)) {
             std::cout << "[Runtime] Room state: " << describeRoomState(room)
