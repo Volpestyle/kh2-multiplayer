@@ -764,6 +764,9 @@ static constexpr float PUPPET_TIME_DRIFT_FRAMES = 2.0f;
 static constexpr uintptr_t ACTOR_MOTCTRL = 0x158;        // embedded motion controller
 static constexpr uintptr_t MOTCTRL_CURRENT_TIME = 0x44;  // float frames
 static constexpr uintptr_t ACTOR_VELOCITY = 0xB98;       // 3 floats
+static constexpr uintptr_t ACTOR_CARRIED_DISPLACEMENT = 0x690;  // 3 floats, added per frame
+static constexpr uintptr_t ACTOR_ACCEL_BLOCK = 0xA48;           // accel +0xA48..+0xA60
+static constexpr size_t ACTOR_ACCEL_BLOCK_BYTES = 0x18;
 
 // Puppet i (0/1) has a fresh, active pose.
 // Room transitions: the moment the local room key (NOW world/room) changes,
@@ -1904,6 +1907,12 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
     *reinterpret_cast<float*>(entity + offsets::entity::POS_Z) = pose.position.z;
     *reinterpret_cast<float*>(entity + offsets::entity::ROT_Y) = pose.rotationY;
     std::memset(reinterpret_cast<void*>(actor + ACTOR_VELOCITY), 0, 3 * sizeof(float));
+    // Other terms EntityPositionPhysics (0x3B89A0) adds each frame (repos-60):
+    // a carried displacement vector and the acceleration block. With
+    // collision off there's no ground snap, so leftovers here drift the
+    // puppet until our write.
+    std::memset(reinterpret_cast<void*>(actor + ACTOR_CARRIED_DISPLACEMENT), 0, 3 * sizeof(float));
+    std::memset(reinterpret_cast<void*>(actor + ACTOR_ACCEL_BLOCK), 0, ACTOR_ACCEL_BLOCK_BYTES);
     if (!IsPlayerClassActor(actor)) {
         // Companion follow timer; not a known field on player-class actors.
         *reinterpret_cast<float*>(actor + ACTOR_FOLLOW_TIMER) = DISABLE_FOLLOW_TIMER;
