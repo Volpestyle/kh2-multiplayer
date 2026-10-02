@@ -33,15 +33,17 @@ Tailscale makes a private network between your PCs, with no router changes.
 ## Host
 
 ```powershell
-# 1. The relay. The version flags must match what the runtimes send
-#    (today's runtime defaults shown).
-build\Release\kh2coop_server.exe --port 7782 --build 1.0.0.10-steam-global --content none --mod ""
+# 1. The relay, listening only on your Tailscale address. The version
+#    flags must match what the runtimes send (today's runtime defaults).
+build\Release\kh2coop_server.exe --port 7782 --bind <your 100.x address> `
+    --build 1.0.0.10-steam-global --content none --mod ""
 
 # 2. The game with the mod, then load your save on the title menu.
 build\tools\kh2ctl\Release\kh2ctl.exe launch      # prints the game's pid
 
 # 3. Your runtime, bound to that game. You are the host: role player (slot 0).
-build\Release\kh2coop_runtime_scaffold.exe --network --server 127.0.0.1 --port 7782 `
+#    With --bind, connect to your own 100.x address (127.0.0.1 isn't listening).
+build\Release\kh2coop_runtime_scaffold.exe --network --server <your 100.x address> --port 7782 `
     --pid <game pid> --role player --peer-id <your name> --no-camera
 ```
 
@@ -69,8 +71,10 @@ A second friend uses `--role friend2`. Each slot can be taken once.
 - Combat: the host owns enemy HP. A friend's hits play their reaction, but
   the HP change comes from the host (VUH-1502; friend hit claims are
   VUH-1501).
-- Round-trip time and loss: shown in the overlay and logged (in progress,
-  VUH-1493).
+- Round-trip time and loss: `kh2ctl overlay on` shows `rtt … ms  loss …%`
+  in the corner once your runtime is connected, and the runtime logs
+  `Net: rtt=… loss=…` every 5 s. Loss currently counts only ENet's
+  reliable traffic.
 
 ## Troubleshooting
 
@@ -91,8 +95,9 @@ nobody else (and no agent) sets it up.
 
 ## Known limits (dev build)
 
-- The relay listens on every network interface, including the host's LAN.
-  A `--bind` option to listen on the Tailscale address only is requested.
+- Without `--bind`, the relay listens on every network interface,
+  including the host's LAN. With `--bind 100.x`, only on Tailscale
+  (verified 2026-10-02).
 - Tested 2026-10-02 through the host's own Tailscale address only
   (`net_tailscale_self`): two instances on one PC reached the relay at
   100.108.214.60. A friend on a different network is the open acceptance
