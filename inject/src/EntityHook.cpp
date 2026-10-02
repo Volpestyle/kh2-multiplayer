@@ -453,20 +453,67 @@ static constexpr uint32_t PUPPET_STALE_FRAMES = 120;
 // friend's moveset until the puppet model is decided (VUH-1489), so they
 // fall back to the nearest basic motion instead of risking a bad id.
 static constexpr uint32_t PUPPET_MAX_BASIC_MOTION = 8;
+static constexpr uint32_t PUPPET_CLONE_UNSAFE_MOTION = 9;
 static constexpr float PUPPET_TIME_DRIFT_FRAMES = 2.0f;
 static constexpr uintptr_t ACTOR_MOTCTRL = 0x158;        // embedded motion controller
 static constexpr uintptr_t MOTCTRL_CURRENT_TIME = 0x44;  // float frames
 static constexpr uintptr_t ACTOR_VELOCITY = 0xB98;       // 3 floats
 
-static bool IsPuppetSlot(int friendSlot) {
-    if (friendSlot < 1 || friendSlot > 2) return false;
-    const PuppetDriver& d = g_puppets[friendSlot - 1];
+// Puppet i (0/1) has a fresh, active pose.
+static bool IsPuppetActive(int index) {
+    if (index < 0 || index > 1) return false;
+    const PuppetDriver& d = g_puppets[index];
     return d.have && d.pose.active && g_frameCounter - d.poseFrame <= PUPPET_STALE_FRAMES;
+}
+
+// Sora clones: player-class actors (objentry type 0) other than the real
+// Sora, e.g. a Sora the world party table spawned into a friend slot
+// (VUH-1489). They don't appear in the friend-slot pointers (with a clone
+// in the party, slot 1's friend pointer is the next companion), so they're
+// collected as entities update. g_clones is the last complete frame's list.
+static uintptr_t g_clones[2] = {0, 0};
+static uintptr_t g_clonesNow[2] = {0, 0};
+static int g_cloneCountNow = 0;
+
+static bool IsPlayerClassActor(uintptr_t actor) {
+    const auto obj = *reinterpret_cast<const uintptr_t*>(actor + offsets::actor::OBJENTRY_PTR);
+    if (obj <= g_exeBase || obj >= g_exeBase + 0x3000000) return false;
+    return *reinterpret_cast<const uint8_t*>(obj + offsets::objentry::TYPE_FLAGS) == 0;
+}
+
+static void BeginCloneFrame() {
+    g_clones[0] = g_clonesNow[0];
+    g_clones[1] = g_clonesNow[1];
+    g_clonesNow[0] = g_clonesNow[1] = 0;
+    g_cloneCountNow = 0;
+}
+
+static void NoteActorForClones(uintptr_t actor) {
+    if (actor != g_soraActor && g_cloneCountNow < 2 && IsPlayerClassActor(actor)) {
+        g_clonesNow[g_cloneCountNow++] = actor;
+    }
+}
+
+// The actor puppet i drives: Sora clones when the room has any, otherwise
+// the friend-slot actors (Donald/Goofy).
+static uintptr_t PuppetTarget(int index) {
+    if (g_clones[0] != 0) return g_clones[index];
+    return index == 0 ? g_friend1Actor : g_friend2Actor;
+}
+
+static int PuppetIndexFor(uintptr_t actor) {
+    if (actor == 0) return -1;
+    for (int i = 0; i < 2; ++i) {
+        if (PuppetTarget(i) == actor && IsPuppetActive(i)) return i;
+    }
+    return -1;
 }
 
 // Friend slots our code drives instead of the vanilla AI.
 static bool IsDrivenFriend(int friendSlot) {
-    return friendSlot != 0 && (g_soloTestMode || IsPuppetSlot(friendSlot));
+    if (friendSlot == 0) return false;
+    if (g_soloTestMode) return true;
+    return PuppetIndexFor(friendSlot == 1 ? g_friend1Actor : g_friend2Actor) >= 0;
 }
 
 // Puts back the team of an actor we stopped driving, if it's still the
@@ -483,19 +530,18 @@ static void RestorePuppetTeam(PuppetDriver& d, uintptr_t currentActor) {
 // and hold the drive gauge while any puppet is active.
 static void PollPuppetPoses() {
     if (!g_avatarBridge.IsOpen()) return;
-    const uintptr_t friends[2] = {g_friend1Actor, g_friend2Actor};
     bool anyActive = false;
     for (int i = 0; i < 2; ++i) {
-        const bool wasActive = IsPuppetSlot(i + 1);
+        const bool wasActive = IsPuppetActive(i);
         kh2coop::PuppetPose pose;
         if (g_avatarBridge.TryReadPuppet(i, pose)) {
             g_puppets[i].pose = pose;
             g_puppets[i].have = true;
             g_puppets[i].poseFrame = g_frameCounter;
         }
-        const bool active = IsPuppetSlot(i + 1);
+        const bool active = IsPuppetActive(i);
         if (wasActive && !active) {
-            RestorePuppetTeam(g_puppets[i], friends[i]);
+            RestorePuppetTeam(g_puppets[i], PuppetTarget(i));
             g_puppets[i].lastAnim = -1;
             Log("Puppet %d released", i);
         } else if (!wasActive && active) {
@@ -1290,7 +1336,7 @@ static uint8_t __fastcall HookedMotionChainSetAnim(void* motCtrl, int animId,
 
         // Puppets: block the game's calls, pass our own through unchanged
         // (DrivePuppetMotion already chose the stream's motion).
-        if (IsPuppetSlot(friendSlot)) {
+        if (PuppetIndexFor(actorAddr) >= 0) {
             if (!g_inOurAnimSet) return 1;
             if (g_inPuppetAnimSet) {
                 return g_origMotionChainSetAnim
@@ -1423,9 +1469,10 @@ static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
 // which replaces the follow-distance speed delta with our stick-based one.
 // ============================================================================
 
-// Puppet motion, from the friend AI hook (replaces the AI for this frame).
-static void DrivePuppetMotion(void* actorObj, int friendSlot) {
-    PuppetDriver& d = g_puppets[friendSlot - 1];
+// Puppet motion: from the friend AI hook for companions (replacing the AI),
+// after the entity update for Sora clones (which have no friend AI).
+static void DrivePuppetMotion(void* actorObj, int index) {
+    PuppetDriver& d = g_puppets[index];
     const auto actor = reinterpret_cast<uintptr_t>(actorObj);
     if (d.actor != actor) {  // new room / reloaded actor
         d.actor = actor;
@@ -1435,7 +1482,13 @@ static void DrivePuppetMotion(void* actorObj, int friendSlot) {
 
     const auto& pose = d.pose.pose;
     uint32_t motion = pose.motionId;
-    if (motion > PUPPET_MAX_BASIC_MOTION) {
+    // A Sora clone has Sora's moveset. But setting motion 9 (seen during a
+    // Fire cast) on a clone crashed the game (VUH-1489, 2026-10-02), so it's
+    // held at idle until the spell path is understood. Attack 151 and the
+    // basic motions play fine.
+    if (motion == PUPPET_CLONE_UNSAFE_MOTION && IsPlayerClassActor(actor)) {
+        motion = ANIM_IDLE;
+    } else if (motion > PUPPET_MAX_BASIC_MOTION && !IsPlayerClassActor(actor)) {
         // Unknown to the friend's moveset for now: idle if still, else run.
         const float speed2 = pose.velocity.x * pose.velocity.x + pose.velocity.z * pose.velocity.z;
         motion = speed2 > 1.0f ? ANIM_RUN : ANIM_IDLE;
@@ -1444,6 +1497,8 @@ static void DrivePuppetMotion(void* actorObj, int friendSlot) {
     auto* motCtrl = reinterpret_cast<void*>(actor + ACTOR_MOTCTRL);
     auto* time = reinterpret_cast<float*>(actor + ACTOR_MOTCTRL + MOTCTRL_CURRENT_TIME);
     if (static_cast<int>(motion) != d.lastAnim) {
+        Log("[puppet %d] frame %u motion %d -> %u (stream %u, time %.1f) actor=%p",
+            index, g_frameCounter, d.lastAnim, motion, pose.motionId, pose.motionTime, actorObj);
         g_inOurAnimSet = true;
         g_inPuppetAnimSet = true;
         g_setAnimationUnderlying(motCtrl, static_cast<int>(motion), 0.0f, 0.0f);
@@ -1457,8 +1512,8 @@ static void DrivePuppetMotion(void* actorObj, int friendSlot) {
 }
 
 // Puppet transform, after the entity's own update so it has the last word.
-static void ApplyPuppetTransform(void* actorObj, int friendSlot) {
-    const auto& pose = g_puppets[friendSlot - 1].pose.pose;
+static void ApplyPuppetTransform(void* actorObj, int index) {
+    const auto& pose = g_puppets[index].pose.pose;
     const auto actor = reinterpret_cast<uintptr_t>(actorObj);
     const uintptr_t entity = actor + offsets::actor::ENTITY_TRANSFORM;
     *reinterpret_cast<float*>(entity + offsets::entity::POS_X) = pose.position.x;
@@ -1466,11 +1521,14 @@ static void ApplyPuppetTransform(void* actorObj, int friendSlot) {
     *reinterpret_cast<float*>(entity + offsets::entity::POS_Z) = pose.position.z;
     *reinterpret_cast<float*>(entity + offsets::entity::ROT_Y) = pose.rotationY;
     std::memset(reinterpret_cast<void*>(actor + ACTOR_VELOCITY), 0, 3 * sizeof(float));
-    *reinterpret_cast<float*>(actor + ACTOR_FOLLOW_TIMER) = DISABLE_FOLLOW_TIMER;
+    if (!IsPlayerClassActor(actor)) {
+        // Companion follow timer; not a known field on player-class actors.
+        *reinterpret_cast<float*>(actor + ACTOR_FOLLOW_TIMER) = DISABLE_FOLLOW_TIMER;
+    }
 
     // Untouchable: team 0 is in no attack's hit mask. Re-applied every frame
     // in case the game resets it; the original team comes back on release.
-    PuppetDriver& d = g_puppets[friendSlot - 1];
+    PuppetDriver& d = g_puppets[index];
     auto* team = reinterpret_cast<uint32_t*>(actor + ACTOR_TEAM);
     if (d.actor == actor && !d.teamSaved) {
         d.savedTeam = *team;
@@ -1480,11 +1538,12 @@ static void ApplyPuppetTransform(void* actorObj, int friendSlot) {
 }
 
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
-    if (IsPuppetSlot(g_currentFriendSlot)) {
+    const int puppet = PuppetIndexFor(reinterpret_cast<uintptr_t>(actorObj));
+    if (puppet >= 0) {
         __try {
-            DrivePuppetMotion(actorObj, g_currentFriendSlot);
+            DrivePuppetMotion(actorObj, puppet);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
-            Log("EXCEPTION in DrivePuppetMotion (friend%d)", g_currentFriendSlot);
+            Log("EXCEPTION in DrivePuppetMotion (puppet %d)", puppet);
         }
         return;  // never run the vanilla AI for a puppet
     }
@@ -1770,9 +1829,11 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
                 // Hand pending room warps to the game on its own thread.
                 warp::OnFrameStart(g_frameCounter, addr);
+                BeginCloneFrame();
                 PollPuppetPoses();
             }
         }
+        NoteActorForClones(addr);
 
         // Check hotkey (handles standalone mode where OnFrame isn't called)
         CheckTestModeHotkey();
@@ -1868,8 +1929,14 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             g_avatarBridge.PublishLocal(avatar);
         }
 
-        if (IsPuppetSlot(savedFriendSlot)) {
-            ApplyPuppetTransform(actorObj, savedFriendSlot);
+        const int puppet = PuppetIndexFor(reinterpret_cast<uintptr_t>(actorObj));
+        if (puppet >= 0) {
+            // Sora clones don't run the friend AI hook, so their motion is
+            // set here; companions got theirs in HookedFriendAI.
+            if (IsPlayerClassActor(reinterpret_cast<uintptr_t>(actorObj))) {
+                DrivePuppetMotion(actorObj, puppet);
+            }
+            ApplyPuppetTransform(actorObj, puppet);
         } else if (savedFriendSlot != 0) {
             // Re-inject movement input after physics overwrites.
             // The motion controller tick (FUN_1403c6740) has already run
