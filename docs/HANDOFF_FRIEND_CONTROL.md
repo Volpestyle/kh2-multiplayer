@@ -195,7 +195,7 @@ HookedMovementDispatch(actor, delta, channel, flag):
 | PerEntityUpdate | exe+0x3BFD30 |
 | Friend AI (vtable+0x10) | exe+0x1B0020 |
 | Behavior timer | FUN_1403c3bd0 |
-| Movement dispatch | exe+0x3D5E50 — hooked but NOP for friends |
+| "Movement dispatch" | exe+0x3D5E50 — hooked but NOP for friends. **Correction (VUH-1501, 2026-10-02):** this is the TakeDamage virtual `(actor, delta, statIdx, reactFlag)`, which calls ApplyStatDelta `0x3D2EB0`; it isn't movement. |
 | MotCtrl tick call site | exe+0x3BFE8A (inside PerEntityUpdate) |
 
 ## Known limitations / future work

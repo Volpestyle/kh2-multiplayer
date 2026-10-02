@@ -1449,6 +1449,12 @@ static uint8_t __fastcall HookedMotionChainSetAnim(void* motCtrl, int animId,
     return 0;
 }
 
+// NOTE (VUH-1501, 2026-10-02): 0x3D5E50 is not a movement dispatch. It's
+// the TakeDamage virtual (actor, delta, statIdx, reactFlag): it adds drive
+// gauge to the victim and calls ApplyStatDelta 0x3D2EB0, and a live enemy
+// hit on Sora passes through it (stack ...3D613C <- 3A8DC5). The hook
+// below only counts and logs calls, so it's left in place under its old
+// name; "speedDelta"/"channel" are really the stat delta and stat index.
 // Diagnostic counters for movement dispatch hook
 static uint32_t g_movDispatchTotalCalls = 0;
 static uint32_t g_movDispatchFriendCalls = 0;
