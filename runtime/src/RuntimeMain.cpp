@@ -927,6 +927,9 @@ int main(int argc, char* argv[]) {
         if (!netClient || !netConnected || !avatarBridge.IsOpen()) return;
         kh2coop::AvatarState local;
         if (avatarBridge.TryReadLocal(local)) {
+            // Network seq is per send (sendAvatar restamps 0), so receivers can
+            // count gaps as loss; the DLL's frame counter stays in recordings.
+            local.seq = 0;
             local.serverTimeMs = 0; // stamped by sendAvatar
             netClient->sendAvatar(local);
         }
@@ -1021,11 +1024,15 @@ int main(int argc, char* argv[]) {
                 const auto slot = static_cast<std::uint8_t>(options.config.ownedSlot);
                 if (worldBridge.LocalSlot() != slot) worldBridge.SetLocalSlot(slot);
                 // Link quality for the overlay: app-level RTT (includes any
-                // simulated latency), ENet's loss estimate.
+                // simulated latency) and the avatar-stream loss players see,
+                // falling back to ENet's estimate until a loss window closes.
                 const auto link = netClient->linkStats();
                 if (link.valid) {
-                    worldBridge.SetNetStats(link.appRttMs ? link.appRttMs : link.rttMs,
-                                            link.lossPermille);
+                    const auto loss =
+                        link.avatarLossPermille != kh2coop::NetworkClient::kNoAvatarLoss
+                            ? link.avatarLossPermille
+                            : link.lossPermille;
+                    worldBridge.SetNetStats(link.appRttMs ? link.appRttMs : link.rttMs, loss);
                 } else {
                     worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN,
                                             kh2coop::WORLD_NET_UNKNOWN);
@@ -1114,9 +1121,13 @@ int main(int argc, char* argv[]) {
             if (link.valid) {
                 std::cout << "[Runtime] Net: rtt=" << link.appRttMs
                           << "ms enet_rtt=" << link.rttMs << "ms var="
-                          << link.rttVarMs << "ms loss="
-                          << link.lossPermille / 10 << "." << link.lossPermille % 10
-                          << "%\n";
+                          << link.rttVarMs << "ms enet_loss="
+                          << link.lossPermille / 10 << "." << link.lossPermille % 10 << "%";
+                if (link.avatarLossPermille != kh2coop::NetworkClient::kNoAvatarLoss) {
+                    std::cout << " avatar_loss=" << link.avatarLossPermille / 10 << "."
+                              << link.avatarLossPermille % 10 << "%";
+                }
+                std::cout << "\n";
             }
             lastNetLogAt = now;
         }

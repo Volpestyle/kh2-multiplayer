@@ -456,6 +456,15 @@ void testEndToEnd() {
               "viewer " + std::to_string(v) + " puppets within 50 units (~0.5 m) of truth");
     }
     check(host.relayedAvatarCount() > 900, "relay forwarded the streams");
+    {
+        // 2% conditioner loss on each hop (owner out, viewer in) ~= 4% end to
+        // end; ENet's own estimate can't see these drops.
+        const auto link = clients[2]->linkStats();
+        check(link.avatarLossPermille != NetworkClient::kNoAvatarLoss &&
+                  link.avatarLossPermille >= 10 && link.avatarLossPermille <= 100,
+              "avatar-stream loss sees simulated drops (" +
+                  std::to_string(link.avatarLossPermille) + " per mille)");
+    }
 
     for (auto& c : clients) c->disconnect();
     host.stop();

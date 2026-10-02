@@ -121,7 +121,12 @@ public:
         std::uint32_t rttVarMs {0};
         std::uint32_t lossPermille {0};
         std::uint32_t appRttMs {0};
+        // Loss players actually see: gaps in received avatar sequence numbers,
+        // worst remote owner over its last ~300-packet window (~5 s at 60 Hz).
+        // Includes LinkConditioner drops. kNoAvatarLoss until a window closes.
+        std::uint32_t avatarLossPermille {kNoAvatarLoss};
     };
+    static constexpr std::uint32_t kNoAvatarLoss = 0xFFFFFFFFu;
     [[nodiscard]] LinkStats linkStats() const;
 
     // Test hooks: simulated network conditions per direction, and a skew
@@ -169,6 +174,16 @@ private:
     std::int64_t clockOffsetMs_{0}; // serverTime - localTime
     std::uint32_t bestRttMs_{0};
     std::uint32_t lastRttMs_{0};
+    // Avatar loss windows per owner slot (VUH-1493).
+    struct AvatarLossWindow {
+        bool started {false};
+        std::uint32_t firstSeq {0};
+        std::uint32_t maxSeq {0};
+        std::uint32_t received {0};
+        std::uint32_t lastLossPermille {kNoAvatarLoss};
+    };
+    AvatarLossWindow avatarLoss_[3];
+    void noteAvatarSeq(std::uint8_t ownerSlot, std::uint32_t seq);
     std::uint32_t clockSamples_{0};
     std::uint64_t lastPingMs_{0};
     std::uint32_t avatarSeq_{0};

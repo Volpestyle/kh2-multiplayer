@@ -230,7 +230,33 @@ NetworkClient::LinkStats NetworkClient::linkStats() const {
         (static_cast<std::uint64_t>(enetPeer_->packetLoss) * 1000u) /
         ENET_PEER_PACKET_LOSS_SCALE);
     s.appRttMs = lastRttMs_;
+    for (const auto& w : avatarLoss_) {
+        if (w.lastLossPermille == kNoAvatarLoss) continue;
+        if (s.avatarLossPermille == kNoAvatarLoss || w.lastLossPermille > s.avatarLossPermille)
+            s.avatarLossPermille = w.lastLossPermille;
+    }
     return s;
+}
+
+void NetworkClient::noteAvatarSeq(std::uint8_t ownerSlot, std::uint32_t seq) {
+    if (ownerSlot >= 3 || seq == 0) return;
+    auto& w = avatarLoss_[ownerSlot];
+    constexpr std::uint32_t kWindow = 300;
+    if (!w.started || seq + kWindow < w.firstSeq) { // first packet, or sender restarted
+        w = AvatarLossWindow {true, seq, seq, 1, w.lastLossPermille};
+        return;
+    }
+    if (seq < w.firstSeq) return; // late packet from a closed window
+    ++w.received;
+    if (seq > w.maxSeq) w.maxSeq = seq;
+    const std::uint32_t expected = w.maxSeq - w.firstSeq + 1;
+    if (expected >= kWindow) {
+        const std::uint32_t got = w.received < expected ? w.received : expected;
+        w.lastLossPermille =
+            static_cast<std::uint32_t>((static_cast<std::uint64_t>(expected - got) * 1000u) / expected);
+        w.firstSeq = w.maxSeq + 1;
+        w.received = 0;
+    }
 }
 
 void NetworkClient::setLinkConditions(const LinkConditions& outbound,
@@ -336,6 +362,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
             case PacketType::AvatarRelay: {
                 AvatarState avatar;
                 read(reader, avatar);
+                noteAvatarSeq(static_cast<std::uint8_t>(avatar.ownerSlot), avatar.seq);
                 if (callbacks_.onAvatarState) callbacks_.onAvatarState(avatar);
                 break;
             }
