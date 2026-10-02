@@ -209,6 +209,7 @@ void NetworkClient::onClockPong(const ClockPong& pong) {
     const auto now = localTimeMs();
     if (pong.clientSendMs > now) return; // stale or bogus
     const auto rtt = static_cast<std::uint32_t>(now - pong.clientSendMs);
+    lastRttMs_ = rtt;
     // The lowest-RTT sample has the least queuing asymmetry, so trust it.
     if (clockSamples_ == 0 || rtt <= bestRttMs_) {
         bestRttMs_ = rtt;
@@ -217,6 +218,19 @@ void NetworkClient::onClockPong(const ClockPong& pong) {
                          static_cast<std::int64_t>(now);
     }
     ++clockSamples_;
+}
+
+NetworkClient::LinkStats NetworkClient::linkStats() const {
+    LinkStats s;
+    if (!connected_ || !enetPeer_) return s;
+    s.valid = true;
+    s.rttMs = enetPeer_->roundTripTime;
+    s.rttVarMs = enetPeer_->roundTripTimeVariance;
+    s.lossPermille = static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(enetPeer_->packetLoss) * 1000u) /
+        ENET_PEER_PACKET_LOSS_SCALE);
+    s.appRttMs = lastRttMs_;
+    return s;
 }
 
 void NetworkClient::setLinkConditions(const LinkConditions& outbound,

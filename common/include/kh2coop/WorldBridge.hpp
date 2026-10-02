@@ -14,7 +14,9 @@
 // without re-encoding and both sides share one message definition.
 // Either side may open first; the first opener formats the rings.
 // Header words: [0] magic, [1] version, [2] the runtime's session slot
-// (0 = Player = host, 1/2 = clients, 0xFF = not known yet; VUH-1502).
+// (0 = Player = host, 1/2 = clients, 0xFF = not known yet; VUH-1502),
+// [3] round trip ms and [4] loss per-mille for the overlay (VUH-1493;
+// WORLD_NET_UNKNOWN until the runtime is connected).
 // ============================================================================
 
 #include "kh2coop/PacketRing.hpp"
@@ -35,9 +37,10 @@ namespace kh2coop {
 
 static constexpr const char* WORLD_BRIDGE_PREFIX = "Local\\kh2coop_world_";
 static constexpr std::uint32_t WORLD_BRIDGE_MAGIC = 0x42574B32; // "2KWB"
-static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 2; // 2: header[2] local slot
+static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 3; // 2: local slot, 3: net stats
 static constexpr std::uint32_t WORLD_RING_BYTES = 1u << 20;      // 1 MiB each way
 static constexpr std::uint8_t WORLD_SLOT_UNKNOWN = 0xFF;
+static constexpr std::uint32_t WORLD_NET_UNKNOWN = 0xFFFFFFFFu;
 
 class WorldBridge {
 public:
@@ -68,6 +71,8 @@ public:
             PacketRing::format(view_ + kHeaderBytes + kRingBytes, WORLD_RING_BYTES);
             header[1] = WORLD_BRIDGE_VERSION;
             header[2] = WORLD_SLOT_UNKNOWN; // a zeroed word would read as host
+            header[3] = WORLD_NET_UNKNOWN;
+            header[4] = WORLD_NET_UNKNOWN;
             std::atomic_thread_fence(std::memory_order_release);
             header[0] = WORLD_BRIDGE_MAGIC;
         } else if (header[0] != WORLD_BRIDGE_MAGIC || header[1] != WORLD_BRIDGE_VERSION) {
@@ -107,6 +112,27 @@ public:
         if (!view_) return WORLD_SLOT_UNKNOWN;
         return static_cast<std::uint8_t>(
             reinterpret_cast<const volatile std::uint32_t*>(view_)[2]);
+    }
+
+    // Runtime publishes link quality; the DLL overlay reads it. Pass
+    // WORLD_NET_UNKNOWN for both when disconnected.
+    void SetNetStats(std::uint32_t rttMs, std::uint32_t lossPermille) {
+        if (!view_) return;
+        auto* header = reinterpret_cast<volatile std::uint32_t*>(view_);
+        header[3] = rttMs;
+        header[4] = lossPermille;
+    }
+    struct NetStatsView {
+        std::uint32_t rttMs {WORLD_NET_UNKNOWN};
+        std::uint32_t lossPermille {WORLD_NET_UNKNOWN};
+    };
+    [[nodiscard]] NetStatsView NetStats() const {
+        NetStatsView out;
+        if (!view_) return out;
+        const auto* header = reinterpret_cast<const volatile std::uint32_t*>(view_);
+        out.rttMs = header[3];
+        out.lossPermille = header[4];
+        return out;
     }
 
     [[nodiscard]] std::uint32_t droppedToRuntime() const { return toRuntime_.dropped(); }

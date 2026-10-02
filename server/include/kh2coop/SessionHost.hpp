@@ -21,6 +21,7 @@ namespace kh2coop {
 // ---------------------------------------------------------------------------
 struct SessionConfig {
     std::uint16_t port{7782}; // default listen port
+    std::string bindAddress;  // empty = all interfaces; else e.g. a 100.x Tailscale IP
     std::uint16_t protocolVersion{2};
     std::uint32_t maxPeers{3};
     std::uint32_t heartbeatTimeoutMs{5000};

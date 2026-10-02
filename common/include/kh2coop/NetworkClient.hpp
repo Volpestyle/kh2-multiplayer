@@ -110,6 +110,20 @@ public:
     [[nodiscard]] std::uint64_t estimatedServerTimeMs() const;
     [[nodiscard]] std::uint32_t roundTripMs() const { return bestRttMs_; }
 
+    // Link quality for logs and the overlay (VUH-1493). rttMs/rttVarMs and
+    // lossPermille are ENet's transport estimates (lossPermille only reflects
+    // reliable traffic). appRttMs is the latest clock-ping round trip, which
+    // also includes any LinkConditioner delay, so it's the one that moves in
+    // impaired tests. valid is false until connected.
+    struct LinkStats {
+        bool valid {false};
+        std::uint32_t rttMs {0};
+        std::uint32_t rttVarMs {0};
+        std::uint32_t lossPermille {0};
+        std::uint32_t appRttMs {0};
+    };
+    [[nodiscard]] LinkStats linkStats() const;
+
     // Test hooks: simulated network conditions per direction, and a skew
     // added to this client's clock to mimic a different machine.
     void setLinkConditions(const LinkConditions& outbound,
@@ -154,6 +168,7 @@ private:
     std::int64_t clockSkewMs_{0};
     std::int64_t clockOffsetMs_{0}; // serverTime - localTime
     std::uint32_t bestRttMs_{0};
+    std::uint32_t lastRttMs_{0};
     std::uint32_t clockSamples_{0};
     std::uint64_t lastPingMs_{0};
     std::uint32_t avatarSeq_{0};

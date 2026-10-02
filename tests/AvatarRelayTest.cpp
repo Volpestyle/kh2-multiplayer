@@ -380,6 +380,14 @@ void testEndToEnd() {
     while (steadyMs() < deadline && host.verifiedPeerCount() < 3) pump(10);
     check(host.verifiedPeerCount() == 3, "3 clients verified");
     pump(1500);
+    {
+        const auto link = clients[1]->linkStats();
+        // 50 ms each way per client + jitter: app RTT sees the conditioner.
+        check(link.valid && link.appRttMs >= 90 && link.appRttMs < 400,
+              "linkStats: app RTT includes simulated latency (" +
+                  std::to_string(link.appRttMs) + " ms)");
+        check(link.lossPermille <= 1000, "linkStats: loss is a per-mille value");
+    }
 
     for (int i = 0; i < 3; ++i) {
         const auto err = static_cast<long long>(clients[i]->estimatedServerTimeMs()) -
@@ -462,8 +470,15 @@ void testVersionReject() {
     cfg.contentHash = "c";
     cfg.modHash = "m";
     cfg.sessionId = "reject-test";
+    {
+        SessionConfig bad = cfg;
+        bad.bindAddress = "not-an-ip";
+        SessionHost badHost(bad, {});
+        check(!badHost.start(), "relay refuses an invalid --bind address");
+    }
+    cfg.bindAddress = "127.0.0.1"; // --bind: clients on that address still connect
     SessionHost host(cfg, {});
-    check(host.start(), "relay starts");
+    check(host.start(), "relay starts (bound to 127.0.0.1)");
 
     std::string reason;
     bool disconnected = false;

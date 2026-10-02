@@ -134,6 +134,12 @@ int main() {
     clientRuntimeSide.SetLocalSlot(1);
     check(hostDll.LocalSlot() == 0 && clientDll.LocalSlot() == 1,
           "DLL side reads the slot the runtime set");
+    check(hostDll.NetStats().rttMs == WORLD_NET_UNKNOWN &&
+              hostDll.NetStats().lossPermille == WORLD_NET_UNKNOWN,
+          "net stats are unknown until the runtime publishes them");
+    hostRuntimeSide.SetNetStats(42, 15);
+    check(hostDll.NetStats().rttMs == 42 && hostDll.NetStats().lossPermille == 15,
+          "DLL side reads the runtime's RTT and loss");
 
     WorldPumpStats hostStats, clientStats;
     ClientCallbacks hostCb, clientCb;

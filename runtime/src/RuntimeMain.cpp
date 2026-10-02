@@ -909,6 +909,7 @@ int main(int argc, char* argv[]) {
     std::optional<bool> lastEntityDiscovered;
     std::optional<kh2coop::RoomState> lastRoomState;
     auto lastActorLogAt = std::chrono::steady_clock::now();
+    auto lastNetLogAt = std::chrono::steady_clock::now();
     auto lastHeartbeatAt = std::chrono::steady_clock::now();
     auto lastSnapshotAt = std::chrono::steady_clock::now();
     std::uint32_t snapshotSeq = 0;
@@ -1019,6 +1020,16 @@ int main(int argc, char* argv[]) {
                 // Tell the DLL its session slot (0 = Player = host).
                 const auto slot = static_cast<std::uint8_t>(options.config.ownedSlot);
                 if (worldBridge.LocalSlot() != slot) worldBridge.SetLocalSlot(slot);
+                // Link quality for the overlay: app-level RTT (includes any
+                // simulated latency), ENet's loss estimate.
+                const auto link = netClient->linkStats();
+                if (link.valid) {
+                    worldBridge.SetNetStats(link.appRttMs ? link.appRttMs : link.rttMs,
+                                            link.lossPermille);
+                } else {
+                    worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN,
+                                            kh2coop::WORLD_NET_UNKNOWN);
+                }
                 kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
             }
             pumpAvatars(room.worldId, room.roomId);
@@ -1096,6 +1107,18 @@ int main(int argc, char* argv[]) {
                 }
                 lastSnapshotAt = now;
             }
+        }
+
+        if (netClient && netConnected && now - lastNetLogAt >= 5s) {
+            const auto link = netClient->linkStats();
+            if (link.valid) {
+                std::cout << "[Runtime] Net: rtt=" << link.appRttMs
+                          << "ms enet_rtt=" << link.rttMs << "ms var="
+                          << link.rttVarMs << "ms loss="
+                          << link.lossPermille / 10 << "." << link.lossPermille % 10
+                          << "%\n";
+            }
+            lastNetLogAt = now;
         }
 
         if (options.config.logOwnedActorState &&

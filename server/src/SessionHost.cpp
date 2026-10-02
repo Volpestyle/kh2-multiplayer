@@ -83,6 +83,11 @@ bool SessionHost::start() {
     ENetAddress address;
     address.host = ENET_HOST_ANY;
     address.port = config_.port;
+    if (!config_.bindAddress.empty() &&
+        enet_address_set_host_ip(&address, config_.bindAddress.c_str()) != 0) {
+        log("Invalid bind address: " + config_.bindAddress);
+        return false;
+    }
 
     enetHost_ = enet_host_create(&address, config_.maxPeers, 2 /* channels */,
                                  0 /* unlimited downstream */,

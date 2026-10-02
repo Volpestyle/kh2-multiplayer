@@ -15,6 +15,8 @@ static void signalHandler(int) { g_running = false; }
 static void printUsage() {
     std::cout << "Usage: kh2coop_server [options]\n"
               << "  --port <port>       Listen port (default 7782)\n"
+              << "  --bind <ip>         Listen only on this address (e.g. your Tailscale 100.x IP);\n"
+              << "                      default: all interfaces\n"
               << "  --heartbeat-timeout-ms <ms>\n"
               << "                      Drop idle verified peers after this long (default 5000)\n"
               << "  --pending-timeout-ms <ms>\n"
@@ -52,6 +54,8 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--port" && i + 1 < argc) {
             config.port = static_cast<std::uint16_t>(std::stoi(argv[++i]));
+        } else if (arg == "--bind" && i + 1 < argc) {
+            config.bindAddress = argv[++i];
         } else if (arg == "--heartbeat-timeout-ms" && i + 1 < argc) {
             config.heartbeatTimeoutMs = static_cast<std::uint32_t>(std::stoul(argv[++i]));
         } else if (arg == "--pending-timeout-ms" && i + 1 < argc) {
