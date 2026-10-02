@@ -64,8 +64,11 @@ foreground-window key injection.
 
 That means:
 
-- Save/title automation is still menu-key driven rather than migrated to the
-  new native slot-0 commands
+- The `load-save`/`boot-load-save` commands are still menu-key driven, so
+  they need window focus. `player-press` also works on the title menu and
+  the save list (D-pad `down`/`up`, `cross` to confirm) with no focus, since
+  the DLL's mailbox timers run on wall-clock time, not gameplay frames
+  (2026-10-02). The scenario runner's `boot` step uses that.
 - `GameBridgePC::InjectOwnedInput(...)` remains the long-term path for
   an external process API if we decide to move the control logic out of the
   inject DLL later

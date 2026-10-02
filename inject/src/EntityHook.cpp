@@ -849,11 +849,14 @@ static void PollPuppetPoses() {
     }
 }
 static bool     g_mailboxAvailable     = false;
-static uint32_t g_lastMailboxCheckFrame = 0;
-static constexpr uint32_t MAILBOX_RETRY_INTERVAL = 120;  // liveness check, ~2 sec at 60fps
+// Wall-clock timers: the DLL frame counter only advances during entity
+// updates, so it stands still on the title screen and in loads, where
+// kh2ctl pulses still need to reach the input collector.
+static uint64_t g_lastMailboxCheckMs = 0;
+static constexpr uint64_t MAILBOX_RETRY_INTERVAL_MS = 2000;  // runtime liveness check
 // Connect retries are cheap (OpenFileMapping on a missing name) and kh2ctl
 // pulses only keep the mailbox open for their duration, so poll quickly.
-static constexpr uint32_t MAILBOX_CONNECT_INTERVAL = 6;  // ~0.1 sec at 60fps
+static constexpr uint64_t MAILBOX_CONNECT_INTERVAL_MS = 100;
 
 // ============================================================================
 // Logging
@@ -1022,8 +1025,9 @@ static void ClearMailboxCachedState() {
 static bool PollMailbox() {
     if (!g_mailboxAvailable) {
         // Periodically retry opening the mailbox (runtime may start later)
-        if (g_frameCounter - g_lastMailboxCheckFrame >= MAILBOX_CONNECT_INTERVAL) {
-            g_lastMailboxCheckFrame = g_frameCounter;
+        const uint64_t nowMs = GetTickCount64();
+        if (nowMs - g_lastMailboxCheckMs >= MAILBOX_CONNECT_INTERVAL_MS) {
+            g_lastMailboxCheckMs = nowMs;
             if (g_mailboxReader.Open()) {
                 g_mailboxAvailable = true;
                 ClearMailboxCachedState();
@@ -1036,8 +1040,8 @@ static bool PollMailbox() {
 
     // Periodic liveness check (~every 2s): verify the runtime process is still
     // alive. If it died, close the stale mapping and fall back to local gamepads.
-    if (g_frameCounter - g_lastMailboxCheckFrame >= MAILBOX_RETRY_INTERVAL) {
-        g_lastMailboxCheckFrame = g_frameCounter;
+    if (GetTickCount64() - g_lastMailboxCheckMs >= MAILBOX_RETRY_INTERVAL_MS) {
+        g_lastMailboxCheckMs = GetTickCount64();
         DWORD rtPid = g_mailboxReader.RuntimePid();
         if (rtPid != 0) {
             HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE, rtPid);

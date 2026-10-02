@@ -111,7 +111,7 @@ attack hits him) for the whole run, so combat rooms don't end in a game over.
 
 | Step | Fields | Does |
 |---|---|---|
-| `boot` | `timeoutSec` | Launch + inject, mute, pick LOAD on the title menu (checked by pixel in captures), load the save list's default slot, wait until the room is live |
+| `boot` | `timeoutSec` | Launch + inject, mute, pick LOAD on the title menu (checked by pixel in captures), load the save list's default slot, wait until the room is live. Menu presses go through the DLL's input collector (`player-press`), so no window focus is needed |
 | `launch` | `mute` | Launch + inject only (stays on the title) |
 | `warp` | `world room door map btl evt` | `kh2ctl warp`; returns once the room has loaded |
 | `input` | `lx ly rx ry ms` | Hold sticks (`player-input`) |
@@ -124,13 +124,31 @@ attack hits him) for the whole run, so combat rooms don't end in a game over.
 | `capture` | `name` | PNG from inside the renderer → artifact |
 | `clip` | `name seconds` | MP4 → artifact |
 | `crash`, `freeze` | | Runner self-tests: fault or suspend the instance |
+| `relay` | `port build content mod args` | Start `kh2coop_server` on loopback for this run; the version gate defaults to what the runtime sends |
+| `runtime` | `instance role peerId args settleMs` | Start `kh2coop_runtime_scaffold --network --no-camera` bound to that instance (`KH2COOP_PID`) |
+| `record` / `record_stop` | `as instances` | Sample every party actor's position on those instances in the background; `record_stop` writes `<as>.csv` |
+
+Processes started by `relay`/`runtime` are stopped at the end of the run.
 
 Expressions are Python with these helpers (the instance index is the last
 argument, default 0): `room()` → `(world, room)`; `pos(name='P_EX100')` →
 `(x, y, z)`; `actor(name)` → the `kh2ctl entities` record (`hp`, `maxHp`,
 `team`, `motionId`, `address`, …); `actors()`; `enemies()` (objentry type 3/4);
 `peek(rva, kind='u32')`; `log_count(text)` (lines in the inject log, e.g.
-`'attacker=P_EX100'` from the hit log); `dist(a, b)`; `saved`.
+`'attacker=P_EX100'` from the hit log); `dist(a, b)`; `saved`;
+`bridge(i)` (the instance's AvatarBridge via `avatarctl peek`: local
+frames/s and both puppet slots); `puppet_error(saved['rec'], owner, viewer)`.
+
+`puppet_error` scores how well the viewer's puppet follows the owner's
+Sora in a recording:
+- Each sample from a viewer actor (other than the viewer's own Sora) is
+  compared with the owner's positions over the preceding 0.5 s, because the
+  puppet renders behind on purpose. The best-matching actor counts as the
+  puppet.
+- It returns `mean`, `p95` and `max` error in KH2 units (100 = 1 m), the
+  fitted `lagMs`, and `ownerTravel`.
+- Check `ownerTravel` too. If the owner barely moved, a low error proves
+  nothing.
 
 ## Example scenarios
 
@@ -141,6 +159,11 @@ argument, default 0): `room()` → `(world, room)`; `pos(name='P_EX100')` →
   the hit log.
 - `two_instances_same_room`: two instances load and warp to the GoA; both
   are there and both Soras move.
+- `net_two_instances` (VUH-1492, in progress): a relay and a runtime per
+  instance; each Sora moves and the other instance's puppet must follow.
+  It's not valid evidence yet. The runtime's legacy replica path writes the
+  relay's simulated actors onto the non-owner's Sora (reported on
+  VUH-1492).
 - `forced_crash`, `forced_hang`: runner self-tests. They're expected to
   report CRASH/HANG with a bundle; don't include them in a pass/fail suite.
 

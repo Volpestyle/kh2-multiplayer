@@ -187,6 +187,8 @@ class Context:
         self.saved: dict = {}
         self.artifacts: list[str] = []
         self.protect: set[int] = set()
+        self.processes: list[tuple] = []  # (name, Popen, log file) to stop at the end
+        self.relay_port = "7782"
         self._stop = threading.Event()
         self._protector = threading.Thread(target=self._protect_loop, daemon=True)
         self._protector.start()
@@ -244,8 +246,15 @@ class Context:
         def dist(a, b) -> float:
             return math.dist(a, b)
 
+        def bridge(index: int = 0, seconds: float = 0.5) -> dict:
+            """The instance's AvatarBridge: local frames/s and both puppet slots."""
+            out = subprocess.run([str(AVATARCTL), "peek", "--pid", str(self.inst(index).pid),
+                                  "--seconds", str(seconds)], capture_output=True, text=True, timeout=30)
+            return json.loads(out.stdout.strip().splitlines()[-1])
+
         return {"peek": peek, "pos": pos, "room": room, "enemies": enemies, "actor": self.actor,
                 "actors": self.actors, "log_count": log_count, "dist": dist, "saved": self.saved,
+                "puppet_error": puppet_error, "bridge": bridge,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all}
 
     def eval(self, expr: str):
@@ -266,6 +275,17 @@ class Context:
 
     def close(self) -> None:
         self._stop.set()
+        for value in self.saved.values():
+            if isinstance(value, Recorder):
+                value.stop()
+        for name, proc, log in reversed(self.processes):  # runtimes before the relay
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            log.close()
 
 
 # --------------------------------------------------------------------------
@@ -310,6 +330,12 @@ def step_launch(ctx: Context, step: dict) -> dict:
     return {"processId": inst.pid, "instance": inst.index}
 
 
+def press(inst: Instance, button: str) -> None:
+    """A pad press injected through the DLL's input collector: no window
+    focus needed, so a dialog in the foreground can't break a boot."""
+    kh2ctl("player-press", "--button", button, "--duration-ms", "150", pid=inst.pid)
+
+
 def step_boot(ctx: Context, step: dict) -> dict:
     """Launch, then load the save list's default (last-used) slot. Each menu
     move is checked in an in-renderer capture."""
@@ -322,11 +348,11 @@ def step_boot(ctx: Context, step: dict) -> dict:
     for _ in range(5):
         if title_rows(ctx, inst, shot)["load"]:
             break
-        kh2ctl("tap-key", "--key", "down", pid=inst.pid)
+        press(inst, "down")
         ctx.sleep(0.7)
     else:
         raise StepFailed("LOAD never highlighted")
-    kh2ctl("tap-key", "--key", "enter", pid=inst.pid)
+    press(inst, "cross")
     ctx.sleep(2)
 
     def in_save_list() -> bool:
@@ -335,7 +361,7 @@ def step_boot(ctx: Context, step: dict) -> dict:
 
     wait_for(ctx, in_save_list, "save list", timeout)
     ctx.sleep(1)
-    kh2ctl("tap-key", "--key", "enter", pid=inst.pid)
+    press(inst, "cross")
 
     def loaded() -> bool:
         s = kh2ctl("peek", "--rva", "0x9BA8D0:u8,0x717008:u8", pid=inst.pid)["samples"][0]
@@ -447,10 +473,149 @@ def step_freeze(ctx: Context, step: dict) -> dict:
     return {}
 
 
+# ---- Networking (VUH-1492) ----
+
+SERVER = ROOT / "build" / "Release" / "kh2coop_server.exe"
+RUNTIME = ROOT / "build" / "Release" / "kh2coop_runtime_scaffold.exe"
+AVATARCTL = ROOT / "build" / "Release" / "avatarctl.exe"
+
+
+def start_process(ctx: Context, name: str, cmd: list[str], env: dict | None = None) -> subprocess.Popen:
+    log = open(ctx.run_dir / f"{name}.log", "w")  # noqa: SIM115 - closed with the process
+    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
+    ctx.processes.append((name, proc, log))
+    ctx.artifacts.append(f"{name}.log")
+    return proc
+
+
+def step_relay(ctx: Context, step: dict) -> dict:
+    """Start the relay (kh2coop_server) on loopback for this run."""
+    port = str(step.get("port", 7782))
+    # The relay's version gate must match what the runtime sends (its
+    # defaults: build 1.0.0.10-steam-global, content none, mod empty).
+    gate = ["--build", step.get("build", "1.0.0.10-steam-global"),
+            "--content", step.get("content", "none"), "--mod", step.get("mod", "")]
+    proc = start_process(ctx, "relay", [str(SERVER), "--port", port, *gate,
+                                        *map(str, step.get("args", []))])
+    ctx.sleep(1)
+    if proc.poll() is not None:
+        raise StepFailed(f"relay exited with {proc.returncode}")
+    ctx.relay_port = port
+    return {"pid": proc.pid, "port": port}
+
+
+def step_runtime(ctx: Context, step: dict) -> dict:
+    """Start a runtime bound to one instance (KH2COOP_PID) and connect it to
+    the relay. Waits until its log shows it connected."""
+    inst = ctx.inst(step.get("instance", 0))
+    env = dict(os.environ, KH2COOP_PID=str(inst.pid))
+    cmd = [str(RUNTIME), "--network", "--server", "127.0.0.1", "--port", str(ctx.relay_port),
+           "--role", step["role"], "--peer-id", step.get("peerId", f"peer{inst.index}"), "--no-camera",
+           *map(str, step.get("args", []))]
+    name = f"runtime_{inst.index}"
+    proc = start_process(ctx, name, cmd, env)
+    # Its stdout is block-buffered into the log, so "connected" can't be read
+    # live; scenarios check the AvatarBridge (bridge()) instead.
+    ctx.sleep(step.get("settleMs", 3000) / 1000)
+    if proc.poll() is not None:
+        raise StepFailed(f"runtime {inst.index} exited with {proc.returncode}")
+    return {"pid": proc.pid, "role": step["role"]}
+
+
+class Recorder:
+    """Samples every actor's position on the given instances in a thread:
+    rows of (t, instance, address, name, objectType, x, y, z)."""
+
+    def __init__(self, ctx: Context, instances: list[int]) -> None:
+        self.ctx, self.instances = ctx, instances
+        self.rows: list[tuple] = []
+        self.heads: dict[int, str] = {}  # instance -> its own Sora (entity list head)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            for index in self.instances:
+                try:
+                    actors = self.ctx.actors(index)
+                except Exception:  # noqa: BLE001 - loading screens etc.
+                    continue
+                t = time.monotonic()
+                if actors:
+                    self.heads[index] = actors[0]["address"]
+                for a in actors:
+                    if a.get("objectType") in (0, 1):
+                        p = a["position"]
+                        self.rows.append((t, index, a["address"], a["name"], a["objectType"],
+                                          p["x"], p["y"], p["z"]))
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=5)
+
+
+def step_record(ctx: Context, step: dict) -> dict:
+    ctx.saved[step["as"]] = Recorder(ctx, step.get("instances", [0, 1]))
+    return {}
+
+
+def step_record_stop(ctx: Context, step: dict) -> dict:
+    rec: Recorder = ctx.saved[step["as"]]
+    rec.stop()
+    path = ctx.run_dir / f"{step['as']}.csv"
+    with open(path, "w") as fh:
+        fh.write("t,instance,address,name,type,x,y,z\n")
+        for r in rec.rows:
+            fh.write(",".join(f"{v:.4f}" if isinstance(v, float) else str(v) for v in r) + "\n")
+    ctx.artifacts.append(path.name)
+    return {"samples": len(rec.rows)}
+
+
+def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) -> dict:
+    """How closely the viewer's puppet follows the owner's Sora. Each viewer
+    actor (except its own Sora) is a candidate; for each of its samples, the
+    error is the distance to the nearest owner position in the preceding
+    `window` seconds (the puppet renders behind on purpose). The candidate
+    with the lowest mean error is the puppet. Units: KH2 units (100 = 1 m)."""
+    owner_head = rec.heads.get(owner)
+    viewer_head = rec.heads.get(viewer)
+    truth = [(t, (x, y, z)) for t, i, a, n, o, x, y, z in rec.rows if i == owner and a == owner_head]
+    if not truth:
+        return {"ok": False, "why": "no owner samples"}
+    candidates: dict[str, list] = {}
+    for t, i, a, n, o, x, y, z in rec.rows:
+        if i == viewer and a != viewer_head:
+            candidates.setdefault(f"{n}@{a}", []).append((t, (x, y, z)))
+    best = None
+    for key, samples in candidates.items():
+        errors, lags = [], []
+        for t, p in samples:
+            near = [(math.dist(p, q), t - tq) for tq, q in truth if t - window <= tq <= t]
+            if near:
+                d, lag = min(near)
+                errors.append(d)
+                lags.append(lag)
+        if len(errors) < 10:
+            continue
+        errors.sort()
+        result = {"actor": key, "n": len(errors), "mean": sum(errors) / len(errors),
+                  "p95": errors[int(0.95 * (len(errors) - 1))], "max": errors[-1],
+                  "lagMs": 1000 * sum(lags) / len(lags)}
+        if best is None or result["mean"] < best["mean"]:
+            best = result
+    out = best or {"ok": False, "why": "no candidate with 10+ matched samples"}
+    out["ownerTravel"] = round(sum(math.dist(a[1], b[1]) for a, b in zip(truth, truth[1:])), 1)
+    return out
+
+
 STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": step_input,
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until,
          "assert": step_assert, "save": step_save, "protect": step_protect,
-         "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze}
+         "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze,
+         "relay": step_relay, "runtime": step_runtime, "record": step_record,
+         "record_stop": step_record_stop}
 
 
 # --------------------------------------------------------------------------
