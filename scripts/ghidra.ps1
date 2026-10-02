@@ -6,6 +6,8 @@
 #   .\scripts\ghidra.ps1 -Setup                       # import + full analysis (~5 min)
 #   .\scripts\ghidra.ps1 -Xrefs 0x7435D0 [-Window 0x40] [-MaxDecomp 3]
 #   .\scripts\ghidra.ps1 -Decompile 0x3C86A0,0x3BFD30
+#   .\scripts\ghidra.ps1 -Strings "player attack","ATTACK@YS"   # strings + who uses them
+#   .\scripts\ghidra.ps1 -Symbols ATTACK                        # RTTI classes, vftable slots
 #
 # RVAs are relative to the image base (0x140000000), matching
 # docs/pointer_map_v1.md and KH2Offsets.hpp. The project lives in
@@ -19,6 +21,8 @@ param(
     [switch]$Setup,
     [string[]]$Xrefs,
     [string[]]$Decompile,
+    [string[]]$Strings,
+    [string[]]$Symbols,
     [string]$Window = "0x40",
     [int]$MaxDecomp = 3
 )
@@ -86,6 +90,10 @@ if ($Xrefs) {
 } elseif ($Decompile) {
     $targets = $Decompile | ForEach-Object { $_ -split "," } | Where-Object { $_ }
     Invoke-Headless ($common + @("-postScript", "Decompile.java") + $targets)
+} elseif ($Strings) {
+    Invoke-Headless ($common + @("-postScript", "FindStrings.java") + $Strings)
+} elseif ($Symbols) {
+    Invoke-Headless ($common + @("-postScript", "FindSymbols.java") + $Symbols)
 } else {
     Get-Help $MyInvocation.MyCommand.Path -Detailed
 }
