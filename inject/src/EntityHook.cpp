@@ -373,6 +373,62 @@ static kh2coop::MailboxReader g_mailboxReader;
 
 // Avatar telemetry to the runtime (VUH-1490) and puppet poses back (VUH-1491).
 static kh2coop::AvatarBridge g_avatarBridge;
+
+// ============================================================================
+// Puppet driver (VUH-1491): friend slots 1/2 follow a remote avatar stream
+// from AvatarBridge::TryReadPuppet instead of their AI. Reuses the Session 5
+// motion control: skip the AI, set the motion only when it changes (our
+// call passes the HookedMotionChainSetAnim guard), let the motCtrl tick
+// advance it, and correct the clock when it drifts. Position/rotation are
+// written after the entity's own update, with velocity zeroed and the
+// follow timer held so physics can't pull the puppet back toward Sora.
+// ============================================================================
+
+struct PuppetDriver {
+    kh2coop::PuppetPose pose {};
+    bool have = false;           // a pose has arrived
+    uint32_t poseFrame = 0;      // DLL frame of the latest new pose
+    uintptr_t actor = 0;         // actor we last drove (re-resolved per frame)
+    int lastAnim = -1;           // motion we last set on `actor`
+};
+static PuppetDriver g_puppets[2];
+static bool g_inPuppetAnimSet = false;
+
+// Release a puppet back to its AI when poses stop arriving (the runtime
+// normally clears `active` itself; this covers a dead writer).
+static constexpr uint32_t PUPPET_STALE_FRAMES = 120;
+// Motions applied as-is. Others (Sora's attacks etc.) may not exist in the
+// friend's moveset until the puppet model is decided (VUH-1489), so they
+// fall back to the nearest basic motion instead of risking a bad id.
+static constexpr uint32_t PUPPET_MAX_BASIC_MOTION = 8;
+static constexpr float PUPPET_TIME_DRIFT_FRAMES = 2.0f;
+static constexpr uintptr_t ACTOR_MOTCTRL = 0x158;        // embedded motion controller
+static constexpr uintptr_t MOTCTRL_CURRENT_TIME = 0x44;  // float frames
+static constexpr uintptr_t ACTOR_VELOCITY = 0xB98;       // 3 floats
+
+static bool IsPuppetSlot(int friendSlot) {
+    if (friendSlot < 1 || friendSlot > 2) return false;
+    const PuppetDriver& d = g_puppets[friendSlot - 1];
+    return d.have && d.pose.active && g_frameCounter - d.poseFrame <= PUPPET_STALE_FRAMES;
+}
+
+// Friend slots our code drives instead of the vanilla AI.
+static bool IsDrivenFriend(int friendSlot) {
+    return friendSlot != 0 && (g_soloTestMode || IsPuppetSlot(friendSlot));
+}
+
+// Frame start: take any new poses from the bridge.
+static void PollPuppetPoses() {
+    if (!g_avatarBridge.IsOpen()) return;
+    for (int i = 0; i < 2; ++i) {
+        kh2coop::PuppetPose pose;
+        if (g_avatarBridge.TryReadPuppet(i, pose)) {
+            g_puppets[i].pose = pose;
+            g_puppets[i].have = true;
+            g_puppets[i].poseFrame = g_frameCounter;
+        }
+    }
+}
 static bool     g_mailboxAvailable     = false;
 static uint32_t g_lastMailboxCheckFrame = 0;
 static constexpr uint32_t MAILBOX_RETRY_INTERVAL = 120;  // liveness check, ~2 sec at 60fps
@@ -1129,7 +1185,7 @@ static uint32_t g_motionChainLogFrame  = 0;
 
 static uint8_t __fastcall HookedMotionChainSetAnim(void* motCtrl, int animId,
                                                      float startTime, float blendParam) {
-    if (g_soloTestMode) {
+    {
         // Derive actor address from motCtrl: actor = motCtrl - 0x158
         auto actorAddr = reinterpret_cast<uintptr_t>(motCtrl) - 0x158;
 
@@ -1137,7 +1193,18 @@ static uint8_t __fastcall HookedMotionChainSetAnim(void* motCtrl, int animId,
         if (g_friend1Actor != 0 && actorAddr == g_friend1Actor) friendSlot = 1;
         else if (g_friend2Actor != 0 && actorAddr == g_friend2Actor) friendSlot = 2;
 
-        if (friendSlot != 0) {
+        // Puppets: block the game's calls, pass our own through unchanged
+        // (DrivePuppetMotion already chose the stream's motion).
+        if (IsPuppetSlot(friendSlot)) {
+            if (!g_inOurAnimSet) return 1;
+            if (g_inPuppetAnimSet) {
+                return g_origMotionChainSetAnim
+                    ? g_origMotionChainSetAnim(motCtrl, animId, startTime, blendParam)
+                    : 0;
+            }
+        }
+
+        if (friendSlot != 0 && g_soloTestMode) {
             // Session 5 fix: Block ALL FUN_1403c88c0 calls for controlled
             // friends EXCEPT our own (from HookedFriendAI via FUN_1403c86a0).
             //
@@ -1261,7 +1328,61 @@ static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
 // which replaces the follow-distance speed delta with our stick-based one.
 // ============================================================================
 
+// Puppet motion, from the friend AI hook (replaces the AI for this frame).
+static void DrivePuppetMotion(void* actorObj, int friendSlot) {
+    PuppetDriver& d = g_puppets[friendSlot - 1];
+    const auto actor = reinterpret_cast<uintptr_t>(actorObj);
+    if (d.actor != actor) {  // new room / reloaded actor
+        d.actor = actor;
+        d.lastAnim = -1;
+    }
+
+    const auto& pose = d.pose.pose;
+    uint32_t motion = pose.motionId;
+    if (motion > PUPPET_MAX_BASIC_MOTION) {
+        // Unknown to the friend's moveset for now: idle if still, else run.
+        const float speed2 = pose.velocity.x * pose.velocity.x + pose.velocity.z * pose.velocity.z;
+        motion = speed2 > 1.0f ? ANIM_RUN : ANIM_IDLE;
+    }
+
+    auto* motCtrl = reinterpret_cast<void*>(actor + ACTOR_MOTCTRL);
+    auto* time = reinterpret_cast<float*>(actor + ACTOR_MOTCTRL + MOTCTRL_CURRENT_TIME);
+    if (static_cast<int>(motion) != d.lastAnim) {
+        g_inOurAnimSet = true;
+        g_inPuppetAnimSet = true;
+        g_setAnimationUnderlying(motCtrl, static_cast<int>(motion), 0.0f, 0.0f);
+        g_inPuppetAnimSet = false;
+        g_inOurAnimSet = false;
+        d.lastAnim = static_cast<int>(motion);
+    }
+    if (motion == pose.motionId && std::fabs(*time - pose.motionTime) > PUPPET_TIME_DRIFT_FRAMES) {
+        *time = pose.motionTime;
+    }
+}
+
+// Puppet transform, after the entity's own update so it has the last word.
+static void ApplyPuppetTransform(void* actorObj, int friendSlot) {
+    const auto& pose = g_puppets[friendSlot - 1].pose.pose;
+    const auto actor = reinterpret_cast<uintptr_t>(actorObj);
+    const uintptr_t entity = actor + offsets::actor::ENTITY_TRANSFORM;
+    *reinterpret_cast<float*>(entity + offsets::entity::POS_X) = pose.position.x;
+    *reinterpret_cast<float*>(entity + offsets::entity::POS_Y) = pose.position.y;
+    *reinterpret_cast<float*>(entity + offsets::entity::POS_Z) = pose.position.z;
+    *reinterpret_cast<float*>(entity + offsets::entity::ROT_Y) = pose.rotationY;
+    std::memset(reinterpret_cast<void*>(actor + ACTOR_VELOCITY), 0, 3 * sizeof(float));
+    *reinterpret_cast<float*>(actor + ACTOR_FOLLOW_TIMER) = DISABLE_FOLLOW_TIMER;
+}
+
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
+    if (IsPuppetSlot(g_currentFriendSlot)) {
+        __try {
+            DrivePuppetMotion(actorObj, g_currentFriendSlot);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("EXCEPTION in DrivePuppetMotion (friend%d)", g_currentFriendSlot);
+        }
+        return;  // never run the vanilla AI for a puppet
+    }
+
     if (g_currentFriendSlot != 0 && g_soloTestMode) {
         // ---- Controlled friend: SKIP vanilla AI entirely ----
         //
@@ -1366,7 +1487,7 @@ static alignas(16) float g_zeroVec4[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
 static void* __fastcall HookedFollowSteering(void* typeHandler, void* outVec4,
                                                void* entity, float dt) {
-    if (g_soloTestMode && g_currentFriendSlot != 0) {
+    if (IsDrivenFriend(g_currentFriendSlot)) {
         // Controlled friend: zero the output so physics gets no follow-steering.
         // Return pointer to our zero buffer so the caller's MEMCPY_4FLOATS
         // copies zeroes into the velocity field.
@@ -1543,6 +1664,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
                 // Hand pending room warps to the game on its own thread.
                 warp::OnFrameStart(g_frameCounter, addr);
+                PollPuppetPoses();
             }
         }
 
@@ -1640,7 +1762,9 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             g_avatarBridge.PublishLocal(avatar);
         }
 
-        if (savedFriendSlot != 0) {
+        if (IsPuppetSlot(savedFriendSlot)) {
+            ApplyPuppetTransform(actorObj, savedFriendSlot);
+        } else if (savedFriendSlot != 0) {
             // Re-inject movement input after physics overwrites.
             // The motion controller tick (FUN_1403c6740) has already run
             // by this point, so our velocity/facing here gets the LAST WORD
