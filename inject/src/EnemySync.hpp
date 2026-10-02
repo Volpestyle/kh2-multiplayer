@@ -42,6 +42,10 @@ bool DropLocalEnemyDamage(uintptr_t victim);
 // per-mille). False until a runtime has connected.
 bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille);
 
+// Read the runtime's current session role even between gameplay frames,
+// so disconnecting while a menu/load is active releases native exits.
+bool HasClientAuthority();
+
 void Shutdown();
 
 } // namespace enemysync

@@ -25,6 +25,7 @@ import json
 import math
 import mmap
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -242,6 +243,19 @@ class Context:
             r = kh2ctl("state", pid=self.inst(index).pid)["room"]
             return (r["worldId"], r["roomId"])
 
+        def location(index: int = 0) -> list[int]:
+            # One sample of NOW; commit stores the entrance as a byte at +2.
+            fields = ("0x717008:u8", "0x717009:u8", "0x71700A:u8",
+                      "0x71700C:u16", "0x71700E:u16", "0x717010:u16")
+            sample = kh2ctl("peek", "--rva", ",".join(fields),
+                            pid=self.inst(index).pid)["samples"][0]
+            return [sample[f.split(":")[0]] for f in fields]
+
+        def log_matches(pattern: str, index: int = 0) -> list[dict]:
+            path = LOGS / f"kh2coop_inject_{self.inst(index).pid}.log"
+            text = path.read_text(errors="replace") if path.exists() else ""
+            return [match.groupdict() for match in re.finditer(pattern, text)]
+
         def enemies(index: int = 0):
             return [a for a in self.actors(index) if a.get("objectType") in (3, 4)]
 
@@ -272,7 +286,8 @@ class Context:
                 "actors": self.actors, "log_count": log_count, "dist": dist, "saved": self.saved,
                 "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
-                "range": range, "round": round}
+                "location": location, "log_matches": log_matches,
+                "range": range, "round": round, "int": int, "str": str}
 
     def eval(self, expr: str):
         # Helpers go in globals: comprehensions inside an expression only see globals.
@@ -412,6 +427,57 @@ def step_input(ctx: Context, step: dict) -> dict:
             args += [f"--{axis}", str(step[axis])]
     kh2ctl(*args, pid=ctx.inst(step.get("instance", 0)).pid)
     return {}
+
+
+def step_align_courtyard_exit(ctx: Context, step: dict) -> dict:
+    """Bounded door-0 fixture alignment, not general navigation.
+
+    This camera faces out from the castle stairs: screen-left should reduce
+    the negative X offset toward the doorway centerline at X=0. Check that claim
+    after every pulse instead of continuing with a wrong camera orientation.
+    """
+    index = step.get("instance", 1)
+    name = step.get("as", "courtyard_alignment")
+    helpers = ctx.namespace()
+    evidence = {"instance": index, "start": helpers["pos"](index=index), "pulses": []}
+    deadline = time.monotonic() + 6.0
+    try:
+        if helpers["location"](index)[:3] != [5, 6, 0]:
+            raise StepFailed("courtyard alignment requires BC 05/06 entrance 0")
+        position = evidence["start"]
+        while True:
+            if ctx.eval(step["blockedExpr"]):
+                evidence["stopped"] = "native exit blocked"
+                break
+            if abs(position[0]) < 60:
+                evidence["stopped"] = "centered"
+                break
+            if time.monotonic() + 0.25 > deadline:
+                raise StepFailed("courtyard alignment did not reach |x| < 60 within 6 seconds")
+            start = position
+            kh2ctl("player-input", "--lx", "-1", "--duration-ms", "250", pid=ctx.inst(index).pid)
+            ctx.check_all()
+            position = helpers["pos"](index=index)
+            evidence["pulses"].append({"start": start, "end": position, "lx": -1, "ms": 250})
+            if ctx.eval(step["blockedExpr"]):
+                evidence["stopped"] = "native exit blocked"
+                break
+            if abs(position[0]) >= abs(start[0]):
+                raise StepFailed(f"courtyard alignment pulse did not reduce |x|: {start[0]:.2f} -> "
+                                 f"{position[0]:.2f}; check camera direction and obstruction")
+        evidence["end"] = position
+    except StepFailed as error:
+        evidence["error"] = str(error)
+        try:
+            step_capture(ctx, {"instance": index, "name": f"{name}_failed"})
+        except Exception as capture_error:
+            evidence["captureError"] = str(capture_error)
+        path = ctx.run_dir / f"{name}_failed.json"
+        path.write_text(json.dumps(evidence, indent=2))
+        ctx.artifacts.append(path.name)
+        raise
+    ctx.saved[name] = evidence
+    return evidence
 
 
 def step_press(ctx: Context, step: dict) -> dict:
@@ -575,6 +641,156 @@ def step_runtime(ctx: Context, step: dict) -> dict:
 
     wait_for(ctx, ready, f"runtime {inst.index}: {expect!r}", step.get("timeoutMs", 15000) / 1000, 0.5)
     return {"pid": proc.pid, "role": step["role"], "link": link}
+
+
+ARRIVAL_PATTERN = (r"\[enemysync\] (?:host|client) arrived epoch=(?P<epoch>\d+) "
+                   r"room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) "
+                   r"door=(?P<door>\d+) map=(?P<map>\d+) btl=(?P<btl>\d+) evt=(?P<evt>\d+)")
+
+
+def native_puppet_actors(ctx: Context, index: int) -> dict:
+    """Resolve the DLL's actual friend-slot targets in the active entity list.
+
+    Companion pointers live in unit slot 1, at SLOT0_BASE + SLOT_STRIDE +
+    0x220/0x228. Sora clones bypass those pointers: use the DLL's per-slot
+    motion-driver actor log from this load, never actor names or list order.
+    GameBridge's state command can return a default ActorState for an absent
+    actor, so it is not evidence that a native friend actor exists.
+    """
+    keys = ("0x2A239B0", "0x2A239B8")
+    sample = kh2ctl("peek", "--rva", ",".join(f"{key}:u64" for key in keys),
+                    pid=ctx.inst(index).pid)["samples"][0]
+    pointers = [int(sample[key], 16) for key in keys]
+    entities = ctx.entities(index)
+    active = {int(actor["address"], 16): actor for actor in entities.get("actors", [])}
+    local = int(entities["actors"][0]["address"], 16) if entities.get("actors") else 0
+    clones = [address for address, actor in active.items()
+              if address != local and actor.get("objectType") == 0]
+    mode = "friendPointers"
+    friend_pointers = [f"0x{p:X}" for p in pointers]
+    if clones:
+        mode = "cloneDriverLogs"
+        path = LOGS / f"kh2coop_inject_{ctx.inst(index).pid}.log"
+        text = path.read_text(errors="replace") if path.exists() else ""
+        load = text.rfind("[warp] load complete")
+        pointers = [0, 0]
+        # A stale actor address can be reused in the next room. Only accept
+        # driver bindings observed after this load's genuine completion.
+        for match in re.finditer(r"\[puppet ([01])\] frame \d+ motion [^\r\n]* actor=(?:0x)?([0-9A-Fa-f]+)",
+                                 text[load:] if load >= 0 else ""):
+            address = int(match[2], 16)
+            pointers[int(match[1])] = address if address in clones else 0
+    return {"pointers": [f"0x{p:X}" for p in pointers], "localAddress": f"0x{local:X}",
+            "source": mode, "friendPointers": friend_pointers,
+            "cloneCandidates": [f"0x{p:X}" for p in clones],
+            "room": [entities.get("world"), entities.get("room")],
+            "actors": [active.get(p) if p and p != local and pointers.count(p) == 1 else None
+                       for p in pointers]}
+
+
+def transition_evidence(ctx: Context, instances: list[int], after_epoch: int = -1) -> dict:
+    """Read settled-load evidence plus actual location and puppet slot state.
+
+    Instance indices match session slots in these fixtures (host starts first).
+    Bridge activity alone only proves the runtime published a pose: also check
+    each native friend actor exists and is near that pose after settling.
+    """
+    helpers = ctx.namespace()
+    evidence: dict = {"ready": False, "instances": {}, "problems": []}
+    problems = evidence["problems"]
+    for index in instances:
+        arrivals = helpers["log_matches"](ARRIVAL_PATTERN, index)
+        arrival = arrivals[-1] if arrivals else None
+        data = {"location": helpers["location"](index), "arrival": arrival,
+                "bridge": helpers["bridge"](index, 0.1),
+                "nativePuppets": native_puppet_actors(ctx, index)}
+        evidence["instances"][str(index)] = data
+        if arrival is None:
+            problems.append(f"instance {index}: no completed-load arrival")
+            continue
+        data["epoch"] = int(arrival["epoch"])
+        target = [int(arrival[k], 16 if k in ("world", "room") else 10)
+                  for k in ("world", "room", "door", "map", "btl", "evt")]
+        if data["epoch"] <= after_epoch:
+            problems.append(f"instance {index}: epoch did not advance past {after_epoch}")
+        if data["location"] != target:
+            problems.append(f"instance {index}: current full location differs from arrival")
+        if data["nativePuppets"]["room"] != target[:2]:
+            problems.append(f"instance {index}: native entity list is not in the target room")
+        b = data["bridge"]
+        if not b.get("local") or b["local"].get("room") != target[:2] or b.get("localFramesPerSecond", 0) <= 0:
+            problems.append(f"instance {index}: local avatar is not live in the target room")
+        expected = [owner for owner in range(3) if owner != index]
+        for slot, owner in enumerate(expected):
+            puppet = b.get(f"puppet{slot}") or {}
+            if owner not in instances:
+                continue
+            pose = puppet.get("pose") or {}
+            actor = data["nativePuppets"]["actors"][slot]
+            if not puppet.get("active") or pose.get("owner") != owner or pose.get("room") != target[:2]:
+                problems.append(f"instance {index}: puppet {slot} is not active for owner {owner}")
+            elif not actor:
+                pointer = data["nativePuppets"]["pointers"][slot]
+                problems.append(f"instance {index}: native friend slot {slot + 1} target {pointer} "
+                                "is absent from the active entity list or aliases another party slot")
+            else:
+                point = actor["position"]
+                error = math.dist([point[k] for k in ("x", "y", "z")], pose["pos"])
+                data.setdefault("puppetErrors", {})[str(slot)] = round(error, 2)
+                if error > 100:
+                    problems.append(f"instance {index}: friend slot {slot + 1} is {error:.1f} units off its pose")
+    host = evidence["instances"][str(instances[0])]
+    evidence["epoch"] = host.get("epoch", -1)
+    relay_path = ctx.run_dir / "relay.log"
+    relay_text = relay_path.read_text(errors="replace") if relay_path.exists() else ""
+    evidence["acks"] = [match.groupdict() for match in re.finditer(
+        r"\[SessionHost\] TransitionAck slot=(?P<slot>\d+) epoch=(?P<epoch>\d+) "
+        r"room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) arrived=(?P<arrived>[01])", relay_text)]
+    for index in instances[1:]:
+        data = evidence["instances"][str(index)]
+        if data.get("epoch") != host.get("epoch") or data["location"] != host["location"]:
+            problems.append(f"instance {index}: full location or epoch differs from host")
+        if not any(int(ack["slot"]) == index and int(ack["epoch"]) == evidence["epoch"]
+                   and ack["arrived"] == "1"
+                   and [int(ack[k], 16) for k in ("world", "room")] == host["location"][:2]
+                   for ack in evidence["acks"]):
+            problems.append(f"instance {index}: relay has no successful acknowledgement for current epoch")
+    evidence["ready"] = not problems
+    return evidence
+
+
+def step_transition_check(ctx: Context, step: dict) -> dict:
+    name = step.get("as", "transition")
+    after = ctx.saved[step["after"]]["epoch"] if "after" in step else -1
+    latest = {}
+
+    def ready() -> bool:
+        nonlocal latest
+        latest = transition_evidence(ctx, step.get("instances", [0, 1, 2]), after)
+        if "target" in step and latest["instances"]["0"]["location"][:2] != step["target"]:
+            latest["problems"].append("host did not reach requested world/room")
+            latest["ready"] = False
+        return latest["ready"]
+
+    def capture_samples(suffix: str) -> None:
+        for index in step.get("instances", [0, 1, 2]):
+            try:
+                step_capture(ctx, {"instance": index, "name": f"{name}_{suffix}"})
+            except Exception as error:  # keep diagnostic capture failure from hiding the checkpoint failure
+                latest.setdefault("captureErrors", []).append(f"instance {index}: {error}")
+
+    try:
+        wait_for(ctx, ready, f"transition checkpoint {name}", step.get("timeoutMs", 30000) / 1000, 0.5)
+    except StepFailed:
+        capture_samples("failed")
+        path = ctx.run_dir / f"{name}_failed.json"
+        path.write_text(json.dumps(latest, indent=2))
+        ctx.artifacts.append(path.name)
+        raise StepFailed(f"transition checkpoint {name}: {latest.get('problems', [])}") from None
+    if step.get("capture", False):
+        capture_samples("passed")
+    ctx.saved[name] = latest
+    return latest
 
 
 class Recorder:
@@ -752,7 +968,8 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
          "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all,
-         "kh2ctl": step_kh2ctl}
+         "kh2ctl": step_kh2ctl, "transition_check": step_transition_check,
+         "align_courtyard_exit": step_align_courtyard_exit}
 
 
 # --------------------------------------------------------------------------
@@ -853,11 +1070,62 @@ def render_md(report: dict) -> str:
 # Suite
 # --------------------------------------------------------------------------
 
+def validate_scenario(scenario: dict) -> None:
+    """Offline structure/expression checks; never evaluate code or touch the rig."""
+    if not isinstance(scenario, dict) or not isinstance(scenario.get("steps"), list):
+        raise ValueError("scenario must be an object with a steps array")
+    if not scenario["steps"]:
+        raise ValueError("scenario needs at least one step")
+    count = 0
+    required = {"warp": ("world", "room"), "press": ("button",),
+                "assert": ("expr",), "wait_until": ("expr",), "save": ("as", "expr"),
+                "runtime": ("role",), "record": ("as",), "record_stop": ("as",),
+                "kh2ctl": ("args",), "align_courtyard_exit": ("blockedExpr",)}
+    for number, step in enumerate(scenario["steps"]):
+        prefix = f"step {number}"
+        if not isinstance(step, dict) or step.get("do") not in STEPS:
+            raise ValueError(f"{prefix}: unknown or missing do")
+        kind = step["do"]
+        for key in required.get(kind, ()):
+            if key not in step:
+                raise ValueError(f"{prefix} ({kind}): missing {key}")
+        if kind in ("boot", "launch"):
+            if "instance" in step and step["instance"] != count:
+                raise ValueError(f"{prefix}: boot/launch appends instance {count}")
+            count += 1
+        elif "instance" in step:
+            index = step["instance"]
+            if type(index) is not int or not 0 <= index < count:
+                raise ValueError(f"{prefix}: instance must refer to an earlier boot/launch")
+        if "instances" in step and any(type(i) is not int or not 0 <= i < count
+                                       for i in step["instances"]):
+            raise ValueError(f"{prefix}: instances must refer to earlier boots/launches")
+        if "expr" in step:
+            compile(step["expr"], f"<{prefix}>", "eval")
+        if "blockedExpr" in step:
+            compile(step["blockedExpr"], f"<{prefix} blockedExpr>", "eval")
+        if kind == "runtime" and step["role"] not in ("player", "friend1", "friend2", "spectator"):
+            raise ValueError(f"{prefix}: invalid runtime role")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("scenarios", nargs="+", type=Path)
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--validate", action="store_true",
+                        help="check JSON, step structure and expression syntax offline; never access the rig")
     args = parser.parse_args()
+
+    try:
+        for path in args.scenarios:
+            validate_scenario(json.loads(path.read_text(encoding="utf-8")))
+    except (ValueError, SyntaxError, OSError, TypeError) as error:
+        print(json.dumps({"ok": False, "file": str(path), "error": str(error)}))
+        return EXIT_FAIL
+    if args.validate:
+        print(json.dumps({"ok": True, "validated": [str(p) for p in args.scenarios],
+                          "scope": "offline structure and expression syntax only"}))
+        return EXIT_PASS
 
     if not KH2CTL.exists():
         print(f"kh2ctl not built: {KH2CTL}", file=sys.stderr)

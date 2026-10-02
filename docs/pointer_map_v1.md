@@ -8,6 +8,8 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 
 - `[CONFIRMED]` = Verified live in Cheat Engine on target build
 - `[KH2LIB]` = Pulled from KH2 Lua library, not fully live-verified in this project
+- `[GHIDRA]` = Verified by static analysis of the target executable
+- `[LIVE]` = Observed through the injected DLL/scenario rig; evidence linked alongside the claim
 - `[UNKNOWN]` = Not mapped yet
 
 ---
@@ -17,7 +19,7 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 | Area | Status | Notes |
 |---|---|---|
 | World/room identity | Done | Static `NOW` block + **commit path** mapped (staging at `0x717018`, helper `axaAppMain+0x3A00`, `KH2J` table `0x9A98B0`). See [NOW commit path](#now-commit-path-disassembly). |
-| Cutscene/transition state | Partial | `CUTSCENE_TIMER` used as proxy. Transition start/end flags not yet mapped. |
+| Cutscene/transition state | Partial | Native transition request and load-completion callbacks mapped and hooked; arrival requires a completed load plus the full target location. Cutscene hold remains separate work. See [room transition lifecycle](#room-transition-request-cold-warp--verified-live-2026-10-02). |
 | Unit slot stat block | Partial | `SLOT0_BASE`, `SLOT_STRIDE`, `slot::HP`, `slot::MAX_HP` confirmed. MP offset unknown. |
 | Actor transform (slot 0) | Done | Entity struct layout fully mapped: position, rotation, velocity, airborne flags. |
 | Actor transform (slot 1/2) | Done | Slot1+0x220/+0x228 actor pointers, entity at actor+0x640. Same layout as slot 0. |
@@ -41,7 +43,7 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 |---|---|---|
 | `0x0717008` | `WORLD_ID` | `[CONFIRMED]` |
 | `0x0717009` | `ROOM_ID` | `[CONFIRMED]` |
-| `0x071700A` | `NOW_EXTRA` (byte) | `[CONFIRMED]` third byte in `NOW` block; written by same commit helper as world/room |
+| `0x071700A` | `NOW_EXTRA` / entrance door (byte) | `[CONFIRMED]` third byte in `NOW`; commit helper `0x152BE0` writes only this byte, not a `u16` |
 | `0x071700C` | `MAP_PROGRAM` | `[KH2LIB]` |
 | `0x071700E` | `BATTLE_PROGRAM` | `[KH2LIB]` |
 | `0x0717010` | `EVENT_PROGRAM` | `[KH2LIB]` |
@@ -198,22 +200,74 @@ from `OBJENTRY_POINTER`, `obj0+0x16F0` is Donald's model name and
 
 | RVA | Role | Source |
 |---|---|---|
-| `0x152990` | **`RequestTransition(const LocationPacket*, u32 fadeFlags, int mode, u8 flag, int extra)`**. Starts the room-load task (callback `0x152A90`) and copies the packet into `NOW` staging `0x717018`/`0x717020` (or `0x717120`/`0x717128` when byte `0x9BA8D1` is set). Every room change goes through it: 23 callers, including the room-script Jump handler `0x3A46E0` and the world-map flow `0x154E20` → `0x151000`. | `[GHIDRA]` + `[CONFIRMED]` |
+| `0x152990` | **`void __fastcall RequestTransition(const LocationPacket*, u32 fadeFlags, int mode, u8 flag, int extra)`**. Starts the room-load task (callback `0x152A90`) and copies the packet into `NOW` staging `0x717018`/`0x717020` (or `0x717120`/`0x717128` when byte `0x9BA8D1` is set). 23 traced callers include the room-script Jump handler `0x3A46E0` and the world-map flow `0x154E20` → `0x151000`; this does not prove coverage of every initial-load or scripted path. | `[GHIDRA]` + `[CONFIRMED]` + `[LIVE]` |
+| `0x152BE0` | **`void __fastcall CommitLocation(const LocationPacket*)`**. Copies world/room/door bytes to `NOW`; resolves map/btl/evt from the save's room table unless the corresponding packet field is not `0xFFFF`. | `[GHIDRA]` |
+| `0x152680` | **`void __fastcall LoadRoom(void* task)`**. Runs room loading, including script redirects, then schedules `0x152CD0` through `0x1506B0`. | `[GHIDRA]` |
+| `0x152CD0` | **`void __fastcall LoadComplete(void* task)`**. Sets `IN_FIELD` (`0x9BA8D0`) to 1, runs native room finalizers, then calls `0x1500B0(task)` (zeros the task callback and returns). The detour records completion **after** the original callback returns. | `[GHIDRA]`; hook bytes verified and installed in the live run below |
+| `0x152F40` | **`void __fastcall LoadCompleteDirect()`**. Equivalent field-live/finalizer path without the task argument or task-clear tail. The detour also records completion after return. | `[GHIDRA]`; hook bytes verified and installed, but the shared live completion log does not identify which callback fired |
 | `0x3A46E0` | Room-script Jump handler: builds a packet from the script operand and calls `0x152990(&packet, flags, 0 or 2, 0, op[6])`. | `[GHIDRA]` |
 | `0x154E20` | World-map exit: packet with programs `0xFFFF`, then `0x152990(&packet, flags \| 1, 0, 0, 0)`. | `[GHIDRA]` |
 
-`LocationPacket` is the `NOW` layout: `u8 world, u8 room, u16 door, u16 map,
-u16 btl` (8 bytes), then `u16 evt` at `+8`. Programs of `0xFFFF` take the
+`LocationPacket` uses `u8 world, u8 room, u16 door, u16 map,
+u16 btl` (8 bytes), then `u16 evt` at `+8`; the DLL pads the buffer to 16 bytes.
+The native commit consumes only the low door byte, so host-follow requests
+reject doors above `0xFF` and read current door as `u8`. Programs of `0xFFFF` take the
 save's per-room values. The inject DLL calls `0x152990(&packet, 1, 0, 0, 0)` from
-the PerEntityUpdate hook at the start of a frame (`inject/src/Warp.cpp`,
-`kh2ctl warp`), guarded by the function's first 24 bytes. 50 consecutive
+the PerEntityUpdate hook at the start of a frame ([Warp.cpp](../inject/src/Warp.cpp),
+`kh2ctl warp`). All three request/completion hook targets must match their
+first 24 executable bytes before installation. The earlier cold-warp test's 50 consecutive
 warps across 13 rooms in three worlds loaded cleanly.
 
-**Load signals.** `NOW` world/room change at request time. `0x9BA928` (the
+**Load signals.** The request stages a target; the commit changes `NOW` before
+the new room has finished loading. `0x9BA928` (the
 load task pointer written by `0x152990`), byte `0x9BA8D1` and
 `LOADING_INDICATOR` `0x8EC540` didn't change when sampled every 50 ms through a
-load. The reliable signal is that entity updates stop for ~0.55 s during a
-load and resume in the new room (the DLL's frame counter).
+load. Earlier code inferred loading from a ~0.55 s entity-update stall. That
+heuristic is superseded: a pause can stall updates, and a same-room reload can
+leave all location fields unchanged. Native completion callbacks now provide
+the load generation; `NOW` equality or elapsed time alone never proves arrival.
+
+**Lifecycle and authority (VUH-1496).** [Warp.cpp](../inject/src/Warp.cpp)
+increments a transition serial when accepting a request and a load serial after
+a native completion callback returns. Client-native calls to `0x152990` are
+blocked; only the host-command path bypasses that detour through its trampoline.
+The current session role is checked at the native call, so disconnect releases
+the client lock. [EnemySync.cpp](../inject/src/EnemySync.cpp) and
+[EntityHook.cpp](../inject/src/EntityHook.cpp) discard old enemy/puppet/clone and
+hit-target caches without restoring fields through stale actor pointers. They
+rebind from subsequent entity updates, including after same-room reloads. If
+the lifecycle hooks cannot be verified, these actor writers remain suspended.
+
+Every accepted host epoch, including a join to an already matching location,
+queues a real reload. `TransitionAck(arrived=true)` is queued only after a later
+load generation, the safe gameplay gate, and exact equality of **world, room,
+door, map, battle and event**. The gate requires no frozen entity groups,
+`IN_FIELD != 0`, no open menu and an idle cutscene timer. The host advances its
+epoch when the new room instance becomes live; request acceptance alone is not
+client arrival. This establishes completion behavior, not proof that every
+native exit path is intercepted.
+
+**First live host-follow evidence, 2026-10-02.** The
+[smoke report](../build/scenarios/20261002-142449_net_host_transitions_smoke_1/report.json)
+records a passing initial `04/1A` checkpoint with zero puppet position error on
+both connected instances. The
+[host log](../build/scenarios/20261002-142449_net_host_transitions_smoke_1/kh2coop_inject_55600.log)
+then records load serial 3 and host epoch 2 at `02/00` with door/map/btl/evt all 0.
+The [client log](../build/scenarios/20261002-142449_net_host_transitions_smoke_1/kh2coop_inject_66492.log)
+orders epoch-2 queued → issued (transition 3) → load complete (serial 4) → arrived
+at the same full target, and the
+[relay log](../build/scenarios/20261002-142449_net_host_transitions_smoke_1/relay.log)
+records `TransitionAck slot=1 epoch=2 room=02/00 arrived=1`.
+
+That run **failed** the `before_late_join` checkpoint:
+[captured state](../build/scenarios/20261002-142449_net_host_transitions_smoke_1/before_late_join_failed.json)
+reports both native friend positions at zero and a 500-unit puppet error in
+Twilight Town. It is evidence for request/load/ACK ordering, not a passing
+multiplayer acceptance run or proof of late join, same-room reload, or native
+exit blocking. The missing bindings are consistent with the documented R12
+party-slot limitation; the capture lacks an actor roster/raw friend pointers
+needed to conclusively identify that cause. Both completion hooks use the same
+log line, so this run cannot separately establish which completion RVA fired.
 
 **`[KH2LIB]` state flags on this build.** `PAUSE_STATUS` `0xABB7F8` reads
 garbage (`0xE5E04CA0`). `+0x80` (`0xABB878`) reads 0. `CONTROLLABLE`
@@ -229,12 +283,12 @@ code addresses these at the library value `+0x80`:
 | `0x2A11404` (`BATTLE_STATUS`+0x80) | battle type: `0x3AB690` sets `2` (forced battle), `0x3ABAB0` clears it, `0x3ABB20` tests `!= 0` |
 | `0x2A171E8` (`CONTROLLABLE`+0x80) | frozen-entity-group bitset; `0x3BFA40` skips an entity whose group bit is set. `0` = nothing frozen |
 | `0xABB878` (`PAUSE_STATUS`+0x80) | pause-blocker bitmask; the pause watcher `0x1572B0` opens pause only when it is `0`, `0x9BA8D0 != 0` and Start is pressed |
-| `0x9BA8D0` | "in field" byte; the load task `0x152A90` clears it at load start |
+| `0x9BA8D0` | "in field" byte; the load task `0x152A90` clears it at load start; `0x152CD0` / `0x152F40` set it before running finalizers, so the byte alone is not completion proof |
 | `0xB64F98` (`CUTSCENE_TIMER`+0x80) | cutscene timer |
 | `0x8EC5C0` (`LOADING_INDICATOR`+0x80) | loading indicator |
 | `0x2AE5D78` (`SPAWNS`+0x80) | **not** an enemy toggle: a rotating 0–7 index for an effect's random spread (`0x3F3FA0`) |
 
-`CURRENT_OPEN_MENU` `0x7435D0` needs no shift. Suggested safe-state gate:
+`CURRENT_OPEN_MENU` `0x7435D0` needs no shift. Current warp/arrival safe-state gate:
 `0x2A171E8 == 0 && 0x9BA8D0 != 0 && menu == 0xFF && cutscene idle`.
 
 ### Unit slot stat system

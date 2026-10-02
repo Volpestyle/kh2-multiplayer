@@ -104,10 +104,101 @@ void testPacketRing() {
     check(got == kCount && ordered, "20000 records across threads, in order, intact");
 }
 
+void testWorldInbox() {
+    std::cout << "\n=== Deferred world delivery ===\n";
+    WorldBridge runtime, dll;
+    WorldInbox inbox;
+    WorldPumpStats stats;
+    const auto transition = encode(RoomTransition {12, 4, 26, 3, 1, 2, 0});
+    const auto hold = encode(EventHold {12, true, 7});
+    check(inbox.Receive(runtime, transition, stats) &&
+              inbox.Receive(runtime, hold, stats) && inbox.PendingCount() == 2,
+          "pre-attach transition and hold are retained in order");
+    const DWORD pid = 0x7FF20000u + (GetCurrentProcessId() & 0xFFFFu);
+    check(runtime.Open(pid) && dll.Open(pid), "delayed bridge opens");
+    inbox.Flush(runtime, stats);
+    std::vector<std::uint8_t> out;
+    check(inbox.PendingCount() == 0 && dll.ReceiveFromRuntime(out) && out == transition &&
+              dll.ReceiveFromRuntime(out) && out == hold && !dll.ReceiveFromRuntime(out),
+          "initial snapshot reaches the DLL intact after attach");
+
+    const auto filler = bytesOf(99, 65536);
+    int filled = 0;
+    while (runtime.SendToDll(filler)) ++filled;
+    const auto smallFiller = bytesOf(98, 1);
+    while (runtime.SendToDll(smallFiller)) ++filled;
+    check(filled > 0 && inbox.Receive(runtime, transition, stats) &&
+              inbox.Receive(runtime, hold, stats) && inbox.PendingCount() == 2,
+          "full bridge retains both world packets instead of dropping them");
+    int drained = 0;
+    while (dll.ReceiveFromRuntime(out)) ++drained;
+    inbox.Flush(runtime, stats);
+    check(drained == filled && dll.ReceiveFromRuntime(out) && out == transition &&
+              dll.ReceiveFromRuntime(out) && out == hold && inbox.PendingCount() == 0,
+          "backpressure clears without loss or reordering");
+
+    runtime.Close();
+    bool accepted = true;
+    for (std::size_t i = 0; i < WorldInbox::kMaxBytes / filler.size(); ++i) {
+        accepted &= inbox.Receive(runtime, filler, stats);
+    }
+    check(accepted && !inbox.Receive(runtime, transition, stats) && stats.inboxOverflow == 1,
+          "unattached inbox is bounded and reports overflow");
+    inbox.Clear();
+    check(inbox.PendingCount() == 0 && inbox.Receive(runtime, hold, stats),
+          "disconnect clearing removes buffered state and frees capacity");
+    check(!inbox.Receive(runtime, bytesOf(0, WORLD_RING_BYTES / 2), stats),
+          "a record too large for the bridge fails instead of blocking the inbox");
+}
+
+void testSessionReset() {
+    std::cout << "\n=== Ordered world session boundaries ===\n";
+    WorldBridge runtime, dll;
+    WorldInbox inbox;
+    WorldPumpStats stats;
+    const DWORD pid = 0x7FF30000u + (GetCurrentProcessId() & 0xFFFFu);
+    check(runtime.Open(pid) && dll.Open(pid), "session-reset bridges open");
+    runtime.SetLocalSlot(1);
+    const auto oldRoom = encode(RoomTransition {99, 4, 26, 3, 1, 2, 0});
+    const auto newRoom = encode(RoomTransition {1, 2, 0, 0, 1, 2, 0});
+    const auto reset = encodePacket(PacketType::SessionState, {});
+    runtime.SendToDll(oldRoom);
+    // The DLL is between its frame-start check and its packet loop. Runtime
+    // can remove and replace the host now without losing the new low epoch.
+    runtime.SetLocalSlot(WORLD_SLOT_UNKNOWN);
+    inbox.Receive(runtime, reset, stats);
+    runtime.SetLocalSlot(1);
+    inbox.Receive(runtime, reset, stats);
+    inbox.Receive(runtime, newRoom, stats);
+    std::uint32_t epoch = 99;
+    int resets = 0;
+    std::vector<std::uint8_t> out;
+    while (dll.ReceiveFromRuntime(out)) {
+        const std::uint8_t* payload = nullptr;
+        std::size_t size = 0;
+        const auto type = decodePacketHeader(out.data(), out.size(), payload, size);
+        if (type == PacketType::SessionState && size == 0) {
+            epoch = 0;
+            ++resets;
+        } else if (type == PacketType::RoomTransition) {
+            RoomTransition room;
+            ByteReader r(payload, size);
+            read(r, room);
+            if (room.epoch > epoch) epoch = room.epoch;
+        }
+    }
+    check(resets == 2 && epoch == 1 && dll.LocalSlot() == 1,
+          "reset published between frame check and dequeue preserves the new host transition");
+    check(!isWorldPacket(PacketType::SessionState),
+          "bridge-local reset cannot pass the DLL-to-network world filter");
+}
+
 } // namespace
 
 int main() {
     testPacketRing();
+    testWorldInbox();
+    testSessionReset();
     if (enet_initialize() != 0) return 2;
 
     std::cout << "\n=== WorldBridge end to end ===\n";
@@ -142,12 +233,13 @@ int main() {
           "DLL side reads the runtime's RTT and loss");
 
     WorldPumpStats hostStats, clientStats;
+    WorldInbox clientInbox;
     ClientCallbacks hostCb, clientCb;
     hostCb.onWorldPacket = [&](const std::vector<std::uint8_t>& p) {
         forwardToDll(hostRuntimeSide, p, hostStats);
     };
     clientCb.onWorldPacket = [&](const std::vector<std::uint8_t>& p) {
-        forwardToDll(clientRuntimeSide, p, clientStats);
+        clientInbox.Receive(clientRuntimeSide, p, clientStats);
     };
     NetworkClient host("127.0.0.1", cfg.port, cfg.gameBuild, cfg.modHash, "host",
                        SlotType::Player, std::move(hostCb), RuntimeMode::CampaignCoop,
@@ -180,9 +272,18 @@ int main() {
     };
     check(waitFor([&] { return relay.verifiedPeerCount() == 2; }), "host and client verified");
 
+    // A real receive callback can precede the runtime's game attach even when
+    // the DLL has already created its mapping.
+    clientRuntimeSide.Close();
+
     // Host DLL detects a transition and emits it.
     check(hostDll.SendToRuntime(encode(RoomTransition {7, 4, 0x1A, 3, 1, 2, 0})),
           "host DLL queues a RoomTransition");
+    check(waitFor([&] { return clientInbox.PendingCount() == 1; }),
+          "relay transition received before runtime attach is buffered");
+    check(clientRuntimeSide.Open(clientPid), "client runtime attaches after its snapshot arrives");
+    clientRuntimeSide.SetLocalSlot(1);
+    clientInbox.Flush(clientRuntimeSide, clientStats);
     std::vector<std::uint8_t> pkt;
     RoomTransition got;
     const bool arrived = waitFor([&] {

@@ -111,10 +111,12 @@ For rooms whose spawner emits enemies over time based on player position
 runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1–2 = client);
 `KH2COOP_ROLE=host|client` overrides it for tests.
 
-- **Room instance.** NOW (world/room/btl) changes as soon as a transition is
-  requested, while the old room's actors keep updating through the fade. A
-  new instance starts at the first gameplay frame after a load stall once the
-  key has changed, and spawn tracking pauses in between.
+- **Room instance.** Native transition-request and load-completion hooks in
+  `Warp.cpp` advance separate generations. Requests and completed loads clear
+  cached enemy actors, including same-room reloads; spawn tracking pauses
+  while a transition is pending. A new instance starts on a gameplay frame
+  after native completion. NOW changes and frame stalls alone do not establish
+  arrival; lifecycle details are in `pointer_map_v1.md`.
 - **Host.**
   - Every instance: `epoch++` and a `RoomTransition`. When hosting starts
     mid-room (the runtime connected late), the room and everything already
@@ -130,6 +132,11 @@ runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1–2 = client);
   - If none appears within 3 s, it's reported as a death, so clients don't
     keep a copy that would hold the room open.
 - **Client.**
+  - Replays each accepted host epoch through the native transition path.
+    Arrival requires a load completion after that request, the playable-state
+    gate, and exact world, room, entrance, map, battle and event programs.
+    Enemy matching waits for arrival; `TransitionAck` retries if the outgoing
+    bridge ring is full.
   - Matches each local spawn by spawn point + objentry to the host's newest
     enemy at that point. Spawn index is the fallback.
   - A new local spawn binds only to a live host entry, and waits for the
@@ -153,8 +160,44 @@ host + 2 clients, relay, host-only damage):
   entries and cleared.
 - **Battle end:** battle state ended (0) on all three.
 
+**Transition-lifecycle regression evidence, 2026-10-02.** The
+[courtyard rerun](../build/scenarios/20261002-145659_net_enemy_sync_courtyard_1/report.json)
+failed its after-client-hits population/HP equality check. The original five
+Shadows were at 13 HP on every instance after host damage and remained there.
+Client 1 independently spawned a sixth Shadow at `(-40,-1,-349)`, with 20 HP
+and no host manifest match. Its four subsequent hits targeted that actor and
+were zeroed ([client log](../build/scenarios/20261002-145659_net_enemy_sync_courtyard_1/kh2coop_inject_99000.log)).
+The failed assertion's message describes changed enemy HP; the raw samples
+show a real extra-client-actor mismatch. No further epoch or load occurred
+during that mismatch. Keep this failure as unresolved spawn divergence.
+
+The earlier passing courtyard run also had native despawn/refill variation,
+eventually settling at four enemies. The new lifecycle intentionally performs
+a real initial follow reload even when the location matches; the old fixture
+only recorded that first epoch. Player/camera trajectories were not captured,
+so these reports cannot establish why the additional spawn appeared. Shared
+HP/death checks on fixed scripted waves provide separate lifecycle evidence;
+they do not retire the courtyard population mismatch.
+
+The [fixed-wave rerun](../build/scenarios/20261002-150336_net_enemy_sync_waves_1/report.json)
+**passed** with the new lifecycle (154.8 s). Four initial enemies changed from
+160 to 153 HP on all three instances after host damage. The second wave had
+two 160-HP enemies on every instance; each client recorded six native death
+applications in total, and battle state ended at 0 everywhere. Four save-file
+hashes were unchanged. This verifies fresh bindings and HP/death application
+after real join reloads, while leaving spawn convergence and live hashes open.
+
 Not covered yet:
 - Bosses: none reachable on this save.
 - Drops and barrier objects (battle state stands in for "barriers lift").
 - Continuous spawners.
 - Client hits as claims (VUH-1501).
+- Live state-hash agreement. The HP/death checks above observe real enemies,
+  but no live `StateHash` publisher currently proves shared enemy and progress
+  state. VUH-1497 must verify the progress allow list and integrate mirroring;
+  VUH-1508 must define comparable hashes of actual local state, including
+  missing matches, deaths and superseded spawns. Empty enemy sets or hashes of
+  the client's received host cache do not prove local application.
+  Calibrate against the nonempty courtyard/wave fixtures above, retaining raw
+  matched IDs and local HP/death observations at settled checkpoints and
+  confirming that a deliberately mismatched observation is detected.

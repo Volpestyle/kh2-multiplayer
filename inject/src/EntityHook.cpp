@@ -769,19 +769,18 @@ static constexpr uintptr_t ACTOR_ACCEL_BLOCK = 0xA48;           // accel +0xA48.
 static constexpr size_t ACTOR_ACCEL_BLOCK_BYTES = 0x18;
 
 // Puppet i (0/1) has a fresh, active pose.
-// Room transitions: the moment the local room key (NOW world/room) changes,
-// a transition has been requested and the current room's actors are about
+// Room transitions: native request/load callbacks identify room generations,
+// including same-room reloads. The current room's actors are about
 // to be torn down. Puppets are suspended and every cached actor pointer is
 // dropped without touching it; driving resumes on the first gameplay frame
 // after the load (soak crash 2026-10-02: heap corruption after a door
 // transition with a puppet active).
 static bool g_puppetsSuspended = false;
-static uint16_t g_puppetRoomKey = 0xFFFF;
-static uint64_t g_lastPuppetFrameMs = 0;
-static constexpr uint64_t LOAD_STALL_MS = 150;  // gameplay frames stop during a load
+static uint32_t g_puppetTransitionSerial = 0;
+static uint32_t g_puppetLoadSerial = 0;
 
 static bool IsPuppetActive(int index) {
-    if (index < 0 || index > 1 || g_puppetsSuspended) return false;
+    if (index < 0 || index > 1 || g_puppetsSuspended || warp::TransitionPending()) return false;
     const PuppetDriver& d = g_puppets[index];
     return d.have && d.pose.active && g_frameCounter - d.poseFrame <= PUPPET_STALE_FRAMES;
 }
@@ -809,6 +808,7 @@ static void BeginCloneFrame() {
 }
 
 static void NoteActorForClones(uintptr_t actor) {
+    if (warp::TransitionPending()) return;
     if (actor != g_soraActor && g_cloneCountNow < 2 && IsPlayerClassActor(actor)) {
         g_clonesNow[g_cloneCountNow++] = actor;
     }
@@ -864,30 +864,31 @@ static void ForgetPuppetActor(PuppetDriver& d) {
 // Frame start: suspend puppets when a transition is requested and resume
 // after the load. Returns true while suspended.
 static bool UpdatePuppetSuspension() {
-    const uint64_t nowMs = GetTickCount64();
-    const bool afterLoad = g_lastPuppetFrameMs != 0 && nowMs - g_lastPuppetFrameMs > LOAD_STALL_MS;
-    g_lastPuppetFrameMs = nowMs;
-    const uint16_t roomKey = *reinterpret_cast<const uint16_t*>(g_exeBase + offsets::WORLD_ID);
-    if (afterLoad && (g_puppetsSuspended || roomKey != g_puppetRoomKey)) {
-        // New room loaded: fresh actors, nothing cached. (A stall without a
-        // room change is a pause or menu; the cached actors are still live.)
+    const auto transition = warp::TransitionSerial();
+    const auto load = warp::LoadSerial();
+    const bool pending = warp::TransitionPending();
+    if (transition != g_puppetTransitionSerial || load != g_puppetLoadSerial || pending) {
+        // Invalidate on the actual native lifecycle, including same-room
+        // reloads. No restoration writes may reach a prior room's actors.
         for (auto& d : g_puppets) ForgetPuppetActor(d);
-        if (g_puppetsSuspended) Log("Puppets resumed after load (room %04X)", roomKey);
-        g_puppetsSuspended = false;
-        g_puppetRoomKey = roomKey;
-    } else if (g_puppetRoomKey == 0xFFFF) {
-        g_puppetRoomKey = roomKey;
-    } else if (roomKey != g_puppetRoomKey && !g_puppetsSuspended) {
-        for (auto& d : g_puppets) ForgetPuppetActor(d);
-        g_puppetsSuspended = true;
-        Log("Puppets suspended: transition %04X -> %04X requested", g_puppetRoomKey, roomKey);
+        g_clones[0] = g_clones[1] = 0;
+        g_clonesNow[0] = g_clonesNow[1] = 0;
+        g_cloneCountNow = 0;
+        g_friend1Actor = g_friend2Actor = 0;
+        g_handleCount = 0;
     }
+    if (pending != g_puppetsSuspended) {
+        Log("Puppets %s: transition=%u load=%u", pending ? "suspended" : "resumed", transition, load);
+    }
+    g_puppetTransitionSerial = transition;
+    g_puppetLoadSerial = load;
+    g_puppetsSuspended = pending;
     return g_puppetsSuspended;
 }
 
 static void PollPuppetPoses() {
-    if (!g_avatarBridge.IsOpen()) return;
     UpdatePuppetSuspension();
+    if (!g_avatarBridge.IsOpen()) return;
     bool anyActive = false;
     for (int i = 0; i < 2; ++i) {
         const bool wasActive = IsPuppetActive(i);
@@ -2229,12 +2230,12 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 g_soraActor = addr;
 
                 // Hand pending room warps to the game on its own thread.
-                warp::OnFrameStart(g_frameCounter, addr);
-                ProcessHitRequest();
                 enemysync::OnFrameStart(g_frameCounter);
+                warp::OnFrameStart(g_frameCounter, addr);
                 BeginCloneFrame();
-                BeginHandleFrame();
                 PollPuppetPoses();
+                ProcessHitRequest();
+                BeginHandleFrame();
             }
         }
         NoteActorForClones(addr);

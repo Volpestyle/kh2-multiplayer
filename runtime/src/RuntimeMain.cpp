@@ -741,6 +741,20 @@ int main(int argc, char* argv[]) {
     // encoded packets: DLL -> relay and relay -> DLL.
     kh2coop::WorldBridge worldBridge;
     kh2coop::WorldPumpStats worldStats;
+    kh2coop::WorldInbox worldInbox;
+    std::uint8_t worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
+    std::string worldSessionHost;
+    const auto resetWorldSession = [&](std::uint8_t slot) {
+        worldInbox.Clear();
+        worldBridge.SetLocalSlot(slot);
+        // Bridge-local reset shares the FIFO with world packets, so it cannot
+        // race with a DLL frame and discard the new session's first transition.
+        if (!worldInbox.Receive(worldBridge,
+                kh2coop::encodePacket(kh2coop::PacketType::SessionState, {}), worldStats)) {
+            std::cerr << "[Runtime] Could not queue world session reset\n";
+            g_running = false;
+        }
+    };
 #endif
     std::unique_ptr<kh2coop::NetworkClient> netClient;
     std::atomic_bool netConnected {false};
@@ -769,7 +783,8 @@ int main(int argc, char* argv[]) {
 
         callbacks.onDisconnected = [&netConnected, &replica, &replicaMtx
 #ifdef _WIN32
-                                    , &closeMailbox
+                                    , &closeMailbox, &worldBridge, &worldInbox, &avatarSync,
+                                    &worldSessionSlot, &resetWorldSession
 #endif
                                     ]() {
             netConnected = false;
@@ -779,14 +794,45 @@ int main(int argc, char* argv[]) {
 
 #ifdef _WIN32
             closeMailbox();
+            worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
+            resetWorldSession(kh2coop::WORLD_SLOT_UNKNOWN);
+            worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN,
+                                    kh2coop::WORLD_NET_UNKNOWN);
+            avatarSync.clear();
 #endif
         };
 
-        callbacks.onSessionState = [](const kh2coop::SessionState& ss) {
+        callbacks.onSessionState = [
+#ifdef _WIN32
+            &options, &worldSessionSlot, &worldSessionHost, &worldBridge, &worldInbox,
+            &resetWorldSession,
+#endif
+            &avatarSync, &netConnected](const kh2coop::SessionState& ss) {
+            if (!netConnected) return;
             std::cout << "[Runtime] Network: SessionState session="
                       << ss.sessionId
                       << " actors=" << ss.actors.size()
                       << " room=" << describeRoomState(ss.room) << "\n";
+#ifdef _WIN32
+            const auto host = std::find_if(ss.actors.begin(), ss.actors.end(),
+                [](const auto& actor) { return actor.slot == kh2coop::SlotType::Player; });
+            const auto self = std::find_if(ss.actors.begin(), ss.actors.end(),
+                [&options](const auto& actor) {
+                    return actor.ownerPeerId == options.config.peerId &&
+                           actor.slot == options.config.ownedSlot;
+                });
+            const auto slot = host != ss.actors.end() && self != ss.actors.end()
+                ? static_cast<std::uint8_t>(self->slot) : kh2coop::WORLD_SLOT_UNKNOWN;
+            const auto hostPeer = host != ss.actors.end() ? host->ownerPeerId : std::string {};
+            if (slot != worldSessionSlot || hostPeer != worldSessionHost) {
+                worldSessionSlot = slot;
+                worldSessionHost = hostPeer;
+                resetWorldSession(slot);
+            }
+            if (worldSessionSlot == kh2coop::WORLD_SLOT_UNKNOWN) {
+                avatarSync.clear();
+            }
+#endif
         };
 
         callbacks.onRejected = [](const kh2coop::HelloReject& reject) {
@@ -854,16 +900,23 @@ int main(int argc, char* argv[]) {
                 replica.ApplyEnemySnapshot(snap);
             };
 
-        callbacks.onAvatarState = [&avatarSync, &replicaMtx](
+        callbacks.onAvatarState = [&avatarSync, &replicaMtx, &netConnected](
                                       const kh2coop::AvatarState& avatar) {
+            if (!netConnected) return;
             std::lock_guard<std::mutex> lock(replicaMtx);
             avatarSync.onRemote(avatar);
         };
 
 #ifdef _WIN32
-        callbacks.onWorldPacket = [&worldBridge, &worldStats](
+        callbacks.onWorldPacket = [&worldBridge, &worldStats, &worldInbox,
+                                  &netConnected, &worldSessionSlot](
                                       const std::vector<std::uint8_t>& packet) {
-            kh2coop::forwardToDll(worldBridge, packet, worldStats);
+            if (!netConnected || worldSessionSlot == kh2coop::WORLD_SLOT_UNKNOWN) return;
+            if (!worldInbox.Receive(worldBridge, packet, worldStats)) {
+                std::cerr << "[Runtime] World inbox overflow; stopping rather than "
+                             "continuing with incomplete world state\n";
+                g_running = false;
+            }
         };
 #endif
 
@@ -1017,12 +1070,15 @@ int main(int argc, char* argv[]) {
                 avatarBridge.Open(static_cast<DWORD>(game.ProcessId()));
             }
             if (!worldBridge.IsOpen()) {
-                worldBridge.Open(static_cast<DWORD>(game.ProcessId()));
+                if (worldBridge.Open(static_cast<DWORD>(game.ProcessId()))) {
+                    worldBridge.SetLocalSlot(worldSessionSlot);
+                }
             }
             if (worldBridge.IsOpen()) {
                 // Tell the DLL its session slot (0 = Player = host).
-                const auto slot = static_cast<std::uint8_t>(options.config.ownedSlot);
+                const auto slot = worldSessionSlot;
                 if (worldBridge.LocalSlot() != slot) worldBridge.SetLocalSlot(slot);
+                worldInbox.Flush(worldBridge, worldStats);
                 // Link quality for the overlay: app-level RTT (includes any
                 // simulated latency) and the avatar-stream loss players see,
                 // falling back to ENet's estimate until a loss window closes.
@@ -1164,6 +1220,8 @@ int main(int argc, char* argv[]) {
         closeMailbox();
         std::cout << "[Runtime] Input mailbox closed\n";
     }
+    resetWorldSession(kh2coop::WORLD_SLOT_UNKNOWN);
+    worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN, kh2coop::WORLD_NET_UNKNOWN);
 #endif
 
     if (netClient) {

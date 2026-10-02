@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <enet/enet.h>
+#include <iomanip>
 #include <optional>
 #include <sstream>
 
@@ -518,6 +519,13 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 ps->ackWorldId = ack.worldId;
                 ps->ackRoomId = ack.roomId;
                 ps->ackArrived = ack.arrived;
+                std::ostringstream ackLog;
+                ackLog << "TransitionAck slot=" << static_cast<int>(ps->assignedSlot)
+                       << " epoch=" << ack.epoch << " room=" << std::hex
+                       << std::uppercase << std::setfill('0') << std::setw(2) << ack.worldId
+                       << "/" << std::setw(2) << ack.roomId << std::dec
+                       << " arrived=" << (ack.arrived ? 1 : 0);
+                log(ackLog.str());
                 if (room_ && ack.epoch == room_->epoch &&
                     (!ack.arrived || ack.worldId != room_->worldId ||
                      ack.roomId != room_->roomId)) {

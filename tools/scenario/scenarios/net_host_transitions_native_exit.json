@@ -1,0 +1,226 @@
+{
+  "name": "net_host_transitions_native_exit",
+  "description": "VUH-1496 native walking fixture, calibrated live 2026-10-02: align client with BC courtyard door0, require its native exit request to be blocked without changing room or epoch, then let the host walk through the same doorway. Require newer completed-load epoch, matching full locations, both client ACKs and restored native puppets. Never substitutes a client CLI warp for walking.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "initial",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "before_late_join",
+      "after": "initial",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "location(2)[:2] != location(0)[:2]",
+      "message": "late join fixture must begin in a different room"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "as": "joined",
+      "target": [
+        5,
+        1
+      ],
+      "capture": true
+    },
+    {
+      "do": "assert",
+      "expr": "saved['joined']['epoch'] == saved['before_late_join']['epoch']",
+      "message": "late join should follow the current host epoch without advancing it"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6,
+      "door": 0
+    },
+    {
+      "do": "transition_check",
+      "as": "courtyard",
+      "after": "joined",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "save",
+      "as": "blocked_before",
+      "expr": "len(log_matches('\\\\[warp\\\\] client native exit blocked count=(?P<count>\\\\d+) target=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)', 1))"
+    },
+    {
+      "do": "save",
+      "as": "exit_start_positions",
+      "expr": "{'host': pos(index=0), 'client': pos(index=1)}"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "before_exit_walk"
+    },
+    {
+      "do": "align_courtyard_exit",
+      "instance": 1,
+      "as": "courtyard_alignment",
+      "blockedExpr": "len(log_matches('\\\\[warp\\\\] client native exit blocked count=(?P<count>\\\\d+) target=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)', 1)) > saved['blocked_before']"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "after_client_alignment"
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": -1,
+      "ms": 4000
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "immediately_after_client_walk"
+    },
+    {
+      "do": "save",
+      "as": "client_walk_end",
+      "expr": "pos(index=1)"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches('\\\\[warp\\\\] client native exit blocked count=(?P<count>\\\\d+) target=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)', 1)) > saved['blocked_before']",
+      "timeoutMs": 5000
+    },
+    {
+      "do": "save",
+      "as": "blocked_request",
+      "expr": "log_matches('\\\\[warp\\\\] client native exit blocked count=(?P<count>\\\\d+) target=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)', 1)[saved['blocked_before']]"
+    },
+    {
+      "do": "save",
+      "as": "blocked_target",
+      "expr": "[int(saved['blocked_request'][key], 16) for key in ('world', 'room')]"
+    },
+    {
+      "do": "wait",
+      "ms": 2000
+    },
+    {
+      "do": "transition_check",
+      "as": "after_exit_walk",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_exit_walk']['epoch'] == saved['courtyard']['epoch'] and all(saved['after_exit_walk']['instances'][str(i)]['location'] == saved['courtyard']['instances'][str(i)]['location'] for i in range(3))",
+      "message": "client walk changed the host epoch or a full location"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "after_exit_walk"
+    },
+    {
+      "do": "save",
+      "as": "host_before_native_walk",
+      "expr": "pos(index=0)"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": -1,
+      "ms": 4000
+    },
+    {
+      "do": "transition_check",
+      "as": "host_native_exit",
+      "after": "courtyard",
+      "capture": true
+    },
+    {
+      "do": "assert",
+      "expr": "saved['host_native_exit']['instances']['0']['location'][:2] == saved['blocked_target']",
+      "message": "host walking exit did not reach the target intercepted from the client attempt"
+    }
+  ],
+  "protect": [
+    0,
+    1,
+    2
+  ]
+}

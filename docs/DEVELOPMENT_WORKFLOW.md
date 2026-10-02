@@ -53,6 +53,26 @@ known broken (see `KH2_CONTROL_CLI.md`).
   the keyboard; agents use `kh2ctl restart` and `kh2ctl kill`.
 - Never save in-game during automation (AGENTS.md).
 
+## Running the rig from a session-0 agent
+
+Herdr's current server and its PowerShell panes run in Windows session 0.
+The game and its `Local\\kh2coop_*` shared-memory channels need the logged-in
+desktop session. On this PC the existing `desk-agent` task runs
+`C:\desk\agent.ps1` in session 1. It executes `.ps1` jobs from `C:\desk\jobs`
+and moves each completed job, with its `.out` result, to `C:\desk\done`.
+This bridge was verified on 2026-10-02 with a read-only job reporting session 1.
+
+Use that existing bridge for `tools/scenario/run.py` and `kh2ctl`; the usual
+rig lock, process ownership and save guards still apply. Write a uniquely named
+job outside the queue, then move it into the queue so the agent never reads a
+partial script. For a long scenario, start a hidden process with explicit
+stdout/stderr files under `build/rig/`, retain its PID, and inspect its report
+and exit status. Do not create another scheduled task or change the bridge.
+
+Check that `desk-agent` is actually running and that a read-only job reports
+the interactive session before using it. A task definition alone does not
+establish an available desktop worker.
+
 ## Rebuilding while KH2 runs
 
 Each injection loads a fresh copy of `build/inject/staging/kh2coop_inject.dll`

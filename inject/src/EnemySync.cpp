@@ -1,10 +1,9 @@
 // ============================================================================
 // EnemySync — see EnemySync.hpp.
 //
-// Room instances: NOW (world/room/btl) changes as soon as a transition is
-// requested, while the old room's actors keep updating through the fade.
-// So a new instance starts at the first gameplay frame after a load stall
-// once the room key has changed; spawn tracking pauses in between.
+// Room instances follow Warp's native request/load-completion generations.
+// Cached actors are forgotten at requests and loads, including same-room
+// reloads; NOW changes and frame stalls alone never prove arrival.
 //
 // Spawn order: an enemy's spawn index is its order of first appearance in
 // the instance (entity-list order within a frame). VUH-1499 measured this
@@ -13,6 +12,7 @@
 // ============================================================================
 
 #include "EnemySync.hpp"
+#include "Warp.hpp"
 
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -32,8 +32,8 @@ namespace enemysync {
 namespace {
 
 enum class Role { Off, Host, Client };
+Role CurrentRole();
 
-constexpr std::uint64_t LOAD_STALL_MS = 150;
 constexpr std::uint32_t HP_INTERVAL_FRAMES = 6;  // ~10 Hz
 constexpr uintptr_t ACTOR_STATUS = 0x5C0;
 constexpr float SPAWN_POINT_TOLERANCE = 8.0f;  // units; spawn points matched to 0.0 in VUH-1499
@@ -69,13 +69,15 @@ struct Spawn {
 
 struct Instance {
     std::uint16_t world = 0xFFFF, room = 0xFFFF, btl = 0;
+    std::uint16_t door = 0, map = 0, evt = 0;
     bool live = false;        // tracking spawns (not mid-transition)
     std::vector<Spawn> spawns;
     std::unordered_map<uintptr_t, std::size_t> byActor;  // every address seen -> latest spawn there
 };
 
 Instance g_inst;
-std::uint64_t g_lastFrameMs = 0;
+std::uint32_t g_seenTransition = 0;
+std::uint32_t g_seenLoad = 0;
 std::uint32_t g_epoch = 0;          // host: current epoch
 bool g_manifestSent = false;        // host: first manifest of the epoch went out
 std::vector<uintptr_t> g_frameActors, g_lastActors;
@@ -92,6 +94,8 @@ struct HostEnemy {
 struct HostRoom {
     std::uint32_t epoch = 0;
     std::uint16_t world = 0xFFFF, room = 0xFFFF, btl = 0;
+    bool arrived = false;
+    bool ackSent = false;
     std::map<std::uint16_t, HostEnemy> enemies;  // by netId
 };
 HostRoom g_host;
@@ -133,28 +137,17 @@ void Send(const std::vector<std::uint8_t>& packet) {
     }
 }
 
-void ReadRoomKey(std::uint16_t& world, std::uint16_t& room, std::uint16_t& btl) {
-    world = Read<std::uint8_t>(g_exeBase + offsets::WORLD_ID);
-    room = Read<std::uint8_t>(g_exeBase + offsets::ROOM_ID);
-    btl = Read<std::uint16_t>(g_exeBase + offsets::BATTLE_PROGRAM);
-}
-
 // ---- Host -------------------------------------------------------------------
 
 void HostBeginInstance() {
     ++g_epoch;
     g_manifestSent = false;
-    RoomTransition t;
+    RoomTransition t = warp::ReadLocation();
     t.epoch = g_epoch;
-    t.worldId = g_inst.world;
-    t.roomId = g_inst.room;
-    t.door = Read<std::uint16_t>(g_exeBase + offsets::NOW + 2);
-    t.mapProgram = Read<std::uint16_t>(g_exeBase + offsets::MAP_PROGRAM);
-    t.battleProgram = g_inst.btl;
-    t.eventProgram = Read<std::uint16_t>(g_exeBase + offsets::EVENT_PROGRAM);
     Send(encode(t));
-    SYNC_LOG("[enemysync] host epoch %u: room %02X/%02X btl %u", g_epoch, t.worldId, t.roomId,
-             t.battleProgram);
+    if (g_log) g_log("[enemysync] host arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
+                     t.epoch, t.worldId, t.roomId, t.door, t.mapProgram,
+                     t.battleProgram, t.eventProgram);
 }
 
 void HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns) {
@@ -233,24 +226,52 @@ void HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns) {
 
 // ---- Client -----------------------------------------------------------------
 
-void ClientReceive() {
+bool ReceiveWorldPackets() {
+    bool hostSessionReset = false;
     std::vector<std::uint8_t> packet;
     while (g_bridge.ReceiveFromRuntime(packet)) {
         try {
             const std::uint8_t* payload = nullptr;
             std::size_t size = 0;
             const auto type = decodePacketHeader(packet.data(), packet.size(), payload, size);
+            if (type == PacketType::SessionState && size == 0) {
+                // DLL-local boundary, ordered in the ring before new-session
+                // world packets. Reset here, not before/after the drain: a
+                // producer may enqueue this marker halfway through our frame.
+                g_host = {};
+                warp::SetClientAuthority(false);
+                for (Spawn& s : g_inst.spawns) s.netId = -1;
+                g_lastActors.clear();
+                g_frameActors.clear();
+                g_role = CurrentRole();
+                warp::SetClientAuthority(g_role == Role::Client);
+                hostSessionReset = hostSessionReset || g_role == Role::Host;
+                if (g_log) g_log("[enemysync] session reset: host epoch and pending target cleared");
+                continue;
+            }
+            if (CurrentRole() != Role::Client) continue;
             ByteReader r(payload, size);
             if (type == PacketType::RoomTransition) {
                 RoomTransition t;
                 read(r, t);
-                if (t.epoch != g_host.epoch) {
+                // Reliable delivery normally orders these, but never let an
+                // old/replayed epoch roll back authority. Epoch zero is unset.
+                const auto advance = t.epoch - g_host.epoch;
+                if (t.epoch != 0 && (g_host.epoch == 0 || (advance != 0 && advance < 0x80000000u))) {
+                    if (!warp::QueueHostTransition(t)) {
+                        if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
+                        continue;
+                    }
                     g_host = {};
                     g_host.epoch = t.epoch;
                     g_host.world = t.worldId;
                     g_host.room = t.roomId;
                     g_host.btl = t.battleProgram;
-                    for (Spawn& s : g_inst.spawns) s.netId = -1;
+                    // No old-room pointer can survive even a same-room reload.
+                    g_inst.spawns.clear();
+                    g_inst.byActor.clear();
+                    g_lastActors.clear();
+                    g_frameActors.clear();
                     SYNC_LOG("[enemysync] client: host epoch %u room %02X/%02X btl %u", t.epoch,
                              t.worldId, t.roomId, t.battleProgram);
                 }
@@ -288,10 +309,11 @@ void ClientReceive() {
             SYNC_LOG("[enemysync] client: malformed world packet");
         }
     }
+    return hostSessionReset;
 }
 
 void ClientFrame() {
-    if (g_inst.world != g_host.world || g_inst.room != g_host.room || g_inst.btl != g_host.btl) {
+    if (!g_host.arrived || g_inst.world != g_host.world || g_inst.room != g_host.room || g_inst.btl != g_host.btl) {
         return;  // not in the host's room instance: nothing to match
     }
     for (Spawn& s : g_inst.spawns) {
@@ -431,49 +453,90 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta) {
 }
 
 void NoteActor(uintptr_t actor) {
-    if (g_bridge.IsOpen() && g_frameActors.size() < 512) g_frameActors.push_back(actor);
+    if (g_bridge.IsOpen() && !warp::TransitionPending() &&
+        (g_role != Role::Client || g_host.arrived) && g_frameActors.size() < 512) {
+        g_frameActors.push_back(actor);
+    }
 }
 
 void OnFrameStart(std::uint32_t frame) {
     if (!g_bridge.IsOpen()) return;
     const Role role = CurrentRole();
-    const bool becameHost = role == Role::Host && g_role != Role::Host;
+    bool becameHost = role == Role::Host && g_role != Role::Host;
     if (role != g_role) {
         SYNC_LOG("[enemysync] role %s", role == Role::Host     ? "host"
                                         : role == Role::Client ? "client"
                                                                : "off");
         g_role = role;
+        g_host = {};
+        for (Spawn& s : g_inst.spawns) s.netId = -1;
     }
+    // Unknown/disconnected sessions immediately release native exit authority.
+    warp::SetClientAuthority(role == Role::Client);
+    // Every role drains local reset markers. Each marker takes effect before
+    // the next packet, and no later frame-level reset can erase a new command.
+    becameHost = ReceiveWorldPackets() || becameHost;
     g_lastActors.swap(g_frameActors);
     g_frameActors.clear();
 
-    const std::uint64_t now = GetTickCount64();
-    const bool afterStall = g_lastFrameMs != 0 && now - g_lastFrameMs > LOAD_STALL_MS;
-    g_lastFrameMs = now;
-    std::uint16_t world, room, btl;
-    ReadRoomKey(world, room, btl);
-    const bool keyChanged = world != g_inst.world || room != g_inst.room || btl != g_inst.btl;
-
-    if (keyChanged && (afterStall || g_inst.world == 0xFFFF)) {
-        // First frame of a new room instance (or of this DLL).
+    const auto location = warp::ReadLocation();
+    const auto transition = warp::TransitionSerial();
+    const auto load = warp::LoadSerial();
+    const bool newLoad = load != g_seenLoad;
+    if (transition != g_seenTransition || newLoad || warp::TransitionPending()) {
+        // Requests invalidate cached pointers before the native fade/teardown;
+        // load callbacks do the same for initial loads and same-room reloads.
         g_inst = {};
-        g_inst.world = world;
-        g_inst.room = room;
-        g_inst.btl = btl;
+        g_lastActors.clear();
+        g_frameActors.clear();
+    }
+    g_seenTransition = transition;
+    g_seenLoad = load;
+    const bool keyChanged = location.worldId != g_inst.world || location.roomId != g_inst.room ||
+                            location.battleProgram != g_inst.btl || location.door != g_inst.door ||
+                            location.mapProgram != g_inst.map || location.eventProgram != g_inst.evt;
+    if (!warp::TransitionPending() && (newLoad || g_inst.world == 0xFFFF) &&
+        location.worldId != 0xFF && location.roomId != 0xFF) {
+        g_inst = {};
+        g_inst.world = location.worldId;
+        g_inst.room = location.roomId;
+        g_inst.door = location.door;
+        g_inst.map = location.mapProgram;
+        g_inst.btl = location.battleProgram;
+        g_inst.evt = location.eventProgram;
         g_inst.live = true;
-        g_lastActors.clear();  // the list we collected straddles the load
+        g_lastActors.clear();
         if (g_role == Role::Host) HostBeginInstance();
-        SYNC_LOG("[enemysync] room instance %02X/%02X btl %u", world, room, btl);
+        SYNC_LOG("[enemysync] room instance %02X/%02X btl %u", g_inst.world, g_inst.room, g_inst.btl);
     } else if (keyChanged) {
         g_inst.live = false;  // transition requested: old room is on its way out
-    } else if (becameHost && g_inst.live) {
+    } else if (g_role == Role::Host && becameHost && g_inst.live) {
         // Hosting started mid-room (the runtime just connected): announce the
         // room now; everything already spawned goes out as the manifest below.
         HostBeginInstance();
         for (Spawn& s : g_inst.spawns) s.announced = false;
     }
 
-    if (g_role == Role::Client) ClientReceive();
+    if (g_role == Role::Client) {
+        if (!g_host.arrived && warp::HostTransitionArrived(g_host.epoch)) {
+            g_host.arrived = true;
+        }
+        if (g_host.arrived && !g_host.ackSent && g_inst.live) {
+            TransitionAck ack;
+            ack.epoch = g_host.epoch;
+            ack.worldId = location.worldId;
+            ack.roomId = location.roomId;
+            ack.arrived = true;
+            // Retry on ring pressure; only log arrival once the ack is queued.
+            if (g_bridge.SendToRuntime(encode(ack))) {
+                g_host.ackSent = true;
+                if (g_log) g_log("[enemysync] client arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
+                                 ack.epoch, location.worldId, location.roomId, location.door,
+                                 location.mapProgram, location.battleProgram, location.eventProgram);
+            }
+        }
+        if (!g_host.arrived) return;
+    }
     if (!g_inst.live) return;
     auto fresh = TrackSpawns();
     if (g_role == Role::Host) {
@@ -499,7 +562,7 @@ void OnFrameStart(std::uint32_t frame) {
 }
 
 bool DropLocalEnemyDamage(uintptr_t victim) {
-    return g_role == Role::Client && g_inst.live && IsEnemy(victim);
+    return g_role == Role::Client && g_inst.live && !warp::TransitionPending() && IsEnemy(victim);
 }
 
 bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille) {
@@ -510,6 +573,8 @@ bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille) {
     lossPermille = stats.lossPermille;
     return true;
 }
+
+bool HasClientAuthority() { return CurrentRole() == Role::Client; }
 
 void Shutdown() { g_bridge.Close(); }
 

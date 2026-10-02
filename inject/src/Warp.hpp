@@ -7,6 +7,7 @@
 #include <cstdint>
 
 namespace kh2coop {
+struct RoomTransition;
 namespace inject {
 namespace warp {
 
@@ -20,6 +21,16 @@ bool Install(uintptr_t exeBase, LogFn log);
 // the entity list head (Sora's actor). Publishes liveness and hands a
 // pending request to the game.
 void OnFrameStart(std::uint32_t frame, uintptr_t listHead);
+
+// Game-thread transition authority and lifecycle. Every accepted host epoch,
+// including an initial join to the same location, performs a real reload.
+void SetClientAuthority(bool enabled);
+bool QueueHostTransition(const RoomTransition& target);
+bool HostTransitionArrived(std::uint32_t epoch);
+bool TransitionPending();
+std::uint32_t TransitionSerial();
+std::uint32_t LoadSerial();
+RoomTransition ReadLocation();
 
 void Shutdown();
 

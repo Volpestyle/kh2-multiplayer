@@ -1,0 +1,429 @@
+{
+  "name": "net_host_transitions_acceptance",
+  "description": "VUH-1496 transition route: after a late join, 20 host-requested native loads across five party-room fixtures (GoA and BC 05/01,04,05,06) with three instances. Every load must advance the completed-load epoch and restore full-location parity, relay ACKs and both native puppet slots with correct owners. Loads 19 and 20 are an identical-location reload pair. This route alone does not prove a natural scripted same-room reload, client walking-exit denial, cutscene hold, or shared-state hashes.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "initial",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "before_late_join",
+      "after": "initial",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "location(2)[:2] != location(0)[:2]",
+      "message": "late join fixture must begin in a different room"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "as": "joined",
+      "target": [
+        5,
+        1
+      ],
+      "capture": true
+    },
+    {
+      "do": "assert",
+      "expr": "saved['joined']['epoch'] == saved['before_late_join']['epoch']",
+      "message": "late join should follow the current host epoch without advancing it"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_01",
+      "after": "joined",
+      "target": [
+        5,
+        4
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_02",
+      "after": "transition_01",
+      "target": [
+        5,
+        5
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_03",
+      "after": "transition_02",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_04",
+      "after": "transition_03",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_05",
+      "after": "transition_04",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_06",
+      "after": "transition_05",
+      "target": [
+        5,
+        4
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_07",
+      "after": "transition_06",
+      "target": [
+        5,
+        5
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_08",
+      "after": "transition_07",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_09",
+      "after": "transition_08",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_10",
+      "after": "transition_09",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_11",
+      "after": "transition_10",
+      "target": [
+        5,
+        4
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_12",
+      "after": "transition_11",
+      "target": [
+        5,
+        5
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_13",
+      "after": "transition_12",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_14",
+      "after": "transition_13",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_15",
+      "after": "transition_14",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_16",
+      "after": "transition_15",
+      "target": [
+        5,
+        4
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_17",
+      "after": "transition_16",
+      "target": [
+        5,
+        5
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_18",
+      "after": "transition_17",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_19",
+      "after": "transition_18",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_20",
+      "after": "transition_19",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['transition_19']['instances']['0']['location'] == saved['transition_20']['instances']['0']['location']",
+      "message": "same-room reload fixture changed a location field"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "acceptance_end"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "acceptance_end"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "acceptance_end"
+    }
+  ],
+  "protect": [
+    0,
+    1,
+    2
+  ]
+}

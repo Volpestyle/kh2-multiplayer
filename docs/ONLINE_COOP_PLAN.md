@@ -14,21 +14,22 @@ with their own camera and full controls. Then widen who you can play as: three
 recolored Soras first, then Roxas and Riku, party and world characters, and
 possibly enemies.
 
-## Where the project stands
+## Where the project stands (updated 2026-10-02)
 
 | Area | State |
 |---|---|
-| Pointer map | Party transforms and HP, world/room/programs, camera, active-entity list, objentry ids. Enemy HP, spawn groups, death and AI are unmapped. |
+| Pointer map | Party transforms/HP, full locations, camera, entity list, objentry IDs, enemy stats and the damage/death path are mapped. Spawn control and enemy AI suppression remain open. |
 | In-process hooks | MinHook DLL hooks the per-entity update, friend AI, pre-physics and the motion setter, and reads raw input. |
 | Friend control | Donald moves and animates under player control (F5). He cannot attack, jump, guard or cast. |
 | Animation control | Any motion can be set and held on a friend actor without the game resetting it (Session 5). |
 | Network layer | ENet relay server, codec, version gate; the 3-client fake-simulation test passes. |
-| Live networking | Never run end to end against a live game. |
-| Rooms | World/room/program reads work; the transition request path is partly traced; no warp. |
-| Dev loop | Every live step needs James: Cheat Engine injection, eyes on the screen, in-game setup. |
+| Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Remote internet and controller playtests remain open. |
+| Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. State-hash equality remains open; evidence is in `SCENARIOS.md`. |
+| Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
-The hard parts (enemies, damage, transitions) are still ahead, and none of them
-can be verified without a person at the PC. That ordering drives this plan.
+Local scenarios now cover transitions and shared enemy HP/deaths. Meaningful
+live state hashes, verified progress mirroring, cutscene hold/resume, bosses
+and remote playtests still gate the later phases.
 
 ## Prior art (researched 2026-10-01)
 
@@ -301,13 +302,17 @@ loaded, get several instances into a known room, act, look, and judge.
   the room scripts. The GoA ROM's `Warp` rewrites the `Now` block (world,
   room, door, map/btl/evt programs, defaulting the programs from the save's
   per-room table) — but it redirects a transition already in progress (from the
-  world map); it doesn't start one. The `NOW` staging/commit path is traced
-  (`pointer_map_v1.md`). The warp primitive needs a load trigger, loads
-  (world, room, spawn, programs) on command, and reports when the room is
-  playable.
-- **Following the host.** Hook the transition request on the host, broadcast
-  its location packet, and warp clients to it. On clients the same hook blocks
-  any transition the host didn't command.
+  world map); it doesn't start one. The native `RequestTransition` hook now
+  starts a load, and the completion hooks distinguish a finished load from a
+  pause (`pointer_map_v1.md`). Arrival requires playable gameplay and an exact
+  match of world, room, entrance and all three programs.
+- **Following the host.** The host publishes a new epoch after each completed
+  native load, including same-room reloads. Clients queue that location, block
+  other native transition requests, and acknowledge only after their own load
+  completes with all six fields matching. The runtime retains ordered world
+  packets while its DLL bridge attaches; session changes insert a reset into
+  that same queue so old epochs cannot survive a new session. Live route and
+  natural-exit evidence is recorded in `SCENARIOS.md`.
 - **Cutscenes.** Detect host events; clients hold behind an overlay and resync
   afterwards, including any room change the event caused.
 - **Progress.** At join and on change, mirror the host's story and world-state

@@ -17,6 +17,9 @@
 // (0 = Player = host, 1/2 = clients, 0xFF = not known yet; VUH-1502),
 // [3] round trip ms and [4] loss per-mille for the overlay (VUH-1493;
 // WORLD_NET_UNKNOWN until the runtime is connected).
+// A framed SessionState with an empty payload is a bridge-local session reset;
+// it precedes the new session's world packets in the same FIFO. It never goes
+// over the network. The DLL clears its epoch/warp state when consuming it.
 // ============================================================================
 
 #include "kh2coop/PacketRing.hpp"
@@ -37,7 +40,7 @@ namespace kh2coop {
 
 static constexpr const char* WORLD_BRIDGE_PREFIX = "Local\\kh2coop_world_";
 static constexpr std::uint32_t WORLD_BRIDGE_MAGIC = 0x42574B32; // "2KWB"
-static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 3; // 2: local slot, 3: net stats
+static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 4; // 4: durable session reset
 static constexpr std::uint32_t WORLD_RING_BYTES = 1u << 20;      // 1 MiB each way
 static constexpr std::uint8_t WORLD_SLOT_UNKNOWN = 0xFF;
 static constexpr std::uint32_t WORLD_NET_UNKNOWN = 0xFFFFFFFFu;
@@ -113,7 +116,6 @@ public:
         return static_cast<std::uint8_t>(
             reinterpret_cast<const volatile std::uint32_t*>(view_)[2]);
     }
-
     // Runtime publishes link quality; the DLL overlay reads it. Pass
     // WORLD_NET_UNKNOWN for both when disconnected.
     void SetNetStats(std::uint32_t rttMs, std::uint32_t lossPermille) {

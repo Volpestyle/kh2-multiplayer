@@ -15,6 +15,7 @@
 #include "kh2coop/WorldBridge.hpp"
 
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 namespace kh2coop {
@@ -23,7 +24,9 @@ struct WorldPumpStats {
     std::uint64_t toNet {0};
     std::uint64_t toDll {0};
     std::uint64_t rejected {0};     // non-world or malformed packets from the DLL
-    std::uint64_t dllRingFull {0};  // relay packets the DLL ring had no room for
+    std::uint64_t dllRingFull {0};  // DLL ring backpressure observations
+    std::uint64_t deferred {0};     // retained until the game bridge can accept them
+    std::uint64_t inboxOverflow {0}; // queue overflow or an undeliverable record
 };
 
 // Drains the DLL's outgoing ring into the network client (call every tick).
@@ -54,5 +57,59 @@ inline void forwardToDll(WorldBridge& bridge, const std::vector<std::uint8_t>& p
     if (bridge.IsOpen() && bridge.SendToDll(packet)) ++stats.toDll;
     else ++stats.dllRingFull;
 }
+
+// Network callbacks can run before KH2 attaches, including the relay's one-time
+// late-join snapshot. Keep that ordered snapshot until the bridge is open, and
+// retry a full DLL ring rather than silently losing a reliable transition.
+// All methods run on the runtime's network/game-pump thread.
+class WorldInbox {
+public:
+    static constexpr std::size_t kMaxBytes = 4u * WORLD_RING_BYTES;
+
+    bool Receive(WorldBridge& bridge, const std::vector<std::uint8_t>& packet,
+                 WorldPumpStats& stats) {
+        if (packet.empty() || packet.size() > WORLD_RING_BYTES / 2u - 4u) {
+            ++stats.inboxOverflow;
+            return false;
+        }
+        Flush(bridge, stats);
+        if (pending_.empty() && bridge.IsOpen() && bridge.SendToDll(packet)) {
+            ++stats.toDll;
+            return true;
+        }
+        if (packet.size() > kMaxBytes - bytes_) {
+            ++stats.inboxOverflow;
+            return false;
+        }
+        pending_.push_back(packet);
+        bytes_ += packet.size();
+        ++stats.deferred;
+        return true;
+    }
+
+    void Flush(WorldBridge& bridge, WorldPumpStats& stats) {
+        if (!bridge.IsOpen()) return;
+        while (!pending_.empty()) {
+            if (!bridge.SendToDll(pending_.front())) {
+                ++stats.dllRingFull;
+                return;
+            }
+            bytes_ -= pending_.front().size();
+            pending_.pop_front();
+            ++stats.toDll;
+        }
+    }
+
+    void Clear() {
+        pending_.clear();
+        bytes_ = 0;
+    }
+
+    [[nodiscard]] std::size_t PendingCount() const { return pending_.size(); }
+
+private:
+    std::deque<std::vector<std::uint8_t>> pending_;
+    std::size_t bytes_ = 0;
+};
 
 } // namespace kh2coop
