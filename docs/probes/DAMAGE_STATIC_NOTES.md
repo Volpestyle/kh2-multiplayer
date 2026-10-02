@@ -78,3 +78,19 @@ instruction, at `0x3C0884` (the trap reported `0x3C0888`). Decompiled from there
 
 The attacker-side resolver calls TakeDamage through a vtable; find it from a stack trace in a `0x3D2EB0` hook.
 Puppet attack motions produced no HP writes (live), so hitboxes come from attack logic, not animation.
+
+## Hit resolution (2026-10-02, VUH-1501; from live stacks through `0x3D2EB0`)
+
+Live stack, player hits on Shadows: `3D37D2 <- 3D3CD5 <- 410EFF <- 3D1937 <- 3D00C1 <- 14FDFE ...`;
+enemy hit on Sora: `... 3D3CD5 <- 3D613C <- 3A8DC5 <- 3D1937 ...`.
+
+| RVA | Role (`[GHIDRA]`) |
+|---|---|
+| `0x3D1730(ATTACK** atk, victim, contact)` | ResolveHit. `A = *atk`: `+0x30` atkp, `+0x10` owner handle, `+0x94` credited actor (its `vtable+0xE0` runs). Builds the hit record, runs `0x3D1B40` (likely knockback), atkp `+0x2F` → owner `vtable+0xE8`, then victim `vtable+0xC0` (OnHit), then frees the record via `0x3CE950` |
+| `0x3D23C0(A, victim, atkp.id, atkp+1)` | builds the hit record, including damage (the damage calculation) |
+| `0x410D60` | enemy OnHit: reaction via `0x3DADF0(victim, reactId*1000+…, attacker)`, damage, hit effects |
+| `0x3A8DB0` → `0x3D60C0` | Sora's OnHit |
+| `0x3D3BA0(victim, hit)` | ApplyHitDamage: once per record (`hit+0x18` bit 1), damage `hit+0x28` i32, stat `hit+0x25` u8, survive-at-1 (`vtable+0xA8`), then `vtable+0xE8` → TakeDamage |
+
+Hit record: `+0x18` flags, `+0x1C` attack object handle (`+0x10` owner), `+0x20` atkp-like handle (`+0x04` type, `+0x12` flags),
+`+0x25` stat index, `+0x28` damage. D4 client rule: pre-hook `0x3D3BA0`, claim, zero `hit+0x28`.
