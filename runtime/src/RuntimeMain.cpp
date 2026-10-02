@@ -87,6 +87,14 @@ struct LaunchOptions {
     std::optional<std::uint16_t> serverPortOverride;
     std::optional<std::string> peerIdOverride;
     std::optional<std::string> contentHashOverride;
+    // Bind to one KH2 instance when several run (VUH-1492).
+    std::optional<std::uint32_t> pid;
+    // Pre-D2 replica path: apply relay actor snapshots to the game, write
+    // them to the input mailbox and send InputFrames. Off by default; the
+    // avatar path (local-primary) replaces it.
+    bool legacyReplica {false};
+    // Applied to both directions when any field is set.
+    kh2coop::LinkConditions link {};
 };
 
 void signalHandler(int) {
@@ -209,6 +217,11 @@ void printUsage() {
         << "  --peer-id <id>        Peer identifier (default player-1)\n"
         << "  --content <hash>      Content hash (default none)\n"
         << "  --network             Enable networking (connect to server)\n"
+        << "  --pid <pid>           Attach to this KH2 process (several instances)\n"
+        << "  --legacy-replica      Also run the old actor-snapshot replica path\n"
+        << "  --link-latency-ms <n> Add one-way latency, both directions\n"
+        << "  --link-jitter-ms <n>  Add uniform jitter in [0, n] ms\n"
+        << "  --link-loss <pct>     Drop this percent of unreliable packets\n"
         << "  --no-network          Disable networking (offline mode, default)\n"
         << "\n"
         << "  --help                Show this message\n";
@@ -482,6 +495,32 @@ bool parseArgs(int argc, char* argv[], LaunchOptions& options,
             continue;
         }
 
+        if (arg == "--legacy-replica") {
+            options.legacyReplica = true;
+            continue;
+        }
+
+        if ((arg == "--pid" || arg == "--link-latency-ms" ||
+             arg == "--link-jitter-ms" || arg == "--link-loss") &&
+            i + 1 < argc) {
+            const std::string value = argv[++i];
+            try {
+                if (arg == "--pid") {
+                    options.pid = static_cast<std::uint32_t>(std::stoul(value));
+                } else if (arg == "--link-latency-ms") {
+                    options.link.latencyMs = static_cast<std::uint32_t>(std::stoul(value));
+                } else if (arg == "--link-jitter-ms") {
+                    options.link.jitterMs = static_cast<std::uint32_t>(std::stoul(value));
+                } else {
+                    options.link.lossRate = std::stof(value) / 100.0f;
+                }
+            } catch (const std::exception&) {
+                error = "Invalid " + arg + " value";
+                return false;
+            }
+            continue;
+        }
+
         error = "Unknown argument: " + arg;
         return false;
     }
@@ -543,6 +582,9 @@ bool panicHotkeyPressed() {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    // Unbuffered so redirected logs survive a kill (scenario runner).
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
@@ -746,13 +788,22 @@ int main(int argc, char* argv[]) {
                       << " room=" << describeRoomState(ss.room) << "\n";
         };
 
+        callbacks.onRejected = [](const kh2coop::HelloReject& reject) {
+            std::cout << "[Runtime] Network: refused by relay: " << reject.reason
+                      << "\n";
+        };
+
         callbacks.onActorSnapshot =
             [&replica, &replicaMtx,
 #ifdef _WIN32
              &mailboxWriter,
 #endif
+             legacyReplica = options.legacyReplica,
              ownedSlot = options.config.ownedSlot](
                 const kh2coop::ActorSnapshot& snap) {
+                // The relay's simulated actors would overwrite the local
+                // Sora (VUH-1492); avatars drive puppets instead.
+                if (!legacyReplica) return;
                 // Skip snapshots for our own slot — we are authoritative.
                 if (snap.actor.slot == ownedSlot) return;
 
@@ -836,6 +887,14 @@ int main(int argc, char* argv[]) {
             options.config.runtimeMode,
             options.config.contentHash);
 
+        if (options.link.active()) {
+            netClient->setLinkConditions(options.link, options.link);
+            std::cout << "[Runtime] Link conditions: latency="
+                      << options.link.latencyMs << "ms jitter="
+                      << options.link.jitterMs << "ms loss="
+                      << options.link.lossRate * 100.0f << "%\n";
+        }
+
         if (!netClient->connect()) {
             std::cerr << "[Runtime] Failed to initiate network connection\n";
             // Continue in offline mode rather than aborting.
@@ -868,7 +927,7 @@ int main(int argc, char* argv[]) {
                 waitingForAttachLogged = true;
             }
 
-            if (game.Attach()) {
+            if (options.pid ? game.Attach(*options.pid) : game.Attach()) {
                 attachLogged = true;
                 waitingForAttachLogged = false;
                 std::cout << "[Runtime] Attached to KH2 process (PID="
@@ -984,7 +1043,7 @@ int main(int argc, char* argv[]) {
         }
 
         // ----- Networking: send owned actor snapshot at configured interval -----
-        if (netClient && netConnected && entityDiscovered) {
+        if (options.legacyReplica && netClient && netConnected && entityDiscovered) {
             const auto snapshotElapsed =
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - lastSnapshotAt)

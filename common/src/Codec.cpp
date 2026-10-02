@@ -119,6 +119,11 @@ void write(ByteWriter& w, const EventMessage& em) {
     w.writeString(em.payloadJson);
 }
 
+void write(ByteWriter& w, const HelloReject& hr) {
+    w.writeU8(hr.code);
+    w.writeString(hr.reason);
+}
+
 void write(ByteWriter& w, const ClientHello& ch) {
     w.writeU16(ch.protocolVersion);
     w.writeString(ch.gameBuild);
@@ -360,6 +365,11 @@ void read(ByteReader& r, EventMessage& em) {
     em.payloadJson = r.readString();
 }
 
+void read(ByteReader& r, HelloReject& hr) {
+    hr.code = r.readU8();
+    hr.reason = r.readString();
+}
+
 void read(ByteReader& r, ClientHello& ch) {
     ch.protocolVersion = r.readU16();
     ch.gameBuild = r.readString();
@@ -536,6 +546,12 @@ std::vector<std::uint8_t> encode(const EventMessage& em) {
     ByteWriter w;
     write(w, em);
     return encodePacket(PacketType::EventMessage, w.data());
+}
+
+std::vector<std::uint8_t> encode(const HelloReject& hr) {
+    ByteWriter w;
+    write(w, hr);
+    return encodePacket(PacketType::HelloReject, w.data());
 }
 
 std::vector<std::uint8_t> encode(const ClientHello& ch) {

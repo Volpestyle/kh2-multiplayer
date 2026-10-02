@@ -67,6 +67,14 @@ struct ClockPong {
     std::uint64_t serverMs {0};
 };
 
+// Relay -> client just before a refused connection is closed, so the client
+// can say why (VUH-1492). code matches the ENet disconnect data: 1 = protocol,
+// mode or version mismatch, 2 = slot or other refusal.
+struct HelloReject {
+    std::uint8_t code {0};
+    std::string reason;
+};
+
 // ===========================================================================
 // World sync — host-authored messages (plan D5/D7, VUH-1496/1502/1503).
 //

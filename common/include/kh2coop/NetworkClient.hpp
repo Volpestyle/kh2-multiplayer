@@ -21,6 +21,9 @@ namespace kh2coop {
 struct ClientCallbacks {
     std::function<void()> onConnected;
     std::function<void()> onDisconnected;
+    // The relay refused this client (version, mode or slot); reason is
+    // human-readable. onDisconnected follows.
+    std::function<void(const HelloReject&)> onRejected;
     std::function<void(const SessionState&)> onSessionState;
     std::function<void(const ActorSnapshot&)> onActorSnapshot;
     std::function<void(const EnemySnapshot&)> onEnemySnapshot;
@@ -120,7 +123,7 @@ public:
 
 private:
     void onConnect();
-    void onDisconnect();
+    void onDisconnect(std::uint32_t code = 0);
     void onReceive(const std::uint8_t* data, std::size_t size);
     void sendPacket(const std::vector<std::uint8_t>& packet, bool reliable);
     void sendNow(const std::vector<std::uint8_t>& packet, bool reliable);

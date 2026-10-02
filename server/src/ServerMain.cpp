@@ -27,6 +27,9 @@ static void printUsage() {
 }
 
 int main(int argc, char* argv[]) {
+    // Unbuffered so redirected logs survive a kill (scenario runner).
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
     constexpr auto kTickSleep = std::chrono::milliseconds(16);
     constexpr float kTickDtSeconds = 1.0f / 60.0f;
 

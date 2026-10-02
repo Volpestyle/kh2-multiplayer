@@ -86,7 +86,7 @@ void NetworkClient::tick(std::uint32_t timeoutMs) {
                 onConnect();
                 break;
             case ENET_EVENT_TYPE_DISCONNECT:
-                onDisconnect();
+                onDisconnect(event.data);
                 break;
             case ENET_EVENT_TYPE_RECEIVE:
                 if (inbound_.conditions().active()) {
@@ -276,9 +276,10 @@ void NetworkClient::onConnect() {
     if (callbacks_.onConnected) callbacks_.onConnected();
 }
 
-void NetworkClient::onDisconnect() {
+void NetworkClient::onDisconnect(std::uint32_t code) {
     connected_ = false;
-    log("Disconnected from host.");
+    log(code == 0 ? std::string("Disconnected from host.")
+                  : "Disconnected from host (code " + std::to_string(code) + ").");
     if (callbacks_.onDisconnected) callbacks_.onDisconnected();
 }
 
@@ -376,6 +377,13 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
                 ClockPong pong;
                 read(reader, pong);
                 onClockPong(pong);
+                break;
+            }
+            case PacketType::HelloReject: {
+                HelloReject reject;
+                read(reader, reject);
+                log("Refused by host: " + reject.reason);
+                if (callbacks_.onRejected) callbacks_.onRejected(reject);
                 break;
             }
             default:

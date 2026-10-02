@@ -30,6 +30,7 @@ enum class PacketType : std::uint8_t {
     EventMessage = 13,
     AvatarRelay = 14,  // AvatarState with ownerSlot stamped by the host
     ClockPong = 15,
+    HelloReject = 16,  // why the relay refused this client; sent before disconnect
 
     // Host-authored world sync: host -> relay -> everyone else
     RoomTransition = 20,
@@ -74,6 +75,7 @@ void write(ByteWriter& w, const EventMessage& em);
 void write(ByteWriter& w, const ClientHello& ch);
 void write(ByteWriter& w, const ClockPing& p);
 void write(ByteWriter& w, const ClockPong& p);
+void write(ByteWriter& w, const HelloReject& hr);
 void write(ByteWriter& w, const RoomTransition& m);
 void write(ByteWriter& w, const TransitionAck& m);
 void write(ByteWriter& w, const EventHold& m);
@@ -94,6 +96,7 @@ void read(ByteReader& r, EventMessage& em);
 void read(ByteReader& r, ClientHello& ch);
 void read(ByteReader& r, ClockPing& p);
 void read(ByteReader& r, ClockPong& p);
+void read(ByteReader& r, HelloReject& hr);
 void read(ByteReader& r, RoomTransition& m);
 void read(ByteReader& r, TransitionAck& m);
 void read(ByteReader& r, EventHold& m);
@@ -125,6 +128,7 @@ std::vector<std::uint8_t> encode(const EventMessage& em);
 std::vector<std::uint8_t> encode(const ClientHello& ch);
 std::vector<std::uint8_t> encode(const ClockPing& p);
 std::vector<std::uint8_t> encode(const ClockPong& p);
+std::vector<std::uint8_t> encode(const HelloReject& hr);
 std::vector<std::uint8_t> encode(const RoomTransition& m);
 std::vector<std::uint8_t> encode(const TransitionAck& m);
 std::vector<std::uint8_t> encode(const EventHold& m);

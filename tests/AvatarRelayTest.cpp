@@ -453,6 +453,40 @@ void testEndToEnd() {
     host.stop();
 }
 
+void testVersionReject() {
+    std::cout << "\n=== Version mismatch: client hears why it was refused ===\n";
+    SessionConfig cfg;
+    cfg.port = kPort + 1;
+    cfg.maxPeers = 3;
+    cfg.gameBuild = "host-build";
+    cfg.contentHash = "c";
+    cfg.modHash = "m";
+    cfg.sessionId = "reject-test";
+    SessionHost host(cfg, {});
+    check(host.start(), "relay starts");
+
+    std::string reason;
+    bool disconnected = false;
+    ClientCallbacks cb;
+    cb.onRejected = [&reason](const HelloReject& r) { reason = r.reason; };
+    cb.onDisconnected = [&disconnected]() { disconnected = true; };
+    NetworkClient client("127.0.0.1", cfg.port, "other-build", cfg.modHash, "stale",
+                         SlotType::Friend1, std::move(cb), RuntimeMode::CampaignCoop,
+                         cfg.contentHash);
+    client.connect();
+    const auto deadline = steadyMs() + 3000;
+    while (steadyMs() < deadline && !disconnected) {
+        host.tick(0);
+        client.tick(0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(disconnected, "mismatched client is disconnected");
+    check(reason.find("Version mismatch") != std::string::npos &&
+              reason.find("other-build") != std::string::npos,
+          "client received the reject reason: " + reason);
+    check(host.verifiedPeerCount() == 0, "mismatched client never verified");
+}
+
 } // namespace
 
 int main() {
@@ -467,6 +501,7 @@ int main() {
     testAvatarBridge();
     testAvatarCapture();
     testEndToEnd();
+    testVersionReject();
     enet_deinitialize();
 
     std::cout << "\n=======================================\n"

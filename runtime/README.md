@@ -46,5 +46,15 @@ Options:
 - `--no-camera` -- disable camera override
 - `--log-actor-state` -- log owned actor state once per second
 - `--max-ticks <n>` -- exit after N ticks (0=infinite)
+- `--pid <pid>` -- attach to this KH2 process when several instances run
+- `--link-latency-ms <n>`, `--link-jitter-ms <n>`, `--link-loss <pct>` --
+  impair the link in both directions (repeatable network tests)
+- `--legacy-replica` -- also run the pre-D2 replica path (apply relay actor
+  snapshots, write the input mailbox, send InputFrames). Off by default:
+  co-op is local-primary, and other players arrive as avatars that drive
+  puppets.
+
+If the relay refuses the connection (build, content, mod, mode or slot
+mismatch), the runtime prints `refused by relay: <reason>`.
 
 Press F8 during runtime to toggle camera override on/off (Windows only).

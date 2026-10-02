@@ -127,6 +127,10 @@ private:
                              bool reliable);
 
     void log(const std::string& msg);
+    // Logs, reports, sends HelloReject{code, reason}, then disconnects once
+    // queued packets have gone out.
+    void rejectPeer(_ENetPeer* peer, const std::string& peerId,
+                    const std::string& reason, std::uint8_t code);
 
     // World sync helpers
     bool fromHost(const PeerState& ps) const;

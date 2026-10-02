@@ -267,19 +267,13 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                         "Protocol mismatch: client=" +
                         std::to_string(hello.protocolVersion) +
                         " server=" + std::to_string(config_.protocolVersion);
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 1);
+                    rejectPeer(peer, ps->peerId, reason, 1);
                     return;
                 }
 
                 if (!isValidRuntimeMode(hello.requestedMode)) {
                     const std::string reason = "Invalid requested mode";
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 1);
+                    rejectPeer(peer, ps->peerId, reason, 1);
                     return;
                 }
 
@@ -288,10 +282,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                         "Mode mismatch: client=" +
                         std::string(runtimeModeName(hello.requestedMode)) +
                         " server=" + runtimeModeName(config_.runtimeMode);
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 1);
+                    rejectPeer(peer, ps->peerId, reason, 1);
                     return;
                 }
 
@@ -302,10 +293,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                         "Version mismatch: build=" + hello.gameBuild +
                         " content=" + hello.contentHash +
                         " mod=" + hello.modHash;
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 1);
+                    rejectPeer(peer, ps->peerId, reason, 1);
                     return;
                 }
 
@@ -316,10 +304,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                         static_cast<SlotType>(hello.requestedSlot);
                     if (!isValidSlot(requested)) {
                         const std::string reason = "Invalid requested slot";
-                        log("Rejecting " + ps->peerId + ": " + reason);
-                        if (callbacks_.onPeerRejected)
-                            callbacks_.onPeerRejected(ps->peerId, reason);
-                        enet_peer_disconnect(peer, 2);
+                        rejectPeer(peer, ps->peerId, reason, 2);
                         return;
                     }
                     requestedSlot = requested;
@@ -327,10 +312,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     requestedSlot = firstFreeSlot();
                     if (!requestedSlot.has_value()) {
                         const std::string reason = "No free slots available";
-                        log("Rejecting " + ps->peerId + ": " + reason);
-                        if (callbacks_.onPeerRejected)
-                            callbacks_.onPeerRejected(ps->peerId, reason);
-                        enet_peer_disconnect(peer, 2);
+                        rejectPeer(peer, ps->peerId, reason, 2);
                         return;
                     }
                 }
@@ -340,10 +322,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                         "Requested slot " +
                         std::to_string(static_cast<int>(*requestedSlot)) +
                         " is already taken";
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 2);
+                    rejectPeer(peer, ps->peerId, reason, 2);
                     return;
                 }
 
@@ -382,10 +361,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     std::string reason =
                         "Version mismatch: build=" + clientSession.gameBuild +
                         " mod=" + clientSession.modHash;
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 1);
+                    rejectPeer(peer, ps->peerId, reason, 1);
                     return;
                 }
 
@@ -393,10 +369,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 if (!tryGetRequestedSlot(clientSession, requestedSlot)) {
                     const std::string reason =
                         "Handshake missing a valid requested slot";
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 2);
+                    rejectPeer(peer, ps->peerId, reason, 2);
                     return;
                 }
 
@@ -405,10 +378,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                         "Requested slot " +
                         std::to_string(static_cast<int>(requestedSlot)) +
                         " is already taken";
-                    log("Rejecting " + ps->peerId + ": " + reason);
-                    if (callbacks_.onPeerRejected)
-                        callbacks_.onPeerRejected(ps->peerId, reason);
-                    enet_peer_disconnect(peer, 2);
+                    rejectPeer(peer, ps->peerId, reason, 2);
                     return;
                 }
 
@@ -861,6 +831,18 @@ void SessionHost::broadcastToVerified(
             sendTo(ps.enetPeer, packet, reliable);
         }
     }
+}
+
+void SessionHost::rejectPeer(ENetPeer* peer, const std::string& peerId,
+                             const std::string& reason, std::uint8_t code) {
+    log("Rejecting " + peerId + ": " + reason);
+    if (callbacks_.onPeerRejected) callbacks_.onPeerRejected(peerId, reason);
+    HelloReject reject;
+    reject.code = code;
+    reject.reason = reason;
+    sendTo(peer, encode(reject), true);
+    // disconnect_later lets the reject packet go out first.
+    enet_peer_disconnect_later(peer, code);
 }
 
 void SessionHost::log(const std::string& msg) {
