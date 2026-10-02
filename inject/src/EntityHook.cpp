@@ -1844,10 +1844,28 @@ static void DrivePuppetMotion(void* actorObj, int index) {
 }
 
 // Puppet transform, after the entity's own update so it has the last word.
+// KH2COOP_PUPPET_TRACE=1: log, every frame, puppet 0's position as the
+// game's own update left it next to the pose we write (jitter diagnosis).
+static int PuppetTraceBudget() {
+    static int budget = [] {
+        char v[8] = {};
+        return GetEnvironmentVariableA("KH2COOP_PUPPET_TRACE", v, sizeof(v)) > 0 ? 7200 : 0;
+    }();
+    return budget > 0 ? budget-- : 0;
+}
+
 static void ApplyPuppetTransform(void* actorObj, int index) {
     const auto& pose = g_puppets[index].pose.pose;
     const auto actor = reinterpret_cast<uintptr_t>(actorObj);
     const uintptr_t entity = actor + offsets::actor::ENTITY_TRANSFORM;
+    if (index == 0 && PuppetTraceBudget() > 0) {
+        Log("[ptrace] f=%u t=%llu game=(%.1f,%.1f,%.1f) pose=(%.1f,%.1f,%.1f) motion=%u",
+            g_frameCounter, static_cast<unsigned long long>(GetTickCount64()),
+            *reinterpret_cast<float*>(entity + offsets::entity::POS_X),
+            *reinterpret_cast<float*>(entity + offsets::entity::POS_Y),
+            *reinterpret_cast<float*>(entity + offsets::entity::POS_Z),
+            pose.position.x, pose.position.y, pose.position.z, pose.motionId);
+    }
     *reinterpret_cast<float*>(entity + offsets::entity::POS_X) = pose.position.x;
     *reinterpret_cast<float*>(entity + offsets::entity::POS_Y) = pose.position.y;
     *reinterpret_cast<float*>(entity + offsets::entity::POS_Z) = pose.position.z;

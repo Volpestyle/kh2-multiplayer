@@ -1,0 +1,82 @@
+{
+  "name": "net_jump_trace_tick1",
+  "description": "Jitter diagnosis: instance 0 jumps in place and while running; instance 1 traces its puppet per frame (game position before our write vs the pose written).",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "env": {
+        "KH2COOP_PUPPET_TRACE": "1"
+      }
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1",
+      "args": [
+        "--tick-ms",
+        "1"
+      ]
+    },
+    {
+      "do": "wait_until",
+      "expr": "(bridge(1).get('puppet0') or {}).get('active')",
+      "timeoutMs": 10000,
+      "pollMs": 500
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 700
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "circle",
+      "times": 6,
+      "gapMs": 1200
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 500
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "circle",
+      "times": 4,
+      "gapMs": 250
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    }
+  ]
+}

@@ -65,11 +65,13 @@ class InstanceDied(Exception):
 # kh2ctl
 # --------------------------------------------------------------------------
 
-def kh2ctl(*args: str, pid: int | None = None, check: bool = True, timeout: float = 120) -> dict:
+def kh2ctl(*args: str, pid: int | None = None, check: bool = True, timeout: float = 120,
+           env: dict | None = None) -> dict:
     cmd = [str(KH2CTL), *map(str, args)]
     if pid is not None:
         cmd += ["--pid", str(pid)]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                          env=dict(os.environ, **env) if env else None)
     text = proc.stdout.strip()
     try:
         data = json.loads(text.splitlines()[-1]) if text else {}
@@ -332,7 +334,9 @@ def wait_for(ctx: Context, cond, what: str, timeout: float, poll: float = 0.7) -
 
 
 def step_launch(ctx: Context, step: dict) -> dict:
-    data = kh2ctl("launch")
+    # step "env" reaches the game (kh2ctl launch passes its environment on),
+    # e.g. {"KH2COOP_PUPPET_TRACE": "1"}.
+    data = kh2ctl("launch", env={k: str(v) for k, v in step.get("env", {}).items()})
     inst = Instance(len(ctx.instances), data["processId"])
     ctx.instances.append(inst)
     if step.get("mute", True):
