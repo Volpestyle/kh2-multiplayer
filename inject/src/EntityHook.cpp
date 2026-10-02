@@ -433,6 +433,57 @@ static PFN_LimitMenuState g_origLimitMenuState = nullptr;
 static PFN_LimitLookup g_origLimitUsable = nullptr;
 static PFN_LimitLookup g_limitByCmd = nullptr;
 
+// ApplyStatDelta 0x3D2EB0(actor, delta, idx, reactFlag) -> new value: the
+// single funnel for HP changes (repos-60's decompile, VUH-1501). idx 0 =
+// HP, damage is a negative delta, HP reaching 0 runs vtable+0xB0 (death).
+// Logged with a return-address stack so the attacker-side resolver above
+// the TakeDamage thunk can be identified.
+using PFN_ApplyStatDelta = int(__fastcall*)(void* actor, int delta, int idx, int reactFlag);
+static constexpr uint64_t RVA_APPLY_STAT_DELTA = 0x3D2EB0;
+static constexpr uint8_t kApplyStatDeltaBytes[] = {
+    0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x6c, 0x24, 0x18, 0x56, 0x48, 0x83, 0xec, 0x20, 0x48};
+static PFN_ApplyStatDelta g_origApplyStatDelta = nullptr;
+static uint32_t g_hpDamageLogged = 0;
+static constexpr uint32_t HP_DAMAGE_LOG_LIMIT = 40;
+
+static void LogHpDelta(void* actor, int delta, int idx, int reactFlag, int result) {
+    char name[33] = "?";
+    const auto obj = *reinterpret_cast<const uintptr_t*>(
+        reinterpret_cast<uintptr_t>(actor) + offsets::actor::OBJENTRY_PTR);
+    uint8_t type = 0xFF;
+    if (obj > g_exeBase && obj < g_exeBase + 0x3000000) {
+        std::memcpy(name, reinterpret_cast<const void*>(obj + offsets::objentry::NAME), 32);
+        name[32] = '\0';
+        type = *reinterpret_cast<const uint8_t*>(obj + offsets::objentry::TYPE_FLAGS);
+    }
+    void* frames[12] = {};
+    const USHORT n = RtlCaptureStackBackTrace(1, 12, frames, nullptr);
+    char stack[256] = {};
+    size_t used = 0;
+    for (USHORT i = 0; i < n && used < sizeof(stack) - 16; ++i) {
+        const auto f = reinterpret_cast<uintptr_t>(frames[i]);
+        if (f >= g_exeBase && f < g_exeBase + 0x3000000) {
+            used += std::snprintf(stack + used, sizeof(stack) - used, " %llX",
+                                  static_cast<unsigned long long>(f - g_exeBase));
+        }
+    }
+    Log("[hp] frame %u victim=%s type=%u actor=%p idx=%d delta=%d react=%d -> %d | stack%s",
+        g_frameCounter, name, type, actor, idx, delta, reactFlag, result, stack);
+}
+
+static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
+    const int result = g_origApplyStatDelta(actor, delta, idx, reactFlag);
+    if (idx == 0 && delta < 0 && g_hpDamageLogged < HP_DAMAGE_LOG_LIMIT) {
+        ++g_hpDamageLogged;
+        __try {
+            LogHpDelta(actor, delta, idx, reactFlag, result);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("[hp] exception while logging a hit");
+        }
+    }
+    return result;
+}
+
 static int __fastcall HookedLimitMenuState(void* actor, uint16_t* cmd, int state) {
     const int result = g_origLimitMenuState(actor, cmd, state);
     if (g_anyPuppetActive && cmd != nullptr && g_limitByCmd(*cmd) != 0) {
@@ -2186,6 +2237,18 @@ bool Initialize(uintptr_t exeBase) {
             }
         } else {
             Log("  WARNING: limit gate functions don't match this build; limits not gated");
+        }
+
+        // HP funnel logging (VUH-1501).
+        if (matches(RVA_APPLY_STAT_DELTA, kApplyStatDeltaBytes, sizeof(kApplyStatDeltaBytes))) {
+            void* target = reinterpret_cast<void*>(exeBase + RVA_APPLY_STAT_DELTA);
+            MH_STATUS st = MH_CreateHook(target, reinterpret_cast<void*>(&HookedApplyStatDelta),
+                                         reinterpret_cast<void**>(&g_origApplyStatDelta));
+            if (st == MH_OK) st = MH_EnableHook(target);
+            Log(st == MH_OK ? "  ApplyStatDelta hook installed (0x3D2EB0)"
+                            : "  WARNING: ApplyStatDelta hook failed");
+        } else {
+            Log("  WARNING: ApplyStatDelta bytes don't match this build; HP not hooked");
         }
     }
 
