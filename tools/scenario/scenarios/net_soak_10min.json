@@ -1,6 +1,6 @@
 {
   "name": "net_soak_10min",
-  "description": "Two instances, 100 ms owner-to-viewer latency, 10 ms jitter, 2% loss; both Soras wander for ~10 minutes. Puppet error must stay under 0.5 m and no puppet pops (a sample-to-sample jump 30+ units beyond the owner's own motion). Sampling is ~10-20 Hz, so single-frame jitter is judged from the clip. Runtimes tick at 1 ms (--tick-ms 1): the default 16 ms sleep publishes puppet poses every 16-31 ms on Windows, which the DLL (60 fps) turns into stop-go steps.",
+  "description": "Two instances, 100 ms owner-to-viewer latency, 10 ms jitter, 2% loss; both Soras wander for ~10 minutes. Puppet error must stay under 0.5 m and no puppet pops (a sample-to-sample jump 30+ units beyond the owner's own motion). Sampling is ~10-20 Hz, so single-frame jitter is judged from the clip. The runtime pumps avatars every ~1 ms (fa7deab), so default settings are used.",
   "steps": [
     {
       "do": "boot",
@@ -33,11 +33,7 @@
         "latencyMs": 50,
         "jitterMs": 10,
         "lossPct": 2
-      },
-      "args": [
-        "--tick-ms",
-        "1"
-      ]
+      }
     },
     {
       "do": "runtime",
@@ -47,11 +43,7 @@
         "latencyMs": 50,
         "jitterMs": 10,
         "lossPct": 2
-      },
-      "args": [
-        "--tick-ms",
-        "1"
-      ]
+      }
     },
     {
       "do": "wait_until",
