@@ -80,7 +80,7 @@ Format: decision — why (rejected alternative).
   would leave their own character a round trip behind their stick (host
   simulates all three players from forwarded input — the original design).
   Cheating isn't a concern among friends.
-- **D3. Local-primary actor model** *(provisional until spike VUH-1489)*. On every
+- **D3. Local-primary actor model** *(confirmed by James 2026-10-02 after VUH-1489)*. On every
   machine the local human is the native player (slot 0) with all of Sora's
   systems — combos, magic, items, lock-on, camera, HUD — and no control RE.
   Remote humans appear as puppets in the friend slots, so three recolored Soras
@@ -90,6 +90,12 @@ Format: decision — why (rejected alternative).
   the hardest roster instead of the easiest.) The existing friend
   AI-replacement work becomes the puppet driver and, later, the route to
   playing party members and enemies.
+  **Flexible parties (James):** each party slot can be a remote player,
+  Donald, Goofy, the world ally or empty, set per session through the world
+  party table (VUH-1519). That covers everyone in one party, players replacing
+  NPCs, no NPCs, and solo play. Keeping your own NPC party while joining
+  someone else's world needs more actors than KH2 has slots; that's a stretch
+  goal.
 - **D4. Hits are detected where they are seen; enemy HP lives on the host.** The
   attacker's machine detects its hits on replica enemies and sends a claim; the
   host applies the damage and decides deaths. The victim's machine detects
@@ -133,6 +139,10 @@ Format: decision — why (rejected alternative).
 - **D10. The relay server stays; the host is whoever owns the world.** The
   existing ENet server is lobby and relay, run on the host PC or a small
   Tailscale/VPS node. No host migration: if the host leaves, the session ends.
+  **Hosting is Minecraft-style (James, 2026-10-02):** the host runs the relay
+  next to their game and friends join by address; no central service.
+  Friends reach the host over Tailscale (first test) or, if the host chooses,
+  a forwarded UDP port (VUH-1493).
 - **D11. Public Realm and PvP stay parked** until the P4 playtest gate passes.
 - **D12. Autonomy first.** P0 makes every later phase verifiable by an agent
   alone; live RE and gameplay work wait for it.
@@ -427,9 +437,9 @@ live behavior; unit tests cover stabilized boundaries such as the codec.
 
 | Question | Owner | Leaning |
 |---|---|---|
-| Actor model: local-primary (D3) or canonical slots? | VUH-1489 spike, then James | Local-primary |
+| ~~Actor model: local-primary (D3) or canonical slots?~~ | Decided 2026-10-02 | Local-primary, with flexible parties (D3) |
 | Enemy→player hits: victim-side or host-side detection? | VUH-1500 | Victim-side if puppet motions spawn hitboxes |
-| Connectivity: Tailscale or a relay VPS? | VUH-1493, James for accounts | Tailscale for friends; VPS for anything public |
+| Connectivity: how friends reach a Minecraft-style host | VUH-1493, James for accounts | Tailscale first; port forwarding documented as the host's choice; VPS for a dedicated server |
 | Save policy after the MVP: a dedicated co-op save, or mirroring host story into each player's own save? | VUH-1495 | Dedicated co-op save; character import later |
 | Drive, summons, limits: disable or support? | VUH-1509 | Disabled for the MVP; drive forms first after |
 | Pause: does the host's pause stop the world, and does a client's stay local? | VUH-1509 | Host pause stops the world; a client's pause is local (their avatar stands still) |
