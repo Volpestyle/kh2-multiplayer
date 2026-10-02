@@ -13,6 +13,8 @@
 // Payloads are exactly what the codec encodes, so the runtime forwards bytes
 // without re-encoding and both sides share one message definition.
 // Either side may open first; the first opener formats the rings.
+// Header words: [0] magic, [1] version, [2] the runtime's session slot
+// (0 = Player = host, 1/2 = clients, 0xFF = not known yet; VUH-1502).
 // ============================================================================
 
 #include "kh2coop/PacketRing.hpp"
@@ -33,8 +35,9 @@ namespace kh2coop {
 
 static constexpr const char* WORLD_BRIDGE_PREFIX = "Local\\kh2coop_world_";
 static constexpr std::uint32_t WORLD_BRIDGE_MAGIC = 0x42574B32; // "2KWB"
-static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 1;
+static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 2; // 2: header[2] local slot
 static constexpr std::uint32_t WORLD_RING_BYTES = 1u << 20;      // 1 MiB each way
+static constexpr std::uint8_t WORLD_SLOT_UNKNOWN = 0xFF;
 
 class WorldBridge {
 public:
@@ -64,6 +67,7 @@ public:
             PacketRing::format(view_ + kHeaderBytes, WORLD_RING_BYTES);
             PacketRing::format(view_ + kHeaderBytes + kRingBytes, WORLD_RING_BYTES);
             header[1] = WORLD_BRIDGE_VERSION;
+            header[2] = WORLD_SLOT_UNKNOWN; // a zeroed word would read as host
             std::atomic_thread_fence(std::memory_order_release);
             header[0] = WORLD_BRIDGE_MAGIC;
         } else if (header[0] != WORLD_BRIDGE_MAGIC || header[1] != WORLD_BRIDGE_VERSION) {
@@ -93,6 +97,17 @@ public:
     // Runtime side
     bool ReceiveFromDll(std::vector<std::uint8_t>& packet) { return toRuntime_.pop(packet); }
     bool SendToDll(const std::vector<std::uint8_t>& packet) { return toDll_.push(packet); }
+
+    // Runtime sets its session slot once known; the DLL reads it to decide
+    // whether it is the host (slot 0). WORLD_SLOT_UNKNOWN until set.
+    void SetLocalSlot(std::uint8_t slot) {
+        if (view_) reinterpret_cast<volatile std::uint32_t*>(view_)[2] = slot;
+    }
+    [[nodiscard]] std::uint8_t LocalSlot() const {
+        if (!view_) return WORLD_SLOT_UNKNOWN;
+        return static_cast<std::uint8_t>(
+            reinterpret_cast<const volatile std::uint32_t*>(view_)[2]);
+    }
 
     [[nodiscard]] std::uint32_t droppedToRuntime() const { return toRuntime_.dropped(); }
     [[nodiscard]] std::uint32_t droppedToDll() const { return toDll_.dropped(); }

@@ -1016,6 +1016,9 @@ int main(int argc, char* argv[]) {
                 worldBridge.Open(static_cast<DWORD>(game.ProcessId()));
             }
             if (worldBridge.IsOpen()) {
+                // Tell the DLL its session slot (0 = Player = host).
+                const auto slot = static_cast<std::uint8_t>(options.config.ownedSlot);
+                if (worldBridge.LocalSlot() != slot) worldBridge.SetLocalSlot(slot);
                 kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
             }
             pumpAvatars(room.worldId, room.roomId);

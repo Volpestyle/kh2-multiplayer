@@ -128,6 +128,12 @@ int main() {
     check(hostRuntimeSide.Open(hostPid) && hostDll.Open(hostPid) &&
               clientRuntimeSide.Open(clientPid) && clientDll.Open(clientPid),
           "bridges open for both machines");
+    check(hostDll.LocalSlot() == WORLD_SLOT_UNKNOWN,
+          "slot is unknown until the runtime sets it (not 0 = host)");
+    hostRuntimeSide.SetLocalSlot(0);
+    clientRuntimeSide.SetLocalSlot(1);
+    check(hostDll.LocalSlot() == 0 && clientDll.LocalSlot() == 1,
+          "DLL side reads the slot the runtime set");
 
     WorldPumpStats hostStats, clientStats;
     ClientCallbacks hostCb, clientCb;
