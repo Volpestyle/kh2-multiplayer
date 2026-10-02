@@ -64,3 +64,17 @@ sites (`0x53AA40`, `0x4372E0`, `0x4371B0`, `0x3D0780`, `0x1B8250`, `0x538920`,
    `ATTACK+0x39` (hit mask), and to call slot 2 for the knockback direction.
 3. Decompile it with `scripts/ghidra.ps1 -Decompile <rip>` and name the
    (attacker, victim, ATTACK*) boundary the damage rule hooks.
+
+## HP boundary (2026-10-02, VUH-1501)
+
+Live: enemy HP is `*(actor+0x5C0)+0` (i32), max HP `+4`; every HP write in a courtyard fight came from one
+instruction, at `0x3C0884` (the trap reported `0x3C0888`). Decompiled from there (`[GHIDRA]`):
+
+| RVA | Role |
+|---|---|
+| `0x3C0860(stats, delta, idx)` | clamped stat add on 12-byte triplets `[cur, max, min]`; `idx 0` = HP. Damage is a negative delta |
+| `0x3D2EB0(actor, delta, idx, reactFlag)` | ApplyStatDelta, the single HP funnel (~28 callers). Skipped when `actor+0x9B8` bit 2 is set (HP lock). Damage → `0x3DCC10`, heal → `0x3DCBB0`. HP 0 on idx 0 → `vtable+0xB0(actor)` (death) |
+| `0x3D5E50(actor, delta, idx, reactFlag)` | TakeDamage virtual (thunks `0x3C2C10`, `0x1B03D0`): adds drive gauge to the victim (`0x3D3CF0`, scaled by `status+0x22C`), then `0x3D2EB0`. `actor+0x18C` bit 14 suppresses the react flag |
+
+The attacker-side resolver calls TakeDamage through a vtable; find it from a stack trace in a `0x3D2EB0` hook.
+Puppet attack motions produced no HP writes (live), so hitboxes come from attack logic, not animation.
