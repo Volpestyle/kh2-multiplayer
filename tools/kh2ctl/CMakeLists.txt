@@ -6,6 +6,7 @@ target_link_libraries(kh2ctl PRIVATE
     kh2coop_runtime
     user32
     ole32
+    dbghelp
 )
 
 target_compile_definitions(kh2ctl PRIVATE

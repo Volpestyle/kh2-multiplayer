@@ -7,6 +7,7 @@
 
 #include <Windows.h>
 #include <TlHelp32.h>
+#include <DbgHelp.h>
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
 
@@ -2293,6 +2294,65 @@ CommandResult CmdWarp(std::vector<std::string> args) {
 }
 
 // ============================================================================
+// dump / crash — crash-bundle support for the scenario runner (VUH-1488)
+// ============================================================================
+
+bool IsOwnedPid(DWORD pid) {
+    const auto ownedList = ReadOwned();
+    for (const auto& proc : ListKh2Processes()) {
+        if (proc.pid == pid) return IsOwned(proc, ownedList);
+    }
+    return false;
+}
+
+// Writes a minidump of a live (e.g. hung) instance from outside.
+CommandResult CmdDump(std::vector<std::string> args) {
+    const auto outRaw = ConsumeOption(args, "--out");
+    if (!outRaw) throw std::runtime_error("dump requires --out");
+    if (!args.empty()) throw std::runtime_error("Unexpected argument for dump: " + args.front());
+    const DWORD pid = ResolveTargetPid();
+    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!process) return MakeError("OpenProcess failed for PID " + std::to_string(pid));
+    const std::filesystem::path out = *outRaw;
+    HANDLE file = CreateFileW(out.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        CloseHandle(process);
+        return MakeError("Could not create " + out.string());
+    }
+    const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpWithIndirectlyReferencedMemory |
+                                                 MiniDumpWithThreadInfo |
+                                                 MiniDumpWithUnloadedModules);
+    const BOOL ok = MiniDumpWriteDump(process, pid, file, type, nullptr, nullptr, nullptr);
+    const DWORD error = GetLastError();
+    CloseHandle(file);
+    CloseHandle(process);
+    if (!ok) return MakeError("MiniDumpWriteDump failed (" + std::to_string(error) + ")");
+    std::ostringstream body;
+    body << "{\"ok\":true,\"processId\":" << pid << ",\"path\":" << JsonString(out.string())
+         << ",\"bytes\":" << std::filesystem::file_size(out) << "}";
+    return {0, body.str()};
+}
+
+// Crashes a rig-launched instance on purpose: a remote thread starting at
+// address 0 faults, which reaches the DLL's crash-dump filter.
+CommandResult CmdCrash(std::vector<std::string> args) {
+    if (!args.empty()) throw std::runtime_error("Unexpected argument for crash: " + args.front());
+    const DWORD pid = ResolveTargetPid();
+    if (!IsOwnedPid(pid)) return MakeError("crash only targets rig-launched instances");
+    HANDLE process = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
+                                 PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
+                                 FALSE, pid);
+    if (!process) return MakeError("OpenProcess failed for PID " + std::to_string(pid));
+    HANDLE thread = CreateRemoteThread(process, nullptr, 0, nullptr, nullptr, 0, nullptr);
+    const DWORD error = GetLastError();
+    if (thread) CloseHandle(thread);
+    CloseHandle(process);
+    if (!thread) return MakeError("CreateRemoteThread failed (" + std::to_string(error) + ")");
+    return {0, "{\"ok\":true,\"processId\":" + std::to_string(pid) + "}"};
+}
+
+// ============================================================================
 // hit — hit ownership controls over the DLL's HitChannel (VUH-1501)
 // ============================================================================
 
@@ -2682,6 +2742,8 @@ void PrintUsage() {
         << "  warp --world W --room R [--door D] [--map M --btl B --evt E]\n"
         << "  hit drop --on|--off [--attacker A] [--victim V] [--enemies] | hit claims [--last N]\n"
         << "  hit damage --victim V --amount N | hit kill --victim V\n"
+        << "  dump --out x.dmp          minidump of a live instance (hang evidence)\n"
+        << "  crash                     fault a rig-launched instance on purpose (tests)\n"
         << "       [--timeout-ms N]     load a room (programs default to the save's)\n"
         << "  peek --rva RVA[:u8|u16|i16|u32|i32|f32|u64][,...] [--samples N]\n"
         << "       [--interval-ms N]    sample exe-relative memory\n"
@@ -2779,6 +2841,10 @@ int main(int argc, char* argv[]) {
             result = CmdFps(std::move(args));
         } else if (command == "warp") {
             result = CmdWarp(std::move(args));
+        } else if (command == "dump") {
+            result = CmdDump(std::move(args));
+        } else if (command == "crash") {
+            result = CmdCrash(std::move(args));
         } else if (command == "hit") {
             result = CmdHit(std::move(args));
         } else if (command == "peek") {

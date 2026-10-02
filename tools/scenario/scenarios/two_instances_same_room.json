@@ -1,0 +1,19 @@
+{
+  "name": "two_instances_same_room",
+  "description": "Two rig instances load the save and warp to the same room; both are in it and both Soras can move.",
+  "steps": [
+    {"do": "boot", "instance": 0},
+    {"do": "boot", "instance": 1},
+    {"do": "warp", "instance": 0, "world": 4, "room": 26},
+    {"do": "warp", "instance": 1, "world": 4, "room": 26},
+    {"do": "assert", "expr": "room(0) == room(1) == (4, 26)", "message": "instances aren't both in the GoA"},
+    {"do": "save", "as": "a", "expr": "pos('P_EX100', 0)"},
+    {"do": "save", "as": "b", "expr": "pos('P_EX100', 1)"},
+    {"do": "input", "instance": 0, "ly": 1, "ms": 900},
+    {"do": "input", "instance": 1, "ly": 1, "ms": 900},
+    {"do": "wait", "ms": 400},
+    {"do": "assert", "expr": "dist(pos('P_EX100', 0), saved['a']) > 150 and dist(pos('P_EX100', 1), saved['b']) > 150", "message": "a Sora didn't move"},
+    {"do": "capture", "name": "same_room", "instance": 0},
+    {"do": "capture", "name": "same_room", "instance": 1}
+  ]
+}

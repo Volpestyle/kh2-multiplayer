@@ -1,0 +1,14 @@
+{
+  "name": "boot_to_goa",
+  "description": "Boot, load the last-used save, warp to the Garden of Assemblage, and check Sora can move there.",
+  "steps": [
+    {"do": "boot"},
+    {"do": "warp", "world": 4, "room": 26},
+    {"do": "assert", "expr": "room() == (4, 26)", "message": "not in the GoA"},
+    {"do": "save", "as": "start", "expr": "pos()"},
+    {"do": "input", "ly": 1, "ms": 900},
+    {"do": "wait", "ms": 400},
+    {"do": "assert", "expr": "dist(pos(), saved['start']) > 150", "message": "Sora didn't move"},
+    {"do": "capture", "name": "goa"}
+  ]
+}

@@ -42,6 +42,12 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/EntityHook.hpp` | 28 | Public API: `Initialize()`, `Shutdown()`, `OnFrame()` |
 | `src/DllMain.cpp` | 217 | DLL entry point, Panacea plugin exports, standalone init thread |
 | `src/PatternScan.hpp` | 126 | AOB pattern scanner for finding functions in the .text section |
+| `src/RenderHook.cpp` | | D3D12 capture (screenshots/clips) and debug overlay |
+| `src/Warp.cpp` | | Room warp requests via the game's transition function |
+| `src/SaveGuard.cpp` | ~520 | Redirects write opens under the KH2 save folder to a sandbox, denies deletes/moves/copies (installed first at init) |
+| `src/CrashDump.cpp` | ~90 | Minidump on unhandled exceptions, chained ahead of the game's filter |
+
+EntityHook.cpp also holds the VUH-1501 hit-ownership hooks (BuildHit `0x3D23C0` log, ApplyHitDamage `0x3D3BA0` drop filter + claims, host apply), driven through `common/include/kh2coop/HitChannel.hpp`.
 
 ### EntityHook.cpp sections
 
@@ -123,6 +129,8 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 |------|------|
 | `kh2ctl/src/main.cpp` (1498 lines) | CLI for KH2 control: process attach, state queries, save loading, input injection |
 | `mcp_kh2ctl/server.py` (372 lines) | Python MCP server wrapping kh2ctl for agent use |
+| `scenario/run.py` | Scenario runner: rig lock, save hashing, JSON scenarios, crash/hang bundles, reports (`docs/SCENARIOS.md`) |
+| `scenario/scenarios/*.json` | Example scenarios and runner self-tests |
 | `avatarctl/main.cpp` | Drive an AvatarBridge without a network: `synth`, `record`/`replay`, `fake-local`, `peek` |
 | `ghidra/*.java` | Headless Ghidra scripts behind `scripts/ghidra.ps1` (decompile, xrefs, strings, symbols) |
 

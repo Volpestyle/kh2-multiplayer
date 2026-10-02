@@ -1,0 +1,20 @@
+{
+  "name": "sora_move_attack",
+  "description": "In the BC courtyard (Shadows spawn as Sora walks in), run toward the enemies and combo until Sora's hits land.",
+  "protect": [0],
+  "steps": [
+    {"do": "boot"},
+    {"do": "warp", "world": 5, "room": 6},
+    {"do": "save", "as": "start", "expr": "pos()"},
+    {"do": "input", "ly": 1, "ms": 900},
+    {"do": "input", "ly": 1, "ms": 900},
+    {"do": "input", "ly": 1, "ms": 900},
+    {"do": "assert", "expr": "dist(pos(), saved['start']) > 300", "message": "Sora didn't move"},
+    {"do": "wait_until", "expr": "len(enemies()) > 0", "timeoutMs": 10000},
+    {"do": "save", "as": "hits", "expr": "log_count('attacker=P_EX100')"},
+    {"do": "press", "button": "cross", "times": 20, "gapMs": 300},
+    {"do": "assert", "expr": "log_count('attacker=P_EX100') > saved['hits']", "message": "no Sora hit landed"},
+    {"do": "assert", "expr": "actor('P_EX100')['hp'] > 0"},
+    {"do": "capture", "name": "after_combo"}
+  ]
+}

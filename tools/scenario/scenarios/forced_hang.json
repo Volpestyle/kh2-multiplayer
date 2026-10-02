@@ -1,0 +1,9 @@
+{
+  "name": "forced_hang",
+  "description": "Runner self-test: suspend an instance so gameplay frames stop. Expected result: a HANG report with an outside minidump and the log, and the instance killed.",
+  "steps": [
+    {"do": "boot"},
+    {"do": "freeze"},
+    {"do": "assert", "expr": "True", "message": "unreachable: the hang should end the run"}
+  ]
+}

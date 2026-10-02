@@ -1,0 +1,9 @@
+{
+  "name": "forced_crash",
+  "description": "Runner self-test: crash an instance on purpose. Expected result: a CRASH report with a bundle (minidump + log), and the runner moves on.",
+  "steps": [
+    {"do": "boot"},
+    {"do": "crash"},
+    {"do": "assert", "expr": "True", "message": "unreachable: the crash should end the run"}
+  ]
+}

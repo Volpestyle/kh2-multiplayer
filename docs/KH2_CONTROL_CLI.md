@@ -222,6 +222,19 @@ each. Sora could move after every one.
   cancelled when `--timeout-ms` runs out, and the error reports the gate
   inputs.
 
+### Crash evidence
+
+```powershell
+kh2ctl dump --pid 1234 --out hang.dmp   # minidump of a live (e.g. hung) instance
+kh2ctl crash --pid 1234                 # fault a rig-launched instance on purpose
+```
+
+The inject DLL writes `build/rig/logs/kh2coop_crash_<pid>.dmp` itself when
+the game dies from an unhandled exception (its filter is chained ahead of
+the game's own). `crash` starts a remote thread at address 0 and only
+targets instances the rig launched; it exists to test the scenario runner's
+crash bundles (`docs/SCENARIOS.md`).
+
 ### Hit ownership (VUH-1501)
 
 ```powershell
@@ -248,8 +261,10 @@ claims; replaying them with `damage` left each Shadow at exactly 20 minus
 its claimed total; `kill` took a Shadow from 20 to 0, and it died and left
 the entity list; filtering one Shadow → Sora zeroed only that Shadow's hit.
 
-Notes: attack owner handles (`ATTACK+0x10`) carry the actor address's low
-24 bits, which is how attackers are named. The hit builder also builds
+Notes: attack owner handles (`ATTACK+0x10`) are resolved with the engine's
+own `0x4AD270(handle)` (byte-guarded). If that function doesn't match, the
+fallback matches the handle's low 24 bits against actor addresses, which is
+what they carry. The hit builder also builds
 heals: Goofy's atkp 1525 "damage" 20 restored Sora without going through
 ApplyStatDelta, so `--enemies` (or an explicit victim) keeps heals out of
 the filter.

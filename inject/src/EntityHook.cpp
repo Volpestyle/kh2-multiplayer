@@ -32,6 +32,8 @@
 #include "PatternScan.hpp"
 #include "RenderHook.hpp"
 #include "Warp.hpp"
+#include "SaveGuard.hpp"
+#include "CrashDump.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
@@ -490,8 +492,7 @@ static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int 
 //   0x3D1730(ATTACK** atk, victim, contact) = ResolveHit. A = *atk:
 //            A+0x10 owner (attacker) handle, A+0x30 -> atkp entry (id u16 +2)
 //   0x3D23C0(A, victim, u16, u8) -> hit record: damage i32 +0x28, stat u8 +0x25
-// Attacker handles are resolved through a per-frame handle -> actor map
-// (an actor's handle is its first dword).
+// Attacker handles are resolved with the engine's handle lookup (below).
 // ----------------------------------------------------------------------------
 // The damage calculation receives the ATTACK object itself, so hooking it
 // alone gives attacker, atkp, victim and damage.
@@ -509,12 +510,21 @@ static int g_handleCount = 0;
 static void BeginHandleFrame() { g_handleCount = 0; }
 // Attack owner handles carry the actor address's low 24 bits (plus a tag in
 // the top byte): live, Sora at ...612AB820 attacked with handle 852AB820.
+// The engine resolves them with 0x4AD270(handle) -> object (repos-60); the
+// per-frame low-24-bit map is the fallback if that function doesn't match.
+using PFN_ResolveHandle = uintptr_t(__fastcall*)(uint32_t handle);
+static constexpr uint64_t RVA_RESOLVE_HANDLE = 0x4AD270;
+static constexpr uint8_t kResolveHandleBytes[] = {
+    0x85, 0xc9, 0x75, 0x03, 0x33, 0xc0, 0xc3, 0xe9, 0x74, 0x01, 0x00, 0x00};
+static PFN_ResolveHandle g_resolveHandle = nullptr;
+
 static void NoteActorHandle(uintptr_t actor) {
     if (g_handleCount < 128) {
         g_handleMap[g_handleCount++] = {static_cast<uint32_t>(actor & 0xFFFFFF), actor};
     }
 }
 static uintptr_t ActorForHandle(uint32_t handle) {
+    if (g_resolveHandle) return g_resolveHandle(handle);
     for (int i = 0; i < g_handleCount; ++i) {
         if (g_handleMap[i].handle == (handle & 0xFFFFFF)) return g_handleMap[i].actor;
     }
@@ -2281,6 +2291,10 @@ bool Initialize(uintptr_t exeBase) {
     }
     Log("  MinHook initialized");
 
+    // Before anything that can fail: an injected instance never writes saves.
+    saveguard::Install(&Log);
+    crashdump::Install(&Log);
+
     // --- Find PerEntityUpdate ---
     uintptr_t perEntityUpdateAddr = 0;
 
@@ -2475,6 +2489,13 @@ bool Initialize(uintptr_t exeBase) {
                             : "  WARNING: ApplyStatDelta hook failed");
         } else {
             Log("  WARNING: ApplyStatDelta bytes don't match this build; HP not hooked");
+        }
+
+        if (matches(RVA_RESOLVE_HANDLE, kResolveHandleBytes, sizeof(kResolveHandleBytes))) {
+            g_resolveHandle = reinterpret_cast<PFN_ResolveHandle>(exeBase + RVA_RESOLVE_HANDLE);
+            Log("  Handle resolver verified (0x4AD270)");
+        } else {
+            Log("  WARNING: handle resolver bytes don't match; attackers resolve by address bits");
         }
 
         // Hit log: damage calculation post-hook (attacker + atkp in scope).
