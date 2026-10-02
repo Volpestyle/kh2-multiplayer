@@ -39,8 +39,6 @@ constexpr std::uint8_t kRequestTransitionBytes[] = {
     0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xec, 0x20, 0x80, 0x3d, 0x26, 0x7f,
 };
 
-// [KH2LIB], unverified on this build; recorded for gate diagnostics only.
-constexpr std::uint64_t OPEN_MENU = 0x07435D0;
 
 #pragma pack(push, 1)
 struct LocationPacket {
@@ -76,16 +74,26 @@ void Complete(WarpStatus status) {
     InterlockedExchange(&g_channel->doneSeq, g_channel->requestSeq);
 }
 
+// Safe-state gate (addresses from VUH-1486's static analysis, verified live):
+// nothing frozen (events freeze entity groups), the room is live, no menu,
+// no cutscene timer running. Loading never reaches here: the caller only
+// runs inside entity updates.
+bool SafeToWarp() {
+    g_channel->controllable = ReadExe<std::int32_t>(offsets::CONTROLLABLE);
+    g_channel->inField = ReadExe<std::uint8_t>(offsets::IN_FIELD);
+    g_channel->openMenu = ReadExe<std::uint8_t>(offsets::OPEN_MENU);
+    g_channel->cutsceneTimer = ReadExe<std::int32_t>(offsets::CUTSCENE_TIMER);
+    g_channel->pauseStatus = ReadExe<std::int32_t>(offsets::PAUSE_STATUS);
+    return g_channel->controllable == 0 && g_channel->inField != 0 &&
+           g_channel->openMenu == 0xFF && g_channel->cutsceneTimer == 0;
+}
+
 void HandOver(std::uint32_t frame) {
     const std::uint8_t world = ReadExe<std::uint8_t>(offsets::WORLD_ID);
     const std::uint8_t room = ReadExe<std::uint8_t>(offsets::ROOM_ID);
 
     g_channel->fromWorld = world;
     g_channel->fromRoom = room;
-    g_channel->pauseStatus = ReadExe<std::int32_t>(offsets::PAUSE_STATUS);
-    g_channel->controllable = ReadExe<std::int32_t>(offsets::CONTROLLABLE);
-    g_channel->cutsceneTimer = ReadExe<std::int32_t>(offsets::CUTSCENE_TIMER);
-    g_channel->openMenu = ReadExe<std::uint8_t>(OPEN_MENU);
     g_channel->frame = frame;
 
     if (!g_requestTransition) {
@@ -94,6 +102,10 @@ void HandOver(std::uint32_t frame) {
     }
     if (world == 0xFF || room == 0xFF) {
         Complete(WarpStatus::NotInRoom);
+        return;
+    }
+    if (!SafeToWarp()) {
+        ++g_channel->gateWaitFrames;  // keep the request pending
         return;
     }
 
@@ -108,11 +120,11 @@ void HandOver(std::uint32_t frame) {
 
     if (g_log) {
         g_log("Warp: %02X/%02X -> %02X/%02X door %u map %04X btl %04X evt %04X "
-              "(pause=%d ctrl=%d cut=%d menu=%d frame=%u)",
+              "(waited %u frames; pause=%d frozen=%d infield=%d cut=%d menu=%d frame=%u)",
               world, room, packet.world, packet.room, packet.door, packet.map,
-              packet.battle, packet.event, g_channel->pauseStatus,
-              g_channel->controllable, g_channel->cutsceneTimer, g_channel->openMenu,
-              frame);
+              packet.battle, packet.event, g_channel->gateWaitFrames,
+              g_channel->pauseStatus, g_channel->controllable, g_channel->inField,
+              g_channel->cutsceneTimer, g_channel->openMenu, frame);
     }
     g_requestTransition(&packet, fade, 0, 0, 0);
     Complete(WarpStatus::Ok);
@@ -156,7 +168,10 @@ void OnFrameStart(std::uint32_t frame, uintptr_t listHead) {
     if (!g_channel) return;
     InterlockedExchange(&g_channel->liveFrame, static_cast<long>(frame));
     InterlockedExchange64(&g_channel->liveActor, static_cast<long long>(listHead));
-    if (g_channel->requestSeq == g_channel->doneSeq) return;
+    if (g_channel->requestSeq == g_channel->doneSeq) {
+        g_channel->gateWaitFrames = 0;
+        return;
+    }
     HandOver(frame);
 }
 

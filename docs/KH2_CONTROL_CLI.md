@@ -193,13 +193,23 @@ Beast's Castle, 1.0–2.8 s each; Sora could move after every one.
 
 - **Rooms that open on a cutscene** (`05/02`, `05/08` with default
   programs) load, but Sora can't move. Avoid them as fixtures.
-- **Combat rooms:** none found yet. With this save's programs, and with
-  battle programs 1–8 forced in the BC courtyard, no enemies spawned.
-- **Safe-state gate:** hand-over only happens from the entity-update hook,
-  so never mid-load, and kh2ctl allows one warp at a time. The KH2 Lua
-  library's `PAUSE_STATUS` reads garbage on this build, and its `CONTROLLABLE`
-  / `CURRENT_OPEN_MENU` didn't change in testing, so menu, pause and
-  cutscene gating isn't in yet. Don't warp while a menu is open.
+- **Combat rooms:** the battle program alone doesn't spawn enemies. Scripted
+  fights come from event programs: `--world 5 --room 1 --evt 1` (Parlor
+  Ambush) put the game in forced battle (`0x2A11404` = 2) and Sora took
+  damage. `--world 8 --room 0x0C --evt 1` (Attack on the Camp) plays an
+  ~85 s cutscene and, on the test save, no fight followed. The BC courtyard
+  (`05/06`) spawns enemies once Sora runs far enough in. `kh2ctl state`'s enemy
+  list (objentry `B_`/`M_` prefix) reported 0 enemies during the ambush, so
+  it misses these Heartless.
+- **Safe-state gate:** a request is handed over only when nothing is
+  frozen (`0x2A171E8` == 0), the room is live (`0x9BA8D0` != 0), no menu is
+  open (`0x7435D0` == `0xFF`) and no cutscene timer is running (`0xB64F98`
+  == 0). It's never handed over mid-load either, because hand-over only
+  happens inside entity updates. Verified live: a warp requested in the
+  pause menu was held, then cancelled at its timeout. During an event the
+  frozen bitset reads 3 and the cutscene timer counts up. A held request is
+  cancelled when `--timeout-ms` runs out, and the error reports the gate
+  inputs.
 
 ### Restart
 
@@ -304,13 +314,15 @@ Accepted player button names include:
 - `start`, `select`, `back`
 - `dup`, `ddown`, `dleft`, `dright`
 
-**Stick bytes look swapped (2026-10-01, no physical controller attached).**
-`--lx/--ly` turned the camera and `--rx/--ry` moved Sora: `--ry -1` for 3 s
-moved him ~370 units forward. The DLL writes `--lx/--ly` to raw-slot bytes
-`0x02/0x03` (`LSTICK_*` in `KH2Offsets.hpp`, marked confirmed, probably with a
-real pad). Until the layout is rechecked with a controller, move Sora with
-`player-input --rx/--ry`; `player-move` uses the left-stick fields and may
-only turn the camera.
+**Raw slot = PS2 DualShock 2 layout (fixed 2026-10-02).** The right stick
+comes first (`+0x02/+0x03`), then the left (`+0x04/+0x05`). Buttons use PS2
+bit order: Select `0x0001`, L3 `0x0002`, R3 `0x0004`, Start `0x0008`, Up
+`0x0010`, Right `0x0020`, Down `0x0040`, Left `0x0080`, L2 `0x0100`, R2
+`0x0200`, L1 `0x0400`, R1 `0x0800`, Triangle `0x1000`, Circle `0x2000`, Cross
+`0x4000`, Square `0x8000`. `KH2Offsets.hpp` and kh2ctl's button names now
+follow it. Verified: `--ly 1` moves Sora, and `player-press --button start`
+opens the pause menu (open-menu id `0x0A`). Before the fix, the stick labels
+were swapped and "start" was D-pad Up.
 
 The DLL now retries the mailbox every ~6 frames (was ~120), so short pulses
 are no longer missed.

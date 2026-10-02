@@ -16,7 +16,7 @@ namespace kh2coop {
 
 constexpr const wchar_t* WARP_NAME_PREFIX = L"Local\\kh2coop_warp_";
 constexpr std::uint32_t WARP_MAGIC = 0x50574B48;  // "HKWP"
-constexpr std::uint32_t WARP_VERSION = 1;
+constexpr std::uint32_t WARP_VERSION = 2;
 constexpr std::uint16_t WARP_DEFAULT_PROGRAM = 0xFFFF;  // use the save's per-room program
 
 enum class WarpStatus : std::int32_t {
@@ -51,6 +51,11 @@ struct WarpChannel {
     // advances while room entities update, so it stalls during a load.
     volatile long liveFrame;
     volatile long long liveActor;  // entity list head (Sora's actor) this frame
+    // [dll] safe-state gate inputs, refreshed every frame while a request
+    // waits; a request is handed over only when frozen == 0, inField != 0,
+    // openMenu == 0xFF and cutsceneTimer == 0.
+    std::int32_t inField;
+    std::uint32_t gateWaitFrames;  // frames the current request has waited
 };
 #pragma pack(pop)
 

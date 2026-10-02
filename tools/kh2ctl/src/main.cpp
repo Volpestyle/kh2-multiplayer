@@ -972,20 +972,24 @@ bool SendKeyPress(const KeySpec& spec, int durationMs) {
     return ok;
 }
 
-constexpr std::uint16_t kRawButtonDpadUp = 0x0001;
-constexpr std::uint16_t kRawButtonDpadDown = 0x0002;
-constexpr std::uint16_t kRawButtonDpadLeft = 0x0004;
-constexpr std::uint16_t kRawButtonDpadRight = 0x0008;
-constexpr std::uint16_t kRawButtonStart = 0x0010;
-constexpr std::uint16_t kRawButtonBack = 0x0020;
-constexpr std::uint16_t kRawButtonL3 = 0x0040;
-constexpr std::uint16_t kRawButtonR3 = 0x0080;
-constexpr std::uint16_t kRawButtonL1 = 0x0100;
-constexpr std::uint16_t kRawButtonR1 = 0x0200;
-constexpr std::uint16_t kRawButtonCross = 0x1000;
+// Raw slot buttons use the PS2 DualShock 2 bit order (the game's mapping
+// table at 0x5C3420 maps 0xF09 = Select+Start+L1+R1+L2+R2 to soft reset).
+constexpr std::uint16_t kRawButtonBack = 0x0001;       // Select
+constexpr std::uint16_t kRawButtonL3 = 0x0002;
+constexpr std::uint16_t kRawButtonR3 = 0x0004;
+constexpr std::uint16_t kRawButtonStart = 0x0008;
+constexpr std::uint16_t kRawButtonDpadUp = 0x0010;
+constexpr std::uint16_t kRawButtonDpadRight = 0x0020;
+constexpr std::uint16_t kRawButtonDpadDown = 0x0040;
+constexpr std::uint16_t kRawButtonDpadLeft = 0x0080;
+constexpr std::uint16_t kRawButtonL2 = 0x0100;
+constexpr std::uint16_t kRawButtonR2 = 0x0200;
+constexpr std::uint16_t kRawButtonL1 = 0x0400;
+constexpr std::uint16_t kRawButtonR1 = 0x0800;
+constexpr std::uint16_t kRawButtonTriangle = 0x1000;
 constexpr std::uint16_t kRawButtonCircle = 0x2000;
-constexpr std::uint16_t kRawButtonSquare = 0x4000;
-constexpr std::uint16_t kRawButtonTriangle = 0x8000;
+constexpr std::uint16_t kRawButtonCross = 0x4000;
+constexpr std::uint16_t kRawButtonSquare = 0x8000;
 
 std::uint32_t ParseFriendMailboxSlot(const std::string& raw) {
     const auto lower = ToLower(raw);
@@ -1027,6 +1031,14 @@ void ApplyRawButtonName(std::uint16_t& buttons, const std::string& rawName) {
     }
     if (name == "r1" || name == "rb" || name == "lockon" || name == "lock-on") {
         buttons |= kRawButtonR1;
+        return;
+    }
+    if (name == "l2" || name == "lt") {
+        buttons |= kRawButtonL2;
+        return;
+    }
+    if (name == "r2" || name == "rt") {
+        buttons |= kRawButtonR2;
         return;
     }
     if (name == "start") {
@@ -2167,7 +2179,8 @@ CommandResult CmdWarp(std::vector<std::string> args) {
     }
     auto* channel = static_cast<kh2coop::WarpChannel*>(
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(kh2coop::WarpChannel)));
-    if (!channel || channel->magic != kh2coop::WARP_MAGIC) {
+    if (!channel || channel->magic != kh2coop::WARP_MAGIC ||
+        channel->version != kh2coop::WARP_VERSION) {
         if (channel) UnmapViewOfFile(channel);
         CloseHandle(mapping);
         return MakeError("Warp channel has an unexpected layout");
@@ -2194,7 +2207,16 @@ CommandResult CmdWarp(std::vector<std::string> args) {
     const auto deadline = t0 + std::chrono::milliseconds(timeoutMs);
     while (channel->doneSeq != seq) {
         if (std::chrono::steady_clock::now() > deadline) {
-            return MakeError("The DLL didn't take the warp (no room is running?)");
+            // Cancel so a held request can't fire later, then say why.
+            InterlockedCompareExchange(&channel->doneSeq, seq, seq - 1);
+            std::ostringstream out;
+            out << "{\"ok\":false,\"processId\":" << pid
+                << ",\"error\":\"Warp held by the safe-state gate (or no room running); cancelled\""
+                << ",\"gate\":{\"frozen\":" << channel->controllable
+                << ",\"inField\":" << channel->inField << ",\"openMenu\":" << channel->openMenu
+                << ",\"cutsceneTimer\":" << channel->cutsceneTimer
+                << ",\"waitedFrames\":" << channel->gateWaitFrames << "}}";
+            return {1, out.str()};
         }
         SleepMs(10);
     }
@@ -2254,10 +2276,11 @@ CommandResult CmdWarp(std::vector<std::string> args) {
         << ",\"target\":{\"world\":" << world << ",\"room\":" << room << ",\"door\":" << door
         << ",\"map\":" << map << ",\"btl\":" << battle << ",\"evt\":" << event << "}"
         << ",\"from\":{\"world\":" << channel->fromWorld << ",\"room\":" << channel->fromRoom
-        << "},\"stateAtRequest\":{\"pauseStatus\":" << channel->pauseStatus
-        << ",\"controllable\":" << channel->controllable
+        << "},\"gateAtHandOver\":{\"frozen\":" << channel->controllable
+        << ",\"inField\":" << channel->inField
         << ",\"cutsceneTimer\":" << channel->cutsceneTimer
-        << ",\"openMenu\":" << channel->openMenu << "}"
+        << ",\"openMenu\":" << channel->openMenu
+        << ",\"pauseBlockers\":" << channel->pauseStatus << "}"
         << ",\"seconds\":" << seconds << ",\"longestStallMs\":" << longestStallMs
         << ",\"resumedAtMs\":" << resumeAtMs
         << ",\"actorChanged\":" << JsonBool(actorAfter != actorBefore)

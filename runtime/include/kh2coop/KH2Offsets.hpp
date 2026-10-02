@@ -62,11 +62,16 @@ constexpr std::uint64_t KH2J_PROGRAM_TABLE = 0x09A98B0; // [CONFIRMED] fills MAP
 // --------------------------------------------------------------------------
 // Game state flags
 // --------------------------------------------------------------------------
-constexpr std::uint64_t PAUSE_STATUS   = 0x0ABB7F8;   // [KH2LIB] 0=enabled,1=paused,2=disabled,3=menu,4=dying,5=continue
-constexpr std::uint64_t BATTLE_STATUS  = 0x2A11384;   // [KH2LIB] Out-of-battle / Regular / Forced
-constexpr std::uint64_t BATTLE_END     = 0x2A0FC60;   // [KH2LIB] End-of-battle signal
-constexpr std::uint64_t CONTROLLABLE   = 0x2A17168;   // [KH2LIB] Sora controllable flag
-constexpr std::uint64_t CUTSCENE_TIMER = 0x0B64F18;   // [KH2LIB] Current cutscene timer
+// The KH2 Lua library's Steam Global addresses in this region are 0x80 low on
+// this build; the values below are library + 0x80, matched to code that
+// reads them (docs/pointer_map_v1.md, VUH-1486).
+constexpr std::uint64_t PAUSE_STATUS   = 0x0ABB878;   // [GHIDRA] pause-blocker bitmask; pause menu opens only when 0
+constexpr std::uint64_t BATTLE_STATUS  = 0x2A11404;   // [GHIDRA] battle state, != 0 in battle (2 = forced)
+constexpr std::uint64_t BATTLE_END     = 0x2A0FC60;   // [KH2LIB] End-of-battle signal (unverified, not shifted)
+constexpr std::uint64_t CONTROLLABLE   = 0x2A171E8;   // [GHIDRA] bitset of frozen entity groups; 0 = nothing frozen
+constexpr std::uint64_t CUTSCENE_TIMER = 0x0B64F98;   // [GHIDRA] current cutscene timer
+constexpr std::uint64_t IN_FIELD       = 0x09BA8D0;   // [GHIDRA] u8, cleared at room-load start, set when the room is live
+constexpr std::uint64_t OPEN_MENU      = 0x07435D0;   // [KH2LIB] u8 menu id, 0xFF = none (menu manager 0x2F5E50)
 constexpr std::uint64_t CUTSCENE_LEN   = 0x0B64F34;   // [KH2LIB] Cutscene length
 constexpr std::uint64_t CUTSCENE_SKIP  = 0x0B64F1C;   // [KH2LIB] Cutscene skip flag
 constexpr std::uint64_t GAME_SPEED     = 0x0717424;   // [KH2LIB] Game speed
@@ -145,10 +150,12 @@ namespace input {
 
     // Raw input slot layout (0x44 bytes per slot)
     constexpr std::uint64_t BUTTONS          = 0x00;    // [CONFIRMED] ushort, raw button bitmask
-    constexpr std::uint64_t LSTICK_X         = 0x02;    // [CONFIRMED] byte, left stick X (0x80=center)
-    constexpr std::uint64_t LSTICK_Y         = 0x03;    // [CONFIRMED] byte, left stick Y (0x80=center)
-    constexpr std::uint64_t RSTICK_X         = 0x04;    // [CONFIRMED] byte, right stick X (0x80=center)
-    constexpr std::uint64_t RSTICK_Y         = 0x05;    // [CONFIRMED] byte, right stick Y (0x80=center)
+    // PS2 DualShock 2 order: right stick first (VUH-1486; verified live:
+    // 0x04/0x05 move Sora, 0x02/0x03 turn the camera).
+    constexpr std::uint64_t RSTICK_X         = 0x02;    // [CONFIRMED] byte, right stick X (0x80=center)
+    constexpr std::uint64_t RSTICK_Y         = 0x03;    // [CONFIRMED] byte, right stick Y (0x80=center)
+    constexpr std::uint64_t LSTICK_X         = 0x04;    // [CONFIRMED] byte, left stick X (0x80=center)
+    constexpr std::uint64_t LSTICK_Y         = 0x05;    // [CONFIRMED] byte, left stick Y (0x80=center)
 
     // Processed button state array (fixed addresses, NOT relative to struct)
     constexpr std::uint64_t PROCESSED_ENTRY0 = 0x0BF31A0; // [CONFIRMED] processed buttons, slot 0 (0x68 bytes)
