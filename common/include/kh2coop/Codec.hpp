@@ -21,6 +21,7 @@ enum class PacketType : std::uint8_t {
     AvatarState = 5,   // Owner's avatar; the host relays it to the others
     ClockPing = 6,
     HitClaim = 8,      // client -> host only (relay stamps attackerSlot)
+    StateHash = 9,     // every machine -> relay (desync detection)
 
     // Host -> Client
     SessionState = 10,
@@ -37,6 +38,10 @@ enum class PacketType : std::uint8_t {
     EnemyHp = 23,
     EnemyDeath = 24,
     ProgressUpdate = 25,
+    ResyncRequest = 26, // host only
+
+    // Relay -> everyone
+    DesyncNotice = 27,
 };
 
 // ---------------------------------------------------------------------------
@@ -77,6 +82,9 @@ void write(ByteWriter& w, const EnemyHp& m);
 void write(ByteWriter& w, const EnemyDeath& m);
 void write(ByteWriter& w, const HitClaim& m);
 void write(ByteWriter& w, const ProgressUpdate& m);
+void write(ByteWriter& w, const StateHash& m);
+void write(ByteWriter& w, const DesyncNotice& m);
+void write(ByteWriter& w, const ResyncRequest& m);
 
 void read(ByteReader& r, SessionActor& sa);
 void read(ByteReader& r, SessionState& ss);
@@ -94,6 +102,9 @@ void read(ByteReader& r, EnemyHp& m);
 void read(ByteReader& r, EnemyDeath& m);
 void read(ByteReader& r, HitClaim& m);
 void read(ByteReader& r, ProgressUpdate& m);
+void read(ByteReader& r, StateHash& m);
+void read(ByteReader& r, DesyncNotice& m);
+void read(ByteReader& r, ResyncRequest& m);
 
 // ---------------------------------------------------------------------------
 // Framed packet helpers
@@ -122,6 +133,9 @@ std::vector<std::uint8_t> encode(const EnemyHp& m);
 std::vector<std::uint8_t> encode(const EnemyDeath& m);
 std::vector<std::uint8_t> encode(const HitClaim& m);
 std::vector<std::uint8_t> encode(const ProgressUpdate& m);
+std::vector<std::uint8_t> encode(const StateHash& m);
+std::vector<std::uint8_t> encode(const DesyncNotice& m);
+std::vector<std::uint8_t> encode(const ResyncRequest& m);
 // AvatarState travels as PacketType::AvatarState (client -> host) or
 // PacketType::AvatarRelay (host -> clients); the payload is identical.
 std::vector<std::uint8_t> encode(const AvatarState& a, PacketType type);
@@ -138,6 +152,9 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::ProgressUpdate:
         case PacketType::HitClaim:
         case PacketType::TransitionAck:
+        case PacketType::StateHash:
+        case PacketType::ResyncRequest:
+        case PacketType::DesyncNotice:
             return true;
         default:
             return false;

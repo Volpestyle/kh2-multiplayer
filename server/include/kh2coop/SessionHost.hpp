@@ -102,6 +102,7 @@ public:
     [[nodiscard]] const std::optional<RoomTransition>& currentRoom() const { return room_; }
     [[nodiscard]] std::size_t manifestSize() const { return manifest_.entries.size(); }
     [[nodiscard]] std::size_t progressBytes() const { return progress_.size(); }
+    [[nodiscard]] std::uint64_t desyncNoticeCount() const { return desyncNotices_; }
     [[nodiscard]] const PeerState* peerBySlot(SlotType slot) const;
 
 private:
@@ -134,6 +135,7 @@ private:
                          bool reliable);
     void sendWorldStateTo(_ENetPeer* peer);
     void clearWorldState();
+    void compareWithHost(PeerState& client);
 
     // State
     SessionConfig config_;
@@ -154,6 +156,7 @@ private:
     std::uint64_t rejectedWorld_{0};
     std::map<std::uint32_t, std::uint8_t> progress_; // merged host flags
     std::uint32_t progressVersion_{0};
+    std::uint64_t desyncNotices_{0};
 };
 
 } // namespace kh2coop

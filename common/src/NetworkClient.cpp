@@ -180,6 +180,14 @@ void NetworkClient::sendRawPacket(const std::vector<std::uint8_t>& packet,
     if (connected_ && !packet.empty()) sendPacket(packet, reliable);
 }
 
+void NetworkClient::sendStateHash(const StateHash& m) {
+    if (connected_) sendPacket(encode(m), false);
+}
+
+void NetworkClient::sendResyncRequest(const ResyncRequest& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
 void NetworkClient::sendClockPing() {
     if (!connected_) return;
     lastPingMs_ = localTimeMs();
@@ -356,6 +364,12 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
                 ProgressUpdate m;
                 read(reader, m);
                 if (callbacks_.onProgressUpdate) callbacks_.onProgressUpdate(m);
+                break;
+            }
+            case PacketType::DesyncNotice: {
+                DesyncNotice m;
+                read(reader, m);
+                if (callbacks_.onDesyncNotice) callbacks_.onDesyncNotice(m);
                 break;
             }
             case PacketType::ClockPong: {

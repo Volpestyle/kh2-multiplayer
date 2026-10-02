@@ -49,6 +49,7 @@ struct Seen {
     std::vector<EnemyDeath> deaths;
     std::vector<HitClaim> claims;
     std::vector<ProgressUpdate> progress;
+    std::vector<DesyncNotice> desyncs;
 };
 
 ClientCallbacks callbacksFor(Seen& seen) {
@@ -60,6 +61,7 @@ ClientCallbacks callbacksFor(Seen& seen) {
     cb.onEnemyDeath = [&seen](const EnemyDeath& m) { seen.deaths.push_back(m); };
     cb.onHitClaim = [&seen](const HitClaim& m) { seen.claims.push_back(m); };
     cb.onProgressUpdate = [&seen](const ProgressUpdate& m) { seen.progress.push_back(m); };
+    cb.onDesyncNotice = [&seen](const DesyncNotice& m) { seen.desyncs.push_back(m); };
     return cb;
 }
 
@@ -291,6 +293,38 @@ int main() {
     host->sendRoomTransition(RoomTransition {2, 4, 0x1B, 1, 0, 0, 0});
     check(waitFor([&] { return c1Seen.rooms.size() == 2; }) && relay.manifestSize() == 0,
           "a new transition clears the cached enemy set");
+
+    std::cout << "\n=== Desync detection and resync ===\n";
+    const StateHash good {2, 4, 0x1B, 10, 20};
+    host->sendStateHash(good);
+    c1->sendStateHash(good);
+    pump(300);
+    check(relay.desyncNoticeCount() == 0 && hostSeen.desyncs.empty(),
+          "matching state hashes raise nothing");
+    const StateHash diverged {2, 4, 0x1B, 99, 20};
+    c2->sendStateHash(diverged);
+    pump(150);
+    check(relay.desyncNoticeCount() == 0, "a single mismatch (e.g. mid-load) is tolerated");
+    c2->sendStateHash(diverged);
+    check(waitFor([&] { return !hostSeen.desyncs.empty(); }) &&
+              hostSeen.desyncs.back().slot == SlotType::Friend2 &&
+              hostSeen.desyncs.back().fields == DesyncEnemies &&
+              hostSeen.desyncs.back().epoch == 2,
+          "a persistent mismatch is reported to everyone, naming client 2 and the enemy set");
+    c2->sendStateHash(diverged);
+    c2->sendStateHash(diverged);
+    pump(300);
+    check(relay.desyncNoticeCount() == 1, "the same desync isn't reported twice");
+
+    const auto c2RoomsBefore = c2Seen.rooms.size();
+    const auto c1RoomsBefore = c1Seen.rooms.size();
+    c1->sendResyncRequest(ResyncRequest {2});
+    pump(200);
+    check(c2Seen.rooms.size() == c2RoomsBefore, "a non-host resync request is dropped");
+    host->sendResyncRequest(ResyncRequest {static_cast<std::uint8_t>(SlotType::Friend2)});
+    check(waitFor([&] { return c2Seen.rooms.size() > c2RoomsBefore; }) &&
+              c2Seen.rooms.back().epoch == 2 && c1Seen.rooms.size() == c1RoomsBefore,
+          "host resync re-sends the current room to client 2 only");
 
     std::cout << "\n=== Host leaves ===\n";
     host->disconnect();

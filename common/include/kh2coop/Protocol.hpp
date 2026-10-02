@@ -157,6 +157,35 @@ struct ProgressUpdate {
     std::vector<ProgressSpan> spans;
 };
 
+// Desync detection and resync (VUH-1508). Every machine (host included)
+// sends StateHash periodically; the relay compares each client with the
+// host for the same epoch and, when a mismatch persists, tells everyone.
+enum DesyncField : std::uint8_t {
+    DesyncRoom = 1 << 0,
+    DesyncEnemies = 1 << 1,
+    DesyncProgress = 1 << 2,
+};
+
+struct StateHash {
+    std::uint32_t epoch {0};
+    std::uint16_t worldId {0};
+    std::uint16_t roomId {0};
+    std::uint32_t enemiesHash {0};   // e.g. over (netId, alive) of matched enemies
+    std::uint32_t progressHash {0};  // over the mirrored progress bytes
+};
+
+struct DesyncNotice {
+    SlotType slot {SlotType::Player}; // the diverged client
+    std::uint32_t epoch {0};
+    std::uint8_t fields {0};          // DesyncField bits
+};
+
+// Host-only: the relay re-sends its cached world state to `slot`
+// (0xFF = every client).
+struct ResyncRequest {
+    std::uint8_t slot {0xFF};
+};
+
 // ===========================================================================
 // Protocol v2 forward-looking records (declared, not yet wired into codec)
 //

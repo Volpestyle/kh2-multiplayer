@@ -4,7 +4,8 @@
 // packets from the DLL to the relay, and from the relay to the DLL.
 //
 // DLL -> relay: only world packet types pass (anything else the DLL emits is
-// dropped and counted); EnemyHp goes unreliable, everything else reliable.
+// dropped and counted); EnemyHp and StateHash go unreliable, everything
+// else reliable.
 // Host-only enforcement stays in the relay, so a client DLL that emits host
 // messages is harmless.
 // ============================================================================
@@ -37,7 +38,9 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
                 ++stats.rejected;
                 continue;
             }
-            net.sendRawPacket(packet, type != PacketType::EnemyHp);
+            const bool periodic =
+                type == PacketType::EnemyHp || type == PacketType::StateHash;
+            net.sendRawPacket(packet, !periodic);
             ++stats.toNet;
         } catch (const std::exception&) {
             ++stats.rejected;

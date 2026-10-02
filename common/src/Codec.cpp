@@ -234,6 +234,22 @@ void write(ByteWriter& w, const ProgressUpdate& m) {
     }
 }
 
+void write(ByteWriter& w, const StateHash& m) {
+    w.writeU32(m.epoch);
+    w.writeU16(m.worldId);
+    w.writeU16(m.roomId);
+    w.writeU32(m.enemiesHash);
+    w.writeU32(m.progressHash);
+}
+
+void write(ByteWriter& w, const DesyncNotice& m) {
+    w.writeU8(static_cast<std::uint8_t>(m.slot));
+    w.writeU32(m.epoch);
+    w.writeU8(m.fields);
+}
+
+void write(ByteWriter& w, const ResyncRequest& m) { w.writeU8(m.slot); }
+
 // ===== Binary read helpers ==================================================
 
 void read(ByteReader& r, Vec3& v) {
@@ -457,6 +473,22 @@ void read(ByteReader& r, ProgressUpdate& m) {
     }
 }
 
+void read(ByteReader& r, StateHash& m) {
+    m.epoch = r.readU32();
+    m.worldId = r.readU16();
+    m.roomId = r.readU16();
+    m.enemiesHash = r.readU32();
+    m.progressHash = r.readU32();
+}
+
+void read(ByteReader& r, DesyncNotice& m) {
+    m.slot = static_cast<SlotType>(r.readU8());
+    m.epoch = r.readU32();
+    m.fields = r.readU8();
+}
+
+void read(ByteReader& r, ResyncRequest& m) { m.slot = r.readU8(); }
+
 // ===== Framed packet helpers ================================================
 
 static constexpr std::size_t kHeaderSize = 3; // 1 type + 2 length
@@ -579,6 +611,24 @@ std::vector<std::uint8_t> encode(const ProgressUpdate& m) {
     ByteWriter w;
     write(w, m);
     return encodePacket(PacketType::ProgressUpdate, w.data());
+}
+
+std::vector<std::uint8_t> encode(const StateHash& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::StateHash, w.data());
+}
+
+std::vector<std::uint8_t> encode(const DesyncNotice& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::DesyncNotice, w.data());
+}
+
+std::vector<std::uint8_t> encode(const ResyncRequest& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::ResyncRequest, w.data());
 }
 
 PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,

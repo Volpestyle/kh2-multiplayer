@@ -1,4 +1,5 @@
 #pragma once
+#include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
 
 #include <cstdint>
@@ -40,6 +41,13 @@ struct PeerState {
     std::uint16_t ackWorldId{0};
     std::uint16_t ackRoomId{0};
     bool ackArrived{false};
+
+    // Desync detection: latest state hash and how many consecutive
+    // comparisons with the host disagreed (and on what).
+    bool hasHash{false};
+    StateHash lastHash{};
+    std::uint32_t mismatchStreak{0};
+    std::uint8_t reportedFields{0};
 
     // Heartbeat tracking
     std::uint64_t lastHeartbeatMs{0};

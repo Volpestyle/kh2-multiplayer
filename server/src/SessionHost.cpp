@@ -549,6 +549,41 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::StateHash: {
+                if (ps->status != PeerStatus::Verified) return;
+                read(reader, ps->lastHash);
+                ps->hasHash = true;
+                if (fromHost(*ps)) {
+                    for (auto& other : peers_) {
+                        if (!fromHost(other) && other.hasHash) compareWithHost(other);
+                    }
+                } else {
+                    compareWithHost(*ps);
+                }
+                break;
+            }
+
+            case PacketType::ResyncRequest: {
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps)) {
+                    ++rejectedWorld_;
+                    return;
+                }
+                ResyncRequest req;
+                read(reader, req);
+                for (auto& other : peers_) {
+                    if (other.status != PeerStatus::Verified || fromHost(other)) continue;
+                    if (req.slot != 0xFF &&
+                        req.slot != static_cast<std::uint8_t>(other.assignedSlot)) {
+                        continue;
+                    }
+                    log("Resync requested for " + other.peerId);
+                    other.mismatchStreak = 0;
+                    other.reportedFields = 0;
+                    sendWorldStateTo(other.enetPeer);
+                }
+                break;
+            }
+
             case PacketType::ClockPing: {
                 ClockPing ping;
                 read(reader, ping);
@@ -655,6 +690,33 @@ void SessionHost::sendWorldStateTo(ENetPeer* peer) {
     for (auto id : deadEnemies_) {
         sendTo(peer, encode(EnemyDeath {manifest_.epoch, id}), true);
     }
+}
+
+// A client disagreeing with the host on the same epoch for two consecutive
+// comparisons is reported once per distinct set of fields (transient
+// mismatches during a load don't fire). Different epochs aren't compared:
+// the client may simply still be loading.
+void SessionHost::compareWithHost(PeerState& client) {
+    auto* host = hostPeer();
+    if (!host || !host->hasHash || !client.hasHash) return;
+    const auto& h = host->lastHash;
+    const auto& c = client.lastHash;
+    if (h.epoch != c.epoch) return;
+    std::uint8_t fields = 0;
+    if (h.worldId != c.worldId || h.roomId != c.roomId) fields |= DesyncRoom;
+    if (h.enemiesHash != c.enemiesHash) fields |= DesyncEnemies;
+    if (h.progressHash != c.progressHash) fields |= DesyncProgress;
+    if (fields == 0) {
+        client.mismatchStreak = 0;
+        client.reportedFields = 0;
+        return;
+    }
+    if (++client.mismatchStreak < 2 || fields == client.reportedFields) return;
+    client.reportedFields = fields;
+    ++desyncNotices_;
+    log("Desync: " + client.peerId + " fields=" + std::to_string(fields) +
+        " epoch=" + std::to_string(h.epoch));
+    broadcastToVerified(encode(DesyncNotice {client.assignedSlot, h.epoch, fields}), true);
 }
 
 void SessionHost::clearWorldState() {
