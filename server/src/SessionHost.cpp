@@ -366,6 +366,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
 
                 // Send full session state to everyone.
                 broadcastSessionState();
+                if (!fromHost(*ps)) sendWorldStateTo(peer);
                 break;
             }
 
@@ -452,6 +453,89 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::RoomTransition:
+            case PacketType::EventHold:
+            case PacketType::EnemyManifest:
+            case PacketType::EnemyHp:
+            case PacketType::EnemyDeath: {
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps)) {
+                    ++rejectedWorld_;
+                    log("Dropping world message from non-host " + ps->peerId);
+                    return;
+                }
+                const std::vector<std::uint8_t> packet(data, data + size);
+                bool reliable = true;
+                if (type == PacketType::RoomTransition) {
+                    RoomTransition m;
+                    read(reader, m);
+                    clearWorldState();
+                    room_ = m;
+                    log("Host transition epoch " + std::to_string(m.epoch) +
+                        " -> world " + std::to_string(m.worldId) + " room " +
+                        std::to_string(m.roomId));
+                } else if (type == PacketType::EventHold) {
+                    EventHold m;
+                    read(reader, m);
+                    hold_ = m;
+                } else if (type == PacketType::EnemyManifest) {
+                    EnemyManifest m;
+                    read(reader, m);
+                    if (m.replace || m.epoch != manifest_.epoch) {
+                        manifest_ = m;
+                        enemyHp_.clear();
+                        deadEnemies_.clear();
+                    } else {
+                        manifest_.entries.insert(manifest_.entries.end(),
+                                                 m.entries.begin(), m.entries.end());
+                    }
+                } else if (type == PacketType::EnemyHp) {
+                    EnemyHp m;
+                    read(reader, m);
+                    for (const auto& e : m.entries) enemyHp_[e.netId] = e;
+                    reliable = false; // periodic absolute values
+                } else {
+                    EnemyDeath m;
+                    read(reader, m);
+                    deadEnemies_.insert(m.netId);
+                }
+                forwardToOthers(peer, packet, reliable);
+                break;
+            }
+
+            case PacketType::HitClaim: {
+                if (ps->status != PeerStatus::Verified || fromHost(*ps)) {
+                    // The host applies its own hits natively.
+                    ++rejectedWorld_;
+                    return;
+                }
+                HitClaim claim;
+                read(reader, claim);
+                claim.attackerSlot = ps->assignedSlot; // never trust the claim
+                if (auto* host = hostPeer()) {
+                    sendTo(host->enetPeer, encode(claim), true);
+                }
+                break;
+            }
+
+            case PacketType::TransitionAck: {
+                if (ps->status != PeerStatus::Verified) return;
+                TransitionAck ack;
+                read(reader, ack);
+                ps->ackEpoch = ack.epoch;
+                ps->ackWorldId = ack.worldId;
+                ps->ackRoomId = ack.roomId;
+                ps->ackArrived = ack.arrived;
+                if (room_ && ack.epoch == room_->epoch &&
+                    (!ack.arrived || ack.worldId != room_->worldId ||
+                     ack.roomId != room_->roomId)) {
+                    log("Divergence: " + ps->peerId + " reports world " +
+                        std::to_string(ack.worldId) + " room " +
+                        std::to_string(ack.roomId) + " for epoch " +
+                        std::to_string(ack.epoch));
+                }
+                break;
+            }
+
             case PacketType::ClockPing: {
                 ClockPing ping;
                 read(reader, ping);
@@ -488,6 +572,67 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
     } catch (const std::exception& ex) {
         log("Packet decode error from " + ps->peerId + ": " + ex.what());
     }
+}
+
+// ---------------------------------------------------------------------------
+// World sync helpers
+// ---------------------------------------------------------------------------
+
+bool SessionHost::fromHost(const PeerState& ps) const {
+    return ps.status == PeerStatus::Verified && ps.assignedSlot == SlotType::Player;
+}
+
+PeerState* SessionHost::hostPeer() {
+    for (auto& ps : peers_) {
+        if (fromHost(ps)) return &ps;
+    }
+    return nullptr;
+}
+
+const PeerState* SessionHost::peerBySlot(SlotType slot) const {
+    for (const auto& ps : peers_) {
+        if (ps.status == PeerStatus::Verified && ps.assignedSlot == slot) return &ps;
+    }
+    return nullptr;
+}
+
+void SessionHost::forwardToOthers(ENetPeer* sender,
+                                  const std::vector<std::uint8_t>& packet,
+                                  bool reliable) {
+    for (auto& other : peers_) {
+        if (other.enetPeer != sender && other.status == PeerStatus::Verified &&
+            other.enetPeer) {
+            sendTo(other.enetPeer, packet, reliable);
+        }
+    }
+}
+
+// Catch a late joiner up: room, hold, enemy set, HP, deaths.
+void SessionHost::sendWorldStateTo(ENetPeer* peer) {
+    if (!room_) return;
+    sendTo(peer, encode(*room_), true);
+    if (hold_ && hold_->epoch == room_->epoch) sendTo(peer, encode(*hold_), true);
+    if (!manifest_.entries.empty()) {
+        EnemyManifest m = manifest_;
+        m.replace = true;
+        sendTo(peer, encode(m), true);
+    }
+    if (!enemyHp_.empty()) {
+        EnemyHp hp;
+        hp.epoch = manifest_.epoch;
+        for (const auto& [id, e] : enemyHp_) hp.entries.push_back(e);
+        sendTo(peer, encode(hp), true);
+    }
+    for (auto id : deadEnemies_) {
+        sendTo(peer, encode(EnemyDeath {manifest_.epoch, id}), true);
+    }
+}
+
+void SessionHost::clearWorldState() {
+    hold_.reset();
+    manifest_ = {};
+    enemyHp_.clear();
+    deadEnemies_.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -593,6 +738,10 @@ void SessionHost::expireStalePeers(std::uint64_t nowMs) {
 }
 
 void SessionHost::removePeer(ENetPeer* peer) {
+    if (auto* ps = findPeer(peer); ps && fromHost(*ps)) {
+        room_.reset();
+        clearWorldState();
+    }
     peers_.erase(
         std::remove_if(peers_.begin(), peers_.end(),
                         [peer](const PeerState& ps) { return ps.enetPeer == peer; }),

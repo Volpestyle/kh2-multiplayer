@@ -68,6 +68,83 @@ struct ClockPong {
 };
 
 // ===========================================================================
+// World sync — host-authored messages (plan D5/D7, VUH-1496/1502/1503).
+//
+// The host is the peer in SlotType::Player. The relay accepts these only
+// from the host and forwards them to everyone else; HitClaim goes the other
+// way (any client -> host only). `epoch` increments on every host room
+// transition so stale messages from a previous room are recognizable.
+// ===========================================================================
+
+struct RoomTransition {
+    std::uint32_t epoch {0};
+    std::uint16_t worldId {0};
+    std::uint16_t roomId {0};
+    std::uint16_t door {0};          // entrance / spawn id
+    std::uint16_t mapProgram {0};
+    std::uint16_t battleProgram {0};
+    std::uint16_t eventProgram {0};
+};
+
+struct TransitionAck {
+    std::uint32_t epoch {0};
+    std::uint16_t worldId {0};
+    std::uint16_t roomId {0};
+    bool arrived {false};            // false = load failed / diverged
+};
+
+// Host entered (active) or left a cutscene/event; clients hold meanwhile.
+struct EventHold {
+    std::uint32_t epoch {0};
+    bool active {false};
+    std::uint16_t eventProgram {0};
+};
+
+// Deterministic enemy identity (plan D5): room + battle program + spawn
+// entry + object id. Clients match their natively spawned enemies to it.
+struct EnemyManifestEntry {
+    std::uint16_t netId {0};
+    std::uint16_t battleProgram {0};
+    std::uint16_t spawnIndex {0};
+    std::uint32_t objectId {0};
+    Vec3 spawnPosition {};
+};
+
+struct EnemyManifest {
+    std::uint32_t epoch {0};
+    bool replace {true};             // false = append (a later wave)
+    std::vector<EnemyManifestEntry> entries;
+};
+
+struct EnemyHpEntry {
+    std::uint16_t netId {0};
+    std::int32_t hp {0};             // absolute, never a delta
+    std::int32_t maxHp {0};
+};
+
+struct EnemyHp {
+    std::uint32_t epoch {0};
+    std::vector<EnemyHpEntry> entries;
+};
+
+struct EnemyDeath {
+    std::uint32_t epoch {0};
+    std::uint16_t netId {0};
+};
+
+// A client's hit on a replica enemy (plan D4). attackerSlot is stamped by
+// the relay; the host applies the damage natively and broadcasts EnemyHp.
+struct HitClaim {
+    std::uint32_t epoch {0};
+    std::uint32_t seq {0};
+    std::uint16_t netId {0};
+    std::uint32_t attackId {0};      // atkp entry
+    std::int32_t damage {0};
+    Vec3 attackerPosition {};
+    SlotType attackerSlot {SlotType::Player};
+};
+
+// ===========================================================================
 // Protocol v2 forward-looking records (declared, not yet wired into codec)
 //
 // These types support both CampaignCoop and PublicRealm modes.

@@ -158,6 +158,69 @@ void write(ByteWriter& w, const ClockPong& p) {
     w.writeU64(p.serverMs);
 }
 
+void write(ByteWriter& w, const RoomTransition& m) {
+    w.writeU32(m.epoch);
+    w.writeU16(m.worldId);
+    w.writeU16(m.roomId);
+    w.writeU16(m.door);
+    w.writeU16(m.mapProgram);
+    w.writeU16(m.battleProgram);
+    w.writeU16(m.eventProgram);
+}
+
+void write(ByteWriter& w, const TransitionAck& m) {
+    w.writeU32(m.epoch);
+    w.writeU16(m.worldId);
+    w.writeU16(m.roomId);
+    w.writeBool(m.arrived);
+}
+
+void write(ByteWriter& w, const EventHold& m) {
+    w.writeU32(m.epoch);
+    w.writeBool(m.active);
+    w.writeU16(m.eventProgram);
+}
+
+void write(ByteWriter& w, const EnemyManifest& m) {
+    if (m.entries.size() > 0xFFFF) throw std::runtime_error("EnemyManifest too large");
+    w.writeU32(m.epoch);
+    w.writeBool(m.replace);
+    w.writeU16(static_cast<std::uint16_t>(m.entries.size()));
+    for (const auto& e : m.entries) {
+        w.writeU16(e.netId);
+        w.writeU16(e.battleProgram);
+        w.writeU16(e.spawnIndex);
+        w.writeU32(e.objectId);
+        write(w, e.spawnPosition);
+    }
+}
+
+void write(ByteWriter& w, const EnemyHp& m) {
+    if (m.entries.size() > 0xFFFF) throw std::runtime_error("EnemyHp too large");
+    w.writeU32(m.epoch);
+    w.writeU16(static_cast<std::uint16_t>(m.entries.size()));
+    for (const auto& e : m.entries) {
+        w.writeU16(e.netId);
+        w.writeI32(e.hp);
+        w.writeI32(e.maxHp);
+    }
+}
+
+void write(ByteWriter& w, const EnemyDeath& m) {
+    w.writeU32(m.epoch);
+    w.writeU16(m.netId);
+}
+
+void write(ByteWriter& w, const HitClaim& m) {
+    w.writeU32(m.epoch);
+    w.writeU32(m.seq);
+    w.writeU16(m.netId);
+    w.writeU32(m.attackId);
+    w.writeI32(m.damage);
+    write(w, m.attackerPosition);
+    w.writeU8(static_cast<std::uint8_t>(m.attackerSlot));
+}
+
 // ===== Binary read helpers ==================================================
 
 void read(ByteReader& r, Vec3& v) {
@@ -307,6 +370,69 @@ void read(ByteReader& r, ClockPong& p) {
     p.serverMs = r.readU64();
 }
 
+void read(ByteReader& r, RoomTransition& m) {
+    m.epoch = r.readU32();
+    m.worldId = r.readU16();
+    m.roomId = r.readU16();
+    m.door = r.readU16();
+    m.mapProgram = r.readU16();
+    m.battleProgram = r.readU16();
+    m.eventProgram = r.readU16();
+}
+
+void read(ByteReader& r, TransitionAck& m) {
+    m.epoch = r.readU32();
+    m.worldId = r.readU16();
+    m.roomId = r.readU16();
+    m.arrived = r.readBool();
+}
+
+void read(ByteReader& r, EventHold& m) {
+    m.epoch = r.readU32();
+    m.active = r.readBool();
+    m.eventProgram = r.readU16();
+}
+
+void read(ByteReader& r, EnemyManifest& m) {
+    m.epoch = r.readU32();
+    m.replace = r.readBool();
+    const auto n = r.readU16();
+    m.entries.resize(n);
+    for (auto& e : m.entries) {
+        e.netId = r.readU16();
+        e.battleProgram = r.readU16();
+        e.spawnIndex = r.readU16();
+        e.objectId = r.readU32();
+        read(r, e.spawnPosition);
+    }
+}
+
+void read(ByteReader& r, EnemyHp& m) {
+    m.epoch = r.readU32();
+    const auto n = r.readU16();
+    m.entries.resize(n);
+    for (auto& e : m.entries) {
+        e.netId = r.readU16();
+        e.hp = r.readI32();
+        e.maxHp = r.readI32();
+    }
+}
+
+void read(ByteReader& r, EnemyDeath& m) {
+    m.epoch = r.readU32();
+    m.netId = r.readU16();
+}
+
+void read(ByteReader& r, HitClaim& m) {
+    m.epoch = r.readU32();
+    m.seq = r.readU32();
+    m.netId = r.readU16();
+    m.attackId = r.readU32();
+    m.damage = r.readI32();
+    read(r, m.attackerPosition);
+    m.attackerSlot = static_cast<SlotType>(r.readU8());
+}
+
 // ===== Framed packet helpers ================================================
 
 static constexpr std::size_t kHeaderSize = 3; // 1 type + 2 length
@@ -381,6 +507,48 @@ std::vector<std::uint8_t> encode(const AvatarState& a, PacketType type) {
     ByteWriter w;
     write(w, a);
     return encodePacket(type, w.data());
+}
+
+std::vector<std::uint8_t> encode(const RoomTransition& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::RoomTransition, w.data());
+}
+
+std::vector<std::uint8_t> encode(const TransitionAck& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::TransitionAck, w.data());
+}
+
+std::vector<std::uint8_t> encode(const EventHold& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::EventHold, w.data());
+}
+
+std::vector<std::uint8_t> encode(const EnemyManifest& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::EnemyManifest, w.data());
+}
+
+std::vector<std::uint8_t> encode(const EnemyHp& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::EnemyHp, w.data());
+}
+
+std::vector<std::uint8_t> encode(const EnemyDeath& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::EnemyDeath, w.data());
+}
+
+std::vector<std::uint8_t> encode(const HitClaim& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::HitClaim, w.data());
 }
 
 PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,

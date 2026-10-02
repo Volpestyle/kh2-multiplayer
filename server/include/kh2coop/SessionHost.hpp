@@ -6,6 +6,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <set>
 #include <optional>
 #include <string>
 #include <vector>
@@ -94,6 +96,13 @@ public:
     [[nodiscard]] bool isRunning() const { return running_; }
     [[nodiscard]] std::uint64_t relayedAvatarCount() const { return relayedAvatars_; }
 
+    // World sync (host-authored). The host is the verified peer in
+    // SlotType::Player; world messages from anyone else are dropped.
+    [[nodiscard]] std::uint64_t rejectedWorldMessages() const { return rejectedWorld_; }
+    [[nodiscard]] const std::optional<RoomTransition>& currentRoom() const { return room_; }
+    [[nodiscard]] std::size_t manifestSize() const { return manifest_.entries.size(); }
+    [[nodiscard]] const PeerState* peerBySlot(SlotType slot) const;
+
 private:
     // ENet event handlers
     void onConnect(_ENetPeer* peer);
@@ -117,6 +126,14 @@ private:
 
     void log(const std::string& msg);
 
+    // World sync helpers
+    bool fromHost(const PeerState& ps) const;
+    PeerState* hostPeer();
+    void forwardToOthers(_ENetPeer* sender, const std::vector<std::uint8_t>& packet,
+                         bool reliable);
+    void sendWorldStateTo(_ENetPeer* peer);
+    void clearWorldState();
+
     // State
     SessionConfig config_;
     SessionCallbacks callbacks_;
@@ -126,6 +143,14 @@ private:
     bool running_{false};
     std::uint32_t nextSnapshotId_{1};
     std::uint64_t relayedAvatars_{0};
+
+    // Cached world state for late joiners (VUH-1495).
+    std::optional<RoomTransition> room_;
+    std::optional<EventHold> hold_;
+    EnemyManifest manifest_;
+    std::map<std::uint16_t, EnemyHpEntry> enemyHp_;
+    std::set<std::uint16_t> deadEnemies_;
+    std::uint64_t rejectedWorld_{0};
 };
 
 } // namespace kh2coop

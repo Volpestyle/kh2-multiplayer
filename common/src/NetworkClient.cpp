@@ -143,6 +143,34 @@ void NetworkClient::sendAvatar(AvatarState avatar) {
     sendPacket(encode(avatar, PacketType::AvatarState), false);
 }
 
+void NetworkClient::sendRoomTransition(const RoomTransition& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
+void NetworkClient::sendEventHold(const EventHold& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
+void NetworkClient::sendEnemyManifest(const EnemyManifest& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
+void NetworkClient::sendEnemyHp(const EnemyHp& m) {
+    if (connected_) sendPacket(encode(m), false);
+}
+
+void NetworkClient::sendEnemyDeath(const EnemyDeath& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
+void NetworkClient::sendHitClaim(const HitClaim& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
+void NetworkClient::sendTransitionAck(const TransitionAck& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
 void NetworkClient::sendClockPing() {
     if (!connected_) return;
     lastPingMs_ = localTimeMs();
@@ -273,6 +301,42 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
                 AvatarState avatar;
                 read(reader, avatar);
                 if (callbacks_.onAvatarState) callbacks_.onAvatarState(avatar);
+                break;
+            }
+            case PacketType::RoomTransition: {
+                RoomTransition m;
+                read(reader, m);
+                if (callbacks_.onRoomTransition) callbacks_.onRoomTransition(m);
+                break;
+            }
+            case PacketType::EventHold: {
+                EventHold m;
+                read(reader, m);
+                if (callbacks_.onEventHold) callbacks_.onEventHold(m);
+                break;
+            }
+            case PacketType::EnemyManifest: {
+                EnemyManifest m;
+                read(reader, m);
+                if (callbacks_.onEnemyManifest) callbacks_.onEnemyManifest(m);
+                break;
+            }
+            case PacketType::EnemyHp: {
+                EnemyHp m;
+                read(reader, m);
+                if (callbacks_.onEnemyHp) callbacks_.onEnemyHp(m);
+                break;
+            }
+            case PacketType::EnemyDeath: {
+                EnemyDeath m;
+                read(reader, m);
+                if (callbacks_.onEnemyDeath) callbacks_.onEnemyDeath(m);
+                break;
+            }
+            case PacketType::HitClaim: {
+                HitClaim m;
+                read(reader, m);
+                if (callbacks_.onHitClaim) callbacks_.onHitClaim(m);
                 break;
             }
             case PacketType::ClockPong: {

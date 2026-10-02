@@ -35,6 +35,12 @@ struct PeerState {
     // Latest input received from this peer
     InputFrame lastInput{};
 
+    // Last room this peer reported arriving in (TransitionAck)
+    std::uint32_t ackEpoch{0};
+    std::uint16_t ackWorldId{0};
+    std::uint16_t ackRoomId{0};
+    bool ackArrived{false};
+
     // Heartbeat tracking
     std::uint64_t lastHeartbeatMs{0};
     std::uint32_t roundTripMs{0};

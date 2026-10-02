@@ -105,6 +105,16 @@ add_executable(kh2coop_avatar_test
 target_link_libraries(kh2coop_avatar_test PRIVATE kh2coop_server_core kh2coop_common)
 
 # ---------------------------------------------------------------------------
+# kh2coop_world_test — host-authored transitions, cutscene holds, enemy
+# manifest/HP/deaths, hit claims and late-joiner catch-up via the relay.
+# ---------------------------------------------------------------------------
+add_executable(kh2coop_world_test
+    tests/WorldSyncTest.cpp
+)
+
+target_link_libraries(kh2coop_world_test PRIVATE kh2coop_server_core kh2coop_common)
+
+# ---------------------------------------------------------------------------
 # kh2coop_inject — in-process DLL for friend AI replacement (Strategy B).
 # Loads into KH2's process and hooks PerEntityUpdate to replace friend AI
 # with player input from XInput gamepads.

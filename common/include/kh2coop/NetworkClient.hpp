@@ -26,6 +26,14 @@ struct ClientCallbacks {
     std::function<void(const EnemySnapshot&)> onEnemySnapshot;
     std::function<void(const EventMessage&)> onEvent;
     std::function<void(const AvatarState&)> onAvatarState;
+    // World sync (from the host, via the relay)
+    std::function<void(const RoomTransition&)> onRoomTransition;
+    std::function<void(const EventHold&)> onEventHold;
+    std::function<void(const EnemyManifest&)> onEnemyManifest;
+    std::function<void(const EnemyHp&)> onEnemyHp;
+    std::function<void(const EnemyDeath&)> onEnemyDeath;
+    // Host only: a client's hit claim, attackerSlot stamped by the relay
+    std::function<void(const HitClaim&)> onHitClaim;
     std::function<void(const std::string&)> onLog;
 };
 
@@ -75,6 +83,16 @@ public:
     // Clock sync. tick() pings the host automatically (fast until a few
     // samples arrive, then every 2 s); the estimate uses the lowest-RTT sample.
     void sendClockPing();
+
+    // World sync. Host-only messages are dropped by the relay when sent by a
+    // non-host. EnemyHp is unreliable (periodic absolute values).
+    void sendRoomTransition(const RoomTransition& m);
+    void sendEventHold(const EventHold& m);
+    void sendEnemyManifest(const EnemyManifest& m);
+    void sendEnemyHp(const EnemyHp& m);
+    void sendEnemyDeath(const EnemyDeath& m);
+    void sendHitClaim(const HitClaim& m);
+    void sendTransitionAck(const TransitionAck& m);
     [[nodiscard]] bool hasClockSync() const { return clockSamples_ > 0; }
     [[nodiscard]] std::uint64_t estimatedServerTimeMs() const;
     [[nodiscard]] std::uint32_t roundTripMs() const { return bestRttMs_; }

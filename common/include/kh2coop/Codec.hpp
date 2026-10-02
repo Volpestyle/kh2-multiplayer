@@ -20,6 +20,7 @@ enum class PacketType : std::uint8_t {
     ClientHello = 4,   // Dedicated handshake (replaces SessionState-as-hello)
     AvatarState = 5,   // Owner's avatar; the host relays it to the others
     ClockPing = 6,
+    HitClaim = 8,      // client -> host only (relay stamps attackerSlot)
 
     // Host -> Client
     SessionState = 10,
@@ -28,6 +29,13 @@ enum class PacketType : std::uint8_t {
     EventMessage = 13,
     AvatarRelay = 14,  // AvatarState with ownerSlot stamped by the host
     ClockPong = 15,
+
+    // Host-authored world sync: host -> relay -> everyone else
+    RoomTransition = 20,
+    EventHold = 21,
+    EnemyManifest = 22,
+    EnemyHp = 23,
+    EnemyDeath = 24,
 };
 
 // ---------------------------------------------------------------------------
@@ -60,6 +68,13 @@ void write(ByteWriter& w, const EventMessage& em);
 void write(ByteWriter& w, const ClientHello& ch);
 void write(ByteWriter& w, const ClockPing& p);
 void write(ByteWriter& w, const ClockPong& p);
+void write(ByteWriter& w, const RoomTransition& m);
+void write(ByteWriter& w, const TransitionAck& m);
+void write(ByteWriter& w, const EventHold& m);
+void write(ByteWriter& w, const EnemyManifest& m);
+void write(ByteWriter& w, const EnemyHp& m);
+void write(ByteWriter& w, const EnemyDeath& m);
+void write(ByteWriter& w, const HitClaim& m);
 
 void read(ByteReader& r, SessionActor& sa);
 void read(ByteReader& r, SessionState& ss);
@@ -69,6 +84,13 @@ void read(ByteReader& r, EventMessage& em);
 void read(ByteReader& r, ClientHello& ch);
 void read(ByteReader& r, ClockPing& p);
 void read(ByteReader& r, ClockPong& p);
+void read(ByteReader& r, RoomTransition& m);
+void read(ByteReader& r, TransitionAck& m);
+void read(ByteReader& r, EventHold& m);
+void read(ByteReader& r, EnemyManifest& m);
+void read(ByteReader& r, EnemyHp& m);
+void read(ByteReader& r, EnemyDeath& m);
+void read(ByteReader& r, HitClaim& m);
 
 // ---------------------------------------------------------------------------
 // Framed packet helpers
@@ -89,6 +111,13 @@ std::vector<std::uint8_t> encode(const EventMessage& em);
 std::vector<std::uint8_t> encode(const ClientHello& ch);
 std::vector<std::uint8_t> encode(const ClockPing& p);
 std::vector<std::uint8_t> encode(const ClockPong& p);
+std::vector<std::uint8_t> encode(const RoomTransition& m);
+std::vector<std::uint8_t> encode(const TransitionAck& m);
+std::vector<std::uint8_t> encode(const EventHold& m);
+std::vector<std::uint8_t> encode(const EnemyManifest& m);
+std::vector<std::uint8_t> encode(const EnemyHp& m);
+std::vector<std::uint8_t> encode(const EnemyDeath& m);
+std::vector<std::uint8_t> encode(const HitClaim& m);
 // AvatarState travels as PacketType::AvatarState (client -> host) or
 // PacketType::AvatarRelay (host -> clients); the payload is identical.
 std::vector<std::uint8_t> encode(const AvatarState& a, PacketType type);
