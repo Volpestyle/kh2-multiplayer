@@ -13,6 +13,7 @@
 // Exit code 0 = all checks passed.
 
 #include "kh2coop/AvatarBridge.hpp"
+#include "kh2coop/AvatarCapture.hpp"
 #include "kh2coop/AvatarInterpolator.hpp"
 #include "kh2coop/AvatarSync.hpp"
 #include "kh2coop/Codec.hpp"
@@ -28,6 +29,7 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <thread>
 
 using namespace kh2coop;
@@ -242,6 +244,70 @@ void testAvatarBridge() {
           "DLL reads puppet 1's pose");
 }
 
+// Byte-addressed fake memory for AvatarCapture.
+struct FakeMemory {
+    std::map<std::uint64_t, std::uint8_t> bytes;
+    template <class T>
+    void put(std::uint64_t addr, T v) {
+        std::uint8_t raw[sizeof(T)];
+        std::memcpy(raw, &v, sizeof(T));
+        for (std::size_t i = 0; i < sizeof(T); ++i) bytes[addr + i] = raw[i];
+    }
+    template <class T>
+    T read(std::uint64_t addr) const {
+        std::uint8_t raw[sizeof(T)] = {};
+        for (std::size_t i = 0; i < sizeof(T); ++i) {
+            auto it = bytes.find(addr + i);
+            if (it != bytes.end()) raw[i] = it->second;
+        }
+        T v;
+        std::memcpy(&v, raw, sizeof(T));
+        return v;
+    }
+};
+
+void testAvatarCapture() {
+    std::cout << "\n=== AvatarCapture ===\n";
+    namespace o = offsets;
+    const std::uint64_t exe = 0x140000000ULL;
+    const std::uint64_t actor = 0x7FF600001000ULL;
+    const std::uint64_t motCtrl = 0x7FF600009000ULL;
+    FakeMemory m;
+    m.put<std::uint8_t>(exe + o::WORLD_ID, 4);
+    m.put<std::uint8_t>(exe + o::ROOM_ID, 0x1A);
+    m.put<std::int32_t>(exe + o::slot0::HP, 87);
+    m.put<std::int32_t>(exe + o::slot0::MAX_HP, 120);
+    const std::uint64_t entity = actor + o::actor::ENTITY_TRANSFORM;
+    m.put<float>(entity + o::entity::POS_X, 10.0f);
+    m.put<float>(entity + o::entity::POS_X + 4, -20.0f);
+    m.put<float>(entity + o::entity::POS_X + 8, 30.0f);
+    m.put<float>(entity + o::entity::ROT_Y, 1.5f);
+    m.put<std::uint32_t>(entity + o::entity::AIRBORNE_FLAG, 1);
+    m.put<float>(actor + capture::ACTOR_VELOCITY, 3.0f);
+    m.put<float>(actor + capture::ACTOR_VELOCITY + 8, -4.0f);
+    m.put<std::uint32_t>(actor + o::actor::ANIM_ID, 151);
+    m.put<std::uint64_t>(actor + capture::ACTOR_MOTCTRL, motCtrl);
+    m.put<float>(motCtrl + capture::MOTCTRL_TIME, 12.5f);
+    m.put<float>(motCtrl + capture::MOTCTRL_SPEED, 1.25f);
+
+    const auto a = captureAvatar(m, exe, actor, false, false);
+    check(a.worldId == 4 && a.roomId == 0x1A && a.hp == 87 && a.maxHp == 120,
+          "room and HP come from NOW and slot 0");
+    check(a.position.x == 10.0f && a.position.y == -20.0f && a.position.z == 30.0f &&
+              a.rotationY == 1.5f && a.velocity.x == 3.0f && a.velocity.z == -4.0f,
+          "transform from entity+0x30/+0x4C, velocity from actor+0xB98");
+    check(a.motionId == 151 && a.motionTime == 12.5f && a.motionSpeed == 1.25f,
+          "motion id from actor+0x180, time/speed through the motion controller");
+    check((a.flags & AvatarAirborne) && !(a.flags & AvatarInCutscene), "airborne flag set");
+
+    const auto noActor = captureAvatar(m, exe, 0, false, false);
+    check((noActor.flags & AvatarInCutscene) && noActor.roomId == 0x1A,
+          "no actor (loading) -> flagged hidden, room still reported");
+    const auto event = captureAvatar(m, exe, actor, true, true);
+    check((event.flags & AvatarInCutscene) && (event.flags & AvatarDowned),
+          "caller's event/downed state becomes flags");
+}
+
 // ---------------------------------------------------------------------------
 
 constexpr std::uint16_t kPort = 17795;
@@ -401,6 +467,7 @@ int main() {
     testInterpolator();
     testAvatarSync();
     testAvatarBridge();
+    testAvatarCapture();
     testEndToEnd();
     enet_deinitialize();
 

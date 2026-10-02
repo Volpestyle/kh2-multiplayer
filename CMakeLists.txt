@@ -102,7 +102,7 @@ add_executable(kh2coop_avatar_test
     tests/AvatarRelayTest.cpp
 )
 
-target_link_libraries(kh2coop_avatar_test PRIVATE kh2coop_server_core kh2coop_common)
+target_link_libraries(kh2coop_avatar_test PRIVATE kh2coop_server_core kh2coop_runtime)
 
 # ---------------------------------------------------------------------------
 # kh2coop_world_test — host-authored transitions, cutscene holds, enemy
