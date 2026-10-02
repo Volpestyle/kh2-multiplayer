@@ -1,5 +1,6 @@
 #include "kh2coop/CaptureChannel.hpp"
 #include "kh2coop/WarpChannel.hpp"
+#include "kh2coop/HitChannel.hpp"
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/Types.hpp"
@@ -2292,6 +2293,100 @@ CommandResult CmdWarp(std::vector<std::string> args) {
 }
 
 // ============================================================================
+// hit — hit ownership controls over the DLL's HitChannel (VUH-1501)
+// ============================================================================
+
+std::string HexAddr(std::uint64_t value) {
+    std::ostringstream out;
+    out << "\"0x" << std::hex << std::uppercase << value << "\"";
+    return out.str();
+}
+
+CommandResult CmdHit(std::vector<std::string> args) {
+    if (args.empty()) throw std::runtime_error("hit requires drop, claims, damage or kill");
+    const std::string sub = args.front();
+    args.erase(args.begin());
+    const bool on = ConsumeFlag(args, "--on");
+    const bool off = ConsumeFlag(args, "--off");
+    const bool enemies = ConsumeFlag(args, "--enemies");
+    const auto attackerRaw = ConsumeOption(args, "--attacker");
+    const auto victimRaw = ConsumeOption(args, "--victim");
+    const auto amountRaw = ConsumeOption(args, "--amount");
+    const auto lastRaw = ConsumeOption(args, "--last");
+    if (!args.empty()) throw std::runtime_error("Unexpected argument for hit: " + args.front());
+
+    const DWORD pid = ResolveTargetPid();
+    const std::wstring name = kh2coop::HIT_NAME_PREFIX + std::to_wstring(pid);
+    HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
+    if (!mapping) {
+        return MakeError("No hit channel for PID " + std::to_string(pid) +
+                         " (inject a DLL build with hit ownership support)");
+    }
+    auto* ch = static_cast<kh2coop::HitChannel*>(
+        MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(kh2coop::HitChannel)));
+    struct Cleanup {
+        HANDLE mapping;
+        void* view;
+        ~Cleanup() { if (view) UnmapViewOfFile(view); CloseHandle(mapping); }
+    } cleanup {mapping, ch};
+    if (!ch || ch->magic != kh2coop::HIT_MAGIC || ch->version != kh2coop::HIT_VERSION) {
+        return MakeError("Hit channel has an unexpected layout");
+    }
+
+    std::ostringstream out;
+    if (sub == "drop") {
+        if (on == off) throw std::runtime_error("hit drop needs --on or --off");
+        ch->dropAttacker = attackerRaw ? ParseNumber<std::uint64_t>(*attackerRaw, "--attacker") : 0;
+        ch->dropVictim = victimRaw ? ParseNumber<std::uint64_t>(*victimRaw, "--victim") : 0;
+        ch->enemyVictimsOnly = enemies ? 1 : 0;
+        ch->dropEnabled = on ? 1 : 0;
+        out << "{\"ok\":true,\"processId\":" << pid << ",\"dropEnabled\":" << ch->dropEnabled
+            << ",\"attacker\":" << HexAddr(ch->dropAttacker) << ",\"victim\":"
+            << HexAddr(ch->dropVictim) << ",\"enemyVictimsOnly\":" << ch->enemyVictimsOnly
+            << ",\"claimCount\":" << ch->claimCount << "}";
+        return {0, out.str()};
+    }
+    if (sub == "claims") {
+        const long total = ch->claimCount;
+        const long want = lastRaw ? ParseNumber<long>(*lastRaw, "--last") : 16;
+        const long count = (std::min)({want, total, static_cast<long>(kh2coop::HIT_CLAIM_CAPACITY)});
+        out << "{\"ok\":true,\"processId\":" << pid << ",\"claimCount\":" << total
+            << ",\"claims\":[";
+        for (long i = total - count; i < total; ++i) {
+            const auto& c = ch->claims[i % kh2coop::HIT_CLAIM_CAPACITY];
+            out << (i == total - count ? "" : ",") << "{\"n\":" << i << ",\"frame\":" << c.frame
+                << ",\"atkp\":" << c.atkpId << ",\"attacker\":" << HexAddr(c.attacker)
+                << ",\"victim\":" << HexAddr(c.victim) << ",\"damage\":" << c.damage
+                << ",\"victimHp\":" << c.victimHp << "}";
+        }
+        out << "]}";
+        return {0, out.str()};
+    }
+    if (sub != "damage" && sub != "kill") throw std::runtime_error("Unknown hit subcommand: " + sub);
+    if (!victimRaw) throw std::runtime_error("hit " + sub + " requires --victim");
+    if (sub == "damage" && !amountRaw) throw std::runtime_error("hit damage requires --amount");
+    if (ch->requestSeq != ch->doneSeq) return MakeError("A hit request is already pending");
+    ch->op = static_cast<std::uint32_t>(sub == "damage" ? kh2coop::HitOp::Damage
+                                                          : kh2coop::HitOp::Lethal);
+    ch->amount = amountRaw ? ParseNumber<std::int32_t>(*amountRaw, "--amount") : 0;
+    ch->victim = ParseNumber<std::uint64_t>(*victimRaw, "--victim");
+    const long seq = InterlockedIncrement(&ch->requestSeq);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (ch->doneSeq != seq) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            InterlockedCompareExchange(&ch->doneSeq, seq, seq - 1);
+            return MakeError("Hit request not picked up (no room running?); cancelled");
+        }
+        SleepMs(5);
+    }
+    out << "{\"ok\":" << (ch->status == 0 ? "true" : "false") << ",\"processId\":" << pid
+        << ",\"status\":" << ch->status << ",\"victim\":" << HexAddr(ch->victim)
+        << ",\"hpBefore\":" << ch->hpBefore << ",\"hpAfter\":" << ch->hpAfter
+        << ",\"frame\":" << ch->frame << "}";
+    return {ch->status == 0 ? 0 : 1, out.str()};
+}
+
+// ============================================================================
 // peek: sample exe-relative memory over time (RE aid).
 //   kh2ctl peek --rva 0x9BA928:u64,0x8EC540:u32 [--samples N] [--interval-ms N]
 // ============================================================================
@@ -2585,6 +2680,8 @@ void PrintUsage() {
         << "  overlay on|off            debug overlay: pid, frame, world/room, fps\n"
         << "  fps [--window-ms N]       game present rate\n"
         << "  warp --world W --room R [--door D] [--map M --btl B --evt E]\n"
+        << "  hit drop --on|--off [--attacker A] [--victim V] [--enemies] | hit claims [--last N]\n"
+        << "  hit damage --victim V --amount N | hit kill --victim V\n"
         << "       [--timeout-ms N]     load a room (programs default to the save's)\n"
         << "  peek --rva RVA[:u8|u16|i16|u32|i32|f32|u64][,...] [--samples N]\n"
         << "       [--interval-ms N]    sample exe-relative memory\n"
@@ -2682,6 +2779,8 @@ int main(int argc, char* argv[]) {
             result = CmdFps(std::move(args));
         } else if (command == "warp") {
             result = CmdWarp(std::move(args));
+        } else if (command == "hit") {
+            result = CmdHit(std::move(args));
         } else if (command == "peek") {
             result = CmdPeek(std::move(args));
         } else if (command == "entities") {

@@ -36,6 +36,7 @@
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/AvatarCapture.hpp"
+#include "kh2coop/HitChannel.hpp"
 
 #include <Windows.h>
 #include <MinHook.h>
@@ -531,18 +532,26 @@ static void ActorName(uintptr_t actor, char* out) {
     }
 }
 
+// The most recent hit record, so ApplyHitDamage (called with the record
+// right after it's built) knows who dealt it.
+struct LastHit { uintptr_t hit; uintptr_t victim; uintptr_t attacker; uint32_t atkpId; };
+static LastHit g_lastHit = {};
+
 static uintptr_t __fastcall HookedBuildHit(void* atk, void* victim, uint32_t a3, uint32_t a4) {
     const uintptr_t hit = g_origBuildHit(atk, victim, a3, a4);
-    if (hit == 0 || g_hitsLogged >= HIT_LOG_LIMIT) return hit;
+    if (hit == 0) return hit;
     __try {
         const auto A = reinterpret_cast<uintptr_t>(atk);
         const uint32_t ownerHandle = *reinterpret_cast<const uint32_t*>(A + 0x10);
         const uintptr_t atkp = *reinterpret_cast<const uintptr_t*>(A + 0x30);
         const uint32_t atkpId = atkp ? *reinterpret_cast<const uint16_t*>(atkp + 2) : 0xFFFF;
+        const uintptr_t attackerActor = ActorForHandle(ownerHandle);
+        g_lastHit = {hit, reinterpret_cast<uintptr_t>(victim), attackerActor, atkpId};
+        if (g_hitsLogged >= HIT_LOG_LIMIT) return hit;
         const int32_t damage = *reinterpret_cast<const int32_t*>(hit + 0x28);
         const uint8_t stat = *reinterpret_cast<const uint8_t*>(hit + 0x25);
         char attacker[32], target[32];
-        ActorName(ActorForHandle(ownerHandle), attacker);
+        ActorName(attackerActor, attacker);
         ActorName(reinterpret_cast<uintptr_t>(victim), target);
         const int32_t* hp = nullptr;
         const auto status = *reinterpret_cast<const uintptr_t*>(
@@ -557,6 +566,139 @@ static uintptr_t __fastcall HookedBuildHit(void* atk, void* victim, uint32_t a3,
         Log("[hit] exception while logging");
     }
     return hit;
+}
+
+// ----------------------------------------------------------------------------
+// Hit ownership (VUH-1501): drop filter + claims, host apply, lethal blow.
+// See kh2coop/HitChannel.hpp.
+//   0x3D3BA0(victim, hit) ApplyHitDamage: consumes hit+0x28 (first checks
+//            and sets bit 1 of hit+0x18, the "applied" flag).
+// ----------------------------------------------------------------------------
+using PFN_ApplyHitDamage = uintptr_t(__fastcall*)(void* victim, void* hit);
+static constexpr uint64_t RVA_APPLY_HIT_DAMAGE = 0x3D3BA0;
+static constexpr uint8_t kApplyHitDamageBytes[] = {
+    0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf1, 0x48, 0x8b, 0xfa};
+static PFN_ApplyHitDamage g_origApplyHitDamage = nullptr;
+static HANDLE g_hitMapping = nullptr;
+static HitChannel* g_hitChannel = nullptr;
+static uint32_t g_dropsLogged = 0;
+
+static int32_t ActorHp(uintptr_t actor) {
+    const auto status = *reinterpret_cast<const uintptr_t*>(actor + 0x5C0);
+    return status > 0x10000 ? *reinterpret_cast<const int32_t*>(status) : -1;
+}
+
+static bool IsEnemyVictim(uintptr_t actor) {
+    const auto obj = *reinterpret_cast<const uintptr_t*>(actor + offsets::actor::OBJENTRY_PTR);
+    if (obj <= g_exeBase || obj >= g_exeBase + 0x3000000) return false;
+    const uint8_t type = *reinterpret_cast<const uint8_t*>(obj + offsets::objentry::TYPE_FLAGS);
+    return type == offsets::objentry::TYPE_BOSS || type == offsets::objentry::TYPE_MOB;
+}
+
+static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
+    HitChannel* ch = g_hitChannel;
+    if (ch && ch->dropEnabled) {
+        __try {
+            const auto v = reinterpret_cast<uintptr_t>(victim);
+            const auto h = reinterpret_cast<uintptr_t>(hit);
+            const uintptr_t attacker =
+                (g_lastHit.hit == h && g_lastHit.victim == v) ? g_lastHit.attacker : 0;
+            auto* damage = reinterpret_cast<int32_t*>(h + 0x28);
+            const bool match = *damage > 0
+                && (ch->dropAttacker == 0 || ch->dropAttacker == attacker)
+                && (ch->dropVictim == 0 || ch->dropVictim == v)
+                && (!ch->enemyVictimsOnly || IsEnemyVictim(v));
+            if (match) {
+                const long n = InterlockedIncrement(&ch->claimCount) - 1;
+                HitClaim& c = ch->claims[n % HIT_CLAIM_CAPACITY];
+                c.frame = g_frameCounter;
+                c.atkpId = g_lastHit.hit == h ? g_lastHit.atkpId : 0xFFFF;
+                c.attacker = attacker;
+                c.victim = v;
+                c.damage = *damage;
+                c.victimHp = ActorHp(v);
+                if (g_dropsLogged++ < HIT_LOG_LIMIT) {
+                    char a[32], t[32];
+                    ActorName(attacker, a);
+                    ActorName(v, t);
+                    Log("[drop] frame %u %s atkp=%u -> %s@%llX damage %d zeroed (claim #%ld, hp %d)",
+                        g_frameCounter, a, c.atkpId, t, static_cast<unsigned long long>(v),
+                        c.damage, n, c.victimHp);
+                }
+                *damage = 0;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("[drop] exception in filter");
+        }
+    }
+    return g_origApplyHitDamage(victim, hit);
+}
+
+static bool IsLiveActor(uintptr_t actor) {
+    for (int i = 0; i < g_handleCount; ++i) {
+        if (g_handleMap[i].actor == actor) return true;
+    }
+    return false;
+}
+
+// Runs a pending apply request on the game thread. Called at frame start,
+// after the previous frame's actor map is complete (before it's reset).
+static void ProcessHitRequest() {
+    HitChannel* ch = g_hitChannel;
+    if (!ch || ch->requestSeq == ch->doneSeq) return;
+    const auto victim = static_cast<uintptr_t>(ch->victim);
+    HitStatus status = HitStatus::Ok;
+    ch->hpBefore = ch->hpAfter = -1;
+    if (!IsLiveActor(victim)) {
+        status = HitStatus::UnknownVictim;
+    } else {
+        __try {
+            ch->hpBefore = ActorHp(victim);
+            switch (static_cast<HitOp>(ch->op)) {
+            case HitOp::Damage:
+                if (!g_origMovementDispatch) { status = HitStatus::Unavailable; break; }
+                // TakeDamage(actor, -damage, HP, react) — the path a real hit takes.
+                g_origMovementDispatch(reinterpret_cast<void*>(victim), -ch->amount, 0, 1);
+                break;
+            case HitOp::Lethal:
+                if (!g_origApplyStatDelta) { status = HitStatus::Unavailable; break; }
+                g_origApplyStatDelta(reinterpret_cast<void*>(victim), -ch->hpBefore, 0, 0);
+                break;
+            default:
+                status = HitStatus::BadOp;
+            }
+            ch->hpAfter = ActorHp(victim);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("[apply] exception applying op %u", ch->op);
+        }
+    }
+    char name[32];
+    ActorName(status == HitStatus::UnknownVictim ? 0 : victim, name);
+    Log("[apply] frame %u op=%u amount=%d -> %s@%llX status=%d hp %d -> %d", g_frameCounter,
+        ch->op, ch->amount, name, static_cast<unsigned long long>(victim),
+        static_cast<int>(status), ch->hpBefore, ch->hpAfter);
+    ch->status = static_cast<int32_t>(status);
+    ch->frame = g_frameCounter;
+    InterlockedExchange(&ch->doneSeq, ch->requestSeq);
+}
+
+static void OpenHitChannel() {
+    wchar_t name[96];
+    swprintf_s(name, L"%s%lu", HIT_NAME_PREFIX, GetCurrentProcessId());
+    g_hitMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                                      sizeof(HitChannel), name);
+    if (g_hitMapping) {
+        g_hitChannel = static_cast<HitChannel*>(
+            MapViewOfFile(g_hitMapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HitChannel)));
+    }
+    if (!g_hitChannel) {
+        Log("  WARNING: hit channel creation failed (%lu)", GetLastError());
+        return;
+    }
+    std::memset(g_hitChannel, 0, sizeof(HitChannel));
+    g_hitChannel->magic = HIT_MAGIC;
+    g_hitChannel->version = HIT_VERSION;
+    Log("  Hit channel open (Local\\kh2coop_hit_%lu)", GetCurrentProcessId());
 }
 
 static int __fastcall HookedLimitMenuState(void* actor, uint16_t* cmd, int state) {
@@ -1961,6 +2103,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
                 // Hand pending room warps to the game on its own thread.
                 warp::OnFrameStart(g_frameCounter, addr);
+                ProcessHitRequest();
                 BeginCloneFrame();
                 BeginHandleFrame();
                 PollPuppetPoses();
@@ -2345,6 +2488,19 @@ bool Initialize(uintptr_t exeBase) {
         } else {
             Log("  WARNING: BuildHit bytes don't match this build; hits not logged");
         }
+
+        // Hit drop filter (client side of hit ownership).
+        if (matches(RVA_APPLY_HIT_DAMAGE, kApplyHitDamageBytes, sizeof(kApplyHitDamageBytes))) {
+            void* target = reinterpret_cast<void*>(exeBase + RVA_APPLY_HIT_DAMAGE);
+            MH_STATUS st = MH_CreateHook(target, reinterpret_cast<void*>(&HookedApplyHitDamage),
+                                         reinterpret_cast<void**>(&g_origApplyHitDamage));
+            if (st == MH_OK) st = MH_EnableHook(target);
+            Log(st == MH_OK ? "  ApplyHitDamage hook installed (0x3D3BA0)"
+                            : "  WARNING: ApplyHitDamage hook failed");
+        } else {
+            Log("  WARNING: ApplyHitDamage bytes don't match this build; hits can't be dropped");
+        }
+        OpenHitChannel();
     }
 
     render::Install(exeBase, &Log);

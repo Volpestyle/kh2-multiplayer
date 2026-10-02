@@ -222,6 +222,38 @@ each. Sora could move after every one.
   cancelled when `--timeout-ms` runs out, and the error reports the gate
   inputs.
 
+### Hit ownership (VUH-1501)
+
+```powershell
+kh2ctl hit --pid 1234 drop --on --enemies                  # client: zero all hits on enemies
+kh2ctl hit --pid 1234 drop --on --attacker 0x7FF6... --victim 0x7FF6...
+kh2ctl hit --pid 1234 claims --last 16                     # what the dropped hits were
+kh2ctl hit --pid 1234 damage --victim 0x7FF6... --amount 7 # host: apply a claim
+kh2ctl hit --pid 1234 kill --victim 0x7FF6...              # synthetic killing blow
+kh2ctl hit --pid 1234 drop --off
+```
+
+Actor addresses come from `kh2ctl entities`. The DLL logs every hit as it's
+built (`[hit]` lines in the inject log: attacker, atkp id, victim, damage)
+from a post-hook on the hit builder `0x3D23C0`. The drop filter pre-hooks
+`ApplyHitDamage` `0x3D3BA0(victim, hit)` and zeroes the hit's damage
+(`hit+0x28`) when the attacker/victim match (0 = any; `--enemies` limits it to
+objentry type 3/4 victims). Each dropped hit goes into a 64-slot claim ring
+with its original damage. `damage` calls TakeDamage `0x3D5E50(victim,
+-amount, 0, 1)` and `kill` calls ApplyStatDelta `0x3D2EB0(victim, -hp, 0, 0)`,
+both on the game thread at the next frame start, and only for an actor in
+the current entity list. Verified 2026-10-02 in the BC courtyard: with
+`--enemies`, a 20-press combo left all Shadows at 20/20 and recorded 12
+claims; replaying them with `damage` left each Shadow at exactly 20 minus
+its claimed total; `kill` took a Shadow from 20 to 0, and it died and left
+the entity list; filtering one Shadow → Sora zeroed only that Shadow's hit.
+
+Notes: attack owner handles (`ATTACK+0x10`) carry the actor address's low
+24 bits, which is how attackers are named. The hit builder also builds
+heals: Goofy's atkp 1525 "damage" 20 restored Sora without going through
+ApplyStatDelta, so `--enemies` (or an explicit victim) keeps heals out of
+the filter.
+
 ### Restart
 
 ```powershell
