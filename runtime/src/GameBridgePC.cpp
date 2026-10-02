@@ -535,6 +535,12 @@ std::vector<GameBridgePC::ActorInfo> GameBridgePC::ListActors() const {
         info.position = {readAbs<float>(entityAddr + entity::POS_X),
                          readAbs<float>(entityAddr + entity::POS_Y),
                          readAbs<float>(entityAddr + entity::POS_Z)};
+        const std::uint64_t status = readAbs<std::uint64_t>(actorAddr + 0x5C0);
+        if (status > 0x10000 && status < 0x7FFFFFFFFFFFULL) {
+            info.statusAddress = status;
+            info.hp = readAbs<std::int32_t>(status);
+            info.maxHp = readAbs<std::int32_t>(status + 4);
+        }
         if (const std::uint64_t obj = actorObjEntryPtr(actorAddr)) {
             info.objectId = readAbs<std::uint32_t>(obj + objentry::OBJECT_ID);
             info.objectType = readAbs<std::uint8_t>(obj + objentry::TYPE_FLAGS);

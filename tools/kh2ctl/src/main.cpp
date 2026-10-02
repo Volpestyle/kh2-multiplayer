@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -2414,6 +2415,117 @@ CommandResult CmdPoke(std::vector<std::string> args) {
     return {0, out.str()};
 }
 
+// watch: hardware write breakpoint on one address, as a debugger, for N
+// seconds; reports which instructions wrote it (RE aid, VUH-1501/1487).
+//   kh2ctl watch --pid N --addr 0x... [--seconds S]
+// Data breakpoints trap after the write, so each RIP is the instruction
+// *following* the writer. The debugger detaches without killing the game.
+CommandResult CmdWatch(std::vector<std::string> args) {
+    const auto addrRaw = ConsumeOption(args, "--addr");
+    const double seconds =
+        ParseNumber<double>(ConsumeOption(args, "--seconds").value_or("10"), "--seconds");
+    if (!args.empty()) throw std::runtime_error("Unexpected argument for watch: " + args.front());
+    if (!addrRaw) throw std::runtime_error("watch requires --addr");
+    const std::uint64_t address = std::stoull(*addrRaw, nullptr, 0);
+
+    const DWORD pid = ResolveTargetPid();
+    bool owned = false;
+    const auto ownedList = ReadOwned();
+    for (const auto& proc : ListKh2Processes()) {
+        if (proc.pid == pid) owned = IsOwned(proc, ownedList);
+    }
+    if (!owned) return MakeError("watch only attaches to rig-launched instances");
+
+    HANDLE process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
+    const std::uint64_t base = process ? ModuleBase(process) : 0;
+    if (!DebugActiveProcess(pid)) {
+        if (process) CloseHandle(process);
+        return MakeError("DebugActiveProcess failed: " + std::to_string(GetLastError()));
+    }
+    DebugSetProcessKillOnExit(FALSE);
+
+    std::map<DWORD, HANDLE> threads;
+    auto arm = [&](HANDLE thread, bool on) {
+        CONTEXT ctx {};
+        ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+        if (!GetThreadContext(thread, &ctx)) return;
+        ctx.Dr0 = on ? address : 0;
+        ctx.Dr7 &= ~(0x3ULL | (0xFULL << 16));
+        if (on) ctx.Dr7 |= 1ULL | (1ULL << 16) | (3ULL << 18);  // L0, write, 4 bytes
+        ctx.Dr6 = 0;
+        SetThreadContext(thread, &ctx);
+    };
+
+    std::map<std::uint64_t, std::uint32_t> hits;
+    std::vector<std::int32_t> values;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(static_cast<int>(seconds * 1000));
+    DEBUG_EVENT ev {};
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!WaitForDebugEvent(&ev, 100)) continue;
+        DWORD status = DBG_CONTINUE;
+        switch (ev.dwDebugEventCode) {
+        case CREATE_PROCESS_DEBUG_EVENT:
+            threads[ev.dwThreadId] = ev.u.CreateProcessInfo.hThread;
+            arm(ev.u.CreateProcessInfo.hThread, true);
+            if (ev.u.CreateProcessInfo.hFile) CloseHandle(ev.u.CreateProcessInfo.hFile);
+            break;
+        case CREATE_THREAD_DEBUG_EVENT:
+            threads[ev.dwThreadId] = ev.u.CreateThread.hThread;
+            arm(ev.u.CreateThread.hThread, true);
+            break;
+        case EXIT_THREAD_DEBUG_EVENT:
+            threads.erase(ev.dwThreadId);
+            break;
+        case LOAD_DLL_DEBUG_EVENT:
+            if (ev.u.LoadDll.hFile) CloseHandle(ev.u.LoadDll.hFile);
+            break;
+        case EXCEPTION_DEBUG_EVENT: {
+            const auto& rec = ev.u.Exception.ExceptionRecord;
+            if (rec.ExceptionCode == EXCEPTION_SINGLE_STEP) {
+                ++hits[reinterpret_cast<std::uint64_t>(rec.ExceptionAddress)];
+                std::int32_t v = 0;
+                if (process) ReadProcessMemory(process, reinterpret_cast<LPCVOID>(address), &v, 4, nullptr);
+                if (values.size() < 64) values.push_back(v);
+            } else if (rec.ExceptionCode != EXCEPTION_BREAKPOINT) {
+                status = DBG_EXCEPTION_NOT_HANDLED;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        ContinueDebugEvent(ev.dwProcessId, ev.dwThreadId, status);
+    }
+
+    // Disarm every thread, then detach. Threads must be stopped to set
+    // their context: suspend each one around the write.
+    for (const auto& [tid, handle] : threads) {
+        SuspendThread(handle);
+        arm(handle, false);
+        ResumeThread(handle);
+    }
+    DebugActiveProcessStop(pid);
+    if (process) CloseHandle(process);
+
+    std::ostringstream out;
+    out << "{\"ok\":true,\"processId\":" << pid << ",\"address\":\"0x" << std::hex
+        << std::uppercase << address << std::dec << "\",\"threads\":" << threads.size()
+        << ",\"writers\":[";
+    bool first = true;
+    for (const auto& [rip, count] : hits) {
+        std::ostringstream rva;
+        rva << "0x" << std::hex << std::uppercase << (rip - base);
+        out << (first ? "" : ",") << "{\"nextInstructionRva\":\"" << rva.str()
+            << "\",\"hits\":" << count << "}";
+        first = false;
+    }
+    out << "],\"valuesAfterWrite\":[";
+    for (std::size_t i = 0; i < values.size(); ++i) out << (i ? "," : "") << values[i];
+    out << "]}";
+    return {0, out.str()};
+}
+
 // entities: every actor on the active entity list (RE aid, VUH-1486/1499).
 CommandResult CmdEntities(std::vector<std::string> args) {
     if (!args.empty()) throw std::runtime_error("Unexpected argument for entities: " + args.front());
@@ -2432,6 +2544,8 @@ CommandResult CmdEntities(std::vector<std::string> args) {
             << JsonString(a.name) << ",\"objectId\":" << a.objectId
             << ",\"objectType\":" << a.objectType << ",\"team\":" << a.team
             << ",\"moveState\":" << a.moveState << ",\"motionId\":" << a.motionId
+            << ",\"status\":\"0x" << std::hex << std::uppercase << a.statusAddress << std::dec
+            << "\",\"hp\":" << a.hp << ",\"maxHp\":" << a.maxHp
             << ",\"position\":{\"x\":" << a.position.x << ",\"y\":" << a.position.y
             << ",\"z\":" << a.position.z << "}}";
     }
@@ -2477,6 +2591,7 @@ void PrintUsage() {
         << "  entities                  every actor on the active entity list\n"
         << "  poke (--rva R | --addr A) --type u8|u16|u32|i32|f32 --value V\n"
         << "                            write one value (rig-launched instances only)\n"
+        << "  watch --addr A [--seconds S]  hardware write breakpoint; report writer RIPs\n"
         << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"
         << "      LAUNCH_OPTS: [--game-dir DIR] [--dll PATH] [--no-inject]\n"
         << "                   [--window-timeout-ms N] [--settle-ms N]\n"
@@ -2573,6 +2688,8 @@ int main(int argc, char* argv[]) {
             result = CmdEntities(std::move(args));
         } else if (command == "poke") {
             result = CmdPoke(std::move(args));
+        } else if (command == "watch") {
+            result = CmdWatch(std::move(args));
         } else if (command == "restart") {
             result = CmdRestart(std::move(args));
         } else if (command == "state") {
