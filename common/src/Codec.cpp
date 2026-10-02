@@ -221,6 +221,19 @@ void write(ByteWriter& w, const HitClaim& m) {
     w.writeU8(static_cast<std::uint8_t>(m.attackerSlot));
 }
 
+void write(ByteWriter& w, const ProgressUpdate& m) {
+    if (m.spans.size() > 0xFFFF) throw std::runtime_error("ProgressUpdate: too many spans");
+    w.writeU32(m.version);
+    w.writeBool(m.full);
+    w.writeU16(static_cast<std::uint16_t>(m.spans.size()));
+    for (const auto& span : m.spans) {
+        if (span.bytes.size() > 0xFFFF) throw std::runtime_error("ProgressUpdate: span too long");
+        w.writeU32(span.offset);
+        w.writeU16(static_cast<std::uint16_t>(span.bytes.size()));
+        for (auto b : span.bytes) w.writeU8(b);
+    }
+}
+
 // ===== Binary read helpers ==================================================
 
 void read(ByteReader& r, Vec3& v) {
@@ -433,6 +446,17 @@ void read(ByteReader& r, HitClaim& m) {
     m.attackerSlot = static_cast<SlotType>(r.readU8());
 }
 
+void read(ByteReader& r, ProgressUpdate& m) {
+    m.version = r.readU32();
+    m.full = r.readBool();
+    m.spans.resize(r.readU16());
+    for (auto& span : m.spans) {
+        span.offset = r.readU32();
+        span.bytes.resize(r.readU16());
+        for (auto& b : span.bytes) b = r.readU8();
+    }
+}
+
 // ===== Framed packet helpers ================================================
 
 static constexpr std::size_t kHeaderSize = 3; // 1 type + 2 length
@@ -549,6 +573,12 @@ std::vector<std::uint8_t> encode(const HitClaim& m) {
     ByteWriter w;
     write(w, m);
     return encodePacket(PacketType::HitClaim, w.data());
+}
+
+std::vector<std::uint8_t> encode(const ProgressUpdate& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::ProgressUpdate, w.data());
 }
 
 PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,

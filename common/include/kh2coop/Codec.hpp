@@ -36,6 +36,7 @@ enum class PacketType : std::uint8_t {
     EnemyManifest = 22,
     EnemyHp = 23,
     EnemyDeath = 24,
+    ProgressUpdate = 25,
 };
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ void write(ByteWriter& w, const EnemyManifest& m);
 void write(ByteWriter& w, const EnemyHp& m);
 void write(ByteWriter& w, const EnemyDeath& m);
 void write(ByteWriter& w, const HitClaim& m);
+void write(ByteWriter& w, const ProgressUpdate& m);
 
 void read(ByteReader& r, SessionActor& sa);
 void read(ByteReader& r, SessionState& ss);
@@ -91,6 +93,7 @@ void read(ByteReader& r, EnemyManifest& m);
 void read(ByteReader& r, EnemyHp& m);
 void read(ByteReader& r, EnemyDeath& m);
 void read(ByteReader& r, HitClaim& m);
+void read(ByteReader& r, ProgressUpdate& m);
 
 // ---------------------------------------------------------------------------
 // Framed packet helpers
@@ -118,6 +121,7 @@ std::vector<std::uint8_t> encode(const EnemyManifest& m);
 std::vector<std::uint8_t> encode(const EnemyHp& m);
 std::vector<std::uint8_t> encode(const EnemyDeath& m);
 std::vector<std::uint8_t> encode(const HitClaim& m);
+std::vector<std::uint8_t> encode(const ProgressUpdate& m);
 // AvatarState travels as PacketType::AvatarState (client -> host) or
 // PacketType::AvatarRelay (host -> clients); the payload is identical.
 std::vector<std::uint8_t> encode(const AvatarState& a, PacketType type);

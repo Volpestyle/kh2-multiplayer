@@ -101,6 +101,7 @@ public:
     [[nodiscard]] std::uint64_t rejectedWorldMessages() const { return rejectedWorld_; }
     [[nodiscard]] const std::optional<RoomTransition>& currentRoom() const { return room_; }
     [[nodiscard]] std::size_t manifestSize() const { return manifest_.entries.size(); }
+    [[nodiscard]] std::size_t progressBytes() const { return progress_.size(); }
     [[nodiscard]] const PeerState* peerBySlot(SlotType slot) const;
 
 private:
@@ -151,6 +152,8 @@ private:
     std::map<std::uint16_t, EnemyHpEntry> enemyHp_;
     std::set<std::uint16_t> deadEnemies_;
     std::uint64_t rejectedWorld_{0};
+    std::map<std::uint32_t, std::uint8_t> progress_; // merged host flags
+    std::uint32_t progressVersion_{0};
 };
 
 } // namespace kh2coop

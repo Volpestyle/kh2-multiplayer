@@ -144,6 +144,19 @@ struct HitClaim {
     SlotType attackerSlot {SlotType::Player};
 };
 
+// Host story/world flags (plan D6, VUH-1495/1497): bytes of the save body
+// inside an allow list. `full` replaces everything the receiver holds.
+struct ProgressSpan {
+    std::uint32_t offset {0};
+    std::vector<std::uint8_t> bytes;
+};
+
+struct ProgressUpdate {
+    std::uint32_t version {0};
+    bool full {false};
+    std::vector<ProgressSpan> spans;
+};
+
 // ===========================================================================
 // Protocol v2 forward-looking records (declared, not yet wired into codec)
 //

@@ -1,4 +1,5 @@
 #include "kh2coop/SessionHost.hpp"
+#include "kh2coop/ProgressMirror.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -457,7 +458,8 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
             case PacketType::EventHold:
             case PacketType::EnemyManifest:
             case PacketType::EnemyHp:
-            case PacketType::EnemyDeath: {
+            case PacketType::EnemyDeath:
+            case PacketType::ProgressUpdate: {
                 if (ps->status != PeerStatus::Verified || !fromHost(*ps)) {
                     ++rejectedWorld_;
                     log("Dropping world message from non-host " + ps->peerId);
@@ -493,6 +495,17 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     read(reader, m);
                     for (const auto& e : m.entries) enemyHp_[e.netId] = e;
                     reliable = false; // periodic absolute values
+                } else if (type == PacketType::ProgressUpdate) {
+                    ProgressUpdate m;
+                    read(reader, m);
+                    if (m.full) progress_.clear();
+                    for (const auto& span : m.spans) {
+                        for (std::size_t i = 0; i < span.bytes.size(); ++i) {
+                            progress_[static_cast<std::uint32_t>(span.offset + i)] =
+                                span.bytes[i];
+                        }
+                    }
+                    progressVersion_ = m.version;
                 } else {
                     EnemyDeath m;
                     read(reader, m);
@@ -609,6 +622,22 @@ void SessionHost::forwardToOthers(ENetPeer* sender,
 
 // Catch a late joiner up: room, hold, enemy set, HP, deaths.
 void SessionHost::sendWorldStateTo(ENetPeer* peer) {
+    if (!progress_.empty()) {
+        // Coalesce the merged byte map into spans, then chunk under the
+        // packet size limit; the first chunk replaces the joiner's state.
+        std::vector<ProgressSpan> spans;
+        for (const auto& [offset, value] : progress_) {
+            if (!spans.empty() &&
+                spans.back().offset + spans.back().bytes.size() == offset) {
+                spans.back().bytes.push_back(value);
+            } else {
+                spans.push_back({offset, {value}});
+            }
+        }
+        for (const auto& u : splitProgressUpdate(progressVersion_, true, spans)) {
+            sendTo(peer, encode(u), true);
+        }
+    }
     if (!room_) return;
     sendTo(peer, encode(*room_), true);
     if (hold_ && hold_->epoch == room_->epoch) sendTo(peer, encode(*hold_), true);
@@ -741,6 +770,7 @@ void SessionHost::removePeer(ENetPeer* peer) {
     if (auto* ps = findPeer(peer); ps && fromHost(*ps)) {
         room_.reset();
         clearWorldState();
+        progress_.clear();
     }
     peers_.erase(
         std::remove_if(peers_.begin(), peers_.end(),

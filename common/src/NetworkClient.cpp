@@ -171,6 +171,10 @@ void NetworkClient::sendTransitionAck(const TransitionAck& m) {
     if (connected_) sendPacket(encode(m), true);
 }
 
+void NetworkClient::sendProgressUpdate(const ProgressUpdate& m) {
+    if (connected_) sendPacket(encode(m), true);
+}
+
 void NetworkClient::sendClockPing() {
     if (!connected_) return;
     lastPingMs_ = localTimeMs();
@@ -337,6 +341,12 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size) {
                 HitClaim m;
                 read(reader, m);
                 if (callbacks_.onHitClaim) callbacks_.onHitClaim(m);
+                break;
+            }
+            case PacketType::ProgressUpdate: {
+                ProgressUpdate m;
+                read(reader, m);
+                if (callbacks_.onProgressUpdate) callbacks_.onProgressUpdate(m);
                 break;
             }
             case PacketType::ClockPong: {

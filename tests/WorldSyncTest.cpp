@@ -10,6 +10,7 @@
 
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/ProgressMirror.hpp"
 #include "kh2coop/SessionHost.hpp"
 
 #include <enet/enet.h>
@@ -46,6 +47,7 @@ struct Seen {
     std::vector<EnemyHp> hps;
     std::vector<EnemyDeath> deaths;
     std::vector<HitClaim> claims;
+    std::vector<ProgressUpdate> progress;
 };
 
 ClientCallbacks callbacksFor(Seen& seen) {
@@ -56,6 +58,7 @@ ClientCallbacks callbacksFor(Seen& seen) {
     cb.onEnemyHp = [&seen](const EnemyHp& m) { seen.hps.push_back(m); };
     cb.onEnemyDeath = [&seen](const EnemyDeath& m) { seen.deaths.push_back(m); };
     cb.onHitClaim = [&seen](const HitClaim& m) { seen.claims.push_back(m); };
+    cb.onProgressUpdate = [&seen](const ProgressUpdate& m) { seen.progress.push_back(m); };
     return cb;
 }
 
@@ -69,10 +72,55 @@ EnemyManifestEntry entry(std::uint16_t netId, std::uint16_t spawn, std::uint32_t
     return e;
 }
 
+void testProgressMirror() {
+    std::cout << "\n=== ProgressMirror ===\n";
+    // Allow two story ranges; keep 0x2500.. (character stats) off the list.
+    ProgressMirror host({{0x1C00, 0x40}, {0x1D20, 0x10}});
+    std::vector<std::uint8_t> before(0x3000, 0), after(0x3000, 0);
+    after[0x1C05] = 1; after[0x1C06] = 2;  // contiguous -> one span
+    after[0x1D2E] = 9;                     // second range
+    after[0x2500] = 99;                    // stats: not allowed
+    const auto spans = host.diff(before.data(), after.data(), after.size());
+    check(spans.size() == 2 && spans[0].offset == 0x1C05 && spans[0].bytes.size() == 2 &&
+              spans[1].offset == 0x1D2E && spans[1].bytes[0] == 9,
+          "diff coalesces changes and ignores bytes outside the allow list");
+
+    ProgressMirror client({{0x1C00, 0x40}, {0x1D20, 0x10}});
+    ProgressUpdate u {1, false, spans};
+    u.spans.push_back({0x2500, {99}}); // a hostile/malformed span
+    check(client.accept(u) == 1 && client.desiredSize() == 3,
+          "client keeps allowed bytes and rejects the stats byte");
+
+    std::vector<std::uint8_t> live(0x3000, 0);
+    auto todo = client.pending(live.data(), live.size());
+    check(todo.size() == 2, "pending lists both spans before they're written");
+    for (const auto& sp : todo) {
+        for (std::size_t i = 0; i < sp.bytes.size(); ++i) live[sp.offset + i] = sp.bytes[i];
+    }
+    check(client.pending(live.data(), live.size()).empty() && live[0x2500] == 0,
+          "after applying, nothing is pending and stats were never touched");
+    live[0x1C06] = 0; // the game reloaded the room and reset a flag
+    todo = client.pending(live.data(), live.size());
+    check(todo.size() == 1 && todo[0].offset == 0x1C06 && todo[0].bytes[0] == 2,
+          "re-assert finds the flag the game reset");
+
+    std::vector<ProgressSpan> big {{0, std::vector<std::uint8_t>(130000, 7)}};
+    const auto parts = splitProgressUpdate(3, true, big);
+    std::size_t total = 0;
+    bool fits = true;
+    for (const auto& part : parts) {
+        for (const auto& sp : part.spans) total += sp.bytes.size();
+        fits &= encode(part).size() < 65535;
+    }
+    check(parts.size() >= 3 && parts[0].full && !parts[1].full && total == 130000 && fits,
+          "large snapshots split under the packet limit, first part replaces");
+}
+
 } // namespace
 
 int main() {
     if (enet_initialize() != 0) return 2;
+    testProgressMirror();
 
     SessionConfig cfg;
     cfg.port = 17796;
@@ -177,6 +225,18 @@ int main() {
               c1Seen.holds.back().eventProgram == 0x33,
           "client receives the host's cutscene hold");
 
+    std::cout << "\n=== Progress ===\n";
+    host->sendProgressUpdate(ProgressUpdate {1, true, {{0x1CFF, {8}}, {0x1D2E, {1, 2}}}});
+    host->sendProgressUpdate(ProgressUpdate {2, false, {{0x1D2F, {3}}}});
+    check(waitFor([&] { return c1Seen.progress.size() == 2; }) &&
+              c1Seen.progress[0].full && c1Seen.progress[1].spans[0].bytes[0] == 3 &&
+              relay.progressBytes() == 3,
+          "client receives full + delta progress; relay merges 3 bytes");
+    c1->sendProgressUpdate(ProgressUpdate {9, true, {{0x1CFF, {0}}}});
+    pump(200);
+    check(hostSeen.progress.empty() && relay.progressBytes() == 3,
+          "a non-host progress update is dropped");
+
     std::cout << "\n=== Late joiner ===\n";
     auto c2 = makeClient("c2", SlotType::Friend2, c2Seen);
     live = {host.get(), c1.get(), c2.get()};
@@ -194,6 +254,16 @@ int main() {
           "late joiner gets the full 4-enemy set as one replace");
     check(!c2Seen.deaths.empty() && c2Seen.deaths.back().netId == 2,
           "late joiner learns enemy 2 is already dead");
+    {
+        ProgressMirror joiner({{0x1C00, 0x200}});
+        for (const auto& u : c2Seen.progress) joiner.accept(u);
+        std::vector<std::uint8_t> live(0x2000, 0);
+        const auto todo = joiner.pending(live.data(), live.size());
+        check(!c2Seen.progress.empty() && c2Seen.progress[0].full && todo.size() == 2 &&
+                  todo[1].offset == 0x1D2E && todo[1].bytes.size() == 2 &&
+                  todo[1].bytes[1] == 3,
+              "late joiner gets the merged progress (delta applied) as a full update");
+    }
 
     std::cout << "\n=== Transition acks ===\n";
     c1->sendTransitionAck(TransitionAck {1, 4, 0x1A, true});

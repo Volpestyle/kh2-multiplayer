@@ -34,6 +34,7 @@ struct ClientCallbacks {
     std::function<void(const EnemyDeath&)> onEnemyDeath;
     // Host only: a client's hit claim, attackerSlot stamped by the relay
     std::function<void(const HitClaim&)> onHitClaim;
+    std::function<void(const ProgressUpdate&)> onProgressUpdate;
     std::function<void(const std::string&)> onLog;
 };
 
@@ -93,6 +94,7 @@ public:
     void sendEnemyDeath(const EnemyDeath& m);
     void sendHitClaim(const HitClaim& m);
     void sendTransitionAck(const TransitionAck& m);
+    void sendProgressUpdate(const ProgressUpdate& m); // host only
     [[nodiscard]] bool hasClockSync() const { return clockSamples_ > 0; }
     [[nodiscard]] std::uint64_t estimatedServerTimeMs() const;
     [[nodiscard]] std::uint32_t roundTripMs() const { return bestRttMs_; }
