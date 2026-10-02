@@ -503,7 +503,7 @@ Live CE validation on 2026-03-31:
 - The current room contained `18` active list nodes total and `1` moveState `8/9` false positive (`N_BB080_TSURU1`) in a non-combat room
 - This established that active-list traversal needs an objentry-based class filter in addition to moveState
 
-**Result:** enemy count is derived by traversing the active list, filtering `entity+0x100` for moveState `8`/`9`, then accepting only objentry names with `B_` / `M_` prefixes. No dedicated enemy-only count global has been identified.
+**Result (superseded 2026-10-02, VUH-1486):** an enemy is an active-list actor whose objentry type byte (`actor+0x918` → record `+0x04`, OpenKH `ObjectType`) is `3` (BOSS) or `4` (ZAKO). Verified live in the Parlor Ambush: 8 `M_EX020_RAW` Shadows read type `4`. Their team `actor+0x4DC` read `2`; the party reads `1`, props `0`. The earlier moveState `8`/`9` + `B_`/`M_` filter missed them because some enemies don't use the player's entity layout, so `entity+0x100` reads garbage. `kh2ctl entities` lists every active actor with these fields. No enemy-only count global has been identified.
 
 ### Entity update call chain  (CE + Ghidra Session — 2026-03-31, CONFIRMED)
 
