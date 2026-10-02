@@ -482,7 +482,8 @@ void testVersionReject() {
     }
     check(disconnected, "mismatched client is disconnected");
     check(reason.find("Version mismatch") != std::string::npos &&
-              reason.find("other-build") != std::string::npos,
+              reason.find("other-build") != std::string::npos &&
+              reason.find("relay expects build=host-build") != std::string::npos,
           "client received the reject reason: " + reason);
     check(host.verifiedPeerCount() == 0, "mismatched client never verified");
 }

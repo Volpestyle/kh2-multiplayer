@@ -292,7 +292,10 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     std::string reason =
                         "Version mismatch: build=" + hello.gameBuild +
                         " content=" + hello.contentHash +
-                        " mod=" + hello.modHash;
+                        " mod=" + hello.modHash +
+                        " (relay expects build=" + config_.gameBuild +
+                        " content=" + config_.contentHash +
+                        " mod=" + config_.modHash + ")";
                     rejectPeer(peer, ps->peerId, reason, 1);
                     return;
                 }
@@ -360,7 +363,9 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     clientSession.modHash != config_.modHash) {
                     std::string reason =
                         "Version mismatch: build=" + clientSession.gameBuild +
-                        " mod=" + clientSession.modHash;
+                        " mod=" + clientSession.modHash +
+                        " (relay expects build=" + config_.gameBuild +
+                        " mod=" + config_.modHash + ")";
                     rejectPeer(peer, ps->peerId, reason, 1);
                     return;
                 }
