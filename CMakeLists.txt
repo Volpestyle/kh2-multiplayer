@@ -9,6 +9,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ENet — lightweight UDP networking library for game traffic.
 # ---------------------------------------------------------------------------
 include(FetchContent)
+# ENet v1.3.17 declares cmake_minimum_required < 3.5, which CMake 4 rejects.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 FetchContent_Declare(
     enet
     GIT_REPOSITORY https://github.com/lsalzman/enet.git

@@ -1,5 +1,9 @@
 # Acceptance Tests
 
+> **2026-10-01:** the phase gates in `docs/ONLINE_COOP_PLAN.md` (P0–P5) and the
+> acceptance criteria on each Linear issue supersede the M3–M7 criteria below.
+> Track B–D sections are parked with those tracks.
+
 ## Global preflight
 - Same KH2 build hash on all clients.
 - Same content/mod hash on all clients.

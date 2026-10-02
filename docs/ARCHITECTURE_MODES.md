@@ -1,5 +1,11 @@
 # Architecture Modes: CampaignCoop vs PublicRealm
 
+> **2026-10-01:** `docs/ONLINE_COOP_PLAN.md` moves CampaignCoop to the
+> local-primary actor model described below for PublicRealm (each human is
+> `LocalPrimary` on their own machine; other humans are `RemoteReplica`
+> puppets in the friend slots), pending spike VUH-1489. PublicRealm itself is
+> parked until the co-op playtest gate (plan D11).
+
 This project supports two runtime modes sharing one infrastructure. This document defines the boundary between them.
 
 ## Shared infrastructure (both modes)

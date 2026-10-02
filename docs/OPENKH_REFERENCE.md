@@ -1,6 +1,6 @@
 # OpenKH Reference Guide
 
-OpenKH (`../openkh`) is an open-source KH2 modding toolkit. It is primarily a
+OpenKH (`~/openkh`) is an open-source KH2 modding toolkit. It is primarily a
 **file-format parser and asset editor**, not a runtime memory manipulation
 project. However, several components are directly useful for our co-op mod.
 

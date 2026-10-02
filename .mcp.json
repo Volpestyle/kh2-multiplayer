@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "python",
       "args": [
-        "${PROJECT_ROOT:-C:/Users/volpe/kh2-multiplayer}/tools/mcp_kh2ctl/server.py"
+        "tools/mcp_kh2ctl/server.py"
       ],
       "env": {}
     },

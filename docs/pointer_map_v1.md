@@ -153,6 +153,38 @@ Disassembly around **`KINGDOM HEARTS II FINAL MIX.exe+0x15112C`** (live MCP capt
 | `0x0B64F34` | `CUTSCENE_LEN` | `[KH2LIB]` |
 | `0x0B64F1C` | `CUTSCENE_SKIP` | `[KH2LIB]` |
 | `0x0717424` | `GAME_SPEED` | `[KH2LIB]` |
+| `0x08EC540` | `LOADING_INDICATOR` | `[KH2LIB]` |
+| `0x07435D0` | `CURRENT_OPEN_MENU` — `FF` none, `01` save, `03` load, `05` moogle, `07` item popup, `08` pause (cutscene/fight), `0A` pause | `[KH2LIB]` |
+| `0x29FB500` | `CONTINUE` | `[KH2LIB]` |
+| `0x2A0C4C0` | `SVE` — saved location | `[KH2LIB]` |
+| `0x0BF3340` | `MSN` — mission | `[KH2LIB]` |
+| `0x07535C0` | `RNG` | `[KH2LIB]` |
+| `0x2AE5CF8` | `SPAWNS` | `[KH2LIB]` |
+| `0x2A0F7A8` | `ARD_POINTER` — room script data | `[KH2LIB]` |
+| `0x2A24FB0` | `OBJENTRY_POINTER` (`00objentry.bin`) | `[KH2LIB]` |
+| `0x2AE5DD0` / `0x2AE5DD8` | `SYS3_POINTER` / `BTL0_POINTER` (`03system.bin` / `00battle.bin`) | `[KH2LIB]` |
+
+`CONTROLLABLE` reads `3` during cutscenes and `0` when a minigame starts (GoA ROM
+script). Writing `2` to `PAUSE_STATUS` disables pausing (GoA ROM script).
+
+### Save region (Steam Global)
+
+| Offset | Name | Source |
+|---|---|---|
+| `0x09A9830` | `SAVE` — live save body | `[KH2LIB]` |
+| `SAVE+0x0C` / `+0x0D` / `+0x0E` | saved world / room / door | `[KH2LIB]` (GoA ROM `Warp`) |
+| `SAVE+0x10 + 0x180*world + 0x6*room` | per-room map / btl / evt program table (3 shorts) | `[KH2LIB]` (GoA ROM `Warp`) |
+| `SAVE+0x3534` | world party table | Expert595 KH2 Online Coop (save-relative; their Epic save body is at RVA `0x09A7070`) |
+| `SAVE+0x353C` | party member bytes — GoA ROM writes `0x12020100` for the full party and `0x12121200` for "Roxas only" | `[KH2LIB]` (GoA ROM) |
+| `SAVE+0x3524` | current form (`6` = Anti) | `[KH2LIB]` (GoA ROM) |
+| `SAVE+0x3580…` | inventory bytes | `[KH2LIB]` |
+
+The GoA ROM's `Warp(W,R,D,M,B,E)` writes the `NOW` block (world, room, door,
+programs) and the saved location, but only redirects a transition already in
+progress (from the world map). It also swaps party costumes by rewriting
+objentry model-name strings before rooms load: with `obj0` = the pointer read
+from `OBJENTRY_POINTER`, `obj0+0x16F0` is Donald's model name and
+`obj0+0x1750` Goofy's.
 
 ### Unit slot stat system
 

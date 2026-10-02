@@ -1,5 +1,12 @@
 # KH2 Three-Client Co-op Design (Working Draft)
 
+> **Partly superseded 2026-10-01** by `docs/ONLINE_COOP_PLAN.md`. Replaced:
+> the authority model (host simulates all players from forwarded input →
+> owner-authoritative avatars, host-authoritative world, D2/D4) and the actor
+> model (canonical slots on every machine → local-primary with friend-slot
+> puppets, D3, pending spike VUH-1489). Still valid background: no lockstep, host
+> owns enemies/story/transitions, MVP scope cuts, GoA-first testing.
+
 ## Goal
 Build a true 3-client Kingdom Hearts II Final Mix co-op prototype where:
 - each player runs their own KH2 client,

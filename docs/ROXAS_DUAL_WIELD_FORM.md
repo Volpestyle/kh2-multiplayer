@@ -58,7 +58,7 @@ Sora's drive forms (Valor, Wisdom, Master, Final) don't map to Roxas. In co-op o
 2. Allocate and initialize weapon objects from scratch
 3. Attach to character bone sockets via the game's own attachment system
 4. Most flexible, most RE work required
-5. Reference: `../openkh/OpenKh.Research.Panacea/` for injection framework
+5. Reference: `~/openkh/OpenKh.Research.Panacea/` for injection framework
 
 ---
 
@@ -85,5 +85,5 @@ Sora's drive forms (Valor, Wisdom, Master, Final) don't map to Roxas. In co-op o
 
 ## References
 - `docs/probes/AXEL_FIGHT_RE_SESSION.md` — weapon object discovery and transform layout
-- `../openkh/OpenKh.Kh2/MotionSet.cs` — animation ID enum (check for dual-wield entries)
-- `../openkh/OpenKh.Research.Panacea/` — DLL injection reference if Approach C is chosen
+- `~/openkh/OpenKh.Kh2/MotionSet.cs` — animation ID enum (check for dual-wield entries)
+- `~/openkh/OpenKh.Research.Panacea/` — DLL injection reference if Approach C is chosen

@@ -1,5 +1,11 @@
 # Implementation Backlog
 
+> **Superseded 2026-10-01 for M4 onward.** The plan of record is
+> `docs/ONLINE_COOP_PLAN.md` (phases P0–P5), tracked in the Linear project
+> **KH2 Multiplayer**. M0–M3 below stay as history; M3's remaining items move
+> into the plan (friend combat control becomes part of P5). Tracks B–D are
+> parked (plan D11); the B2 handshake work lands with P1.
+
 ## Milestone 0 — Environment lock + observability `[DONE]`
 **Goal:** make the build deterministic and make the runtime inspectable.
 
