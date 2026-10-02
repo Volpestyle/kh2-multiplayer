@@ -738,8 +738,19 @@ static constexpr uintptr_t MOTCTRL_CURRENT_TIME = 0x44;  // float frames
 static constexpr uintptr_t ACTOR_VELOCITY = 0xB98;       // 3 floats
 
 // Puppet i (0/1) has a fresh, active pose.
+// Room transitions: the moment the local room key (NOW world/room) changes,
+// a transition has been requested and the current room's actors are about
+// to be torn down. Puppets are suspended and every cached actor pointer is
+// dropped without touching it; driving resumes on the first gameplay frame
+// after the load (soak crash 2026-10-02: heap corruption after a door
+// transition with a puppet active).
+static bool g_puppetsSuspended = false;
+static uint16_t g_puppetRoomKey = 0xFFFF;
+static uint64_t g_lastPuppetFrameMs = 0;
+static constexpr uint64_t LOAD_STALL_MS = 150;  // gameplay frames stop during a load
+
 static bool IsPuppetActive(int index) {
-    if (index < 0 || index > 1) return false;
+    if (index < 0 || index > 1 || g_puppetsSuspended) return false;
     const PuppetDriver& d = g_puppets[index];
     return d.have && d.pose.active && g_frameCounter - d.poseFrame <= PUPPET_STALE_FRAMES;
 }
@@ -806,8 +817,41 @@ static void RestorePuppetTeam(PuppetDriver& d, uintptr_t currentActor) {
 
 // Frame start: take new poses, release slots that stopped being puppets,
 // and hold the drive gauge while any puppet is active.
+// Forgets a driver's cached actor without writing to it (the actor may be
+// mid-teardown or already freed).
+static void ForgetPuppetActor(PuppetDriver& d) {
+    d.actor = 0;
+    d.teamSaved = false;
+    d.lastAnim = -1;
+}
+
+// Frame start: suspend puppets when a transition is requested and resume
+// after the load. Returns true while suspended.
+static bool UpdatePuppetSuspension() {
+    const uint64_t nowMs = GetTickCount64();
+    const bool afterLoad = g_lastPuppetFrameMs != 0 && nowMs - g_lastPuppetFrameMs > LOAD_STALL_MS;
+    g_lastPuppetFrameMs = nowMs;
+    const uint16_t roomKey = *reinterpret_cast<const uint16_t*>(g_exeBase + offsets::WORLD_ID);
+    if (afterLoad && (g_puppetsSuspended || roomKey != g_puppetRoomKey)) {
+        // New room loaded: fresh actors, nothing cached. (A stall without a
+        // room change is a pause or menu; the cached actors are still live.)
+        for (auto& d : g_puppets) ForgetPuppetActor(d);
+        if (g_puppetsSuspended) Log("Puppets resumed after load (room %04X)", roomKey);
+        g_puppetsSuspended = false;
+        g_puppetRoomKey = roomKey;
+    } else if (g_puppetRoomKey == 0xFFFF) {
+        g_puppetRoomKey = roomKey;
+    } else if (roomKey != g_puppetRoomKey && !g_puppetsSuspended) {
+        for (auto& d : g_puppets) ForgetPuppetActor(d);
+        g_puppetsSuspended = true;
+        Log("Puppets suspended: transition %04X -> %04X requested", g_puppetRoomKey, roomKey);
+    }
+    return g_puppetsSuspended;
+}
+
 static void PollPuppetPoses() {
     if (!g_avatarBridge.IsOpen()) return;
+    UpdatePuppetSuspension();
     bool anyActive = false;
     for (int i = 0; i < 2; ++i) {
         const bool wasActive = IsPuppetActive(i);
@@ -1819,7 +1863,8 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
     PuppetDriver& d = g_puppets[index];
     auto* team = reinterpret_cast<uint32_t*>(actor + ACTOR_TEAM);
     if (d.actor == actor && !d.teamSaved) {
-        d.savedTeam = *team;
+        // 0 would be our own write surviving a reset; companions are team 1.
+        d.savedTeam = *team == 0 ? 1 : *team;
         d.teamSaved = true;
     }
     *team = 0;

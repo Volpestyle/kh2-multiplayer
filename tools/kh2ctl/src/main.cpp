@@ -2689,7 +2689,11 @@ CommandResult CmdEntities(std::vector<std::string> args) {
         return MakeAttachTimeout("entities");
     }
     std::ostringstream out;
-    out << "{\"ok\":true,\"processId\":" << game.ProcessId() << ",\"actors\":[";
+    // The room is read with the actors so a sample says where it was taken
+    // (actor addresses repeat across rooms).
+    const auto room = game.ReadRoomState();
+    out << "{\"ok\":true,\"processId\":" << game.ProcessId() << ",\"world\":" << room.worldId
+        << ",\"room\":" << room.roomId << ",\"actors\":[";
     const auto actors = game.ListActors();
     for (std::size_t i = 0; i < actors.size(); ++i) {
         const auto& a = actors[i];

@@ -1,0 +1,28 @@
+{
+  "name": "net_mismatch",
+  "description": "A runtime whose content hash differs from the relay's is refused, and its log says why.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player",
+      "args": [
+        "--content",
+        "other-content"
+      ],
+      "expect": "refused by relay"
+    },
+    {
+      "do": "assert",
+      "expr": "'content' in runtime_log(0).lower()",
+      "message": "refusal doesn't name the mismatch"
+    }
+  ]
+}

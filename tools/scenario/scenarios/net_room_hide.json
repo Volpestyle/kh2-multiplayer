@@ -1,0 +1,89 @@
+{
+  "name": "net_room_hide",
+  "description": "A puppet hides while its owner is in another room and reappears when the owner returns.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "(bridge(0).get('puppet0') or {}).get('active')",
+      "timeoutMs": 10000,
+      "pollMs": 500
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 10
+    },
+    {
+      "do": "wait_until",
+      "expr": "not (bridge(0).get('puppet0') or {}).get('active')",
+      "timeoutMs": 5000,
+      "pollMs": 250
+    },
+    {
+      "do": "capture",
+      "name": "owner_away",
+      "instance": 0
+    },
+    {
+      "do": "save",
+      "as": "away_on_1",
+      "expr": "bridge(1).get('puppet0')"
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "wait_until",
+      "expr": "(bridge(0).get('puppet0') or {}).get('active')",
+      "timeoutMs": 5000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "back",
+      "expr": "bridge(0).get('puppet0')"
+    },
+    {
+      "do": "capture",
+      "name": "owner_back",
+      "instance": 0
+    }
+  ]
+}

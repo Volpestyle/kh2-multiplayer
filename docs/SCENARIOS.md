@@ -125,8 +125,9 @@ attack hits him) for the whole run, so combat rooms don't end in a game over.
 | `clip` | `name seconds` | MP4 → artifact |
 | `crash`, `freeze` | | Runner self-tests: fault or suspend the instance |
 | `relay` | `port build content mod args` | Start `kh2coop_server` on loopback for this run; the version gate defaults to what the runtime sends |
-| `runtime` | `instance role peerId args settleMs` | Start `kh2coop_runtime_scaffold --network --no-camera` bound to that instance (`KH2COOP_PID`) |
-| `record` / `record_stop` | `as instances` | Sample every party actor's position on those instances in the background; `record_stop` writes `<as>.csv` |
+| `runtime` | `instance role peerId link args expect timeoutMs` | Start `kh2coop_runtime_scaffold --network --no-camera --pid <instance>` and wait for `expect` in its log (default `connected to server`). `link: {latencyMs, jitterMs, lossPct}` sets the runtime's impairment both ways (owner→viewer crosses two runtimes, so 50 ms each = 100 ms) |
+| `record` / `record_stop` | `as instances` | Sample every party actor's position (with the instance's world/room) on those instances in the background; `record_stop` writes `<as>.csv` |
+| `wander` | `instances seconds seed` | Seeded random stick walks with occasional jumps, taking turns (soaks) |
 
 Processes started by `relay`/`runtime` are stopped at the end of the run.
 
@@ -149,6 +150,17 @@ Sora in a recording:
   fitted `lagMs`, and `ownerTravel`.
 - Check `ownerTravel` too. If the owner barely moved, a low error proves
   nothing.
+- Only samples taken while owner and viewer are in the same world/room
+  count. Puppets are matched by actor name, since addresses repeat across
+  rooms.
+
+`jitter_stats(saved['rec'], owner, viewer, err['actor'])` counts "pops": puppet
+steps between consecutive samples that exceed the owner's largest step over
+the last 0.5 s by more than 30 units. Steps only count while the owner has
+been in the viewer's room for at least 1.5 s.
+`tools/scenario/spikes/pops.py RUN_DIR OWNER VIEWER NAME` lists each pop
+with its context. The sampling runs at about 20–40 Hz per instance, so
+single-frame jitter needs a clip.
 
 ## Example scenarios
 
@@ -159,11 +171,14 @@ Sora in a recording:
   the hit log.
 - `two_instances_same_room`: two instances load and warp to the GoA; both
   are there and both Soras move.
-- `net_two_instances` (VUH-1492, in progress): a relay and a runtime per
-  instance; each Sora moves and the other instance's puppet must follow.
-  It's not valid evidence yet. The runtime's legacy replica path writes the
-  relay's simulated actors onto the non-owner's Sora (reported on
-  VUH-1492).
+- VUH-1492 networking (relay on loopback, one runtime per instance):
+  - `net_two_instances`, `net_two_instances_impaired` (100 ms + 2% loss),
+    `net_three_instances`: every puppet follows its owner.
+  - `net_room_hide`: a puppet hides while its owner is in another room.
+  - `net_mismatch`: a mismatched peer is refused with a reason.
+  - `net_viewer_leaves`: the viewer changes rooms with a puppet active.
+  - `net_soak_10min` + `soak_control_no_network`: the 10-minute soak and its
+    no-network control.
 - `forced_crash`, `forced_hang`: runner self-tests. They're expected to
   report CRASH/HANG with a bundle; don't include them in a pass/fail suite.
 

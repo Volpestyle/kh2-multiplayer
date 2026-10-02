@@ -214,7 +214,11 @@ class Context:
 
     # ---- state helpers for expressions ----
     def actors(self, index: int = 0) -> list[dict]:
-        return kh2ctl("entities", pid=self.inst(index).pid)["actors"]
+        return self.entities(index)["actors"]
+
+    def entities(self, index: int = 0) -> dict:
+        """kh2ctl entities: world, room and every actor."""
+        return kh2ctl("entities", pid=self.inst(index).pid)
 
     def actor(self, name: str, index: int = 0) -> dict:
         for a in self.actors(index):
@@ -246,6 +250,10 @@ class Context:
         def dist(a, b) -> float:
             return math.dist(a, b)
 
+        def runtime_log(index: int = 0) -> str:
+            path = self.run_dir / f"runtime_{index}.log"
+            return path.read_text(errors="replace") if path.exists() else ""
+
         def bridge(index: int = 0, seconds: float = 0.5) -> dict:
             """The instance's AvatarBridge: local frames/s and both puppet slots."""
             out = subprocess.run([str(AVATARCTL), "peek", "--pid", str(self.inst(index).pid),
@@ -254,11 +262,13 @@ class Context:
 
         return {"peek": peek, "pos": pos, "room": room, "enemies": enemies, "actor": self.actor,
                 "actors": self.actors, "log_count": log_count, "dist": dist, "saved": self.saved,
-                "puppet_error": puppet_error, "bridge": bridge,
-                "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all}
+                "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
+                "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
+                "range": range, "round": round}
 
     def eval(self, expr: str):
-        return eval(expr, {"__builtins__": {}}, self.namespace())  # noqa: S307 (repo-owned scenarios)
+        # Helpers go in globals: comprehensions inside an expression only see globals.
+        return eval(expr, {"__builtins__": {}, **self.namespace()})  # noqa: S307 (repo-owned scenarios)
 
     # ---- Sora protection (team 0 is in no attack's hit mask) ----
     def _protect_loop(self) -> None:
@@ -506,26 +516,41 @@ def step_relay(ctx: Context, step: dict) -> dict:
 
 
 def step_runtime(ctx: Context, step: dict) -> dict:
-    """Start a runtime bound to one instance (KH2COOP_PID) and connect it to
+    """Start a runtime bound to one instance (--pid) and connect it to
     the relay. Waits until its log shows it connected."""
     inst = ctx.inst(step.get("instance", 0))
-    env = dict(os.environ, KH2COOP_PID=str(inst.pid))
     cmd = [str(RUNTIME), "--network", "--server", "127.0.0.1", "--port", str(ctx.relay_port),
-           "--role", step["role"], "--peer-id", step.get("peerId", f"peer{inst.index}"), "--no-camera",
-           *map(str, step.get("args", []))]
+           "--pid", str(inst.pid), "--role", step["role"],
+           "--peer-id", step.get("peerId", f"peer{inst.index}"), "--no-camera"]
+    # Impairment, applied by the runtime to both directions: owner -> viewer
+    # crosses two runtimes, so 50 ms here is 100 ms end to end.
+    link = step.get("link", {})
+    for key, flag in (("latencyMs", "--link-latency-ms"), ("jitterMs", "--link-jitter-ms"),
+                      ("lossPct", "--link-loss")):
+        if key in link:
+            cmd += [flag, str(link[key])]
+    cmd += [str(a) for a in step.get("args", [])]
     name = f"runtime_{inst.index}"
-    proc = start_process(ctx, name, cmd, env)
-    # Its stdout is block-buffered into the log, so "connected" can't be read
-    # live; scenarios check the AvatarBridge (bridge()) instead.
-    ctx.sleep(step.get("settleMs", 3000) / 1000)
-    if proc.poll() is not None:
-        raise StepFailed(f"runtime {inst.index} exited with {proc.returncode}")
-    return {"pid": proc.pid, "role": step["role"]}
+    proc = start_process(ctx, name, cmd)
+    log = ctx.run_dir / f"{name}.log"
+    expect = step.get("expect", "connected to server")
+
+    def ready() -> bool:
+        text = log.read_text(errors="replace")
+        if expect in text:
+            return True
+        if proc.poll() is not None:
+            raise StepFailed(f"runtime {inst.index} exited with {proc.returncode}: {text[-300:]}")
+        return False
+
+    wait_for(ctx, ready, f"runtime {inst.index}: {expect!r}", step.get("timeoutMs", 15000) / 1000, 0.5)
+    return {"pid": proc.pid, "role": step["role"], "link": link}
 
 
 class Recorder:
-    """Samples every actor's position on the given instances in a thread:
-    rows of (t, instance, address, name, objectType, x, y, z)."""
+    """Samples every party actor's position on the given instances in a
+    thread: rows of (t, instance, room, head, address, name, objectType, x,
+    y, z), where head is the instance's own Sora (the entity list head)."""
 
     def __init__(self, ctx: Context, instances: list[int]) -> None:
         self.ctx, self.instances = ctx, instances
@@ -539,21 +564,96 @@ class Recorder:
         while not self._stop.is_set():
             for index in self.instances:
                 try:
-                    actors = self.ctx.actors(index)
+                    ents = self.ctx.entities(index)
                 except Exception:  # noqa: BLE001 - loading screens etc.
                     continue
                 t = time.monotonic()
-                if actors:
-                    self.heads[index] = actors[0]["address"]
+                actors = ents.get("actors") or []
+                if not actors:
+                    continue
+                # The list head is this instance's own Sora; the room key says
+                # where the sample was taken (addresses repeat across rooms).
+                head = actors[0]["address"]
+                room = f"{ents.get('world', 0):02X}/{ents.get('room', 0):02X}"
+                self.heads[index] = head
                 for a in actors:
                     if a.get("objectType") in (0, 1):
                         p = a["position"]
-                        self.rows.append((t, index, a["address"], a["name"], a["objectType"],
+                        self.rows.append((t, index, room, head, a["address"], a["name"], a["objectType"],
                                           p["x"], p["y"], p["z"]))
 
     def stop(self) -> None:
         self._stop.set()
         self._thread.join(timeout=5)
+
+
+def step_wander(ctx: Context, step: dict) -> dict:
+    """Random stick walks on several instances for a while (seeded), taking
+    turns, with an occasional jump. For soaks."""
+    import random
+
+    rng = random.Random(step.get("seed", 1))
+    instances = step.get("instances", [0])
+    end = time.monotonic() + step.get("seconds", 60)
+    moves = 0
+    while time.monotonic() < end:
+        for index in instances:
+            angle = rng.uniform(0, 2 * math.pi)
+            kh2ctl("player-input", "--lx", f"{math.cos(angle):.2f}", "--ly", f"{math.sin(angle):.2f}",
+                   "--duration-ms", str(rng.randint(400, 900)), pid=ctx.inst(index).pid)
+            if rng.random() < 0.15:
+                kh2ctl("player-press", "--button", "circle", "--duration-ms", "120", pid=ctx.inst(index).pid)
+            moves += 1
+        ctx.check_all()
+    return {"moves": moves}
+
+
+def _tracks(rec: "Recorder", owner: int, viewer: int):
+    """Owner's own-Sora samples (t, room, pos) and the viewer's other party
+    actors (t, room, address, name, pos)."""
+    truth = [(t, r, (x, y, z)) for t, i, r, h, a, n, o, x, y, z in rec.rows if i == owner and a == h]
+    others = [(t, r, a, n, (x, y, z)) for t, i, r, h, a, n, o, x, y, z in rec.rows if i == viewer and a != h]
+    return truth, others
+
+
+class _Window:
+    """Time-range slices of a sorted owner track."""
+
+    def __init__(self, truth: list) -> None:
+        self.truth, self.times = truth, [s[0] for s in truth]
+
+    def __call__(self, start: float, end: float) -> list:
+        import bisect
+
+        return self.truth[bisect.bisect_left(self.times, start):bisect.bisect_right(self.times, end)]
+
+
+def jitter_stats(rec: "Recorder", owner: int, viewer: int, actor: str, settle: float = 1.5) -> dict:
+    """Pops: puppet steps between consecutive samples that exceed the owner's
+    largest step over the same interval by more than 30 units. Only steps
+    where the owner was in the viewer's room for the step and the `settle`
+    seconds before it count (appear/hide snaps aren't jitter)."""
+    name = actor.split("@")[0]
+    truth, others = _tracks(rec, owner, viewer)
+    puppet = [s for s in others if s[3] == name]
+    owner_window = _Window(truth)
+    pops, worst, counted, seconds = 0, 0.0, 0, 0.0
+    for (t0, h0, a0, _, p0), (t1, h1, a1, _, p1) in zip(puppet, puppet[1:]):
+        if h0 != h1 or a0 != a1 or t1 - t0 > 0.25:
+            continue
+        window = owner_window(t0 - settle, t1)
+        if not window or any(h != h0 for _, h, _ in window) or window[0][0] > t0 - settle + 0.25:
+            continue  # owner elsewhere, or only just arrived
+        owner_step = max((math.dist(a[2], b[2]) for a, b in zip(window, window[1:])
+                          if a[0] >= t0 - 0.5), default=0.0)
+        excess = math.dist(p0, p1) - owner_step
+        worst = max(worst, excess)
+        counted += 1
+        seconds += t1 - t0
+        if excess > 30:
+            pops += 1
+    return {"steps": counted, "sameRoomMinutes": round(seconds / 60, 1), "pops": pops,
+            "worstExcess": round(worst, 1)}
 
 
 def step_record(ctx: Context, step: dict) -> dict:
@@ -566,7 +666,7 @@ def step_record_stop(ctx: Context, step: dict) -> dict:
     rec.stop()
     path = ctx.run_dir / f"{step['as']}.csv"
     with open(path, "w") as fh:
-        fh.write("t,instance,address,name,type,x,y,z\n")
+        fh.write("t,instance,room,head,address,name,type,x,y,z\n")
         for r in rec.rows:
             fh.write(",".join(f"{v:.4f}" if isinstance(v, float) else str(v) for v in r) + "\n")
     ctx.artifacts.append(path.name)
@@ -578,25 +678,28 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
     actor (except its own Sora) is a candidate; for each of its samples, the
     error is the distance to the nearest owner position in the preceding
     `window` seconds (the puppet renders behind on purpose). The candidate
-    with the lowest mean error is the puppet. Units: KH2 units (100 = 1 m)."""
-    owner_head = rec.heads.get(owner)
-    viewer_head = rec.heads.get(viewer)
-    truth = [(t, (x, y, z)) for t, i, a, n, o, x, y, z in rec.rows if i == owner and a == owner_head]
+    with the lowest mean error is the puppet. Only samples where the owner is
+    in the viewer's room count (same world/room), and candidates are
+    keyed by name since actor addresses change per room. Units: KH2 units
+    (100 = 1 m)."""
+    truth, others = _tracks(rec, owner, viewer)
     if not truth:
         return {"ok": False, "why": "no owner samples"}
     candidates: dict[str, list] = {}
-    for t, i, a, n, o, x, y, z in rec.rows:
-        if i == viewer and a != viewer_head:
-            candidates.setdefault(f"{n}@{a}", []).append((t, (x, y, z)))
+    for t, h, a, n, p in others:
+        candidates.setdefault(n, []).append((t, h, a, p))
+    owner_window = _Window(truth)
     best = None
-    for key, samples in candidates.items():
+    for name, samples in candidates.items():
         errors, lags = [], []
-        for t, p in samples:
-            near = [(math.dist(p, q), t - tq) for tq, q in truth if t - window <= tq <= t]
+        for t, h, a, p in samples:
+            near = [(math.dist(p, q), t - tq) for tq, hq, q in owner_window(t - window, t)
+                    if hq == h]
             if near:
                 d, lag = min(near)
                 errors.append(d)
                 lags.append(lag)
+        key = f"{name}@{samples[-1][2]}"
         if len(errors) < 10:
             continue
         errors.sort()
@@ -606,7 +709,8 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
         if best is None or result["mean"] < best["mean"]:
             best = result
     out = best or {"ok": False, "why": "no candidate with 10+ matched samples"}
-    out["ownerTravel"] = round(sum(math.dist(a[1], b[1]) for a, b in zip(truth, truth[1:])), 1)
+    out["ownerTravel"] = round(sum(math.dist(a[2], b[2]) for a, b in zip(truth, truth[1:])
+                                   if a[1] == b[1]), 1)
     return out
 
 
@@ -615,7 +719,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "assert": step_assert, "save": step_save, "protect": step_protect,
          "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
-         "record_stop": step_record_stop}
+         "record_stop": step_record_stop, "wander": step_wander}
 
 
 # --------------------------------------------------------------------------

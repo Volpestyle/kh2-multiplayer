@@ -1,0 +1,112 @@
+{
+  "name": "net_soak_10min",
+  "description": "Two instances, 100 ms owner-to-viewer latency, 10 ms jitter, 2% loss; both Soras wander for ~10 minutes. Puppet error must stay under 0.5 m and no puppet pops (a sample-to-sample jump 30+ units beyond the owner's own motion). Sampling is ~10-20 Hz, so single-frame jitter is judged from the clip.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player",
+      "link": {
+        "latencyMs": 50,
+        "jitterMs": 10,
+        "lossPct": 2
+      }
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1",
+      "link": {
+        "latencyMs": 50,
+        "jitterMs": 10,
+        "lossPct": 2
+      }
+    },
+    {
+      "do": "wait_until",
+      "expr": "(bridge(0).get('puppet0') or {}).get('active') and (bridge(1).get('puppet0') or {}).get('active')",
+      "timeoutMs": 15000,
+      "pollMs": 1000
+    },
+    {
+      "do": "record",
+      "as": "rec",
+      "instances": [
+        0,
+        1
+      ]
+    },
+    {
+      "do": "wander",
+      "instances": [
+        0,
+        1
+      ],
+      "seconds": 580,
+      "seed": 7
+    },
+    {
+      "do": "clip",
+      "name": "puppet_view",
+      "instance": 1,
+      "seconds": 20
+    },
+    {
+      "do": "record_stop",
+      "as": "rec"
+    },
+    {
+      "do": "save",
+      "as": "err_0_on_1",
+      "expr": "puppet_error(saved['rec'], 0, 1)"
+    },
+    {
+      "do": "save",
+      "as": "err_1_on_0",
+      "expr": "puppet_error(saved['rec'], 1, 0)"
+    },
+    {
+      "do": "save",
+      "as": "jit_0_on_1",
+      "expr": "jitter_stats(saved['rec'], 0, 1, saved['err_0_on_1']['actor'])"
+    },
+    {
+      "do": "save",
+      "as": "jit_1_on_0",
+      "expr": "jitter_stats(saved['rec'], 1, 0, saved['err_1_on_0']['actor'])"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_0_on_1']['mean'] < 50 and saved['err_1_on_0']['mean'] < 50",
+      "message": "puppet error over 0.5 m"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['jit_0_on_1']['pops'] == 0 and saved['jit_1_on_0']['pops'] == 0",
+      "message": "puppet popped"
+    }
+  ]
+}

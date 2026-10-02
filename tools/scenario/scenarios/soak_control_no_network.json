@@ -1,0 +1,35 @@
+{
+  "name": "soak_control_no_network",
+  "description": "Control for net_soak_10min: the same seeded 10-minute wander on two instances with no relay, runtimes or puppets. If this crashes too, the crash isn't the puppet driver's.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "wander",
+      "instances": [
+        0,
+        1
+      ],
+      "seconds": 580,
+      "seed": 7
+    }
+  ]
+}

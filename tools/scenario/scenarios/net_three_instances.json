@@ -1,0 +1,221 @@
+{
+  "name": "net_three_instances",
+  "description": "Three instances in the GoA on a loopback relay with 100 ms owner-to-viewer latency, 10 ms jitter and 2% loss; every instance's two puppets must follow their owners (lag-compensated mean error under 50 units = 0.5 m).",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player",
+      "link": {
+        "latencyMs": 50,
+        "jitterMs": 10,
+        "lossPct": 2
+      }
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1",
+      "link": {
+        "latencyMs": 50,
+        "jitterMs": 10,
+        "lossPct": 2
+      }
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2",
+      "link": {
+        "latencyMs": 50,
+        "jitterMs": 10,
+        "lossPct": 2
+      }
+    },
+    {
+      "do": "wait_until",
+      "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+      "timeoutMs": 15000,
+      "pollMs": 1000
+    },
+    {
+      "do": "record",
+      "as": "rec",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": -1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": -1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "lx": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": -1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": -1,
+      "ms": 900
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "record_stop",
+      "as": "rec"
+    },
+    {
+      "do": "capture",
+      "name": "end",
+      "instance": 0
+    },
+    {
+      "do": "capture",
+      "name": "end",
+      "instance": 1
+    },
+    {
+      "do": "capture",
+      "name": "end",
+      "instance": 2
+    },
+    {
+      "do": "save",
+      "as": "err_0_on_1",
+      "expr": "puppet_error(saved['rec'], 0, 1)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_0_on_1'].get('mean', 1e9) < 50 and saved['err_0_on_1']['ownerTravel'] > 300",
+      "message": "instance 1's puppet of 0 is off (or 0 didn't move)"
+    },
+    {
+      "do": "save",
+      "as": "err_0_on_2",
+      "expr": "puppet_error(saved['rec'], 0, 2)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_0_on_2'].get('mean', 1e9) < 50 and saved['err_0_on_2']['ownerTravel'] > 300",
+      "message": "instance 2's puppet of 0 is off (or 0 didn't move)"
+    },
+    {
+      "do": "save",
+      "as": "err_1_on_0",
+      "expr": "puppet_error(saved['rec'], 1, 0)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_1_on_0'].get('mean', 1e9) < 50 and saved['err_1_on_0']['ownerTravel'] > 300",
+      "message": "instance 0's puppet of 1 is off (or 1 didn't move)"
+    },
+    {
+      "do": "save",
+      "as": "err_1_on_2",
+      "expr": "puppet_error(saved['rec'], 1, 2)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_1_on_2'].get('mean', 1e9) < 50 and saved['err_1_on_2']['ownerTravel'] > 300",
+      "message": "instance 2's puppet of 1 is off (or 1 didn't move)"
+    },
+    {
+      "do": "save",
+      "as": "err_2_on_0",
+      "expr": "puppet_error(saved['rec'], 2, 0)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_2_on_0'].get('mean', 1e9) < 50 and saved['err_2_on_0']['ownerTravel'] > 300",
+      "message": "instance 0's puppet of 2 is off (or 2 didn't move)"
+    },
+    {
+      "do": "save",
+      "as": "err_2_on_1",
+      "expr": "puppet_error(saved['rec'], 2, 1)"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['err_2_on_1'].get('mean', 1e9) < 50 and saved['err_2_on_1']['ownerTravel'] > 300",
+      "message": "instance 1's puppet of 2 is off (or 2 didn't move)"
+    }
+  ]
+}

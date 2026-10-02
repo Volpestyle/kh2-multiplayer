@@ -3,7 +3,6 @@
 
 #include <array>
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
 
 #ifdef _WIN32
@@ -28,14 +27,6 @@ GameBridgePC::~GameBridgePC() { Detach(); }
 bool GameBridgePC::Attach() {
 #ifdef _WIN32
     if (attached_) return true;
-
-    // KH2COOP_PID binds to one instance when several are running (stopgap
-    // until the runtime has --pid; VUH-1492).
-    char pidEnv[16] = {};
-    const DWORD pidLen = GetEnvironmentVariableA("KH2COOP_PID", pidEnv, sizeof(pidEnv));
-    if (pidLen > 0 && pidLen < sizeof(pidEnv)) {
-        return Attach(static_cast<std::uint32_t>(std::strtoul(pidEnv, nullptr, 10)));
-    }
 
     // Enumerate processes to find KH2.
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
