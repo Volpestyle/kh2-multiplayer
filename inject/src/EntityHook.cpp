@@ -484,6 +484,81 @@ static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int 
     return result;
 }
 
+// ----------------------------------------------------------------------------
+// Hit log (VUH-1501 criterion 1), from repos-60's decompile:
+//   0x3D1730(ATTACK** atk, victim, contact) = ResolveHit. A = *atk:
+//            A+0x10 owner (attacker) handle, A+0x30 -> atkp entry (id u16 +2)
+//   0x3D23C0(A, victim, u16, u8) -> hit record: damage i32 +0x28, stat u8 +0x25
+// Attacker handles are resolved through a per-frame handle -> actor map
+// (an actor's handle is its first dword).
+// ----------------------------------------------------------------------------
+// The damage calculation receives the ATTACK object itself, so hooking it
+// alone gives attacker, atkp, victim and damage.
+using PFN_BuildHit = uintptr_t(__fastcall*)(void* atk, void* victim, uint32_t a3, uint32_t a4);
+static constexpr uint64_t RVA_BUILD_HIT = 0x3D23C0;
+static constexpr uint8_t kBuildHitBytes[] = {
+    0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
+static PFN_BuildHit g_origBuildHit = nullptr;
+static uint32_t g_hitsLogged = 0;
+static constexpr uint32_t HIT_LOG_LIMIT = 60;
+
+struct HandleEntry { uint32_t handle; uintptr_t actor; };
+static HandleEntry g_handleMap[128];
+static int g_handleCount = 0;
+static void BeginHandleFrame() { g_handleCount = 0; }
+// Attack owner handles carry the actor address's low 24 bits (plus a tag in
+// the top byte): live, Sora at ...612AB820 attacked with handle 852AB820.
+static void NoteActorHandle(uintptr_t actor) {
+    if (g_handleCount < 128) {
+        g_handleMap[g_handleCount++] = {static_cast<uint32_t>(actor & 0xFFFFFF), actor};
+    }
+}
+static uintptr_t ActorForHandle(uint32_t handle) {
+    for (int i = 0; i < g_handleCount; ++i) {
+        if (g_handleMap[i].handle == (handle & 0xFFFFFF)) return g_handleMap[i].actor;
+    }
+    return 0;
+}
+
+// Copies an actor's objentry name (or "?") into out[32].
+static void ActorName(uintptr_t actor, char* out) {
+    std::strcpy(out, "?");
+    if (actor == 0) return;
+    const auto obj = *reinterpret_cast<const uintptr_t*>(actor + offsets::actor::OBJENTRY_PTR);
+    if (obj > g_exeBase && obj < g_exeBase + 0x3000000) {
+        std::memcpy(out, reinterpret_cast<const void*>(obj + offsets::objentry::NAME), 31);
+        out[31] = '\0';
+    }
+}
+
+static uintptr_t __fastcall HookedBuildHit(void* atk, void* victim, uint32_t a3, uint32_t a4) {
+    const uintptr_t hit = g_origBuildHit(atk, victim, a3, a4);
+    if (hit == 0 || g_hitsLogged >= HIT_LOG_LIMIT) return hit;
+    __try {
+        const auto A = reinterpret_cast<uintptr_t>(atk);
+        const uint32_t ownerHandle = *reinterpret_cast<const uint32_t*>(A + 0x10);
+        const uintptr_t atkp = *reinterpret_cast<const uintptr_t*>(A + 0x30);
+        const uint32_t atkpId = atkp ? *reinterpret_cast<const uint16_t*>(atkp + 2) : 0xFFFF;
+        const int32_t damage = *reinterpret_cast<const int32_t*>(hit + 0x28);
+        const uint8_t stat = *reinterpret_cast<const uint8_t*>(hit + 0x25);
+        char attacker[32], target[32];
+        ActorName(ActorForHandle(ownerHandle), attacker);
+        ActorName(reinterpret_cast<uintptr_t>(victim), target);
+        const int32_t* hp = nullptr;
+        const auto status = *reinterpret_cast<const uintptr_t*>(
+            reinterpret_cast<uintptr_t>(victim) + 0x5C0);
+        if (status > 0x10000) hp = reinterpret_cast<const int32_t*>(status);
+        ++g_hitsLogged;
+        Log("[hit] frame %u attacker=%s (handle %08X) atkp=%u -> victim=%s@%llX damage=%d stat=%u hpBefore=%d",
+            g_frameCounter, attacker, ownerHandle, atkpId, target,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(victim)),
+            damage, stat, hp ? *hp : -1);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[hit] exception while logging");
+    }
+    return hit;
+}
+
 static int __fastcall HookedLimitMenuState(void* actor, uint16_t* cmd, int state) {
     const int result = g_origLimitMenuState(actor, cmd, state);
     if (g_anyPuppetActive && cmd != nullptr && g_limitByCmd(*cmd) != 0) {
@@ -1887,10 +1962,12 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 // Hand pending room warps to the game on its own thread.
                 warp::OnFrameStart(g_frameCounter, addr);
                 BeginCloneFrame();
+                BeginHandleFrame();
                 PollPuppetPoses();
             }
         }
         NoteActorForClones(addr);
+        NoteActorHandle(addr);
 
         // Check hotkey (handles standalone mode where OnFrame isn't called)
         CheckTestModeHotkey();
@@ -2255,6 +2332,18 @@ bool Initialize(uintptr_t exeBase) {
                             : "  WARNING: ApplyStatDelta hook failed");
         } else {
             Log("  WARNING: ApplyStatDelta bytes don't match this build; HP not hooked");
+        }
+
+        // Hit log: damage calculation post-hook (attacker + atkp in scope).
+        if (matches(RVA_BUILD_HIT, kBuildHitBytes, sizeof(kBuildHitBytes))) {
+            void* target = reinterpret_cast<void*>(exeBase + RVA_BUILD_HIT);
+            MH_STATUS st = MH_CreateHook(target, reinterpret_cast<void*>(&HookedBuildHit),
+                                         reinterpret_cast<void**>(&g_origBuildHit));
+            if (st == MH_OK) st = MH_EnableHook(target);
+            Log(st == MH_OK ? "  BuildHit hook installed (0x3D23C0)"
+                            : "  WARNING: BuildHit hook failed");
+        } else {
+            Log("  WARNING: BuildHit bytes don't match this build; hits not logged");
         }
     }
 
