@@ -408,6 +408,43 @@ static constexpr uint64_t SORA_DRIVE_PARTIAL = 0x2A23748;  // u8
 static bool g_driveHeld = false;
 static uint8_t g_savedDriveBars = 0;
 static uint8_t g_savedDrivePartial = 0;
+static bool g_anyPuppetActive = false;
+
+// Limits grey out while puppets are active: a limit's cutscene would grab
+// the partner actor, which is now a puppet (repos-60's static trace).
+//   0x3D88E0(actor, cmd*, state) -> menu state for a command (5 = greyed,
+//            what the game returns while a limit runs or MP recharges)
+//   0x3E7800(cmdId) -> limt entry if the limit is usable now, else 0; the
+//            execute path 0x3D8B40 re-checks it
+//   0x3E7C30(cmdId) -> limt entry for a command id, or 0 (plain lookup)
+using PFN_LimitMenuState = int(__fastcall*)(void* actor, uint16_t* cmd, int state);
+using PFN_LimitLookup = uintptr_t(__fastcall*)(uint32_t cmdId);
+static constexpr uint64_t RVA_LIMIT_MENU_STATE = 0x3D88E0;
+static constexpr uint64_t RVA_LIMIT_USABLE = 0x3E7800;
+static constexpr uint64_t RVA_LIMIT_BY_CMD = 0x3E7C30;
+static constexpr uint8_t kLimitMenuStateBytes[] = {
+    0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
+static constexpr uint8_t kLimitUsableBytes[] = {
+    0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
+static constexpr uint8_t kLimitByCmdBytes[] = {
+    0x4c, 0x8b, 0x1d, 0x59, 0xda, 0x6f, 0x02, 0x45, 0x33, 0xc9, 0x4d, 0x63, 0x53, 0x04, 0x4d, 0x85};
+static constexpr int LIMIT_STATE_GREYED = 5;
+static PFN_LimitMenuState g_origLimitMenuState = nullptr;
+static PFN_LimitLookup g_origLimitUsable = nullptr;
+static PFN_LimitLookup g_limitByCmd = nullptr;
+
+static int __fastcall HookedLimitMenuState(void* actor, uint16_t* cmd, int state) {
+    const int result = g_origLimitMenuState(actor, cmd, state);
+    if (g_anyPuppetActive && cmd != nullptr && g_limitByCmd(*cmd) != 0) {
+        return LIMIT_STATE_GREYED;
+    }
+    return result;
+}
+
+static uintptr_t __fastcall HookedLimitUsable(uint32_t cmdId) {
+    if (g_anyPuppetActive && g_limitByCmd(cmdId & 0xFFFF) != 0) return 0;
+    return g_origLimitUsable(cmdId);
+}
 
 // Release a puppet back to its AI when poses stop arriving (the runtime
 // normally clears `active` itself; this covers a dead writer).
@@ -466,6 +503,7 @@ static void PollPuppetPoses() {
         }
         anyActive = anyActive || active;
     }
+    g_anyPuppetActive = anyActive;
 
     auto* bars = reinterpret_cast<uint8_t*>(g_exeBase + SORA_DRIVE_BARS);
     auto* partial = reinterpret_cast<uint8_t*>(g_exeBase + SORA_DRIVE_PARTIAL);
@@ -2054,6 +2092,36 @@ bool Initialize(uintptr_t exeBase) {
 
     // Screenshots, clips and the debug overlay (VUH-1485). Optional: the DLL
     // keeps working if the renderer can't be hooked.
+    // Limit gate for puppets (VUH-1491): hook only when all three functions
+    // match this build.
+    {
+        auto matches = [&](uint64_t rva, const uint8_t* bytes, size_t n) {
+            return std::memcmp(reinterpret_cast<const void*>(exeBase + rva), bytes, n) == 0;
+        };
+        if (matches(RVA_LIMIT_MENU_STATE, kLimitMenuStateBytes, sizeof(kLimitMenuStateBytes)) &&
+            matches(RVA_LIMIT_USABLE, kLimitUsableBytes, sizeof(kLimitUsableBytes)) &&
+            matches(RVA_LIMIT_BY_CMD, kLimitByCmdBytes, sizeof(kLimitByCmdBytes))) {
+            g_limitByCmd = reinterpret_cast<PFN_LimitLookup>(exeBase + RVA_LIMIT_BY_CMD);
+            void* menuState = reinterpret_cast<void*>(exeBase + RVA_LIMIT_MENU_STATE);
+            void* usable = reinterpret_cast<void*>(exeBase + RVA_LIMIT_USABLE);
+            MH_STATUS st = MH_CreateHook(menuState, reinterpret_cast<void*>(&HookedLimitMenuState),
+                                         reinterpret_cast<void**>(&g_origLimitMenuState));
+            if (st == MH_OK) st = MH_EnableHook(menuState);
+            if (st == MH_OK) {
+                st = MH_CreateHook(usable, reinterpret_cast<void*>(&HookedLimitUsable),
+                                   reinterpret_cast<void**>(&g_origLimitUsable));
+            }
+            if (st == MH_OK) st = MH_EnableHook(usable);
+            if (st == MH_OK) {
+                Log("  Limit gate hooks installed (0x3D88E0, 0x3E7800)");
+            } else {
+                Log("  WARNING: limit gate hooks failed: %d (%s)", st, MH_StatusToString(st));
+            }
+        } else {
+            Log("  WARNING: limit gate functions don't match this build; limits not gated");
+        }
+    }
+
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
     if (g_avatarBridge.Open(GetCurrentProcessId())) {
