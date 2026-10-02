@@ -4,68 +4,85 @@ How to build, test, and iterate on the inject DLL against a running KH2 instance
 
 ## Prerequisites
 
-- KH2 HD 1.5+2.5 ReMIX (Steam Global)
+- KH2 HD 1.5+2.5 ReMIX (Steam Global), with Steam running
 - Visual Studio 2019+ build tools (for CMake/MSVC)
-- Cheat Engine 7.x (for DLL injection and runtime analysis)
 - `steam_appid.txt` containing `2552430` in the KH2 game directory (bypasses Steam launcher)
+- A desktop session. KH2 crashes at startup (`0xC0000005`) when launched from
+  Windows session 0 (services, SSH, some remote agents), which has no display.
+  Run the rig from a terminal on the logged-in desktop.
+- Cheat Engine 7.x for runtime analysis only; injection no longer needs it
 
 ## The development loop
 
 ```
 1. Edit code (inject/src/EntityHook.cpp)
-2. Kill KH2          →  .\scripts\restart-kh2.ps1 -Kill
-3. Build             →  cmake --build build --target kh2coop_inject --config Release
-4. Relaunch KH2      →  .\scripts\restart-kh2.ps1 -NoBuild
-5. Load a save (get into gameplay with Donald in party)
-6. Attach CE to KH2
-7. Inject DLL via CE Lua console (see below)
-8. Press F5 to toggle solo mode
-9. Test, observe logs, repeat from step 1
+2. kh2ctl restart        kill rig instances, rebuild the DLL, launch, inject
+3. Load a save (get into gameplay with Donald in party)
+4. Press F5 to toggle solo mode
+5. Test, read build/rig/logs/kh2coop_inject_<pid>.log, repeat from step 1
 ```
 
-Steps 2-4 can be combined:
+`kh2ctl` is `.\build\tools\kh2ctl\Release\kh2ctl.exe`. The kh2ctl MCP server
+exposes the same commands (`launch_kh2`, `inject_kh2`, `list_instances`,
+`kill_kh2`, `restart_kh2`).
+
 ```powershell
-.\scripts\restart-kh2.ps1           # kill + rebuild + relaunch (all-in-one)
+kh2ctl launch            # launch + inject; prints pid, log path, installed hooks
+kh2ctl instances         # KH2 processes, and which ones the rig owns
+kh2ctl kill --all        # kill rig-launched instances only
+kh2ctl inject --pid N    # inject into an already running KH2
 ```
 
-## DLL injection (CE Lua console)
+`launch` reports `"hooksInstalled":true` and the hook list once the DLL's init
+log shows every hook. Measured 2026-10-01: 10 of 10 launches installed all four
+hooks, about 2 s from launch to injection.
 
-```lua
-openProcess("KINGDOM HEARTS II FINAL MIX.exe")
-local loadLibA = getAddress("kernel32.LoadLibraryA")
-local mem = allocateMemory(512)
-writeString(mem, "C:\\Users\\volpe\\kh2-multiplayer\\build\\inject\\staging\\kh2coop_inject.dll", false)
-createRemoteThread(loadLibA, mem)
-```
+Loading a save is still manual or step-by-step `tap-key`; `boot-load-save` is
+known broken (see `KH2_CONTROL_CLI.md`).
 
-Update the DLL path if your build output is elsewhere.
+## Safety
 
-## Why you must kill KH2 before rebuilding
+- The rig records the processes it launches in `build/rig/owned.txt` and kills
+  only those. `restart` refuses to run while a KH2 it didn't launch is open,
+  because that means James is playing.
+- `scripts/restart-kh2.ps1` kills **every** KH2 process. It is for a human at
+  the keyboard; agents use `kh2ctl restart` and `kh2ctl kill`.
+- Never save in-game during automation (AGENTS.md).
 
-The inject DLL is loaded into the KH2 process. The linker can't overwrite a DLL that's in use. You must kill KH2 before rebuilding. The restart script handles this automatically.
+## Rebuilding while KH2 runs
+
+Each injection loads a fresh copy of `build/inject/staging/kh2coop_inject.dll`
+from `build/rig/dll/`, so the linker never hits a locked DLL and you can rebuild
+while instances run. A running instance keeps the build it was injected with;
+relaunch it to pick up a new one. Old copies in `build/rig/dll/` can be deleted
+when no instance is running.
 
 ## Log file
 
-The inject DLL writes to `kh2coop_inject.log` in the KH2 game directory:
-```
-C:\Program Files (x86)\Steam\steamapps\common\KINGDOM HEARTS -HD 1.5+2.5 ReMIX-\kh2coop_inject.log
-```
+Rig-launched instances log to `build/rig/logs/kh2coop_inject_<pid>.log`
+(`launch` sets `KH2COOP_LOG_DIR` for the game process). A DLL injected any other
+way logs to `kh2coop_inject_<pid>.log` in the KH2 game directory.
 
-Check this after injection for:
+Check the log for:
 - Hook installation success/failure
 - Friend entity detection
 - Animation override events
 - Movement injection diagnostics
 - Periodic status (every 300 frames)
 
-## Quick reference: restart script flags
+## Manual injection (Cheat Engine fallback)
 
-| Command | What it does |
-|---------|-------------|
-| `.\scripts\restart-kh2.ps1` | Kill + rebuild inject DLL + relaunch |
-| `.\scripts\restart-kh2.ps1 -NoBuild` | Kill + relaunch only (DLL already built) |
-| `.\scripts\restart-kh2.ps1 -Kill` | Kill only (no relaunch) |
-| `.\scripts\restart-kh2.ps1 -CopyDll` | Also copy DLL to game directory |
+Only needed when `kh2ctl inject` can't be used:
+
+```lua
+openProcess("KINGDOM HEARTS II FINAL MIX.exe")
+local loadLibA = getAddress("kernel32.LoadLibraryA")
+local mem = allocateMemory(512)
+writeString(mem, "C:\\Users\\volpe\\repos\\kh2-multiplayer\\build\\inject\\staging\\kh2coop_inject.dll", false)
+createRemoteThread(loadLibA, mem)
+```
+
+A DLL loaded this way locks the staging file until KH2 exits.
 
 ## Building other targets
 
@@ -81,18 +98,18 @@ cmake --build build --config Release                           # everything
 The E2E test (`kh2coop_fake_sim`) exercises the codec, networking, and server with 3 simulated clients. No running KH2 instance needed:
 
 ```powershell
-.\build\tests\Release\kh2coop_fake_sim.exe
+.\build\Release\kh2coop_fake_sim.exe
 ```
 
 ## Using kh2ctl
 
-The CLI tool for automated KH2 control. Requires the runtime or inject DLL to be attached.
+The CLI tool for automated KH2 control. Player and friend input commands need the inject DLL loaded.
 
 ```powershell
-.\build\tools\kh2ctl\Release\kh2ctl.exe status          # check if attached
-.\build\tools\kh2ctl\Release\kh2ctl.exe room             # current world/room
-.\build\tools\kh2ctl\Release\kh2ctl.exe player-pos       # Sora's position
-.\build\tools\kh2ctl\Release\kh2ctl.exe boot-load-save 1 # restart KH2 + load save 1
+.\build\tools\kh2ctl\Release\kh2ctl.exe state               # attach; room and party actor state
+.\build\tools\kh2ctl\Release\kh2ctl.exe wait-ingame          # wait for a live room
+.\build\tools\kh2ctl\Release\kh2ctl.exe tap-key --key down   # focus KH2 and tap a key
+.\build\tools\kh2ctl\Release\kh2ctl.exe player-press --button confirm
 ```
 
 See `docs/KH2_CONTROL_CLI.md` for the full command reference.

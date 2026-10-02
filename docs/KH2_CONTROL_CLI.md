@@ -7,7 +7,6 @@ version needs direct reuse of:
 - `runtime/include/kh2coop/GameBridgePC.hpp`
 - `common/include/kh2coop/InputMailbox.hpp`
 - `runtime/include/kh2coop/KH2Offsets.hpp`
-- `scripts/restart-kh2.ps1`
 
 Once the command surface stops moving, it can be extracted if needed.
 
@@ -26,7 +25,9 @@ Expected output path on Windows is usually one of:
 
 ### Process and state control
 
-- Restart KH2 through the existing restart script
+- Launch KH2 with the current inject DLL build loaded (no Cheat Engine)
+- Track which KH2 processes the rig launched, and kill only those
+- Restart KH2 (kill rig instances, rebuild the DLL, launch, inject)
 - Attach to the KH2 process
 - Read room state and actor state
 - Wait for title/loading
@@ -76,15 +77,58 @@ Friend-slot commands are more reliable because they go through
 
 All successful commands print a single JSON object to stdout.
 
+### Launch, inject and instances (the rig)
+
+```powershell
+kh2ctl launch                   # launch KH2, inject the current DLL build
+kh2ctl launch --no-inject       # launch only
+kh2ctl inject --pid 1234        # inject into a running KH2
+kh2ctl instances                # list KH2 processes and whether the rig owns them
+kh2ctl kill --pid 1234          # kill one rig-launched instance
+kh2ctl kill --all               # kill every rig-launched instance
+```
+
+`launch` starts the exe directly (`steam_appid.txt` in the game directory skips
+the launcher; Steam must be running), waits for the game window, then injects
+with `LoadLibraryW` from a remote thread. It reports the process id, the
+per-PID log and the hooks that installed:
+
+```json
+{"ok":true,"command":"launch","processId":70260,"dll":".../build/rig/dll/kh2coop_inject_<ms>.dll",
+ "log":".../build/rig/logs/kh2coop_inject_70260.log","hooksInstalled":true,
+ "hooks":["PerEntityUpdate hook installed","MovementDispatch hook installed at RVA 0x3D5E50",
+          "MotionChainSetAnim hook installed at RVA 0x3C88C0","InputCollector hook installed"],"errors":[]}
+```
+
+- **DLL copies.** Each injection loads a fresh copy of
+  `build/inject/staging/kh2coop_inject.dll` from `build/rig/dll/`, so the DLL
+  can be rebuilt while instances are running. Nothing is written to the game
+  directory. `--dll PATH` injects a different build.
+- **Logs.** `launch` sets `KH2COOP_LOG_DIR` for the child, so the DLL logs to
+  `build/rig/logs/kh2coop_inject_<pid>.log`. `inject --pid` into a process the
+  rig didn't launch logs to `kh2coop_inject_<pid>.log` in the game directory.
+- **Ownership.** Launched processes are recorded as (pid, creation time) in
+  `build/rig/owned.txt`. `kill` only terminates those; anything else is
+  reported in `skippedUnowned` and left alone, because it means James is
+  playing.
+- Options: `--game-dir DIR` (or `KH2_GAME_DIR`), `--window-timeout-ms`,
+  `--settle-ms` (wait after the window appears, default 1500),
+  `--init-timeout-ms` (wait for the DLL's hooks, default 15000).
+- Injection happens once the window is up, not suspended before game init.
+  Startup hooks or a single-instance mutex rename would need the early path.
+
 ### Restart
 
 ```powershell
-kh2ctl restart
+kh2ctl restart              # kill rig instances, rebuild the DLL, launch + inject
 kh2ctl restart --no-build
-kh2ctl restart --kill
-kh2ctl restart --copy-dll
-kh2ctl restart --steam
+kh2ctl restart --kill       # kill rig instances only
+kh2ctl restart --no-inject
 ```
+
+`restart` refuses (`"phase":"preflight"`, exit 1) when a KH2 process the rig
+didn't launch is running. It never runs `scripts/restart-kh2.ps1`, which kills
+every KH2 process and is only for humans.
 
 ### State and waits
 
@@ -124,15 +168,23 @@ and game-state dependent:
 
 ```powershell
 kh2ctl boot-load-save --slot 1
-kh2ctl boot-load-save --slot 2 --no-build --copy-dll
+kh2ctl boot-load-save --slot 2 --no-build
 ```
 
 This is the first end-to-end "get me to a playable room" command. It:
 
-1. Runs `restart-kh2.ps1`
+1. Runs `restart` (refuses if an unowned KH2 is running)
 2. Waits for KH2 to reach title/loading state
 3. Drives the save menu
 4. Waits until KH2 is in a live room again
+
+**Known broken (2026-10-01).** Step 2 passes as soon as the world id reads
+`0xFF`, which is also true during the boot logos and intro, so the menu keys
+land before the title menu exists. The title menu (NEW GAME / LOAD / BACK)
+also wraps and doesn't always start on NEW GAME, so a fixed key count can't
+reach LOAD reliably. It needs a title-menu-ready signal and the cursor index
+from memory. Until then, drive the menu step by step with `tap-key`. From a
+clean boot, the cursor starts on NEW GAME.
 
 ## Player Input Commands
 
@@ -197,5 +249,5 @@ python tools\mcp_kh2ctl\server.py
 If the server cannot find the built CLI automatically, set:
 
 ```powershell
-$env:KH2CTL_BIN="C:\Users\volpe\kh2-multiplayer\build\Release\kh2ctl.exe"
+$env:KH2CTL_BIN="<repo>\build\Release\kh2ctl.exe"
 ```

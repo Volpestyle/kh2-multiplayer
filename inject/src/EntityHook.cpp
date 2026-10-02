@@ -1652,8 +1652,23 @@ bool Initialize(uintptr_t exeBase) {
 
     g_exeBase = exeBase;
 
-    // Open log file in the game directory
-    g_logFile = fopen("kh2coop_inject.log", "w");
+    // One log per process so several instances don't clobber each other.
+    // kh2ctl launch sets KH2COOP_LOG_DIR; otherwise the log lands in the
+    // game's working directory.
+    {
+        char logDir[MAX_PATH] = {};
+        const DWORD dirLen =
+            GetEnvironmentVariableA("KH2COOP_LOG_DIR", logDir, MAX_PATH);
+        char logPath[MAX_PATH] = {};
+        if (dirLen > 0 && dirLen < MAX_PATH) {
+            snprintf(logPath, sizeof(logPath), "%s\\kh2coop_inject_%lu.log",
+                     logDir, GetCurrentProcessId());
+        } else {
+            snprintf(logPath, sizeof(logPath), "kh2coop_inject_%lu.log",
+                     GetCurrentProcessId());
+        }
+        g_logFile = fopen(logPath, "w");
+    }
     Log("=== kh2coop_inject v0.2 ===");
     Log("Initializing...");
     Log("  exe base: 0x%llX", static_cast<unsigned long long>(exeBase));

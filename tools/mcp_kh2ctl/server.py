@@ -79,19 +79,62 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool(description="Restart KH2 using the repo restart script.")
+@mcp.tool(
+    description=(
+        "Launch a new KH2 instance and inject the current inject DLL build. "
+        "Reports the process id, per-PID log path and installed hooks."
+    )
+)
+def launch_kh2(no_inject: bool = False, init_timeout_ms: int = 15000) -> dict[str, Any]:
+    return _run_kh2ctl(
+        "launch",
+        *_bool_flag("--no-inject", no_inject),
+        "--init-timeout-ms",
+        str(init_timeout_ms),
+    )
+
+
+@mcp.tool(description="Inject the current inject DLL build into a running KH2 process.")
+def inject_kh2(pid: int, init_timeout_ms: int = 15000) -> dict[str, Any]:
+    return _run_kh2ctl(
+        "inject", "--pid", str(pid), "--init-timeout-ms", str(init_timeout_ms)
+    )
+
+
+@mcp.tool(description="List KH2 processes and whether the rig launched (owns) each.")
+def list_instances() -> dict[str, Any]:
+    return _run_kh2ctl("instances")
+
+
+@mcp.tool(
+    description=(
+        "Kill rig-launched KH2 processes (one pid, or all). KH2 processes the "
+        "rig did not launch are never killed and are reported as skippedUnowned."
+    )
+)
+def kill_kh2(pid: int | None = None) -> dict[str, Any]:
+    if pid is None:
+        return _run_kh2ctl("kill", "--all")
+    return _run_kh2ctl("kill", "--pid", str(pid))
+
+
+@mcp.tool(
+    description=(
+        "Restart KH2 through the rig: refuse if a KH2 the rig didn't launch is "
+        "running, kill rig-launched instances, rebuild the inject DLL, then "
+        "launch and inject."
+    )
+)
 def restart_kh2(
     no_build: bool = False,
     kill: bool = False,
-    copy_dll: bool = False,
-    steam: bool = False,
+    no_inject: bool = False,
 ) -> dict[str, Any]:
     return _run_kh2ctl(
         "restart",
         *_bool_flag("--no-build", no_build),
         *_bool_flag("--kill", kill),
-        *_bool_flag("--copy-dll", copy_dll),
-        *_bool_flag("--steam", steam),
+        *_bool_flag("--no-inject", no_inject),
     )
 
 
@@ -200,15 +243,14 @@ def load_save(
 
 @mcp.tool(
     description=(
-        "Restart KH2, wait for title/loading, select a save slot, and wait "
+        "Restart KH2 through the rig (see restart_kh2), wait for title/loading, select a save slot, and wait "
         "until gameplay is live."
     )
 )
 def boot_load_save(
     slot: int,
     no_build: bool = False,
-    copy_dll: bool = False,
-    steam: bool = False,
+    no_inject: bool = False,
     confirm_key: str = "enter",
     down_key: str = "down",
     title_timeout_ms: int = 60000,
@@ -224,8 +266,7 @@ def boot_load_save(
         "--slot",
         str(slot),
         *_bool_flag("--no-build", no_build),
-        *_bool_flag("--copy-dll", copy_dll),
-        *_bool_flag("--steam", steam),
+        *_bool_flag("--no-inject", no_inject),
         "--confirm-key",
         confirm_key,
         "--down-key",

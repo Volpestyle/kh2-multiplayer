@@ -1,16 +1,17 @@
 # KH2 Multiplayer
 
-Kingdom Hearts II Final Mix multiplayer mod. Player-controlled friend party members (Donald, Goofy) via in-process DLL injection with full animation, movement, and camera support.
+Online co-op mod for Kingdom Hearts II Final Mix (PC). The goal: each player runs their own game, sees the others in the same room, fights the same enemies and travels the story together — then plays as other characters. Today the mod hooks the game in-process and drives a party member's movement and animation; online play is not working yet.
 
 ## Start here
 
 | What you want | Where to go |
 |---------------|-------------|
-| Understand the project | This file, then `docs/kh2_three_client_coop_design.md` |
+| Understand the plan | `docs/ONLINE_COOP_PLAN.md` — decisions, risks, phase gates |
+| See what's being worked on | Linear project **KH2 Multiplayer** (vuhlp workspace) |
 | Build and test the inject DLL | `docs/DEVELOPMENT_WORKFLOW.md` |
 | Navigate the codebase | `docs/CODEBASE_MAP.md` |
 | Continue friend control work | `docs/HANDOFF_FRIEND_CONTROL.md` |
-| Check milestone progress | `docs/IMPLEMENTATION_BACKLOG.md` |
+| Milestone history (M0–M3) | `docs/IMPLEMENTATION_BACKLOG.md` |
 | Look up memory offsets | `docs/pointer_map_v1.md` + `runtime/include/kh2coop/KH2Offsets.hpp` |
 | Understand RE methodology | `docs/LESSONS_LEARNED.md` |
 
@@ -37,12 +38,7 @@ Kingdom Hearts II Final Mix multiplayer mod. Player-controlled friend party memb
 
 ## Architecture
 
-Two runtime modes on shared infrastructure:
-
-1. **Campaign Co-op** — up to 3 players share one host-authoritative session, each controlling a party slot (Sora, Donald, Goofy) with independent cameras.
-2. **Public Realm** (planned) — persistent characters, public hubs, party-formed instances.
-
-See `docs/ARCHITECTURE_MODES.md` for the full breakdown.
+Planned model (`docs/ONLINE_COOP_PLAN.md`): every player is the native player character on their own machine and streams it; other players appear as puppets in the friend slots; the host's game owns enemies, rooms and story state. Public Realm and PvP (`docs/ARCHITECTURE_MODES.md`) are parked until co-op is playable.
 
 ```
                     ┌──────────────────┐
@@ -64,13 +60,16 @@ cmake -B build -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build --config Release
 
 # Run E2E test (no KH2 needed)
-.\build\tests\Release\kh2coop_fake_sim.exe
+.\build\Release\kh2coop_fake_sim.exe
 
 # Build just the inject DLL
 cmake --build build --target kh2coop_inject --config Release
 
-# Restart KH2 + rebuild DLL
-.\scripts\restart-kh2.ps1
+# Launch KH2 with the inject DLL loaded (no Cheat Engine)
+.\build\tools\kh2ctl\Release\kh2ctl.exe launch
+
+# Kill rig instances, rebuild the DLL, relaunch + inject
+.\build\tools\kh2ctl\Release\kh2ctl.exe restart
 ```
 
 See `docs/DEVELOPMENT_WORKFLOW.md` for the full inject/test loop.
@@ -79,13 +78,15 @@ See `docs/DEVELOPMENT_WORKFLOW.md` for the full inject/test loop.
 
 | Doc | Purpose |
 |-----|---------|
+| `docs/ONLINE_COOP_PLAN.md` | Plan of record: decisions, risk register, phase gates, autonomy rules |
+| `docs/research/PRIOR_ART.md` | How other projects added online play to single-player games, and the pitfalls |
 | `docs/CODEBASE_MAP.md` | What's in each directory, key source files |
 | `docs/DEVELOPMENT_WORKFLOW.md` | Build/inject/test loop |
 | `docs/HANDOFF_FRIEND_CONTROL.md` | Current state of friend control: hooks, structs, addresses |
 | `docs/LESSONS_LEARNED.md` | Hard-won RE and hooking insights |
-| `docs/IMPLEMENTATION_BACKLOG.md` | Full milestone tracking (M0-M8, Tracks A-D) |
+| `docs/IMPLEMENTATION_BACKLOG.md` | Milestone history (M0–M3); M4+ superseded by the plan |
 | `docs/pointer_map_v1.md` | Confirmed memory offsets |
-| `docs/kh2_three_client_coop_design.md` | Original 3-client co-op design |
+| `docs/kh2_three_client_coop_design.md` | Original 3-client co-op design (authority and actor model superseded) |
 | `docs/ARCHITECTURE_MODES.md` | CampaignCoop vs PublicRealm architecture |
 | `docs/INPUT_RE_SESSION.md` | Full Ghidra trace of the KH2 input pipeline |
 | `docs/OPENKH_REFERENCE.md` | Guide to the sibling OpenKH repository |

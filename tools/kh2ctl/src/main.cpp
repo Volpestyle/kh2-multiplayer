@@ -3,6 +3,7 @@
 #include "kh2coop/Types.hpp"
 
 #include <Windows.h>
+#include <TlHelp32.h>
 
 #include <algorithm>
 #include <array>
@@ -10,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -337,6 +339,408 @@ std::string WindowTitle(HWND hwnd) {
     return utf8;
 }
 
+// ============================================================================
+// Rig: hands-free launch, injection, and owned-process tracking
+//
+// The rig only ever kills KH2 processes it launched. Ownership is recorded as
+// (pid, creation time) in build/rig/owned.txt so a reused PID never matches.
+// ============================================================================
+
+constexpr const wchar_t* kKh2ExeName = L"KINGDOM HEARTS II FINAL MIX.exe";
+constexpr const wchar_t* kDefaultGameDir =
+    L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\"
+    L"KINGDOM HEARTS -HD 1.5+2.5 ReMIX-";
+
+std::filesystem::path RigDir() {
+    return RepoRoot() / "build" / "rig";
+}
+
+std::filesystem::path GameDir(const std::optional<std::string>& override) {
+    if (override) return std::filesystem::path(*override);
+    wchar_t buffer[MAX_PATH] = {};
+    const DWORD len = GetEnvironmentVariableW(L"KH2_GAME_DIR", buffer, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) return std::filesystem::path(buffer);
+    return std::filesystem::path(kDefaultGameDir);
+}
+
+std::uint64_t ProcessCreationTime(HANDLE process) {
+    FILETIME created {}, exited {}, kernel {}, user {};
+    if (!GetProcessTimes(process, &created, &exited, &kernel, &user)) return 0;
+    return (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) |
+           created.dwLowDateTime;
+}
+
+struct Kh2Process {
+    DWORD pid {0};
+    std::uint64_t creationTime {0};
+};
+
+std::vector<Kh2Process> ListKh2Processes() {
+    std::vector<Kh2Process> result;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return result;
+    PROCESSENTRY32W entry {};
+    entry.dwSize = sizeof(entry);
+    for (BOOL more = Process32FirstW(snapshot, &entry); more;
+         more = Process32NextW(snapshot, &entry)) {
+        if (_wcsicmp(entry.szExeFile, kKh2ExeName) != 0) continue;
+        Kh2Process proc {entry.th32ProcessID, 0};
+        if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                   entry.th32ProcessID)) {
+            proc.creationTime = ProcessCreationTime(h);
+            CloseHandle(h);
+        }
+        result.push_back(proc);
+    }
+    CloseHandle(snapshot);
+    return result;
+}
+
+std::vector<Kh2Process> ReadOwned() {
+    std::vector<Kh2Process> owned;
+    std::ifstream in(RigDir() / "owned.txt");
+    Kh2Process proc;
+    while (in >> proc.pid >> proc.creationTime) owned.push_back(proc);
+    return owned;
+}
+
+void WriteOwned(const std::vector<Kh2Process>& owned) {
+    std::filesystem::create_directories(RigDir());
+    std::ofstream out(RigDir() / "owned.txt", std::ios::trunc);
+    for (const auto& proc : owned) {
+        out << proc.pid << " " << proc.creationTime << "\n";
+    }
+}
+
+bool IsOwned(const Kh2Process& proc, const std::vector<Kh2Process>& owned) {
+    return std::any_of(owned.begin(), owned.end(), [&](const Kh2Process& o) {
+        return o.pid == proc.pid && o.creationTime == proc.creationTime;
+    });
+}
+
+// Drops registry entries whose process is gone.
+std::vector<Kh2Process> PruneOwned() {
+    const auto live = ListKh2Processes();
+    std::vector<Kh2Process> kept;
+    for (const auto& o : ReadOwned()) {
+        if (IsOwned(o, live)) kept.push_back(o);
+    }
+    WriteOwned(kept);
+    return kept;
+}
+
+// LoadLibraryW in the target via a remote thread. Returns an error or empty.
+std::string InjectDll(DWORD pid, const std::filesystem::path& dll) {
+    HANDLE process = OpenProcess(
+        PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE |
+            PROCESS_VM_READ | PROCESS_QUERY_INFORMATION,
+        FALSE, pid);
+    if (!process) return "OpenProcess failed: " + std::to_string(GetLastError());
+
+    const std::wstring path = dll.wstring();
+    const SIZE_T bytes = (path.size() + 1) * sizeof(wchar_t);
+    void* remote = VirtualAllocEx(process, nullptr, bytes,
+                                  MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    std::string error;
+    if (!remote) {
+        error = "VirtualAllocEx failed: " + std::to_string(GetLastError());
+    } else if (!WriteProcessMemory(process, remote, path.c_str(), bytes, nullptr)) {
+        error = "WriteProcessMemory failed: " + std::to_string(GetLastError());
+    } else {
+        auto loadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(
+            GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryW"));
+        HANDLE thread = CreateRemoteThread(process, nullptr, 0, loadLibrary,
+                                           remote, 0, nullptr);
+        if (!thread) {
+            error = "CreateRemoteThread failed: " + std::to_string(GetLastError());
+        } else {
+            if (WaitForSingleObject(thread, 15000) != WAIT_OBJECT_0) {
+                error = "LoadLibraryW did not return within 15 s";
+            } else {
+                DWORD moduleLow = 0;
+                GetExitCodeThread(thread, &moduleLow);
+                if (moduleLow == 0) error = "LoadLibraryW returned NULL in target";
+            }
+            CloseHandle(thread);
+        }
+    }
+    if (remote) VirtualFreeEx(process, remote, 0, MEM_RELEASE);
+    CloseHandle(process);
+    return error;
+}
+
+// Copies the staged DLL to a unique file so rebuilds never hit a locked DLL.
+std::filesystem::path StageDllCopy(const std::optional<std::string>& dllOverride) {
+    const std::filesystem::path source = dllOverride
+        ? std::filesystem::path(*dllOverride)
+        : RepoRoot() / "build" / "inject" / "staging" / "kh2coop_inject.dll";
+    if (!std::filesystem::exists(source)) {
+        throw std::runtime_error("Inject DLL not found: " + source.string() +
+                                 " (build the kh2coop_inject target)");
+    }
+    const auto dir = RigDir() / "dll";
+    std::filesystem::create_directories(dir);
+    const auto dest = dir / ("kh2coop_inject_" + std::to_string(NowMs()) + ".dll");
+    std::filesystem::copy_file(source, dest);
+    return dest;
+}
+
+std::filesystem::path LogPathForPid(DWORD pid) {
+    return RigDir() / "logs" / ("kh2coop_inject_" + std::to_string(pid) + ".log");
+}
+
+// Waits for the DLL's init log to report its hooks; returns hook lines/errors.
+void CollectInitLog(DWORD pid, int timeoutMs, std::vector<std::string>& hooks,
+                    std::vector<std::string>& errors, bool& complete) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    complete = false;
+    do {
+        hooks.clear();
+        errors.clear();
+        std::ifstream in(LogPathForPid(pid));
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.find("hook installed") != std::string::npos) {
+                hooks.push_back(line.substr(line.find_first_not_of(' ')));
+            }
+            if (line.find("ERROR") != std::string::npos) errors.push_back(line);
+            if (line.find("InputCollector hook installed") != std::string::npos) {
+                complete = true;
+            }
+        }
+        if (complete || !errors.empty()) return;
+        SleepMs(250);
+    } while (std::chrono::steady_clock::now() < deadline);
+}
+
+std::string JsonStringArray(const std::vector<std::string>& values) {
+    std::string out = "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i) out += ",";
+        out += JsonString(values[i]);
+    }
+    return out + "]";
+}
+
+CommandResult InjectAndReport(DWORD pid, const std::optional<std::string>& dllOverride,
+                              int initTimeoutMs, const char* command) {
+    const auto dll = StageDllCopy(dllOverride);
+    const std::string error = InjectDll(pid, dll);
+    if (!error.empty()) return MakeError(error);
+
+    std::vector<std::string> hooks, errors;
+    bool complete = false;
+    CollectInitLog(pid, initTimeoutMs, hooks, errors, complete);
+
+    std::string title;
+    if (auto hwnd = FindWindowForPid(pid)) title = WindowTitle(*hwnd);
+
+    std::ostringstream out;
+    out << "{"
+        << "\"ok\":" << JsonBool(complete && errors.empty()) << ","
+        << "\"command\":" << JsonString(command) << ","
+        << "\"processId\":" << pid << ","
+        << "\"windowTitle\":" << JsonString(title) << ","
+        << "\"dll\":" << JsonString(dll.string()) << ","
+        << "\"log\":" << JsonString(LogPathForPid(pid).string()) << ","
+        << "\"hooksInstalled\":" << JsonBool(complete) << ","
+        << "\"hooks\":" << JsonStringArray(hooks) << ","
+        << "\"errors\":" << JsonStringArray(errors)
+        << "}";
+    return {complete && errors.empty() ? 0 : 1, out.str()};
+}
+
+struct LaunchOptions {
+    std::optional<std::string> gameDir;
+    std::optional<std::string> dll;
+    bool noInject {false};
+    int windowTimeoutMs {60000};
+    int settleMs {1500};
+    int initTimeoutMs {15000};
+};
+
+// Consumes the launch options shared by launch, restart and boot-load-save.
+LaunchOptions ConsumeLaunchOptions(std::vector<std::string>& args) {
+    LaunchOptions options;
+    options.gameDir = ConsumeOption(args, "--game-dir");
+    options.dll = ConsumeOption(args, "--dll");
+    options.noInject = ConsumeFlag(args, "--no-inject");
+    options.windowTimeoutMs =
+        ParseNumber<int>(ConsumeOption(args, "--window-timeout-ms").value_or("60000"),
+                         "--window-timeout-ms");
+    options.settleMs =
+        ParseNumber<int>(ConsumeOption(args, "--settle-ms").value_or("1500"),
+                         "--settle-ms");
+    options.initTimeoutMs =
+        ParseNumber<int>(ConsumeOption(args, "--init-timeout-ms").value_or("15000"),
+                         "--init-timeout-ms");
+    return options;
+}
+
+CommandResult LaunchInstance(const LaunchOptions& options, const char* command) {
+    const auto& dllOverride = options.dll;
+    const bool noInject = options.noInject;
+    const int windowTimeoutMs = options.windowTimeoutMs;
+    const int settleMs = options.settleMs;
+    const int initTimeoutMs = options.initTimeoutMs;
+
+    const auto gameDir = GameDir(options.gameDir);
+    const auto exe = gameDir / kKh2ExeName;
+    if (!std::filesystem::exists(exe)) {
+        return MakeError("KH2 executable not found: " + exe.string());
+    }
+
+    // The DLL reads KH2COOP_LOG_DIR at init; the child inherits it.
+    const auto logDir = RigDir() / "logs";
+    std::filesystem::create_directories(logDir);
+    SetEnvironmentVariableW(L"KH2COOP_LOG_DIR", logDir.wstring().c_str());
+
+    STARTUPINFOW startup {};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION info {};
+    std::wstring commandLine = L"\"" + exe.wstring() + L"\"";
+    if (!CreateProcessW(exe.wstring().c_str(), commandLine.data(), nullptr,
+                        nullptr, FALSE, 0, nullptr, gameDir.wstring().c_str(),
+                        &startup, &info)) {
+        return MakeError("CreateProcessW failed: " + std::to_string(GetLastError()));
+    }
+
+    auto owned = PruneOwned();
+    owned.push_back({info.dwProcessId, ProcessCreationTime(info.hProcess)});
+    WriteOwned(owned);
+
+    // Wait for the game window so the CRT and loader are fully up.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(windowTimeoutMs);
+    bool windowFound = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (WaitForSingleObject(info.hProcess, 0) == WAIT_OBJECT_0) {
+            DWORD exitCode = 0;
+            GetExitCodeProcess(info.hProcess, &exitCode);
+            CloseHandle(info.hThread);
+            CloseHandle(info.hProcess);
+            return MakeError("KH2 exited during startup with code " +
+                             std::to_string(exitCode));
+        }
+        if (FindWindowForPid(info.dwProcessId)) {
+            windowFound = true;
+            break;
+        }
+        SleepMs(250);
+    }
+    CloseHandle(info.hThread);
+    CloseHandle(info.hProcess);
+    if (!windowFound) {
+        return MakeError("KH2 window did not appear for PID " +
+                         std::to_string(info.dwProcessId));
+    }
+    SleepMs(settleMs);
+
+    if (noInject) {
+        std::ostringstream out;
+        out << "{\"ok\":true,\"command\":" << JsonString(command)
+            << ",\"processId\":" << info.dwProcessId << ",\"injected\":false}";
+        return {0, out.str()};
+    }
+    return InjectAndReport(info.dwProcessId, dllOverride, initTimeoutMs, command);
+}
+
+CommandResult CmdLaunch(std::vector<std::string> args) {
+    const auto options = ConsumeLaunchOptions(args);
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for launch: " + args.front());
+    }
+    return LaunchInstance(options, "launch");
+}
+
+CommandResult CmdInject(std::vector<std::string> args) {
+    const auto pidRaw = ConsumeOption(args, "--pid");
+    const auto dllOverride = ConsumeOption(args, "--dll");
+    const int initTimeoutMs =
+        ParseNumber<int>(ConsumeOption(args, "--init-timeout-ms").value_or("15000"),
+                         "--init-timeout-ms");
+    if (!pidRaw) throw std::runtime_error("inject requires --pid");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for inject: " + args.front());
+    }
+    return InjectAndReport(ParseNumber<DWORD>(*pidRaw, "--pid"), dllOverride,
+                           initTimeoutMs, "inject");
+}
+
+CommandResult CmdInstances(std::vector<std::string> args) {
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for instances: " + args.front());
+    }
+    const auto owned = PruneOwned();
+    std::ostringstream out;
+    out << "{\"ok\":true,\"instances\":[";
+    bool first = true;
+    for (const auto& proc : ListKh2Processes()) {
+        std::string title;
+        if (auto hwnd = FindWindowForPid(proc.pid)) title = WindowTitle(*hwnd);
+        out << (first ? "" : ",") << "{"
+            << "\"processId\":" << proc.pid << ","
+            << "\"owned\":" << JsonBool(IsOwned(proc, owned)) << ","
+            << "\"windowTitle\":" << JsonString(title) << ","
+            << "\"log\":" << JsonString(LogPathForPid(proc.pid).string())
+            << "}";
+        first = false;
+    }
+    out << "]}";
+    return {0, out.str()};
+}
+
+std::string JsonDwordArray(const std::vector<DWORD>& values) {
+    std::string out = "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i) out += ",";
+        out += std::to_string(values[i]);
+    }
+    return out + "]";
+}
+
+// Kills rig-owned KH2 processes (all, or only `pid`). Unowned ones are listed
+// in skippedUnowned and left running.
+void KillOwned(std::optional<DWORD> pid, std::vector<DWORD>& killed,
+               std::vector<DWORD>& skippedUnowned) {
+    const auto owned = PruneOwned();
+    for (const auto& proc : ListKh2Processes()) {
+        if (pid && proc.pid != *pid) continue;
+        if (!IsOwned(proc, owned)) {
+            skippedUnowned.push_back(proc.pid);
+            continue;
+        }
+        if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, proc.pid)) {
+            TerminateProcess(h, 0);
+            WaitForSingleObject(h, 10000);
+            CloseHandle(h);
+            killed.push_back(proc.pid);
+        }
+    }
+    PruneOwned();
+}
+
+// Kills rig-owned KH2 processes only. Unowned ones (James playing) are left.
+CommandResult CmdKill(std::vector<std::string> args) {
+    const auto pidRaw = ConsumeOption(args, "--pid");
+    const bool all = ConsumeFlag(args, "--all");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for kill: " + args.front());
+    }
+    if (!pidRaw && !all) throw std::runtime_error("kill requires --pid N or --all");
+
+    std::optional<DWORD> pid;
+    if (pidRaw) pid = ParseNumber<DWORD>(*pidRaw, "--pid");
+    std::vector<DWORD> killed, skippedUnowned;
+    KillOwned(pid, killed, skippedUnowned);
+
+    std::ostringstream out;
+    out << "{\"ok\":true,\"killed\":" << JsonDwordArray(killed)
+        << ",\"skippedUnowned\":" << JsonDwordArray(skippedUnowned) << "}";
+    return {0, out.str()};
+}
+
 bool FocusWindow(HWND hwnd) {
     if (IsIconic(hwnd)) {
         ShowWindow(hwnd, SW_RESTORE);
@@ -344,22 +748,40 @@ bool FocusWindow(HWND hwnd) {
         ShowWindow(hwnd, SW_SHOW);
     }
 
+    // The foreground lock only lets the thread that owns the current
+    // foreground window hand focus away, so attach to that thread's input
+    // queue (attaching to the target's thread is not enough).
     const DWORD currentThread = GetCurrentThreadId();
-    const DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
+    const HWND foreground = GetForegroundWindow();
+    const DWORD foregroundThread =
+        foreground ? GetWindowThreadProcessId(foreground, nullptr) : 0;
     bool attachedInput = false;
-
-    if (targetThread != 0 && targetThread != currentThread) {
-        attachedInput = AttachThreadInput(currentThread, targetThread, TRUE) != 0;
+    if (foregroundThread != 0 && foregroundThread != currentThread) {
+        attachedInput = AttachThreadInput(currentThread, foregroundThread, TRUE) != 0;
     }
 
-    const bool ok = SetForegroundWindow(hwnd) != 0 &&
-                    BringWindowToTop(hwnd) != 0;
+    SetForegroundWindow(hwnd);
+    BringWindowToTop(hwnd);
 
     if (attachedInput) {
-        AttachThreadInput(currentThread, targetThread, FALSE);
+        AttachThreadInput(currentThread, foregroundThread, FALSE);
     }
 
-    return ok || GetForegroundWindow() == hwnd;
+    if (GetForegroundWindow() != hwnd) {
+        // Fallback: a synthetic ALT press counts as the last input event,
+        // which unlocks SetForegroundWindow for this process.
+        INPUT alt[2] {};
+        alt[0].type = INPUT_KEYBOARD;
+        alt[0].ki.wVk = VK_MENU;
+        alt[1] = alt[0];
+        alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(2, alt, sizeof(INPUT));
+        SetForegroundWindow(hwnd);
+        BringWindowToTop(hwnd);
+    }
+
+    for (int i = 0; i < 20 && GetForegroundWindow() != hwnd; ++i) SleepMs(25);
+    return GetForegroundWindow() == hwnd;
 }
 
 struct KeySpec {
@@ -698,17 +1120,49 @@ bool WriteMailboxPulse(std::uint32_t mailboxSlot, const InputFrame& frame,
     return true;
 }
 
-ProcessCapture RunRestartScript(bool noBuild, bool killOnly, bool copyDll,
-                                bool steam) {
-    const auto script = RepoRoot() / "scripts" / "restart-kh2.ps1";
-    std::wstring command = L"powershell.exe -ExecutionPolicy Bypass -File \"" +
-                           script.wstring() + L"\"";
-    if (noBuild) command += L" -NoBuild";
-    if (killOnly) command += L" -Kill";
-    if (copyDll) command += L" -CopyDll";
-    if (steam) command += L" -Steam";
+// Rig restart: refuse if a KH2 the rig didn't launch is running (James may be
+// playing), kill rig-owned instances, rebuild the DLL, launch and inject.
+CommandResult RigRestart(bool noBuild, bool killOnly, const LaunchOptions& options,
+                         const char* command) {
+    const auto owned = PruneOwned();
+    std::vector<DWORD> unowned;
+    for (const auto& proc : ListKh2Processes()) {
+        if (!IsOwned(proc, owned)) unowned.push_back(proc.pid);
+    }
+    if (!unowned.empty()) {
+        std::ostringstream out;
+        out << "{\"ok\":false,\"command\":" << JsonString(command)
+            << ",\"phase\":\"preflight\",\"error\":"
+            << JsonString("KH2 is running outside the rig (James may be playing); "
+                          "refusing to restart")
+            << ",\"unowned\":" << JsonDwordArray(unowned) << "}";
+        return {1, out.str()};
+    }
 
-    return RunProcessCapture(command, RepoRoot());
+    std::vector<DWORD> killed, skippedUnowned;
+    KillOwned(std::nullopt, killed, skippedUnowned);
+    if (killOnly) {
+        std::ostringstream out;
+        out << "{\"ok\":true,\"command\":" << JsonString(command)
+            << ",\"killed\":" << JsonDwordArray(killed) << "}";
+        return {0, out.str()};
+    }
+
+    if (!noBuild) {
+        const auto build = RunProcessCapture(
+            L"cmake --build \"" + (RepoRoot() / "build").wstring() +
+                L"\" --target kh2coop_inject --config Release",
+            RepoRoot());
+        if (!build.launched || build.exitCode != 0) {
+            std::ostringstream out;
+            out << "{\"ok\":false,\"command\":" << JsonString(command)
+                << ",\"phase\":\"build\",\"exitCode\":" << build.exitCode
+                << ",\"output\":" << JsonString(build.output) << "}";
+            return {1, out.str()};
+        }
+    }
+
+    return LaunchInstance(options, command);
 }
 
 bool DriveLoadSaveMenu(GameBridgePC& game, int slot, const KeySpec& confirmSpec,
@@ -764,25 +1218,11 @@ bool DriveLoadSaveMenu(GameBridgePC& game, int slot, const KeySpec& confirmSpec,
 CommandResult CmdRestart(std::vector<std::string> args) {
     const bool noBuild = ConsumeFlag(args, "--no-build");
     const bool killOnly = ConsumeFlag(args, "--kill");
-    const bool copyDll = ConsumeFlag(args, "--copy-dll");
-    const bool steam = ConsumeFlag(args, "--steam");
+    const auto options = ConsumeLaunchOptions(args);
     if (!args.empty()) {
         throw std::runtime_error("Unexpected argument for restart: " + args.front());
     }
-
-    const auto result = RunRestartScript(noBuild, killOnly, copyDll, steam);
-    if (!result.launched) {
-        return MakeError("Failed to launch restart-kh2.ps1");
-    }
-
-    std::ostringstream out;
-    out << "{"
-        << "\"ok\":" << JsonBool(result.exitCode == 0) << ","
-        << "\"exitCode\":" << result.exitCode << ","
-        << "\"output\":" << JsonString(result.output)
-        << "}";
-    return {result.exitCode == 0 ? 0 : static_cast<int>(result.exitCode),
-            out.str()};
+    return RigRestart(noBuild, killOnly, options, "restart");
 }
 
 CommandResult CmdState(std::vector<std::string> args) {
@@ -1030,8 +1470,7 @@ CommandResult CmdBootLoadSave(std::vector<std::string> args) {
     }
 
     const bool noBuild = ConsumeFlag(args, "--no-build");
-    const bool copyDll = ConsumeFlag(args, "--copy-dll");
-    const bool steam = ConsumeFlag(args, "--steam");
+    const auto launchOptions = ConsumeLaunchOptions(args);
     const std::string confirmKey =
         ConsumeOption(args, "--confirm-key").value_or("enter");
     const std::string downKey =
@@ -1062,19 +1501,9 @@ CommandResult CmdBootLoadSave(std::vector<std::string> args) {
                                  args.front());
     }
 
-    const auto restart = RunRestartScript(noBuild, false, copyDll, steam);
-    if (!restart.launched) {
-        return MakeError("Failed to launch restart-kh2.ps1");
-    }
+    const auto restart = RigRestart(noBuild, false, launchOptions, "boot-load-save");
     if (restart.exitCode != 0) {
-        std::ostringstream out;
-        out << "{"
-            << "\"ok\":false,"
-            << "\"phase\":\"restart\","
-            << "\"exitCode\":" << restart.exitCode << ","
-            << "\"output\":" << JsonString(restart.output)
-            << "}";
-        return {static_cast<int>(restart.exitCode), out.str()};
+        return restart;
     }
 
     const auto confirmSpec = ParseKeySpec(confirmKey);
@@ -1102,7 +1531,7 @@ CommandResult CmdBootLoadSave(std::vector<std::string> args) {
         out << "{"
             << "\"ok\":false,"
             << "\"phase\":\"wait-title\","
-            << "\"restartOutput\":" << JsonString(restart.output) << ","
+            << "\"launch\":" << restart.json << ","
             << "\"result\":" << titleWait.json
             << "}";
         return {titleWait.exitCode, out.str()};
@@ -1133,7 +1562,7 @@ CommandResult CmdBootLoadSave(std::vector<std::string> args) {
         out << "{"
             << "\"ok\":false,"
             << "\"phase\":\"wait-room\","
-            << "\"restartOutput\":" << JsonString(restart.output) << ","
+            << "\"launch\":" << restart.json << ","
             << "\"result\":" << roomWait.json
             << "}";
         return {roomWait.exitCode, out.str()};
@@ -1145,7 +1574,7 @@ CommandResult CmdBootLoadSave(std::vector<std::string> args) {
         << "\"slot\":" << slot << ","
         << "\"confirmKey\":" << JsonString(confirmKey) << ","
         << "\"downKey\":" << JsonString(downKey) << ","
-        << "\"restartOutput\":" << JsonString(restart.output) << ","
+        << "\"launch\":" << restart.json << ","
         << "\"result\":" << roomWait.json
         << "}";
     return {0, out.str()};
@@ -1406,7 +1835,14 @@ CommandResult CmdPlayerPress(std::vector<std::string> args) {
 void PrintUsage() {
     std::cout
         << "kh2ctl commands:\n"
-        << "  restart [--no-build] [--kill] [--copy-dll] [--steam]\n"
+        << "  launch [LAUNCH_OPTS]      launch KH2 and inject the current DLL build\n"
+        << "  inject --pid N [--dll PATH] [--init-timeout-ms N]\n"
+        << "  instances                 list KH2 processes and whether the rig owns them\n"
+        << "  kill (--pid N | --all)    kill rig-launched KH2 processes only\n"
+        << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"
+        << "      LAUNCH_OPTS: [--game-dir DIR] [--dll PATH] [--no-inject]\n"
+        << "                   [--window-timeout-ms N] [--settle-ms N]\n"
+        << "                   [--init-timeout-ms N]\n"
         << "  state\n"
         << "  wait-title [--timeout-ms N] [--poll-ms N]\n"
         << "  wait-ingame [--timeout-ms N] [--poll-ms N]\n"
@@ -1418,7 +1854,7 @@ void PrintUsage() {
         << "            [--wake-presses N] [--wake-delay-ms N]\n"
         << "            [--step-delay-ms N] [--post-select-delay-ms N]\n"
         << "            [--final-confirm-presses N] [--load-timeout-ms N]\n"
-        << "  boot-load-save --slot N [--no-build] [--copy-dll] [--steam]\n"
+        << "  boot-load-save --slot N [--no-build] [LAUNCH_OPTS]\n"
         << "                 [--confirm-key KEY] [--down-key KEY]\n"
         << "                 [--title-timeout-ms N] [--wake-presses N]\n"
         << "                 [--wake-delay-ms N] [--step-delay-ms N]\n"
@@ -1452,6 +1888,14 @@ int main(int argc, char* argv[]) {
         if (command == "help" || command == "--help" || command == "-h") {
             PrintUsage();
             return 0;
+        } else if (command == "launch") {
+            result = CmdLaunch(std::move(args));
+        } else if (command == "inject") {
+            result = CmdInject(std::move(args));
+        } else if (command == "instances") {
+            result = CmdInstances(std::move(args));
+        } else if (command == "kill") {
+            result = CmdKill(std::move(args));
         } else if (command == "restart") {
             result = CmdRestart(std::move(args));
         } else if (command == "state") {

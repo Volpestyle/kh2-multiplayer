@@ -1,3 +1,12 @@
+### Plan and tracking
+- Plan of record: `docs/ONLINE_COOP_PLAN.md` (decisions D1–D12, risks, phase gates). Work is tracked in the Linear project **KH2 Multiplayer** (vuhlp workspace); close an issue with its evidence (scenario report, screenshots or clips).
+- Only one agent drives live KH2 at a time (the "live lane"). Other agents work offline: network/protocol code, headless Ghidra, tooling, docs.
+
+### Safety rules
+- Never write James's save under `OneDrive/Documents/My Games/KINGDOM HEARTS HD 1.5+2.5 ReMIX/` — Steam Cloud syncs it. Never save in-game during automation.
+- Launch, restart and kill KH2 only through `kh2ctl launch/restart/kill`: the rig kills only processes it launched and refuses to restart while a KH2 it didn't launch is open (James may be playing). Agents never run `restart-kh2.ps1`; it kills every KH2 process.
+- No public network exposure, accounts or third-party services without James.
+
 ### General Guidelines
 - Refer to `docs/` as the primary source of truth, and always keep up to date with code changes
 - See `docs/CODEBASE_MAP.md` for the full directory/file inventory
@@ -9,14 +18,14 @@
 - **Before using Cheat Engine MCP tools**, verify CE is attached to the running KH2 process by calling `ping` and `get_process_info`. If the process is not attached or the game is not running, do not proceed with memory reads/writes/scans — prompt the user to launch KH2 and attach CE first.
 - **When you need the user to do something in-game that cannot be automated via `kh2ctl`** (e.g., trigger a specific breakpoint scenario, engage a particular enemy, enter a cutscene, or perform a complex sequence not covered by the CLI), **stop and make a clear, explicit request to the user** before continuing. Do not assume the user has done it or proceed without confirmation. Wait for the user to confirm they have completed the action before resuming analysis. For actions that *can* be automated (loading saves, basic movement, button presses), prefer using `kh2ctl` instead of asking the user.
 
-### Quick KH2 Restart (`scripts/restart-kh2.ps1`)
+### Launching KH2 (the rig)
 ```powershell
-.\scripts\restart-kh2.ps1           # kill + rebuild inject DLL + relaunch
-.\scripts\restart-kh2.ps1 -NoBuild  # kill + relaunch only
-.\scripts\restart-kh2.ps1 -Kill     # kill only
-.\scripts\restart-kh2.ps1 -CopyDll  # also copy inject DLL to game dir
+kh2ctl launch            # launch + inject the current DLL build; reports pid, log, hooks
+kh2ctl restart           # kill rig instances, rebuild the DLL, launch + inject
+kh2ctl instances         # KH2 processes and which ones the rig owns
+kh2ctl kill --all        # kill rig-launched instances only
 ```
-Requires `steam_appid.txt` (containing `2552430`) in the game directory to bypass the launcher. Already placed there.
+Run from the desktop session (KH2 crashes at startup from session 0). Logs: `build/rig/logs/kh2coop_inject_<pid>.log`. Requires `steam_appid.txt` (containing `2552430`) in the game directory to bypass the launcher; already placed there. See `docs/DEVELOPMENT_WORKFLOW.md`.
 
 ### KH2 Control CLI / MCP
 Use `kh2ctl` as the canonical local control surface for automated KH2 testing. See `docs/KH2_CONTROL_CLI.md` for the full command set and current limitations.
@@ -25,7 +34,7 @@ Build: `cmake --build build --target kh2ctl --config Release`
 
 Rules:
 - Prefer `kh2ctl` over ad-hoc PowerShell/UI scripting when testing KH2 flows.
-- Use `boot-load-save` for "restart KH2 and land in a playable save" workflows.
+- `boot-load-save` is known broken (keys land before the title menu exists; see `docs/KH2_CONTROL_CLI.md`). Until it's fixed, load saves with step-by-step `tap-key` and check each step.
 - Use `player-input/player-move/player-press` for native slot-0 control (goes through inject DLL's raw input collector hook).
 - Friend-slot gameplay automation should go through mailbox-backed `kh2ctl input/move/press` commands.
 
@@ -34,17 +43,17 @@ Rules:
 
 ### External Reference Repos
 
-**OpenKH** (`../openkh`) — KH2 modding toolkit. See `docs/OPENKH_REFERENCE.md`. Use for animation IDs, entity types, party slot mapping, world IDs. Do NOT use for runtime memory offsets (those come from `KH2Offsets.hpp`).
+**OpenKH** (`~/openkh`) — KH2 modding toolkit. See `docs/OPENKH_REFERENCE.md`. Use for animation IDs, entity types, party slot mapping, world IDs. Do NOT use for runtime memory offsets (those come from `KH2Offsets.hpp`).
 
-**KH2 Lua Library** (`../kh2-lua-library`) — Community runtime memory addresses for all PC versions. Use for non-Steam-Global builds, unit slot internal offsets, save file structure, game state detection. Do NOT use for entity transforms, camera, or animation RE.
+**KH2 Lua Library** (`~/kh2-lua-library`) — Community runtime memory addresses for all PC versions. Use for non-Steam-Global builds, unit slot internal offsets, save file structure, game state detection. Do NOT use for entity transforms, camera, or animation RE.
 
-**Ghidra + GhidraMCP** (`../GhidraMCP`) — Static binary analysis via MCP. Use for decompiling functions, tracing xrefs, understanding call chains, renaming/annotating. Use Ghidra for static analysis, CE for dynamic analysis. Cross-reference both.
+**Ghidra + GhidraMCP** (`~/GhidraMCP`) — Static binary analysis via MCP. Use for decompiling functions, tracing xrefs, understanding call chains, renaming/annotating. Use Ghidra for static analysis, CE for dynamic analysis. Cross-reference both.
 
-**LuaBackend** (`../kh2-tools/LuaBackend`) — Lua scripting engine with frame hook via DLL proxy. Reference for hook mechanisms, Lua API, memory access patterns.
+**LuaBackend** (`~/kh2-tools/LuaBackend`) — Lua scripting engine with frame hook via DLL proxy. Reference for hook mechanisms, Lua API, memory access patterns.
 
-**KHPCPatchManager** (`../kh2-tools/KHPCPatchManager`) — Binary patching tool. Reference for mod distribution packaging.
+**KHPCPatchManager** (`~/kh2-tools/KHPCPatchManager`) — Binary patching tool. Reference for mod distribution packaging.
 
-**Character Mod Examples** (`../kh2-tools/mods/`) — Four reference mods (axel-mix, dual-wield-roxas, vanitas-remaster, master-trio) showing character swap/addition techniques. Key patterns for multiplayer: `memt_0.list` for party composition, ObjEntry for custom entities, AtkpList for attack parameters.
+**Character Mod Examples** (`~/kh2-tools/mods/`) — Four reference mods (axel-mix, dual-wield-roxas, vanitas-remaster, master-trio) showing character swap/addition techniques. Key patterns for multiplayer: `memt_0.list` for party composition, ObjEntry for custom entities, AtkpList for attack parameters.
 
 ### Swarm Coordination
 For multi-agent sessions, load the `swarm-mcp` skill (or `swarm-planner`/`swarm-implementer` for specific roles). Those skills contain the full coordination protocol.
