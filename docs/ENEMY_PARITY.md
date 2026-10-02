@@ -104,3 +104,57 @@ For rooms whose spawner emits enemies over time based on player position
   session has players arriving at different times. That is exactly where
   continuous spawners diverge.
 - No boss fight was reachable on this save (see VUH-1501).
+
+## Step 1 implementation (VUH-1502)
+
+`inject/src/EnemySync.cpp`, over the WorldBridge. The role comes from the
+runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1–2 = client);
+`KH2COOP_ROLE=host|client` overrides it for tests.
+
+- **Room instance.** NOW (world/room/btl) changes as soon as a transition is
+  requested, while the old room's actors keep updating through the fade. A
+  new instance starts at the first gameplay frame after a load stall once the
+  key has changed, and spawn tracking pauses in between.
+- **Host.**
+  - Every instance: `epoch++` and a `RoomTransition`. When hosting starts
+    mid-room (the runtime connected late), the room and everything already
+    spawned go out at once.
+  - New enemies go out as `EnemyManifest` (netId = spawn index + 1).
+  - `EnemyHp` goes out about every 6 frames.
+  - `EnemyDeath` is sent once per netId, when HP first reaches 0.
+- **Host despawns.** Some enemies leave the list alive: the courtyard
+  Shadow on its ledge spawn point, host only; and Dusks (M_EX900), which
+  vanish and reappear as new actors.
+  - If a new enemy appears at the same spawn point, the old one was
+    superseded and clients re-bind to it.
+  - If none appears within 3 s, it's reported as a death, so clients don't
+    keep a copy that would hold the room open.
+- **Client.**
+  - Matches each local spawn by spawn point + objentry to the host's newest
+    enemy at that point. Spawn index is the fallback.
+  - A new local spawn binds only to a live host entry, and waits for the
+    manifest otherwise. A bound copy follows re-binds, including to a dead
+    entry, which is how deaths reach it.
+  - Holds matched HP at the host's absolute value (never writing 0).
+  - Applies host deaths through `ApplyStatDelta(-hp)`, the native death
+    path.
+  - Zeroes its own hits on enemies (`[drop]`): the host owns enemy HP.
+- **Why spawn points rather than spawn order.** Spawn order breaks as soon
+  as one machine despawns and refills a point and the others don't.
+  Spawn points matched to 0.0 units across instances in the spike above.
+
+Verified 2026-10-02 (`net_enemy_sync_courtyard`, `net_enemy_sync_waves`:
+host + 2 clients, relay, host-only damage):
+- **HP:** the same on all three after host damage (courtyard 20 → 13,
+  12/0B 160 → 153), read 0.4 s later.
+- **Deaths:** every host kill killed each client copy exactly once (5 and 6
+  deaths per client).
+- **12/0B second wave:** spawned on all three, bound to the host's new
+  entries and cleared.
+- **Battle end:** battle state ended (0) on all three.
+
+Not covered yet:
+- Bosses: none reachable on this save.
+- Drops and barrier objects (battle state stands in for "barriers lift").
+- Continuous spawners.
+- Client hits as claims (VUH-1501).

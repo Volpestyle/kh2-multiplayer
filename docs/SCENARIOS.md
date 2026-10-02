@@ -128,6 +128,7 @@ attack hits him) for the whole run, so combat rooms don't end in a game over.
 | `runtime` | `instance role peerId link args expect timeoutMs` | Start `kh2coop_runtime_scaffold --network --no-camera --pid <instance>` and wait for `expect` in its log (default `connected to server`). `link: {latencyMs, jitterMs, lossPct}` sets the runtime's impairment both ways (owner→viewer crosses two runtimes, so 50 ms each = 100 ms) |
 | `record` / `record_stop` | `as instances` | Sample every party actor's position (with the instance's world/room) on those instances in the background; `record_stop` writes `<as>.csv` |
 | `wander` | `instances seconds seed` | Seeded random stick walks with occasional jumps, taking turns (soaks) |
+| `hit_all` | `instance op amount` | `kh2ctl hit damage/kill` on every live combat enemy of that instance (host-only damage tests) |
 
 Processes started by `relay`/`runtime` are stopped at the end of the run.
 
@@ -137,7 +138,7 @@ argument, default 0): `room()` → `(world, room)`; `pos(name='P_EX100')` →
 `team`, `motionId`, `address`, …); `actors()`; `enemies()` (objentry type 3/4);
 `peek(rva, kind='u32')`; `log_count(text)` (lines in the inject log, e.g.
 `'attacker=P_EX100'` from the hit log); `dist(a, b)`; `saved`;
-`bridge(i)` (the instance's AvatarBridge via `avatarctl peek`: local
+`enemy_hps(i)` (sorted `(name, hp)` of live combat enemies); `bridge(i)` (the instance's AvatarBridge via `avatarctl peek`: local
 frames/s and both puppet slots); `puppet_error(saved['rec'], owner, viewer)`.
 
 `puppet_error` scores how well the viewer's puppet follows the owner's
@@ -179,6 +180,8 @@ single-frame jitter needs a clip.
   - `net_viewer_leaves`: the viewer changes rooms with a puppet active.
   - `net_soak_10min` + `soak_control_no_network`: the 10-minute soak and its
     no-network control.
+- VUH-1502 enemy sync (host + 2 clients): `net_enemy_sync_courtyard`,
+  `net_enemy_sync_waves`.
 - `forced_crash`, `forced_hang`: runner self-tests. They're expected to
   report CRASH/HANG with a bundle; don't include them in a pass/fail suite.
 

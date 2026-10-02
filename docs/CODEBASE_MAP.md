@@ -46,6 +46,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/Warp.cpp` | | Room warp requests via the game's transition function |
 | `src/SaveGuard.cpp` | ~520 | Redirects write opens under the KH2 save folder to a sandbox, denies deletes/moves/copies (installed first at init) |
 | `src/CrashDump.cpp` | ~90 | Minidump on unhandled exceptions, chained ahead of the game's filter |
+| `src/EnemySync.cpp` | ~500 | Shared enemy HP and deaths over the WorldBridge (host manifest/HP/deaths, client matching by spawn point) |
 
 EntityHook.cpp also holds the VUH-1501 hit-ownership hooks (BuildHit `0x3D23C0` log, ApplyHitDamage `0x3D3BA0` drop filter + claims, host apply), driven through `common/include/kh2coop/HitChannel.hpp`.
 

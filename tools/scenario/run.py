@@ -245,6 +245,12 @@ class Context:
         def enemies(index: int = 0):
             return [a for a in self.actors(index) if a.get("objectType") in (3, 4)]
 
+        def enemy_hps(index: int = 0) -> list:
+            """Sorted (name, hp) of live combat enemies (stats, not F_)."""
+            return sorted((a["name"], a["hp"]) for a in self.actors(index)
+                          if a.get("objectType") in (3, 4) and not a["name"].startswith("F_")
+                          and a.get("hp", -1) > 0)
+
         def log_count(pattern: str, index: int = 0) -> int:
             path = LOGS / f"kh2coop_inject_{self.inst(index).pid}.log"
             return sum(pattern in line for line in path.read_text(errors="replace").splitlines())
@@ -262,7 +268,7 @@ class Context:
                                   "--seconds", str(seconds)], capture_output=True, text=True, timeout=30)
             return json.loads(out.stdout.strip().splitlines()[-1])
 
-        return {"peek": peek, "pos": pos, "room": room, "enemies": enemies, "actor": self.actor,
+        return {"peek": peek, "pos": pos, "room": room, "enemies": enemies, "enemy_hps": enemy_hps, "actor": self.actor,
                 "actors": self.actors, "log_count": log_count, "dist": dist, "saved": self.saved,
                 "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
@@ -470,6 +476,21 @@ def step_crash(ctx: Context, step: dict) -> dict:
     kh2ctl("crash", pid=ctx.inst(step.get("instance", 0)).pid)
     ctx.sleep(step.get("ms", 5000) / 1000)
     return {}
+
+
+def step_hit_all(ctx: Context, step: dict) -> dict:
+    """kh2ctl hit damage/kill on every live combat enemy of one instance
+    (objentry type 3/4 with stats, not F_). For host-only damage tests."""
+    inst = ctx.inst(step.get("instance", 0))
+    done = 0
+    for a in ctx.actors(inst.index):
+        if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0:
+            args = ["hit", step.get("op", "damage"), "--victim", a["address"]]
+            if step.get("op", "damage") == "damage":
+                args += ["--amount", str(step.get("amount", 1))]
+            if kh2ctl(*args, pid=inst.pid, check=False).get("ok"):
+                done += 1
+    return {"hit": done}
 
 
 def step_freeze(ctx: Context, step: dict) -> dict:
@@ -723,7 +744,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "assert": step_assert, "save": step_save, "protect": step_protect,
          "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
-         "record_stop": step_record_stop, "wander": step_wander}
+         "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all}
 
 
 # --------------------------------------------------------------------------

@@ -51,6 +51,7 @@ add_library(kh2coop_inject SHARED
     src/Warp.cpp
     src/SaveGuard.cpp
     src/CrashDump.cpp
+    src/EnemySync.cpp
 )
 
 target_include_directories(kh2coop_inject PRIVATE
@@ -59,7 +60,7 @@ target_include_directories(kh2coop_inject PRIVATE
     ${CMAKE_SOURCE_DIR}/common/include    # Types.hpp
 )
 
-target_link_libraries(kh2coop_inject PRIVATE minhook_lib)
+target_link_libraries(kh2coop_inject PRIVATE minhook_lib kh2coop_common)
 
 if(WIN32)
     target_link_libraries(kh2coop_inject PRIVATE xinput dbghelp d3d11 d3d12 dxgi windowscodecs ole32 gdi32 user32)

@@ -34,6 +34,7 @@
 #include "Warp.hpp"
 #include "SaveGuard.hpp"
 #include "CrashDump.hpp"
+#include "EnemySync.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
@@ -605,20 +606,34 @@ static bool IsEnemyVictim(uintptr_t actor) {
     return type == offsets::objentry::TYPE_BOSS || type == offsets::objentry::TYPE_MOB;
 }
 
+static bool SyncDropsHit(void* victim) {
+    __try {
+        return enemysync::DropLocalEnemyDamage(reinterpret_cast<uintptr_t>(victim));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
     HitChannel* ch = g_hitChannel;
-    if (ch && ch->dropEnabled) {
+    const bool filterOn = ch && ch->dropEnabled;
+    // A client in a synced session never changes an enemy's HP itself: the
+    // host owns it (VUH-1502); the hit still plays its local reaction.
+    const bool syncDrop = SyncDropsHit(victim);
+    if (filterOn || syncDrop) {
         __try {
             const auto v = reinterpret_cast<uintptr_t>(victim);
             const auto h = reinterpret_cast<uintptr_t>(hit);
             const uintptr_t attacker =
                 (g_lastHit.hit == h && g_lastHit.victim == v) ? g_lastHit.attacker : 0;
             auto* damage = reinterpret_cast<int32_t*>(h + 0x28);
-            const bool match = *damage > 0
+            const bool match = *damage > 0 && (syncDrop || (filterOn
                 && (ch->dropAttacker == 0 || ch->dropAttacker == attacker)
                 && (ch->dropVictim == 0 || ch->dropVictim == v)
-                && (!ch->enemyVictimsOnly || IsEnemyVictim(v));
-            if (match) {
+                && (!ch->enemyVictimsOnly || IsEnemyVictim(v))));
+            if (match && !ch) {
+                *damage = 0;
+            } else if (match) {
                 const long n = InterlockedIncrement(&ch->claimCount) - 1;
                 HitClaim& c = ch->claims[n % HIT_CLAIM_CAPACITY];
                 c.frame = g_frameCounter;
@@ -2186,6 +2201,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 // Hand pending room warps to the game on its own thread.
                 warp::OnFrameStart(g_frameCounter, addr);
                 ProcessHitRequest();
+                enemysync::OnFrameStart(g_frameCounter);
                 BeginCloneFrame();
                 BeginHandleFrame();
                 PollPuppetPoses();
@@ -2193,6 +2209,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         }
         NoteActorForClones(addr);
         NoteActorHandle(addr);
+        enemysync::NoteActor(addr);
 
         // Check hotkey (handles standalone mode where OnFrame isn't called)
         CheckTestModeHotkey();
@@ -2594,6 +2611,7 @@ bool Initialize(uintptr_t exeBase) {
             Log("  WARNING: ApplyHitDamage bytes don't match this build; hits can't be dropped");
         }
         OpenHitChannel();
+        enemysync::Install(exeBase, &Log, g_origApplyStatDelta);
     }
 
     render::Install(exeBase, &Log);
@@ -2642,6 +2660,7 @@ void Shutdown() {
 
     render::Shutdown();
     warp::Shutdown();
+    enemysync::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
