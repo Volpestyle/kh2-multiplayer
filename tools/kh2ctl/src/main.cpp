@@ -1,3 +1,4 @@
+#include "kh2coop/CaptureChannel.hpp"
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/Types.hpp"
@@ -1926,6 +1927,213 @@ CommandResult CmdPlayerPress(std::vector<std::string> args) {
     return {0, out.str()};
 }
 
+// ============================================================================
+// In-renderer capture (VUH-1485): talks to the DLL's Present hook through
+// CaptureChannel. Works for occluded and unfocused windows.
+// ============================================================================
+
+class CaptureChannelView {
+public:
+    explicit CaptureChannelView(DWORD pid) {
+        const std::wstring name = kh2coop::CAPTURE_NAME_PREFIX + std::to_wstring(pid);
+        mapping_ = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
+        if (!mapping_) return;
+        view_ = static_cast<kh2coop::CaptureChannel*>(MapViewOfFile(
+            mapping_, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(kh2coop::CaptureChannel)));
+        if (view_ && (view_->magic != kh2coop::CAPTURE_MAGIC ||
+                      view_->version != kh2coop::CAPTURE_VERSION)) {
+            UnmapViewOfFile(view_);
+            view_ = nullptr;
+        }
+    }
+    ~CaptureChannelView() {
+        if (view_) UnmapViewOfFile(view_);
+        if (mapping_) CloseHandle(mapping_);
+    }
+    CaptureChannelView(const CaptureChannelView&) = delete;
+    CaptureChannelView& operator=(const CaptureChannelView&) = delete;
+
+    kh2coop::CaptureChannel* get() const { return view_; }
+
+private:
+    HANDLE mapping_ {nullptr};
+    kh2coop::CaptureChannel* view_ {nullptr};
+};
+
+std::string NarrowPath(const std::filesystem::path& path) { return path.string(); }
+
+// Present rate over `windowMs`, from the DLL's present counter.
+double MeasurePresentFps(kh2coop::CaptureChannel* channel, int windowMs) {
+    const long start = channel->presentCount;
+    const auto t0 = std::chrono::steady_clock::now();
+    SleepMs(windowMs);
+    const long end = channel->presentCount;
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count();
+    return seconds > 0 ? (end - start) / seconds : 0.0;
+}
+
+// Fills and submits a request, then waits for the DLL to finish it.
+// Returns an error string, or empty on success.
+std::string RunCaptureRequest(kh2coop::CaptureChannel* channel,
+                              const std::wstring& output, std::uint32_t frames,
+                              std::uint32_t interval, int timeoutMs) {
+    if (channel->requestSeq != channel->doneSeq) {
+        return "A capture is already running on this instance";
+    }
+    wcsncpy_s(channel->output, output.c_str(), _TRUNCATE);
+    channel->frameCount = frames;
+    channel->frameInterval = interval;
+    const long seq = InterlockedIncrement(&channel->requestSeq);
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (channel->doneSeq != seq) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return "Timed out waiting for the capture (is the game rendering?)";
+        }
+        SleepMs(20);
+    }
+    if (channel->status != static_cast<std::int32_t>(kh2coop::CaptureStatus::Ok)) {
+        std::wstring message(channel->error);
+        return "Capture failed (status " + std::to_string(channel->status) + "): " +
+               std::filesystem::path(message).string();
+    }
+    return {};
+}
+
+CommandResult OpenChannelError(DWORD pid) {
+    return MakeError("No capture channel for PID " + std::to_string(pid) +
+                     " (inject a DLL build with the Present hook)");
+}
+
+DWORD ResolveTargetPid() {
+    if (g_targetPid) return *g_targetPid;
+    const auto procs = ListKh2Processes();
+    if (procs.empty()) throw std::runtime_error("KH2 is not running");
+    return procs.front().pid;
+}
+
+CommandResult CmdCapture(std::vector<std::string> args) {
+    const auto outRaw = ConsumeOption(args, "--out");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for capture: " + args.front());
+    }
+    const DWORD pid = ResolveTargetPid();
+    CaptureChannelView channel(pid);
+    if (!channel.get()) return OpenChannelError(pid);
+
+    std::filesystem::path out = outRaw
+        ? std::filesystem::absolute(*outRaw)
+        : RigDir() / "shots" / (std::to_string(pid) + "_" + std::to_string(NowMs()) + ".png");
+    std::filesystem::create_directories(out.parent_path());
+
+    const std::string error = RunCaptureRequest(channel.get(), out.wstring(), 1, 1, 10000);
+    if (!error.empty()) return MakeError(error);
+
+    std::ostringstream json;
+    json << "{\"ok\":true,\"processId\":" << pid
+         << ",\"path\":" << JsonString(NarrowPath(out))
+         << ",\"width\":" << channel.get()->width
+         << ",\"height\":" << channel.get()->height << "}";
+    return {0, json.str()};
+}
+
+CommandResult CmdClip(std::vector<std::string> args) {
+    const auto outRaw = ConsumeOption(args, "--out");
+    const double seconds =
+        ParseNumber<double>(ConsumeOption(args, "--seconds").value_or("3"), "--seconds");
+    const int fps = ParseNumber<int>(ConsumeOption(args, "--fps").value_or("30"), "--fps");
+    const bool keepFrames = ConsumeFlag(args, "--keep-frames");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for clip: " + args.front());
+    }
+    if (seconds <= 0 || seconds > 30) throw std::runtime_error("--seconds must be in (0, 30]");
+    if (fps < 1 || fps > 60) throw std::runtime_error("--fps must be in [1, 60]");
+
+    const DWORD pid = ResolveTargetPid();
+    CaptureChannelView channel(pid);
+    if (!channel.get()) return OpenChannelError(pid);
+
+    const double gameFps = MeasurePresentFps(channel.get(), 500);
+    if (gameFps < 1.0) return MakeError("The game isn't presenting frames");
+    const std::uint32_t interval =
+        static_cast<std::uint32_t>((std::max)(1.0, std::round(gameFps / fps)));
+    const std::uint32_t frames = static_cast<std::uint32_t>(std::ceil(seconds * fps));
+
+    const std::string stem = std::to_string(pid) + "_" + std::to_string(NowMs());
+    const auto frameDir = RigDir() / "clips" / stem;
+    std::filesystem::create_directories(frameDir);
+    std::filesystem::path out = outRaw ? std::filesystem::absolute(*outRaw)
+                                       : RigDir() / "clips" / (stem + ".mp4");
+    std::filesystem::create_directories(out.parent_path());
+
+    const long presentsBefore = channel.get()->presentCount;
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::string error = RunCaptureRequest(
+        channel.get(), (frameDir / L"f_%05u.bmp").wstring(), frames, interval,
+        static_cast<int>(seconds * 1000) + 30000);
+    const double elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    const double fpsDuring = (channel.get()->presentCount - presentsBefore) / elapsed;
+    if (!error.empty()) return MakeError(error);
+
+    // Frames are captured every `interval` presents, so the clip plays back
+    // at the game's present rate divided by the interval.
+    const double clipFps = gameFps / interval;
+    std::wostringstream command;
+    command << L"ffmpeg -y -loglevel error -framerate " << clipFps << L" -i \""
+            << (frameDir / L"f_%05d.bmp").wstring()
+            << L"\" -c:v libx264 -pix_fmt yuv420p -crf 20 \"" << out.wstring() << L"\"";
+    const auto encode = RunProcessCapture(command.str(), RepoRoot());
+    if (!encode.launched || encode.exitCode != 0) {
+        return MakeError("ffmpeg failed (is it on PATH?): " + encode.output);
+    }
+    if (!keepFrames) std::filesystem::remove_all(frameDir);
+
+    std::ostringstream json;
+    json << "{\"ok\":true,\"processId\":" << pid
+         << ",\"path\":" << JsonString(NarrowPath(out))
+         << ",\"frames\":" << channel.get()->framesWritten
+         << ",\"width\":" << channel.get()->width
+         << ",\"height\":" << channel.get()->height
+         << ",\"clipFps\":" << clipFps
+         << ",\"gameFpsBefore\":" << gameFps
+         << ",\"gameFpsDuringCapture\":" << fpsDuring << "}";
+    return {0, json.str()};
+}
+
+CommandResult CmdOverlay(std::vector<std::string> args) {
+    if (args.size() != 1 || (args[0] != "on" && args[0] != "off")) {
+        throw std::runtime_error("overlay takes on|off");
+    }
+    const DWORD pid = ResolveTargetPid();
+    CaptureChannelView channel(pid);
+    if (!channel.get()) return OpenChannelError(pid);
+    InterlockedExchange(&channel.get()->overlay, args[0] == "on" ? 1 : 0);
+    std::ostringstream json;
+    json << "{\"ok\":true,\"processId\":" << pid
+         << ",\"overlay\":" << JsonBool(args[0] == "on") << "}";
+    return {0, json.str()};
+}
+
+CommandResult CmdFps(std::vector<std::string> args) {
+    const int windowMs =
+        ParseNumber<int>(ConsumeOption(args, "--window-ms").value_or("2000"), "--window-ms");
+    if (!args.empty()) {
+        throw std::runtime_error("Unexpected argument for fps: " + args.front());
+    }
+    const DWORD pid = ResolveTargetPid();
+    CaptureChannelView channel(pid);
+    if (!channel.get()) return OpenChannelError(pid);
+    const double fps = MeasurePresentFps(channel.get(), windowMs);
+    std::ostringstream json;
+    json << "{\"ok\":true,\"processId\":" << pid << ",\"fps\":" << fps
+         << ",\"renderer\":" << channel.get()->renderer
+         << ",\"backbufferFormat\":" << channel.get()->backbufferFormat << "}";
+    return {0, json.str()};
+}
+
 void PrintUsage() {
     std::cout
         << "kh2ctl commands:\n"
@@ -1936,6 +2144,10 @@ void PrintUsage() {
         << "  instances                 list KH2 processes and whether the rig owns them\n"
         << "  kill (--pid N | --all)    kill rig-launched KH2 processes only\n"
         << "  mute --pid N [--off]      mute (or unmute) one instance's audio\n"
+        << "  capture [--out x.png]     PNG from inside the renderer (works occluded)\n"
+        << "  clip [--seconds S] [--fps F] [--out x.mp4] [--keep-frames]\n"
+        << "  overlay on|off            debug overlay: pid, frame, world/room, fps\n"
+        << "  fps [--window-ms N]       game present rate\n"
         << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"
         << "      LAUNCH_OPTS: [--game-dir DIR] [--dll PATH] [--no-inject]\n"
         << "                   [--window-timeout-ms N] [--settle-ms N]\n"
@@ -2016,6 +2228,14 @@ int main(int argc, char* argv[]) {
             result = CmdKill(std::move(args));
         } else if (command == "mute") {
             result = CmdMute(std::move(args));
+        } else if (command == "capture") {
+            result = CmdCapture(std::move(args));
+        } else if (command == "clip") {
+            result = CmdClip(std::move(args));
+        } else if (command == "overlay") {
+            result = CmdOverlay(std::move(args));
+        } else if (command == "fps") {
+            result = CmdFps(std::move(args));
         } else if (command == "restart") {
             result = CmdRestart(std::move(args));
         } else if (command == "state") {

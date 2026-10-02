@@ -145,6 +145,34 @@ kh2ctl mute --pid 1234          # mute
 kh2ctl mute --pid 1234 --off    # unmute
 ```
 
+### Screenshots, clips and the overlay (in-renderer)
+
+```powershell
+kh2ctl capture --pid 1234                     # PNG -> build/rig/shots/<pid>_<ms>.png
+kh2ctl capture --pid 1234 --out shot.png
+kh2ctl clip --pid 1234 --seconds 4 --fps 30   # MP4 -> build/rig/clips/<pid>_<ms>.mp4
+kh2ctl overlay --pid 1234 on                  # pid, frame, world/room, fps box
+kh2ctl fps --pid 1234                         # present rate over 2 s
+```
+
+The inject DLL hooks the swapchain's `Present`/`Present1` and copies the
+backbuffer on the GPU, so captures work while the window is behind other
+windows or unfocused. Minimized windows are untested (the game may stop
+presenting). KH2 renders with D3D12 (1920×1080 `B8G8R8A8_UNORM`, 3-buffer
+flip model, presents via `Present1`); the D3D11 path isn't implemented.
+
+- Requests travel through `Local\kh2coop_capture_<pid>`
+  (`common/include/kh2coop/CaptureChannel.hpp`).
+- Copies run on the game's own direct queue, captured by hooking
+  `ExecuteCommandLists`, and are read back 1–2 frames later, so the render
+  thread doesn't wait on the GPU. PNG/BMP encoding runs on a worker thread.
+- `clip` writes BMP frames, encodes them with `ffmpeg` (must be on `PATH`),
+  then deletes the frames (`--keep-frames` keeps them). It reports
+  `gameFpsBefore` and `gameFpsDuringCapture`; measured 2026-10-02: 66 → 68
+  fps for a 4 s, 30 fps clip at 1920×1080.
+- The overlay is drawn into the backbuffer, so it shows on screen and in
+  captures. It's off by default.
+
 ### Restart
 
 ```powershell

@@ -47,6 +47,7 @@ set_target_properties(minhook_lib PROPERTIES
 add_library(kh2coop_inject SHARED
     src/DllMain.cpp
     src/EntityHook.cpp
+    src/RenderHook.cpp
 )
 
 target_include_directories(kh2coop_inject PRIVATE
@@ -58,7 +59,7 @@ target_include_directories(kh2coop_inject PRIVATE
 target_link_libraries(kh2coop_inject PRIVATE minhook_lib)
 
 if(WIN32)
-    target_link_libraries(kh2coop_inject PRIVATE xinput)
+    target_link_libraries(kh2coop_inject PRIVATE xinput d3d11 d3d12 dxgi windowscodecs ole32 gdi32 user32)
 endif()
 
 target_compile_definitions(kh2coop_inject PRIVATE

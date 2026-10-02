@@ -33,6 +33,10 @@ kh2ctl kill --all        # kill rig-launched instances only
 kh2ctl inject --pid N    # inject into an already running KH2
 ```
 
+To see an instance, use `kh2ctl capture --pid N` (PNG from inside the
+renderer, works behind other windows) or `kh2ctl clip --pid N` (MP4), and
+`kh2ctl overlay --pid N on` for pid, frame, world/room and fps on screen.
+
 `launch` reports `"hooksInstalled":true` and the hook list once the DLL's init
 log shows every hook. Measured 2026-10-01: 10 of 10 launches installed all four
 hooks, about 2 s from launch to injection.

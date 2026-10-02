@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextvars
+import functools
+import inspect
 import json
 import os
 import subprocess
@@ -40,10 +43,18 @@ def _find_kh2ctl() -> Path:
     )
 
 
+# Instance chosen by the `pid` argument of the game tools (see _with_pid).
+_target_pid: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "target_pid", default=None
+)
+
+
 def _run_kh2ctl(*args: str) -> dict[str, Any]:
     exe = _find_kh2ctl()
+    pid = _target_pid.get()
+    pid_args = ["--pid", str(pid)] if pid is not None else []
     result = subprocess.run(
-        [str(exe), *args],
+        [str(exe), *args, *pid_args],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -66,6 +77,35 @@ def _run_kh2ctl(*args: str) -> dict[str, Any]:
 
 def _bool_flag(flag: str, enabled: bool) -> list[str]:
     return [flag] if enabled else []
+
+
+def _with_pid(fn):
+    """Adds an optional `pid` argument that targets one KH2 instance.
+
+    kh2ctl refuses game commands without --pid when several instances run.
+    """
+    sig = inspect.signature(fn)
+    pid_param = inspect.Parameter(
+        "pid", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=int | None
+    )
+
+    @functools.wraps(fn)
+    def wrapper(*args, pid: int | None = None, **kwargs):
+        token = _target_pid.set(pid)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _target_pid.reset(token)
+
+    params = [
+        p.replace(kind=inspect.Parameter.KEYWORD_ONLY)
+        if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        else p
+        for p in sig.parameters.values()
+    ]
+    wrapper.__signature__ = sig.replace(parameters=[*params, pid_param])
+    wrapper.__annotations__ = {**fn.__annotations__, "pid": int | None}
+    return wrapper
 
 
 mcp = FastMCP(
@@ -139,11 +179,13 @@ def restart_kh2(
 
 
 @mcp.tool(description="Read current KH2 room and actor state.")
+@_with_pid
 def get_state() -> dict[str, Any]:
     return _run_kh2ctl("state")
 
 
 @mcp.tool(description="Wait until KH2 is at the title/loading state.")
+@_with_pid
 def wait_title(timeout_ms: int = 60000, poll_ms: int = 250) -> dict[str, Any]:
     return _run_kh2ctl(
         "wait-title",
@@ -155,6 +197,7 @@ def wait_title(timeout_ms: int = 60000, poll_ms: int = 250) -> dict[str, Any]:
 
 
 @mcp.tool(description="Wait until KH2 is in a live room, not title/loading.")
+@_with_pid
 def wait_ingame(timeout_ms: int = 60000, poll_ms: int = 250) -> dict[str, Any]:
     return _run_kh2ctl(
         "wait-ingame",
@@ -166,6 +209,7 @@ def wait_ingame(timeout_ms: int = 60000, poll_ms: int = 250) -> dict[str, Any]:
 
 
 @mcp.tool(description="Wait until KH2 reaches a specific world/room.")
+@_with_pid
 def wait_room(
     world: int,
     room: int,
@@ -186,11 +230,13 @@ def wait_room(
 
 
 @mcp.tool(description="Focus the KH2 game window.")
+@_with_pid
 def focus_game() -> dict[str, Any]:
     return _run_kh2ctl("focus")
 
 
 @mcp.tool(description="Tap a keyboard key against KH2, focusing first by default.")
+@_with_pid
 def tap_key(key: str, duration_ms: int = 60, focus: bool = True) -> dict[str, Any]:
     args = ["tap-key", "--key", key, "--duration-ms", str(duration_ms)]
     if not focus:
@@ -199,6 +245,7 @@ def tap_key(key: str, duration_ms: int = 60, focus: bool = True) -> dict[str, An
 
 
 @mcp.tool(description="Hold a keyboard key against KH2 for a fixed duration.")
+@_with_pid
 def hold_key(key: str, duration_ms: int = 500, focus: bool = True) -> dict[str, Any]:
     args = ["hold-key", "--key", key, "--duration-ms", str(duration_ms)]
     if not focus:
@@ -207,6 +254,7 @@ def hold_key(key: str, duration_ms: int = 500, focus: bool = True) -> dict[str, 
 
 
 @mcp.tool(description="Drive the save-load menu using keyboard confirm/down keys.")
+@_with_pid
 def load_save(
     slot: int,
     confirm_key: str = "enter",
@@ -289,6 +337,7 @@ def boot_load_save(
 
 
 @mcp.tool(description="Send a raw slot-0/player input pulse through the inject DLL.")
+@_with_pid
 def player_input(
     duration_ms: int = 100,
     lx: float = 0.0,
@@ -316,6 +365,7 @@ def player_input(
 
 
 @mcp.tool(description="Move the local player with a slot-0 left-stick pulse.")
+@_with_pid
 def player_move(
     x: float = 0.0,
     y: float = 1.0,
@@ -333,6 +383,7 @@ def player_move(
 
 
 @mcp.tool(description="Press a raw slot-0/player controller button.")
+@_with_pid
 def player_press(button: str, duration_ms: int = 100) -> dict[str, Any]:
     return _run_kh2ctl(
         "player-press",
@@ -344,6 +395,7 @@ def player_press(button: str, duration_ms: int = 100) -> dict[str, Any]:
 
 
 @mcp.tool(description="Send a raw friend-slot mailbox input pulse.")
+@_with_pid
 def friend_input(
     slot: str,
     duration_ms: int = 100,
@@ -377,6 +429,7 @@ def friend_input(
 
 
 @mcp.tool(description="Move Friend1 or Friend2 with a left-stick pulse.")
+@_with_pid
 def friend_move(
     slot: str,
     x: float = 0.0,
@@ -397,6 +450,7 @@ def friend_move(
 
 
 @mcp.tool(description="Press a single friend-slot action button.")
+@_with_pid
 def friend_press(slot: str, button: str, duration_ms: int = 100) -> dict[str, Any]:
     return _run_kh2ctl(
         "press",
@@ -407,6 +461,48 @@ def friend_press(slot: str, button: str, duration_ms: int = 100) -> dict[str, An
         "--duration-ms",
         str(duration_ms),
     )
+
+
+@mcp.tool(
+    description=(
+        "Screenshot one KH2 instance from inside its renderer (works when the "
+        "window is hidden or unfocused). Returns the PNG path."
+    )
+)
+@_with_pid
+def capture_screenshot(out: str = "") -> dict[str, Any]:
+    return _run_kh2ctl("capture", *(["--out", out] if out else []))
+
+
+@mcp.tool(
+    description=(
+        "Record a short MP4 clip of one KH2 instance from inside its renderer. "
+        "Reports the game's fps before and during capture."
+    )
+)
+@_with_pid
+def capture_clip(seconds: float = 3.0, fps: int = 30, out: str = "") -> dict[str, Any]:
+    return _run_kh2ctl(
+        "clip", "--seconds", str(seconds), "--fps", str(fps),
+        *(["--out", out] if out else []),
+    )
+
+
+@mcp.tool(description="Turn the in-game debug overlay (pid, frame, world/room, fps) on or off.")
+@_with_pid
+def set_overlay(on: bool = True) -> dict[str, Any]:
+    return _run_kh2ctl("overlay", "on" if on else "off")
+
+
+@mcp.tool(description="Measure one KH2 instance's frame rate.")
+@_with_pid
+def get_fps(window_ms: int = 2000) -> dict[str, Any]:
+    return _run_kh2ctl("fps", "--window-ms", str(window_ms))
+
+
+@mcp.tool(description="Mute or unmute one KH2 instance's audio.")
+def mute_kh2(pid: int, mute: bool = True) -> dict[str, Any]:
+    return _run_kh2ctl("mute", "--pid", str(pid), *([] if mute else ["--off"]))
 
 
 if __name__ == "__main__":

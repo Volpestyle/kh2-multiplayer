@@ -30,6 +30,7 @@
 
 #include "EntityHook.hpp"
 #include "PatternScan.hpp"
+#include "RenderHook.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
 
@@ -1838,6 +1839,10 @@ bool Initialize(uintptr_t exeBase) {
         }
     }
 
+    // Screenshots, clips and the debug overlay (VUH-1485). Optional: the DLL
+    // keeps working if the renderer can't be hooked.
+    render::Install(exeBase, &Log);
+
     Log("  InputCollector hook installed");
     Log("Initialization complete — waiting for friend entities...");
     Log("  Press F5 to toggle solo test mode (control Friend1 with KH2 controller 0)");
@@ -1874,6 +1879,7 @@ void Shutdown() {
         Log("  Network input mailbox closed");
     }
 
+    render::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
