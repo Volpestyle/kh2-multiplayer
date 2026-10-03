@@ -69,7 +69,9 @@ constexpr std::uint64_t PAUSE_STATUS   = 0x0ABB878;   // [GHIDRA] pause-blocker 
 constexpr std::uint64_t BATTLE_STATUS  = 0x2A11404;   // [GHIDRA] battle state, != 0 in battle (2 = forced)
 constexpr std::uint64_t BATTLE_END     = 0x2A0FC60;   // [KH2LIB] End-of-battle signal (unverified, not shifted)
 constexpr std::uint64_t CONTROLLABLE   = 0x2A171E8;   // [GHIDRA] bitset of frozen entity groups; 0 = nothing frozen
-constexpr std::uint64_t CUTSCENE_TIMER = 0x0B64F98;   // [GHIDRA] current cutscene timer
+constexpr std::uint64_t CUTSCENE_TIMER = 0x0B64F98;   // [GHIDRA] elapsed timeline position, retained after completion
+constexpr std::uint64_t CUTSCENE_STATE = 0x0B65210;   // [GHIDRA] int32 timeline lifecycle; 0 = idle
+constexpr std::uint64_t EVENT_CONTEXT  = 0x2A11478;   // [GHIDRA] pointer; native event-active predicate 0x3AC220
 constexpr std::uint64_t IN_FIELD       = 0x09BA8D0;   // [GHIDRA] u8, cleared at room-load start, set when the room is live
 constexpr std::uint64_t OPEN_MENU      = 0x07435D0;   // [KH2LIB] u8 menu id, 0xFF = none (menu manager 0x2F5E50)
 constexpr std::uint64_t CUTSCENE_LEN   = 0x0B64F34;   // [KH2LIB] Cutscene length

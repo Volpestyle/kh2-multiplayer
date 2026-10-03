@@ -44,7 +44,7 @@ struct WarpChannel {
     std::uint32_t fromRoom;
     std::int32_t pauseStatus;
     std::int32_t controllable;
-    std::int32_t cutsceneTimer;
+    std::int32_t cutsceneTimer;    // elapsed timeline position; diagnostic only
     std::int32_t openMenu;
     std::uint32_t frame;           // [dll] DLL frame counter at hand-over
     // [dll] updated every gameplay frame. The DLL's frame counter only
@@ -53,7 +53,7 @@ struct WarpChannel {
     volatile long long liveActor;  // entity list head (Sora's actor) this frame
     // [dll] safe-state gate inputs, refreshed every frame while a request
     // waits; a request is handed over only when frozen == 0, inField != 0,
-    // openMenu == 0xFF and cutsceneTimer == 0.
+    // openMenu == 0xFF and the native timeline and event context are idle.
     std::int32_t inField;
     std::uint32_t gateWaitFrames;  // frames the current request has waited
 };

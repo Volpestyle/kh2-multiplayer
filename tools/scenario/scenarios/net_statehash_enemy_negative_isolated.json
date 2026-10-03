@@ -1,0 +1,202 @@
+{
+  "name": "net_statehash_enemy_negative_isolated",
+  "description": "Two-peer isolated native enemy detector control (host plus client1 only): target matched objectId311 with reversible client HP-lock, native host kill, failed client death and actual surviving HP, two fresh same-epoch enemy mismatch observations plus relay detection, guarded restoration and host native reload parity. Three-peer positive proof and failed three-peer negative runs remain separate; no existing peer is excluded.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "protect",
+      "instance": 0
+    },
+    {
+      "do": "protect",
+      "instance": 1
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "wait",
+      "ms": 4000
+    },
+    {
+      "do": "save",
+      "as": "spawned",
+      "expr": "[[(a['name'], a['address'][-5:], a.get('hp'), round(a['position']['x']), round(a['position']['z'])) for a in enemies(k)] for k in range(2)]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemy_hps(0)) > 0 and len(enemy_hps(1)) == len(enemy_hps(0))",
+      "timeoutMs": 15000,
+      "pollMs": 500
+    },
+    {
+      "do": "save",
+      "as": "before",
+      "expr": "[enemy_hps(i) for i in range(2)]"
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_before_damage",
+      "minEnemies": 4
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "damage",
+      "amount": 7
+    },
+    {
+      "do": "wait",
+      "ms": 400
+    },
+    {
+      "do": "save",
+      "as": "after_damage",
+      "expr": "[enemy_hps(i) for i in range(2)]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_damage'][0] == saved['after_damage'][1] and saved['after_damage'][0] != saved['before'][0]",
+      "message": "client HP doesn't match the host's after host-only damage"
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_after_damage",
+      "minEnemies": 4
+    },
+    {
+      "do": "enemy_hash_control",
+      "as": "enemy_negative_control",
+      "instance": 1,
+      "objectId": 311
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "transition_check",
+      "as": "enemy_control_reload",
+      "target": [
+        18,
+        11
+      ],
+      "instances": [
+        0,
+        1
+      ]
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "statehash_check",
+      "as": "enemy_control_restored",
+      "minEnemies": 4,
+      "timeoutMs": 20000
+    }
+  ]
+}

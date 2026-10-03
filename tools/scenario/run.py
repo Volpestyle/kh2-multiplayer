@@ -287,7 +287,8 @@ class Context:
                 "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
                 "location": location, "log_matches": log_matches,
-                "range": range, "round": round, "int": int, "str": str}
+                "range": range, "round": round, "int": int, "str": str,
+                "chests": lambda index=0: chest_records(self, index)}
 
     def eval(self, expr: str):
         # Helpers go in globals: comprehensions inside an expression only see globals.
@@ -319,6 +320,49 @@ class Context:
                 except subprocess.TimeoutExpired:
                     proc.kill()
             log.close()
+
+
+
+def chest_records(ctx: Context, index: int = 0) -> list[dict]:
+    """Read bounded treasure records only from native F_* actors."""
+    pid = ctx.inst(index).pid
+    header = kh2ctl("peek", "--rva", "0x717008:u8,0x717009:u8", pid=pid)
+    if "moduleBase" not in header:
+        raise StepFailed("chests requires kh2ctl peek moduleBase metadata")
+    base = int(str(header["moduleBase"]), 0)
+    location = [header["samples"][0][key] for key in ("0x717008", "0x717009")]
+
+    def at(address: int, kind: str):
+        rva = (address - base) & ((1 << 64) - 1)
+        key = f"0x{rva:X}"
+        sample = kh2ctl("peek", "--rva", f"{key}:{kind}", pid=pid)["samples"][0]
+        return sample[key]
+
+    result = []
+    for actor in ctx.actors(index):
+        if not actor.get("name", "").startswith("F_"):
+            continue
+        pointer = int(str(at(int(actor["address"], 16) + 0xC00, "u64")), 0)
+        if not 0x10000 <= pointer < 0x0000800000000000 or pointer % 2:
+            continue
+        try:
+            schema = (("treasureId", 0, "u16"), ("itemId", 2, "u16"), ("type", 4, "u8"),
+                      ("world", 5, "u8"), ("room", 6, "u8"), ("roomIndex", 7, "u8"),
+                      ("event", 8, "u16"), ("flag", 10, "u16"))
+            keys = [f"0x{(pointer + offset - base) & ((1 << 64) - 1):X}" for _, offset, _ in schema]
+            sample = kh2ctl("peek", "--rva", ",".join(f"{key}:{kind}" for key, (_, _, kind) in zip(keys, schema)),
+                            pid=pid)["samples"][0]
+            fields = {name: sample[key] for key, (name, _, _) in zip(keys, schema)}
+        except StepFailed:
+            continue  # F_* also contains non-chest field objects.
+        if fields["type"] != 0 or [fields["world"], fields["room"]] != location or not 1 <= fields["flag"] <= 411:
+            continue
+        byte_rva = 0x9ABC5C + fields["flag"] // 8
+        raw = ctx.namespace()["peek"](byte_rva, "u8", index)
+        result.append({**actor, **fields, "treasureRecord": f"0x{pointer:X}",
+                       "flagRva": f"0x{byte_rva:X}", "flagByte": raw,
+                       "openedBit": bool(raw & (1 << (fields["flag"] % 8)))})
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -546,7 +590,8 @@ def step_crash(ctx: Context, step: dict) -> dict:
 
 def step_kh2ctl(ctx: Context, step: dict) -> dict:
     """Any kh2ctl command against one instance, e.g. ["overlay", "on"]."""
-    return kh2ctl(*map(str, step["args"]), pid=ctx.inst(step.get("instance", 0)).pid)
+    args = ctx.eval(step["argsExpr"]) if "argsExpr" in step else step["args"]
+    return kh2ctl(*map(str, args), pid=ctx.inst(step.get("instance", 0)).pid)
 
 
 def step_hit_all(ctx: Context, step: dict) -> dict:
@@ -793,6 +838,522 @@ def step_transition_check(ctx: Context, step: dict) -> dict:
     return latest
 
 
+
+def step_approach_goa_chest(ctx: Context, step: dict) -> dict:
+    """Bounded camera-relative native walking to GoA flag 409 from its platform."""
+    index = step.get("instance", 0)
+    name = step.get("as", "goa_approach")
+    helpers = ctx.namespace()
+    evidence = {"target": [0, 460, 900], "pulses": []}
+    deadline = time.monotonic() + 15
+    window_start = None
+    try:
+        while True:
+            if helpers["room"](index) != (4, 26):
+                raise StepFailed("GoA approach requires current room 04/1A")
+            position = helpers["pos"]("P_EX100", index)
+            distance = math.hypot(position[0], 900 - position[2])
+            evidence["finalPosition"] = position
+            evidence["finalDistance"] = distance
+            if abs(position[1] - 460) > 80:
+                raise StepFailed("GoA approach must start on the chest platform (Y near 460)")
+            if distance <= 100:
+                break
+            if time.monotonic() >= deadline:
+                raise StepFailed("GoA native approach exceeded 15 seconds")
+            keys = ("0x718C68", "0x718C70", "0x718C78", "0x718C80")
+            sample = kh2ctl("peek", "--rva", ",".join(f"{key}:f32" for key in keys),
+                            pid=ctx.inst(index).pid)["samples"][0]
+            look_x, look_z, eye_x, eye_z = [sample[k] for k in keys]
+            fx, fz = look_x - eye_x, look_z - eye_z
+            length = math.hypot(fx, fz)
+            if not math.isfinite(length) or length < 1:
+                raise StepFailed("GoA camera has no usable horizontal forward basis")
+            fx, fz = fx / length, fz / length
+            dx, dz = -position[0] / distance, (900 - position[2]) / distance
+            lx, ly = dx * fz - dz * fx, dx * fx + dz * fz
+            kh2ctl("player-input", "--lx", f"{lx:.5f}", "--ly", f"{ly:.5f}",
+                   "--duration-ms", "200", pid=ctx.inst(index).pid)
+            end = helpers["pos"]("P_EX100", index)
+            end_distance = math.hypot(end[0], 900 - end[2])
+            evidence["pulses"].append({"start": position, "end": end, "distanceBefore": distance,
+                "distanceAfter": end_distance, "camera": sample, "lx": lx, "ly": ly})
+            if window_start is None:
+                window_start = distance
+            if len(evidence["pulses"]) % 3 == 0:
+                if end_distance > 100 and end_distance >= window_start - 10:
+                    raise StepFailed("GoA walking made no progress toward chest over three pulses")
+                window_start = None
+            ctx.check_all()
+    except StepFailed:
+        step_capture(ctx, {"instance": index, "name": f"{name}_failed"})
+        raise
+    finally:
+        path = ctx.run_dir / f"{name}.json"
+        path.write_text(json.dumps(evidence, indent=2))
+        ctx.artifacts.append(path.name)
+        ctx.saved[name] = evidence
+    return evidence
+
+
+
+def step_dismiss_goa_map_reward(ctx: Context, step: dict) -> dict:
+    """Confirm GoA map obtained modal through native input; never bypass safe gate."""
+    index = step.get("instance", 0)
+    name = step.get("as", "goa_map_reward")
+    evidence = {"samples": [], "presses": 0}
+    step_capture(ctx, {"instance": index, "name": f"{name}_before"})
+    start = time.monotonic()
+    deadline = start + 10
+    fields = (("world", 0x717008, "u8"), ("room", 0x717009, "u8"),
+              ("chestByte", 0x9ABC8F, "u8"), ("controllable", 0x2A171E8, "i32"),
+              ("inField", 0x9BA8D0, "u8"), ("openMenu", 0x7435D0, "u8"),
+              ("cutsceneTimer", 0xB64F98, "i32"), ("uiTickDelta", 0x717484, "f32"),
+              ("eventState", 0xB65210, "i32"), ("eventContext", 0x2A11478, "u64"))
+    def sample():
+        row = kh2ctl("peek", "--rva", ",".join(f"0x{rva:X}:{kind}" for _, rva, kind in fields),
+                     pid=ctx.inst(index).pid)["samples"][0]
+        data = {key: row[f"0x{rva:X}"] for key, rva, _ in fields}
+        data["eventContext"] = int(data["eventContext"], 0) if isinstance(data["eventContext"], str) else data["eventContext"]
+        data["elapsedMs"] = round((time.monotonic() - start) * 1000)
+        data["safe"] = data["controllable"] == 0 and data["inField"] != 0 and data["openMenu"] == 255 and data["eventState"] == 0 and data["eventContext"] == 0
+        evidence["samples"].append(data)
+        if [data["world"], data["room"]] != [4, 26] or not data["chestByte"] & 2:
+            raise StepFailed("GoA reward dismissal requires room 04/1A with flag409 already opened")
+        return data["safe"]
+    try:
+        while not sample():
+            if time.monotonic() >= deadline:
+                raise StepFailed("GoA obtained-map modal did not reach native safe gameplay within 10 seconds")
+            kh2ctl("player-press", "--button", "cross", "--duration-ms", "150", pid=ctx.inst(index).pid)
+            evidence["presses"] += 1
+            if sample():
+                break
+            ctx.sleep(min(0.7, max(0, deadline - time.monotonic())))
+        evidence["safe"] = True
+        step_capture(ctx, {"instance": index, "name": f"{name}_after"})
+    except StepFailed:
+        observation = {}
+        for key, read in (
+                ("actors", lambda: ctx.actors(index)),
+                ("chests", lambda: chest_records(ctx, index)),
+                ("location", lambda: ctx.namespace()["location"](index)),
+                ("state", lambda: kh2ctl("state", pid=ctx.inst(index).pid)),
+                ("liveFrame", lambda: ctx.inst(index).live_frame())):
+            try:
+                observation[key] = read()
+            except Exception as error:
+                observation[key + "Error"] = str(error)
+        observation["nativeWarpGate"] = evidence["samples"][-1] if evidence["samples"] else None
+        evidence["failureObservation"] = observation
+        try:
+            step_capture(ctx, {"instance": index, "name": f"{name}_failed"})
+        except Exception as error:
+            evidence["captureError"] = str(error)
+        raise
+    finally:
+        path = ctx.run_dir / f"{name}.json"
+        path.write_text(json.dumps(evidence, indent=2))
+        ctx.artifacts.append(path.name)
+        ctx.saved[name] = evidence
+    return evidence
+
+
+PERSONAL_RANGES = (("characters", 0x24F0, 0xE04), ("inventory", 0x3580, 0x140),
+                   ("munny", 0x2440, 4), ("exp", 0x36E0, 4))
+PROGRESS_RANGES = (("programs", 0x10, 0x1C80), ("story", 0x1C90, 0x260),
+                   ("visited", 0x22F8, 0x98), ("chests", 0x23AC, 0x34))
+
+
+def step_progress_snapshot(ctx: Context, step: dict) -> dict:
+    """Actual SAVE bytes, including all personal exclusions; room init can change them."""
+    name = step.get("as", "progress")
+    evidence = {"instances": {}}
+    for index in step.get("instances", [step.get("instance", 0)]):
+        ranges = {}
+        for label, offset, length in (*PROGRESS_RANGES, *PERSONAL_RANGES):
+            fields = [(0x9A98B0 + offset + n, min(8, length - n)) for n in range(0, length, 8)]
+            raw = bytearray()
+            for start in range(0, len(fields), 128):
+                batch = fields[start:start + 128]
+                specs = [f"0x{rva:X}:u{size * 8}" for rva, size in batch]
+                sample = kh2ctl("peek", "--rva", ",".join(specs), pid=ctx.inst(index).pid)["samples"][0]
+                for rva, size in batch:
+                    value = sample[f"0x{rva:X}"]
+                    raw.extend((int(value, 0) if isinstance(value, str) else value).to_bytes(size, "little"))
+            ranges[label] = {"saveOffset": offset, "length": length, "hex": raw.hex(),
+                             "sha256": hashlib.sha256(raw).hexdigest()}
+        evidence["instances"][str(index)] = {"ranges": ranges}
+    if "compare" in step:
+        before = ctx.saved[step["compare"]]
+        for key, data in evidence["instances"].items():
+            data["diffs"] = {}
+            for label, region in data["ranges"].items():
+                old = bytes.fromhex(before["instances"][key]["ranges"][label]["hex"])
+                new = bytes.fromhex(region["hex"])
+                data["diffs"][label] = [{"saveOffset": region["saveOffset"] + n,
+                                         "before": a, "after": b}
+                                        for n, (a, b) in enumerate(zip(old, new)) if a != b]
+    ctx.saved[name] = evidence
+    path = ctx.run_dir / f"{name}.json"
+    path.write_text(json.dumps(evidence, indent=2))
+    ctx.artifacts.append(path.name)
+    return {"path": path.name, "instances": list(evidence["instances"]),
+            "changedBytes": {i: {k: len(v) for k, v in d.get("diffs", {}).items()}
+                             for i, d in evidence["instances"].items()}}
+
+
+HASH_PATTERN = re.compile(
+    r"\[statehash\] role=(?P<role>host|client) epoch=(?P<epoch>\d+) frame=(?P<frame>\d+) "
+    r"room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\d+) "
+    r"map=(?P<map>\d+) btl=(?P<btl>\d+) evt=(?P<evt>\d+) enemies=(?P<enemies>[0-9A-Fa-f]+) "
+    r"progress=(?P<progress>[0-9A-Fa-f]+) count=(?P<count>\d+) unmatched=(?P<unmatched>\d+) observed=(?P<observed>\d+)")
+NATIVE_HASH_PATTERN = re.compile(
+    r"\[statehash\] native epoch=(?P<epoch>\d+) frame=(?P<frame>\d+) netId=(?P<netId>\d+) "
+    r"objectId=(?P<objectId>\d+) hp=(?P<hp>-?\d+) actor=(?P<actor>[0-9A-Fa-f]+)")
+
+
+def step_statehash_check(ctx: Context, step: dict) -> dict:
+    """Require fresh completed-arrival hashes and their complete native population."""
+    name = step.get("as", "statehash")
+    indices = step.get("instances", list(range(len(ctx.instances))))
+    expected = step.get("expectedFields", 0)
+    paths = {i: LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log" for i in indices}
+    offsets = {i: len(p.read_text(errors="replace")) if p.exists() else 0 for i, p in paths.items()}
+    relay_path = ctx.run_dir / "relay.log"
+    relay_offset = step.get("relayOffset", len(relay_path.read_text(errors="replace")) if relay_path.exists() else 0)
+    latest = {}
+    matching_frames = []
+    matching_samples = []
+    saw_extra = False
+
+    def ready():
+        nonlocal latest, saw_extra
+        latest = {"ready": False, "instances": {}, "problems": [], "expectedFields": expected,
+                  "sawUnmatchedExtra": saw_extra, "participatingInstances": indices,
+                  "rigInstanceCount": len(ctx.instances)}
+        problems = latest["problems"]
+        for index, path in paths.items():
+            text = path.read_text(errors="replace") if path.exists() else ""
+            arrivals = list(re.finditer(ARRIVAL_PATTERN, text))
+            matches = [m for m in HASH_PATTERN.finditer(text) if m.start() >= offsets[index]]
+            if not arrivals or not matches or matches[-1].start() < arrivals[-1].end():
+                problems.append(f"instance {index}: no fresh post-arrival hash")
+                continue
+            match = matches[-1]
+            data = match.groupdict()
+            for key in data.keys() - {"role"}:
+                data[key] = int(data[key], 16 if key in ("world", "room", "enemies", "progress") else 10)
+            data["location"] = [data[k] for k in ("world", "room", "door", "map", "btl", "evt")]
+            data["currentLocation"] = ctx.namespace()["location"](index)
+            arrival = arrivals[-1].groupdict()
+            arrival_location = [int(arrival[k], 16 if k in ("world", "room") else 10)
+                                for k in ("world", "room", "door", "map", "btl", "evt")]
+            rows = []
+            for row in NATIVE_HASH_PATTERN.finditer(text, match.end()):
+                values = row.groupdict()
+                if int(values["epoch"]) == data["epoch"] and int(values["frame"]) == data["frame"]:
+                    rows.append({k: int(v, 16 if k == "actor" else 10) for k, v in values.items()})
+            data["nativeRows"] = rows
+            data["liveRows"] = sorted([[r[k] for k in ("netId", "objectId", "hp")] for r in rows if r["hp"] > 0])
+            native_hash = 2166136261
+            encoded = struct.pack("<II", 0x3145484B, len(data["liveRows"]))
+            encoded += b"".join(struct.pack("<HIi", *row) for row in data["liveRows"])
+            for byte in encoded:
+                native_hash = ((native_hash ^ byte) * 16777619) & 0xFFFFFFFF
+            data["recomputedEnemiesHash"] = native_hash
+            latest["instances"][str(index)] = data
+            if native_hash != data["enemies"]:
+                problems.append(f"instance {index}: hash does not describe raw native rows")
+            if data["epoch"] != int(arrival["epoch"]) or data["location"] != arrival_location or data["location"] != data["currentLocation"]:
+                problems.append(f"instance {index}: hash is not current completed six-field location/epoch")
+            if len(rows) != data["observed"] or len(data["liveRows"]) != data["count"]:
+                problems.append(f"instance {index}: incomplete raw native records")
+            if data["count"] < step.get("minEnemies", 1):
+                problems.append(f"instance {index}: nonempty enemy population required")
+            if not expected and (data["unmatched"] or any(r[0] == 0 for r in data["liveRows"])):
+                problems.append(f"instance {index}: unmatched native enemies")
+        if len(latest["instances"]) != len(indices):
+            return False
+        host = latest["instances"][str(indices[0])]
+        latest["epoch"] = host["epoch"]
+        if "epoch" in step and host["epoch"] != step["epoch"]:
+            problems.append("hash checkpoint crossed the required epoch")
+        if step.get("requireUnmatchedExtra", False):
+            control = latest["instances"][str(step.get("controlInstance", 1))]
+            extra = control["count"] > host["count"] and control["unmatched"] > 0 and any(r[0] == 0 for r in control["liveRows"])
+            saw_extra = saw_extra or extra
+            latest["sawUnmatchedExtra"] = saw_extra
+            if not extra:
+                problems.append("no extra positive unmatched native client actor")
+        for index in indices[1:]:
+            data = latest["instances"][str(index)]
+            fields = (1 if data["location"] != host["location"] else 0) | (2 if data["enemies"] != host["enemies"] else 0) | (4 if data["progress"] != host["progress"] else 0)
+            data["fields"] = fields
+            want = expected if index == step.get("controlInstance", 1) else 0
+            field_match = (fields & want) == want if want and step.get("allowOtherFields", False) else fields == want
+            if data["epoch"] != host["epoch"] or data["location"] != host["location"] or not field_match:
+                problems.append(f"instance {index}: epoch/hash mismatch fields={fields}, expected={want}")
+            if not (want & 2) and data["liveRows"] != host["liveRows"]:
+                problems.append(f"instance {index}: native netId/objectId/HP population differs")
+        relay = relay_path.read_text(errors="replace")[relay_offset:] if relay_path.exists() else ""
+        latest["relayDesync"] = [m.groupdict() for m in re.finditer(r"Desync: (?P<peer>\S+) fields=(?P<fields>\d+) epoch=(?P<epoch>\d+)", relay)]
+        if expected and not any(((int(r["fields"]) & expected) == expected if step.get("allowOtherFields", False) else int(r["fields"]) == expected) and int(r["epoch"]) == host["epoch"] and r["peer"] == step.get("controlPeer", "peer1") for r in latest["relayDesync"]):
+            problems.append("no fresh relay Desync with requested fields and epoch")
+        if problems:
+            matching_frames.clear()
+            matching_samples.clear()
+        else:
+            frames = [latest["instances"][str(i)]["frame"] for i in indices]
+            if not matching_frames or all(a != b for a, b in zip(frames, matching_frames[-1])):
+                matching_frames.append(frames)
+                matching_samples.append({"epoch": host["epoch"], "instances": {
+                    peer: {key: data[key] for key in ("frame", "location", "enemies", "progress", "count", "unmatched", "nativeRows", "liveRows")}
+                    for peer, data in latest["instances"].items()}})
+            latest["matchingFrames"] = list(matching_frames)
+            latest["matchingSamples"] = list(matching_samples)
+            if len(matching_frames) < step.get("consecutiveSamples", 1):
+                problems.append("waiting for another distinct matching frame on every peer")
+        latest["ready"] = not problems
+        return latest["ready"]
+
+    try:
+        wait_for(ctx, ready, f"statehash checkpoint {name}", step.get("timeoutMs", 20000) / 1000, 0.5)
+    except StepFailed:
+        path = ctx.run_dir / f"{name}_failed.json"
+        path.write_text(json.dumps(latest, indent=2))
+        ctx.artifacts.append(path.name)
+        raise StepFailed(f"statehash checkpoint {name}: {latest.get('problems')}") from None
+    ctx.saved[name] = latest
+    path = ctx.run_dir / f"{name}.json"
+    path.write_text(json.dumps(latest, indent=2))
+    ctx.artifacts.append(path.name)
+    return latest
+
+
+def step_progress_hash_control(ctx: Context, step: dict) -> dict:
+    """Reversible rig-only chest-bit fault; require actual readback and relay fields=4."""
+    index = step.get("instance", 1)
+    helpers = ctx.namespace()
+    if helpers["room"](index) == (4, 26):
+        raise StepFailed("progress hash control must run outside GoA")
+    applies = helpers["log_matches"](r"\[progresssync\] apply version=(?P<version>\d+) [^\r\n]*personal_unchanged=1", index)
+    if not applies:
+        raise StepFailed("progress hash control requires a successfully applied progress version")
+    original = helpers["peek"](0x9ABC8F, "u8", index)
+    relay = ctx.run_dir / "relay.log"
+    baseline = len(relay.read_text(errors="replace")) if relay.exists() else 0
+    def write(value):
+        kh2ctl("poke", "--rva", "0x9ABC8F", "--type", "u8", "--value", str(value), pid=ctx.inst(index).pid)
+        if helpers["peek"](0x9ABC8F, "u8", index) != value:
+            raise StepFailed("progress control SAVE byte readback failed")
+    name = step.get("as", "statehash")
+    control = {"rva": "0x9ABC8F", "before": original, "during": original ^ 2,
+               "instance": index, "appliedVersion": int(applies[-1]["version"])}
+    try:
+        write(original ^ 2)
+        control["mutationVerified"] = True
+        result = step_statehash_check(ctx, {**step, "expectedFields": 4, "controlInstance": index,
+                                           "relayOffset": baseline})
+    finally:
+        try:
+            write(original)
+            control["restored"] = original
+            control["restorationVerified"] = True
+        except Exception as error:
+            control["restorationError"] = str(error)
+            raise
+        finally:
+            path = ctx.run_dir / f"{name}_control.json"
+            path.write_text(json.dumps(control, indent=2))
+            ctx.artifacts.append(path.name)
+    result["control"] = control
+    (ctx.run_dir / f"{name}.json").write_text(json.dumps(result, indent=2))
+    return result
+
+
+
+def step_enemy_hash_control(ctx: Context, step: dict) -> dict:
+    """Hold one client's native HP-lock bit while host native death is mirrored."""
+    index = step.get("instance", 1)
+    name = step.get("as", "enemy_negative")
+    baseline = step_statehash_check(ctx, {"as": f"{name}_baseline", "minEnemies": 4})
+    client_rows = baseline["instances"][str(index)]["nativeRows"]
+    candidates = [r for r in client_rows if r["netId"] > 0 and r["hp"] > 0
+                  and ("objectId" not in step or r["objectId"] == step["objectId"])]
+    if not candidates:
+        raise StepFailed(f"enemy negative control has no matched live objectId={step.get('objectId', 'any')}")
+    row = candidates[0]
+    host_row = next(r for r in baseline["instances"]["0"]["nativeRows"]
+                    if r["netId"] == row["netId"] and r["objectId"] == row["objectId"] and r["hp"] > 0)
+    def current_actor(peer=index, expected=row):
+        return next((a for a in ctx.actors(peer) if int(a["address"], 16) == expected["actor"]), None)
+    target_location = baseline["instances"]["0"]["location"]
+    def active_gate(peer, expected, identity=None):
+        helpers = ctx.namespace()
+        location = helpers["location"](peer)
+        arrivals = helpers["log_matches"](ARRIVAL_PATTERN, peer)
+        actor = current_actor(peer, expected)
+        if not arrivals or int(arrivals[-1]["epoch"]) != baseline["epoch"] or location != target_location:
+            raise StepFailed(f"enemy control instance {peer}: completed epoch/full location changed")
+        arrival_location = [int(arrivals[-1][k], 16 if k in ("world", "room") else 10)
+                            for k in ("world", "room", "door", "map", "btl", "evt")]
+        if arrival_location != location:
+            raise StepFailed(f"enemy control instance {peer}: current location differs from arrival")
+        if (not actor or actor["objectId"] != expected["objectId"] or actor.get("hp", 0) <= 0
+                or int(actor.get("status", "0"), 16) == 0
+                or (identity and any(actor.get(k) != v for k, v in identity.items()))):
+            raise StepFailed(f"enemy control instance {peer}: live native actor identity/status changed")
+        return {"instance": peer, "epoch": int(arrivals[-1]["epoch"]), "location": location, "actor": actor}
+    initial_client = active_gate(index, row)
+    initial_host = active_gate(0, host_row)
+    identity = {k: initial_client["actor"][k] for k in ("address", "objectId", "status")}
+    host_identity = {k: initial_host["actor"][k] for k in ("address", "objectId", "status")}
+    pid = ctx.inst(index).pid
+    header = kh2ctl("peek", "--rva", "0x717008:u8", pid=pid)
+    base = int(str(header["moduleBase"]), 0)
+    key = f"0x{(row['actor'] + 0x9B8 - base) & ((1 << 64) - 1):X}"
+    def flags():
+        return kh2ctl("peek", "--rva", f"{key}:u32", pid=pid)["samples"][0][key]
+    def write(value):
+        kh2ctl("poke", "--addr", f"0x{row['actor'] + 0x9B8:X}", "--type", "u32", "--value", str(value), pid=pid)
+        if flags() != value:
+            raise StepFailed("enemy HP-lock readback failed")
+    original = flags()
+    if original & 4:
+        raise StepFailed("selected client enemy already has HP lock; cannot establish a new fault")
+    evidence = {"instance": index, "identity": identity, "hostIdentity": host_identity, "netId": row["netId"],
+                "hostActor": host_row["actor"], "epoch": baseline["epoch"], "flagsBefore": original,
+                "initialGates": [initial_client, initial_host], "mutationGates": [],
+                "selectionPolicy": {"requestedObjectId": step.get("objectId"),
+                                    "selectedObjectId": row["objectId"], "selectedNetId": row["netId"],
+                                    "rule": "first matched positive-HP native row satisfying explicit objectId filter"}}
+    relay = ctx.run_dir / "relay.log"
+    relay_offset = len(relay.read_text(errors="replace")) if relay.exists() else 0
+    log = LOGS / f"kh2coop_inject_{pid}.log"
+    log_offset = len(log.read_text(errors="replace"))
+    try:
+        evidence["mutationGates"].append({"operation": "client HP lock", "peers": [
+            active_gate(index, row, identity), active_gate(0, host_row, host_identity)]})
+        # Re-read at mutation time so unrelated native flag changes survive.
+        current_flags = flags()
+        original = current_flags
+        if original & 4:
+            raise StepFailed("client HP lock became set before control mutation")
+        evidence["flagsBefore"] = original
+        evidence["mutationAttempted"] = True
+        write(current_flags | 4)
+        evidence["lockVerified"] = True
+        evidence["mutationGates"].append({"operation": "host native kill", "peers": [
+            active_gate(index, row, identity), active_gate(0, host_row, host_identity)]})
+        kh2ctl("hit", "kill", "--victim", f"0x{host_row['actor']:X}", pid=ctx.inst(0).pid)
+        pattern = re.compile(r"host death netId " + str(row["netId"]) + r" FAILED \(hp (\d+) -> (\d+)\)")
+        def failed_death():
+            matches = list(pattern.finditer(log.read_text(errors="replace")[log_offset:]))
+            current = current_actor()
+            if matches and current and all(current.get(k) == v for k, v in identity.items()) and current.get("hp", 0) > 0:
+                evidence["failedNativeDeath"] = matches[-1].group(0)
+                evidence["survivingNativeActor"] = current
+                return True
+            return False
+        wait_for(ctx, failed_death, "failed client native death with positive HP", 10, 0.2)
+        result = step_statehash_check(ctx, {"as": name, "expectedFields": 2, "allowOtherFields": True,
+            "controlInstance": index, "relayOffset": relay_offset, "minEnemies": 1, "consecutiveSamples": 2})
+        if result["epoch"] != baseline["epoch"]:
+            raise StepFailed("enemy negative control crossed an epoch")
+        surviving = [r for r in result["instances"][str(index)]["nativeRows"]
+                     if r["netId"] == row["netId"] and r["actor"] == row["actor"] and r["hp"] > 0]
+        host_live = [r for r in result["instances"]["0"]["nativeRows"] if r["netId"] == row["netId"] and r["hp"] > 0]
+        if not surviving or host_live:
+            raise StepFailed("negative hashes do not contain the surviving client-only enemy")
+    finally:
+        try:
+            try:
+                restore_gate = active_gate(index, row, identity)
+            except StepFailed as error:
+                restore_gate = None
+                evidence["restorationSkipped"] = str(error)
+            if restore_gate and evidence.get("mutationAttempted"):
+                evidence["restorationGate"] = restore_gate
+                current_flags = flags()
+                restored = (current_flags & ~4) | (original & 4)
+                write(restored)
+                evidence["flagsAtRestore"] = current_flags
+                evidence["flagsRestored"] = restored
+                evidence["restorationVerified"] = True
+            else:
+                evidence.setdefault("restorationSkipped", "no verified lock mutation; no restoration write")
+        finally:
+            path = ctx.run_dir / f"{name}_control.json"
+            path.write_text(json.dumps(evidence, indent=2))
+            ctx.artifacts.append(path.name)
+    result["control"] = evidence
+    return result
+
+
+
+def step_courtyard_diagnostic(ctx: Context, step: dict) -> dict:
+    """Replay the known courtyard trigger; absence of an extra actor is inconclusive."""
+    index = step.get("instance", 1)
+    name = step.get("as", "courtyard_diagnostic")
+    baseline = ctx.saved[step.get("baseline", "hash_after_damage")]
+    helpers = ctx.namespace()
+    if helpers["location"](index) != baseline["instances"][str(index)]["location"] or helpers["room"](index) != (5, 6):
+        raise StepFailed("courtyard diagnostic requires unchanged BC courtyard baseline")
+    def observe():
+        samples = {}
+        for peer in (0, 1, 2):
+            log = LOGS / f"kh2coop_inject_{ctx.inst(peer).pid}.log"
+            text = log.read_text(errors="replace") if log.exists() else ""
+            keys = [f"0x{0x718C60 + n:X}" for n in (8, 12, 16, 24, 28, 32)]
+            samples[str(peer)] = {"location": helpers["location"](peer), "player": helpers["pos"]("P_EX100", peer),
+                "camera": kh2ctl("peek", "--rva", ",".join(f"{k}:f32" for k in keys), pid=ctx.inst(peer).pid)["samples"][0],
+                "actors": ctx.actors(peer), "spawnBindings": [line for line in text.splitlines()
+                    if "[enemysync]" in line and any(word in line for word in ("spawn", "matched", "bind", "manifest"))][-100:]}
+        return samples
+    evidence = {"baseline": baseline, "before": observe()}
+    relay = ctx.run_dir / "relay.log"
+    relay_offset = len(relay.read_text(errors="replace")) if relay.exists() else 0
+    evidence["relayOffsetBeforeReplay"] = relay_offset
+    try:
+        step_input(ctx, {"instance": index, "ly": 1, "ms": 600})
+        step_press(ctx, {"instance": index, "button": "cross", "times": 15, "gapMs": 300})
+        evidence["afterReplay"] = observe()
+        try:
+            result = step_statehash_check(ctx, {"as": f"{name}_hash", "expectedFields": 2, "allowOtherFields": True,
+                "controlInstance": index, "relayOffset": relay_offset, "minEnemies": 1, "consecutiveSamples": 2,
+                "requireUnmatchedExtra": True, "epoch": baseline["epoch"], "timeoutMs": step.get("timeoutMs", 12000)})
+        except StepFailed:
+            failed = ctx.run_dir / f"{name}_hash_failed.json"
+            observation = json.loads(failed.read_text()) if failed.exists() else {}
+            evidence["hashObservation"] = observation
+            if any(data.get("epoch") != baseline["epoch"] or data.get("location") != baseline["instances"][peer]["location"]
+                   for peer, data in observation.get("instances", {}).items()):
+                evidence["outcome"] = "invalidated by epoch/location change"
+                raise StepFailed("courtyard diagnostic invalidated by a completed epoch/location change") from None
+            if not observation.get("sawUnmatchedExtra", False):
+                evidence["outcome"] = "inconclusive"
+                raise StepFailed("INCONCLUSIVE: courtyard replay did not produce an extra unmatched native actor") from None
+            evidence["outcome"] = "extra actor without required desync evidence"
+            raise
+        evidence["hashObservation"] = result
+        evidence["outcome"] = "extra native actor detected by applied hash and relay"
+        ctx.saved[name] = evidence
+        return evidence
+    finally:
+        try:
+            evidence["after"] = observe()
+        except Exception as error:
+            evidence["afterError"] = str(error)
+        try:
+            step_capture(ctx, {"instance": index, "name": name})
+        except Exception as error:
+            evidence["captureError"] = str(error)
+        path = ctx.run_dir / f"{name}.json"
+        path.write_text(json.dumps(evidence, indent=2))
+        ctx.artifacts.append(path.name)
+
+
 class Recorder:
     """Samples every party actor's position on the given instances in a
     thread: rows of (t, instance, room, head, address, name, objectType, x,
@@ -969,7 +1530,13 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
          "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all,
          "kh2ctl": step_kh2ctl, "transition_check": step_transition_check,
-         "align_courtyard_exit": step_align_courtyard_exit}
+         "align_courtyard_exit": step_align_courtyard_exit,
+         "progress_snapshot": step_progress_snapshot, "statehash_check": step_statehash_check,
+         "progress_hash_control": step_progress_hash_control,
+         "approach_goa_chest": step_approach_goa_chest,
+         "dismiss_goa_map_reward": step_dismiss_goa_map_reward,
+         "enemy_hash_control": step_enemy_hash_control,
+         "courtyard_diagnostic": step_courtyard_diagnostic}
 
 
 # --------------------------------------------------------------------------
@@ -1080,7 +1647,7 @@ def validate_scenario(scenario: dict) -> None:
     required = {"warp": ("world", "room"), "press": ("button",),
                 "assert": ("expr",), "wait_until": ("expr",), "save": ("as", "expr"),
                 "runtime": ("role",), "record": ("as",), "record_stop": ("as",),
-                "kh2ctl": ("args",), "align_courtyard_exit": ("blockedExpr",)}
+                "align_courtyard_exit": ("blockedExpr",)}
     for number, step in enumerate(scenario["steps"]):
         prefix = f"step {number}"
         if not isinstance(step, dict) or step.get("do") not in STEPS:
@@ -1100,6 +1667,10 @@ def validate_scenario(scenario: dict) -> None:
         if "instances" in step and any(type(i) is not int or not 0 <= i < count
                                        for i in step["instances"]):
             raise ValueError(f"{prefix}: instances must refer to earlier boots/launches")
+        if kind == "kh2ctl" and ("args" in step) == ("argsExpr" in step):
+            raise ValueError(f"{prefix}: kh2ctl requires exactly one of args/argsExpr")
+        if "argsExpr" in step:
+            compile(step["argsExpr"], f"<{prefix} argsExpr>", "eval")
         if "expr" in step:
             compile(step["expr"], f"<{prefix}>", "eval")
         if "blockedExpr" in step:

@@ -1,0 +1,337 @@
+{
+  "name": "net_progress_chest_goa",
+  "description": "Native host GoA map chest opening, next-load client application and open animation, late-join latest snapshot, subsequent reload persistence, full personal snapshots and immediate-apply invariance. Fixture resets only bit409 in memory outside GoA, never saves. Native camera approach, reward gate, immediate opened153 and reloaded152 were calibrated live.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1,
+      "evt": 20
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 5,
+      "room": 1,
+      "evt": 20
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 5,
+      "room": 1,
+      "evt": 20
+    },
+    {
+      "do": "save",
+      "as": "original_chest_bytes",
+      "expr": "[peek('0x9ABC8F', 'u8', i) for i in range(3)]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke', '--rva', '0x9ABC8F', '--type', 'u8', '--value', str(saved['original_chest_bytes'][0] & 253)]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke', '--rva', '0x9ABC8F', '--type', 'u8', '--value', str(saved['original_chest_bytes'][1] & 253)]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 2,
+      "argsExpr": "['poke', '--rva', '0x9ABC8F', '--type', 'u8', '--value', str(saved['original_chest_bytes'][2] & 253)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(peek('0x9ABC8F', 'u8', i) == (saved['original_chest_bytes'][i] & 253) for i in range(3))",
+      "message": "Fixture clear must preserve the other seven chest bits"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "assert",
+      "expr": "all(any(c['flag'] == 409 and c['motionId'] == 151 and not c['openedBit'] for c in chests(i)) for i in range(2))",
+      "message": "Host and client must initialize the map chest closed"
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "transition_check",
+      "as": "closed_initial",
+      "instances": [
+        0,
+        1
+      ],
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "progress_snapshot",
+      "as": "personal_before_open",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches('\\\\[progresssync\\\\] host (?:full|delta) version=(?P<version>\\\\d+)', 0)) > 0",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "save",
+      "as": "version_before_open",
+      "expr": "int(log_matches('\\\\[progresssync\\\\] host (?:full|delta) version=(?P<version>\\\\d+)', 0)[-1][\"version\"])"
+    },
+    {
+      "do": "save",
+      "as": "apply_before_open",
+      "expr": "len(log_matches('\\\\[progresssync\\\\] apply version=(?P<version>\\\\d+) spans=\\\\d+ bytes=\\\\d+ hash=[0-9A-Fa-f]+ personal_before=(?P<before>[0-9A-Fa-f]+) personal_after=(?P<after>[0-9A-Fa-f]+) personal_unchanged=(?P<unchanged>[01])', 1))"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 4500
+    },
+    {
+      "do": "approach_goa_chest",
+      "instance": 0,
+      "as": "host_native_approach"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "host_before_native_open"
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "triangle",
+      "ms": 100
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek('0x9ABC8F', 'u8', 0) & 2 != 0",
+      "timeoutMs": 5000,
+      "pollMs": 200
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "dismiss_goa_map_reward",
+      "instance": 0,
+      "as": "host_map_reward_dismissal"
+    },
+    {
+      "do": "save",
+      "as": "host_opened_chests",
+      "expr": "chests(0)"
+    },
+    {
+      "do": "assert",
+      "expr": "any(c['flag'] == 409 and c['motionId'] == 153 and c['openedBit'] for c in chests(0))",
+      "message": "Host native reaction must set flag409 and calibrated opened-animation153; reloaded clients use152"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "host_native_opened"
+    },
+    {
+      "do": "wait_until",
+      "expr": "int(log_matches('\\\\[progresssync\\\\] host (?:full|delta) version=(?P<version>\\\\d+)', 0)[-1][\"version\"]) > saved[\"version_before_open\"]",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "save",
+      "as": "opened_version",
+      "expr": "int(log_matches('\\\\[progresssync\\\\] host (?:full|delta) version=(?P<version>\\\\d+)', 0)[-1][\"version\"])"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches('\\\\[progresssync\\\\] client (?:full|delta) version=(?P<version>\\\\d+)', 1)) > 0 and int(log_matches('\\\\[progresssync\\\\] client (?:full|delta) version=(?P<version>\\\\d+)', 1)[-1][\"version\"]) >= saved[\"opened_version\"]",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "progress_snapshot",
+      "as": "after_native_open",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "compare": "personal_before_open"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1,
+      "evt": 20
+    },
+    {
+      "do": "transition_check",
+      "as": "leave_after_open",
+      "after": "closed_initial",
+      "instances": [
+        0,
+        1
+      ],
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "transition_check",
+      "as": "client_reload_open",
+      "after": "leave_after_open",
+      "instances": [
+        0,
+        1
+      ],
+      "target": [
+        4,
+        26
+      ],
+      "capture": true
+    },
+    {
+      "do": "save",
+      "as": "client_reloaded_chests",
+      "expr": "chests(1)"
+    },
+    {
+      "do": "assert",
+      "expr": "any(c['flag'] == 409 and c['motionId'] == 152 and c['openedBit'] for c in chests(1))",
+      "message": "Client room init must show mirrored map chest open"
+    },
+    {
+      "do": "assert",
+      "expr": "len(log_matches('\\\\[progresssync\\\\] apply version=(?P<version>\\\\d+) spans=\\\\d+ bytes=\\\\d+ hash=[0-9A-Fa-f]+ personal_before=(?P<before>[0-9A-Fa-f]+) personal_after=(?P<after>[0-9A-Fa-f]+) personal_unchanged=(?P<unchanged>[01])', 1)) > saved[\"apply_before_open\"] and int(log_matches('\\\\[progresssync\\\\] apply version=(?P<version>\\\\d+) spans=\\\\d+ bytes=\\\\d+ hash=[0-9A-Fa-f]+ personal_before=(?P<before>[0-9A-Fa-f]+) personal_after=(?P<after>[0-9A-Fa-f]+) personal_unchanged=(?P<unchanged>[01])', 1)[-1][\"version\"]) >= saved[\"opened_version\"]",
+      "message": "Client must apply a newer chest-containing progress version before room init"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "as": "late_join_open",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "target": [
+        4,
+        26
+      ],
+      "capture": true
+    },
+    {
+      "do": "save",
+      "as": "late_join_chests",
+      "expr": "chests(2)"
+    },
+    {
+      "do": "assert",
+      "expr": "all(any(c['flag'] == 409 and c['motionId'] == 152 and c['openedBit'] for c in chests(i)) for i in range(3))",
+      "message": "Late join must receive current chest progress and initialize open"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "transition_check",
+      "as": "open_persists_reload",
+      "after": "late_join_open",
+      "target": [
+        4,
+        26
+      ],
+      "capture": true
+    },
+    {
+      "do": "assert",
+      "expr": "all(any(c['flag'] == 409 and c['motionId'] == 152 and c['openedBit'] for c in chests(i)) for i in range(3))",
+      "message": "Opened map chest must survive a subsequent all-peer reload"
+    },
+    {
+      "do": "save",
+      "as": "personal_apply_evidence",
+      "expr": "[log_matches('\\\\[progresssync\\\\] apply version=(?P<version>\\\\d+) spans=\\\\d+ bytes=\\\\d+ hash=[0-9A-Fa-f]+ personal_before=(?P<before>[0-9A-Fa-f]+) personal_after=(?P<after>[0-9A-Fa-f]+) personal_unchanged=(?P<unchanged>[01])', i) for i in (1, 2)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(rows) > 0 and all(r['unchanged'] == '1' and r['before'] == r['after'] for r in rows) for rows in saved['personal_apply_evidence'])",
+      "message": "Every client apply must preserve personal bytes immediately around allowed writes"
+    },
+    {
+      "do": "assert",
+      "expr": "all(int(rows[-1]['version']) >= saved['opened_version'] for rows in saved['personal_apply_evidence'])",
+      "message": "Both clients must have applied the current opened-chest version"
+    },
+    {
+      "do": "progress_snapshot",
+      "as": "after_all_reloads",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "compare": "personal_before_open"
+    }
+  ]
+}

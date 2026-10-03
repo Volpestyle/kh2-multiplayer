@@ -2491,8 +2491,15 @@ CommandResult CmdPeek(std::vector<std::string> args) {
     if (!process) return MakeError("OpenProcess failed for PID " + std::to_string(pid));
     const std::uint64_t base = ModuleBase(process);
 
+    if (base == 0) {
+        CloseHandle(process);
+        return MakeError("Could not read the KH2 executable module base");
+    }
+    std::ostringstream baseHex;
+    baseHex << "0x" << std::hex << std::uppercase << base;
     std::ostringstream out;
-    out << "{\"ok\":true,\"processId\":" << pid << ",\"samples\":[";
+    out << "{\"ok\":true,\"processId\":" << pid
+        << ",\"moduleBase\":" << JsonString(baseHex.str()) << ",\"samples\":[";
     const auto t0 = std::chrono::steady_clock::now();
     for (int s = 0; s < samples; ++s) {
         if (s) SleepMs(intervalMs);
@@ -2501,8 +2508,16 @@ CommandResult CmdPeek(std::vector<std::string> args) {
         out << (s ? "," : "") << "{\"t\":" << ms;
         for (const auto& field : fields) {
             std::uint64_t raw = 0;
-            ReadProcessMemory(process, reinterpret_cast<LPCVOID>(base + field.rva), &raw,
-                              field.size, nullptr);
+            SIZE_T read = 0;
+            if (field.rva > UINT64_MAX - base ||
+                !ReadProcessMemory(process, reinterpret_cast<LPCVOID>(base + field.rva),
+                                   &raw, field.size, &read) || read != field.size) {
+                CloseHandle(process);
+                std::ostringstream error;
+                error << "peek failed to read RVA 0x" << std::hex << std::uppercase
+                      << field.rva << " (" << field.type << ")";
+                return MakeError(error.str());
+            }
             std::ostringstream key;
             key << "0x" << std::hex << std::uppercase << field.rva;
             out << ",\"" << key.str() << "\":";

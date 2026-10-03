@@ -1,0 +1,86 @@
+{
+  "name": "progress_chest_goa_native_open",
+  "description": "Native GoA flag409 approach/open calibration; capture popup and active-event safe gate, then native out/back room loads requiring opened motion0x98. No memory writes or saves.",
+  "steps": [
+    {
+      "do": "boot"
+    },
+    {
+      "do": "warp",
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "assert",
+      "expr": "any(c['flag'] == 409 and c['motionId'] == 151 and not c['openedBit'] for c in chests())",
+      "message": "GoA flag409 must start natively closed"
+    },
+    {
+      "do": "input",
+      "ly": 1,
+      "ms": 4500
+    },
+    {
+      "do": "approach_goa_chest",
+      "as": "native_approach"
+    },
+    {
+      "do": "capture",
+      "name": "before_reaction"
+    },
+    {
+      "do": "press",
+      "button": "triangle",
+      "ms": 100
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek('0x9ABC8F', 'u8') & 2 != 0",
+      "timeoutMs": 5000,
+      "pollMs": 200
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "dismiss_goa_map_reward",
+      "instance": 0,
+      "as": "host_map_reward_dismissal"
+    },
+    {
+      "do": "save",
+      "as": "opened_chests",
+      "expr": "chests()"
+    },
+    {
+      "do": "capture",
+      "name": "native_opened"
+    },
+    {
+      "do": "warp",
+      "world": 5,
+      "room": 1,
+      "evt": 20
+    },
+    {
+      "do": "warp",
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "save",
+      "as": "reloaded_chests",
+      "expr": "chests()"
+    },
+    {
+      "do": "assert",
+      "expr": "any(c['flag'] == 409 and c['motionId'] == 152 and c['openedBit'] for c in chests())",
+      "message": "Native reloaded GoA map chest must initialize opened with motion0x98"
+    },
+    {
+      "do": "capture",
+      "name": "reloaded_opened"
+    }
+  ]
+}

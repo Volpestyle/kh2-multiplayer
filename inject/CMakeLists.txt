@@ -52,6 +52,7 @@ add_library(kh2coop_inject SHARED
     src/SaveGuard.cpp
     src/CrashDump.cpp
     src/EnemySync.cpp
+    src/ProgressSync.cpp
 )
 
 target_include_directories(kh2coop_inject PRIVATE

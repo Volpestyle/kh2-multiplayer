@@ -1,0 +1,182 @@
+{
+  "name": "net_enemy_courtyard_diagnostic",
+  "description": "Bounded reproduction of the unresolved 05/06 extra-client Shadow. Three instances must first agree on fresh nonempty native hashes before and after host damage. Replay client 1 forward 600 ms and 15 Cross presses with 300 ms gaps; capture player/camera basis, spawn points, bindings, native HP, and fresh hash rows. PASS means an actual unmatched extra client enemy persisted across two fresh hash sets and produced DesyncEnemies in the same completed epoch/location. No reproduced extra is explicitly INCONCLUSIVE and fails this diagnostic; a detected extra without its relay notice also fails. A diagnostic PASS proves detection only, never spawn convergence. The original net_enemy_sync_courtyard regression remains unchanged.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "protect",
+      "instance": 0
+    },
+    {
+      "do": "protect",
+      "instance": 1
+    },
+    {
+      "do": "protect",
+      "instance": 2
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "wait",
+      "ms": 4000
+    },
+    {
+      "do": "save",
+      "as": "spawned",
+      "expr": "[[(a['name'], a['address'][-5:], a.get('hp'), round(a['position']['x']), round(a['position']['z'])) for a in enemies(k)] for k in range(3)]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemy_hps(0)) > 0 and len(enemy_hps(1)) == len(enemy_hps(0)) and len(enemy_hps(2)) == len(enemy_hps(0))",
+      "timeoutMs": 15000,
+      "pollMs": 500
+    },
+    {
+      "do": "save",
+      "as": "before",
+      "expr": "[enemy_hps(i) for i in range(3)]"
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_before_damage",
+      "minEnemies": 5
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "damage",
+      "amount": 7
+    },
+    {
+      "do": "wait",
+      "ms": 400
+    },
+    {
+      "do": "save",
+      "as": "after_damage",
+      "expr": "[enemy_hps(i) for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_damage'][0] == saved['after_damage'][1] == saved['after_damage'][2] and saved['after_damage'][0] != saved['before'][0]",
+      "message": "client HP doesn't match the host's after host-only damage"
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_after_damage",
+      "minEnemies": 5
+    },
+    {
+      "do": "courtyard_diagnostic",
+      "as": "courtyard_diagnostic",
+      "instance": 1,
+      "baseline": "hash_after_damage",
+      "timeoutMs": 12000
+    },
+    {
+      "do": "capture",
+      "name": "courtyard_extra_actor_detected",
+      "instance": 1
+    }
+  ]
+}

@@ -185,19 +185,47 @@ The [fixed-wave rerun](../build/scenarios/20261002-150336_net_enemy_sync_waves_1
 two 160-HP enemies on every instance; each client recorded six native death
 applications in total, and battle state ended at 0 everywhere. Four save-file
 hashes were unchanged. This verifies fresh bindings and HP/death application
-after real join reloads, while leaving spawn convergence and live hashes open.
+after real join reloads, while leaving spawn convergence open.
+
+**Actual-state hash evidence, 2026-10-02.** The
+[nonempty hash run](../build/scenarios/20261002-184220_net_statehash_nonempty_1/report.json)
+passed with three instances (180.2 s). Four live native enemies had matching
+bindings, object IDs and 160 HP on all peers, then 153 HP after host damage.
+The scenario independently recomputed the published enemy hash from each
+peer's native observation rows. Unmatched living actors participate in the
+hash with net ID 0; missing, extra or duplicate actors cannot be hidden by
+hashing the received host cache. Positions are excluded while AI runs locally.
+
+The progress hash reads 8,108 masked, verified SAVE bytes. A client-only
+change to chest flag 409 produced a different actual progress hash and the
+relay's progress mismatch bit (`fields=4`). Restoring that bit restored
+agreement; complete before/after snapshots showed no remaining changes in
+the shared ranges or sampled character, inventory, munny and EXP ranges.
+All four on-disk save hashes were unchanged. This proves detection and
+restoration of a progress mismatch; automatic resync, a deliberately failed
+native enemy death, and hash agreement across the full transition suite need
+separate evidence. The courtyard population failure above remains open.
+
+The enemy negative-control runs remain **overall failures**. In the
+[two-participant run](../build/scenarios/20261002-192119_net_statehash_enemy_negative_isolated_1/report.json),
+the detection checkpoint passed twice: a client HP-lock bit prevented the
+native lethal call (`153 -> 153`), the actual living target remained in its
+hash, and the relay reported `DesyncEnemies` (`fields=2`). The temporary bit
+was restored with native identity/epoch checks, preserving other flags.
+The later reload reached epoch 2 on both peers but failed because the native
+friend pointers were null and no remote Sora actors existed in `12/0B`, battle
+program 1. Logical avatar poses alone did not satisfy the native actor check.
+This establishes detection/bit restoration, not successful reload recovery.
+The earlier three-participant controls also exposed an independent client-2
+spawn of an unmatched 160-HP object 309. Keep those failures and the strict
+population/puppet checks; neither spawn convergence nor recovery is complete.
 
 Not covered yet:
 - Bosses: none reachable on this save.
 - Drops and barrier objects (battle state stands in for "barriers lift").
 - Continuous spawners.
 - Client hits as claims (VUH-1501).
-- Live state-hash agreement. The HP/death checks above observe real enemies,
-  but no live `StateHash` publisher currently proves shared enemy and progress
-  state. VUH-1497 must verify the progress allow list and integrate mirroring;
-  VUH-1508 must define comparable hashes of actual local state, including
-  missing matches, deaths and superseded spawns. Empty enemy sets or hashes of
-  the client's received host cache do not prove local application.
-  Calibrate against the nonempty courtyard/wave fixtures above, retaining raw
-  matched IDs and local HP/death observations at settled checkpoints and
-  confirming that a deliberately mismatched observation is detected.
+- Hash agreement across repeated native room loads and varied populations,
+  plus successful recovery after the enemy mismatch control. The nonempty
+  proof covers one fixed-wave room; it does not establish spawn convergence
+  or native remote actors after its battle-room reload.

@@ -136,8 +136,16 @@ attack hits him) for the whole run, so combat rooms don't end in a game over.
 | `record` / `record_stop` | `as instances` | Sample every party actor's position (with the instance's world/room) on those instances in the background; `record_stop` writes `<as>.csv` |
 | `wander` | `instances seconds seed` | Seeded random stick walks with occasional jumps, taking turns (soaks) |
 | `hit_all` | `instance op amount` | `kh2ctl hit damage/kill` on every live combat enemy of that instance (host-only damage tests) |
-| `kh2ctl` | `instance args` | Run the supplied argument array against that instance |
+| `kh2ctl` | `instance args` or `argsExpr` | Run the supplied argument array against that instance. `argsExpr` evaluates an expression to an array, for explicit reversible fixture writes |
 | `transition_check` | `as after instances target timeoutMs capture` | Wait for completed-load parity, relay ACKs, and restored puppet slots; save structured evidence under `as` (default `transition`). `after` names an earlier checkpoint whose epoch must advance; `target` is the expected `[world, room]`. Default instances are `[0,1,2]`, default timeout 30 s. On timeout, capture every participating instance and preserve the last observation as `<as>_failed.json`. `capture: true` also captures successful checkpoints |
+
+| `progress_snapshot` | `as instances compare` | Save actual allow-listed progress and complete personal byte ranges to JSON. Optional `compare` names a prior snapshot and emits each changed SAVE offset and before/after byte |
+| `statehash_check` | `as instances minEnemies timeoutMs` | Require fresh post-arrival hashes on all peers at the same completed epoch and exact six-field location, nonempty native enemy rows, zero unmatched actors, and matching netID/object/HP populations. Save evidence or a failure artifact |
+| `dismiss_goa_map_reward` | `as instance` | With flag409 open in GoA, capture the reward popup and poll the unchanged native safe gate; while unsafe, send cross150ms and wait700ms, bounded to10s. Save every gate sample, press count and failure capture |
+| `approach_goa_chest` | `as instance` | In GoA on the central platform, walk toward flag409 using camera-basis projections and 200 ms native pulses. Stop within 100 units, require progress over each three-pulse window, fail after 15 s with a trace/capture |
+| `courtyard_diagnostic` | `as instance baseline timeoutMs` | Replay the original courtyard client pulse/combo after a positive hash baseline; capture player/camera/spawn bindings and require a persistent extra unmatched actor plus enemy-desync. No reproduction fails explicitly as INCONCLUSIVE; a room/epoch change invalidates the diagnostic |
+| `enemy_hash_control` | `as instance` | Separate native enemy fault: temporarily set one matched client's per-actor HP-lock bit, kill its host counterpart through the native hit path, require failed client death and two fresh native hash disagreements with relay enemy-desync, and restore only that bit if actor identity still matches |
+| `progress_hash_control` | `as instance minEnemies timeoutMs` | Outside GoA, after a successful progress apply, toggle only chest flag 409 on the selected rig client, verify readback and fresh relay `fields=4` evidence, then restore and verify the original byte in `finally` |
 
 Processes started by `relay`/`runtime` are stopped at the end of the run.
 
@@ -153,7 +161,11 @@ frames/s and both puppet slots); `puppet_error(saved['rec'], owner, viewer)`.
 `location(i)` returns `[world, room, door, map, btl, evt]` from one NOW sample;
 `log_matches(pattern, i)` returns named regex captures from the inject log;
 `runtime_log(i)` returns the runtime log. `int` and `str` are available when
-working with captures and structured evidence.
+working with captures and structured evidence. `chests(i)` resolves native `F_*`
+actors through their bounded `actor+0xC00` treasure pointer, validates the
+record against the current world/room, and returns native actor state with
+its treasure/item IDs, overall completion flag, SAVE byte and opened bit.
+It requires the CLI's `peek.moduleBase` metadata; invalid reads fail explicitly.
 
 `puppet_error` scores how well the viewer's puppet follows the owner's
 Sora in a recording:
@@ -321,13 +333,179 @@ why alignment checks measured progress rather than assuming every client's
 spawn remains centered. The subsequent passing run and its per-pulse samples
 are retained in the table above.
 
-No current live `StateHash` publisher provides meaningful shared enemy or
-progress hashes to these fixtures. Empty rooms cannot prove enemy parity;
-location equality cannot prove mirrored story state. Passing the route
-therefore covers the transition/puppet portion of VUH-1496, **not** full P2
-acceptance. Meaningful hashes of actual local enemy state and verified
-progress still need implementation and calibration before closing VUH-1496's
-hash requirement; cutscene hold/resume is separate.
+The transition route evidence above covers transition and puppet behavior;
+it does not establish enemy/progress hash acceptance. The applied-state
+publisher and the additional nonempty fixture below now provide that check,
+but require a passing live report from the current build. Cutscene
+hold/resume remains separate.
+
+## Progress and applied-state hash fixtures
+
+- `progress_chest_goa_probe`: one instance boots, enters `04/1A`, captures
+  the room and records all actors, native treasure records and flag 409.
+  This is exploratory evidence, with no memory write or chest interaction.
+- `progress_chest_goa_native_open`: native camera-aware approach and reaction
+  press, capture/dismiss the obtained-map popup with native confirm, and wait
+  for normal gameplay before checking settled/opened state. This calibration
+  fixture requires an initially closed chest and performs no memory writes.
+- `net_progress_chest_goa`: three-instance chest acceptance. It clears only
+  flag409 in memory outside GoA, verifies closed native initialization, opens
+  the host chest through movement/reaction input, checks client next-load
+  application, late-join current state and subsequent reload persistence.
+  Each client apply must log unchanged personal bytes around allowed writes.
+- `net_statehash_enemy_negative`: separate negative fixture using verified
+  actor `+0x9B8` bit `0x4` (native ApplyStatDelta HP lock) on one client enemy,
+  followed by a native host kill. It requires a FAILED client death log,
+  actual surviving positive HP, two distinct fresh hash frame sets and
+  relay DesyncEnemies. It restores only the original bit by read-modify-write
+  while address/object/status identity still matches, then reloads through
+  the host and requires nonempty parity. No shared object descriptor is
+  modified. Failure remains failure; it cannot pass from a fabricated packet
+  or an attempted mutation alone.
+  The current fixture explicitly targets object ID311. Its prior object309
+  run [`20261002-185625_net_statehash_enemy_negative_1`](../build/scenarios/20261002-185625_net_statehash_enemy_negative_1/report.json)
+  correctly failed: client1 retained native HP153 after a failed mirrored
+  death and produced relay `fields=2`, but client2 independently acquired an
+  unmatched object309 actor at HP160. Unaffected-peer parity remains strict.
+  The control restored flags1159 to1155; that useful negative observation
+  does not turn the full failed run into acceptance. Targeting311 is an
+  explicit fixture choice, recorded in control evidence, not a population
+  filter in the hash checker.
+  The three-peer311 attempt also failed in
+  [`20261002-190415_net_statehash_enemy_negative_1`](../build/scenarios/20261002-190415_net_statehash_enemy_negative_1/report.json):
+  client2 again gained an independent unmatched309/HP160 while the controlled
+  client1 target remained alive. Both failed three-peer runs and their
+  strict checker remain intact.
+- `net_statehash_enemy_negative_isolated` boots exactly two peers (host and
+  client1) to isolate the detector control for object311. The checker uses
+  every instance in that run, requires two fresh actual native mismatches
+  and relay enemy-desync, restores the guarded HP-lock bit and reloads to
+  require nonempty parity. This is explicitly two-peer detector evidence;
+  it neither replaces the three-peer positive hash proof nor resolves the
+  independently observed third-peer spawn divergence.
+  The isolated live run
+  [`20261002-192119_net_statehash_enemy_negative_isolated_1`](../build/scenarios/20261002-192119_net_statehash_enemy_negative_isolated_1/report.json)
+  **failed overall** (134.9s) at its post-reload transition checkpoint.
+  Its earlier negative checkpoint passed: two full native observations
+  (host/client frames3643/1228 and3703/1289) retained client netID5/object311
+  at HP153 while the host counterpart was dead, the native client death log
+  reported FAILED153?153, and the relay reported peer1 `fields=2`. Guarded
+  restoration verified flags1155?1159?1155.
+  Reload reached completed epoch2 and matching full locations, but both
+  peers had an active logical puppet with native friend pointers `[0,0]`,
+  no clone candidates and only the local actor. The strict native-puppet
+  check correctly failed; the later restored nonempty hash check was not
+  reached. Thus detector and flag-restoration checkpoints are proven within
+  a failed run, while native-puppet reload recovery and the separate
+  three-peer extra-spawn divergence remain unresolved. The fixture and
+  checks remain unchanged; this run is not represented as acceptance.
+- `net_statehash_nonempty`: extends the established `12/0B` battle-program-1
+  two-wave fixture. Three peers must agree before and after host damage,
+  with at least four living native enemies. It then toggles only client 1's
+  in-memory GoA chest flag 409, requires a fresh relay notice with exactly
+  `fields=4`, restores the byte and requires fresh agreement again. The
+  original wave scenario and known courtyard failure are preserved.
+
+The chest reward popup freezes native gameplay and holds animation `0x99`
+(153); bit409 changes before it is dismissed. The fixtures capture the popup,
+send bounded native confirmation pulses, then wait for unfrozen gameplay, a live field, menu
+`0xFF`, native event state `exe+0xB65210 == 0` and event context
+`exe+0x2A11478 == 0`. The retained timer is diagnostic. This preserves the native safe-state gate.
+Do not interpret the popup animation as the reloaded opened chest state.
+The confirmation pulses are a bounded calibration action, not proof that
+confirm is what closes the popup: offline native tracing indicates an
+animation/resource-driven lifetime. Gate samples also record UI tick delta
+at `0x717484` to distinguish stalled timing from input readiness.
+Calibration [`20261002-190126_progress_chest_goa_native_open_1`](../build/scenarios/20261002-190126_progress_chest_goa_native_open_1/report.json)
+failed the strict safe-state wait even after the popup disappeared and normal
+HUD/gameplay returned: frozen=0, inField=1, menu=255, but the sampled timer
+retained90. This is evidence to investigate whether the timer represents
+active playback or retained elapsed time; the fixture does not mask it.
+Dismissal failures preserve native chest/actor state and gate samples even
+while the gate rejects traversal. The runner now uses the bounded native event-state/context predicate above;
+the single-instance calibration additionally leaves and reloads GoA to
+require the native opened initialization motion `0x98`. Full mirrored-chest
+acceptance uses the verified calibration below.
+
+Corrected-gate single-instance calibration passed in
+[`20261002-191026_progress_chest_goa_native_open_1`](../build/scenarios/20261002-191026_progress_chest_goa_native_open_1/report.json)
+(66.3s). During the popup, native event state3 and nonzero context blocked
+traversal with timer45. After2.906s, state/context were both zero while the
+timer retained90; native leave-and-return warps succeeded and GameBridge
+reported no active cutscene. The natively opened host chest used animation
+153 with flag409 set. After native room reload it initialized to animation
+152, while the other two closed chests stayed151. The full fixture therefore
+requires immediate host153 and reloaded client/late-join152, not one animation
+value across both lifecycle phases. Native opened-bit proof comes from the
+reaction input, and no memory write changed the event state or timer.
+
+Three-instance chest acceptance passed in
+[`20261002-191345_net_progress_chest_goa_1`](../build/scenarios/20261002-191345_net_progress_chest_goa_1/report.json)
+(189.3s). Native host opening changed flag409 and progress version1 to2;
+the immediate snapshot showed only the host chest byte changed, while both
+client bytes stayed closed until their allowed application boundary. Client1
+then reloaded GoA at completed epoch3 with opened initialization motion152.
+Client2 joined at that existing epoch, applied version2 and also initialized
+the chest open. A subsequent all-peer reload advanced epoch4 with the exact
+six-field location `[4,26,0,0,0,0]` and opened motion152 on all three peers.
+Each transition checkpoint also retained relay acknowledgements and native
+puppet checks; captures show next-load, late-join and final reload states.
+
+Client1 applied versions1,2,2,2 and client2 applied2,2. Every immediate
+around-write personal comparison reported before/after hash `124AA108` and
+`personal_unchanged=1`. Full endpoint snapshots independently showed zero
+changed bytes in characters, inventory, munny and EXP on all three peers.
+The shared chest difference was exactly SAVE+0x23DF, byte0 to2, on each peer;
+client2 also recorded a visited-room difference. All four on-disk
+save hashes were unchanged. This proves native chest progress, boundary
+application, late-join freshness and personal exclusions for this fixture;
+it does not assert that every native story-setter side effect is mirrored.
+
+The hash checkpoint starts a fresh observation window when called; old
+matching logs cannot satisfy it. Every hash must follow the latest native
+arrival, match its completed epoch and all six current NOW fields, and
+include the complete raw row set associated by epoch/frame. It recomputes
+`KHE1` FNV-1a from the sorted positive-HP `(netId, objectId, hp)` records and
+compares the result with the published hash. Positive checks require zero
+unmatched rows and identical populations across all three peers. Dead rows
+remain in the artifact, and negative controls retain unmatched rows rather
+than filtering them out. An empty room cannot satisfy the default minimum.
+
+`progress_snapshot` records actual bytes and SHA-256 for programs
+`SAVE+0x10/0x1C80`, story `+0x1C90/0x260`, visited `+0x22F8/0x98`, chests
+`+0x23AC/0x34`, and these complete personal exclusions: characters
+`+0x24F0/0xE04`, inventory `+0x3580/0x140`, munny `+0x2440/4`, EXP
+`+0x36E0/4`. A comparison reports each differing SAVE offset, old byte and
+new byte. Native room initialization may legitimately change personal
+state; these snapshots do not assert whole-range equality across loads.
+The narrower apply invariant comes from `[progresssync] apply` logs:
+`personal_before`, `personal_after`, and `personal_unchanged=1` compare
+personal bytes immediately around only the allowed writes, before native
+room initialization.
+
+Live probe on 2026-10-02:
+[`20261002-182909_progress_chest_goa_probe_1`](../build/scenarios/20261002-182909_progress_chest_goa_probe_1/report.json)
+passed. Installed native `F_EX040_HB` (object 2540) resolves to treasure
+585, item 592, room index 100, event `0x101E`, overall flag 409. Its closed
+motion is `0x97`, at `(0,460,900)`, and `RVA 0x9ABC8F & 2` was zero.
+The other two GoA records resolve to flags 410 and 411. This confirms those
+installed rows; broader chest-range coverage still relies on the bounded
+native/table evidence in `build/rig/progress-ranges.md`. Native host opening and mirrored open initialization are established by the
+three-instance acceptance run below.
+
+Applied-state hash acceptance passed live in
+[`20261002-184220_net_statehash_nonempty_1`](../build/scenarios/20261002-184220_net_statehash_nonempty_1/report.json)
+(180.2 s). All three peers had completed epoch 1 and exact location
+`[18,11,0,0,1,0]`, four native matched enemies (netIDs 3?6, object IDs
+309/311), zero unmatched actors, and identical recomputed enemy hashes.
+Native HP changed from 160 to 153 after host damage, with fresh agreement.
+Toggling client1's actual flag409 byte from 0 to 2 after applied version 1
+changed only its progress hash and produced relay `fields=4`; restoring 0
+restored three-peer hash agreement. The full before/after snapshots had
+zero changed bytes in every captured region on every peer, and all four
+save-file hashes stayed unchanged. This run proves the hash and reversible
+progress-control behavior; its later `second_wave` observation was empty
+and is not additional two-wave-spawn evidence.
 
 ## Known limits
 

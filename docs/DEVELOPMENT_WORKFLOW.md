@@ -73,6 +73,13 @@ Check that `desk-agent` is actually running and that a read-only job reports
 the interactive session before using it. A task definition alone does not
 establish an available desktop worker.
 
+A Herdr session name does not establish its Windows session. Restarting a
+desktop-named session from SSH can place the server and tool processes back
+in session 0. Check the actual `exec_command` process SessionId before live
+testing, then use the existing desktop bridge if it is 0. Native agent tasks
+may also stop when their owning CLI is replaced; preserve their partial files
+and verify the old runtime stopped before assigning those paths again.
+
 ## Rebuilding while KH2 runs
 
 Each injection loads a fresh copy of `build/inject/staging/kh2coop_inject.dll`

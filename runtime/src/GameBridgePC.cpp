@@ -743,10 +743,25 @@ RoomState GameBridgePC::ReadRoomState() const {
     rs.eventProgram = static_cast<std::uint32_t>(readMem<std::uint16_t>(EVENT_PROGRAM));
     rs.inTransition = (rs.worldId == 0xFFU || rs.roomId == 0xFFU);
 
-    // Transition/cutscene: use cutscene timer as a proxy.
-    // A non-zero cutscene timer means a cutscene is playing.
-    if (CUTSCENE_TIMER != 0)
-        rs.inCutscene = readU32(CUTSCENE_TIMER) != 0;
+    // Native lifecycle and context are active predicates. The elapsed timer
+    // can remain nonzero after an event has completed.
+    rs.inCutscene = true;
+#ifdef _WIN32
+    std::int32_t eventState = 0;
+    std::uint64_t eventContext = 0;
+    SIZE_T stateBytes = 0, contextBytes = 0;
+    const bool stateRead = processHandle_ &&
+        ReadProcessMemory(static_cast<HANDLE>(processHandle_),
+                          reinterpret_cast<LPCVOID>(baseAddress_ + CUTSCENE_STATE),
+                          &eventState, sizeof(eventState), &stateBytes) &&
+        stateBytes == sizeof(eventState);
+    const bool contextRead = processHandle_ &&
+        ReadProcessMemory(static_cast<HANDLE>(processHandle_),
+                          reinterpret_cast<LPCVOID>(baseAddress_ + EVENT_CONTEXT),
+                          &eventContext, sizeof(eventContext), &contextBytes) &&
+        contextBytes == sizeof(eventContext);
+    rs.inCutscene = !stateRead || !contextRead || eventState != 0 || eventContext != 0;
+#endif
 
     return rs;
 }

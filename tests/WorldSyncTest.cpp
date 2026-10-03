@@ -8,6 +8,7 @@
 // recorded per peer; the host leaving ends the world.
 // Exit code 0 = all checks passed.
 
+#include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/ProgressAllowList.hpp"
@@ -75,6 +76,60 @@ EnemyManifestEntry entry(std::uint16_t netId, std::uint16_t spawn, std::uint32_t
     return e;
 }
 
+void testAppliedEnemyHash() {
+    std::cout << "\n=== Applied native enemy hash ===\n";
+    const std::vector<AppliedEnemyState> host {{1, 0x210, 153}, {2, 0x210, 160}, {3, 0x2A0, 40}};
+    const auto baseline = hashAppliedEnemies(host);
+    auto local = host;
+    std::reverse(local.begin(), local.end());
+    check(hashAppliedEnemies(local) == baseline,
+          "nonempty native populations compare equally independent of actor enumeration order");
+    local[0].hp -= 7;
+    check(hashAppliedEnemies(local) != baseline,
+          "deliberately mismatched local HP changes the applied hash");
+    local = host;
+    local.pop_back();
+    check(hashAppliedEnemies(local) != baseline,
+          "a missing matched live actor changes the applied hash");
+    local = host;
+    local.push_back({0, 0x210, 20});
+    const auto extra = hashAppliedEnemies(local);
+    check(extra != baseline, "an unmatched client-only living spawn changes the applied hash");
+    local.push_back({0, 0x210, 20});
+    check(hashAppliedEnemies(local) != extra,
+          "identical unmatched spawns retain multiplicity");
+    local = host;
+    local.push_back(host.front());
+    check(hashAppliedEnemies(local) != baseline,
+          "two native actors bound to one host ID cannot collapse into one record");
+    local = host;
+    local[0].netId = 0;
+    check(hashAppliedEnemies(local) != baseline,
+          "an unbound native actor is distinguished from its matched host copy");
+    local = host;
+    local[0].objectId += 1;
+    check(hashAppliedEnemies(local) != baseline,
+          "a different native enemy object changes the applied hash");
+    local = host;
+    local[0].netId += 8;
+    check(hashAppliedEnemies(local) != baseline,
+          "a different host binding changes the applied hash");
+    local = host;
+    local.push_back({4, 0x210, 0});
+    local.push_back({0, 0x210, -1});
+    check(hashAppliedEnemies(local) == baseline,
+          "observed dead actors are excluded consistently, matched or unmatched");
+    const std::vector<AppliedEnemyState> afterDeath {{2, 0x210, 160}, {3, 0x2A0, 40}};
+    check(hashAppliedEnemies(host) != hashAppliedEnemies(afterDeath),
+          "a failed native death retaining positive HP differs from the host's dead population");
+    local = host;
+    local[0].hp = 0;
+    check(hashAppliedEnemies(local) == hashAppliedEnemies(afterDeath),
+          "native death success agrees even while its zero-HP actor remains in the list");
+    check(hashAppliedEnemies({}) != baseline,
+          "an empty enemy set cannot stand in for the nonempty checkpoint");
+}
+
 void testProgressMirror() {
     std::cout << "\n=== ProgressMirror ===\n";
     // Allow two story ranges; keep 0x2500.. (character stats) off the list.
@@ -118,8 +173,8 @@ void testProgressMirror() {
     check(parts.size() >= 3 && parts[0].full && !parts[1].full && total == 130000 && fits,
           "large snapshots split under the packet limit, first part replaces");
 
-    // Policy check on the candidate allow list (D8: per-player state stays off).
-    const auto allow = candidateProgressAllowList();
+    // Verified SAVE-body boundaries (D8: per-player state stays off).
+    const auto allow = verifiedProgressAllowList();
     bool sorted = true;
     for (std::size_t i = 1; i < allow.size(); ++i) {
         sorted &= allow[i - 1].offset + allow[i - 1].length <= allow[i].offset;
@@ -127,13 +182,30 @@ void testProgressMirror() {
     ProgressMirror policy(allow);
     check(sorted && !policy.allowed(0x24F8) && !policy.allowed(0x353C) &&
               !policy.allowed(0x3580) && policy.allowed(0x1CFF) && policy.allowed(0x0010),
-          "candidate allow list: no overlaps; stats/party/inventory excluded; story included");
+          "verified allow list: no overlaps; stats/party/inventory excluded; story included");
+    check(!policy.allowed(0x000F) && policy.allowed(0x1C8F) && policy.allowed(0x1C90) &&
+              policy.allowed(0x1EEF) && !policy.allowed(0x1EF0),
+          "room program and story ranges stop at the verified SAVE boundaries");
+    check(!policy.allowed(0x22F7) && policy.allowed(0x22F8) && policy.allowed(0x238F) &&
+              !policy.allowed(0x2390),
+          "visited-room bytes start at 0x22F8 without the stale eight-byte shift");
+    check(!policy.allowed(0x23AB) && policy.allowed(0x23AC) && policy.allowed(0x23DF) &&
+              !policy.allowed(0x23E0),
+          "chest flags include only the verified 0x34-byte span");
+    check(verifiedProgressByteMask(0x23AC) == 0xFE &&
+              verifiedProgressByteMask(0x23DF) == 0x0F &&
+              verifiedProgressByteMask(0x23AD) == 0xFF &&
+              verifiedProgressByteMask(0x1CFF) == 0xFF &&
+              verifiedProgressByteMask(0x23E0) == 0 &&
+              verifiedProgressByteMask(0x24F8) == 0,
+          "chest boundary masks preserve adjacent personal bits and reject disallowed bytes");
 }
 
 } // namespace
 
 int main() {
     if (enet_initialize() != 0) return 2;
+    testAppliedEnemyHash();
     testProgressMirror();
 
     SessionConfig cfg;
@@ -295,13 +367,13 @@ int main() {
           "a new transition clears the cached enemy set");
 
     std::cout << "\n=== Desync detection and resync ===\n";
-    const StateHash good {2, 4, 0x1B, 10, 20};
+    const StateHash good {2, 4, 0x1B, hashAppliedEnemies({{1, 0x210, 153}, {2, 0x210, 160}}), 20};
     host->sendStateHash(good);
     c1->sendStateHash(good);
     pump(300);
     check(relay.desyncNoticeCount() == 0 && hostSeen.desyncs.empty(),
-          "matching state hashes raise nothing");
-    const StateHash diverged {2, 4, 0x1B, 99, 20};
+          "matching nonempty applied enemy hashes raise nothing");
+    const StateHash diverged {2, 4, 0x1B, hashAppliedEnemies({{1, 0x210, 152}, {2, 0x210, 160}}), 20};
     c2->sendStateHash(diverged);
     pump(150);
     check(relay.desyncNoticeCount() == 0, "a single mismatch (e.g. mid-load) is tolerated");

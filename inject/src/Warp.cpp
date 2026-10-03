@@ -18,6 +18,7 @@
 
 #include "Warp.hpp"
 #include "EnemySync.hpp"
+#include "ProgressSync.hpp"
 
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/Protocol.hpp"
@@ -103,7 +104,8 @@ void Complete(WarpStatus status) {
 
 // Safe-state gate (addresses from VUH-1486's static analysis, verified live):
 // nothing frozen (events freeze entity groups), the room is live, no menu,
-// no cutscene timer running. Loading never reaches here: the caller only
+// no active event or timeline. The elapsed timer survives event completion.
+// Loading never reaches here: the caller only
 // runs inside entity updates.
 bool SafeToWarp() {
     g_channel->controllable = ReadExe<std::int32_t>(offsets::CONTROLLABLE);
@@ -111,8 +113,14 @@ bool SafeToWarp() {
     g_channel->openMenu = ReadExe<std::uint8_t>(offsets::OPEN_MENU);
     g_channel->cutsceneTimer = ReadExe<std::int32_t>(offsets::CUTSCENE_TIMER);
     g_channel->pauseStatus = ReadExe<std::int32_t>(offsets::PAUSE_STATUS);
-    return g_channel->controllable == 0 && g_channel->inField != 0 &&
-           g_channel->openMenu == 0xFF && g_channel->cutsceneTimer == 0;
+    __try {
+        return g_channel->controllable == 0 && g_channel->inField != 0 &&
+               g_channel->openMenu == 0xFF &&
+               *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
+               *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 void BeginTransition() {
@@ -154,6 +162,9 @@ void __fastcall HookedLoadCompleteDirect() {
 
 void IssueHostTransition() {
     if (!g_hostQueued || g_transitionPending || !SafeToWarp()) return;
+    // Room initialization reads programs and chest flags from SAVE. Wait for
+    // the complete host snapshot and apply it before starting the native load.
+    if (!progresssync::ApplyAtRoomBoundary()) return;
     LocationPacket packet {};
     packet.world = static_cast<std::uint8_t>(g_hostTarget.worldId);
     packet.room = static_cast<std::uint8_t>(g_hostTarget.roomId);

@@ -2329,7 +2329,8 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         // recording shows dropped frames; the runtime restamps it to send.
         if (reinterpret_cast<uintptr_t>(actorObj) == g_soraActor && g_avatarBridge.IsOpen()) {
             const bool inEvent =
-                *reinterpret_cast<const std::uint32_t*>(g_exeBase + offsets::CUTSCENE_TIMER) != 0;
+                *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) != 0 ||
+                *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) != 0;
             AvatarState avatar = captureAvatar(DirectMemory {}, g_exeBase, g_soraActor,
                                                inEvent, false);
             avatar.seq = g_frameCounter;

@@ -178,8 +178,8 @@ struct StateHash {
     std::uint32_t epoch {0};
     std::uint16_t worldId {0};
     std::uint16_t roomId {0};
-    std::uint32_t enemiesHash {0};   // e.g. over (netId, alive) of matched enemies
-    std::uint32_t progressHash {0};  // over the mirrored progress bytes
+    std::uint32_t enemiesHash {0};   // actual live (netId, objectId, HP), including unmatched actors
+    std::uint32_t progressHash {0};  // actual local SAVE bytes/bits inside the progress allow list
 };
 
 struct DesyncNotice {

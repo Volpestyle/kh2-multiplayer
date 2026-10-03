@@ -178,16 +178,21 @@ script). Writing `2` to `PAUSE_STATUS` disables pausing (GoA ROM script).
 | `SAVE+0x10 + 0x180*world + 0x6*room` | per-room map / btl / evt program table (3 shorts) | `[KH2LIB]` (GoA ROM `Warp`) |
 | `SAVE+0x3534 + 4*world` | world party table: 4 bytes per world, `[player, friend1, friend2, world ally]`, with `0x00` = playable character, `0x01` Donald, `0x02` Goofy, `0x12` empty. The GoA ROM writes `0x12020100` (full party) / `0x12121200` (Roxas only) at `+0x353C` (world 2, Twilight Town) and `+0x357C` (world `0x12`). This is OpenKH `WorldPartyMembers` `0x3534` and Expert595's "party table at save `+0x3534`" with **no** offset shift. GoA (world 4) friend1 = `SAVE+0x3545` | `[KH2LIB]` (GoA ROM), OpenKH, Expert595 |
 | `SAVE+0x3524` | current form (`6` = Anti) | `[KH2LIB]` (GoA ROM) |
-| `SAVE+0x1C98` (20 × `0x20`) | story progress per world (OpenKH `StoryProgress` `0x1C90`); GoA ROM progress checks `+0x1CFF`, `+0x1D2E`, `+0x1EDE` fall inside | OpenKH + 8, unverified |
-| `SAVE+0x2300` (8 × 19) | room-visited flags (OpenKH `RoomVisitedFlag` `0x22F8`) | OpenKH + 8, unverified |
-| `SAVE+0x24F8` (13 × `0x114`) | character stats (OpenKH `Characters` `0x24F0`) | OpenKH + 8, unverified |
-| `SAVE+0x3580…` | inventory bytes (OpenKH `InventoryCount` `0x3580`; this one matches without the +8, so recheck live) | `[KH2LIB]` |
+| `SAVE+0x1C90` (19 × `0x20`) | world story flags, ending at `+0x1EF0`; the next bytes belong to separate auxiliary structures | Native readers/setter `0x39A980` / `0x39AFC0`, table initialization `0x39ACD0` |
+| `SAVE+0x22F8` (8 × 19) | room-visited flags, ending at `+0x2390` | Native reader/setter `0x3BAEA0` / `0x3BAF20`, clear `0x3BAF00` |
+| `SAVE+0x23AC` (known chest indices 1…411) | chest flags; GoA map chest uses `+0x23DF` mask `0x02` (overall flag 409). Unknown bits 0 and 412…415 are excluded from mirroring | Native setter/reader `0x3A1B60` / `0x3A1EA0`, chest initialization `0x402200`; local treasure table corroboration |
+| `SAVE+0x24F0` (13 × `0x114`) | personal character stats, excluded from progress mirroring | OpenKH layout; native personal preservation remains a live acceptance check |
+| `SAVE+0x3580` (length `0x140`) | personal inventory, excluded from progress mirroring | OpenKH and local KH2 Lua inventory table |
 
-**OpenKH vs in-memory offsets:** OpenKH's `SaveDataFinalMix` offsets read 8
-lower than the in-memory body the GoA ROM addresses (world id OpenKH `0x04` vs
-`SAVE+0x0C`). The party table was once cited as a second example, but it is a per-world array that matches OpenKH exactly, so the shift rests on one data point. The candidate
-progress allow list in `common/include/kh2coop/ProgressAllowList.hpp` uses
-in-memory offsets; verify the shift live before relying on it.
+**OpenKH vs in-memory offsets:** There is no universal eight-byte shift.
+OpenKH places world ID at `+0x0C`, after magic, version and checksum. Native
+readers/writers independently establish the story and visited ranges above.
+OpenKH's proposed twentieth story block overlaps native auxiliary state;
+that state is excluded until its schema is understood. The progress allow
+list in `common/include/kh2coop/ProgressAllowList.hpp` also masks unverified
+chest bits. The known chest extent comes from a local mod treasure table,
+corroborated by native addressing and the GoA chest entry; it is not proof
+of the complete installed archive or all story-setter side effects.
 
 The GoA ROM's `Warp(W,R,D,M,B,E)` writes the `NOW` block (world, room, door,
 programs) and the saved location, but only redirects a transition already in
@@ -242,7 +247,8 @@ Every accepted host epoch, including a join to an already matching location,
 queues a real reload. `TransitionAck(arrived=true)` is queued only after a later
 load generation, the safe gameplay gate, and exact equality of **world, room,
 door, map, battle and event**. The gate requires no frozen entity groups,
-`IN_FIELD != 0`, no open menu and an idle cutscene timer. The host advances its
+`IN_FIELD != 0`, no open menu, idle native timeline state and no active event
+context. The elapsed cutscene timer is diagnostic only. The host advances its
 epoch when the new room instance becomes live; request acceptance alone is not
 client arrival. This establishes completion behavior, not proof that every
 native exit path is intercepted.
@@ -284,12 +290,30 @@ code addresses these at the library value `+0x80`:
 | `0x2A171E8` (`CONTROLLABLE`+0x80) | frozen-entity-group bitset; `0x3BFA40` skips an entity whose group bit is set. `0` = nothing frozen |
 | `0xABB878` (`PAUSE_STATUS`+0x80) | pause-blocker bitmask; the pause watcher `0x1572B0` opens pause only when it is `0`, `0x9BA8D0 != 0` and Start is pressed |
 | `0x9BA8D0` | "in field" byte; the load task `0x152A90` clears it at load start; `0x152CD0` / `0x152F40` set it before running finalizers, so the byte alone is not completion proof |
-| `0xB64F98` (`CUTSCENE_TIMER`+0x80) | cutscene timer |
+| `0xB64F98` (`CUTSCENE_TIMER`+0x80) | elapsed timeline position, retained after completion; **not** an active-event predicate |
+| `0xB65210` (`CUTSCENE_STATE`) | int32 timeline lifecycle; updater `0x2CC8A0` runs only in state 3, teardown `0x2C85B0` and transition reset `0x2C87C0` clear this state without clearing the timer |
+| `0x2A11478` (`EVENT_CONTEXT`) | active event-context pointer; native predicate `0x3AC220` tests nonzero, completion `0x3AC000` and cleanup `0x3AC0E0` restore event policies then clear it |
 | `0x8EC5C0` (`LOADING_INDICATOR`+0x80) | loading indicator |
 | `0x2AE5D78` (`SPAWNS`+0x80) | **not** an enemy toggle: a rotating 0–7 index for an effect's random spread (`0x3F3FA0`) |
 
 `CURRENT_OPEN_MENU` `0x7435D0` needs no shift. Current warp/arrival safe-state gate:
-`0x2A171E8 == 0 && 0x9BA8D0 != 0 && menu == 0xFF && cutscene idle`.
+`0x2A171E8 == 0 && 0x9BA8D0 != 0 && menu == 0xFF &&
+0xB65210 == 0 && 0x2A11478 == 0`.
+
+The native GoA map chest exposed the stale-timer gate on 2026-10-02: after
+the popup disappeared, frozen groups were 0, in-field 1 and menu 255, while
+the timer remained 90. Independent decompilation confirmed that the timer is
+retained. Runtime gate and event flags now use both lifecycle and context. The
+[native chest calibration](../build/scenarios/20261002-191026_progress_chest_goa_native_open_1/report.json)
+passed: an active popup had state 3 and a non-null context; completion left
+timer 90 with both predicates zero. Native warps then succeeded and
+`ReadRoomState()` reported no cutscene. Chest flag 409 initialized motion 152
+after reload; the immediate native opening motion was 153. The separate
+[three-instance chest run](../build/scenarios/20261002-191345_net_progress_chest_goa_1/report.json)
+also passed client next-load mirroring, late join and a subsequent reload.
+All six client applies preserved personal bytes immediately around writes;
+full character/inventory/munny/EXP snapshots and four disk save hashes stayed
+unchanged. This establishes chest behavior, not all native story side effects.
 
 ### Unit slot stat system
 

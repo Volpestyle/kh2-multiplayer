@@ -24,12 +24,14 @@ possibly enemies.
 | Animation control | Any motion can be set and held on a friend actor without the game resetting it (Session 5). |
 | Network layer | ENet relay server, codec, version gate; the 3-client fake-simulation test passes. |
 | Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Remote internet and controller playtests remain open. |
-| Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. State-hash equality remains open; evidence is in `SCENARIOS.md`. |
+| Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. Actual-state hashes passed in one nonempty battle room; matching hashes across the transition suite remain open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
+| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. A native host chest opening passed next-load client mirroring, late join and subsequent reload on three instances, with personal bytes preserved. A deliberate progress mismatch was detected and restoration verified. Broader story side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
-Local scenarios now cover transitions and shared enemy HP/deaths. Meaningful
-live state hashes, verified progress mirroring, cutscene hold/resume, bosses
-and remote playtests still gate the later phases.
+Local scenarios now cover transitions, shared enemy HP/deaths and actual
+nonempty enemy/progress hashes, plus chest progress mirroring and late join.
+Broader hash agreement and story coverage, cutscene hold/resume, bosses and
+remote playtests still gate the later phases.
 
 ## Prior art (researched 2026-10-01)
 

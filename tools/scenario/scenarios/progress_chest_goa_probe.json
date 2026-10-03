@@ -1,0 +1,33 @@
+{
+  "name": "progress_chest_goa_probe",
+  "description": "Exploratory native GoA chest records and actor state; no opening, no memory writes and no save operation.",
+  "steps": [
+    {
+      "do": "boot"
+    },
+    {
+      "do": "warp",
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "capture",
+      "name": "goa_probe"
+    },
+    {
+      "do": "save",
+      "as": "goa_actors",
+      "expr": "actors()"
+    },
+    {
+      "do": "save",
+      "as": "goa_chests",
+      "expr": "chests()"
+    },
+    {
+      "do": "save",
+      "as": "goa_flag409_byte",
+      "expr": "peek('0x9ABC8F', 'u8')"
+    }
+  ]
+}

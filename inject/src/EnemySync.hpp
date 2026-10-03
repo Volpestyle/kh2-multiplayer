@@ -11,6 +11,11 @@
 // Client: matches its own spawns to the host's manifest, holds matched HP
 //       at the host's value, applies host deaths through the native lethal
 //       path, and drops its own hits on enemies (claims are VUH-1501).
+// Both: once per second in confirmed, controllable gameplay, publish a hash
+//       of actual local live actors (including unmatched copies) and verified
+//       applied SAVE bytes. Native actor observations accompany each hash log.
+// Host room announcements wait for safe native gameplay and an enqueued full
+// progress snapshot; actors remain tracked while the room packet is retried.
 // Packets travel through the WorldBridge (kh2coop/WorldBridge.hpp) as the
 // codec encodes them; the runtime forwards them to and from the relay.
 // ============================================================================

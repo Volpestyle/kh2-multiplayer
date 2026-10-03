@@ -217,8 +217,11 @@ each. Sora could move after every one.
   state.
 - **Safe-state gate:** a request is handed over only when nothing is
   frozen (`0x2A171E8` == 0), the room is live (`0x9BA8D0` != 0), no menu is
-  open (`0x7435D0` == `0xFF`) and no cutscene timer is running (`0xB64F98`
-  == 0). It's never handed over mid-load either, because hand-over only
+  open (`0x7435D0` == `0xFF`), timeline state is idle (`0xB65210` == 0)
+  and the active event-context pointer is null (`0x2A11478` == 0).
+  The elapsed timer (`0xB64F98`) remains a diagnostic: a native chest event
+  left it at 90 after completion, so it cannot indicate whether an event
+  is active. It's never handed over mid-load either, because hand-over only
   happens inside entity updates. Verified live: a warp requested in the
   pause menu was held, then cancelled at its timeout. During an event the
   frozen bitset reads 3 and the cutscene timer counts up. A held request is
