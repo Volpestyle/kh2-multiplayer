@@ -1,0 +1,431 @@
+{
+  "name": "net_enemy_census_transition08",
+  "description": "Read-only diagnostic of the strict transition route through transition08. Preserves all earlier route/checks, then collects three bounded independently checked native actor-list, spawn-cache and controller snapshots per peer before the original strict hash check. Collection is not parity acceptance; incomplete reads cannot prove absence. The original strict check remains and may fail after evidence is saved.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "initial",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_initial",
+      "instances": [
+        0,
+        1
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_initial']['epoch'] == saved['initial']['epoch'] and all(row['location'] == saved['initial']['instances'][peer]['location'] for peer, row in saved['hash_initial']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at initial"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "before_late_join",
+      "after": "initial",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_before_late_join",
+      "instances": [
+        0,
+        1
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_before_late_join']['epoch'] == saved['before_late_join']['epoch'] and all(row['location'] == saved['before_late_join']['instances'][peer]['location'] for peer, row in saved['hash_before_late_join']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at before_late_join"
+    },
+    {
+      "do": "assert",
+      "expr": "location(2)[:2] != location(0)[:2]",
+      "message": "late join fixture must begin in a different room"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "as": "joined",
+      "target": [
+        5,
+        1
+      ],
+      "capture": true
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_joined",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_joined']['epoch'] == saved['joined']['epoch'] and all(row['location'] == saved['joined']['instances'][peer]['location'] for peer, row in saved['hash_joined']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at joined"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['joined']['epoch'] == saved['before_late_join']['epoch']",
+      "message": "late join should follow the current host epoch without advancing it"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_01",
+      "after": "joined",
+      "target": [
+        5,
+        4
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_01",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_01']['epoch'] == saved['transition_01']['epoch'] and all(row['location'] == saved['transition_01']['instances'][peer]['location'] for peer, row in saved['hash_transition_01']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_01"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_02",
+      "after": "transition_01",
+      "target": [
+        5,
+        5
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_02",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_02']['epoch'] == saved['transition_02']['epoch'] and all(row['location'] == saved['transition_02']['instances'][peer]['location'] for peer, row in saved['hash_transition_02']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_02"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_03",
+      "after": "transition_02",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_03",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_03']['epoch'] == saved['transition_03']['epoch'] and all(row['location'] == saved['transition_03']['instances'][peer]['location'] for peer, row in saved['hash_transition_03']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_03"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_04",
+      "after": "transition_03",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_04",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_04']['epoch'] == saved['transition_04']['epoch'] and all(row['location'] == saved['transition_04']['instances'][peer]['location'] for peer, row in saved['hash_transition_04']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_04"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 1
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_05",
+      "after": "transition_04",
+      "target": [
+        5,
+        1
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_05",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_05']['epoch'] == saved['transition_05']['epoch'] and all(row['location'] == saved['transition_05']['instances'][peer]['location'] for peer, row in saved['hash_transition_05']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_05"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 4
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_06",
+      "after": "transition_05",
+      "target": [
+        5,
+        4
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_06",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_06']['epoch'] == saved['transition_06']['epoch'] and all(row['location'] == saved['transition_06']['instances'][peer]['location'] for peer, row in saved['hash_transition_06']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_06"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 5
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_07",
+      "after": "transition_06",
+      "target": [
+        5,
+        5
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_07",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_07']['epoch'] == saved['transition_07']['epoch'] and all(row['location'] == saved['transition_07']['instances'][peer]['location'] for peer, row in saved['hash_transition_07']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_07"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6
+    },
+    {
+      "do": "transition_check",
+      "as": "transition_08",
+      "after": "transition_07",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "native_enemy_census_transition08",
+      "samples": 3,
+      "intervalMs": 1500
+    },
+    {
+      "do": "statehash_check",
+      "as": "hash_transition_08",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['hash_transition_08']['epoch'] == saved['transition_08']['epoch'] and all(row['location'] == saved['transition_08']['instances'][peer]['location'] for peer, row in saved['hash_transition_08']['instances'].items())",
+      "message": "fresh hash samples crossed the settled transition epoch or location at transition_08"
+    }
+  ],
+  "protect": [
+    0,
+    1,
+    2
+  ]
+}

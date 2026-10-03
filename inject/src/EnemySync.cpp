@@ -23,6 +23,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <map>
 #include <unordered_map>
@@ -61,7 +62,7 @@ struct Spawn {
     std::uint32_t objectId = 0;
     uintptr_t actor = 0;
     Vec3 spawnPos {};         // where it first appeared (identical across instances)
-    bool present = false;     // in the entity list last frame
+    bool present = false;     // in the latest complete native census
     std::int32_t lastHp = 1;  // HP when last seen (<= 0: dead, the slot may be reused)
     bool announced = false;   // host: sent in a manifest this epoch
     bool deathSent = false;   // host: EnemyDeath sent (or superseded by a refill)
@@ -86,8 +87,9 @@ std::uint32_t g_epoch = 0;          // host: current epoch
 bool g_manifestSent = false;        // host: first manifest of the epoch went out
 bool g_hostBeginPending = false;
 RoomTransition g_pendingHostRoom {};
-std::vector<uintptr_t> g_frameActors, g_lastActors;
 std::uint64_t g_lastHashMs = 0;
+bool g_censusInterrupted = false;
+std::uint64_t g_lastCensusErrorMs = 0;
 
 // Client view of the host.
 struct HostEnemy {
@@ -115,6 +117,201 @@ T Read(uintptr_t address) {
     T value {};
     std::memcpy(&value, reinterpret_cast<const void*>(address), sizeof(T));
     return value;
+}
+
+// Keep SEH in a POD-only leaf: callers own all C++ containers/unwinding.
+bool CopyNative(uintptr_t address, void* destination, std::size_t size) {
+    if (address <= 0x10000 || address >= 0x7FFFFFFFFFFFULL ||
+        size > 0x7FFFFFFFFFFFULL - address) return false;
+    __try {
+        std::memcpy(destination, reinterpret_cast<const void*>(address), size);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+template <typename T>
+bool ReadNative(uintptr_t address, T& value) {
+    return CopyNative(address, &value, sizeof(value));
+}
+
+struct NativeEnemy {
+    uintptr_t actor = 0, objentry = 0, status = 0;
+    std::uint32_t objectId = 0;
+    std::int32_t hp = 0, maxHp = 0;
+    Vec3 position {};
+};
+
+// A successful exclusion is different from a failed classifier read.
+bool ReadNativeEnemy(uintptr_t actor, NativeEnemy& enemy, bool& isEnemy) {
+    enemy = {};
+    enemy.actor = actor;
+    isEnemy = false;
+    if (!ReadNative(actor + offsets::actor::OBJENTRY_PTR, enemy.objentry)) return false;
+    if (!enemy.objentry) return true;
+    if (enemy.objentry <= g_exeBase || enemy.objentry >= g_exeBase + 0x3000000) return false;
+    std::uint8_t type = 0;
+    if (!ReadNative(enemy.objentry + offsets::objentry::TYPE_FLAGS, type)) return false;
+    if (type != offsets::objentry::TYPE_BOSS && type != offsets::objentry::TYPE_MOB) return true;
+    char prefix[2] {};
+    if (!CopyNative(enemy.objentry + offsets::objentry::NAME, prefix, sizeof(prefix))) return false;
+    if (prefix[0] == 'F' && prefix[1] == '_') return true;
+    if (!ReadNative(actor + ACTOR_STATUS, enemy.status)) return false;
+    if (!enemy.status) return true; // native noncombat actors can have no stats
+    if (!ReadNative(enemy.objentry + offsets::objentry::OBJECT_ID, enemy.objectId) ||
+        !ReadNative(enemy.status, enemy.hp) || !ReadNative(enemy.status + 4, enemy.maxHp)) return false;
+    const auto transform = actor + offsets::actor::ENTITY_TRANSFORM;
+    if (!ReadNative(transform + offsets::entity::POS_X, enemy.position.x) ||
+        !ReadNative(transform + offsets::entity::POS_Y, enemy.position.y) ||
+        !ReadNative(transform + offsets::entity::POS_Z, enemy.position.z)) return false;
+    isEnemy = true;
+    return true;
+}
+
+bool SameNativeIdentity(const NativeEnemy& a, const NativeEnemy& b) {
+    return a.actor == b.actor && a.objentry == b.objentry && a.status == b.status &&
+           a.objectId == b.objectId;
+}
+
+bool ReadLocationChecked(RoomTransition& location) {
+    std::uint8_t world = 0, room = 0, door = 0;
+    if (!ReadNative(g_exeBase + offsets::WORLD_ID, world) ||
+        !ReadNative(g_exeBase + offsets::ROOM_ID, room) ||
+        !ReadNative(g_exeBase + offsets::NOW + 2, door) ||
+        !ReadNative(g_exeBase + offsets::MAP_PROGRAM, location.mapProgram) ||
+        !ReadNative(g_exeBase + offsets::BATTLE_PROGRAM, location.battleProgram) ||
+        !ReadNative(g_exeBase + offsets::EVENT_PROGRAM, location.eventProgram)) return false;
+    location.worldId = world;
+    location.roomId = room;
+    location.door = door;
+    return true;
+}
+
+bool SameLocation(const RoomTransition& a, const RoomTransition& b) {
+    return a.worldId == b.worldId && a.roomId == b.roomId && a.door == b.door &&
+           a.mapProgram == b.mapProgram && a.battleProgram == b.battleProgram &&
+           a.eventProgram == b.eventProgram;
+}
+
+enum class CensusState { Unavailable, Complete };
+struct NativeCensus {
+    CensusState state = CensusState::Unavailable;
+    const char* reason = "not sampled";
+    uintptr_t failedAt = 0;
+    std::size_t nodeCount = 0;
+    std::uint32_t transition = 0, load = 0;
+    RoomTransition location {};
+    std::vector<NativeEnemy> enemies;
+};
+
+bool SafeNativeGameplay();
+
+NativeCensus CaptureNativeCensus() {
+    using namespace offsets::active_entity_list;
+    NativeCensus result;
+    auto fail = [&](const char* reason, uintptr_t address) {
+        result.reason = reason;
+        result.failedAt = address;
+        return result;
+    };
+    if (!SafeNativeGameplay()) return fail("gameplay gate", 0);
+    result.transition = warp::TransitionSerial();
+    result.load = warp::LoadSerial();
+    if (!ReadLocationChecked(result.location)) return fail("location read", g_exeBase + offsets::NOW);
+    uintptr_t head = 0, tail = 0;
+    if (!ReadNative(g_exeBase + HEAD, head) || !ReadNative(g_exeBase + TAIL, tail))
+        return fail("list roots read", g_exeBase + HEAD);
+    if ((head == 0) != (tail == 0)) return fail("list roots disagree", head);
+    std::array<uintptr_t, HANDLE_BUCKET_COUNT> regions {};
+    std::array<bool, HANDLE_BUCKET_COUNT> usedRegions {};
+    if (!CopyNative(g_exeBase + HANDLE_REGION_TABLE, regions.data(), sizeof(regions)))
+        return fail("handle table read", g_exeBase + HANDLE_REGION_TABLE);
+    struct Link { uintptr_t actor; std::uint32_t next; };
+    std::vector<Link> links;
+    links.reserve(MAX_TRAVERSAL);
+    uintptr_t actor = head;
+    while (actor != 0) {
+        // This is a safety cap, not a native roster limit. Exact-cap/null is
+        // complete; a continuation beyond it makes the whole sample unavailable.
+        if (links.size() == MAX_TRAVERSAL) return fail("list cap", actor);
+        if (std::any_of(links.begin(), links.end(), [actor](const Link& link) { return link.actor == actor; }))
+            return fail("list cycle", actor);
+        if (actor <= 0x10000 || actor >= 0x7FFFFFFFFFFFULL - 0x1000)
+            return fail("actor address", actor);
+        std::uint32_t next = 0;
+        if (!ReadNative(actor + offsets::actor::LINKED_NEXT_HANDLE, next)) return fail("next read", actor);
+        links.push_back({actor, next});
+        result.nodeCount = links.size();
+        NativeEnemy enemy;
+        bool isEnemy = false;
+        if (!ReadNativeEnemy(actor, enemy, isEnemy)) return fail("enemy metadata read", actor);
+        if (isEnemy) result.enemies.push_back(enemy);
+        if (next == 0) {
+            if (actor != tail) return fail("tail mismatch", actor);
+            actor = 0;
+        } else {
+            // Native 0x4AD3F0 ignores bit 31. It is not a validity/generation bit.
+            const auto bucket = (next & 0x7FFFFFFFU) >> HANDLE_BUCKET_SHIFT;
+            const auto region = regions[bucket];
+            if (region == 0 || region == UINT64_MAX || (region & HANDLE_LOW_MASK) != 0)
+                return fail("invalid handle region", g_exeBase + HANDLE_REGION_TABLE + bucket * 8);
+            usedRegions[bucket] = true;
+            actor = region | (next & HANDLE_LOW_MASK);
+            if (actor == 0) return fail("nonnull handle resolved null", links.back().actor);
+        }
+    }
+    // Validate internal links as well as roots; unchanged HEAD alone is insufficient.
+    for (const auto& link : links) {
+        std::uint32_t next = 0;
+        if (!ReadNative(link.actor + offsets::actor::LINKED_NEXT_HANDLE, next) || next != link.next)
+            return fail("list link changed", link.actor);
+    }
+    for (std::size_t i = 0; i < regions.size(); ++i) {
+        uintptr_t region = 0;
+        if (usedRegions[i] && (!ReadNative(g_exeBase + HANDLE_REGION_TABLE + i * 8, region) || region != regions[i]))
+            return fail("handle region changed", g_exeBase + HANDLE_REGION_TABLE + i * 8);
+    }
+    uintptr_t finalHead = 0, finalTail = 0;
+    RoomTransition finalLocation {};
+    if (!ReadNative(g_exeBase + HEAD, finalHead) || !ReadNative(g_exeBase + TAIL, finalTail) ||
+        finalHead != head || finalTail != tail) return fail("list roots changed", g_exeBase + HEAD);
+    if (!ReadLocationChecked(finalLocation) || !SameLocation(result.location, finalLocation) ||
+        result.transition != warp::TransitionSerial() || result.load != warp::LoadSerial() ||
+        !SafeNativeGameplay()) return fail("lifecycle changed", 0);
+    result.state = CensusState::Complete;
+    result.reason = "complete";
+    return result;
+}
+
+void InterruptCensus(const char* reason, uintptr_t address, std::size_t nodes = 0) {
+    g_censusInterrupted = true;
+    // Wall time spent without a complete observation never counts as absence.
+    for (Spawn& spawn : g_inst.spawns) spawn.goneSinceMs = 0;
+    const auto now = GetTickCount64();
+    if (g_log && (g_lastCensusErrorMs == 0 || now - g_lastCensusErrorMs >= HASH_INTERVAL_MS)) {
+        g_log("[enemysync] native census unavailable: %s at=%llX nodes=%zu", reason,
+              static_cast<unsigned long long>(address), nodes);
+        g_lastCensusErrorMs = now;
+    }
+}
+
+bool CensusMatchesInstance(const NativeCensus& census) {
+    RoomTransition currentLocation {};
+    return census.state == CensusState::Complete && census.transition == g_seenTransition &&
+           census.load == g_seenLoad && census.transition == warp::TransitionSerial() &&
+           census.load == warp::LoadSerial() && ReadLocationChecked(currentLocation) &&
+           SameLocation(census.location, currentLocation) && census.location.worldId == g_inst.world &&
+           census.location.roomId == g_inst.room && census.location.door == g_inst.door &&
+           census.location.mapProgram == g_inst.map && census.location.battleProgram == g_inst.btl &&
+           census.location.eventProgram == g_inst.evt;
+}
+
+const NativeEnemy* FindNativeEnemy(const NativeCensus& census, const Spawn& spawn) {
+    const auto it = std::find_if(census.enemies.begin(), census.enemies.end(), [&](const NativeEnemy& row) {
+        return row.actor == spawn.actor && row.objectId == spawn.objectId;
+    });
+    return it == census.enemies.end() ? nullptr : &*it;
 }
 
 uintptr_t ObjEntry(uintptr_t actor) {
@@ -190,7 +387,8 @@ bool HostBeginInstance() {
     return true;
 }
 
-bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns) {
+bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
+               const NativeCensus& census) {
     if (!newSpawns.empty()) {
         EnemyManifest m;
         m.epoch = g_epoch;
@@ -250,9 +448,9 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns) {
     for (Spawn& s : g_inst.spawns) {
         if (!s.present) continue;
         s.goneSinceMs = 0;
-        const std::int32_t* p = HpPtr(s.actor);
-        if (!p) continue;
-        if (*p <= 0 && !s.deathSent) {
+        const auto* native = FindNativeEnemy(census, s);
+        if (!native) return false;
+        if (native->hp <= 0 && !s.deathSent) {
             EnemyDeath d;
             d.epoch = g_epoch;
             d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
@@ -261,7 +459,8 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns) {
                 SYNC_LOG("[enemysync] host death epoch %u netId %u", g_epoch, d.netId);
             }
         }
-        if (*p > 0) hp.entries.push_back({static_cast<std::uint16_t>(s.spawnIndex + 1), p[0], p[1]});
+        if (native->hp > 0) hp.entries.push_back({static_cast<std::uint16_t>(s.spawnIndex + 1),
+                                                native->hp, native->maxHp});
     }
     if (frame % HP_INTERVAL_FRAMES == 0 && !hp.entries.empty()) Send(encode(hp));
     return true;
@@ -291,8 +490,6 @@ bool ReceiveWorldPackets() {
                     s.killed = false;
                     s.deathAttempted = false;
                 }
-                g_lastActors.clear();
-                g_frameActors.clear();
                 g_role = CurrentRole();
                 warp::SetClientAuthority(g_role == Role::Client);
                 hostSessionReset = hostSessionReset || g_role == Role::Host;
@@ -322,8 +519,6 @@ bool ReceiveWorldPackets() {
                     // No old-room pointer can survive even a same-room reload.
                     g_inst.spawns.clear();
                     g_inst.byActor.clear();
-                    g_lastActors.clear();
-                    g_frameActors.clear();
                     SYNC_LOG("[enemysync] client: host epoch %u room %02X/%02X btl %u", t.epoch,
                              t.worldId, t.roomId, t.battleProgram);
                 }
@@ -364,10 +559,36 @@ bool ReceiveWorldPackets() {
     return hostSessionReset;
 }
 
-void ClientFrame() {
-    if (!g_host.arrived || g_inst.world != g_host.world || g_inst.room != g_host.room || g_inst.btl != g_host.btl) {
-        return;  // not in the host's room instance: nothing to match
+// No C++ objects requiring unwinding in the SEH leaves that call/write native memory.
+bool WriteNativeHp(const NativeEnemy& expected, std::int32_t hp) {
+    __try {
+        if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
+            Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
+            Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId) return false;
+        *reinterpret_cast<std::int32_t*>(expected.status) = hp;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
     }
+}
+
+bool ApplyNativeDeath(const NativeEnemy& expected, int hp) {
+    __try {
+        if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
+            Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
+            Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId) return false;
+        g_applyStatDelta(reinterpret_cast<void*>(expected.actor), -hp, 0, 0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool ClientFrame(const NativeCensus& initialCensus) {
+    if (!g_host.arrived || g_inst.world != g_host.world || g_inst.room != g_host.room || g_inst.btl != g_host.btl) {
+        return false;  // not in the host's room instance: nothing to match
+    }
+    NativeCensus current = initialCensus;
     for (Spawn& s : g_inst.spawns) {
         if (!s.present || s.killed) continue;
         // Match by spawn point + object, to the host's newest enemy there: a
@@ -399,32 +620,60 @@ void ClientFrame() {
         }
         if (s.netId < 0) continue;
         const HostEnemy& h = g_host.enemies[static_cast<std::uint16_t>(s.netId)];
-        std::int32_t* p = HpPtr(s.actor);
-        if (!p) continue;
+        const auto* sampled = FindNativeEnemy(current, s);
+        if (!sampled) continue; // a preceding native lethal may have removed it
+        NativeEnemy native;
+        bool isEnemy = false;
+        if (!CensusMatchesInstance(current) || !SafeNativeGameplay() ||
+            !ReadNativeEnemy(s.actor, native, isEnemy) || !isEnemy || !SameNativeIdentity(*sampled, native)) {
+            InterruptCensus("client target changed", s.actor);
+            return false;
+        }
         if (h.dead) {
-            if (*p > 0 && g_applyStatDelta && !s.deathAttempted) {
+            if (native.hp > 0 && g_applyStatDelta && !s.deathAttempted) {
                 s.deathAttempted = true;
-                const int before = *p;
-                g_applyStatDelta(reinterpret_cast<void*>(s.actor), -before, 0, 0);
-                if (*p <= 0) {
+                const int before = native.hp;
+                if (!ApplyNativeDeath(native, before)) {
+                    InterruptCensus("native lethal fault; outcome unknown", s.actor);
+                    return false;
+                }
+                NativeEnemy after;
+                if (!ReadNativeEnemy(s.actor, after, isEnemy) || !isEnemy || !SameNativeIdentity(native, after)) {
+                    InterruptCensus("native lethal outcome unavailable", s.actor);
+                    return false;
+                }
+                native = after;
+                if (native.hp <= 0) {
                     if (g_log) g_log("[enemysync] client: host death netId %d applied (hp %d -> %d)",
-                                     s.netId, before, *p);
+                                     s.netId, before, native.hp);
                 } else if (g_log) {
                     g_log("[enemysync] client: host death netId %d FAILED (hp %d -> %d)", s.netId,
-                          before, *p);
+                          before, native.hp);
+                }
+                // The native call may mutate the roster. Subsequent targets need
+                // current membership, not addresses retained before the call.
+                current = CaptureNativeCensus();
+                if (!CensusMatchesInstance(current)) {
+                    InterruptCensus(current.state == CensusState::Complete ? "instance changed" : current.reason,
+                                    current.failedAt, current.nodeCount);
+                    return false;
                 }
             }
-            s.killed = *p <= 0;
-        } else if (h.hp > 0 && *p != h.hp) {
-            *p = h.hp;  // hold at the host's absolute HP (never 0: deaths are explicit)
+            s.killed = native.hp <= 0;
+        } else if (h.hp > 0 && native.hp != h.hp) {
+            if (!WriteNativeHp(native, h.hp)) { // never 0: deaths are explicit
+                InterruptCensus("client HP write unavailable", s.actor);
+                return false;
+            }
         }
     }
+    return true;
 }
 
 // ---- Both -------------------------------------------------------------------
 
-void PublishAppliedHash(std::uint32_t frame) {
-    if (g_role == Role::Off || !g_inst.live || g_lastActors.empty() ||
+void PublishAppliedHash(std::uint32_t frame, const NativeCensus& beforeApply) {
+    if (g_role == Role::Off || !g_inst.live ||
         g_hostBeginPending || !SafeNativeGameplay()) return;
     const auto epoch = g_role == Role::Host ? g_epoch : g_host.epoch;
     if (epoch == 0 || (g_role == Role::Client &&
@@ -443,25 +692,37 @@ void PublishAppliedHash(std::uint32_t frame) {
     state.roomId = location.roomId;
     if (!progresssync::ReadHash(state.progressHash)) return;
 
+    const auto census = CaptureNativeCensus();
+    if (!CensusMatchesInstance(census)) {
+        InterruptCensus(census.state == CensusState::Complete ? "instance changed" : census.reason,
+                        census.failedAt, census.nodeCount);
+        return;
+    }
     std::vector<AppliedEnemyState> observed;
     std::vector<uintptr_t> actors;
-    for (const Spawn& spawn : g_inst.spawns) {
-        // Presence and native HP decide life, independently of received deaths,
-        // killed/deathSent flags or historical host manifest entries.
-        if (!spawn.present || !IsEnemy(spawn.actor)) continue;
-        const auto objectId = Read<std::uint32_t>(ObjEntry(spawn.actor) + offsets::objentry::OBJECT_ID);
-        const auto hp = *HpPtr(spawn.actor);
+    for (const auto& native : census.enemies) {
+        // Native membership and HP supply rows. The tracker supplies only a
+        // binding; a missing tracker row must never hide a living native actor.
         std::uint16_t netId = 0;
-        if (g_role == Role::Host) {
-            netId = static_cast<std::uint16_t>(spawn.spawnIndex + 1);
-        } else if (spawn.netId > 0) {
-            const auto bound = g_host.enemies.find(static_cast<std::uint16_t>(spawn.netId));
-            if (bound != g_host.enemies.end() && bound->second.objectId == objectId) {
-                netId = bound->first;
+        const auto tracked = g_inst.byActor.find(native.actor);
+        if (tracked != g_inst.byActor.end()) {
+            const auto& spawn = g_inst.spawns[tracked->second];
+            const auto* prior = FindNativeEnemy(beforeApply, spawn);
+            if (prior && SameNativeIdentity(*prior, native)) {
+                if (g_role == Role::Host && spawn.announced) {
+                    netId = static_cast<std::uint16_t>(spawn.spawnIndex + 1);
+                } else if (g_role == Role::Client && spawn.netId > 0) {
+                    const auto bound = g_host.enemies.find(static_cast<std::uint16_t>(spawn.netId));
+                    if (bound != g_host.enemies.end() && bound->second.objectId == native.objectId)
+                        netId = bound->first;
+                }
             }
         }
-        observed.push_back({netId, objectId, hp});
-        actors.push_back(spawn.actor);
+        // Preserve manifest-before-hash ordering for newly appeared host actors.
+        // Clients still expose all unmatched native actors with netId zero.
+        if (g_role == Role::Host && netId == 0) return;
+        observed.push_back({netId, native.objectId, native.hp});
+        actors.push_back(native.actor);
     }
     const auto live = canonicalAppliedEnemies(observed);
     const auto unmatched = std::count_if(live.begin(), live.end(),
@@ -486,20 +747,20 @@ void PublishAppliedHash(std::uint32_t frame) {
     }
 }
 
-// Folds last frame's actor list into the instance's spawns. Returns the
-// indices of new spawns.
-std::vector<std::size_t> TrackSpawns() {
+// Commit presence only from a complete native list; callbacks are not a census.
+std::vector<std::size_t> TrackSpawns(const NativeCensus& census) {
     std::vector<std::size_t> fresh;
     std::unordered_map<uintptr_t, std::size_t> present;
-    for (const uintptr_t actor : g_lastActors) {
-        if (!IsEnemy(actor)) continue;
+    for (const auto& native : census.enemies) {
+        const auto actor = native.actor;
         auto it = g_inst.byActor.find(actor);
         std::size_t index;
         // An address seen before is the same enemy: still in the list (a
         // dying enemy stays there at 0 HP through its death animation), or
-        // back after leaving it alive (e.g. burrowed). Only a slot whose
-        // enemy left the list dead is a new spawn.
+        // back after leaving it alive (e.g. burrowed). A changed object or
+        // a slot whose enemy left the list dead is a new spawn.
         const bool same = it != g_inst.byActor.end() &&
+                          g_inst.spawns[it->second].objectId == native.objectId &&
                           (g_inst.spawns[it->second].present || g_inst.spawns[it->second].lastHp > 0);
         if (same) {
             index = it->second;
@@ -507,10 +768,8 @@ std::vector<std::size_t> TrackSpawns() {
             Spawn s;
             s.spawnIndex = static_cast<std::uint16_t>(g_inst.spawns.size());
             s.actor = actor;
-            s.objectId = Read<std::uint32_t>(ObjEntry(actor) + offsets::objentry::OBJECT_ID);
-            const uintptr_t ent = actor + offsets::actor::ENTITY_TRANSFORM;
-            s.spawnPos = {Read<float>(ent + offsets::entity::POS_X), Read<float>(ent + offsets::entity::POS_Y),
-                          Read<float>(ent + offsets::entity::POS_Z)};
+            s.objectId = native.objectId;
+            s.spawnPos = native.position;
             g_inst.spawns.push_back(s);
             index = g_inst.spawns.size() - 1;
             fresh.push_back(index);
@@ -528,7 +787,7 @@ std::vector<std::size_t> TrackSpawns() {
     for (const auto& [actor, index] : present) {
         Spawn& s = g_inst.spawns[index];
         s.present = true;
-        if (const std::int32_t* p = HpPtr(actor)) s.lastHp = *p;
+        if (const auto* native = FindNativeEnemy(census, s)) s.lastHp = native->hp;
     }
     return fresh;
 }
@@ -574,11 +833,9 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta) {
     }
 }
 
-void NoteActor(uintptr_t actor) {
-    if (g_bridge.IsOpen() && !warp::TransitionPending() &&
-        (g_role != Role::Client || g_host.arrived)) {
-        g_frameActors.push_back(actor);
-    }
+void NoteActor(uintptr_t) {
+    // Retained for EntityHook API compatibility. Per-actor callback coverage
+    // does not define native presence or the hash population.
 }
 
 void OnFrameStart(std::uint32_t frame) {
@@ -608,8 +865,6 @@ void OnFrameStart(std::uint32_t frame) {
     // One world-ring consumer owns ordering: snapshot/deltas are consumed
     // before this tick, and host progress goes out before RoomTransition.
     progresssync::Tick(frame, g_role == Role::Host, g_role == Role::Client);
-    g_lastActors.swap(g_frameActors);
-    g_frameActors.clear();
 
     const auto location = warp::ReadLocation();
     const auto transition = warp::TransitionSerial();
@@ -621,8 +876,6 @@ void OnFrameStart(std::uint32_t frame) {
         g_inst = {};
         g_hostBeginPending = false;
         g_lastHashMs = 0;
-        g_lastActors.clear();
-        g_frameActors.clear();
     }
     g_seenTransition = transition;
     g_seenLoad = load;
@@ -639,7 +892,6 @@ void OnFrameStart(std::uint32_t frame) {
         g_inst.btl = location.battleProgram;
         g_inst.evt = location.eventProgram;
         g_inst.live = true;
-        g_lastActors.clear();
         if (g_role == Role::Host) QueueHostBeginInstance(location);
         SYNC_LOG("[enemysync] room instance %02X/%02X btl %u", g_inst.world, g_inst.room, g_inst.btl);
     } else if (keyChanged) {
@@ -672,7 +924,17 @@ void OnFrameStart(std::uint32_t frame) {
         if (!g_host.arrived) return;
     }
     if (!g_inst.live) return;
-    auto fresh = TrackSpawns();
+    const auto census = CaptureNativeCensus();
+    if (!CensusMatchesInstance(census)) {
+        InterruptCensus(census.state == CensusState::Complete ? "instance changed" : census.reason,
+                        census.failedAt, census.nodeCount);
+        return;
+    }
+    if (g_censusInterrupted) {
+        for (Spawn& spawn : g_inst.spawns) spawn.goneSinceMs = 0;
+        g_censusInterrupted = false;
+    }
+    auto fresh = TrackSpawns(census);
     if (g_role == Role::Host) {
         // Track while progress or ring capacity delays the announcement. No
         // manifest/HP/hash may escape under the previous room's epoch.
@@ -686,19 +948,17 @@ void OnFrameStart(std::uint32_t frame) {
         // A failed manifest stays pending. Publishing its actors' hash before
         // their bindings reach the peer would report a transport backlog as a
         // native population mismatch.
-        if (!HostFrame(frame, fresh)) return;
+        if (!HostFrame(frame, fresh, census)) return;
     } else if (g_role == Role::Client) {
         for (const std::size_t i : fresh) {
-            const uintptr_t ent = g_inst.spawns[i].actor + offsets::actor::ENTITY_TRANSFORM;
             SYNC_LOG("[enemysync] client: local spawn %u frame %u objectId %u @%llX at (%.0f,%.0f,%.0f)",
                      g_inst.spawns[i].spawnIndex, frame, g_inst.spawns[i].objectId,
                      static_cast<unsigned long long>(g_inst.spawns[i].actor),
-                     Read<float>(ent + offsets::entity::POS_X), Read<float>(ent + offsets::entity::POS_Y),
-                     Read<float>(ent + offsets::entity::POS_Z));
+                     g_inst.spawns[i].spawnPos.x, g_inst.spawns[i].spawnPos.y, g_inst.spawns[i].spawnPos.z);
         }
-        ClientFrame();
+        if (!ClientFrame(census)) return;
     }
-    PublishAppliedHash(frame);
+    PublishAppliedHash(frame, census);
 }
 
 bool DropLocalEnemyDamage(uintptr_t victim) {

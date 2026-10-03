@@ -2203,8 +2203,9 @@ static bool DiscoverAndHookFriendAI(void* actorObj) {
 // ============================================================================
 // PerEntityUpdate hook — main interception point
 //
-// Called for EVERY entity every frame. For non-friends, passes through
-// to the original immediately. For friends, sets the slot indicator so
+// Called for entities selected by the native dependency/update passes.
+// Callback coverage is not a complete active-list census. For non-friends,
+// passes through to the original. For friends, sets the slot indicator so
 // the AI hook knows to suppress AI and inject input.
 // ============================================================================
 

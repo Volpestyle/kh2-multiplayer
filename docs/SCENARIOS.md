@@ -507,6 +507,79 @@ save-file hashes stayed unchanged. This run proves the hash and reversible
 progress-control behavior; its later `second_wave` observation was empty
 and is not additional two-wave-spawn evidence.
 
+## Native enemy census diagnostic
+
+The strict 20-load acceptance failed at `hash_transition_08` in
+[`20261002-193320_net_host_transitions_statehash_acceptance_1`](../build/scenarios/20261002-193320_net_host_transitions_statehash_acceptance_1/report.json):
+completed epoch 10, location `[5,6,0,1,1,0]`, published host count 0 versus
+five unmatched object302/HP20 rows on each client, with equal progress hashes.
+Those published counts came from the update-hook census; they were not an
+independent complete native-list observation.
+
+`net_enemy_census_transition08.json` retains that route through transition08,
+then collects an immediate snapshot and two more after 1.5-second intervals
+before retaining the original strict hash check. `native_enemy_census` reads
+peers concurrently, with a 30-second bound per peer/sample. Its artifact always
+retains errors and partial observations. Successful collection proves neither
+peer parity nor enemy absence by itself.
+
+The helper treats `entities` as candidates only. Checked reads validate native
+HEAD/TAIL, every next handle and its region-table resolution, terminal handle0,
+object descriptors including the `F_` prefix, status and actual HP, and stable
+identity/location/arrival/lifecycle bookends during safe gameplay. Cycles, cap
+hits, unreadable pointers and changing loads remain incomplete. Hash coverage
+comparisons require the latest post-arrival hash to match epoch/full location
+and complete raw records/recomputed canonical hash; unavailable comparisons
+retain raw logs without a coverage conclusion.
+
+The cache probe accepts only four inline buckets rooted at RVA `2AE5E60`,
+reads all 256 u16 record IDs twice, and brackets active pointer/counter reads.
+Record IDs are not object IDs. Controller/record shape checks and bounded
+ordinary controller-table observations are separate causal evidence: script
+entries are skipped, table cap64 is diagnostic rather than a proven native
+limit, and incomplete provenance does not erase complete list evidence.
+Controller stage/cooldown, tracked activation/player positions, raw spawn
+records and table/key membership help distinguish activation history. These
+observations remain read-only and do not establish every producer's semantics.
+
+Live collection succeeded in
+[`20261002-200856_net_enemy_census_transition08_1`](../build/scenarios/20261002-200856_net_enemy_census_transition08_1/report.json),
+but the retained strict parity check made the overall scenario **FAIL**
+(208.9 s). All nine peer snapshots were complete with valid hash comparisons.
+The first snapshot had no native enemies and empty caches everywhere; the
+later two had zero host enemies and five actual client enemies, matching each
+peer's published rows. Type-2 controller header30 had flags2 on the host and
+flags10 on clients; client caches gained record IDs `11,12,13,14,18` while the
+host cache stayed empty, and activation positions diverged. This establishes
+native spawn divergence in this reproduction, not a hidden host update-hook
+population. Initially equal caches do not support retained cache history alone
+as its cause. See [native findings and inference limits](ENEMY_PARITY.md).
+All four disk saves remained unchanged.
+
+The separate ignored party-availability probe
+[`20261002-194936_net_party_availability_probe_1`](../build/scenarios/20261002-194936_net_party_availability_probe_1/report.json)
+passed its diagnostic checks: both native friend pointers were already zero on
+first native `12/0B` entry before networking and remained zero after epoch1/2;
+world18 party word stayed `0x12121200` and all four disk saves were unchanged.
+This narrows the earlier isolated negative-control recovery failure; it does
+not turn that failed recovery into a pass or establish a network regression.
+
+## Checked native-list coverage regressions
+
+The checked native-list coverage change passed the Release DLL build and
+the [native-wave regression](../build/scenarios/20261002-201456_net_enemy_sync_waves_1/report.json)
+(153.6 s), [nonempty hash/progress control](../build/scenarios/20261002-201730_net_statehash_nonempty_1/report.json)
+(166.1 s), and [focused native-death detector](../build/scenarios/20261002-202126_net_native_census_death_control_1/report.json)
+(102.4 s). All four disk saves were unchanged in both suites. The wave fixture
+recorded two real second-wave enemies and six native client deaths; the
+nonempty fixture's later empty-wave sample is not extra wave evidence.
+
+`net_native_census_death_control.json` preserves the isolated negative fixture
+through its failed native lethal/detection/guarded bit-restoration checkpoint
+and ends there. It verifies the changed lethal/census path independently of
+the known unsupported battle-room native-puppet reload. It does not close
+that original recovery failure or the courtyard spawn-authority gap.
+
 ## Known limits
 
 - `boot` loads whatever slot the save list opens on (the last used one) and

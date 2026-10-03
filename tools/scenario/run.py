@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1354,6 +1355,395 @@ def step_courtyard_diagnostic(ctx: Context, step: dict) -> dict:
         ctx.artifacts.append(path.name)
 
 
+
+def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) -> dict:
+    """Checked, bounded native-list/cache observation independent of update-hook membership."""
+    started = time.monotonic()
+    deadline = started + timeout
+    pid = ctx.inst(index).pid
+    out = {"instance": index, "pid": pid, "complete": False, "listComplete": False,
+           "classificationComplete": False, "errors": [], "provenance": [], "provenanceErrors": [],
+           "source": "kh2ctl entities candidates + independently checked native links/identity/HP; no game writes"}
+    base = 0
+    def remaining():
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise StepFailed("native census read deadline exceeded")
+        return left
+    def valid_pointer(value):
+        return 0x10000 <= value < 0x0000800000000000
+    def read(fields):
+        """Batched checked absolute reads through peek; unsupported below-module addresses fail."""
+        result = {}
+        items = list(fields.items())
+        for start in range(0, len(items), 128):
+            batch = items[start:start + 128]
+            for label, (address, _) in batch:
+                if not valid_pointer(address) or address < base:
+                    raise StepFailed(f"{label}: invalid/below-module pointer 0x{address:X}; not read")
+            specs = [f"0x{address - base:X}:{kind}" for _, (address, kind) in batch]
+            response = kh2ctl("peek", "--rva", ",".join(specs), pid=pid, timeout=remaining())
+            sample = response["samples"][0]
+            for label, (address, kind) in batch:
+                value = sample[f"0x{address - base:X}"]
+                result[label] = int(value, 0) if kind == "u64" and isinstance(value, str) else value
+        return result
+    def header():
+        fields = {"head": (base + 0x2A171C8, "u64"), "tail": (base + 0x2A171D0, "u64"),
+                  "cachePointer": (base + 0x2AE6680, "u64"), "cacheCounter": (base + 0x2AE6688, "u32"),
+                  "inField": (base + 0x9BA8D0, "u8"), "frozen": (base + 0x2A171E8, "u32"),
+                  "eventState": (base + 0xB65210, "i32"), "eventContext": (base + 0x2A11478, "u64"),
+                  "openMenu": (base + 0x7435D0, "u8")}
+        fields.update({key: (base + rva, kind) for key, rva, kind in (
+            ("world", 0x717008, "u8"), ("room", 0x717009, "u8"), ("door", 0x71700A, "u8"),
+            ("map", 0x71700C, "u16"), ("btl", 0x71700E, "u16"), ("evt", 0x717010, "u16"))})
+        fields.update({f"region{n}": (base + 0x2B0D720 + n * 8, "u64") for n in range(64)})
+        data = read(fields)
+        data["location"] = [data[k] for k in ("world", "room", "door", "map", "btl", "evt")]
+        data["regions"] = [data.pop(f"region{n}") for n in range(64)]
+        return data
+    def logs():
+        path = LOGS / f"kh2coop_inject_{pid}.log"
+        text = path.read_text(errors="replace") if path.exists() else ""
+        arrivals = list(re.finditer(ARRIVAL_PATTERN, text))
+        hashes = list(HASH_PATTERN.finditer(text))
+        result = {"arrival": arrivals[-1].groupdict() if arrivals else None, "hash": None, "nativeRows": []}
+        if hashes:
+            match = hashes[-1]
+            result["hash"] = match.groupdict()
+            result["hashAfterLatestArrival"] = bool(arrivals and match.start() > arrivals[-1].end())
+            result["nativeRows"] = [r.groupdict() for r in NATIVE_HASH_PATTERN.finditer(text, match.end())
+                                    if r["epoch"] == match["epoch"] and r["frame"] == match["frame"]]
+        lifecycle = list(re.finditer(r"(?:\[warp\] (?:load complete|client issued|client queued)[^\r\n]*|Warp: [0-9A-Fa-f]{2}/[0-9A-Fa-f]{2} ->[^\r\n]*)", text))
+        result["lifecycle"] = {"offset": lifecycle[-1].start(), "line": lifecycle[-1].group()} if lifecycle else None
+        result["arrivalAfterLifecycle"] = bool(arrivals and lifecycle and arrivals[-1].start() > lifecycle[-1].end())
+        result["bindingLines"] = [line for line in text.splitlines() if "[enemysync]" in line
+                                   and any(word in line for word in ("spawn", "manifest", "matched", "bind"))][-100:]
+        return result
+    def cache_sample(pointer):
+        buckets = [base + 0x2AE5E60 + n * 0x208 for n in range(4)]
+        if pointer not in buckets:
+            raise StepFailed(f"cache pointer 0x{pointer:X} is not one of four rooted inline buckets")
+        values = read({"roomTag": (pointer, "i32"), "age": (pointer + 4, "i32"),
+                       **{f"word{n}": (pointer + 8 + n * 8, "u64") for n in range(64)}})
+        ids = [(values[f"word{n}"] >> (16 * j)) & 0xFFFF for n in range(64) for j in range(4)]
+        return {"bucketIndex": buckets.index(pointer), "roomTag": values["roomTag"], "age": values["age"],
+                "ids": ids, "nonzeroIds": [value for value in ids if value != 0],
+                "layout": "root2AE5E60 + index*208; room-only tag; all256 raw u16 IDs, zero slots retained"}
+    try:
+        probe = kh2ctl("peek", "--rva", "0x2A171C8:u64", pid=pid, timeout=remaining())
+        base = int(probe["moduleBase"], 0)
+        out["moduleBase"] = f"0x{base:X}"
+        out["before"] = before = header()
+        out["logsBefore"] = logs()
+        entities = kh2ctl("entities", pid=pid, timeout=remaining())
+        out["entities"] = entities
+        candidates = entities.get("actors", [])
+        addresses = [int(actor["address"], 16) for actor in candidates]
+        if len(addresses) >= 256 or len(set(addresses)) != len(addresses):
+            raise StepFailed("entities candidate list hit256 cap or repeated an actor; not a complete traversal")
+        if not addresses or not before["head"]:
+            raise StepFailed("no live native root/candidates; empty entities alone is not absence proof")
+        actor_fields = {}
+        for n, address in enumerate(addresses):
+            actor_fields.update({f"{n}:{key}": (address + offset, kind) for key, offset, kind in (
+                ("nextHandle", 0xA90, "u32"), ("objectEntry", 0x918, "u64"), ("status", 0x5C0, "u64"),
+                ("controller", 0x9E8, "u64"), ("spawnRecord", 0x9F0, "u64"),
+                ("flags9B8", 0x9B8, "u32"), ("state9C0", 0x9C0, "u64"), ("flags120", 0x120, "u32"))})
+        values = read(actor_fields)
+        nodes = []
+        for n, actor in enumerate(candidates):
+            node = {"actor": actor, "address": addresses[n],
+                    **{key.split(":", 1)[1]: value for key, value in values.items() if key.startswith(f"{n}:")}}
+            handle = node["nextHandle"]
+            if handle:
+                masked = handle & 0x7FFFFFFF
+                bucket = masked >> 25
+                region = before["regions"][bucket] if bucket < 64 else 0
+                if region == 0xFFFFFFFFFFFFFFFF or region & 0x1FFFFFF or not valid_pointer(region | (masked & 0x1FFFFFF)):
+                    raise StepFailed(f"actor0x{addresses[n]:X}: nonzero link has invalid region/bucket")
+                node["nextAddress"] = region | (masked & 0x1FFFFFF)
+                node["handleBucket"] = bucket
+            else:
+                node["nextAddress"] = 0
+            nodes.append(node)
+        out["nodes"] = nodes
+        if before["head"] != addresses[0] or before["tail"] != addresses[-1]:
+            raise StepFailed("checked HEAD/TAIL do not bound the entities candidate order")
+        if any(node["nextAddress"] != (addresses[n + 1] if n + 1 < len(nodes) else 0)
+               for n, node in enumerate(nodes)):
+            raise StepFailed("checked native chain differs from entities order, cycles or lacks terminal handle0")
+        out["terminalHandleZero"] = nodes[-1]["nextHandle"] == 0
+        descriptors = {}
+        for n, node in enumerate(nodes):
+            pointer = node["objectEntry"]
+            if not base < pointer < base + 0x3000000:
+                raise StepFailed(f"actor0x{node['address']:X}: object descriptor unavailable; classification incomplete")
+            descriptors[f"{n}:objectId"] = (pointer, "u32")
+            descriptors[f"{n}:objectType"] = (pointer + 4, "u8")
+            descriptors[f"{n}:namePrefix"] = (pointer + 8, "u16")
+        descriptor_values = read(descriptors)
+        hp_fields = {}
+        for n, node in enumerate(nodes):
+            node["objectId"] = descriptor_values[f"{n}:objectId"]
+            node["objectType"] = descriptor_values[f"{n}:objectType"]
+            node["namePrefix"] = descriptor_values[f"{n}:namePrefix"]
+            node["nativeEnemyType"] = node["objectType"] in (3, 4)
+            if node["nativeEnemyType"]:
+                if not valid_pointer(node["status"]):
+                    raise StepFailed(f"native enemy0x{node['address']:X}: status pointer unavailable, HP unknown")
+                hp_fields[f"{n}:hp"] = (node["status"], "i32")
+                hp_fields[f"{n}:maxHp"] = (node["status"] + 4, "i32")
+        hp_values = read(hp_fields)
+        for n, node in enumerate(nodes):
+            if node["nativeEnemyType"]:
+                node["hp"] = hp_values[f"{n}:hp"]
+                node["maxHp"] = hp_values[f"{n}:maxHp"]
+                node["combatEligible"] = node["namePrefix"] != 0x5F46
+            else:
+                node["combatEligible"] = False
+        out["classificationComplete"] = True
+        out["nativeEnemyRows"] = [node for node in nodes if node["nativeEnemyType"]]
+        out["livingCombatRows"] = [node for node in nodes if node["combatEligible"] and node["hp"] > 0]
+        out["cacheFirst"] = cache_sample(before["cachePointer"])
+        for node in out["nativeEnemyRows"]:
+            record = {"actor": node["address"], "controller": node["controller"], "pointer": node["spawnRecord"]}
+            out["provenance"].append(record)
+            if node["controller"] == 0 or node["spawnRecord"] == 0:
+                record["status"] = "null native metadata; no dereference or invented record identity"
+                continue
+            try:
+                controller = read({"groupKey": (node["controller"], "u32"),
+                                   "header": (node["controller"] + 8, "u64"),
+                                   "spawnArray": (node["controller"] + 0x30, "u64"),
+                                   "regionArray": (node["controller"] + 0x38, "u64")})
+                record["controllerFields"] = controller
+                count = read({"spawnCount": (controller["header"] + 4, "u16")})["spawnCount"]
+                record["spawnCount"] = count
+                start = controller["spawnArray"]
+                if (controller["header"] == 0 or start != controller["header"] + 0x2C
+                        or controller["regionArray"] != start + count * 0x40
+                        or not 0 < count <= 256 or not start <= node["spawnRecord"] < start + count * 0x40
+                        or (node["spawnRecord"] - start) % 0x40):
+                    raise StepFailed("spawn record is outside validated controller/header span (diagnostic count cap256)")
+                words = read({str(n): (node["spawnRecord"] + n * 8, "u64") for n in range(8)})
+                raw = b"".join(words[str(n)].to_bytes(8, "little") for n in range(8))
+                record.update(status="shape-validated static provenance; ordinary table identity pending", hex=raw.hex(), objectId=struct.unpack_from("<I", raw)[0],
+                              position=list(struct.unpack_from("<fff", raw, 4)), mode=raw[0x1C],
+                              positionMode=raw[0x1D], recordId=struct.unpack_from("<H", raw, 0x1E)[0],
+                              delay=struct.unpack_from("<H", raw, 0x2A)[0], stage=raw[0x30],
+                              recordIndex=(node["spawnRecord"] - start) // 0x40)
+                record["cacheSlots"] = [i for i, value in enumerate(out["cacheFirst"]["ids"])
+                                        if record["recordId"] != 0 and value == record["recordId"]]
+            except (StepFailed, subprocess.TimeoutExpired) as error:
+                record.update(status="incomplete", error=str(error))
+                out["provenanceErrors"].append(f"spawn provenance actor0x{node['address']:X}: {error}")
+        out["cacheSecond"] = cache_sample(before["cachePointer"])
+        verify = read({key: field for key, field in actor_fields.items()
+                       if key.split(":", 1)[1] in ("nextHandle", "objectEntry", "status", "controller", "spawnRecord")})
+        out["actorIdentityStable"] = all(verify[key] == values[key] for key in verify)
+        out["after"] = after = header()
+        out["logsAfter"] = logs()
+        stable_keys = ("head", "tail", "location", "regions", "inField", "frozen", "eventState", "eventContext", "openMenu")
+        out["nativeHeaderStable"] = all(before[k] == after[k] for k in stable_keys)
+        arrival_before, arrival_after = out["logsBefore"]["arrival"], out["logsAfter"]["arrival"]
+        arrival_location = ([int(arrival_after[k], 16 if k in ("world", "room") else 10)
+                             for k in ("world", "room", "door", "map", "btl", "evt")] if arrival_after else None)
+        out["epochStable"] = bool(arrival_before and arrival_after and arrival_before == arrival_after
+                                   and arrival_location == after["location"])
+        out["safeGameplay"] = all(h["inField"] != 0 and h["frozen"] == 0 and h["eventState"] == 0
+                                   and h["eventContext"] == 0 and h["openMenu"] == 255 for h in (before, after))
+        out["lifecycleStable"] = bool(out["logsBefore"]["lifecycle"] == out["logsAfter"]["lifecycle"]
+                                      and out["logsBefore"]["arrivalAfterLifecycle"]
+                                      and out["logsAfter"]["arrivalAfterLifecycle"])
+        out["listComplete"] = bool(out["terminalHandleZero"] and out["actorIdentityStable"]
+                                    and out["nativeHeaderStable"] and out["epochStable"]
+                                    and out["safeGameplay"] and out["lifecycleStable"])
+        out["cacheStable"] = (before["cachePointer"] == after["cachePointer"]
+                               and before["cacheCounter"] == after["cacheCounter"]
+                               and out["cacheFirst"] == out["cacheSecond"])
+        if not out["listComplete"]:
+            out["errors"].append("native traversal/identity/location/load epoch changed during read; no complete absence proof")
+        if not out["cacheStable"]:
+            out["errors"].append("native cache changed during read; raw samples preserved")
+        published = out["logsAfter"]
+        native_addresses = {row["address"] for row in out["livingCombatRows"]}
+        comparison = {"nativeLivingCount": len(native_addresses), "comparisonValid": False, "reasons": [],
+                      "caution": "reads and periodic publisher are not atomic; repeat stable snapshots before inference"}
+        out["comparison"] = comparison
+        h = published["hash"]
+        if not out["listComplete"]:
+            comparison["reasons"].append("checked gameplay census/lifecycle is incomplete")
+        if not h or not published.get("hashAfterLatestArrival"):
+            comparison["reasons"].append("no hash after latest completed arrival")
+        if h:
+            hash_location = [int(h[k], 16 if k in ("world", "room") else 10)
+                             for k in ("world", "room", "door", "map", "btl", "evt")]
+            if (not arrival_after or h["epoch"] != arrival_after["epoch"]
+                    or hash_location != before["location"] or hash_location != after["location"]):
+                comparison["reasons"].append("published epoch/full location is not bound to checked census")
+            rows = [{k: int(v, 16 if k == "actor" else 10) for k, v in row.items()}
+                    for row in published["nativeRows"]]
+            live = sorted([[r[k] for k in ("netId", "objectId", "hp")] for r in rows if r["hp"] > 0])
+            encoded = struct.pack("<II", 0x3145484B, len(live)) + b"".join(struct.pack("<HIi", *r) for r in live)
+            recomputed = 2166136261
+            for byte in encoded:
+                recomputed = ((recomputed ^ byte) * 16777619) & 0xFFFFFFFF
+            comparison["recomputedEnemiesHash"] = recomputed
+            if len(rows) != int(h["observed"]) or len(live) != int(h["count"]) or recomputed != int(h["enemies"], 16):
+                comparison["reasons"].append("published native rows incomplete or canonical hash mismatch")
+            comparison["comparisonValid"] = not comparison["reasons"]
+            if comparison["comparisonValid"]:
+                logged_addresses = {r["actor"] for r in rows if r["hp"] > 0}
+                comparison.update(publishedCount=int(h["count"]),
+                                  nativeLivingAbsentFromLatestHash=sorted(native_addresses - logged_addresses),
+                                  publishedRowsAbsentFromNativeList=sorted(logged_addresses - set(addresses)))
+        out["complete"] = out["listComplete"] and out["classificationComplete"] and out["cacheStable"] and not out["errors"]
+    except Exception as error:
+        out["errors"].append(f"{type(error).__name__}: {error}")
+    # Causal context is separate: a truncated controller table must not erase
+    # a completed checked native traversal/cache snapshot or imply native absence.
+    causes = {"complete": False, "controllers": [], "limits": []}
+    out["causeContext"] = causes
+    if out.get("listComplete") and time.monotonic() < deadline:
+        try:
+            roots = read({"controllerCount": (base + 0x2A10418, "i32"),
+                          "activationActor": (base + 0x2A10420, "u64"),
+                          "playerActor": (base + 0x2A105D0, "u64")})
+            causes["before"] = roots
+            count = roots["controllerCount"]
+            if not 0 <= count <= 64:
+                causes["limits"].append(f"controller count{count} exceeds diagnostic bound0..64;64 is not a proven native limit")
+            table_count = min(64, max(0, count))
+            fields = {}
+            for n in range(table_count):
+                entry = base + 0x2A10010 + n * 16
+                fields.update({f"{n}:key": (entry, "u32"), f"{n}:flags": (entry + 4, "u32"),
+                               f"{n}:pointer": (entry + 8, "u64")})
+            entries = read(fields)
+            controller_fields = {}
+            for n in range(table_count):
+                entry = {key: entries[f"{n}:{key}"] for key in ("key", "flags", "pointer")}
+                entry["tableIndex"] = n
+                causes["controllers"].append(entry)
+                if entry["flags"] & 1:
+                    entry["status"] = "alternate script-pointer entry; not interpreted as controller"
+                elif not valid_pointer(entry["pointer"]):
+                    entry["status"] = "invalid/null controller pointer"
+                    causes["limits"].append(f"entry{n}: no valid ordinary controller")
+                else:
+                    pointer = entry["pointer"]
+                    controller_fields.update({f"{n}:{key}": (pointer + offset, kind) for key, offset, kind in (
+                        ("groupKey", 0, "u32"), ("controllerFlags", 4, "u32"), ("header", 8, "u64"),
+                        ("regionHead", 0x10, "u64"), ("regionTail", 0x18, "u64"),
+                        ("cooldown", 0x20, "f32"), ("currentCount", 0x24, "i32"),
+                        ("initialCount", 0x28, "i32"), ("stage", 0x2C, "u8"),
+                        ("spawnArray", 0x30, "u64"), ("regionArray", 0x38, "u64"))})
+                    entry["status"] = "ordinary controller candidate"
+            controller_values = read(controller_fields)
+            header_fields = {}
+            for entry in causes["controllers"]:
+                n = entry["tableIndex"]
+                if entry["status"] != "ordinary controller candidate":
+                    continue
+                entry.update({key.split(":", 1)[1]: value for key, value in controller_values.items()
+                              if key.startswith(f"{n}:")})
+                pointer = entry["header"]
+                if not valid_pointer(pointer):
+                    causes["limits"].append(f"entry{n}: invalid ordinary controller header")
+                    entry["status"] = "unavailable header"
+                    continue
+                header_fields.update({f"{n}:{key}": (pointer + offset, kind) for key, offset, kind in (
+                    ("type", 0, "u8"), ("flags", 1, "u8"), ("headerId", 2, "u16"),
+                    ("spawnCount", 4, "u16"), ("regionCount", 6, "u16"),
+                    ("activationMarker", 0xE, "u8"), ("removalDelay", 0x20, "u16"),
+                    ("threshold", 0x22, "u8"), ("loopEndStage", 0x23, "u8"), ("restartStage", 0x24, "u8"))})
+            headers = read(header_fields)
+            for entry in causes["controllers"]:
+                n = entry["tableIndex"]
+                if entry["status"] != "ordinary controller candidate":
+                    continue
+                entry["headerFields"] = h = {key.split(":", 1)[1]: value for key, value in headers.items()
+                                             if key.startswith(f"{n}:")}
+                entry["layoutValidated"] = (entry["spawnArray"] == entry["header"] + 0x2C
+                    and entry["regionArray"] == entry["spawnArray"] + h["spawnCount"] * 0x40)
+                entry["status"] = "read" if entry["layoutValidated"] else "header/array layout inconsistent"
+                if not entry["layoutValidated"]:
+                    causes["limits"].append(f"entry{n}: native controller/header layout inconsistent")
+            # Positions only for addresses that the checked canonical list contains.
+            active = {node["address"]: node for node in out.get("nodes", [])}
+            position_fields = {}
+            causes["activationActors"] = {}
+            for key in ("activationActor", "playerActor"):
+                address = roots[key]
+                record = {"address": address, "inCheckedNativeList": address in active}
+                causes["activationActors"][key] = record
+                if address in active:
+                    record["actor"] = active[address]["actor"]
+                    position_fields.update({f"{key}:{axis}": (address + offset, "f32")
+                                            for axis, offset in (("x", 0x670), ("y", 0x674), ("z", 0x678))})
+                else:
+                    record["positionStatus"] = "not dereferenced: no checked active-list identity"
+            positions = read(position_fields)
+            for key, record in causes["activationActors"].items():
+                if record["inCheckedNativeList"]:
+                    record["position"] = [positions[f"{key}:{axis}"] for axis in ("x", "y", "z")]
+            after = read({"controllerCount": (base + 0x2A10418, "i32"),
+                          "activationActor": (base + 0x2A10420, "u64"), "playerActor": (base + 0x2A105D0, "u64")})
+            causes["after"] = after
+            causes["tableStable"] = read(fields) == entries and after == roots
+            if not causes["tableStable"]:
+                causes["limits"].append("controller table/activation roots changed during read")
+            causes["complete"] = not causes["limits"]
+            for record in out["provenance"]:
+                matches = [entry for entry in causes["controllers"] if not entry["flags"] & 1
+                           and entry["pointer"] == record["controller"]
+                           and entry.get("groupKey") == entry["key"]
+                           and entry.get("groupKey") == record.get("controllerFields", {}).get("groupKey")
+                           and entry.get("layoutValidated")]
+                record["ordinaryTableIdentityVerified"] = bool(causes["tableStable"] and matches)
+                record["ordinaryTableIndices"] = [entry["tableIndex"] for entry in matches]
+                record["provenanceScope"] = "static shape plus table/key evidence; not proof of every native producer's semantic identity"
+        except Exception as error:
+            causes["limits"].append(f"{type(error).__name__}: {error}")
+    else:
+        causes["limits"].append("primary native list incomplete or30s deadline exhausted; causal reads skipped")
+    out["elapsedMs"] = round((time.monotonic() - started) * 1000)
+    return out
+
+
+def step_native_enemy_census(ctx: Context, step: dict) -> dict:
+    """Three read-only concurrent-peer snapshots; complete collection is not parity acceptance."""
+    name = step.get("as", "native_enemy_census")
+    indices = step.get("instances", list(range(len(ctx.instances))))
+    count = step.get("samples", 3)
+    interval = step.get("intervalMs", 1500)
+    if not 1 <= count <= 3 or not 0 <= interval <= 5000:
+        raise StepFailed("native census supports1..3 snapshots and0..5000ms settling interval")
+    evidence = {"diagnosticOnly": True, "snapshots": [], "readOnly": True,
+                "note": "a successful collection does not assert peer parity or empty enemy application"}
+    try:
+        for number in range(count):
+            if number:
+                ctx.sleep(interval / 1000)
+            with ThreadPoolExecutor(max_workers=len(indices)) as pool:
+                futures = {i: pool.submit(native_enemy_census_snapshot, ctx, i, 30) for i in indices}
+                peers = {str(i): future.result() for i, future in futures.items()}
+            evidence["snapshots"].append({"ordinal": number, "peers": peers})
+            ctx.check_all()
+        evidence["complete"] = all(peer["complete"] for snap in evidence["snapshots"] for peer in snap["peers"].values())
+        if not evidence["complete"]:
+            raise StepFailed("native census has incomplete/changing reads; inspect preserved snapshots, do not infer native absence")
+        return {"path": f"{name}.json", "complete": True, "diagnosticOnly": True,
+                "nativeCounts": [{i: peer["comparison"]["nativeLivingCount"] for i, peer in snap["peers"].items()}
+                                 for snap in evidence["snapshots"]]}
+    finally:
+        ctx.saved[name] = evidence
+        path = ctx.run_dir / f"{name}.json"
+        path.write_text(json.dumps(evidence, indent=2))
+        ctx.artifacts.append(path.name)
+
+
 class Recorder:
     """Samples every party actor's position on the given instances in a
     thread: rows of (t, instance, room, head, address, name, objectType, x,
@@ -1536,7 +1926,8 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "approach_goa_chest": step_approach_goa_chest,
          "dismiss_goa_map_reward": step_dismiss_goa_map_reward,
          "enemy_hash_control": step_enemy_hash_control,
-         "courtyard_diagnostic": step_courtyard_diagnostic}
+         "courtyard_diagnostic": step_courtyard_diagnostic,
+         "native_enemy_census": step_native_enemy_census}
 
 
 # --------------------------------------------------------------------------

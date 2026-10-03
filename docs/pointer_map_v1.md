@@ -27,7 +27,7 @@ Source of truth for current constants: `runtime/include/kh2coop/KH2Offsets.hpp`
 | Position buffer array | Done | Buffer at `exe+0xAD9100`, stride `0x38`. Dual-write for physics-active rooms. |
 | Camera struct | Done | Full camera struct at `exe+0x718C60` with look-at, eye position, actor pointer, distance. |
 | Camera retarget | Done | Fake actor allocation + pointer redirect at `camStruct+0x50`. Implemented in `WriteCameraTarget()` / `RestoreVanillaCamera()`. |
-| Enemy list root | Done | Active-entity list head at `exe+0x2A171C8`; next handle at `actor+0xA90`; handle region table at `exe+0x2B0D720`. Enemy count is derived by traversal + moveState `8/9` plus objentry-name filter (`B_`/`M_`). |
+| Enemy list root | Done | Active-entity list head at `exe+0x2A171C8`; next handle at `actor+0xA90`; handle region table at `exe+0x2B0D720`. Enemy class is objentry type `3/4`; the old moveState/name filter missed some mobs. Checked traversal completion is required to establish absence. |
 | Input system | Done | Full pipeline mapped: raw collection (`exe+0x105810`), button mapping (`exe+0x39C720`), processed state (`exe+0xBF31A0`). Friends are AI-only; two injection strategies defined. See [Input system](#input-system--ghidra-re-session--2026-03-31-confirmed). |
 | Animation ID | Done | `actor+0x180` (DWORD), maps to OpenKH MotionSet enum. Verified IDLE/RUN/JUMP/FALL/LAND/ATTACK. |
 | Entity update chain | Done | Full call chain traced: update loop (`0x3BF5E0`) → per-entity update (`0x3BFD30`) → position physics (`0x3B89A0`) → position calc (`0x3B9090`) → MEMCPY_4FLOATS. Strategy B hook target identified; current live M3 work is on suppressing the friend vtable `+0x28` pre-physics callback to remove residual Sora tethering. |
@@ -649,7 +649,7 @@ File: `runtime/src/GameBridgePC.cpp`
 | `DiscoverEntityAddresses()` | Implemented | Camera chain (slot 0) + Slot1+0x220/0x228 (friends). Re-discovers on room transition. |
 | `ReadRoomState()` | Implemented | Reads world/room/program/cutscene state |
 | `ReadActorState(slot)` | Implemented | All slots: position, rotation, velocity, airborne, HP. Friends via Slot1 actor pointers. |
-| `ReadEnemyStates()` | Partial | Traverses active-entity list head `exe+0x2A171C8`, resolves `actor+0xA90` handles via `exe+0x2B0D720`, reads `objectId` from `actor+0x918`, filters moveState `8/9` plus objentry prefix `B_`/`M_` |
+| `ReadEnemyStates()` | Partial | Traverses active-entity list head `exe+0x2A171C8`, resolves `actor+0xA90` handles via `exe+0x2B0D720`, reads `objectId` from `actor+0x918`, filters objentry type `3/4`. External traversal currently has silent read-failure/truncation paths; an empty result alone does not prove native absence. |
 | `WriteCameraTarget(slot)` | Implemented | Fake actor allocation + pointer redirect |
 | `RestoreVanillaCamera()` | Implemented | Restores original pointer, frees memory |
 | `InjectOwnedInput(slot, input)` | TODO | Input pipeline fully mapped (see Input System section). Friends are AI-only; injection requires Strategy A (direct entity write) or Strategy B (AI hook). |
@@ -676,3 +676,27 @@ To block limits while puppets are active, hook `0x3D88E0` and return `5` for any
 | 6 (`0x40`) | Skips collision: actor-vs-actor separation in `EntityPositionPhysics` (`0x3B89A0` → `0x3B81D0`), and terrain collision plus ground snap in the position calculator (`0x3B9090`). Per actor; the objentry-wide equivalent is `objentry+0x0C & 2` (shared by every actor of that type). Use for non-colliding puppets |
 | 14 (`0x4000`) | TakeDamage (`0x3D5E50`) passes reactFlag 0, so no hit reaction |
 | `0x1000020` | Also skips the ground-snap block in `0x3B9090` |
+
+### Native enemy provenance and appearance cache (`[GHIDRA]`, 2026-10-02)
+
+Independently corroborated static reads, additionally observed in the
+[checked native census](../build/scenarios/20261002-200856_net_enemy_census_transition08_1/native_enemy_census_transition08.json).
+They are diagnostic fields, not a validated suppression or replication
+boundary. Equal SAVE progress hashes do not cover this cache.
+
+| Address / offset | Meaning |
+|---|---|
+| `actor+0x9E8` | Controller pointer attached by `0x3B4BD0`; null is legal |
+| `actor+0x9F0` | Pointer to a `0x40`-byte native spawn record, not inline bytes; record ID is u16 at `+0x1E` |
+| `exe+0x2AE5E60` | Four inline appearance-cache buckets, each `0x208` bytes: room tag i32, age i32, then 256 u16 record IDs |
+| `exe+0x2AE6680` | Active bucket pointer; must equal one of root `+0`, `+0x208`, `+0x410`, `+0x618` before reading |
+| `exe+0x2AE6688` | u32 selection counter; IDs can change without this counter changing |
+| `0x3F5980` | Selects a bucket using the NOW room byte and age; tag is not a packed world/room identity |
+| `0x3F5900`, `0x3F5BE0`, `0x3F5CD0` | Test, insert and clear native record IDs; membership scans all 256 slots, including after zero gaps |
+| `0x3A0580`, `0x3A0660` | Restore/back up `0x830` cache bytes from/to `exe+0x2A0C550` during native load lifecycle |
+
+Native emission wrappers `0x3FE590`/`0x3FE650` call factory `0x3DF930` and
+attach this provenance. Some callers dereference the result without a null
+check, so returning null from a broad spawn hook is not safe. Compare a checked
+native linked-list census, controller/record state and cache contents before
+choosing an authoritative emission strategy.

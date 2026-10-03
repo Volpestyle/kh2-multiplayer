@@ -196,6 +196,11 @@ peer's native observation rows. Unmatched living actors participate in the
 hash with net ID 0; missing, extra or duplicate actors cannot be hidden by
 hashing the received host cache. Positions are excluded while AI runs locally.
 
+That run used actual native actors observed by the per-entity update hook,
+rather than the received host cache. Callback coverage alone did not establish
+that every linked native actor entered the hook. The subsequent independent
+census below resolves that uncertainty for its sampled courtyard reproduction.
+
 The progress hash reads 8,108 masked, verified SAVE bytes. A client-only
 change to chest flag 409 produced a different actual progress hash and the
 relay's progress mismatch bit (`fields=4`). Restoring that bit restored
@@ -216,9 +221,87 @@ The later reload reached epoch 2 on both peers but failed because the native
 friend pointers were null and no remote Sora actors existed in `12/0B`, battle
 program 1. Logical avatar poses alone did not satisfy the native actor check.
 This establishes detection/bit restoration, not successful reload recovery.
+The [separate party diagnostic](../build/scenarios/20261002-194936_net_party_availability_probe_1/report.json)
+passed its observation steps (95.3 s), without combat or the enemy fault.
+Both peers had valid companion pointers in the loaded-save room, then null
+friend pointers on first native entry into `12/0B` **before networking**.
+They remained null at settled connected epoch 1 and identical reload epoch 2.
+The world-18 party word stayed `0x12121200` throughout; each actor sample
+contained only local Sora, PRIZE and W_EX010, while connected logical puppet
+poses were active. All four on-disk saves were unchanged. This establishes
+preexisting native companion absence in this fixture, consistent with plan
+risk R12; it does not establish native puppet support or change the failed
+negative-control recovery result.
 The earlier three-participant controls also exposed an independent client-2
 spawn of an unmatched 160-HP object 309. Keep those failures and the strict
 population/puppet checks; neither spawn convergence nor recovery is complete.
+
+The [20-load hash route](../build/scenarios/20261002-193320_net_host_transitions_statehash_acceptance_1/report.json)
+also **failed** (203.3 s), after ten passing fresh hash checkpoints. At route
+transition 8, epoch 10, all three peers had arrived at the complete location
+`05/06, door 0, map 1, battle 1, event 0`; native puppet checks passed. The
+host published no observed enemies, while both clients published five living,
+unmatched object-302 actors at 20 HP. Their enemy hashes differed
+(`401581688` versus `712275580`, relay `fields=2`), while all progress hashes
+were `105337703`. All four on-disk save hashes were unchanged.
+
+That report did not capture an independent native-list snapshot, so it could
+not establish host absence. Native spawn appearance-ID caches and controller
+state also lie outside the SAVE progress hash. The subsequent checked census
+below supplies those missing observations. The strict route remains failed;
+matching progress bytes alone do not prove matching enemy activation.
+
+The [subsequent checked census](../build/scenarios/20261002-200856_net_enemy_census_transition08_1/native_enemy_census_transition08.json)
+collected three complete native-list/cache snapshots on every peer; the
+retained strict hash check still **failed** (208.9 s). The first snapshot had
+zero native enemies and an empty active cache everywhere. The later two had
+zero host enemies and five living client enemies, agreeing with each published
+hash population. This establishes real spawn divergence in this run, without
+a hidden host actor in the update registry.
+
+The same type-2 controller (header ID 30) had flags `2` on the host and `10`
+on both clients after their appearance, while each client cache gained record
+IDs `11,12,13,14,18`. The host cache stayed empty. Its activation actor remained
+near `(45,-260,1950)`; the clients moved near `(-1019,-180,1636)` and
+`(-923,-206,1638)`. Native analysis identifies controller bit 3 as an accepted
+activation region. These observations support local activation as the next
+authority boundary to investigate; they do not validate a hook or suppression
+strategy. Initially equal caches also rule out differing retained IDs as a
+sufficient explanation for this particular reproduction. All four disk save
+hashes were unchanged.
+
+**Checked native-list coverage.** EnemySync now commits presence only from a
+complete canonical native-list traversal with checked metadata, links, tail,
+handle regions and lifecycle. A failed read, cycle, changing list or continuation
+beyond the 256-node safety bound makes the entire sample unavailable; it never
+publishes a truncated or invented empty roster. Unknown intervals restart
+despawn grace and suspend enemy writes/messages/hashes. Checked native target
+identity guards HP/lethal calls, and a fresh post-application census supplies
+hash rows independently of tracker presence. Unmatched live client actors
+remain visible. This corrects coverage; it does not synchronize spawn activation.
+
+The [native-wave regression](../build/scenarios/20261002-201456_net_enemy_sync_waves_1/report.json)
+passed (153.6 s) after the change: two real second-wave enemies, six native
+deaths on each client and battle state zero everywhere. The
+[nonempty hash regression](../build/scenarios/20261002-201730_net_statehash_nonempty_1/report.json)
+also passed (166.1 s), including actual HP/hash agreement and reversible
+progress mismatch detection. Its later empty second-wave observation remains
+separate from the real-wave proof. All four disk save hashes were unchanged.
+
+The [focused native-death detector](../build/scenarios/20261002-202126_net_native_census_death_control_1/report.json)
+passed (102.4 s) on the same DLL: the HP-locked client target survived its native
+lethal call, appeared in two fresh actual hash samples with relay `fields=2`,
+and its temporary bit was restored. All four saves were unchanged. The fixture
+ends after detection/restoration; it does not replace the still-failed full
+negative-control reload-recovery scenario.
+
+The next activation change needs a host-authored native position sample tied
+to the epoch, complete location and session, with source sequence/liveness.
+Existing visual puppet poses have only world/room and can remain held across
+reloads, so they cannot supply that authority. A scoped native `0x3FF000`
+position substitution is a candidate only for validated ordinary combat type-2
+controllers with static-position records; broader modes, type 9 and seven
+header-30 region geometries still require separate evidence.
 
 Not covered yet:
 - Bosses: none reachable on this save.

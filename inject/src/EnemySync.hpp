@@ -14,6 +14,10 @@
 // Both: once per second in confirmed, controllable gameplay, publish a hash
 //       of actual local live actors (including unmatched copies) and verified
 //       applied SAVE bytes. Native actor observations accompany each hash log.
+// Presence comes from a checked canonical native active-list census. An
+// unavailable census suspends enemy writes, sends, hashes and despawn inference;
+// time without a complete observation does not count toward despawn grace.
+// Hash rows use a fresh post-application census, independently of spawn presence.
 // Host room announcements wait for safe native gameplay and an enqueued full
 // progress snapshot; actors remain tracked while the room packet is retried.
 // Packets travel through the WorldBridge (kh2coop/WorldBridge.hpp) as the
@@ -32,11 +36,11 @@ using StatDeltaFn = int(__fastcall*)(void* actor, int delta, int idx, int reactF
 
 void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta);
 
-// Game thread, at the start of each frame's entity update (the previous
-// frame's actor list is complete).
+// Game thread, at the head actor's update entry, before its native update.
+// Dependency scheduling means this need not be the first actor callback.
 void OnFrameStart(std::uint32_t frame);
 
-// Game thread, once per actor per frame.
+// Compatibility entry point for EntityHook; callback coverage is not presence.
 void NoteActor(uintptr_t actor);
 
 // True on a client with enemy sync running: its own hits on enemies must
