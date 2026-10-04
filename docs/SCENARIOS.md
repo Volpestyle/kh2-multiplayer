@@ -60,6 +60,7 @@ A timeout after partial emission stays a partial failure, not a retry.
 | [20261004-142007](../build/scenarios/20261004-142007_net_reconnect_shadows_outside_activation_control_farther_1/report.md) | FAIL final assertion with `KeyError: runnerBindings`,235.3s | Both complete post-rejoin samples5/0/5 and all seven BOXes outside; native reconnect audit ready. The fixture asked for runner fields absent from `reconnect_check`. Final death/no-replay checks were not executed; four saves unchanged. |
 | [20261004-143318](../build/scenarios/20261004-143318_net_reconnect_shadows_outside_activation_control_farther_1/report.md) | PASS all120 control steps,242.1s | Two complete5/0/5 samples with host endpoints outside all seven BOXes, original survivor HP17/max20, exact original identity/load/progress and zero-death/no-replay checks. Four saves and98 sealed inputs unchanged. |
 | [20261004-143903](../build/scenarios/20261004-143903_net_reconnect_shadows_outside_farther_forced_activation_replay_1/report.md) | PASS all142 forced-treatment steps,259.3s | Qualified5/0/5 prefix, one slot1 Bootstrap, actual recorded host point,33 completed historical updates and120 completed live-input updates, reconciled1 and two complete5/5/5 HP17/max20 samples. Four saves and98 sealed inputs unchanged. Forced scope only. |
+| [20261004-155707](../build/scenarios/20261004-155707_net_reconnect_shadows_outside_farther_forced_activation_replay_1/report.md) | FAIL outside movement at step92,206.5s | On commitf10b0d4 with automatic recovery explicitly disabled, native finishZ365.722 missed the unchanged450<Z<600 band. Failed before Friend1 pause/rejoin or the forced request; recovery was not exercised. Four saves unchanged; owned cleanup completed. |
 
 These are observer/setup failures, not new recovery failures or acceptance. The
 observer validator's hardcoded WorldBridge10 check was inconsistent with current
@@ -90,6 +91,17 @@ by firstUpdate55413; client raw point bits and canonical snapshot bytes are not
 independently retained. Measured endpoints do not prove continuous outside state.
 This is bounded forced recovery, not automatic or ten-cycle acceptance.
 
+The unchanged forced fixture then failed its outside movement on the new
+commitf10b0d4 in run155707, before reconnect or treatment. Its250ms probe
+underestimated the continuation rate, so the single1929ms native pulse
+overshot the original lower Z bound. This setup FAIL is retained; it does not
+qualify or falsify the recovery code. A distinct private candidate replaces
+only that long extrapolation with same-direction native pulse/read feedback,
+at most24 pulses within one8s deadline. The original final position, full
+location, all-seven-BOX, census, HP, progress and death gates remain. No transform
+write, reverse rescue or retry is allowed. The candidate still needs its own
+owned live qualification; measured endpoints do not prove continuous clearance.
+
 The integrated host notice route remains default-off and requires exact `1` for
 `KH2COOP_AUTOMATIC_RECOVERY`, `KH2COOP_SURVIVING_PACK_PREPARE` and
 `KH2COOP_SPAWN_TRACE`. It uses the existing request generator, combined requested/
@@ -107,8 +119,11 @@ after that census, then require a newer complete seal and no pending/requested/
 planned work. Shutdown is unnecessary, and cross-process clocks are not compared.
 Unavailable ordinary native session identity must join independent runtime/relay
 evidence. These receipts alone do not qualify an episode or relax v1's existing
-no-forced-resync rules. James's proposed v2 natural/resynced gate sign-off remains
-pending, including both ten-cycle gates.
+no-forced-resync rules. James approved the separate v2 natural/resynced contract
+on2026-10-04 (VUH-1508 comment7ca6ae56): the original-route gate requires10/10
+passing cycles in any natural/resynced mix; the outside gate requires10 resynced
+cycles. A natural outside cycle fails without a skip or retry. Every other
+classification fails. Both live ten-cycle gates remain unverified.
 
 The full Release build and **2,298 affected offline checks pass**, including
 59 notice/generator, 44 claim-hold, 66 load-receipt and 365 canonical native-hit

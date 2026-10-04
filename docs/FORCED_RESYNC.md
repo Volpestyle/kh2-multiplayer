@@ -184,8 +184,11 @@ retains executed results; private sanitizer checks are scoped separately.
 The first combined build failed on a test adapter declaration; the corrected
 explicit-argument calls retain all assertions and pass the final build/run. No live
 automatic result is claimed. Both original and forced-outside ten-cycle gates
-remain open. Proposed v2 natural/resynced episode accounting preserves v1 and
-historical FAILs and still needs James's gate sign-off.
+remain open. James approved separate v2 natural/resynced accounting on2026-10-04
+(VUH-1508 comment7ca6ae56): the original route requires10/10 passing cycles in
+any natural/resynced mix; the outside variant requires10 resynced cycles, with
+a natural cycle failing without a skip or retry. Every other classification
+fails. v1 and historical FAILs remain unchanged; live qualification remains open.
 
 The recorder copies the exact native RDX input inside the qualified host update
 and joins it by update identity to the first actual nonnull fixed-wrapper return

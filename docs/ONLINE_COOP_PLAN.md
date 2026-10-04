@@ -83,7 +83,13 @@ then passed all142 steps: one Friend1 Bootstrap, actual host first-emission
 point,33 completed historical updates and120 completed live-input updates,
 reconciled1 and two complete5/5/5 samples atHP17/max20. All four saves and98
 sealed inputs stayed unchanged in both runs. This qualifies only the bounded
-forced route. The host-owned enemies-DesyncNotice path is now integrated and
+forced route. The unchanged forced regression155707 on commitf10b0d4
+subsequently failed outside-position setup at step92,206.5s, before Friend1
+rejoin or any forced request: native Z365.722 missed450<Z<600. All four saves
+were unchanged and owned cleanup completed. Recovery was not exercised. A
+bounded native pulse/read movement candidate is under separate qualification;
+no geometry or population gate is relaxed. The host-owned enemies-DesyncNotice
+path is now integrated and
 remains default-off: it requires exact `1` for `KH2COOP_AUTOMATIC_RECOVERY`,
 `KH2COOP_SURVIVING_PACK_PREPARE` and `KH2COOP_SPAWN_TRACE`. It uses the existing
 request generator, one combined requested/plan busy guard, captured-context
@@ -103,9 +109,12 @@ checks. The [combined receipt](../build/rig/automatic-recovery-root-integration-
 retains executed results; private sanitizer checks are scoped separately.
 The first combined build failed on a test adapter declaration; the corrected
 explicit-argument calls retain all assertions and pass the final build/run.
-The original and forced-outside ten-cycle gates remain open. Proposed v2
-natural/resynced accounting retains v1 and historical FAILs; James's acceptance-gate
-sign-off is pending. The earlier first-rejoin5/0/5 failure and zero completed
+The original and forced-outside ten-cycle gates remain open. James approved the
+separate v2 contract on2026-10-04 (VUH-1508 comment7ca6ae56):10/10 natural or
+resynced cycles for the original route, and10 resynced cycles for the outside
+variant. A natural outside cycle fails without a skip or retry; every other
+classification fails. v1 and historical FAILs remain unchanged. Approval does
+not qualify the private validator or a live run. The earlier first-rejoin5/0/5 failure and zero completed
 ten-cycle acceptance remain. General deaths/waves and battle/barrier/music parity
 remain unqualified.
 
