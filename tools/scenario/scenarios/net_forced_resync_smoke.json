@@ -1,0 +1,126 @@
+{
+  "name": "net_forced_resync_smoke",
+  "description": "Bounded three-instance empty-GoA forced-resync smoke. One host mailbox command freezes both original friend connection/delivery targets. Require genuine native Converged checks63, new bootstrap loads and two distinct native observation frames; exact phase/cut/SHA/fingerprint joins; independent relay and host-runtime terminal success with unchanged denominator; then two fresh complete native statehash samples with matching full room/progress/population/HP and two independently complete native census joins. CLI queued, local serialized ACK, snapshot receipt and arrival never count as success. Every incomplete saved observation remains evidence. This local empty-room smoke does not prove nonempty/dead bootstrap, natural desync repair, native creation identity or multi-PC acceptance.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "as": "initial",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "before",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['count'] == 0 and row['unmatched'] == 0 for row in saved['before']['instances'].values())",
+      "message": "empty-room smoke requires complete empty native population before resync"
+    },
+    {
+      "do": "forced_resync",
+      "as": "forced_resync",
+      "instance": 0,
+      "slot": "all"
+    },
+    {
+      "do": "statehash_check",
+      "as": "after",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "after_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1500
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['count'] == 0 and row['unmatched'] == 0 for row in saved['after']['instances'].values())",
+      "message": "empty smoke must remain empty; it does not prove nonempty bootstrap"
+    },
+    {
+      "do": "forced_resync_evidence",
+      "from": "forced_resync",
+      "statehash": "after",
+      "census": "after_census"
+    }
+  ]
+}

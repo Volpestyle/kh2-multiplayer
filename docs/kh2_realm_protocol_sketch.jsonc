@@ -4,7 +4,47 @@
   //  1) CampaignCoop  (3-player shared party/story)
   //  2) PublicRealm   (persistent characters + public hubs + party instances)
 
-  "protocolVersion": 2,
+  "protocolVersion": 9,
+  // V9 adds exact ordinary-record content to native resync; WorldBridge is 11.
+  // The optional HARP/v1 historical-input trailer is 1128 bytes, covered by
+  // snapshot SHA but excluded from the native-state fingerprint.
+  // V8 scopes native world packets with immutable producer/target delivery
+  // context. Resync26 is a fresh-capture transaction: binding33, envelope34,
+  // plan35, begin36/part37/end38, native ACK39 and fixed-target result40.
+  // Original 30-second deadline, complete full progress/population snapshot,
+  // source cut and one optional checkpoint. Dead bootstrap remains unavailable.
+  // WorldBridge10 has an independent bounded CAS operator mailbox; CLI queue
+  // receipt is not native convergence. See docs/FORCED_RESYNC.md.
+  // V7 EnemyHp: u32 epoch, u64 nonzero source sequence, u16 count, then
+  // count * (u16 netId, i32 hp, i32 maxHp). Source order survives rooms and
+  // manifests; relay/client reject older samples before cache/raw callbacks.
+  // Equal reliable relay cache replay is allowed. See docs/HP_ORDERING.md.
+  // V6 adds diagnostic request30/chunk31/done32 with strict bounded codecs.
+  // All three ENet channels are negotiated: gameplay reliable0/unreliable1,
+  // diagnostics reliable2. Frozen session+connection roster, report ID,
+  // relay receipt witnesses, nonextending remaining lifetime and raw SHA-256
+  // artifact transfers are described in docs/DESYNC_REPORTS.md.
+  // CampaignCoop v5 retains the v4 byte layouts, but requires typed closure
+  // reasons and an OS-random 128-bit world incarnation in SessionState.sessionId.
+  // Configured session names are labels; a new Player lifetime mints a new token.
+  // Automatic friend rejoin pins the original token, host peer/connection and
+  // exact local peer/slot. It never migrates hosts or accepts a restarted relay.
+  // ENet close codes / HelloReject: 0 unknown transport, 1 incompatible,
+  // 2 admission rejected, 3 peer idle, 4 host ended, 5 relay stopping,
+  // 6 handshake timeout, 7 occupied slot, 8 full lobby; unknown nonzero terminal.
+  // Code 9 is a local resume-pin mismatch, never a new session admission.
+  // AvatarRelay is exactly 84 payload bytes: ownerConnectionId:u64 followed
+  // by the unchanged 76-byte AvatarState. Relay stamps connection and slot;
+  // receivers require the current roster incarnation before sequence/loss
+  // accounting or callbacks. Outbound AvatarState remains 76 bytes.
+  // ClientHello only; no legacy SessionState handshake.
+  // SessionActor appends uint64 connectionId after archetype. Relay assigns a
+  // nonzero ID once per verified connection, never reused in its lifetime.
+  // HitClaim wire order (43 bytes): epoch:u32, seq:u32, netId:u16,
+  // objectId:u32, requesterConnectionId:u64, attackId:u32, damage:i32,
+  // attackerPosition:float32[3], attackerSlot:u8. Claim echoes its detection
+  // connection; seq strictly increases across rooms, without wrap. Relay
+  // validates current manifest type, epoch and identity, then stamps the slot.
 
   "enums": {
     "Mode": ["CampaignCoop", "PublicRealm"],

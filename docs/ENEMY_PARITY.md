@@ -4,6 +4,30 @@ Question (plan D5, hard problem 3, risk R4): with the same save and room, do
 two instances spawn the same enemies, and what key matches a host enemy to
 its client copy?
 
+## Current resync binding, 2026-10-04
+
+The current protocol9/WorldBridge11 resync path now qualifies the complete
+ordinary native catalog and exact actor-to-record membership before any HP/death
+write. Full projected header/ordered record bytes and native record index supply
+the resync association; spawn point and manifest observation order cannot supply
+a fallback while fenced. This does not change the historical ordinary-message
+key or establish controller incarnation, continuous lifetime or creation.
+
+The unchanged 89-step courtyard population fixture passed in201.7s on one PC
+over loopback (`20261004-043836`). The host and both friends qualified all10
+definitions/26 records and five living references; each friend returned five
+native20-to-requested17 positive stores, then observed all five atHP17/max20 on
+two distinct native frames. Fresh independent censuses/hash samples preserve
+the original IDs1-5/object302/type4 and progress. All101 prelaunch inputs/four
+saves remained unchanged through terminal verification, and all8 owned
+processes exited. [Exact result and evidence](FORCED_RESYNC.md#native-record-content-candidate-2026-10-04).
+
+This is living Bootstrap content/HP acceptance. The outside-region first-rejoin
+FAIL (5/0/5), zero complete ten-cycle repetitions and disabled creation remain;
+the absent surviving pack still needs safe reconstruction. Positive geometry,
+dead recovery and physical remote acceptance remain open. The observations and
+chosen ordinary key below retain their original historical scope.
+
 ## Method
 
 `tools/scenario/spikes/enemy_parity.py` (2026-10-02):
@@ -187,6 +211,17 @@ applications in total, and battle state ended at 0 everywhere. Four save-file
 hashes were unchanged. This verifies fresh bindings and HP/death application
 after real join reloads, while leaving spawn convergence open.
 
+**Current first-pack evidence, 2026-10-03.** The
+[provenance run](../build/scenarios/20261003-001955_net_enemy_census_waves_provenance_1/report.json)
+passed in 170.6 s: complete native censuses showed two object-309 and two
+object-311 enemies per peer, zero unmatched bindings and shared 160 to 153 HP
+after host damage. Four subsequent native kills applied once per client.
+Its second wave was empty and the native controller count remained two;
+six host death announcements included two earlier alive-despawn policy events.
+This is bounded first-pack replication, not multi-wave or barrier acceptance.
+The [independent audits and limits](SCENARIOS.md#native-enemy-census-diagnostic)
+retain the earlier strict divergence and incomplete creation provenance.
+
 **Actual-state hash evidence, 2026-10-02.** The
 [nonempty hash run](../build/scenarios/20261002-184220_net_statehash_nonempty_1/report.json)
 passed with three instances (180.2 s). Four live native enemies had matching
@@ -207,9 +242,12 @@ relay's progress mismatch bit (`fields=4`). Restoring that bit restored
 agreement; complete before/after snapshots showed no remaining changes in
 the shared ranges or sampled character, inventory, munny and EXP ranges.
 All four on-disk save hashes were unchanged. This proves detection and
-restoration of a progress mismatch; automatic resync, a deliberately failed
+restoration of a progress mismatch; forced resync, a deliberately failed
 native enemy death, and hash agreement across the full transition suite need
-separate evidence. The courtyard population failure above remains open.
+separate evidence. At that checkpoint, the protocol 8 fresh transaction was verified offline; native
+acceptance remained pending ([FORCED_RESYNC.md](FORCED_RESYNC.md)); historical
+dead targets remain explicitly unavailable without safe identity proof. The
+courtyard population failure above remains open.
 
 The enemy negative-control runs remain **overall failures**. In the
 [two-participant run](../build/scenarios/20261002-192119_net_statehash_enemy_negative_isolated_1/report.json),
@@ -295,19 +333,150 @@ and its temporary bit was restored. All four saves were unchanged. The fixture
 ends after detection/restoration; it does not replace the still-failed full
 negative-control reload-recovery scenario.
 
-The next activation change needs a host-authored native position sample tied
-to the epoch, complete location and session, with source sequence/liveness.
-Existing visual puppet poses have only world/room and can remain held across
-reloads, so they cannot supply that authority. A scoped native `0x3FF000`
-position substitution is a candidate only for validated ordinary combat type-2
-controllers with static-position records; broader modes, type 9 and seven
-header-30 region geometries still require separate evidence.
+The [follow-up geometry diagnostic](../build/scenarios/20261002-204742_net_enemy_census_transition03_1/native_enemy_census_transition03.json)
+is **FAIL** (164.6 s): one changing actor identity made the first client sample
+unavailable, so its trailing strict parity check never ran. Eight of nine native
+and causal snapshots were complete. Their seven BOX descriptors, inverse
+matrices and extents matched across peers. In both later snapshots, sampled
+host activation was outside all seven regions while both clients were inside
+regions 5 and 6, away from the numerical uncertainty bounds. These are checked
+reads and offline float32 calculations, not native predicate-return tracing.
+They strengthen the local-activation explanation without turning a partial
+diagnostic into a passing acceptance test. Four disk saves stayed unchanged.
+
+**Scoped native activation authority.** `NativeSpawnController` hooks verified
+`0x3FF000` calls from the ordinary controller task. Qualification checks current
+table/key membership and every record: type-2 combat, delayed mode 2, fixed
+position mode 0, finite coordinates and actual direct-ID objentry type 3/4,
+excluding `F_` objects and dynamic aliases. The controller type is one byte;
+header byte 1 is flags. No room, header-30 or enemy-ID allowlist grants authority.
+
+Clients request an exact epoch/full-location host-native float4 every 100 ms.
+A response must echo their incarnation and request identity and come from a
+native hook capture after the host consumed that request. Its lease ends at the
+original client request time plus 500 ms; receipt cannot renew it. This bounds
+capture age including bridge, relay and network backlog without comparing PC
+clocks. The relay verifies the sender, stamps the requester and routes only
+matched challenges. Both packets are ephemeral and never enter late-join or
+resync snapshots. Visual puppet poses do not supply activation authority.
+
+Current WorldBridge v11 retains the immediate session generation introduced in
+v5 and adds exact generation/delivery reset markers and per-peer delivery floors.
+Protocol 9 retains the producer source identity introduced in protocol 8; these fences do not replace
+fresh activation challenges. Native use stays unarmed until that exact marker
+arrives. Native transition/load changes, including same-room reload, invalidate
+the lease. Host capture and response flush require safe gameplay, the announced
+epoch/full location and unchanged native serials; flush follows the fresh census
+and manifest barrier. A qualified client calls the original update once with a
+fresh copied host point, or explicitly holds the whole native tick when authority
+is unavailable. Hold pauses flags/cooldown/emission and never catches up skipped
+ticks. Host/off roles and unsupported controllers retain native execution.
+
+Qualification read failures pass through with coverage diagnostics: an unknown
+controller may produce events, so it cannot be broadly held. Mixed/dynamic or
+initializer records, type 9, cache/stage divergence and transient triggers remain
+outside this boundary. A recent sampled point does not guarantee every host
+spawn decision; host-commanded emission remains D5's fallback. Native census and
+strict unmatched-row hashes continue to expose those gaps. Portable lease/relay
+tests passed with ASan/UBSan, and Windows bridge tests and the Release DLL build
+passed. The [original 20-load route](../build/scenarios/20261002-205416_net_host_transitions_statehash_acceptance_1/report.json)
+now passed (246.9 s), preserving all location, native puppet and strict hash
+checks, including the previously divergent room. Its accepted hash populations
+were empty; this proves the scoped client-only trigger regression, not nonempty
+spawn/HP/death convergence or the full P2 hash gate. Four disk saves stayed
+unchanged. The [source-expiry control](../build/scenarios/20261002-210128_net_activation_lease_menu_1/report.json)
+also passed (93.5 s). START produced an observed native unsafe menu/pause gate;
+the client stayed safely in field and both runtimes kept reporting connected
+network traffic. After a wait exceeding one second, fresh qualified Hold counts
+rose `505 -> 749` while Apply stayed `388` and no new lease was accepted. Resume
+accepted a newer source (`752 -> 836`) and Apply advanced to `389`, with the same
+controller, epoch, native serials and full location. The report retains the gate
+predicate, not its raw values; its screenshot does not prove visible menu UI.
+The exact 500 ms expiry is the portable lease contract; this live control proves
+cessation and recovery beyond that bound. Four saves stayed unchanged.
+
+The [new native-wave regression](../build/scenarios/20261002-210512_net_enemy_sync_waves_1/report.json)
+**failed** (155.5 s) before native deaths or second-wave acceptance. Before damage,
+the host had four object-309 enemies while each client had two 309s and two
+unmatched object-311 enemies. Equal total counts had admitted unequal identities.
+All four selected host actors actually took `160 -> 153`; surviving matched
+client netIDs 3/4 also reached 153. A damaged host actor then left alive and
+refilled at 160 HP before the snapshot. The strict failure is real population
+and lifecycle divergence, not list order, missed damage or demonstrated matched
+HP transport failure. The six-record controller 115 was qualified and used
+leases in this room, but the run did not capture the 311 producer/provenance or
+prove that lease holds caused the difference. Four saves stayed unchanged.
+Keep this failure alongside the earlier passing wave run; the scoped activation
+change has not established nonempty wave convergence. Creation, removal and
+controller bookkeeping need correlated native evidence. Supported nonempty
+activation and those new diagnostics are prepared offline, pending live runs.
+
+**Offline creation and lifecycle diagnostics.** Exact opt-in
+`KH2COOP_SPAWN_TRACE=1` adds independent byte-verified observers for all callers
+of fixed wrapper `3FE590` and generated wrapper `3FE650`, dispatcher `3FE320`
+and script callback `42DC10`. Each original executes once with its return value
+preserved. Events retain raw record bytes, actual returned actor metadata,
+generated point where applicable, full NOW/load/transition stamps and separate
+wrapper and enclosing `3FF000` controller/cache snapshots. Script and dispatcher
+scope are explicit dynamic enclosure; the script's native tail jump can yield
+a DLL dispatcher return address, so unavailable caller ancestry remains visible.
+
+Five independently verified lifecycle probes observe removal bookkeeping
+`3FFD90`, disposal `3B45C0`, lethal notification `3D4A40`, death bookkeeping
+`3FED10` and count decrement `3FED40`. Nested events retain entry sequence,
+parent/depth and checked pre/post actor/controller/cache facts. Disposal may
+invalidate poststate; count decrement has no actor argument. Neither missing
+poststate nor a later disappearance proves death or allocation reuse. Native
+exceptions continue to their original handler, with interrupted poststate and
+restored scope. Fault counters count observer filter hits, which can include
+several nested observations of one exception.
+
+Only the registered game thread samples role and Warp serial callbacks.
+Unknown/foreign threads preserve raw facts with unavailable role/stamps. The
+game-thread drain records events even when current correlation is unavailable.
+Fresh post-apply native census plus identity rereads establish current membership;
+binding additionally requires one sampled generation matching current, activation
+and consumed ordered-reset generations. `bindingEpoch`/netId is a current hint,
+not a creation incarnation, and is never derived from emission order.
+
+Per-hook availability, partial installation, unsupported callers, unavailable
+reads, queue loss and interrupted events remain explicit. Generic factory calls,
+unhooked subtype removal, actual deallocation and producers outside these
+boundaries are unobserved. Same-address reuse and controller reincarnation remain
+unproven. Bounded queues, missing shutdown drain and diagnostic overhead prevent
+full coverage claims. This instrumentation changes no creation authority or
+activation lease/Hold/Apply policy and does not repair the failed wave. At that offline checkpoint, the
+strict wave diagnostic and separate nonempty activation control were prepared;
+no live trace run had occurred while James used the desktop for Rivals.
+
+The expanded Release DLL and both Windows headless targets build with native
+tests under MSVC `/W4 /WX`. Spawn tests passed 38 checks and lifecycle tests
+24, then both passed in the isolated Windows AddressSanitizer build. Tests use
+actual observer code, synthetic originals and test-owned memory, including
+exception propagation, original-call count, nested/TLS recovery, queue loss and
+real foreign-thread controls. They do not execute game functions, install hooks
+or validate live ordering/census bindings. The saved-log auditor passed 37
+controls and rejects the archived untraced wave logs as incomplete evidence.
+Activation deadline evidence is reused for unchanged inputs. Subsequent relay
+claim-epoch and co-op host-loss changes have fresh world/fake/avatar/bridge
+checks, Windows ASan and portable relay ASan+UBSan evidence in the
+[relay lifecycle receipt](../build/rig/relay_lifecycle_offline_receipt.json).
+The Windows native trace path has no UBSan evidence.
+Fresh logs and source/DLL hashes are in the
+[expanded offline receipt](../build/rig/native_trace_expanded_offline_receipt.json).
+The [earlier fixed-only receipt](../build/rig/spawntrace_offline_receipt.json)
+retains its historical 19-check scope.
 
 Not covered yet:
 - Bosses: none reachable on this save.
 - Drops and barrier objects (battle state stands in for "barriers lift").
 - Continuous spawners.
-- Client hits as claims (VUH-1501).
+- Broader client-hit authority (VUH-1503): native courtyard acceptance now
+  confirms 22 ordinary client claims and three Shadow kills, delivered once to
+  both clients with matching applied HP/population/progress. Boss finishers,
+  survival/caps, attack-specific effects, victim-side enemy attacks and native
+  reconnect remain unproven. See
+  [native D4 evidence](SCENARIOS.md#automatic-client-hits-native-courtyard-acceptance-2026-10-02).
 - Hash agreement across repeated native room loads and varied populations,
   plus successful recovery after the enemy mismatch control. The nonempty
   proof covers one fixed-wave room; it does not establish spawn convergence

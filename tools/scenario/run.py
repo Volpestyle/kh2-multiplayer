@@ -151,6 +151,7 @@ def foreign_kh2() -> list[int]:
 class Instance:
     def __init__(self, index: int, pid: int) -> None:
         self.index, self.pid = index, pid
+        self.inject_log: Path | None = None  # exact registration from our launch result
         self.live_frame_seen: tuple[int, float] | None = None  # (frame, when it last changed)
         self.in_field = False
         self.expect_exit = False
@@ -404,6 +405,8 @@ def step_launch(ctx: Context, step: dict) -> dict:
     # e.g. {"KH2COOP_PUPPET_TRACE": "1"}.
     data = kh2ctl("launch", env={k: str(v) for k, v in step.get("env", {}).items()})
     inst = Instance(len(ctx.instances), data["processId"])
+    if data.get("log"):
+        inst.inject_log = Path(data["log"]).resolve()
     ctx.instances.append(inst)
     if step.get("mute", True):
         kh2ctl("mute", pid=inst.pid, check=False)
@@ -567,9 +570,9 @@ def step_protect(ctx: Context, step: dict) -> dict:
 def step_capture(ctx: Context, step: dict) -> dict:
     inst = ctx.inst(step.get("instance", 0))
     out = ctx.run_dir / f"{step.get('name', 'capture')}_{inst.index}.png"
-    kh2ctl("capture", "--out", str(out), pid=inst.pid)
+    receipt = kh2ctl("capture", "--out", str(out), pid=inst.pid)
     ctx.artifacts.append(out.name)
-    return {"path": out.name}
+    return {"path": out.name, "receipt": receipt}
 
 
 def step_clip(ctx: Context, step: dict) -> dict:
@@ -649,7 +652,8 @@ def step_relay(ctx: Context, step: dict) -> dict:
     gate = ["--build", step.get("build", "1.0.0.10-steam-global"),
             "--content", step.get("content", "none"), "--mod", step.get("mod", "")]
     proc = start_process(ctx, "relay", [str(SERVER), "--port", port, *gate,
-                                        *map(str, step.get("args", []))])
+                                        *map(str, step.get("args", [])),
+                                        "--desync-dir", str((ctx.run_dir / "desync-reports").resolve())])
     ctx.sleep(1)
     if proc.poll() is not None:
         raise StepFailed(f"relay exited with {proc.returncode}")
@@ -659,7 +663,7 @@ def step_relay(ctx: Context, step: dict) -> dict:
 
 def step_runtime(ctx: Context, step: dict) -> dict:
     """Start a runtime bound to one instance (--pid) and connect it to
-    the relay. Waits until its log shows it connected."""
+    the relay. Waits for verified membership; native bootstrap is checked separately."""
     inst = ctx.inst(step.get("instance", 0))
     cmd = [str(RUNTIME), "--network", "--server", step.get("server", "127.0.0.1"), "--port", str(ctx.relay_port),
            "--pid", str(inst.pid), "--role", step["role"],
@@ -672,10 +676,23 @@ def step_runtime(ctx: Context, step: dict) -> dict:
         if key in link:
             cmd += [flag, str(link[key])]
     cmd += [str(a) for a in step.get("args", [])]
+    # Keep diagnostics inside this run and register only our launch-owned log.
+    cmd += ["--desync-dir", str((ctx.run_dir / "desync-local" / f"peer_{inst.index}").resolve())]
+    if inst.inject_log is not None:
+        cmd += ["--inject-log", str(inst.inject_log)]
     name = f"runtime_{inst.index}"
+    # A second writer would also truncate the original identity/recovery log.
+    if any(owner == name for owner, _, _ in ctx.processes) or (ctx.run_dir / f"{name}.log").exists():
+        raise StepFailed(f"runtime {inst.index} already has an owned process/log; duplicate launch refused")
+    for owner, existing, _ in ctx.processes:
+        args = existing.args if isinstance(existing.args, (list, tuple)) else []
+        if owner.startswith("runtime_") and existing.poll() is None and any(
+                args[n] == "--pid" and n + 1 < len(args) and str(args[n + 1]) == str(inst.pid)
+                for n in range(len(args))):
+            raise StepFailed(f"game {inst.pid} already has a live runtime writer")
     proc = start_process(ctx, name, cmd)
     log = ctx.run_dir / f"{name}.log"
-    expect = step.get("expect", "connected to server")
+    expect = step.get("expect", "Verified membership; native bootstrap remains separate")
 
     def ready() -> bool:
         text = log.read_text(errors="replace")
@@ -694,7 +711,7 @@ ARRIVAL_PATTERN = (r"\[enemysync\] (?:host|client) arrived epoch=(?P<epoch>\d+) 
                    r"door=(?P<door>\d+) map=(?P<map>\d+) btl=(?P<btl>\d+) evt=(?P<evt>\d+)")
 
 
-def native_puppet_actors(ctx: Context, index: int) -> dict:
+def native_puppet_actors(ctx: Context, index: int, *, _read=None, _entities=None) -> dict:
     """Resolve the DLL's actual friend-slot targets in the active entity list.
 
     Companion pointers live in unit slot 1, at SLOT0_BASE + SLOT_STRIDE +
@@ -704,10 +721,10 @@ def native_puppet_actors(ctx: Context, index: int) -> dict:
     actor, so it is not evidence that a native friend actor exists.
     """
     keys = ("0x2A239B0", "0x2A239B8")
-    sample = kh2ctl("peek", "--rva", ",".join(f"{key}:u64" for key in keys),
+    sample = (_read or kh2ctl)("peek", "--rva", ",".join(f"{key}:u64" for key in keys),
                     pid=ctx.inst(index).pid)["samples"][0]
     pointers = [int(sample[key], 16) for key in keys]
-    entities = ctx.entities(index)
+    entities = (_entities or ctx.entities)(index)
     active = {int(actor["address"], 16): actor for actor in entities.get("actors", [])}
     local = int(entities["actors"][0]["address"], 16) if entities.get("actors") else 0
     clones = [address for address, actor in active.items()
@@ -840,6 +857,293 @@ def step_transition_check(ctx: Context, step: dict) -> dict:
 
 
 
+def reconnect_runtime(ctx: Context, index: int):
+    matches = [proc for name, proc, _ in ctx.processes if name == f"runtime_{index}"]
+    if len(matches) != 1 or matches[0].poll() is not None:
+        raise StepFailed(f"reconnect requires exactly one live owned runtime for instance {index}")
+    args = matches[0].args
+    expected_role = ("player", "friend1", "friend2")[index]
+    if not isinstance(args, (tuple, list)) or Path(args[0]).resolve() != RUNTIME.resolve():
+        raise StepFailed("reconnect runtime executable does not match our launch")
+    for flag, value in (("--pid", str(ctx.inst(index).pid)), ("--role", expected_role)):
+        positions = [n for n, arg in enumerate(args) if arg == flag]
+        if len(positions) != 1 or positions[0] + 1 >= len(args) or str(args[positions[0] + 1]) != value:
+            raise StepFailed(f"reconnect runtime {index}: invalid owned {flag} binding")
+    return matches[0]
+
+
+def reconnect_log_bytes(path: Path) -> bytes:
+    if not path.is_file():
+        raise StepFailed(f"reconnect evidence log missing: {path}")
+    return path.read_bytes()
+
+
+def collect_reconnect_sample(ctx: Context, deadline: float) -> dict:
+    """Read separate current observations; never claim an atomic snapshot."""
+    def read(*args, **kwargs):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise StepFailed("reconnect observation deadline exceeded")
+        return kh2ctl(*args, **kwargs, timeout=min(5.0, remaining))
+
+    sample = {"peers": []}
+    ctx._reconnect_partial_sample = sample
+    fields = ("0x717008:u8", "0x717009:u8", "0x71700A:u8",
+              "0x71700C:u16", "0x71700E:u16", "0x717010:u16")
+    for index in range(3):
+        ctx.check_all()
+        proc = reconnect_runtime(ctx, index)
+        inst = ctx.inst(index)
+        row = {"slot": index, "gamePid": inst.pid, "runtimePid": proc.pid,
+               "runtimeAlive": True, "runtimeArgv": list(proc.args), "problems": []}
+        sample["peers"].append(row)
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise StepFailed("reconnect observation deadline exceeded")
+            observed = subprocess.run(
+                [str(AVATARCTL), "observe", "--pid", str(inst.pid), "--samples", "2", "--interval-ms", "100"],
+                capture_output=True, text=True, timeout=min(5.0, remaining))
+            row["avatarObservation"] = json.loads(observed.stdout)
+            row["avatarExitCode"] = observed.returncode
+            row["avatarStderr"] = observed.stderr
+            values = read("peek", "--rva", ",".join(fields), pid=inst.pid)["samples"][0]
+            row["location"] = [values[field.split(":")[0]] for field in fields]
+            row["nativePuppets"] = native_puppet_actors(
+                ctx, index, _read=read,
+                _entities=lambda peer: read("entities", pid=ctx.inst(peer).pid))
+        except (StepFailed, subprocess.TimeoutExpired, ValueError, KeyError) as error:
+            row["problems"].append(str(error))
+        row["runtimeAlive"] = proc.poll() is None
+        row["nativeLog"] = reconnect_log_bytes(inst.inject_log or LOGS / f"kh2coop_inject_{inst.pid}.log")
+        row["runtimeLog"] = reconnect_log_bytes(ctx.run_dir / f"runtime_{index}.log")
+    sample["relayLog"] = reconnect_log_bytes(ctx.run_dir / "relay.log")
+    return sample
+
+
+def save_reconnect_sample(ctx: Context, name: str, sample: dict, evidence: dict) -> None:
+    """Retain exact byte inputs for independent replay of the pure validator."""
+    metadata = {"schema": 1, "atomicAcrossSources": False, "peers": [], "evidence": evidence,
+                "collectionIncomplete": sample.get("collectionIncomplete", False),
+                "missingLogs": sample.get("missingLogs", [])}
+    def store(log_name, data):
+        path = ctx.run_dir / f"{name}_{log_name}.bin"
+        path.write_bytes(data)
+        if path.name not in ctx.artifacts:
+            ctx.artifacts.append(path.name)
+        return {"path": path.name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    metadata["relayLog"] = store("relay", sample["relayLog"])
+    for row in sample["peers"]:
+        copied = {key: value for key, value in row.items() if key not in ("nativeLog", "runtimeLog")}
+        for kind in ("nativeLog", "runtimeLog"):
+            copied[kind] = store(f"peer{row['slot']}_{kind}", row[kind])
+        metadata["peers"].append(copied)
+    path = ctx.run_dir / f"{name}_sample.json"
+    path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    if path.name not in ctx.artifacts:
+        ctx.artifacts.append(path.name)
+
+
+def reconnect_failure_sample(ctx: Context, sample: dict | None) -> dict:
+    """Keep available exact inputs; missing bytes are labelled, never absence proof."""
+    partial = getattr(ctx, "_reconnect_partial_sample", None)
+    source = partial if partial is not None else sample or {}
+    result = {**source, "peers": [dict(row) for row in source.get("peers", [])],
+              "collectionIncomplete": True, "missingLogs": []}
+
+    def recover_log(row, key, path, label):
+        if isinstance(row.get(key), bytes):
+            return
+        try:
+            row[key] = reconnect_log_bytes(path)
+        except BaseException as error:
+            row[key] = b""
+            result["missingLogs"].append({"source": label, "path": str(path),
+                                           "error": f"{type(error).__name__}: {error}",
+                                           "emptyFallbackIsAbsenceProof": False})
+
+    recover_log(result, "relayLog", ctx.run_dir / "relay.log", "relayLog")
+    for index in range(3):
+        rows = [row for row in result["peers"] if row.get("slot") == index]
+        row = rows[0] if rows else {"slot": index, "problems": ["collection incomplete"]}
+        if not rows:
+            result["peers"].append(row)
+        recover_log(row, "runtimeLog", ctx.run_dir / f"runtime_{index}.log", f"peer{index}.runtimeLog")
+        try:
+            inst = ctx.inst(index)
+            path = inst.inject_log or LOGS / f"kh2coop_inject_{inst.pid}.log"
+        except BaseException as error:
+            path = ctx.run_dir / f"unavailable_native_log_{index}"
+            row.setdefault("problems", []).append(f"native log path unavailable: {error}")
+        recover_log(row, "nativeLog", path, f"peer{index}.nativeLog")
+    return result
+
+
+def retain_reconnect_failure(ctx: Context, name: str, sample: dict | None,
+                             latest: dict, error: BaseException) -> None:
+    """Best effort retention must never mask the original failure/cancellation."""
+    failed = {**latest, "ready": False, "collectionIncomplete": True,
+              "problems": [*latest.get("problems", []), f"{type(error).__name__}: {error}"]}
+    ctx.saved[name] = failed
+    try:
+        partial = getattr(ctx, "_reconnect_partial_sample", None)
+        if sample is not None and partial is not None and partial is not sample:
+            save_reconnect_sample(ctx, name + "_last_complete", sample, failed)
+        save_reconnect_sample(ctx, name, reconnect_failure_sample(ctx, sample), failed)
+    except BaseException as persistence_error:
+        failed["artifactPersistenceError"] = f"{type(persistence_error).__name__}: {persistence_error}"
+        if hasattr(error, "add_note"):
+            error.add_note("Reconnect artifact persistence failed: " + failed["artifactPersistenceError"])
+
+
+def check_reconnect_bindings(ctx: Context, baseline: dict) -> None:
+    ctx.check_all()
+    originals = getattr(ctx, "_reconnect_owned", {}).get(baseline.get("baselineName"))
+    if originals is None:
+        raise StepFailed("reconnect original Popen bindings unavailable")
+    for index in range(3):
+        old = baseline["runnerBindings"][index]
+        current = reconnect_runtime(ctx, index)
+        if (current is not originals["runtimes"][index] or old["slot"] != index
+                or old["gamePid"] != ctx.inst(index).pid or old["runtimePid"] != current.pid
+                or old["runtimeArgv"] != list(current.args)):
+            raise StepFailed("reconnect original game/runtime binding changed")
+    relay = [proc for owner, proc, _ in ctx.processes if owner == "relay"]
+    if (len(relay) != 1 or relay[0] is not originals["relay"]
+            or relay[0].poll() is not None or relay[0].pid != baseline["runnerRelayPid"]):
+        raise StepFailed("reconnect original owned relay binding changed or exited")
+
+
+def step_reconnect_mark(ctx: Context, step: dict) -> dict:
+    if step.get("instances", [0, 1, 2]) != [0, 1, 2]:
+        raise StepFailed("reconnect supports the original ordered three-peer rig only")
+    name = step.get("as", "reconnect_before")
+    if name in ctx.saved:
+        raise StepFailed("reconnect baseline name already exists")
+    deadline = time.monotonic() + min(15.0, step.get("timeoutMs", 10000) / 1000)
+    latest, sample = {}, None
+    ctx._reconnect_partial_sample = None
+    try:
+        while True:
+            if time.monotonic() >= deadline:
+                raise StepFailed("reconnect baseline deadline exceeded")
+            ctx._reconnect_partial_sample = None
+            sample = collect_reconnect_sample(ctx, deadline)
+            latest = _native_reconnect.capture_baseline(sample)
+            if time.monotonic() >= deadline:
+                raise StepFailed("reconnect baseline deadline exceeded")
+            if latest.get("ready"):
+                break
+            ctx.sleep(min(0.25, max(0, deadline - time.monotonic())))
+        latest["baselineName"] = name
+        latest["runnerBindings"] = [{"slot": row["slot"], "gamePid": row["gamePid"],
+                                     "runtimePid": row["runtimePid"], "runtimeArgv": row["runtimeArgv"]}
+                                    for row in sample["peers"]]
+        relay = [proc for owner, proc, _ in ctx.processes if owner == "relay"]
+        if len(relay) != 1 or relay[0].poll() is not None:
+            raise StepFailed("reconnect baseline lost its original owned relay")
+        latest["runnerRelayPid"] = relay[0].pid
+        if not hasattr(ctx, "_reconnect_owned"):
+            ctx._reconnect_owned = {}
+        ctx._reconnect_owned[name] = {"relay": relay[0],
+                                      "runtimes": [reconnect_runtime(ctx, i) for i in range(3)]}
+        check_reconnect_bindings(ctx, latest)
+        if time.monotonic() >= deadline:
+            raise StepFailed("reconnect baseline deadline exceeded")
+        save_reconnect_sample(ctx, name, sample, latest)
+        ctx.saved[name] = latest
+        return latest
+    except BaseException as error:
+        retain_reconnect_failure(ctx, name, sample, latest, error)
+        raise
+
+
+def step_runtime_pause(ctx: Context, step: dict) -> dict:
+    if step.get("instance") != 1:
+        raise StepFailed("bounded reconnect fault may target only original Friend1 runtime")
+    baseline = ctx.saved.get(step.get("after"), {})
+    if not baseline.get("ready"):
+        raise StepFailed("runtime pause requires a qualified saved reconnect baseline")
+    name = step.get("as", "reconnect_pause")
+    if name in ctx.saved:
+        raise StepFailed("runtime pause receipt name already exists")
+    friend = reconnect_runtime(ctx, 1)
+    if any(isinstance(value, dict) and value.get("receiptKind") == "runtime_pause"
+           and value.get("baselineName") == step["after"] for value in ctx.saved.values()):
+        raise StepFailed("reconnect baseline already has a pause receipt")
+
+    def check_alive():
+        check_reconnect_bindings(ctx, baseline)
+
+    def retired(_offset):
+        proof = _native_reconnect.retirement_proof(
+            baseline, reconnect_log_bytes(ctx.run_dir / "relay.log"),
+            {index: reconnect_log_bytes(ctx.run_dir / f"runtime_{index}.log") for index in (0, 2)})
+        return proof if proof and proof.get("retired") is True and proof.get("identityComplete") is True else None
+
+    receipt = {}
+    try:
+        receipt = _runtime_lifecycle.pause_owned_friend_runtime(
+            ctx.processes, ctx.instances, friend, ctx.inst(1).pid, 1, RUNTIME,
+            retired, check_alive, step.get("timeoutMs", 20000) / 1000,
+            relay_offset=baseline["relayLog"]["bytes"], expected_connection_id=baseline["roster"][1])
+    except BaseException as error:
+        receipt = getattr(error, "receipt", {"status": "failed", "completed": False, "error": str(error)})
+        if isinstance(error, Exception):
+            raise StepFailed(f"owned Friend1 pause failed: {error}") from error
+        raise
+    finally:
+        receipt["baselineName"] = step["after"]
+        receipt["receiptKind"] = "runtime_pause"
+        ctx.saved[name] = receipt
+        path = ctx.run_dir / f"{name}.json"
+        path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+        ctx.artifacts.append(path.name)
+    return receipt
+
+
+def step_reconnect_check(ctx: Context, step: dict) -> dict:
+    baseline = ctx.saved.get(step.get("after"), {})
+    if not baseline.get("ready"):
+        raise StepFailed("reconnect check requires a qualified immutable baseline")
+    name = step.get("as", "reconnect_after")
+    if name in ctx.saved:
+        raise StepFailed("reconnect checkpoint name already exists")
+    deadline = time.monotonic() + min(60.0, step.get("timeoutMs", 45000) / 1000)
+    latest, sample = {}, None
+    ctx._reconnect_partial_sample = None
+    try:
+        receipts = [value for value in ctx.saved.values() if isinstance(value, dict)
+                    and value.get("receiptKind") == "runtime_pause"
+                    and value.get("baselineName") == step["after"]]
+        if len(receipts) != 1 or not all(receipts[0].get(key) is True
+                                        for key in ("completed", "resumed", "pinPreserved")):
+            raise StepFailed("reconnect requires exactly one successful original-baseline pause receipt")
+        pause_receipt = dict(receipts[0])
+        latest["pauseReceipt"] = pause_receipt
+        while True:
+            if time.monotonic() >= deadline:
+                raise StepFailed("native reconnect deadline exceeded")
+            check_reconnect_bindings(ctx, baseline)
+            ctx._reconnect_partial_sample = None
+            sample = collect_reconnect_sample(ctx, deadline)
+            check_reconnect_bindings(ctx, baseline)
+            latest = {**_native_reconnect.validate_reconnect(baseline, sample),
+                      "pauseReceipt": pause_receipt}
+            check_reconnect_bindings(ctx, baseline)
+            if time.monotonic() >= deadline:
+                raise StepFailed("native reconnect deadline exceeded")
+            if latest.get("ready"):
+                break
+            ctx.sleep(min(0.25, max(0, deadline - time.monotonic())))
+        save_reconnect_sample(ctx, name, sample, latest)
+        ctx.saved[name] = latest
+        return latest
+    except BaseException as error:
+        retain_reconnect_failure(ctx, name, sample, latest, error)
+        raise
+
+
 def step_approach_goa_chest(ctx: Context, step: dict) -> dict:
     """Bounded camera-relative native walking to GoA flag 409 from its platform."""
     index = step.get("instance", 0)
@@ -966,9 +1270,10 @@ PROGRESS_RANGES = (("programs", 0x10, 0x1C80), ("story", 0x1C90, 0x260),
                    ("visited", 0x22F8, 0x98), ("chests", 0x23AC, 0x34))
 
 
-def step_progress_snapshot(ctx: Context, step: dict) -> dict:
+def step_progress_snapshot(ctx: Context, step: dict, *, _read=None) -> dict:
     """Actual SAVE bytes, including all personal exclusions; room init can change them."""
     name = step.get("as", "progress")
+    read = _read or kh2ctl
     evidence = {"instances": {}}
     for index in step.get("instances", [step.get("instance", 0)]):
         ranges = {}
@@ -978,7 +1283,7 @@ def step_progress_snapshot(ctx: Context, step: dict) -> dict:
             for start in range(0, len(fields), 128):
                 batch = fields[start:start + 128]
                 specs = [f"0x{rva:X}:u{size * 8}" for rva, size in batch]
-                sample = kh2ctl("peek", "--rva", ",".join(specs), pid=ctx.inst(index).pid)["samples"][0]
+                sample = read("peek", "--rva", ",".join(specs), pid=ctx.inst(index).pid)["samples"][0]
                 for rva, size in batch:
                     value = sample[f"0x{rva:X}"]
                     raw.extend((int(value, 0) if isinstance(value, str) else value).to_bytes(size, "little"))
@@ -1356,8 +1661,1479 @@ def step_courtyard_diagnostic(ctx: Context, step: dict) -> dict:
 
 
 
-def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) -> dict:
+def evaluate_native_region(region: dict, point: list[float]) -> dict:
+    """Offline float32 approximation; edge outcomes explicitly remain uncertain."""
+    result = {"kind": region["kind"], "nativePredicateCalled": False,
+              "precision": "float32 operations; near-boundary results uncertain (native operation ordering not instrumented)"}
+    if region["kind"] == "INFINITY":
+        return dict(result, accepted=True, edgeUncertain=False)
+    matrix, extents = region["inverseMatrix"], region["extents"]
+    if len(point) != 4 or not all(math.isfinite(v) for v in point + matrix + extents):
+        return dict(result, accepted=None, edgeUncertain=True, reason="nonfinite/incomplete geometry or position")
+    def f32(value):
+        return struct.unpack("<f", struct.pack("<f", value))[0]
+    try:
+        transformed = [f32(f32(f32(f32(matrix[j] * point[0]) + f32(matrix[j + 4] * point[1]))
+                                + f32(matrix[j + 8] * point[2])) + matrix[j + 12]) for j in range(3)]
+        result["transformed"] = transformed
+        scale = max(1.0, *(abs(v) for v in transformed + extents),
+                    *(sum(abs(matrix[j + k * 4] * point[k]) for k in range(3)) + abs(matrix[j + 12]) for j in range(3)))
+        tolerance = 32 * 2 ** -23 * scale
+        if region["kind"] == "BOX":
+            margins = [extents[i] - abs(transformed[i]) for i in range(3)]
+            result.update(accepted=all(v >= 0 for v in margins), margins=margins,
+                          edgeUncertain=any(abs(v) <= tolerance for v in margins))
+        elif region["kind"] == "CYLINDER":
+            if extents[0] == 0 or extents[2] == 0:
+                return dict(result, accepted=None, edgeUncertain=True, reason="zero cylinder radius: native IEEE comparison not emulated")
+            x, z = f32(transformed[0] / extents[0]), f32(transformed[2] / extents[2])
+            radial = f32(f32(x * x) + f32(z * z))
+            ymargin = extents[1] - abs(transformed[1])
+            radial_tolerance = 32 * 2 ** -23 * max(1.0, abs(radial)) + tolerance * (1 / abs(extents[0]) + 1 / abs(extents[2]))
+            result.update(accepted=ymargin >= 0 and radial <= 1, radialSquared=radial, yMargin=ymargin,
+                          edgeUncertain=abs(ymargin) <= tolerance or abs(1 - radial) <= radial_tolerance)
+        else:
+            return dict(result, accepted=None, edgeUncertain=True, reason="unknown region kind")
+    except (OverflowError, ZeroDivisionError):
+        result.update(accepted=None, edgeUncertain=True, reason="float32 overflow/division unavailable")
+    return result
+
+
+def capture_native_regions(entry: dict, base: int, read, region_table: list[int]) -> dict:
+    """Read the actual type2 linked regions; descriptor count is a bound, not list membership."""
+    geometry = {"complete": False, "regions": [], "descriptors": [], "limits": [], "diagnosticRegionCap": 64}
+    try:
+        count = entry["headerFields"]["regionCount"]
+        if not 0 <= count <= 64:
+            raise StepFailed("region descriptor count exceeds diagnostic cap64; no native maximum claimed")
+        start = entry["regionArray"]
+        descriptor_fields = {f"{n}:{j}": (start + n * 64 + j * 8, "u64") for n in range(count) for j in range(8)}
+        descriptor_values = read(descriptor_fields)
+        for n in range(count):
+            raw = b"".join(descriptor_values[f"{n}:{j}"].to_bytes(8, "little") for j in range(8))
+            geometry["descriptors"].append({"index": n, "address": start + n * 64, "hex": raw.hex(),
+                "kind": struct.unpack_from("<H", raw)[0], "category": struct.unpack_from("<H", raw, 2)[0],
+                "position": list(struct.unpack_from("<fff", raw, 4)), "extents": list(struct.unpack_from("<fff", raw, 0x10)),
+                "rotationY": struct.unpack_from("<f", raw, 0x20)[0]})
+        address, seen, verify_fields, captured = entry["regionHead"], set(), {}, {}
+        known = {base + 0x5D4F98: (0, "BOX"), base + 0x5D4FB0: (1, "CYLINDER"), base + 0x5D4FC8: (2, "INFINITY")}
+        while address:
+            if address in seen or len(seen) >= count:
+                raise StepFailed("region list repeats/cycles or exceeds rooted descriptor count")
+            seen.add(address)
+            fields = {f"{address}:{j}": (address + j * 8, "u64") for j in range(14)}
+            words = read(fields)
+            raw = b"".join(words[f"{address}:{j}"].to_bytes(8, "little") for j in range(14))
+            vtable, descriptor = struct.unpack_from("<Q", raw)[0], struct.unpack_from("<Q", raw, 0x68)[0]
+            handle = struct.unpack_from("<I", raw, 0x58)[0]
+            node = {"address": address, "hex": raw.hex(), "vtable": vtable, "descriptor": descriptor,
+                    "nextHandle": handle, "inverseMatrix": list(struct.unpack_from("<16f", raw, 8)),
+                    "extents": list(struct.unpack_from("<fff", raw, 0x48))}
+            geometry["regions"].append(node)
+            if vtable not in known:
+                raise StepFailed("runtime region has unknown vtable; predicate unavailable")
+            if not start <= descriptor < start + count * 64 or (descriptor - start) % 64:
+                raise StepFailed("runtime region descriptor is outside/alignment-mismatched rooted descriptor span")
+            node["descriptorIndex"] = n = (descriptor - start) // 64
+            kind, node["kind"] = known[vtable]
+            if geometry["descriptors"][n]["kind"] != kind:
+                raise StepFailed("runtime vtable kind differs from rooted source descriptor")
+            if handle:
+                masked = handle & 0x7FFFFFFF
+                region = region_table[masked >> 25]
+                nxt = region | (masked & 0x1FFFFFF)
+                if region == 0xFFFFFFFFFFFFFFFF or region & 0x1FFFFFF or not 0x10000 <= nxt < 0x800000000000:
+                    raise StepFailed("region next handle has unavailable region-table resolution")
+            else:
+                nxt = 0
+            node["nextAddress"] = nxt
+            verify_fields.update(fields); captured.update(words)
+            address = nxt
+        if (geometry["regions"][-1]["address"] if geometry["regions"] else 0) != entry["regionTail"]:
+            raise StepFailed("runtime region terminal node does not match checked tail")
+        geometry["bytesStable"] = read(verify_fields) == captured and read(descriptor_fields) == descriptor_values
+        if not geometry["bytesStable"]:
+            raise StepFailed("runtime region matrices/extents/links/descriptors changed while reading")
+        geometry["complete"] = True
+    except Exception as error:
+        geometry["limits"].append(f"{type(error).__name__}: {error}")
+    return geometry
+
+
+def capture_raw_native_occupancy(base: int, read, cap: int = 256, *, lifecycle_read=None) -> dict:
+    """Checked active/deferred sample only: no atomicity or pre-link exclusion claim."""
+    receipt = {"schemaVersion": 2, "listedOccupancyComplete": False,
+               "pendingExclusionComplete": False, "atomic": False,
+               "controllerIncarnationQualified": False, "globalControllerIdCoverageComplete": False,
+               "diagnosticNodeCap": cap, "lists": {}, "reasons": [],
+               "readback": {"fields": {}, "before": {"values": {}, "complete": False},
+                            "after": {"values": {}, "attempted": False, "complete": False}, "changes": []}}
+    evidence = receipt["readback"]
+    fields, captured = {}, evidence["before"]["values"]
+    nodes = []
+    lifecycle = receipt["lifecycle"] = {"before": {}, "after": {}, "available": False,
+        "stable": False, "status": "unavailable", "changes": [], "reasons": [],
+        "scope": "checked raw-interval bookends only; no atomicity or incarnation claim"}
+
+    def sample_lifecycle(phase):
+        sample = lifecycle[phase]
+        sample.update(native={}, nativeComplete=False, logs={}, scope=None, available=False)
+        try:
+            if lifecycle_read is None:
+                raise StepFailed("raw lifecycle reader unavailable")
+            lifecycle_read(sample, "raw-occupancy-lifecycle-" + phase, lifecycle)
+            sample["available"] = bool(sample["nativeComplete"] and sample["scope"] and sample["logs"].get("arrival")
+                                       and sample["logs"].get("lifecycle"))
+            if not sample["available"]:
+                lifecycle["reasons"].append({"phase": phase, "code": "lifecycle-scope-unavailable"})
+        except Exception as error:
+            lifecycle["reasons"].append({"phase": phase, "code": "lifecycle-read-failed",
+                                         "error": f"{type(error).__name__}: {error}"})
+
+    def problem(code, **detail):
+        receipt["reasons"].append({"code": code, **detail})
+
+    def pointer(value):
+        return type(value) is int and base <= value < 0x800000000000
+
+    def validate_field_types(stage):
+        # CmdPeek JSON keys contain only the RVA. Mixed types at one address
+        # would decode the last value into every label, including on recheck.
+        aliases = {}
+        for label, (address, kind) in fields.items():
+            aliases.setdefault(address, []).append({"label": label, "type": kind})
+        conflicts = [(address, labels) for address, labels in aliases.items()
+                     if len({field["type"] for field in labels}) > 1]
+        for address, labels in conflicts:
+            problem("typed-address-conflict", stage=stage, address=address, fields=labels)
+        if conflicts:
+            raise StepFailed("raw occupancy mixed-type address aliases cannot be read unambiguously")
+
+    def collect(batch, stage):
+        fields.update(batch)
+        validate_field_types(stage)
+        read(batch, captured, stage="raw-occupancy-" + stage, failure_evidence=receipt)
+
+    roots = {name: (base + offset, "u64") for name, offset in (
+        ("activeHead", 0x2A171C8), ("activeTail", 0x2A171D0),
+        ("deferredHead", 0x2A171D8), ("deferredTail", 0x2A171E0))}
+    roots.update({f"bucket{n}": (base + 0x2B0D720 + n * 8, "u64") for n in range(64)})
+    sample_lifecycle("before")
+    try:
+        if type(base) is not int or not 0x10000 <= base < 0x800000000000:
+            raise StepFailed("raw occupancy module base unavailable")
+        if type(cap) is not int or not 1 <= cap <= 256:
+            raise StepFailed("raw occupancy diagnostic node cap must be in1..256")
+        collect(roots, "roots-before")
+        memberships = {}
+        metadata = {}
+        for name in ("active", "deferred"):
+            head, tail = captured[name + "Head"], captured[name + "Tail"]
+            lane = {"head": head, "tail": tail, "nodes": [], "terminalHandleZero": False}
+            receipt["lists"][name] = lane
+            if bool(head) != bool(tail):
+                problem("root-tail-null-mismatch", list=name)
+            address = head
+            seen = set()
+            while address:
+                if not pointer(address) or address % 8:
+                    problem("invalid-node-pointer", list=name, address=address)
+                    break
+                if address in memberships:
+                    problem("cycle-or-repeated-node" if address in seen else "cross-list-membership",
+                            list=name, address=address, firstList=memberships[address])
+                    break
+                if len(nodes) >= cap:
+                    problem("node-cap-exhausted", list=name, address=address)
+                    break
+                seen.add(address)
+                memberships[address] = name
+                node = {"address": address, "readSuccess": {}}
+                lane["nodes"].append(node)
+                nodes.append(node)
+                prefix = f"node{len(nodes) - 1}:"
+                node["fieldPrefix"] = prefix
+                batch = {prefix + key: (address + offset, kind) for key, offset, kind in (
+                    ("nextHandle", 0xA90, "u32"), ("flags120", 0x120, "u32"),
+                    ("objectEntry", 0x918, "u64"), ("status", 0x5C0, "u64"),
+                    ("controller", 0x9E8, "u64"), ("spawnRecord", 0x9F0, "u64"))}
+                collect(batch, "node-before")
+                for key in ("status", "controller", "spawnRecord", "objectEntry"):
+                    value = captured[prefix + key]
+                    if value and not pointer(value):
+                        problem("invalid-field-pointer", list=name, address=address, field=key, value=value)
+                descriptor = captured[prefix + "objectEntry"]
+                if pointer(descriptor):
+                    metadata.update({prefix + key: (descriptor + offset, kind) for key, offset, kind in (
+                        ("objectId", 0, "u32"), ("objectType", 4, "u8"), ("namePrefix", 8, "u16"))})
+                else:
+                    problem("object-descriptor-unavailable", list=name, address=address)
+                record = captured[prefix + "spawnRecord"]
+                node["recordIdApplicable"] = record != 0
+                if pointer(record):
+                    metadata[prefix + "recordId"] = (record + 0x1E, "u16")
+                handle = captured[prefix + "nextHandle"]
+                if handle == 0:
+                    node["nextAddress"] = 0
+                    lane["terminalHandleZero"] = True
+                    address = 0
+                else:
+                    masked = handle & 0x7FFFFFFF
+                    bucket = masked >> 25
+                    region = captured[f"bucket{bucket}"]
+                    nxt = region | (masked & 0x1FFFFFF)
+                    node.update(handleBucket=bucket, handleBucketBase=region)
+                    if (region in (0, 0xFFFFFFFFFFFFFFFF) or region & 0x1FFFFFF
+                            or not pointer(nxt) or nxt % 8):
+                        problem("invalid-handle-bucket", list=name, address=address,
+                                handle=handle, bucket=bucket, bucketBase=region)
+                        break
+                    node["nextAddress"] = address = nxt
+            if not head:
+                lane["terminalHandleZero"] = tail == 0
+            if (lane["nodes"][-1]["address"] if lane["nodes"] else 0) != tail:
+                problem("terminal-tail-mismatch", list=name, tail=tail)
+        collect(metadata, "metadata-before")
+        evidence["before"]["complete"] = True
+        validate_field_types("after")
+        evidence["after"]["attempted"] = True
+        read(fields, evidence["after"]["values"], stage="raw-occupancy-after", failure_evidence=receipt)
+        evidence["after"]["complete"] = True
+    except Exception as error:
+        problem("read-or-capture-failed", error=f"{type(error).__name__}: {error}")
+    sample_lifecycle("after")
+    lifecycle["available"] = all(lifecycle[phase]["available"] for phase in ("before", "after"))
+    if lifecycle["available"]:
+        for source, keys in (("native", ("head", "tail", "location", "regions", "inField", "frozen",
+                                         "eventState", "eventContext", "openMenu")),
+                             ("logs", ("arrival", "lifecycle"))):
+            for key in keys:
+                before, after = (lifecycle[phase][source][key] for phase in ("before", "after"))
+                if before != after:
+                    lifecycle["changes"].append({"source": source, "field": key, "before": before, "after": after})
+        for phase in ("before", "after"):
+            sample = lifecycle[phase]
+            native, observed = sample["native"], sample["logs"]
+            arrival_location = [int(observed["arrival"][k], 16 if k in ("world", "room") else 10)
+                                for k in ("world", "room", "door", "map", "btl", "evt")]
+            if (not observed.get("arrivalAfterLifecycle") or arrival_location != native["location"]
+                    or sample["scope"]["location"] != native["location"]
+                    or native["inField"] == 0 or native["frozen"] != 0 or native["eventState"] != 0
+                    or native["eventContext"] != 0 or native["openMenu"] != 255):
+                lifecycle["reasons"].append({"phase": phase, "code": "lifecycle-scope-unqualified"})
+        lifecycle["stable"] = not lifecycle["changes"] and not lifecycle["reasons"]
+        lifecycle["status"] = "stable" if lifecycle["stable"] else "changed"
+    elif any(lifecycle[phase]["available"] for phase in ("before", "after")):
+        lifecycle["status"] = "partial"
+    # Header bookends and the intervening raw reads are separate observations.
+    # Join their overlapping roots/buckets explicitly; equality is still only
+    # sampled agreement, and the header makes no deferred-list observation.
+    for phase in ("before", "after"):
+        native = lifecycle[phase]["native"]
+        raw = evidence[phase]["values"]
+        join = lifecycle[phase]["rawReadbackJoin"] = {"complete": False, "missing": [], "mismatches": []}
+        pairs = [("head", "activeHead"), ("tail", "activeTail")]
+        pairs += [(f"region{n}", f"bucket{n}") for n in range(64)]
+        for native_key, raw_key in pairs:
+            if native_key.startswith("region") and "regions" in native:
+                index = int(native_key[6:])
+                native_present = index < len(native["regions"])
+                native_value = native["regions"][index] if native_present else None
+            else:
+                native_present = native_key in native
+                native_value = native.get(native_key)
+            if not native_present or raw_key not in raw:
+                join["missing"].append({"nativeField": native_key, "rawField": raw_key,
+                    "nativeAvailable": native_present, "rawAvailable": raw_key in raw})
+            elif native_value != raw[raw_key]:
+                join["mismatches"].append({"nativeField": native_key, "rawField": raw_key,
+                    "nativeValue": native_value, "rawValue": raw[raw_key]})
+        join["complete"] = not join["missing"] and not join["mismatches"]
+        for key, code in (("missing", "lifecycle-raw-readback-missing"),
+                          ("mismatches", "lifecycle-raw-readback-mismatch")):
+            if join[key]:
+                lifecycle["reasons"].append({"phase": phase, "code": code, "fields": join[key]})
+        if not join["complete"]:
+            lifecycle["stable"] = False
+            if any(lifecycle[p]["available"] for p in ("before", "after")):
+                lifecycle["status"] = "partial"
+    if not lifecycle["stable"]:
+        problem("lifecycle-not-stable", status=lifecycle["status"])
+    evidence["fields"] = {key: {"address": address, "type": kind} for key, (address, kind) in fields.items()}
+    for phase in ("before", "after"):
+        sample = evidence[phase]
+        sample["unreadFields"] = [key for key in fields if key not in sample["values"]]
+    for key, value in evidence["after"]["values"].items():
+        if key in captured and value != captured[key]:
+            change = {"field": key, "address": fields[key][0], "before": captured[key], "after": value}
+            evidence["changes"].append(change)
+            problem("read-changed", **change)
+    for node in nodes:
+        prefix = node.pop("fieldPrefix")
+        for key in ("nextHandle", "flags120", "objectEntry", "status", "controller", "spawnRecord",
+                    "objectId", "objectType", "namePrefix", "recordId"):
+            node["readSuccess"][key] = prefix + key in captured
+            if node["readSuccess"][key]:
+                node[key] = captured[prefix + key]
+    receipt["listedOccupancyComplete"] = bool(evidence["before"]["complete"]
+        and evidence["after"]["complete"] and not receipt["reasons"])
+    return receipt
+
+
+def capture_native_secondary_bindings(base, read, census, *, lifecycle_read):
+    """Bounded current slot0/1 data bindings, never execution or creator authority."""
+    out = {"schemaVersion": 1, "pid": census.get("pid"), "moduleBase": base,
+        "parentModuleBase": census.get("moduleBase"), "lineage": census.get("lineage"),
+        "startedMonotonic": time.monotonic(), "deadlineOwner": "supplied census read/lifecycle readers",
+        "diagnosticCaps": {"objectRows": 8192, "selectedEntries": 128, "ownerSlots": 256,
+                           "barEntries": 256, "itemRows": 4096},
+        "reasons": [], "observations": [], "tables": [], "selectedEntries": [], "bindings": [],
+        "bar": {}, "items": {}, "lifecycle": {}, "readbackChanges": [],
+        "inventoryComplete": False, "declaredExtentBindingComplete": False,
+        "currentSelectionComplete": False, "sampledBindingsStable": False,
+        "localBindingsStable": False, "sampledScope": "unavailable",
+        "consumedBucketJoin": {"entries": [], "complete": False, "knownDisagreement": False},
+        "effectiveObjectLookupQualified": False}
+    for key in ("executedMapperCallObserved", "currentActorOwnerProven", "futureEquipmentDomainComplete",
+                "replacementArgumentDomainComplete", "continuousTableIdentity", "pendingExclusionComplete",
+                "creatorExclusive", "lifetimeProven", "atomic", "mayCreate", "creationAuthority"):
+        out[key] = False
+    widths = {"u64": 8, "u32": 4}
+    declarations, stage_values, stage_bytes, scheduled = {}, {}, {}, {}
+    blocked, conflicts = set(), []
+    out["conflicts"] = conflicts
+
+    def reason(code, **details):
+        out["reasons"].append({"code": code, **details})
+
+    def span(a, n):
+        return (type(base) is int and 0x10000 <= base < 0x800000000000 and type(a) is int
+                and type(n) is int and n > 0 and base <= a and a + n <= 0x800000000000)
+
+    def fields(a, n):
+        return [(a + i, "u64") for i in range(0, n, 8)]
+
+    def collect(requests, stage="initial"):
+        # A stage owns its first bytes. Extension never overwrites a previous
+        # word; W's native reload and final readback are distinct observations.
+        requests = list(dict.fromkeys(requests))
+        values = stage_values.setdefault(stage, {})
+        observed_bytes = stage_bytes.setdefault(stage, {})
+        requested_once = scheduled.setdefault(stage, set())
+        aliases = []
+        pending = {}
+        for a, kind in requests:
+            key = f"{a:X}:{kind}"
+            aliases.append(key)
+            if not span(a, widths[kind]):
+                blocked.add(key); reason("unsupported-span", address=a, type=kind, stage=stage)
+                continue
+            old = declarations.get(a)
+            if old is not None and old != kind:
+                blocked.update((key, f"{a:X}:{old}"))
+                conflicts.append({"kind": "typed-address", "address": a, "types": [old, kind], "stage": stage})
+                continue
+            declarations[a] = kind
+            if key not in blocked and key not in requested_once:
+                pending[key] = (a, kind)
+                requested_once.add(key)
+        raw = {}
+        event = {"stage": stage, "requested": aliases, "fields": pending, "values": raw, "hex": {}, "complete": False}
+        out["observations"].append(event)
+        try:
+            if pending:
+                read(pending, raw, stage="secondary-" + stage, failure_evidence=out, require_identity=True)
+        except Exception as error:
+            reason("read-failed", stage=stage, error=f"{type(error).__name__}: {error}")
+        for key, value in raw.items():
+            a, kind = pending[key]; width = widths[kind]
+            if type(value) is not int or not 0 <= value < 1 << (8 * width):
+                blocked.add(key); reason("invalid-typed-value", stage=stage, field=key, value=value)
+                continue
+            data = value.to_bytes(width, "little")
+            event["hex"][key] = data.hex()
+            for i, byte in enumerate(data):
+                if a+i in observed_bytes and observed_bytes[a+i] != byte:
+                    conflicts.append({"kind": "overlapping-bytes", "stage": stage, "address": a+i,
+                                      "first": observed_bytes[a+i], "later": byte, "field": key})
+                else:
+                    observed_bytes[a+i] = byte
+            values[key] = value
+        event["complete"] = all(k in values and k not in blocked for k in aliases)
+        return event["complete"]
+
+    def value(a, kind="u64", stage="initial"):
+        key = f"{a:X}:{kind}"
+        return None if key in blocked else stage_values.get(stage, {}).get(key)
+
+    def blob(a, n):
+        words = [value(a+i) for i in range(0, n, 8)]
+        return None if any(v is None for v in words) else b"".join(v.to_bytes(8, "little") for v in words)[:n]
+
+    def lifecycle(phase):
+        sample = {"native": {}, "nativeComplete": False, "logs": {}, "scope": None, "available": False}
+        out["lifecycle"][phase] = sample
+        try:
+            lifecycle_read(sample, "secondary-lifecycle-" + phase, out, require_identity=True)
+            native, logs, scope = sample["native"], sample["logs"], sample["scope"]
+            expected = {"head": 64, "tail": 64, "cachePointer": 64, "cacheCounter": 32,
+                        "inField": 8, "frozen": 32, "eventContext": 64, "openMenu": 8,
+                        "world": 8, "room": 8, "door": 8, "map": 16, "btl": 16, "evt": 16}
+            typed = all(type(native.get(k)) is int and 0 <= native[k] < 1 << w for k,w in expected.items())
+            typed = typed and type(native.get("eventState")) is int and -(1 << 31) <= native["eventState"] < 1 << 31
+            regions = native.get("regions")
+            typed = typed and isinstance(regions, list) and len(regions) == 64 and all(type(v) is int and 0 <= v < 1 << 64 for v in regions)
+            location = [native.get(k) for k in ("world", "room", "door", "map", "btl", "evt")]
+            arrival = logs.get("arrival")
+            arrival_location = [int(arrival[k], 16 if k in ("world", "room") else 10)
+                                for k in ("world", "room", "door", "map", "btl", "evt")] if arrival else None
+            sample["available"] = bool(typed and sample["nativeComplete"] and scope and logs.get("lifecycle")
+                and logs.get("arrivalAfterLifecycle") is True and scope["location"] == location
+                and native.get("location") == location and arrival_location == location
+                and int(arrival["epoch"]) == scope["epoch"])
+        except Exception as error:
+            reason("lifecycle-read-failed", phase=phase, error=f"{type(error).__name__}: {error}")
+        if not sample["available"]:
+            reason("lifecycle-unavailable", phase=phase)
+
+    def signed_count(data):
+        return int.from_bytes(data[4:8], "little", signed=True)
+
+    if not span(base, 1):
+        reason("invalid-module-base")
+        out["endedMonotonic"] = time.monotonic()
+        return out
+    lifecycle("before")
+    root_addresses = {"object0": base+0x2A25030, "object1": base+0x2A25038,
+        "object2": base+0x2A25040, "went": base+0x2AE5A38, "item": base+0x2A25370, "bar": base+0x2AE5E50}
+    collect([(a,"u64") for a in root_addresses.values()])
+    roots = {k: value(a) for k,a in root_addresses.items()}; out["roots"] = roots
+    inventory_ok, declared_count = True, 0
+    for i in range(3):
+        root = roots[f"object{i}"]
+        table = {"tableIndex": i, "root": root, "rows": [], "complete": False}
+        out["tables"].append(table)
+        if root == 0:
+            table.update(observedNull=True, complete=True); continue
+        if not span(root, 8):
+            table["failure"] = "root-unavailable"; inventory_ok = False; continue
+        collect(fields(root, 8)); data = blob(root, 8)
+        if data is None:
+            table["failure"] = "header-unavailable"; inventory_ok = False; continue
+        count = signed_count(data); table.update(headerHex=data.hex(), count=count)
+        declared_count += max(count, 0)
+        if count < 0 or declared_count > 8192 or (count and not span(root+8, count*96)):
+            table["failure"] = "count-cap-or-span"; inventory_ok = False; continue
+        requests = [(root+8+96*j+off,"u64") for j in range(count) for off in (0,0x48)]
+        table["complete"] = collect(requests)
+        inventory_ok &= table["complete"]
+        for j in range(count):
+            a = root+8+96*j; lo, high = value(a), value(a+0x48)
+            table["rows"].append({"index": j, "address": a, "idWord": lo, "selectorGroupWord": high,
+                "objectId": None if lo is None else lo & 0xFFFFFFFF,
+                "group": None if high is None else high >> 48})
+        ids = [r["objectId"] for r in table["rows"]]
+        multiplicity = {}
+        for v in ids:
+            if v is not None:
+                multiplicity[v] = multiplicity.get(v, 0) + 1
+        table["duplicateIds"] = sorted(v for v,n in multiplicity.items() if n > 1)
+        table["unsignedSorted"] = all(v is not None for v in ids) and ids == sorted(ids)
+        table["nativeComparatorScope"] = "signed32(key-rowId); no effective bsearch binding claimed"
+    out["inventoryComplete"] = bool(inventory_ok)
+    census_refs = {n.get("objectEntry") for n in census.get("nodes", []) if isinstance(n, dict)}
+    census_refs.discard(None)
+    census_refs.discard(0)
+    rooted_addresses = {r["address"] for t in out["tables"] for r in t["rows"]}
+    out["censusReferences"] = [{"address": a, "rootedExactRow": a in rooted_addresses}
+                               for a in sorted(census_refs)]
+    physical = {}
+    for table in out["tables"]:
+        for row in table["rows"]:
+            if row["group"] not in (None, 0) or row["objectId"] == 302 or row["address"] in census_refs:
+                selected = physical.setdefault(row["address"], {"address": row["address"], "aliases": []})
+                selected["aliases"].append({"tableIndex": table["tableIndex"], "index": row["index"]})
+    selection_capped = len(physical) > 128
+    out["selectedPhysicalCount"] = len(physical)
+    if selection_capped:
+        reason("selected-entry-cap", count=len(physical))
+    selected = list(physical.values())[:128]
+    out["selectedEntries"] = selected
+    collect([f for r in selected for f in fields(r["address"],96)])
+    for entry in selected:
+        data = blob(entry["address"],96)
+        entry["available"] = data is not None
+        if data is not None:
+            entry.update(hex=data.hex(), objectId=int.from_bytes(data[:4],"little"), objectType=data[4],
+                selector=int.from_bytes(data[0x4C:0x4E],"little"), group=int.from_bytes(data[0x4E:0x50],"little"),
+                form=int.from_bytes(data[0x57:0x58],"little",signed=True))
+
+    # First descriptors are retained even if malformed; no later-match fallback.
+    bar, B = out["bar"], roots["bar"]
+    bar.update(root=B, descriptors=[], complete=False)
+    if span(B,16):
+        collect(fields(B,16)); data=blob(B,16)
+        if data is not None:
+            count=signed_count(data); bar.update(headerHex=data.hex(), count=count)
+            if 0 <= count <= 256 and (not count or span(B+16,16*count)):
+                bar["complete"]=collect([f for j in range(count) for f in fields(B+16+16*j,16)])
+                for j in range(count):
+                    a=B+16+16*j; raw=blob(a,16)
+                    d={"index":j,"address":a,"hex":None if raw is None else raw.hex()}
+                    if raw is not None:
+                        d.update(type=int.from_bytes(raw[:2],"little"), name=int.from_bytes(raw[4:8],"little"),
+                                 handle=int.from_bytes(raw[8:12],"little"), length=int.from_bytes(raw[12:16],"little"))
+                    bar["descriptors"].append(d)
+            else: reason("bar-count-cap-or-span",count=count)
+    extents={}
+    for name,tag in (("went",0x746E6577),("item",0x6D657469)):
+        matches=[d for d in bar["descriptors"] if d.get("type")==2 and d.get("name")==tag]
+        binding={"matches":[d["index"] for d in matches],"complete":False}; bar[name]=binding
+        if not bar["complete"] or not matches: continue
+        d=matches[0]; h=d["handle"]; masked=h&0x7FFFFFFF; bucket=masked>>25
+        binding.update(descriptorIndex=d["index"],rawHandle=h,length=d["length"],bucket=bucket)
+        a=base+0x2B0D720+8*bucket; collect([(a,"u64")]); region=value(a)
+        pointer=None if region is None else region|(masked&0x1FFFFFF)
+        binding.update(bucketAddress=a,bucketBase=region,decodedPointer=pointer)
+        length=d["length"]
+        ok=bool(h and region is not None and region & 0x1FFFFFF == 0 and pointer==roots[name]
+            and span(pointer,length) and (length%4==0 if name=="went" else length>=8))
+        binding["complete"]=ok
+        if ok: extents[name]=(pointer,length)
+    out["declaredExtentBindingComplete"]=len(extents)==2
+    if len(extents)!=2: reason("bar-root-extent-unavailable")
+
+    equipment=[]
+    for entry in selected:
+        for slot in (0,1):
+            binding={"entryAddress":entry["address"],"aliases":entry["aliases"],"slot":slot,"available":False,"status":"unavailable"}
+            out["bindings"].append(binding)
+            if not entry["available"]: continue
+            binding.update(group=entry["group"],selector=entry["selector"],form=entry["form"])
+            selector,form=entry["selector"],entry["form"]
+            zero=None; a=None
+            if entry["group"]==0: zero="group-zero"
+            elif selector in (1,14) and slot==1:
+                if 1<=form<=10: a=base+0x9ABDA0+0xE04+(form-1)*0x38
+                else: zero="form-null"
+            elif not 1<=selector<=15: zero="selector-null"
+            else:
+                mapped={14:1,15:6}.get(selector,selector)
+                a=base+0x9ABDA0+(mapped-1)*0x114+slot*2
+            if zero: binding.update(available=True,status=zero,rawOutput=0)
+            else: binding["equipmentAddress"]=a; equipment.append((a,"u64"))
+    collect(equipment)
+    for binding in out["bindings"]:
+        if "equipmentAddress" not in binding: continue
+        word=value(binding["equipmentAddress"])
+        if word is None: continue
+        binding["equipmentWord"]=word; binding["equipmentId"]=word&0xFFFF
+        if binding["equipmentId"]==0: binding.update(available=True,status="equipment-zero",rawOutput=0)
+    def inside(name,a,n):
+        return name in extents and span(a,n) and extents[name][0]<=a and a+n<=sum(extents[name])
+    pending=[b for b in out["bindings"] if b.get("equipmentId",0)>0]
+    offset_requests=[]
+    for b in pending:
+        a=roots["went"]+4*b["group"] if roots["went"] is not None else 0
+        b["offsetBeforeAddress"]=a
+        if inside("went",a,4): offset_requests.append((a,"u32"))
+        else: b["status"]="offset-outside-qualified-extent"
+    collect(offset_requests)
+    for b in pending:
+        b["wentBefore"]=roots["went"]; b["offsetBeforeLookup"]=value(b["offsetBeforeAddress"],"u32")
+        if b["offsetBeforeLookup"]==0: b.update(available=True,status="row-offset-zero",rawOutput=0)
+    lookup=[b for b in pending if b.get("offsetBeforeLookup") not in (None,0)]
+    items=out["items"]; items.update(root=roots["item"],rows=[],complete=False)
+    if "item" in extents:
+        I=roots["item"]; collect(fields(I,8)); data=blob(I,8)
+        if data is not None:
+            count=signed_count(data); items.update(headerHex=data.hex(),count=count)
+            if max(count,0)<=4096 and 8+24*max(count,0)<=extents["item"][1]:
+                items["complete"]=collect([(I+8+24*j,"u64") for j in range(max(count,0))])
+                for j in range(max(count,0)):
+                    a=I+8+24*j; word=value(a)
+                    items["rows"].append({"index":j,"address":a,"word":word,
+                        "itemId":None if word is None else word&0xFFFF,
+                        "ordinal":None if word is None else (word>>32)&0xFFFF})
+            else: reason("item-count-cap-or-extent",count=count)
+    full_items=[]
+    for b in lookup:
+        if not items["complete"]: b["status"]="item-inventory-unavailable"; continue
+        matches=[r for r in items["rows"] if r["itemId"]==b["equipmentId"]]
+        b["itemMatches"]=[r["index"] for r in matches]
+        if not matches: b.update(available=True,status="would-fault-missing-item"); continue
+        r=matches[0]; b.update(itemIndex=r["index"],itemAddress=r["address"],ordinal=r["ordinal"])
+        full_items.extend(fields(r["address"],24))
+    collect(full_items)
+    reloads=[b for b in lookup if "itemAddress" in b]
+    for b in reloads:
+        data=blob(b["itemAddress"],24); b["itemHex"]=None if data is None else data.hex()
+    if reloads:
+        collect([(root_addresses["went"],"u64")],"post-lookup")
+        W1=value(root_addresses["went"],stage="post-lookup")
+        requests=[]
+        for b in reloads:
+            b["wentAfter"]=W1
+            if W1!=roots["went"]: b["status"]="went-reload-drift"; continue
+            a=W1+4*b["group"]
+            if inside("went",a,4): requests.append((a,"u32"))
+        collect(requests,"post-lookup")
+        outputs=[]
+        for b in reloads:
+            if b.get("wentAfter")!=roots["went"]: continue
+            offset=value(b["offsetBeforeAddress"],"u32","post-lookup")
+            b["offsetAfterLookup"]=offset
+            if offset is None: continue
+            if offset!=b["offsetBeforeLookup"]: b["status"]="offset-reload-drift"; continue
+            index=offset+b["ordinal"]; a=W1+4*index; b.update(outputIndex=index,outputAddress=a)
+            if inside("went",a,4): outputs.append((a,"u32"))
+            else: b["status"]="output-outside-qualified-extent"
+        collect(outputs,"post-lookup")
+        for b in reloads:
+            if "outputAddress" not in b or not b.get("itemHex"): continue
+            output=value(b["outputAddress"],"u32","post-lookup")
+            if output is not None: b.update(available=True,status="sampled-output",rawOutput=output)
+
+    collect([(a,k) for a,k in declarations.items()],"readback")
+    after=stage_values.get("readback",{})
+    for stage,values in stage_values.items():
+        if stage=="readback": continue
+        for key,before in values.items():
+            if key not in after or after[key]!=before:
+                out["readbackChanges"].append({"stage":stage,"field":key,"before":before,"after":after.get(key)})
+    lifecycle("after")
+    left,right=(out["lifecycle"][p] for p in ("before","after"))
+    out["lifecycle"]["stable"]=bool(left["available"] and right["available"] and left["native"]==right["native"]
+        and left["scope"]==right["scope"] and left["logs"]==right["logs"])
+    out["readbackStable"]=bool(not blocked and not conflicts and not out["readbackChanges"]
+        and all(f"{a:X}:{k}" in after for a,k in declarations.items()) and not out.get("readFailures")
+        and not any(r["code"] in ("read-failed","invalid-typed-value") for r in out["reasons"]))
+    out["itemFirstMatchCoverageComplete"] = items["complete"]
+    out["currentSelectionComplete"]=bool(inventory_ok and not selection_capped
+        and all(r["rootedExactRow"] for r in out["censusReferences"]) and all(e["available"] for e in selected)
+        and all(b["available"] for b in out["bindings"]) and not blocked and not conflicts)
+    try:
+        parent_base = census.get("moduleBase")
+        if isinstance(parent_base, str):
+            parent_base = int(parent_base, 0)
+        out["parentIdentityAvailable"] = (type(census.get("pid")) is int and census["pid"] > 0
+                                          and type(parent_base) is int and parent_base == base)
+    except (ValueError, TypeError):
+        out["parentIdentityAvailable"] = False
+    parent_scope = census.get("rawOccupancy", {}).get("lifecycle", {}).get("after", {}).get("scope")
+    out["parentScopeJoin"] = {"available": parent_scope is not None, "parentScope": parent_scope,
+                              "matches": parent_scope is not None and parent_scope == left["scope"] == right["scope"]}
+    # Lifecycle endpoints and the content decoder read the same handle table
+    # independently. Equal endpoints alone cannot erase a known intervening
+    # bucket disagreement. Retain partial joins as well as complete mismatches.
+    bucket_join = out["consumedBucketJoin"]
+    for name in ("went", "item"):
+        binding = bar.get(name, {})
+        if "bucketAddress" not in binding:
+            continue
+        bucket, address = binding["bucket"], binding["bucketAddress"]
+        samples = {"binding": binding.get("bucketBase"), "readback": after.get(f"{address:X}:u64")}
+        for phase, endpoint in (("lifecycleBefore", left), ("lifecycleAfter", right)):
+            regions = endpoint["native"].get("regions")
+            samples[phase] = regions[bucket] if isinstance(regions, list) and bucket < len(regions) else None
+        available = {key: type(v) is int and 0 <= v < 1 << 64 for key,v in samples.items()}
+        known = [v for key,v in samples.items() if available[key]]
+        disagreement = len(set(known)) > 1
+        complete = all(available.values())
+        bucket_join["entries"].append({"bindingName": name, "bucket": bucket, "address": address,
+            "samples": samples, "available": available, "complete": complete,
+            "knownDisagreement": disagreement, "matches": complete and not disagreement})
+        if disagreement:
+            reason("consumed-bucket-lifecycle-disagreement", binding=name, bucket=bucket)
+        elif not complete:
+            reason("consumed-bucket-join-unavailable", binding=name, bucket=bucket)
+    bucket_join["complete"] = all(e["matches"] for e in bucket_join["entries"])
+    bucket_join["knownDisagreement"] = any(e["knownDisagreement"] for e in bucket_join["entries"])
+    out["localBindingsStable"]=bool(out["currentSelectionComplete"] and out["readbackStable"]
+        and out["lifecycle"]["stable"] and out["parentIdentityAvailable"] and bucket_join["complete"])
+    parent_join = out["parentScopeJoin"]
+    out["sampledScope"] = ("local-only-parent-unavailable" if not parent_join["available"] else
+                            "parent-joined" if parent_join["matches"] else "parent-conflict")
+    if parent_join["available"] and not parent_join["matches"]:
+        reason("available-parent-scope-disagreement")
+    out["sampledBindingsStable"]=bool(out["localBindingsStable"]
+        and (not parent_join["available"] or parent_join["matches"]))
+    out["endedMonotonic"]=time.monotonic()
+    return out
+
+
+def capture_native_resource_bindings(base, read, census, *, lifecycle_read):
+    """Unintegrated bounded pointer diagnostic; supplied readers own the existing deadline."""
+    receipt = {"schemaVersion": 1, "pid": census.get("pid"), "moduleBase": base,
+        "parentModuleBase": census.get("moduleBase"), "lineage": census.get("lineage"),
+        "startedMonotonic": time.monotonic(), "deadlineOwner": "supplied census read/lifecycle readers",
+        "diagnosticCaps": {"actors": 16, "barEntries": 64}, "actors": [], "selection": [], "reasons": [],
+        "allocator": {"reasons": []}, "allocatorPointerBindingComplete": False, "actorCoverageComplete": False,
+        "executedCallObserved": False, "callbackClosureComplete": False, "pendingExclusionComplete": False,
+        "controllerIncarnationQualified": False, "atomic": False, "creationAuthority": False,
+        "readback": {"fields": {}, "before": {"values": {}, "hex": {}, "complete": False},
+                     "after": {"values": {}, "hex": {}, "attempted": False, "complete": False}, "changes": []},
+        "lifecycle": {"before": {}, "after": {}, "available": False, "stable": False, "reasons": []}}
+    evidence, lifecycle, allocator = receipt["readback"], receipt["lifecycle"], receipt["allocator"]
+    fields, values, blocked = {}, evidence["before"]["values"], set()
+    widths = {"u8": 1, "u16": 2, "u32": 4, "i32": 4, "u64": 8}
+
+    def reason(sink, code, **details):
+        sink["reasons"].append({"code": code, **details})
+
+    def span(address, size, alignment=1):
+        return (type(base) is int and 0x10000 <= base < 0x800000000000
+            and type(address) is int and type(size) is int and size > 0
+            and base <= address and address % alignment == 0 and address + size <= 0x800000000000)
+
+    def object_pointer(value, size, alignment, sink, field):
+        if not span(value, size, alignment):
+            reason(sink, "unsupported-pointer-span", field=field, value=value, bytes=size, alignment=alignment)
+            return False
+        return True
+
+    def collect(batch, stage, phase="before"):
+        sample = evidence[phase]
+        if phase == "before":
+            fields.update(batch)
+        aliases = {}
+        for label, (address, kind) in fields.items():
+            evidence["fields"][label] = {"address": address, "type": kind, "width": widths[kind]}
+            aliases.setdefault(address, []).append({"label": label, "type": kind})
+            if not span(address, widths[kind], 8 if kind == "u64" else 1):
+                blocked.add(label)
+                reason(receipt, "invalid-field-span", stage=stage, field=label, address=address, width=widths[kind])
+        for address, labels in aliases.items():
+            if len({f["type"] for f in labels}) > 1:
+                blocked.update(f["label"] for f in labels)
+                reason(receipt, "typed-address-conflict", stage=stage, address=address, fields=labels)
+        # Conflicts retain all labels. No mixed-width request is sent, including
+        # on readback. Independently readable components keep their own evidence.
+        allowed = {k: v for k, v in batch.items() if k not in blocked}
+        raw = {}
+        stage_receipt = {"stage": stage, "phase": phase, "fieldLabels": list(batch), "complete": False}
+        receipt.setdefault("stages", []).append(stage_receipt)
+        failed = False
+        try:
+            if allowed:
+                read(allowed, raw, stage="resource-binding-" + stage, failure_evidence=receipt)
+        except Exception as error:
+            failed = True
+            reason(receipt, "read-failed", stage=stage, phase=phase, error=f"{type(error).__name__}: {error}")
+        for label, value in raw.items():
+            kind = fields[label][1]
+            width = widths[kind]
+            lower, upper = (-(1 << 31), (1 << 31) - 1) if kind == "i32" else (0, (1 << (8 * width)) - 1)
+            if type(value) is not int or not lower <= value <= upper:
+                sample.setdefault("invalidValues", {})[label] = value
+                reason(receipt, "invalid-typed-value", stage=stage, phase=phase, field=label, type=kind)
+                continue
+            sample["values"][label] = value
+            sample["hex"][label] = value.to_bytes(width, "little", signed=kind == "i32").hex()
+        stage_receipt["complete"] = not failed and all(k in sample["values"] and k not in blocked for k in batch)
+        return stage_receipt["complete"]
+
+    def sample_lifecycle(phase):
+        sample = lifecycle[phase]
+        sample.update(native={}, nativeComplete=False, logs={}, scope=None, available=False)
+        try:
+            lifecycle_read(sample, "resource-binding-lifecycle-" + phase, lifecycle)
+            native = sample["native"]
+            header_types = {"head": "u64", "tail": "u64", "cachePointer": "u64", "cacheCounter": "u32",
+                "inField": "u8", "frozen": "u32", "eventState": "i32", "eventContext": "u64", "openMenu": "u8",
+                "world": "u8", "room": "u8", "door": "u8", "map": "u16", "btl": "u16", "evt": "u16"}
+            for key, kind in header_types.items():
+                value = native.get(key)
+                low, high = (-(1 << 31), (1 << 31)-1) if kind == "i32" else (0, (1 << (8*widths[kind]))-1)
+                if type(value) is not int or not low <= value <= high:
+                    raise StepFailed(f"invalid or missing lifecycle typed field {key}")
+            if (len(native.get("regions", [])) != 64
+                    or any(type(v) is not int or not 0 <= v < 1 << 64 for v in native["regions"])
+                    or native.get("location") != [native[k] for k in ("world", "room", "door", "map", "btl", "evt")]):
+                raise StepFailed("invalid lifecycle region table or location")
+            sample["available"] = bool(sample["nativeComplete"] and sample["scope"]
+                and sample["logs"].get("arrival") and sample["logs"].get("lifecycle"))
+        except Exception as error:
+            reason(lifecycle, "lifecycle-read-failed", phase=phase, error=f"{type(error).__name__}: {error}")
+        if not sample["available"]:
+            reason(lifecycle, "lifecycle-unavailable", phase=phase)
+
+    if not span(base, 1):
+        reason(receipt, "invalid-module-base")
+        receipt["endedMonotonic"] = time.monotonic()
+        return receipt
+    sample_lifecycle("before")
+    raw_parent = census.get("rawOccupancy", {})
+    parent_lifecycle = raw_parent.get("lifecycle", {})
+    parent_raw_ok = (raw_parent.get("schemaVersion") == 2 and raw_parent.get("listedOccupancyComplete") is True
+        and parent_lifecycle.get("available") is True and parent_lifecycle.get("stable") is True
+        and all(parent_lifecycle.get(p, {}).get("rawReadbackJoin", {}).get("complete") is True for p in ("before", "after")))
+    parent_actor_ok = parent_raw_ok and all(census.get(k) is True for k in
+        ("complete", "listComplete", "classificationComplete", "actorIdentityStable", "lifecycleStable", "epochStable", "safeGameplay"))
+    try:
+        module_ok = type(base) is int and type(census.get("pid")) is int and census["pid"] > 0 and int(census["moduleBase"], 0) == base
+    except (KeyError, TypeError, ValueError):
+        module_ok = False
+    if not module_ok:
+        reason(receipt, "parent-process-module-unavailable")
+    if not parent_raw_ok:
+        reason(receipt, "parent-raw-scope-unavailable")
+    eligible, selection_ok = [], parent_actor_ok
+    living = census.get("livingCombatRows", [])
+    raw_nodes = raw_parent.get("lists", {}).get("active", {}).get("nodes", [])
+    for node in census.get("nodes", []):
+        address = node.get("address")
+        choice = {"actor": address, "eligible": False, "reasons": []}
+        receipt["selection"].append(choice)
+        matches = [n for n in living if n.get("address") == address]
+        if not matches or node.get("objectId") != 302 or node.get("objectType") != 4:
+            reason(choice, "not-selected-living-object302-type4")
+            continue
+        originals = [p for p in census.get("provenance", []) if p.get("actor") == address]
+        raws = [n for n in raw_nodes if n.get("address") == address]
+        identities = ("objectEntry", "status", "controller", "spawnRecord", "nextHandle", "flags120")
+        qualified = (parent_actor_ok and len(matches) == len(originals) == len(raws) == 1
+            and matches[0].get("combatEligible") is True and type(matches[0].get("hp")) is int and matches[0]["hp"] > 0
+            and all(matches[0].get(k) == node.get(k) for k in identities)
+            and all(raws[0].get("readSuccess", {}).get(k) is True and raws[0].get(k) == node.get(k) for k in identities))
+        provenance = originals[0] if len(originals) == 1 else {}
+        qualified = qualified and (provenance.get("ordinaryTableIdentityVerified") is True
+            and provenance.get("controller") == node.get("controller") and provenance.get("pointer") == node.get("spawnRecord")
+            and provenance.get("objectId") == 302 and raws[0].get("readSuccess", {}).get("recordId") is True
+            and all(raws[0].get("readSuccess", {}).get(k) is True and raws[0].get(k) == node.get(k)
+                    for k in ("objectId", "objectType"))
+            and type(provenance.get("recordId")) is int and raws[0].get("recordId") == provenance.get("recordId"))
+        try:
+            original_record = bytes.fromhex(provenance.get("hex", ""))
+            qualified = (qualified and len(original_record) == 64
+                and struct.unpack_from("<I", original_record)[0] == 302
+                and struct.unpack_from("<H", original_record, 0x1E)[0] == provenance["recordId"])
+        except (TypeError, ValueError, KeyError, struct.error):
+            qualified = False
+        if not qualified:
+            reason(choice, "qualified-census-raw-provenance-join-unavailable")
+            selection_ok = False
+            continue
+        choice["eligible"] = True
+        eligible.append((node, provenance))
+    target_addresses = [n.get("address") for n in living if n.get("objectId") == 302 and n.get("objectType") == 4]
+    if (len(set(target_addresses)) != len(target_addresses)
+            or len({n[0]["address"] for n in eligible}) != len(eligible)
+            or any(not any(n.get("address") == address for n in census.get("nodes", [])) for address in target_addresses)):
+        reason(receipt, "living-traversal-membership-unavailable")
+        selection_ok = False
+    receipt.update(eligibleActors=len(eligible), attemptedActors=min(len(eligible), 16), omittedActors=max(0, len(eligible) - 16))
+    if not eligible:
+        reason(receipt, "no-qualified-actors")
+    if len(eligible) > 16:
+        reason(receipt, "actor-cap-exhausted", omitted=len(eligible) - 16)
+    batch = {"allocator:root": (base + 0x9BA920, "u64")} if type(base) is int else {}
+    for index, (node, provenance) in enumerate(eligible[:16]):
+        actor = {"actor": node["address"], "prefix": f"actor{index}:", "selection": dict(node),
+            "provenance": dict(provenance), "reasons": [], "modelPointerBindingComplete": False}
+        receipt["actors"].append(actor)
+        if object_pointer(actor["actor"], 0xA94, 8, actor, "actor"):
+            batch.update({actor["prefix"] + name: (actor["actor"] + offset, kind) for name, offset, kind in (
+                ("objectEntry", 0x918, "u64"), ("status", 0x5C0, "u64"), ("controller", 0x9E8, "u64"),
+                ("spawnRecord", 0x9F0, "u64"), ("flags120", 0x120, "u32"), ("nextHandle", 0xA90, "u32"),
+                ("bar", 0x920, "u64"), ("cached", 0xA88, "u64"))})
+    collect(batch, "roots-identity")
+
+    def actor_values(actor, names):
+        prefix = actor["prefix"]
+        if actor["reasons"]:
+            return None
+        if not all(prefix + n in values and prefix + n not in blocked for n in names):
+            reason(actor, "dependency-unavailable", fields=names)
+            return None
+        return [values[prefix + n] for n in names]
+
+    batch = {}
+    a = values.get("allocator:root")
+    if object_pointer(a, 8, 16, allocator, "allocator"):
+        batch["allocator:vtable"] = (a, "u64")
+    for actor in receipt["actors"]:
+        names = ["objectEntry", "status", "controller", "spawnRecord", "flags120", "nextHandle", "bar", "cached"]
+        identity = actor_values(actor, names)
+        if identity is None:
+            continue
+        observed = dict(zip(names, identity)); actor["identity"] = observed
+        if any(observed[k] != actor["selection"][k] for k in names[:6]):
+            reason(actor, "census-identity-changed")
+            continue
+        o, s, c, r, b = (observed[k] for k in ("objectEntry", "status", "controller", "spawnRecord", "bar"))
+        if not all([object_pointer(o, 5, 8, actor, "objectEntry"), object_pointer(s, 1, 8, actor, "status"),
+                    object_pointer(c, 1, 8, actor, "controller"), object_pointer(r, 0x20, 4, actor, "spawnRecord"),
+                    object_pointer(b, 8, 4, actor, "bar")]):
+            continue
+        p = actor["prefix"]
+        batch.update({p+"objectId": (o, "u32"), p+"objectEntryType": (o+4, "u8"),
+                      p+"recordId": (r+0x1E, "u16"), p+"barCount": (b+4, "i32")})
+    collect(batch, "allocator-object-bar")
+    batch = {}
+    va = values.get("allocator:vtable")
+    if va == base + 0x5B2BB0 and "allocator:vtable" not in blocked:
+        batch["allocator:target"] = (va+8, "u64")
+    else:
+        reason(allocator, "unsupported-allocator-vtable", value=va)
+    for actor in receipt["actors"]:
+        data = actor_values(actor, ["objectId", "objectEntryType", "recordId", "barCount"])
+        if data is None:
+            continue
+        oid, kind, rid, count = data
+        if (oid, kind, rid) != (302, 4, actor["provenance"]["recordId"]):
+            reason(actor, "object-record-mismatch", objectId=oid, objectEntryType=kind, recordId=rid)
+            continue
+        if not 1 <= count <= 64:
+            reason(actor, "unsupported-bar-count", count=count, diagnosticCap=64)
+            continue
+        actor["barCount"] = count
+        b = actor["identity"]["bar"]
+        if object_pointer(b, 0x10 + 0x10 * count, 4, actor, "bar-entry-span"):
+            batch.update({actor["prefix"]+f"barType{n}": (b+0x10+0x10*n, "u16") for n in range(count)})
+    collect(batch, "allocator-slot-bar-types")
+    if values.get("allocator:target") != base + 0x19C2B0:
+        reason(allocator, "allocator-target-mismatch", value=values.get("allocator:target"))
+    batch = {}
+    for actor in receipt["actors"]:
+        types = actor_values(actor, [f"barType{n}" for n in range(actor.get("barCount", 0))])
+        if types is None:
+            continue
+        actor["barTypes"] = types
+        if 4 not in types:
+            reason(actor, "bar-type4-not-found")
+            continue
+        j = types.index(4); e = actor["identity"]["bar"] + 0x10 + 0x10*j
+        actor.update(selectedIndex=j, selectedEntry=e, selectedPrefix=types[:j+1])
+        batch.update({actor["prefix"]+"handle": (e+8, "u32"), actor["prefix"]+"resourceSize": (e+0xC, "u32")})
+    collect(batch, "selected-entry")
+    batch = {}
+    for actor in receipt["actors"]:
+        data = actor_values(actor, ["handle", "resourceSize"])
+        if data is None:
+            continue
+        h, size = data
+        if h == 0 or not h & 0x80000000 or size < 0x94:
+            reason(actor, "unsupported-tagged-entry-shape", handle=h, resourceSize=size,
+                   limit="bit31 is a diagnostic loader-shape guard, not a native decoder rejection")
+            continue
+        actor.update(handle=h, resourceSize=size, bucket=(h & 0x7FFFFFFF) >> 25)
+        batch[actor["prefix"]+"bucket"] = (base+0x2B0D720+8*actor["bucket"], "u64")
+    collect(batch, "fresh-handle-bucket")
+    batch = {}
+    for actor in receipt["actors"]:
+        data = actor_values(actor, ["bucket"])
+        if data is None:
+            continue
+        region = data[0]
+        if not 0 < region < 0x800000000000 or region & 0x1FFFFFF:
+            reason(actor, "invalid-handle-region", value=region)
+            continue
+        p = region | (actor["handle"] & 0x1FFFFFF)
+        actor["model"] = p
+        if not object_pointer(p, actor["resourceSize"], 8, actor, "model-resource-span"):
+            continue
+        if actor["identity"]["cached"] != p:
+            reason(actor, "cached-model-mismatch", cached=actor["identity"]["cached"], decoded=p)
+            continue
+        batch.update({actor["prefix"]+"modelVtable": (p, "u64"), actor["prefix"]+"modelData": (p+8, "u64"),
+                      actor["prefix"]+"modelKind": (p+0x90, "i32")})
+    collect(batch, "model-shape")
+    batch = {}
+    classes = {3: (0x5B3E00, 0x1C21E0, "ModelSKL"), 2: (0x5B3D40, 0x1C1500, "ModelBG"), -1: (0x5B3EC0, 0x1C2CA0, "ModelMulti")}
+    for actor in receipt["actors"]:
+        data = actor_values(actor, ["modelVtable", "modelData", "modelKind"])
+        if data is None:
+            continue
+        vp, pointer, kind = data
+        if pointer != actor["model"]+0x90:
+            reason(actor, "model-data-mismatch", value=pointer)
+            continue
+        if kind not in classes or vp != base + classes[kind][0]:
+            reason(actor, "unsupported-model-pair", modelKind=kind, vtable=vp)
+            continue
+        actor.update(modelClass=classes[kind][2], expectedTarget=base+classes[kind][1])
+        batch[actor["prefix"]+"modelTarget"] = (vp+0x40, "u64")
+    collect(batch, "model-slot")
+    for actor in receipt["actors"]:
+        data = actor_values(actor, ["modelTarget"])
+        if data is not None and data[0] != actor["expectedTarget"]:
+            reason(actor, "model-target-mismatch", value=data[0])
+    evidence["before"]["complete"] = all(k in values and k not in blocked for k in fields)
+    evidence["after"]["requested"] = True
+    evidence["after"]["complete"] = collect(fields, "frozen-address-readback", "after")
+    evidence["after"]["attempted"] = any(work["stage"] == "resource-binding-frozen-address-readback"
+        and work["peekAttempted"] for work in receipt.get("readWork", []))
+    sample_lifecycle("after")
+    for phase in ("before", "after"):
+        sample = evidence[phase]
+        sample["unreadFields"] = [k for k in fields if k not in sample["values"] or k in blocked]
+    for label, before in values.items():
+        if label in evidence["after"]["values"] and before != evidence["after"]["values"][label]:
+            evidence["changes"].append({"field": label, "before": before, "after": evidence["after"]["values"][label]})
+    native_keys = ("head", "tail", "location", "regions", "inField", "frozen", "eventState", "eventContext", "openMenu")
+    lifecycle["available"] = all(lifecycle[p]["available"] for p in ("before", "after"))
+    for phase in ("before", "after"):
+        local = lifecycle[phase]
+        try:
+            native, observed, scope = local["native"], local["logs"], local["scope"]
+            parent = parent_lifecycle[phase]
+            if not local["available"] or not parent_raw_ok:
+                raise StepFailed("local or parent raw scope unavailable")
+            if (any(native[k] != lifecycle["before"]["native"][k] for k in native_keys)
+                    or observed != lifecycle["before"]["logs"] or scope != lifecycle["before"]["scope"]):
+                raise StepFailed("local lifecycle bookends changed")
+            if (any(native[k] != parent["native"][k] for k in native_keys)
+                    or scope != parent["scope"] or observed != parent["logs"]):
+                raise StepFailed("local lifecycle differs from qualified census raw scope")
+            arrival = [int(observed["arrival"][k], 16 if k in ("world", "room") else 10)
+                       for k in ("world", "room", "door", "map", "btl", "evt")]
+            if (not observed["arrivalAfterLifecycle"] or native["location"] != arrival or scope["location"] != arrival
+                    or native["inField"] == 0 or native["frozen"] != 0 or native["eventState"] != 0
+                    or native["eventContext"] != 0 or native["openMenu"] != 255):
+                raise StepFailed("local gameplay/arrival scope unqualified")
+            if eligible and (native["location"] != census["after"]["location"]
+                    or observed["arrival"] != census["logsAfter"]["arrival"]):
+                raise StepFailed("local scope differs from actor-qualifying legacy census")
+            parent_raw_values = raw_parent["readback"][phase]["values"]
+            if (native["head"] != parent_raw_values["activeHead"] or native["tail"] != parent_raw_values["activeTail"]
+                    or len(native["regions"]) != 64 or any(native["regions"][n] != parent_raw_values[f"bucket{n}"] for n in range(64))):
+                raise StepFailed("local roots/buckets disagree with parent raw readback")
+            for actor in receipt["actors"]:
+                label = actor["prefix"]+"bucket"
+                if label in evidence[phase]["values"] and evidence[phase]["values"][label] != native["regions"][actor["bucket"]]:
+                    raise StepFailed("fresh selected bucket disagrees with local lifecycle")
+        except (KeyError, TypeError, ValueError, StepFailed) as error:
+            reason(lifecycle, "scope-or-root-join-unavailable", phase=phase, error=str(error))
+    lifecycle["stable"] = lifecycle["available"] and not lifecycle["reasons"] and module_ok
+    def binding_fields_complete(prefix):
+        keys = [k for k in fields if k.startswith(prefix)]
+        return bool(keys) and all(k not in blocked and k in values and k in evidence["after"]["values"]
+            and values[k] == evidence["after"]["values"][k] for k in keys)
+    receipt["allocatorPointerBindingComplete"] = bool(lifecycle["stable"] and not allocator["reasons"]
+        and binding_fields_complete("allocator:"))
+    for actor in receipt["actors"]:
+        actor["modelPointerBindingComplete"] = bool(lifecycle["stable"] and not actor["reasons"]
+            and binding_fields_complete(actor["prefix"]))
+    receipt["actorCoverageComplete"] = bool(selection_ok and lifecycle["stable"] and len(eligible) <= 16
+        and all(a["modelPointerBindingComplete"] for a in receipt["actors"]))
+    receipt["endedMonotonic"] = time.monotonic()
+    return receipt
+
+
+def capture_native_controller_id_coverage(base, read, census, *, lifecycle_read):
+    """Bounded ordinary definitions and sampled list joins; never creation authority."""
+    receipt = {"schemaVersion": 1, "diagnosticOnly": True, "pid": census.get("pid"),
+        "moduleBase": base, "parentModuleBase": census.get("moduleBase"), "lineage": census.get("lineage"),
+        "deadlineOwner": "supplied census read/lifecycle readers", "startedMonotonic": time.monotonic(),
+        "diagnosticCaps": {"tableEntries": 64, "rawNodes": 256, "recordsPerDefinition": 256, "logicalRecords": 1024},
+        "table": [], "definitions": [], "references": [], "idConflicts": [], "definitionAliases": [],
+        "reasons": [], "parentReasons": [], "rawReasons": [], "tableReasons": [],
+        "tableInventoryComplete": False, "ordinaryRecordBytesComplete": False,
+        "listedReferenceJoinComplete": False, "sampledSupportedCoverageComplete": False,
+        "noIdConflictInSampledScope": None,
+        "idConflictScope": "duplicate raw u16 IDs among sampled ordinary slots; not an executed native lookup",
+        "globalControllerIdCoverageComplete": False,
+        "controllerIncarnationQualified": False, "pendingExclusionComplete": False, "atomic": False,
+        "creationAuthority": False, "executedCallObserved": False,
+        "readback": {"fields": {}, "before": {"values": {}, "complete": False},
+                     "after": {"values": {}, "complete": False}, "changes": []},
+        "lifecycle": {"before": {}, "after": {}, "available": False, "stable": False, "reasons": []}}
+    rb, life = receipt["readback"], receipt["lifecycle"]
+    fields, blocked, failed_fields = {}, set(), set()
+    widths = {"u8": 1, "u16": 2, "u32": 4, "i32": 4, "u64": 8}
+    raw_fields, parent_expected, raw_nodes = {}, {}, []
+    table_labels, definition_labels = set(), set()
+
+    def issue(sink, code, **details):
+        sink.append({"code": code, **details})
+
+    def span(address, size):
+        return (type(base) is int and 0x10000 <= base < 0x800000000000
+            and type(address) is int and type(size) is int and size > 0
+            and base <= address and address + size <= 0x800000000000)
+
+    def typed(value, kind):
+        low, high = (-(1 << 31), (1 << 31)-1) if kind == "i32" else (0, (1 << (widths[kind]*8))-1)
+        return type(value) is int and low <= value <= high
+
+    def collect(batch, stage, phase="before"):
+        if phase == "before":
+            fields.update(batch)
+        aliases = {}
+        for label, (address, kind) in fields.items():
+            rb["fields"][label] = {"address": address, "type": kind, "width": widths[kind]}
+            aliases.setdefault(address, []).append(label)
+            if not span(address, widths[kind]):
+                blocked.add(label)
+                issue(receipt["reasons"], "invalid-field-span", stage=stage, field=label, address=address)
+        for address, labels in aliases.items():
+            if len({fields[k][1] for k in labels}) > 1:
+                blocked.update(labels)
+                issue(receipt["reasons"], "typed-address-conflict", stage=stage, address=address, fields=labels)
+        allowed = {k: v for k, v in batch.items() if k not in blocked}
+        obtained = {}
+        work = {"stage": stage, "phase": phase, "requested": len(batch), "allowed": len(allowed), "complete": False}
+        receipt.setdefault("stages", []).append(work)
+        try:
+            if allowed:
+                read(allowed, obtained, stage="controller-id-" + stage, failure_evidence=receipt)
+        except Exception as error:
+            failed_fields.update(set(batch) - set(obtained) or set(batch))
+            issue(receipt["reasons"], "read-failed", stage=stage, phase=phase, error=f"{type(error).__name__}: {error}")
+        for k, value in obtained.items():
+            if typed(value, fields[k][1]):
+                rb[phase]["values"][k] = value
+            else:
+                rb[phase].setdefault("invalidValues", {})[k] = value
+                issue(receipt["reasons"], "invalid-typed-value", stage=stage, phase=phase, field=k)
+        work["completed"] = sum(k in rb[phase]["values"] and k not in blocked for k in batch)
+        work["complete"] = work["completed"] == len(batch) and not failed_fields.intersection(batch)
+
+    def get(label):
+        return rb["before"]["values"].get(label) if label not in blocked else None
+
+    def stable(labels):
+        return all(k not in blocked and k not in failed_fields and k in rb["before"]["values"] and k in rb["after"]["values"]
+            and rb["before"]["values"][k] == rb["after"]["values"][k] for k in labels)
+
+    def words(prefix, count, width, phase):
+        labels = [prefix + str(i) for i in range(count)]
+        values = rb[phase]["values"]
+        if any(k in blocked or k not in values for k in labels):
+            return None
+        return b"".join(values[k].to_bytes(width, "little") for k in labels)
+
+    native_types = {"head": "u64", "tail": "u64", "cachePointer": "u64", "cacheCounter": "u32",
+        "inField": "u8", "frozen": "u32", "eventState": "i32", "eventContext": "u64", "openMenu": "u8",
+        "world": "u8", "room": "u8", "door": "u8", "map": "u16", "btl": "u16", "evt": "u16"}
+    native_keys = ("head", "tail", "location", "regions", "inField", "frozen", "eventState", "eventContext", "openMenu")
+
+    def lifecycle(phase):
+        sample = life[phase]
+        sample.update(native={}, nativeComplete=False, logs={}, scope=None, available=False)
+        try:
+            lifecycle_read(sample, "controller-id-lifecycle-" + phase, life)
+            n, logs, scope = sample["native"], sample["logs"], sample["scope"]
+            if (not sample["nativeComplete"] or any(not typed(n.get(k), t) for k,t in native_types.items())
+                    or len(n.get("regions", [])) != 64 or any(not typed(v, "u64") for v in n["regions"])
+                    or n.get("location") != [n[k] for k in ("world", "room", "door", "map", "btl", "evt")]
+                    or not scope or any(type(scope.get(k)) is not int or scope[k] < 0 for k in ("loadSerial", "transitionSerial", "epoch"))
+                    or not logs.get("arrival") or not logs.get("lifecycle")):
+                raise StepFailed("lifecycle typed fields/scope unavailable")
+            sample["available"] = True
+            arrival = [int(logs["arrival"][k], 16 if k in ("world", "room") else 10)
+                       for k in ("world", "room", "door", "map", "btl", "evt")]
+            if (scope["epoch"] != int(logs["arrival"]["epoch"]) or not logs.get("arrivalAfterLifecycle") or scope["location"] != n["location"] or arrival != n["location"]
+                    or n["inField"] == 0 or n["frozen"] != 0 or n["eventState"] != 0
+                    or n["eventContext"] != 0 or n["openMenu"] != 255):
+                issue(life["reasons"], "lifecycle-scope-unqualified", phase=phase)
+        except Exception as error:
+            issue(life["reasons"], "lifecycle-unavailable", phase=phase, error=f"{type(error).__name__}: {error}")
+
+    if not span(base, 1):
+        issue(receipt["reasons"], "invalid-module-base")
+        return receipt
+    lifecycle("before")
+    parent = census.get("rawOccupancy", {})
+    if not isinstance(parent, dict):
+        issue(receipt["parentReasons"], "parent-raw-invalid-shape")
+        parent = {}
+    try:
+        if (type(census.get("pid")) is not int or census["pid"] <= 0 or int(census["moduleBase"], 0) != base
+                or any(census.get(k) is not True for k in ("complete", "listComplete", "classificationComplete", "actorIdentityStable", "lifecycleStable", "epochStable", "safeGameplay"))
+                or parent.get("schemaVersion") != 2 or parent.get("listedOccupancyComplete") is not True
+                or parent["lifecycle"].get("available") is not True or parent["lifecycle"].get("stable") is not True
+                or any(parent["lifecycle"][p]["rawReadbackJoin"]["complete"] is not True for p in ("before", "after"))):
+            raise StepFailed("parent raw/module qualification unavailable")
+    except (KeyError, TypeError, ValueError, StepFailed) as error:
+        issue(receipt["parentReasons"], "parent-raw-unavailable", error=str(error))
+    roots = {k: (base+r, "u64") for k,r in (("activeHead",0x2A171C8),("activeTail",0x2A171D0),
+        ("deferredHead",0x2A171D8),("deferredTail",0x2A171E0))}
+    roots.update({f"bucket{i}": (base+0x2B0D720+8*i,"u64") for i in range(64)})
+    raw_fields.update(roots)
+    try:
+        seen = set()
+        for lane in ("active", "deferred"):
+            listing = parent["lists"][lane]
+            for node in listing["nodes"]:
+                if len(raw_nodes) >= 256:
+                    raise StepFailed("aggregate raw node cap")
+                address = node["address"]
+                if not span(address, 0xA94) or address % 8 or address in seen:
+                    raise StepFailed("invalid/repeated raw node address")
+                seen.add(address)
+                prefix = f"node{len(raw_nodes)}:"
+                raw_nodes.append({"list": lane, "address": address, "prefix": prefix, "parent": node})
+                for key,offset,kind in (("nextHandle",0xA90,"u32"),("flags120",0x120,"u32"),
+                    ("objectEntry",0x918,"u64"),("status",0x5C0,"u64"),("controller",0x9E8,"u64"),("spawnRecord",0x9F0,"u64")):
+                    raw_fields[prefix+key] = (address+offset,kind)
+                obj, record = node.get("objectEntry"), node.get("spawnRecord")
+                if span(obj,10):
+                    for key,off,kind in (("objectId",0,"u32"),("objectType",4,"u8"),("namePrefix",8,"u16")):
+                        raw_fields[prefix+key] = (obj+off,kind)
+                if record:
+                    raw_fields[prefix+"recordId"] = (record+0x1E,"u16")
+        for k, (address, kind) in raw_fields.items():
+            spec = parent["readback"]["fields"][k]
+            if spec["address"] != address or spec["type"] != kind:
+                raise StepFailed("parent raw field descriptor mismatch")
+            value = parent["readback"]["before"]["values"][k]
+            if not typed(value,kind) or parent["readback"]["after"]["values"].get(k) != value:
+                raise StepFailed("parent raw values unavailable/changing")
+            parent_expected[k] = value
+        for node in raw_nodes:
+            for k in raw_fields:
+                if k.startswith(node["prefix"]) and (node["parent"].get(k.split(":",1)[1]) != parent_expected[k]
+                        or node["parent"].get("readSuccess", {}).get(k.split(":",1)[1]) is not True):
+                    raise StepFailed("parent node/raw value mismatch")
+        if any(parent["readback"][p].get("complete") is not True for p in ("before", "after")):
+            raise StepFailed("parent raw readback incomplete")
+    except (KeyError, TypeError, ValueError, StepFailed) as error:
+        issue(receipt["parentReasons"], "parent-raw-inventory-unavailable", error=str(error))
+    collect({"count": (base+0x2A10418,"i32"), **raw_fields}, "roots-raw-before")
+    table_labels.add("count")
+    count = get("count")
+    receipt["declaredTableCount"] = count
+    if type(count) is int and 0 <= count <= 64:
+        batch = {f"entry{i}:{k}": (base+0x2A10010+i*16+off,t)
+                 for i in range(count) for k,off,t in (("key",0,"u32"),("flags",4,"u32"),("pointer",8,"u64"))}
+        table_labels.update(batch)
+        collect(batch, "table-before")
+    else:
+        issue(receipt["tableReasons"], "table-count-unavailable-or-cap", value=count)
+        count = 0
+    controller_batch = {}
+    for i in range(count):
+        entry = {"tableIndex": i, **{k:get(f"entry{i}:{k}") for k in ("key","flags","pointer")}}
+        receipt["table"].append(entry)
+        if any(entry[k] is None for k in ("key","flags","pointer")):
+            issue(receipt["tableReasons"], "table-entry-unavailable", tableIndex=i)
+        elif entry["flags"] & 1:
+            entry["status"] = "unsupported alternate script pointer"
+            issue(receipt["tableReasons"], "alternate-table-entry", tableIndex=i)
+        elif not span(entry["pointer"],0x40) or entry["pointer"] % 8:
+            issue(receipt["tableReasons"], "invalid-controller-pointer", tableIndex=i, value=entry["pointer"])
+        else:
+            definition = {"tableIndex": i, "pointer": entry["pointer"], "key": entry["key"], "prefix": f"def{i}:",
+                          "records": [], "reasons": [], "fullBytesComplete": False}
+            receipt["definitions"].append(definition)
+            controller_batch.update({definition["prefix"]+k:(entry["pointer"]+off,t) for k,off,t in
+                (("groupKey",0,"u32"),("flags",4,"u32"),("header",8,"u64"),("spawnArray",0x30,"u64"),("regionArray",0x38,"u64"))})
+    definition_labels.update(controller_batch)
+    collect(controller_batch, "controllers-before")
+    headers = {}
+    for d in receipt["definitions"]:
+        d.update({k:get(d["prefix"]+k) for k in ("groupKey","flags","header","spawnArray","regionArray")})
+        if d["groupKey"] != d["key"]:
+            issue(d["reasons"], "table-key-mismatch")
+        if not span(d["header"],44):
+            issue(d["reasons"], "invalid-header-span", value=d["header"])
+        else:
+            headers.update({d["prefix"]+f"headerWord{i}":(d["header"]+4*i,"u32") for i in range(11)})
+    definition_labels.update(headers)
+    collect(headers,"headers-before")
+    records, logical_count = {}, 0
+    for d in receipt["definitions"]:
+        data = words(d["prefix"]+"headerWord",11,4,"before")
+        if data is None:
+            issue(d["reasons"],"header-unavailable")
+            continue
+        d["headerBeforeHex"] = data.hex()
+        d["headerFields"] = {"type":data[0],"flags":data[1],"headerId":int.from_bytes(data[2:4],"little"),
+            "spawnCount":int.from_bytes(data[4:6],"little"),"regionCount":int.from_bytes(data[6:8],"little"),"activationMarker":data[14]}
+        h = d["headerFields"]; n = h["spawnCount"]
+        d["supportedType"] = h["type"] in (1,2)
+        if not d["supportedType"]:
+            issue(d["reasons"],"unsupported-header-type",value=h["type"])
+        logical_count += n
+        if n > 256 or logical_count > 1024:
+            d["omittedRecordIndices"] = [0,n]
+            issue(d["reasons"],"record-cap",declared=n,logicalTotal=logical_count)
+            continue
+        start = d["spawnArray"]
+        d["layoutValidated"] = (start == d["header"]+44 and d["regionArray"] == start+n*64
+                                and span(start,max(1,n*64)) and span(d["regionArray"],1))
+        if not d["layoutValidated"]:
+            issue(d["reasons"],"header-array-layout-mismatch")
+            continue
+        for i in range(n):
+            prefix = d["prefix"]+f"record{i}:"
+            row = {"recordIndex":i,"pointer":start+i*64,"prefix":prefix,"fullBytesComplete":False}
+            d["records"].append(row)
+            records.update({prefix+str(j):(row["pointer"]+j*8,"u64") for j in range(8)})
+    receipt["declaredLogicalRecordCount"] = logical_count
+    definition_labels.update(records)
+    collect(records,"records-before")
+    # Definitions first: a later missing raw field cannot erase completed table readback.
+    ordered_after = {k:v for k,v in fields.items() if k not in raw_fields}
+    ordered_after.update({k:fields[k] for k in raw_fields})
+    collect(ordered_after,"all-after","after")
+    lifecycle("after")
+    # Full-byte overlap checks catch independently sampled overlapping typed reads.
+    for phase in ("before","after"):
+        bytes_seen = {}
+        for k,value in rb[phase]["values"].items():
+            address,kind = fields[k]
+            for offset,byte in enumerate(value.to_bytes(widths[kind],"little",signed=kind=="i32")):
+                other = bytes_seen.get(address+offset)
+                if other is not None and other[0] != byte:
+                    blocked.update((k,other[1]))
+                    issue(receipt["reasons"],"overlapping-byte-mismatch",phase=phase,address=address+offset,fields=[other[1],k])
+                else:
+                    bytes_seen[address+offset] = (byte,k)
+        rb[phase]["unreadFields"] = [k for k in fields if k not in rb[phase]["values"] or k in blocked]
+        rb[phase]["complete"] = not rb[phase]["unreadFields"] and not failed_fields
+    for k,v in rb["before"]["values"].items():
+        if k in rb["after"]["values"] and v != rb["after"]["values"][k]:
+            rb["changes"].append({"field":k,"before":v,"after":rb["after"]["values"][k]})
+    for phase in ("before","after"):
+        local,values = life[phase], rb[phase]["values"]
+        try:
+            if not local["available"]:
+                raise StepFailed("local lifecycle unavailable")
+            native = local["native"]
+            if any(native[k] != life["before"]["native"][k] for k in native_keys) or local["logs"] != life["before"]["logs"] or local["scope"] != life["before"]["scope"]:
+                issue(life["reasons"],"lifecycle-drift",phase=phase)
+            if (native["head"] != values["activeHead"] or native["tail"] != values["activeTail"]
+                    or any(native["regions"][i] != values[f"bucket{i}"] for i in range(64))):
+                issue(life["reasons"],"lifecycle-raw-root-bucket-mismatch",phase=phase)
+        except (KeyError,TypeError,ValueError,StepFailed) as error:
+            issue(life["reasons"],"lifecycle-join-unavailable",phase=phase,error=str(error))
+        try:
+            for parent_phase in ("before","after"):
+                other = parent["lifecycle"][parent_phase]
+                if (not local["available"] or not other["available"] or any(local["native"][k] != other["native"][k] for k in native_keys)
+                        or local["logs"] != other["logs"] or local["scope"] != other["scope"]):
+                    raise StepFailed("local/parent native or log scope mismatch")
+        except (KeyError,TypeError,ValueError,StepFailed) as error:
+            issue(receipt["parentReasons"],"local-parent-lifecycle-mismatch",phase=phase,error=str(error))
+        for k in raw_fields:
+            if k not in parent_expected or values.get(k) != parent_expected[k]:
+                issue(receipt["parentReasons"],"fresh-parent-raw-mismatch",phase=phase,field=k)
+        # Validate both supplied list paths against the fresh roots/links; no new graph is chased.
+        try:
+            for lane in ("active","deferred"):
+                nodes = [n for n in raw_nodes if n["list"]==lane]
+                if values[lane+"Head"] != (nodes[0]["address"] if nodes else 0) or values[lane+"Tail"] != (nodes[-1]["address"] if nodes else 0):
+                    raise StepFailed("raw root/tail does not match supplied list")
+                for i,node in enumerate(nodes):
+                    handle = values[node["prefix"]+"nextHandle"]
+                    nxt = 0
+                    if handle:
+                        masked = handle & 0x7fffffff; bucket = values[f"bucket{masked>>25}"]
+                        nxt = bucket | (masked & 0x1ffffff)
+                        if bucket in (0,0xffffffffffffffff) or bucket & 0x1ffffff or not span(nxt,1) or nxt%8:
+                            raise StepFailed("invalid raw handle bucket")
+                    if nxt != (nodes[i+1]["address"] if i+1<len(nodes) else 0):
+                        raise StepFailed("fresh raw link differs from supplied chain")
+        except (KeyError,TypeError,ValueError,StepFailed) as error:
+            issue(receipt["rawReasons"],"raw-chain-unavailable",phase=phase,error=str(error))
+    life["available"] = all(life[p]["available"] for p in ("before","after"))
+    life["stable"] = life["available"] and not life["reasons"]
+    life["status"] = "stable" if life["stable"] else "partial" if any(life[p]["available"] for p in ("before","after")) else "unavailable"
+    occurrences = {}
+    for d in receipt["definitions"]:
+        after = words(d["prefix"]+"headerWord",11,4,"after")
+        if after is not None: d["headerAfterHex"] = after.hex()
+        for row in d["records"]:
+            for phase in ("before","after"):
+                data = words(row["prefix"],8,8,phase)
+                if data is not None: row[phase+"Hex"] = data.hex()
+            row["fullBytesComplete"] = stable([row["prefix"]+str(i) for i in range(8)])
+            if "beforeHex" in row:
+                data = bytes.fromhex(row["beforeHex"])
+                row.update(recordId=int.from_bytes(data[30:32],"little"),objectId=int.from_bytes(data[:4],"little"),
+                           mode=data[28],positionMode=data[29],stage=data[48])
+                row["lookupQueryId"] = 0x70 if row["recordId"] == 0 else row["recordId"]
+                row["recordIdLimitations"] = (["zero-query-remaps-to-0x70"] if row["recordId"] == 0 else
+                    ["high-bit-cache-signedness-unqualified"] if row["recordId"] > 0x7FFF else [])
+                occurrences.setdefault(row["recordId"],[]).append({"tableIndex":d["tableIndex"],"controller":d["pointer"],
+                    "recordIndex":row["recordIndex"],"pointer":row["pointer"],"fullBytesComplete":row["fullBytesComplete"]})
+                if row["fullBytesComplete"]: row["sha256"] = hashlib.sha256(data).hexdigest()
+        labels = [k for k in definition_labels if k.startswith(d["prefix"])]
+        d["fullBytesComplete"] = bool(not d["reasons"] and "headerFields" in d and
+            len(d["records"])==d["headerFields"]["spawnCount"] and stable(labels))
+    for record_id,refs in occurrences.items():
+        if len(refs)>1:
+            receipt["idConflicts"].append({"recordId":record_id,"occurrences":refs,
+                "samePhysicalRecord":len({r["pointer"] for r in refs})==1})
+    definitions = receipt["definitions"]
+    for i,d in enumerate(definitions):
+        for other in definitions[:i]:
+            if d["pointer"]==other["pointer"] or (d.get("records") and other.get("records") and
+                    max(d["spawnArray"],other["spawnArray"]) < min(d["regionArray"],other["regionArray"])):
+                receipt["definitionAliases"].append({"tableIndices":[other["tableIndex"],d["tableIndex"]],
+                    "sameController":d["pointer"]==other["pointer"],"sameArray":d.get("spawnArray")==other.get("spawnArray")})
+    for node in raw_nodes:
+        prefix = node["prefix"]
+        ref = {"list":node["list"],"actor":node["address"],"controller":get(prefix+"controller"),
+            "record":get(prefix+"spawnRecord"),"recordId":get(prefix+"recordId"),"matches":[],"reasons":[]}
+        ref["recordIdReadPointer"] = node["parent"].get("spawnRecord")
+        ref["recordIdReadValue"] = ref["recordId"]
+        ref["recordIdReadSuccess"] = (ref["recordId"] is not None and ref["record"] == ref["recordIdReadPointer"])
+        if not ref["recordIdReadSuccess"]:
+            ref["recordId"] = None
+        receipt["references"].append(ref)
+        if ref["record"]==0:
+            ref["status"] = "null-record"
+            if ref["controller"] != 0: issue(ref["reasons"],"controller-with-null-record")
+        elif ref["record"] is None:
+            issue(ref["reasons"],"record-pointer-unavailable")
+        else:
+            for d in definitions:
+                if d["pointer"]==ref["controller"]:
+                    for row in d["records"]:
+                        if row["pointer"]==ref["record"]:
+                            ref["matches"].append({"tableIndex":d["tableIndex"],"recordIndex":row["recordIndex"]})
+                            if not d["fullBytesComplete"] or ref["recordId"]!=row.get("recordId"):
+                                issue(ref["reasons"],"record-id-or-bytes-unavailable")
+            if len(ref["matches"])!=1:
+                issue(ref["reasons"],"record-reference-unresolved",matches=len(ref["matches"]))
+    # A prior table/geometry receipt is a separate sample: explicitly join its identity projection.
+    try:
+        cause = census["causeContext"]
+        if not all(cause.get(k) is True for k in ("complete","tableStable","lifecycleStable")):
+            raise StepFailed("parent cause scope unavailable")
+        for native, logs in ((census["before"], census["logsBefore"]), (census["after"], census["logsAfter"]),
+                             (cause["nativeBefore"], cause["logsBefore"]), (cause["nativeAfter"], cause["logsAfter"])):
+            if (not life["before"]["available"] or any(native[k] != life["before"]["native"][k] for k in native_keys)
+                    or any(logs[k] != life["before"]["logs"][k] for k in ("arrival", "lifecycle", "arrivalAfterLifecycle"))):
+                raise StepFailed("parent census/cause native lifecycle mismatch")
+        if any(cause[p]["controllerCount"]!=receipt["declaredTableCount"] for p in ("before","after")) or len(cause["controllers"])!=len(receipt["table"]):
+            raise StepFailed("parent table count mismatch")
+        for entry in receipt["table"]:
+            old = cause["controllers"][entry["tableIndex"]]
+            if any(old.get(k)!=entry[k] for k in ("tableIndex","key","flags","pointer")):
+                raise StepFailed("parent table entry mismatch")
+        for d in definitions:
+            old = cause["controllers"][d["tableIndex"]]
+            if (any(old.get(k)!=d.get(k) for k in ("groupKey","header","spawnArray","regionArray"))
+                    or any(old.get("headerFields",{}).get(k)!=d.get("headerFields",{}).get(k) for k in ("type","headerId","spawnCount","regionCount"))):
+                raise StepFailed("parent definition mismatch")
+    except (KeyError,IndexError,TypeError,ValueError,AttributeError,StepFailed) as error:
+        issue(receipt["parentReasons"],"parent-table-join-unavailable",error=str(error))
+    receipt["tableInventoryComplete"] = bool(type(receipt["declaredTableCount"]) is int and
+        0<=receipt["declaredTableCount"]<=64 and len(receipt["table"])==receipt["declaredTableCount"] and stable(table_labels) and life["stable"])
+    receipt["ordinaryRecordBytesComplete"] = bool(receipt["tableInventoryComplete"] and not receipt["tableReasons"]
+        and len(definitions)==len(receipt["table"]) and all(d["fullBytesComplete"] for d in definitions))
+    receipt["listedReferenceJoinComplete"] = bool(not receipt["parentReasons"] and not receipt["rawReasons"] and life["stable"]
+        and stable(raw_fields) and all(not r["reasons"] for r in receipt["references"]))
+    receipt["sampledSupportedCoverageComplete"] = receipt["ordinaryRecordBytesComplete"] and receipt["listedReferenceJoinComplete"]
+    if receipt["idConflicts"] or receipt["definitionAliases"]:
+        receipt["noIdConflictInSampledScope"] = False
+    elif receipt["sampledSupportedCoverageComplete"]:
+        receipt["noIdConflictInSampledScope"] = True
+    receipt["endedMonotonic"] = time.monotonic()
+    return receipt
+
+
+def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30, *, resource_bindings: bool = False, controller_id_coverage: bool = False, secondary_bindings: bool = False) -> dict:
     """Checked, bounded native-list/cache observation independent of update-hook membership."""
+    if type(controller_id_coverage) is not bool:
+        raise StepFailed("native census controllerIdCoverage must be a boolean")
+    if type(secondary_bindings) is not bool:
+        raise StepFailed("native census secondaryBindings must be a boolean")
     started = time.monotonic()
     deadline = started + timeout
     pid = ctx.inst(index).pid
@@ -1372,23 +3148,66 @@ def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) 
         return left
     def valid_pointer(value):
         return 0x10000 <= value < 0x0000800000000000
-    def read(fields):
+    def read(fields, result=None, *, stage="native-field-batch", failure_evidence=None, require_identity=False):
         """Batched checked absolute reads through peek; unsupported below-module addresses fail."""
-        result = {}
+        # An optional evidence dictionary retains completed fields if a later
+        # checked read times out or fails. It does not make the read complete.
+        if result is None:
+            result = {}
         items = list(fields.items())
         for start in range(0, len(items), 128):
             batch = items[start:start + 128]
+            work = None
+            if failure_evidence is not None:
+                work = {"stage": stage, "batchStart": start, "fieldCount": len(batch),
+                        "peekAttempted": False, "complete": False}
+                failure_evidence.setdefault("readWork", []).append(work)
             for label, (address, _) in batch:
                 if not valid_pointer(address) or address < base:
                     raise StepFailed(f"{label}: invalid/below-module pointer 0x{address:X}; not read")
             specs = [f"0x{address - base:X}:{kind}" for _, (address, kind) in batch]
-            response = kh2ctl("peek", "--rva", ",".join(specs), pid=pid, timeout=remaining())
-            sample = response["samples"][0]
-            for label, (address, kind) in batch:
-                value = sample[f"0x{address - base:X}"]
-                result[label] = int(value, 0) if kind == "u64" and isinstance(value, str) else value
+            argv = [str(KH2CTL), "peek", "--rva", ",".join(specs), "--pid", str(pid)]
+            phase = "deadline-check"
+            try:
+                budget = remaining()
+                phase = "kh2ctl-call"  # subprocess creation/communication OR the tool's reported failure
+                if work is not None:
+                    work["peekAttempted"] = True
+                response = kh2ctl("peek", "--rva", ",".join(specs), pid=pid, timeout=budget)
+                if require_identity:
+                    phase = "peek-response-identity"
+                    if work is not None:
+                        work["responseIdentity"] = {"processId": response.get("processId"), "moduleBase": response.get("moduleBase")}
+                    observed_base = response.get("moduleBase")
+                    if isinstance(observed_base, str):
+                        observed_base = int(observed_base, 0)
+                    if (type(response.get("processId")) is not int or response["processId"] != pid
+                            or type(observed_base) is not int or observed_base != base):
+                        raise StepFailed("secondary binding peek process/module identity mismatch or missing")
+                phase = "peek-response-decode"
+                sample = response["samples"][0]
+                for label, (address, kind) in batch:
+                    value = sample[f"0x{address - base:X}"]
+                    result[label] = int(value, 0) if kind == "u64" and isinstance(value, str) else value
+                if work is not None:
+                    work["complete"] = True
+            except Exception as error:
+                # Keep invocation failures distinct from native read/tool JSON
+                # failures and Python decoding. No retry or completeness change.
+                sink = out if failure_evidence is None else failure_evidence
+                failures = sink.setdefault("readFailures", [])
+                if len(failures) < 8:
+                    failures.append({"stage": stage, "operation": "kh2ctl peek", "phase": phase,
+                                     "argv": argv, "batchStart": start, "fieldLabels": [label for label, _ in batch],
+                                     "completedFieldCount": len(result), "exceptionType": type(error).__name__,
+                                     "winerror": getattr(error, "winerror", None), "errno": getattr(error, "errno", None),
+                                     "filename": str(error.filename) if getattr(error, "filename", None) is not None else None,
+                                     "traceback": traceback.format_exc(limit=8)[-8192:]})
+                else:
+                    sink["readFailuresOmitted"] = sink.get("readFailuresOmitted", 0) + 1
+                raise
         return result
-    def header():
+    def header(result=None, *, stage="native-field-batch", failure_evidence=None, require_identity=False):
         fields = {"head": (base + 0x2A171C8, "u64"), "tail": (base + 0x2A171D0, "u64"),
                   "cachePointer": (base + 0x2AE6680, "u64"), "cacheCounter": (base + 0x2AE6688, "u32"),
                   "inField": (base + 0x9BA8D0, "u8"), "frozen": (base + 0x2A171E8, "u32"),
@@ -1398,7 +3217,8 @@ def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) 
             ("world", 0x717008, "u8"), ("room", 0x717009, "u8"), ("door", 0x71700A, "u8"),
             ("map", 0x71700C, "u16"), ("btl", 0x71700E, "u16"), ("evt", 0x717010, "u16"))})
         fields.update({f"region{n}": (base + 0x2B0D720 + n * 8, "u64") for n in range(64)})
-        data = read(fields)
+        data = read(fields, result, stage=stage, failure_evidence=failure_evidence,
+                    **({"require_identity": True} if require_identity else {}))
         data["location"] = [data[k] for k in ("world", "room", "door", "map", "btl", "evt")]
         data["regions"] = [data.pop(f"region{n}") for n in range(64)]
         return data
@@ -1482,7 +3302,7 @@ def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) 
             descriptors[f"{n}:objectId"] = (pointer, "u32")
             descriptors[f"{n}:objectType"] = (pointer + 4, "u8")
             descriptors[f"{n}:namePrefix"] = (pointer + 8, "u16")
-        descriptor_values = read(descriptors)
+        descriptor_values = read(descriptors, stage="actor-descriptors")
         hp_fields = {}
         for n, node in enumerate(nodes):
             node["objectId"] = descriptor_values[f"{n}:objectId"]
@@ -1539,9 +3359,24 @@ def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) 
                 record.update(status="incomplete", error=str(error))
                 out["provenanceErrors"].append(f"spawn provenance actor0x{node['address']:X}: {error}")
         out["cacheSecond"] = cache_sample(before["cachePointer"])
-        verify = read({key: field for key, field in actor_fields.items()
-                       if key.split(":", 1)[1] in ("nextHandle", "objectEntry", "status", "controller", "spawnRecord")})
-        out["actorIdentityStable"] = all(verify[key] == values[key] for key in verify)
+        identity_fields = {key: field for key, field in actor_fields.items()
+                           if key.split(":", 1)[1] in ("nextHandle", "objectEntry", "status", "controller", "spawnRecord")}
+        recheck = {"complete": False, "before": {key: values[key] for key in identity_fields},
+                   "after": {}, "changes": []}
+        out["actorIdentityRecheck"] = recheck
+        out["actorIdentityStable"] = False
+        try:
+            read(identity_fields, recheck["after"])
+            recheck["complete"] = True
+        finally:
+            recheck["changes"] = [
+                {"actorIndex": int(key.split(":", 1)[0]),
+                 "actor": addresses[int(key.split(":", 1)[0])],
+                 "field": key.split(":", 1)[1], "fieldAddress": identity_fields[key][0],
+                 "before": values[key], "after": value}
+                for key, value in recheck["after"].items() if value != values[key]]
+            recheck["unreadFields"] = [key for key in identity_fields if key not in recheck["after"]]
+        out["actorIdentityStable"] = recheck["complete"] and not recheck["changes"]
         out["after"] = after = header()
         out["logsAfter"] = logs()
         stable_keys = ("head", "tail", "location", "regions", "inField", "frozen", "eventState", "eventContext", "openMenu")
@@ -1607,6 +3442,8 @@ def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) 
     out["causeContext"] = causes
     if out.get("listComplete") and time.monotonic() < deadline:
         try:
+            causes["nativeBefore"] = cause_before = header()
+            causes["logsBefore"] = cause_logs_before = logs()
             roots = read({"controllerCount": (base + 0x2A10418, "i32"),
                           "activationActor": (base + 0x2A10420, "u64"),
                           "playerActor": (base + 0x2A105D0, "u64")})
@@ -1667,27 +3504,132 @@ def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) 
                                              if key.startswith(f"{n}:")}
                 entry["layoutValidated"] = (entry["spawnArray"] == entry["header"] + 0x2C
                     and entry["regionArray"] == entry["spawnArray"] + h["spawnCount"] * 0x40)
+                entry["tableKeyValidated"] = entry["groupKey"] == entry["key"]
+                if not entry["tableKeyValidated"]:
+                    causes["limits"].append(f"entry{n}: ordinary controller key does not match table identity")
                 entry["status"] = "read" if entry["layoutValidated"] else "header/array layout inconsistent"
                 if not entry["layoutValidated"]:
                     causes["limits"].append(f"entry{n}: native controller/header layout inconsistent")
-            # Positions only for addresses that the checked canonical list contains.
+            # Capture the native accessor's float4, including attachment selection.
             active = {node["address"]: node for node in out.get("nodes", [])}
-            position_fields = {}
             causes["activationActors"] = {}
+            # Additive receipts for the four existing reads below. Raw bytes are
+            # little-endian memory order; no float conversion defines stability.
+            for name in ("positionSelectorReadback", "positionReadback"):
+                causes[name] = {"schemaVersion": 1, "encoding": "little-endian memory bytes, hex",
+                                "aliasing": "Same-address role labels share CLI address-keyed returned values; no independent per-role timestamps",
+                                "scope": [], "fields": {},
+                                "before": {"attempted": False, "complete": False, "bytesComplete": False, "bytes": {}, "unreadFields": []},
+                                "after": {"attempted": False, "complete": False, "bytesComplete": False, "bytes": {}, "unreadFields": []},
+                                "comparisonComplete": False, "changes": []}
+
+            def geometry_readback(fields, name, phase, stage):
+                receipt = causes[name]
+                receipt["scope"] = list(dict.fromkeys(key.split(":", 1)[0] for key in fields))
+                receipt["fields"] = {key: {"address": address, "type": kind}
+                                     for key, (address, kind) in fields.items()}
+                for pending in (receipt["before"], receipt["after"]):
+                    if not pending["attempted"]:
+                        pending["unreadFields"] = list(fields)
+                sample, values = receipt[phase], {}
+                sample["attempted"] = True
+                try:
+                    read(fields, values, stage=stage)
+                    sample["complete"] = True
+                    return values
+                except Exception as error:
+                    sample["error"] = f"{type(error).__name__}: {error}"[:1024]
+                    raise
+                finally:
+                    sample["bytes"] = {}
+                    for key, value in values.items():
+                        try:
+                            sample["bytes"][key] = value.to_bytes(4 if fields[key][1] == "u32" else 8, "little").hex()
+                        except (AttributeError, TypeError, OverflowError) as error:
+                            # Diagnostics must not replace the original read or
+                            # comparison outcome on malformed decoded values.
+                            sample.setdefault("encodingErrors", {})[key] = type(error).__name__
+                    sample["unreadFields"] = [key for key in fields if key not in values]
+                    sample["bytesComplete"] = len(sample["bytes"]) == len(fields)
+                    before_bytes, after_bytes = receipt["before"]["bytes"], receipt["after"]["bytes"]
+                    receipt["comparisonComplete"] = bool(fields) and all(
+                        receipt[p]["complete"] and receipt[p]["bytesComplete"] for p in ("before", "after"))
+                    receipt["changes"] = [{"field": key, "address": fields[key][0],
+                                           "beforeHex": before_bytes[key], "afterHex": value}
+                                          for key, value in after_bytes.items()
+                                          if key in before_bytes and value != before_bytes[key]]
+
+            position_fields, selector_fields = {}, {}
             for key in ("activationActor", "playerActor"):
                 address = roots[key]
                 record = {"address": address, "inCheckedNativeList": address in active}
                 causes["activationActors"][key] = record
                 if address in active:
                     record["actor"] = active[address]["actor"]
-                    position_fields.update({f"{key}:{axis}": (address + offset, "f32")
-                                            for axis, offset in (("x", 0x670), ("y", 0x674), ("z", 0x678))})
+                    selector_fields[f"{key}:parentHandle"] = (address + 0x6A0, "u32")
+                    selector_fields[f"{key}:objectEntry"] = (address + 0x918, "u64")
+                    selector_fields[f"{key}:status"] = (address + 0x5C0, "u64")
                 else:
                     record["positionStatus"] = "not dereferenced: no checked active-list identity"
-            positions = read(position_fields)
+                    causes["limits"].append(f"{key}: no checked active-list position identity")
+            selectors = geometry_readback(selector_fields, "positionSelectorReadback", "before", "geometry-selectors-before")
+            for key, record in causes["activationActors"].items():
+                if not record["inCheckedNativeList"]:
+                    continue
+                address = record["address"]
+                if (selectors[f"{key}:objectEntry"] != active[address]["objectEntry"]
+                        or selectors[f"{key}:status"] != active[address]["status"]):
+                    raise StepFailed("activation actor identity changed before native position read")
+                handle = selectors[f"{key}:parentHandle"]
+                resolved = 0
+                if handle:
+                    masked = handle & 0x7FFFFFFF
+                    region = cause_before["regions"][masked >> 25]
+                    resolved = region | (masked & 0x1FFFFFF)
+                    if region == 0xFFFFFFFFFFFFFFFF or region & 0x1FFFFFF or not valid_pointer(resolved):
+                        raise StepFailed("activation parent handle resolution unavailable; cannot select position")
+                offset = 0x70 if resolved else 0x670
+                record.update(parentHandle=handle, resolvedParent=resolved, selectedOffset=offset,
+                              accessor="native3B5B40/3DA520; generic encoded-handle resolution")
+                position_fields.update({f"{key}:{n}": (address + offset + n * 8, "u64") for n in range(2)})
+            positions = geometry_readback(position_fields, "positionReadback", "before", "geometry-positions-before")
             for key, record in causes["activationActors"].items():
                 if record["inCheckedNativeList"]:
-                    record["position"] = [positions[f"{key}:{axis}"] for axis in ("x", "y", "z")]
+                    raw = b"".join(positions[f"{key}:{n}"].to_bytes(8, "little") for n in range(2))
+                    record["position4"] = list(struct.unpack("<4f", raw))
+                    record["position"] = record["position4"][:3]
+                    record["positionHex"] = raw.hex()
+            for entry in sorted(causes["controllers"], key=lambda item: item.get("headerFields", {}).get("headerId") != 30):
+                if entry.get("layoutValidated") and entry.get("tableKeyValidated") and entry.get("headerFields", {}).get("type") == 2:
+                    entry["geometry"] = capture_native_regions(entry, base, read, cause_before["regions"])
+                    if not entry["geometry"]["complete"]:
+                        causes["limits"].append(f"controller{entry['tableIndex']}: incomplete native region geometry")
+            causes["positionSelectorsStable"] = geometry_readback(
+                selector_fields, "positionSelectorReadback", "after", "geometry-selectors-after") == selectors
+            causes["positionsStableDuringGeometry"] = geometry_readback(
+                position_fields, "positionReadback", "after", "geometry-positions-after") == positions
+            if not causes["positionSelectorsStable"]:
+                causes["limits"].append("activation actor identity/accessor selector changed during geometry capture")
+            causes["nativeAfter"] = cause_after = header()
+            causes["logsAfter"] = cause_logs_after = logs()
+            causes["lifecycleStable"] = (all(cause_before[k] == cause_after[k] for k in stable_keys)
+                and cause_logs_before["arrival"] == cause_logs_after["arrival"]
+                and cause_logs_before["lifecycle"] == cause_logs_after["lifecycle"]
+                and cause_logs_after["arrivalAfterLifecycle"]
+                and cause_after["location"] == out["after"]["location"]
+                and cause_logs_after["arrival"] == out["logsAfter"]["arrival"]
+                and cause_after["inField"] != 0 and cause_after["frozen"] == 0
+                and cause_after["eventState"] == 0 and cause_after["eventContext"] == 0 and cause_after["openMenu"] == 255)
+            if not causes["lifecycleStable"]:
+                causes["limits"].append("native location/gameplay/list/lifecycle changed during causal geometry capture")
+            stable_controller_fields = {key: value for key, value in controller_fields.items()
+                                       if key.split(":", 1)[1] in ("groupKey", "header", "regionHead", "regionTail", "spawnArray", "regionArray")}
+            stable_header_fields = {key: value for key, value in header_fields.items()
+                                   if key.split(":", 1)[1] in ("type", "headerId", "spawnCount", "regionCount")}
+            causes["geometryRootsStable"] = (all(value == controller_values[key] for key, value in read(stable_controller_fields).items())
+                                             and all(value == headers[key] for key, value in read(stable_header_fields).items()))
+            if not causes["geometryRootsStable"]:
+                causes["limits"].append("native controller/header region roots changed during geometry capture")
             after = read({"controllerCount": (base + 0x2A10418, "i32"),
                           "activationActor": (base + 0x2A10420, "u64"), "playerActor": (base + 0x2A105D0, "u64")})
             causes["after"] = after
@@ -1708,8 +3650,198 @@ def native_enemy_census_snapshot(ctx: Context, index: int, timeout: float = 30) 
             causes["limits"].append(f"{type(error).__name__}: {error}")
     else:
         causes["limits"].append("primary native list incomplete or30s deadline exhausted; causal reads skipped")
+    # Independent post-census receipt: never changes population/readiness/hash or
+    # geometry classifications. The same deadline/read failures remain visible.
+    def raw_lifecycle_read(sample, stage, evidence, *, require_identity=False):
+        try:
+            header(sample["native"], stage=stage, failure_evidence=evidence,
+                   **({"require_identity": True} if require_identity else {}))
+            sample["nativeComplete"] = True
+        finally:
+            remaining()
+            observed = logs()
+            sample["logs"] = {key: observed[key] for key in ("arrival", "lifecycle", "arrivalAfterLifecycle")}
+            line = observed["lifecycle"]["line"] if observed["lifecycle"] else ""
+            completed = re.fullmatch(r"\[warp\] load complete serial=(\d+) transition=(\d+) "
+                r"room=([0-9A-Fa-f]+)/([0-9A-Fa-f]+) door=(\d+) map=(\d+) btl=(\d+) evt=(\d+)", line)
+            if completed and observed["arrival"]:
+                values = completed.groups()
+                sample["scope"] = {"loadSerial": int(values[0]), "transitionSerial": int(values[1]),
+                    "location": [int(value, 16 if n < 2 else 10) for n, value in enumerate(values[2:])],
+                    "epoch": int(observed["arrival"]["epoch"])}
+            remaining()
+    out["rawOccupancy"] = capture_raw_native_occupancy(base, read, lifecycle_read=raw_lifecycle_read)
+    if resource_bindings:
+        out["resourceBindings"] = capture_native_resource_bindings(base, read, out, lifecycle_read=raw_lifecycle_read)
+    if controller_id_coverage:
+        out["controllerIdCoverage"] = capture_native_controller_id_coverage(base, read, out, lifecycle_read=raw_lifecycle_read)
+    if secondary_bindings:
+        out["secondaryBindings"] = capture_native_secondary_bindings(base, read, out, lifecycle_read=raw_lifecycle_read)
     out["elapsedMs"] = round((time.monotonic() - started) * 1000)
     return out
+
+
+def native_geometry_sampled_endpoints(snapshot: dict, entry: dict, other: dict) -> dict:
+    """Evaluate two retained readbacks only; no new reads or trajectory/native-AL claim."""
+    result = {"schemaVersion": 1, "available": False, "nativePredicateCalled": False,
+              "sampling": "two retained readback endpoints; non-atomic; no continuous trajectory claim",
+              "endpoints": []}
+    try:
+        def require(condition, reason):
+            if not condition:
+                raise ValueError(reason)
+
+        def raw_word(value, size):
+            require(isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{%d}" % (size * 2), value) is not None,
+                    "missing or malformed exact readback bytes")
+            return bytes.fromhex(value)
+
+        cause, point_cause = snapshot["causeContext"], other["causeContext"]
+        location, arrival = snapshot["after"]["location"], snapshot["logsAfter"]["arrival"]
+        require(isinstance(location, list) and len(location) == 6 and all(type(v) is int for v in location)
+                and all(0 <= v <= (255 if n < 3 else 65535) for n, v in enumerate(location))
+                and isinstance(arrival, dict) and int(arrival["epoch"]) > 0,
+                "missing current full location or arrival")
+        arrival_location = [int(arrival[k], 16 if k in ("world", "room") else 10)
+                            for k in ("world", "room", "door", "map", "btl", "evt")]
+        require(arrival_location == location, "arrival does not bind current full location")
+        for peer, context in ((snapshot, cause), (other, point_cause)):
+            require(all(peer.get(k) is True for k in ("complete", "listComplete", "actorIdentityStable", "lifecycleStable"))
+                    and all(context.get(k) is True for k in ("complete", "lifecycleStable", "tableStable",
+                                                           "geometryRootsStable", "positionSelectorsStable")),
+                    "incomplete native identity, selectors, lifecycle or geometry context")
+            require(all(peer[phase]["location"] == location for phase in ("before", "after"))
+                    and all(context[phase]["location"] == location for phase in ("nativeBefore", "nativeAfter"))
+                    and all(logs["arrival"] == arrival and logs["arrivalAfterLifecycle"] is True
+                            for logs in (peer["logsBefore"], peer["logsAfter"], context["logsBefore"], context["logsAfter"]))
+                    and peer["logsBefore"]["lifecycle"] is not None
+                    and peer["logsBefore"]["lifecycle"] == peer["logsAfter"]["lifecycle"]
+                       == context["logsBefore"]["lifecycle"] == context["logsAfter"]["lifecycle"],
+                    "different or unbound completed lifecycle, epoch or full location")
+
+        actor = point_cause["activationActors"]["activationActor"]
+        address, offset = actor["address"], actor["selectedOffset"]
+        require(type(address) is int and 0x10000 <= address <= 0x7FFFFFFFFFFF and actor["inCheckedNativeList"] is True
+                and offset in (0x70, 0x670)
+                and point_cause["before"]["activationActor"] == address == point_cause["after"]["activationActor"],
+                "activation actor/root/accessor is unavailable")
+        nodes = [node for node in other["nodes"] if node["address"] == address]
+        require(len(nodes) == 1, "activation actor is not unique in checked native list")
+        selectors, positions = point_cause["positionSelectorReadback"], point_cause["positionReadback"]
+        require({key for key in positions["fields"] if key.startswith("activationActor:")}
+                    == {"activationActor:0", "activationActor:1"}
+                and {key for key in selectors["fields"] if key.startswith("activationActor:")}
+                    == {"activationActor:parentHandle", "activationActor:objectEntry", "activationActor:status"},
+                "activation readback field cardinality mismatch")
+        for receipt in (selectors, positions):
+            require(type(receipt["schemaVersion"]) is int and receipt["schemaVersion"] == 1
+                    and receipt["encoding"] == "little-endian memory bytes, hex"
+                    and receipt["comparisonComplete"] is True and "activationActor" in receipt["scope"],
+                    "readback comparison or activation scope incomplete")
+            for phase in ("before", "after"):
+                sample = receipt[phase]
+                require(all(sample.get(k) is True for k in ("attempted", "complete", "bytesComplete"))
+                        and not sample.get("unreadFields") and not sample.get("encodingErrors")
+                        and set(sample["bytes"]) == set(receipt["fields"]), "partial readback receipt")
+                for label, field in receipt["fields"].items():
+                    require(field["type"] in ("u32", "u64"), "unsupported readback field encoding")
+                    raw_word(sample["bytes"][label], 4 if field["type"] == "u32" else 8)
+        selector_values = {}
+        for name, relative, kind, size in (("parentHandle", 0x6A0, "u32", 4),
+                                           ("objectEntry", 0x918, "u64", 8), ("status", 0x5C0, "u64", 8)):
+            label = "activationActor:" + name
+            require(selectors["fields"][label] == {"address": address + relative, "type": kind},
+                    "selector field address/type does not bind checked actor")
+            first = raw_word(selectors["before"]["bytes"][label], size)
+            require(first == raw_word(selectors["after"]["bytes"][label], size), "activation selector bytes changed")
+            selector_values[name] = int.from_bytes(first, "little")
+        require(all(selector_values[k] == nodes[0][k] for k in ("objectEntry", "status"))
+                and selector_values["parentHandle"] == actor["parentHandle"], "selector native identity mismatch")
+        handle = selector_values["parentHandle"]
+        resolved = 0
+        if handle:
+            masked = handle & 0x7FFFFFFF
+            before_regions = point_cause["nativeBefore"]["regions"]
+            require(before_regions == point_cause["nativeAfter"]["regions"], "attachment handle roots changed")
+            region = before_regions[masked >> 25]
+            resolved = region | (masked & 0x1FFFFFF)
+            require(region != 0xFFFFFFFFFFFFFFFF and not region & 0x1FFFFFF and 0x10000 <= resolved <= 0x7FFFFFFFFFFF,
+                    "attachment handle resolution unavailable")
+        require(actor["resolvedParent"] == resolved and offset == (0x70 if resolved else 0x670),
+                "selected accessor offset does not match retained selector")
+
+        geometry = entry["geometry"]
+        regions, descriptors = geometry["regions"], geometry["descriptors"]
+        owners = [candidate for candidate in cause["controllers"]
+                  if candidate["pointer"] == entry["pointer"] and not candidate["flags"] & 1]
+        require(len(owners) == 1 and owners[0] == entry
+                and entry["layoutValidated"] is True and entry["tableKeyValidated"] is True
+                and not entry["flags"] & 1 and entry["groupKey"] == entry["key"]
+                and geometry["complete"] is True and geometry["bytesStable"] is True
+                and 0 < len(regions) <= len(descriptors) == entry["headerFields"]["regionCount"]
+                and len({r["address"] for r in regions}) == len(regions)
+                and len({r["descriptorIndex"] for r in regions}) == len(regions)
+                and entry["regionHead"] == regions[0]["address"] and entry["regionTail"] == regions[-1]["address"],
+                "incomplete, empty or ambiguous rooted current geometry")
+        for n, region in enumerate(regions):
+            index = region["descriptorIndex"]
+            require(type(index) is int and 0 <= index < len(descriptors)
+                    and type(region["address"]) is int and 0x10000 <= region["address"] <= 0x7FFFFFFFFFFF
+                    and region["descriptor"] == entry["regionArray"] + index * 64 == descriptors[index]["address"]
+                    and region["nextAddress"] == (regions[n + 1]["address"] if n + 1 < len(regions) else 0)
+                    and len(region["inverseMatrix"]) == 16 and len(region["extents"]) == 3,
+                    "region list/descriptor identity mismatch")
+        endpoints = []
+        for phase in ("before", "after"):
+            words = []
+            for n in range(2):
+                label = f"activationActor:{n}"
+                require(positions["fields"][label] == {"address": address + offset + n * 8, "type": "u64"},
+                        "position field address/type does not bind selected accessor")
+                words.append(raw_word(positions[phase]["bytes"][label], 8))
+            raw = b"".join(words)
+            point = list(struct.unpack("<4f", raw))
+            require(all(math.isfinite(v) for v in point), "nonfinite endpoint position")
+            if phase == "before":
+                require(raw == raw_word(actor["positionHex"], 16), "initial position differs from retained actor readback")
+            evaluated = [dict(descriptorIndex=r["descriptorIndex"], address=r["address"],
+                              **evaluate_native_region(r, point)) for r in regions]
+            require(all(type(r.get("accepted")) is bool for r in evaluated), "endpoint geometry evaluation unavailable")
+            endpoints.append({"phase": phase, "positionHex": raw.hex(), "position4": point, "regions": evaluated})
+        result.update(available=True, endpoints=endpoints,
+                      positionBytesStable=endpoints[0]["positionHex"] == endpoints[1]["positionHex"])
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError, OverflowError, struct.error) as error:
+        result["reason"] = str(error)
+    return result
+
+
+def native_geometry_comparisons(peers: dict) -> list[dict]:
+    """Evaluate sampled peer activation points against each captured type2 geometry."""
+    comparisons = []
+    for owner, snapshot in peers.items():
+        cause = snapshot.get("causeContext", {})
+        for entry in cause.get("controllers", []):
+            if "geometry" not in entry:
+                continue
+            for peer, other in peers.items():
+                other_cause = other.get("causeContext", {})
+                point = other_cause.get("activationActors", {}).get("activationActor", {}).get("position4")
+                result = {"geometryPeer": owner, "pointPeer": peer, "groupKey": entry.get("groupKey"),
+                          "headerId": entry["headerFields"]["headerId"], "available": False,
+                          "sampling": "concurrent read windows, not atomic game frames or native predicate return instrumentation"}
+                result["sampledEndpoints"] = native_geometry_sampled_endpoints(snapshot, entry, other)
+                comparisons.append(result)
+                if (not cause.get("complete") or not other_cause.get("complete") or not point
+                        or not entry["geometry"]["complete"]
+                        or snapshot.get("after", {}).get("location") != other.get("after", {}).get("location")
+                        or snapshot.get("logsAfter", {}).get("arrival") != other.get("logsAfter", {}).get("arrival")):
+                    result["reason"] = "incomplete geometry/activation sample or different completed epoch/location"
+                    continue
+                result.update(available=True, position4=point,
+                              pointStableDuringCapture=other_cause.get("positionsStableDuringGeometry"),
+                              regions=[dict(descriptorIndex=r["descriptorIndex"],
+                                            **evaluate_native_region(r, point)) for r in entry["geometry"]["regions"]])
+    return comparisons
 
 
 def step_native_enemy_census(ctx: Context, step: dict) -> dict:
@@ -1718,6 +3850,15 @@ def step_native_enemy_census(ctx: Context, step: dict) -> dict:
     indices = step.get("instances", list(range(len(ctx.instances))))
     count = step.get("samples", 3)
     interval = step.get("intervalMs", 1500)
+    controller_id_coverage = step.get("controllerIdCoverage", False)
+    if type(controller_id_coverage) is not bool:
+        raise StepFailed("native census controllerIdCoverage must be a boolean")
+    secondary_bindings = step.get("secondaryBindings", False)
+    if type(secondary_bindings) is not bool:
+        raise StepFailed("native census secondaryBindings must be a boolean")
+    resource_bindings = step.get("resourceBindings", False)
+    if type(resource_bindings) is not bool:
+        raise StepFailed("native census resourceBindings must be a boolean")
     if not 1 <= count <= 3 or not 0 <= interval <= 5000:
         raise StepFailed("native census supports1..3 snapshots and0..5000ms settling interval")
     evidence = {"diagnosticOnly": True, "snapshots": [], "readOnly": True,
@@ -1727,15 +3868,21 @@ def step_native_enemy_census(ctx: Context, step: dict) -> dict:
             if number:
                 ctx.sleep(interval / 1000)
             with ThreadPoolExecutor(max_workers=len(indices)) as pool:
-                futures = {i: pool.submit(native_enemy_census_snapshot, ctx, i, 30) for i in indices}
+                futures = {i: pool.submit(native_enemy_census_snapshot, ctx, i, 30,
+                                         resource_bindings=resource_bindings,
+                                         **({"controller_id_coverage": True} if controller_id_coverage else {}),
+                                         **({"secondary_bindings": True} if secondary_bindings else {})) for i in indices}
                 peers = {str(i): future.result() for i, future in futures.items()}
-            evidence["snapshots"].append({"ordinal": number, "peers": peers})
+            evidence["snapshots"].append({"ordinal": number, "peers": peers,
+                                          "geometryComparisons": native_geometry_comparisons(peers)})
             ctx.check_all()
         evidence["complete"] = all(peer["complete"] for snap in evidence["snapshots"] for peer in snap["peers"].values())
+        evidence["geometryComplete"] = all(peer.get("causeContext", {}).get("complete", False)
+                                            for snap in evidence["snapshots"] for peer in snap["peers"].values())
         if not evidence["complete"]:
             raise StepFailed("native census has incomplete/changing reads; inspect preserved snapshots, do not infer native absence")
         return {"path": f"{name}.json", "complete": True, "diagnosticOnly": True,
-                "nativeCounts": [{i: peer["comparison"]["nativeLivingCount"] for i, peer in snap["peers"].items()}
+                "geometryComplete": evidence["geometryComplete"], "nativeCounts": [{i: peer["comparison"]["nativeLivingCount"] for i, peer in snap["peers"].items()}
                                  for snap in evidence["snapshots"]]}
     finally:
         ctx.saved[name] = evidence
@@ -1930,6 +4077,38 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "native_enemy_census": step_native_enemy_census}
 
 
+# Saved-log forced-resync evidence is isolated from the live collector. Load by
+# this file's fixed sibling path so both script and importlib test entry work.
+import importlib.util as _importlib_util
+_resync_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_resync_evidence", Path(__file__).with_name("resync_evidence.py"))
+_resync_evidence = _importlib_util.module_from_spec(_resync_spec)
+_resync_spec.loader.exec_module(_resync_evidence)
+_resync_evidence.register(STEPS, kh2ctl=lambda *a, **kw: kh2ctl(*a, **kw), logs=LOGS,
+                          step_failed=StepFailed, wait_for=wait_for)
+
+_progress_resync_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_progress_resync_control", Path(__file__).with_name("progress_resync_control.py"))
+_progress_resync = _importlib_util.module_from_spec(_progress_resync_spec)
+_progress_resync_spec.loader.exec_module(_progress_resync)
+_progress_resync.register(STEPS, kh2ctl=lambda *a, **kw: kh2ctl(*a, **kw), logs=LOGS,
+                          step_failed=StepFailed, arrival_pattern=ARRIVAL_PATTERN,
+                          snapshot=lambda ctx, step, read: step_progress_snapshot(ctx, step, _read=read))
+
+_reconnect_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_native_reconnect_evidence", Path(__file__).with_name("native_reconnect_evidence.py"))
+_native_reconnect = _importlib_util.module_from_spec(_reconnect_spec)
+sys.modules[_reconnect_spec.name] = _native_reconnect
+_reconnect_spec.loader.exec_module(_native_reconnect)
+_lifecycle_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_runtime_lifecycle", Path(__file__).with_name("runtime_lifecycle.py"))
+_runtime_lifecycle = _importlib_util.module_from_spec(_lifecycle_spec)
+sys.modules[_lifecycle_spec.name] = _runtime_lifecycle
+_lifecycle_spec.loader.exec_module(_runtime_lifecycle)
+STEPS.update({"reconnect_mark": step_reconnect_mark, "runtime_pause": step_runtime_pause,
+              "reconnect_check": step_reconnect_check})
+
+
 # --------------------------------------------------------------------------
 # One run
 # --------------------------------------------------------------------------
@@ -1947,6 +4126,94 @@ def bundle(ctx: Context, died: InstanceDied) -> list[str]:
             shutil.copy2(src, ctx.run_dir / src.name)
             files.append(src.name)
     return files
+
+
+def link_desync_reports(run_dir: Path) -> dict:
+    """Index relay-owned artifacts already in this run; never collect peer files.
+
+    A killed relay can leave its initial collecting manifest. Keep it and label
+    the collection partial instead of letting the scenario's PASS imply success.
+    """
+    root = run_dir / "desync-reports"
+    result = {"collectionStatus": "none", "reports": [], "suppressionSummaries": [], "errors": [],
+              "filesystemEvidence": "unavailable",
+              "filesystemNote": "No automatic report files found; relay/runtime logs remain evidence of output failures or whether collection was triggered."}
+    if not root.exists():
+        return result
+    run_root = run_dir.resolve()
+    try:
+        manifests = sorted(root.glob("*/*/manifest.json"))
+        for path in manifests[:64]:
+            if not path.resolve().is_relative_to(run_root):
+                result["errors"].append("manifest escapes owned run directory")
+                continue
+            item = {"manifest": path.relative_to(run_dir).as_posix(),
+                    "directory": path.parent.relative_to(run_dir).as_posix(),
+                    "collectionStatus": "partial"}
+            try:
+                if path.stat().st_size > 2 * 1024 * 1024:
+                    raise ValueError("manifest exceeds 2 MiB linkage limit")
+                data = json.loads(path.read_text(encoding="utf-8"))
+                status = data.get("collectionStatus")
+                item["reportedStatus"] = status
+                item["key"] = data.get("key")
+                if data.get("schemaVersion") != 1:
+                    raise ValueError("unknown desync manifest schema")
+                if status in ("complete", "partial", "interrupted", "storage-error"):
+                    item["collectionStatus"] = status
+                elif status == "collecting":
+                    item["error"] = "relay stopped before collection finalization"
+                else:
+                    raise ValueError("unknown desync collection status")
+            except (OSError, ValueError, TypeError, AttributeError) as exc:
+                item["error"] = f"{type(exc).__name__}: {exc}"
+            result["reports"].append(item)
+        if len(manifests) > 64:
+            result["errors"].append("more than 64 manifests; additional reports retained on disk")
+        summaries = sorted(root.glob("*/suppression-summary*"))
+        for path in summaries[:64]:
+            if not path.resolve().is_relative_to(run_root):
+                result["errors"].append("suppression summary escapes owned run directory")
+                continue
+            item = {"path": path.relative_to(run_dir).as_posix(), "collectionStatus": "partial"}
+            try:
+                if path.stat().st_size > 2 * 1024 * 1024:
+                    raise ValueError("suppression summary exceeds 2 MiB linkage limit")
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data.get("schemaVersion") != 1 or data.get("artifactType") != "desync-suppression-summary":
+                    raise ValueError("unknown suppression summary schema")
+                if data.get("collectionStatus") != "skipped":
+                    raise ValueError("suppression summary cannot certify collected evidence")
+                if data.get("sessionId") != path.parent.name:
+                    raise ValueError("suppression session does not match owned directory")
+                counters = data.get("counters", {})
+                fields = ("cadence", "quota", "active", "finishing", "witnessOverflow", "lostTriggers", "storageErrors")
+                if not all(type(counters.get(key)) is int and counters[key] >= 0 for key in fields):
+                    raise ValueError("incomplete suppression counters")
+                item.update(sessionId=data["sessionId"], revision=data.get("revision"), counters=counters)
+                if path.name != "suppression-summary.json":
+                    raise ValueError("suppression summary publication remains unfinished")
+                item["collectionStatus"] = "skipped"
+            except (OSError, ValueError, TypeError, AttributeError) as exc:
+                item["error"] = f"{type(exc).__name__}: {exc}"
+            result["suppressionSummaries"].append(item)
+        if manifests or summaries:
+            result["filesystemEvidence"] = "present"
+            result.pop("filesystemNote", None)
+        if len(summaries) > 64:
+            result["errors"].append("more than 64 suppression summaries; additional evidence retained on disk")
+        if not manifests and not summaries and any(root.iterdir()):
+            result["errors"].append("report output exists without a manifest or suppression summary")
+    except OSError as exc:
+        result["errors"].append(f"{type(exc).__name__}: {exc}")
+    if (result["errors"] or any(r["collectionStatus"] != "complete" for r in result["reports"])
+            or any(r["collectionStatus"] != "skipped" for r in result["suppressionSummaries"])):
+        result["collectionStatus"] = "partial"
+    elif result["suppressionSummaries"]:
+        result["collectionStatus"] = "partial" if result["reports"] else "skipped"
+    elif result["reports"]:
+        result["collectionStatus"] = "complete"
+    return result
 
 
 def run_scenario(path: Path, attempt: int) -> dict:
@@ -2000,6 +4267,13 @@ def run_scenario(path: Path, attempt: int) -> dict:
             log = LOGS / f"kh2coop_inject_{inst.pid}.log"
             if log.exists() and not (run_dir / log.name).exists():
                 shutil.copy2(log, run_dir / log.name)
+        report["desyncCollection"] = link_desync_reports(run_dir)
+        if (run_dir / "desync-reports").exists():
+            ctx.artifacts.append("desync-reports")
+        for capture in report["desyncCollection"]["reports"]:
+            ctx.artifacts.append(capture["directory"])
+        for summary in report["desyncCollection"]["suppressionSummaries"]:
+            ctx.artifacts.append(summary["path"])
         report["seconds"] = round(time.monotonic() - t0, 1)
         report["instances"] = [inst.pid for inst in ctx.instances]
         (run_dir / "report.json").write_text(json.dumps(report, indent=2))
@@ -2011,6 +4285,21 @@ def run_scenario(path: Path, attempt: int) -> dict:
 def render_md(report: dict) -> str:
     lines = [f"# {report['scenario']} (attempt {report['attempt']}): {report['status'].upper()}", "",
              f"Started {report['started']}, {report.get('seconds', '?')} s, instances {report.get('instances')}.", ""]
+    if report.get("desyncCollection"):
+        diagnostic = report["desyncCollection"]
+        lines += [f"Automatic desync collection: **{diagnostic['collectionStatus'].upper()}** (separate from scenario step status).", ""]
+        for capture in diagnostic["reports"]:
+            lines += [f"- [{capture['manifest']}]({capture['manifest']}): {capture['collectionStatus']}"
+                      + (f" - {capture['error']}" if capture.get("error") else "")]
+        for summary in diagnostic.get("suppressionSummaries", []):
+            lines += [f"- Suppression evidence [{summary['path']}]({summary['path']}): {summary['collectionStatus']}"
+                      + (f" - {summary['error']}" if summary.get("error") else
+                         " - skipped triggers; no collected peer report: " + json.dumps(summary.get("counters", {}), sort_keys=True))]
+        if diagnostic.get("filesystemEvidence") == "unavailable":
+            lines += ["- Filesystem evidence unavailable: " + diagnostic.get("filesystemNote", "See relay/runtime logs.")]
+        for error in diagnostic["errors"]:
+            lines += [f"- Collection error: {error}"]
+        lines += [""]
     if report.get("error"):
         lines += [f"**Error:** {report['error']}", ""]
     lines += ["| # | step | status | s | detail |", "|---|---|---|---|---|"]
@@ -2035,9 +4324,11 @@ def validate_scenario(scenario: dict) -> None:
     if not scenario["steps"]:
         raise ValueError("scenario needs at least one step")
     count = 0
-    required = {"warp": ("world", "room"), "press": ("button",),
+    required = {"forced_resync_evidence": ("statehash", "census"), "warp": ("world", "room"), "press": ("button",),
                 "assert": ("expr",), "wait_until": ("expr",), "save": ("as", "expr"),
                 "runtime": ("role",), "record": ("as",), "record_stop": ("as",),
+                "reconnect_mark": ("as",), "runtime_pause": ("instance", "after"),
+                "reconnect_check": ("after",),
                 "align_courtyard_exit": ("blockedExpr",)}
     for number, step in enumerate(scenario["steps"]):
         prefix = f"step {number}"
@@ -2060,6 +4351,12 @@ def validate_scenario(scenario: dict) -> None:
             raise ValueError(f"{prefix}: instances must refer to earlier boots/launches")
         if kind == "kh2ctl" and ("args" in step) == ("argsExpr" in step):
             raise ValueError(f"{prefix}: kh2ctl requires exactly one of args/argsExpr")
+        if kind == "native_enemy_census" and type(step.get("secondaryBindings", False)) is not bool:
+            raise ValueError(f"{prefix}: native census secondaryBindings must be a boolean")
+        if kind == "native_enemy_census" and type(step.get("controllerIdCoverage", False)) is not bool:
+            raise ValueError(f"{prefix}: native census controllerIdCoverage must be a boolean")
+        if kind == "native_enemy_census" and type(step.get("resourceBindings", False)) is not bool:
+            raise ValueError(f"{prefix}: native census resourceBindings must be a boolean")
         if "argsExpr" in step:
             compile(step["argsExpr"], f"<{prefix} argsExpr>", "eval")
         if "expr" in step:
@@ -2068,6 +4365,16 @@ def validate_scenario(scenario: dict) -> None:
             compile(step["blockedExpr"], f"<{prefix} blockedExpr>", "eval")
         if kind == "runtime" and step["role"] not in ("player", "friend1", "friend2", "spectator"):
             raise ValueError(f"{prefix}: invalid runtime role")
+        if kind in ("reconnect_mark", "runtime_pause", "reconnect_check"):
+            if count != 3 or step.get("instances", [0, 1, 2]) != [0, 1, 2]:
+                raise ValueError(f"{prefix}: reconnect requires exactly three earlier ordered instances")
+            if kind == "runtime_pause" and step["instance"] != 1:
+                raise ValueError(f"{prefix}: runtime_pause may target only Friend1")
+            timeout = step.get("timeoutMs", 20000 if kind == "runtime_pause" else 10000 if kind == "reconnect_mark" else 45000)
+            limit = 20000 if kind == "runtime_pause" else 15000 if kind == "reconnect_mark" else 60000
+            minimum = 1000 if kind == "runtime_pause" else 1
+            if type(timeout) is not int or not minimum <= timeout <= limit:
+                raise ValueError(f"{prefix}: reconnect timeoutMs must be an integer in {minimum}..{limit}")
 
 
 def main() -> int:

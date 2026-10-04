@@ -1,5 +1,6 @@
 add_executable(kh2ctl
     src/main.cpp
+    src/world_resync.cpp
 )
 
 target_link_libraries(kh2ctl PRIVATE

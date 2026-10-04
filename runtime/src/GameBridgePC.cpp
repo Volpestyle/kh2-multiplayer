@@ -54,8 +54,8 @@ bool GameBridgePC::Attach() {
 #endif
 }
 
-bool GameBridgePC::Attach(std::uint32_t pid) {
 #ifdef _WIN32
+bool GameBridgePC::Attach(std::uint32_t pid) {
     if (attached_) return ProcessId() == pid;
     if (pid == 0) return false;
 
@@ -92,11 +92,13 @@ bool GameBridgePC::Attach(std::uint32_t pid) {
     processHandle_ = handle;
     attached_ = true;
     return true;
+}
 #else
+bool GameBridgePC::Attach(std::uint32_t) {
     // Non-Windows stub.
     return false;
-#endif
 }
+#endif
 
 void GameBridgePC::Detach() {
     // Restore camera BEFORE closing the process handle, since

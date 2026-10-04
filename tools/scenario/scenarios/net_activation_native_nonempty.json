@@ -1,0 +1,478 @@
+{
+  "name": "net_activation_native_nonempty",
+  "description": "Three-peer supported type2 positional authority control. BC05/06 fulltuple(5,6,0,1,1,0): clients walk by native input into captured header30 geometry while host stays outside all7 regions; independent checked native census and fresh hashes must remain0. Then host native input enters measured central BOX, all peers must expose exactly five bound living native Shadows302 and fresh matching minEnemies5 hashes. Independent geometry/list capture, host-only native damage, and per-client verified native HP<=0 death logs follow. Direction/duration estimates use a measured250ms input probe; uncertain camera/native movement explicitly fails, no transform writes. Geometry conclusions are offline float32 evaluation of checked captured native regions, not instrumented predicate returns. Does not claim general spawn-command completeness. Live run20261003-003531 passed bounded native movement, complete stable negative positional/empty controls and exact five matched20HP Shadows after host entry with fresh hashes. Overall FAIL159.8s at step63: second positive capture reported host pointStableDuringCapture=false even though sampled containment was safely inside. HP/death checks were not reached. Preserve this failed observation; full live acceptance and continuous positional stability remain unverified.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6,
+      "door": 0,
+      "map": 1,
+      "btl": 1,
+      "evt": 0
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "as": "settled",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['location']==[5,6,0,1,1,0] for row in saved['settled']['instances'].values())",
+      "message": "initial full location differs from supported courtyard fixture"
+    },
+    {
+      "do": "save",
+      "as": "spawn_pattern",
+      "expr": "'\\\\[spawnctl\\\\] action=(?P<action>\\\\w+) reason=[^\\\\r\\\\n]*? controller=(?P<controller>[0-9A-Fa-f]+) key=(?P<key>\\\\d+) headerId=(?P<header>\\\\d+) records=(?P<records>\\\\d+) transition=(?P<transition>\\\\d+) load=(?P<load>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) capture=(?P<capture>\\\\d+) apply=(?P<apply>\\\\d+) hold=(?P<hold>\\\\d+) unsupported=(?P<unsupported>\\\\d+) unavailable=(?P<unavailable>\\\\d+) pointAvailable=(?P<point>\\\\d+) point=\\\\([^\\\\r\\\\n]*\\\\)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "lease_pattern",
+      "expr": "'\\\\[spawn-authority\\\\] lease epoch=(?P<epoch>\\\\d+) source=(?P<source>\\\\d+) point=\\\\([^\\\\r\\\\n]*\\\\)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "arrival_pattern",
+      "expr": "'\\\\[enemysync\\\\] (?:host|client) arrived epoch=(?P<epoch>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "arrivals",
+      "expr": "[log_matches(saved['arrival_pattern'],i)[-1] for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "initial_marks",
+      "expr": "[len(log_matches(saved['spawn_pattern'],i)) for i in range(3)]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(any(row['action']=='apply' and row['point']=='1' and row['header']=='30' and row['records']=='5' for row in log_matches(saved['spawn_pattern'],i)[saved['initial_marks'][i]:]) for i in [1,2])",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "statehash_check",
+      "as": "initial_empty",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['initial_empty']['epoch']==saved['settled']['epoch'] and all(row['count']==0 for row in saved['initial_empty']['instances'].values())",
+      "message": "native enemy population is already nonempty before the positional control"
+    },
+    {
+      "do": "save",
+      "as": "client1_start",
+      "expr": "pos('P_EX100',1)"
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": 0,
+      "ly": 1,
+      "ms": 250
+    },
+    {
+      "do": "save",
+      "as": "client1_probe",
+      "expr": "pos('P_EX100',1)"
+    },
+    {
+      "do": "assert",
+      "expr": "20 < saved['client1_start'][2]-saved['client1_probe'][2] < 300 and abs(saved['client1_probe'][0]-saved['client1_start'][0]) < 150 and saved['client1_probe'][2]>1550",
+      "message": "client1: camera-forward probe did not move safely toward -Z while remaining outside region0; recalibrate native input"
+    },
+    {
+      "do": "save",
+      "as": "client1_remaining_ms",
+      "expr": "int(min(2000,max(100,(saved['client1_probe'][2]-1300)*250/(saved['client1_start'][2]-saved['client1_probe'][2]))))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['player-input','--lx','0','--ly','1','--duration-ms',str(saved['client1_remaining_ms'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 700
+    },
+    {
+      "do": "save",
+      "as": "client1_finish",
+      "expr": "pos('P_EX100',1)"
+    },
+    {
+      "do": "assert",
+      "expr": "850 < saved['client1_finish'][2] < 1500 and abs(saved['client1_finish'][0]+14.26138)<370 and abs(saved['client1_finish'][1]+286.0282)<240",
+      "message": "client1: native movement did not reach the safe interior of measured central BOX; no transform fallback"
+    },
+    {
+      "do": "save",
+      "as": "client2_start",
+      "expr": "pos('P_EX100',2)"
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "lx": 0,
+      "ly": 1,
+      "ms": 250
+    },
+    {
+      "do": "save",
+      "as": "client2_probe",
+      "expr": "pos('P_EX100',2)"
+    },
+    {
+      "do": "assert",
+      "expr": "20 < saved['client2_start'][2]-saved['client2_probe'][2] < 300 and abs(saved['client2_probe'][0]-saved['client2_start'][0]) < 150 and saved['client2_probe'][2]>1550",
+      "message": "client2: camera-forward probe did not move safely toward -Z while remaining outside region0; recalibrate native input"
+    },
+    {
+      "do": "save",
+      "as": "client2_remaining_ms",
+      "expr": "int(min(2000,max(100,(saved['client2_probe'][2]-1300)*250/(saved['client2_start'][2]-saved['client2_probe'][2]))))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 2,
+      "argsExpr": "['player-input','--lx','0','--ly','1','--duration-ms',str(saved['client2_remaining_ms'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 700
+    },
+    {
+      "do": "save",
+      "as": "client2_finish",
+      "expr": "pos('P_EX100',2)"
+    },
+    {
+      "do": "assert",
+      "expr": "850 < saved['client2_finish'][2] < 1500 and abs(saved['client2_finish'][0]+14.26138)<370 and abs(saved['client2_finish'][1]+286.0282)<240",
+      "message": "client2: native movement did not reach the safe interior of measured central BOX; no transform fallback"
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "clients_inside_host_outside",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['clients_inside_host_outside']['complete'] and saved['clients_inside_host_outside']['geometryComplete'] and all(peer['comparison']['nativeLivingCount']==0 and peer['comparison']['comparisonValid'] for snap in saved['clients_inside_host_outside']['snapshots'] for peer in snap['peers'].values())",
+      "message": "client-local entry produced enemies or native absence evidence is incomplete"
+    },
+    {
+      "do": "save",
+      "as": "outside_comparisons",
+      "expr": "[[c for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514] for snap in saved['clients_inside_host_outside']['snapshots']]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(rows)==9 and all(c['available'] and c['pointStableDuringCapture'] and len(c['regions'])==7 and all(r['kind']=='BOX' and not r['edgeUncertain'] for r in c['regions']) and (all(not r['accepted'] for r in c['regions']) if c['pointPeer']=='0' else any(r['accepted'] and min(r['margins'])>20 for r in c['regions'])) for c in rows) for rows in saved['outside_comparisons'])",
+      "message": "fresh complete geometry must place host outside all7 regions and both clients safely inside; geometry is sampled offline predicate evaluation"
+    },
+    {
+      "do": "assert",
+      "expr": "all(location(i)==[5,6,0,1,1,0] and log_matches(saved['arrival_pattern'],i)[-1]==saved['arrivals'][i] for i in range(3))",
+      "message": "positional negative control crossed a room lifecycle"
+    },
+    {
+      "do": "statehash_check",
+      "as": "clients_inside_empty_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['clients_inside_empty_hash']['epoch']==saved['settled']['epoch'] and all(row['count']==0 for row in saved['clients_inside_empty_hash']['instances'].values())",
+      "message": "clients inside with host outside did not retain actual empty native hashes"
+    },
+    {
+      "do": "save",
+      "as": "activation_marks",
+      "expr": "[len(log_matches(saved['spawn_pattern'],i)) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "lease_marks",
+      "expr": "[len(log_matches(saved['lease_pattern'],i)) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "host_start",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 0,
+      "ly": 1,
+      "ms": 250
+    },
+    {
+      "do": "save",
+      "as": "host_probe",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "assert",
+      "expr": "20 < saved['host_start'][2]-saved['host_probe'][2] < 300 and abs(saved['host_probe'][0]-saved['host_start'][0]) < 150 and saved['host_probe'][2]>1550",
+      "message": "host: camera-forward probe did not move safely toward -Z while remaining outside region0; recalibrate native input"
+    },
+    {
+      "do": "save",
+      "as": "host_remaining_ms",
+      "expr": "int(min(2000,max(100,(saved['host_probe'][2]-1300)*250/(saved['host_start'][2]-saved['host_probe'][2]))))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['player-input','--lx','0','--ly','1','--duration-ms',str(saved['host_remaining_ms'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 700
+    },
+    {
+      "do": "save",
+      "as": "host_finish",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "assert",
+      "expr": "850 < saved['host_finish'][2] < 1500 and abs(saved['host_finish'][0]+14.26138)<370 and abs(saved['host_finish'][1]+286.0282)<240",
+      "message": "host: native movement did not reach the safe interior of measured central BOX; no transform fallback"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(len([a for a in actors(i) if a.get('objectId')==302 and a.get('hp',0)>0])==5 for i in range(3))",
+      "timeoutMs": 15000,
+      "pollMs": 250
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(any(row['action']=='apply' and row['point']=='1' and row['header']=='30' and row['records']=='5' for row in log_matches(saved['spawn_pattern'],i)[saved['activation_marks'][i]:]) and any(int(row['epoch'])==saved['settled']['epoch'] for row in log_matches(saved['lease_pattern'],i)[saved['lease_marks'][i]:]) for i in [1,2])",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "statehash_check",
+      "as": "five_native_shadows",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['five_native_shadows']['epoch']==saved['settled']['epoch'] and all(row['count']==5 and all(enemy['objectId']==302 and enemy['netId']>0 and enemy['hp']>0 for enemy in row['nativeRows'] if enemy['hp']>0) for row in saved['five_native_shadows']['instances'].values())",
+      "message": "nonempty acceptance requires exactly five matched native Shadows on every peer"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "host_inside_native_five",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['host_inside_native_five']['complete'] and saved['host_inside_native_five']['geometryComplete'] and all(peer['comparison']['comparisonValid'] and peer['comparison']['nativeLivingCount']==5 and all(row['objectId']==302 for row in peer['livingCombatRows']) for snap in saved['host_inside_native_five']['snapshots'] for peer in snap['peers'].values())",
+      "message": "independent native list does not contain exactly five Shadows after host entry"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len([c for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514 and c['pointPeer']=='0'])==3 and all(c['available'] and c['pointStableDuringCapture'] and len(c['regions'])==7 and all(r['kind']=='BOX' and not r['edgeUncertain'] for r in c['regions']) and any(r['accepted'] and not r['edgeUncertain'] and min(r['margins'])>20 for r in c['regions']) for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514 and c['pointPeer']=='0') for snap in saved['host_inside_native_five']['snapshots'])",
+      "message": "host activation geometry must have three complete stable-point captures per sample, seven unambiguous BOX regions and a safely contained host point"
+    },
+    {
+      "do": "statehash_check",
+      "as": "before_host_damage",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['before_host_damage']['epoch']==saved['settled']['epoch'] and all(row['count']==5 and all(r[0]>0 and r[1]==302 and r[2]>3 for r in row['liveRows']) for row in saved['before_host_damage']['instances'].values())",
+      "message": "host damage control requires exactly five matched native Shadows with HP above three in the settled epoch"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "damage",
+      "amount": 3
+    },
+    {
+      "do": "statehash_check",
+      "as": "after_host_damage",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_host_damage']['epoch']==saved['settled']['epoch'] and all(row['count']==5 for row in saved['after_host_damage']['instances'].values()) and all(any(after[0]==before[0] and after[1]==before[1]==302 and after[2]==before[2]-3 for after in saved['after_host_damage']['instances']['0']['liveRows']) for before in saved['before_host_damage']['instances']['0']['liveRows'])",
+      "message": "all five original host netIDs must lose exactly three native HP with matching client populations"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "five_shadows_native_hp_applied"
+    },
+    {
+      "do": "save",
+      "as": "death_pattern",
+      "expr": "'\\\\[enemysync\\\\] client: host death netId (?P<netId>\\\\d+) applied \\\\(hp (?P<before>\\\\d+) -> (?P<after>-?\\\\d+)\\\\)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "death_marks",
+      "expr": "[len(log_matches(saved['death_pattern'],i)) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "death_ids",
+      "expr": "[row[0] for row in saved['after_host_damage']['instances']['0']['liveRows']]"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "kill"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(all(any(int(row['netId'])==net_id and int(row['before'])>0 and int(row['after'])<=0 for row in log_matches(saved['death_pattern'],i)[saved['death_marks'][i]:]) for net_id in saved['death_ids']) for i in [1,2])",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "statehash_check",
+      "as": "native_deaths_applied",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['native_deaths_applied']['epoch']==saved['settled']['epoch'] and all(row['count']==0 for row in saved['native_deaths_applied']['instances'].values()) and all(location(i)==[5,6,0,1,1,0] and log_matches(saved['arrival_pattern'],i)[-1]==saved['arrivals'][i] for i in range(3))",
+      "message": "native death control left live actors or crossed an epoch/full location"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "native_shadows_cleared"
+    }
+  ],
+  "protect": [
+    0,
+    1,
+    2
+  ]
+}

@@ -1,4 +1,5 @@
 #include "kh2coop/CaptureChannel.hpp"
+#include "kh2coop/CaptureLease.hpp"
 #include "kh2coop/WarpChannel.hpp"
 #include "kh2coop/HitChannel.hpp"
 #include "kh2coop/GameBridgePC.hpp"
@@ -30,6 +31,10 @@
 #ifndef KH2COOP_SOURCE_DIR
 #define KH2COOP_SOURCE_DIR "."
 #endif
+
+namespace kh2coop {
+std::string queueWorldResyncCommand(std::uint32_t pid, std::uint8_t targetMask);
+}
 
 namespace {
 
@@ -2002,11 +2007,23 @@ double MeasurePresentFps(kh2coop::CaptureChannel* channel, int windowMs) {
     return seconds > 0 ? (end - start) / seconds : 0.0;
 }
 
+struct CaptureCompletion {
+    long expectedRequestSeq = 0;
+    long doneSeq = 0;
+    std::int32_t nativeStatus = 0;
+    std::uint32_t framesWritten = 0;
+    std::uint32_t width = 0, height = 0;
+    std::uint32_t renderer = 0, backbufferFormat = 0;
+};
+
 // Fills and submits a request, then waits for the DLL to finish it.
 // Returns an error string, or empty on success.
+// Optional completion is copied only on success while the caller holds its lease.
 std::string RunCaptureRequest(kh2coop::CaptureChannel* channel,
                               const std::wstring& output, std::uint32_t frames,
-                              std::uint32_t interval, int timeoutMs) {
+                              std::uint32_t interval, int timeoutMs,
+                              CaptureCompletion* completion = nullptr) {
+    if (output.size() >= std::size(channel->output)) return "Capture output path exceeds mailbox capacity";
     if (channel->requestSeq != channel->doneSeq) {
         return "A capture is already running on this instance";
     }
@@ -2018,15 +2035,31 @@ std::string RunCaptureRequest(kh2coop::CaptureChannel* channel,
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (channel->doneSeq != seq) {
+        if (channel->requestSeq != seq) return "Capture mailbox ownership changed";
         if (std::chrono::steady_clock::now() > deadline) {
             return "Timed out waiting for the capture (is the game rendering?)";
         }
         SleepMs(20);
     }
+    if (channel->requestSeq != seq) return "Capture mailbox ownership changed";
+    CaptureCompletion observed;
+    if (completion) {
+        // seq is the actual submission result, never a later requestSeq guess.
+        observed = {seq, channel->doneSeq, channel->status, channel->framesWritten,
+                    channel->width, channel->height, channel->renderer, channel->backbufferFormat};
+        if (observed.doneSeq != seq || channel->requestSeq != seq || channel->doneSeq != seq)
+            return "Capture mailbox ownership changed";
+    }
     if (channel->status != static_cast<std::int32_t>(kh2coop::CaptureStatus::Ok)) {
         std::wstring message(channel->error);
         return "Capture failed (status " + std::to_string(channel->status) + "): " +
                std::filesystem::path(message).string();
+    }
+    if (completion) {
+        if (observed.nativeStatus != static_cast<std::int32_t>(kh2coop::CaptureStatus::Ok) ||
+            channel->requestSeq != seq || channel->doneSeq != seq)
+            return "Capture mailbox ownership changed";
+        *completion = observed;
     }
     return {};
 }
@@ -2049,6 +2082,13 @@ CommandResult CmdCapture(std::vector<std::string> args) {
         throw std::runtime_error("Unexpected argument for capture: " + args.front());
     }
     const DWORD pid = ResolveTargetPid();
+    kh2coop::CaptureLease lease;
+    const auto leaseStatus = lease.Acquire(pid);
+    if (leaseStatus != kh2coop::CaptureLeaseStatus::Acquired) {
+        return MakeError(leaseStatus == kh2coop::CaptureLeaseStatus::Busy ? "Capture caller lease Busy" :
+                         leaseStatus == kh2coop::CaptureLeaseStatus::Abandoned ? "Capture caller lease Abandoned; no request submitted" :
+                         "Capture caller lease error " + std::to_string(lease.Error()));
+    }
     CaptureChannelView channel(pid);
     if (!channel.get()) return OpenChannelError(pid);
 
@@ -2057,14 +2097,21 @@ CommandResult CmdCapture(std::vector<std::string> args) {
         : RigDir() / "shots" / (std::to_string(pid) + "_" + std::to_string(NowMs()) + ".png");
     std::filesystem::create_directories(out.parent_path());
 
-    const std::string error = RunCaptureRequest(channel.get(), out.wstring(), 1, 1, 10000);
+    CaptureCompletion completion;
+    const std::string error = RunCaptureRequest(channel.get(), out.wstring(), 1, 1, 10000, &completion);
     if (!error.empty()) return MakeError(error);
 
     std::ostringstream json;
     json << "{\"ok\":true,\"processId\":" << pid
          << ",\"path\":" << JsonString(NarrowPath(out))
-         << ",\"width\":" << channel.get()->width
-         << ",\"height\":" << channel.get()->height << "}";
+         << ",\"width\":" << completion.width
+         << ",\"height\":" << completion.height
+         << ",\"expectedRequestSeq\":" << completion.expectedRequestSeq
+         << ",\"doneSeq\":" << completion.doneSeq
+         << ",\"nativeStatus\":" << completion.nativeStatus
+         << ",\"framesWritten\":" << completion.framesWritten
+         << ",\"renderer\":" << completion.renderer
+         << ",\"backbufferFormat\":" << completion.backbufferFormat << "}";
     return {0, json.str()};
 }
 
@@ -2081,6 +2128,13 @@ CommandResult CmdClip(std::vector<std::string> args) {
     if (fps < 1 || fps > 60) throw std::runtime_error("--fps must be in [1, 60]");
 
     const DWORD pid = ResolveTargetPid();
+    kh2coop::CaptureLease lease;
+    const auto leaseStatus = lease.Acquire(pid);
+    if (leaseStatus != kh2coop::CaptureLeaseStatus::Acquired) {
+        return MakeError(leaseStatus == kh2coop::CaptureLeaseStatus::Busy ? "Capture caller lease Busy" :
+                         leaseStatus == kh2coop::CaptureLeaseStatus::Abandoned ? "Capture caller lease Abandoned; no request submitted" :
+                         "Capture caller lease error " + std::to_string(lease.Error()));
+    }
     CaptureChannelView channel(pid);
     if (!channel.get()) return OpenChannelError(pid);
 
@@ -2744,6 +2798,19 @@ CommandResult CmdFps(std::vector<std::string> args) {
     return {0, json.str()};
 }
 
+CommandResult CmdWorldResync(std::vector<std::string> args) {
+    const auto pidRaw = ConsumeOption(args, "--pid");
+    const auto slotRaw = ConsumeOption(args, "--slot");
+    if (!pidRaw || !slotRaw || !args.empty())
+        throw std::runtime_error("world-resync requires --pid N --slot 1|2|all");
+    const auto pid = ParseNumber<std::uint32_t>(*pidRaw, "--pid");
+    if (!pid) throw std::runtime_error("world-resync requires a nonzero explicit PID");
+    const auto slot = ToLower(*slotRaw);
+    const std::uint8_t mask = slot == "1" ? 2 : slot == "2" ? 4 : slot == "all" ? 6 : 0;
+    if (!mask) throw std::runtime_error("world-resync --slot must be 1, 2 or all");
+    return {0, kh2coop::queueWorldResyncCommand(pid, mask)};
+}
+
 void PrintUsage() {
     std::cout
         << "kh2ctl commands:\n"
@@ -2759,6 +2826,7 @@ void PrintUsage() {
         << "  overlay on|off            debug overlay: pid, frame, world/room, fps\n"
         << "  fps [--window-ms N]       game present rate\n"
         << "  warp --world W --room R [--door D] [--map M --btl B --evt E]\n"
+        << "  world-resync --pid N --slot 1|2|all  queue a host recovery request\n"
         << "  hit drop --on|--off [--attacker A] [--victim V] [--enemies] | hit claims [--last N]\n"
         << "  hit damage --victim V --amount N | hit kill --victim V\n"
         << "  dump --out x.dmp          minidump of a live instance (hang evidence)\n"
@@ -2821,6 +2889,7 @@ int main(int argc, char* argv[]) {
         const bool rigCommand = command == "launch" || command == "inject" ||
                                 command == "instances" || command == "kill" ||
                                 command == "mute" ||
+                                command == "world-resync" ||
                                 command == "restart" ||
                                 command == "boot-load-save";
         if (!rigCommand && command != "help" && command != "--help" &&
@@ -2860,6 +2929,8 @@ int main(int argc, char* argv[]) {
             result = CmdFps(std::move(args));
         } else if (command == "warp") {
             result = CmdWarp(std::move(args));
+        } else if (command == "world-resync") {
+            result = CmdWorldResync(std::move(args));
         } else if (command == "dump") {
             result = CmdDump(std::move(args));
         } else if (command == "crash") {

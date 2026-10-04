@@ -32,7 +32,13 @@ Hard-won insights from reverse engineering and modifying a closed-source game at
 
 **Example:** We needed `HookedMotionChainSetAnim` to pass through our own calls to `FUN_1403c88c0` (via `FUN_1403c86a0`) while blocking the game's per-frame calls. The game's calls had non-zero blend params while ours had zero, but relying on parameter values is fragile. The guard flag is unambiguous and costs nothing.
 
-**Rule:** `g_inOurCall = true; callGameFunction(); g_inOurCall = false;` — simple, reliable, single-threaded safe.
+**Rule:** An explicit guard distinguishes an intended call scope. Restore it on
+every normal and unwind exit. Thread-local state can be inherited by another
+fiber on the same thread, and nested native callbacks can reenter it; the guard
+alone grants neither frame ownership nor creator exclusion. Qualify the actual
+native activation separately when those properties matter. The
+[executed construction controls](../build/rig/native-resource-serialization-20261004-01/receipt.md)
+retain the two-fiber false-positive case.
 
 ## 5. Ghidra decompilation lies about argument counts
 
@@ -40,7 +46,21 @@ Hard-won insights from reverse engineering and modifying a closed-source game at
 
 **Example:** `FUN_1403c7c50()` appeared to take no arguments in the decompilation, but actually takes `(motCtrl, animId)` — it's the animation resolver that maps an animation ID to an internal motion index. Missing this made the call chain through `FUN_1403c88c0` harder to understand.
 
-**Rule:** For any function call in decompiled output, check the 4-8 instructions before the CALL in the disassembly listing. The MOV/LEA instructions loading RCX/RDX/R8/R9 reveal the real arguments.
+The saved552430 factory caller is another consequential example: decompilation
+showed a constant-zero object ID, but no instruction from function entry to the
+factory call defines ECX. It forwards the caller's arbitrary ID and then
+dereferences the returned pointer without a null check. Classifying it as a
+non-Shadow constant caller would permit an unsafe creation fence. The
+[byte-checked correction](../build/rig/native-resync-creator-admission-feasibility-20261004-01/decision.md)
+supersedes that entry in the earlier frozen caller matrix.
+
+The later [entry-binding review](../build/rig/native-creator-552430-owner-binding-20261004-01/decision.md)
+found no saved direct/literal caller or export. Preserve both conclusions:
+unsafe behavior if entered does not establish that a live ingress exists.
+
+**Rule:** Trace each argument register to its actual defining instruction or
+function entry; a short window before CALL may miss an inherited argument.
+Check the caller's post-return use before assuming a failure value is safe.
 
 ## 6. QWORD writes can affect two DWORD fields
 
@@ -89,3 +109,128 @@ Hard-won insights from reverse engineering and modifying a closed-source game at
 **Example:** Our initial animation fix appeared to work because we tested while standing at a distance where our target animation happened to match what the vanilla system would have chosen. Moving closer/farther revealed the "stuck at frame 0" bug that only manifested when our choice DIFFERED from the vanilla distance-based selection.
 
 **Rule:** For any friend-entity change, test at: on top of Sora (0 distance), walk range (~50 units), run range (~150 units), and edge of follow range (~300 units).
+
+## 11. Relocated prologues need tested unwind behavior
+
+The finite `107240` package callback starts with four pushes in five bytes.
+MinHook v1.3.3 copies these into a generated trampoline without registering
+unwind metadata. Registering the matching push codes alone still failed an
+actual Windows `RtlVirtualUnwind` control at the trailing `FF25` jump: Windows
+treated that encoding as an epilogue and returned saved RDI as caller RIP.
+Increasing `SizeOfProlog` to19 also failed. A validated `mov R11,imm64; jmp R11`
+tail plus the matching prefix metadata passed the owned-buffer controls.
+This choice is specific to the inspected body, which has no incoming R11
+parameter; it is not a generic trampoline rewrite.
+
+Check actual generated instruction boundaries and Windows unwind behavior
+before enabling a stack-changing entry hook. Keep the function table, metadata
+and code alive together until execution is quiescent. Retaining metadata while
+`MH_Uninitialize` frees the trampoline is not safe teardown. The
+[executed design packet](../build/rig/native-resource-dispatch-design-20261004-01/design.md)
+retains the failing controls and the corrected finite candidate; production
+installation remains a separate gate.
+
+For chained runtime entries, check alignment relative to their common RVA base,
+not only absolute metadata alignment. An unaligned base produces unaligned
+UnwindData even when the metadata address is aligned. The
+[shared-generator review](../build/rig/native-owned-emitter-code-independent-review-20261004-01/review.md)
+retains that corrected guard and its executed negative control.
+
+Set the retained-resource latch before registering an OS function table, and
+keep code, metadata and module lifetime together even if registration actually
+succeeds but its caller sees failure. A failed operation cannot prove that no
+observer retained its pointer. The [preparation review](../build/rig/native-owned-emitter-install-independent-review-20261004-01/review.md)
+executes that ambiguous failure against Windows and verifies permanent retention.
+Default-off preparation must return false when its Boolean promises a prepared
+view; disabled success would contradict that API even with creation still held.
+
+## 12. Preserve AL semantics in resource callback evidence
+
+The native `107240` package callback uses AL as its logical result. In the
+203.8-second natural-resource run, every logged AL0 return still had nonzero
+upper RAX bits. Treating the entire opaque register as a Boolean would report
+failures as successes. Forward the full register unchanged, derive AL separately,
+and qualify either as returned evidence only after normal return.
+
+The selected Shadow records actually supplied `.a.us` names and reached AL1
+after unsuccessful earlier package callbacks. An older all-AL0 filename probe
+therefore cannot establish complete native routing or resource absence. Preserve
+the actual arguments, caller, parent bytes and coverage limits. Both friends
+also exhausted the512-receipt logger budget: complete parent records plus zero
+logged children did not mean no callbacks. See the
+[actual callback audit](../build/rig/native-resource-native-20261004-01/callback-review.md).
+
+## 13. One dispatcher call can contain several irreversible attempts
+
+This lesson applies to the **parked added-dispatch/A-B-C branch route**. Current
+all-alive recovery changes the recorded activation input to the game's normal
+scheduled original update; it adds no dispatcher call and does not inherit B1
+creator admission or loader-installation requirements.
+
+The ordinary emitter's null wrapper return at3FE98C advances to the next record
+without assigning cooldown; its stage helper can also rescan. Recording failure
+only after the dispatcher returns cannot stop subsequent creation attempts.
+Nonnull assigns delay8, so one successful emission is not one attempted record.
+
+Place a terminal stop or admission check inside the owned invocation before its
+next irreversible entry, and preserve natural calls and native cleanup. Treat
+dispatcher AL1, factory RAX, and independently ready record membership as distinct
+results. The [saved-byte execution design](../build/rig/native-surviving-pack-execution-design-20261004-01/design.md)
+records the actual null, mode/stage skip and outer-loop branches. The private
+[A/B/C machine component](../build/rig/native-owned-emitter-abc-independent-review-20261004-01/review.md)
+has independent executed controls for pre-entry, null-return and post-cooldown
+stops, including stage rescans. Its
+[versioned generator](../build/rig/native-owned-emitter-code-independent-review-20261004-01/review.md)
+preserves those controls; that added-call production seam and creator boundary
+remain unimplemented and unqualified.
+
+For the direct assembly gateway, compare the forwarded register to the actual
+dispatcher return-PC RAX. The native post-wrapper cooldown path can change its
+upper bits before the dispatcher sets AL1; wrapper RAX and dispatcher RAX are
+different evidence. The [gateway controls](../build/rig/native-owned-emitter-gateway-20261004-01/receipt.md)
+retain the initially incorrect equality assertion and the corrected boundary
+check. Compile the C++ and MASM files to distinct object basenames, and verify
+the linked DLL's actual body and handler metadata rather than assuming assembly
+compilation alone retained them.
+
+## 14. Count completed native work and preserve input provenance
+
+The current historical-input policy must record the exact host float4 from the
+qualified native update that first returns a nonnull selected wrapper and then
+completes normally. Periodic rounded capture logs, dispatcher AL1 and native
+counts5/5 do not prove that event. Pending actor metadata can be unavailable at
+nonnull return; join the exact record and normal-return cache attachment, then
+wait for independently ready full-set membership before HP reconciliation.
+
+Native initialization can finish before the load-complete hook publishes its
+new serial. Bind the witnessed initialization once at its first qualified host
+update, allowing only the same load or exactly+1 with unchanged transition/NOW,
+pointers and definition. Never restamp a later update or revive a refused
+first-emission record. Header+E0/1 is an explicit comparison exception because
+the selected native type-2 body joins both values before emission; retain both
+raw values and never rewrite the marker to manufacture equality.
+
+Two lease copies in one update are not two completed updates. Record successful
+original returns per controller; a single last-return slot can be overwritten
+by another controller. The bounded64-slot table never evicts and refuses on
+overflow. Count distinct completed selected-controller identities, not gaps in
+the global sequence. Historical512 and live-input120 budgets retain the same30s
+transaction deadline, including pending/deferred progress and partial outcomes.
+Hold selected claims until the whole exact set reconciles, and verify survival
+after live input resumes. A fresh Bootstrap transaction reset must not erase
+the parked owned gateway's sticky tombstones.
+
+Finally, label where a fixture failed. The132438/133512 activation-replay runs
+stopped at the pre-reconnect observer, not recovery. An outdated WorldBridge10
+validator against current11 is an observer compatibility defect, not native
+population evidence. Its correction and a later successful observation still
+cannot retroactively pass either run. See the
+[current scenario record](SCENARIOS.md#historical-activation-replay-single-cycle-2026-10-04).
+
+Check the actual transaction route before choosing a live fixture. Automatic
+ClientHello cached-world bootstrap and an explicit ResyncPlan are separate paths;
+adding metadata to the latter does not make it reachable from the former. Run134727
+passed ordinary rejoin at5/5/5 but never invoked the historical-input receiver.
+An enabled feature and matching enemies are not proof it ran. Establish the
+missing-population negative control, require production attempt/verification
+receipts, and label forced-resync scope before claiming automatic recovery.

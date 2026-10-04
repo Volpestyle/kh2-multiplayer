@@ -1,0 +1,235 @@
+{
+  "name": "net_activation_lease_menu",
+  "description": "Focused native activation lease expiry control: two peers in BC05/06, fresh accepted lease plus actual qualified Apply, native host Start-menu pause while runtimes stay connected, >500ms expiry followed by repeated same-controller Hold with unchanged Apply count and no new lease, then native resume/fresh source/Apply in unchanged epoch/full location. Uses complete per-PID regex-record index boundaries and fresh runtime log suffixes; all menu controls and qualification must be observed, never assumed. Menu control is uncalibrated until first live pass. Does not assert enemy parity or authoritative spawn completeness. Same-room reload/latejoin are covered by net_host_transitions_smoke; reconnect has portable lease/transport coverage, no live runner stop/rejoin step.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6,
+      "door": 0,
+      "map": 1,
+      "btl": 1,
+      "evt": 0
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "settled",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['location'] == [5,6,0,1,1,0] for row in saved['settled']['instances'].values())",
+      "message": "full settled location is not the qualified courtyard fixture"
+    },
+    {
+      "do": "save",
+      "as": "spawn_pattern",
+      "expr": "'\\\\[spawnctl\\\\] action=(?P<action>\\\\w+) reason=[^\\\\r\\\\n]*? controller=(?P<controller>[0-9A-Fa-f]+) key=(?P<key>\\\\d+) headerId=(?P<header>\\\\d+) records=(?P<records>\\\\d+) transition=(?P<transition>\\\\d+) load=(?P<load>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) capture=(?P<capture>\\\\d+) apply=(?P<apply>\\\\d+) hold=(?P<hold>\\\\d+) unsupported=(?P<unsupported>\\\\d+) unavailable=(?P<unavailable>\\\\d+) pointAvailable=(?P<point>\\\\d+) point=\\\\([^\\\\r\\\\n]*\\\\)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "lease_pattern",
+      "expr": "'\\\\[spawn-authority\\\\] lease epoch=(?P<epoch>\\\\d+) source=(?P<source>\\\\d+) point=\\\\([^\\\\r\\\\n]*\\\\)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "arrival_pattern",
+      "expr": "'\\\\[enemysync\\\\] (?:host|client) arrived epoch=(?P<epoch>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "baseline_marks",
+      "expr": "{'host':len(log_matches(saved['spawn_pattern'],0)), 'client':len(log_matches(saved['spawn_pattern'],1)), 'lease':len(log_matches(saved['lease_pattern'],1))}"
+    },
+    {
+      "do": "wait_until",
+      "expr": "any(row['action']=='capture' and row['point']=='1' and int(row['world'],16)==5 and int(row['room'],16)==6 for row in log_matches(saved['spawn_pattern'],0)[saved['baseline_marks']['host']:]) and any(row['action']=='apply' and row['point']=='1' and int(row['world'],16)==5 and int(row['room'],16)==6 for row in log_matches(saved['spawn_pattern'],1)[saved['baseline_marks']['client']:]) and any(int(row['epoch'])==saved['settled']['epoch'] for row in log_matches(saved['lease_pattern'],1)[saved['baseline_marks']['lease']:])",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "applied",
+      "expr": "[row for row in log_matches(saved['spawn_pattern'],1)[saved['baseline_marks']['client']:] if row['action']=='apply' and row['point']=='1'][-1]"
+    },
+    {
+      "do": "save",
+      "as": "baseline_lease",
+      "expr": "log_matches(saved['lease_pattern'],1)[-1]"
+    },
+    {
+      "do": "save",
+      "as": "arrivals",
+      "expr": "[log_matches(saved['arrival_pattern'],i)[-1] for i in range(2)]"
+    },
+    {
+      "do": "save",
+      "as": "pause_runtime_marks",
+      "expr": "[len(runtime_log(i)) for i in range(2)]"
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "start",
+      "ms": 100
+    },
+    {
+      "do": "wait_until",
+      "expr": "(peek('0x7435D0','u8',0)!=255 or peek('0x2A171E8','i32',0)!=0)",
+      "timeoutMs": 8000,
+      "pollMs": 250
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "host_native_menu"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "assert",
+      "expr": "(peek('0x7435D0','u8',0)!=255 or peek('0x2A171E8','i32',0)!=0) and peek('0x7435D0','u8',1)==255 and peek('0x2A171E8','i32',1)==0 and peek('0x9BA8D0','u8',1)!=0 and peek('0xB65210','i32',1)==0 and int(peek('0x2A11478','u64',1),16)==0",
+      "message": "host did not remain natively paused, or client gameplay became unsafe"
+    },
+    {
+      "do": "save",
+      "as": "expired_marks",
+      "expr": "{'client':len(log_matches(saved['spawn_pattern'],1)), 'lease':len(log_matches(saved['lease_pattern'],1)), 'runtime':[len(runtime_log(i)) for i in range(2)]}"
+    },
+    {
+      "do": "wait_until",
+      "expr": "(peek('0x7435D0','u8',0)!=255 or peek('0x2A171E8','i32',0)!=0) and peek('0x7435D0','u8',1)==255 and peek('0x2A171E8','i32',1)==0 and peek('0x9BA8D0','u8',1)!=0 and peek('0xB65210','i32',1)==0 and int(peek('0x2A11478','u64',1),16)==0 and len([row for row in log_matches(saved['spawn_pattern'],1)[saved['expired_marks']['client']:] if row['action']=='hold' and row['point']=='0' and row['controller']==saved['applied']['controller'] and row['header']==saved['applied']['header'] and row['load']==saved['applied']['load'] and row['transition']==saved['applied']['transition']])>=1",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "first_hold",
+      "expr": "[row for row in log_matches(saved['spawn_pattern'],1)[saved['expired_marks']['client']:] if row['action']=='hold' and row['point']=='0' and row['controller']==saved['applied']['controller'] and row['header']==saved['applied']['header'] and row['load']==saved['applied']['load'] and row['transition']==saved['applied']['transition']][0]"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "wait_until",
+      "expr": "(peek('0x7435D0','u8',0)!=255 or peek('0x2A171E8','i32',0)!=0) and peek('0x7435D0','u8',1)==255 and peek('0x2A171E8','i32',1)==0 and peek('0x9BA8D0','u8',1)!=0 and peek('0xB65210','i32',1)==0 and int(peek('0x2A11478','u64',1),16)==0 and any(row['action']=='hold' and row['point']=='0' and row['controller']==saved['applied']['controller'] and row['header']==saved['applied']['header'] and row['load']==saved['applied']['load'] and row['transition']==saved['applied']['transition'] and int(row['hold'])>int(saved['first_hold']['hold']) and row['apply']==saved['first_hold']['apply'] for row in log_matches(saved['spawn_pattern'],1)[saved['expired_marks']['client']:]) and all('[Runtime] Net: rtt=' in runtime_log(i)[saved['expired_marks']['runtime'][i]:] for i in range(2))",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "held_rows",
+      "expr": "log_matches(saved['spawn_pattern'],1)[saved['expired_marks']['client']:]"
+    },
+    {
+      "do": "save",
+      "as": "last_hold",
+      "expr": "[row for row in log_matches(saved['spawn_pattern'],1)[saved['expired_marks']['client']:] if row['action']=='hold' and row['point']=='0' and row['controller']==saved['applied']['controller'] and row['header']==saved['applied']['header'] and row['load']==saved['applied']['load'] and row['transition']==saved['applied']['transition']][-1]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['action']!='apply' and row['apply']==saved['first_hold']['apply'] for row in saved['held_rows']) and int(saved['last_hold']['hold'])>int(saved['first_hold']['hold']) and len(log_matches(saved['lease_pattern'],1))==saved['expired_marks']['lease']",
+      "message": "client renewed authority or applied native controller ticks after the source lease expired"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(runtime_log(i))>=saved['expired_marks']['runtime'][i] and '[Runtime] Net: rtt=' in runtime_log(i)[saved['expired_marks']['runtime'][i]:] and 'disconnected from server' not in runtime_log(i)[saved['pause_runtime_marks'][i]:] and 'refused by relay' not in runtime_log(i)[saved['pause_runtime_marks'][i]:] for i in range(2))",
+      "message": "network disconnected or lacks fresh connected link evidence during host pause"
+    },
+    {
+      "do": "assert",
+      "expr": "all(location(i)==[5,6,0,1,1,0] and log_matches(saved['arrival_pattern'],i)[-1]==saved['arrivals'][i] for i in range(2))",
+      "message": "epoch or full location changed during expiry control"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "client_expired_lease_hold"
+    },
+    {
+      "do": "save",
+      "as": "resume_marks",
+      "expr": "{'host':len(log_matches(saved['spawn_pattern'],0)), 'client':len(log_matches(saved['spawn_pattern'],1)), 'lease':len(log_matches(saved['lease_pattern'],1))}"
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "start",
+      "ms": 100
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek('0x7435D0','u8',0)==255 and peek('0x2A171E8','i32',0)==0 and peek('0x9BA8D0','u8',0)!=0 and peek('0xB65210','i32',0)==0 and int(peek('0x2A11478','u64',0),16)==0",
+      "timeoutMs": 8000,
+      "pollMs": 250
+    },
+    {
+      "do": "wait_until",
+      "expr": "any(row['action']=='capture' and row['point']=='1' for row in log_matches(saved['spawn_pattern'],0)[saved['resume_marks']['host']:]) and any(int(row['epoch'])==saved['settled']['epoch'] and int(row['source'])>int(saved['baseline_lease']['source']) for row in log_matches(saved['lease_pattern'],1)[saved['resume_marks']['lease']:]) and any(row['action']=='apply' and row['point']=='1' and row['controller']==saved['applied']['controller'] and row['header']==saved['applied']['header'] and row['load']==saved['applied']['load'] and row['transition']==saved['applied']['transition'] and int(row['apply'])>int(saved['last_hold']['apply']) for row in log_matches(saved['spawn_pattern'],1)[saved['resume_marks']['client']:])",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "resumed_lease",
+      "expr": "log_matches(saved['lease_pattern'],1)[-1]"
+    },
+    {
+      "do": "save",
+      "as": "resumed_apply",
+      "expr": "[row for row in log_matches(saved['spawn_pattern'],1)[saved['resume_marks']['client']:] if row['action']=='apply' and row['controller']==saved['applied']['controller'] and row['header']==saved['applied']['header'] and row['load']==saved['applied']['load'] and row['transition']==saved['applied']['transition']][-1]"
+    },
+    {
+      "do": "assert",
+      "expr": "peek('0x7435D0','u8',0)==255 and peek('0x2A171E8','i32',0)==0 and peek('0x9BA8D0','u8',0)!=0 and peek('0xB65210','i32',0)==0 and int(peek('0x2A11478','u64',0),16)==0 and peek('0x7435D0','u8',1)==255 and peek('0x2A171E8','i32',1)==0 and peek('0x9BA8D0','u8',1)!=0 and peek('0xB65210','i32',1)==0 and int(peek('0x2A11478','u64',1),16)==0 and all(location(i)==[5,6,0,1,1,0] and log_matches(saved['arrival_pattern'],i)[-1]==saved['arrivals'][i] for i in range(2))",
+      "message": "resume used another epoch/location or unsafe gameplay"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "client_fresh_lease_resumed"
+    }
+  ],
+  "protect": [
+    0,
+    1
+  ]
+}

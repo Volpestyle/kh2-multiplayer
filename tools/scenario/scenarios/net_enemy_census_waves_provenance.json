@@ -1,0 +1,272 @@
+{
+  "name": "net_enemy_census_waves_provenance",
+  "description": "Read-only provenance diagnostic derived from all44 unchanged net_enemy_sync_waves steps in their exact original order, including its9 native900ms movement pulses, count-only readiness, host7damage, and strict HP assertion. Inserts checked native list/controller/cache/actor+9E8/+9F0 provenance before movement, three samples after the original4000ms settle/count readiness, and one immediately before the unchanged HP assertion. Count readiness is not identity parity; captures retain unmatched/extras. The known native population/refill divergence must still fail the original assertion, never become an expected-pass exception. Census windows perturb timing; no causal equivalence to the original run is assumed. Incomplete collection fails with partial evidence and may prevent reaching the retained assertion. The first live diagnostic run (20261002-234801) failed before movement because peer2 was still in its runtime-triggered load (zero native roots/inField, no completed arrival). A bounded read-only readiness wait now requires each peer latest lifecycle/session-boundary log to be a completed nonzero-epoch arrival at the current full target location, safe native gameplay flags, valid head/tail pointers, and nonempty actor candidates before the unchanged first census. The wait does not certify census completeness or parity, retry census observations, or discard incomplete evidence. The revised run20261002-235825 failed strict collection with host descriptor PermissionError before damage. Run20261003-001955 passed48steps with complete censuses, four native enemies per peer at160 then153HP and four client deaths each, but its second wave was empty and controller count remained2: bounded first-pack HP/death proof only, not multi-wave/barrier acceptance. The intermittent access-denied cause remains unproven.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "protect",
+      "instance": 0
+    },
+    {
+      "do": "protect",
+      "instance": 1
+    },
+    {
+      "do": "protect",
+      "instance": 2
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(events and events[-1]['epoch'] and int(events[-1]['epoch']) > 0 and [int(events[-1][key], 16 if key in ('world', 'room') else 10) for key in ('world', 'room', 'door', 'map', 'btl', 'evt')] == location(i) == [18, 11, 0, 0, 1, 0] and peek('0x9BA8D0', 'u8', i) != 0 and peek('0x2A171E8', 'u32', i) == 0 and peek('0xB65210', 'i32', i) == 0 and int(str(peek('0x2A11478', 'u64', i)), 0) == 0 and peek('0x7435D0', 'u8', i) == 255 and all(0x10000 <= int(str(peek(root, 'u64', i)), 0) < 0x0000800000000000 for root in ('0x2A171C8', '0x2A171D0')) and len(actors(i)) > 0 for i in range(3) for events in [log_matches('\\\\[enemysync\\\\] (?:host|client) arrived epoch=(?P<epoch>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)|(?:\\\\[warp\\\\] (?:load complete|client issued|client queued)|Warp: [0-9A-Fa-f]{2}/[0-9A-Fa-f]{2} ->|\\\\[enemysync\\\\] (?:session reset:|role ))[^\\\\r\\\\n]*', i)])",
+      "timeoutMs": 30000,
+      "pollMs": 250
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "waves_before_movement",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 1,
+      "intervalMs": 0
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "wait",
+      "ms": 4000
+    },
+    {
+      "do": "save",
+      "as": "spawned",
+      "expr": "[[(a['name'], a['address'][-5:], a.get('hp'), round(a['position']['x']), round(a['position']['z'])) for a in enemies(k)] for k in range(3)]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemy_hps(0)) > 0 and len(enemy_hps(1)) == len(enemy_hps(0)) and len(enemy_hps(2)) == len(enemy_hps(0))",
+      "timeoutMs": 15000,
+      "pollMs": 500
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "waves_after_original_settle",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 3,
+      "intervalMs": 1500
+    },
+    {
+      "do": "save",
+      "as": "before",
+      "expr": "[enemy_hps(i) for i in range(3)]"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "damage",
+      "amount": 7
+    },
+    {
+      "do": "wait",
+      "ms": 400
+    },
+    {
+      "do": "save",
+      "as": "after_damage",
+      "expr": "[enemy_hps(i) for i in range(3)]"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "waves_before_strict_hp_assert",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 1,
+      "intervalMs": 0
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_damage'][0] == saved['after_damage'][1] == saved['after_damage'][2] and saved['after_damage'][0] != saved['before'][0]",
+      "message": "client HP doesn't match the host's after host-only damage"
+    },
+    {
+      "do": "save",
+      "as": "host_logs",
+      "expr": "[log_count('[enemysync] client: matched', i) for i in range(3)]"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "kill"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemy_hps(1)) == 0 and len(enemy_hps(2)) == 0",
+      "timeoutMs": 8000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "deaths_applied",
+      "expr": "[log_count('host death netId', i) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "host_deaths_sent",
+      "expr": "log_count('[enemysync] host death', 0)"
+    },
+    {
+      "do": "wait",
+      "ms": 6000
+    },
+    {
+      "do": "save",
+      "as": "second_wave",
+      "expr": "[enemy_hps(i) for i in range(3)]"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "kill"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(len(enemy_hps(i)) == 0 for i in range(3))",
+      "timeoutMs": 10000,
+      "pollMs": 500
+    },
+    {
+      "do": "wait",
+      "ms": 4000
+    },
+    {
+      "do": "save",
+      "as": "battle_state",
+      "expr": "[peek('0x2A11404', 'u8', i) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "final_deaths",
+      "expr": "[log_count('host death netId', i) for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(enemy_hps(i)) == 0 for i in range(3))",
+      "message": "enemies left on some instance"
+    },
+    {
+      "do": "capture",
+      "name": "end",
+      "instance": 1
+    }
+  ]
+}

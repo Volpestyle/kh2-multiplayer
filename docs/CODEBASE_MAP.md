@@ -13,7 +13,15 @@ cmake --build build --target kh2coop_fake_sim --config Release # E2E test
 ```
 
 Offline test suites (no KH2): `kh2coop_fake_sim`, `kh2coop_avatar_test`,
-`kh2coop_world_test`, `kh2coop_bridge_test` — each prints `ALL CHECKS PASSED`.
+`kh2coop_world_test`, `kh2coop_bridge_test`, `kh2coop_recovery_test` — each prints
+`ALL CHECKS PASSED`. The recovery target exercises the production monotonic
+scheduler plus actual ENet dropped-friend bootstrap and original-session pins.
+Windows-only `kh2coop_spawntrace_test`, `kh2coop_lifecycletrace_test` and
+`kh2coop_hittrace_test` exercise actual observer helpers with synthetic originals
+and test-owned memory. `kh2coop_nativehit_test` exercises the production claim
+consumer, incoming-hit context and production generation-guarded world/progress/
+warp boundaries over owned memory and a headless transport. The Python
+saved-log auditor controls run via `python -B -m unittest discover -s tests -p test_trace_audit.py`.
 
 Dependencies: ENet v1.3.17 (FetchContent), MinHook v1.3.3 (FetchContent, inject only).
 
@@ -38,7 +46,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 
 | File | Lines | What it does |
 |------|-------|-------------|
-| `src/EntityHook.cpp` | ~1930 | **The big file.** All hook logic — see section breakdown below |
+| `src/EntityHook.cpp` | ~2790 | **The big file.** Hook logic, hit ownership, activation and diagnostic initialization |
 | `src/EntityHook.hpp` | 28 | Public API: `Initialize()`, `Shutdown()`, `OnFrame()` |
 | `src/DllMain.cpp` | 217 | DLL entry point, Panacea plugin exports, standalone init thread |
 | `src/PatternScan.hpp` | 126 | AOB pattern scanner for finding functions in the .text section |
@@ -46,9 +54,43 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/Warp.cpp` | | Room warp requests via the game's transition function |
 | `src/SaveGuard.cpp` | ~520 | Redirects write opens under the KH2 save folder to a sandbox, denies deletes/moves/copies (installed first at init) |
 | `src/CrashDump.cpp` | ~90 | Minidump on unhandled exceptions, chained ahead of the game's filter |
-| `src/EnemySync.cpp` | ~500 | Shared enemy HP and deaths over the WorldBridge (host manifest/HP/deaths, client matching by spawn point) |
+| `src/EnemySync.cpp` | | Checked native census, shared HP/deaths, actual-state hashes and activation leases; default-off all-alive historical-input recovery inside explicit ResyncPlan, exact full-set HP/claim hold, bounded completed-update/live-input hold and diagnostic receipts; automatic cached-world rejoin does not start this path |
+| `src/ProgressSync.cpp` | ~330 | Verified SAVE progress snapshots/deltas and atomic boundary application |
+| `src/NativeSpawnController.cpp` | | Ordinary fixed-combat activation hook and checked readers; opt-in exact host first-emission input/state recorder, bounded initialization binding,64-slot non-evicting per-controller completed-original receipts and fixed/generated/dispatcher/script traces |
+| `src/NativeResourceTrace.cpp` | | Default-off exact-body-qualified `107240` package callback observer; raw ABI/SEH forwarding, copied candidate construction parents, bounded child queue, corrected registered trampoline and process-lifetime retention |
+| `src/NativeOwnedEmitterCode.hpp/.cpp` | | Parked added-dispatch route: finite A/B/C emitter generator and stable280-byte POD, checked branches/unwind descriptions; no current recovery caller |
+| `src/NativeOwnedEmitterGateway.hpp/.cpp`, `src/NativeOwnedEmitterGatewayRaw.asm` | | Parked direct-dispatch gateway: actual frame identity, one outstanding monotonic invocation, raw RAX and MASM return/SEH retirement; tombstones survive fresh Bootstrap resets |
+| `src/NativeOwnedEmitterInstall.hpp/.cpp` | | Parked, default-off loaded emitter/unwind preparation with retained RX/RO/RW storage and Windows function tables; no current recovery branch writer or execution permit |
+| `src/NativeLifecycleTrace.cpp` | ~340 | Five independently byte-verified opt-in removal/death/count probes, nested pre/post actor/controller/cache evidence and native unwind/loss reporting |
+| `src/NativeHitTrace.cpp` | | Opt-in bounded ApplyHitDamage/TakeDamage/ApplyStatDelta observations, plus copied policy decisions and actual operation outcomes; separate incoming-delta/HP and checked-zero evidence, no ownership-rule changes |
+| `src/DamagePolicy.cpp` | | Copied-facts active-session HP ownership matrix and fault-contained, exact-record amount-zero leaf; EntityHook owns current actor/companion evidence |
 
 EntityHook.cpp also holds the VUH-1501 hit-ownership hooks (BuildHit `0x3D23C0` log, ApplyHitDamage `0x3D3BA0` drop filter + claims, host apply), driven through `common/include/kh2coop/HitChannel.hpp`.
+Those diagnostic claims/manual apply requests remain separate from protocol
+HitClaim transport. ApplyHitDamage now snapshots an ordinary canonical-player
+HP hit before client suppression and submits an immutable typed claim to
+EnemySync. The host checks current roster connection, sequence, epoch, binding
+and native combat metadata before one byte-verified TakeDamage attempt, then
+recaptures the census before HP/death publication. WorldBridge v11 carries atomic
+roster/delivery floors, explicit puppet authority, captured producer context and
+a separate bounded CAS operator mailbox. Protocol v9 retains v3
+claims and v4 connection-tagged avatar relays; AvatarBridge v2 carries pose
+provenance, checked in the DLL even for an unchanged cached pose.
+V5 also requires opaque world-incarnation identity and typed closure semantics.
+V6 adds separate authenticated diagnostic request/chunk/done packets on reliable
+channel 2. `DesyncCollector` copies actual local artifact bytes on one worker;
+`DesyncUpload` paces owner-thread transport; `DesyncCapture` persists the frozen
+all-peer aggregate and bounded suppression evidence. See `DESYNC_REPORTS.md`.
+V7 adds a DLL-produced nonzero 64-bit sequence to absolute enemy HP. Relay,
+network callbacks and the DLL reject older samples while retaining reliable
+cache replay; see `HP_ORDERING.md`. `kh2coop_hp_order_test` exercises real local
+ENet, reversed delivery, exact cache reconstruction and admission boundaries.
+V8 adds fresh-capture transaction fencing, bounded complete native staging and
+strict load/two-frame convergence ACKs; see `FORCED_RESYNC.md`. Dead bootstrap
+and full native/remote acceptance remain open.
+`common/include/kh2coop/ClientRecovery.hpp` owns bounded friend-only scheduling;
+RuntimeMain pumps it and heartbeats before attachment waits. Native combat,
+reconnect acceptance and attack-specific/boss behavior remain unverified.
 
 ### EntityHook.cpp sections
 
@@ -81,14 +123,22 @@ Attaches to KH2 via `ReadProcessMemory`/`WriteProcessMemory`. Reads game state, 
 | `include/kh2coop/ReplicaController.hpp` | 81 | Applies incoming snapshots to non-owned entity slots |
 | `src/GameBridgePC.cpp` | 1032 | Process attach, entity discovery, state reads/writes, camera |
 | `src/RuntimeMain.cpp` | 996 | Main loop: config, per-frame tick, network client, mailbox IPC |
+| `include/kh2coop/DesyncCollector.hpp`, `src/DesyncCollector.cpp` | | One-worker local log/metadata/capture spool, checked mailbox witnesses and bounded retirement/deadline handling |
 
 ## server/ — Multiplayer session server (relay)
 
 Accepts client connections, version-gates them and assigns party slots. Relays
 owner-authoritative avatars (stamping the owner slot) and host-authored world
 sync (room transitions, cutscene holds, enemy manifest/HP/deaths, progress),
-which it accepts only from the host (slot Player). Routes hit claims to the
-host only. Caches world state so late joiners are caught up. The older
+which it accepts only from the host (slot Player). Routes authenticated,
+current-room hit claims to the host only. Caches world state so late joiners
+are caught up. Exact complete frames and current nonzero room epochs guard
+hold/manifest/HP/death cache writes; HP/death also require the current manifest.
+Old-room values cannot be replayed under a new epoch. Host resync now requests
+fresh checked native capture and stages an immutable transaction with delivery
+fencing; native recovery acceptance remains pending ([FORCED_RESYNC.md](FORCED_RESYNC.md)).
+Co-op host departure/expiry closes old peer connections and
+clears those caches while the relay keeps listening. The older
 fake-physics `SimulationState` is a test double.
 
 | File | Lines | What |
@@ -97,8 +147,9 @@ fake-physics `SimulationState` is a test double.
 | `include/kh2coop/SimulationState.hpp` | 48 | Server-side fake physics for 3 actors |
 | `include/kh2coop/PeerState.hpp` | 43 | Per-peer tracking (slot, status, heartbeat) |
 | `src/ServerMain.cpp` | 133 | Entry point, 60fps main loop |
-| `src/SessionHost.cpp` | ~810 | Handshake, validation, avatar relay, host-only world sync, claim routing, late-joiner catch-up |
+| `src/SessionHost.cpp` | ~1000 | Handshake, avatar/world relay, current-epoch claim routing, late-join state and co-op host-loss teardown |
 | `src/SimulationState.cpp` | 213 | Input-driven movement, gravity, action timers |
+| `include/kh2coop/DesyncCapture.hpp`, `src/DesyncCapture.cpp` | | Frozen all-peer byte assembly, async manifests, exact digests, partial/error outcomes and coalesced suppression evidence |
 
 ## common/ — Shared library
 
@@ -110,16 +161,24 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 | `include/kh2coop/Protocol.hpp` | ~250 | Session messages, clock sync, world sync (RoomTransition, EventHold, EnemyManifest/Hp/Death, HitClaim, TransitionAck, ProgressUpdate) |
 | `include/kh2coop/Codec.hpp` | ~170 | PacketType enum, encode/decode declarations, `isWorldPacket` |
 | `include/kh2coop/ByteBuffer.hpp` | 140 | Little-endian byte writer/reader |
+| `include/kh2coop/DesyncProtocol.hpp` | | Bounded diagnostic keys, roster/hash witnesses, byte chunks and descriptors |
+| `include/kh2coop/ResyncProtocol.hpp` | | Immutable forced-resync request/targets, bounded snapshot staging, native ACK/result and optional SHA-covered HARP/v1 historical-input trailer; metadata excluded from native-state fingerprint |
+| `include/kh2coop/WorldContext.hpp` | | Lightweight observation-time generation/delivery/native source context |
+| `include/kh2coop/ResyncEvidence.hpp` | | Bounded exact terminal-result evidence with escaped peer errors |
+| `include/kh2coop/DesyncUpload.hpp` | | Fixed-deadline, identity-bound upload pacing before game attachment |
+| `include/kh2coop/CaptureLease.hpp` | | Per-PID cooperative mutex for automatic and CLI capture/clip callers |
 | `include/kh2coop/NetworkClient.hpp` | ~155 | ENet client: callbacks, avatars, clock sync, world sync, raw packets, link-conditioner test hook |
 | `include/kh2coop/LinkConditioner.hpp` | ~90 | Seeded latency/jitter/loss per direction for repeatable network tests |
 | `include/kh2coop/AvatarInterpolator.hpp` | ~115 | Per-avatar snapshot buffer sampled at a render delay |
-| `include/kh2coop/AvatarSync.hpp` | ~95 | Remote avatars to the two friend-slot puppets, with visibility rules |
-| `include/kh2coop/AvatarBridge.hpp` | ~170 | Shared memory DLL/runtime: local avatar out, puppet poses in (seqlock) |
+| `include/kh2coop/AvatarSync.hpp` | | Current-roster admission, per-connection interpolation retirement and immutable sampled owner identity |
+| `include/kh2coop/AvatarBridge.hpp` | | Version 2 shared memory DLL/runtime: unchanged local avatar, provenance-tagged puppet poses (seqlock) |
+| `include/kh2coop/PuppetProvenance.hpp` | | Platform-free network/standalone pose eligibility against explicit receiver authority and slot mapping |
 | `include/kh2coop/PacketRing.hpp` | ~125 | Lock-free SPSC ring of variable-length packets in shared memory |
-| `include/kh2coop/WorldBridge.hpp` | ~110 | Shared memory DLL/runtime for world events (two PacketRings) |
-| `include/kh2coop/WorldPump.hpp` | ~55 | Runtime's bridge-to-network forwarding for world packets |
+| `include/kh2coop/WorldBridge.hpp` | ~190 | Shared world rings, immediate session generation and generation-bound ordered reset |
+| `include/kh2coop/WorldPump.hpp` | ~160 | Reliable world backlog and expendable activation-lease forwarding |
+| `include/kh2coop/ActivationLease.hpp` | ~120 | Bounded challenge state; fixed original-request expiry and replay rejection on a client-local clock |
 | `include/kh2coop/ProgressMirror.hpp` | ~145 | Host story-flag diff/snapshot; client allow-list accept + re-assert |
-| `include/kh2coop/ProgressAllowList.hpp` | ~40 | Candidate (unverified) save-body ranges to mirror |
+| `include/kh2coop/ProgressAllowList.hpp` | | Verified 8108-byte SAVE progress selection and boundary bit masks; personal data excluded |
 | `include/kh2coop/InputMailbox.hpp` | 412 | Cross-process shared memory IPC (seqlock, 3 slots) |
 | `src/Codec.cpp` | ~730 | All serialization implementations |
 | `src/NetworkClient.cpp` | ~405 | ENet connect/tick/send, clock sync, conditioned send/receive |
@@ -129,9 +188,13 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 | File | What |
 |------|------|
 | `kh2ctl/src/main.cpp` (1498 lines) | CLI for KH2 control: process attach, state queries, save loading, input injection |
+| `kh2ctl/src/world_resync.cpp` | Existing admitted-host mailbox command, isolated from local HitChannel types; queue receipt only |
 | `mcp_kh2ctl/server.py` (372 lines) | Python MCP server wrapping kh2ctl for agent use |
-| `scenario/run.py` | Scenario runner: rig lock, save hashing, JSON scenarios, crash/hang bundles, reports (`docs/SCENARIOS.md`) |
-| `scenario/scenarios/*.json` | Example scenarios and runner self-tests |
+| `scenario/run.py` | Scenario runner: rig lock, save hashing, JSON scenarios, crash/hang bundles, reports; default-off current secondary equipment/map binding capture (`docs/SCENARIOS.md`) |
+| `scenario/resync_evidence.py` | Strict native ACK/original-target/relay/runtime joins and independent fresh native evidence; incomplete remains failure |
+| `scenario/trace_audit.py` | Saved spawn/lifecycle envelope and predicate auditor, plus separate native-hit incoming witnesses and damage-policy matrix/checked-zero evidence; never overall gameplay acceptance |
+| `scenario/scenarios/*.json` | Live controls and runner self-tests, including strict two-pack native HP/death acceptance and positional activation controls |
+| `scenario/scenarios/net_reconnect_shadows_activation_replay.json` | Default-off98-step single-cycle historical-input experiment, derived from population93 plus five live-input hold checks;512 historical/120 live completed selected-controller originals under the unchanged30s deadline |
 | `avatarctl/main.cpp` | Drive an AvatarBridge without a network: `synth`, `record`/`replay`, `fake-local`, `peek` |
 | `ghidra/*.java` | Headless Ghidra scripts behind `scripts/ghidra.ps1` (decompile, xrefs, strings, symbols) |
 
@@ -141,8 +204,19 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 |------|------|
 | `FakeSimulation.cpp` (772 lines) | E2E test: 3 clients + server, verifies handshake, input exchange, snapshot consistency, event delivery |
 | `AvatarRelayTest.cpp` | Avatar codec, LinkConditioner, interpolation, AvatarSync, AvatarBridge; 3 clients at 100 ms + 2% loss with skewed clocks |
-| `WorldSyncTest.cpp` | Host-only world sync, claim routing, late-joiner catch-up, acks, ProgressMirror and allow-list policy |
+| `WorldSyncTest.cpp` | Host-only world sync, claim epoch/slot routing, late-join state, co-op disconnect/expiry/rejoin, acks and ProgressMirror policy |
+| `ForcedResyncTest.cpp` | Actual codec/staging/ENet transaction, deadline/conditioning/fixed-target controls; native facts explicitly synthetic |
+| `WorldWireFixture.hpp` | Test-only authenticated raw endpoint access for malformed and retained scoped records |
+| `test_resync_evidence.py` | Saved-evidence positive/negative controls; synthetic fixture facts cannot prove native execution |
 | `BridgeTest.cpp` | PacketRing (incl. two-thread stress) and fake DLL to relay to fake DLL world events |
+| `ActivationLeaseTest.cpp` | Fixed request deadline, queued/duplicate/reordered replies, exact challenge identity and reset invalidation |
+| `NativeSpawnTraceTest.cpp` | Windows-only headless native exception/original-call regression using actual trace code, synthetic callbacks and test-owned memory; no game or hook installation |
+| `NativeResourceTraceTest.cpp` | Windows-only actual observer/MinHook installation, retained retirement, ABI/SEH and bounded-queue controls over owned executable memory; copied game identity bytes are never executed |
+| `NativeLifecycleTraceTest.cpp` | Windows-only headless nested lifecycle/original-call, unavailable state, thread-affinity and queue/unwind controls using synthetic originals; no installed hooks |
+| `NativeHitClaimTest.cpp` | Production claim consumer/publisher and read-only native-hit/damage context with all three full-width roster IDs over owned memory and headless transport; no game or installed hooks |
+| `DamagePolicyTest.cpp` | Production policy matrix and owned-record zero-leaf controls; explicitly synthetic original/claim harness, no production membership adapter or game hooks |
+| `NativeHitTraceTest.cpp` | Production hit trace/policy serializer and owned zero leaf; synthetic original/argument/return/SEH, scope/queue and outcome controls; baseline and policy-veto emitter modes |
+| `test_trace_audit.py` | Saved-log envelope/provenance, predicate and native-hit schema, coverage, HP/delta, ambiguity and historical-limit controls |
 
 ## scripts/
 
@@ -184,11 +258,12 @@ Avatar and world paths (plan D2/D9; the DLL sides of both bridges are live-lane 
 ```
  KH2 + inject DLL                 runtime                       relay
  ----------------                 -------                       -----
- local avatar --AvatarBridge--> sendAvatar ---AvatarState----> stamp owner,
+ local avatar --AvatarBridge--> sendAvatar ---AvatarState----> stamp slot +
+                                                               connection ID,
                                                                 forward to
  puppet poses <-AvatarBridge--- AvatarSync <--AvatarRelay----- the others
                                 (interpolate)
  world events --WorldBridge---> WorldPump ----world packets--> host-only check,
  (transition, enemies, claims)                                  cache, forward
- act on them  <-WorldBridge---- onWorldPacket <--------------- (claims -> host)
+ act on them  <-WorldBridge---- onWorldEnvelope <--------------- (claims -> host)
 ```

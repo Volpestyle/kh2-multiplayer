@@ -1,0 +1,334 @@
+{
+  "name": "net_forced_resync_native_nonempty",
+  "description": "Living-only forced-resync acceptance using the proven first pack in12/0B btl1 from saved20261003-001955 provenance: three completed arrivals, checked pre-movement census, exactly nine native900ms forward pulses and original4s settle. Require exactly two309 plus two311 with unique positive current bindings, twofresh matching typed native hashes and independent exact address/type/HP census joins. Host-only seven-HP damage must affect every original binding while all four remain alive. ONE host both-target forced-resync then requires both original connection/delivery targets, genuine new native loads and ordered two-frame full-progress/census checks, same final phase/cut/SHA/fingerprint, and independent exact relay+host-runtime terminal corroboration. Twofresh post-resync hashes and two independent native censuses must preserve the exact damaged host netId/objectId/HP rows and progress hash, without extras, unmatched rows, dead history or refill substitution. Capture all three rendered views only after strict checks; pixels are not identity/HP authority. Current binding IDs do not prove creation incarnation. This fixture does not cover a second pack, deaths, barriers, natural desync repair, remote-machine acceptance or nonzero progress writes; no transforms or kill steps. Source-only candidate; root owns validation/live execution.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 18,
+      "room": 11,
+      "btl": 1
+    },
+    {
+      "do": "protect",
+      "instance": 0
+    },
+    {
+      "do": "protect",
+      "instance": 1
+    },
+    {
+      "do": "protect",
+      "instance": 2
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(events and events[-1]['epoch'] and int(events[-1]['epoch']) > 0 and [int(events[-1][key], 16 if key in ('world', 'room') else 10) for key in ('world', 'room', 'door', 'map', 'btl', 'evt')] == location(i) == [18, 11, 0, 0, 1, 0] and peek('0x9BA8D0', 'u8', i) != 0 and peek('0x2A171E8', 'u32', i) == 0 and peek('0xB65210', 'i32', i) == 0 and int(str(peek('0x2A11478', 'u64', i)), 0) == 0 and peek('0x7435D0', 'u8', i) == 255 and all(0x10000 <= int(str(peek(root, 'u64', i)), 0) < 0x0000800000000000 for root in ('0x2A171C8', '0x2A171D0')) and len(actors(i)) > 0 for i in range(3) for events in [log_matches('\\\\[enemysync\\\\] (?:host|client) arrived epoch=(?P<epoch>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)|(?:\\\\[warp\\\\] (?:load complete|client issued|client queued)|Warp: [0-9A-Fa-f]{2}/[0-9A-Fa-f]{2} ->|\\\\[enemysync\\\\] (?:session reset:|role ))[^\\\\r\\\\n]*', i)])",
+      "timeoutMs": 30000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "death_baseline",
+      "expr": "[log_count('host death', i) for i in range(3)]"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "waves_before_movement",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 1,
+      "intervalMs": 0
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "ly": 1,
+      "ms": 900
+    },
+    {
+      "do": "wait",
+      "ms": 4000
+    },
+    {
+      "do": "save",
+      "as": "spawned",
+      "expr": "[[(a['name'], a['address'][-5:], a.get('hp'), round(a['position']['x']), round(a['position']['z'])) for a in enemies(k)] for k in range(3)]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemy_hps(0)) > 0 and len(enemy_hps(1)) == len(enemy_hps(0)) and len(enemy_hps(2)) == len(enemy_hps(0))",
+      "timeoutMs": 15000,
+      "pollMs": 500
+    },
+    {
+      "do": "statehash_check",
+      "as": "pack1_before",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 4,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "save",
+      "as": "pack_epoch",
+      "expr": "saved['pack1_before']['epoch']"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['pack1_before']['epoch']==saved['pack_epoch'] and all(row['location']==[18,11,0,0,1,0] for row in saved['pack1_before']['instances'].values()) and len(saved['pack1_before']['matchingSamples'])>=2 and all(sample['epoch']==saved['pack1_before']['epoch'] and row['location']==[18,11,0,0,1,0] and row['count']==4 and len(row['liveRows'])==4 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['pack1_before']['instances'][i]['liveRows'] for sample in saved['pack1_before']['matchingSamples'] for i,row in sample['instances'].items()) and all(len([r for r in row['liveRows'] if r[1]==309])==2 and len([r for r in row['liveRows'] if r[1]==311])==2 and all(r[2]>7 for r in row['liveRows']) for row in saved['pack1_before']['instances'].values())",
+      "message": "First pack must have two309 and two311 with unique positive bindings and HP above seven on all peers"
+    },
+    {
+      "do": "save",
+      "as": "pack1_ids",
+      "expr": "[r[0] for r in saved['pack1_before']['instances']['0']['liveRows']]"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "pack1_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack1_native']['complete'] and len(saved['pack1_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==4 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[18,11,0,0,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==4 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['pack1_before']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['pack1_native']['snapshots'] for i,peer in snap['peers'].items())",
+      "message": "Independent checked native list and current typed bindings must match the nonempty pack on every peer; no count-only acceptance"
+    },
+    {
+      "do": "save",
+      "as": "before",
+      "expr": "[enemy_hps(i) for i in range(3)]"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "damage",
+      "amount": 7
+    },
+    {
+      "do": "wait",
+      "ms": 400
+    },
+    {
+      "do": "save",
+      "as": "after_damage",
+      "expr": "[enemy_hps(i) for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_damage'][0] == saved['after_damage'][1] == saved['after_damage'][2] and saved['after_damage'][0] != saved['before'][0]",
+      "message": "client HP doesn't match the host's after host-only damage"
+    },
+    {
+      "do": "statehash_check",
+      "as": "pack1_after_damage",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 4,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack1_after_damage']['epoch']==saved['pack_epoch'] and all(row['location']==[18,11,0,0,1,0] for row in saved['pack1_after_damage']['instances'].values()) and len(saved['pack1_after_damage']['matchingSamples'])>=2 and all(sample['epoch']==saved['pack1_after_damage']['epoch'] and row['location']==[18,11,0,0,1,0] and row['count']==4 and len(row['liveRows'])==4 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['pack1_after_damage']['instances'][i]['liveRows'] for sample in saved['pack1_after_damage']['matchingSamples'] for i,row in sample['instances'].items()) and all(any(a[0]==b[0] and a[1]==b[1] and a[2]==b[2]-7 for a in saved['pack1_after_damage']['instances']['0']['liveRows']) for b in saved['pack1_before']['instances']['0']['liveRows'])",
+      "message": "Every original current pack binding must lose exactly seven native HP with matching peers in two fresh samples"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "pack1_damaged_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack1_damaged_native']['complete'] and len(saved['pack1_damaged_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==4 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[18,11,0,0,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==4 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['pack1_after_damage']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['pack1_damaged_native']['snapshots'] for i,peer in snap['peers'].items())",
+      "message": "Independent checked native lists and latest typed bindings must preserve the four host-damaged living enemies before resync"
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] and all(r[2] > 0 for row in saved['pack1_after_damage']['instances'].values() for r in row['liveRows'])",
+      "message": "No death observation or nonpositive enemy HP is allowed before living-only resync"
+    },
+    {
+      "do": "forced_resync",
+      "instance": 0,
+      "slot": "all",
+      "as": "forced_resync"
+    },
+    {
+      "do": "statehash_check",
+      "as": "pack1_after_resync",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 4,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack1_after_resync']['epoch']==saved['pack_epoch'] and all(row['location']==[18,11,0,0,1,0] for row in saved['pack1_after_resync']['instances'].values()) and len(saved['pack1_after_resync']['matchingSamples'])>=2 and all(sample['epoch']==saved['pack1_after_resync']['epoch'] and row['location']==[18,11,0,0,1,0] and row['count']==4 and len(row['liveRows'])==4 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['pack1_after_resync']['instances'][i]['liveRows'] for sample in saved['pack1_after_resync']['matchingSamples'] for i,row in sample['instances'].items()) and all(row['liveRows'] == saved['pack1_after_damage']['instances']['0']['liveRows'] and row['progress'] == saved['pack1_after_damage']['instances']['0']['progress'] for row in saved['pack1_after_resync']['instances'].values()) and all(ack['status']=='2' and int(ack['enemyCount'])==4 and int(ack['deadCount'])==0 for ack in saved['forced_resync']['audit']['acknowledgments'].values())",
+      "message": "Both original targets must reload and converge to the exact four damaged host netId/objectId/positive HP rows with unchanged full room, epoch and progress hash; extra/refilled/unmatched enemies cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "pack1_after_resync_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack1_after_resync_native']['complete'] and len(saved['pack1_after_resync_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==4 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[18,11,0,0,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==4 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['pack1_after_resync']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['pack1_after_resync_native']['snapshots'] for i,peer in snap['peers'].items())",
+      "message": "Two independent checked post-resync native lists must join every latest typed live binding by exact local actor address, objectId and damaged HP, with no missing or extra actor"
+    },
+    {
+      "do": "forced_resync_evidence",
+      "from": "forced_resync",
+      "statehash": "pack1_after_resync",
+      "census": "pack1_after_resync_native"
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline']",
+      "message": "Living-only resync must not silently consume a death or replace dead-history acceptance"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "living_resync_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "living_resync_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "living_resync_peer2"
+    }
+  ]
+}

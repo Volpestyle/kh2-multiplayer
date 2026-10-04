@@ -1,4 +1,5 @@
 #include "ProgressSync.hpp"
+#include "EnemySync.hpp"
 #include "Warp.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/ProgressAllowList.hpp"
@@ -7,6 +8,7 @@
 #include <array>
 #include <cstring>
 #include <exception>
+#include <utility>
 
 namespace kh2coop::inject::progresssync {
 namespace {
@@ -25,7 +27,9 @@ const auto g_allow = verifiedProgressAllowList();
 const ProgressMirror g_policy(g_allow);
 Save g_baseline {}, g_queuedSave {}, g_desired {};
 std::vector<std::uint8_t> g_packet;
+ProducerWorldContext g_packetContext {};
 std::uint32_t g_version = 0, g_queuedVersion = 0;
+std::uint32_t g_desiredGeneration = 0;
 bool g_hostFull = false, g_queuedFull = false, g_clientFull = false;
 bool g_hostSampleReady = false;
 bool g_desiredApplied = false, g_sendBlocked = false, g_personalFailure = false;
@@ -42,8 +46,9 @@ bool ReadMemory(uintptr_t address, void* output, std::size_t size) {
     }
 }
 
-bool WriteMasked(uintptr_t address, std::uint8_t value, std::uint8_t mask) {
+bool WriteMasked(uintptr_t address, std::uint8_t value, std::uint8_t mask, std::uint32_t generation) {
     __try {
+        if (!generation || enemysync::WorldSessionGeneration() != generation) return false;
         auto* target = reinterpret_cast<volatile std::uint8_t*>(address);
         *target = static_cast<std::uint8_t>((*target & ~mask) | (value & mask));
         return true;
@@ -59,6 +64,9 @@ bool ValidSave() {
 }
 
 bool SafeGameplay() {
+    // TransitionPending also reads native IN_FIELD. Keep that inherited read
+    // inside the same POD-only fault boundary as the remaining checked fields.
+    __try {
     if (!g_exeBase || warp::TransitionPending() || warp::LoadSerial() == 0) return false;
     std::int32_t controllable = -1, cutsceneState = -1;
     uintptr_t eventContext = 0;
@@ -70,6 +78,9 @@ bool SafeGameplay() {
            ReadMemory(g_exeBase + offsets::OPEN_MENU, &menu, sizeof(menu)) &&
            controllable == 0 && cutsceneState == 0 && eventContext == 0 &&
            inField != 0 && menu == 0xFF;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 bool ReadSave(Save& save) {
@@ -137,7 +148,12 @@ bool Newer(std::uint32_t version, std::uint32_t previous) {
 
 bool FlushHostPacket() {
     if (g_packet.empty()) return true;
-    if (!g_send || !g_send(g_packet)) {
+    if (!enemysync::WorldContextCurrent(g_packetContext)) {
+        g_packet.clear(); g_packetContext = {}; g_hostFull = false;
+        g_hostSampleReady = false;
+        return false;
+    }
+    if (!g_send || !g_send(g_packet, g_packetContext)) {
         if (!g_sendBlocked && g_log)
             g_log("[progresssync] send deferred version=%u full=%u", g_queuedVersion,
                   static_cast<unsigned>(g_queuedFull));
@@ -152,6 +168,7 @@ bool FlushHostPacket() {
               g_queuedFull ? "full" : "delta", g_version, g_queuedSpans,
               g_queuedBytes, HashSave(g_baseline));
     g_packet.clear();
+    g_packetContext = {};
     g_sendBlocked = false;
     return true;
 }
@@ -179,7 +196,9 @@ void Reset() {
     g_queuedSave.fill(0);
     g_desired.fill(0);
     g_packet.clear();
+    g_packetContext = {};
     g_version = g_queuedVersion = 0;
+    g_desiredGeneration = 0;
     g_hostFull = g_queuedFull = g_clientFull = false;
     g_hostSampleReady = false;
     g_desiredApplied = g_sendBlocked = g_personalFailure = false;
@@ -209,7 +228,10 @@ void Tick(std::uint32_t frame, bool host, bool client) {
     if (version == 0) ++version;
     // 8108 allowed bytes: even a maximally fragmented diff fits one 16-bit
     // packet. The full snapshot is atomic; no partial-full assembly is needed.
+    ProducerWorldContext context;
+    if (!enemysync::CaptureWorldContext(context)) return;
     g_packet = encode(ProgressUpdate {version, full, spans});
+    g_packetContext = context;
     g_queuedSave = live;
     g_queuedVersion = version;
     g_queuedFull = full;
@@ -220,6 +242,8 @@ void Tick(std::uint32_t frame, bool host, bool client) {
 
 bool HandlePacket(PacketType type, ByteReader& reader) {
     if (type != PacketType::ProgressUpdate) return false;
+    const auto generation = enemysync::WorldSessionGeneration();
+    if (!generation) return true;
     // Only the active-client drain calls this. Establish role before Tick so
     // it cannot reset away the first full packet of a freshly joined session.
     if (g_role != Role::Client) {
@@ -259,7 +283,9 @@ bool HandlePacket(PacketType type, ByteReader& reader) {
     // Same-version full relay resyncs are idempotent. Preserve applied status
     // only if both version and all desired bytes really remained unchanged.
     const bool unchanged = g_clientFull && update.version == g_version && desired == g_desired;
+    if (enemysync::WorldSessionGeneration() != generation) return true;
     g_desired = desired;
+    g_desiredGeneration = generation;
     g_version = update.version;
     g_clientFull = true;
     if (!unchanged) g_desiredApplied = false;
@@ -271,6 +297,70 @@ bool HandlePacket(PacketType type, ByteReader& reader) {
 
 bool HostReady() {
     return g_role == Role::Host && g_hostFull && g_hostSampleReady && g_packet.empty();
+}
+
+bool DesiredMatchesFull(const ProgressUpdate& expected, std::uint32_t generation) {
+    if (!generation || generation != enemysync::WorldSessionGeneration() ||
+        g_desiredGeneration != generation || !g_clientFull || !expected.full || !expected.version) return false;
+    std::array<bool, SAVE_END> covered {};
+    std::size_t count = 0;
+    for (const auto& span : expected.spans) {
+        if (span.offset >= SAVE_END || span.bytes.size() > SAVE_END - span.offset) return false;
+        for (std::size_t i = 0; i < span.bytes.size(); ++i) {
+            const auto offset = span.offset + static_cast<std::uint32_t>(i);
+            const auto mask = verifiedProgressByteMask(offset);
+            if (!mask || covered[offset] || (span.bytes[i] & ~mask) || g_desired[offset] != span.bytes[i]) return false;
+            covered[offset] = true; ++count;
+        }
+    }
+    return count == PROGRESS_BYTES && generation == enemysync::WorldSessionGeneration();
+}
+
+bool StageFull(const ProgressUpdate& update, std::uint32_t generation) {
+    if (!generation || generation != enemysync::WorldSessionGeneration() ||
+        !update.full || !update.version) return false;
+    Save expected {};
+    std::array<bool, SAVE_END> covered {};
+    std::size_t count = 0;
+    for (const auto& span : update.spans) {
+        if (span.offset >= SAVE_END || span.bytes.size() > SAVE_END - span.offset) return false;
+        for (std::size_t i = 0; i < span.bytes.size(); ++i) {
+            const auto offset = span.offset + static_cast<std::uint32_t>(i);
+            const auto mask = verifiedProgressByteMask(offset);
+            if (!mask || covered[offset] || (span.bytes[i] & ~mask)) return false;
+            covered[offset] = true; ++count; expected[offset] = span.bytes[i];
+        }
+    }
+    if (count != PROGRESS_BYTES) return false;
+    const auto packet = encode(update);
+    const std::uint8_t* payload = nullptr; std::size_t size = 0;
+    decodePacketHeader(packet.data(), packet.size(), payload, size);
+    ByteReader reader(payload, size);
+    HandlePacket(PacketType::ProgressUpdate, reader);
+    return generation == enemysync::WorldSessionGeneration() && g_role == Role::Client &&
+           g_clientFull && g_desiredGeneration == generation && g_version == update.version &&
+           g_desired == expected;
+}
+
+bool CaptureFull(ProgressUpdate& output, std::uint32_t& hash) {
+    const auto generation = enemysync::WorldSessionGeneration();
+    if (!generation || !HostReady() || !g_version || g_personalFailure || !SafeGameplay()) return false;
+    const auto version = g_version;
+    const auto transition = warp::TransitionSerial();
+    const auto load = warp::LoadSerial();
+    Save before {}, after {};
+    // Read the native allow-list twice, not the cached baseline or desired
+    // mirror. Masking excludes personal/unverified bits from this contract.
+    if (!ReadSave(before) || enemysync::WorldSessionGeneration() != generation ||
+        !ReadSave(after) || before != after) return false;
+    ProgressUpdate captured {version, true, g_policy.snapshot(after.data(), after.size())};
+    if (SpanBytes(captured.spans) != PROGRESS_BYTES || !HostReady() || g_version != version ||
+        warp::TransitionSerial() != transition || warp::LoadSerial() != load ||
+        !SafeGameplay() || enemysync::WorldSessionGeneration() != generation) return false;
+    const auto capturedHash = HashSave(after);
+    output = std::move(captured);
+    hash = capturedHash;
+    return true;
 }
 
 bool ReadHash(std::uint32_t& hash) {
@@ -289,8 +379,34 @@ bool ReadHash(std::uint32_t& hash) {
     return true;
 }
 
-bool ApplyAtRoomBoundary() {
-    if (g_role != Role::Client || !g_clientFull || g_personalFailure || !SafeGameplay()) return false;
+bool MatchesFull(const ProgressUpdate& expected, std::uint32_t& hash) {
+    const auto generation = enemysync::WorldSessionGeneration();
+    if (!generation || !expected.full || !expected.version || !SafeGameplay() || g_personalFailure) return false;
+    Save desired {}, before {}, after {};
+    std::array<bool, SAVE_END> covered {};
+    std::size_t count = 0;
+    for (const auto& span : expected.spans) {
+        if (span.offset >= SAVE_END || span.bytes.size() > SAVE_END - span.offset) return false;
+        for (std::size_t i = 0; i < span.bytes.size(); ++i) {
+            const auto offset = span.offset + static_cast<std::uint32_t>(i);
+            const auto mask = verifiedProgressByteMask(offset);
+            if (!mask || covered[offset] || (span.bytes[i] & ~mask)) return false;
+            covered[offset] = true; ++count; desired[offset] = span.bytes[i];
+        }
+    }
+    const auto transition = warp::TransitionSerial(), load = warp::LoadSerial();
+    if (count != PROGRESS_BYTES || !ReadSave(before) || before != desired ||
+        !ReadSave(after) || after != before || !SafeGameplay() ||
+        transition != warp::TransitionSerial() || load != warp::LoadSerial() ||
+        enemysync::WorldSessionGeneration() != generation) return false;
+    hash = HashSave(after);
+    return true;
+}
+
+bool ApplyAtRoomBoundary(std::uint32_t generation) {
+    if (!generation || generation != g_desiredGeneration ||
+        enemysync::WorldSessionGeneration() != generation ||
+        g_role != Role::Client || !g_clientFull || g_personalFailure || !SafeGameplay()) return false;
     Save live {};
     if (!ReadSave(live)) return ApplyFailure("save-read");
     const auto spans = g_policy.diff(live.data(), g_desired.data(), live.size());
@@ -300,7 +416,7 @@ bool ApplyAtRoomBoundary() {
     for (const auto& span : spans) {
         for (std::size_t i = 0; i < span.bytes.size(); ++i) {
             const auto o = span.offset + static_cast<std::uint32_t>(i);
-            if (!WriteMasked(g_exeBase + SAVE_RVA + o, span.bytes[i], verifiedProgressByteMask(o))) {
+            if (!WriteMasked(g_exeBase + SAVE_RVA + o, span.bytes[i], verifiedProgressByteMask(o), generation)) {
                 wrote = false;
                 break;
             }
@@ -316,7 +432,8 @@ bool ApplyAtRoomBoundary() {
     const bool unchanged = before == after; // exact comparison, not just hash
     if (!unchanged) g_personalFailure = true;
     const bool readBack = ReadSave(live);
-    const bool applied = wrote && readBack && live == g_desired;
+    const bool applied = wrote && readBack && live == g_desired &&
+        enemysync::WorldSessionGeneration() == generation;
     if (g_log)
         g_log("[progresssync] apply version=%u spans=%zu bytes=%zu hash=%08X personal_before=%08X personal_after=%08X personal_unchanged=%u",
               g_version, spans.size(), SpanBytes(spans), readBack ? HashSave(live) : 0,

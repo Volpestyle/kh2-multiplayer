@@ -6,6 +6,8 @@ How to build, test, and iterate on the inject DLL against a running KH2 instance
 
 - KH2 HD 1.5+2.5 ReMIX (Steam Global), with Steam running
 - Visual Studio 2019+ build tools (for CMake/MSVC)
+- 64-bit MSVC and MASM (`ml64`); the Windows inject target enables `ASM_MASM`
+  for its internal owned-emitter gateway
 - `steam_appid.txt` containing `2552430` in the KH2 game directory (bypasses Steam launcher)
 - A desktop session. KH2 crashes at startup (`0xC0000005`) when launched from
   Windows session 0 (services, SSH, some remote agents), which has no display.
@@ -51,7 +53,7 @@ known broken (see `KH2_CONTROL_CLI.md`).
   because that means James is playing.
 - `scripts/restart-kh2.ps1` kills **every** KH2 process. It is for a human at
   the keyboard; agents use `kh2ctl restart` and `kh2ctl kill`.
-- Never save in-game during automation (AGENTS.md).
+- Do not save in-game during automation without James's explicit approval (AGENTS.md).
 
 ## Running the rig from a session-0 agent
 
@@ -80,7 +82,63 @@ testing, then use the existing desktop bridge if it is 0. Native agent tasks
 may also stop when their owning CLI is replaced; preserve their partial files
 and verify the old runtime stopped before assigning those paths again.
 
+On 2026-10-03, a strict wave census failed with WinError 5 at Python
+`_winapi.CreateProcess`; matching Defender 1116/1117 events identified a
+command-line detection for `kh2ctl peek`. The helper never started for those
+reads. Retain `readFailures` stage/argv/traceback and matching local event
+evidence; incomplete classification is not native enemy absence. This is
+separate from an `OpenProcess`/`ReadProcessMemory` error inside a running helper.
+The detection's correctness remains unestablished. Live runs were held and
+offline development continued without protection or permission changes.
+
 ## Rebuilding while KH2 runs
+
+Relay cached world records now require complete exact frames and the current
+nonzero room epoch; HP/death also require its current manifest. The world-cache
+receipt in `build/rig/world_cache_epoch_offline_receipt_20261003.json` records
+separate current checks; the earlier reconnect zip stays frozen. The protocol 9
+candidate adds offline-accepted bounded native record-content qualification to
+the fresh host-native resync transaction introduced in protocol 8. Its unchanged
+89-step local living Bootstrap passed on 2026-10-04; absent-pack reconnect
+recovery remains open ([current witness scope](FORCED_RESYNC.md#native-record-content-candidate-2026-10-04)). Do not remove the
+fresh-actor anti-refill guard to make a reload inherit old host deaths: checked
+creation/lifecycle evidence and a same-point alive-refill negative control are
+required. Automatic desync reporting now transfers bounded actual peer artifacts
+under a frozen session/connection roster and preserves partial results. Shared
+CaptureChannel caller leases serialize automatic and CLI capture/clip requests;
+outstanding timed-out sequences still block reuse. See `DESYNC_REPORTS.md` for
+registration, output roots, capture witnesses and collection limits.
+
+Protocol **7** sequences absolute enemy HP at the DLL publication point and
+rejects older same-room samples before relay caching or client/native mutation.
+Reliable equal-sequence cache replay remains supported; see `HP_ORDERING.md`.
+That ordering result alone does not prove native convergence; the protocol 8
+transaction adds separate source cuts and per-target delivery fences.
+
+The current candidate uses protocol **9**, AvatarBridge **2**,
+WorldBridge **11** and CaptureChannel **1**. Runtime, relay, inject DLL and avatarctl must be rebuilt
+together. Shared mappings with incompatible versions fail their version checks;
+the changed WorldBridge layout rejects older mappings. An already injected
+older DLL is not current validation. Existing protocol-v3 native receipts stay
+historical. AvatarState telemetry/recording layout and the v3 claim shape are
+unchanged. V5 introduced opaque world-incarnation identity and typed closure
+reasons; v6 adds diagnostic request/chunk/done messages and a third ENet channel.
+WorldBridge 11 retains captured generation/delivery/source context and uses a
+separate bounded CAS operator mailbox, preserving the DLL ring's single producer.
+Protocol 9 adds full record witnesses (native coverage255); generic synthetic
+coverage127 is rejected by the native consumer. Exact content qualification and
+write fences do not prove controller lifetime or creation authority. Historical
+protocol-8 native results retain their checked scope and do not validate v9.
+Cancellation immediately unarms native world authority; lazy attachment retains
+bounded post-cut continuation after the validated bootstrap. The relay defaults
+to native traffic; `--simulate` opts into legacy simulation, which cannot satisfy
+native capture. The CLI's host `world-resync` queue receipt is not native success.
+Friend rejoin retries at most five times within 60 seconds, after
+1/2/4/8/8-second delays, with separate four-second transport and roster
+deadlines. Initial failure and Player loss stop networking; host loss ends the
+session. Ten uninterrupted seconds of verified membership reset the retry
+budget, without asserting native bootstrap readiness. Avatar restoration,
+native world recovery and progress/warp behavior still need a native run.
 
 Each injection loads a fresh copy of `build/inject/staging/kh2coop_inject.dll`
 from `build/rig/dll/`, so the linker never hits a locked DLL and you can rebuild
@@ -156,3 +214,12 @@ When reverse engineering game internals:
 5. **Hook it** — Add to `EntityHook.cpp` if needed
 
 See `docs/LESSONS_LEARNED.md` for hard-won RE insights.
+
+For offline queries against the saved `build/ghidra/kh2_full` project, use
+`scripts/ghidra.ps1` without `-Setup`. Coordinate one headless query at a time:
+on2026-10-03, concurrent `-noanalysis -readOnly` readers still produced
+`LockException: Unable to lock project`, despite the helper's parallel-safe
+comment. Wait for the query owner's actual handle to become terminal before
+retrying; do not clear its lock or kill its process. Independent saved-PE byte
+reads/dumpbin need no project lock. Inspect retained output for Ghidra errors:
+a surrounding PowerShell output pipeline can report exit0 after a failed query.

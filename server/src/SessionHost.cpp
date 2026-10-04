@@ -1,16 +1,208 @@
+#ifndef _CRT_RAND_S
+#define _CRT_RAND_S
+#endif
 #include "kh2coop/SessionHost.hpp"
 #include "kh2coop/ProgressMirror.hpp"
+#include "kh2coop/ResyncEvidence.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <cerrno>
 #include <enet/enet.h>
 #include <iomanip>
 #include <optional>
 #include <sstream>
+#if defined(__linux__)
+#include <sys/random.h>
+#endif
 
 namespace kh2coop {
 
+void SessionHost::sendBinding(PeerState& ps) {
+    auto* host=hostPeer();if(!host||ps.status!=PeerStatus::Verified)return;
+    sendTo(ps.enetPeer,encode(WorldBinding{session_.sessionId,host->connectionId,ps.connectionId,
+        static_cast<std::uint8_t>(ps.assignedSlot),ps.deliverySerial}),true);
+}
+void SessionHost::finishResync(ResyncResultReason reason,const std::string& error) {
+    if(!resyncPlan_)return;
+    ResyncResult result;result.key=resyncPlan_->request.key;result.reason=reason;result.targetCount=resyncPlan_->targetCount;
+    for(std::size_t i=0;i<result.targetCount;++i){auto& t=result.targets[i];t.target=resyncPlan_->targets[i];t.error=error;
+        if(resyncAcks_[i]){t.status=resyncAcks_[i]->status;t.appliedCut=resyncAcks_[i]->snapshotCut;t.fingerprint=resyncAcks_[i]->observedFingerprint;}
+        if(reason!=ResyncResultReason::Converged)for(auto& ps:peers_)if(ps.connectionId==t.target.connectionId)ps.worldQuarantined=true;
+    }
+    resyncPlan_.reset();resyncAssembler_.Reset();resyncBegin_.reset();resyncSnapshot_.reset();
+    for(auto& q:resyncContinuation_)q.clear();
+    resyncContinuationBytes_={};resyncAcks_={};
+    lastResyncResult_=result;
+    // Immutable original target denominator survives disconnect and failures.
+    for(auto& ps:peers_)if(ps.status==PeerStatus::Verified){bool selected=ps.connectionId==result.key.hostConnectionId;for(std::size_t i=0;i<result.targetCount;++i)selected=selected||ps.connectionId==result.targets[i].target.connectionId;if(selected)sendTo(ps.enetPeer,encode(result),true);}
+    log(formatResyncResultEvidence(result,"relay"));
+    if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(result);
+}
+void SessionHost::pumpResync(std::uint64_t nowMs) {
+    if(resyncPlan_&&nowMs>=resyncDeadline_)finishResync(ResyncResultReason::Deadline,"fixed transaction deadline");
+}
+void SessionHost::refreshResyncCache(const ResyncSnapshot& s,const std::vector<WorldEnvelope>& continuation,std::uint64_t cut) {
+    room_=s.room;hold_=s.hold;manifest_={s.room.epoch,true,{}};enemyHp_.clear();deadEnemies_.clear();
+    for(const auto& e:s.enemies){manifest_.entries.push_back(e.identity);enemyHp_[e.identity.netId]={e.identity.netId,e.hp,e.maxHp};if(e.life==ResyncLife::ObservedDeadHistory)deadEnemies_.insert(e.identity.netId);}
+    lastEnemyHpSequence_=(std::max)(lastEnemyHpSequence_,s.hpSequence);
+    progress_.clear();progressVersion_=s.progress.version;
+    for(const auto& span:s.progress.spans)for(std::size_t i=0;i<span.bytes.size();++i)progress_[span.offset+static_cast<std::uint32_t>(i)]=span.bytes[i];
+    // These records have already passed host, epoch, framing and HP ordering
+    // admission. Reapply once without a second publication or sequence mint.
+    for(const auto& e:continuation)if(e.scope.hostSourceSerial>cut){
+        const std::uint8_t* p;std::size_t n;const auto type=decodePacketHeader(e.packet.data(),e.packet.size(),p,n);ByteReader r(p,n);
+        if(type==PacketType::RoomTransition){RoomTransition m;read(r,m);clearWorldState();room_=m;}
+        else if(type==PacketType::EventHold){EventHold m;read(r,m);hold_=m;}
+        else if(type==PacketType::EnemyManifest){EnemyManifest m;read(r,m);if(m.replace){manifest_=m;enemyHp_.clear();deadEnemies_.clear();}else manifest_.entries.insert(manifest_.entries.end(),m.entries.begin(),m.entries.end());}
+        else if(type==PacketType::EnemyHp){EnemyHp m;read(r,m);for(const auto& hp:m.entries)enemyHp_[hp.netId]=hp;}
+        else if(type==PacketType::EnemyDeath){EnemyDeath m;read(r,m);deadEnemies_.insert(m.netId);}
+        else if(type==PacketType::ProgressUpdate){ProgressUpdate m;read(r,m);if(m.full)progress_.clear();for(const auto& span:m.spans)for(std::size_t i=0;i<span.bytes.size();++i)progress_[span.offset+static_cast<std::uint32_t>(i)]=span.bytes[i];progressVersion_=m.version;}
+    }
+}
+void SessionHost::publishResyncPlan() {
+    if(!resyncPlan_)return;
+    const auto now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if(static_cast<std::uint64_t>(now)>=resyncDeadline_){finishResync(ResyncResultReason::Deadline,"fixed transaction deadline");return;}
+    resyncPlan_->remainingMs=static_cast<std::uint32_t>(resyncDeadline_-static_cast<std::uint64_t>(now));
+    for(auto& peer:peers_)if(peer.status==PeerStatus::Verified){
+        bool target=false;for(std::size_t i=0;i<resyncPlan_->targetCount;++i)target=target||resyncPlan_->targets[i].connectionId==peer.connectionId;
+        if(target){sendBinding(peer);auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::Fenced;if(!sendTo(peer.enetPeer,encode(plan),true)){finishResync(ResyncResultReason::Overflow,"plan submission failed");return;}}
+    }
+    if(auto* host=hostPeer()){auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::CaptureRequested;if(!sendTo(host->enetPeer,encode(plan),true))finishResync(ResyncResultReason::Overflow,"capture request submission failed");}
+}
+bool SessionHost::resyncMaterialDifference(PacketType type,const std::vector<std::uint8_t>& bytes) const {
+    if(!resyncSnapshot_)return true;
+    try {
+        const auto& s=*resyncSnapshot_;const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader r(p,n);
+        if(type==PacketType::RoomTransition){RoomTransition m;read(r,m);return !sameResyncRoom(m,s.room);}
+        if(type==PacketType::EventHold){EventHold m;read(r,m);return m.epoch!=s.hold.epoch||m.active!=s.hold.active||m.eventProgram!=s.hold.eventProgram;}
+        if(type==PacketType::EnemyHp){EnemyHp m;read(r,m);for(const auto& e:m.entries){auto i=std::find_if(s.enemies.begin(),s.enemies.end(),[&](const auto& v){return v.identity.netId==e.netId;});if(i==s.enemies.end()||i->hp!=e.hp||i->maxHp!=e.maxHp)return true;}return false;}
+        if(type==PacketType::EnemyDeath){EnemyDeath m;read(r,m);auto i=std::find_if(s.enemies.begin(),s.enemies.end(),[&](const auto& v){return v.identity.netId==m.netId;});return i==s.enemies.end()||i->life!=ResyncLife::ObservedDeadHistory;}
+        if(type==PacketType::EnemyManifest){EnemyManifest m;read(r,m);if(m.replace&&m.entries.size()!=s.enemies.size())return true;for(const auto& e:m.entries){auto i=std::find_if(s.enemies.begin(),s.enemies.end(),[&](const auto& v){return v.identity.netId==e.netId;});if(i==s.enemies.end())return true;const auto& a=i->identity;if(a.objectId!=e.objectId||a.spawnIndex!=e.spawnIndex||a.battleProgram!=e.battleProgram||a.spawnPosition.x!=e.spawnPosition.x||a.spawnPosition.y!=e.spawnPosition.y||a.spawnPosition.z!=e.spawnPosition.z)return true;}return false;}
+        if(type==PacketType::ProgressUpdate){ProgressUpdate m;read(r,m);std::map<std::uint32_t,std::uint8_t> expected,actual;for(const auto& span:s.progress.spans)for(std::size_t i=0;i<span.bytes.size();++i)expected[span.offset+static_cast<std::uint32_t>(i)]=span.bytes[i];for(const auto& span:m.spans)for(std::size_t i=0;i<span.bytes.size();++i)actual[span.offset+static_cast<std::uint32_t>(i)]=span.bytes[i];if(m.full&&actual!=expected)return true;for(auto [o,v]:actual){auto i=expected.find(o);if(i==expected.end()||i->second!=v)return true;}return false;}
+    }catch(const std::exception&){return true;}
+    return true;
+}
+bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
+    const auto now=static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+    pumpResync(now);
+    if(type==PacketType::ResyncRequest) {
+        ResyncRequest request;read(r,request);
+        if(!fromHost(ps)||!room_||request.key.sessionId!=session_.sessionId||request.key.hostConnectionId!=ps.connectionId||!sameResyncRoom(request.room,*room_)){++rejectedWorld_;return false;}
+        for(std::size_t i=0;i<3;++i){auto* peer=peerBySlot(static_cast<SlotType>(i));if(request.connections[i]!=(peer?peer->connectionId:0)){++rejectedWorld_;return false;}}
+        if(resyncPlan_){if(encode(request)==encode(resyncPlan_->request))return true;
+            ResyncResult busy;busy.key=request.key;busy.reason=ResyncResultReason::Busy;
+            for(std::size_t slot=1;slot<3;++slot)if(request.targetMask&(1u<<slot)){const auto* target=peerBySlot(static_cast<SlotType>(slot));if(target){auto& t=busy.targets[busy.targetCount++];t.target={static_cast<std::uint8_t>(slot),target->connectionId,target->deliverySerial};t.error="another transaction is active";}}
+            lastResyncResult_=busy;sendTo(ps.enetPeer,encode(busy),true);if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(busy);++rejectedWorld_;return false;}
+        if(request.key.requestId<=lastResyncRequestId_){++rejectedWorld_;return false;}
+        ResyncPlan plan;plan.request=request;plan.remainingMs=RESYNC_TIMEOUT_MS;
+        for(std::size_t slot=1;slot<3;++slot)if(request.targetMask&(1u<<slot)){
+            auto it=std::find_if(peers_.begin(),peers_.end(),[&](const auto& p){return p.status==PeerStatus::Verified&&static_cast<std::size_t>(p.assignedSlot)==slot;});
+            if(it==peers_.end()||it->deliverySerial==UINT64_MAX){++rejectedWorld_;return false;}
+            plan.targets[plan.targetCount++]={static_cast<std::uint8_t>(slot),it->connectionId,it->deliverySerial+1};
+        }
+        if(simulationActive_){ResyncResult unavailable;unavailable.key=request.key;unavailable.reason=ResyncResultReason::CaptureUnavailable;unavailable.targetCount=plan.targetCount;for(std::size_t i=0;i<plan.targetCount;++i){unavailable.targets[i].target=plan.targets[i];--unavailable.targets[i].target.deliverySerial;unavailable.targets[i].error="legacy simulation is active";}lastResyncRequestId_=request.key.requestId;lastResyncResult_=unavailable;sendTo(ps.enetPeer,encode(unavailable),true);if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(unavailable);return false;}
+        lastResyncRequestId_=request.key.requestId;resyncPlan_=plan;resyncDeadline_=now+RESYNC_TIMEOUT_MS;resyncAcks_={};resyncMaterialChanged_=false;resyncBegin_.reset();resyncSnapshot_.reset();resyncAssembler_.Reset();
+        for(std::size_t i=0;i<plan.targetCount;++i)for(auto& peer:peers_)if(peer.connectionId==plan.targets[i].connectionId){peer.deliverySerial=plan.targets[i].deliverySerial;peer.worldQuarantined=true;peer.hasHash=false;pendingActivation_.erase(peer.enetPeer);}
+        publishResyncPlan();return true;
+    }
+    if(!resyncPlan_){++rejectedWorld_;return false;}
+    if(type==PacketType::ResyncResult){ResyncResult result;read(r,result);if(!fromHost(ps)||result.key!=resyncPlan_->request.key||result.reason==ResyncResultReason::Converged){++rejectedWorld_;return false;}finishResync(result.reason,"host reported capture/producer failure");return true;}
+    if(type==PacketType::ResyncBegin){
+        ResyncBegin b;read(r,b);
+        if(!fromHost(ps)||b.key!=resyncPlan_->request.key||b.phase!=resyncPlan_->phase||b.targets!=resyncPlan_->targets||b.targetCount!=resyncPlan_->targetCount||!sameResyncRoom(b.room,resyncPlan_->request.room)){++rejectedWorld_;return false;}
+        if(resyncBegin_){
+            if(b.phase==resyncBegin_->phase){
+                if(encode(b)==encode(*resyncBegin_))return true;
+                finishResync(ResyncResultReason::InvalidSnapshot,"snapshot is immutable within a phase");return false;
+            }
+            if(b.snapshotCut<=resyncBegin_->snapshotCut){finishResync(ResyncResultReason::InvalidSnapshot,"checkpoint requires a fresh source cut");return false;}
+        }
+        if(!resyncAssembler_.Begin(b)){finishResync(ResyncResultReason::InvalidSnapshot,"invalid begin");return false;}
+        resyncBegin_=b;return true;
+    }
+    if(type==PacketType::ResyncPart){ResyncPart p;read(r,p);if(!fromHost(ps)||p.key!=resyncPlan_->request.key){++rejectedWorld_;return false;}if(!resyncAssembler_.Part(p)){finishResync(ResyncResultReason::InvalidSnapshot,"invalid part");return false;}return true;}
+    if(type==PacketType::ResyncEnd){ResyncEnd e;read(r,e);if(!fromHost(ps)||e.key!=resyncPlan_->request.key){++rejectedWorld_;return false;}auto snapshot=resyncAssembler_.End(e);if(!snapshot||!resyncBegin_){finishResync(ResyncResultReason::InvalidSnapshot,"invalid complete snapshot");return false;}resyncSnapshot_=*snapshot;resyncMaterialChanged_=false;
+        // Queued post-cut material was admitted before the complete capture arrived.
+        for(const auto& queue:resyncContinuation_)for(const auto& item:queue)if(item.scope.hostSourceSerial>resyncBegin_->snapshotCut&&resyncMaterialDifference(static_cast<PacketType>(item.packet.front()),item.packet))resyncMaterialChanged_=true;
+        if(resyncPlan_->phase==ResyncPhase::Checkpoint&&resyncMaterialChanged_){finishResync(ResyncResultReason::NativeFailed,"checkpoint already changed");return false;}
+        refreshResyncCache(*snapshot,resyncContinuation_[0],resyncBegin_->snapshotCut);
+        hostSourceCutFloor_=(std::max)(hostSourceCutFloor_,resyncBegin_->snapshotCut);
+        lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,resyncBegin_->snapshotCut);
+        auto bytes=encodeResyncSnapshot(*snapshot);const auto begin=*resyncBegin_;
+        for(std::size_t i=0;resyncPlan_&&i<resyncPlan_->targetCount;++i){auto* target=const_cast<PeerState*>(peerBySlot(static_cast<SlotType>(resyncPlan_->targets[i].slot)));if(!target||target->connectionId!=resyncPlan_->targets[i].connectionId){finishResync(ResyncResultReason::TargetChanged,"target missing");return false;}
+            bool sent=sendTo(target->enetPeer,encode(begin),true);
+            for(std::size_t off=0;sent&&off<bytes.size();off+=RESYNC_MAX_PART_BYTES){const auto end=(std::min)(bytes.size(),off+RESYNC_MAX_PART_BYTES);sent=sendTo(target->enetPeer,encode(ResyncPart{begin.key,begin.phase,begin.snapshotCut,static_cast<std::uint32_t>(off),{bytes.begin()+off,bytes.begin()+end}}),true);}
+            sent=sent&&sendTo(target->enetPeer,encode(e),true);if(!sent){finishResync(ResyncResultReason::Overflow,"snapshot forwarding failed");return false;}
+            target->hostSourceFloor=begin.snapshotCut;target->worldQuarantined=false;
+            for(const auto& item:resyncContinuation_[i])if(item.scope.hostSourceSerial>begin.snapshotCut&&!sendTo(target->enetPeer,encode(item),true)){finishResync(ResyncResultReason::Overflow,"continuation forwarding failed");return false;}
+            resyncContinuation_[i].clear();resyncContinuationBytes_[i]=0;
+        }
+        return true;
+    }
+    if(type==PacketType::ResyncAck){ResyncAck a;read(r,a);if(fromHost(ps)||a.key!=resyncPlan_->request.key||a.target.connectionId!=ps.connectionId||a.target.deliverySerial!=ps.deliverySerial||a.target.slot!=static_cast<std::uint8_t>(ps.assignedSlot)||a.phase!=resyncPlan_->phase){++rejectedWorld_;return false;}
+        std::size_t index=0;for(;index<resyncPlan_->targetCount;++index)if(resyncPlan_->targets[index]==a.target)break;if(index==resyncPlan_->targetCount){++rejectedWorld_;return false;}
+        if(a.status==ResyncAckStatus::Unavailable||a.status==ResyncAckStatus::Failed){resyncAcks_[index]=a;finishResync(a.status==ResyncAckStatus::Unavailable?ResyncResultReason::NativeUnavailable:ResyncResultReason::NativeFailed,a.error);return true;}
+        if(!resyncSnapshot_||!resyncBegin_||a.snapshotCut!=resyncBegin_->snapshotCut||a.snapshotSha256!=resyncBegin_->sha256){++rejectedWorld_;return false;}
+        if(a.status!=ResyncAckStatus::Converged){if(!resyncAcks_[index]||static_cast<unsigned>(a.status)>static_cast<unsigned>(resyncAcks_[index]->status))resyncAcks_[index]=a;return true;}
+        if(a.observedFingerprint!=resyncSnapshot_->nativeFingerprint||!sameResyncRoom(a.observedRoom,resyncSnapshot_->room)||a.enemyCount!=resyncSnapshot_->livingCount||a.deadCount!=resyncSnapshot_->deadCount||a.checksMask!=ResyncChecksComplete||!a.observationFrame1||a.observationFrame2<=a.observationFrame1||!a.loadAfter||(a.phase==ResyncPhase::Bootstrap&&a.loadBefore==a.loadAfter)){finishResync(ResyncResultReason::NativeFailed,"invalid native convergence witness");return false;}
+        resyncAcks_[index]=a;
+        if(resyncMaterialChanged_){resyncPlan_->phase=ResyncPhase::Checkpoint;resyncSnapshot_.reset();resyncAssembler_.Reset();resyncAcks_={};resyncMaterialChanged_=false;for(auto& p:peers_)for(std::size_t i=0;i<resyncPlan_->targetCount;++i)if(p.connectionId==resyncPlan_->targets[i].connectionId)p.worldQuarantined=true;publishResyncPlan();return true;}
+        for(std::size_t i=0;i<resyncPlan_->targetCount;++i){
+            if(!resyncAcks_[i]||resyncAcks_[i]->status!=ResyncAckStatus::Converged)return true;
+            const auto& witness=*resyncAcks_[i];
+            if(witness.key!=resyncPlan_->request.key || witness.phase!=resyncPlan_->phase ||
+               witness.target!=resyncPlan_->targets[i] || witness.snapshotCut!=resyncBegin_->snapshotCut ||
+               witness.snapshotSha256!=resyncBegin_->sha256 || witness.observedFingerprint!=resyncSnapshot_->nativeFingerprint){
+                finishResync(ResyncResultReason::NativeFailed,"mixed native convergence witnesses");return false;
+            }
+        }
+        finishResync(ResyncResultReason::Converged,"");return true;
+    }
+    ++rejectedWorld_;return false;
+}
+
 namespace {
+
+constexpr std::uint32_t disconnectCode(DisconnectReason reason) {
+    return static_cast<std::uint32_t>(reason);
+}
+
+// OS entropy, never a clock/configuration-derived identity. No weak fallback:
+// admission fails if entropy is unavailable. The opaque wire token has 128 bits.
+std::optional<std::string> mintWorldIncarnation() {
+    std::array<unsigned char, 16> bytes {};
+#if defined(_WIN32)
+    static_assert(sizeof(unsigned int) == 4);
+    for (std::size_t i = 0; i < bytes.size(); i += 4) {
+        unsigned int value = 0;
+        if (rand_s(&value) != 0) return std::nullopt;
+        for (std::size_t j = 0; j < 4; ++j)
+            bytes[i + j] = static_cast<unsigned char>(value >> (j * 8));
+    }
+#elif defined(__linux__)
+    std::size_t filled = 0;
+    while (filled < bytes.size()) {
+        const auto count = getrandom(bytes.data() + filled, bytes.size() - filled, 0);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) return std::nullopt;
+        filled += static_cast<std::size_t>(count);
+    }
+#elif defined(__APPLE__)
+    arc4random_buf(bytes.data(), bytes.size());
+#else
+    return std::nullopt;
+#endif
+    if (std::all_of(bytes.begin(), bytes.end(), [](unsigned char b) { return b == 0; }))
+        return std::nullopt;
+    std::ostringstream out;
+    out << std::hex << std::setfill('0');
+    for (const auto byte : bytes) out << std::setw(2) << static_cast<unsigned>(byte);
+    return out.str();
+}
 
 std::uint64_t currentTimeMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -27,6 +219,17 @@ bool isValidSlot(SlotType slot) {
     }
 
     return false;
+}
+
+bool sameActivationRoom(const RoomTransition& a, const RoomTransition& b) {
+    return a.epoch == b.epoch && a.worldId == b.worldId && a.roomId == b.roomId &&
+           a.door == b.door && a.mapProgram == b.mapProgram &&
+           a.battleProgram == b.battleProgram && a.eventProgram == b.eventProgram;
+}
+
+bool sameActivationRequest(const ActivationRequest& a, const ActivationRequest& b) {
+    return sameActivationRoom(a.location, b.location) && a.incarnation == b.incarnation &&
+           a.requestSeq == b.requestSeq && a.requesterSlot == b.requesterSlot;
 }
 
 bool isValidRuntimeMode(RuntimeMode mode) {
@@ -50,15 +253,6 @@ const char* runtimeModeName(RuntimeMode mode) {
     return "unknown";
 }
 
-bool tryGetRequestedSlot(const SessionState& handshake, SlotType& requestedSlot) {
-    if (handshake.actors.size() != 1) {
-        return false;
-    }
-
-    requestedSlot = handshake.actors.front().slot;
-    return isValidSlot(requestedSlot);
-}
-
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -67,9 +261,9 @@ bool tryGetRequestedSlot(const SessionState& handshake, SlotType& requestedSlot)
 
 SessionHost::SessionHost(const SessionConfig& config, SessionCallbacks callbacks)
     : config_(config), callbacks_(std::move(callbacks)) {
-    session_.sessionId = config_.sessionId;
     session_.gameBuild = config_.gameBuild;
     session_.modHash = config_.modHash;
+    desyncCapture_ = std::make_unique<DesyncCapture>(config_.desyncOutputRoot);
 }
 
 SessionHost::~SessionHost() { stop(); }
@@ -80,6 +274,11 @@ SessionHost::~SessionHost() { stop(); }
 
 bool SessionHost::start() {
     if (running_) return true;
+    if (config_.protocolVersion != PROTOCOL_VERSION) {
+        log("Unsupported configured protocol version: " + std::to_string(config_.protocolVersion) +
+            " (this binary requires " + std::to_string(PROTOCOL_VERSION) + ")");
+        return false;
+    }
 
     ENetAddress address;
     address.host = ENET_HOST_ANY;
@@ -90,7 +289,7 @@ bool SessionHost::start() {
         return false;
     }
 
-    enetHost_ = enet_host_create(&address, config_.maxPeers, 2 /* channels */,
+    enetHost_ = enet_host_create(&address, config_.maxPeers, 3 /* channels */,
                                  0 /* unlimited downstream */,
                                  0 /* unlimited upstream */);
     if (!enetHost_) {
@@ -110,6 +309,8 @@ bool SessionHost::start() {
 
 void SessionHost::tick(std::uint32_t timeoutMs) {
     if (!running_ || !enetHost_) return;
+    pumpDesyncCapture();
+    pumpResync(currentTimeMs());
 
     ENetEvent event;
     while (enet_host_service(enetHost_, &event, timeoutMs) > 0) {
@@ -132,16 +333,20 @@ void SessionHost::tick(std::uint32_t timeoutMs) {
     }
 
     expireStalePeers(currentTimeMs());
+    pumpDesyncCapture();
 }
 
 void SessionHost::stop() {
     if (!running_) return;
+    finishResync(ResyncResultReason::Cancelled,"relay stopping");
+    desyncCapture_->Interrupt("relay stopping");
+    pumpDesyncCapture();
     running_ = false;
 
     // Disconnect all peers gracefully.
     for (auto& ps : peers_) {
         if (ps.enetPeer) {
-            enet_peer_disconnect(ps.enetPeer, 0);
+            enet_peer_disconnect(ps.enetPeer, disconnectCode(DisconnectReason::RelayStopping));
         }
     }
 
@@ -158,7 +363,17 @@ void SessionHost::stop() {
     }
 
     peers_.clear();
+    session_.actors.clear();
+    session_.sessionId.clear();
+    lastEnemyHpSequence_ = 0;
+    room_.reset();
+    clearWorldState();
+    progress_.clear();
+    progressVersion_ = 0;
+    pendingActivation_.clear();
     log("Session host stopped.");
+    desyncCapture_->Shutdown();
+    pumpDesyncCapture();
 }
 
 // ---------------------------------------------------------------------------
@@ -168,11 +383,15 @@ void SessionHost::stop() {
 void SessionHost::broadcastSessionState() {
     auto pkt = encode(session_);
     broadcastToVerified(pkt, true /* reliable */);
+    for(auto& ps:peers_)if(ps.status==PeerStatus::Verified)sendBinding(ps);
 }
 
 void SessionHost::broadcastActorSnapshots(
     const std::vector<ActorSnapshot>& snapshots) {
     for (const auto& snap : snapshots) {
+        if(simulationSourceSerial_==UINT64_MAX)continue;
+        simulationActive_=true;++simulationSourceSerial_;
+        if(resyncPlan_)finishResync(ResyncResultReason::CaptureUnavailable,"legacy simulation is active");
         auto pkt = encode(snap);
         broadcastToVerified(pkt, false /* unreliable */);
     }
@@ -181,12 +400,18 @@ void SessionHost::broadcastActorSnapshots(
 void SessionHost::broadcastEnemySnapshots(
     const std::vector<EnemySnapshot>& snapshots) {
     for (const auto& snap : snapshots) {
+        if(simulationSourceSerial_==UINT64_MAX)continue;
+        simulationActive_=true;++simulationSourceSerial_;
+        if(resyncPlan_)finishResync(ResyncResultReason::CaptureUnavailable,"legacy simulation is active");
         auto pkt = encode(snap);
         broadcastToVerified(pkt, false /* unreliable */);
     }
 }
 
 void SessionHost::broadcastEvent(const EventMessage& event) {
+    if(simulationSourceSerial_==UINT64_MAX)return;
+    simulationActive_=true;++simulationSourceSerial_;
+    if(resyncPlan_)finishResync(ResyncResultReason::CaptureUnavailable,"legacy simulation is active");
     auto pkt = encode(event);
     broadcastToVerified(pkt, true /* reliable */);
 }
@@ -218,7 +443,7 @@ std::optional<SlotType> SessionHost::firstFreeSlot() const {
 void SessionHost::onConnect(ENetPeer* peer) {
     if (peers_.size() >= config_.maxPeers) {
         log("Rejecting connection: lobby full.");
-        enet_peer_disconnect(peer, 0);
+        enet_peer_disconnect(peer, disconnectCode(DisconnectReason::LobbyFull));
         return;
     }
 
@@ -251,9 +476,11 @@ void SessionHost::onDisconnect(ENetPeer* peer) {
 }
 
 void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
-                            std::size_t size) {
+                            std::size_t size, const WorldScope* admittedScope) {
     auto* ps = findPeer(peer);
     if (!ps) return;
+    const bool diagnostic = size && (data[0]==static_cast<std::uint8_t>(PacketType::DesyncArtifactChunk) ||
+                                      data[0]==static_cast<std::uint8_t>(PacketType::DesyncCaptureDone));
 
     try {
         const std::uint8_t* payload = nullptr;
@@ -262,8 +489,30 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
         ByteReader reader(payload, payloadSize);
         ps->lastHeartbeatMs = currentTimeMs();
 
+        if(type==PacketType::LocalResyncCommand || type==PacketType::NativeResyncSnapshot)return;
+        if(type==PacketType::WorldEnvelope) {
+            WorldEnvelope envelope;read(reader,envelope);const auto& scope=envelope.scope;
+            if(ps->status!=PeerStatus::Verified || scope.sessionId!=session_.sessionId ||
+               scope.kind!=WorldSourceKind::Native || scope.sourceConnectionId!=ps->connectionId || scope.sourceDeliverySerial!=ps->deliverySerial ||
+               scope.targetConnectionId || scope.targetDeliverySerial || (fromHost(*ps)?!scope.hostSourceSerial:scope.hostSourceSerial!=0)) {++rejectedWorld_;return;}
+            const auto inner=static_cast<PacketType>(envelope.packet.front());
+            if(ps->worldQuarantined&&!isEphemeralWorldPacket(inner)){++rejectedWorld_;return;}
+            if(fromHost(*ps)&&scope.hostSourceSerial<=(std::max)(hostSourceCutFloor_,resyncBegin_?resyncBegin_->snapshotCut:0)){++rejectedWorld_;return;}
+            const auto previous=forwardingScope_;forwardingScope_=scope;
+            onReceive(peer,envelope.packet.data(),envelope.packet.size(),&scope);
+            forwardingScope_=previous;return;
+        }
+        if(isScopedWorldPacket(type)&&!admittedScope){++rejectedWorld_;return;}
+        if(type==PacketType::ResyncRequest || (type>=PacketType::ResyncBegin&&type<=PacketType::ResyncResult)) {
+            if(ps->status!=PeerStatus::Verified)return;
+            receiveResync(*ps,type,reader);return;
+        }
         switch (type) {
             case PacketType::ClientHello: {
+                if (ps->status != PeerStatus::PendingVersion) {
+                    rejectPeer(peer, ps->peerId, "Repeated ClientHello is not permitted", 1);
+                    return;
+                }
                 // Dedicated handshake packet (B2: replaces SessionState-as-hello).
                 ClientHello hello;
                 read(reader, hello);
@@ -321,7 +570,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     requestedSlot = firstFreeSlot();
                     if (!requestedSlot.has_value()) {
                         const std::string reason = "No free slots available";
-                        rejectPeer(peer, ps->peerId, reason, 2);
+                        rejectPeer(peer, ps->peerId, reason, static_cast<std::uint8_t>(DisconnectReason::LobbyFull));
                         return;
                     }
                 }
@@ -331,11 +580,25 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                         "Requested slot " +
                         std::to_string(static_cast<int>(*requestedSlot)) +
                         " is already taken";
-                    rejectPeer(peer, ps->peerId, reason, 2);
+                    rejectPeer(peer, ps->peerId, reason, static_cast<std::uint8_t>(DisconnectReason::SlotOccupied));
                     return;
                 }
 
                 // Version OK — assign the validated requested slot.
+                if (nextConnectionId_ == 0) {
+                    rejectPeer(peer, ps->peerId, "Connection identity exhausted", 1);
+                    return;
+                }
+                if (*requestedSlot == SlotType::Player) {
+                    const auto incarnation = mintWorldIncarnation();
+                    if (!incarnation) {
+                        rejectPeer(peer, ps->peerId, "World incarnation entropy unavailable", 1);
+                        return;
+                    }
+                    session_.sessionId = *incarnation;
+                    lastEnemyHpSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
+                    log("New world incarnation " + session_.sessionId + " (label=" + config_.sessionId + ")");
+                }
                 ps->gameBuild = hello.gameBuild;
                 ps->modHash = hello.modHash;
                 if (!hello.peerId.empty()) {
@@ -344,6 +607,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
 
                 ps->status = PeerStatus::Verified;
                 ps->assignedSlot = *requestedSlot;
+                ps->connectionId = nextConnectionId_++;
 
                 log("Peer verified: " + ps->peerId + " -> slot " +
                     std::to_string(static_cast<int>(ps->assignedSlot)));
@@ -360,61 +624,8 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
             }
 
             case PacketType::SessionState: {
-                // Legacy handshake: client sends SessionState as version check.
-                // Kept for backward compatibility during transition to ClientHello.
-                SessionState clientSession;
-                read(reader, clientSession);
-
-                if (clientSession.gameBuild != config_.gameBuild ||
-                    clientSession.modHash != config_.modHash) {
-                    std::string reason =
-                        "Version mismatch: build=" + clientSession.gameBuild +
-                        " mod=" + clientSession.modHash +
-                        " (relay expects build=" + config_.gameBuild +
-                        " mod=" + config_.modHash + ")";
-                    rejectPeer(peer, ps->peerId, reason, 1);
-                    return;
-                }
-
-                SlotType requestedSlot = SlotType::Player;
-                if (!tryGetRequestedSlot(clientSession, requestedSlot)) {
-                    const std::string reason =
-                        "Handshake missing a valid requested slot";
-                    rejectPeer(peer, ps->peerId, reason, 2);
-                    return;
-                }
-
-                if (isSlotTaken(requestedSlot)) {
-                    const std::string reason =
-                        "Requested slot " +
-                        std::to_string(static_cast<int>(requestedSlot)) +
-                        " is already taken";
-                    rejectPeer(peer, ps->peerId, reason, 2);
-                    return;
-                }
-
-                // Version OK — assign the validated requested slot.
-                ps->gameBuild = clientSession.gameBuild;
-                ps->modHash = clientSession.modHash;
-                if (!clientSession.sessionId.empty()) {
-                    ps->peerId = clientSession.sessionId; // use as peer name
-                }
-
-                ps->status = PeerStatus::Verified;
-                ps->assignedSlot = requestedSlot;
-
-                log("Peer verified (legacy handshake): " + ps->peerId +
-                    " -> slot " +
-                    std::to_string(static_cast<int>(ps->assignedSlot)));
-
-                rebuildSessionActors();
-
-                if (callbacks_.onPeerJoined)
-                    callbacks_.onPeerJoined(ps->peerId, ps->assignedSlot);
-
-                // Send full session state to everyone.
-                broadcastSessionState();
-                break;
+                rejectPeer(peer, ps->peerId, "Legacy handshake unsupported; ClientHello required", 1);
+                return;
             }
 
             case PacketType::InputFrame: {
@@ -441,6 +652,9 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
             case PacketType::EnemyHp:
             case PacketType::EnemyDeath:
             case PacketType::ProgressUpdate: {
+                // The generic header decoder permits trailing frame bytes for
+                // legacy packet types; cached state requires the exact frame.
+                if (size != payloadSize + 3) { ++rejectedWorld_; return; }
                 if (ps->status != PeerStatus::Verified || !fromHost(*ps)) {
                     ++rejectedWorld_;
                     log("Dropping world message from non-host " + ps->peerId);
@@ -451,6 +665,8 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 if (type == PacketType::RoomTransition) {
                     RoomTransition m;
                     read(reader, m);
+                    if (!reader.atEnd()) { ++rejectedWorld_; return; }
+                    if(resyncPlan_&&!sameResyncRoom(m,resyncPlan_->request.room))finishResync(ResyncResultReason::RoomChanged,"host room changed");
                     clearWorldState();
                     room_ = m;
                     log("Host transition epoch " + std::to_string(m.epoch) +
@@ -459,10 +675,18 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 } else if (type == PacketType::EventHold) {
                     EventHold m;
                     read(reader, m);
+                    if (!reader.atEnd() || !room_ || m.epoch == 0 || m.epoch != room_->epoch) {
+                        ++rejectedWorld_;
+                        return;
+                    }
                     hold_ = m;
                 } else if (type == PacketType::EnemyManifest) {
                     EnemyManifest m;
                     read(reader, m);
+                    if (!reader.atEnd() || !room_ || m.epoch == 0 || m.epoch != room_->epoch) {
+                        ++rejectedWorld_;
+                        return;
+                    }
                     if (m.replace || m.epoch != manifest_.epoch) {
                         manifest_ = m;
                         enemyHp_.clear();
@@ -474,11 +698,24 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 } else if (type == PacketType::EnemyHp) {
                     EnemyHp m;
                     read(reader, m);
+                    // Decode the entire record before touching the cache. HP is
+                    // normally unreliable and can arrive after its room ended;
+                    // never relabel that old payload with manifest_.epoch later.
+                    if (!reader.atEnd() || !room_ || m.epoch == 0 ||
+                        m.epoch != room_->epoch || m.epoch != manifest_.epoch ||
+                        m.sequence <= lastEnemyHpSequence_) {
+                        ++rejectedWorld_;
+                        return;
+                    }
+                    // Preserve last-entry-wins and same-epoch unknown IDs: HP
+                    // can precede a reliable appended manifest on another channel.
+                    lastEnemyHpSequence_ = m.sequence;
                     for (const auto& e : m.entries) enemyHp_[e.netId] = e;
                     reliable = false; // periodic absolute values
                 } else if (type == PacketType::ProgressUpdate) {
                     ProgressUpdate m;
                     read(reader, m);
+                    if (!reader.atEnd()) { ++rejectedWorld_; return; }
                     if (m.full) progress_.clear();
                     for (const auto& span : m.spans) {
                         for (std::size_t i = 0; i < span.bytes.size(); ++i) {
@@ -490,9 +727,81 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 } else {
                     EnemyDeath m;
                     read(reader, m);
+                    if (!reader.atEnd() || !room_ || m.epoch == 0 ||
+                        m.epoch != room_->epoch || m.epoch != manifest_.epoch) {
+                        ++rejectedWorld_;
+                        return;
+                    }
                     deadEnemies_.insert(m.netId);
                 }
+                if(admittedScope)lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
+                if(resyncSnapshot_&&admittedScope&&admittedScope->hostSourceSerial>resyncBegin_->snapshotCut&&resyncMaterialDifference(type,packet)) {
+                    resyncMaterialChanged_=true;
+                    if(resyncPlan_->phase==ResyncPhase::Checkpoint)finishResync(ResyncResultReason::NativeFailed,"material change after checkpoint cut");
+                }
                 forwardToOthers(peer, packet, reliable);
+                break;
+            }
+
+            case PacketType::ActivationRequest: {
+                if (ps->status != PeerStatus::Verified || fromHost(*ps) || !room_) {
+                    ++rejectedWorld_;
+                    return;
+                }
+                validateActivationPacket(std::vector<std::uint8_t>(data, data + size));
+                ActivationRequest request;
+                read(reader, request);
+                if (!sameActivationRoom(request.location, *room_)) {
+                    ++rejectedWorld_;
+                    return;
+                }
+                auto* host = hostPeer();
+                if (!host) return;
+                request.requesterSlot = static_cast<std::uint8_t>(ps->assignedSlot);
+                const auto now = currentTimeMs();
+                auto& pending = pendingActivation_[peer];
+                std::erase_if(pending, [now](const PendingActivation& entry) {
+                    return now - entry.receivedMs >= ACTIVATION_LEASE_MS;
+                });
+                if (std::any_of(pending.begin(), pending.end(), [&](const PendingActivation& entry) {
+                        return sameActivationRequest(entry.request, request);
+                    })) return; // duplicates never renew a routing lease
+                if (pending.size() == ACTIVATION_MAX_OUTSTANDING) pending.erase(pending.begin());
+                pending.push_back({request, now});
+                sendTo(host->enetPeer, encode(request), false);
+                break;
+            }
+
+            case PacketType::HostActivationPoint: {
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps) || !room_) {
+                    ++rejectedWorld_;
+                    return;
+                }
+                validateActivationPacket(std::vector<std::uint8_t>(data, data + size));
+                HostActivationPoint point;
+                read(reader, point);
+                if (!sameActivationRoom(point.request.location, *room_)) {
+                    ++rejectedWorld_;
+                    return;
+                }
+                auto target = std::find_if(peers_.begin(), peers_.end(), [&](const PeerState& other) {
+                    return other.status == PeerStatus::Verified && !fromHost(other) &&
+                           static_cast<std::uint8_t>(other.assignedSlot) == point.request.requesterSlot;
+                });
+                if (target == peers_.end()) { ++rejectedWorld_; return; }
+                auto pending = pendingActivation_.find(target->enetPeer);
+                if (pending == pendingActivation_.end()) { ++rejectedWorld_; return; }
+                const auto now = currentTimeMs();
+                std::erase_if(pending->second, [now](const PendingActivation& entry) {
+                    return now - entry.receivedMs >= ACTIVATION_LEASE_MS;
+                });
+                const auto match = std::find_if(pending->second.begin(), pending->second.end(),
+                    [&](const PendingActivation& entry) {
+                        return sameActivationRequest(entry.request, point.request);
+                    });
+                if (match == pending->second.end()) { ++rejectedWorld_; return; }
+                pending->second.erase(match); // a response can be routed only once
+                sendTo(target->enetPeer, encode(point), false);
                 break;
             }
 
@@ -504,10 +813,33 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 }
                 HitClaim claim;
                 read(reader, claim);
-                claim.attackerSlot = ps->assignedSlot; // never trust the claim
-                if (auto* host = hostPeer()) {
-                    sendTo(host->enetPeer, encode(claim), true);
+                // A delayed claim cannot target an enemy identity from a new
+                // room. Epoch zero is unset, even if both sides report it.
+                if (!room_ || room_->epoch == 0 || claim.epoch != room_->epoch) {
+                    ++rejectedWorld_;
+                    return;
                 }
+                const auto matchingIdCount = std::count_if(manifest_.entries.begin(), manifest_.entries.end(),
+                    [&](const EnemyManifestEntry& entry) { return entry.netId == claim.netId; });
+                const auto target = std::find_if(manifest_.entries.begin(), manifest_.entries.end(),
+                    [&](const EnemyManifestEntry& entry) {
+                        return entry.netId == claim.netId && entry.objectId == claim.objectId;
+                    });
+                if (claim.requesterConnectionId == 0 || claim.requesterConnectionId != ps->connectionId ||
+                    claim.seq == 0 || claim.seq <= ps->lastHitClaimSeq || claim.netId == 0 ||
+                    claim.objectId == 0 || manifest_.epoch != room_->epoch || matchingIdCount != 1 ||
+                    target == manifest_.entries.end() || deadEnemies_.count(claim.netId) != 0 ||
+                    claim.damage <= 0 || !std::isfinite(claim.attackerPosition.x) ||
+                    !std::isfinite(claim.attackerPosition.y) || !std::isfinite(claim.attackerPosition.z)) {
+                    ++rejectedWorld_;
+                    return;
+                }
+                auto* host = hostPeer();
+                if (!host) { ++rejectedWorld_; return; }
+                claim.attackerSlot = ps->assignedSlot; // never trust the claim
+                // Consume before forwarding. Room changes never reset this watermark.
+                ps->lastHitClaimSeq = claim.seq;
+                sendTo(host->enetPeer, encode(claim), true);
                 break;
             }
 
@@ -539,8 +871,13 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
 
             case PacketType::StateHash: {
                 if (ps->status != PeerStatus::Verified) return;
-                read(reader, ps->lastHash);
+                StateHash hash;
+                read(reader, hash);
+                if(!reader.atEnd() || size!=payloadSize+3)return;
+                ps->lastHash=hash;
                 ps->hasHash = true;
+                if (ps->hashReceiptSeq != UINT64_MAX) ++ps->hashReceiptSeq;
+                ps->hashReceiptMs = currentTimeMs();
                 if (fromHost(*ps)) {
                     for (auto& other : peers_) {
                         if (!fromHost(other) && other.hasHash) compareWithHost(other);
@@ -550,25 +887,18 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 }
                 break;
             }
-
-            case PacketType::ResyncRequest: {
-                if (ps->status != PeerStatus::Verified || !fromHost(*ps)) {
-                    ++rejectedWorld_;
-                    return;
-                }
-                ResyncRequest req;
-                read(reader, req);
-                for (auto& other : peers_) {
-                    if (other.status != PeerStatus::Verified || fromHost(other)) continue;
-                    if (req.slot != 0xFF &&
-                        req.slot != static_cast<std::uint8_t>(other.assignedSlot)) {
-                        continue;
-                    }
-                    log("Resync requested for " + other.peerId);
-                    other.mismatchStreak = 0;
-                    other.reportedFields = 0;
-                    sendWorldStateTo(other.enetPeer);
-                }
+            case PacketType::DesyncArtifactChunk: {
+                if(ps->status!=PeerStatus::Verified) return;
+                desyncCapture_->Pump(currentTimeMs());
+                DesyncArtifactChunk chunk;read(reader,chunk);
+                desyncCapture_->Chunk(ps->connectionId,chunk);
+                break;
+            }
+            case PacketType::DesyncCaptureDone: {
+                if(ps->status!=PeerStatus::Verified) return;
+                desyncCapture_->Pump(currentTimeMs());
+                DesyncCaptureDone done;read(reader,done);
+                desyncCapture_->Done(ps->connectionId,done);
                 break;
             }
 
@@ -589,7 +919,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 read(reader, avatar);
                 // The owner is whoever sent it, never what the packet claims.
                 avatar.ownerSlot = ps->assignedSlot;
-                const auto relay = encode(avatar, PacketType::AvatarRelay);
+                const auto relay = encode(AvatarRelay {ps->connectionId, avatar});
                 for (auto& other : peers_) {
                     if (other.enetPeer != peer &&
                         other.status == PeerStatus::Verified && other.enetPeer) {
@@ -606,6 +936,9 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 break;
         }
     } catch (const std::exception& ex) {
+        if(diagnostic && ps->status==PeerStatus::Verified)desyncCapture_->Reject(ps->connectionId,"malformed diagnostic packet");
+        if(resyncPlan_&&fromHost(*ps)&&size&&data[0]>=static_cast<std::uint8_t>(PacketType::ResyncBegin)&&data[0]<=static_cast<std::uint8_t>(PacketType::ResyncEnd))
+            finishResync(ResyncResultReason::InvalidSnapshot,"malformed host snapshot record");
         log("Packet decode error from " + ps->peerId + ": " + ex.what());
     }
 }
@@ -638,7 +971,7 @@ void SessionHost::forwardToOthers(ENetPeer* sender,
     for (auto& other : peers_) {
         if (other.enetPeer != sender && other.status == PeerStatus::Verified &&
             other.enetPeer) {
-            sendTo(other.enetPeer, packet, reliable);
+            if(!sendTo(other.enetPeer,packet,reliable)&&resyncPlan_&&isMaterialWorldPacket(static_cast<PacketType>(packet.front()))) {finishResync(ResyncResultReason::Overflow,"material forwarding failed");return;}
         }
     }
 }
@@ -672,6 +1005,7 @@ void SessionHost::sendWorldStateTo(ENetPeer* peer) {
     if (!enemyHp_.empty()) {
         EnemyHp hp;
         hp.epoch = manifest_.epoch;
+        hp.sequence = lastEnemyHpSequence_;
         for (const auto& [id, e] : enemyHp_) hp.entries.push_back(e);
         sendTo(peer, encode(hp), true);
     }
@@ -690,6 +1024,7 @@ void SessionHost::compareWithHost(PeerState& client) {
     const auto& h = host->lastHash;
     const auto& c = client.lastHash;
     if (h.epoch != c.epoch) return;
+    if(desyncComparisonSeq_!=UINT64_MAX)++desyncComparisonSeq_;
     std::uint8_t fields = 0;
     if (h.worldId != c.worldId || h.roomId != c.roomId) fields |= DesyncRoom;
     if (h.enemiesHash != c.enemiesHash) fields |= DesyncEnemies;
@@ -705,9 +1040,55 @@ void SessionHost::compareWithHost(PeerState& client) {
     log("Desync: " + client.peerId + " fields=" + std::to_string(fields) +
         " epoch=" + std::to_string(h.epoch));
     broadcastToVerified(encode(DesyncNotice {client.assignedSlot, h.epoch, fields}), true);
+    if(!config_.desyncOutputRoot.empty() && nextDesyncReportId_) {
+        DesyncCaptureRequest request;
+        request.key={session_.sessionId,nextDesyncReportId_};
+        if(nextDesyncReportId_==UINT64_MAX)nextDesyncReportId_=0;else ++nextDesyncReportId_;
+        for(const auto& peer:peers_)if(peer.status==PeerStatus::Verified)
+            request.connections[static_cast<std::size_t>(peer.assignedSlot)]=peer.connectionId;
+        request.epoch=h.epoch;request.divergedSlot=static_cast<std::uint8_t>(client.assignedSlot);request.fields=fields;
+        request.hostHash=h;request.clientHash=c;request.hostReceiptSeq=host->hashReceiptSeq;request.clientReceiptSeq=client.hashReceiptSeq;
+        request.hostReceiptMs=host->hashReceiptMs;request.clientReceiptMs=client.hashReceiptMs;request.comparisonSeq=desyncComparisonSeq_;
+        request.triggerMs=currentTimeMs();request.deadlineMs=request.triggerMs+DESYNC_DEADLINE_MS;
+        if(!desyncCapture_->Trigger(request,desyncRelayLog_,request.triggerMs,desyncRelayLogBytes_)) {
+            const auto& stats=desyncCapture_->Stats();
+            log("Desync capture coalesced/suppressed cadence="+std::to_string(stats.suppressedCadence)+
+                " quota="+std::to_string(stats.suppressedQuota)+" extra="+std::to_string(stats.extraTriggers)+
+                " overflow="+std::to_string(stats.extraTriggerOverflow)+
+                " summaryLostTriggers="+std::to_string(stats.summaryLostTriggers));
+        }
+    }
+}
+
+void SessionHost::pumpDesyncCapture() {
+    desyncCapture_->Pump(currentTimeMs());
+    if(auto result=desyncCapture_->TakeSuppressionResult()) {
+        lastDesyncSuppression_=std::move(*result);
+        log("Desync suppression summary session="+lastDesyncSuppression_->sessionId+
+            " revision="+std::to_string(lastDesyncSuppression_->revision)+
+            " written="+(lastDesyncSuppression_->written?"1":"0")+
+            " storageErrors="+std::to_string(desyncCapture_->Stats().summaryStorageErrors)+
+            " error="+lastDesyncSuppression_->error);
+    }
+    if(auto request=desyncCapture_->TakeRequest()) {
+        for(const auto& peer:peers_)if(peer.status==PeerStatus::Verified &&
+            request->connections[static_cast<std::size_t>(peer.assignedSlot)]==peer.connectionId)
+            {
+                if(peer.enetPeer->channelCount<3)desyncCapture_->Reject(peer.connectionId,"diagnostic channel unavailable");
+                else sendTo(peer.enetPeer,encode(*request),true);
+            }
+    }
+    if(auto result=desyncCapture_->TakeFinalized()) {
+        lastDesyncCapture_=std::move(*result);
+        log("Desync capture finalized report="+std::to_string(lastDesyncCapture_->key.reportId)+
+            " status="+std::to_string(static_cast<unsigned>(lastDesyncCapture_->status))+
+            " manifestWritten="+(lastDesyncCapture_->manifestWritten?"1":"0")+" error="+lastDesyncCapture_->error);
+        if(callbacks_.onDesyncCaptureFinalized)callbacks_.onDesyncCaptureFinalized(*lastDesyncCapture_);
+    }
 }
 
 void SessionHost::clearWorldState() {
+    pendingActivation_.clear();
     hold_.reset();
     manifest_ = {};
     enemyHp_.clear();
@@ -749,6 +1130,7 @@ void SessionHost::rebuildSessionActors() {
         actor.actorId = static_cast<std::uint32_t>(peer.assignedSlot);
         actor.slot = peer.assignedSlot;
         actor.ownerPeerId = peer.peerId;
+        actor.connectionId = peer.connectionId;
         session_.actors.push_back(std::move(actor));
     }
 }
@@ -789,8 +1171,13 @@ void SessionHost::expireStalePeers(std::uint64_t nowMs) {
     bool removedVerifiedPeer = false;
 
     for (const auto& expiredPeer : expired) {
+        // A preceding host expiry may already have ended this peer's session.
+        // Do not disconnect or notify entries from that stale snapshot twice.
+        if (!findPeer(expiredPeer.peer)) continue;
         if (expiredPeer.peer) {
-            enet_peer_disconnect(expiredPeer.peer, 3);
+            enet_peer_disconnect(expiredPeer.peer, disconnectCode(
+                expiredPeer.status == PeerStatus::Verified ? DisconnectReason::PeerIdleTimeout
+                                                          : DisconnectReason::HandshakeTimeout));
         }
 
         removePeer(expiredPeer.peer);
@@ -817,10 +1204,43 @@ void SessionHost::expireStalePeers(std::uint64_t nowMs) {
 }
 
 void SessionHost::removePeer(ENetPeer* peer) {
+    if(auto* ps=findPeer(peer);ps&&resyncPlan_) {
+        if(fromHost(*ps))finishResync(ResyncResultReason::HostChanged,"host retired");
+        else for(std::size_t i=0;resyncPlan_&&i<resyncPlan_->targetCount;++i)if(resyncPlan_->targets[i].connectionId==ps->connectionId){finishResync(ResyncResultReason::TargetChanged,"target retired");break;}
+    }
+    if(auto* ps=findPeer(peer)) {
+        if(fromHost(*ps))desyncCapture_->Interrupt("host session ended");
+        else desyncCapture_->PeerLeft(ps->connectionId);
+    }
+    pendingActivation_.erase(peer);
     if (auto* ps = findPeer(peer); ps && fromHost(*ps)) {
+        session_.sessionId.clear();
+        lastEnemyHpSequence_ = 0;
         room_.reset();
         clearWorldState();
         progress_.clear();
+        if (config_.runtimeMode == RuntimeMode::CampaignCoop) {
+            // The Player owns the co-op world: losing that connection ends the
+            // session, without migrating ownership or stopping the relay.
+            // Detach all membership before callbacks or later ENet events can
+            // observe it. Keep the old entries alive locally during teardown.
+            auto departed = std::move(peers_);
+            peers_.clear();
+            session_.actors.clear();
+            progressVersion_ = 0;
+            for (const auto& remaining : departed) {
+                if (remaining.enetPeer == peer) continue;
+                if (remaining.enetPeer)
+                    enet_peer_disconnect(remaining.enetPeer, disconnectCode(DisconnectReason::HostSessionEnded));
+            }
+            for (const auto& remaining : departed) {
+                if (remaining.enetPeer == peer) continue;
+                log("Session ended after host loss: " + remaining.peerId);
+                if (callbacks_.onPeerLeft) callbacks_.onPeerLeft(remaining.peerId);
+            }
+            // The caller reports the original host's departure exactly once.
+            return;
+        }
     }
     peers_.erase(
         std::remove_if(peers_.begin(), peers_.end(),
@@ -832,14 +1252,35 @@ void SessionHost::removePeer(ENetPeer* peer) {
 // Send helpers
 // ---------------------------------------------------------------------------
 
-void SessionHost::sendTo(ENetPeer* peer,
-                         const std::vector<std::uint8_t>& packet,
-                         bool reliable) {
-    auto* enetPacket = enet_packet_create(
-        packet.data(), packet.size(),
-        reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
-    // Channel 0 = reliable, channel 1 = unreliable snapshots.
-    enet_peer_send(peer, reliable ? 0 : 1, enetPacket);
+bool SessionHost::sendTo(ENetPeer* peer,const std::vector<std::uint8_t>& packet,bool reliable) {
+    if(!peer||packet.empty())return false;
+    const auto type=static_cast<PacketType>(packet.front());
+    if(isScopedWorldPacket(type)) {
+        auto* target=findPeer(peer);auto* host=hostPeer();
+        if(!target||target->status!=PeerStatus::Verified||!host)return false;
+        WorldScope scope=forwardingScope_.value_or(WorldScope{session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0});
+        const bool simulation=type==PacketType::ActorSnapshot||type==PacketType::EnemySnapshot||type==PacketType::EventMessage;
+        if(simulation){scope.kind=WorldSourceKind::Simulation;scope.hostSourceSerial=simulationSourceSerial_;}
+        if(type==PacketType::DesyncNotice){scope={session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0};scope.kind=WorldSourceKind::Relay;}
+        scope.targetConnectionId=target->connectionId;scope.targetDeliverySerial=target->deliverySerial;
+        if(scope.sourceConnectionId==host->connectionId && scope.kind==WorldSourceKind::Native && type!=PacketType::DesyncNotice && scope.hostSourceSerial<=target->hostSourceFloor)return true;
+        WorldEnvelope env{scope,packet};
+        if(resyncPlan_&&scope.sourceConnectionId==host->connectionId&&isMaterialWorldPacket(type)) {
+            reliable=true;
+            for(std::size_t i=0;i<resyncPlan_->targetCount;++i)if(resyncPlan_->targets[i].connectionId==target->connectionId&&target->worldQuarantined) {
+                if(resyncContinuation_[i].size()>=RESYNC_MAX_CONTINUATION_RECORDS || resyncContinuationBytes_[i]+packet.size()>RESYNC_MAX_CONTINUATION_BYTES){finishResync(ResyncResultReason::Overflow,"continuation bound");return false;}
+                resyncContinuation_[i].push_back(std::move(env));resyncContinuationBytes_[i]+=packet.size();return true;
+            }
+        }
+        if(target->worldQuarantined&&!isEphemeralWorldPacket(type))return true;
+        return sendTo(peer,encode(env),reliable);
+    }
+    const bool diagnostic=isDesyncDiagnosticPacket(type);
+    if(diagnostic)reliable=true;
+    auto* enetPacket=enet_packet_create(packet.data(),packet.size(),reliable?ENET_PACKET_FLAG_RELIABLE:0);
+    if(!enetPacket)return false;
+    if(enet_peer_send(peer,diagnostic?2:(reliable?0:1),enetPacket)<0){enet_packet_destroy(enetPacket);return false;}
+    return true;
 }
 
 void SessionHost::broadcastToVerified(
@@ -853,6 +1294,10 @@ void SessionHost::broadcastToVerified(
 
 void SessionHost::rejectPeer(ENetPeer* peer, const std::string& peerId,
                              const std::string& reason, std::uint8_t code) {
+    // A refused handshake cannot become verified through a second packet
+    // already queued before the delayed ENet disconnect is observed.
+    if (auto* ps = findPeer(peer); ps && ps->status == PeerStatus::PendingVersion)
+        ps->status = PeerStatus::Disconnected;
     log("Rejecting " + peerId + ": " + reason);
     if (callbacks_.onPeerRejected) callbacks_.onPeerRejected(peerId, reason);
     HelloReject reject;
@@ -864,6 +1309,9 @@ void SessionHost::rejectPeer(ENetPeer* peer, const std::string& peerId,
 }
 
 void SessionHost::log(const std::string& msg) {
+    desyncRelayLogBytes_ += msg.size()+15; // '[SessionHost] ' plus newline
+    desyncRelayLog_ += "[SessionHost] "+msg+"\n";
+    if(desyncRelayLog_.size()>DESYNC_LOG_BYTES)desyncRelayLog_.erase(0,desyncRelayLog_.size()-DESYNC_LOG_BYTES);
     if (callbacks_.onLog) {
         callbacks_.onLog("[SessionHost] " + msg);
     }

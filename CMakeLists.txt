@@ -4,6 +4,7 @@ project(kh2coop LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------
 # ENet — lightweight UDP networking library for game traffic.
@@ -45,13 +46,14 @@ endif()
 add_library(kh2coop_server_core
     server/src/SessionHost.cpp
     server/src/SimulationState.cpp
+    server/src/DesyncCapture.cpp
 )
 
 target_include_directories(kh2coop_server_core PUBLIC
     server/include
 )
 
-target_link_libraries(kh2coop_server_core PUBLIC kh2coop_common)
+target_link_libraries(kh2coop_server_core PUBLIC kh2coop_common Threads::Threads)
 
 # ---------------------------------------------------------------------------
 # kh2coop_server — the host-authoritative relay executable.
@@ -68,13 +70,14 @@ target_link_libraries(kh2coop_server PRIVATE kh2coop_server_core)
 # ---------------------------------------------------------------------------
 add_library(kh2coop_runtime
     runtime/src/GameBridgePC.cpp
+    runtime/src/DesyncCollector.cpp
 )
 
 target_include_directories(kh2coop_runtime PUBLIC
     runtime/include
 )
 
-target_link_libraries(kh2coop_runtime PUBLIC kh2coop_common)
+target_link_libraries(kh2coop_runtime PUBLIC kh2coop_common Threads::Threads)
 
 # ---------------------------------------------------------------------------
 # kh2coop_runtime_scaffold — placeholder entry point for the runtime.
@@ -114,6 +117,75 @@ add_executable(kh2coop_world_test
 
 target_link_libraries(kh2coop_world_test PRIVATE kh2coop_server_core kh2coop_common)
 
+# Same-room HP producer ordering through actual local ENet and cache replay.
+add_executable(kh2coop_hp_order_test tests/EnemyHpOrderTest.cpp)
+target_link_libraries(kh2coop_hp_order_test PRIVATE kh2coop_server_core kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_hp_order_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_hp_order_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+add_executable(kh2coop_resync_test tests/ForcedResyncTest.cpp)
+target_link_libraries(kh2coop_resync_test PRIVATE kh2coop_server_core kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_resync_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_resync_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# Automatic diagnostic collection over real ENet peers and owned test files.
+# Native capture is represented by an explicit synthetic provider, never KH2.
+add_executable(kh2coop_desync_test tests/DesyncCaptureTest.cpp)
+target_link_libraries(kh2coop_desync_test PRIVATE kh2coop_server_core kh2coop_runtime)
+add_executable(kh2coop_runtime_desync_smoke tests/RuntimeDesyncSmoke.cpp)
+target_link_libraries(kh2coop_runtime_desync_smoke PRIVATE kh2coop_server_core)
+if(WIN32)
+    target_compile_definitions(kh2coop_desync_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(kh2coop_runtime_desync_smoke PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    add_executable(kh2coop_desync_collector_test tests/DesyncCollectorTest.cpp)
+    target_link_libraries(kh2coop_desync_collector_test PRIVATE kh2coop_runtime)
+    target_compile_definitions(kh2coop_desync_collector_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
+
+# Production bounded friend-recovery coordinator and real loopback bootstrap.
+add_executable(kh2coop_recovery_test tests/ClientRecoveryTest.cpp)
+target_link_libraries(kh2coop_recovery_test PRIVATE kh2coop_server_core kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_recovery_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_recovery_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+add_executable(kh2coop_activation_test tests/ActivationLeaseTest.cpp)
+target_link_libraries(kh2coop_activation_test PRIVATE kh2coop_common)
+
+add_executable(kh2coop_activation_replay_wire_test tests/ActivationReplayWireTest.cpp)
+target_link_libraries(kh2coop_activation_replay_wire_test PRIVATE kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_activation_replay_wire_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_activation_replay_wire_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# Exact ordinary record-content comparison; no native creation or lifetime claim.
+add_executable(kh2coop_record_content_test tests/NativeRecordContentTest.cpp)
+target_link_libraries(kh2coop_record_content_test PRIVATE kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_record_content_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_record_content_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# Bounded surviving-pack preparation and sticky outcomes; never dispatches native code.
+add_executable(kh2coop_pack_preparation_test tests/SurvivingPackPreparationTest.cpp)
+target_link_libraries(kh2coop_pack_preparation_test PRIVATE kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_pack_preparation_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_pack_preparation_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 # ---------------------------------------------------------------------------
 # kh2coop_bridge_test — PacketRing + WorldBridge DLL<->runtime plumbing, with a
 # fake DLL on each side of the relay.
@@ -140,6 +212,78 @@ endif()
 # Only builds on Windows (requires MinHook, XInput, PE headers).
 # ---------------------------------------------------------------------------
 if(WIN32)
+    enable_language(ASM_MASM)
     add_subdirectory(tools/kh2ctl)
     add_subdirectory(inject)
+
+    # Actual trace scope/queue code with synthetic native callbacks and deliberate
+    # SEH. The test supplies unavailable MinHook stubs; it never installs hooks
+    # or accesses a game process.
+    add_executable(kh2coop_spawntrace_test tests/NativeSpawnTraceTest.cpp)
+    target_sources(kh2coop_spawntrace_test PRIVATE inject/src/NativeResourceTrace.cpp)
+    target_include_directories(kh2coop_spawntrace_test PRIVATE
+        runtime/include
+        common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+    target_link_libraries(kh2coop_spawntrace_test PRIVATE kh2coop_common)
+    target_compile_definitions(kh2coop_spawntrace_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_spawntrace_test PRIVATE /W4 /WX)
+    endif()
+
+    # The concrete package callback observer over task-owned memory and native
+    # Windows SEH/MinHook. No game is launched or accessed by this executable.
+    add_executable(kh2coop_resourcetrace_test tests/NativeResourceTraceTest.cpp)
+    target_include_directories(kh2coop_resourcetrace_test PRIVATE
+        runtime/include
+        common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+    target_link_libraries(kh2coop_resourcetrace_test PRIVATE minhook_lib kh2coop_common)
+    target_compile_definitions(kh2coop_resourcetrace_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_resourcetrace_test PRIVATE /W4 /WX)
+    endif()
+
+    add_executable(kh2coop_lifecycletrace_test tests/NativeLifecycleTraceTest.cpp)
+    target_include_directories(kh2coop_lifecycletrace_test PRIVATE
+        runtime/include
+        common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+    target_compile_definitions(kh2coop_lifecycletrace_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_lifecycletrace_test PRIVATE /W4 /WX)
+    endif()
+
+    # Real hit consumer/publisher and census over owned synthetic native memory;
+    # only transport, lifecycle and unrelated diagnostic services are stubbed.
+    add_executable(kh2coop_nativehit_test tests/NativeHitClaimTest.cpp inject/src/NativeHitTrace.cpp
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp)
+    target_include_directories(kh2coop_nativehit_test PRIVATE runtime/include common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(kh2coop_nativehit_test PRIVATE kh2coop_common)
+    target_compile_definitions(kh2coop_nativehit_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_nativehit_test PRIVATE /W4 /WX)
+    endif()
+
+    # Actual bounded hit/policy serializer and owned-record zero leaf over
+    # synthetic originals; no game process or MinHook installation.
+    add_executable(kh2coop_hittrace_test tests/NativeHitTraceTest.cpp inject/src/NativeHitTrace.cpp inject/src/DamagePolicy.cpp)
+    target_include_directories(kh2coop_hittrace_test PRIVATE inject/src runtime/include common/include)
+    target_compile_definitions(kh2coop_hittrace_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_hittrace_test PRIVATE /W4 /WX)
+    endif()
+
+    # Production HP permission policy and checked zero-write leaf; only owned
+    # record pages and synthetic native callbacks, never a game process.
+    add_executable(kh2coop_damagepolicy_test tests/DamagePolicyTest.cpp inject/src/DamagePolicy.cpp)
+    target_include_directories(kh2coop_damagepolicy_test PRIVATE inject/src)
+    target_compile_definitions(kh2coop_damagepolicy_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_damagepolicy_test PRIVATE /W4 /WX)
+    endif()
 endif()

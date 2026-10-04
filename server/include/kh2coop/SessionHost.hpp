@@ -3,6 +3,7 @@
 #include "kh2coop/PeerState.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
+#include "kh2coop/DesyncCapture.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -22,15 +23,16 @@ namespace kh2coop {
 struct SessionConfig {
     std::uint16_t port{7782}; // default listen port
     std::string bindAddress;  // empty = all interfaces; else e.g. a 100.x Tailscale IP
-    std::uint16_t protocolVersion{2};
+    std::uint16_t protocolVersion{PROTOCOL_VERSION};
     std::uint32_t maxPeers{3};
     std::uint32_t heartbeatTimeoutMs{5000};
     std::uint32_t pendingPeerTimeoutMs{2000};
     std::string gameBuild;
     std::string contentHash;
     std::string modHash;
-    std::string sessionId;
+    std::string sessionId; // configured display label; wire incarnation is minted per host
     RuntimeMode runtimeMode{RuntimeMode::CampaignCoop};
+    std::string desyncOutputRoot; // empty disables collection; executable supplies explicit local root
 };
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,8 @@ struct SessionCallbacks {
     std::function<void(const std::string& peerId, const std::string& reason)> onPeerRejected;
     std::function<void(const std::string& peerId, const InputFrame& input)> onInputReceived;
     std::function<void(const std::string& msg)> onLog;
+    std::function<void(const DesyncCaptureResult&)> onDesyncCaptureFinalized;
+    std::function<void(const ResyncResult&)> onResyncFinalized;
 };
 
 // ---------------------------------------------------------------------------
@@ -105,12 +109,20 @@ public:
     [[nodiscard]] std::size_t progressBytes() const { return progress_.size(); }
     [[nodiscard]] std::uint64_t desyncNoticeCount() const { return desyncNotices_; }
     [[nodiscard]] const PeerState* peerBySlot(SlotType slot) const;
+    [[nodiscard]] const std::optional<DesyncCaptureResult>& lastDesyncCapture() const { return lastDesyncCapture_; }
+    [[nodiscard]] const DesyncCaptureStats& desyncCaptureStats() const { return desyncCapture_->Stats(); }
+    [[nodiscard]] const std::optional<DesyncSuppressionResult>& lastDesyncSuppression() const { return lastDesyncSuppression_; }
 
+    const std::optional<ResyncResult>& lastResyncResult() const { return lastResyncResult_; }
+    const std::optional<ResyncPlan>& activeResyncPlan() const { return resyncPlan_; }
+    std::uint64_t resyncDeadlineMs() const { return resyncDeadline_; }
+    // Production monotonic deadline pump, also usable by headless controls.
+    void pumpResync(std::uint64_t nowMs);
 private:
     // ENet event handlers
     void onConnect(_ENetPeer* peer);
     void onDisconnect(_ENetPeer* peer);
-    void onReceive(_ENetPeer* peer, const std::uint8_t* data, std::size_t size);
+    void onReceive(_ENetPeer* peer, const std::uint8_t* data, std::size_t size, const WorldScope* admittedScope = nullptr);
 
     // Peer helpers
     PeerState* findPeer(_ENetPeer* peer);
@@ -122,7 +134,7 @@ private:
     void removePeer(_ENetPeer* peer);
 
     // Packet send helpers
-    void sendTo(_ENetPeer* peer, const std::vector<std::uint8_t>& packet,
+    bool sendTo(_ENetPeer* peer, const std::vector<std::uint8_t>& packet,
                 bool reliable);
     void broadcastToVerified(const std::vector<std::uint8_t>& packet,
                              bool reliable);
@@ -141,7 +153,27 @@ private:
     void sendWorldStateTo(_ENetPeer* peer);
     void clearWorldState();
     void compareWithHost(PeerState& client);
+    void pumpDesyncCapture();
 
+    void sendBinding(PeerState&);
+    void finishResync(ResyncResultReason, const std::string&);
+    void publishResyncPlan();
+    bool receiveResync(PeerState&, PacketType, ByteReader&);
+    void refreshResyncCache(const ResyncSnapshot&, const std::vector<WorldEnvelope>&, std::uint64_t cut);
+    bool resyncMaterialDifference(PacketType, const std::vector<std::uint8_t>&) const;
+    std::optional<ResyncPlan> resyncPlan_;
+    std::optional<ResyncResult> lastResyncResult_;
+    ResyncAssembler resyncAssembler_;
+    std::optional<ResyncBegin> resyncBegin_;
+    std::optional<ResyncSnapshot> resyncSnapshot_;
+    std::array<std::optional<ResyncAck>,2> resyncAcks_{};
+    std::array<std::vector<WorldEnvelope>,2> resyncContinuation_{};
+    std::array<std::size_t,2> resyncContinuationBytes_{};
+    std::uint64_t resyncDeadline_{0}, lastResyncRequestId_{0}, lastHostSourceSerial_{0}, hostSourceCutFloor_{0};
+    bool resyncMaterialChanged_{false};
+    std::optional<WorldScope> forwardingScope_;
+    std::uint64_t simulationSourceSerial_{0};
+    bool simulationActive_{false};
     // State
     SessionConfig config_;
     SessionCallbacks callbacks_;
@@ -150,6 +182,7 @@ private:
     _ENetHost* enetHost_{nullptr};
     bool running_{false};
     std::uint32_t nextSnapshotId_{1};
+    std::uint64_t nextConnectionId_{1}; // never reset on room/session/stop boundaries
     std::uint64_t relayedAvatars_{0};
 
     // Cached world state for late joiners (VUH-1495).
@@ -157,11 +190,28 @@ private:
     std::optional<EventHold> hold_;
     EnemyManifest manifest_;
     std::map<std::uint16_t, EnemyHpEntry> enemyHp_;
+    // Host connection/world lifetime, not room/cache lifetime. Cached union
+    // replays carry this admitted producer sequence without restamping.
+    std::uint64_t lastEnemyHpSequence_{0};
     std::set<std::uint16_t> deadEnemies_;
     std::uint64_t rejectedWorld_{0};
     std::map<std::uint32_t, std::uint8_t> progress_; // merged host flags
     std::uint32_t progressVersion_{0};
     std::uint64_t desyncNotices_{0};
+    std::unique_ptr<DesyncCapture> desyncCapture_;
+    std::optional<DesyncCaptureResult> lastDesyncCapture_;
+    std::optional<DesyncSuppressionResult> lastDesyncSuppression_;
+    std::uint64_t nextDesyncReportId_{1}, desyncComparisonSeq_{0};
+    std::string desyncRelayLog_;
+    std::uint64_t desyncRelayLogBytes_{0};
+
+    // Routing proof only, never a replay/snapshot cache. Bounded per requester
+    // connection and cleared at every room/host/session boundary.
+    struct PendingActivation {
+        ActivationRequest request;
+        std::uint64_t receivedMs = 0;
+    };
+    std::map<_ENetPeer*, std::vector<PendingActivation>> pendingActivation_;
 };
 
 } // namespace kh2coop

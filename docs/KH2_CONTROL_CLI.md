@@ -35,6 +35,30 @@ Expected output path on Windows is usually one of:
 - Wait for a specific world/room
 - Focus the KH2 window
 
+### Host world recovery request
+
+```powershell
+kh2ctl world-resync --pid N --slot 1
+kh2ctl world-resync --pid N --slot all
+```
+
+`--pid` must explicitly identify an admitted host mapping; `--slot` accepts
+`1`, `2` or `all`. This opens only an existing compatible WorldBridge 11 mapping,
+without attaching to or reading/writing native game memory. A separate bounded
+CAS mailbox preserves the captured generation, delivery serial and host
+connection. A busy mailbox fails explicitly; the CLI never becomes a second
+producer of the DLL's packet ring. The runtime rechecks that identity before
+requesting the protocol 9 transaction.
+
+`queued:true,nativeConvergence:false` confirms only local queue submission.
+Fresh capture, staged bootstrap and actual native convergence must succeed
+separately; dead/bootstrap ambiguity reports unavailable. Cancellation unarms
+native world authority, and late attachment retains bounded newer continuation.
+See [FORCED_RESYNC.md](FORCED_RESYNC.md) for the contract and open native/remote
+acceptance. Current versions are protocol 9, AvatarBridge 2, WorldBridge 11 and
+CaptureChannel 1. The relay defaults to native traffic; `--simulate` opts into
+legacy simulation and cannot supply native capture.
+
 ### Menu/title interaction
 
 - Send keyboard taps and holds to KH2
@@ -176,6 +200,53 @@ flip model, presents via `Present1`); the D3D11 path isn't implemented.
 - The overlay is drawn into the backbuffer, so it shows on screen and in
   captures. It's off by default.
 
+Successful `capture` JSON retains `processId`, `path`, `width` and `height`,
+and now includes `expectedRequestSeq`, `doneSeq`, `nativeStatus`, `framesWritten`,
+`renderer` and `backbufferFormat`. The expected sequence comes from this actual
+request's submission; completion fields are copied and checked against that
+sequence while the existing caller lease is held. Error paths do not emit a
+successful completion receipt. `clip` keeps its existing response and behavior.
+These are mailbox/render-path observations, not an atomic gameplay snapshot or
+native frame/generation attestation. Retain the actual JSON with the PNG; a
+historical path-only report cannot be backfilled with another capture's fields.
+
+### Existing bridge identity observations
+
+```powershell
+build/Release/avatarctl.exe observe --pid 1234 --samples 2 --interval-ms 250
+```
+
+`observe` requires an explicit PID and opens only existing compatible
+AvatarBridge 2 and WorldBridge 11 mappings. It does not create or repair a
+missing mapping. Samples are bounded to 1..30 with intervals 0..1000 ms. Each
+sample freshly reads checked local/puppet seqlocks and brackets them with
+repeated world slot, generation, delivery, roster, peer-floor and authority
+observations. Full puppet provenance is retained, with the existing admission
+predicate reported separately as `provenanceMatchesWorld`.
+
+`ok:true` means all requested mapping, bracket and slot reads were available;
+it does not mean tags match, authority is Network or native gameplay is ready.
+Stale tags and Unavailable authority remain visible. Missing, incompatible,
+unpublished, torn or changing observations return incomplete samples, null
+unavailable payloads and exit 1. No payload is cached across samples. This is
+semantic read-only use of the existing bridge APIs, not an OS read-only view
+or globally atomic snapshot. Mapping/actor incarnation and native application
+remain unverified. Consume 64-bit JSON identities with an integer-preserving
+parser.
+
+Ten actual CLI controls over owned artificial mappings passed, including
+whole-mapping byte equality and teardown; they are not KH2 gameplay evidence.
+See `build/rig/avatar_observe_owned_receipt_20261003.json`.
+
+The runtime also emits bounded `[runtime-identity] schema=1` lines at existing
+admission, reset, retirement, retry and delivery boundaries. Fields distinguish
+cached admission, runtime-owned generation/delivery/roster, bridge-header
+authority and retained resume pin. Every line keeps
+`nativeBootstrapReady=unverified atomicBinding=0`. A 512-record cap emits an
+explicit gap and shutdown summary; abrupt exit may omit that summary. These
+observations do not prove reconnect recovery or native readiness. No retry or
+authority policy changed.
+
 ### Warp (load a room)
 
 ```powershell
@@ -183,6 +254,11 @@ kh2ctl warp --pid 1234 --world 4 --room 0x1A               # Garden of Assemblag
 kh2ctl warp --pid 1234 --world 5 --room 6 --btl 2          # override one program
 kh2ctl peek --pid 1234 --rva 0x717008:u8,0x9BA928:u64 --samples 40   # RE aid
 ```
+
+`peek` keys each sample by RVA, without the requested type. Requesting different
+types at the same RVA produces duplicate JSON keys; decoding can retain only
+the last value. Use separate calls or reject mixed-type aliases before a batch.
+The scenario runner's raw occupancy collector rejects them explicitly.
 
 `warp` hands the target to the DLL, which calls the game's own transition
 request (the function room-script `Jump`s use, RVA `0x152990`) on the game

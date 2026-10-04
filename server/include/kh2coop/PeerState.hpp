@@ -28,6 +28,11 @@ struct PeerState {
     std::string peerId;
     SlotType assignedSlot{SlotType::Player};
     PeerStatus status{PeerStatus::PendingVersion};
+    std::uint64_t connectionId{0};
+    std::uint64_t deliverySerial{1};
+    bool worldQuarantined{false};
+    std::uint64_t hostSourceFloor{0};
+    std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
 
     // Version gate — set on first message from peer
     std::string gameBuild;
@@ -46,6 +51,7 @@ struct PeerState {
     // comparisons with the host disagreed (and on what).
     bool hasHash{false};
     StateHash lastHash{};
+    std::uint64_t hashReceiptSeq{0}, hashReceiptMs{0}; // relay receipts, NOT native frame IDs
     std::uint32_t mismatchStreak{0};
     std::uint8_t reportedFields{0};
 

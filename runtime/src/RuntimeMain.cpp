@@ -8,9 +8,13 @@
 
 #include "kh2coop/AvatarSync.hpp"
 #include "kh2coop/CameraController.hpp"
+#include "kh2coop/ClientRecovery.hpp"
+#include "kh2coop/DesyncCollector.hpp"
+#include "kh2coop/DesyncUpload.hpp"
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/ReplicaController.hpp"
+#include "kh2coop/ResyncEvidence.hpp"
 #include "kh2coop/Types.hpp"
 
 #include <enet/enet.h>
@@ -31,13 +35,17 @@
 #include <cctype>
 #include <csignal>
 #include <cstdint>
+#include <deque>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <streambuf>
 #include <thread>
 
 #ifdef _WIN32
@@ -51,6 +59,54 @@ using namespace std::chrono_literals;
 constexpr float kRuntimeSnapshotMaxSpeed = 6.0f;
 
 std::atomic_bool g_running {true};
+
+// Retain actual runtime output independently of stdout redirection. Only a
+// bounded raw tail is handed to the diagnostic worker; no disk I/O here.
+class RuntimeLogTail {
+public:
+    struct Snapshot { std::string bytes; std::uint64_t totalBytes {}; };
+    RuntimeLogTail() : out_(*this, std::cout.rdbuf()), err_(*this, std::cerr.rdbuf()) {
+        std::cout.rdbuf(&out_); std::cerr.rdbuf(&err_);
+    }
+    ~RuntimeLogTail() { std::cout.rdbuf(out_.original); std::cerr.rdbuf(err_.original); }
+    Snapshot Take() { std::lock_guard lock(mutex_); return {tail_, total_}; }
+private:
+    class Buffer : public std::streambuf {
+    public:
+        Buffer(RuntimeLogTail& owner, std::streambuf* destination) : original(destination), owner_(owner) {}
+        std::streambuf* original;
+    private:
+        std::streamsize xsputn(const char* data, std::streamsize size) override {
+            const auto written = original->sputn(data, size);
+            if (written > 0) owner_.Append(data, static_cast<std::size_t>(written));
+            return written;
+        }
+        int_type overflow(int_type c) override {
+            if (traits_type::eq_int_type(c, traits_type::eof())) return traits_type::not_eof(c);
+            const auto result = original->sputc(traits_type::to_char_type(c));
+            if (!traits_type::eq_int_type(result, traits_type::eof())) {
+                const char value = traits_type::to_char_type(c); owner_.Append(&value, 1);
+            }
+            return result;
+        }
+        int sync() override { return original->pubsync(); }
+        RuntimeLogTail& owner_;
+    };
+    void Append(const char* data, std::size_t size) {
+        std::lock_guard lock(mutex_);
+        total_ += size;
+        constexpr std::size_t cap = 128 * 1024;
+        if (size >= cap) tail_.assign(data + size - cap, cap);
+        else {
+            if (tail_.size() + size > cap) tail_.erase(0, tail_.size() + size - cap);
+            tail_.append(data, size);
+        }
+    }
+    std::mutex mutex_;
+    std::string tail_;
+    std::uint64_t total_ {};
+    Buffer out_, err_;
+};
 
 struct RuntimeConfig {
     kh2coop::RuntimeMode runtimeMode {kh2coop::RuntimeMode::CampaignCoop};
@@ -70,6 +126,8 @@ struct RuntimeConfig {
     std::string modHash;
     std::uint32_t heartbeatIntervalMs {1000};
     std::uint32_t snapshotIntervalMs {16};  // send owned actor state at tick rate
+    std::string desyncDir {"build/rig/desync-local"};
+    std::string injectLogPath; // explicitly registered launch log; never guessed from PID
 };
 
 struct LaunchOptions {
@@ -88,6 +146,7 @@ struct LaunchOptions {
     std::optional<std::uint16_t> serverPortOverride;
     std::optional<std::string> peerIdOverride;
     std::optional<std::string> contentHashOverride;
+    std::optional<std::string> desyncDirOverride, injectLogPathOverride;
     // Bind to one KH2 instance when several run (VUH-1492).
     std::optional<std::uint32_t> pid;
     // Pre-D2 replica path: apply relay actor snapshots to the game, write
@@ -217,6 +276,8 @@ void printUsage() {
         << "  --port <port>         Server port (default 7946)\n"
         << "  --peer-id <id>        Peer identifier (default player-1)\n"
         << "  --content <hash>      Content hash (default none)\n"
+        << "  --desync-dir <path>   Local diagnostic spool (default build/rig/desync-local)\n"
+        << "  --inject-log <path>   Exact log registered by the launcher, if available\n"
         << "  --network             Enable networking (connect to server)\n"
         << "  --pid <pid>           Attach to this KH2 process (several instances)\n"
         << "  --legacy-replica      Also run the old actor-snapshot replica path\n"
@@ -316,6 +377,8 @@ bool loadConfigFile(const std::string& path, RuntimeConfig& config,
         }
 
         // Networking config keys
+        if (key == "desync_dir") { config.desyncDir = value; continue; }
+        if (key == "inject_log") { config.injectLogPath = value; continue; }
         if (key == "networking" || key == "networking_enabled") {
             if (!parseBool(value, config.networkingEnabled)) {
                 error = "Invalid networking on line " +
@@ -496,6 +559,13 @@ bool parseArgs(int argc, char* argv[], LaunchOptions& options,
             continue;
         }
 
+        if (arg == "--desync-dir" && i + 1 < argc) {
+            options.desyncDirOverride = argv[++i]; continue;
+        }
+        if (arg == "--inject-log" && i + 1 < argc) {
+            options.injectLogPathOverride = argv[++i]; continue;
+        }
+
         if (arg == "--legacy-replica") {
             options.legacyReplica = true;
             continue;
@@ -583,6 +653,7 @@ bool panicHotkeyPressed() {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    RuntimeLogTail runtimeLog;
     // Unbuffered so redirected logs survive a kill (scenario runner).
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
@@ -654,6 +725,8 @@ int main(int argc, char* argv[]) {
     if (options.contentHashOverride.has_value()) {
         options.config.contentHash = *options.contentHashOverride;
     }
+    if (options.desyncDirOverride) options.config.desyncDir = *options.desyncDirOverride;
+    if (options.injectLogPathOverride) options.config.injectLogPath = *options.injectLogPathOverride;
 
     std::cout << "[Runtime] Booting runtime scaffold\n";
     std::cout << "[Runtime] config=" << options.configPath
@@ -735,8 +808,16 @@ int main(int argc, char* argv[]) {
     // bridge; we send it to the relay, feed received avatars to AvatarSync and
     // publish interpolated puppet poses back for the DLL to apply.
     kh2coop::AvatarSync avatarSync(options.config.ownedSlot);
+    std::string avatarSessionId;
+    // Assigned after the existing diagnostic binding is available. Earlier
+    // world-reset lambdas invoke it only at their actual state boundaries.
+    std::function<void(const char*)> observeIdentity;
 #ifdef _WIN32
     kh2coop::AvatarBridge avatarBridge;
+    const auto publishInactiveAvatars = [&avatarBridge]() {
+        for (int index = 0; index < kh2coop::AVATAR_BRIDGE_PUPPETS; ++index)
+            avatarBridge.PublishPuppet(index, kh2coop::PuppetPose {});
+    };
     // Discrete world events (transitions, enemies, claims, progress) as
     // encoded packets: DLL -> relay and relay -> DLL.
     kh2coop::WorldBridge worldBridge;
@@ -744,76 +825,311 @@ int main(int argc, char* argv[]) {
     kh2coop::WorldInbox worldInbox;
     std::uint8_t worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
     std::string worldSessionHost;
+    std::string worldSessionId;
+    std::array<std::uint64_t, 3> worldConnectionIds {};
+    std::array<std::uint64_t, 3> worldPeerDeliverySerials {};
+    std::uint64_t worldDeliverySerial = 0;
+    bool worldQuarantined = true;
+    std::optional<std::pair<kh2coop::ResyncBegin, kh2coop::ResyncSnapshot>> pendingNativeSnapshot;
+    std::deque<std::vector<std::uint8_t>> pendingNativeContinuation;
+    std::size_t pendingNativeContinuationBytes = 0;
+    const auto clearNativeContinuation = [&]() {
+        pendingNativeContinuation.clear();
+        pendingNativeContinuationBytes = 0;
+    };
+    std::uint64_t worldHostConnectionId = 0, worldSelfConnectionId = 0;
+    std::uint32_t worldSessionGeneration = 0;
     const auto resetWorldSession = [&](std::uint8_t slot) {
+        worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+        avatarSync.clear();
+        publishInactiveAvatars();
         worldInbox.Clear();
+        worldBridge.SetDeliverySerial(worldDeliverySerial);
+        worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+        worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
+        worldBridge.SetConnectionIds(worldConnectionIds);
         worldBridge.SetLocalSlot(slot);
+        if (slot < 3 && worldConnectionIds[0] && worldConnectionIds[slot] &&
+            worldDeliverySerial && !worldQuarantined)
+            worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Network);
         // Bridge-local reset shares the FIFO with world packets, so it cannot
         // race with a DLL frame and discard the new session's first transition.
         if (!worldInbox.Receive(worldBridge,
-                kh2coop::encodePacket(kh2coop::PacketType::SessionState, {}), worldStats)) {
+                kh2coop::encodeWorldSessionReset(worldSessionGeneration, worldDeliverySerial), worldStats)) {
             std::cerr << "[Runtime] Could not queue world session reset\n";
             g_running = false;
         }
+        if (observeIdentity) observeIdentity("world-reset");
     };
 #endif
     std::unique_ptr<kh2coop::NetworkClient> netClient;
-    std::atomic_bool netConnected {false};
+    std::atomic_bool netReady {false};
+#ifdef _WIN32
+    const auto enqueueWorld = [&](const std::vector<std::uint8_t>& packet) {
+        if (worldInbox.Receive(worldBridge, packet, worldStats)) return true;
+        if (netClient) netClient->failWorldResync(kh2coop::ResyncResultReason::Overflow,
+                                                 "runtime world inbox overflow");
+        std::cerr << "[Runtime] World inbox overflow; stopping with incomplete world state\n";
+        g_running = false;
+        return false;
+    };
+    const auto deliverNativeSnapshot = [&](const kh2coop::ResyncBegin& begin,
+                                           const kh2coop::ResyncSnapshot& snapshot) {
+        if (!worldBridge.IsOpen()) {
+            pendingNativeSnapshot = std::make_pair(begin, snapshot);
+            return;
+        }
+        if (!netClient || !netClient->pendingResync() ||
+            netClient->pendingResync()->request.key != begin.key) return;
+        const auto plan = *netClient->pendingResync();
+        if (begin.phase == kh2coop::ResyncPhase::Bootstrap) {
+            worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+            avatarSync.clear();
+            publishInactiveAvatars();
+            worldInbox.Clear();
+            worldBridge.SetDeliverySerial(worldDeliverySerial);
+            worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+            worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
+            worldBridge.SetConnectionIds(worldConnectionIds);
+            worldBridge.SetLocalSlot(worldSessionSlot);
+            if (observeIdentity) observeIdentity("bootstrap-generation");
+            // Requeue the immutable fence before its new marker, including
+            // lazy attachment/full old FIFO. Duplicate plans cannot renew it.
+            if (!enqueueWorld(kh2coop::encode(plan)) ||
+                !enqueueWorld(kh2coop::encodeWorldSessionReset(worldSessionGeneration,
+                                                              worldDeliverySerial))) return;
+        }
+        if (!enqueueWorld(kh2coop::encodeNativeResyncSnapshot(begin, snapshot))) return;
+        // The client can receive the complete snapshot and newer ordered world
+        // records before KH2 attaches. Keep those records separately from the
+        // old bootstrap FIFO that the new generation deliberately retires.
+        auto continuation = std::move(pendingNativeContinuation);
+        clearNativeContinuation();
+        for (const auto& packet : continuation) {
+            if (!enqueueWorld(packet)) return;
+        }
+        worldQuarantined = false;
+        worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Network);
+        if (observeIdentity) observeIdentity("snapshot-delivered");
+    };
+#endif
+    kh2coop::ClientRecovery recovery(options.config.ownedSlot);
+    std::optional<kh2coop::SessionResumePin> resumePin;
+    bool membershipInvalidated = false;
+    kh2coop::DesyncCollectorOptions desyncOptions;
+    desyncOptions.spoolRoot = options.config.desyncDir;
+    desyncOptions.injectLogPath = options.config.injectLogPath;
+    kh2coop::DesyncCollector desyncCollector(std::move(desyncOptions));
+    kh2coop::DesyncUpload desyncUpload;
+    std::string diagnosticSessionId;
+    std::array<std::uint64_t, 3> diagnosticConnections {};
+    std::uint8_t diagnosticSlot {0xFF};
+    kh2coop::DesyncKey diagnosticKey;
+    std::uint64_t diagnosticDeadlineMs {};
+    std::optional<kh2coop::RoomState> diagnosticRoom; // existing loop observation, never a new native read
+    const auto recoveryNow = []() {
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    };
+    const auto diagnosticBinding = [&]() {
+        kh2coop::DesyncBinding binding;
+        binding.sessionId = diagnosticSessionId;
+        binding.connections = diagnosticConnections;
+        binding.localSlot = diagnosticSlot;
+        binding.admitted = netReady && netClient && netClient->ready();
+        binding.attachedPid = game.IsAttached() ? game.ProcessId() : 0;
+#ifdef _WIN32
+        binding.localGeneration = worldSessionGeneration;
+        binding.generationValid = worldBridge.IsOpen() && worldSessionGeneration != 0 &&
+            worldBridge.GetPuppetAuthorityMode() == kh2coop::PuppetAuthorityMode::Network;
+#endif
+        return binding;
+    };
+    constexpr std::uint32_t identityLogLimit = 512;
+    std::uint32_t identityLogAttempts = 0, identityLogSuppressed = 0, identityLogErrors = 0;
+    const auto incrementDiagnostic = [](std::uint32_t& value) noexcept {
+        if (value != std::numeric_limits<std::uint32_t>::max()) ++value;
+    };
+    observeIdentity = [&](const char* stage) noexcept {
+        if (!options.config.networkingEnabled) return;
+        if (identityLogAttempts == identityLogLimit) {
+            incrementDiagnostic(identityLogSuppressed);
+            if (identityLogSuppressed == 1) {
+                try {
+                    std::cout << "[runtime-identity-gap] schema=1 reason=budget-exhausted limit="
+                              << identityLogLimit << " suppressed=1 errors=" << identityLogErrors << '\n';
+                } catch (...) { incrementDiagnostic(identityLogErrors); }
+            }
+            return;
+        }
+        ++identityLogAttempts;
+        try {
+            const auto binding = diagnosticBinding(); // cached attachment; no native read
+            const auto validSession = [](const std::string& value) {
+                return value.empty() || (value.size() == 32 && std::all_of(value.begin(), value.end(),
+                    [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }));
+            };
+            const auto peerHex = [](const std::string& value) {
+                constexpr char digits[] = "0123456789abcdef";
+                std::string encoded;
+                const auto length = std::min<std::size_t>(value.size(), 128);
+                encoded.reserve(length * 2);
+                for (std::size_t index = 0; index < length; ++index) {
+                    const auto byte = static_cast<unsigned char>(value[index]);
+                    encoded.push_back(digits[byte >> 4]); encoded.push_back(digits[byte & 15]);
+                }
+                return encoded.empty() ? std::string("-") : encoded;
+            };
+            const bool sessionValid = validSession(binding.sessionId);
+            const bool pinValid = !resumePin || validSession(resumePin->sessionId);
+            std::ostringstream out;
+            out << "[runtime-identity] schema=1 seq=" << identityLogAttempts << " stage=" << stage
+                << " observationClock=runtime-steady-ms observationMs=" << recoveryNow()
+                << " identitySource=runtime-admission-snapshot identityCurrent=" << binding.admitted
+                << " session=" << (sessionValid && !binding.sessionId.empty() ? binding.sessionId : "-")
+                << " peerHex=" << peerHex(options.config.peerId)
+                << " peerBytes=" << options.config.peerId.size()
+                << " stringsComplete=" << (sessionValid && pinValid && options.config.peerId.size() <= 128)
+                << " slot=" << static_cast<unsigned>(binding.localSlot)
+                << " selfConnection=" << (binding.localSlot < 3 ? binding.connections[binding.localSlot] : 0)
+                << " hostConnection=" << binding.connections[0]
+                << " roster0=" << binding.connections[0] << " roster1=" << binding.connections[1]
+                << " roster2=" << binding.connections[2] << " attachedPid=" << binding.attachedPid
+                << " generation=" << binding.localGeneration
+                << " generationValid=" << binding.generationValid;
+#ifdef _WIN32
+            out << " generationSource=runtime-owned delivery=" << worldDeliverySerial << " deliverySource=runtime-owned"
+                << " worldSlot=" << static_cast<unsigned>(worldSessionSlot)
+                << " worldRoster0=" << worldConnectionIds[0] << " worldRoster1=" << worldConnectionIds[1]
+                << " worldRoster2=" << worldConnectionIds[2] << " worldRosterSource=runtime-owned"
+                << " peerFloor0=" << worldPeerDeliverySerials[0]
+                << " peerFloor1=" << worldPeerDeliverySerials[1]
+                << " peerFloor2=" << worldPeerDeliverySerials[2] << " peerFloorSource=runtime-owned"
+                << " authority=" << static_cast<unsigned>(worldBridge.GetPuppetAuthorityMode())
+                << " authoritySource=bridge-header bridgeOpen=" << worldBridge.IsOpen()
+                << " quarantine=" << worldQuarantined;
+#else
+            out << " generationSource=unavailable delivery=0 deliverySource=unavailable worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0"
+                   " worldRosterSource=unavailable peerFloor0=0 peerFloor1=0 peerFloor2=0"
+                   " peerFloorSource=unavailable authority=0 authoritySource=unavailable bridgeOpen=0 quarantine=1";
+#endif
+            out << " admitted=" << binding.admitted << " transportConnected=" << (netClient && netClient->isConnected())
+                << " recoveryState=" << static_cast<unsigned>(recovery.state())
+                << " recoveryAttempts=" << recovery.attempts()
+                << " pinPresent=" << resumePin.has_value()
+                << " pinSession=" << (resumePin && pinValid && !resumePin->sessionId.empty() ? resumePin->sessionId : "-")
+                << " pinHostConnection=" << (resumePin ? resumePin->hostConnectionId : 0)
+                << " pinSlot=" << (resumePin ? static_cast<unsigned>(resumePin->localSlot) : 255)
+                << " nativeBootstrapReady=unverified atomicBinding=0 errors=" << identityLogErrors << '\n';
+            std::cout << out.str();
+            if (!std::cout) incrementDiagnostic(identityLogErrors);
+        } catch (...) {
+            // Observation failures never alter admission, recovery, or world state.
+            incrementDiagnostic(identityLogErrors);
+        }
+    };
+    const auto diagnosticMetadata = [&]() {
+        const auto binding = diagnosticBinding();
+        const auto ring = runtimeLog.Take();
+        std::ostringstream out;
+        out << "observationClock=runtime-steady-ms observationMs=" << recoveryNow()
+            << " protocol=" << kh2coop::PROTOCOL_VERSION
+            << " session=" << binding.sessionId
+            << " slot=" << static_cast<unsigned>(binding.localSlot)
+            << " admitted=" << binding.admitted
+            << " recoveryState=" << static_cast<unsigned>(recovery.state())
+            << " recoveryAttempts=" << recovery.attempts()
+            << " attachedPid=" << binding.attachedPid
+            << " localGeneration=" << binding.localGeneration
+            << " generationValid=" << binding.generationValid
+            << " connections=" << binding.connections[0] << ',' << binding.connections[1] << ',' << binding.connections[2]
+            << "\nnativeBootstrapReadiness=unverified; metadata is a local observation, not an atomic cross-peer snapshot"
+            << "\nruntimeRing totalBytes=" << ring.totalBytes
+            << " rangeBegin=" << ring.totalBytes - ring.bytes.size()
+            << " rangeEnd=" << ring.totalBytes
+            << " truncated=" << (ring.totalBytes > ring.bytes.size()) << '\n';
+        if (diagnosticRoom) out << "lastObservedRoom " << describeRoomState(*diagnosticRoom) << '\n';
+        else out << "lastObservedRoom=unavailable\n";
+        if (netClient) {
+            const auto link = netClient->linkStats();
+            out << "transport connected=" << netClient->isConnected() << " statsValid=" << link.valid
+                << " rttMs=" << link.rttMs << " appRttMs=" << link.appRttMs
+                << " lossPermille=" << link.lossPermille << " avatarLossPermille=" << link.avatarLossPermille << '\n';
+        }
+#ifdef _WIN32
+        out << "bridges avatarVersion=" << kh2coop::AVATAR_BRIDGE_VERSION
+            << " avatarOpen=" << avatarBridge.IsOpen()
+            << " worldVersion=" << kh2coop::WORLD_BRIDGE_VERSION
+            << " worldOpen=" << worldBridge.IsOpen()
+            << " worldAuthority=" << static_cast<unsigned>(worldBridge.GetPuppetAuthorityMode())
+            << " worldToNet=" << worldStats.toNet << " worldToDll=" << worldStats.toDll
+            << " rejected=" << worldStats.rejected << " ringFull=" << worldStats.dllRingFull
+            << " deferred=" << worldStats.deferred << " inboxOverflow=" << worldStats.inboxOverflow
+            << " ephemeralDropped=" << worldStats.ephemeralDropped
+            << " retiredOutgoing=" << worldStats.retiredOutgoing << '\n';
+#else
+        out << "bridges=unavailable-on-this-platform\n";
+#endif
+        return out.str();
+    };
+    const auto retireNetworkState = [&]() {
+        observeIdentity("retire-before");
+        netReady = false;
+        desyncCollector.Cancel();
+        desyncUpload.Cancel();
+        diagnosticSessionId.clear();
+        diagnosticConnections = {};
+        diagnosticSlot = 0xFF;
+        std::lock_guard<std::mutex> lock(replicaMtx);
+        replica.Reset();
+        avatarSessionId.clear();
+        avatarSync.setRoster(static_cast<kh2coop::SlotType>(0xFF), {});
+#ifdef _WIN32
+        closeMailbox();
+        worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
+        worldSessionHost.clear();
+        worldSessionId.clear();
+        worldHostConnectionId = worldSelfConnectionId = 0;
+        worldConnectionIds = {};
+        worldPeerDeliverySerials = {};
+        worldDeliverySerial = 0;
+        worldQuarantined = true;
+        pendingNativeSnapshot.reset();
+        clearNativeContinuation();
+        resetWorldSession(kh2coop::WORLD_SLOT_UNKNOWN);
+        worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN, kh2coop::WORLD_NET_UNKNOWN);
+#endif
+        observeIdentity("retire-after");
+    };
 
     if (options.config.networkingEnabled) {
         kh2coop::ClientCallbacks callbacks;
 
-        callbacks.onConnected = [&netConnected,
-#ifdef _WIN32
-                                 &game,
-                                 &mailboxWriter,
-#endif
-                                 &options]() {
-            netConnected = true;
-            std::cout << "[Runtime] Network: connected to server\n";
+        callbacks.onConnected = [&]() {
+            recovery.connected(recoveryNow());
+            std::cout << "[Runtime] Network: transport connected; awaiting verified roster\n";
+            observeIdentity("transport-connected");
+        };
 
-#ifdef _WIN32
-            if (options.config.networkingEnabled && game.IsAttached() &&
-                !mailboxWriter.IsOpen() &&
-                mailboxWriter.Create(static_cast<DWORD>(game.ProcessId()))) {
-                std::cout << "[Runtime] Input mailbox created for PID="
-                          << game.ProcessId() << "\n";
+        callbacks.onDisconnected = retireNetworkState;
+        callbacks.onClosed = [&](const kh2coop::ClientCloseInfo& info) {
+            recovery.closed(recoveryNow(), info);
+            std::cout << "[Runtime] Network: closed code=" << info.rawCode
+                      << " reason=" << static_cast<std::uint32_t>(info.reason) << "\n";
+            observeIdentity("transport-closed");
+        };
+
+        callbacks.onSessionState = [&](const kh2coop::SessionState& ss) {
+            if (!netClient || !netClient->isConnected()) return;
+            if (!netClient->ready()) {
+                if (resumePin) membershipInvalidated = true;
+                retireNetworkState();
+                return;
             }
-#endif
-        };
-
-        callbacks.onDisconnected = [&netConnected, &replica, &replicaMtx
-#ifdef _WIN32
-                                    , &closeMailbox, &worldBridge, &worldInbox, &avatarSync,
-                                    &worldSessionSlot, &resetWorldSession
-#endif
-                                    ]() {
-            netConnected = false;
-            std::cout << "[Runtime] Network: disconnected from server\n";
-            std::lock_guard<std::mutex> lock(replicaMtx);
-            replica.Reset();
-
-#ifdef _WIN32
-            closeMailbox();
-            worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
-            resetWorldSession(kh2coop::WORLD_SLOT_UNKNOWN);
-            worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN,
-                                    kh2coop::WORLD_NET_UNKNOWN);
-            avatarSync.clear();
-#endif
-        };
-
-        callbacks.onSessionState = [
-#ifdef _WIN32
-            &options, &worldSessionSlot, &worldSessionHost, &worldBridge, &worldInbox,
-            &resetWorldSession,
-#endif
-            &avatarSync, &netConnected](const kh2coop::SessionState& ss) {
-            if (!netConnected) return;
             std::cout << "[Runtime] Network: SessionState session="
                       << ss.sessionId
                       << " actors=" << ss.actors.size()
                       << " room=" << describeRoomState(ss.room) << "\n";
-#ifdef _WIN32
             const auto host = std::find_if(ss.actors.begin(), ss.actors.end(),
                 [](const auto& actor) { return actor.slot == kh2coop::SlotType::Player; });
             const auto self = std::find_if(ss.actors.begin(), ss.actors.end(),
@@ -821,27 +1137,99 @@ int main(int argc, char* argv[]) {
                     return actor.ownerPeerId == options.config.peerId &&
                            actor.slot == options.config.ownedSlot;
                 });
-            const auto slot = host != ss.actors.end() && self != ss.actors.end()
-                ? static_cast<std::uint8_t>(self->slot) : kh2coop::WORLD_SLOT_UNKNOWN;
+            const auto slot = host != ss.actors.end() && self != ss.actors.end() &&
+                              host->connectionId != 0 && self->connectionId != 0
+                ? static_cast<std::uint8_t>(self->slot) : std::uint8_t {0xFF};
             const auto hostPeer = host != ss.actors.end() ? host->ownerPeerId : std::string {};
-            if (slot != worldSessionSlot || hostPeer != worldSessionHost) {
-                worldSessionSlot = slot;
-                worldSessionHost = hostPeer;
-                resetWorldSession(slot);
+            const auto hostId = host != ss.actors.end() ? host->connectionId : 0;
+            const auto selfId = self != ss.actors.end() ? self->connectionId : 0;
+            if (resumePin && (ss.sessionId != resumePin->sessionId ||
+                hostPeer != resumePin->hostPeerId || hostId != resumePin->hostConnectionId ||
+                slot != static_cast<std::uint8_t>(resumePin->localSlot))) {
+                membershipInvalidated = true;
+                retireNetworkState();
+                return;
             }
-            if (worldSessionSlot == kh2coop::WORLD_SLOT_UNKNOWN) {
-                avatarSync.clear();
+            recovery.admitted(recoveryNow(), selfId);
+            if (recovery.state() != kh2coop::ClientRecovery::State::Admitted) {
+                retireNetworkState();
+                return;
+            }
+            if (!resumePin) {
+                resumePin = kh2coop::SessionResumePin {ss.sessionId, hostPeer, hostId,
+                                                     options.config.peerId, options.config.ownedSlot};
+            }
+            netReady = true; // verified membership, not native bootstrap readiness
+#ifdef _WIN32
+            if (game.IsAttached() && !mailboxWriter.IsOpen() &&
+                mailboxWriter.Create(static_cast<DWORD>(game.ProcessId()))) {
+                std::cout << "[Runtime] Input mailbox created for PID=" << game.ProcessId() << "\n";
             }
 #endif
+            std::lock_guard<std::mutex> lock(replicaMtx);
+            std::array<std::uint64_t, 3> avatarConnections {};
+            if (slot < 3) {
+                for (const auto& member : ss.actors) {
+                    const auto memberSlot = static_cast<std::uint8_t>(member.slot);
+                    if (memberSlot < avatarConnections.size())
+                        avatarConnections[memberSlot] = member.connectionId;
+                }
+            }
+            if (avatarSessionId != ss.sessionId) avatarSync.clear();
+            avatarSessionId = ss.sessionId;
+            avatarSync.setRoster(static_cast<kh2coop::SlotType>(slot), avatarConnections);
+            diagnosticSessionId = ss.sessionId;
+            diagnosticConnections = avatarConnections;
+            diagnosticSlot = slot;
+#ifdef _WIN32
+            const bool rosterChanged = worldConnectionIds != avatarConnections;
+            for (std::size_t index = 0; index < worldPeerDeliverySerials.size(); ++index) {
+                if (!avatarConnections[index]) worldPeerDeliverySerials[index] = 0;
+                else if (avatarConnections[index] != worldConnectionIds[index])
+                    worldPeerDeliverySerials[index] = 1;
+            }
+            worldConnectionIds = avatarConnections;
+            if (slot != worldSessionSlot || hostPeer != worldSessionHost || ss.sessionId != worldSessionId ||
+                hostId != worldHostConnectionId || selfId != worldSelfConnectionId) {
+                worldSessionSlot = slot;
+                worldSessionHost = hostPeer;
+                worldSessionId = ss.sessionId;
+                worldHostConnectionId = hostId;
+                worldSelfConnectionId = selfId;
+                worldDeliverySerial = 0;
+                worldQuarantined = true;
+                pendingNativeSnapshot.reset();
+                clearNativeContinuation();
+                resetWorldSession(slot);
+            } else {
+                // Membership changes retire queued claims without resetting the
+                // room or losing the host's already-announced world state.
+                if (rosterChanged) {
+                    worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                    publishInactiveAvatars();
+                    worldBridge.SetConnectionIds(worldConnectionIds);
+                    worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+                    if (slot < 3 && worldConnectionIds[0] && worldConnectionIds[slot] &&
+                        worldDeliverySerial && !worldQuarantined)
+                        worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Network);
+                }
+            }
+#endif
+            observeIdentity("roster-admitted");
         };
 
-        callbacks.onRejected = [](const kh2coop::HelloReject& reject) {
+        callbacks.onRejected = [&](const kh2coop::HelloReject& reject) {
+            retireNetworkState();
+            recovery.rejected(recoveryNow(), reject.code == 0
+                ? kh2coop::DisconnectReason::AdmissionRejected
+                : static_cast<kh2coop::DisconnectReason>(reject.code));
             std::cout << "[Runtime] Network: refused by relay: " << reject.reason
                       << "\n";
+            observeIdentity("admission-rejected");
         };
 
         callbacks.onActorSnapshot =
-            [&replica, &replicaMtx,
+            [&replica, &replicaMtx, &netReady,
 #ifdef _WIN32
              &mailboxWriter,
 #endif
@@ -850,7 +1238,7 @@ int main(int argc, char* argv[]) {
                 const kh2coop::ActorSnapshot& snap) {
                 // The relay's simulated actors would overwrite the local
                 // Sora (VUH-1492); avatars drive puppets instead.
-                if (!legacyReplica) return;
+                if (!legacyReplica || !netReady) return;
                 // Skip snapshots for our own slot — we are authoritative.
                 if (snap.actor.slot == ownedSlot) return;
 
@@ -895,30 +1283,141 @@ int main(int argc, char* argv[]) {
             };
 
         callbacks.onEnemySnapshot =
-            [&replica, &replicaMtx](const kh2coop::EnemySnapshot& snap) {
+            [&replica, &replicaMtx, &netReady](const kh2coop::EnemySnapshot& snap) {
+                if (!netReady) return;
                 std::lock_guard<std::mutex> lock(replicaMtx);
                 replica.ApplyEnemySnapshot(snap);
             };
 
-        callbacks.onAvatarState = [&avatarSync, &replicaMtx, &netConnected](
-                                      const kh2coop::AvatarState& avatar) {
-            if (!netConnected) return;
+        callbacks.onAvatarState = [&avatarSync, &replicaMtx, &netReady](
+                                      const kh2coop::AvatarRelay& avatar) {
+            if (!netReady) return;
             std::lock_guard<std::mutex> lock(replicaMtx);
             avatarSync.onRemote(avatar);
         };
 
-#ifdef _WIN32
-        callbacks.onWorldPacket = [&worldBridge, &worldStats, &worldInbox,
-                                  &netConnected, &worldSessionSlot](
-                                      const std::vector<std::uint8_t>& packet) {
-            if (!netConnected || worldSessionSlot == kh2coop::WORLD_SLOT_UNKNOWN) return;
-            if (!worldInbox.Receive(worldBridge, packet, worldStats)) {
-                std::cerr << "[Runtime] World inbox overflow; stopping rather than "
-                             "continuing with incomplete world state\n";
-                g_running = false;
-            }
+        callbacks.onDesyncNotice = [](const kh2coop::DesyncNotice& notice) {
+            std::cout << "[Runtime] Desync notice epoch=" << notice.epoch
+                      << " slot=" << static_cast<unsigned>(notice.slot)
+                      << " fields=" << static_cast<unsigned>(notice.fields) << '\n';
         };
+        callbacks.onDesyncCaptureRequest = [&](const kh2coop::DesyncCaptureRequest& request) {
+            const auto now = recoveryNow();
+            const auto binding = diagnosticBinding();
+            if (desyncUpload.State() == kh2coop::DesyncUploadState::Sending ||
+                !desyncCollector.Start(request, binding, diagnosticMetadata(), runtimeLog.Take().bytes)) {
+                std::cerr << "[Runtime] Desync collection unavailable/busy report=" << request.key.reportId << '\n';
+                return;
+            }
+            diagnosticKey = request.key;
+            diagnosticDeadlineMs = now + request.remainingMs;
+            std::cout << "[Runtime] Desync collection started report=" << request.key.reportId
+                      << " remainingMs=" << request.remainingMs << '\n';
+        };
+
+#ifdef _WIN32
+        callbacks.onWorldBinding = [&](const kh2coop::WorldBinding& binding) {
+            if (binding.selfConnectionId != worldSelfConnectionId ||
+                binding.hostConnectionId != worldHostConnectionId || binding.sessionId != worldSessionId) return;
+            const bool initial = worldDeliverySerial == 0;
+            if (worldDeliverySerial == binding.deliverySerial) return;
+            worldDeliverySerial = binding.deliverySerial;
+            worldPeerDeliverySerials[binding.selfSlot] = binding.deliverySerial;
+            worldBridge.SetDeliverySerial(worldDeliverySerial);
+            worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+            worldQuarantined = !initial;
+            if (worldQuarantined) {
+                worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                avatarSync.clear();
+                publishInactiveAvatars();
+                worldInbox.Clear();
+                pendingNativeSnapshot.reset();
+                clearNativeContinuation();
+            } else if (worldBridge.IsOpen()) {
+                if (!worldInbox.BindSessionGeneration(worldSessionGeneration, worldStats,
+                                                       worldDeliverySerial)) {
+                    g_running = false;
+                    observeIdentity("world-binding-failed");
+                    return;
+                }
+                worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Network);
+            }
+            observeIdentity("world-binding");
+        };
+        callbacks.onWorldEnvelope = [&](const kh2coop::WorldEnvelope& envelope) {
+            if (!netReady || worldSessionSlot == kh2coop::WORLD_SLOT_UNKNOWN ||
+                envelope.scope.kind != kh2coop::WorldSourceKind::Native) return;
+            if (worldQuarantined && (!netClient || !netClient->pendingResync())) return;
+            if (pendingNativeSnapshot && !worldBridge.IsOpen()) {
+                const auto& begin = pendingNativeSnapshot->first;
+                if (envelope.scope.hostSourceSerial <= begin.snapshotCut) return;
+                if (envelope.packet.empty()) {
+                    netClient->failWorldResync(kh2coop::ResyncResultReason::InvalidSnapshot,
+                                               "empty native continuation");
+                    return;
+                }
+                const auto type = static_cast<kh2coop::PacketType>(envelope.packet.front());
+                if (kh2coop::isEphemeralWorldPacket(type)) {
+                    ++worldStats.ephemeralDropped;
+                    return;
+                }
+                auto packet = kh2coop::encode(envelope);
+                if (pendingNativeContinuation.size() >= kh2coop::RESYNC_MAX_CONTINUATION_RECORDS ||
+                    packet.size() > kh2coop::RESYNC_MAX_CONTINUATION_BYTES - pendingNativeContinuationBytes) {
+                    ++worldStats.inboxOverflow;
+                    netClient->failWorldResync(kh2coop::ResyncResultReason::Overflow,
+                                               "unattached native continuation overflow");
+                    return;
+                }
+                pendingNativeContinuationBytes += packet.size();
+                pendingNativeContinuation.push_back(std::move(packet));
+                ++worldStats.deferred;
+                return;
+            }
+            enqueueWorld(kh2coop::encode(envelope));
+        };
+        callbacks.onResyncPlan = [&](const kh2coop::ResyncPlan& plan) {
+            for (std::size_t index = 0; index < plan.targetCount; ++index)
+                worldPeerDeliverySerials[plan.targets[index].slot] = plan.targets[index].deliverySerial;
+            // Atomic floors retire reverse traffic already past network admission.
+            worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+            if (worldSessionSlot != 0 && plan.phase == kh2coop::ResyncPhase::Bootstrap) {
+                worldQuarantined = true;
+                worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                avatarSync.clear();
+                publishInactiveAvatars();
+            }
+            enqueueWorld(kh2coop::encode(plan));
+            observeIdentity("resync-fenced");
+        };
+        callbacks.onResyncSnapshot = deliverNativeSnapshot;
 #endif
+        callbacks.onResyncResult = [&](const kh2coop::ResyncResult& result) {
+            std::cout << kh2coop::formatResyncResultEvidence(result, "runtime", diagnosticSlot,
+                diagnosticSlot < diagnosticConnections.size() ? diagnosticConnections[diagnosticSlot] : 0)
+                      << '\n';
+#ifdef _WIN32
+            pendingNativeSnapshot.reset();
+            clearNativeContinuation();
+            if (worldSessionSlot != 0 && result.reason != kh2coop::ResyncResultReason::Converged) {
+                worldQuarantined = true;
+                worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                avatarSync.clear();
+                publishInactiveAvatars();
+                worldInbox.Clear();
+                // Invalidate native authority immediately, before the game
+                // consumes another frame of an already staged bootstrap.
+                // Keep the network delivery floor for a later authorized
+                // resync, while this native generation remains unarmed.
+                worldBridge.SetDeliverySerial(0);
+                worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
+                observeIdentity("resync-cancel-generation");
+                if (!enqueueWorld(kh2coop::encodeWorldSessionReset(worldSessionGeneration, 0))) return;
+            }
+            enqueueWorld(kh2coop::encode(result));
+#endif
+            observeIdentity("resync-result");
+        };
 
         callbacks.onEvent = [](const kh2coop::EventMessage& evt) {
             std::cout << "[Runtime] Network: Event type="
@@ -949,11 +1448,13 @@ int main(int argc, char* argv[]) {
                       << options.link.lossRate * 100.0f << "%\n";
         }
 
-        if (!netClient->connect()) {
+        if (recovery.start(recoveryNow()) == kh2coop::ClientRecovery::Action::Connect &&
+            !netClient->connect()) {
             std::cerr << "[Runtime] Failed to initiate network connection\n";
-            // Continue in offline mode rather than aborting.
-            netClient.reset();
+            retireNetworkState();
+            recovery.initiationFailed(recoveryNow());
         }
+        observeIdentity("initial-connect-attempted");
     }
 
     bool cameraOverrideEnabled = options.config.cameraOverrideEnabled;
@@ -966,6 +1467,7 @@ int main(int argc, char* argv[]) {
     auto lastHeartbeatAt = std::chrono::steady_clock::now();
     auto lastSnapshotAt = std::chrono::steady_clock::now();
     std::uint32_t snapshotSeq = 0;
+    auto lastRecoveryState = kh2coop::ClientRecovery::State::Idle;
 
 #ifdef _WIN32
     // Avatar exchange: local avatar out, interpolated puppet poses in. It runs
@@ -977,7 +1479,13 @@ int main(int argc, char* argv[]) {
     const auto pumpAvatars = [&](std::uint16_t worldId, std::uint16_t roomId) {
         pumpWorld = worldId;
         pumpRoom = roomId;
-        if (!netClient || !netConnected || !avatarBridge.IsOpen()) return;
+        if (!avatarBridge.IsOpen()) return;
+        if (!netClient || !netReady || worldSessionSlot >= 3 || worldSessionGeneration == 0 ||
+            !worldConnectionIds[0] || !worldConnectionIds[worldSessionSlot] ||
+            worldQuarantined || worldBridge.GetPuppetAuthorityMode() != kh2coop::PuppetAuthorityMode::Network) {
+            publishInactiveAvatars();
+            return;
+        }
         kh2coop::AvatarState local;
         if (avatarBridge.TryReadLocal(local)) {
             // Network seq is per send (sendAvatar restamps 0), so receivers can
@@ -996,6 +1504,12 @@ int main(int argc, char* argv[]) {
             kh2coop::PuppetPose pose;
             pose.active = targets[i].active ? 1 : 0;
             pose.pose = targets[i].pose;
+            pose.provenance.producer = kh2coop::PuppetProducer::Network;
+            pose.provenance.localSlot = worldSessionSlot;
+            pose.provenance.generation = worldSessionGeneration;
+            pose.provenance.ownerConnectionId = targets[i].ownerConnectionId;
+            pose.provenance.localConnectionId = worldConnectionIds[worldSessionSlot];
+            pose.provenance.hostConnectionId = worldConnectionIds[0];
             avatarBridge.PublishPuppet(i, pose);
         }
     };
@@ -1010,7 +1524,75 @@ int main(int argc, char* argv[]) {
         // Pump network events every tick, even before KH2 is attached.
         if (netClient) {
             netClient->tick(0);
+            if (membershipInvalidated) {
+                membershipInvalidated = false;
+                retireNetworkState();
+                netClient->disconnect();
+                kh2coop::ClientCloseInfo info;
+                info.reason = kh2coop::DisconnectReason::SessionChanged;
+                info.rawCode = static_cast<std::uint32_t>(info.reason);
+                info.local = true;
+                recovery.closed(recoveryNow(), info);
+            }
+            const auto action = recovery.tick(recoveryNow());
+            if (action == kh2coop::ClientRecovery::Action::Disconnect) {
+                observeIdentity("recovery-disconnect");
+                retireNetworkState();
+                netClient->disconnect();
+            } else if (action == kh2coop::ClientRecovery::Action::Connect) {
+                retireNetworkState();
+                if (!resumePin || !netClient->SetResumePin(resumePin)) {
+                    recovery.shutdown();
+                    std::cerr << "[Runtime] Rejoin stopped: original session pin unavailable\n";
+                } else {
+                    std::cout << "[Runtime] Rejoin attempt=" << recovery.attempts() << "\n";
+                    if (!netClient->connect()) recovery.initiationFailed(recoveryNow());
+                }
+                observeIdentity("retry-attempted");
+            }
+            // Keep protocol activity independent of game attachment and bootstrap.
+            const auto networkNow = std::chrono::steady_clock::now();
+            if (netClient->isConnected() && networkNow - lastHeartbeatAt >=
+                std::chrono::milliseconds(options.config.heartbeatIntervalMs)) {
+                netClient->sendHeartbeat();
+                lastHeartbeatAt = networkNow;
+            }
+#ifdef _WIN32
+            if (worldBridge.IsOpen() && !netReady)
+                kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
+#endif
+            if (recovery.state() != lastRecoveryState) {
+                lastRecoveryState = recovery.state();
+                if (lastRecoveryState == kh2coop::ClientRecovery::State::Terminal)
+                    std::cerr << "[Runtime] Networking stopped: " << recovery.terminalReason() << "\n";
+                else if (lastRecoveryState == kh2coop::ClientRecovery::State::RetryWait)
+                    std::cout << "[Runtime] Rejoin waiting; world authority unavailable\n";
+                else if (lastRecoveryState == kh2coop::ClientRecovery::State::Admitted)
+                    std::cout << "[Runtime] Verified membership; native bootstrap remains separate\n";
+                observeIdentity("recovery-state");
+            }
         }
+
+        // Collection filesystem/capture work runs on one owned worker. Poll
+        // and upload before the attachment early-return, just like heartbeats.
+        const auto binding = diagnosticBinding();
+        desyncCollector.Tick(binding, desyncCollector.Busy() ? diagnosticMetadata() : std::string {});
+        if (auto collected = desyncCollector.TakeCompleted()) {
+            std::cout << "[Runtime] Desync local evidence report=" << collected->done.key.reportId
+                      << " directory=" << collected->localDirectory.string()
+                      << " identityChanged=" << collected->identityChanged << '\n';
+            if (collected->done.key == diagnosticKey)
+                desyncUpload.Begin(std::move(collected->done), std::move(collected->bytes), diagnosticDeadlineMs);
+        }
+        const auto uploadBefore = desyncUpload.State();
+        const auto uploadAfter = desyncUpload.Tick(recoveryNow(), binding.sessionId,
+            binding.localSlot < 3 ? binding.connections[binding.localSlot] : 0, binding.admitted,
+            [&](const auto& chunk) { return netClient && netClient->sendDesyncArtifactChunk(chunk); },
+            [&](const auto& done) { return netClient && netClient->sendDesyncCaptureDone(done); });
+        if (uploadBefore == kh2coop::DesyncUploadState::Sending && uploadAfter != uploadBefore)
+            std::cout << "[Runtime] Desync upload finished report=" << diagnosticKey.reportId
+                      << " state=" << static_cast<unsigned>(uploadAfter)
+                      << " (complete means queued, relay manifest is authoritative)\n";
 
         if (!game.IsAttached()) {
             if (!waitingForAttachLogged) {
@@ -1030,7 +1612,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
                 // Create the input mailbox shared memory for this KH2 process.
                 // The inject DLL (inside KH2) will open it by its own PID.
-                if (options.config.networkingEnabled && !mailboxWriter.IsOpen()) {
+                if (netReady && !mailboxWriter.IsOpen()) {
                     if (mailboxWriter.Create(
                             static_cast<DWORD>(game.ProcessId()))) {
                         std::cout << "[Runtime] Input mailbox created for PID="
@@ -1062,16 +1644,37 @@ int main(int argc, char* argv[]) {
         }
 
         const auto room = game.ReadRoomState();
+        diagnosticRoom = room;
 
 #ifdef _WIN32
         // ----- Avatars: local out, remote puppets in -----
-        if (netClient && netConnected) {
+        if (netClient) {
             if (!avatarBridge.IsOpen()) {
                 avatarBridge.Open(static_cast<DWORD>(game.ProcessId()));
             }
             if (!worldBridge.IsOpen()) {
                 if (worldBridge.Open(static_cast<DWORD>(game.ProcessId()))) {
+                    worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                    worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
+                    worldBridge.SetConnectionIds(worldConnectionIds);
+                    const auto nativeDelivery = worldQuarantined ? 0 : worldDeliverySerial;
+                    worldBridge.SetDeliverySerial(nativeDelivery);
+                    worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+                    if (!worldInbox.BindSessionGeneration(worldSessionGeneration, worldStats,
+                                                          nativeDelivery)) {
+                        std::cerr << "[Runtime] Could not bind world session generation\n";
+                        g_running = false;
+                    }
                     worldBridge.SetLocalSlot(worldSessionSlot);
+                    if (worldSessionSlot < 3 && worldConnectionIds[0] && worldConnectionIds[worldSessionSlot] &&
+                        worldDeliverySerial && !worldQuarantined)
+                        worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Network);
+                    observeIdentity("bridge-open-bound");
+                    if (pendingNativeSnapshot) {
+                        const auto staged = std::move(*pendingNativeSnapshot);
+                        pendingNativeSnapshot.reset();
+                        deliverNativeSnapshot(staged.first, staged.second);
+                    }
                 }
             }
             if (worldBridge.IsOpen()) {
@@ -1083,7 +1686,7 @@ int main(int argc, char* argv[]) {
                 // simulated latency) and the avatar-stream loss players see,
                 // falling back to ENet's estimate until a loss window closes.
                 const auto link = netClient->linkStats();
-                if (link.valid) {
+                if (netReady && link.valid) {
                     const auto loss =
                         link.avatarLossPermille != kh2coop::NetworkClient::kNoAvatarLoss
                             ? link.avatarLossPermille
@@ -1120,21 +1723,8 @@ int main(int argc, char* argv[]) {
 
         const auto now = std::chrono::steady_clock::now();
 
-        // ----- Networking: send heartbeat at configured interval -----
-        if (netClient && netConnected) {
-            const auto heartbeatElapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - lastHeartbeatAt)
-                    .count();
-            if (heartbeatElapsed >=
-                static_cast<long long>(options.config.heartbeatIntervalMs)) {
-                netClient->sendHeartbeat();
-                lastHeartbeatAt = now;
-            }
-        }
-
         // ----- Networking: send owned actor snapshot at configured interval -----
-        if (options.legacyReplica && netClient && netConnected && entityDiscovered) {
+        if (options.legacyReplica && netClient && netReady && entityDiscovered) {
             const auto snapshotElapsed =
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - lastSnapshotAt)
@@ -1172,7 +1762,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (netClient && netConnected && now - lastNetLogAt >= 5s) {
+        if (netClient && netReady && now - lastNetLogAt >= 5s) {
             const auto link = netClient->linkStats();
             if (link.valid) {
                 std::cout << "[Runtime] Net: rtt=" << link.appRttMs
@@ -1214,12 +1804,17 @@ int main(int argc, char* argv[]) {
     }
 
     // ----- Graceful shutdown -----
+    observeIdentity("shutdown-before");
+    desyncCollector.Cancel();
+    desyncUpload.Cancel();
+    recovery.shutdown();
 #ifdef _WIN32
     timeEndPeriod(1);
     if (mailboxWriter.IsOpen()) {
         closeMailbox();
         std::cout << "[Runtime] Input mailbox closed\n";
     }
+    worldConnectionIds = {};
     resetWorldSession(kh2coop::WORLD_SLOT_UNKNOWN);
     worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN, kh2coop::WORLD_NET_UNKNOWN);
 #endif
@@ -1228,6 +1823,14 @@ int main(int argc, char* argv[]) {
         std::cout << "[Runtime] Disconnecting from server...\n";
         netClient->disconnect();
         netClient.reset();
+    }
+    observeIdentity("shutdown-after");
+    if (options.config.networkingEnabled) {
+        try {
+            std::cout << "[runtime-identity-summary] schema=1 limit=" << identityLogLimit
+                      << " attempted=" << identityLogAttempts << " suppressed=" << identityLogSuppressed
+                      << " errors=" << identityLogErrors << '\n';
+        } catch (...) { /* shutdown diagnostics never prevent owned cleanup */ }
     }
 
     if (attachLogged) {

@@ -35,6 +35,11 @@
 #include "SaveGuard.hpp"
 #include "CrashDump.hpp"
 #include "EnemySync.hpp"
+#include "NativeSpawnController.hpp"
+#include "NativeResourceTrace.hpp"
+#include "NativeLifecycleTrace.hpp"
+#include "NativeHitTrace.hpp"
+#include "DamagePolicy.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
@@ -43,6 +48,7 @@
 
 #include <Windows.h>
 #include <MinHook.h>
+#include <intrin.h>
 
 #include <atomic>
 #include <cmath>
@@ -170,12 +176,13 @@ static constexpr uint64_t RVA_RESOLVE_ENTITY_TYPE = 0x4AD270;
 static constexpr uint64_t RVA_SET_MOTION        = 0x3B6670;
 static constexpr uint64_t RVA_SET_MOTION_SIMPLE  = 0x3B6630;
 
-// RVA for the movement dispatch (FUN_1403d5e50).
-// This is the function that drives idle ↔ walk ↔ run animation transitions.
-// Called from the friend AI's behavior timer via vtable+0xE8.
-// We hook it to replace the speed delta for controlled friends so the
-// animation matches stick input instead of follow-distance-to-Sora.
+// Historical name: this is the four-argument TakeDamage helper, not the
+// five-argument type-handler virtual at +0xE8. Keep the original ABI intact.
 static constexpr uint64_t RVA_MOVEMENT_DISPATCH = 0x3D5E50;
+// Verified TakeDamage entry in the saved Steam Global image, before detouring.
+static constexpr uint8_t kTakeDamageBytes[] = {
+    0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c,
+    0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
 
 // RVA for the direct animation setter (FUN_1403c6dc0).
 // Discovered by tracing writes to actor+0x188 (motionCtrl+0x30) via CE
@@ -400,6 +407,8 @@ struct PuppetDriver {
     bool teamSaved = false;
     bool savedNoCollide = false; // `actor`'s no-collision bit before we set it
     bool noCollideSaved = false;
+    bool applied = false;       // prior native drive, independent of current pose permission
+    nativehittrace::ActorSnapshot boundActor {}; // checked metadata for bounded release
 };
 static PuppetDriver g_puppets[2];
 static bool g_inPuppetAnimSet = false;
@@ -450,6 +459,61 @@ static PFN_LimitLookup g_limitByCmd = nullptr;
 // HP, damage is a negative delta, HP reaching 0 runs vtable+0xB0 (death).
 // Logged with a return-address stack so the attacker-side resolver above
 // the TakeDamage thunk can be identified.
+// Diagnostic reads are independent of native-call exception handling. A failed
+// read only clears availability; it must never turn into a successful hit.
+static bool HitTraceAddress(uintptr_t address, std::size_t size) {
+    constexpr uintptr_t end = 0x7FFFFFFFFFFFULL;
+    return address > 0x10000 && address < end && size <= end - address;
+}
+static bool ReadHitTraceMemory(uintptr_t address, void* out, std::size_t size) {
+    if (!HitTraceAddress(address, size)) return false;
+    __try {
+        std::memcpy(out, reinterpret_cast<const void*>(address), size);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+template <typename T> static bool ReadHitTrace(uintptr_t address, T& out) {
+    return ReadHitTraceMemory(address, &out, sizeof(out));
+}
+static std::uint32_t g_hitTraceImageSize = 0;
+static bool HitTraceCaller(uintptr_t caller, uintptr_t& rva) {
+    if (!g_hitTraceImageSize || caller < g_exeBase || caller - g_exeBase >= g_hitTraceImageSize) return false;
+    rva = caller - g_exeBase;
+    return true;
+}
+static nativehittrace::ActorSnapshot CaptureHitActor(uintptr_t actor) {
+    using namespace nativehittrace;
+    ActorSnapshot out {};
+    out.actor = actor;
+    if (!HitTraceAddress(actor, offsets::actor::OBJENTRY_PTR + sizeof(uintptr_t))) return out;
+    if (ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, out.objentry)) out.readMask |= ActorObject;
+    if (ReadHitTrace(actor + 0x5C0, out.status)) out.readMask |= ActorStatus;
+    if (HitTraceAddress(out.objentry, offsets::objentry::NAME + sizeof(out.namePrefix))) {
+        if (ReadHitTrace(out.objentry + offsets::objentry::TYPE_FLAGS, out.type)) out.readMask |= ActorType;
+        if (ReadHitTrace(out.objentry + offsets::objentry::OBJECT_ID, out.objectId)) out.readMask |= ActorId;
+        if (ReadHitTrace(out.objentry + offsets::objentry::NAME, out.namePrefix)) out.readMask |= ActorName;
+    }
+    if (ReadHitTrace(actor + 0x4DC, out.team)) out.readMask |= ActorTeam;
+    if (HitTraceAddress(out.status, 8)) {
+        if (ReadHitTrace(out.status, out.hp)) out.readMask |= ActorHp;
+        if (ReadHitTrace(out.status + 4, out.maxHp)) out.readMask |= ActorMaxHp;
+    }
+    uintptr_t obj = 0, status = 0;
+    std::uint32_t id = 0, team = 0;
+    std::uint16_t namePrefix = 0;
+    std::uint8_t type = 0;
+    if (out.objentry && out.status &&
+        (out.readMask & (ActorObject | ActorStatus | ActorType | ActorId | ActorTeam | ActorName)) ==
+                       (ActorObject | ActorStatus | ActorType | ActorId | ActorTeam | ActorName) &&
+        ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, obj) && obj == out.objentry &&
+        ReadHitTrace(actor + 0x5C0, status) && status == out.status &&
+        ReadHitTrace(obj + offsets::objentry::OBJECT_ID, id) && id == out.objectId &&
+        ReadHitTrace(obj + offsets::objentry::TYPE_FLAGS, type) && type == out.type &&
+        ReadHitTrace(obj + offsets::objentry::NAME, namePrefix) && namePrefix == out.namePrefix &&
+        ReadHitTrace(actor + 0x4DC, team) && team == out.team) out.readMask |= ActorRepeated;
+    return out;
+}
+
 using PFN_ApplyStatDelta = int(__fastcall*)(void* actor, int delta, int idx, int reactFlag);
 static constexpr uint64_t RVA_APPLY_STAT_DELTA = 0x3D2EB0;
 static constexpr uint8_t kApplyStatDeltaBytes[] = {
@@ -483,7 +547,7 @@ static void LogHpDelta(void* actor, int delta, int idx, int reactFlag, int resul
         g_frameCounter, name, type, actor, idx, delta, reactFlag, result, stack);
 }
 
-static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
+static int ApplyStatDeltaBody(void* actor, int delta, int idx, int reactFlag) {
     const int result = g_origApplyStatDelta(actor, delta, idx, reactFlag);
     if (idx == 0 && delta < 0 && g_hpDamageLogged < HP_DAMAGE_LOG_LIMIT) {
         ++g_hpDamageLogged;
@@ -492,6 +556,29 @@ static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int 
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             Log("[hp] exception while logging a hit");
         }
+    }
+    return result;
+}
+
+static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
+    using namespace nativehittrace;
+    if (!CanCaptureChild()) return ApplyStatDeltaBody(actor, delta, idx, reactFlag);
+    const auto address = reinterpret_cast<uintptr_t>(actor);
+    uintptr_t callerRva = 0;
+    const bool callerAvailable = HitTraceCaller(reinterpret_cast<uintptr_t>(_ReturnAddress()), callerRva);
+    ChildToken token {};
+    const ActorSnapshot before = CaptureHitActor(address);
+    BeginStat(token, address, delta, idx, reactFlag, callerRva, callerAvailable, before);
+    ActorSnapshot after {};
+    int result = 0;
+    bool normal = false;
+    __try {
+        result = ApplyStatDeltaBody(actor, delta, idx, reactFlag);
+        normal = true;
+        if (token.active) after = CaptureHitActor(address);
+    } __finally {
+        EndStat(token, normal && !AbnormalTermination(), result,
+                normal && !AbnormalTermination() ? &after : nullptr);
     }
     return result;
 }
@@ -622,12 +709,162 @@ static bool SyncDropsHit(void* victim) {
     }
 }
 
-static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
+// This snapshot is a calculated ordinary HP hit, not observed HP loss.
+// Keep native reads in a POD-only SEH leaf; EnemySync validates the current
+// session/binding outside this boundary. g_lastHit and the diagnostic
+// low-address handle fallback cannot establish authoritative ownership.
+static bool CaptureLocalPlayerEnemyHit(uintptr_t victim, uintptr_t hit,
+                                       enemysync::LocalPlayerEnemyHit& out) {
+    out = {};
+    if (!spawncontroller::IsDiagnosticGameThread()) return false;
+    if (!victim || !hit || !g_resolveHandle) return false;
+    __try {
+        if ((*reinterpret_cast<const uint32_t*>(hit + 0x18) & 2u) != 0 ||
+            *reinterpret_cast<const uint8_t*>(hit + 0x25) != 0) return false;
+        const int32_t damage = *reinterpret_cast<const int32_t*>(hit + 0x28);
+        if (damage <= 0 || !IsEnemyVictim(victim) || ActorHp(victim) <= 0) return false;
+        const uintptr_t hitAtkp = g_resolveHandle(*reinterpret_cast<const uint32_t*>(hit + 0x20));
+        if (!hitAtkp) return false;
+        const uint8_t attackType = *reinterpret_cast<const uint8_t*>(hitAtkp + 4);
+        // ApplyHitDamage keeps the positive delta for these healing types.
+        if (attackType == 5 || attackType == 6) return false;
+        const uintptr_t attack = g_resolveHandle(*reinterpret_cast<const uint32_t*>(hit + 0x1C));
+        if (!attack) return false;
+        const uintptr_t owner = g_resolveHandle(*reinterpret_cast<const uint32_t*>(attack + 0x10));
+        static constexpr uintptr_t RVA_NATIVE_PLAYER = 0x2A105D0;
+        const uintptr_t player = *reinterpret_cast<const uintptr_t*>(g_exeBase + RVA_NATIVE_PLAYER);
+        const uintptr_t head = *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::active_entity_list::HEAD);
+        // Remote Sora copies have the same name/type. Require the canonical
+        // player and current head tracked by our game-thread update hook.
+        if (!owner || owner != player || owner != head || owner != g_soraActor) return false;
+        const uintptr_t atkp = *reinterpret_cast<const uintptr_t*>(attack + 0x30);
+        if (!atkp) return false;
+        const uint32_t attackId = *reinterpret_cast<const uint16_t*>(atkp + 2);
+        const auto position = owner + offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X;
+        const float x = *reinterpret_cast<const float*>(position);
+        const float y = *reinterpret_cast<const float*>(position + sizeof(float));
+        const float z = *reinterpret_cast<const float*>(position + 2 * sizeof(float));
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
+        out = {victim, owner, attackId, damage, {x, y, z}};
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        out = {};
+        return false;
+    }
+}
+
+// This is a diagnostic identity lookup only. It never replays a hit and never
+// uses the diagnostic low-address actor map as authority.
+static bool ResolveHitTraceHandle(std::uint32_t handle, uintptr_t& out) {
+    out = 0;
+    if (!g_resolveHandle) return false; // Installed only after the resolver byte guard.
+    __try { out = g_resolveHandle(handle); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+static nativehittrace::ApplyFacts CaptureHitFacts(uintptr_t victim, uintptr_t hit, bool afterCall = false,
+                                                bool captureContext = true) {
+    using namespace nativehittrace;
+    ApplyFacts out {};
+    // Bracket all diagnostic reads and the native call with the two contexts.
+    if (captureContext && !afterCall) out.context = enemysync::CaptureNativeHitContext();
+    out.victim = CaptureHitActor(victim);
+    auto& h = out.hit;
+    h.hit = hit;
+    if (HitTraceAddress(hit, 0x40)) {
+        if (ReadHitTrace(hit + 0x18, h.flags)) h.readMask |= HitFlags;
+        if (ReadHitTrace(hit + 0x25, h.stat)) h.readMask |= HitStat;
+        if (ReadHitTrace(hit + 0x28, h.damage)) h.readMask |= HitDamage;
+        uintptr_t atkp = 0;
+        if (ReadHitTrace(hit + 0x20, h.atkpHandle) &&
+            ResolveHitTraceHandle(h.atkpHandle, atkp) && HitTraceAddress(atkp, 5) &&
+            ReadHitTrace(atkp + 4, h.kind)) {
+            std::uint32_t checkHandle = 0;
+            std::uint8_t checkKind = 0;
+            if (ReadHitTrace(hit + 0x20, checkHandle) && checkHandle == h.atkpHandle &&
+                ReadHitTrace(atkp + 4, checkKind) && checkKind == h.kind) h.readMask |= HitKind;
+        }
+        if (ReadHitTrace(hit + 0x1C, h.attackHandle) &&
+            ResolveHitTraceHandle(h.attackHandle, h.attack) && HitTraceAddress(h.attack, 0x38)) {
+            std::uint32_t checkHandle = 0;
+            if (ReadHitTrace(hit + 0x1C, checkHandle) && checkHandle == h.attackHandle) h.readMask |= HitAttack;
+            if (ReadHitTrace(h.attack + 0x10, h.ownerHandle) &&
+                ResolveHitTraceHandle(h.ownerHandle, h.owner) && h.owner) {
+                out.source = CaptureHitActor(h.owner);
+                std::uint32_t checkOwner = 0;
+                if ((h.readMask & HitAttack) &&
+                    ReadHitTrace(h.attack + 0x10, checkOwner) && checkOwner == h.ownerHandle &&
+                    ReadHitTrace(hit + 0x1C, checkHandle) && checkHandle == h.attackHandle) h.readMask |= HitOwner;
+            }
+            uintptr_t attackParams = 0, checkParams = 0;
+            std::uint16_t id = 0, checkId = 0;
+            if (ReadHitTrace(h.attack + 0x30, attackParams) && HitTraceAddress(attackParams, 4) &&
+                ReadHitTrace(attackParams + 2, id) &&
+                ReadHitTrace(h.attack + 0x30, checkParams) && checkParams == attackParams &&
+                ReadHitTrace(attackParams + 2, checkId) && checkId == id &&
+                ReadHitTrace(hit + 0x1C, checkHandle) && checkHandle == h.attackHandle) {
+                h.attackId = id;
+                h.readMask |= HitAttackId;
+            }
+        }
+    }
+    h.tracked = g_soraActor;
+    uintptr_t player = 0, head = 0;
+    if (ReadHitTrace(g_exeBase + 0x2A105D0, h.canonicalPlayer) &&
+        ReadHitTrace(g_exeBase + offsets::active_entity_list::HEAD, h.head) &&
+        ReadHitTrace(g_exeBase + 0x2A105D0, player) && player == h.canonicalPlayer &&
+        ReadHitTrace(g_exeBase + offsets::active_entity_list::HEAD, head) && head == h.head &&
+        h.tracked == g_soraActor) h.readMask |= HitCanonical;
+    if (captureContext && afterCall) out.context = enemysync::CaptureNativeHitContext();
+    return out;
+}
+
+struct DamageObservation {
+    damagepolicy::Facts facts {};
+    damagepolicy::Decision decision {};
+    nativehittrace::Context context {};
+    nativehittrace::ActorSnapshot victim {}, source {};
+    nativehittrace::HitSnapshot hit {};
+    std::uint64_t roster[3] {};
+};
+static DamageObservation CaptureDamagePolicy(uintptr_t victim, uintptr_t hit);
+static bool DamageObservationCurrent(const DamageObservation& observation);
+
+static uintptr_t ApplyHitDamageBody(void* victim, void* hit, nativehittrace::HitSnapshot* observation,
+                                   nativehittrace::PolicyObservation* policyObservation) {
+    const DamageObservation authority = CaptureDamagePolicy(reinterpret_cast<uintptr_t>(victim),
+                                                            reinterpret_cast<uintptr_t>(hit));
+    if (policyObservation) {
+        *policyObservation = {};
+        policyObservation->authority.context = authority.context;
+        policyObservation->authority.victim = authority.victim;
+        policyObservation->authority.source = authority.source;
+        policyObservation->authority.hit = authority.hit;
+        policyObservation->facts = authority.facts;
+        policyObservation->decision = authority.decision;
+        std::memcpy(policyObservation->roster, authority.roster, sizeof(authority.roster));
+        policyObservation->recorded = true;
+    }
     HitChannel* ch = g_hitChannel;
     const bool filterOn = ch && ch->dropEnabled;
     // A client in a synced session never changes an enemy's HP itself: the
     // host owns it (VUH-1502); the hit still plays its local reaction.
     const bool syncDrop = SyncDropsHit(victim);
+    if (observation) {
+        observation->manualFilterOn = filterOn;
+        observation->syncDrop = syncDrop;
+    }
+    enemysync::LocalPlayerEnemyHit localHit {};
+    const bool claimCandidate = authority.decision.supported
+        ? authority.decision.action == damagepolicy::Action::ClaimThenZeroHp : syncDrop;
+    if (claimCandidate && CaptureLocalPlayerEnemyHit(reinterpret_cast<uintptr_t>(victim),
+                                              reinterpret_cast<uintptr_t>(hit), localHit)) {
+        // Rejection never re-enables client HP authority. This noexcept
+        // callback retains copied values only, never the native hit record.
+        if (policyObservation) policyObservation->claimAttempted = true;
+        const bool queued = enemysync::RecordLocalPlayerEnemyHit(localHit);
+        if (policyObservation) policyObservation->claimQueued = queued;
+    }
     if (filterOn || syncDrop) {
         __try {
             const auto v = reinterpret_cast<uintptr_t>(victim);
@@ -660,11 +897,58 @@ static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
                 }
                 *damage = 0;
             }
+            // syncDrop short-circuits the manual selectors in the original
+            // expression. Do not claim they matched when they were not tested.
+            if (observation && match && filterOn && !syncDrop) observation->manualDrop = true;
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             Log("[drop] exception in filter");
         }
     }
+    // New authority vetoes never enter the manual HitChannel or synthesize a
+    // network claim. The native call below still consumes the record and owns
+    // its genuine result and remaining effects. A changed/unreadable record is
+    // not reported as suppressed and is never repaired with a helper replay.
+    if (authority.decision.supported && authority.decision.action != damagepolicy::Action::Native) {
+        if (policyObservation) policyObservation->revalidationAttempted = true;
+        const bool current = DamageObservationCurrent(authority);
+        if (policyObservation) policyObservation->revalidationPassed = current;
+        if (current) {
+            if (policyObservation) policyObservation->zeroAttempted = true;
+            const auto zeroResult = damagepolicy::TryZeroHp(reinterpret_cast<uintptr_t>(hit), authority.facts.hit);
+            if (policyObservation) policyObservation->zeroResult = zeroResult;
+        }
+    }
     return g_origApplyHitDamage(victim, hit);
+}
+
+static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
+    using namespace nativehittrace;
+    if (!CanCaptureApply()) return ApplyHitDamageBody(victim, hit, nullptr, nullptr);
+    const auto actor = reinterpret_cast<uintptr_t>(victim);
+    const auto record = reinterpret_cast<uintptr_t>(hit);
+    uintptr_t callerRva = 0;
+    const bool callerAvailable = HitTraceCaller(reinterpret_cast<uintptr_t>(_ReturnAddress()), callerRva);
+    ApplyToken token {};
+    const ApplyFacts before = CaptureHitFacts(actor, record);
+    BeginApply(token, callerRva, callerAvailable, before);
+    ApplyFacts after {};
+    uintptr_t result = 0;
+    bool normal = false;
+    __try {
+        result = ApplyHitDamageBody(victim, hit, token.active ? &token.event.before.hit : nullptr,
+                                   token.active ? &token.event.policy : nullptr);
+        normal = true;
+        if (token.active) {
+            after = CaptureHitFacts(actor, record, true);
+            after.hit.syncDrop = token.event.before.hit.syncDrop;
+            after.hit.manualFilterOn = token.event.before.hit.manualFilterOn;
+            after.hit.manualDrop = token.event.before.hit.manualDrop;
+        }
+    } __finally {
+        EndApply(token, normal && !AbnormalTermination(), result,
+                 normal && !AbnormalTermination() ? &after : nullptr);
+    }
+    return result;
 }
 
 static bool IsLiveActor(uintptr_t actor) {
@@ -782,7 +1066,9 @@ static uint32_t g_puppetLoadSerial = 0;
 static bool IsPuppetActive(int index) {
     if (index < 0 || index > 1 || g_puppetsSuspended || warp::TransitionPending()) return false;
     const PuppetDriver& d = g_puppets[index];
-    return d.have && d.pose.active && g_frameCounter - d.poseFrame <= PUPPET_STALE_FRAMES;
+    return d.have && d.pose.active && g_frameCounter - d.poseFrame <= PUPPET_STALE_FRAMES &&
+        ValidPuppetProvenance(d.pose.provenance, static_cast<std::uint8_t>(d.pose.pose.ownerSlot),
+                              index, enemysync::CapturePuppetAuthority());
 }
 
 // Sora clones: player-class actors (objentry type 0) other than the real
@@ -829,6 +1115,183 @@ static int PuppetIndexFor(uintptr_t actor) {
     return -1;
 }
 
+// Permission to treat a native friend as AI-owned is positive, frame-local
+// evidence from the branch which actually invokes the original friend AI.
+// Cached poses and a negative PuppetIndexFor result cannot grant permission.
+struct NativeAiStamp {
+    nativehittrace::Context context {};
+    nativehittrace::ActorSnapshot actor {};
+    std::uint64_t roster[3] {};
+    uintptr_t friendPointer = 0;
+    bool valid = false;
+};
+static NativeAiStamp g_nativeAiStamps[2] {};
+static void ClearNativeAiStamps() { g_nativeAiStamps[0] = {}; g_nativeAiStamps[1] = {}; }
+
+static bool SameDamageContext(const nativehittrace::Context& a, const nativehittrace::Context& b) {
+    return a.available && b.available && a.readMask == nativehittrace::ContextComplete &&
+        b.readMask == nativehittrace::ContextComplete && a.frame == b.frame && a.generation == b.generation &&
+        a.epoch == b.epoch && a.transitionSerial == b.transitionSerial && a.loadSerial == b.loadSerial &&
+        a.connectionId == b.connectionId && a.hostConnectionId == b.hostConnectionId &&
+        a.role == b.role && a.slot == b.slot && std::memcmp(a.location, b.location, sizeof(a.location)) == 0;
+}
+static bool DamageObservationCurrent(const DamageObservation& observation) {
+    if (!spawncontroller::IsDiagnosticGameThread()) return false;
+    nativehittrace::Context context {}; std::uint64_t roster[3] {};
+    if (!enemysync::CaptureDamageContext(context, roster) || !SameDamageContext(observation.context, context) ||
+        std::memcmp(observation.roster, roster, sizeof(roster)) != 0) return false;
+    const auto fresh = CaptureHitFacts(observation.victim.actor, observation.hit.hit, false, false);
+    const auto sameKnownActor = [](const nativehittrace::ActorSnapshot& a, const nativehittrace::ActorSnapshot& b) {
+        return a.actor == b.actor && (b.readMask & a.readMask) == a.readMask &&
+            (!(a.readMask & nativehittrace::ActorObject) || a.objentry == b.objentry) &&
+            (!(a.readMask & nativehittrace::ActorStatus) || a.status == b.status) &&
+            (!(a.readMask & nativehittrace::ActorType) || a.type == b.type) &&
+            (!(a.readMask & nativehittrace::ActorId) || a.objectId == b.objectId) &&
+            (!(a.readMask & nativehittrace::ActorTeam) || a.team == b.team) &&
+            (!(a.readMask & nativehittrace::ActorName) || a.namePrefix == b.namePrefix) &&
+            (!(a.readMask & nativehittrace::ActorMaxHp) || a.maxHp == b.maxHp);
+    };
+    const auto& a = observation.hit; const auto& b = fresh.hit;
+    using namespace nativehittrace;
+    if (!sameKnownActor(observation.victim, fresh.victim) || (b.readMask & a.readMask) != a.readMask ||
+        ((a.readMask & HitAttack) && (a.attackHandle != b.attackHandle || a.attack != b.attack)) ||
+        ((a.readMask & HitOwner) && (a.ownerHandle != b.ownerHandle || a.owner != b.owner ||
+                                    !sameKnownActor(observation.source, fresh.source))) ||
+        ((a.readMask & HitKind) && (a.atkpHandle != b.atkpHandle || a.kind != b.kind)) ||
+        ((a.readMask & HitAttackId) && a.attackId != b.attackId) ||
+        ((a.readMask & HitCanonical) && (a.canonicalPlayer != b.canonicalPlayer || a.head != b.head || a.tracked != b.tracked))) return false;
+    nativehittrace::Context finalContext {}; std::uint64_t finalRoster[3] {};
+    return enemysync::CaptureDamageContext(finalContext, finalRoster) && SameDamageContext(context, finalContext) &&
+        std::memcmp(roster, finalRoster, sizeof(roster)) == 0;
+}
+static bool SameDamageActor(const nativehittrace::ActorSnapshot& a, const nativehittrace::ActorSnapshot& b) {
+    return a.readMask == nativehittrace::ActorComplete && b.readMask == nativehittrace::ActorComplete &&
+        a.actor && a.objentry && a.status && a.actor == b.actor && a.objentry == b.objentry && a.status == b.status &&
+        a.objectId == b.objectId && a.type == b.type && a.namePrefix == b.namePrefix &&
+        a.maxHp == b.maxHp && a.team == b.team;
+}
+static bool ReadDamageFriends(uintptr_t (&friends)[2]) {
+    const auto slot = g_exeBase + offsets::SLOT0_BASE + offsets::SLOT_STRIDE;
+    uintptr_t repeated[2] {};
+    return ReadHitTrace(slot + offsets::slot::FRIEND1_ACTOR_PTR, friends[0]) &&
+        ReadHitTrace(slot + offsets::slot::FRIEND2_ACTOR_PTR, friends[1]) &&
+        ReadHitTrace(slot + offsets::slot::FRIEND1_ACTOR_PTR, repeated[0]) &&
+        ReadHitTrace(slot + offsets::slot::FRIEND2_ACTOR_PTR, repeated[1]) &&
+        friends[0] == repeated[0] && friends[1] == repeated[1];
+}
+static bool DamageReservedActor(uintptr_t actor, const nativehittrace::Context& context,
+                                const std::uint64_t (&roster)[3]) {
+    if (!actor) return false;
+    // A stale/inactive driver is still an exclusion, never positive peer
+    // incarnation proof. Slot assignment follows AvatarSync's ascending order.
+    for (const auto& driver : g_puppets) if (driver.actor == actor) return true;
+    unsigned index = 0;
+    for (unsigned slot = 0; slot < 3; ++slot) {
+        if (slot == context.slot) continue;
+        if (roster[slot] && PuppetTarget(static_cast<int>(index)) == actor) return true;
+        ++index;
+    }
+    return false;
+}
+static bool NativeAiPermission(const nativehittrace::ActorSnapshot& actor,
+                               const nativehittrace::Context& context, const std::uint64_t (&roster)[3]) {
+    if (g_soloTestMode || context.frame != g_frameCounter || actor.type != 1 || actor.hp <= 0 || actor.maxHp <= 0 ||
+        DamageReservedActor(actor.actor, context, roster)) return false;
+    uintptr_t friends[2] {};
+    // PuppetTarget uses the cached friend pointers. Never grant permission
+    // from a fresh replacement while reservation still names the old actor.
+    if (!ReadDamageFriends(friends) || friends[0] == friends[1] ||
+        friends[0] != g_friend1Actor || friends[1] != g_friend2Actor) return false;
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto& stamp = g_nativeAiStamps[i];
+        if (stamp.valid && friends[i] == actor.actor && stamp.friendPointer == actor.actor &&
+            SameDamageActor(stamp.actor, actor) && SameDamageContext(stamp.context, context) &&
+            std::memcmp(stamp.roster, roster, sizeof(stamp.roster)) == 0) return true;
+    }
+    return false;
+}
+static damagepolicy::ActorClass ClassifyDamageActor(const nativehittrace::ActorSnapshot& actor,
+    const nativehittrace::HitSnapshot& hit, const nativehittrace::Context& context,
+    const std::uint64_t (&roster)[3]) {
+    using damagepolicy::ActorClass;
+    if (actor.readMask != nativehittrace::ActorComplete || !actor.actor || !actor.objentry || !actor.status)
+        return ActorClass::Unknown;
+    if ((hit.readMask & nativehittrace::HitCanonical) == 0 || !hit.canonicalPlayer ||
+        hit.canonicalPlayer != hit.head || hit.canonicalPlayer != hit.tracked) return ActorClass::Unknown;
+    if (actor.actor == hit.canonicalPlayer)
+        return actor.type == 0 ? ActorClass::LocalAvatar : ActorClass::Unknown;
+    // Type-zero actors other than the checked local triple are nonlocal player
+    // representations. This is an ownership veto, not authenticated membership.
+    if (actor.type == 0) return ActorClass::NonLocalPlayer;
+    if (DamageReservedActor(actor.actor, context, roster)) return ActorClass::RemoteRepresentation;
+    if (actor.type == 1)
+        return NativeAiPermission(actor, context, roster) ? ActorClass::NativeCompanion : ActorClass::Unknown;
+    if ((actor.type == offsets::objentry::TYPE_BOSS || actor.type == offsets::objentry::TYPE_MOB) &&
+        actor.namePrefix != 0x5F46 && actor.objectId && actor.hp > 0 && actor.maxHp > 0) return ActorClass::Enemy;
+    // A typed, checked native actor outside the player/companion/enemy classes
+    // may affect the local victim, but never receives host-enemy permission.
+    return ActorClass::OtherNative;
+}
+static DamageObservation CaptureDamagePolicy(uintptr_t victim, uintptr_t hit) {
+    DamageObservation out {};
+    // Existing non-policy paths retain their behavior on unsupported threads.
+    if (!spawncontroller::IsDiagnosticGameThread()) { out.decision = damagepolicy::Evaluate(out.facts); return out; }
+    out.facts.ownerThread = true;
+    nativehittrace::Context before {}, after {};
+    std::uint64_t roster[3] {}, repeated[3] {};
+    if (!enemysync::CaptureDamageContext(before, roster)) { out.decision = damagepolicy::Evaluate(out.facts); return out; }
+    const auto captured = CaptureHitFacts(victim, hit, false, false);
+    out.victim = captured.victim; out.source = captured.source; out.hit = captured.hit;
+    auto& f = out.facts;
+    f.role = static_cast<damagepolicy::Role>(before.role);
+    f.hit.flags = captured.hit.flags; f.hit.stat = captured.hit.stat; f.hit.amount = captured.hit.damage; f.hit.kind = captured.hit.kind;
+    if (captured.hit.readMask & nativehittrace::HitFlags) f.hit.readMask |= damagepolicy::FlagsAvailable;
+    if (captured.hit.readMask & nativehittrace::HitStat) f.hit.readMask |= damagepolicy::StatAvailable;
+    if (captured.hit.readMask & nativehittrace::HitDamage) f.hit.readMask |= damagepolicy::AmountAvailable;
+    if (captured.hit.readMask & nativehittrace::HitKind) f.hit.readMask |= damagepolicy::KindAvailable;
+    f.victim = ClassifyDamageActor(captured.victim, captured.hit, before, roster);
+    if ((captured.hit.readMask & (nativehittrace::HitAttack | nativehittrace::HitOwner)) ==
+        (nativehittrace::HitAttack | nativehittrace::HitOwner) && captured.hit.owner == captured.source.actor)
+        f.source = ClassifyDamageActor(captured.source, captured.hit, before, roster);
+    f.contextAvailable = enemysync::CaptureDamageContext(after, repeated) && SameDamageContext(before, after) &&
+        std::memcmp(roster, repeated, sizeof(roster)) == 0;
+    if (f.contextAvailable) { out.context = after; std::memcpy(out.roster, repeated, sizeof(out.roster)); }
+    out.decision = damagepolicy::Evaluate(f);
+    return out;
+}
+
+static int BeginNativeAiStamp(uintptr_t actor, uintptr_t typeHandler) {
+    if (!spawncontroller::IsDiagnosticGameThread()) return -1;
+    for (auto& stamp : g_nativeAiStamps) if (stamp.actor.actor == actor) stamp = {};
+    if (!g_origFriendAI || !g_friendAIHooked || !g_hookedAITarget || g_soloTestMode) return -1;
+    NativeAiStamp stamp {};
+    if (!enemysync::CaptureDamageContext(stamp.context, stamp.roster) || stamp.context.frame != g_frameCounter ||
+        DamageReservedActor(actor, stamp.context, stamp.roster)) return -1;
+    uintptr_t vtable = 0, target = 0, friends[2] {};
+    if (!ReadHitTrace(typeHandler, vtable) || !ReadHitTrace(vtable + 0x10, target) ||
+        target != reinterpret_cast<uintptr_t>(g_hookedAITarget) || !ReadDamageFriends(friends) || friends[0] == friends[1] ||
+        friends[0] != g_friend1Actor || friends[1] != g_friend2Actor) return -1;
+    const int index = friends[0] == actor ? 0 : (friends[1] == actor ? 1 : -1);
+    if (index < 0) return -1;
+    stamp.actor = CaptureHitActor(actor);
+    if (stamp.actor.type != 1 || stamp.actor.hp <= 0 || stamp.actor.maxHp <= 0 || !SameDamageActor(stamp.actor, stamp.actor)) return -1;
+    nativehittrace::Context repeatedContext {}; std::uint64_t repeatedRoster[3] {}; uintptr_t repeatedFriends[2] {};
+    if (!enemysync::CaptureDamageContext(repeatedContext, repeatedRoster) || !SameDamageContext(stamp.context, repeatedContext) ||
+        std::memcmp(stamp.roster, repeatedRoster, sizeof(stamp.roster)) != 0 || !ReadDamageFriends(repeatedFriends) ||
+        repeatedFriends[0] != g_friend1Actor || repeatedFriends[1] != g_friend2Actor ||
+        repeatedFriends[index] != actor || DamageReservedActor(actor, repeatedContext, repeatedRoster)) return -1;
+    stamp.friendPointer = actor; stamp.valid = true; g_nativeAiStamps[index] = stamp;
+    return index;
+}
+static void EndNativeAiStamp(int index, bool normal) {
+    if (index < 0 || index > 1) return;
+    auto& stamp = g_nativeAiStamps[index];
+    if (!normal) { stamp = {}; return; } // Abnormal cleanup never reads native state.
+    nativehittrace::Context context {}; std::uint64_t roster[3] {};
+    const auto actor = CaptureHitActor(stamp.actor.actor);
+    if (!enemysync::CaptureDamageContext(context, roster) || !NativeAiPermission(actor, context, roster)) stamp = {};
+}
+
 // Friend slots our code drives instead of the vanilla AI.
 static bool IsDrivenFriend(int friendSlot) {
     if (friendSlot == 0) return false;
@@ -839,8 +1302,50 @@ static bool IsDrivenFriend(int friendSlot) {
 // Puts back the team of an actor we stopped driving, if it's still the
 // same actor (after a room load the old actor is gone and the new one
 // starts with its own team).
-static void RestorePuppetTeam(PuppetDriver& d, uintptr_t currentActor) {
-    if (d.actor != 0 && d.actor == currentActor) {
+static bool PuppetReleaseLifecycleCurrent(std::uint32_t transition, std::uint32_t load) {
+    __try {
+        return transition == g_puppetTransitionSerial && load == g_puppetLoadSerial &&
+            transition == warp::TransitionSerial() && load == warp::LoadSerial() && !warp::TransitionPending();
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+static bool PuppetReleaseCanonicalCurrent(uintptr_t actor) {
+    const auto tracked = g_soraActor;
+    uintptr_t player = 0, head = 0, repeatedPlayer = 0, repeatedHead = 0;
+    return tracked != 0 && actor != tracked &&
+        ReadHitTrace(g_exeBase + 0x2A105D0, player) &&
+        ReadHitTrace(g_exeBase + offsets::active_entity_list::HEAD, head) &&
+        ReadHitTrace(g_exeBase + 0x2A105D0, repeatedPlayer) &&
+        ReadHitTrace(g_exeBase + offsets::active_entity_list::HEAD, repeatedHead) &&
+        player == tracked && head == tracked && repeatedPlayer == tracked && repeatedHead == tracked &&
+        g_soraActor == tracked;
+}
+
+static void RestorePuppetTeam(PuppetDriver& d, int index) {
+    const auto transition = warp::TransitionSerial();
+    const auto load = warp::LoadSerial();
+    uintptr_t friends[2] {}, repeated[2] {};
+    const auto& bound = d.boundActor;
+    const bool eligible = index >= 0 && index < 2 && d.actor != 0 && PuppetReleaseCanonicalCurrent(d.actor) &&
+        PuppetReleaseLifecycleCurrent(transition, load);
+    const bool currentFriend = eligible && g_clones[0] == 0 &&
+        ReadDamageFriends(friends) && friends[0] != friends[1] && friends[index] == d.actor;
+    // Cached clone selection is only a candidate. Reuse the existing complete
+    // canonical census to prove current membership, then reread actor metadata.
+    const bool currentClone = eligible && g_clones[0] != 0 && g_clones[index] == d.actor &&
+        bound.type == 0 && enemysync::CurrentPuppetActor(d.actor, transition, load);
+    const auto now = CaptureHitActor(currentFriend || currentClone ? d.actor : 0);
+    constexpr auto metadata = nativehittrace::ActorObject | nativehittrace::ActorStatus |
+        nativehittrace::ActorType | nativehittrace::ActorId | nativehittrace::ActorName | nativehittrace::ActorRepeated;
+    const bool same = (bound.readMask & metadata) == metadata && (now.readMask & metadata) == metadata &&
+        bound.actor == now.actor && bound.objentry == now.objentry && bound.status == now.status &&
+        bound.objectId == now.objectId && bound.type == now.type && bound.namePrefix == now.namePrefix;
+    const bool membership =
+        (currentFriend && now.type == 1 && ReadDamageFriends(repeated) &&
+         repeated[0] == friends[0] && repeated[1] == friends[1]) ||
+        (currentClone && now.type == 0 && g_clones[0] != 0 && g_clones[index] == d.actor);
+    if (membership && same && PuppetReleaseCanonicalCurrent(d.actor) &&
+        PuppetReleaseLifecycleCurrent(transition, load)) {
         if (d.teamSaved) *reinterpret_cast<uint32_t*>(d.actor + ACTOR_TEAM) = d.savedTeam;
         if (d.noCollideSaved && !d.savedNoCollide) {
             *reinterpret_cast<uint8_t*>(d.actor + ACTOR_COLLISION_FLAGS) &= ~ACTOR_NO_COLLIDE;
@@ -848,6 +1353,7 @@ static void RestorePuppetTeam(PuppetDriver& d, uintptr_t currentActor) {
     }
     d.teamSaved = false;
     d.noCollideSaved = false;
+    d.applied = false;
 }
 
 // Frame start: take new poses, release slots that stopped being puppets,
@@ -859,6 +1365,8 @@ static void ForgetPuppetActor(PuppetDriver& d) {
     d.teamSaved = false;
     d.noCollideSaved = false;
     d.lastAnim = -1;
+    d.applied = false;
+    d.boundActor = {};
 }
 
 // Frame start: suspend puppets when a transition is requested and resume
@@ -868,9 +1376,15 @@ static bool UpdatePuppetSuspension() {
     const auto load = warp::LoadSerial();
     const bool pending = warp::TransitionPending();
     if (transition != g_puppetTransitionSerial || load != g_puppetLoadSerial || pending) {
+        ClearNativeAiStamps();
         // Invalidate on the actual native lifecycle, including same-room
         // reloads. No restoration writes may reach a prior room's actors.
-        for (auto& d : g_puppets) ForgetPuppetActor(d);
+        for (auto& d : g_puppets) {
+            ForgetPuppetActor(d);
+            d.pose = {};
+            d.have = false;
+            d.poseFrame = 0;
+        }
         g_clones[0] = g_clones[1] = 0;
         g_clonesNow[0] = g_clonesNow[1] = 0;
         g_cloneCountNow = 0;
@@ -887,23 +1401,36 @@ static bool UpdatePuppetSuspension() {
 }
 
 static void PollPuppetPoses() {
-    UpdatePuppetSuspension();
+    const bool suspended = UpdatePuppetSuspension();
     if (!g_avatarBridge.IsOpen()) return;
     bool anyActive = false;
     for (int i = 0; i < 2; ++i) {
-        const bool wasActive = IsPuppetActive(i);
+        auto& driver = g_puppets[i];
+        // Authority can retire between DLL frames. Previous application is a
+        // separate fact: asking the current predicate cannot detect its edge.
+        const bool wasApplied = driver.applied;
+        if (!IsPuppetActive(i)) {
+            driver.pose = {};
+            driver.have = false;
+        }
         kh2coop::PuppetPose pose;
         if (g_avatarBridge.TryReadPuppet(i, pose)) {
-            g_puppets[i].pose = pose;
-            g_puppets[i].have = true;
-            g_puppets[i].poseFrame = g_frameCounter;
+            if (!suspended && pose.active && ValidPuppetProvenance(pose.provenance,
+                    static_cast<std::uint8_t>(pose.pose.ownerSlot), i, enemysync::CapturePuppetAuthority())) {
+                driver.pose = pose;
+                driver.have = true;
+                driver.poseFrame = g_frameCounter;
+            } else {
+                driver.pose = {};
+                driver.have = false;
+            }
         }
         const bool active = IsPuppetActive(i);
-        if (wasActive && !active) {
-            RestorePuppetTeam(g_puppets[i], PuppetTarget(i));
-            g_puppets[i].lastAnim = -1;
+        if (wasApplied && !active) {
+            RestorePuppetTeam(driver, i);
+            driver.lastAnim = -1;
             Log("Puppet %d released", i);
-        } else if (!wasActive && active) {
+        } else if (!wasApplied && active) {
             Log("Puppet %d active", i);
         }
         anyActive = anyActive || active;
@@ -1762,7 +2289,7 @@ static uint8_t __fastcall HookedMotionChainSetAnim(void* motCtrl, int animId,
 }
 
 // NOTE (VUH-1501, 2026-10-02): 0x3D5E50 is not a movement dispatch. It's
-// the TakeDamage virtual (actor, delta, statIdx, reactFlag): it adds drive
+// the TakeDamage helper (actor, delta, statIdx, reactFlag): it adds drive
 // gauge to the victim and calls ApplyStatDelta 0x3D2EB0, and a live enemy
 // hit on Sora passes through it (stack ...3D613C <- 3A8DC5). The hook
 // below only counts and logs calls, so it's left in place under its old
@@ -1772,8 +2299,7 @@ static uint32_t g_movDispatchTotalCalls = 0;
 static uint32_t g_movDispatchFriendCalls = 0;
 static uint32_t g_movDispatchLogFrame = 0;
 
-static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
-                                               int channel, uint8_t flag) {
+static void MovementDispatchBody(void* actor, int speedDelta, int channel, uint8_t flag) {
     auto actorAddr = reinterpret_cast<uintptr_t>(actor);
     ++g_movDispatchTotalCalls;
 
@@ -1826,6 +2352,27 @@ static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
     }
 }
 
+static void __fastcall HookedMovementDispatch(void* actor, int speedDelta, int channel, uint8_t flag) {
+    using namespace nativehittrace;
+    if (!CanCaptureChild()) { MovementDispatchBody(actor, speedDelta, channel, flag); return; }
+    const auto address = reinterpret_cast<uintptr_t>(actor);
+    uintptr_t callerRva = 0;
+    const bool callerAvailable = HitTraceCaller(reinterpret_cast<uintptr_t>(_ReturnAddress()), callerRva);
+    ChildToken token {};
+    const ActorSnapshot before = CaptureHitActor(address);
+    BeginTake(token, address, speedDelta, channel, flag, callerRva, callerAvailable, before);
+    ActorSnapshot after {};
+    bool normal = false;
+    __try {
+        MovementDispatchBody(actor, speedDelta, channel, flag);
+        normal = true;
+        if (token.active) after = CaptureHitActor(address);
+    } __finally {
+        EndTake(token, normal && !AbnormalTermination(),
+                normal && !AbnormalTermination() ? &after : nullptr);
+    }
+}
+
 // ============================================================================
 // Friend AI hook — intercepts vtable+0x10 dispatch
 //
@@ -1840,15 +2387,25 @@ static void __fastcall HookedMovementDispatch(void* actor, int speedDelta,
 
 // Puppet motion: from the friend AI hook for companions (replacing the AI),
 // after the entity update for Sora clones (which have no friend AI).
-static void DrivePuppetMotion(void* actorObj, int index) {
+static void BindPuppetDrive(int index, uintptr_t actor) {
     PuppetDriver& d = g_puppets[index];
-    const auto actor = reinterpret_cast<uintptr_t>(actorObj);
     if (d.actor != actor) {  // new room / reloaded actor
         d.actor = actor;
         d.lastAnim = -1;
         d.teamSaved = false;
+        d.noCollideSaved = false;
+        d.applied = false;
     }
 
+    if (!d.applied) d.boundActor = CaptureHitActor(actor);
+    d.applied = true;
+}
+
+static void DrivePuppetMotion(void* actorObj, int index) {
+    if (!IsPuppetActive(index) || PuppetTarget(index) != reinterpret_cast<uintptr_t>(actorObj)) return;
+    const auto actor = reinterpret_cast<uintptr_t>(actorObj);
+    BindPuppetDrive(index, actor);
+    PuppetDriver& d = g_puppets[index];
     const auto& pose = d.pose.pose;
     uint32_t motion = pose.motionId;
     // A Sora clone has Sora's moveset. But setting motion 9 (seen during a
@@ -1892,6 +2449,8 @@ static int PuppetTraceBudget() {
 }
 
 static void ApplyPuppetTransform(void* actorObj, int index) {
+    if (!IsPuppetActive(index) || PuppetTarget(index) != reinterpret_cast<uintptr_t>(actorObj)) return;
+    BindPuppetDrive(index, reinterpret_cast<uintptr_t>(actorObj));
     const auto& pose = g_puppets[index].pose.pose;
     const auto actor = reinterpret_cast<uintptr_t>(actorObj);
     const uintptr_t entity = actor + offsets::actor::ENTITY_TRANSFORM;
@@ -2027,7 +2586,10 @@ static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
 
     // Non-controlled friend (or solo mode off): run the original AI normally.
     if (g_origFriendAI) {
-        g_origFriendAI(typeHandler, actorObj);
+        const int stamp = BeginNativeAiStamp(reinterpret_cast<uintptr_t>(actorObj), reinterpret_cast<uintptr_t>(typeHandler));
+        bool normal = false;
+        __try { g_origFriendAI(typeHandler, actorObj); normal = true; }
+        __finally { EndNativeAiStamp(stamp, normal && !AbnormalTermination()); }
     }
 }
 
@@ -2224,6 +2786,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
             if (addr == listHead && listHead != 0) {
                 ++g_frameCounter;
+                ClearNativeAiStamps();
                 g_processedStickFrame = UINT32_MAX;  // allow fresh snapshot
 
                 // Track Sora's actor — he's always the entity list head.
@@ -2378,10 +2941,21 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 // Public API
 // ============================================================================
 
+static void UninitializeMinHookUnlessRetained() {
+    if (resourcetrace::RetainsMinHookResources()) {
+        Log("[resourcetrace] global MinHook teardown retained until process exit");
+        return;
+    }
+    MH_Uninitialize();
+}
+
 bool Initialize(uintptr_t exeBase) {
+    if (resourcetrace::RejectReinitialization()) return false;
     if (g_initialized) return true;
 
     g_exeBase = exeBase;
+    PFN_MovementDispatch verifiedTakeDamage = nullptr;
+    std::uint32_t hitTraceVerified = 0, hitTraceInstalled = 0;
 
     // One log per process so several instances don't clobber each other.
     // kh2ctl launch sets KH2COOP_LOG_DIR; otherwise the log lands in the
@@ -2489,7 +3063,7 @@ bool Initialize(uintptr_t exeBase) {
     if (mhStatus != MH_OK) {
         Log("ERROR: MH_CreateHook(InputCollector) failed: %d (%s)",
             mhStatus, MH_StatusToString(mhStatus));
-        MH_Uninitialize();
+        UninitializeMinHookUnlessRetained();
         return false;
     }
 
@@ -2497,7 +3071,7 @@ bool Initialize(uintptr_t exeBase) {
     if (mhStatus != MH_OK) {
         Log("ERROR: MH_EnableHook(InputCollector) failed: %d (%s)",
             mhStatus, MH_StatusToString(mhStatus));
-        MH_Uninitialize();
+        UninitializeMinHookUnlessRetained();
         return false;
     }
 
@@ -2510,7 +3084,7 @@ bool Initialize(uintptr_t exeBase) {
     if (mhStatus != MH_OK) {
         Log("ERROR: MH_CreateHook(PerEntityUpdate) failed: %d (%s)",
             mhStatus, MH_StatusToString(mhStatus));
-        MH_Uninitialize();
+        UninitializeMinHookUnlessRetained();
         return false;
     }
 
@@ -2518,32 +3092,33 @@ bool Initialize(uintptr_t exeBase) {
     if (mhStatus != MH_OK) {
         Log("ERROR: MH_EnableHook(PerEntityUpdate) failed: %d (%s)",
             mhStatus, MH_StatusToString(mhStatus));
-        MH_Uninitialize();
+        UninitializeMinHookUnlessRetained();
         return false;
     }
 
     Log("  PerEntityUpdate hook installed");
 
-    // --- Install MovementDispatch hook (FUN_1403d5e50) ---
-    // This intercepts the animation speed delta for controlled friends.
+    // --- Install historical MovementDispatch hook (actually TakeDamage) ---
     {
         void* movDispAddr = reinterpret_cast<void*>(exeBase + RVA_MOVEMENT_DISPATCH);
-        mhStatus = MH_CreateHook(
-            movDispAddr,
-            reinterpret_cast<void*>(&HookedMovementDispatch),
-            reinterpret_cast<void**>(&g_origMovementDispatch));
-
-        if (mhStatus == MH_OK) {
-            mhStatus = MH_EnableHook(movDispAddr);
-        }
-
-        if (mhStatus == MH_OK) {
-            Log("  MovementDispatch hook installed at RVA 0x%llX",
-                static_cast<unsigned long long>(RVA_MOVEMENT_DISPATCH));
+        if (std::memcmp(movDispAddr, kTakeDamageBytes, sizeof(kTakeDamageBytes)) == 0) {
+            hitTraceVerified |= 2U;
+            mhStatus = MH_CreateHook(
+                movDispAddr,
+                reinterpret_cast<void*>(&HookedMovementDispatch),
+                reinterpret_cast<void**>(&g_origMovementDispatch));
+            if (mhStatus == MH_OK) mhStatus = MH_EnableHook(movDispAddr);
+            if (mhStatus == MH_OK) {
+                hitTraceInstalled |= 2U;
+                verifiedTakeDamage = g_origMovementDispatch;
+                Log("  MovementDispatch hook installed at RVA 0x%llX",
+                    static_cast<unsigned long long>(RVA_MOVEMENT_DISPATCH));
+            } else {
+                Log("  WARNING: TakeDamage hook failed: %d (%s); network hit apply unavailable",
+                    mhStatus, MH_StatusToString(mhStatus));
+            }
         } else {
-            Log("  WARNING: MovementDispatch hook failed: %d (%s) — animation override disabled",
-                mhStatus, MH_StatusToString(mhStatus));
-            // Non-fatal: movement still works, just animation won't match stick
+            Log("  WARNING: TakeDamage bytes don't match; hook and network hit apply unavailable");
         }
     }
 
@@ -2603,10 +3178,12 @@ bool Initialize(uintptr_t exeBase) {
 
         // HP funnel logging (VUH-1501).
         if (matches(RVA_APPLY_STAT_DELTA, kApplyStatDeltaBytes, sizeof(kApplyStatDeltaBytes))) {
+            hitTraceVerified |= 4U;
             void* target = reinterpret_cast<void*>(exeBase + RVA_APPLY_STAT_DELTA);
             MH_STATUS st = MH_CreateHook(target, reinterpret_cast<void*>(&HookedApplyStatDelta),
                                          reinterpret_cast<void**>(&g_origApplyStatDelta));
             if (st == MH_OK) st = MH_EnableHook(target);
+            if (st == MH_OK) hitTraceInstalled |= 4U;
             Log(st == MH_OK ? "  ApplyStatDelta hook installed (0x3D2EB0)"
                             : "  WARNING: ApplyStatDelta hook failed");
         } else {
@@ -2634,21 +3211,53 @@ bool Initialize(uintptr_t exeBase) {
 
         // Hit drop filter (client side of hit ownership).
         if (matches(RVA_APPLY_HIT_DAMAGE, kApplyHitDamageBytes, sizeof(kApplyHitDamageBytes))) {
+            hitTraceVerified |= 1U;
             void* target = reinterpret_cast<void*>(exeBase + RVA_APPLY_HIT_DAMAGE);
             MH_STATUS st = MH_CreateHook(target, reinterpret_cast<void*>(&HookedApplyHitDamage),
                                          reinterpret_cast<void**>(&g_origApplyHitDamage));
             if (st == MH_OK) st = MH_EnableHook(target);
+            if (st == MH_OK) hitTraceInstalled |= 1U;
             Log(st == MH_OK ? "  ApplyHitDamage hook installed (0x3D3BA0)"
                             : "  WARNING: ApplyHitDamage hook failed");
         } else {
             Log("  WARNING: ApplyHitDamage bytes don't match this build; hits can't be dropped");
         }
         OpenHitChannel();
-        enemysync::Install(exeBase, &Log, g_origApplyStatDelta);
+        enemysync::Install(exeBase, &Log, g_origApplyStatDelta, verifiedTakeDamage);
     }
+
+    char hitTraceSetting[2] {};
+    const bool hitTrace = GetEnvironmentVariableA("KH2COOP_TRACE_HITS", hitTraceSetting,
+                                                  sizeof(hitTraceSetting)) == 1 && hitTraceSetting[0] == '1';
+    g_hitTraceImageSize = 0;
+    if (hitTrace) {
+        IMAGE_DOS_HEADER dos {};
+        IMAGE_NT_HEADERS64 nt {};
+        if (ReadHitTrace(exeBase, dos) && dos.e_magic == IMAGE_DOS_SIGNATURE &&
+            dos.e_lfanew >= static_cast<LONG>(sizeof(dos)) && dos.e_lfanew <= 0x100000 &&
+            ReadHitTrace(exeBase + static_cast<uintptr_t>(dos.e_lfanew), nt) &&
+            nt.Signature == IMAGE_NT_SIGNATURE && nt.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
+            nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+            g_hitTraceImageSize = nt.OptionalHeader.SizeOfImage;
+    }
+    nativehittrace::Configure(hitTrace, hitTraceVerified, hitTraceInstalled);
 
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
+    char spawnTraceSetting[2] {};
+    const bool spawnTrace = GetEnvironmentVariableA("KH2COOP_SPAWN_TRACE", spawnTraceSetting,
+                                                   sizeof(spawnTraceSetting)) == 1 &&
+                            spawnTraceSetting[0] == '1';
+    spawncontroller::Install(exeBase, &Log, &enemysync::ActivationRole,
+                             &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace);
+    resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
+    lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
+    if (spawnTrace) {
+        const auto coverage = lifecycletrace::GetStats();
+        Log("[lifecycletrace] %s requested=%u verifiedMask=%u installedMask=%u failedMask=%u diagnostic-only=1",
+            coverage.installedMask == lifecycletrace::AllHooks ? "ready" : "unavailable",
+            coverage.requested ? 1u : 0u, coverage.verifiedMask, coverage.installedMask, coverage.failedMask);
+    }
     if (g_avatarBridge.Open(GetCurrentProcessId())) {
         Log("  Avatar bridge open (Local\\kh2coop_avatar_%lu)", GetCurrentProcessId());
     } else {
@@ -2676,6 +3285,7 @@ bool Initialize(uintptr_t exeBase) {
 }
 
 void Shutdown() {
+    resourcetrace::StopRecording(); // Retired callbacks use only process-lifetime storage.
     if (!g_initialized) return;
 
     Log("Shutting down...");
@@ -2692,10 +3302,14 @@ void Shutdown() {
     }
 
     render::Shutdown();
+    nativehittrace::Shutdown(); // Quiescent teardown: stop observations before hooks/context retire.
+    ClearNativeAiStamps();
+    lifecycletrace::Shutdown();
+    spawncontroller::Shutdown();
     warp::Shutdown();
     enemysync::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);
-    MH_Uninitialize();
+    UninitializeMinHookUnlessRetained();
 
     g_initialized = false;
     g_friendAIHooked = false;

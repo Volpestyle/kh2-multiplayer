@@ -25,7 +25,9 @@ static void printUsage() {
               << "  --content <hash>    Required content hash\n"
               << "  --mod <hash>        Required mod hash\n"
               << "  --session <id>      Session identifier\n"
+              << "  --desync-dir <path> Automatic report root (default build/rig/desync)\n"
               << "  --max-peers <n>     Max peers (default 3)\n";
+    std::cout << "  --simulate         Enable legacy synthetic actor simulation\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -37,6 +39,7 @@ int main(int argc, char* argv[]) {
 
     // --- Parse args ---
     kh2coop::SessionConfig config;
+    bool simulate = false;
     config.port = 7782;
     config.maxPeers = 3;
     config.heartbeatTimeoutMs = 5000;
@@ -45,6 +48,7 @@ int main(int argc, char* argv[]) {
     config.contentHash = "none";
     config.modHash = "none";
     config.sessionId = "local-test";
+    config.desyncOutputRoot = "build/rig/desync";
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -68,8 +72,12 @@ int main(int argc, char* argv[]) {
             config.modHash = argv[++i];
         } else if (arg == "--session" && i + 1 < argc) {
             config.sessionId = argv[++i];
+        } else if (arg == "--desync-dir" && i + 1 < argc) {
+            config.desyncOutputRoot = argv[++i];
         } else if (arg == "--max-peers" && i + 1 < argc) {
             config.maxPeers = static_cast<std::uint32_t>(std::stoi(argv[++i]));
+        } else if (arg == "--simulate") {
+            simulate = true;
         }
     }
 
@@ -83,6 +91,13 @@ int main(int argc, char* argv[]) {
     kh2coop::SessionCallbacks callbacks;
     callbacks.onLog = [](const std::string& msg) {
         std::cout << msg << "\n";
+    };
+    callbacks.onDesyncCaptureFinalized = [](const kh2coop::DesyncCaptureResult& result) {
+        std::cout << "[Server] Desync report=" << result.key.reportId
+                  << " state=" << static_cast<unsigned>(result.status)
+                  << " manifestWritten=" << result.manifestWritten
+                  << " manifest=" << result.manifestPath
+                  << " error=" << result.error << '\n';
     };
     callbacks.onPeerJoined = [](const std::string& peerId,
                                 kh2coop::SlotType slot) {
@@ -121,14 +136,14 @@ int main(int argc, char* argv[]) {
     while (g_running) {
         host.tick(0);
 
-        for (const auto& peer : host.peers()) {
-            if (peer.status == kh2coop::PeerStatus::Verified) {
-                sim.applyInput(peer.assignedSlot, peer.lastInput);
+        if (simulate) {
+            for (const auto& peer : host.peers()) {
+                if (peer.status == kh2coop::PeerStatus::Verified)
+                    sim.applyInput(peer.assignedSlot, peer.lastInput);
             }
+            sim.tick(kTickDtSeconds);
+            host.broadcastActorSnapshots(sim.generateSnapshots());
         }
-
-        sim.tick(kTickDtSeconds);
-        host.broadcastActorSnapshots(sim.generateSnapshots());
 
         std::this_thread::sleep_for(kTickSleep);
     }

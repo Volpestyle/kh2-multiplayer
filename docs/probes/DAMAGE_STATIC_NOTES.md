@@ -1,9 +1,12 @@
 # Damage pipeline — static notes (2026-10-01)
 
 Static groundwork for VUH-1501 from the fully analyzed Ghidra project
-(`scripts/ghidra.ps1`, Steam Global, RVAs from image base `0x140000000`). Nothing
-here is live-verified yet; it narrows where the live write-watch on an enemy's
-HP should land.
+(`scripts/ghidra.ps1`, Steam Global, RVAs from image base `0x140000000`). The
+later hit-resolution section records live stacks and the diagnostic/manual
+damage spike. Automatic ordinary client hits now have native courtyard
+acceptance: 22 unique host applications and three client-only Shadow kills.
+Enemy attacks against a connected client's local Sora, the full damage rule
+and boss-specific behavior remain open.
 
 ## Attack objects (RTTI)
 
@@ -57,13 +60,54 @@ sites (`0x53AA40`, `0x4372E0`, `0x4371B0`, `0x3D0780`, `0x1B8250`, `0x538920`,
   printed by `FUN_14039fa90`. The tunables they label are likely per-side
   attack multipliers, but the value storage isn't traced yet.
 
-## Next (live)
+## Remaining live evidence
 
-1. Write-watch an enemy's HP during a mob fight → the resolver's RIP.
-2. Expect the resolver to read `ATTACK+0x30` (atkp: power/element) and
-   `ATTACK+0x39` (hit mask), and to call slot 2 for the knockback direction.
-3. Decompile it with `scripts/ghidra.ps1 -Decompile <rip>` and name the
-   (attacker, victim, ATTACK*) boundary the damage rule hooks.
+The resolver and HP funnel below are already identified. The next ordinary
+damage check must bind one genuine enemy attack to the registered client's
+canonical local Sora and its native HP change in the same completed room.
+Historical solo Sora damage and same-name remote puppets do not establish
+that ownership. Step 1 uses each machine's native enemy AI; whether mirrored
+enemy motions generate hitboxes in step 2 remains a separate requirement.
+
+Legacy hit/HP diagnostics are bounded to 60/40 records per process and lack
+an explicit canonical-victim and session join. Missing lines do not prove
+that no incoming attack occurred. The passing client-kill fixture does not
+test incoming player damage. Preserve that distinction when extending its
+acceptance evidence.
+
+The new default-off `KH2COOP_TRACE_HITS=1` observer uses the existing guarded
+ApplyHitDamage, four-argument TakeDamage and ApplyStatDelta detours. It captures
+checked canonical player/head/tracked pointers, actor metadata and HP, complete
+read-only room/session facts, actual nested arguments and genuine returns.
+One normal, fully covered ordinary enemy-to-client-local-player scope can be
+classified from its adjusted negative delta and checked HP/clamp agreement.
+Raw ApplyHitDamage RAX remains opaque. This is an offline candidate, with no
+live hook-installation or incoming-damage evidence yet. The observer itself
+does not implement ownership vetoes or step-2 replicated hitboxes.
+
+The separate active DamagePolicy gate now evaluates checked current
+session/roster, canonical roots and victim/source ownership for readable,
+unapplied, nonzero HP records. Remote victims/sources and unknown sources are
+suppressed; host enemies require canonical-host or positively stamped native
+companion sources; canonical client attacks retain one claim before zero.
+Positive companion stamps require the actual original FriendAI branch and
+fresh native/cached friend-pointer agreement. The checked zero leaf changes
+only hit+0x28; the original ApplyHitDamage still runs once and consumes the
+record. Unsupported/changed facts retain the existing path, rather than proving
+a veto. Release/ASan policy and context controls plus independent source review
+are offline evidence; production adapter execution, general world-object
+compatibility and native damage acceptance remain open. See
+[the bounded policy contract](../SCENARIOS.md#active-session-hp-ownership-gate-offline-candidate).
+
+The opt-in hit trace also carries the actual copied policy decision and operation
+outcomes in a separate damagepolicy envelope keyed to the enclosing Apply scope.
+The saved-log audit distinguishes a matrix-consistent decision from checked
+noncanonical type-0 exclusion, successful zero, native consumption and unchanged
+HP evidence. A zero-delta Stat no-write result can be zero; it is not a failed
+HP application. Driver/AI membership, revalidation and third-roster post state
+are not independently reconstructed. Current ordinary incoming-witness checks
+remain unchanged. Serializer controls are synthetic and no live acceptance is
+claimed; see [recorded policy outcomes](../SCENARIOS.md#recorded-ownership-decisions-and-checked-zero-outcomes).
 
 ## HP boundary (2026-10-02, VUH-1501)
 
@@ -74,10 +118,21 @@ instruction, at `0x3C0884` (the trap reported `0x3C0888`). Decompiled from there
 |---|---|
 | `0x3C0860(stats, delta, idx)` | clamped stat add on 12-byte triplets `[cur, max, min]`; `idx 0` = HP. Damage is a negative delta |
 | `0x3D2EB0(actor, delta, idx, reactFlag)` | ApplyStatDelta, the single HP funnel (~28 callers). Skipped when `actor+0x9B8` bit 2 is set (HP lock). Damage → `0x3DCC10`, heal → `0x3DCBB0`. HP 0 on idx 0 → `vtable+0xB0(actor)` (death) |
-| `0x3D5E50(actor, delta, idx, reactFlag)` | TakeDamage virtual (thunks `0x3C2C10`, `0x1B03D0`): adds drive gauge to the victim (`0x3D3CF0`, scaled by `status+0x22C`), then `0x3D2EB0`. `actor+0x18C` bit 14 suppresses the react flag |
+| `0x3D5E50(actor, delta, idx, reactFlag)` | Four-argument TakeDamage helper: adds drive gauge to the victim (`0x3D3CF0`, scaled by `status+0x22C`), then tail-jumps to `0x3D2EB0`. `actor+0x18C` bit 14 suppresses the react flag |
 
 The attacker-side resolver calls TakeDamage through a vtable; find it from a stack trace in a `0x3D2EB0` hook.
 Puppet attack motions produced no HP writes (live), so hitboxes come from attack logic, not animation.
+
+Saved-PE review distinguishes that helper from the handler virtual. Dispatcher
+`3D3790` supplies five arguments to handler `vtable+E8`: handler receiver,
+actor, delta, stat and a stack-passed flag. Its return address is `3D37D2`.
+The four-argument helper ABI must not be applied to that virtual. Player hit
+processing `3D60C0` calls `3D3BA0` at `3D6137`, returning at `3D613C`.
+`ApplyHitDamage`'s forwarded RAX is not a semantic success/HP result;
+`ApplyStatDelta` can return zero without a write. Checked native HP and actual
+adjusted delta are required to establish application. Full saved-PE evidence
+and the limits of historical Sora logs are in the
+[victim contract](../../build/rig/victim_damage_native_contract_20261003.md).
 
 ## Hit resolution (2026-10-02, VUH-1501; from live stacks through `0x3D2EB0`)
 
@@ -94,3 +149,16 @@ enemy hit on Sora: `... 3D3CD5 <- 3D613C <- 3A8DC5 <- 3D1937 ...`.
 
 Hit record: `+0x18` flags, `+0x1C` attack object handle (`+0x10` owner), `+0x20` atkp-like handle (`+0x04` type, `+0x12` flags),
 `+0x25` stat index, `+0x28` damage. D4 client rule: pre-hook `0x3D3BA0`, claim, zero `hit+0x28`.
+
+Automatic ordinary HP claims require an unapplied record, stat zero and positive
+damage; resolved `hit+0x20` types 5/6 are healing and cannot become damage claims.
+The verified resolver follows `hit+0x1C` to ATTACK, then its `+0x10` owner handle
+to the canonical local player. Diagnostic last-hit caches and low-address handle
+fallbacks do not establish this ownership. The host callback uses the verified
+`3D5E50` prefix `48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57` and exact
+ABI `void(actor, int delta, int statIdx, uint8 reactFlag)`; it is available only
+after successful hook installation. This carries calculated damage through
+TakeDamage, bypassing the full attack resolver and its survival/atkp behavior;
+it does not prove those semantics or boss finishers. Offline results and the
+passing native ordinary-Shadow claim/kill fixture are in
+[SCENARIOS.md](../SCENARIOS.md#automatic-client-hits-native-courtyard-acceptance-2026-10-02).

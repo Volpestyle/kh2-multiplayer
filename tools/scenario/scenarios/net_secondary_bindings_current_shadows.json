@@ -1,0 +1,98 @@
+{
+  "name": "net_secondary_bindings_current_shadows",
+  "protect": [
+    0,
+    1,
+    2
+  ],
+  "description": "Diagnostic current secondary equipment/map binding only. The first12 setup steps are copied unchanged from net_forced_resync_shadows_population.json (SHA8296E2C90CAD3B9C4F3261D14066C794D8747A916E7EA95B29A3B787EF5E4520). One read-only three-peer census checks current object inventory, relocated went/item BAR roots/declared extents, current slot0/1 equipment, ordered item first-match, selected mapping cells, explicit lifecycle and parent-scope joins, and endpoint readback. Partial/malformed/drifting capture fails this diagnostic and retains its evidence. No HP damage, resync, additional native creation, flag/culling/cache edits, save or recovery acceptance. Current selections do not cover future replacement arguments, pending/foreign creators or continuous lifetime. Live launch requires the independently accepted bucket/lifecycle and parent-scope completeness fix.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6,
+      "door": 0,
+      "map": 1,
+      "btl": 1,
+      "evt": 0
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "as": "settled",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['location']==[5,6,0,1,1,0] for row in saved['settled']['instances'].values())",
+      "message": "initial full location differs from supported courtyard fixture"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 1,
+      "intervalMs": 0,
+      "secondaryBindings": true,
+      "as": "secondary_current"
+    },
+    {
+      "do": "assert",
+      "expr": "all(peer.get('secondaryBindings', {}).get(key) is True for snap in saved['secondary_current']['snapshots'] for peer in snap['peers'].values() for key in ('inventoryComplete','declaredExtentBindingComplete','itemFirstMatchCoverageComplete','currentSelectionComplete','readbackStable','sampledBindingsStable')) and all(peer['secondaryBindings']['parentScopeJoin'].get('matches') is True for snap in saved['secondary_current']['snapshots'] for peer in snap['peers'].values())",
+      "message": "Current secondary table/equipment capture is incomplete, contradictory or drifting; preserve partial evidence. This diagnostic cannot establish creator exclusion or recovery."
+    }
+  ]
+}

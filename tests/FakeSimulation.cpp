@@ -352,6 +352,96 @@ static void testReplicaOrdering() {
           "newer enemy snapshot wins for the same enemy");
 }
 
+static void testHandshakeIdentityGate() {
+    std::cout << "\n=== Versioned connection identity gate ===\n";
+    SessionConfig config;
+    config.port = 17784;
+    config.bindAddress = "127.0.0.1";
+    config.maxPeers = 3;
+    config.gameBuild = "identity-build";
+    config.contentHash = "identity-content";
+    config.modHash = "identity-mod";
+    auto unsupportedConfig = config;
+    unsupportedConfig.protocolVersion = 2;
+    SessionHost unsupported(unsupportedConfig, {});
+    check(!unsupported.start() && !unsupported.isRunning(),
+          "current server refuses an unsupported configured protocol before listening");
+    std::string rejected;
+    unsigned joins = 0;
+    SessionCallbacks cb;
+    cb.onPeerRejected = [&](const std::string&, const std::string& reason) { rejected = reason; };
+    cb.onPeerJoined = [&](const std::string&, SlotType) { ++joins; };
+    SessionHost relay(config, std::move(cb));
+    check(relay.start(), "identity-gate relay starts on loopback with free capacity");
+    std::string wireRejection;
+    ClientCallbacks badCb;
+    badCb.onRejected = [&](const HelloReject& r) { wireRejection = r.reason; };
+    NetworkClient old("127.0.0.1", config.port, config.gameBuild, config.modHash, "v2",
+                      SlotType::Player, std::move(badCb), RuntimeMode::CampaignCoop, config.contentHash, 2);
+    old.connect();
+    for (int i = 0; i < 200 && wireRejection.empty(); ++i) tickPair(relay, old, 1, 5);
+    check(rejected.find("Protocol mismatch: client=2 server=" + std::to_string(PROTOCOL_VERSION)) != std::string::npos &&
+              wireRejection == rejected && joins == 0 && relay.verifiedPeerCount() == 0,
+          "v2 is refused for its protocol with free capacity and a transmitted reason");
+    old.disconnect();
+    tickPair(relay, old, 5, 1);
+
+    rejected.clear();
+    ENetHost* legacy = enet_host_create(nullptr, 1, 2, 0, 0);
+    check(legacy != nullptr, "legacy handshake test creates a loopback client");
+    if (legacy) {
+        ENetAddress address {};
+        enet_address_set_host_ip(&address, "127.0.0.1");
+        address.port = config.port;
+        auto* peer = enet_host_connect(legacy, &address, 2, 0);
+        bool sent = false;
+        for (int i = 0; i < 200 && rejected.empty(); ++i) {
+            relay.tick(1);
+            ENetEvent event;
+            while (enet_host_service(legacy, &event, 1) > 0) {
+                if (event.type == ENET_EVENT_TYPE_CONNECT) {
+                    SessionState handshake;
+                    handshake.gameBuild = config.gameBuild;
+                    handshake.modHash = config.modHash;
+                    handshake.actors.push_back(SessionActor {});
+                    auto packet = encode(handshake);
+                    enet_peer_send(peer, 0, enet_packet_create(packet.data(), packet.size(), ENET_PACKET_FLAG_RELIABLE));
+                    sent = true;
+                } else if (event.type == ENET_EVENT_TYPE_RECEIVE) enet_packet_destroy(event.packet);
+            }
+        }
+        check(sent && rejected.find("Legacy handshake unsupported") != std::string::npos &&
+                  joins == 0 && relay.verifiedPeerCount() == 0,
+              "legacy SessionState cannot bypass protocol verification");
+        if (peer) enet_peer_disconnect_now(peer, 0);
+        enet_host_destroy(legacy);
+        relay.tick(5);
+    }
+
+    rejected.clear();
+    // A lone pre-host friend is intentionally unready. Use the Player here so
+    // the repeated-hello control has a real admitted roster and free Friend2.
+    NetworkClient current("127.0.0.1", config.port, config.gameBuild, config.modHash, "current",
+                          SlotType::Player, {}, RuntimeMode::CampaignCoop, config.contentHash);
+    current.connect();
+    for (int i = 0; i < 200 && (relay.verifiedPeerCount() != 1 || !current.ready()); ++i) tickPair(relay, current, 1, 5);
+    check(current.ready() && relay.peerBySlot(SlotType::Player) && relay.peerBySlot(SlotType::Player)->connectionId != 0 &&
+              !relay.peerBySlot(SlotType::Friend2) && joins == 1,
+          "current default protocol verifies with a nonzero connection identity");
+    ClientHello repeated;
+    repeated.gameBuild = config.gameBuild; repeated.contentHash = config.contentHash;
+    repeated.modHash = config.modHash; repeated.peerId = "changed-identity";
+    repeated.requestedSlot = static_cast<std::uint8_t>(SlotType::Friend2);
+    const bool admittedBeforeRepeatedHello = current.ready();
+    current.sendRawPacket(encode(repeated), true);
+    for (int i = 0; i < 200 && rejected.empty(); ++i) tickPair(relay, current, 1, 5);
+    check(admittedBeforeRepeatedHello && rejected.find("Repeated ClientHello") != std::string::npos &&
+              !relay.peerBySlot(SlotType::Friend2) && joins == 1,
+          "verified peer cannot repeat hello to assume a free slot or new identity");
+    current.disconnect();
+    relay.stop();
+}
+
 static void testHeartbeatTimeout() {
     std::cout << "\n=== Heartbeat timeout ===\n";
 
@@ -361,6 +451,7 @@ static void testHeartbeatTimeout() {
 
     SessionConfig config;
     config.port = 17783;
+    config.bindAddress = "127.0.0.1";
     config.maxPeers = 1;
     config.heartbeatTimeoutMs = kTimeoutMs;
     config.pendingPeerTimeoutMs = kTimeoutMs;
@@ -421,6 +512,7 @@ static void testNetworkIntegration() {
     // --- Server setup ---
     SessionConfig serverConfig;
     serverConfig.port = 17782; // non-default to avoid conflicts
+    serverConfig.bindAddress = "127.0.0.1";
     serverConfig.maxPeers = 3;
     serverConfig.gameBuild = BUILD;
     serverConfig.contentHash = CONTENT;
@@ -759,6 +851,7 @@ int main() {
     testReplicaOrdering();
     testNetworkIntegration();
     testHeartbeatTimeout();
+    testHandshakeIdentityGate();
 
     enet_deinitialize();
 

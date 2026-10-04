@@ -53,7 +53,24 @@ add_library(kh2coop_inject SHARED
     src/CrashDump.cpp
     src/EnemySync.cpp
     src/ProgressSync.cpp
+    src/NativeSpawnController.cpp
+    src/NativeResourceTrace.cpp
+    src/NativeOwnedEmitterCode.cpp
+    src/NativeOwnedEmitterGateway.cpp
+    src/NativeOwnedEmitterGatewayRaw.asm
+    src/NativeOwnedEmitterInstall.cpp
+    src/NativeLifecycleTrace.cpp
+    src/NativeHitTrace.cpp
+    src/DamagePolicy.cpp
 )
+
+if(MSVC)
+    set_source_files_properties(
+        src/NativeOwnedEmitterGateway.cpp
+        src/NativeOwnedEmitterInstall.cpp
+        PROPERTIES COMPILE_OPTIONS "/W4;/WX"
+    )
+endif()
 
 target_include_directories(kh2coop_inject PRIVATE
     src

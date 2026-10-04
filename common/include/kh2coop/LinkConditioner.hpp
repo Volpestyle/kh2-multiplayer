@@ -43,6 +43,15 @@ public:
 
     [[nodiscard]] const LinkConditions& conditions() const { return conditions_; }
 
+    // A transport boundary discards packets, timing and loss from its old link.
+    // Preserve the configured conditions for the next connection.
+    void reset() {
+        queue_.clear();
+        lastDueMs_ = 0;
+        dropped_ = 0;
+        rng_.seed(conditions_.seed);
+    }
+
     // Returns false if the packet was dropped.
     bool enqueue(std::uint64_t nowMs, std::vector<std::uint8_t> bytes,
                  bool reliable) {

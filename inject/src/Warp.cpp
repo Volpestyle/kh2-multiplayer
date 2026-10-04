@@ -87,6 +87,7 @@ RoomTransition g_hostTarget {};
 bool g_hostQueued = false;
 bool g_hostIssued = false;
 std::uint32_t g_hostIssueLoad = 0;
+std::uint32_t g_hostGeneration = 0;
 HANDLE g_mapping = nullptr;
 WarpChannel* g_channel = nullptr;
 
@@ -161,10 +162,12 @@ void __fastcall HookedLoadCompleteDirect() {
 }
 
 void IssueHostTransition() {
-    if (!g_hostQueued || g_transitionPending || !SafeToWarp()) return;
+    if (!g_hostQueued || !g_hostGeneration ||
+        enemysync::WorldSessionGeneration() != g_hostGeneration ||
+        g_transitionPending || !SafeToWarp()) return;
     // Room initialization reads programs and chest flags from SAVE. Wait for
     // the complete host snapshot and apply it before starting the native load.
-    if (!progresssync::ApplyAtRoomBoundary()) return;
+    if (!progresssync::ApplyAtRoomBoundary(g_hostGeneration)) return;
     LocationPacket packet {};
     packet.world = static_cast<std::uint8_t>(g_hostTarget.worldId);
     packet.room = static_cast<std::uint8_t>(g_hostTarget.roomId);
@@ -172,14 +175,16 @@ void IssueHostTransition() {
     packet.map = g_hostTarget.mapProgram;
     packet.battle = g_hostTarget.battleProgram;
     packet.event = g_hostTarget.eventProgram;
+    const auto issuedEpoch = g_hostTarget.epoch;
+    if (enemysync::WorldSessionGeneration() != g_hostGeneration) return;
     g_hostQueued = false;
     g_hostIssued = true;
     g_hostIssueLoad = g_loadSerial;
     BeginTransition();
-    if (g_log) g_log("[warp] client issued epoch=%u transition=%u", g_hostTarget.epoch,
-                     g_transitionSerial);
+    const auto issuedTransition = g_transitionSerial;
     // Only this authority path bypasses the native-exit detour.
     g_requestTransition(&packet, 1, 0, 0, 0);
+    if (g_log) g_log("[warp] client issued epoch=%u transition=%u", issuedEpoch, issuedTransition);
 }
 
 void HandOver(std::uint32_t frame) {
@@ -306,14 +311,17 @@ void SetClientAuthority(bool enabled) {
     if (!enabled) {
         g_hostQueued = false;
         g_hostIssued = false;
+        g_hostGeneration = 0;
     }
 }
 
 bool QueueHostTransition(const RoomTransition& target) {
+    const auto generation = enemysync::WorldSessionGeneration();
     // NOW stores world, room and door as bytes; reject truncation.
-    if (!g_ready || !g_clientAuthority || target.worldId >= 0xFF || target.roomId >= 0xFF ||
+    if (!generation || !g_ready || !g_clientAuthority || target.worldId >= 0xFF || target.roomId >= 0xFF ||
         target.door > 0xFF) return false;
     g_hostTarget = target;
+    g_hostGeneration = generation;
     g_hostQueued = true;
     g_hostIssued = false;
     if (g_log) g_log("[warp] client queued epoch=%u target=%02X/%02X door=%u map=%u btl=%u evt=%u",
@@ -334,10 +342,20 @@ RoomTransition ReadLocation() {
 }
 
 bool HostTransitionArrived(std::uint32_t epoch) {
-    if (!g_hostIssued || epoch != g_hostTarget.epoch || g_hostIssueLoad == g_loadSerial ||
+    if (!g_hostGeneration || enemysync::WorldSessionGeneration() != g_hostGeneration ||
+        !g_hostIssued || epoch != g_hostTarget.epoch || g_hostIssueLoad == g_loadSerial ||
         TransitionPending() || !SafeToWarp()) return false;
     const auto location = ReadLocation();
     return location.worldId == g_hostTarget.worldId && location.roomId == g_hostTarget.roomId &&
+           location.door == g_hostTarget.door && location.mapProgram == g_hostTarget.mapProgram &&
+           location.battleProgram == g_hostTarget.battleProgram && location.eventProgram == g_hostTarget.eventProgram;
+}
+
+bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept {
+    return g_hostGeneration != 0 && enemysync::WorldSessionGeneration() == g_hostGeneration &&
+           g_ready && g_hostIssued && location.epoch == g_hostTarget.epoch &&
+           g_hostIssueLoad != g_loadSerial && !g_transitionPending &&
+           location.worldId == g_hostTarget.worldId && location.roomId == g_hostTarget.roomId &&
            location.door == g_hostTarget.door && location.mapProgram == g_hostTarget.mapProgram &&
            location.battleProgram == g_hostTarget.battleProgram && location.eventProgram == g_hostTarget.eventProgram;
 }

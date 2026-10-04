@@ -1,0 +1,1859 @@
+{
+  "name": "net_reconnect_shadows_outside_trace",
+  "protect": [
+    0,
+    1,
+    2
+  ],
+  "description": "Unexecuted controlled outside-region native BOX-trace experiment. Preserve all260 objects of net_reconnect_shadows_repeat_diagnostic in their original order, including all ten strict population/progress/death/recovery cycles. After qualified original five Shadows and sole host damage3 to HP17/max20, use only existing native player-input: one250ms measured lx0/ly+1 probe and one100..2000ms calibrated continuation toward z650, with no retries, movement loop, direct transform, policy edit or fallback. Actual probe displacement must verify direction; fresh all-peer complete native/geometry censuses must prove original fiveHP17/progress survive and stable host point lies outside all seven current header30 BOX regions. Recheck this immediately before original first pause. Preserve all game/runtime/relay/session/roster/pin/generation/load identities across movement and first mark. Any failed qualification retains FAIL; z650 alone never establishes geometric eligibility. Default-OFF bounded observer is armed by root launch environment for Friend1 first rejoin load4/transition3 and fulltuple[5,6,0,1,1,0], never by this fixture. Native trace is diagnostic only and never substitutes for original population/death gates. Native physics and camera/actor changes can contribute to measured displacement; timing and added observations perturb execution. This fixture is unexecuted, provides no native-predicate/pass claim, and cannot close ten-cycle, five-room, natural-progress, dead-history or remote acceptance from a shorter prefix.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "boot",
+      "instance": 2
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6,
+      "door": 0,
+      "map": 1,
+      "btl": 1,
+      "evt": 0
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "as": "settled",
+      "target": [
+        5,
+        6
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['location']==[5,6,0,1,1,0] for row in saved['settled']['instances'].values())",
+      "message": "initial full location differs from supported courtyard fixture"
+    },
+    {
+      "do": "save",
+      "as": "death_baseline",
+      "expr": "[log_count('host death', i) for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['death_baseline']==[0,0,0]",
+      "message": "Original pre-movement courtyard death baseline must be zero and is never reset"
+    },
+    {
+      "do": "save",
+      "as": "pack_epoch",
+      "expr": "saved['settled']['epoch']"
+    },
+    {
+      "do": "save",
+      "as": "spawn_pattern",
+      "expr": "'\\\\[spawnctl\\\\] action=(?P<action>\\\\w+) reason=[^\\\\r\\\\n]*? controller=(?P<controller>[0-9A-Fa-f]+) key=(?P<key>\\\\d+) headerId=(?P<header>\\\\d+) records=(?P<records>\\\\d+) transition=(?P<transition>\\\\d+) load=(?P<load>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) capture=(?P<capture>\\\\d+) apply=(?P<apply>\\\\d+) hold=(?P<hold>\\\\d+) unsupported=(?P<unsupported>\\\\d+) unavailable=(?P<unavailable>\\\\d+) pointAvailable=(?P<point>\\\\d+) point=\\\\([^\\\\r\\\\n]*\\\\)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "lease_pattern",
+      "expr": "'\\\\[spawn-authority\\\\] lease epoch=(?P<epoch>\\\\d+) source=(?P<source>\\\\d+) point=\\\\([^\\\\r\\\\n]*\\\\)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "arrival_pattern",
+      "expr": "'\\\\[enemysync\\\\] (?:host|client) arrived epoch=(?P<epoch>\\\\d+) room=(?P<world>[0-9A-Fa-f]+)/(?P<room>[0-9A-Fa-f]+) door=(?P<door>\\\\d+) map=(?P<map>\\\\d+) btl=(?P<btl>\\\\d+) evt=(?P<evt>\\\\d+)(?=\\\\r?\\\\n)'"
+    },
+    {
+      "do": "save",
+      "as": "arrivals",
+      "expr": "[log_matches(saved['arrival_pattern'],i)[-1] for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "initial_marks",
+      "expr": "[len(log_matches(saved['spawn_pattern'],i)) for i in range(3)]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(any(row['action']=='apply' and row['point']=='1' and row['header']=='30' and row['records']=='5' for row in log_matches(saved['spawn_pattern'],i)[saved['initial_marks'][i]:]) for i in [1,2])",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "statehash_check",
+      "as": "initial_empty",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['initial_empty']['epoch']==saved['settled']['epoch'] and all(row['count']==0 for row in saved['initial_empty']['instances'].values())",
+      "message": "native enemy population is already nonempty before the positional control"
+    },
+    {
+      "do": "save",
+      "as": "client1_start",
+      "expr": "pos('P_EX100',1)"
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": 0,
+      "ly": 1,
+      "ms": 250
+    },
+    {
+      "do": "save",
+      "as": "client1_probe",
+      "expr": "pos('P_EX100',1)"
+    },
+    {
+      "do": "assert",
+      "expr": "20 < saved['client1_start'][2]-saved['client1_probe'][2] < 300 and abs(saved['client1_probe'][0]-saved['client1_start'][0]) < 150 and saved['client1_probe'][2]>1550",
+      "message": "client1: camera-forward probe did not move safely toward -Z while remaining outside region0; recalibrate native input"
+    },
+    {
+      "do": "save",
+      "as": "client1_remaining_ms",
+      "expr": "int(min(2000,max(100,(saved['client1_probe'][2]-1300)*250/(saved['client1_start'][2]-saved['client1_probe'][2]))))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['player-input','--lx','0','--ly','1','--duration-ms',str(saved['client1_remaining_ms'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 700
+    },
+    {
+      "do": "save",
+      "as": "client1_finish",
+      "expr": "pos('P_EX100',1)"
+    },
+    {
+      "do": "assert",
+      "expr": "850 < saved['client1_finish'][2] < 1500 and abs(saved['client1_finish'][0]+14.26138)<370 and abs(saved['client1_finish'][1]+286.0282)<240",
+      "message": "client1: native movement did not reach the safe interior of measured central BOX; no transform fallback"
+    },
+    {
+      "do": "save",
+      "as": "client2_start",
+      "expr": "pos('P_EX100',2)"
+    },
+    {
+      "do": "input",
+      "instance": 2,
+      "lx": 0,
+      "ly": 1,
+      "ms": 250
+    },
+    {
+      "do": "save",
+      "as": "client2_probe",
+      "expr": "pos('P_EX100',2)"
+    },
+    {
+      "do": "assert",
+      "expr": "20 < saved['client2_start'][2]-saved['client2_probe'][2] < 300 and abs(saved['client2_probe'][0]-saved['client2_start'][0]) < 150 and saved['client2_probe'][2]>1550",
+      "message": "client2: camera-forward probe did not move safely toward -Z while remaining outside region0; recalibrate native input"
+    },
+    {
+      "do": "save",
+      "as": "client2_remaining_ms",
+      "expr": "int(min(2000,max(100,(saved['client2_probe'][2]-1300)*250/(saved['client2_start'][2]-saved['client2_probe'][2]))))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 2,
+      "argsExpr": "['player-input','--lx','0','--ly','1','--duration-ms',str(saved['client2_remaining_ms'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 700
+    },
+    {
+      "do": "save",
+      "as": "client2_finish",
+      "expr": "pos('P_EX100',2)"
+    },
+    {
+      "do": "assert",
+      "expr": "850 < saved['client2_finish'][2] < 1500 and abs(saved['client2_finish'][0]+14.26138)<370 and abs(saved['client2_finish'][1]+286.0282)<240",
+      "message": "client2: native movement did not reach the safe interior of measured central BOX; no transform fallback"
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "clients_inside_host_outside",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['clients_inside_host_outside']['complete'] and saved['clients_inside_host_outside']['geometryComplete'] and all(peer['comparison']['nativeLivingCount']==0 and peer['comparison']['comparisonValid'] for snap in saved['clients_inside_host_outside']['snapshots'] for peer in snap['peers'].values())",
+      "message": "client-local entry produced enemies or native absence evidence is incomplete"
+    },
+    {
+      "do": "save",
+      "as": "outside_comparisons",
+      "expr": "[[c for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514] for snap in saved['clients_inside_host_outside']['snapshots']]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(rows)==9 and all(c['available'] and c['pointStableDuringCapture'] and len(c['regions'])==7 and all(r['kind']=='BOX' and not r['edgeUncertain'] for r in c['regions']) and (all(not r['accepted'] for r in c['regions']) if c['pointPeer']=='0' else any(r['accepted'] and min(r['margins'])>20 for r in c['regions'])) for c in rows) for rows in saved['outside_comparisons'])",
+      "message": "fresh complete geometry must place host outside all7 regions and both clients safely inside; geometry is sampled offline predicate evaluation"
+    },
+    {
+      "do": "assert",
+      "expr": "all(location(i)==[5,6,0,1,1,0] and log_matches(saved['arrival_pattern'],i)[-1]==saved['arrivals'][i] for i in range(3))",
+      "message": "positional negative control crossed a room lifecycle"
+    },
+    {
+      "do": "statehash_check",
+      "as": "clients_inside_empty_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['clients_inside_empty_hash']['epoch']==saved['settled']['epoch'] and all(row['count']==0 for row in saved['clients_inside_empty_hash']['instances'].values())",
+      "message": "clients inside with host outside did not retain actual empty native hashes"
+    },
+    {
+      "do": "save",
+      "as": "activation_marks",
+      "expr": "[len(log_matches(saved['spawn_pattern'],i)) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "lease_marks",
+      "expr": "[len(log_matches(saved['lease_pattern'],i)) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "host_start",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 0,
+      "ly": 1,
+      "ms": 250
+    },
+    {
+      "do": "save",
+      "as": "host_probe",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "assert",
+      "expr": "20 < saved['host_start'][2]-saved['host_probe'][2] < 300 and abs(saved['host_probe'][0]-saved['host_start'][0]) < 150 and saved['host_probe'][2]>1550",
+      "message": "host: camera-forward probe did not move safely toward -Z while remaining outside region0; recalibrate native input"
+    },
+    {
+      "do": "save",
+      "as": "host_remaining_ms",
+      "expr": "int(min(2000,max(100,(saved['host_probe'][2]-1300)*250/(saved['host_start'][2]-saved['host_probe'][2]))))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['player-input','--lx','0','--ly','1','--duration-ms',str(saved['host_remaining_ms'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 700
+    },
+    {
+      "do": "save",
+      "as": "host_finish",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "assert",
+      "expr": "850 < saved['host_finish'][2] < 1500 and abs(saved['host_finish'][0]+14.26138)<370 and abs(saved['host_finish'][1]+286.0282)<240",
+      "message": "host: native movement did not reach the safe interior of measured central BOX; no transform fallback"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(len([a for a in actors(i) if a.get('objectId')==302 and a.get('hp',0)>0])==5 for i in range(3))",
+      "timeoutMs": 15000,
+      "pollMs": 250
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(any(row['action']=='apply' and row['point']=='1' and row['header']=='30' and row['records']=='5' for row in log_matches(saved['spawn_pattern'],i)[saved['activation_marks'][i]:]) and any(int(row['epoch'])==saved['settled']['epoch'] for row in log_matches(saved['lease_pattern'],i)[saved['lease_marks'][i]:]) for i in [1,2])",
+      "timeoutMs": 12000,
+      "pollMs": 250
+    },
+    {
+      "do": "statehash_check",
+      "as": "five_native_shadows",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['five_native_shadows']['epoch']==saved['settled']['epoch'] and all(row['count']==5 and all(enemy['objectId']==302 and enemy['netId']>0 and enemy['hp']>0 for enemy in row['nativeRows'] if enemy['hp']>0) for row in saved['five_native_shadows']['instances'].values())",
+      "message": "nonempty acceptance requires exactly five matched native Shadows on every peer"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "host_inside_native_five",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['host_inside_native_five']['complete'] and saved['host_inside_native_five']['geometryComplete'] and all(peer['comparison']['comparisonValid'] and peer['comparison']['nativeLivingCount']==5 and all(row['objectId']==302 for row in peer['livingCombatRows']) for snap in saved['host_inside_native_five']['snapshots'] for peer in snap['peers'].values())",
+      "message": "independent native list does not contain exactly five Shadows after host entry"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['five_native_shadows']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['five_native_shadows']['instances'].values()) and len(saved['five_native_shadows']['matchingSamples'])>=2 and all(sample['epoch']==saved['five_native_shadows']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['five_native_shadows']['instances'][i]['liveRows'] for sample in saved['five_native_shadows']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>3 for r in row['liveRows']) for row in saved['five_native_shadows']['instances'].values())",
+      "message": "Two fresh samples must establish exactly five stable Shadows302 with unique positive host bindings and valid nonlethal HP on every peer"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['host_inside_native_five']['complete'] and len(saved['host_inside_native_five']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['five_native_shadows']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['host_inside_native_five']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['host_inside_native_five']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Both checked native censuses must exactly join every live actor address/object302/HP to the current bound population with positive valid maxHP; missing/extra/stale rows fail"
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Initial living-only Shadows gate must retain original zero death/tombstone history"
+    },
+    {
+      "do": "statehash_check",
+      "as": "before_host_damage",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['before_host_damage']['epoch']==saved['settled']['epoch'] and all(row['count']==5 and all(r[0]>0 and r[1]==302 and r[2]>3 for r in row['liveRows']) for row in saved['before_host_damage']['instances'].values())",
+      "message": "host damage control requires exactly five matched native Shadows with HP above three in the settled epoch"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['before_host_damage']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['before_host_damage']['instances'].values()) and len(saved['before_host_damage']['matchingSamples'])>=2 and all(sample['epoch']==saved['before_host_damage']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['before_host_damage']['instances'][i]['liveRows'] for sample in saved['before_host_damage']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>3 for r in row['liveRows']) for row in saved['before_host_damage']['instances'].values()) and all(row['liveRows']==saved['five_native_shadows']['instances']['0']['liveRows'] for row in saved['before_host_damage']['instances'].values())",
+      "message": "The same five original living bindings must remain stable before host damage; no replacement or refill is accepted"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "damage",
+      "amount": 3
+    },
+    {
+      "do": "statehash_check",
+      "as": "after_host_damage",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['after_host_damage']['epoch']==saved['settled']['epoch'] and all(row['count']==5 for row in saved['after_host_damage']['instances'].values()) and all(any(after[0]==before[0] and after[1]==before[1]==302 and after[2]==before[2]-3 for after in saved['after_host_damage']['instances']['0']['liveRows']) for before in saved['before_host_damage']['instances']['0']['liveRows'])",
+      "message": "all five original host netIDs must lose exactly three native HP with matching client populations"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['after_host_damage']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['after_host_damage']['instances'].values()) and len(saved['after_host_damage']['matchingSamples'])>=2 and all(sample['epoch']==saved['after_host_damage']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['after_host_damage']['instances'][i]['liveRows'] for sample in saved['after_host_damage']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['after_host_damage']['instances'].values()) and all(any(after[0]==before[0] and after[1]==before[1]==302 and after[2]==before[2]-3 and after[2]>0 for after in saved['after_host_damage']['instances']['0']['liveRows']) for before in saved['before_host_damage']['instances']['0']['liveRows'])",
+      "message": "Every original Shadow binding must lose exactly three HP and remain positive in two stable all-peer samples (20 to17 when initialHP20)"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "shadows_damaged_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['shadows_damaged_native']['complete'] and len(saved['shadows_damaged_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['after_host_damage']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['shadows_damaged_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['shadows_damaged_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Two complete independent damaged-native censuses must still match exact current five bound Shadow IDs/types/HP before resync"
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Host damage must leave original zero death/tombstone history before one living-only resync"
+    },
+    {
+      "do": "assert",
+      "expr": "all(all(r[1]==302 and r[2]==20 for r in row['liveRows']) for key in ['five_native_shadows','before_host_damage'] for sample in saved[key]['matchingSamples'] for row in sample['instances'].values()) and all(native['objectId']==302 and native['objectType']==4 and native['hp']==20 and native['maxHp']==20 for snap in saved['host_inside_native_five']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Original two fresh typed-hash observations and both complete native censuses must establish HP20/maxHP20 for every original Shadow"
+    },
+    {
+      "do": "assert",
+      "expr": "all(all(r[1]==302 and r[2]==17 for r in row['liveRows']) and row['progress']==saved['five_native_shadows']['instances']['0']['progress'] for sample in saved['after_host_damage']['matchingSamples'] for row in sample['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] for sample in saved['before_host_damage']['matchingSamples'] for row in sample['instances'].values()) and all(native['objectId']==302 and native['objectType']==4 and native['hp']==17 and native['maxHp']==20 for snap in saved['shadows_damaged_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Before reconnect, both damaged typed-hash observations and complete native censuses must establish HP17/maxHP20 with unchanged original progress"
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "outside_trace_before_movement",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['outside_trace_before_movement']['epoch']==saved['pack_epoch'] and saved['outside_trace_before_movement']['location']==[5,6,0,1,1,0] and [p['loadSerial'] for p in saved['outside_trace_before_movement']['peers']]==[2,3,3] and [p['transition'] for p in saved['outside_trace_before_movement']['peers']]==[1,2,2]",
+      "message": "outside trace: qualified original native lifecycle must target only first Friend1 rejoin load4/transition3; no retarget fallback"
+    },
+    {
+      "do": "save",
+      "as": "outside_trace_start",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "assert",
+      "expr": "850 < saved['outside_trace_start'][2] < 1600 and abs(saved['outside_trace_start'][0]+14.26138)<370",
+      "message": "outside trace: start must remain in the bounded calibrated courtyard corridor before any new input"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 0,
+      "ly": 1,
+      "ms": 250
+    },
+    {
+      "do": "save",
+      "as": "outside_trace_probe",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "assert",
+      "expr": "20 < saved['outside_trace_start'][2]-saved['outside_trace_probe'][2] < 300 and abs(saved['outside_trace_probe'][0]-saved['outside_trace_start'][0]) < 150 and saved['outside_trace_probe'][2]>700 and all(location(i)==[5,6,0,1,1,0] for i in range(3))",
+      "message": "outside trace: single camera-forward probe must actually move toward -Z within bounded lateral displacement and same tuple; fail rather than guessing mapping"
+    },
+    {
+      "do": "save",
+      "as": "outside_trace_remaining_ms",
+      "expr": "int(min(2000,max(100,(saved['outside_trace_probe'][2]-650)*250/(saved['outside_trace_start'][2]-saved['outside_trace_probe'][2]))))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['player-input','--lx','0','--ly','1','--duration-ms',str(saved['outside_trace_remaining_ms'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 700
+    },
+    {
+      "do": "save",
+      "as": "outside_trace_finish",
+      "expr": "pos('P_EX100',0)"
+    },
+    {
+      "do": "assert",
+      "expr": "450 < saved['outside_trace_finish'][2] < 850 and abs(saved['outside_trace_finish'][0]-saved['outside_trace_start'][0])<300 and all(location(i)==[5,6,0,1,1,0] for i in range(3))",
+      "message": "outside trace: single continuation must remain in bounded courtyard target corridor; Z alone never establishes outside geometry"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "outside_trace_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['outside_trace_native']['complete'] and len(saved['outside_trace_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['after_host_damage']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['outside_trace_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['outside_trace_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['outside_trace_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(int(peer['logsAfter']['hash']['progress'],16)==saved['five_native_shadows']['instances']['0']['progress'] and peer['logsAfter']['hashAfterLatestArrival'] and peer['logsAfter']['arrivalAfterLifecycle'] for snap in saved['outside_trace_native']['snapshots'] for peer in snap['peers'].values())",
+      "message": "outside trace: both complete independent native lists must retain exact original five unique bindings/object302/HP17/max20 and progress; missing/extra/refilled rows fail"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['outside_trace_native']['complete'] and saved['outside_trace_native']['geometryComplete'] and len(saved['outside_trace_native']['snapshots'])==2 and all(len([c for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514 and c['pointPeer']=='0'])==3 and all(c['available'] and c['pointStableDuringCapture'] and len(c['regions'])==7 and all(r['kind']=='BOX' and not r['edgeUncertain'] and r['accepted']==False for r in c['regions']) for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514 and c['pointPeer']=='0') for snap in saved['outside_trace_native']['snapshots'])",
+      "message": "outside trace: both fresh all-peer header30/group808476514 geometries must reject stable host point against all seven BOXes with no edge uncertainty; sampled evaluation only"
+    },
+    {
+      "do": "statehash_check",
+      "as": "outside_trace_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['outside_trace_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['outside_trace_hash']['instances'].values()) and len(saved['outside_trace_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['outside_trace_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['outside_trace_hash']['instances'][i]['liveRows'] for sample in saved['outside_trace_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['outside_trace_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['outside_trace_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['outside_trace_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "outside trace: two fresh hashes must retain exact original damaged five IDs/HP17 and original progress in original epoch/full tuple"
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death',i) for i in range(3)]==saved['death_baseline']==[0,0,0] and all(log_count('tombstone',i)==0 for i in range(3))",
+      "message": "outside trace: controlled native movement must preserve original zero-death and no tombstone history"
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "outside_trace_after_movement",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['outside_trace_after_movement']['ready'] and saved['outside_trace_before_movement']['ready'] and saved['outside_trace_after_movement']['epoch']==saved['outside_trace_before_movement']['epoch']==saved['pack_epoch'] and saved['outside_trace_after_movement']['location']==saved['outside_trace_before_movement']['location']==[5,6,0,1,1,0] and saved['outside_trace_after_movement']['session']==saved['outside_trace_before_movement']['session'] and saved['outside_trace_after_movement']['runnerBindings']==saved['outside_trace_before_movement']['runnerBindings'] and saved['outside_trace_after_movement']['runnerRelayPid']==saved['outside_trace_before_movement']['runnerRelayPid'] and saved['outside_trace_after_movement']['roster']==saved['outside_trace_before_movement']['roster'] and all(saved['outside_trace_after_movement']['peers'][i]['loadSerial']==saved['outside_trace_before_movement']['peers'][i]['loadSerial'] and saved['outside_trace_after_movement']['peers'][i]['transition']==saved['outside_trace_before_movement']['peers'][i]['transition'] and saved['outside_trace_after_movement']['peers'][i]['identity']['generation']==saved['outside_trace_before_movement']['peers'][i]['identity']['generation'] and all(saved['outside_trace_after_movement']['peers'][i]['identity'][key]==saved['outside_trace_before_movement']['peers'][i]['identity'][key] for key in ['session','pinSession','pinHostConnection','pinSlot','selfConnection','hostConnection']) for i in range(3))",
+      "message": "outside trace: movement interval must preserve original processes/relay/session/roster/pins/generations/native loads/transitions on all three peers"
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle01_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle01_before']['ready'] and saved['outside_trace_before_movement']['ready'] and saved['cycle01_before']['epoch']==saved['outside_trace_before_movement']['epoch']==saved['pack_epoch'] and saved['cycle01_before']['location']==saved['outside_trace_before_movement']['location']==[5,6,0,1,1,0] and saved['cycle01_before']['session']==saved['outside_trace_before_movement']['session'] and saved['cycle01_before']['runnerBindings']==saved['outside_trace_before_movement']['runnerBindings'] and saved['cycle01_before']['runnerRelayPid']==saved['outside_trace_before_movement']['runnerRelayPid'] and saved['cycle01_before']['roster']==saved['outside_trace_before_movement']['roster'] and all(saved['cycle01_before']['peers'][i]['loadSerial']==saved['outside_trace_before_movement']['peers'][i]['loadSerial'] and saved['cycle01_before']['peers'][i]['transition']==saved['outside_trace_before_movement']['peers'][i]['transition'] and saved['cycle01_before']['peers'][i]['identity']['generation']==saved['outside_trace_before_movement']['peers'][i]['identity']['generation'] and all(saved['cycle01_before']['peers'][i]['identity'][key]==saved['outside_trace_before_movement']['peers'][i]['identity'][key] for key in ['session','pinSession','pinHostConnection','pinSlot','selfConnection','hostConnection']) for i in range(3))",
+      "message": "outside trace: first fault baseline must not adopt any process/session/identity/native lifecycle change during controlled setup"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle01_before']['epoch']==saved['pack_epoch'] and saved['cycle01_before']['location']==[5,6,0,1,1,0] and saved['cycle01_before']['session']==saved['cycle01_before']['session'] and saved['cycle01_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle01_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle01_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle01_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle01_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle01_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle01_before']['peers'])",
+      "message": "cycle01: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle01_diagnostic_before_pause"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle01_diagnostic_before_pause']['complete'] and len(saved['cycle01_diagnostic_before_pause']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['after_host_damage']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle01_diagnostic_before_pause']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle01_diagnostic_before_pause']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle01_diagnostic_before_pause']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(int(peer['logsAfter']['hash']['progress'],16)==saved['five_native_shadows']['instances']['0']['progress'] and peer['logsAfter']['hashAfterLatestArrival'] and peer['logsAfter']['arrivalAfterLifecycle'] for snap in saved['cycle01_diagnostic_before_pause']['snapshots'] for peer in snap['peers'].values()) and saved['cycle01_diagnostic_before_pause']['complete'] and saved['cycle01_diagnostic_before_pause']['geometryComplete'] and len(saved['cycle01_diagnostic_before_pause']['snapshots'])==2 and all(len([c for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514 and c['pointPeer']=='0'])==3 and all(c['available'] and c['pointStableDuringCapture'] and len(c['regions'])==7 and all(r['kind']=='BOX' and not r['edgeUncertain'] and r['accepted']==False for r in c['regions']) for c in snap['geometryComparisons'] if c['headerId']==30 and c['groupKey']==808476514 and c['pointPeer']=='0') for snap in saved['cycle01_diagnostic_before_pause']['snapshots']) and [log_count('host death',i) for i in range(3)]==saved['death_baseline']==[0,0,0] and all(log_count('tombstone',i)==0 for i in range(3))",
+      "message": "outside trace: last two pre-pause snapshots must still prove host outside all seven current regions while original five17/progress/death/tuple remain intact; no outside setup drift is accepted"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle01_before",
+      "as": "cycle01_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle01_before",
+      "as": "cycle01_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle01_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle01_before",
+      "as": "cycle01_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle01_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle01_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle01_after']['peers'][1]['identity']['admitted']==1 and saved['cycle01_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle01: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle01_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle01_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle01_hash']['instances'].values()) and len(saved['cycle01_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle01_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle01_hash']['instances'][i]['liveRows'] for sample in saved['cycle01_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle01_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle01_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle01_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle01_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle01_native']['complete'] and len(saved['cycle01_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle01_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle01_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle01_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle01_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle01_before",
+      "as": "cycle01_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle01_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle01_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle01_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle02_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle02_before']['epoch']==saved['pack_epoch'] and saved['cycle02_before']['location']==[5,6,0,1,1,0] and saved['cycle02_before']['session']==saved['cycle01_before']['session'] and saved['cycle02_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle02_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle02_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle02_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle02_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle02_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle02_before']['peers']) and saved['cycle02_before']['roster']==saved['cycle01_final']['roster'] and all(saved['cycle02_before']['peers'][i]['loadSerial']==saved['cycle01_final']['peers'][i]['loadSerial'] and saved['cycle02_before']['peers'][i]['transition']==saved['cycle01_final']['peers'][i]['transition'] and saved['cycle02_before']['peers'][i]['identity']['generation']==saved['cycle01_final']['peers'][i]['identity']['generation'] and saved['cycle02_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle02: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle02_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle02_before",
+      "as": "cycle02_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle02_before",
+      "as": "cycle02_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle02_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle02_before",
+      "as": "cycle02_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle02_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle02_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle02_after']['peers'][1]['identity']['admitted']==1 and saved['cycle02_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle02: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle02_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle02_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle02_hash']['instances'].values()) and len(saved['cycle02_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle02_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle02_hash']['instances'][i]['liveRows'] for sample in saved['cycle02_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle02_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle02_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle02_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle02_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle02_native']['complete'] and len(saved['cycle02_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle02_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle02_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle02_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle02_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle02_before",
+      "as": "cycle02_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle02_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle02_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle02_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle03_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle03_before']['epoch']==saved['pack_epoch'] and saved['cycle03_before']['location']==[5,6,0,1,1,0] and saved['cycle03_before']['session']==saved['cycle01_before']['session'] and saved['cycle03_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle03_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle03_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle03_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle03_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle03_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle03_before']['peers']) and saved['cycle03_before']['roster']==saved['cycle02_final']['roster'] and all(saved['cycle03_before']['peers'][i]['loadSerial']==saved['cycle02_final']['peers'][i]['loadSerial'] and saved['cycle03_before']['peers'][i]['transition']==saved['cycle02_final']['peers'][i]['transition'] and saved['cycle03_before']['peers'][i]['identity']['generation']==saved['cycle02_final']['peers'][i]['identity']['generation'] and saved['cycle03_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle03: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle03_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle03_before",
+      "as": "cycle03_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle03_before",
+      "as": "cycle03_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle03_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle03_before",
+      "as": "cycle03_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle03_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle03_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle03_after']['peers'][1]['identity']['admitted']==1 and saved['cycle03_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle03: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle03_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle03_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle03_hash']['instances'].values()) and len(saved['cycle03_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle03_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle03_hash']['instances'][i]['liveRows'] for sample in saved['cycle03_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle03_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle03_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle03_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle03_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle03_native']['complete'] and len(saved['cycle03_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle03_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle03_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle03_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle03_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle03_before",
+      "as": "cycle03_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle03_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle03_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle03_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle04_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle04_before']['epoch']==saved['pack_epoch'] and saved['cycle04_before']['location']==[5,6,0,1,1,0] and saved['cycle04_before']['session']==saved['cycle01_before']['session'] and saved['cycle04_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle04_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle04_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle04_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle04_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle04_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle04_before']['peers']) and saved['cycle04_before']['roster']==saved['cycle03_final']['roster'] and all(saved['cycle04_before']['peers'][i]['loadSerial']==saved['cycle03_final']['peers'][i]['loadSerial'] and saved['cycle04_before']['peers'][i]['transition']==saved['cycle03_final']['peers'][i]['transition'] and saved['cycle04_before']['peers'][i]['identity']['generation']==saved['cycle03_final']['peers'][i]['identity']['generation'] and saved['cycle04_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle04: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle04_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle04_before",
+      "as": "cycle04_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle04_before",
+      "as": "cycle04_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle04_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle04_before",
+      "as": "cycle04_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle04_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle04_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle04_after']['peers'][1]['identity']['admitted']==1 and saved['cycle04_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle04: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle04_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle04_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle04_hash']['instances'].values()) and len(saved['cycle04_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle04_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle04_hash']['instances'][i]['liveRows'] for sample in saved['cycle04_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle04_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle04_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle04_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle04_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle04_native']['complete'] and len(saved['cycle04_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle04_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle04_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle04_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle04_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle04_before",
+      "as": "cycle04_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle04_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle04_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle04_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle05_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle05_before']['epoch']==saved['pack_epoch'] and saved['cycle05_before']['location']==[5,6,0,1,1,0] and saved['cycle05_before']['session']==saved['cycle01_before']['session'] and saved['cycle05_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle05_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle05_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle05_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle05_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle05_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle05_before']['peers']) and saved['cycle05_before']['roster']==saved['cycle04_final']['roster'] and all(saved['cycle05_before']['peers'][i]['loadSerial']==saved['cycle04_final']['peers'][i]['loadSerial'] and saved['cycle05_before']['peers'][i]['transition']==saved['cycle04_final']['peers'][i]['transition'] and saved['cycle05_before']['peers'][i]['identity']['generation']==saved['cycle04_final']['peers'][i]['identity']['generation'] and saved['cycle05_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle05: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle05_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle05_before",
+      "as": "cycle05_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle05_before",
+      "as": "cycle05_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle05_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle05_before",
+      "as": "cycle05_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle05_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle05_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle05_after']['peers'][1]['identity']['admitted']==1 and saved['cycle05_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle05: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle05_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle05_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle05_hash']['instances'].values()) and len(saved['cycle05_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle05_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle05_hash']['instances'][i]['liveRows'] for sample in saved['cycle05_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle05_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle05_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle05_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle05_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle05_native']['complete'] and len(saved['cycle05_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle05_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle05_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle05_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle05_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle05_before",
+      "as": "cycle05_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle05_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle05_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle05_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle06_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle06_before']['epoch']==saved['pack_epoch'] and saved['cycle06_before']['location']==[5,6,0,1,1,0] and saved['cycle06_before']['session']==saved['cycle01_before']['session'] and saved['cycle06_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle06_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle06_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle06_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle06_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle06_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle06_before']['peers']) and saved['cycle06_before']['roster']==saved['cycle05_final']['roster'] and all(saved['cycle06_before']['peers'][i]['loadSerial']==saved['cycle05_final']['peers'][i]['loadSerial'] and saved['cycle06_before']['peers'][i]['transition']==saved['cycle05_final']['peers'][i]['transition'] and saved['cycle06_before']['peers'][i]['identity']['generation']==saved['cycle05_final']['peers'][i]['identity']['generation'] and saved['cycle06_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle06: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle06_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle06_before",
+      "as": "cycle06_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle06_before",
+      "as": "cycle06_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle06_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle06_before",
+      "as": "cycle06_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle06_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle06_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle06_after']['peers'][1]['identity']['admitted']==1 and saved['cycle06_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle06: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle06_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle06_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle06_hash']['instances'].values()) and len(saved['cycle06_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle06_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle06_hash']['instances'][i]['liveRows'] for sample in saved['cycle06_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle06_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle06_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle06_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle06_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle06_native']['complete'] and len(saved['cycle06_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle06_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle06_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle06_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle06_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle06_before",
+      "as": "cycle06_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle06_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle06_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle06_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle07_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle07_before']['epoch']==saved['pack_epoch'] and saved['cycle07_before']['location']==[5,6,0,1,1,0] and saved['cycle07_before']['session']==saved['cycle01_before']['session'] and saved['cycle07_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle07_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle07_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle07_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle07_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle07_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle07_before']['peers']) and saved['cycle07_before']['roster']==saved['cycle06_final']['roster'] and all(saved['cycle07_before']['peers'][i]['loadSerial']==saved['cycle06_final']['peers'][i]['loadSerial'] and saved['cycle07_before']['peers'][i]['transition']==saved['cycle06_final']['peers'][i]['transition'] and saved['cycle07_before']['peers'][i]['identity']['generation']==saved['cycle06_final']['peers'][i]['identity']['generation'] and saved['cycle07_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle07: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle07_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle07_before",
+      "as": "cycle07_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle07_before",
+      "as": "cycle07_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle07_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle07_before",
+      "as": "cycle07_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle07_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle07_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle07_after']['peers'][1]['identity']['admitted']==1 and saved['cycle07_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle07: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle07_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle07_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle07_hash']['instances'].values()) and len(saved['cycle07_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle07_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle07_hash']['instances'][i]['liveRows'] for sample in saved['cycle07_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle07_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle07_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle07_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle07_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle07_native']['complete'] and len(saved['cycle07_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle07_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle07_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle07_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle07_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle07_before",
+      "as": "cycle07_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle07_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle07_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle07_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle08_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle08_before']['epoch']==saved['pack_epoch'] and saved['cycle08_before']['location']==[5,6,0,1,1,0] and saved['cycle08_before']['session']==saved['cycle01_before']['session'] and saved['cycle08_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle08_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle08_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle08_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle08_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle08_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle08_before']['peers']) and saved['cycle08_before']['roster']==saved['cycle07_final']['roster'] and all(saved['cycle08_before']['peers'][i]['loadSerial']==saved['cycle07_final']['peers'][i]['loadSerial'] and saved['cycle08_before']['peers'][i]['transition']==saved['cycle07_final']['peers'][i]['transition'] and saved['cycle08_before']['peers'][i]['identity']['generation']==saved['cycle07_final']['peers'][i]['identity']['generation'] and saved['cycle08_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle08: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle08_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle08_before",
+      "as": "cycle08_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle08_before",
+      "as": "cycle08_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle08_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle08_before",
+      "as": "cycle08_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle08_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle08_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle08_after']['peers'][1]['identity']['admitted']==1 and saved['cycle08_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle08: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle08_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle08_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle08_hash']['instances'].values()) and len(saved['cycle08_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle08_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle08_hash']['instances'][i]['liveRows'] for sample in saved['cycle08_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle08_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle08_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle08_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle08_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle08_native']['complete'] and len(saved['cycle08_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle08_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle08_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle08_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle08_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle08_before",
+      "as": "cycle08_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle08_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle08_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle08_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle09_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle09_before']['epoch']==saved['pack_epoch'] and saved['cycle09_before']['location']==[5,6,0,1,1,0] and saved['cycle09_before']['session']==saved['cycle01_before']['session'] and saved['cycle09_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle09_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle09_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle09_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle09_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle09_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle09_before']['peers']) and saved['cycle09_before']['roster']==saved['cycle08_final']['roster'] and all(saved['cycle09_before']['peers'][i]['loadSerial']==saved['cycle08_final']['peers'][i]['loadSerial'] and saved['cycle09_before']['peers'][i]['transition']==saved['cycle08_final']['peers'][i]['transition'] and saved['cycle09_before']['peers'][i]['identity']['generation']==saved['cycle08_final']['peers'][i]['identity']['generation'] and saved['cycle09_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle09: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle09_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle09_before",
+      "as": "cycle09_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle09_before",
+      "as": "cycle09_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle09_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle09_before",
+      "as": "cycle09_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle09_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle09_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle09_after']['peers'][1]['identity']['admitted']==1 and saved['cycle09_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle09: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle09_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle09_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle09_hash']['instances'].values()) and len(saved['cycle09_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle09_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle09_hash']['instances'][i]['liveRows'] for sample in saved['cycle09_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle09_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle09_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle09_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle09_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle09_native']['complete'] and len(saved['cycle09_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle09_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle09_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle09_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle09_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle09_before",
+      "as": "cycle09_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle09_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle09_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle09_peer2"
+    },
+    {
+      "do": "wait",
+      "ms": 10000
+    },
+    {
+      "do": "reconnect_mark",
+      "as": "cycle10_before",
+      "instances": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle10_before']['epoch']==saved['pack_epoch'] and saved['cycle10_before']['location']==[5,6,0,1,1,0] and saved['cycle10_before']['session']==saved['cycle01_before']['session'] and saved['cycle10_before']['runnerBindings']==saved['cycle01_before']['runnerBindings'] and saved['cycle10_before']['runnerRelayPid']==saved['cycle01_before']['runnerRelayPid'] and all(saved['cycle10_before']['roster'][i]==saved['cycle01_before']['roster'][i] and saved['cycle10_before']['peers'][i]['loadSerial']==saved['cycle01_before']['peers'][i]['loadSerial'] and saved['cycle10_before']['peers'][i]['transition']==saved['cycle01_before']['peers'][i]['transition'] and saved['cycle10_before']['peers'][i]['identity']['generation']==saved['cycle01_before']['peers'][i]['identity']['generation'] for i in [0,2]) and all(peer['identity']['admitted']==1 and peer['identity']['transportConnected']==1 and peer['identity']['recoveryState']==3 for peer in saved['cycle10_before']['peers']) and saved['cycle10_before']['roster']==saved['cycle09_final']['roster'] and all(saved['cycle10_before']['peers'][i]['loadSerial']==saved['cycle09_final']['peers'][i]['loadSerial'] and saved['cycle10_before']['peers'][i]['transition']==saved['cycle09_final']['peers'][i]['transition'] and saved['cycle10_before']['peers'][i]['identity']['generation']==saved['cycle09_final']['peers'][i]['identity']['generation'] and saved['cycle10_before']['peers'][i]['identity']['peerHex']==saved['cycle01_before']['peers'][i]['identity']['peerHex'] for i in range(3))",
+      "message": "cycle10: admission must preserve original processes/relay/session/host/Friend2 connections and original survivor load/generation/transition; no intercycle connection/load drift or new baseline adoption"
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle10_diagnostic_before_pause"
+    },
+    {
+      "do": "runtime_pause",
+      "instance": 1,
+      "after": "cycle10_before",
+      "as": "cycle10_pause",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle10_before",
+      "as": "cycle10_after",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "native_enemy_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200,
+      "as": "cycle10_diagnostic_after_reconnect"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle10_before",
+      "as": "cycle10_diagnostic_after_census",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle10_after']['peers'][1]['identity']['recoveryState']==3 and saved['cycle10_after']['peers'][1]['identity']['recoveryAttempts']==1 and saved['cycle10_after']['peers'][1]['identity']['admitted']==1 and saved['cycle10_after']['peers'][1]['identity']['transportConnected']==1",
+      "message": "cycle10: fresh actual retry chain must finish admitted with attempt count one, demonstrating a fresh recovery budget; waiting alone proves no native readiness"
+    },
+    {
+      "do": "statehash_check",
+      "as": "cycle10_hash",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 5,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['pack_epoch']>0 and saved['cycle10_hash']['epoch']==saved['pack_epoch'] and all(row['location']==[5,6,0,1,1,0] for row in saved['cycle10_hash']['instances'].values()) and len(saved['cycle10_hash']['matchingSamples'])>=2 and all(sample['epoch']==saved['cycle10_hash']['epoch'] and row['location']==[5,6,0,1,1,0] and row['count']==5 and len(row['liveRows'])==5 and all(r[0]>0 and [x[0] for x in row['liveRows']].count(r[0])==1 for r in row['liveRows']) and row['liveRows']==saved['cycle10_hash']['instances'][i]['liveRows'] for sample in saved['cycle10_hash']['matchingSamples'] for i,row in sample['instances'].items()) and all(all(r[1]==302 and r[2]>0 for r in row['liveRows']) for row in saved['cycle10_hash']['instances'].values()) and all(row['liveRows']==saved['after_host_damage']['instances']['0']['liveRows'] and row['progress']==saved['after_host_damage']['instances']['0']['progress'] for row in saved['cycle10_hash']['instances'].values()) and all(row['progress']==saved['five_native_shadows']['instances']['0']['progress'] and all(r[1]==302 and r[2]==17 for r in row['liveRows']) for sample in saved['cycle10_hash']['matchingSamples'] for row in sample['instances'].values())",
+      "message": "Friend1 automatic reconnect must preserve exact original damaged five-Shadow IDs/types/HP17 and unchanged original progress on all three peers; extra/unmatched/refilled/dead rows cannot pass"
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "cycle10_native",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1200
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cycle10_native']['complete'] and len(saved['cycle10_native']['snapshots'])==2 and all(peer['comparison']['comparisonValid'] and not peer['comparison']['nativeLivingAbsentFromLatestHash'] and not peer['comparison']['publishedRowsAbsentFromNativeList'] and len(peer['livingCombatRows'])==peer['comparison']['nativeLivingCount'] and all(len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0 and int(r['actor'],16)==native['address'] and int(r['objectId'])==native['objectId'] and int(r['hp'])==native['hp']])==1 for native in peer['livingCombatRows']) and all(int(r['netId'])>0 and len([other for other in peer['logsAfter']['nativeRows'] if int(other['hp'])>0 and int(other['netId'])==int(r['netId'])])==1 and len([native for native in peer['livingCombatRows'] if native['address']==int(r['actor'],16) and native['objectId']==int(r['objectId']) and native['hp']==int(r['hp'])])==1 for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) and peer['comparison']['nativeLivingCount']==5 and int(peer['logsAfter']['arrival']['epoch'])==saved['pack_epoch'] and peer['after']['location']==[5,6,0,1,1,0] and len([r for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0])==5 and all(any(int(r['netId'])==old[0] and int(r['objectId'])==old[1] and int(r['hp'])==old[2] for old in saved['cycle10_hash']['instances'][i]['liveRows']) for r in peer['logsAfter']['nativeRows'] if int(r['hp'])>0) for snap in saved['cycle10_native']['snapshots'] for i,peer in snap['peers'].items()) and all(native['objectId']==302 and native['objectType']==4 and native['maxHp']>0 and 0<native['hp']<=native['maxHp'] for snap in saved['cycle10_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows']) and all(native['hp']==17 and native['maxHp']==20 for snap in saved['cycle10_native']['snapshots'] for peer in snap['peers'].values() for native in peer['livingCombatRows'])",
+      "message": "Post-reconnect independent censuses must join all five living actor addresses/object302/HP17/maxHP20 exactly without missing or extra native rows"
+    },
+    {
+      "do": "reconnect_check",
+      "after": "cycle10_before",
+      "as": "cycle10_final",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "assert",
+      "expr": "[log_count('host death', i) for i in range(3)] == saved['death_baseline'] == [0,0,0]",
+      "message": "Living-only Shadows reconnect must preserve original zero death/tombstone history through final convergence"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "cycle10_peer0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "cycle10_peer1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "cycle10_peer2"
+    }
+  ]
+}

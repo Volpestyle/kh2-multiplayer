@@ -448,13 +448,18 @@ Processed button state at exe+0xBF31A0 (2 entries, stride 0x68)
 
 #### Raw input slot layout (0x44 bytes per slot, at struct_base + 0x18 + slot * 0x44)
 
+The March labels for the two sticks were reversed. Native movement/menu
+calibration on2026-10-02 corrected the layout below; it matches
+`KH2Offsets.hpp` and the current `kh2ctl player-input` path. See
+[raw slot calibration](KH2_CONTROL_CLI.md#raw-slot-0-pulse).
+
 | Offset | Type | Name | Notes |
 |---|---|---|---|
 | `+0x00` | ushort | BUTTONS | Raw button bitmask |
-| `+0x02` | byte | LSTICK_X | Left stick X (0x80=center) |
-| `+0x03` | byte | LSTICK_Y | Left stick Y (0x80=center) |
-| `+0x04` | byte | RSTICK_X | Right stick X (0x80=center) |
-| `+0x05` | byte | RSTICK_Y | Right stick Y (0x80=center) |
+| `+0x02` | byte | RSTICK_X | Right stick X (0x80=center) |
+| `+0x03` | byte | RSTICK_Y | Right stick Y (0x80=center) |
+| `+0x04` | byte | LSTICK_X | Left stick X (0x80=center) |
+| `+0x05` | byte | LSTICK_Y | Left stick Y (0x80=center) |
 
 #### Processed entry layout (0x68 bytes per entry)
 
@@ -700,3 +705,228 @@ attach this provenance. Some callers dereference the result without a null
 check, so returning null from a broad spawn hook is not safe. Compare a checked
 native linked-list census, controller/record state and cache contents before
 choosing an authoritative emission strategy.
+
+### Ordinary spawn-controller hook and lookup ABI (2026-10-02)
+
+Static disassembly and checked geometry establish the following module-relative
+RVAs. They define call mechanics and bounded scope, not authoritative spawn
+convergence.
+
+| Address / offset | Meaning |
+|---|---|
+| `0x2A10010`, `0x2A10418` | Controller table: 16-byte `{u32 key, u32 flags, pointer}` entries and i32 count. Entry flags bit0 denotes an alternate script pointer, not an ordinary controller |
+| Controller `+0/+4/+8` | u32 group key / u32 flags / header pointer |
+| Controller `+0x10/+0x18/+0x20` | Runtime region head / tail / float cooldown |
+| Controller `+0x24/+0x28/+0x2C` | Current/initial eligible record counts, then u8 stage; eligible counts are not living actor counts |
+| Controller `+0x30/+0x38` | Spawn array / region descriptor array. Require `spawnArray == header+0x2C`, `regionArray == spawnArray + spawnCount*0x40` |
+| Header `+0/+1/+2/+4/+6` | **u8 type**, u8 flags, u16 ID, u16 spawn count, u16 region count. `0x3FE334: 0F B6 01` reads the type byte; do not combine type/flags into u16 |
+| Spawn record (`0x40` bytes) | u32 object ID +0; float XYZ +4/+8/+`0xC`; u8 mode +`0x1C`, position mode +`0x1D`; u16 record ID +`0x1E`, delay +`0x2A`; u8 stage +`0x30` |
+| `0x2A10420`, `0x2A105D0` | Tracked activation actor / player actor; these need not match |
+
+`0x3FF000` ABI: `void (__fastcall*)(void* controller, const float* point4)`.
+RCX is the controller; RDX points to **16 readable bytes**. The verified caller
+consumes no return value and returns to `0x3A5063`. Use aligned local float[4]
+and call synchronously; native copies the vector and does not retain its pointer.
+
+Exact installation fingerprints (verification spans, not manually selected
+trampoline overwrite lengths):
+
+| RVA / length | Bytes |
+|---|---|
+| `0x3FF000` / 15-byte entry | `48 89 5C 24 10 48 89 6C 24 18 57 48 83 EC 30` |
+| `0x3A5056` / 13-byte setup/call | `48 8B 0B 48 8D 54 24 20 E8 9D 9F 05 00` |
+| `0x3E0F10` / 16-byte lookup entry | `48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57` |
+| `0x1E2300` / 5-byte comparator | `2B 0A 8B C1 C3` |
+
+The update clears transient flags `0x18`, respects disabled bit0/event gating,
+decrements cooldown, tests linked regions and performs emission/cache bookkeeping.
+Bit3 means a region accepted; type2 sets header+`0xE` and dispatches delayed
+records. Qualified-client Hold skips the whole tick, including cooldown; it is
+a scoped pause. Unsupported/unavailable scope cannot be claimed controlled.
+
+Direct read-only lookup `0x3E0F10` has ABI
+`const void* (__fastcall*)(int32_t directObjectId)` (ECX ID, RAX pointer/null).
+It tries three table pointers at `0x2A25030`, `+8`, `+0x10` in order. Each
+nonnull table has i32 count +4 and entries +8, stride `0x60`. Its comparator
+subtracts entry ID from the low32 bits of a pointer-sized numeric key, not a
+pointer to ID storage. Do not replace this with OBJ0-only or `base+ID*stride`.
+Verify bytes, checked nonnegative table counts/spans, then use a POD-only SEH
+leaf. Validate returned span/alignment, ID, type and name; recheck roots/counts
+and lifecycle. Faults/changed tables are unavailable; null is unresolved, not
+combat. Caps64 controllers, 256 records and 65536 object entries are safety
+bounds, not discovered native maxima.
+
+General resolver `0x3DFEB0` also maps party/drive/save aliases. The static direct-ID
+boundary excludes zero, high-four-bit modifiers and hexadecimal aliases
+`236,237,238,23B,23C,23D,23F,240,2C0,319,31A,3EE,62A,62B`.
+Qualify an entire ordinary type2 controller only when **every** record, including
+later-stage/cached records, has mode2, positionMode0, finite fixed XYZ and a
+direct objentry type3/4 with name prefix other than `F_`. Mixed/unsupported
+records exclude the whole controller; header30 is observed coverage, not the
+scope definition. Do not rewrite records or invoke a subset of emitters.
+
+Runtime region nodes are `0x70` bytes: vtable +0, inverse float4x4 +8, extents XYZ
++`0x48/0x4C/0x50`, next encoded handle u32 +`0x58`, descriptor pointer +`0x68`.
+Each source descriptor is `0x40` bytes: u16 kind/category +0/+2, float position
+XYZ +4/+8/+`0xC`, extents +`0x10/0x14/0x18`, Y rotation +`0x20`. Walk the actual
+list, since native setup excludes some categories; require aligned source
+pointers inside the checked descriptor array/count.
+
+| Kind | Vtable / predicate RVA | Native predicate |
+|---|---|---|
+| BOX (0) | `0x5D4F98` / `0x421180` | Inclusive `-extent <= transformed XYZ <= extent` |
+| CYLINDER (1) | `0x5D4FB0` / `0x421250` | Inclusive Y bounds, then `(x/extentX)^2+(z/extentZ)^2 <= 1` |
+| INFINITY (2) | `0x5D4FC8` / `0x421320` | Unconditional true (`B0 01 C3`), independent of point/matrix values |
+
+Predicates copy float4 and force w=1. Captured inverse matrix M transforms via
+`q[j]=M[j]*x+M[j+4]*y+M[j+8]*z+M[j+12]`, j=0..2. Native accessor `0x3B5B40`
+selects actor+`0x70` if parent handle u32 +`0x6A0` resolves nonnull through
+`0x3DA520`, otherwise +`0x670`. Generic resolution uses the 64-entry table at
+`0x2B0D720`: `table[(handle & 0x7FFFFFFF)>>25] | (handle & 0x01FFFFFF)`.
+Bit31 is ignored, raw handle0 is null, and invalid/failed reads cannot imply null.
+
+The [geometry03 artifact](../build/scenarios/20261002-204742_net_enemy_census_transition03_1/native_enemy_census_transition03.json)
+has eight valid native/causal captures out of nine; the overall run **failed**
+because snapshot0/client1 failed actor-identity stability. Later snapshots1/2
+captured all seven header30 BOX regions on every peer. Source descriptor and
+inverse-matrix/extent bytes matched across valid captures. At snapshots1/2, each
+peer's geometry placed the host point outside all seven and both clients inside
+indices5/6, without edge uncertainty. This is offline float32 containment, not
+instrumented predicate returns or an authority-fix pass. See the
+[extraction receipt](../build/rig/native_geometry_transition03_summary.json) and
+[scenario limits](SCENARIOS.md#native-enemy-census-diagnostic).
+
+### Fixed type2 emission observation and replay limits (2026-10-02, static verified)
+
+Successful fixed-wrapper return `0x3FE83F` inside delayed type2 emitter
+`0x3FE6F0` is a verified creation boundary, not a complete replay API.
+The opt-in `KH2COOP_SPAWN_TRACE=1` observer now covers all callers of fixed
+`0x3FE590` and generated `0x3FE650`, plus explicit dispatcher/script scopes.
+It passes each original through once, preserves genuine returns and distinguishes
+checked nonnull, null and unavailable observations. Wrapper evidence outside
+an activation tick is retained separately; it cannot claim completed tick
+bookkeeping. Source and byte checks are offline evidence; native execution and
+diagnostic coverage still need a live run.
+
+| RVA | Windows x64 ABI / role |
+|---|---|
+| `0x3FE6F0` | `void __fastcall(void* controller)`; native type2 occupancy/cache/stage/cooldown checks and record selection |
+| `0x3FE590` | `void* __fastcall(const void* record, void* controller)`; RCX record, RDX controller, RAX actor/null; fixed native position/yaw, constructor, provenance and eligible cache insertion |
+| `0x3FE650` | `void* __fastcall(const void* record, void* controller, const float* point4)`; R8 explicit point; separately traced generated-position path |
+| `0x3FE320` | `uint64_t __fastcall(void* controller, const void* region)`; RCX/RDX; observer preserves full RAX, not just a decompiler's narrow return type |
+| `0x42DC10` | One RCX pointer to native uint32 handle storage; advances stage then tail-jumps to the dispatcher |
+| `0x3DF930` | `void* __fastcall(uint32_t objectId, const float* point4, float yaw)`; ECX, RDX, XMM2; generic factory alone omits wrapper metadata |
+| `0x3B4BD0` | `void __fastcall(void* actor, void* controller, const void* record)`; RCX/RDX/R8; provenance and actor parameters, already called by the wrapper's virtual path |
+
+Verified fixed-wrapper entry (15 bytes):
+`48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30`.
+At `0x3FE83A`, `E8 51 FD FF FF` calls that wrapper; return `0x3FE83F`
+is before caller-owned cooldown assignment at `0x3FE99E` and stage advancement.
+Generated wrapper call `0x3FE984` instead returns `0x3FE989`; do not merge scopes.
+Observe enclosing controller tick completion to obtain truthful post-state.
+
+Wrapper cache insertion uses objentry-type mask `0xA02010`: it includes mob
+type4 (also 13/21/23), **not boss type3**. A successful boss creation need not
+insert its record ID. The wrapper does not perform the caller's region,
+occupancy, cache, stage, cooldown or count/event reconciliation. `0x3FF780`
+is unsafe as a replay convenience: it increments initialCount and resets
+currentCount to initialCount, destroying accumulated death bookkeeping.
+Calling the whole emitter or stage helpers lets divergent local state make
+new population decisions. No safe single-call bookkeeping reconciliation API
+has been verified.
+
+Controller task `0x3A4F90` is scheduled at priority 12000 by `0x3A4E10`;
+actor updating uses priority 20000. Executing creation from a head-actor callback
+is not proven equivalent to the native controller lane. No runtime/worker thread
+may call native creation. Native lethal/count/event behavior must remain on its
+verified path; do not compensate with HP/count/cache writes.
+
+Cross-peer addressing requires epoch/full location/session plus unique ordinary
+controller groupKey/headerId, recordIndex/nativeRecordId/objectId and validated
+static descriptor content. GroupKey alone repeats (headers 30..33 share `b_00`);
+pointers/table indices are local, and controller reinitialization can occur
+within a room. Record ID is not a creation generation: lookup `0x3B41E0` maps
+ID0 to `0x70`, searches without a controller discriminator, and filters actors.
+Cache routines compare signed int16 slots while wrappers load IDs unsigned;
+an initial replay proof must reject zero/high-bit IDs and room-wide collisions,
+using IDs 1..`0x7FFF` until broader semantics are proved. These are replay limits,
+not changes to existing activation qualification.
+
+Successful wrapper order need not equal the next census's manifest netId order.
+Correlate the returned actor under checked native identity before publishing a
+creation event; repeated emissions need distinct host event identities and
+idempotent delivery. Matched initial cache/count enrollment, alive removal versus
+death, stage/refill progression, mid-room reinitialization and late-join history
+remain blockers. Creating the visible actor alone cannot establish that state.
+
+### Alive removal, native death and script bypasses (2026-10-02, static verified)
+
+These Windows x64 ABIs were checked by decompilation and register-bearing
+bytes in the installed executable. They are observation/API candidates, not
+permission to invoke a repair on an arbitrary actor.
+
+| RVA | ABI / native effect |
+|---|---|
+| `0x3FFD90` | `void(controller, actor)` in RCX/RDX; removal bookkeeping only, no disposal |
+| `0x411800` | `void(actor)` in RCX; controller from `actor+0x9E8`, calls `3FFD90`, then disposes through `3B45C0` |
+| `0x411470` | `void(typeHandler, actor)` in RCX/RDX; common type-handler removal path with bookkeeping/disposal |
+| `0x3B45C0` | `void(actor)` in RCX; resource teardown and deferred deletion marker |
+| `0x3D4A40` | `void(actor)` in RCX; guarded lethal notification before setting `actor+0x9B8` bit 2 |
+| `0x3FED10` | `void(controller, actor)` in RCX/RDX; conditional death-count dispatch |
+| `0x3FED40` | `void(controller)` in RCX; native count decrement and events |
+
+For a living delayed-mode-2 record, `3FFD90` clears its appearance-cache ID
+and resets controller cooldown without decrementing the battle count. Dead
+removal recognizes bit 2 and normally retains the record's cache ID. Native
+count events include `3AABE0(3, headerId)` and aggregate-zero `3AABE0(2, 0)`.
+Other death wrappers reach count bookkeeping independently; neither HP alone
+nor a later census disappearance proves which lifecycle side effects ran.
+Never call bookkeeping alone, represent alive removal as HP zero, or repeat
+native count/cache changes after a disposal path already performed them.
+
+Generic actor update `3BFD30` can dispatch type-handler virtual slot `+0x38`
+at `3BFF58` from normalized fade state (`actor+0xA08`, `+0xAAC`) and flags.
+Those values are not HP. A removed actor can cease blocking occupancy before
+allocation is freed. Exact subtype/caller proof is needed before replay or
+selective suppression; broad suppression would also affect death and teardown.
+
+The full 68-byte body of script callback `42DC10` verifies stage advancement
+`3FFE40`, followed by tail jump `42DC49 -> 3FE320(controller, null)`, bypassing
+`3FF000` even for type 2. Its original trampoline can leave the dispatcher with
+a DLL return address: an unavailable executable caller RVA is expected in
+that case. Explicit script TLS records dynamic enclosure, not immediate
+dispatcher ancestry. Return `3FE83F` identifies the fixed emitter branch, not
+the full producer path. All-caller fixed/generated observations outside the
+activation tick retain wrapper evidence without claiming tick bookkeeping.
+
+The opt-in lifecycle module independently byte-gates `3FFD90`, `3B45C0`,
+`3D4A40`, `3FED10` and `3FED40`. Its installed mask exposes partial coverage;
+the other subtype wrappers and `3AABE0` events are not hooked. Pre/post actor,
+controller/cache and full native stamps retain nested entry/parent sequence.
+Disposal can invalidate poststate, and count decrement has no actor argument.
+Only the first registered game thread samples role/Warp callbacks; unknown
+threads retain raw NOW and unavailable serials. These probes are observations,
+not a replay or reconciliation API. Generic factory bypasses, actual allocation
+release and same-address/controller reincarnation remain unproven; current
+census/netId correlation is diagnostic. See `SCENARIOS.md` for saved-log auditing
+and `ENEMY_PARITY.md` for the retained wave failure and offline test scope.
+
+**Scoped predicate extension, 2026-10-03 (saved-PE verification; no live install).**
+Admission `3A1F00(float XMM0) -> AL` reads float32 limit/used at `2A0F7DC` /
+`2A0F830`; the factory passes unsigned-byte objentry weight `+54`, returning
+to `3DFA0B`. Type-4 allocation calls `152430(size_t RCX) -> RAX` with `0xD50`,
+returning to `3DFA7D`. That allocator entry tail-forwards through a vtable;
+its decompiler `void` return is incorrect. Scoped observers preserve actual
+arguments/results and never dereference returned allocation storage.
+
+Removal predicate `3DAC30(actor RCX) -> AL` is reached by the type-4 tail thunk
+`419B90`, retaining ordinary caller `3BFD6F`. Its script child `3B4420` returns
+to `3DAC3E`; auxiliary child `3CE550` returns to `3DAC9C` and tests dword `+14`
+on its genuine argument. Actor boundary operands are qword `+5B0`, dword
+`+5B8`, qwords `+80` / `+98` and encoded dword handle `+BB4`. They are sampled
+operands, not extra native resolutions or immutable identity. New predicate
+events end before the later virtual removal/disposal call. Full byte guards
+and caller-site checks gate the observers; partial masks, foreign calls,
+unwinds, repeated children and loss cannot establish a branch conclusion.
+The [static capture contract](../build/rig/wave_predicate_capture_plan_20261003.md)
+records exact bytes against PE SHA256 `9002B2DE6A1F91A790BD0673DE125D1CF833F7942BFEC827CDCF6BA64D5849ED`.

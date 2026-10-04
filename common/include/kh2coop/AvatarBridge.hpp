@@ -18,6 +18,7 @@
 // ============================================================================
 
 #include "kh2coop/Types.hpp"
+#include "kh2coop/PuppetProvenance.hpp"
 
 // Lean Windows headers so ENet's winsock2 can be included alongside.
 #ifndef WIN32_LEAN_AND_MEAN
@@ -42,13 +43,14 @@ static_assert(std::is_trivially_copyable_v<AvatarState>,
 
 static constexpr const char* AVATAR_BRIDGE_PREFIX = "Local\\kh2coop_avatar_";
 static constexpr std::uint32_t AVATAR_BRIDGE_MAGIC = 0x42564B32; // "2KVB"
-static constexpr std::uint32_t AVATAR_BRIDGE_VERSION = 1;
+static constexpr std::uint32_t AVATAR_BRIDGE_VERSION = 2;
 static constexpr int AVATAR_BRIDGE_PUPPETS = 2; // friend slots 1 and 2
 
 // A pose the DLL should apply to a friend-slot puppet.
 struct PuppetPose {
     std::uint8_t active {0};      // 0 = hide / leave the slot alone
     std::uint8_t _pad[7] {};
+    PuppetProvenance provenance {};
     AvatarState pose {};          // pose.ownerSlot = which player this is
 };
 
@@ -100,17 +102,18 @@ public:
     AvatarBridge& operator=(const AvatarBridge&) = delete;
 
     // The DLL passes GetCurrentProcessId(); the runtime passes KH2's PID.
-    bool Open(DWORD kh2Pid) {
+    bool Open(DWORD kh2Pid, bool existingOnly = false) {
         if (view_) return true;
         char name[128];
         std::snprintf(name, sizeof(name), "%s%lu", AVATAR_BRIDGE_PREFIX,
                       static_cast<unsigned long>(kh2Pid));
-        mapping_ = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr,
+        mapping_ = existingOnly ? OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name)
+                               : CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr,
                                       PAGE_READWRITE, 0,
                                       static_cast<DWORD>(sizeof(AvatarBridgeLayout)),
                                       name);
         if (!mapping_) return false;
-        const bool existed = GetLastError() == ERROR_ALREADY_EXISTS;
+        const bool existed = existingOnly || GetLastError() == ERROR_ALREADY_EXISTS;
         view_ = static_cast<AvatarBridgeLayout*>(MapViewOfFile(
             mapping_, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(AvatarBridgeLayout)));
         if (!view_) {
@@ -129,6 +132,9 @@ public:
         }
         return true;
     }
+
+    // Observation must not create or initialize a mapping for an absent PID.
+    bool OpenExisting(DWORD kh2Pid) { return Open(kh2Pid, true); }
 
     void Close() {
         if (view_) UnmapViewOfFile(view_);

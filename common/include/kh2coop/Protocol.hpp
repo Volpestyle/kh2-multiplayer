@@ -1,20 +1,32 @@
 #pragma once
 #include "kh2coop/Types.hpp"
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace kh2coop {
 
+inline constexpr std::uint16_t PROTOCOL_VERSION = 9;
+
 // ===========================================================================
-// Protocol v1 — CampaignCoop session messages (current, wired into codec)
+// Protocol v5 — typed closure/session-incarnation semantics; v4 byte layouts.
 // ===========================================================================
+
+// Network-only envelope. AvatarState and its shared-memory layout are unchanged.
+// The relay stamps both this connection identity and avatar.ownerSlot.
+struct AvatarRelay {
+    std::uint64_t ownerConnectionId {0};
+    AvatarState avatar {};
+};
 
 struct SessionActor {
     std::uint32_t actorId {0};
     SlotType slot {SlotType::Player};
     std::string ownerPeerId;
     std::string archetype;
+    std::uint64_t connectionId {0}; // relay-lifetime identity; wire field follows archetype
 };
 
 struct SessionState {
@@ -67,6 +79,15 @@ struct ClockPong {
     std::uint64_t serverMs {0};
 };
 
+// Existing HelloReject byte and ENet disconnect data carry these values.
+// Unknown nonzero values are terminal; zero alone does not prove a timeout.
+enum class DisconnectReason : std::uint32_t {
+    TransportLost = 0, Incompatible = 1, AdmissionRejected = 2,
+    PeerIdleTimeout = 3, HostSessionEnded = 4, RelayStopping = 5,
+    HandshakeTimeout = 6, SlotOccupied = 7, LobbyFull = 8,
+    SessionChanged = 9 // locally detected resume-pin mismatch
+};
+
 // Relay -> client just before a refused connection is closed, so the client
 // can say why (VUH-1492). code matches the ENet disconnect data: 1 = protocol,
 // mode or version mismatch, 2 = slot or other refusal.
@@ -92,6 +113,25 @@ struct RoomTransition {
     std::uint16_t mapProgram {0};
     std::uint16_t battleProgram {0};
     std::uint16_t eventProgram {0};
+};
+
+// Ephemeral native activation challenge. The requester owns the deadline on
+// its monotonic clock; receipt never renews it. A host response must be captured
+// AFTER the host consumes this request, never taken from a cached avatar/point.
+inline constexpr std::uint64_t ACTIVATION_LEASE_MS = 500;
+inline constexpr std::uint64_t ACTIVATION_REQUEST_INTERVAL_MS = 100;
+inline constexpr std::size_t ACTIVATION_MAX_OUTSTANDING = 6;
+struct ActivationRequest {
+    RoomTransition location {};
+    std::array<std::uint64_t, 2> incarnation {}; // random client DLL incarnation
+    std::uint64_t requestSeq {0};              // never reused within incarnation
+    std::uint8_t requesterSlot {0xFF};         // relay overwrites from verified peer
+};
+
+struct HostActivationPoint {
+    ActivationRequest request {};
+    std::uint64_t sourceSeq {0}; // host-native capture sequence, not bridge writes
+    std::array<float, 4> position {}; // exact native argument, including w
 };
 
 struct TransitionAck {
@@ -133,6 +173,9 @@ struct EnemyHpEntry {
 struct EnemyHp {
     std::uint32_t epoch {0};
     std::vector<EnemyHpEntry> entries;
+    // Nonzero, nonwrapping producer order; survives room/manifest changes.
+    // Kept last for aggregate source compatibility, encoded after epoch.
+    std::uint64_t sequence {0};
 };
 
 struct EnemyDeath {
@@ -141,11 +184,16 @@ struct EnemyDeath {
 };
 
 // A client's hit on a replica enemy (plan D4). attackerSlot is stamped by
-// the relay; the host applies the damage natively and broadcasts EnemyHp.
+// the relay. Wire order: epoch, seq, netId, objectId, requesterConnectionId,
+// attackId, damage, attackerPosition (x/y/z), attackerSlot: 43 payload bytes.
+// seq is nonzero and strictly increases across rooms within one connection;
+// it cannot wrap. A new connection ID permits restarting the sequence.
 struct HitClaim {
     std::uint32_t epoch {0};
     std::uint32_t seq {0};
     std::uint16_t netId {0};
+    std::uint32_t objectId {0};
+    std::uint64_t requesterConnectionId {0}; // echo the roster identity at detection
     std::uint32_t attackId {0};      // atkp entry
     std::int32_t damage {0};
     Vec3 attackerPosition {};
@@ -188,11 +236,8 @@ struct DesyncNotice {
     std::uint8_t fields {0};          // DesyncField bits
 };
 
-// Host-only: the relay re-sends its cached world state to `slot`
-// (0xFF = every client).
-struct ResyncRequest {
-    std::uint8_t slot {0xFF};
-};
+// Host-only protocol8 immutable forced native resync request (see ResyncProtocol).
+struct ResyncRequest; // protocol8 definition in ResyncProtocol.hpp
 
 // ===========================================================================
 // Protocol v2 forward-looking records (declared, not yet wired into codec)
@@ -206,7 +251,7 @@ struct ResyncRequest {
 
 /// Extended handshake replacing the overloaded SessionState-as-hello pattern.
 struct ClientHello {
-    std::uint16_t protocolVersion {2};
+    std::uint16_t protocolVersion {PROTOCOL_VERSION};
     std::string gameBuild;
     std::string contentHash;
     std::string modHash;

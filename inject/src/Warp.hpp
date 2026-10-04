@@ -24,9 +24,14 @@ void OnFrameStart(std::uint32_t frame, uintptr_t listHead);
 
 // Game-thread transition authority and lifecycle. Every accepted host epoch,
 // including an initial join to the same location, performs a real reload.
+// A queued target is bound to the consumed WorldBridge session generation;
+// retirement disarms it before progress writes or native transition issuance.
 void SetClientAuthority(bool enabled);
 bool QueueHostTransition(const RoomTransition& target);
 bool HostTransitionArrived(std::uint32_t epoch);
+// Game-thread diagnostic check over an already checked native location. Reads
+// only owned lifecycle state; caller must separately check native safe state.
+bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept;
 bool TransitionPending();
 std::uint32_t TransitionSerial();
 std::uint32_t LoadSerial();

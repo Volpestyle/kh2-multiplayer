@@ -15,12 +15,31 @@ struct _ENetPeer;
 
 namespace kh2coop {
 
+struct SessionResumePin {
+    std::string sessionId;
+    std::string hostPeerId;
+    std::uint64_t hostConnectionId {0};
+    std::string localPeerId;
+    SlotType localSlot {SlotType::Friend1};
+};
+
+struct ClientCloseInfo {
+    DisconnectReason reason {DisconnectReason::TransportLost};
+    std::uint32_t rawCode {0};
+    bool hadReady {false};
+    bool local {false}; // SessionChanged, not an ENet-reported reason
+    std::optional<HelloReject> rejection;
+};
+
 // ---------------------------------------------------------------------------
 // Callbacks the client fires when it receives data from the host.
 // ---------------------------------------------------------------------------
 struct ClientCallbacks {
     std::function<void()> onConnected;
     std::function<void()> onDisconnected;
+    // After state reset and legacy onDisconnected, once per remote/local-pin
+    // closure. Explicit disconnect/destruction remain silent.
+    std::function<void(const ClientCloseInfo&)> onClosed;
     // The relay refused this client (version, mode or slot); reason is
     // human-readable. onDisconnected follows.
     std::function<void(const HelloReject&)> onRejected;
@@ -28,7 +47,7 @@ struct ClientCallbacks {
     std::function<void(const ActorSnapshot&)> onActorSnapshot;
     std::function<void(const EnemySnapshot&)> onEnemySnapshot;
     std::function<void(const EventMessage&)> onEvent;
-    std::function<void(const AvatarState&)> onAvatarState;
+    std::function<void(const AvatarRelay&)> onAvatarState;
     // World sync (from the host, via the relay)
     std::function<void(const RoomTransition&)> onRoomTransition;
     std::function<void(const EventHold&)> onEventHold;
@@ -39,8 +58,16 @@ struct ClientCallbacks {
     std::function<void(const HitClaim&)> onHitClaim;
     std::function<void(const ProgressUpdate&)> onProgressUpdate;
     std::function<void(const DesyncNotice&)> onDesyncNotice;
+    std::function<void(const DesyncCaptureRequest&)> onDesyncCaptureRequest;
+    std::function<void(const ActivationRequest&)> onActivationRequest;
+    std::function<void(const HostActivationPoint&)> onHostActivationPoint;
     // Any world packet (the types above), raw, for forwarding to the DLL.
     std::function<void(const std::vector<std::uint8_t>&)> onWorldPacket;
+    std::function<void(const WorldBinding&)> onWorldBinding;
+    std::function<void(const WorldEnvelope&)> onWorldEnvelope;
+    std::function<void(const ResyncPlan&)> onResyncPlan;
+    std::function<void(const ResyncBegin&, const ResyncSnapshot&)> onResyncSnapshot;
+    std::function<void(const ResyncResult&)> onResyncResult;
     std::function<void(const std::string&)> onLog;
 };
 
@@ -63,7 +90,7 @@ public:
                   ClientCallbacks callbacks = {},
                   RuntimeMode requestedMode = RuntimeMode::CampaignCoop,
                   std::string contentHash = {},
-                  std::uint16_t protocolVersion = 2,
+                  std::uint16_t protocolVersion = PROTOCOL_VERSION,
                   std::string peerName = {});
     ~NetworkClient();
 
@@ -102,7 +129,29 @@ public:
     void sendTransitionAck(const TransitionAck& m);
     void sendProgressUpdate(const ProgressUpdate& m); // host only
     void sendStateHash(const StateHash& m);
-    void sendResyncRequest(const ResyncRequest& m);   // host only
+    bool sendResyncRequest(const ResyncRequest& m); // exact immutable host request
+    bool requestWorldResync(std::uint8_t targetMask);
+    void failWorldResync(ResyncResultReason reason, const std::string& error) { abortResync(reason,error); }
+    bool sendNativeWorld(const std::vector<std::uint8_t>&, const ProducerWorldContext&, bool reliable);
+    bool sendResyncCapture(const ResyncBegin&, const ResyncSnapshot&, const ProducerWorldContext&);
+    bool sendResyncAck(const ResyncAck&, const ProducerWorldContext&);
+    bool sendResyncFailure(const ResyncResult&, const ProducerWorldContext&);
+    bool hasCurrentWorldBinding() const { return ready() && worldBinding_ && avatarLocalSlot_<3 &&
+        worldBinding_->sessionId==avatarSessionId_ && worldBinding_->hostConnectionId==avatarConnections_[0] &&
+        worldBinding_->selfSlot==avatarLocalSlot_ && worldBinding_->selfConnectionId==avatarConnections_[avatarLocalSlot_]; }
+    bool worldReady() const { return hasCurrentWorldBinding() && !worldQuarantined_; }
+    std::uint64_t deliverySerial() const { return worldBinding_ ? worldBinding_->deliverySerial : 0; }
+    const std::optional<WorldBinding>& worldBinding() const { return worldBinding_; }
+    const std::optional<ResyncPlan>& pendingResync() const { return resyncPlan_; }
+    // Explicit packet-construction factory for typed legacy/headless callers.
+    // Runtime native transport MUST use sendNativeWorld with observed context.
+    ProducerWorldContext makeTestingWorldContext();
+    // True means submitted to ENet or accepted by the configured delay queue,
+    // not relay receipt. A later delayed-send failure is logged explicitly.
+    bool sendDesyncArtifactChunk(const DesyncArtifactChunk&);
+    bool sendDesyncCaptureDone(const DesyncCaptureDone&);
+    void sendActivationRequest(const ActivationRequest& m); // ephemeral client -> host
+    void sendHostActivationPoint(const HostActivationPoint& m); // host -> requester
 
     // An already-encoded packet (e.g. from the DLL's WorldBridge).
     void sendRawPacket(const std::vector<std::uint8_t>& packet, bool reliable);
@@ -139,18 +188,41 @@ public:
     void disconnect();
 
     [[nodiscard]] bool isConnected() const { return connected_; }
+    [[nodiscard]] bool ready() const { return connected_ && avatarRosterValid_; }
+    // Only between attempts; a resume pin may name Friend1/Friend2, never host.
+    bool SetResumePin(std::optional<SessionResumePin> pin);
 
 private:
     void onConnect();
-    void onDisconnect(std::uint32_t code = 0);
-    void onReceive(const std::uint8_t* data, std::size_t size);
-    void sendPacket(const std::vector<std::uint8_t>& packet, bool reliable);
-    void sendNow(const std::vector<std::uint8_t>& packet, bool reliable);
+    void onDisconnect(std::uint32_t code = 0, bool local = false);
+    void onReceive(const std::uint8_t* data, std::size_t size, bool reliable, const WorldScope* admittedScope = nullptr);
+    bool sendPacket(const std::vector<std::uint8_t>& packet, bool reliable);
+    bool sendNow(const std::vector<std::uint8_t>& packet, bool reliable);
     void flushConditioned();
     void onClockPong(const ClockPong& pong);
+    void resetTransportState();
+    bool updateAvatarRoster(const SessionState& session);
+    bool admitAvatar(const AvatarRelay& relay);
+    bool admitDesync(const DesyncKey&, std::uint64_t connectionId) const;
+    void dispatchPendingDesync();
+    bool matchesResumePin(const SessionState& session) const;
+    void closeChangedSession();
     [[nodiscard]] std::uint64_t localTimeMs() const;
     void log(const std::string& msg);
 
+    bool validWorldContext(const ProducerWorldContext&) const;
+    void abortResync(ResyncResultReason, const std::string&);
+    std::optional<WorldBinding> worldBinding_;
+    std::optional<ResyncPlan> resyncPlan_;
+    std::optional<ResyncRequest> requestedResync_;
+    std::optional<ResyncBegin> completedResyncBegin_;
+    std::optional<RoomTransition> hostRoom_;
+    ResyncAssembler resyncAssembler_;
+    bool worldQuarantined_{false};
+    std::array<std::uint64_t,3> remoteDeliverySerials_{1,1,1};
+    std::array<std::uint64_t,3> deliveryConnections_{};
+    std::uint64_t worldSourceFloor_{0}, testingSourceSerial_{0}, nextResyncRequest_{1};
+    std::uint64_t resyncDeadline_{0}, lastResyncPlanId_{0};
     std::string hostAddress_;
     std::uint16_t port_;
     std::string gameBuild_;
@@ -160,12 +232,33 @@ private:
     std::string peerName_;
     std::optional<SlotType> requestedSlot_;
     RuntimeMode requestedMode_{RuntimeMode::CampaignCoop};
-    std::uint16_t protocolVersion_{2};
+    std::uint16_t protocolVersion_{PROTOCOL_VERSION};
     ClientCallbacks callbacks_;
 
     _ENetHost* enetHost_{nullptr};
     _ENetPeer* enetPeer_{nullptr};
     bool connected_{false};
+    bool attemptActive_{false};
+    bool hadReady_{false};
+    std::optional<HelloReject> rejection_;
+    std::optional<SessionResumePin> resumePin_;
+    std::uint64_t transportGeneration_{0};
+    bool avatarRosterValid_{false};
+    std::string avatarSessionId_;
+    std::uint8_t avatarLocalSlot_{0xFF};
+    std::uint64_t avatarConnections_[3]{};
+    std::uint32_t avatarLastSeq_[3]{};
+    // Independent of transient roster validity: only a real transport or a
+    // newly verified host/world identity change may retire the HP floor.
+    std::string enemyHpSessionId_;
+    std::uint64_t enemyHpHostConnectionId_{0}, enemyHpSequence_{0};
+    std::uint32_t enemyHpRoomEpoch_{0};
+    std::optional<DesyncCaptureRequest> desyncRequest_;
+    std::uint64_t lastDesyncReportId_{0};
+    std::uint64_t lastObservedDesyncReportId_{0}; // expiry/rejection cannot renew an observed request
+    std::uint64_t desyncDeadlineMs_{0};
+    std::optional<DesyncCaptureRequest> pendingDesyncRequest_;
+    std::uint64_t pendingDesyncDeadlineMs_{0};
 
     LinkConditioner outbound_;
     LinkConditioner inbound_;
