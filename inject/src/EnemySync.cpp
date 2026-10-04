@@ -123,7 +123,9 @@ struct HostEnemy {
     std::uint32_t objectId = 0;
     Vec3 spawnPos {};
     std::uint16_t battleProgram = 0;
-    std::int32_t hp = -1;
+    std::int32_t hp = -1, maxHp = -1;
+    std::uint64_t hpSourceSequence = 0;
+    bool hpKnown = false;
     bool dead = false;
 };
 struct HostRoom {
@@ -131,6 +133,7 @@ struct HostRoom {
     std::uint16_t world = 0xFFFF, room = 0xFFFF, btl = 0;
     bool arrived = false;
     bool ackSent = false;
+    bool manifestComplete = false; // only fully framed replace or checked bootstrap
     std::map<std::uint16_t, HostEnemy> enemies;  // by netId
 };
 HostRoom g_host;
@@ -231,10 +234,11 @@ struct ActivationRecovery {
     std::array<std::array<std::uint8_t, 64>, 5> recordBytes {};
     KnownControllerMutationTicket mutation;
     std::uint32_t load = 0, transition = 0, historicalTicks = 0, liveTicks = 0;
-    std::uint64_t lastSequence = 0;
+    std::uint64_t lastSequence = 0, historicalBaseline = 0, liveBaseline = 0;
     bool reconciled = false, occupancyHold = false;
 };
 std::optional<ActivationRecovery> g_activationRecovery;
+std::uint64_t g_activationReceiptSequence = 0, g_activationReceiptGaps = 0;
 constexpr std::uint32_t kActivationRecoveryTicks = 512, kActivationLiveHoldTicks = 120;
 bool PackPreparationActive() {
     const auto& intent = g_survivingPack.Intent();
@@ -280,7 +284,40 @@ void ClearActivation() {
     g_activationChallenges = {};
 }
 
+// Client claim authority is independent of optional historical replay. A
+// release belongs to one admitted world/native scope and one manifest revision.
+struct ClientClaimScope {
+    std::uint32_t generation = 0, ordered = 0, transition = 0, load = 0;
+    std::uint64_t delivery = 0;
+    std::array<std::uint64_t, 3> roster {};
+    RoomTransition room {};
+    std::uint8_t slot = 0;
+};
+struct ClientClaimHold {
+    ClientClaimScope scope;
+    bool bound = false, held = true, poisoned = false;
+    std::uint64_t id = 0, sequence = 0, dropped = 0, submitted = 0, receiptGaps = 0;
+    std::uint64_t releasedRevision = 0;
+};
+ClientClaimHold g_clientClaimHold;
+std::uint64_t g_clientManifestRevision = 0;
+void LogClientClaim(const char* action, const char* reason, std::size_t rows = 0, const HitClaim* claim = nullptr);
+void InvalidateClientClaims(const char* reason) {
+    auto& hold = g_clientClaimHold;
+    if (hold.bound || !hold.held) {
+        hold.held = true; hold.bound = false;
+        LogClientClaim("rearm", reason);
+    }
+}
+void AdvanceClientManifestRevision() {
+    if (g_clientManifestRevision == UINT64_MAX) g_clientClaimHold.poisoned = true;
+    else ++g_clientManifestRevision;
+}
+bool EnsureClientClaimScope();
+bool ReleaseClientClaims(std::uint32_t frame);
+
 void RetireWorldSession() {
+    InvalidateClientClaims("world-session-retired");
     g_activationRecovery.reset();
     if (g_survivingPack.Intent()) g_survivingPack.Cancel();
     g_nativeResync.reset();
@@ -306,6 +343,8 @@ void RetireWorldSession() {
 void CheckActivationGeneration() {
     const auto generation = g_bridge.SessionGeneration();
     if (generation != g_activationGeneration) {
+        InvalidateClientClaims("generation-header-changed");
+        LogClientClaim("boundary", "generation-header-changed");
         if (!g_resyncPlan) {
             g_resyncWriteFence = ResyncWriteFence::None;
             g_resyncRecordAuthority.reset();
@@ -1195,6 +1234,159 @@ bool ActivationContext(Role role, RoomTransition& location) {
     return location.epoch != 0 && g_bridge.SessionGeneration() == g_activationGeneration;
 }
 
+bool SameClientClaimScope(const ClientClaimScope& a, const ClientClaimScope& b) {
+    return a.generation == b.generation && a.ordered == b.ordered && a.delivery == b.delivery &&
+        a.transition == b.transition && a.load == b.load && a.roster == b.roster && a.slot == b.slot &&
+        a.room.epoch == b.room.epoch && SameLocation(a.room, b.room);
+}
+void LogClientClaim(const char* action, const char* reason, std::size_t rows, const HitClaim* claim) {
+    auto& h = g_clientClaimHold;
+    if (h.sequence == UINT64_MAX) { h.poisoned = true; return; }
+    ++h.sequence;
+    if (!g_log || (h.sequence > 4096 && std::strcmp(action, "seal") != 0)) {
+        if (h.receiptGaps != UINT64_MAX) ++h.receiptGaps;
+        return;
+    }
+    const auto& s = h.scope;
+    // No runtime session string exists in WorldBridge. Only an admitted native
+    // resync supplies it; a missing identity is explicit and never fabricated.
+    const auto* n = g_nativeResync ? &*g_nativeResync : nullptr;
+    g_log("[client-claims] schema=1 seq=%llu holdId=%llu action=%s reason=%s held=%u bound=%u generation=%u ordered=%u delivery=%llu slot=%u host=%llu self=%llu peer0=%llu peer1=%llu peer2=%llu epoch=%u world=%u room=%u door=%u map=%u battle=%u event=%u load=%u transition=%u manifestRevision=%llu hpSequence=%llu frame=%u rows=%zu dropped=%llu submitted=%llu receiptGaps=%llu transactionAvailable=%u session=%s request=%llu phase=%u cut=%llu targetConnection=%llu targetDelivery=%llu claimAvailable=%u claimSeq=%u claimNetId=%u claimObjectId=%u claimRequester=%llu matchComplete=%u missing=%d extra=%d conflicts=%d replaySeq=%llu replayReceiptGaps=%llu",
+        static_cast<unsigned long long>(h.sequence), static_cast<unsigned long long>(h.id), action, reason,
+        static_cast<unsigned>(h.held), static_cast<unsigned>(h.bound), s.generation, s.ordered,
+        static_cast<unsigned long long>(s.delivery), static_cast<unsigned>(s.slot),
+        static_cast<unsigned long long>(s.roster[0]), static_cast<unsigned long long>(s.slot < 3 ? s.roster[s.slot] : 0),
+        static_cast<unsigned long long>(s.roster[0]), static_cast<unsigned long long>(s.roster[1]), static_cast<unsigned long long>(s.roster[2]),
+        s.room.epoch, s.room.worldId, s.room.roomId, s.room.door, s.room.mapProgram, s.room.battleProgram, s.room.eventProgram,
+        s.load, s.transition, static_cast<unsigned long long>(g_clientManifestRevision), static_cast<unsigned long long>(g_hostHpSequence),
+        g_hitTraceFrame, rows, static_cast<unsigned long long>(h.dropped), static_cast<unsigned long long>(h.submitted),
+        static_cast<unsigned long long>(h.receiptGaps), static_cast<unsigned>(n != nullptr),
+        n ? n->begin.key.sessionId.c_str() : "unavailable", static_cast<unsigned long long>(n ? n->begin.key.requestId : 0),
+        n ? static_cast<unsigned>(n->begin.phase) : 0, static_cast<unsigned long long>(n ? n->begin.snapshotCut : 0),
+        static_cast<unsigned long long>(n ? n->target.connectionId : 0), static_cast<unsigned long long>(n ? n->target.deliverySerial : 0),
+        static_cast<unsigned>(claim != nullptr), claim ? claim->seq : 0, claim ? claim->netId : 0,
+        claim ? claim->objectId : 0, static_cast<unsigned long long>(claim ? claim->requesterConnectionId : 0),
+        static_cast<unsigned>(std::strcmp(action, "release") == 0),
+        std::strcmp(action, "release") == 0 ? 0 : -1, std::strcmp(action, "release") == 0 ? 0 : -1,
+        std::strcmp(action, "release") == 0 ? 0 : -1,
+        static_cast<unsigned long long>(g_activationReceiptSequence), static_cast<unsigned long long>(g_activationReceiptGaps));
+}
+bool ReadClientClaimScope(ClientClaimScope& out) {
+    out = {};
+    if (!spawncontroller::IsDiagnosticGameThread() || !g_bridge.IsOpen() || CurrentRole() != Role::Client ||
+        g_role != Role::Client) return false;
+    out.generation = g_bridge.SessionGeneration(); out.ordered = g_activationOrderedGeneration;
+    out.delivery = g_bridge.DeliverySerial(); out.slot = g_bridge.LocalSlot();
+    out.transition = warp::TransitionSerial(); out.load = warp::LoadSerial();
+    for (std::uint8_t i = 0; i < 3; ++i) out.roster[i] = g_bridge.ConnectionId(i);
+    if (!ReadLocationChecked(out.room)) return false;
+    out.room.epoch = g_host.epoch;
+    if (g_resyncWriteFence == ResyncWriteFence::Waiting || g_resyncWriteFence == ResyncWriteFence::Failed) return false;
+    if (!out.generation || out.generation != g_activationGeneration || out.ordered != out.generation ||
+        !out.delivery || out.delivery != g_orderedDeliverySerial || out.slot < 1 || out.slot > 2 ||
+        !out.roster[0] || !out.roster[out.slot] || !out.room.epoch || !out.load ||
+        !SafeNativeGameplay() || !g_host.arrived || !g_inst.live ||
+        out.transition != g_seenTransition || out.load != g_seenLoad ||
+        !warp::MatchesArrivedHostTransition(out.room)) return false;
+    return WorldSessionGeneration() == out.generation && g_bridge.DeliverySerial() == out.delivery;
+}
+bool EnsureClientClaimScope() {
+    // This precedes any old release/replay predicate. A new header generation
+    // cannot publish while its FIFO ordered marker is still waiting to drain.
+    CheckActivationGeneration();
+    ClientClaimScope current;
+    if (!ReadClientClaimScope(current)) { InvalidateClientClaims("scope-unavailable"); return false; }
+    auto& h = g_clientClaimHold;
+    if (!h.bound || !SameClientClaimScope(h.scope, current)) {
+        InvalidateClientClaims("scope-changed");
+        if (h.id == UINT64_MAX) h.poisoned = true;
+        else ++h.id;
+        h.scope = current; h.bound = true; h.held = true;
+        LogClientClaim("arm", "current-admitted-scope");
+    }
+    if (!h.held && h.releasedRevision != g_clientManifestRevision) {
+        h.held = true;
+        LogClientClaim("rearm", "manifest-or-hp-changed");
+    }
+    return !h.poisoned && h.bound && !h.held;
+}
+bool ReleaseClientClaims(std::uint32_t frame) {
+    (void)EnsureClientClaimScope();
+    auto& h = g_clientClaimHold;
+    if (!h.bound || h.poisoned) return false;
+    if (!h.held) return true;
+    if (!g_host.manifestComplete || !g_hostHpSequence || g_host.enemies.empty() ||
+        (g_activationRecovery && (!g_activationRecovery->reconciled ||
+            (g_activationRecovery->phase != ActivationRecoveryPhase::LiveHold &&
+             g_activationRecovery->phase != ActivationRecoveryPhase::Verified)))) return false;
+    const auto scope = h.scope;
+    const auto revision = g_clientManifestRevision, hpSequence = g_hostHpSequence;
+    const auto census = CaptureNativeCensus();
+    if (!CensusMatchesInstance(census) || !SameLocation(census.location, scope.room)) return false;
+    std::size_t living = 0;
+    for (const auto& [id, host] : g_host.enemies) {
+        if (host.dead) continue;
+        ++living;
+        if (!id || !host.hpKnown || host.hp <= 0 || host.maxHp <= 0 || host.hp > host.maxHp) return false;
+        const Spawn* selected = nullptr;
+        for (const auto& spawn : g_inst.spawns) {
+            if (!spawn.present || spawn.killed || spawn.netId != id) continue;
+            if (selected) return false;
+            selected = &spawn;
+        }
+        if (!selected || selected->objectId != host.objectId || host.battleProgram != g_inst.btl) return false;
+        const auto* native = FindNativeEnemy(census, *selected);
+        NativeEnemy repeated; bool combat = false;
+        if (!native || native->hp != host.hp || native->maxHp != host.maxHp ||
+            !ReadNativeEnemy(native->actor, repeated, combat) || !combat ||
+            !SameNativeIdentity(*native, repeated) || repeated.objectType != native->objectType ||
+            repeated.hp != host.hp || repeated.maxHp != host.maxHp) return false;
+    }
+    // All current native combat rows must be accounted for, including extras
+    // and dying rows. Authoritative empty-set release is intentionally absent.
+    if (!living || living != census.enemies.size()) return false;
+    for (const auto& native : census.enemies) {
+        unsigned matches = 0;
+        for (const auto& spawn : g_inst.spawns) {
+            const auto host = g_host.enemies.find(static_cast<std::uint16_t>(spawn.netId));
+            if (spawn.present && !spawn.killed && spawn.netId > 0 && spawn.netId <= UINT16_MAX &&
+                host != g_host.enemies.end() && !host->second.dead &&
+                FindNativeEnemy(census, spawn) == &native) ++matches;
+        }
+        if (matches != 1) return false;
+    }
+    ClientClaimScope after;
+    if (!ReadClientClaimScope(after) || !SameClientClaimScope(scope, after) ||
+        revision != g_clientManifestRevision || hpSequence != g_hostHpSequence || !CensusMatchesInstance(census)) return false;
+    LogClientClaim("match-begin", "full-living-manifest", living);
+    for (const auto& spawn : g_inst.spawns) {
+        if (!spawn.present || spawn.killed || spawn.netId <= 0) continue;
+        const auto host = g_host.enemies.find(static_cast<std::uint16_t>(spawn.netId));
+        if (host == g_host.enemies.end() || host->second.dead) continue;
+        const auto* native = FindNativeEnemy(census, spawn);
+        if (g_log && native && h.sequence <= 4096) g_log("[client-claims-row] schema=1 holdId=%llu witnessSeq=%llu frame=%u netId=%d objectId=%u objectType=%u actor=%llX objentry=%llX status=%llX hpObserved=%d maxHpObserved=%d hpAdmitted=%d maxHpAdmitted=%d hpSourceSequence=%llu",
+            static_cast<unsigned long long>(h.id), static_cast<unsigned long long>(h.sequence), frame, spawn.netId, spawn.objectId, static_cast<unsigned>(native->objectType),
+            static_cast<unsigned long long>(native->actor), static_cast<unsigned long long>(native->objentry),
+            static_cast<unsigned long long>(native->status), native->hp, native->maxHp, host->second.hp, host->second.maxHp,
+            static_cast<unsigned long long>(host->second.hpSourceSequence));
+    }
+    for (const auto& native : census.enemies) {
+        NativeEnemy repeated; bool combat = false;
+        if (!ReadNativeEnemy(native.actor, repeated, combat) || !combat ||
+            !SameNativeIdentity(native, repeated) || native.objectType != repeated.objectType ||
+            native.hp != repeated.hp || native.maxHp != repeated.maxHp) {
+            InvalidateClientClaims("native-readback-bookend-changed"); return false;
+        }
+    }
+    if (!ReadClientClaimScope(after) || !SameClientClaimScope(scope, after) ||
+        revision != g_clientManifestRevision || hpSequence != g_hostHpSequence || !CensusMatchesInstance(census)) {
+        InvalidateClientClaims("match-bookend-changed"); return false;
+    }
+    h.releasedRevision = revision; h.held = false;
+    LogClientClaim("release", "complete-stable-readback", living);
+    return true;
+}
+
 void RequestActivation() {
     RoomTransition location;
     if (!ActivationContext(Role::Client, location)) {
@@ -1495,6 +1687,7 @@ void ReceiveResyncPlan(const ResyncPlan& plan) {
         if (g_resyncPlan && now < g_resyncDeadline) return;
         g_resyncDeadline = now + plan.remainingMs;
     }
+    if (role == Role::Client) InvalidateClientClaims("admitted-plan-changed");
     g_resyncPlan = plan; g_resyncHostCaptured = false;
     if (role == Role::Client) {
         g_resyncWriteFence = plan.phase == ResyncPhase::Checkpoint ? ResyncWriteFence::ObserveOnly : ResyncWriteFence::Waiting;
@@ -1572,14 +1765,41 @@ bool SameActivationState(ResyncActivationState actual, ResyncActivationState exp
     return actual == expected;
 }
 void LogActivationRecovery(const char* action, const char* reason = "") {
-    if (!g_log || !g_nativeResync) return;
+    if (!g_nativeResync) return;
+    if (g_activationReceiptSequence == UINT64_MAX) { g_activationReceiptGaps = UINT64_MAX; return; }
+    ++g_activationReceiptSequence;
+    if (!g_log || g_activationReceiptSequence > 4096) {
+        if (g_activationReceiptGaps != UINT64_MAX) ++g_activationReceiptGaps;
+        return;
+    }
     const auto& snapshot = g_nativeResync->snapshot;
+    const auto& transaction = *g_nativeResync;
+    const auto* replay = snapshot.activationReplay ? &*snapshot.activationReplay : nullptr;
+    std::array<std::uint32_t, 4> pointBits {};
+    if (replay) std::memcpy(pointBits.data(), replay->point.data(), sizeof(pointBits));
+    const auto definitionKey = replay && replay->definitionIndex < snapshot.recordDefinitions.size()
+        ? snapshot.recordDefinitions[replay->definitionIndex].groupKey : 0;
     const auto* recovery = g_activationRecovery ? &*g_activationRecovery : nullptr;
     g_log("[resync-activation] action=%s reason=%s load=%u transition=%u controller=%llX hostFirstUpdate=%llu historicalTicks=%u liveTicks=%u reconciled=%u battleParityObserved=0",
         action, reason, recovery ? recovery->load : warp::LoadSerial(),
         recovery ? recovery->transition : warp::TransitionSerial(),
         static_cast<unsigned long long>(recovery ? recovery->controller : 0),
         static_cast<unsigned long long>(snapshot.activationReplay ? snapshot.activationReplay->firstUpdateSequence : 0),
+        recovery ? recovery->historicalTicks : 0, recovery ? recovery->liveTicks : 0,
+        recovery ? static_cast<unsigned>(recovery->reconciled) : 0);
+    g_log("[resync-activation-key] schema=1 seq=%llu receiptGaps=%llu action=%s session=%s host=%llu request=%llu targetSlot=%u targetConnection=%llu targetDelivery=%llu phase=%u cut=%llu generation=%u delivery=%llu holdId=%llu completedSequence=%llu historicalBaseline=%llu liveBaseline=%llu load=%u transition=%u replayAvailable=%u hostFirstUpdate=%llu hostLoad=%u hostTransition=%u definitionKey=%u pointBits=%08X,%08X,%08X,%08X claimSeq=%llu historicalTicks=%u liveTicks=%u reconciled=%u",
+        static_cast<unsigned long long>(g_activationReceiptSequence), static_cast<unsigned long long>(g_activationReceiptGaps),
+        action, transaction.begin.key.sessionId.c_str(), static_cast<unsigned long long>(transaction.begin.key.hostConnectionId),
+        static_cast<unsigned long long>(transaction.begin.key.requestId), static_cast<unsigned>(transaction.target.slot),
+        static_cast<unsigned long long>(transaction.target.connectionId), static_cast<unsigned long long>(transaction.target.deliverySerial),
+        static_cast<unsigned>(transaction.begin.phase), static_cast<unsigned long long>(transaction.begin.snapshotCut),
+        transaction.context.generation, static_cast<unsigned long long>(transaction.context.deliverySerial),
+        static_cast<unsigned long long>(g_clientClaimHold.id), static_cast<unsigned long long>(recovery ? recovery->lastSequence : 0),
+        static_cast<unsigned long long>(recovery ? recovery->historicalBaseline : 0), static_cast<unsigned long long>(recovery ? recovery->liveBaseline : 0),
+        recovery ? recovery->load : warp::LoadSerial(), recovery ? recovery->transition : warp::TransitionSerial(),
+        static_cast<unsigned>(replay != nullptr), static_cast<unsigned long long>(replay ? replay->firstUpdateSequence : 0),
+        replay ? replay->hostLoad : 0, replay ? replay->hostTransition : 0, definitionKey,
+        pointBits[0], pointBits[1], pointBits[2], pointBits[3], static_cast<unsigned long long>(g_clientClaimHold.sequence),
         recovery ? recovery->historicalTicks : 0, recovery ? recovery->liveTicks : 0,
         recovery ? static_cast<unsigned>(recovery->reconciled) : 0);
 }
@@ -1868,20 +2088,23 @@ void ReceiveResyncSnapshot(const std::vector<std::uint8_t>& packet) {
     HostRoom staged;
     staged.epoch = snapshot.room.epoch; staged.world = snapshot.room.worldId;
     staged.room = snapshot.room.roomId; staged.btl = snapshot.room.battleProgram;
+    staged.manifestComplete = true;
     for (const auto& row : snapshot.enemies) {
         HostEnemy enemy;
         enemy.spawnIndex = row.identity.spawnIndex; enemy.objectId = row.identity.objectId;
         enemy.spawnPos = row.identity.spawnPosition; enemy.battleProgram = row.identity.battleProgram;
-        enemy.hp = row.hp;
+        enemy.hp = row.hp; enemy.maxHp = row.maxHp; enemy.hpKnown = true;
+        enemy.hpSourceSequence = snapshot.hpSequence;
         staged.enemies.emplace(row.identity.netId, enemy);
     }
     if (!WorldContextCurrent(context) || !progresssync::StageFull(snapshot.progress, context.generation) ||
-        !WorldContextCurrent(context) || !warp::QueueHostTransition(snapshot.room)) {
+        !WorldContextCurrent(context) || !warp::QueueHostTransition(snapshot.room, context, nullptr, &begin, &*target)) {
         progresssync::Reset();
         warp::SetClientAuthority(false);
         QueueNativeAck(ResyncAckStatus::Unavailable, "native bootstrap context or progress unavailable"); return;
     }
     g_host = std::move(staged); g_hostHpSequence = snapshot.hpSequence;
+    AdvanceClientManifestRevision(); InvalidateClientClaims("bootstrap-admitted");
     g_resyncRecordAuthority = ResyncRecordAuthority {snapshot, context};
     g_resyncWriteFence = ResyncWriteFence::Exact;
     g_inst.spawns.clear(); g_inst.byActor.clear(); ClearActivation(); ClearPendingHits(); g_lastHashMs = 0;
@@ -2197,6 +2420,7 @@ void PollPackPreparation(const NativeCensus& census) {
                 std::copy_n(entry.content.records.begin(), 5, recovery.recordBytes.begin());
                 recovery.mutation = facts.mutation; recovery.load = census.load; recovery.transition = census.transition;
                 (void)spawncontroller::CopyLastClientOriginalReturn(recovery.controller, recovery.lastSequence);
+                recovery.historicalBaseline = recovery.lastSequence;
                 if (ActivationDefinitionCurrent(recovery) && spawncontroller::KnownMutationTicketCurrent(recovery.mutation)) {
                     g_activationRecovery = recovery;
                     LogActivationRecovery("armed", "fresh empty native state matched; header+E 0/1 exception");
@@ -2210,6 +2434,7 @@ void PollPackPreparation(const NativeCensus& census) {
             // counting live-input returns after this exact completed sequence.
             (void)spawncontroller::CopyLastClientOriginalReturn(g_activationRecovery->controller,
                 g_activationRecovery->lastSequence);
+            g_activationRecovery->liveBaseline = g_activationRecovery->lastSequence;
             LogActivationRecovery("live-hold", "five exact ready records; return to current host input");
         }
     }
@@ -2272,7 +2497,10 @@ bool ObserveNativeResync(std::uint32_t frame) {
         auto& recovery = *g_activationRecovery;
         if (recovery.phase != ActivationRecoveryPhase::LiveHold &&
             recovery.phase != ActivationRecoveryPhase::Verified) return false;
-        recovery.reconciled = true; // full exact population and HP readback, not requested stores
+        if (!recovery.reconciled) {
+            recovery.reconciled = true; // exact full-set HP readback, not requested stores
+            LogActivationRecovery("reconciled", "complete exact record and HP readback");
+        }
         if (recovery.liveTicks < kActivationLiveHoldTicks || !state.snapshot.activationReplay ||
             !ActivationDefinitionCurrent(recovery) ||
             !spawncontroller::KnownMutationTicketCurrent(recovery.mutation)) return false;
@@ -2511,7 +2739,9 @@ bool ReceiveWorldPackets() {
                 // old/replayed epoch roll back authority. Epoch zero is unset.
                 const auto advance = t.epoch - g_host.epoch;
                 if (t.epoch != 0 && (g_host.epoch == 0 || (advance != 0 && advance < 0x80000000u))) {
-                    if (!warp::QueueHostTransition(t)) {
+                    ProducerWorldContext loadContext;
+                    const bool loadContextAvailable = CaptureWorldContext(loadContext);
+                    if (!loadContextAvailable || !warp::QueueHostTransition(t, loadContext, &*scope, nullptr, nullptr)) {
                         if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
                         continue;
                     }
@@ -2537,11 +2767,21 @@ bool ReceiveWorldPackets() {
             } else if (type == PacketType::EnemyManifest) {
                 EnemyManifest m;
                 read(r, m);
-                if (m.epoch != g_host.epoch) continue;
+                if (!r.atEnd() || m.epoch != g_host.epoch) continue;
+                bool uniqueManifest = true;
+                for (std::size_t i = 0; i < m.entries.size(); ++i)
+                    for (std::size_t j = 0; j < i; ++j)
+                        if (m.entries[i].netId == m.entries[j].netId) uniqueManifest = false;
+                if (!uniqueManifest) { g_host.manifestComplete = false; InvalidateClientClaims("duplicate-manifest-id"); continue; }
+                AdvanceClientManifestRevision();
                 const bool packChanged = PackManifestChanged(m);
-                if (m.replace) g_host.enemies.clear();
+                if (m.replace) { g_host.enemies.clear(); g_host.manifestComplete = true; }
                 for (const auto& e : m.entries) {
                     HostEnemy& h = g_host.enemies[e.netId];
+                    if (h.objectId != e.objectId || h.spawnIndex != e.spawnIndex ||
+                        h.battleProgram != e.battleProgram || !SamePoint(h.spawnPos, e.spawnPosition)) {
+                        h.hpKnown = false; h.hp = h.maxHp = -1; h.hpSourceSequence = 0;
+                    }
                     h.spawnIndex = e.spawnIndex;
                     h.objectId = e.objectId;
                     h.spawnPos = e.spawnPosition;
@@ -2563,7 +2803,11 @@ bool ReceiveWorldPackets() {
                 const bool packChanged = PackHpChanged(m);
                 for (const auto& e : m.entries) {
                     auto it = g_host.enemies.find(e.netId);
-                    if (it != g_host.enemies.end()) it->second.hp = e.hp;
+                    if (it != g_host.enemies.end()) {
+                        auto& host = it->second;
+                        if (!host.hpKnown || host.hp != e.hp || host.maxHp != e.maxHp) AdvanceClientManifestRevision();
+                        host.hp = e.hp; host.maxHp = e.maxHp; host.hpKnown = true; host.hpSourceSequence = m.sequence;
+                    }
                 }
                 ContinuePackPreparation(scope->hostSourceSerial, packChanged);
             } else if (type == PacketType::EnemyDeath) {
@@ -2571,7 +2815,7 @@ bool ReceiveWorldPackets() {
                 read(r, m);
                 if (m.epoch != g_host.epoch) continue;
                 auto it = g_host.enemies.find(m.netId);
-                if (it != g_host.enemies.end()) it->second.dead = true;
+                if (it != g_host.enemies.end()) { it->second.dead = true; AdvanceClientManifestRevision(); }
                 SYNC_LOG("[enemysync] client: host death epoch %u netId %u", m.epoch, m.netId);
                 ContinuePackPreparation(scope->hostSourceSerial, true);
             }
@@ -3165,6 +3409,10 @@ void OnFrameStart(std::uint32_t frame) {
     becameHost = ReceiveWorldPackets() || becameHost;
     CheckActivationGeneration();
     TickNativeResync(frame);
+    if (g_role == Role::Client) {
+        (void)EnsureClientClaimScope();
+        if (frame % 120 == 0) LogClientClaim("seal", "frame-interval");
+    }
     if (!WorldSessionGeneration()) { DrainPendingSpawnTrace(false); return; }
     // One world-ring consumer owns ordering: snapshot/deltas are consumed
     // before this tick, and host progress goes out before RoomTransition.
@@ -3277,6 +3525,9 @@ void OnFrameStart(std::uint32_t frame) {
     }
     PublishAppliedHash(frame, census);
     TickNativeResync(frame, true);
+    if (g_role == Role::Client) {
+        (void)ReleaseClientClaims(frame); // fresh readback after ClientFrame stores/replay reconciliation
+    }
     // Read-only diagnostics drain after bindings have been announced/applied.
     DrainPendingSpawnTrace(true);
 }
@@ -3311,6 +3562,14 @@ bool RecordLocalPlayerEnemyHit(const LocalPlayerEnemyHit& hit) noexcept {
         if (!hit.victim || !hit.attacker || hit.damage <= 0 ||
             !std::isfinite(claim.attackerPosition.x) || !std::isfinite(claim.attackerPosition.y) ||
             !std::isfinite(claim.attackerPosition.z)) return reject("invalid local HP hit");
+        // Arm/refine the generic scope before consulting prior replay state.
+        // Held claims do not consume claim sequence or enter the world ring.
+        if (!EnsureClientClaimScope()) {
+            if (g_clientClaimHold.dropped == UINT64_MAX) g_clientClaimHold.poisoned = true;
+            else ++g_clientClaimHold.dropped;
+            LogClientClaim("drop", "full-manifest-readback-pending");
+            return reject("generic client claim hold");
+        }
         // This policy supports only this one living pack. Partial native actors
         // remain at their initial HP until the whole content set is reconciled.
         if (g_activationRecovery && !g_activationRecovery->reconciled)
@@ -3356,10 +3615,14 @@ bool RecordLocalPlayerEnemyHit(const LocalPlayerEnemyHit& hit) noexcept {
         }
         if (g_localClaimSequence == std::numeric_limits<std::uint32_t>::max())
             return reject("local sequence exhausted");
+        if (!EnsureClientClaimScope()) return reject("claim scope retired before publication");
         claim.seq = ++g_localClaimSequence;
         // Encode/send this detection's immutable identity immediately. A full
         // ring drops the claim; it can never be relabeled after a room change.
-        if (!Send(encode(claim))) return reject("world ring full");
+        if (!Send(encode(claim))) { LogClientClaim("enqueue-failed", "world-ring-or-context", 0, &claim); return reject("world ring full"); }
+        if (g_clientClaimHold.submitted == UINT64_MAX) g_clientClaimHold.poisoned = true;
+        else ++g_clientClaimHold.submitted;
+        LogClientClaim("submitted", "world-ring-enqueued", 0, &claim);
         if (g_log) g_log("[enemysync] client hit claim connection=%llu seq=%u epoch=%u netId=%u objectId=%u attackId=%u damage=%d",
                          static_cast<unsigned long long>(claim.requesterConnectionId), claim.seq, claim.epoch,
                          claim.netId, claim.objectId, claim.attackId, claim.damage);
@@ -3638,6 +3901,7 @@ bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t up
 }
 
 void Shutdown() {
+    InvalidateClientClaims("shutdown"); LogClientClaim("seal", "shutdown");
     g_activationRecovery.reset();
     if (g_survivingPack.Intent()) g_survivingPack.Cancel();
     ClearActivation();

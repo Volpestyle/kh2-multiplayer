@@ -83,10 +83,29 @@ then passed all142 steps: one Friend1 Bootstrap, actual host first-emission
 point,33 completed historical updates and120 completed live-input updates,
 reconciled1 and two complete5/5/5 samples atHP17/max20. All four saves and98
 sealed inputs stayed unchanged in both runs. This qualifies only the bounded
-forced route. Next: host-owned enemies-DesyncNotice integration and generic
-generation-boundary claim holding, then original and forced-outside ten-cycle
-gates. Proposed v2 natural/resynced episode accounting retains v1 and historical
-FAILs; James's acceptance-gate sign-off is pending. The earlier first-rejoin5/0/5 failure and zero completed
+forced route. The host-owned enemies-DesyncNotice path is now integrated and
+remains default-off: it requires exact `1` for `KH2COOP_AUTOMATIC_RECOVERY`,
+`KH2COOP_SURVIVING_PACK_PREPARE` and `KH2COOP_SPAWN_TRACE`. It uses the existing
+request generator, one combined requested/plan busy guard, captured-context
+dedupe and two pending friend slots. Pending work drains only after a terminal,
+with full context revalidation and current runtime ownership checks; it adds
+no retry or deadline reset.
+
+Independently of that opt-in, the generic client generation boundary now holds
+**all outgoing client hit claims** until the complete admitted living manifest
+has unique full native census coverage and actual HP/maxHP readback equality.
+Unknown/empty universes stay held; scope or manifest/HP changes rearm the hold.
+Keyed replay/claim, runtime cause and native load receipts plus interval seals
+support bounded attribution; unavailable identities and log gaps remain explicit.
+The full Release build and **2,298 affected offline checks pass**, including
+59 notice/generator, 44 claim-hold, 66 load-receipt and 365 canonical native-hit
+checks. The [combined receipt](../build/rig/automatic-recovery-root-integration-20261004-01/cpp-validation.json)
+retains executed results; private sanitizer checks are scoped separately.
+The first combined build failed on a test adapter declaration; the corrected
+explicit-argument calls retain all assertions and pass the final build/run.
+The original and forced-outside ten-cycle gates remain open. Proposed v2
+natural/resynced accounting retains v1 and historical FAILs; James's acceptance-gate
+sign-off is pending. The earlier first-rejoin5/0/5 failure and zero completed
 ten-cycle acceptance remain. General deaths/waves and battle/barrier/music parity
 remain unqualified.
 

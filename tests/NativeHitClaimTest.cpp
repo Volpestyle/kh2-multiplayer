@@ -104,6 +104,7 @@ namespace kh2coop::inject::recoverywarp {
 using LogFn = kh2coop::inject::warp::LogFn;
 RoomTransition ReadLocation();
 bool TransitionPending();
+bool QueueHostTransition(const RoomTransition&, const ProducerWorldContext&, const WorldScope*, const ResyncBegin*, const ResyncTarget*);
 }
 #define warp recoverywarp
 #include "../inject/src/Warp.cpp"
@@ -140,6 +141,10 @@ MH_STATUS WINAPI MH_RemoveHook(LPVOID) { ++hookCalls; return MH_ERROR_NOT_INITIA
 namespace kh2coop::inject::warp {
 void SetClientAuthority(bool enabled) { if (productionWorldMode) recoverywarp::SetClientAuthority(enabled); }
 bool QueueHostTransition(const RoomTransition& room) { return !productionWorldMode || recoverywarp::QueueHostTransition(room); }
+bool QueueHostTransition(const RoomTransition& room, const ProducerWorldContext& context,
+                         const WorldScope* scope, const ResyncBegin* begin, const ResyncTarget* target) {
+    return !productionWorldMode || recoverywarp::QueueHostTransition(room, context, scope, begin, target);
+}
 bool HostTransitionArrived(std::uint32_t epoch) {
     ++mutableArrivalCalls;
     return productionWorldMode ? recoverywarp::HostTransitionArrived(epoch) : arrived;
@@ -276,6 +281,8 @@ void Reset(bool client = false, bool registerReader = true) {
     g_orderedDeliverySerial = 1;
     g_worldSourceSerial = g_worldSendFailures = 0; g_worldSourceExhaustionLogged = false;
     g_resyncPlan.reset(); g_nativeResync.reset(); g_resyncOutput.clear();
+    g_activationRecovery.reset(); g_activationReceiptSequence = g_activationReceiptGaps = 0;
+    g_clientClaimHold = {}; g_clientManifestRevision = 0;
     g_survivingPackEnabled = false; g_survivingPack = SurvivingPackPreparation {};
     g_resyncDeadline = g_resyncFailureFloor = 0; g_resyncHostCaptured = false;
     g_resyncPriorOrderedGeneration = 0;
@@ -548,6 +555,17 @@ void QueueHpManifest(std::uint32_t epoch, bool replace = true) {
     entry.battleProgram = 6;
     manifest.entries.push_back(entry);
     QueueHostWorld(encode(manifest));
+}
+
+// Positive publication fixtures must earn release through the actual packet
+// consumer and complete native readback. No direct hold/knowledge assignments.
+void AdmitClientClaimFixture() {
+    QueueHpManifest(g_host.epoch, true);
+    QueueHostWorld(encode(OrderedHp(g_hostHpSequence + 1, 1000, g_host.epoch)));
+    ReceiveWorldPackets();
+    if (!g_host.manifestComplete || !g_host.enemies.at(1).hpKnown ||
+        g_host.enemies.at(1).maxHp != 1000 || !ReleaseClientClaims(30))
+        throw std::runtime_error("client claim fixture lacks complete admitted release witness");
 }
 
 void TestEnemyHpOrdering() {
@@ -1976,7 +1994,7 @@ int main() try {
     Check(HasHash(hashAppliedEnemies({{2, 309, 993}})) && !HasHash(hashAppliedEnemies({{1, 309, 993}})),
           "decoded StateHash after replacement covers new binding and excludes old binding");
 
-    Reset(true);
+    Reset(true); AdmitClientClaimFixture();
     Check(RecordLocalPlayerEnemyHit(LocalHit()) && g_bridge.outgoing.size() == 1,
           "actual client publisher accepts current typed binding");
     const std::uint8_t* payload = nullptr; std::size_t size = 0;
@@ -1991,19 +2009,21 @@ int main() try {
     Check(!RecordLocalPlayerEnemyHit(LocalHit()) && g_localClaimSequence == 2,
           "transport pressure drops claim and consumes its sequence");
     g_bridge.sendAllowed = true; g_host.epoch = 10;
+    arrivalTarget.epoch = 10; // controlled native-arrival adapter now observes this room epoch
+    AdmitClientClaimFixture();
     Check(RecordLocalPlayerEnemyHit(LocalHit()) && g_localClaimSequence == 3 && g_bridge.outgoing.size() == 2,
           "later room sends only new detection without replaying dropped claim");
-    Reset(true); g_bridge.connections[1] = 0;
+    Reset(true); AdmitClientClaimFixture(); g_bridge.connections[1] = 0;
     Check(!RecordLocalPlayerEnemyHit(LocalHit()), "publisher rejects retired local connection");
-    Reset(true); g_activationOrderedGeneration = 0;
+    Reset(true); AdmitClientClaimFixture(); g_activationOrderedGeneration = 0;
     Check(!RecordLocalPlayerEnemyHit(LocalHit()), "publisher requires ordered generation barrier");
-    Reset(true); Put(enemy + offsets::actor::LINKED_NEXT_HANDLE, std::uint32_t {1});
+    Reset(true); AdmitClientClaimFixture(); Put(enemy + offsets::actor::LINKED_NEXT_HANDLE, std::uint32_t {1});
     Check(!RecordLocalPlayerEnemyHit(LocalHit()), "publisher rejects incomplete native census");
-    Reset(true); g_host.enemies[1].objectId = 311;
+    Reset(true); AdmitClientClaimFixture(); g_host.enemies[1].objectId = 311;
     Check(!RecordLocalPlayerEnemyHit(LocalHit()), "publisher rejects host manifest identity mismatch");
-    Reset(true); Put(enemy + ACTOR_STATUS, status + 0x100);
+    Reset(true); AdmitClientClaimFixture(); Put(enemy + ACTOR_STATUS, status + 0x100);
     Check(!RecordLocalPlayerEnemyHit(LocalHit()), "publisher rejects changed local binding metadata");
-    Reset(true); bool foreignAccepted = true;
+    Reset(true); AdmitClientClaimFixture(); bool foreignAccepted = true;
     HANDLE thread = CreateThread(nullptr, 0, ForeignPublisher, &foreignAccepted, 0, nullptr);
     if (thread) { WaitForSingleObject(thread, INFINITE); CloseHandle(thread); }
     Check(thread && !foreignAccepted && g_bridge.outgoing.empty() && g_localClaimSequence == 0,

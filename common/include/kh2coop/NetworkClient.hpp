@@ -23,6 +23,12 @@ struct SessionResumePin {
     SlotType localSlot {SlotType::Friend1};
 };
 
+struct HostResyncContext {
+    WorldBinding binding;
+    RoomTransition room;
+    std::array<std::uint64_t, 3> connections {};
+};
+
 struct ClientCloseInfo {
     DisconnectReason reason {DisconnectReason::TransportLost};
     std::uint32_t rawCode {0};
@@ -130,7 +136,11 @@ public:
     void sendProgressUpdate(const ProgressUpdate& m); // host only
     void sendStateHash(const StateHash& m);
     bool sendResyncRequest(const ResyncRequest& m); // exact immutable host request
-    bool requestWorldResync(std::uint8_t targetMask);
+    bool requestWorldResync(std::uint8_t targetMask, ResyncRequest* generated = nullptr);
+    // Owner-thread observations; no request ID allocation or deadline mutation.
+    bool resyncBusy() const { return requestedResync_.has_value() || resyncPlan_.has_value(); }
+    bool resyncRequestPending() const { return requestedResync_.has_value(); }
+    std::optional<HostResyncContext> hostResyncContext() const;
     void failWorldResync(ResyncResultReason reason, const std::string& error) { abortResync(reason,error); }
     bool sendNativeWorld(const std::vector<std::uint8_t>&, const ProducerWorldContext&, bool reliable);
     bool sendResyncCapture(const ResyncBegin&, const ResyncSnapshot&, const ProducerWorldContext&);

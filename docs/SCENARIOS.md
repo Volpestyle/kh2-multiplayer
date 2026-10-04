@@ -69,13 +69,14 @@ observation now qualifies individually, while both incomplete three-peer artifac
 remain rejected. Run134727 then passed baseline collection and all original
 checks; neither older failed run is retroactively passed.
 
-The replay fixture is held because automatic cached-world rejoin does not start
-the explicit ResyncPlan carrying historical metadata. All three native opt-ins
-were configured, yet no resync-activation receipt appeared. Its repeat candidate
-is also held. The separate control uses actual native host movement outside all seven
+The replay fixture and its repeat candidate remain held pending automatic-route
+qualification. In run134727, before notice integration, cached-world rejoin did
+not start the explicit ResyncPlan carrying historical metadata; the configured
+native opt-ins produced no resync-activation receipt. The separate control uses
+actual native host movement outside all seven
 current BOXes and requires5/0/5 after Friend1's fresh rejoin. Its complete PASS
 qualified the separately labeled slot1 forced-resync experiment below. Automatic
-integration and both original/forced-outside ten-cycle gates remain later work.
+live qualification and both original/forced-outside ten-cycle gates remain open.
 The farther control uses the same bounded native movement toward Z500, with
 observed clearance before rejoin. Run142007 remains FAIL; its schema correction
 uses returned peer PIDs plus the producer's unchanged mandatory process/argv/
@@ -88,6 +89,34 @@ hashes and independent native censuses agree. Host point bits join the receiver
 by firstUpdate55413; client raw point bits and canonical snapshot bytes are not
 independently retained. Measured endpoints do not prove continuous outside state.
 This is bounded forced recovery, not automatic or ten-cycle acceptance.
+
+The integrated host notice route remains default-off and requires exact `1` for
+`KH2COOP_AUTOMATIC_RECOVERY`, `KH2COOP_SURVIVING_PACK_PREPARE` and
+`KH2COOP_SPAWN_TRACE`. It uses the existing request generator, combined requested/
+plan busy state, captured-context dedupe/coalescing and two pending friend slots.
+Only a terminal permits pending drain, with full context and runtime ownership
+revalidation; there is no retry or deadline reset. The always-on generic client
+generation hold suppresses all outgoing client claims until a complete admitted
+living manifest has unique full native census coverage and exact actual HP/maxHP
+readback. Empty/unknown universes and incomplete matches stay held.
+
+Actual request-key, claim/replay, runtime reset and native queue/issue/load/arrival
+receipts now support episode attribution. A valid interval needs complete raw
+coverage and producer seals after the final census; read the runtime watermark
+after that census, then require a newer complete seal and no pending/requested/
+planned work. Shutdown is unnecessary, and cross-process clocks are not compared.
+Unavailable ordinary native session identity must join independent runtime/relay
+evidence. These receipts alone do not qualify an episode or relax v1's existing
+no-forced-resync rules. James's proposed v2 natural/resynced gate sign-off remains
+pending, including both ten-cycle gates.
+
+The full Release build and **2,298 affected offline checks pass**, including
+59 notice/generator, 44 claim-hold, 66 load-receipt and 365 canonical native-hit
+checks. The [combined receipt](../build/rig/automatic-recovery-root-integration-20261004-01/cpp-validation.json)
+retains executed results; private sanitizer checks are scoped separately.
+The first combined build failed on a test adapter declaration; the corrected
+explicit-argument calls retain all assertions and pass the final build/run.
+
 The earlier first-rejoin5/0/5 failure and zero completed ten-cycle acceptance
 remain. General deaths/waves, barrier/music/room-script parity and physical
 remote recovery are unqualified. List unavailable battle/event fields explicitly;

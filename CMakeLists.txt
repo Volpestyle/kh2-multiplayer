@@ -134,6 +134,15 @@ else()
     target_compile_options(kh2coop_resync_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# Bounded automatic notice policy with the production request generator.
+add_executable(kh2coop_automatic_notice_test tests/AutomaticResyncNoticeTest.cpp)
+target_link_libraries(kh2coop_automatic_notice_test PRIVATE kh2coop_server_core)
+if(MSVC)
+    target_compile_options(kh2coop_automatic_notice_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_automatic_notice_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 # Automatic diagnostic collection over real ENet peers and owned test files.
 # Native capture is represented by an explicit synthetic provider, never KH2.
 add_executable(kh2coop_desync_test tests/DesyncCaptureTest.cpp)
@@ -267,6 +276,28 @@ if(WIN32)
     target_compile_definitions(kh2coop_nativehit_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     if(MSVC)
         target_compile_options(kh2coop_nativehit_test PRIVATE /W4 /WX)
+    endif()
+
+    # Generic generation claim hold and complete native readback release.
+    add_executable(kh2coop_claim_hold_test tests/ClientClaimHoldTest.cpp inject/src/NativeHitTrace.cpp
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp)
+    target_include_directories(kh2coop_claim_hold_test PRIVATE runtime/include common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(kh2coop_claim_hold_test PRIVATE kh2coop_common)
+    target_compile_definitions(kh2coop_claim_hold_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_claim_hold_test PRIVATE /W4 /WX)
+    endif()
+
+    # Native load attribution and interval seals over owned memory.
+    add_executable(kh2coop_load_cause_test tests/NativeLoadCauseTest.cpp inject/src/NativeHitTrace.cpp
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp)
+    target_include_directories(kh2coop_load_cause_test PRIVATE runtime/include common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(kh2coop_load_cause_test PRIVATE kh2coop_common)
+    target_compile_definitions(kh2coop_load_cause_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_load_cause_test PRIVATE /W4 /WX)
     endif()
 
     # Actual bounded hit/policy serializer and owned-record zero leaf over

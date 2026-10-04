@@ -31,11 +31,22 @@ bool NetworkClient::sendNativeWorld(const std::vector<std::uint8_t>& bytes,const
         return sent;
     }catch(const std::exception&){return false;}
 }
-bool NetworkClient::requestWorldResync(std::uint8_t mask) {
+std::optional<HostResyncContext> NetworkClient::hostResyncContext() const {
+    if (!worldReady() || avatarLocalSlot_ != 0 || !hostRoom_) return std::nullopt;
+    HostResyncContext context;
+    context.binding = *worldBinding_;
+    context.room = *hostRoom_;
+    for (std::size_t i = 0; i < context.connections.size(); ++i) context.connections[i] = avatarConnections_[i];
+    return context;
+}
+bool NetworkClient::requestWorldResync(std::uint8_t mask, ResyncRequest* generated) {
+    if (generated) *generated = {};
     if(!worldReady()||avatarLocalSlot_!=0||!hostRoom_||!nextResyncRequest_||resyncPlan_||requestedResync_)return false;
     ResyncRequest r;r.key={avatarSessionId_,avatarConnections_[0],nextResyncRequest_};
     nextResyncRequest_=nextResyncRequest_==UINT64_MAX?0:nextResyncRequest_+1;
     r.room=*hostRoom_;r.targetMask=mask;for(std::size_t i=0;i<3;++i)r.connections[i]=avatarConnections_[i];
+    // Expose only the actual generated immutable request, including failed submission.
+    if (generated) *generated = r;
     return sendResyncRequest(r);
 }
 bool NetworkClient::sendResyncCapture(const ResyncBegin& begin,const ResyncSnapshot& snapshot,const ProducerWorldContext& c) {

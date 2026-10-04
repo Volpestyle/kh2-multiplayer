@@ -29,6 +29,9 @@
 
 #include <cstdio>
 #include <cstring>
+#include <limits>
+#include <optional>
+#include <utility>
 
 namespace kh2coop {
 namespace inject {
@@ -91,6 +94,80 @@ std::uint32_t g_hostGeneration = 0;
 HANDLE g_mapping = nullptr;
 WarpChannel* g_channel = nullptr;
 
+struct HostLoadCause {
+    std::uint64_t id = 0;
+    ProducerWorldContext context {};
+    std::optional<WorldScope> scope;
+    std::optional<ResyncBegin> begin;
+    std::optional<ResyncTarget> target;
+    RoomTransition room {};
+    std::uint32_t loadBefore = 0, issueTransition = 0;
+    bool available = false, issued = false, arrivedLogged = false;
+};
+HostLoadCause g_hostCause;
+std::uint64_t g_loadEvidenceSequence = 0;
+std::uint32_t g_loadLastSealFrame = 0;
+bool g_loadSealEmitted = false;
+
+bool SameLoadRoom(const RoomTransition& a, const RoomTransition& b) {
+    return a.epoch == b.epoch && a.worldId == b.worldId && a.roomId == b.roomId &&
+        a.door == b.door && a.mapProgram == b.mapProgram &&
+        a.battleProgram == b.battleProgram && a.eventProgram == b.eventProgram;
+}
+
+bool LoadCauseCurrent(const HostLoadCause& cause) {
+    return cause.available && enemysync::WorldContextCurrent(cause.context);
+}
+
+void LogLoadCause(const char* event, bool attributed) {
+    const bool complete = g_loadEvidenceSequence != (std::numeric_limits<std::uint64_t>::max)();
+    if (complete) ++g_loadEvidenceSequence;
+    if (!g_log) return;
+    const auto& cause = g_hostCause;
+    const auto* begin = cause.begin ? &*cause.begin : nullptr;
+    const auto* scope = cause.scope ? &*cause.scope : nullptr;
+    const auto* target = cause.target ? &*cause.target : nullptr;
+    const char* origin = !attributed ? "unattributed" : begin ?
+        (begin->phase == ResyncPhase::Bootstrap ? "resync_bootstrap" : "resync_checkpoint") : "ordinary_host_room";
+    char sha[65] {};
+    constexpr char digits[] = "0123456789abcdef";
+    if (begin) for (std::size_t i = 0; i < begin->sha256.size(); ++i) {
+        sha[2*i] = digits[begin->sha256[i] >> 4]; sha[2*i+1] = digits[begin->sha256[i] & 15];
+    }
+    const auto location = ReadLocation();
+    g_log("[load-cause] seq=%llu complete=%u event=%s cause=%llu origin=%s available=%u generation=%u delivery=%llu hostSource=%llu session=%s host=%llu request=%llu target=%llu targetDelivery=%llu phase=%u cut=%llu snapshot=%s loadBefore=%u load=%u transition=%u issueTransition=%u epoch=%u targetRoom=%02X/%02X targetDoor=%u targetMap=%u targetBtl=%u targetEvt=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
+        static_cast<unsigned long long>(g_loadEvidenceSequence), complete ? 1u : 0u, event,
+        static_cast<unsigned long long>(cause.id), origin, attributed ? 1u : 0u,
+        cause.context.generation, static_cast<unsigned long long>(cause.context.deliverySerial),
+        static_cast<unsigned long long>(begin ? begin->snapshotCut : scope ? scope->hostSourceSerial : 0),
+        begin ? begin->key.sessionId.c_str() : scope ? scope->sessionId.c_str() : "-",
+        static_cast<unsigned long long>(begin ? begin->key.hostConnectionId : scope ? scope->sourceConnectionId : 0),
+        static_cast<unsigned long long>(begin ? begin->key.requestId : 0),
+        static_cast<unsigned long long>(target ? target->connectionId : scope ? scope->targetConnectionId : 0),
+        static_cast<unsigned long long>(target ? target->deliverySerial : scope ? scope->targetDeliverySerial : 0),
+        begin ? static_cast<unsigned>(begin->phase) : 255u,
+        static_cast<unsigned long long>(begin ? begin->snapshotCut : 0), begin ? sha : "-",
+        cause.loadBefore, g_loadSerial, g_transitionSerial, cause.issueTransition, cause.room.epoch,
+        cause.room.worldId, cause.room.roomId, cause.room.door, cause.room.mapProgram,
+        cause.room.battleProgram, cause.room.eventProgram,
+        location.worldId, location.roomId, location.door, location.mapProgram, location.battleProgram, location.eventProgram);
+}
+
+void SealLoadCause(std::uint32_t frame) {
+    if (!g_log || (g_loadSealEmitted && frame - g_loadLastSealFrame < 120)) return;
+    g_loadLastSealFrame = frame;
+    g_loadSealEmitted = true;
+    // Sequence bookends detect absent event rows without relying on DLL detach.
+    // This diagnostic observes existing state; it never requests a native load.
+    g_log("[load-cause-seal] frame=%u seq=%llu complete=%u cause=%llu generation=%u delivery=%llu scopeCurrent=%u load=%u transition=%u queued=%u issued=%u pending=%u",
+        frame, static_cast<unsigned long long>(g_loadEvidenceSequence),
+        g_loadEvidenceSequence != UINT64_MAX ? 1u : 0u,
+        static_cast<unsigned long long>(g_hostCause.id), g_hostCause.context.generation,
+        static_cast<unsigned long long>(g_hostCause.context.deliverySerial),
+        LoadCauseCurrent(g_hostCause) ? 1u : 0u, g_loadSerial, g_transitionSerial,
+        g_hostQueued ? 1u : 0u, g_hostIssued ? 1u : 0u, g_transitionPending ? 1u : 0u);
+}
+
 template <typename T>
 T ReadExe(std::uint64_t rva) {
     T value {};
@@ -144,8 +221,13 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
 
 void CompleteLoad() {
     ++g_loadSerial;
+    const bool hostIssued = g_hostCause.issued && g_transitionPending && LoadCauseCurrent(g_hostCause) &&
+        g_hostCause.issueTransition == g_transitionSerial && g_hostCause.loadBefore != UINT32_MAX &&
+        g_loadSerial == g_hostCause.loadBefore + 1;
     g_transitionPending = false;
     const auto location = ReadLocation();
+    auto expected = g_hostCause.room; expected.epoch = location.epoch;
+    LogLoadCause("load", hostIssued && SameLoadRoom(expected, location));
     if (g_log) g_log("[warp] load complete serial=%u transition=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
                      g_loadSerial, g_transitionSerial, location.worldId, location.roomId,
                      location.door, location.mapProgram, location.battleProgram, location.eventProgram);
@@ -182,6 +264,10 @@ void IssueHostTransition() {
     g_hostIssueLoad = g_loadSerial;
     BeginTransition();
     const auto issuedTransition = g_transitionSerial;
+    g_hostCause.issued = true;
+    g_hostCause.loadBefore = g_hostIssueLoad;
+    g_hostCause.issueTransition = issuedTransition;
+    LogLoadCause("issue", LoadCauseCurrent(g_hostCause));
     // Only this authority path bypasses the native-exit detour.
     g_requestTransition(&packet, 1, 0, 0, 0);
     if (g_log) g_log("[warp] client issued epoch=%u transition=%u", issuedEpoch, issuedTransition);
@@ -298,6 +384,7 @@ void OnFrameStart(std::uint32_t frame, uintptr_t listHead) {
     if (!g_channel) return;
     InterlockedExchange(&g_channel->liveFrame, static_cast<long>(frame));
     InterlockedExchange64(&g_channel->liveActor, static_cast<long long>(listHead));
+    SealLoadCause(frame);
     if (g_ready && g_clientAuthority) IssueHostTransition();
     if (g_channel->requestSeq == g_channel->doneSeq) {
         g_channel->gateWaitFrames = 0;
@@ -309,6 +396,8 @@ void OnFrameStart(std::uint32_t frame, uintptr_t listHead) {
 void SetClientAuthority(bool enabled) {
     g_clientAuthority = enabled;
     if (!enabled) {
+        if (g_hostQueued || g_hostIssued) LogLoadCause("retire", LoadCauseCurrent(g_hostCause));
+        g_hostCause = {};
         g_hostQueued = false;
         g_hostIssued = false;
         g_hostGeneration = 0;
@@ -316,14 +405,40 @@ void SetClientAuthority(bool enabled) {
 }
 
 bool QueueHostTransition(const RoomTransition& target) {
+    return QueueHostTransition(target, ProducerWorldContext{}, nullptr, nullptr, nullptr);
+}
+
+bool QueueHostTransition(const RoomTransition& target, const ProducerWorldContext& context,
+                         const WorldScope* scope, const ResyncBegin* begin, const ResyncTarget* resyncTarget) {
     const auto generation = enemysync::WorldSessionGeneration();
     // NOW stores world, room and door as bytes; reject truncation.
     if (!generation || !g_ready || !g_clientAuthority || target.worldId >= 0xFF || target.roomId >= 0xFF ||
         target.door > 0xFF) return false;
+    if (g_hostQueued || g_hostIssued) LogLoadCause("superseded", LoadCauseCurrent(g_hostCause));
+    HostLoadCause cause;
+    cause.context = context; cause.room = target; cause.loadBefore = g_loadSerial;
+    if (scope) cause.scope = *scope;
+    if (begin) cause.begin = *begin;
+    if (resyncTarget) cause.target = *resyncTarget;
+    const bool contextCurrent = context.generation == generation && enemysync::WorldContextCurrent(context);
+    if (contextCurrent && scope && !begin && !resyncTarget)
+        cause.available = scope->kind == WorldSourceKind::Native && !scope->sessionId.empty() &&
+            scope->sourceConnectionId != 0 && scope->hostSourceSerial != 0 && scope->targetConnectionId != 0 &&
+            scope->targetDeliverySerial == context.deliverySerial;
+    if (contextCurrent && !scope && begin && resyncTarget && SameLoadRoom(begin->room, target) &&
+        !begin->key.sessionId.empty() && begin->key.hostConnectionId && begin->key.requestId &&
+        begin->snapshotCut &&
+        resyncTarget->slot >= 1 && resyncTarget->slot <= 2 && resyncTarget->connectionId &&
+        resyncTarget->deliverySerial == context.deliverySerial && begin->targetCount <= begin->targets.size())
+        for (std::size_t i = 0; i < begin->targetCount; ++i)
+            if (begin->targets[i] == *resyncTarget) cause.available = true;
+    cause.id = g_loadEvidenceSequence == UINT64_MAX ? 0 : g_loadEvidenceSequence + 1;
+    g_hostCause = std::move(cause);
     g_hostTarget = target;
     g_hostGeneration = generation;
     g_hostQueued = true;
     g_hostIssued = false;
+    LogLoadCause("queue", LoadCauseCurrent(g_hostCause));
     if (g_log) g_log("[warp] client queued epoch=%u target=%02X/%02X door=%u map=%u btl=%u evt=%u",
                      target.epoch, target.worldId, target.roomId, target.door,
                      target.mapProgram, target.battleProgram, target.eventProgram);
@@ -346,9 +461,16 @@ bool HostTransitionArrived(std::uint32_t epoch) {
         !g_hostIssued || epoch != g_hostTarget.epoch || g_hostIssueLoad == g_loadSerial ||
         TransitionPending() || !SafeToWarp()) return false;
     const auto location = ReadLocation();
-    return location.worldId == g_hostTarget.worldId && location.roomId == g_hostTarget.roomId &&
+    const bool arrived = location.worldId == g_hostTarget.worldId && location.roomId == g_hostTarget.roomId &&
            location.door == g_hostTarget.door && location.mapProgram == g_hostTarget.mapProgram &&
            location.battleProgram == g_hostTarget.battleProgram && location.eventProgram == g_hostTarget.eventProgram;
+    if (arrived && !g_hostCause.arrivedLogged) {
+        g_hostCause.arrivedLogged = true;
+        LogLoadCause("arrival", LoadCauseCurrent(g_hostCause) && g_hostCause.issued &&
+            g_hostCause.issueTransition == g_transitionSerial && g_hostCause.loadBefore != UINT32_MAX &&
+            g_loadSerial == g_hostCause.loadBefore + 1);
+    }
+    return arrived;
 }
 
 bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept {

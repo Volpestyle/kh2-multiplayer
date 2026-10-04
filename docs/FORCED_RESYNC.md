@@ -128,9 +128,13 @@ original update. There is no synthesized BOX point, extra native call, branch
 patch, marker rewrite or synthetic-kill cleanup. B1 creator admission, the
 owned gateway and loader-owned spatial bypass are parked alternatives.
 
-This candidate currently runs only inside an explicit host-origin ResyncPlan.
-Automatic ClientHello rejoin sends cached world state and does not invoke the
-snapshot producer or replay receiver. Run134727 passed the original rejoin
+Replay still runs only inside a host-origin ResyncPlan. ClientHello rejoin sends
+cached world state; it does not itself invoke the snapshot producer or replay
+receiver. The integrated host-only notice path can now submit the existing
+ResyncRequest after an enemies-field DesyncNotice, but is default-off and requires
+exact `1` for all three environment variables: `KH2COOP_AUTOMATIC_RECOVERY`,
+`KH2COOP_SURVIVING_PACK_PREPARE` and `KH2COOP_SPAWN_TRACE`. Run134727, before
+this integration, passed the original rejoin
 checks at5/5/5 but had no replay receipts; it cannot validate this method.
 Run143318 passed the120-step host-outside5/0/5 control. Run143903 then passed
 the142-step forced experiment: one slot1 Bootstrap restored5/5/5 atHP17/max20,
@@ -140,11 +144,48 @@ firstUpdate55413; no independently retained client raw-point or snapshot-SHA
 recomputation is claimed. Exactly one additional Friend1 load4->5/transition3->4
 and native/relay/runtime completion were checked; all four saves and98 sealed
 inputs stayed unchanged. See [the scenario results](SCENARIOS.md#historical-activation-replay-single-cycle-2026-10-04).
-A future host-owned enemies-field
-DesyncNotice-to-existing-ResyncRequest trigger is planned, with duplicate/open-plan
-guards and claim holding from rejoin; it is not implemented. The original and
-forced-outside ten-cycle acceptance gates remain open. The proposed v2 episode
-contract preserves v1 and historical FAILs and still needs James's gate sign-off.
+The notice policy uses combined `requestedResync_ || resyncPlan_` busy state and
+two bounded pending friend slots. Dedupe captures session/host, target connection,
+epoch and exact fields; identical pending notices coalesce and changed fields
+explicitly supersede. A terminal permits deferred drain outside receive callbacks,
+after revalidating the captured binding, delivery, full room and roster. Both
+immediate and drained submissions require running, admitted, non-invalidated,
+world-ready runtime ownership. Submitted receipts join the actual generated
+transaction key; failed attempts stay consumed. There is no implicit retry,
+replacement target or deadline reset.
+
+The generic native hold is always on for every client's outgoing hit claims,
+independent of automatic/replay opt-ins. It checks the current generation and
+ordered delivery before any old release state can publish. Release requires a
+complete framed replace-manifest or checked Bootstrap, trusted HP/maxHP for
+every living entry,
+one unique current native binding each, no missing/extra combat rows and actual
+positive native HP/maxHP equality through repeated reads and scope/manifest/HP
+bookends. Unknown or empty universes stay held; scope or manifest/HP changes
+rearm the hold. A replay also needs its exact reconciliation and LiveHold/Verified
+phase; claim release need not wait for the separate 120-update acceptance check.
+
+`[automatic-resync]`, `[runtime-world-cause]`, `[client-claims]`/`[client-claims-row]`,
+`[resync-activation-key]` and `[load-cause]` receipts retain actual producer
+identities, transactions where available, full scope and native load/transition
+facts. Ordinary claim receipts lack a session/request identity in WorldBridge and
+need an exact runtime identity join. Ordinary load receipts retain admitted
+envelope scope; identifying that load as cached rejoin still needs independent
+runtime/relay admission evidence. Runtime and native interval seals expose their highwaters/state/gaps;
+shutdown or EOF alone is insufficient. After the final independent native census,
+read the current runtime seal watermark and require a strictly newer complete
+seal with full suffix coverage and no pending/requested/planned work. Native
+seals require their own coverage checks; process clocks are separate domains.
+
+The full Release build and **2,298 affected offline checks pass**, including
+59 notice/generator, 44 claim-hold, 66 load-receipt and 365 canonical native-hit
+checks. The [combined receipt](../build/rig/automatic-recovery-root-integration-20261004-01/cpp-validation.json)
+retains executed results; private sanitizer checks are scoped separately.
+The first combined build failed on a test adapter declaration; the corrected
+explicit-argument calls retain all assertions and pass the final build/run. No live
+automatic result is claimed. Both original and forced-outside ten-cycle gates
+remain open. Proposed v2 natural/resynced episode accounting preserves v1 and
+historical FAILs and still needs James's gate sign-off.
 
 The recorder copies the exact native RDX input inside the qualified host update
 and joins it by update identity to the first actual nonnull fixed-wrapper return

@@ -8,6 +8,10 @@
 
 namespace kh2coop {
 struct RoomTransition;
+struct ProducerWorldContext;
+struct WorldScope;
+struct ResyncBegin;
+struct ResyncTarget;
 namespace inject {
 namespace warp {
 
@@ -28,6 +32,11 @@ void OnFrameStart(std::uint32_t frame, uintptr_t listHead);
 // retirement disarms it before progress writes or native transition issuance.
 void SetClientAuthority(bool enabled);
 bool QueueHostTransition(const RoomTransition& target);
+// Diagnostic causal identity only: admission/scheduling stay with the caller.
+// Missing or conflicting evidence is logged unavailable, never invented.
+bool QueueHostTransition(const RoomTransition& target, const ProducerWorldContext& context,
+                         const WorldScope* scope, const ResyncBegin* begin,
+                         const ResyncTarget* resyncTarget = nullptr);
 bool HostTransitionArrived(std::uint32_t epoch);
 // Game-thread diagnostic check over an already checked native location. Reads
 // only owned lifecycle state; caller must separately check native safe state.
