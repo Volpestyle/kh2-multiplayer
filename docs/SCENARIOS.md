@@ -2526,15 +2526,46 @@ observers and the removal auditor. The new DLL has **no live hook installation
 or gameplay validation**; the preserved earlier native results used the prior
 DLL. See the [predicate receipt](../build/rig/predicate_trace_offline_receipt_20261003.json).
 
+## Guarded native menu save (2026-10-04)
+
+James authorized one save-menu attempt. In local Parlor run
+`20261004-150952_save_menu_guard_once_1` (PID 729136), root inspected the native
+Save flow and sent one latched overwrite confirmation for existing slot 04.
+The returned file list showed its time change from 5:55 to 5:59 and a changed thumbnail;
+a separate completion-text dialog was not captured. Four post-confirm guard
+redirects name the exact sandbox KHIIFM twin. It was absent before input, became
+a nonempty 7,073,032-byte PNG-bearing container, and stayed stable in two fresh
+post-cleanup samples. Its SHA256 is
+`0932731bba0e04bf17773ce5afc968579dd6d3351cb4e396ba29695fe55200b5`, different
+from the untouched original. All four original files, including Steam VDF,
+matched historical/prelaunch/premenu/step-exit/post-cleanup hashes and file set.
+
+**The automation run remains FAIL, exit 1.** The fixed 300s menu deadline expired
+before root submitted the finish command. The observed protected menu write is
+sealed separately; it does not reclassify that scenario or establish a full
+save-format audit. Earlier preflight 145847 remains HANG/FAIL with no save attempt
+or sandbox output. The one writing attempt is consumed; no retry, copy-back,
+restoration or deletion occurred.
+
+The menu pauses the gameplay frame used by the ordinary watchdog. The reviewed
+private supervisor used fresh, strictly advancing same-PID native capture
+completions in an explicitly observed Save menu, retaining fixed 30s response and
+300s total bounds. This changes no shared runner watchdog and is not a reusable
+passing menu scenario. See the [sealed result](../build/rig/save-menu-guard-test-20261004-02/sealed-result.json)
+and [publication evidence](../build/rig/save-menu-guard-test-20261004-02/publication-result.md).
+The [independent review](../build/rig/save-menu-independent-review-20261004-01/review.md)
+accepts this bounded write/protection observation and retains the automation FAIL.
+Its raw nested step status says `pass` despite the overall failure and traceback;
+that stale value does not establish completed finish evidence.
+
 ## Known limits
 
 - `boot` loads whatever slot the save list opens on (the last used one) and
   doesn't pick a slot. The pixel checks assume 1920×1080.
 - The hang check needs the room to be live: it doesn't cover the title
   screen or a load that never finishes (those surface as step timeouts).
-- Not proven live: a save attempted from the in-game save menu. The menu
-  runs as a scheduled task (`0x1512B0`), so there's no clean call to open it.
-  The guard is proven against every API on the game's save path (static
-  trace above, plus the self-test through the exe's own imports). James
-  authorized one guarded in-game save attempt on 2026-10-04; it has not yet run.
-  The guard's save-menu acceptance remains unproven.
+- A protected native menu write was observed once in the authorized attempt
+  above; its automation run failed the final evidence deadline. A reusable
+  passing menu scenario remains open. The menu runs as a scheduled task
+  (`0x1512B0`); no direct native writer/task invocation was used. Standing save
+  restrictions remain, and this single save authorization is consumed.

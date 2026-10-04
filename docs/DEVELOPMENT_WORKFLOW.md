@@ -54,6 +54,9 @@ known broken (see `KH2_CONTROL_CLI.md`).
 - `scripts/restart-kh2.ps1` kills **every** KH2 process. It is for a human at
   the keyboard; agents use `kh2ctl restart` and `kh2ctl kill`.
 - Do not save in-game during automation without James's explicit approval (AGENTS.md).
+  The single attempt approved on 2026-10-04 is consumed: its sandbox write and
+  unchanged four originals are [verified separately](SCENARIOS.md#guarded-native-menu-save-2026-10-04),
+  while its automation deadline result remains FAIL. It grants no further saves.
 
 ## Running the rig from a session-0 agent
 
