@@ -94,6 +94,36 @@ outward abort; do not infer a force from sparse velocity/position samples. See
 the [contact audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/enemy-contact-drift-analysis/result.md)
 and [direction audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/correction-direction-analysis/result.md).
 
+## Region-qualified kill and second-wave binding failure, 2026-10-05
+
+The first-pack kill fixture now checks fresh full original IDs/HP/native
+provenance on all peers, gameplay safety, neutral host input and actual native
+region bit8 immediately before the canonical kill. The fixed 100-unit radius
+was a fixture stability convenience, not a native kill prerequisite; only this
+kill removes that radius gate and corrective input. Sora's position is observed
+and uncontrolled. Damage and later-kill gates, correction budgets and all death,
+second-wave, hash and save assertions remain. An out-of-region host still fails.
+See the [source decision](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-approach-feasibility/result.md).
+
+Run 143735 reached the kill with the original IDs 3 through 6 at HP153 on all three games,
+region bit8 true and radius 35.55. Four native kills and each original death's
+once-only native application on both clients are confirmed in the raw logs.
+The cumulative six host death notices include two earlier alive departures,
+not duplicate first-pack deaths. This run happened to remain within 100; it does
+not demonstrate an outside 100 kill. Four protected saves stayed unchanged.
+
+The full wave run FAILED at second-pack parity. Friend1 bound two new actors
+to ID7 while only the first append manifest was available, then rebound one to
+older dead ID1 and killed it. Friend2 later published two different living actors
+as ID8. Both clients consumed the later manifests. Ordinary matching still allows
+spawn-index fallback across mismatched points and has no live-ID reservation;
+it can select an older tombstone after a provisional binding. These are product
+binding failures, not reasons to weaken the second-pack test or retry movement.
+Second-pack combat and reconnect were not reached. Native spawn/removal timing
+and same-address incarnation remain separate unresolved boundaries. See the
+[run result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-qualified-kill-root01/result.md)
+and [raw-log attribution](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/second-wave-143735-audit/result.md).
+
 ## Current resync binding, 2026-10-04
 
 The current protocol9/WorldBridge11 resync path now qualifies the complete
