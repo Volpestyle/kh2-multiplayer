@@ -2632,7 +2632,108 @@ static void* __fastcall HookedFollowSteering(void* typeHandler, void* outVec4,
     return outVec4;
 }
 
+// Diagnostic only: callback entry liveness, not native thread ownership or a
+// script-freeze predicate. Published before enabling the existing input hook.
+static std::atomic<uintptr_t> g_inputTraceBase {0};
+static SRWLOCK g_inputTraceLogLock = SRWLOCK_INIT;
+
+struct InputTraceSample {
+    std::int32_t eventState, frozen, pauseBlockers;
+    uintptr_t eventContext;
+    std::uint8_t menu;
+    unsigned available;
+    DWORD error;
+};
+
+template <typename T>
+static void ReadInputTraceField(uintptr_t address, T& value, unsigned bit,
+                                InputTraceSample& sample) {
+    __try {
+        value = *reinterpret_cast<const volatile T*>(address);
+        sample.available |= bit;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!sample.error) sample.error = GetExceptionCode();
+    }
+}
+
+static InputTraceSample ReadInputTraceSample(uintptr_t base) {
+    InputTraceSample s {};
+    ReadInputTraceField(base + offsets::CUTSCENE_STATE, s.eventState, 1, s);
+    ReadInputTraceField(base + offsets::EVENT_CONTEXT, s.eventContext, 2, s);
+    ReadInputTraceField(base + offsets::OPEN_MENU, s.menu, 4, s);
+    ReadInputTraceField(base + offsets::CONTROLLABLE, s.frozen, 8, s);
+    ReadInputTraceField(base + offsets::PAUSE_STATUS, s.pauseBlockers, 16, s);
+    return s; // The event-context pointer is an identity only; never dereferenced.
+}
+
+static bool SameInputTraceSample(const InputTraceSample& a, const InputTraceSample& b) {
+    return a.available == b.available && a.error == b.error &&
+        a.eventState == b.eventState && a.eventContext == b.eventContext &&
+        a.menu == b.menu && a.frozen == b.frozen && a.pauseBlockers == b.pauseBlockers;
+}
+
+static void TraceInputCallback() {
+    const auto base = g_inputTraceBase.load(std::memory_order_acquire);
+    if (!base) return;
+    // Trivial TLS, no destructor, allocation, environment lookup or entity-frame
+    // globals. A new thread starts a separate count; no main-thread assumption.
+    struct TraceState {
+        unsigned long long calls, lastCalls, lastMs, windowMs, suppressed;
+        unsigned emitted;
+        InputTraceSample before, after;
+    };
+    static thread_local TraceState t {};
+    ++t.calls;
+    const auto now = GetTickCount64();
+    const auto before = ReadInputTraceSample(base);
+    const auto after = ReadInputTraceSample(base);
+    const bool first = t.calls == 1;
+    const bool changed = first || !SameInputTraceSample(before, t.before) ||
+        !SameInputTraceSample(after, t.after);
+    t.before = before;
+    t.after = after;
+    if (first || now - t.windowMs >= 2000) {
+        t.windowMs = now;
+        t.emitted = 0;
+    }
+    const bool heartbeat = !first && now - t.lastMs >= 2000;
+    if (!first && !changed && !heartbeat) return;
+    if (t.emitted >= 8) {
+        if (changed) ++t.suppressed;
+        return;
+    }
+
+    // Only the logging part touches the existing logger. Shutdown disables the
+    // probe under this lock before the logger can close; reads above are local.
+    AcquireSRWLockShared(&g_inputTraceLogLock);
+    __try {
+        if (g_inputTraceBase.load(std::memory_order_acquire) != base) return;
+        Log("[input-callback] tid=%lu calls=%llu ms=%llu deltaCalls=%llu deltaMs=%llu "
+            "reason=%s suppressedChanges=%llu available=%02X/%02X error=%08lX/%08lX "
+            "bracketEqual=%u eventState=%d/%d eventContext=%llX/%llX "
+            "menu=%u/%u frozen=%d/%d pauseBlockers=%08X/%08X",
+            GetCurrentThreadId(), t.calls, now, t.calls - t.lastCalls,
+            first ? 0ULL : now - t.lastMs, first ? "first" : changed ? "change" : "heartbeat",
+            t.suppressed, before.available, after.available, before.error, after.error,
+            before.available == 31 && after.available == 31 &&
+                SameInputTraceSample(before, after) ? 1u : 0u,
+            before.eventState, after.eventState,
+            static_cast<unsigned long long>(before.eventContext),
+            static_cast<unsigned long long>(after.eventContext),
+            static_cast<unsigned>(before.menu), static_cast<unsigned>(after.menu),
+            before.frozen, after.frozen, static_cast<unsigned>(before.pauseBlockers),
+            static_cast<unsigned>(after.pauseBlockers));
+        t.lastCalls = t.calls;
+        t.lastMs = now;
+        t.suppressed = 0;
+        ++t.emitted;
+    } __finally {
+        ReleaseSRWLockShared(&g_inputTraceLogLock);
+    }
+}
+
 static void __fastcall HookedInputCollector(void* inputStruct) {
+    TraceInputCallback();
     if (g_origInputCollector) {
         g_origInputCollector(inputStruct);
     }
@@ -3056,6 +3157,16 @@ bool Initialize(uintptr_t exeBase) {
     Log("  InputCollector: 0x%llX",
         static_cast<unsigned long long>(inputCollectorAddr));
 
+    char inputTraceSetting[2] {};
+    const bool inputTrace = GetEnvironmentVariableA("KH2COOP_INPUT_CALLBACK_TRACE",
+        inputTraceSetting, sizeof(inputTraceSetting)) == 1 && inputTraceSetting[0] == '1';
+    if (inputTrace) {
+        Log("[input-callback] configured=1 entryOnly=1 heartbeatMs=2000 maxLinesPerThreadWindow=8 "
+            "mask=eventState:01,context:02,menu:04,frozen:08,pauseBlockers:10 "
+            "zeroWithoutAvailabilityIsUnknown=1 bracketIsNotAtomic=1");
+        g_inputTraceBase.store(exeBase, std::memory_order_release);
+    }
+
     mhStatus = MH_CreateHook(
         reinterpret_cast<void*>(inputCollectorAddr),
         reinterpret_cast<void*>(&HookedInputCollector),
@@ -3291,6 +3402,9 @@ bool Initialize(uintptr_t exeBase) {
 }
 
 void Shutdown() {
+    AcquireSRWLockExclusive(&g_inputTraceLogLock);
+    g_inputTraceBase.store(0, std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_inputTraceLogLock);
     resourcetrace::StopRecording(); // Retired callbacks use only process-lifetime storage.
     if (!g_initialized) return;
 

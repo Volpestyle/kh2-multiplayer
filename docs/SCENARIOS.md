@@ -2707,6 +2707,23 @@ accepts this bounded write/protection observation and retains the automation FAI
 Its raw nested step status says `pass` despite the overall failure and traceback;
 that stale value does not establish completed finish evidence.
 
+## Native pause and event input callback (2026-10-05)
+
+Set `KH2COOP_INPUT_CALLBACK_TRACE=1` before launching an injected game to log
+bounded, per-thread raw-input entry counts and checked event/menu fields. The
+trace defaults off and changes no input or gameplay behavior. It records two
+consecutive entry reads, availability and exception codes; these reads do not
+bracket the original collector or establish world-mutation authority.
+
+Native Pause run `043841` retained roughly60 callback entries/s in menu10 while
+ordinary avatar publication stopped. Actual story-event run `044129` retained
+roughly30 entries/s through event states2/3/4, returning to roughly60 after the
+native event ended at `[8,12,50,0,0,22]`. Movement resumed after the event. Both
+runs passed without crashes or protected-save changes. This identifies a
+candidate observation/release callback; multiplayer cutscene hold and skip
+remain unimplemented. See the [probe result](../build/rig/vuh1498-input-callback-probe-20261005-01/result.md)
+and [source review](../build/rig/vuh1507-launcher-20261005-01/input-callback-review.md).
+
 ## Known limits
 
 - `boot` loads whatever slot the save list opens on (the last used one) and
