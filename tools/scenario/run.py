@@ -401,13 +401,33 @@ def wait_for(ctx: Context, cond, what: str, timeout: float, poll: float = 0.7) -
 
 
 def step_launch(ctx: Context, step: dict) -> dict:
+    init_timeout_ms = step.get("initTimeoutMs", 15000)
+    if type(init_timeout_ms) is not int or not 1 <= init_timeout_ms <= 60000:
+        raise StepFailed("launch initTimeoutMs must be an integer from 1 to 60000")
     # step "env" reaches the game (kh2ctl launch passes its environment on),
     # e.g. {"KH2COOP_PUPPET_TRACE": "1"}.
-    data = kh2ctl("launch", env={k: str(v) for k, v in step.get("env", {}).items()})
-    inst = Instance(len(ctx.instances), data["processId"])
-    if data.get("log"):
-        inst.inject_log = Path(data["log"]).resolve()
+    # Keep the existing 120s CLI budget, plus any additional init wait. This
+    # also covers the CLI's window, settle and injection waits (max 165s).
+    data = kh2ctl("launch", "--init-timeout-ms", str(init_timeout_ms), check=False,
+                  timeout=120 + max(0, init_timeout_ms - 15000) / 1000,
+                  env={k: str(v) for k, v in step.get("env", {}).items()})
+    if type(data) is not dict:
+        raise StepFailed("kh2ctl launch: invalid reply")
+    pid = data.get("processId")
+    if type(pid) is not int or not 0 < pid <= 0xFFFFFFFF or data.get("command") != "launch":
+        raise StepFailed(f"kh2ctl launch: invalid launched processId/command: {data.get('error', data)}")
+    inst = Instance(len(ctx.instances), pid)
+    # Initialization can fail after launch succeeds. Retain that exact process
+    # for run_scenario's owned kh2ctl cleanup before propagating the failure.
     ctx.instances.append(inst)
+    log = data.get("log")
+    if log is not None:
+        if type(log) is not str:
+            raise StepFailed("kh2ctl launch: invalid inject log path")
+        if log:
+            inst.inject_log = Path(log).resolve()
+    if data.get("ok") is not True:
+        raise StepFailed(f"kh2ctl launch: {data.get('error', data)}")
     if step.get("mute", True):
         kh2ctl("mute", pid=inst.pid, check=False)
     return {"processId": inst.pid, "instance": inst.index}
@@ -4339,6 +4359,9 @@ def validate_scenario(scenario: dict) -> None:
             if key not in step:
                 raise ValueError(f"{prefix} ({kind}): missing {key}")
         if kind in ("boot", "launch"):
+            init_timeout = step.get("initTimeoutMs", 15000)
+            if type(init_timeout) is not int or not 1 <= init_timeout <= 60000:
+                raise ValueError(f"{prefix}: initTimeoutMs must be an integer in 1..60000")
             if "instance" in step and step["instance"] != count:
                 raise ValueError(f"{prefix}: boot/launch appends instance {count}")
             count += 1

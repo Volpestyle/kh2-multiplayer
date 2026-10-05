@@ -87,8 +87,15 @@ forced route. The unchanged forced regression155707 on commitf10b0d4
 subsequently failed outside-position setup at step92,206.5s, before Friend1
 rejoin or any forced request: native Z365.722 missed450<Z<600. All four saves
 were unchanged and owned cleanup completed. Recovery was not exercised. A
-bounded native pulse/read movement candidate is under separate qualification;
-no geometry or population gate is relaxed. The host-owned enemies-DesyncNotice
+bounded native pulse/read movement candidate is under separate qualification.
+Run192433 failed its8s movement budget before final settle/rejoin; last observed
+Z565.096 did not qualify an endpoint. Candidate03's four parallel reads passed
+independent controls, but194715 failed the third launch's15s hook wait before
+movement. Four protected saves stayed unchanged in each run. Exact owned cleanup
+removed the failed launch; the runner now records returned launched PIDs before
+raising initialization failure. The next distinct qualification uses20s walking
+and45s initialization bounds with unchanged endpoint/settle/geometry/population
+checks. These setup bounds do not change recovery acceptance. The host-owned enemies-DesyncNotice
 path is now integrated and
 remains default-off: it requires exact `1` for `KH2COOP_AUTOMATIC_RECOVERY`,
 `KH2COOP_SURVIVING_PACK_PREPARE` and `KH2COOP_SPAWN_TRACE`. It uses the existing

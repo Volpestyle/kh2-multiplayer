@@ -61,6 +61,8 @@ A timeout after partial emission stays a partial failure, not a retry.
 | [20261004-143318](../build/scenarios/20261004-143318_net_reconnect_shadows_outside_activation_control_farther_1/report.md) | PASS all120 control steps,242.1s | Two complete5/0/5 samples with host endpoints outside all seven BOXes, original survivor HP17/max20, exact original identity/load/progress and zero-death/no-replay checks. Four saves and98 sealed inputs unchanged. |
 | [20261004-143903](../build/scenarios/20261004-143903_net_reconnect_shadows_outside_farther_forced_activation_replay_1/report.md) | PASS all142 forced-treatment steps,259.3s | Qualified5/0/5 prefix, one slot1 Bootstrap, actual recorded host point,33 completed historical updates and120 completed live-input updates, reconciled1 and two complete5/5/5 HP17/max20 samples. Four saves and98 sealed inputs unchanged. Forced scope only. |
 | [20261004-155707](../build/scenarios/20261004-155707_net_reconnect_shadows_outside_farther_forced_activation_replay_1/report.md) | FAIL outside movement at step92,206.5s | On commitf10b0d4 with automatic recovery explicitly disabled, native finishZ365.722 missed the unchanged450<Z<600 band. Failed before Friend1 pause/rejoin or the forced request; recovery was not exercised. Four saves unchanged; owned cleanup completed. |
+| [20261004-192433](../build/scenarios/20261004-192433_net_reconnect_shadows_outside_feedback_private_forced_activation_replay_1/report.md) | FAIL movement budget at step88,236.3s | Candidate02 admitted12 pulses in7.391s before its8s budget guard refused another pulse/settle. Last observedZ565.096 was inside the acceptance band but above stop550; final700ms settle/read and geometry/reconnect gates did not run. Four saves and all35 pins unchanged; rig idle. |
+| [20261004-194715](../build/scenarios/20261004-194715_net_reconnect_shadows_outside_feedback_private_forced_activation_replay_1/report.md) | FAIL third boot at step2,105.6s | Candidate03's helper was never exercised. CLI's15s hook wait expired; later log completed initialization. Failed PID795000 was outside the runner's cleanup list and was killed through exact owned `kh2ctl kill --pid`. Four saves and all47 pins unchanged; rig idle afterward. |
 
 These are observer/setup failures, not new recovery failures or acceptance. The
 observer validator's hardcoded WorldBridge10 check was inconsistent with current
@@ -99,8 +101,14 @@ qualify or falsify the recovery code. A distinct private candidate replaces
 only that long extrapolation with same-direction native pulse/read feedback,
 at most24 pulses within one8s deadline. The original final position, full
 location, all-seven-BOX, census, HP, progress and death gates remain. No transform
-write, reverse rescue or retry is allowed. The candidate still needs its own
-owned live qualification; measured endpoints do not prove continuous clearance.
+write, reverse rescue or retry is allowed. Candidate02 exhausted that8s budget
+in192433. Candidate03 parallelizes only four independent read-only observations;
+its independent concurrency controls pass, but194715 failed during boot before
+the helper. Both FAILs remain unchanged. The next distinct qualification uses
+the same24-pulse limit, band,700ms settle and geometry checks with a20s setup
+walk budget and45s hook wait. These are harness time bounds, not recovery
+acceptance criteria. Movement still needs live qualification; measured endpoints
+do not prove continuous clearance.
 
 The integrated host notice route remains default-off and requires exact `1` for
 `KH2COOP_AUTOMATIC_RECOVERY`, `KH2COOP_SURVIVING_PACK_PREPARE` and
@@ -1686,8 +1694,8 @@ protected actor. Protection is best effort during loads.
 
 | Step | Fields | Does |
 |---|---|---|
-| `boot` | `timeoutSec` | Launch + inject, mute, pick LOAD on the title menu (checked by pixel in captures), load the save list's default slot, wait until the room is live. Menu presses go through the DLL's input collector (`player-press`), so no window focus is needed |
-| `launch` | `mute` | Launch + inject only (stays on the title) |
+| `boot` | `timeoutSec initTimeoutMs` | Launch + inject, mute, pick LOAD on the title menu (checked by pixel in captures), load the save list's default slot, wait until the room is live. Menu presses go through the DLL's input collector (`player-press`), so no window focus is needed |
+| `launch` | `mute initTimeoutMs` | Launch + inject only (stays on the title). `initTimeoutMs` is an integer1..60000, default15000, passed to the CLI's existing hook wait. A valid returned launched PID is registered for owned cleanup before initialization failure is raised; failed initialization never advances into boot/input. Missing/malformed PIDs do not supply a cleanup target. |
 | `warp` | `world room door map btl evt` | `kh2ctl warp`; returns once the room has loaded |
 | `input` | `lx ly rx ry ms` | Hold sticks (`player-input`) |
 | `align_courtyard_exit` | `instance as blockedExpr` | BC courtyard entrance-0 fixture only: pulse screen-left (`lx=-1`) for 250 ms at a time, recording each start/end position. Stop at `abs(x)<60` or a true `blockedExpr`, with a 6 s limit. Each unblocked pulse must reduce `abs(x)`; otherwise capture and fail with a diagnostic JSON. No host movement |
