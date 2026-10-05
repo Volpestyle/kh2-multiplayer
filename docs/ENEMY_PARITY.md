@@ -115,7 +115,7 @@ not demonstrate an outside 100 kill. Four protected saves stayed unchanged.
 The full wave run FAILED at second-pack parity. Friend1 bound two new actors
 to ID7 while only the first append manifest was available, then rebound one to
 older dead ID1 and killed it. Friend2 later published two different living actors
-as ID8. Both clients consumed the later manifests. Ordinary matching still allows
+as ID8. Both clients consumed the later manifests. Ordinary matching in that DLL allowed
 spawn-index fallback across mismatched points and has no live-ID reservation;
 it can select an older tombstone after a provisional binding. These are product
 binding failures, not reasons to weaken the second-pack test or retry movement.
@@ -123,6 +123,28 @@ Second-pack combat and reconnect were not reached. Native spawn/removal timing
 and same-address incarnation remain separate unresolved boundaries. See the
 [run result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-qualified-kill-root01/result.md)
 and [raw-log attribution](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/second-wave-143735-audit/result.md).
+
+The reviewed ordinary resolver now selects the whole fresh census before native
+writes. It removes mismatched-point index fallback, retains each tracked row's
+ID high-water mark and holds all conflicting live claimants. A tombstone needs
+the established ID and adjacent owner-frame samples with equal current
+generation/epoch and actor/object/objentry/status/controller/record roots.
+Roots are checked again before writing. One ordinary lethal ends that frame's
+write batch; the next frame resolves the remaining bodies afresh. Held bodies
+publish unmatched. Exact-content resync and native write leaves are unchanged.
+
+The production resolver passed 137 controls normally and under Windows ASan,
+including reversed order and split manifests; the full DLL linked. Run 152041
+failed before damage because Friend1 never sampled the native 311 pair, despite
+receiving the manifest. An unchanged retry, 153018, confirmed all four original
+native deaths exactly once on both clients and two fresh matching second-pack
+samples: unique IDs8/9, both309 HP160. Two independent native census rounds
+joined every current body to its ID, HP and record. That live run did not expose
+the worst reversed-order split-manifest timing. It still FAILED before second
+damage when the existing correction pulse crossed its fixed target axis.
+The whole-wave gate stays open; sampled roots do not prove incarnation or
+support deaths across an observation gap. See the
+[native binding audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/second-wave-binding-153018-audit/result.md).
 
 ## Current resync binding, 2026-10-04
 

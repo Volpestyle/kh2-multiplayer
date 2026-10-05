@@ -12,6 +12,7 @@
 // ============================================================================
 
 #include "EnemySync.hpp"
+#include "OrdinaryEnemyBinding.hpp"
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
@@ -88,12 +89,15 @@ struct Spawn {
     bool killed = false;      // client: native HP confirmed dead
     bool deathAttempted = false; // at most one native lethal call per local spawn
     int netId = -1;           // client: matched host enemy
+    ordinarybinding::State ordinaryBinding {};
+    int ordinaryLogReason = -1, ordinaryLogCandidate = -1;
 };
 
 struct Instance {
     std::uint16_t world = 0xFFFF, room = 0xFFFF, btl = 0;
     std::uint16_t door = 0, map = 0, evt = 0;
     bool live = false;        // tracking spawns (not mid-transition)
+    unsigned ordinaryBindingLogs = 0; // bounded adoption/hold diagnostics per instance
     std::vector<Spawn> spawns;
     std::unordered_map<uintptr_t, std::size_t> byActor;  // every address seen -> latest spawn there
 };
@@ -3082,6 +3086,75 @@ bool ApplyNativeClaim(const NativeEnemy& expected, const PendingHitClaim& pendin
     }
 }
 
+// Sample direct roots only; no record traversal and no creation/incarnation claim.
+bool ReadOrdinaryIdentity(const NativeEnemy& sampled, ordinarybinding::Identity& out) {
+    out = {sampled.actor, sampled.objentry, sampled.status, 0, 0, sampled.objectId};
+    NativeEnemy after;
+    bool isEnemy = false;
+    return ReadNative(sampled.actor + 0x9E8, out.controller) &&
+           ReadNative(sampled.actor + 0x9F0, out.record) &&
+           ReadNativeEnemy(sampled.actor, after, isEnemy) && isEnemy &&
+           SameNativeIdentity(sampled, after) && sampled.hp == after.hp && sampled.maxHp == after.maxHp;
+}
+
+bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generation) {
+    namespace ob = ordinarybinding;
+    std::vector<ob::Local> locals;
+    std::vector<std::size_t> indices;
+    std::vector<ob::Host> hosts;
+    const auto holdAll = [&] {
+        for (auto& s : g_inst.spawns) { s.netId = -1; s.ordinaryBinding.bound = 0; }
+        return false;
+    };
+    if (!CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
+    for (const auto& native : census.enemies) {
+        const auto found = g_inst.byActor.find(native.actor);
+        if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return holdAll();
+        const auto& s = g_inst.spawns[found->second];
+        if (!s.present || FindNativeEnemy(census, s) != &native) return holdAll();
+        ob::Local local;
+        if (!ReadOrdinaryIdentity(native, local.identity)) return holdAll();
+        local.point = {s.spawnPos.x, s.spawnPos.y, s.spawnPos.z};
+        local.prior = s.ordinaryBinding;
+        local.available = !(s.killed && native.hp > 0); // observed lifetime contradiction stays unmatched
+        local.living = native.hp > 0;
+        locals.push_back(local);
+        indices.push_back(found->second);
+    }
+    for (const auto& [id, h] : g_host.enemies) {
+        if (h.battleProgram == g_inst.btl)
+            hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead});
+    }
+    const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame});
+    if (WorldSessionGeneration() != generation || !CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
+    // The entire fresh population is resolved before any native HP/death write.
+    // Historical rows outside this census cannot retain write/hash authority.
+    for (auto& s : g_inst.spawns) s.netId = -1;
+    for (std::size_t i = 0; i < indices.size(); ++i) {
+        auto& s = g_inst.spawns[indices[i]];
+        const auto& d = decisions[i];
+        const auto& identity = locals[i].identity;
+        if (g_log && g_inst.ordinaryBindingLogs < 128 &&
+            (s.ordinaryBinding.bound != d.id || s.ordinaryLogReason != static_cast<int>(d.reason) ||
+             s.ordinaryLogCandidate != d.candidate)) {
+            ++g_inst.ordinaryBindingLogs;
+            g_log("[enemy-binding] epoch=%u frame=%u spawn=%u actor=%llX objentry=%llX status=%llX controller=%llX record=%llX objectId=%u prior=%d floor=%d candidate=%d selected=%d reason=%s conflict=%u sampledIdentityOnly=1",
+                  g_host.epoch, g_hitTraceFrame, s.spawnIndex,
+                  static_cast<unsigned long long>(identity.actor), static_cast<unsigned long long>(identity.objentry),
+                  static_cast<unsigned long long>(identity.status), static_cast<unsigned long long>(identity.controller),
+                  static_cast<unsigned long long>(identity.record), identity.objectId,
+                  s.ordinaryBinding.bound, s.ordinaryBinding.highWater, d.candidate, d.id, ob::Name(d.reason),
+                  static_cast<unsigned>(d.conflict));
+        }
+        s.ordinaryLogReason = static_cast<int>(d.reason);
+        s.ordinaryLogCandidate = d.candidate;
+        s.ordinaryBinding = d.next;
+        s.netId = d.id > 0 ? d.id : -1;
+    }
+    for (auto& s : g_inst.spawns) if (s.netId < 0) s.ordinaryBinding.bound = 0;
+    return true;
+}
+
 bool ClientFrame(const NativeCensus& initialCensus) {
     const auto generation = WorldSessionGeneration();
     if (!generation || !g_host.arrived || g_inst.world != g_host.world || g_inst.room != g_host.room || g_inst.btl != g_host.btl) {
@@ -3125,6 +3198,7 @@ bool ClientFrame(const NativeCensus& initialCensus) {
             return false;
         }
     }
+    if (!contentRequired && !ResolveOrdinaryBindings(current, generation)) return false;
     for (Spawn& s : g_inst.spawns) {
         if (!s.present || s.killed) continue;
         const NativeRecordWriteCheck* recordCheck = nullptr;
@@ -3135,34 +3209,6 @@ bool ClientFrame(const NativeCensus& initialCensus) {
             s.netId = binding->netId;
             recordCheck = &binding->write;
             localRecord = binding->record;
-        } else {
-        // Match by spawn point + object, to the host's newest enemy there: a
-        // spawn point the host refilled (its enemy despawned and respawned
-        // on the host only) re-binds this copy to the replacement. Fallback:
-        // the same spawn index.
-        int best = -1;
-        for (const auto& [netId, h] : g_host.enemies) {
-            // A bound copy follows the newest entry at its point even when the
-            // host reported it dead (then the copy dies with it). A new,
-            // unbound spawn binds only to a live entry: if it appeared before
-            // the host's manifest for it arrived (e.g. an enemy that vanished
-            // and reappeared as a new actor), it waits instead of inheriting
-            // an older death.
-            if (h.objectId != s.objectId || (s.netId < 0 && h.dead)) continue;
-            if (SamePoint(h.spawnPos, s.spawnPos)) {
-                best = netId;  // map is ordered by netId: the last hit is the newest
-            }
-        }
-        if (best < 0 && s.netId < 0) {
-            for (const auto& [netId, h] : g_host.enemies) {
-                if (h.spawnIndex == s.spawnIndex && h.objectId == s.objectId && !h.dead) best = netId;
-            }
-        }
-        if (best >= 0 && best != s.netId) {
-            SYNC_LOG("[enemysync] client: spawn %u %s netId %d", s.spawnIndex,
-                     s.netId < 0 ? "matched to" : "re-bound to", best);
-            s.netId = best;
-        }
         }
         if (s.netId < 0) continue;
         const HostEnemy& h = g_host.enemies[static_cast<std::uint16_t>(s.netId)];
@@ -3178,9 +3224,21 @@ bool ClientFrame(const NativeCensus& initialCensus) {
             InterruptCensus("client target changed", s.actor);
             return false;
         }
+        if (!contentRequired) {
+            ordinarybinding::Identity identity;
+            if (!ReadOrdinaryIdentity(native, identity) || identity != s.ordinaryBinding.identity) {
+                for (auto& held : g_inst.spawns) { held.netId = -1; held.ordinaryBinding.bound = 0; }
+                InterruptCensus("ordinary binding roots changed before write", s.actor);
+                return false;
+            }
+            // No ordinary resurrection or write based on an unavailable incarnation.
+            if (native.hp <= 0) continue;
+        }
+        bool ordinaryLethal = false;
         if (h.dead) {
             if (native.hp > 0 && g_applyStatDelta && !s.deathAttempted) {
                 s.deathAttempted = true;
+                ordinaryLethal = !contentRequired;
                 const int before = native.hp;
                 if (!ApplyNativeDeath(native, before, generation, recordCheck)) {
                     if (contentRequired) {
@@ -3233,6 +3291,10 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 }
             }
             s.killed = native.hp <= 0;
+            // A lethal can create/remove actors. Do not carry the pre-call
+            // ordinary batch into another write: next owner frame resolves
+            // the whole fresh census again. Existing per-spawn once fence stays.
+            if (ordinaryLethal) return WorldSessionGeneration() == generation;
         } else if (h.hp > 0 && native.hp != h.hp) {
             if (!WriteNativeHp(native, h.hp, generation, recordCheck)) { // never 0: deaths are explicit
                 if (contentRequired) {
