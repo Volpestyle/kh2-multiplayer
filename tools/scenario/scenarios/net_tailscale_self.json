@@ -23,7 +23,8 @@
       "room": 26
     },
     {
-      "do": "relay"
+      "do": "relay",
+      "args": ["--bind", "100.108.214.60"]
     },
     {
       "do": "runtime",

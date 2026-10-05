@@ -64,6 +64,7 @@ A timeout after partial emission stays a partial failure, not a retry.
 | [20261004-192433](../build/scenarios/20261004-192433_net_reconnect_shadows_outside_feedback_private_forced_activation_replay_1/report.md) | FAIL movement budget at step88,236.3s | Candidate02 admitted12 pulses in7.391s before its8s budget guard refused another pulse/settle. Last observedZ565.096 was inside the acceptance band but above stop550; final700ms settle/read and geometry/reconnect gates did not run. Four saves and all35 pins unchanged; rig idle. |
 | [20261004-194715](../build/scenarios/20261004-194715_net_reconnect_shadows_outside_feedback_private_forced_activation_replay_1/report.md) | FAIL third boot at step2,105.6s | Candidate03's helper was never exercised. CLI's15s hook wait expired; later log completed initialization. Failed PID795000 was outside the runner's cleanup list and was killed through exact owned `kh2ctl kill --pid`. Four saves and all47 pins unchanged; rig idle afterward. |
 | [20261004-200302](../build/scenarios/20261004-200302_net_reconnect_shadows_outside_feedback_private_forced_activation_replay_1/report.md) | FAIL pre-pause clearance at step104,250.3s | Candidate04 booted with45s hook waits; its12-pulse/4.266s helper settled at(39.2959,-1,520.245), and initial sampled clearance261.516 passed. Later pre-pause host(-170.799,-1,667.840) had142.698 clearance, below200. Friend1 pause/rejoin and recovery never ran. Four saves/all43 pins unchanged; owned cleanup completed. |
+| [20261004-205359](../build/scenarios/20261004-205359_outside_last_walk_core_private_forced_activation_replay_1/report.md) | PASS forced regression,303.9s | Moving full diagnostics before the walk kept the original fresh population/geometry checks and 200-unit clearance. Both post-walk census groups passed in 7.80s and 8.08s. Friend1 rejoined without its pack; one forced Bootstrap restored five original Shadows on all peers at HP17/max20, with 120 live updates verified. Four saves unchanged. Automatic recovery was disabled. |
 
 These are observer/setup failures, not new recovery failures or acceptance. The
 observer validator's hardcoded WorldBridge10 check was inconsistent with current
@@ -113,6 +114,15 @@ immediate geometry, then failed the later200-unit clearance assertion before
 Friend1 pause/rejoin. The host drifted about256 units across intervening
 observations with no scripted movement step. The two endpoints establish the
 drift, not its cause or continuous clearance; diagnosis precedes a new attempt.
+
+Run205359 passed the reviewed walk-last census split on its first live attempt.
+The full provenance and occupancy diagnostics now run before movement; the four
+fresh post-walk population/geometry samples and all original assertions remain.
+The shorter observation path kept the host outside through the reconnect and
+forced recovery. Station-keeping was unnecessary in this attempt. Use this
+deterministic forced route for routine regression; the automatic route is a
+separate one-cycle qualification. Both ten-cycle gates remain parked by the
+2026-10-05 lead brief.
 
 The integrated host notice route remains default-off and requires exact `1` for
 `KH2COOP_AUTOMATIC_RECOVERY`, `KH2COOP_SURVIVING_PACK_PREPARE` and
