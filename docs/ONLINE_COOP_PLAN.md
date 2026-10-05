@@ -24,210 +24,34 @@ possibly enemies.
 | Animation control | Any motion can be set and held on a friend actor without the game resetting it (Session 5). |
 | Network layer | ENet relay server, codec, version gate; the 3-client fake-simulation test passes. |
 | Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Remote internet and controller playtests remain open. |
-| Hit claims | Ordinary local-player HP hits publish typed claims; protocol v9 retains the v3 claim and v4 avatar shapes, v5 opaque session incarnation/typed closure semantics, v6 diagnostics, v7 absolute-HP ordering and v8 fresh resync transaction, adding exact ordinary-record content to native resync ([FORCED_RESYNC.md](FORCED_RESYNC.md)). The host consumes claims through byte-verified TakeDamage, with connection/sequence replay checks and fresh native census gates. Historical live results keep their original protocol scope. The current v9 candidate now has bounded local living-resync acceptance; broader combat, attack-specific effects and boss finishers remain open. |
+| Hit claims | A client's hits on enemies are sent as claims; the host applies each once through the game's own damage routine and broadcasts absolute HP (protocol 9). Ordinary Shadow combat, including client kills, works on loopback. Attack-specific effects and boss finishers are open. |
 | Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. After checked native snapshots exposed five unmatched client enemies, scoped host activation passed the original strict 20-load route with empty enemy populations and a source-expiry control. Its unchanged native-wave regression then failed with different enemy identities and an alive host refill. Nonempty spawn/lifecycle authority remains open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
 | Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. A native host chest opening passed next-load client mirroring, late join and subsequent reload on three instances, with personal bytes preserved. A deliberate progress mismatch was detected and restoration verified. Broader story side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
-Local scenarios now cover transitions, shared enemy HP/deaths and actual
-nonempty enemy/progress hashes, plus chest progress mirroring and late join.
-Broader hash agreement and story coverage, cutscene hold/resume, bosses and
-remote playtests still gate the later phases.
+**Reconnect recovery (VUH-1508), in plain terms.** If a client rejoins while the
+host stands away from the enemy spawn area, the client's room comes back without
+its enemies: the native spawn trigger never fires for it. This reproduces on
+demand (control `20261004-143318`, 5/0/5). A forced resync now replays the host's
+recorded activation input through the client's own spawner, so the game respawns
+all five Shadows natively, reconciles HP and keeps them (`20261004-143903`, 5/5/5).
+It's default-off and covers one all-alive pack only.
 
-The 2026-10-04 protocol **9** / WorldBridge **11** resync candidate has passed
-bounded offline review and controls, plus an unchanged 89-step local living
-Bootstrap in 201.7 seconds. Actual
-capture/consumption requires coverage255 with the full ordinary native catalog
-and exact current actor-to-record membership. Synthetic coverage127 remains in
-the codec but is rejected by the native consumer. Whole catalog/population
-preflight precedes HP/death writes; waiting/failed fences and exact-only binding
-prevent positional fallback, and Checkpoint observes without HP/death repair.
-Positive/max-HP guards and final context samples fail closed, with possible
-partial application and unknown lethal outcomes retained as failures.
+An automatic trigger (host answers the relay's enemies DesyncNotice with the
+existing resync request) and a generic claim hold on rejoin are committed
+(`f10b0d4`), with opt-in causal logging (`e2ac442`, see
+[CAUSAL_RECOVERY_DIAGNOSTICS.md](CAUSAL_RECOVERY_DIAGNOSTICS.md)). They haven't
+run live yet: the last four attempts failed in test setup (host walk, launch,
+idle host drift), not in recovery. James approved the v2 ten-cycle pass rules
+(VUH-1508 comment `7ca6ae56`): 10/10 natural-or-resynced on the original route,
+10 resynced with the host outside. Earlier FAILs stay FAIL.
 
-The current default-off recovery candidate replays the **actual host first-emission
-float4** through one all-alive five-Shadow controller's normal scheduled original
-update. Both `KH2COOP_SURVIVING_PACK_PREPARE=1` and `KH2COOP_SPAWN_TRACE=1` are
-required. The recorder joins exact native input bytes to the update identity,
-the first nonnull native wrapper return and normal update completion. The
-receiver requires exact content and an empty fresh-load cache/census with native
-counts5/5, flags2, cooldown0 and stage0. The observed host marker+E0 may match
-client+E0/1 under the explicit reviewed normalization exception; neither marker
-is rewritten. This is a deliberate historical-input policy, not replay equivalence.
+Details, limits and evidence: [FORCED_RESYNC.md](FORCED_RESYNC.md), `SCENARIOS.md`
+and the VUH-1508 thread. The added-emitter/B1/loader-installer route is parked;
+its history is in FORCED_RESYNC.md.
 
-The integrated optional HARP/v1 snapshot trailer is1128 bytes and SHA-covered;
-legacy snapshot bytes stay unchanged, and historical metadata is excluded from
-the native-state fingerprint. Historical input is bounded by512 actually
-completed selected-controller original updates and the unchanged30s transaction
-deadline. After exact full-set HP reconciliation, a120-completed-update hold
-uses live host input and checks continued convergence. Claims stay held until
-the whole selected set is reconciled. The64-slot per-controller completion
-receipt table never evicts and fails unavailable on overflow. Expected selected
-pending/deferred progress may wait within the same deadline; positive conflicts
-fail. A fresh Bootstrap resets its transaction state, not owned-gateway tombstones.
-See the [current policy and limits](FORCED_RESYNC.md#historical-activation-replay-current-default-off-policy).
-
-The single-cycle98-step fixture is integrated, but its first two runs,
-`20261004-132438` and `20261004-133512`, failed step81 `reconnect_mark` **before
-reconnect**, in204.2s and200.9s; all four protected saves were unchanged. These
-are observer/setup failures, not new recovery failures or acceptance. The
-observer's hardcoded WorldBridge10 check conflicted with current11. The exact
-version correction is integrated and passes the evidence/runner controls. Run
-`20261004-134727` passed the93 original steps with5/5/5, then failed the added
-replay-verification wait: automatic cached-world rejoin never starts the explicit
-ResyncPlan that carries this candidate. All three opt-ins were enabled, but no
-replay ran. The98-step fixture and its repeat derivative are held. The separately
-named farther control143318 passed all120 steps with two complete5/0/5 samples
-and sampled host endpoints outside all seven BOXes. Forced experiment143903
-then passed all142 steps: one Friend1 Bootstrap, actual host first-emission
-point,33 completed historical updates and120 completed live-input updates,
-reconciled1 and two complete5/5/5 samples atHP17/max20. All four saves and98
-sealed inputs stayed unchanged in both runs. This qualifies only the bounded
-forced route. The unchanged forced regression155707 on commitf10b0d4
-subsequently failed outside-position setup at step92,206.5s, before Friend1
-rejoin or any forced request: native Z365.722 missed450<Z<600. All four saves
-were unchanged and owned cleanup completed. Recovery was not exercised. A
-bounded native pulse/read movement candidate is under separate qualification.
-Run192433 failed its8s movement budget before final settle/rejoin; last observed
-Z565.096 did not qualify an endpoint. Candidate03's four parallel reads passed
-independent controls, but194715 failed the third launch's15s hook wait before
-movement. Four protected saves stayed unchanged in each run. Exact owned cleanup
-removed the failed launch; the runner now records returned launched PIDs before
-raising initialization failure. The next distinct qualification uses20s walking
-and45s initialization bounds with unchanged endpoint/settle/geometry/population
-checks. Run200302 then passed boot and its12-pulse/4.266s helper: settled
-host(39.2959,-1,520.245), immediate sampled clearance261.516 units. It still
-failed step104 before Friend1 pause/rejoin: the later pre-pause sample was
-(-170.799,-1,667.840), clearance142.698 below the unchanged200-unit margin.
-Four saves and all43 launch pins stayed unchanged; owned cleanup completed.
-No reconnect/replay ran. Host drift across the intervening observations is
-under diagnosis; two endpoints do not establish its continuous cause.
-These setup bounds do not change recovery acceptance. The host-owned enemies-DesyncNotice
-path is now integrated and
-remains default-off: it requires exact `1` for `KH2COOP_AUTOMATIC_RECOVERY`,
-`KH2COOP_SURVIVING_PACK_PREPARE` and `KH2COOP_SPAWN_TRACE`. It uses the existing
-request generator, one combined requested/plan busy guard, captured-context
-dedupe and two pending friend slots. Pending work drains only after a terminal,
-with full context revalidation and current runtime ownership checks; it adds
-no retry or deadline reset.
-
-Independently of that opt-in, the generic client generation boundary now holds
-**all outgoing client hit claims** until the complete admitted living manifest
-has unique full native census coverage and actual HP/maxHP readback equality.
-Unknown/empty universes stay held; scope or manifest/HP changes rearm the hold.
-Keyed replay/claim, runtime cause and native load receipts plus interval seals
-support bounded attribution; unavailable identities and log gaps remain explicit.
-The full Release build and **2,298 affected offline checks pass**, including
-59 notice/generator, 44 claim-hold, 66 load-receipt and 365 canonical native-hit
-checks. The [combined receipt](../build/rig/automatic-recovery-root-integration-20261004-01/cpp-validation.json)
-retains executed results; private sanitizer checks are scoped separately.
-The first combined build failed on a test adapter declaration; the corrected
-explicit-argument calls retain all assertions and pass the final build/run.
-The original and forced-outside ten-cycle gates remain open. James approved the
-separate v2 contract on2026-10-04 (VUH-1508 comment7ca6ae56):10/10 natural or
-resynced cycles for the original route, and10 resynced cycles for the outside
-variant. A natural outside cycle fails without a skip or retry; every other
-classification fails. v1 and historical FAILs remain unchanged. Approval does
-not qualify the private validator or a live run. The earlier first-rejoin5/0/5 failure and zero completed
-ten-cycle acceptance remain. General deaths/waves and battle/barrier/music parity
-remain unqualified.
-
-Opt-in [causal diagnostics](CAUSAL_RECOVERY_DIAGNOSTICS.md) now join the actual
-native hash publication, both relay comparisons and notice, all request origins,
-cached sends and actual received envelope/body bytes. They retain sticky loss
-and quiet interval seals without changing protocol, authority or deadlines.
-Full private/shared Release builds,12 private and8 shared affected executables,
-and independent normal/ASan boundary review passed. Native consumption and
-first automatic live qualification remain open.
-The original private evidence consumer is BLOCKED on wrong-target and final
-closure/binding defects; a corrected private copy rejects the reproduced cases.
-The prospective owned collector remains under offline development.
-
-The earlier, default-off surviving-pack preparer remains integrated. It
-retains the five-record intent/pending outcomes and cancels on covered native
-controller mutation or material post-cut authority changes; it never dispatches
-native creation. Three entry hooks provide synchronous negative cancellation,
-not incarnation or foreign-creator exclusion. A later unchanged89-step native
-run passed with the opt-in enabled, verifying installed hooks and sampled
-occupancy without added creation or first-rejoin recovery acceptance. See
-[preparation contract and limits](FORCED_RESYNC.md#surviving-pack-preparation-2026-10-04).
-
-The later occupancy reader/receiver join now retains sampled active/deferred,
-full-cache and controller facts, with exact ready membership and current-room
-cache checks. It passed115 reducer,324 receiver and347 reader controls in
-Windows ASan, with a successful full Release build. In the196.8s native run,
-both receivers retained empty/pending/partial samples before ordinary spawning
-reached five-ready/masks31 and exact HP20-to17 reconciliation. Global pre-link
-creator coverage and native execution authority remain missing in every sample.
-The script-handler owner has a concrete normal scene path, while immediate
-script reentrancy and continuous creator exclusion still hold added dispatch.
-
-**Parked alternative: added emitter calls, B1 creator admission and loader-owned
-branch installation.** The following proof and control results remain historical
-evidence for that route; they are not prerequisites for the current original-update
-input policy, and the gateway/branch installer stays off.
-
-Finite saved-code review proves an object302-capable script factory ingress
-outside both observed record wrappers. It also shows that a null wrapper return
-can advance to another record before the emitter returns. An added-dispatch
-alternative would need creator admission through record/cache attachment and
-a stop before later owned attempts inside that loop. Its candidate spatial bypass is the actual
-taken no-region branch, with native cooldown and truthful bit3clear semantics;
-historical constructor replay and complete resource logging are not intrinsic
-requirements. The private A/B/C component now has independent copied-native
-Release and Windows ASan replays, each with426 passing checks. Its versioned
-finite generator/POD is included in the inject target and independently passes
-455 checks in each configuration; installation and production execution remain
-unqualified. The internal direct gateway and default-off retained preparation
-are now compiled into the inject target:512/460 Release and Windows ASan controls,
-with independent28/40-assertion native boundary checks. The actual linked MASM
-body and unwind metadata match the tested gateway. There is no production caller
-or branch writer. A closed patch-admission interval and continuous creator
-ownership remain missing; the selected synchronous scene owner also needs
-qualified reentrant callbacks and prior creator retirement. Blanket null denial
-remains unsafe for secondary allocation and
-consumes VM intent.552430's unsafe return ABI is byte-verified, but no saved
-direct/literal caller or export was established; it is not a proven live ingress.
-The installed Shadow BDX is now decoded: its explicit leave decision uses global
-flags, distance and culling, with no accepted-region query in the exact asset.
-Loaded binding, auxiliary action slots and outside-region liveness remain open.
-The default-off current-secondary diagnostic now passes14 steps in153.4s.
-Independent saved-byte replay verifies522 current slot results across three
-peers, none returning raw302. This binds current relocated tables and equipment
-selections; future arguments, actor ownership and continuous creator exclusion
-remain open. Parent living counts are0/0/0, so no activated Shadow pack,
-recovered enemies or cleared creation gate follows. See the
-[native current-selection review](../build/rig/native-secondary-bindings-native-independent-review-20261004-01/review.md).
-See the [parked execution boundaries](FORCED_RESYNC.md#parked-added-dispatch-b1-and-loader-installation-route).
-
-A default-off natural-construction/resource observer is now integrated in the
-candidate. It copies actual wrapper ancestry and full definition samples, then
-records the specific byte-qualified package callback `107240` without changing
-its native call. The shared Release and Windows ASan targets passed387 spawn,
-63 resource and365 consumer checks each. Its corrected MinHook trampoline and
-process-lifetime retention have independent offline reviews. An unchanged
-89-step native run passed in203.8s with actual byte-qualified/pinned observers
-on all three instances. It retains90 callback receipts per peer joined to the
-selected five-record definition; later friend reload children were suppressed
-by the512-receipt budget and remain unqualified. This diagnostic supplies
-bounded resource evidence and adds no creation authority. See
-[observer scope and limits](FORCED_RESYNC.md#surviving-pack-preparation-2026-10-04).
-
-Release and Windows MSVC ASan each passed **154 common**, **276 reader/trace**,
-**257 wire** and **272 consumer** executed checks, including repeated setup
-checks. The [current candidate evidence table](FORCED_RESYNC.md#native-record-content-candidate-2026-10-04)
-links exact receipts and independent READY reviews. These are not independent
-native scenarios. The preserved first-rejoin population FAIL, zero completed
-ten-cycle repetitions, disabled creation, and open lifetime/pending/creator
-closure remain. In the new native run, both original friends loaded3 to4 and
-each corrected five fresh native HP20 values to17 under exact record-content
-qualification, followed by two distinct actual HP17 observation frames and
-fresh independent census/hash joins. Full host/local catalogs contain10
-definitions/26 records; matching relay and host-runtime terminals corroborate
-the result. All101 inputs/four saves match and all8 owned processes exited.
-Progress apply changed zero bytes, positive geometric stability is unclaimed,
-and automatic collection remains aggregate-partial (cadence1).
-See the [bounded native result](FORCED_RESYNC.md#native-record-content-candidate-2026-10-04).
+Still open beyond reconnect: internet play and the friend playtest (P1),
+cutscene hold, general waves and bosses, and the package.
 
 ## Prior art (researched 2026-10-01)
 

@@ -16,6 +16,14 @@ python tools/scenario/run.py tools/scenario/scenarios/boot_to_goa.json --repeat 
 - Launch, restart and kill KH2 only through `kh2ctl launch/restart/kill`: the rig kills only processes it launched and refuses to restart while a KH2 it didn't launch is open (James may be playing). Agents never run `restart-kh2.ps1`; it kills every KH2 process.
 - No public network exposure, accounts or third-party services without James.
 
+### Proportional rigor
+Match verification to what a change can break. On 2026-10-04 four live runs in a row failed in test setup, and each one-line harness fix took about an hour of freezing, sealing and independent review. Don't repeat that.
+- **Full rigor** (pinned inputs, independent review, sealed results): code that runs inside the game (inject DLL, memory writes, hooks), anything near James's save, and acceptance runs for a Linear gate.
+- **Just change it and run it:** scenario fixtures and harness steps (timing, ordering, movement helpers, budgets), diagnostics and logging that don't change behaviour, and docs. Read the report; if it fails, fix and rerun.
+- Use the deterministic test as the everyday regression (e.g. the forced resync for VUH-1508); keep long or flaky acceptance runs for when a change is ready.
+- When the last two attempts failed in setup or harness work rather than in the feature, stop polishing evidence and shorten the path to an actual attempt.
+- Record limits once, in the result file. Status and result write-ups are for James: short, plain language, run ID and evidence path, no hash dumps or stacked qualifiers.
+
 ### General Guidelines
 - Refer to `docs/` as the primary source of truth, and always keep up to date with code changes
 - See `docs/CODEBASE_MAP.md` for the full directory/file inventory
