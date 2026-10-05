@@ -219,8 +219,43 @@ ended false, so region restoration remains unexposed. The canonical scenario
 retains its intentional diagnostic FAIL and earlier174135 qualification FAIL
 remains. All91 sources/inputs/products and four saves unchanged. The production
 claim path intercepts at Apply before native Stat and does not depend on a Take
-witness, but real-client claim/host-application evidence is still required. See the
+witness. See the
 [one-game attack result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-homing-root08/result.md).
+
+Native181752 supplies the first observed real-client button case. Friend1's
+direct-Stat call had TakeCalls0, queued connection2/claim1 for attack127/damage5,
+and held local HP160 while its damage became0. The host received that claim once
+and applied native160-to-155 once. Two fresh all-peer samples and two independent
+native censuses retained the original four bindings:3/309/160,4/309/160,
+5/311/160,6/311/155. This is one observed production interception and replication,
+not general attack-incarnation or wave acceptance. Its canonical FAIL remains:
+the fixture demanded a positive claim from a subsequent zero-amount callback.
+That complete callback retained HP160 and Native/ZeroAmount policy, with no claim.
+Both retained direct-Stat children account for the client's unmatched increments;
+all other client loss counters stayed zero. Host replay's orphan Stat counter has
+no retained child, so host damage evidence is the claim/application join and HP
+convergence, without a whole-host clean-trace claim.
+
+The corrected diagnostic scopes no-death to the admitted original pack and
+explicitly retains outside-pack IDs1/2 despawn receipts. Complete initial/final
+native and published samples must exclude outside IDs, extras and replacements;
+this is not continuous room-wide lifecycle coverage. The old FAIL is unchanged.
+The zero callback used the same observed hit/attack buffer but a different target.
+Client suppression does not restore that buffer's amount after native return;
+whether this loses intended multi-target damage remains open pending a matched
+host-button control. A zero callback is not proof that the second target should
+receive zero damage. See the [real-client result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-client-network-root03/result.md)
+and [independent review](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-client-real-button-review/result.md).
+
+Fresh183547 passes that corrected one-cycle client diagnostic over the Mac
+relay50/10/2: one positive claim/native host application160-to-155, one retained
+zero callback, exact original four-ID native/HP convergence, no other client
+loss/refusal, and unchanged source/product inputs and four saves. It leaves the
+multi-target question open. Host183019 produced native zero callbacks with
+suppression off, including attack615/damage38 to311 followed by zero to309;
+the exact positive127/damage5 comparison was not exposed, so that control remains
+unqualified for the specific client concern. See the [passing client result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-client-network-root04/result.md)
+and [host comparison](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-host-buffer-root01/result.md).
 
 ## Selected native lifetime observer, 2026-10-05
 
