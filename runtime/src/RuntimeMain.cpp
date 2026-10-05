@@ -996,6 +996,7 @@ int main(int argc, char* argv[]) {
         return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
     };
+    const bool causalDiagnosticsEnabled = exactEnvironmentOne("KH2COOP_CAUSAL_DIAGNOSTICS");
     const bool automaticRecoveryEnabled = exactEnvironmentOne("KH2COOP_AUTOMATIC_RECOVERY") &&
         exactEnvironmentOne("KH2COOP_SURVIVING_PACK_PREPARE") && exactEnvironmentOne("KH2COOP_SPAWN_TRACE");
     std::uint64_t automaticReceiptSequence = 0, automaticSealSequence = 0;
@@ -1009,8 +1010,12 @@ int main(int argc, char* argv[]) {
                 recoveryNow(), generation) << '\n';
         });
     const auto submitAutomaticResync = [&](std::uint8_t mask, kh2coop::ResyncRequest* generated) {
-        return netClient && kh2coop::automaticResyncRuntimeCurrent(g_running.load(), netReady.load(),
-            membershipInvalidated, *netClient) && netClient->requestWorldResync(mask, generated);
+        if (!netClient) return false;
+        if (!kh2coop::automaticResyncRuntimeCurrent(g_running.load(), netReady.load(), membershipInvalidated, *netClient)) {
+            netClient->recordResyncCallerRejection(kh2coop::ResyncRequestOrigin::AutomaticNotice, mask);
+            return false;
+        }
+        return netClient->requestWorldResync(mask, generated, kh2coop::ResyncRequestOrigin::AutomaticNotice);
     };
     if (automaticRecoveryEnabled) std::cout << "[automatic-resync-seal] schema=1 action=begin seq=0 dropped=0\n";
     const auto diagnosticBinding = [&]() {
@@ -1515,6 +1520,9 @@ int main(int argc, char* argv[]) {
                       << " payload=" << evt.payloadJson << "\n";
         };
 
+        if (causalDiagnosticsEnabled) callbacks.onCausalDiagnostic = [](const std::string& row) {
+            std::cout << row << std::endl; return std::cout.good();
+        };
         callbacks.onLog = [](const std::string& msg) {
             std::cout << "[Runtime] " << msg << "\n";
         };
@@ -1529,6 +1537,10 @@ int main(int argc, char* argv[]) {
             std::move(callbacks),
             options.config.runtimeMode,
             options.config.contentHash);
+        if (causalDiagnosticsEnabled) {
+            netClient->sealRequestDiagnostics("begin");
+            netClient->sealWorldAdmissionDiagnostics("begin");
+        }
 
         if (options.link.active()) {
             netClient->setLinkConditions(options.link, options.link);
@@ -1555,6 +1567,7 @@ int main(int argc, char* argv[]) {
     auto lastActorLogAt = std::chrono::steady_clock::now();
     auto lastNetLogAt = std::chrono::steady_clock::now();
     auto lastHeartbeatAt = std::chrono::steady_clock::now();
+    auto lastCausalSealAt = std::chrono::steady_clock::now();
     auto lastSnapshotAt = std::chrono::steady_clock::now();
     std::uint32_t snapshotSeq = 0;
     auto lastRecoveryState = kh2coop::ClientRecovery::State::Idle;
@@ -1644,6 +1657,11 @@ int main(int argc, char* argv[]) {
             }
             // Keep protocol activity independent of game attachment and bootstrap.
             const auto networkNow = std::chrono::steady_clock::now();
+            if (causalDiagnosticsEnabled && networkNow - lastCausalSealAt >= 1s) {
+                netClient->sealRequestDiagnostics();
+                netClient->sealWorldAdmissionDiagnostics();
+                lastCausalSealAt = networkNow;
+            }
             if (netClient->isConnected() && networkNow - lastHeartbeatAt >=
                 std::chrono::milliseconds(options.config.heartbeatIntervalMs)) {
                 netClient->sendHeartbeat();

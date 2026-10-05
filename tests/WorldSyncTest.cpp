@@ -27,6 +27,8 @@
 #include <optional>
 #include <thread>
 #include <vector>
+#include <fstream>
+#include <sstream>
 
 using namespace kh2coop;
 
@@ -46,6 +48,7 @@ std::uint64_t nowMs() {
 }
 
 struct Seen {
+    std::vector<WorldEnvelope> envelopes;
     unsigned disconnects = 0;
     std::vector<SessionState> sessions;
     std::vector<RoomTransition> rooms;
@@ -62,6 +65,7 @@ struct Seen {
 
 ClientCallbacks callbacksFor(Seen& seen) {
     ClientCallbacks cb;
+    cb.onWorldEnvelope = [&seen](const auto& e){ seen.envelopes.push_back(e); };
     cb.onDisconnected = [&seen] { ++seen.disconnects; };
     cb.onSessionState = [&seen](const SessionState& m) { seen.sessions.push_back(m); };
     cb.onRoomTransition = [&seen](const RoomTransition& m) { seen.rooms.push_back(m); };
@@ -640,7 +644,12 @@ int main() {
     cfg.modHash = "world-mod";
     cfg.sessionId = "world-test";
     std::map<std::string, unsigned> left;
+    std::vector<std::string> cacheRows;
+    std::ofstream cacheRaw("cache-raw.log",std::ios::binary);
     SessionCallbacks serverCallbacks;
+    serverCallbacks.onCausalDiagnostic = [&](const std::string& row){
+        cacheRows.push_back(row);cacheRaw<<row<<'\n';cacheRaw.flush();return cacheRaw.good();
+    };
     serverCallbacks.onPeerLeft = [&](const std::string& id) { ++left[id]; };
     SessionHost relay(cfg, std::move(serverCallbacks));
     check(relay.start(), "relay starts");
@@ -884,6 +893,35 @@ int main() {
               "late joiner gets the merged progress (delta applied) as a full update");
     }
 
+    const auto getField=[](const std::string& row,const std::string& key){
+        const auto prefix=key+"=";auto at=row.find(prefix);if(at==std::string::npos)return std::string{};
+        at+=prefix.size();return row.substr(at,row.find(' ',at)-at);
+    };
+    const auto* cachedTarget=relay.peerBySlot(SlotType::Friend2);
+    unsigned exactCached=0;bool roomReuseDiffers=false;
+    for(const auto& row:cacheRows){
+        if(getField(row,"target")!=std::to_string(cachedTarget->connectionId)||
+           getField(row,"disposition")!="enet-submitted")continue;
+        bool matched=false;
+        for(const auto& env:c2Seen.envelopes){
+            if(getField(row,"wireSHA")==causalSha(encode(env))&&getField(row,"payloadSHA")==causalSha(env.packet)&&
+               getField(row,"hostSource")==std::to_string(env.scope.hostSourceSerial)&&
+               getField(row,"targetDelivery")==std::to_string(env.scope.targetDeliverySerial)){
+                matched=true;
+                if(static_cast<PacketType>(env.packet.front())==PacketType::RoomTransition){
+                    for(const auto& ordinary:c1Seen.envelopes)
+                        if(static_cast<PacketType>(ordinary.packet.front())==PacketType::RoomTransition&&ordinary.packet==env.packet)
+                            roomReuseDiffers=ordinary.scope.hostSourceSerial!=env.scope.hostSourceSerial;
+                }
+            }
+        }
+        check(matched,"cache receipt identifies exact actual received envelope and payload bytes");++exactCached;
+    }
+    check(exactCached>=6,"cache provenance covers progress room hold manifest HP death sends");
+    check(roomReuseDiffers,"actual cached room can carry later source serial than original publication");
+    relay.sealCacheDiagnostics();
+    check(getField(cacheRows.back(),"dropped")=="0"&&getField(cacheRows.back(),"highWater")==getField(cacheRows.back(),"flushedHighWater"),
+          "actual flushed relay seal closes all cache sends without gaps");
     std::cout << "\n=== Transition acks ===\n";
     c1->sendTransitionAck(TransitionAck {1, 4, 0x1A, true});
     c2->sendTransitionAck(TransitionAck {1, 4, 0x05, true}); // diverged

@@ -25,6 +25,8 @@
 // ============================================================================
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 #include "NativeHitTrace.hpp"
 #include "kh2coop/PuppetProvenance.hpp"
@@ -40,6 +42,8 @@ using StatDeltaFn = int(__fastcall*)(void* actor, int delta, int idx, int reactF
 using TakeDamageFn = void(__fastcall*)(void* actor, int delta, int idx, std::uint8_t reactFlag);
 
 void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamageFn takeDamage);
+// Install-time opt-in, checked flush result; no authority or protocol role.
+void SetHashDiagnosticSink(std::function<bool(const std::string&)> sink);
 
 // Submitted synchronously by the verified local-player HP-hit hook. Native
 // addresses are inspected now and never retained or put on the wire.

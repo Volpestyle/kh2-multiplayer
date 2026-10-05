@@ -216,6 +216,11 @@ inline std::string formatAutomaticResyncInterval(const AutomaticResyncNotice& po
     std::ostringstream out;
     out << "[automatic-resync-seal] schema=1 action=interval sealSeq=" << sealSequence
         << " observationMs=" << now << " autoHighWater=" << automaticHighWater
+        << " requestCoverageAvailable=" << network.requestDiagnosticsEnabled()
+        << " requestHighWater=" << network.requestDiagnostics().highWater
+        << " requestFlushedHighWater=" << network.requestDiagnostics().flushed
+        << " requestDropped=" << network.requestDiagnostics().dropped
+        << " requestUnavailable=" << network.requestDiagnostics().unavailable
         << " worldCauseHighWater=" << worldCauseHighWater << " pending=" << policy.PendingCount()
         << " requested=" << network.resyncRequestPending() << " planned=" << network.pendingResync().has_value()
         << " busy=" << network.resyncBusy() << " bindingAvailable=" << binding.has_value()

@@ -5,6 +5,7 @@
 // Test-only authenticated ENet injection. No production friend or bypass API.
 // Preinclude all NetworkClient dependencies before exposing its transport handle.
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/LinkConditioner.hpp"
 #include "kh2coop/Types.hpp"
 #include <functional>

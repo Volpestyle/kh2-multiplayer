@@ -95,7 +95,14 @@ movement. Four protected saves stayed unchanged in each run. Exact owned cleanup
 removed the failed launch; the runner now records returned launched PIDs before
 raising initialization failure. The next distinct qualification uses20s walking
 and45s initialization bounds with unchanged endpoint/settle/geometry/population
-checks. These setup bounds do not change recovery acceptance. The host-owned enemies-DesyncNotice
+checks. Run200302 then passed boot and its12-pulse/4.266s helper: settled
+host(39.2959,-1,520.245), immediate sampled clearance261.516 units. It still
+failed step104 before Friend1 pause/rejoin: the later pre-pause sample was
+(-170.799,-1,667.840), clearance142.698 below the unchanged200-unit margin.
+Four saves and all43 launch pins stayed unchanged; owned cleanup completed.
+No reconnect/replay ran. Host drift across the intervening observations is
+under diagnosis; two endpoints do not establish its continuous cause.
+These setup bounds do not change recovery acceptance. The host-owned enemies-DesyncNotice
 path is now integrated and
 remains default-off: it requires exact `1` for `KH2COOP_AUTOMATIC_RECOVERY`,
 `KH2COOP_SURVIVING_PACK_PREPARE` and `KH2COOP_SPAWN_TRACE`. It uses the existing
@@ -124,6 +131,17 @@ classification fails. v1 and historical FAILs remain unchanged. Approval does
 not qualify the private validator or a live run. The earlier first-rejoin5/0/5 failure and zero completed
 ten-cycle acceptance remain. General deaths/waves and battle/barrier/music parity
 remain unqualified.
+
+Opt-in [causal diagnostics](CAUSAL_RECOVERY_DIAGNOSTICS.md) now join the actual
+native hash publication, both relay comparisons and notice, all request origins,
+cached sends and actual received envelope/body bytes. They retain sticky loss
+and quiet interval seals without changing protocol, authority or deadlines.
+Full private/shared Release builds,12 private and8 shared affected executables,
+and independent normal/ASan boundary review passed. Native consumption and
+first automatic live qualification remain open.
+The original private evidence consumer is BLOCKED on wrong-target and final
+closure/binding defects; a corrected private copy rejects the reproduced cases.
+The prospective owned collector remains under offline development.
 
 The earlier, default-off surviving-pack preparer remains integrated. It
 retains the five-record intent/pending outcomes and cancels on covered native

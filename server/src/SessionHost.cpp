@@ -261,6 +261,8 @@ const char* runtimeModeName(RuntimeMode mode) {
 
 SessionHost::SessionHost(const SessionConfig& config, SessionCallbacks callbacks)
     : config_(config), callbacks_(std::move(callbacks)) {
+    const auto* hashOptIn = std::getenv("KH2COOP_CAUSAL_DIAGNOSTICS");
+    if (!hashOptIn || std::string(hashOptIn) != "1") callbacks_.onHashDiagnostic = {};
     session_.gameBuild = config_.gameBuild;
     session_.modHash = config_.modHash;
     desyncCapture_ = std::make_unique<DesyncCapture>(config_.desyncOutputRoot);
@@ -341,6 +343,7 @@ void SessionHost::stop() {
     finishResync(ResyncResultReason::Cancelled,"relay stopping");
     desyncCapture_->Interrupt("relay stopping");
     pumpDesyncCapture();
+    sealHashDiagnostics("shutdown");
     running_ = false;
 
     // Disconnect all peers gracefully.
@@ -878,6 +881,18 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 ps->hasHash = true;
                 if (ps->hashReceiptSeq != UINT64_MAX) ++ps->hashReceiptSeq;
                 ps->hashReceiptMs = currentTimeMs();
+                if (callbacks_.onHashDiagnostic) {
+                    ps->diagnosticHashScopeAvailable = admittedScope != nullptr;
+                    // Only already-admitted scalar provenance: no diagnostic allocation
+                    // may throw out of this receive branch before its real comparison.
+                    ps->diagnosticHashScope.sourceConnectionId = admittedScope ? admittedScope->sourceConnectionId : 0;
+                    ps->diagnosticHashScope.sourceDeliverySerial = admittedScope ? admittedScope->sourceDeliverySerial : 0;
+                    ps->diagnosticHashScope.hostSourceSerial = admittedScope ? admittedScope->hostSourceSerial : 0;
+                    ps->diagnosticHashScope.kind = admittedScope ? admittedScope->kind : WorldSourceKind::Native;
+                    const auto before = hashDiagnostics_.highWater;
+                    hashDiagnostic("receive", *ps, nullptr);
+                    ps->diagnosticHashReceive = hashDiagnostics_.highWater > before ? hashDiagnostics_.highWater : 0;
+                }
                 if (fromHost(*ps)) {
                     for (auto& other : peers_) {
                         if (!fromHost(other) && other.hasHash) compareWithHost(other);
@@ -977,7 +992,7 @@ void SessionHost::forwardToOthers(ENetPeer* sender,
 }
 
 // Catch a late joiner up: room, hold, enemy set, HP, deaths.
-void SessionHost::sendWorldStateTo(ENetPeer* peer) {
+void SessionHost::sendWorldStateTo(ENetPeer* peer) try {
     if (!progress_.empty()) {
         // Coalesce the merged byte map into spans, then chunk under the
         // packet size limit; the first chunk replaces the joiner's state.
@@ -991,33 +1006,69 @@ void SessionHost::sendWorldStateTo(ENetPeer* peer) {
             }
         }
         for (const auto& u : splitProgressUpdate(progressVersion_, true, spans)) {
-            sendTo(peer, encode(u), true);
+            sendTo(peer, encode(u), true, true);
         }
     }
     if (!room_) return;
-    sendTo(peer, encode(*room_), true);
-    if (hold_ && hold_->epoch == room_->epoch) sendTo(peer, encode(*hold_), true);
+    sendTo(peer, encode(*room_), true, true);
+    if (hold_ && hold_->epoch == room_->epoch) sendTo(peer, encode(*hold_), true, true);
     if (!manifest_.entries.empty()) {
         EnemyManifest m = manifest_;
         m.replace = true;
-        sendTo(peer, encode(m), true);
+        sendTo(peer, encode(m), true, true);
     }
     if (!enemyHp_.empty()) {
         EnemyHp hp;
         hp.epoch = manifest_.epoch;
         hp.sequence = lastEnemyHpSequence_;
         for (const auto& [id, e] : enemyHp_) hp.entries.push_back(e);
-        sendTo(peer, encode(hp), true);
+        sendTo(peer, encode(hp), true, true);
     }
     for (auto id : deadEnemies_) {
-        sendTo(peer, encode(EnemyDeath {manifest_.epoch, id}), true);
+        sendTo(peer, encode(EnemyDeath {manifest_.epoch, id}), true, true);
     }
+} catch (...) {
+    // Covers cached body construction/encoding and the nested scope/envelope send.
+    // Preserve the original exception path, but never attest complete coverage.
+    if (callbacks_.onCausalDiagnostic) cacheDiagnostics_.gap();
+    throw;
 }
 
 // A client disagreeing with the host on the same epoch for two consecutive
 // comparisons is reported once per distinct set of fields (transient
 // mismatches during a load don't fire). Different epochs aren't compared:
 // the client may simply still be loading.
+void SessionHost::hashDiagnostic(const char* action, const PeerState& client, const PeerState* host,
+                                 std::uint8_t fields, std::uint64_t previousCompare, std::uint64_t compare) {
+    hashDiagnostics_.emit(callbacks_.onHashDiagnostic,"relay-hash",[&](auto& out) {
+        const auto& c=client.lastHash;
+        out<<" action="<<action<<" session="<<session_.sessionId
+           <<" slot="<<unsigned(client.assignedSlot)<<" connection="<<client.connectionId
+           <<" delivery="<<client.deliverySerial<<" receiveSeq="<<client.hashReceiptSeq
+           <<" receiveSeqAvailable="<<(client.hashReceiptSeq != UINT64_MAX)
+           <<" scopeAvailable="<<client.diagnosticHashScopeAvailable
+           <<" sourceConnection="<<client.diagnosticHashScope.sourceConnectionId
+           <<" sourceDelivery="<<client.diagnosticHashScope.sourceDeliverySerial
+           <<" hostSource="<<client.diagnosticHashScope.hostSourceSerial
+           <<" sourceKind="<<unsigned(client.diagnosticHashScope.kind)
+           <<" receiveRecord="<<(std::string(action)=="receive"?hashDiagnostics_.highWater:client.diagnosticHashReceive)
+           <<" epoch="<<c.epoch<<" world="<<c.worldId<<" room="<<c.roomId
+           <<" enemiesHash="<<c.enemiesHash<<" progressHash="<<c.progressHash
+           <<" latestReceived=1 hostAvailable="<<(host!=nullptr)
+           <<" hostConnection="<<(host?host->connectionId:0)<<" hostDelivery="<<(host?host->deliverySerial:0)
+           <<" hostReceiveSeq="<<(host?host->hashReceiptSeq:0)<<" hostReceiveRecord="<<(host?host->diagnosticHashReceive:0)
+           <<" hostScopeAvailable="<<(host && host->diagnosticHashScopeAvailable)
+           <<" hostSourceConnection="<<(host?host->diagnosticHashScope.sourceConnectionId:0)
+           <<" hostSourceDelivery="<<(host?host->diagnosticHashScope.sourceDeliverySerial:0)
+           <<" hostHostSource="<<(host?host->diagnosticHashScope.hostSourceSerial:0)
+           <<" hostEpoch="<<(host?host->lastHash.epoch:0)<<" hostWorld="<<(host?host->lastHash.worldId:0)
+           <<" hostRoom="<<(host?host->lastHash.roomId:0)<<" hostEnemiesHash="<<(host?host->lastHash.enemiesHash:0)
+           <<" hostProgressHash="<<(host?host->lastHash.progressHash:0)<<" fields="<<unsigned(fields)
+           <<" streakBefore="<<client.mismatchStreak<<" previousCompare="<<previousCompare<<" compare="<<compare
+           <<" coarseHintOnly=1";
+    });
+}
+
 void SessionHost::compareWithHost(PeerState& client) {
     auto* host = hostPeer();
     if (!host || !host->hasHash || !client.hasHash) return;
@@ -1029,6 +1080,14 @@ void SessionHost::compareWithHost(PeerState& client) {
     if (h.worldId != c.worldId || h.roomId != c.roomId) fields |= DesyncRoom;
     if (h.enemiesHash != c.enemiesHash) fields |= DesyncEnemies;
     if (h.progressHash != c.progressHash) fields |= DesyncProgress;
+    const auto previousCompare = client.diagnosticPreviousCompare;
+    std::uint64_t comparisonRecord = 0;
+    if (callbacks_.onHashDiagnostic) {
+        const auto before = hashDiagnostics_.highWater;
+        hashDiagnostic("compare",client,host,fields,previousCompare);
+        comparisonRecord = hashDiagnostics_.highWater > before ? hashDiagnostics_.highWater : 0;
+        client.diagnosticPreviousCompare = fields ? comparisonRecord : 0;
+    }
     if (fields == 0) {
         client.mismatchStreak = 0;
         client.reportedFields = 0;
@@ -1039,7 +1098,9 @@ void SessionHost::compareWithHost(PeerState& client) {
     ++desyncNotices_;
     log("Desync: " + client.peerId + " fields=" + std::to_string(fields) +
         " epoch=" + std::to_string(h.epoch));
+    hashDiagnostic("notice",client,host,fields,previousCompare,comparisonRecord);
     broadcastToVerified(encode(DesyncNotice {client.assignedSlot, h.epoch, fields}), true);
+    sealHashDiagnostics("notice");
     if(!config_.desyncOutputRoot.empty() && nextDesyncReportId_) {
         DesyncCaptureRequest request;
         request.key={session_.sessionId,nextDesyncReportId_};
@@ -1252,28 +1313,51 @@ void SessionHost::removePeer(ENetPeer* peer) {
 // Send helpers
 // ---------------------------------------------------------------------------
 
-bool SessionHost::sendTo(ENetPeer* peer,const std::vector<std::uint8_t>& packet,bool reliable) {
-    if(!peer||packet.empty())return false;
+bool SessionHost::sendTo(ENetPeer* peer,const std::vector<std::uint8_t>& packet,bool reliable,bool cached) {
+    std::optional<WorldScope> emittedScope;
+    const auto finish=[&](bool result,const char* disposition,const std::vector<std::uint8_t>* wire=nullptr) {
+        if(cached)cacheDiagnostics_.emit(callbacks_.onCausalDiagnostic,"relay-cache-delivery",[&](std::ostream& out){
+            const auto* target=findPeer(peer);const auto* host=hostPeer();
+            out<<" origin=sendWorldStateTo disposition="<<disposition<<" return="<<result
+               <<" session="<<session_.sessionId<<" host="<<(host?host->connectionId:0)
+               <<" target="<<(target?target->connectionId:0)<<" targetDelivery="<<(target?target->deliverySerial:0)
+               <<" targetSlot="<<(target?unsigned(target->assignedSlot):255)
+               <<" scopeAvailable="<<emittedScope.has_value()<<" source="<<(emittedScope?emittedScope->sourceConnectionId:0)
+               <<" scopeSession="<<(emittedScope?emittedScope->sessionId:"-")
+               <<" scopeTarget="<<(emittedScope?emittedScope->targetConnectionId:0)<<" scopeTargetDelivery="<<(emittedScope?emittedScope->targetDeliverySerial:0)
+               <<" scopeKind="<<(emittedScope?unsigned(emittedScope->kind):0)
+               <<" sourceDelivery="<<(emittedScope?emittedScope->sourceDeliverySerial:0)
+               <<" hostSource="<<(emittedScope?emittedScope->hostSourceSerial:0)
+               <<" packetType="<<(packet.empty()?0:unsigned(packet.front()))<<" bytes="<<packet.size()
+               <<" payloadSHA="<<causalSha(packet)<<" wireAvailable="<<(wire!=nullptr)
+               <<" wireSHA="<<(wire?causalSha(*wire):"-")<<" progressVersion="<<progressVersion_;
+            causalRoom(out,room_?&*room_:nullptr);
+        });
+        return result;
+    };
+    if(!peer||packet.empty())return finish(false,"invalid-input");
     const auto type=static_cast<PacketType>(packet.front());
     if(isScopedWorldPacket(type)) {
         auto* target=findPeer(peer);auto* host=hostPeer();
-        if(!target||target->status!=PeerStatus::Verified||!host)return false;
+        if(!target||target->status!=PeerStatus::Verified||!host)return finish(false,"context-unavailable");
         WorldScope scope=forwardingScope_.value_or(WorldScope{session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0});
         const bool simulation=type==PacketType::ActorSnapshot||type==PacketType::EnemySnapshot||type==PacketType::EventMessage;
         if(simulation){scope.kind=WorldSourceKind::Simulation;scope.hostSourceSerial=simulationSourceSerial_;}
         if(type==PacketType::DesyncNotice){scope={session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0};scope.kind=WorldSourceKind::Relay;}
         scope.targetConnectionId=target->connectionId;scope.targetDeliverySerial=target->deliverySerial;
-        if(scope.sourceConnectionId==host->connectionId && scope.kind==WorldSourceKind::Native && type!=PacketType::DesyncNotice && scope.hostSourceSerial<=target->hostSourceFloor)return true;
+        if(cached && callbacks_.onCausalDiagnostic){try{emittedScope=scope;}catch(...){cacheDiagnostics_.gap();}}
+        if(scope.sourceConnectionId==host->connectionId && scope.kind==WorldSourceKind::Native && type!=PacketType::DesyncNotice && scope.hostSourceSerial<=target->hostSourceFloor)return finish(true,"source-floor-suppressed");
         WorldEnvelope env{scope,packet};
         if(resyncPlan_&&scope.sourceConnectionId==host->connectionId&&isMaterialWorldPacket(type)) {
             reliable=true;
             for(std::size_t i=0;i<resyncPlan_->targetCount;++i)if(resyncPlan_->targets[i].connectionId==target->connectionId&&target->worldQuarantined) {
-                if(resyncContinuation_[i].size()>=RESYNC_MAX_CONTINUATION_RECORDS || resyncContinuationBytes_[i]+packet.size()>RESYNC_MAX_CONTINUATION_BYTES){finishResync(ResyncResultReason::Overflow,"continuation bound");return false;}
-                resyncContinuation_[i].push_back(std::move(env));resyncContinuationBytes_[i]+=packet.size();return true;
+                if(resyncContinuation_[i].size()>=RESYNC_MAX_CONTINUATION_RECORDS || resyncContinuationBytes_[i]+packet.size()>RESYNC_MAX_CONTINUATION_BYTES){finishResync(ResyncResultReason::Overflow,"continuation bound");return finish(false,"continuation-overflow");}
+                resyncContinuation_[i].push_back(std::move(env));resyncContinuationBytes_[i]+=packet.size();return finish(true,"continuation-buffered");
             }
         }
-        if(target->worldQuarantined&&!isEphemeralWorldPacket(type))return true;
-        return sendTo(peer,encode(env),reliable);
+        if(target->worldQuarantined&&!isEphemeralWorldPacket(type))return finish(true,"quarantine-suppressed");
+        const auto wire=encode(env);const bool sent=sendTo(peer,wire,reliable);
+        return finish(sent,sent?"enet-submitted":"enet-submission-failed",&wire);
     }
     const bool diagnostic=isDesyncDiagnosticPacket(type);
     if(diagnostic)reliable=true;

@@ -54,6 +54,10 @@ struct PeerState {
     std::uint64_t hashReceiptSeq{0}, hashReceiptMs{0}; // relay receipts, NOT native frame IDs
     std::uint32_t mismatchStreak{0};
     std::uint8_t reportedFields{0};
+    // Diagnostic-only references into the relay-hash stream; never wire fields.
+    std::uint64_t diagnosticHashReceive{0}, diagnosticPreviousCompare{0};
+    WorldScope diagnosticHashScope{};
+    bool diagnosticHashScopeAvailable{false};
 
     // Heartbeat tracking
     std::uint64_t lastHeartbeatMs{0};

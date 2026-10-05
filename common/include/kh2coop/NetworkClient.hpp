@@ -1,5 +1,6 @@
 #pragma once
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/LinkConditioner.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
@@ -41,6 +42,7 @@ struct ClientCloseInfo {
 // Callbacks the client fires when it receives data from the host.
 // ---------------------------------------------------------------------------
 struct ClientCallbacks {
+    CausalSink onCausalDiagnostic;
     std::function<void()> onConnected;
     std::function<void()> onDisconnected;
     // After state reset and legacy onDisconnected, once per remote/local-pin
@@ -136,7 +138,18 @@ public:
     void sendProgressUpdate(const ProgressUpdate& m); // host only
     void sendStateHash(const StateHash& m);
     bool sendResyncRequest(const ResyncRequest& m); // exact immutable host request
-    bool requestWorldResync(std::uint8_t targetMask, ResyncRequest* generated = nullptr);
+    bool requestWorldResync(std::uint8_t targetMask, ResyncRequest* generated = nullptr,
+                            ResyncRequestOrigin origin = ResyncRequestOrigin::Unspecified);
+    void recordResyncCallerRejection(ResyncRequestOrigin origin, std::uint8_t mask) noexcept;
+    void sealRequestDiagnostics(const char* action = "interval") noexcept {
+        requestDiagnostics_.seal(callbacks_.onCausalDiagnostic,"resync-request",action);
+    }
+    void sealWorldAdmissionDiagnostics(const char* action = "interval") noexcept {
+        worldAdmissionDiagnostics_.seal(callbacks_.onCausalDiagnostic,"world-envelope-admission",action);
+    }
+    const CausalStream& worldAdmissionDiagnostics() const { return worldAdmissionDiagnostics_; }
+    bool requestDiagnosticsEnabled() const { return static_cast<bool>(callbacks_.onCausalDiagnostic); }
+    const CausalStream& requestDiagnostics() const { return requestDiagnostics_; }
     // Owner-thread observations; no request ID allocation or deadline mutation.
     bool resyncBusy() const { return requestedResync_.has_value() || resyncPlan_.has_value(); }
     bool resyncRequestPending() const { return requestedResync_.has_value(); }
@@ -203,9 +216,17 @@ public:
     bool SetResumePin(std::optional<SessionResumePin> pin);
 
 private:
+    CausalStream requestDiagnostics_;
+    CausalStream worldAdmissionDiagnostics_;
+    std::uint64_t originalDiagnosticRequestId_{};
+    RequestSubmissionObservation originalDiagnosticDeadline_;
+    bool sendResyncRequestObserved(const ResyncRequest&, RequestSubmissionObservation&);
+    void recordResyncRequest(ResyncRequestOrigin, std::uint8_t, const ResyncRequest*,
+                            const char*, const RequestSubmissionObservation&) noexcept;
     void onConnect();
     void onDisconnect(std::uint32_t code = 0, bool local = false);
-    void onReceive(const std::uint8_t* data, std::size_t size, bool reliable, const WorldScope* admittedScope = nullptr);
+    void onReceive(const std::uint8_t* data, std::size_t size, bool reliable, const WorldScope* admittedScope = nullptr,
+                   const std::uint8_t* admittedWire = nullptr, std::size_t admittedWireSize = 0);
     bool sendPacket(const std::vector<std::uint8_t>& packet, bool reliable);
     bool sendNow(const std::vector<std::uint8_t>& packet, bool reliable);
     void flushConditioned();

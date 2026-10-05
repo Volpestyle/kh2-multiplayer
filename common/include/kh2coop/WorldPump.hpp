@@ -44,8 +44,9 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
             operatorContext.deliverySerial != net.deliverySerial() ||
             !operatorHost || operatorHost != bridge.ConnectionId(0) || bridge.LocalSlot() != 0 ||
             bridge.GetPuppetAuthorityMode() != PuppetAuthorityMode::Network) {
+            net.recordResyncCallerRejection(ResyncRequestOrigin::OperatorMailbox, operatorMask);
             ++stats.retiredOutgoing;
-        } else if (net.requestWorldResync(operatorMask)) {
+        } else if (net.requestWorldResync(operatorMask, nullptr, ResyncRequestOrigin::OperatorMailbox)) {
             ++stats.toNet;
         } else {
             ++stats.rejected;

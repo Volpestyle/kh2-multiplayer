@@ -1,7 +1,9 @@
 #include "kh2coop/SessionHost.hpp"
+#include <cstdlib>
 #include "kh2coop/SimulationState.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <csignal>
 #include <enet/enet.h>
 #include <iostream>
@@ -89,6 +91,15 @@ int main(int argc, char* argv[]) {
 
     // --- Callbacks ---
     kh2coop::SessionCallbacks callbacks;
+    const auto* causalSetting=std::getenv("KH2COOP_CAUSAL_DIAGNOSTICS");
+    const bool causalDiagnosticsEnabled=causalSetting && std::string(causalSetting)=="1";
+    if (causalDiagnosticsEnabled) callbacks.onCausalDiagnostic = [](const std::string& row) {
+        std::cout << row << std::endl; return std::cout.good();
+    };
+    const auto* hashSetting = std::getenv("KH2COOP_CAUSAL_DIAGNOSTICS");
+    if (hashSetting && std::string(hashSetting) == "1") callbacks.onHashDiagnostic = [](const std::string& row) {
+        std::cout << row << '\n'; std::cout.flush(); return std::cout.good();
+    };
     callbacks.onLog = [](const std::string& msg) {
         std::cout << msg << "\n";
     };
@@ -133,8 +144,24 @@ int main(int argc, char* argv[]) {
 
     // --- Main loop ---
     kh2coop::SimulationState sim;
+    if (causalDiagnosticsEnabled) host.sealCacheDiagnostics("begin");
+    auto lastCausalSeal=std::chrono::steady_clock::now();
+    const bool hashDiagnosticsEnabled = hashSetting && std::string(hashSetting) == "1";
+    auto lastHashSeal = std::chrono::steady_clock::now();
     while (g_running) {
         host.tick(0);
+        if(causalDiagnosticsEnabled){
+            const auto causalNow=std::chrono::steady_clock::now();
+            if(causalNow-lastCausalSeal>=std::chrono::seconds(1)){
+                host.sealCacheDiagnostics();lastCausalSeal=causalNow;
+            }
+        }
+        if (hashDiagnosticsEnabled) {
+            const auto hashNow = std::chrono::steady_clock::now();
+            if (hashNow - lastHashSeal >= std::chrono::seconds(1)) {
+                host.sealHashDiagnostics(); lastHashSeal = hashNow;
+            }
+        }
 
         if (simulate) {
             for (const auto& peer : host.peers()) {

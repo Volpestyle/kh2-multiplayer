@@ -19,6 +19,7 @@
 #include "Warp.hpp"
 
 #include "kh2coop/AppliedStateHash.hpp"
+#include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
@@ -61,6 +62,8 @@ bool SamePoint(const Vec3& a, const Vec3& b) {
 }
 
 LogFn g_log = nullptr;
+CausalSink g_hashDiagnosticSink;
+CausalStream g_hashDiagnosticStream;
 uintptr_t g_exeBase = 0;
 StatDeltaFn g_applyStatDelta = nullptr;
 TakeDamageFn g_takeDamage = nullptr;
@@ -3172,7 +3175,32 @@ void PublishAppliedHash(std::uint32_t frame, const NativeCensus& beforeApply) {
                                          [](const auto& record) { return record.netId == 0; });
     state.enemiesHash = hashAppliedEnemies(live);
     g_lastHashMs = now;
-    if (!Send(encode(state))) return;
+    // Keep the existing capture/enqueue sequence, exposing its exact context to diagnostics.
+    const auto hashPacket = encode(state);
+    ProducerWorldContext hashContext;
+    const auto hashSlot = g_hashDiagnosticSink ? g_bridge.LocalSlot() : WORLD_SLOT_UNKNOWN;
+    const auto hashConnection = g_hashDiagnosticSink ? g_bridge.ConnectionId(hashSlot) : 0;
+    if (!CaptureWorldContext(hashContext) || !SendCapturedWorld(hashPacket, hashContext)) return;
+    if (g_hashDiagnosticSink) {
+        const bool contextCurrent = hashConnection != 0 && hashSlot < 3 &&
+            g_bridge.LocalSlot() == hashSlot && g_bridge.ConnectionId(hashSlot) == hashConnection &&
+            WorldContextCurrent(hashContext) && CensusMatchesInstance(census);
+        g_hashDiagnosticStream.emit(g_hashDiagnosticSink,"native-hash-publication",[&](auto& out) {
+            out<<" action=publish role="<<(g_role==Role::Host?"host":"client")<<" slot="<<unsigned(hashSlot)
+               <<" connection="<<hashConnection<<" epoch="<<state.epoch<<" frame="<<frame
+               <<" generation="<<hashContext.generation<<" delivery="<<hashContext.deliverySerial
+               <<" hostSource="<<hashContext.hostSourceSerial
+               <<" contextCurrent="<<contextCurrent<<" transition="<<census.transition<<" load="<<census.load
+               <<" world="<<census.location.worldId<<" room="<<census.location.roomId<<" door="<<unsigned(census.location.door)
+               <<" map="<<census.location.mapProgram<<" battle="<<census.location.battleProgram<<" event="<<census.location.eventProgram
+               <<" enemiesHash="<<state.enemiesHash<<" progressHash="<<state.progressHash
+               <<" complete=1 censusCount="<<census.enemies.size()<<" living="<<live.size()
+               <<" selectedAvailable="<<census.enemies.empty()<<" selectedPresent="<<(census.enemies.empty()?"0":"unavailable")
+               <<" selectedProof="<<(census.enemies.empty()?"complete-whole-combat-census-empty":"unavailable")
+               <<" bridgeEnqueued=1 relayReceived=unproven coarseHintOnly=1";
+        });
+        g_hashDiagnosticStream.seal(g_hashDiagnosticSink,"native-hash-publication","publish");
+    }
     // These fixture observations must not disappear when the general sync log
     // budget runs out. frame+epoch associates every raw record with its hash.
     if (g_log) {
@@ -3346,6 +3374,13 @@ Role CurrentRole() {
 }
 
 } // namespace
+
+void SetHashDiagnosticSink(CausalSink sink) {
+    char value[8] {};
+    const auto length=GetEnvironmentVariableA("KH2COOP_CAUSAL_DIAGNOSTICS",value,sizeof(value));
+    if(length==1 && value[0]=='1')g_hashDiagnosticSink=std::move(sink);
+    else g_hashDiagnosticSink={};
+}
 
 void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamageFn takeDamage) {
     g_exeBase = exeBase;
@@ -3901,6 +3936,8 @@ bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t up
 }
 
 void Shutdown() {
+    g_hashDiagnosticStream.seal(g_hashDiagnosticSink,"native-hash-publication","shutdown");
+    g_hashDiagnosticSink = {};
     InvalidateClientClaims("shutdown"); LogClientClaim("seal", "shutdown");
     g_activationRecovery.reset();
     if (g_survivingPack.Intent()) g_survivingPack.Cancel();

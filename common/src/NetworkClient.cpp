@@ -39,15 +39,43 @@ std::optional<HostResyncContext> NetworkClient::hostResyncContext() const {
     for (std::size_t i = 0; i < context.connections.size(); ++i) context.connections[i] = avatarConnections_[i];
     return context;
 }
-bool NetworkClient::requestWorldResync(std::uint8_t mask, ResyncRequest* generated) {
+void NetworkClient::recordResyncRequest(ResyncRequestOrigin origin,std::uint8_t mask,
+    const ResyncRequest* request,const char* disposition,const RequestSubmissionObservation& observation) noexcept {
+    requestDiagnostics_.emit(callbacks_.onCausalDiagnostic,"resync-request",[&](std::ostream& out){
+        out<<" origin="<<causalOrigin(origin)<<" disposition="<<disposition<<" mask="<<unsigned(mask)
+           <<" keyAvailable="<<(request!=nullptr)<<" requestSession="<<(request?request->key.sessionId:"-")
+           <<" requestHost="<<(request?request->key.hostConnectionId:0)<<" request="<<(request?request->key.requestId:0)
+           <<" session="<<(avatarSessionId_.empty()?"-":avatarSessionId_)<<" host="<<avatarConnections_[0]
+           <<" self="<<(avatarLocalSlot_<3?avatarConnections_[avatarLocalSlot_]:0)<<" slot="<<unsigned(avatarLocalSlot_)
+           <<" delivery="<<deliverySerial()<<" roster0="<<(request?request->connections[0]:avatarConnections_[0])
+           <<" roster1="<<(request?request->connections[1]:avatarConnections_[1])
+           <<" roster2="<<(request?request->connections[2]:avatarConnections_[2])
+           <<" deadlineAvailable="<<observation.deadlineAvailable<<" startedMs="<<observation.startedMs
+           <<" originalDeadlineMs="<<observation.deadlineMs;
+        causalRoom(out,request?&request->room:(hostRoom_?&*hostRoom_:nullptr));
+    });
+}
+void NetworkClient::recordResyncCallerRejection(ResyncRequestOrigin origin,std::uint8_t mask) noexcept {
+    recordResyncRequest(origin,mask,nullptr,"caller-rejected",{});
+}
+bool NetworkClient::requestWorldResync(std::uint8_t mask, ResyncRequest* generated, ResyncRequestOrigin origin) try {
     if (generated) *generated = {};
-    if(!worldReady()||avatarLocalSlot_!=0||!hostRoom_||!nextResyncRequest_||resyncPlan_||requestedResync_)return false;
+    if(!worldReady()||avatarLocalSlot_!=0||!hostRoom_||!nextResyncRequest_||resyncPlan_||requestedResync_){
+        recordResyncRequest(origin,mask,nullptr,"generator-rejected",{});return false;
+    }
     ResyncRequest r;r.key={avatarSessionId_,avatarConnections_[0],nextResyncRequest_};
     nextResyncRequest_=nextResyncRequest_==UINT64_MAX?0:nextResyncRequest_+1;
     r.room=*hostRoom_;r.targetMask=mask;for(std::size_t i=0;i<3;++i)r.connections[i]=avatarConnections_[i];
     // Expose only the actual generated immutable request, including failed submission.
     if (generated) *generated = r;
-    return sendResyncRequest(r);
+    RequestSubmissionObservation observation;
+    const bool sent=sendResyncRequestObserved(r,observation);
+    recordResyncRequest(origin,mask,&r,sent?"submitted":"submission-failed",observation);
+    return sent;
+} catch (...) {
+    // Escaping construction/allocation failures have no complete outcome row.
+    if (callbacks_.onCausalDiagnostic) requestDiagnostics_.gap();
+    throw;
 }
 bool NetworkClient::sendResyncCapture(const ResyncBegin& begin,const ResyncSnapshot& snapshot,const ProducerWorldContext& c) {
     if(!validWorldContext(c)||avatarLocalSlot_!=0||!resyncPlan_||begin.key!=resyncPlan_->request.key||
@@ -312,7 +340,17 @@ void NetworkClient::sendStateHash(const StateHash& m) {
     if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), false);
 }
 
-bool NetworkClient::sendResyncRequest(const ResyncRequest& m) {
+bool NetworkClient::sendResyncRequest(const ResyncRequest& m) try {
+    RequestSubmissionObservation observation;
+    const bool sent=sendResyncRequestObserved(m,observation);
+    recordResyncRequest(ResyncRequestOrigin::DirectRequest,m.targetMask,&m,sent?"submitted":"submission-failed",observation);
+    return sent;
+} catch (...) {
+    // Escaping construction/allocation failures have no complete outcome row.
+    if (callbacks_.onCausalDiagnostic) requestDiagnostics_.gap();
+    throw;
+}
+bool NetworkClient::sendResyncRequestObserved(const ResyncRequest& m, RequestSubmissionObservation& observation) {
     if(!worldReady() || avatarLocalSlot_!=0 || m.key.sessionId!=avatarSessionId_ ||
        m.key.hostConnectionId!=avatarConnections_[0] || !hostRoom_ || !sameResyncRoom(m.room,*hostRoom_)) return false;
     if(resyncPlan_ && m.key!=resyncPlan_->request.key)return false;
@@ -321,7 +359,10 @@ bool NetworkClient::sendResyncRequest(const ResyncRequest& m) {
     try {
         const auto packet=encode(m);
         const bool initial=!resyncPlan_&&!requestedResync_;
-        if(initial){requestedResync_=m;resyncDeadline_=localTimeMs()+RESYNC_TIMEOUT_MS;}
+        if(initial){requestedResync_=m;const auto started=localTimeMs();resyncDeadline_=started+RESYNC_TIMEOUT_MS;
+            observation={true,started,resyncDeadline_};
+            if(callbacks_.onCausalDiagnostic){originalDiagnosticRequestId_=m.key.requestId;originalDiagnosticDeadline_=observation;}
+        } else if(callbacks_.onCausalDiagnostic && m.key.requestId==originalDiagnosticRequestId_)observation=originalDiagnosticDeadline_;
         const bool sent=sendPacket(packet,true);
         if(!sent&&initial)requestedResync_.reset();
         return sent;
@@ -650,7 +691,8 @@ void NetworkClient::onDisconnect(std::uint32_t code, bool local) {
     if (callbacks_.onClosed) callbacks_.onClosed(info);
 }
 
-void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool reliable, const WorldScope* admittedScope) {
+void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool reliable, const WorldScope* admittedScope,
+                              const std::uint8_t* admittedWire, std::size_t admittedWireSize) {
     if (!connected_) return;
     // A malformed SessionState must invalidate consumers too, even when its
     // frame/header fails before the switch below. Never forward malformed data.
@@ -691,7 +733,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             if(m.scope.sourceConnectionId==avatarConnections_[0] && m.scope.kind==WorldSourceKind::Native && inner!=PacketType::DesyncNotice &&
                (!m.scope.hostSourceSerial || m.scope.hostSourceSerial<=worldSourceFloor_))return;
             if(worldQuarantined_ && !isEphemeralWorldPacket(inner))return;
-            onReceive(m.packet.data(),m.packet.size(),reliable,&m.scope);return;
+            onReceive(m.packet.data(),m.packet.size(),reliable,&m.scope,data,size);return;
         }
         if (isEphemeralWorldPacket(type))
             validateActivationPacket(std::vector<std::uint8_t>(data, data + size));
@@ -720,6 +762,25 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             admittedHp = std::move(hp);
         }
 
+        // Actual accepted inner body and original received envelope, before bridge callbacks.
+        // Diagnostic failure must neither fabricate a delivery nor change admission.
+        if (admittedScope && callbacks_.onCausalDiagnostic) {
+            worldAdmissionDiagnostics_.emit(callbacks_.onCausalDiagnostic,"world-envelope-admission",[&](auto& out) {
+                out << " action=admitted session=" << avatarSessionId_
+                    << " host=" << avatarConnections_[0] << " self=" << (worldBinding_?worldBinding_->selfConnectionId:0)
+                    << " slot=" << unsigned(avatarLocalSlot_) << " delivery=" << (worldBinding_?worldBinding_->deliverySerial:0)
+                    << " transportGeneration=" << transportGeneration_
+                    << " scopeSession=" << admittedScope->sessionId << " source=" << admittedScope->sourceConnectionId
+                    << " sourceDelivery=" << admittedScope->sourceDeliverySerial << " hostSource=" << admittedScope->hostSourceSerial
+                    << " scopeKind=" << unsigned(admittedScope->kind) << " target=" << admittedScope->targetConnectionId
+                    << " targetDelivery=" << admittedScope->targetDeliverySerial << " packetType=" << unsigned(type)
+                    << " bytes=" << size << " payloadSHA=" << causalSha(std::vector<std::uint8_t>(data,data+size))
+                    << " wireAvailable=" << (admittedWire!=nullptr && admittedWireSize!=0)
+                    << " wireBytes=" << admittedWireSize
+                    << " wireSHA=" << (admittedWire && admittedWireSize ? causalSha(std::vector<std::uint8_t>(admittedWire,admittedWire+admittedWireSize)) : "-")
+                    << " reliable=" << reliable << " callbackDelivered=unproven nativeConsumed=unproven";
+            });
+        }
         if(admittedScope && callbacks_.onWorldEnvelope) {
             const auto generation=transportGeneration_;
             callbacks_.onWorldEnvelope(WorldEnvelope{*admittedScope,{data,data+size}});

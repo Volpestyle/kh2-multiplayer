@@ -1,5 +1,7 @@
 #pragma once
+#include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/PeerState.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
@@ -39,6 +41,8 @@ struct SessionConfig {
 // Callback interface — SessionHost fires these so the owner can log or react.
 // ---------------------------------------------------------------------------
 struct SessionCallbacks {
+    CausalSink onCausalDiagnostic;
+    CausalSink onHashDiagnostic; // true only after a successful sink flush
     std::function<void(const std::string& peerId, SlotType slot)> onPeerJoined;
     std::function<void(const std::string& peerId)> onPeerLeft;
     std::function<void(const std::string& peerId, const std::string& reason)> onPeerRejected;
@@ -65,12 +69,19 @@ public:
                          SessionCallbacks callbacks = {});
     ~SessionHost();
 
+    void sealHashDiagnostics(const char* action = "interval") { hashDiagnostics_.seal(callbacks_.onHashDiagnostic,"relay-hash",action); }
+    const CausalStream& hashDiagnostics() const { return hashDiagnostics_; }
+
     // Non-copyable, non-movable (owns an ENet host)
     SessionHost(const SessionHost&) = delete;
     SessionHost& operator=(const SessionHost&) = delete;
 
     // Start listening. Returns false on bind failure.
     bool start();
+    void sealCacheDiagnostics(const char* action = "interval") noexcept {
+        cacheDiagnostics_.seal(callbacks_.onCausalDiagnostic,"relay-cache-delivery",action);
+    }
+    const CausalStream& cacheDiagnostics() const { return cacheDiagnostics_; }
 
     // Process network events for up to `timeoutMs` milliseconds.
     // Call this once per server tick.
@@ -119,6 +130,7 @@ public:
     // Production monotonic deadline pump, also usable by headless controls.
     void pumpResync(std::uint64_t nowMs);
 private:
+    CausalStream cacheDiagnostics_;
     // ENet event handlers
     void onConnect(_ENetPeer* peer);
     void onDisconnect(_ENetPeer* peer);
@@ -135,7 +147,7 @@ private:
 
     // Packet send helpers
     bool sendTo(_ENetPeer* peer, const std::vector<std::uint8_t>& packet,
-                bool reliable);
+                bool reliable, bool cached = false);
     void broadcastToVerified(const std::vector<std::uint8_t>& packet,
                              bool reliable);
 
@@ -152,6 +164,9 @@ private:
                          bool reliable);
     void sendWorldStateTo(_ENetPeer* peer);
     void clearWorldState();
+    CausalStream hashDiagnostics_;
+    void hashDiagnostic(const char* action, const PeerState& client, const PeerState* host,
+                        std::uint8_t fields = 0, std::uint64_t previousCompare = 0, std::uint64_t compare = 0);
     void compareWithHost(PeerState& client);
     void pumpDesyncCapture();
 

@@ -3224,6 +3224,12 @@ bool Initialize(uintptr_t exeBase) {
         }
         OpenHitChannel();
         enemysync::Install(exeBase, &Log, g_origApplyStatDelta, verifiedTakeDamage);
+        enemysync::SetHashDiagnosticSink([](const std::string& row) {
+            if (!g_logFile) return false;
+            const bool written = fprintf(g_logFile,"%s\n",row.c_str()) >= 0;
+            const bool flushed = fflush(g_logFile) == 0;
+            return written && flushed && !ferror(g_logFile);
+        });
     }
 
     char hitTraceSetting[2] {};
