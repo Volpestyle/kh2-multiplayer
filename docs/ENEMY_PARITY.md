@@ -4,6 +4,37 @@ Question (plan D5, hard problem 3, risk R4): with the same save and room, do
 two instances spawn the same enemies, and what key matches a host enemy to
 its client copy?
 
+## Open native-wave geometry finding, 2026-10-05
+
+The strict impaired Mac-relay wave run remains unpassed. In `094748`, the
+original first-pack damage and exact-ID/HP census gate passed after 2.26 seconds,
+but the first permitted 250 ms correction moved outward: radius 563.030 to
+605.943. The fixture stopped before another pulse or kill. The approved limit
+stays three measured 250 ms pulses, with immediate failure on outward movement
+or overshoot; no further input budget is authorized.
+
+Drift also occurs before damage. In `095701`, two qualified neutral endpoint
+samples 5.907 seconds apart showed the same host actor moving from radius
+58.208 to 224.005 before the first hit. The following read-only run `100816`
+collected a 3.5-second interval outside the original hit gate, then intentionally
+failed without issuing damage or correction. Its 140 rows included 138 qualified
+samples across owner frames 9340–9549. Those samples retained neutral raw and
+processed input, idle motion and zero sampled velocity at actor+0xB98, while
+the actor moved 309.349 planar units. Actor, room, controller and camera
+identities stayed fixed. Two rows crossed frame boundaries and remain
+unqualified; sequential reads do not establish unsampled continuity.
+
+Zero sampled velocity does not identify the position writer or exclude native
+collision, carried displacement or other motion terms. The source audit found
+no demonstrated local transform overwrite in this launch configuration;
+network pose activity alone does not prove a puppet transform was applied.
+The existing protection helper changes team membership, not collision or
+motion. Attribution continues through read-only native-field/static analysis,
+with no speculative suppression. All four protected saves stayed unchanged;
+the owned relays stopped and fetched receipts match their remote originals.
+See the [interval result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/neutral-observe-root02/result.md)
+and [source audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-motion-source-audit/result.md).
+
 ## Current resync binding, 2026-10-04
 
 The current protocol9/WorldBridge11 resync path now qualifies the complete
