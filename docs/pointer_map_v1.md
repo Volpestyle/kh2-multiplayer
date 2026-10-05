@@ -643,7 +643,10 @@ terms; these are capabilities, not attribution of a live position change.
 | `+0xA48` xyz | Separate supplied displacement, passed to position calculation without the `+0xA64` scale. |
 | `+0xA58` xyz / `+0xA64` | Term multiplied by the global float at `exe+0x717480` and `+0xA64` before addition; physical units remain unassigned. |
 | `+0xA18` / `+0xA28` / `+0xA38` xyz | Saved entry position, requested aggregate times `exe+0x717488`, and actual position difference times the same factor. |
-| `+0xA78` xyz | Later solver residual from solved `+0x700`, old `+0x670` and selected movement `+0x6E0`, written at `0x3B9535` to `0x3B9549`. |
+| `+0x6D0` xyz | Solver start: copied from current `+0x670` at `0x3B94CE`; `0x16FEC0` receives the structure at this address. |
+| `+0x6E0` xyz | Selected movement supplied to that solver. `0x16FEC0` / `0x1638F0` can rewrite it during solver passes; its post-call value need not equal the original input. |
+| `+0x700` xyz | Solved position output, copied to `+0x670` at `0x3B955C`. |
+| `+0xA78` xyz | `(solved700 − old670 − S0) * exe[0x717488]`, written at `0x3B9535` to `0x3B9549`. `S0` is the **pre-solver stack copy** of `+0x6E0` taken at `0x3B94DA`, not sampled post-call `+0x6E0`. |
 
 `0x3B81D0` retrieves polygon geometry and transforms a global vector into a
 surface basis; its old actor-pair separation label was incorrect. The explicit
@@ -652,6 +655,7 @@ objects. The final solved position is copied from `+0x700` to `+0x670` at
 `0x3B955C`. Alternate or skipped branches can leave summary fields stale.
 Sparse sequential reads cannot reconstruct all within-frame contributors.
 See [exact static output and field references](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-physics-terms/field-references.md).
+The [upstream calculator audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-calculator-upstream-audit/result.md) resolves the call-site pointer roles and the `S0` distinction; these static capabilities do not identify a live originating force.
 
 **Strategy B hook target:** `exe+0x3BFD30` — intercept for friend entities, replace the vtable AI dispatch (vtable+0x10) with player input processing, then let `exe+0x3B89A0` (physics) run normally for full game integration.
 
@@ -695,13 +699,15 @@ File: `runtime/src/GameBridgePC.cpp`
 
 To block limits while puppets are active, hook `0x3D88E0` and return `5` for any command `0x3E7C30` recognises.
 
-### Actor behaviour flags `actor+0x18C` (`[GHIDRA]`, 2026-10-02; bit 6 not yet checked live)
+### Actor behaviour flags `actor+0x18C` (`[GHIDRA]`, bit 6 corrected 2026-10-05; bit 6 effects not yet checked live)
 
 | Bit | Effect |
 |---|---|
-| 6 (`0x40`) | Skips collision: the surface-derived vector in `EntityPositionPhysics` (`0x3B89A0` → `0x3B81D0`), and actor/terrain collision plus ground snap in the position calculator (`0x3B9090`). Per actor; the objentry-wide equivalent is `objentry+0x0C & 2` (shared by every actor of that type). Use for non-colliding puppets |
+| 6 (`0x40`) | Skips the `0x3B81D0` surface-derived addition in `0x3B89A0`. In `0x3B9090`, selects unfiltered integrated + local supplied + linked movement for `+0x6E0`, then still reaches `0x16FEC0`. Does not itself exclude the earlier `0x3BA970` / `0x40AD70` actor-pair path. Also gates later contact/support handling; not a general collision or ground-snap disable. The handler resolved from `actor+0x0C` has a `+0x0C & 2` test in these surface/selection guards; this is not a proven universal equivalent. |
 | 14 (`0x4000`) | TakeDamage (`0x3D5E50`) passes reactFlag 0, so no hit reaction |
-| `0x1000020` | Also skips the ground-snap block in `0x3B9090` |
+| `0x1000020` | Participates in `0x3BA9A0`'s unfiltered-movement selection and later contact/support guards in `0x3B9090`; does not bypass the earlier actor-pair loop or the `0x16FEC0` call. |
+
+The post-solver contact/notification branch requires handler `+0x0C` bits 0/1 clear, `actor+0x18C & 0x1000020 == 0`, and bit 6 clear; failure can enter alternative notification handling. Later support-handle handling requires `0x3BA9A0` false, handler bit 1 clear, actor bit 6 clear and nonnull `actor+0x748`. These are selective guards after the solved-position copy, not proof that all terrain correction or ground snap is suppressed. See the [byte-check note and retained provenance](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-calculator-upstream-audit/pointer-map-note.md).
 
 ### Native enemy provenance and appearance cache (`[GHIDRA]`, 2026-10-02)
 
