@@ -55,6 +55,14 @@ Private transport now works without a friend: the relay can run on the Mac,
 and the rig can script multiple real Windows games on this PC. A headless
 client can also supply avatar traffic. This permits automated network checks;
 the first human friend session and a second Windows installation remain open.
+One combined impaired Mac-relay session passed (`20261005-001439`): enemy
+HP matched, both client hit claims applied once, the targeted death applied
+once per game, and a native host chest opening persisted on the client through
+reload. No game crashed and all four protected saves were unchanged. Both
+overlays were OFF. The corresponding overlay-ON run `000836` remains CRASH;
+VUH-1675 is still open. See the [combined result](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-result.md)
+and [review](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-acceptance-review.md).
+
 See [private joining and simulation](JOIN_GUIDE.md). Cutscene hold, general
 waves and bosses, and the package also remain open.
 

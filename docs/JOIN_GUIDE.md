@@ -63,18 +63,19 @@ KH2, and the cross-machine probe can send synthetic avatar poses. Those
 clients do not run KH2's enemies, story or combat. Renting a server would
 provide another relay location, but would not replace the host's game.
 
-## Reaching the host: Tailscale (recommended)
+## Reaching the relay: Tailscale (recommended)
 
 Tailscale makes a private network between your PCs, with no router changes.
 
 1. Use the existing, authorized Tailscale installation and check
    `tailscale status` on each machine.
-2. The host makes their PC reachable for each friend. Either use a share of the
-   machine with the friend's Tailscale account (Tailscale admin → Machines
-   → the host PC → Share), or invite them to the host's tailnet. That's an
-   account action; James/the owner decides. Check that tailnet policy permits
-   the friend to reach the host on **UDP 7782**.
-3. The host finds their address: `tailscale ip -4` (a `100.x.y.z` address).
+2. The relay owner makes the relay machine reachable for each player, including
+   the gameplay host. Share that machine with the friend's Tailscale account
+   or invite them to the owner's tailnet. That is an account action;
+   James/the owner decides. Check that existing tailnet policy permits the
+   players to reach the relay on **UDP 7782**, or the chosen relay port.
+3. On the relay machine, find its address with `tailscale ip -4`
+   (a `100.x.y.z` address).
 4. Each friend checks they can reach it: `tailscale ping 100.x.y.z`.
 
 Tailscale ping checks the tunnel, not the game's UDP port. Both direct and
@@ -83,6 +84,12 @@ Tailscale-relayed connections can work; see Tailscale's
 [firewall guidance](https://tailscale.com/kb/1181/firewalls).
 
 ## Matching runtime configuration (both PCs)
+
+Use **protocol 10** binaries for relay and runtimes. Protocol version is
+compiled in; there is no `--protocol` flag or runtime config key to change it.
+The game-build identifier below is the reported compatibility value, not the
+Windows executable's file-version field. Always specify the port: relay and
+runtime defaults differ (7782 and 7946 respectively).
 
 The runtime config uses plain `key=value` lines. Omit INI section headers.
 
@@ -120,15 +127,19 @@ build\Release\kh2coop_runtime_scaffold.exe --config build/rig/private-join/runti
     --pid <game pid> --role player --peer-id <your name> --no-camera
 ```
 
-Run the relay and runtime in separate terminals. Replace all angle-bracket
-placeholders before running. Verify the relay's listener:
+Run the relay and runtime in separate terminals. If the relay is on a Mac
+or another machine, run only the game/runtime commands on the gameplay host
+and give **every runtime the relay machine's address**. The accepted Mac
+checks used `100.103.220.58:27795`; 7782 above is just this guide's example.
+Replace all angle-bracket placeholders before running. On a Windows relay,
+verify the listener:
 
 ```powershell
 Get-NetUDPEndpoint -LocalPort 7782 | Select-Object LocalAddress,LocalPort,OwningProcess
 Get-NetConnectionProfile | Select-Object InterfaceAlias,NetworkCategory
 ```
 
-The relay must listen only on the host's Tailscale address, not `0.0.0.0` or
+The relay must listen only on the relay machine's Tailscale address, not `0.0.0.0` or
 `::`. Inspect the actual Tailscale network profile; do not assume it is
 Private. Check the existing inbound firewall rule for the exact relay path,
 UDP port and active profile. Any necessary rule should be scoped to the
@@ -145,7 +156,7 @@ network tests do not need the rig or a game launch.
 ```powershell
 build\tools\kh2ctl\Release\kh2ctl.exe launch      # then load your save
 build\Release\kh2coop_runtime_scaffold.exe --config build/rig/private-join/runtime.ini `
-    --network --server <host 100.x address> --port 7782 `
+    --network --server <relay 100.x address> --port 7782 `
     --pid <game pid> --role friend1 --peer-id <your name> --no-camera
 ```
 
@@ -163,10 +174,13 @@ peer IDs. A second friend uses `--role friend2`. Each slot can be taken once.
 - Combat: the host owns enemy HP. A friend's hits play their reaction, but
   the HP change comes from the host (VUH-1502; friend hit claims are
   VUH-1501).
-- Round-trip time and loss: `kh2ctl overlay on` shows `rtt … ms  loss …%`
-  in the corner once your runtime is connected, and the runtime logs
-  `Net: rtt=…` every 5 s. `enet_loss` counts reliable traffic;
-  `avatar_loss` counts gaps in received avatar sequences once sampled.
+- Round-trip time and loss: the runtime logs `Net: rtt=...` every 5 s.
+  `enet_loss` counts reliable traffic; `avatar_loss` counts gaps in received
+  avatar sequences once sampled. The optional `kh2ctl overlay on --pid <pid>`
+  is intended to show RTT/loss in-game, but overlay-enabled two-game runs
+  crashed and the overlay investigation is still open. Keep it off for
+  routine join checks; numeric runtime logs do not prove visible overlay
+  acceptance. The accepted combat/progress control ran with overlay off.
 
 If a player drops and returns with missing enemies, the current playtest
 workaround is for the host to leave and re-enter the room. Stop runtimes and
@@ -180,9 +194,9 @@ through `kh2ctl`.
   The message shows both sides.
 - **`Requested slot N is already taken`**: someone else has that role. Pick
   the other friend slot.
-- **Never connects**: `tailscale ping` the host. If that works, check that
-  the relay's bind address/port, firewall rule and tailnet policy allow UDP
-  7782. `Test-NetConnection -Port` tests TCP, not ENet/UDP.
+- **Never connects**: `tailscale ping` the relay machine. If that works, check that
+  the relay's bind address/port, firewall rule and tailnet policy allow the chosen UDP
+  port (7782 in these examples). `Test-NetConnection -Port` tests TCP, not ENet/UDP.
 - **Two verified peers but no puppet**: check the room, local game PID and
   matching DLL. Keep the logs for the live lane.
 
@@ -191,8 +205,8 @@ through `kh2ctl`.
 - Without `--bind`, the relay listens on every network interface,
   including the host's LAN. With `--bind 100.x`, only on Tailscale
   (verified 2026-10-02).
-- Tested 2026-10-02 through the host's own Tailscale address only
-  (`net_tailscale_self`): two instances on one PC reached the relay at
+- The earlier 2026-10-02 `net_tailscale_self` check used the host's own
+  Tailscale address: two instances on one PC reached the relay at
   100.108.214.60. That fixture launches two games; only the live lane runs it.
   It now binds the relay explicitly. Its address is machine-specific: update
   both runtime `server` values and relay `args` together on another host.
@@ -204,6 +218,22 @@ through `kh2ctl`.
   directions and mismatched-build/protocol rejection passed without games
   or firewall changes. Evidence and bounded rerun commands:
   `build/rig/vuh1493-offline-20261005-01/result.md` (local evidence).
-- Next is the live lane's one-game/Mac-synthetic check. Two-player visible
-  gameplay still needs James's chosen second Windows KH2 player. This
-  headless result does not establish a different internet connection.
+- The one-game/Mac-synthetic leg passed (`pc-leg-02`, 120 seconds), followed
+  by two real games on one Windows PC through the Mac relay: normal movement
+  `221407` and impaired movement `221645`. These supersede the earlier
+  own-address-only transport coverage; they do not test a second Windows PC
+  or a different household's internet connection.
+- One combined impaired combat-and-chest session passed in `20261005-001439`,
+  **with both overlays off**: enemy HP matched, two client hits applied once
+  each, the targeted death applied once per game, and the native chest opening
+  persisted on the client through reload. All four protected saves stayed
+  unchanged. See the [result](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-result.md)
+  and [acceptance review](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-acceptance-review.md).
+  Earlier setup failures and overlay crashes retain their original outcomes.
+- The first human friend session still needs James to choose a participant
+  with a working Windows KH2 installation, an authorized game/account and
+  loadable save, matching build/mod configuration, and authorized Tailscale
+  access to the relay. Account sharing/invitations and any access-policy
+  changes require the owner; the tested Mac path creates none of them.
+  Another human's controls, separate Windows setup and internet path remain
+  untested. Player-ready packaging is also still pending.
