@@ -1999,6 +1999,26 @@ hold/resume remains separate.
 
 ## Progress and applied-state hash fixtures
 
+### Native story state through the impaired Mac relay
+
+Run `20261005-040303_mac_relay_native_story_join_root_1` passed 82 steps in
+204.1 seconds; independent review accepted the bounded result. Two real games
+on this PC used the private Mac relay with 50 ms delay, 10 ms jitter and 2%
+loss. The host naturally acquired 08/0C story/program state, returned control
+in `[8,12,50,0,0,22]`, and returned to GoA. A client that never entered 08/0C
+received the latest complete 8108-byte snapshot before its native join load,
+then retained the flag through a same-room reload. Exact shared ranges and
+personal apply invariants matched; protected saves were unchanged. Connected
+incremental event delivery, cutscene hold/skip and broader native side effects
+are separate tests.
+
+The root-owned scratch fixture/adapter, actual relay receipts, sealed inputs
+and commands are in `build/rig/vuh1497-native-progress-mac-relay-20261005-01/`.
+See [result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/story2-result.md)
+and [review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/story2-acceptance-review.md).
+The earlier weak-control calibration `033029` remains FAIL; the stronger,
+delayed native pulse in `040303` demonstrated 191 units of displacement.
+
 - `progress_chest_goa_probe`: one instance boots, enters `04/1A`, captures
   the room and records all actors, native treasure records and flag 409.
   This is exploratory evidence, with no memory write or chest interaction.

@@ -26,7 +26,7 @@ possibly enemies.
 | Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Private Tailscale transport passed with one real game and a Mac synthetic avatar for two minutes, then two real local games through a Mac relay, normally and with delay/loss. Two separate Windows installations and controller playtests remain open. |
 | Hit claims | A client's hits on enemies are sent as claims; the host applies each once through the game's own damage routine and broadcasts absolute HP (protocol 10). Ordinary Shadow combat, including client kills, works on loopback. Attack-specific effects and boss finishers are open. |
 | Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. After checked native snapshots exposed five unmatched client enemies, scoped host activation passed the original strict 20-load route with empty enemy populations and a source-expiry control. Its unchanged native-wave regression then failed with different enemy identities and an alive host refill. Nonempty spawn/lifecycle authority remains open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
-| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. Broader story flags and side effects remain open. |
+| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected event delivery, cutscene hold and broader side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
 **Reconnect recovery (VUH-1508), in plain terms.** If a client rejoins while the
@@ -84,9 +84,19 @@ Native visited progress passed over the impaired Mac relay (`021630`): the
 host acquired BC05/05's visited bit through native loading, and a client that
 never entered that room received it in GoA before its join load and retained
 it through reload. All shared ranges and personal apply invariants matched,
-and protected saves stayed unchanged. This covers visited/full-state bootstrap,
-with story-event effects still open. See the [result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/visited1-result.md)
+and protected saves stayed unchanged. This covers visited/full-state bootstrap.
+See the [result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/visited1-result.md)
 and [independent review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/visited1-acceptance-review.md).
+
+Native story acquisition also passed (`040303`, independently accepted): the
+host completed the game's 08/0C event, acquired a story flag and program/visited
+bytes, then returned to GoA. A client that never loaded the event room applied
+the latest full snapshot before its join load and retained the story flag through
+reload. Native movement returned in the actual completed event tuple. Personal
+bytes and protected saves were unchanged. This proves acquired story state for
+late join/reload; connected event delivery, hold/skip and arbitrary story side
+effects remain open. See the [result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/story2-result.md)
+and [independent review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/story2-acceptance-review.md).
 
 Five room-specific initial joins and same-room reloads also passed through the
 impaired Mac relay: GoA plus BC01/04/05/06. Full native tuples, latest progress
