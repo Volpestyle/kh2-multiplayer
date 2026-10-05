@@ -2635,6 +2635,8 @@ static void* __fastcall HookedFollowSteering(void* typeHandler, void* outVec4,
 // Diagnostic only: callback entry liveness, not native thread ownership or a
 // script-freeze predicate. Published before enabling the existing input hook.
 static std::atomic<uintptr_t> g_inputTraceBase {0};
+static std::atomic<unsigned long long> g_inputTraceOwnerFrame {0};
+static std::atomic<DWORD> g_inputTraceOwnerTid {0};
 static SRWLOCK g_inputTraceLogLock = SRWLOCK_INIT;
 
 struct InputTraceSample {
@@ -2675,6 +2677,9 @@ static bool SameInputTraceSample(const InputTraceSample& a, const InputTraceSamp
 static void TraceInputCallback() {
     const auto base = g_inputTraceBase.load(std::memory_order_acquire);
     if (!base) return;
+    // Independent atomic observations, not a coherent frame/thread binding.
+    const auto ownerFrame = g_inputTraceOwnerFrame.load(std::memory_order_acquire);
+    const auto ownerTid = g_inputTraceOwnerTid.load(std::memory_order_relaxed);
     // Trivial TLS, no destructor, allocation, environment lookup or entity-frame
     // globals. A new thread starts a separate count; no main-thread assumption.
     struct TraceState {
@@ -2711,7 +2716,7 @@ static void TraceInputCallback() {
         Log("[input-callback] tid=%lu calls=%llu ms=%llu deltaCalls=%llu deltaMs=%llu "
             "reason=%s suppressedChanges=%llu available=%02X/%02X error=%08lX/%08lX "
             "bracketEqual=%u eventState=%d/%d eventContext=%llX/%llX "
-            "menu=%u/%u frozen=%d/%d pauseBlockers=%08X/%08X",
+            "menu=%u/%u frozen=%d/%d pauseBlockers=%08X/%08X ownerFrame=%llu ownerTid=%lu",
             GetCurrentThreadId(), t.calls, now, t.calls - t.lastCalls,
             first ? 0ULL : now - t.lastMs, first ? "first" : changed ? "change" : "heartbeat",
             t.suppressed, before.available, after.available, before.error, after.error,
@@ -2722,7 +2727,7 @@ static void TraceInputCallback() {
             static_cast<unsigned long long>(after.eventContext),
             static_cast<unsigned>(before.menu), static_cast<unsigned>(after.menu),
             before.frozen, after.frozen, static_cast<unsigned>(before.pauseBlockers),
-            static_cast<unsigned>(after.pauseBlockers));
+            static_cast<unsigned>(after.pauseBlockers), ownerFrame, ownerTid);
         t.lastCalls = t.calls;
         t.lastMs = now;
         t.suppressed = 0;
@@ -2887,6 +2892,10 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
             if (addr == listHead && listHead != 0) {
                 ++g_frameCounter;
+                if (g_inputTraceBase.load(std::memory_order_acquire)) {
+                    g_inputTraceOwnerTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+                    g_inputTraceOwnerFrame.fetch_add(1, std::memory_order_release);
+                }
                 ClearNativeAiStamps();
                 g_processedStickFrame = UINT32_MAX;  // allow fresh snapshot
 

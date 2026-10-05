@@ -2724,6 +2724,12 @@ candidate observation/release callback; multiplayer cutscene hold and skip
 remain unimplemented. See the [probe result](../build/rig/vuh1498-input-callback-probe-20261005-01/result.md)
 and [source review](../build/rig/vuh1507-launcher-20261005-01/input-callback-review.md).
 
+The optional trace also records independent atomic owner-frame and owner-thread
+observations. Actual event run `050837` retained advancing list-head owner frames
+through states2/3/4. These fields are not a coherent ownership token and do not
+authorize world publication from the raw-input callback. See the
+[owner coverage result](../build/rig/vuh1498-input-callback-probe-20261005-01/owner-coverage-root01/result.md).
+
 ## Known limits
 
 - `boot` loads whatever slot the save list opens on (the last used one) and
