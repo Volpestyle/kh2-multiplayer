@@ -14,7 +14,7 @@ with their own camera and full controls. Then widen who you can play as: three
 recolored Soras first, then Roxas and Riku, party and world characters, and
 possibly enemies.
 
-## Where the project stands (updated 2026-10-04)
+## Where the project stands (updated 2026-10-05)
 
 | Area | State |
 |---|---|
@@ -55,13 +55,19 @@ Private transport now works without a friend: the relay can run on the Mac,
 and the rig can script multiple real Windows games on this PC. A headless
 client can also supply avatar traffic. This permits automated network checks;
 the first human friend session and a second Windows installation remain open.
-One combined impaired Mac-relay session passed (`20261005-001439`): enemy
-HP matched, both client hit claims applied once, the targeted death applied
-once per game, and a native host chest opening persisted on the client through
-reload. No game crashed and all four protected saves were unchanged. Both
-overlays were OFF. The corresponding overlay-ON run `000836` remains CRASH;
-VUH-1675 is still open. See the [combined result](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-result.md)
-and [review](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-acceptance-review.md).
+Combined impaired Mac-relay sessions passed with overlays OFF (`001439`) and
+ON (`012155`). In the latter, five client claims each joined one host receipt
+and native application, enemy HP matched, the target died once per game, and
+native chest opening persisted through client reloads. Both screens showed
+RTT/loss. No game crashed and all four protected saves were unchanged. The
+reviewed render fix uses fresh external DIRECT submissions on the Present
+thread, freezes the queue/fence owner, and stops GPU work on failed calls.
+The old dump proved the previous retained queue differed from the swapchain's
+queue. The new run directly matched all three presentation queue slots on
+both games before and after gameplay. This is bounded acceptance, with startup
+capture failures still retained; earlier overlay-ON `000836` remains CRASH.
+See the [overlay-ON result](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-result.md)
+and [independent review](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-acceptance-review.md).
 
 See [private joining and simulation](JOIN_GUIDE.md). Cutscene hold, general
 waves and bosses, and the package also remain open.

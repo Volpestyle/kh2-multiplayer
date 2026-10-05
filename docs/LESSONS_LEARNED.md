@@ -234,3 +234,22 @@ passed ordinary rejoin at5/5/5 but never invoked the historical-input receiver.
 An enabled feature and matching enemies are not proof it ran. Establish the
 missing-population negative control, require production attempt/verification
 receipts, and label forced-resync scope before claiming automatic recovery.
+
+## D3D12 queue identity and capture failures (2026-10-05)
+
+A DIRECT queue on the same device can still differ from the swapchain's
+presentation queue. The overlay dump established distinct controlling COM
+identities; the corrected live path matched its selected queue to all three
+actual presentation slots. Check association separately from type/device.
+Keep version-specific DXGI structure reads in ignored diagnostics, with exact
+DLL/code/layout guards; they are not production offsets. Recheck fence
+completion after an event wakes, including the removed-device sentinel, before
+mapping or reusing resources. Never release a queue in a TLS destructor under
+loader teardown.
+
+A title-menu timeout can be a capture failure: the current detector treats a
+failed capture as no highlighted menu row. Retain the actual capture reply and
+owner/freshness receipts before blaming loading or tracing. A puppet release
+can also precede reactivation without retiring the network session; check role
+and runtime identity separately, and scope puppet damage to actual ownership.
+See the [reviewed overlay run](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-acceptance-review.md).

@@ -37,7 +37,17 @@ kh2ctl inject --pid N    # inject into an already running KH2
 
 To see an instance, use `kh2ctl capture --pid N` (PNG from inside the
 renderer, works behind other windows) or `kh2ctl clip --pid N` (MP4), and
-`kh2ctl overlay --pid N on` for pid, frame, world/room and fps on screen.
+`kh2ctl overlay --pid N on` for pid, frame, world/room, fps and connected RTT/loss on screen.
+
+The D3D12 renderer selects fresh external DIRECT submissions from the Present
+thread and retains one queue/device/owner for its fence ring. It skips work
+without an eligible submission and stops GPU work after a failed reset, close,
+signal, wait, or removed-device fence result; restart the instance after a GPU
+failure. Last queue references are intentionally retained at process teardown.
+Set `KH2COOP_RENDER_DIAGNOSTICS=1` before launch for bounded queue, owner,
+Present metadata and first-failure receipts. Diagnostics do not establish queue
+association by themselves. The combined overlay-ON native result is
+[012155](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-result.md).
 
 `launch` reports `"hooksInstalled":true` and the hook list once the DLL's init
 log shows every hook. Measured 2026-10-01: 10 of 10 launches installed all four

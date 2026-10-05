@@ -76,10 +76,34 @@ uintptr_t g_exeBase = 0;
 HANDLE g_channelMapping = nullptr;
 CaptureChannel* g_channel = nullptr;
 
-// ---- Game queue (set from the ExecuteCommandLists hook, any thread) ---------
+// ---- External DIRECT submissions observed on each calling thread ---------
 ExecuteCommandListsFn g_origExecute = nullptr;
 void* g_executeTarget = nullptr;
-std::atomic<ID3D12CommandQueue*> g_gameQueue {nullptr};  // holds a reference
+struct ThreadSubmission {
+    ID3D12CommandQueue* queue = nullptr;  // owned by this thread
+    UINT64 sequence = 0;
+    UINT64 previousPresent = 0;
+    // Trivial TLS: retain its last reference at loader teardown; normal replacements release below.
+    void Observe(ID3D12CommandQueue* value) {
+        if (queue != value) {
+            value->AddRef();
+            ID3D12CommandQueue* previous = queue;
+            queue = value;
+            if (previous) previous->Release();
+        }
+        ++sequence;
+    }
+};
+thread_local ThreadSubmission t_externalSubmission;
+ID3D12CommandQueue* g_boundQueue = nullptr;  // owned through outstanding GPU work
+IUnknown* g_boundQueueIdentity = nullptr;  // owned canonical identity
+ID3D12Device* g_boundDevice = nullptr;       // identity; bound queue retains device
+DWORD g_boundThread = 0;
+std::atomic<DWORD> g_renderOwner {0};
+std::atomic<unsigned> g_ownerRejectReceipts {0};
+unsigned g_noFreshReceipts = 0;
+bool g_bindingRejectedLogged = false;
+bool g_gpuFailed = false;
 
 // ---- Render-thread state ------------------------------------------------------
 IDXGISwapChain* g_checkedSwapChain = nullptr;  // identity only
@@ -134,6 +158,61 @@ LARGE_INTEGER g_fpsWindowStart {};
 UINT64 g_fpsWindowPresents = 0;
 unsigned g_fps = 0;
 bool g_disabled = false;
+bool g_renderDiagnostics = false;
+bool g_overlayDiagnosticsLogged[16] {};
+std::atomic<ID3D12CommandQueue*> g_diagnosticQueues[16] {};
+std::atomic<unsigned> g_diagnosticPresentEntries {0};
+std::atomic<bool> g_diagnosticOverlapLogged {false};
+std::atomic<unsigned> g_diagnosticParametersLogged {0};
+std::atomic<bool> g_diagnosticFailureLogged {false};
+
+void LogGpuFailure(const char* operation, HRESULT result) {
+    if (g_diagnosticFailureLogged.exchange(true)) return;
+    __try {
+        const HRESULT removed = g_device ? g_device->GetDeviceRemovedReason() : E_NOINTERFACE;
+        if (g_log) g_log("[render-diag] firstFailure operation=%s result=%08lX removed=%08lX thread=%lu",
+                         operation, result, removed, GetCurrentThreadId());
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (g_log) g_log("[render-diag] firstFailure operation=%s result=%08lX removalQueryUnavailable=1",
+                         operation, result);
+    }
+}
+
+void OnPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags);
+
+void DiagnosticPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags,
+                            const DXGI_PRESENT_PARAMETERS* params, bool present1) {
+    const unsigned concurrent = g_diagnosticPresentEntries.fetch_add(1);
+    __try {
+        if (concurrent && !g_diagnosticOverlapLogged.exchange(true) && g_log) {
+            g_log("[render-diag] PresentOverlap activeBefore=%u enteredThread=%lu swapchain=%p flags=%X",
+                  concurrent, GetCurrentThreadId(), swapChain, flags);
+        }
+        __try {
+            if (present1 && g_channel && g_channel->overlay &&
+                g_diagnosticParametersLogged.fetch_add(1) < 4 && g_log) {
+                const UINT count = params ? params->DirtyRectsCount : 0;
+                g_log("[render-diag] overlayParameters thread=%lu swapchain=%p present1=%d params=%d "
+                      "dirtyRects=%u scrollRectPresent=%d scrollOffsetPresent=%d",
+                      GetCurrentThreadId(), swapChain, present1, params != nullptr, count,
+                      params && params->pScrollRect, params && params->pScrollOffset);
+                if (params && params->pDirtyRects) {
+                    for (UINT i = 0; i < count && i < 4; ++i) {
+                        const RECT r = params->pDirtyRects[i];
+                        g_log("[render-diag] dirtyRect index=%u left=%ld top=%ld right=%ld bottom=%ld",
+                              i, r.left, r.top, r.right, r.bottom);
+                    }
+                }
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            if (g_log) g_log("[render-diag] overlayParameters unavailable exception=%08lX", GetExceptionCode());
+        }
+        OnPresentEntry(hook, swapChain, flags);
+    } __finally {
+        g_diagnosticPresentEntries.fetch_sub(1);
+    }
+}
+
 
 // ---- Encoder thread -------------------------------------------------------------
 struct EncodeItem {
@@ -300,11 +379,33 @@ void WorkerMain() {
 
 void STDMETHODCALLTYPE HookedExecuteCommandLists(ID3D12CommandQueue* queue, UINT count,
                                                  ID3D12CommandList* const* lists) {
-    if (!g_gameQueue.load(std::memory_order_acquire) && queue &&
-        queue->GetDesc().Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-        ID3D12CommandQueue* expected = nullptr;
-        queue->AddRef();
-        if (!g_gameQueue.compare_exchange_strong(expected, queue)) queue->Release();
+    if (queue && count && queue->GetDesc().Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+        t_externalSubmission.Observe(queue);
+    }
+    if (g_renderDiagnostics && queue && queue->GetDesc().Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+        for (auto& observed : g_diagnosticQueues) {
+            ID3D12CommandQueue* expected = nullptr;
+            if (observed.load() == queue) break;
+            if (!observed.compare_exchange_strong(expected, queue)) {
+                if (expected == queue) break;
+                continue;
+            }
+            ID3D12Device* device = nullptr;
+            IUnknown* deviceIdentity = nullptr;
+            IUnknown* queueIdentity = nullptr;
+            const HRESULT deviceHr = queue->GetDevice(IID_PPV_ARGS(&device));
+            const HRESULT deviceIdentityHr = device ? device->QueryInterface(IID_PPV_ARGS(&deviceIdentity)) : E_NOINTERFACE;
+            const HRESULT queueIdentityHr = queue->QueryInterface(IID_PPV_ARGS(&queueIdentity));
+            if (g_log) g_log("[render-diag] directQueue queue=%p queueIdentity=%p deviceIdentity=%p "
+                             "deviceHr=%08lX deviceIdentityHr=%08lX queueIdentityHr=%08lX "
+                             "thread=%lu retained=%d lists=%u",
+                             queue, queueIdentity, deviceIdentity, deviceHr, deviceIdentityHr,
+                             queueIdentityHr, GetCurrentThreadId(), queue == t_externalSubmission.queue, count);
+            if (queueIdentity) queueIdentity->Release();
+            if (deviceIdentity) deviceIdentity->Release();
+            if (device) device->Release();
+            break;
+        }
     }
     g_origExecute(queue, count, lists);
 }
@@ -341,12 +442,13 @@ ID3D12Resource* CreateBuffer(D3D12_HEAP_TYPE heap, UINT64 size,
     return resource;
 }
 
+bool CheckGpuCall(const char* operation, HRESULT result);
+
 // Sets up device objects for a newly seen swapchain. Returns false if this
 // swapchain can't be served (logged once).
 bool PrepareSwapChain(IDXGISwapChain* swapChain) {
+    if (g_gpuFailed) return false;
     if (swapChain == g_checkedSwapChain) return g_ready;
-    g_checkedSwapChain = swapChain;
-    g_ready = false;
 
     DXGI_SWAP_CHAIN_DESC desc {};
     swapChain->GetDesc(&desc);
@@ -365,6 +467,13 @@ bool PrepareSwapChain(IDXGISwapChain* swapChain) {
         if (g_log) g_log("  Render: swapchain device is neither D3D11 nor D3D12");
         return false;
     }
+    if (device != g_device && g_boundQueue) {
+        device->Release();
+        if (g_log) g_log("[render] changed swapchain device rejected; frozen queue resources retained");
+        return false;
+    }
+    g_checkedSwapChain = swapChain;
+    g_ready = false;
     if (g_channel) g_channel->renderer = 12;
 
     if (device != g_device) {
@@ -377,7 +486,14 @@ bool PrepareSwapChain(IDXGISwapChain* swapChain) {
             if (g_log) g_log("  Render: CreateFence failed");
             return false;
         }
-        if (!g_fenceEvent) g_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!g_fenceEvent) {
+            g_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (!g_fenceEvent) {
+                const DWORD error = GetLastError();
+                CheckGpuCall("CreateEventW", error ? HRESULT_FROM_WIN32(error) : E_FAIL);
+                return false;
+            }
+        }
     } else {
         device->Release();
     }
@@ -398,7 +514,7 @@ bool PrepareSwapChain(IDXGISwapChain* swapChain) {
             if (g_log) g_log("  Render: command list creation failed");
             return false;
         }
-        ctx.list->Close();
+        if (!CheckGpuCall("initial list.Close", ctx.list->Close())) return false;
         const UINT64 uploadSize =
             static_cast<UINT64>(AlignPitch(kOverlayWidth * 4)) * kOverlayHeight;
         ctx.upload = CreateBuffer(D3D12_HEAP_TYPE_UPLOAD, uploadSize,
@@ -501,8 +617,85 @@ void DrainReadback(FrameContext& ctx) {
     g_queueCv.notify_one();
 }
 
+bool CheckGpuCall(const char* operation, HRESULT result) {
+    if (SUCCEEDED(result)) return true;
+    g_gpuFailed = true;
+    LogGpuFailure(operation, result);
+    FailJob(CaptureStatus::GpuError, L"renderer GPU work failed; restart required");
+    return false;
+}
+
+bool ReadFenceCompleted(UINT64& completed) {
+    if (g_gpuFailed) return false;
+    completed = g_fence->GetCompletedValue();
+    if (completed == UINT64_MAX) {
+        CheckGpuCall("GetCompletedValue", DXGI_ERROR_DEVICE_REMOVED);
+        return false;
+    }
+    return true;
+}
+
+// KH2 submits frame rendering on its Present thread. This bounded selection
+// requires a fresh non-overlay submission and matching device. Once selected,
+// never migrate the ring's single fence timeline to a different queue.
+ID3D12CommandQueue* FrameQueue() {
+    ID3D12CommandQueue* candidate = t_externalSubmission.queue;
+    if (!candidate || t_externalSubmission.sequence == t_externalSubmission.previousPresent) {
+        if (g_renderDiagnostics && g_noFreshReceipts++ < 4 && g_log)
+            g_log("[render-diag] no fresh queue thread=%lu sequence=%llu previous=%llu queue=%p present=%llu",
+                  GetCurrentThreadId(), static_cast<unsigned long long>(t_externalSubmission.sequence),
+                  static_cast<unsigned long long>(t_externalSubmission.previousPresent), candidate,
+                  static_cast<unsigned long long>(g_presentIndex));
+        return nullptr;
+    }
+    if (candidate == g_boundQueue && g_device == g_boundDevice &&
+        GetCurrentThreadId() == g_boundThread) return g_boundQueue;
+
+    ID3D12Device* device = nullptr;
+    IUnknown* deviceIdentity = nullptr;
+    IUnknown* swapIdentity = nullptr;
+    IUnknown* queueIdentity = nullptr;
+    const HRESULT deviceHr = candidate->GetDevice(IID_PPV_ARGS(&device));
+    const HRESULT deviceIdentityHr = device ? device->QueryInterface(IID_PPV_ARGS(&deviceIdentity)) : E_NOINTERFACE;
+    const HRESULT swapIdentityHr = g_device->QueryInterface(IID_PPV_ARGS(&swapIdentity));
+    const HRESULT queueIdentityHr = candidate->QueryInterface(IID_PPV_ARGS(&queueIdentity));
+    const bool sameDevice = SUCCEEDED(deviceHr) && SUCCEEDED(deviceIdentityHr) &&
+                            SUCCEEDED(swapIdentityHr) && deviceIdentity == swapIdentity;
+    const bool compatible = sameDevice && SUCCEEDED(queueIdentityHr) &&
+                            (!g_boundQueue || (g_boundQueueIdentity == queueIdentity &&
+                                               GetCurrentThreadId() == g_boundThread));
+    if (compatible && !g_boundQueue) {
+        candidate->AddRef();
+        g_boundQueue = candidate;
+        g_boundQueueIdentity = queueIdentity;
+        queueIdentity = nullptr;
+        g_boundDevice = g_device;
+        g_boundThread = GetCurrentThreadId();
+        if (g_log) g_log("[render] queue bound source=present-thread-external-direct "
+                         "thread=%lu sequence=%llu queue=%p identity=%p swapchain=%p sameDevice=1 fresh=1",
+                         g_boundThread, static_cast<unsigned long long>(t_externalSubmission.sequence),
+                         g_boundQueue, g_boundQueueIdentity, g_swapChain3);
+    }
+    if (!compatible && !g_bindingRejectedLogged) {
+        g_bindingRejectedLogged = true;
+        if (g_log) g_log("[render] queue binding rejected thread=%lu sequence=%llu candidate=%p "
+                         "identity=%p bound=%p sameDevice=%d deviceHr=%08lX deviceIdentityHr=%08lX "
+                         "swapIdentityHr=%08lX queueIdentityHr=%08lX",
+                         GetCurrentThreadId(), static_cast<unsigned long long>(t_externalSubmission.sequence),
+                         candidate, queueIdentity, g_boundQueue, sameDevice, deviceHr,
+                         deviceIdentityHr, swapIdentityHr, queueIdentityHr);
+    }
+    if (queueIdentity) queueIdentity->Release();
+    if (swapIdentity) swapIdentity->Release();
+    if (deviceIdentity) deviceIdentity->Release();
+    if (device) device->Release();
+    if (!compatible) FailJob(CaptureStatus::Unsupported, L"no compatible render-thread queue; restart required");
+    return compatible ? g_boundQueue : nullptr;
+}
+
 void DrainCompletedReadbacks() {
-    const UINT64 completed = g_fence->GetCompletedValue();
+    UINT64 completed = 0;
+    if (!ReadFenceCompleted(completed)) return;
     for (auto& ctx : g_ring) {
         if (ctx.hasCapture && ctx.fenceValue <= completed) DrainReadback(ctx);
     }
@@ -590,17 +783,28 @@ void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource,
 
 // Records and submits this present's work: overlay and/or capture copy.
 void SubmitFrameWork(bool drawOverlay, bool captureFrame) {
-    ID3D12CommandQueue* queue = g_gameQueue.load(std::memory_order_acquire);
-    if (!queue) {
-        if (captureFrame) FailJob(CaptureStatus::Unsupported, L"game queue not found yet");
+    if (g_gpuFailed) {
+        if (captureFrame) FailJob(CaptureStatus::GpuError, L"renderer GPU work failed; restart required");
         return;
     }
+    ID3D12CommandQueue* queue = FrameQueue();
+    if (!queue) return;  // Wait for a fresh eligible frame; never use the first observed queue.
 
     FrameContext& ctx = g_ring[g_presentIndex % kRing];
-    if (ctx.fenceValue > g_fence->GetCompletedValue()) {
+    UINT64 completed = 0;
+    if (!ReadFenceCompleted(completed)) return;
+    if (ctx.fenceValue > completed) {
         // The GPU is more than kRing presents behind; wait briefly.
-        g_fence->SetEventOnCompletion(ctx.fenceValue, g_fenceEvent);
-        if (WaitForSingleObject(g_fenceEvent, 100) != WAIT_OBJECT_0) return;
+        if (!CheckGpuCall("SetEventOnCompletion", g_fence->SetEventOnCompletion(ctx.fenceValue, g_fenceEvent))) return;
+        const DWORD wait = WaitForSingleObject(g_fenceEvent, 100);
+        if (wait == WAIT_FAILED) {
+            const DWORD error = GetLastError();
+            CheckGpuCall("WaitForSingleObject", error ? HRESULT_FROM_WIN32(error) : E_FAIL);
+            return;
+        }
+        if (wait != WAIT_OBJECT_0) return;
+        // A completion from an older timed-out registration can wake this shared event.
+        if (!ReadFenceCompleted(completed) || completed < ctx.fenceValue) return;
     }
     if (ctx.hasCapture) DrainReadback(ctx);
 
@@ -611,6 +815,41 @@ void SubmitFrameWork(bool drawOverlay, bool captureFrame) {
         return;
     }
     const D3D12_RESOURCE_DESC bbDesc = backbuffer->GetDesc();
+    if (drawOverlay && g_renderDiagnostics && index < 16 &&
+        !g_overlayDiagnosticsLogged[index]) {
+        g_overlayDiagnosticsLogged[index] = true;
+        DXGI_SWAP_CHAIN_DESC swapDesc {};
+        const HRESULT swapDescHr = g_swapChain3->GetDesc(&swapDesc);
+        ID3D12Device* queueDevice = nullptr;
+        const HRESULT queueDeviceHr = queue->GetDevice(IID_PPV_ARGS(&queueDevice));
+        IUnknown* queueIdentity = nullptr;
+        IUnknown* swapIdentity = nullptr;
+        const HRESULT queueIdentityHr = queueDevice
+            ? queueDevice->QueryInterface(IID_PPV_ARGS(&queueIdentity)) : E_NOINTERFACE;
+        const HRESULT swapIdentityHr = g_device->QueryInterface(IID_PPV_ARGS(&swapIdentity));
+        IDXGIResource* dxgiResource = nullptr;
+        DXGI_USAGE usage = 0;
+        const HRESULT resourceQueryHr = g_swapChain3->GetBuffer(index, IID_PPV_ARGS(&dxgiResource));
+        const HRESULT resourceUsageHr = dxgiResource ? dxgiResource->GetUsage(&usage) : E_NOINTERFACE;
+        const bool identityAvailable = SUCCEEDED(queueIdentityHr) && SUCCEEDED(swapIdentityHr);
+        if (g_log) g_log("[render-diag] overlay present=%llu index=%u swapDescHr=%08lX "
+                         "swapEffect=%u swapFlags=%X swapUsage=%X resourceUsage=%X resourceFlags=%X "
+                         "queue=%p queueDeviceHr=%08lX queueIdentity=%p swapIdentity=%p "
+                         "identityAvailable=%d sameDevice=%d resourceQueryHr=%08lX "
+                         "resourceUsageHr=%08lX removedBefore=%08lX",
+                         static_cast<unsigned long long>(g_presentIndex), index,
+                         swapDescHr, static_cast<unsigned>(swapDesc.SwapEffect), swapDesc.Flags,
+                         swapDesc.BufferUsage,
+                         usage, static_cast<unsigned>(bbDesc.Flags), queue, queueDeviceHr,
+                         queueIdentity, swapIdentity,
+                         identityAvailable, identityAvailable ? queueIdentity == swapIdentity : -1,
+                         resourceQueryHr, resourceUsageHr,
+                         g_device->GetDeviceRemovedReason());
+        if (dxgiResource) dxgiResource->Release();
+        if (queueIdentity) queueIdentity->Release();
+        if (swapIdentity) swapIdentity->Release();
+        if (queueDevice) queueDevice->Release();
+    }
     if (!IsSupportedFormat(bbDesc.Format)) {
         backbuffer->Release();
         if (captureFrame) FailJob(CaptureStatus::Unsupported, L"backbuffer format not supported");
@@ -647,8 +886,10 @@ void SubmitFrameWork(bool drawOverlay, bool captureFrame) {
         }
     }
 
-    ctx.allocator->Reset();
-    ctx.list->Reset(ctx.allocator, nullptr);
+    const HRESULT allocatorReset = ctx.allocator->Reset();
+    if (!CheckGpuCall("allocator.Reset", allocatorReset)) { backbuffer->Release(); return; }
+    const HRESULT listReset = ctx.list->Reset(ctx.allocator, nullptr);
+    if (!CheckGpuCall("list.Reset", listReset)) { backbuffer->Release(); return; }
 
     D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_PRESENT;
     if (drawOverlay) {
@@ -695,13 +936,16 @@ void SubmitFrameWork(bool drawOverlay, bool captureFrame) {
     if (state != D3D12_RESOURCE_STATE_PRESENT) {
         Transition(ctx.list, backbuffer, state, D3D12_RESOURCE_STATE_PRESENT);
     }
-    ctx.list->Close();
+    const HRESULT listClose = ctx.list->Close();
     backbuffer->Release();
+    if (!CheckGpuCall("list.Close", listClose)) return;
 
     ID3D12CommandList* lists[] = {ctx.list};
-    queue->ExecuteCommandLists(1, lists);
-    ctx.fenceValue = ++g_fenceValue;
-    queue->Signal(g_fence, ctx.fenceValue);
+    g_origExecute(queue, 1, lists);  // Our work must not become an external-queue observation.
+    const UINT64 nextFence = g_fenceValue + 1;
+    if (!CheckGpuCall("queue.Signal", queue->Signal(g_fence, nextFence))) return;
+    g_fenceValue = nextFence;
+    ctx.fenceValue = nextFence;
 
     if (captureFrame) {
         ctx.hasCapture = true;
@@ -715,7 +959,8 @@ void OnPresent(IDXGISwapChain* swapChain) {
     const bool ready = PrepareSwapChain(swapChain);
     StartJobIfRequested();
 
-    if (ready) {
+    if (g_gpuFailed) FailJob(CaptureStatus::GpuError, L"renderer GPU work failed; restart required");
+    if (ready && !g_gpuFailed) {
         DrainCompletedReadbacks();
         bool captureFrame = false;
         if (g_job.active && g_job.status == CaptureStatus::Ok &&
@@ -744,6 +989,7 @@ void OnPresentGuarded(IDXGISwapChain* swapChain) {
     __try {
         OnPresent(swapChain);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        LogGpuFailure("PresentHookException", static_cast<HRESULT>(GetExceptionCode()));
         g_disabled = true;
     }
 }
@@ -761,13 +1007,24 @@ PresentHook g_hooks[kMaxHooks];
 thread_local int t_presentDepth = 0;
 
 void OnPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags) {
+    if (t_presentDepth > 1 || !g_channel || !swapChain || (flags & DXGI_PRESENT_TEST)) return;
+    const DWORD thread = GetCurrentThreadId();
+    DWORD owner = 0;
+    const bool claimed = g_renderOwner.compare_exchange_strong(owner, thread);
+    if (claimed && g_renderDiagnostics && g_log)
+        g_log("[render-diag] render owner claimed thread=%lu swapchain=%p", thread, swapChain);
+    if (!claimed && owner != thread) {
+        if (g_renderDiagnostics && g_ownerRejectReceipts.fetch_add(1) < 4 && g_log)
+            g_log("[render-diag] render owner rejected owner=%lu thread=%lu swapchain=%p sequence=%llu previous=%llu queue=%p",
+                  owner, thread, swapChain, static_cast<unsigned long long>(t_externalSubmission.sequence),
+                  static_cast<unsigned long long>(t_externalSubmission.previousPresent), t_externalSubmission.queue);
+        return;
+    }
+    // Only the claimed owner may inspect or mutate shared render state.
+    if (g_disabled) return;
     if (!g_hooks[hook].seen) {
         g_hooks[hook].seen = true;
         if (g_log) g_log("  Render: game presents via %s", g_hooks[hook].label);
-    }
-    if (t_presentDepth > 1 || g_disabled || !g_channel || !swapChain ||
-        (flags & DXGI_PRESENT_TEST)) {
-        return;
     }
     InterlockedIncrement(&g_channel->presentCount);
     OnPresentGuarded(swapChain);
@@ -779,7 +1036,12 @@ template <int N>
 HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInterval,
                                         UINT flags) {
     ++t_presentDepth;
-    OnPresentEntry(N, swapChain, flags);
+    if (g_renderDiagnostics && t_presentDepth == 1) {
+        DiagnosticPresentEntry(N, swapChain, flags, nullptr, false);
+    } else {
+        OnPresentEntry(N, swapChain, flags);
+    }
+    if (t_presentDepth == 1) t_externalSubmission.previousPresent = t_externalSubmission.sequence;
     const HRESULT hr =
         reinterpret_cast<PresentFn>(g_hooks[N].original)(swapChain, syncInterval, flags);
     --t_presentDepth;
@@ -790,7 +1052,12 @@ template <int N>
 HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* swapChain, UINT syncInterval,
                                          UINT flags, const DXGI_PRESENT_PARAMETERS* params) {
     ++t_presentDepth;
-    OnPresentEntry(N, swapChain, flags);
+    if (g_renderDiagnostics && t_presentDepth == 1) {
+        DiagnosticPresentEntry(N, swapChain, flags, params, true);
+    } else {
+        OnPresentEntry(N, swapChain, flags);
+    }
+    if (t_presentDepth == 1) t_externalSubmission.previousPresent = t_externalSubmission.sequence;
     const HRESULT hr = reinterpret_cast<Present1Fn>(g_hooks[N].original)(
         swapChain, syncInterval, flags, params);
     --t_presentDepth;
@@ -889,6 +1156,9 @@ bool HookOne(void* target, void* detour, void** original, const char* label) {
 bool Install(uintptr_t exeBase, LogFn log) {
     g_log = log;
     g_exeBase = exeBase;
+    char diagnostic[8] {};
+    g_renderDiagnostics = GetEnvironmentVariableA("KH2COOP_RENDER_DIAGNOSTICS", diagnostic,
+                                                   sizeof(diagnostic)) == 1 && diagnostic[0] == '1';
 
     if (!CreateChannel()) {
         if (g_log) g_log("  Render: capture channel creation failed (%lu)", GetLastError());

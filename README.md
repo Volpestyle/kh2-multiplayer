@@ -1,6 +1,6 @@
 # KH2 Multiplayer
 
-Online co-op mod for Kingdom Hearts II Final Mix (PC). The goal: each player runs their own game, sees the others in the same room, fights the same enemies and travels the story together — then plays as other characters. Two real games on one Windows PC now pass movement, shared combat and chest sync through a private Mac relay with added delay and loss. The in-game debug overlay still crashes some runs; testing uses it off. A human session on separate Windows PCs and player packaging remain open. See [private joining and solo testing](docs/JOIN_GUIDE.md).
+Online co-op mod for Kingdom Hearts II Final Mix (PC). The goal: each player runs their own game, sees the others in the same room, fights the same enemies and travels the story together — then plays as other characters. Two real games on one Windows PC now pass movement, shared combat and chest sync through a private Mac relay with added delay and loss. A reviewed render-queue fix also passed the combined combat/chest run with both overlays on, showing RTT and loss. A human session on separate Windows PCs and player packaging remain open. See [private joining and solo testing](docs/JOIN_GUIDE.md).
 
 ## Start here
 

@@ -177,10 +177,12 @@ peer IDs. A second friend uses `--role friend2`. Each slot can be taken once.
 - Round-trip time and loss: the runtime logs `Net: rtt=...` every 5 s.
   `enet_loss` counts reliable traffic; `avatar_loss` counts gaps in received
   avatar sequences once sampled. The optional `kh2ctl overlay on --pid <pid>`
-  is intended to show RTT/loss in-game, but overlay-enabled two-game runs
-  crashed and the overlay investigation is still open. Keep it off for
-  routine join checks; numeric runtime logs do not prove visible overlay
-  acceptance. The accepted combat/progress control ran with overlay off.
+  shows application RTT and avatar sequence-gap loss in-game. The reviewed
+  render-queue fix passed a combined impaired two-game Mac-relay run with both
+  overlays on (`012155`); captures show the actual values. See its
+  [result and limits](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-result.md).
+  Earlier overlay crashes and startup capture failures remain in the evidence.
+
 
 If a player drops and returns with missing enemies, the current playtest
 workaround is for the host to leave and re-enter the room. Stop runtimes and
@@ -237,3 +239,8 @@ through `kh2ctl`.
   changes require the owner; the tested Mac path creates none of them.
   Another human's controls, separate Windows setup and internet path remain
   untested. Player-ready packaging is also still pending.
+
+A later combined run (`012155`) passed with both overlays ON after the render
+queue fix. Five client claims applied exactly once; native HP/death and chest
+persistence checks passed, and both captures showed RTT/loss. All four saves
+were unchanged. See its [independent acceptance review](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-acceptance-review.md).
