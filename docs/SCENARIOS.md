@@ -21,6 +21,15 @@ instance references, and compiles expression syntax. It does not evaluate
 expressions, acquire the rig lock, inspect processes or saves, or launch
 anything. It does not establish live behavior or validate arbitrary CLI args.
 
+For tight diagnostic timing on this Windows Python runtime, qualify durations
+with `time.perf_counter_ns()` (QueryPerformanceCounter). Keep native/monotonic
+timestamps as separate metadata and never compare clock domains. In endpoint
+control `125253`, a single 16.66-second sleep measured 16.656 seconds on the
+coarse monotonic clock; the strict guard refused the end read. That FAIL remains
+intact. Fresh control `131241` measured 16.661754 seconds with QPC and qualified
+both endpoints under the same bounds, without adding polling or a tolerance.
+See the [clock correction and live result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/no-observer-endpoints-root02/result.md).
+
 ## Automatic reconnect: one cycle (2026-10-04)
 
 Run [20261004-213052](../build/scenarios/20261004-213052_outside_automatic_once_1/report.md)

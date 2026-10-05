@@ -49,6 +49,29 @@ FAIL remain intact. See the
 [caller result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/caller-motion-root02/result.md)
 and [independent interpretation](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/caller-motion50-analysis/result.md).
 
+The private typed-RPM census transport passed live equivalence in `130211`:
+all retained fields and entities responses matched the CLI on three paused
+games. The paused canonical census kept gameplay eligibility false and skipped
+its causal-context branch; this is transport parity only. The unchanged
+75-step wave attempt `130654` then reduced the complete two-snapshot pre-hit
+census from 16.66 seconds to 0.640 seconds. Host damage needed no correction,
+and all original four IDs matched HP153 at a fresh hash and a strictly later
+independent native HP snapshot. The full run still failed before kill: radius
+268.812 grew to 366.348 after the first 250 ms pulse, triggering immediate
+abort. Later-wave/death acceptance remains unexposed. See the
+[transport comparison](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/census-equivalence-root01/result.md)
+and [wave result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/census-fast-waves-root01/result.md).
+
+Endpoint control `131241` moved 325.571 planar units over a QPC-qualified
+16.661754-second gap with no added observer reads. Both endpoints had neutral
+raw/processed input, safe gameplay, stable identities and advancing owner
+frames. Bulk census reads are therefore not required for movement. The normal
+protection actor/team loop, renderer, runtime and network continued; endpoints
+do not prove continuous neutrality or causal read-load scaling. Enemy contact,
+knockback and terrain remain possible contributors. All four saves stayed
+unchanged in these runs; owned processes and relays closed. See the
+[endpoint result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/no-observer-endpoints-root02/result.md).
+
 ## Current resync binding, 2026-10-04
 
 The current protocol9/WorldBridge11 resync path now qualifies the complete
