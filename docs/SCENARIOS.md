@@ -41,6 +41,22 @@ the evidence reader mishandled continuously arriving unsealed log tails. The
 corrected one-cycle reader retains those tails and certifies through newer real
 post-census seals. Neither result qualifies the parked ten-cycle gates.
 
+## Private Tailscale transport: one real game (2026-10-04)
+
+Run [20261004-214513](../build/scenarios/20261004-214513_tailscale_one_game_mac_avatar_1/report.md)
+passed with a relay bound only to `100.108.214.60:27795`, one real Windows game
+and a synthetic Mac Friend1. Mac run `pc-leg-02` stayed connected for120 seconds,
+sent7,253 avatars and received5,660 actual PC poses with zero errors. On the PC,
+49 bridge/native samples showed the Mac-controlled Donald moving across590 units;
+mean error to a bracketing bridge pose was4.4 units. Renderer start/end captures
+show the movement. All four protected saves were unchanged, owned processes
+stopped and port27795 was free afterward.
+
+The [bounded result](../build/rig/vuh1493-realgame-20261005-01/lead-result.md)
+retains the Mac receipts, sampled/non-atomic measurement limits and earlier
+config/sample failures. This validates private avatar transport with one game.
+Two-Windows-game combat/progress and the friend playtest remain untested.
+
 ## Historical activation replay: single cycle (2026-10-04)
 
 `net_reconnect_shadows_activation_replay.json` is the current **98-step** bounded

@@ -24,6 +24,12 @@ This guide covers the **current dev build**: run from a built checkout with
 A Mac can run a headless client for the transport check. Actual two-player
 gameplay requires a second Windows KH2 machine.
 
+The private transport check passed on 2026-10-04: a real Windows game displayed
+the Mac's moving Friend1 avatar for a full two-minute connection, and the Mac
+received 5,660 valid game poses. All four protected saves were unchanged.
+See the [result and captures](../build/rig/vuh1493-realgame-20261005-01/lead-result.md).
+Two Windows games playing together remain the next playtest.
+
 ## Reaching the host: Tailscale (recommended)
 
 Tailscale makes a private network between your PCs, with no router changes.
@@ -44,6 +50,8 @@ Tailscale-relayed connections can work; see Tailscale's
 [firewall guidance](https://tailscale.com/kb/1181/firewalls).
 
 ## Matching runtime configuration (both PCs)
+
+The runtime config uses plain `key=value` lines. Omit INI section headers.
 
 Run all commands from the repository root. Create this explicit config on
 each PC, using a different filename if it already exists:
