@@ -630,7 +630,28 @@ exe+0x3BF5E0  Entity Update Loop
 | `0x3B9090` | Position Calculator | Collision + writes final position to entity transform |
 | `0x3BEEC0` | calc_motion | Batch animation/motion processing for all entities |
 
-`EntityPositionPhysics` consumes the injected velocity/acceleration vectors and then clears the accel block (`actor+0xA48..0xA60`) before returning. That matches the intended "write every frame" model for the inject hook.
+`EntityPositionPhysics` consumes several independent movement terms. Its native epilogue clears actor+0xA48 through +0xA67, including +0xA64, with four qword stores at RVAs 0x3B9042/0x3B905F/0x3B9066/0x3B906D. Post-physics zero values therefore do not establish that those terms contributed nothing during the update.
+
+### Static movement terms (checked 2026-10-05)
+
+Existing-binary decompilation and instruction bytes distinguish the following
+terms; these are capabilities, not attribution of a live position change.
+
+| Actor offset | Meaning on the normal physics path |
+|---|---|
+| `+0x690` xyz | Direct additive carried/transformed-frame delta; added at `0x3B8C8A` to `0x3B8C96` independently of velocity. |
+| `+0xA48` xyz | Separate supplied displacement, passed to position calculation without the `+0xA64` scale. |
+| `+0xA58` xyz / `+0xA64` | Term multiplied by the global float at `exe+0x717480` and `+0xA64` before addition; physical units remain unassigned. |
+| `+0xA18` / `+0xA28` / `+0xA38` xyz | Saved entry position, requested aggregate times `exe+0x717488`, and actual position difference times the same factor. |
+| `+0xA78` xyz | Later solver residual from solved `+0x700`, old `+0x670` and selected movement `+0x6E0`, written at `0x3B9535` to `0x3B9549`. |
+
+`0x3B81D0` retrieves polygon geometry and transforms a global vector into a
+surface basis; its old actor-pair separation label was incorrect. The explicit
+other-actor loop is in `0x3B9090`, calling `0x40AD70` with the two actors' `+0xA00`
+objects. The final solved position is copied from `+0x700` to `+0x670` at
+`0x3B955C`. Alternate or skipped branches can leave summary fields stale.
+Sparse sequential reads cannot reconstruct all within-frame contributors.
+See [exact static output and field references](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-physics-terms/field-references.md).
 
 **Strategy B hook target:** `exe+0x3BFD30` — intercept for friend entities, replace the vtable AI dispatch (vtable+0x10) with player input processing, then let `exe+0x3B89A0` (physics) run normally for full game integration.
 
@@ -678,7 +699,7 @@ To block limits while puppets are active, hook `0x3D88E0` and return `5` for any
 
 | Bit | Effect |
 |---|---|
-| 6 (`0x40`) | Skips collision: actor-vs-actor separation in `EntityPositionPhysics` (`0x3B89A0` → `0x3B81D0`), and terrain collision plus ground snap in the position calculator (`0x3B9090`). Per actor; the objentry-wide equivalent is `objentry+0x0C & 2` (shared by every actor of that type). Use for non-colliding puppets |
+| 6 (`0x40`) | Skips collision: the surface-derived vector in `EntityPositionPhysics` (`0x3B89A0` → `0x3B81D0`), and actor/terrain collision plus ground snap in the position calculator (`0x3B9090`). Per actor; the objentry-wide equivalent is `objentry+0x0C & 2` (shared by every actor of that type). Use for non-colliding puppets |
 | 14 (`0x4000`) | TakeDamage (`0x3D5E50`) passes reactFlag 0, so no hit reaction |
 | `0x1000020` | Also skips the ground-snap block in `0x3B9090` |
 
