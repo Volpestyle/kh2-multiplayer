@@ -1013,7 +1013,10 @@ void SessionHost::sendWorldStateTo(ENetPeer* peer) try {
     if (!room_) return;
     sendTo(peer, encode(*room_), true, true);
     if (hold_ && hold_->epoch == room_->epoch) sendTo(peer, encode(*hold_), true, true);
-    if (!manifest_.entries.empty()) {
+    // A received complete-empty replacement is state too. Default/absent or
+    // append-only empty packets must not manufacture a complete baseline.
+    if (!manifest_.entries.empty() || (manifest_.replace && manifest_.epoch != 0 &&
+                                       manifest_.epoch == room_->epoch)) {
         EnemyManifest m = manifest_;
         m.replace = true;
         sendTo(peer, encode(m), true, true);

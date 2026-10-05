@@ -625,6 +625,113 @@ void testHostHeartbeatExpiry() {
     }
 }
 
+// Replay completeness is independent of population size. Exercise real ENet
+// late admission, with a reliable progress barrier instead of timed absence.
+void testEmptyManifestCache() {
+    std::cout << "\n=== Complete-empty manifest cache ===\n";
+    enum Case { Absent, AppendEmpty, CompleteEmpty, EmptyThenAppend,
+                RetiredRoom, WrongEpoch, NonHost, RetiredHost };
+    for (const auto which : {Absent, AppendEmpty, CompleteEmpty, EmptyThenAppend,
+                            RetiredRoom, WrongEpoch, NonHost, RetiredHost}) {
+        const auto label = "empty cache case " + std::to_string(which) + ": ";
+        SessionConfig cfg;
+        cfg.port = 17843; cfg.bindAddress = "127.0.0.1"; cfg.maxPeers = 3;
+        cfg.gameBuild = "empty-cache-build"; cfg.contentHash = "none";
+        cfg.modHash = "none"; cfg.sessionId = "empty-cache-test";
+        SessionHost relay(cfg, {});
+        if (!relay.start()) { check(false, label + "loopback relay starts"); return; }
+        Seen hostSeen, observerSeen, lateSeen;
+        NetworkClient host("127.0.0.1", cfg.port, cfg.gameBuild, cfg.modHash, "empty-host",
+            SlotType::Player, callbacksFor(hostSeen), RuntimeMode::CampaignCoop, cfg.contentHash);
+        NetworkClient observer("127.0.0.1", cfg.port, cfg.gameBuild, cfg.modHash, "empty-observer",
+            SlotType::Friend1, callbacksFor(observerSeen), RuntimeMode::CampaignCoop, cfg.contentHash);
+        NetworkClient late("127.0.0.1", cfg.port, cfg.gameBuild, cfg.modHash, "empty-late",
+            SlotType::Friend2, callbacksFor(lateSeen), RuntimeMode::CampaignCoop, cfg.contentHash);
+        const auto wait = [&](const std::function<bool()>& condition) {
+            const auto end = nowMs() + 3000;
+            while (!condition() && nowMs() < end) {
+                for (auto* c : {&host, &observer, &late}) { c->sendHeartbeat(); c->tick(0); }
+                relay.tick(0);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            return condition();
+        };
+        host.connect(); observer.connect();
+        if (!wait([&] { return host.worldReady() && observer.worldReady(); })) {
+            check(false, label + "initial admission"); return;
+        }
+        host.sendRoomTransition(RoomTransition {17, 4, 26, 0, 0, 0, 0});
+        if (!wait([&] { return !observerSeen.rooms.empty(); })) {
+            check(false, label + "initial room"); return;
+        }
+        if (which == AppendEmpty) host.sendEnemyManifest({17, false, {}});
+        if (which == CompleteEmpty || which == EmptyThenAppend || which == RetiredRoom || which == RetiredHost)
+            host.sendEnemyManifest({17, true, {}});
+        if (which == EmptyThenAppend) host.sendEnemyManifest({17, false, {entry(7, 6, 309)}});
+        if (which == WrongEpoch) host.sendEnemyManifest({16, true, {}});
+        if (which == NonHost) {
+            const auto rejected = relay.rejectedWorldMessages();
+            worldfixture::send(observer, encode(EnemyManifest {17, true, {}}));
+            check(wait([&] { return relay.rejectedWorldMessages() > rejected; }), label + "nonhost rejected");
+        }
+        if (which == RetiredRoom) host.sendRoomTransition(RoomTransition {18, 4, 27, 0, 0, 0, 0});
+        host.sendProgressUpdate({1, false, {}});
+        if (!wait([&] { return !observerSeen.progress.empty() && observerSeen.progress.back().version == 1; })) {
+            check(false, label + "publication barrier"); return;
+        }
+        if (which == RetiredHost) {
+            host.disconnect();
+            if (!wait([&] { return relay.verifiedPeerCount() == 0 && !host.worldReady() && !observer.worldReady(); })) {
+                check(false, label + "host retirement"); return;
+            }
+            host.connect(); observer.connect();
+            if (!wait([&] { return host.worldReady() && observer.worldReady(); })) {
+                check(false, label + "fresh admission after retirement"); return;
+            }
+            host.sendRoomTransition(RoomTransition {17, 4, 26, 0, 0, 0, 0});
+            host.sendProgressUpdate({2, false, {}});
+            if (!wait([&] { return observerSeen.progress.back().version == 2; })) {
+                check(false, label + "fresh room barrier"); return;
+            }
+        }
+        late.connect();
+        if (!wait([&] { return late.worldReady(); })) { check(false, label + "late admission"); return; }
+        host.sendProgressUpdate({3, false, {}});
+        if (!wait([&] { return !lateSeen.progress.empty() && lateSeen.progress.back().version == 3; })) {
+            check(false, label + "post-cache reliable barrier"); return;
+        }
+        const bool expectManifest = which == CompleteEmpty || which == EmptyThenAppend;
+        check(lateSeen.manifests.size() == (expectManifest ? 1u : 0u), label + "truthful manifest presence");
+        if (expectManifest && lateSeen.manifests.size() == 1) {
+            const auto& m = lateSeen.manifests.front();
+            check(m.epoch == 17 && m.replace && m.entries.size() == (which == EmptyThenAppend ? 1u : 0u) &&
+                (m.entries.empty() || m.entries.front().netId == 7), label + "complete replacement / later append preserved");
+            const auto& binding = *late.worldBinding();
+            const WorldEnvelope* room = nullptr;
+            const WorldEnvelope* manifest = nullptr;
+            for (const auto& e : lateSeen.envelopes) {
+                if (e.packet.front() == static_cast<std::uint8_t>(PacketType::RoomTransition)) room = &e;
+                if (e.packet.front() == static_cast<std::uint8_t>(PacketType::EnemyManifest)) manifest = &e;
+            }
+            check(room && manifest && manifest->scope.sessionId == room->scope.sessionId &&
+                manifest->scope.sourceConnectionId == room->scope.sourceConnectionId &&
+                manifest->scope.sourceDeliverySerial == room->scope.sourceDeliverySerial &&
+                manifest->scope.hostSourceSerial == room->scope.hostSourceSerial &&
+                manifest->scope.targetConnectionId == room->scope.targetConnectionId &&
+                manifest->scope.targetDeliverySerial == room->scope.targetDeliverySerial &&
+                manifest->scope.kind == room->scope.kind &&
+                manifest->scope.sessionId == binding.sessionId &&
+                manifest->scope.kind == WorldSourceKind::Native && manifest->scope.hostSourceSerial != 0 &&
+                manifest->scope.sourceConnectionId == binding.hostConnectionId &&
+                manifest->scope.sourceDeliverySerial == 1 &&
+                manifest->scope.targetConnectionId == binding.selfConnectionId &&
+                manifest->scope.targetDeliverySerial == binding.deliverySerial,
+                label + "cached room/manifest retain common source and exact admitted target scope");
+        }
+        host.disconnect(); observer.disconnect(); late.disconnect(); relay.stop();
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1145,6 +1252,7 @@ int main() {
     c1->disconnect();
     c2->disconnect();
     relay.stop();
+    testEmptyManifestCache();
     testWorldCacheEpoch();
     testHostHeartbeatExpiry();
     enet_deinitialize();
