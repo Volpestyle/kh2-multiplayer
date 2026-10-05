@@ -35,6 +35,20 @@ the owned relays stopped and fetched receipts match their remote originals.
 See the [interval result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/neutral-observe-root02/result.md)
 and [source audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-motion-source-audit/result.md).
 
+The bounded caller diagnostic `115734` narrowed the observed writes to the
+native position calculator's solved-position copy. All 61 captured candidates
+had complete context/value/stack reads at leaf1A8E69, with stack-top candidate
+return3B9561 and 21 distinct finite X values. Retained leaf/caller disassembly
+supports the copy from actor+700 to actor+670 at3B955C. All 24 surrounding sparse
+native samples qualified, including before, during and after the one-second
+watch, and movement occurred with neutral sampled input and zero sampled B98.
+The originating force remains unknown. The watch lacks a DR6 audit and per-hit
+timestamps; the copy does not establish a unique writer or continuous neutral
+execution. This intentional diagnostic FAIL and the earlier incomplete112744
+FAIL remain intact. See the
+[caller result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/caller-motion-root02/result.md)
+and [independent interpretation](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/caller-motion50-analysis/result.md).
+
 ## Current resync binding, 2026-10-04
 
 The current protocol9/WorldBridge11 resync path now qualifies the complete

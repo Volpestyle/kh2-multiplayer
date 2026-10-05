@@ -779,6 +779,22 @@ distinct from a complete empty census. The native fingerprint covers room, hold,
 masked progress, typed population/health and canonical record content; transport
 SHA covers the exact snapshot including full raw headers and capture stamps.
 
+The bounded dead-history refusal control `120133` passed on three real games
+on loopback. After one native death per game, Friend1 remained visibly in battle
+Pause (menu8/pauseword1). One request ended with the same key and
+`CaptureUnavailable=3` at the host, relay and client. The original four survivors
+remained at HP20, with no Bootstrap, reload, refill or progress delivery. The
+section completed in 8.641 seconds under its unchanged 25-second limit; protected
+saves and personal/shared progress bytes were unchanged.
+
+Canonical paused census completeness and comparison validity remain false.
+Separate fixture-only traversal checks qualified the reads, and root inspected
+both PAUSE captures. This proves safe refusal while paused, not reconstruction
+of a dead pack, unpaused HP invariance or gameplay during Pause. Native session
+reset was not observed during Pause and may be deferred. It does not broaden
+the production cutscene hold beyond its tested empty-room/menu10 case. See the
+[control result](../build/rig/vuh1508-dead-pack-prep-20261005-01/root05/result.md).
+
 The receiver stages at most 60,000 bytes, four parts and 1,024 enemies. Complete framing,
 canonical decode, offsets, counts, coverage and SHA must pass before a single
 native snapshot is published. Different snapshots within one phase fail. Exact
