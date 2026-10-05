@@ -111,5 +111,7 @@ Stats GetStats() noexcept;
 bool PopEvent(Event& event) noexcept;
 // Call outside native adapters. Emits complete events and cumulative summary;
 // at most 16 queued events per call. rawResult is opaque, never success.
-void Drain(LogFn log);
+// Requested idle summaries are eligible every 1000ms on a real drain.
+// ownerFrame=0 keeps source compatibility but is not live interval evidence.
+void Drain(LogFn log, std::uint32_t ownerFrame = 0);
 }

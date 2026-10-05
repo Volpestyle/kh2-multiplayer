@@ -190,9 +190,11 @@ bool PopEvent(Event& e) noexcept {
     if (present) { e = g_queue[g_read]; g_read = (g_read + 1) % QueueCapacity; --g_size; ++g_drained; }
     ReleaseSRWLockExclusive(&g_lock); return present;
 }
-void Drain(LogFn log) {
+void Drain(LogFn log, std::uint32_t ownerFrame) {
     if (!log) return;
+    const auto entryError = GetLastError();
     static std::uint64_t lastSerial = 0, lastActivity = 0;
+    static std::uint64_t lastSummaryMs = 0, summarySeq = 0;
     auto stats = GetStats();
     if (lastSerial != stats.coverageSerial) {
         log("[hittrace] ready schema=1 requested=%u verifiedMask=%u installedMask=%u coverageSerial=%llu",unsigned(stats.requested),stats.verifiedMask,stats.installedMask,U(stats.coverageSerial));
@@ -228,9 +230,13 @@ void Drain(LogFn log) {
     stats = GetStats();
     const auto activity = stats.coverageSerial + stats.started + stats.published + stats.drained + stats.dropped +
         stats.foreign + stats.unwound + stats.nested + stats.overflow + stats.unmatched;
-    if (activity != lastActivity) {
-        log("[hittrace] summary schema=1 requested=%u verifiedMask=%u installedMask=%u coverageSerial=%llu started=%llu published=%llu drained=%llu dropped=%llu foreign=%llu unwound=%llu nested=%llu overflow=%llu unmatched=%llu",unsigned(stats.requested),stats.verifiedMask,stats.installedMask,U(stats.coverageSerial),U(stats.started),U(stats.published),U(stats.drained),U(stats.dropped),U(stats.foreign),U(stats.unwound),U(stats.nested),U(stats.overflow),U(stats.unmatched));
+    const auto receiptTimeMs = GetTickCount64();
+    const bool idleDue = stats.requested && (summarySeq == 0 || receiptTimeMs - lastSummaryMs >= 1000);
+    if (activity != lastActivity || idleDue) {
+        log("[hittrace] summary schema=1 requested=%u verifiedMask=%u installedMask=%u coverageSerial=%llu started=%llu published=%llu drained=%llu dropped=%llu foreign=%llu unwound=%llu nested=%llu overflow=%llu unmatched=%llu ownerFrame=%u ownerThread=%u summarySeq=%llu receiptTimeMs=%llu",unsigned(stats.requested),stats.verifiedMask,stats.installedMask,U(stats.coverageSerial),U(stats.started),U(stats.published),U(stats.drained),U(stats.dropped),U(stats.foreign),U(stats.unwound),U(stats.nested),U(stats.overflow),U(stats.unmatched),ownerFrame,unsigned(IsOwnerThread()),U(++summarySeq),U(receiptTimeMs));
         lastActivity=activity;
+        lastSummaryMs=receiptTimeMs;
     }
+    SetLastError(entryError);
 }
 }

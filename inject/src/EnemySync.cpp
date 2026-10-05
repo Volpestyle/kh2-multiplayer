@@ -1227,7 +1227,7 @@ void DrainResourceTrace() {
 }
 
 void DrainPendingSpawnTrace(bool correlate) {
-    nativehittrace::Drain(g_log);
+    nativehittrace::Drain(g_log, g_hitTraceFrame);
     DrainResourceTrace();
     const auto stats = spawncontroller::GetTraceStats();
     const auto lifecycle = lifecycletrace::GetStats();
@@ -3751,7 +3751,7 @@ void OnFrameStart(std::uint32_t frame) {
                         census.failedAt, census.nodeCount);
         DrainSpawnTrace(census);
         DrainLifecycleTrace(census);
-        nativehittrace::Drain(g_log);
+        nativehittrace::Drain(g_log, g_hitTraceFrame);
         DrainResourceTrace();
         return;
     }

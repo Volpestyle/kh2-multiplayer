@@ -181,6 +181,47 @@ handling. Sora's position remains uncontrolled. See the
 [per-victim result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-qualified-hits-root01/result.md)
 and [batched result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-batched-hits-root01/result.md).
 
+## Native attack trace receipts, 2026-10-05
+
+The one-game R1/Cross diagnostic captures the enemy lock reticle immediately
+and reviews the image after attacking. Missing or unclear reticle evidence is
+unqualified. Native departures are recorded; the current member/HP, process,
+player, controller and safety bracket must still qualify immediately before
+Cross. This changes no original network-wave ID or acceptance requirement.
+
+Requested `KH2COOP_TRACE_HITS=1` now permits an idle summary every1000ms on an
+actual owner drain, in addition to existing activity summaries. Appended owner
+frame/thread, summary sequence and GetTickCount64 time support fresh log
+bookends. The reviewed three-file logger change leaves hooks, producers,
+storage, event serialization and damage policy unchanged. Both affected TUs
+build warning-clean;34 focused actual-logger checks pass. Independent counter
+loads and emission attempts are not an atomic seal or acknowledged log write.
+
+A covered interval requires fresh advancing owner receipts, unchanged requested
+configuration/mask7, balanced started/published/drained counters, complete event
+groups and no unexplained loss/refusal. Zero covered activity requires all three activity
+counters unchanged. That covers ApplyHitDamage, TakeDamage and ApplyStatDelta;
+it cannot exclude every HP path, contact or physics push, or certify fiber
+ancestry. NativeHitTrace's network `witness` flag describes client enemy-to-player
+damage. Sora-to-enemy evidence instead requires the complete normal native
+Apply/Stat causal join and HP decrease, including Take when that route uses it.
+The observed direct Stat caller3D37D2 under Apply caller410EFF does not have an
+enclosing Take token; its retained child explains exactly one unmatched increment.
+Only complete supported groups may account for those increments; every other
+change refuses qualification, and zero activity still requires unmatched unchanged.
+Absent or incomplete rows stay unknown. One Cross may land zero or multiple hits.
+
+Native175242 captured one real R1/Cross attack and one qualified direct-Stat
+HP160-to-122 application to current311/record34, with fresh owner bookends and
+no other loss/refusal. The final current list kept records14/15/34/35, with record34
+at122 and the others at160; no post-Cross additions/removals. Bit8 began true and
+ended false, so region restoration remains unexposed. The canonical scenario
+retains its intentional diagnostic FAIL and earlier174135 qualification FAIL
+remains. All91 sources/inputs/products and four saves unchanged. The production
+claim path intercepts at Apply before native Stat and does not depend on a Take
+witness, but real-client claim/host-application evidence is still required. See the
+[one-game attack result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-homing-root08/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
