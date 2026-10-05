@@ -917,6 +917,34 @@ Those values are not HP. A removed actor can cease blocking occupancy before
 allocation is freed. Exact subtype/caller proof is needed before replay or
 selective suppression; broad suppression would also affect death and teardown.
 
+**Selected actor retirement, 2026-10-05 (saved PE; not live lifetime proof).**
+The deletion marker is `actor+120` bit `0x80000`. `3BF300` first processes the
+previous deferred list, then unlinks marked actors from the active list using
+encoded `+A90` links and queues them for a later sweep. Active-list absence is
+therefore earlier than allocator release. The selected ordinary Shadow handler
+is `7528E8 -> vtable 5D2D68`, slot0 `419AB0`.
+
+| RVA | Checked selected release boundary |
+|---|---|
+| `0x3B4E80` | RCX=actor; invokes handler slot `+30` unless `actor+9B8` bit `0x40` is already set, then marks it after normal return. This callback is separate from the later slot0 dispatch. |
+| `0x419AB0` | RCX=handler, RDX=actor; nonnull actor passes through subtype/base cleanup `3F8E00 -> 3B3D60`, then original actor base goes to `152570` at `419AC8`, return `419ACD`. No actor read is safe after that release. |
+| `0x152570` | RCX=pointer becomes RDX; loads RCX from `[9BA920]` and tail-dispatches its vtable slot `+10`. Base-cleanup release at return `3B3DBC` frees a loaded member, not the actor base. |
+| `0x19C470` | RCX=allocator domain, RDX=pointer; normal nonnull path synchronously unlinks the block header, subtracts its recorded size, poisons the block with `0xEFACCAFE`, and clears its previous link. Arena release, not OS deallocation or demonstrated reuse. |
+
+Binding writers `152450` and `152680` use constructor `19C3A0`, which installs
+the `kn::MemoryAllocator` primary vtable `5B2BB0`; slot `+10` resolves to
+`19C470`. Release header is `pointer-20`, size is read at `pointer-10`; do not
+infer that size from the factory's `0xD50` request. Helper `3A08F0` and the
+paired synchronization helpers remain uncharacterized. Null, changed live
+binding, unwind or partial execution cannot establish successful retirement.
+
+The current lifecycle probes do not observe these completion boundaries.
+Encoded handles identify an address/region, with no creation generation;
+same-address reuse remains ambiguous. These static facts do not authorize
+absent-dead reconstruction. Exact bodies, callsites and limits are in the
+[release audit](../build/rig/vuh1508-dead-pack-prep-20261005-01/dead-pack-final-release-audit/result.md)
+and [allocator binding audit](../build/rig/vuh1508-dead-pack-prep-20261005-01/dead-pack-allocator-binding-audit/result.md).
+
 The full 68-byte body of script callback `42DC10` verifies stage advancement
 `3FFE40`, followed by tail jump `42DC49 -> 3FE320(controller, null)`, bypassing
 `3FF000` even for type 2. Its original trampoline can leave the dispatcher with
