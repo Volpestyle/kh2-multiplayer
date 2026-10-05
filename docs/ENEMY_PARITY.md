@@ -28,8 +28,8 @@ Zero sampled velocity does not identify the position writer or exclude native
 collision, carried displacement or other motion terms. The source audit found
 no demonstrated local transform overwrite in this launch configuration;
 network pose activity alone does not prove a puppet transform was applied.
-The existing protection helper changes team membership, not collision or
-motion. Attribution continues through read-only native-field/static analysis,
+The existing protection helper writes team membership; its indirect effect on
+native collision and motion is unproven. Attribution continues through native-field/static analysis,
 with no speculative suppression. All four protected saves stayed unchanged;
 the owned relays stopped and fetched receipts match their remote originals.
 See the [interval result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/neutral-observe-root02/result.md)
@@ -71,6 +71,28 @@ do not prove continuous neutrality or causal read-load scaling. Enemy contact,
 knockback and terrain remain possible contributors. All four saves stayed
 unchanged in these runs; owned processes and relays closed. See the
 [endpoint result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/no-observer-endpoints-root02/result.md).
+
+Matched empty controls `132932` (protection OFF, team1) and `134125`
+(protection ON, team0) both retained exactly the same position over qualified
+16.702387/16.662934-second waits. Both had complete empty native census
+bookends on all three peers, matching room/controller state and selected
+products/config. Protection alone did not induce movement in this empty
+preactivation setup. Its interaction with populated enemies remains open;
+the empty starting point/phase differs from the populated control. Earlier
+`133550` remains FAIL before the wait because its START read crossed one owner
+frame; the fresh ON invocation retained every sampling guard. Saves stayed
+unchanged and owned processes closed. See the
+[OFF result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/empty-endpoints-root01/result.md)
+and [ON result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/empty-on-endpoints-root02/result.md).
+
+Retained `130654` damage receipts account for hittrace unmatched1->4 through
+the four fixture HP calls, not enemy attacks. Its sampled camera direction and
+nonzero native velocity point inward while position moves outward, arguing
+against a simple joystick sign/axis reversal. No host hit reaction or paired
+body-contact proof was captured. Keep the correction budget and immediate
+outward abort; do not infer a force from sparse velocity/position samples. See
+the [contact audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/enemy-contact-drift-analysis/result.md)
+and [direction audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/correction-direction-analysis/result.md).
 
 ## Current resync binding, 2026-10-04
 
