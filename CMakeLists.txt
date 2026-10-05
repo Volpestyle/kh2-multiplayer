@@ -356,3 +356,13 @@ foreach(target kh2coop_causal_stream_boundary_test kh2coop_world_admission_recei
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
 endforeach()
+
+# Owner-slot/HP projection and nonblocking render telemetry mailbox. No game.
+if(WIN32)
+    add_executable(kh2coop_hud_cpu_test tests/CoopHudStateTest.cpp)
+    target_include_directories(kh2coop_hud_cpu_test PRIVATE inject/src common/include)
+    target_compile_definitions(kh2coop_hud_cpu_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        target_compile_options(kh2coop_hud_cpu_test PRIVATE /W4 /WX)
+    endif()
+endif()

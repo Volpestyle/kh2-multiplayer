@@ -1071,6 +1071,23 @@ static bool IsPuppetActive(int index) {
                               index, enemysync::CapturePuppetAuthority());
 }
 
+// Owner-thread projection only: already captured avatar values, never extra native reads.
+static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& before) {
+    hud::Input input;
+    input.before = before;
+    input.localAvailable = true;
+    input.gameplayCurrent = !g_puppetsSuspended && !warp::TransitionPending();
+    input.local = local;
+    for (int i = 0; i < 2; ++i) {
+        auto& remote = input.remote[static_cast<std::size_t>(i)];
+        remote.active = IsPuppetActive(i);
+        remote.provenance = g_puppets[i].pose.provenance;
+        remote.avatar = g_puppets[i].pose.pose;
+    }
+    input.after = enemysync::CapturePuppetAuthority();
+    render::PublishCoopHud(hud::Project(input, GetTickCount64(), g_frameCounter));
+}
+
 // Sora clones: player-class actors (objentry type 0) other than the real
 // Sora, e.g. a Sora the world party table spawned into a friend slot
 // (VUH-1489). They don't appear in the friend-slot pointers (with a clone
@@ -1376,6 +1393,7 @@ static bool UpdatePuppetSuspension() {
     const auto load = warp::LoadSerial();
     const bool pending = warp::TransitionPending();
     if (transition != g_puppetTransitionSerial || load != g_puppetLoadSerial || pending) {
+        render::InvalidateCoopHud();
         ClearNativeAiStamps();
         // Invalidate on the actual native lifecycle, including same-room
         // reloads. No restoration writes may reach a prior room's actors.
@@ -1402,6 +1420,8 @@ static bool UpdatePuppetSuspension() {
 
 static void PollPuppetPoses() {
     const bool suspended = UpdatePuppetSuspension();
+    if (suspended || !hud::ValidAuthority(enemysync::CapturePuppetAuthority()))
+        render::InvalidateCoopHud();
     if (!g_avatarBridge.IsOpen()) return;
     bool anyActive = false;
     for (int i = 0; i < 2; ++i) {
@@ -2985,6 +3005,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        render::InvalidateCoopHud();
         Log("EXCEPTION in HookedPerEntityUpdate pre-call, falling through");
         g_currentFriendSlot = 0;
     }
@@ -3005,10 +3026,12 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             const bool inEvent =
                 *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) != 0 ||
                 *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) != 0;
+            const auto hudAuthority = enemysync::CapturePuppetAuthority();
             AvatarState avatar = captureAvatar(DirectMemory {}, g_exeBase, g_soraActor,
                                                inEvent, false);
             avatar.seq = g_frameCounter;
             g_avatarBridge.PublishLocal(avatar);
+            PublishCoopHud(avatar, hudAuthority);
         }
 
         const int puppet = PuppetIndexFor(reinterpret_cast<uintptr_t>(actorObj));
@@ -3040,6 +3063,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             SuppressSoraMovement();
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        render::InvalidateCoopHud();
         Log("EXCEPTION in post-update override");
     }
 
@@ -3411,6 +3435,7 @@ bool Initialize(uintptr_t exeBase) {
 }
 
 void Shutdown() {
+    render::InvalidateCoopHud();
     AcquireSRWLockExclusive(&g_inputTraceLogLock);
     g_inputTraceBase.store(0, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_inputTraceLogLock);

@@ -22,7 +22,7 @@
 #include "EnemySync.hpp"
 
 #include "kh2coop/CaptureChannel.hpp"
-#include "kh2coop/KH2Offsets.hpp"
+#include "CoopHudMailbox.hpp"
 
 #include <Windows.h>
 #include <d3d11.h>
@@ -60,8 +60,8 @@ constexpr int kPresentVtableIndex = 8;
 constexpr int kPresent1VtableIndex = 22;
 constexpr int kExecuteCommandListsVtableIndex = 10;
 constexpr int kRing = 3;
-constexpr UINT kOverlayWidth = 820;
-constexpr UINT kOverlayHeight = 34;
+constexpr UINT kOverlayWidth = hud::Width;
+constexpr UINT kOverlayHeight = hud::Height;
 constexpr UINT kOverlayMargin = 12;
 constexpr UINT64 kOverlayRefreshPresents = 15;
 
@@ -158,6 +158,8 @@ std::vector<std::uint8_t> g_overlayPixels;  // kOverlayWidth*4 per row
 DXGI_FORMAT g_overlayFormat = DXGI_FORMAT_UNKNOWN;
 UINT64 g_overlayLastRefresh = 0;
 bool g_overlayValid = false;
+hud::Mailbox g_hudMailbox; // Process lifetime, never recreated under a callback.
+hud::Snapshot g_renderHud {}; // Access only under the existing Present gate.
 LARGE_INTEGER g_fpsWindowStart {};
 UINT64 g_fpsWindowPresents = 0;
 unsigned g_fps = 0;
@@ -763,6 +765,45 @@ bool EnsureOverlayGdi() {
     return true;
 }
 
+void PollCoopHud() {
+    hud::Snapshot snapshot;
+    (void)g_hudMailbox.TryCopy(GetTickCount64(), snapshot);
+    if (!hud::SameDisplayScope(snapshot, g_renderHud)) g_overlayValid = false;
+    g_renderHud = snapshot;
+}
+
+void DrawCoopHudRows() {
+    const auto text = hud::Format(g_renderHud);
+    SetTextColor(g_overlayDc, RGB(170, 170, 170));
+    if (!text.available) {
+        constexpr wchar_t unavailable[] = L"Co-op status unavailable";
+        TextOutW(g_overlayDc, 8, 39, unavailable, static_cast<int>(std::size(unavailable) - 1));
+        return;
+    }
+    for (std::size_t i = 0; i < text.rows.size(); ++i) {
+        const auto& row = text.rows[i];
+        const LONG top = 34 + static_cast<LONG>(i) * 32;
+        const auto draw = [&](const wchar_t* value, LONG left, LONG right) {
+            RECT box {left, top + 5, right, top + 30};
+            DrawTextW(g_overlayDc, value, -1, &box,
+                      DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        };
+        SetTextColor(g_overlayDc, row.showBar ? RGB(255, 255, 255) : RGB(170, 170, 170));
+        draw(row.label, 8, 190);
+        draw(row.health, 440, 568);
+        draw(row.status, 575, 812);
+        if (row.showBar) {
+            const auto brush = static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
+            RECT track {200, top + 14, 420, top + 22};
+            SetDCBrushColor(g_overlayDc, RGB(65, 65, 65));
+            FillRect(g_overlayDc, &track, brush);
+            track.right = track.left + row.fillPixels;
+            SetDCBrushColor(g_overlayDc, row.lowHealth ? RGB(235, 185, 60) : RGB(100, 215, 110));
+            if (row.fillPixels) FillRect(g_overlayDc, &track, brush);
+        }
+    }
+}
+
 void RefreshOverlayText(DXGI_FORMAT format) {
     LARGE_INTEGER now, freq;
     QueryPerformanceCounter(&now);
@@ -779,14 +820,13 @@ void RefreshOverlayText(DXGI_FORMAT format) {
         g_fpsWindowPresents = g_presentIndex;
     }
 
-    const std::uint8_t world =
-        *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::WORLD_ID);
-    const std::uint8_t room =
-        *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::ROOM_ID);
-
     wchar_t text[192];
-    int len = swprintf_s(text, L"pid %lu  frame %llu  w%02X r%02X  %u fps", GetCurrentProcessId(),
-                         static_cast<unsigned long long>(g_presentIndex), world, room, g_fps);
+    int len = g_renderHud.locationValid
+        ? swprintf_s(text, L"pid %lu  frame %llu  w%02X r%02X  %u fps", GetCurrentProcessId(),
+                     static_cast<unsigned long long>(g_presentIndex),
+                     static_cast<unsigned>(g_renderHud.world), static_cast<unsigned>(g_renderHud.room), g_fps)
+        : swprintf_s(text, L"pid %lu  frame %llu  w-- r--  %u fps", GetCurrentProcessId(),
+                     static_cast<unsigned long long>(g_presentIndex), g_fps);
     // Link quality from the runtime (VUH-1493), once one is connected.
     std::uint32_t rttMs = 0, lossPermille = 0;
     if (len > 0 && enemysync::NetStats(rttMs, lossPermille)) {
@@ -796,7 +836,9 @@ void RefreshOverlayText(DXGI_FORMAT format) {
 
     RECT rect {0, 0, static_cast<LONG>(kOverlayWidth), static_cast<LONG>(kOverlayHeight)};
     FillRect(g_overlayDc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    SetTextColor(g_overlayDc, RGB(255, 255, 255));
     TextOutW(g_overlayDc, 8, 5, text, static_cast<int>(wcslen(text)));
+    DrawCoopHudRows();
     GdiFlush();
 
     const size_t bytes = static_cast<size_t>(kOverlayWidth) * kOverlayHeight * 4;
@@ -1005,6 +1047,7 @@ void OnPresent(IDXGISwapChain* swapChain) {
     if (!IsBoundSwapChain(swapChain)) return;  // No job/ring mutation on another chain.
     const bool ready = PrepareSwapChain(swapChain);
     StartJobIfRequested();
+    PollCoopHud();
 
     if (g_gpuFailed) FailJob(CaptureStatus::GpuError, L"renderer GPU work failed; restart required");
     if (ready && !g_gpuFailed) {
@@ -1210,6 +1253,12 @@ bool HookOne(void* target, void* detour, void** original, const char* label) {
 
 } // namespace
 
+void PublishCoopHud(const hud::Snapshot& snapshot) noexcept {
+    (void)g_hudMailbox.TryPublish(snapshot);
+}
+
+void InvalidateCoopHud() noexcept { g_hudMailbox.Invalidate(); }
+
 bool Install(uintptr_t exeBase, LogFn log) {
     g_log = log;
     g_exeBase = exeBase;
@@ -1258,6 +1307,7 @@ bool Install(uintptr_t exeBase, LogFn log) {
 }
 
 void Shutdown() {
+    g_hudMailbox.Stop();
     for (auto& hook : g_hooks) {
         if (hook.target) MH_DisableHook(hook.target);
         hook = PresentHook {};

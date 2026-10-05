@@ -105,6 +105,18 @@ matched. These cases have matching empty enemy populations; populated joins,
 later waves and dead-pack recovery remain open. See the [five-room result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/five-room-result.md)
 and [independent review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/five-room-acceptance-review.md).
 
+The overlay now shows the actual network player slots and owner HP. The bounded
+HUD run `073856` passed through the impaired Mac relay: both games showed their
+correct Host/You labels and two 24/24 bars, independently distinguished from the
+native Donald actor's 18/18 HP. After the remote runtime left, its row became an
+open slot with no health bar and stayed that way. Root inspected all six captures;
+movement still propagated and all four protected files stayed unchanged. The
+owner publishes copied telemetry through a nonblocking mailbox; Present consumes
+no native game pointers for these rows. Normal and ASan CPU checks cover mapping,
+retirement, contention and concurrent copies. Names, MP, downed/revive, reconnect
+and full HUD acceptance remain open. See the [HUD result](../build/rig/vuh1507-hud-prep-20261005-01/hud-root01/result.md)
+and [source review](../build/rig/vuh1507-hud-prep-20261005-01/independent-review.md).
+
 See [private joining and simulation](JOIN_GUIDE.md). Cutscene hold, general
 waves and bosses, and the package also remain open.
 
