@@ -8,6 +8,8 @@ There's no central service.
 This guide covers the **current dev build**: run from a built checkout with
 `kh2ctl`. Player packaging (P4) will replace these steps.
 
+The development checkout also has a [host/join launcher](../tools/launcher/README.md): run `pythonw tools/launcher/launcher.py` in the Windows desktop after preparing and injecting the game with kh2ctl. It selects the loaded game and manages the runtime and optional private relay. The manual commands below remain useful for a friend's setup and troubleshooting.
+
 ## What everyone needs
 
 - KINGDOM HEARTS HD 1.5+2.5 ReMIX on Steam (Global, game build
