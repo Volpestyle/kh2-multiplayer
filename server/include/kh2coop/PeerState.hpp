@@ -48,12 +48,15 @@ struct PeerState {
     bool ackArrived{false};
 
     // Desync detection: latest state hash and how many consecutive
-    // comparisons with the host disagreed (and on what).
+    // fresh client observations disagreed with the host (and on what).
     bool hasHash{false};
     StateHash lastHash{};
     std::uint64_t hashReceiptSeq{0}, hashReceiptMs{0}; // relay receipts, NOT native frame IDs
     std::uint32_t mismatchStreak{0};
     std::uint8_t reportedFields{0};
+    std::uint8_t mismatchFields{0};
+    std::uint64_t comparedHashReceiptSeq{0};
+    std::uint32_t comparedHashEpoch{0};
     // Diagnostic-only references into the relay-hash stream; never wire fields.
     std::uint64_t diagnosticHashReceive{0}, diagnosticPreviousCompare{0};
     WorldScope diagnosticHashScope{};

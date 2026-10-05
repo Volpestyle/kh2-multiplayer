@@ -62,6 +62,15 @@ template<class T> void codecShape(const T& message){
     for(unsigned variant=0;variant<2;++variant){auto frame=encode(message);if(variant)frame.push_back(0xEE);else frame.pop_back();bool rejected=false;try{const std::uint8_t* data=nullptr;std::size_t size=0;(void)decodePacketHeader(frame.data(),frame.size(),data,size);}catch(const std::exception&){rejected=true;}check(rejected,"diagnostic frame rejects short or extra bytes");}
 }
 void testAssembly(const std::filesystem::path& root){
+    auto missing=request();missing.fields=DesyncEnemies|DesyncMissingEnemies;
+    missing.hostHash.nativeCensusComplete=true;missing.hostHash.nativeLivingCount=5;missing.hostHash.nativeCombatCount=5;
+    missing.clientHash.nativeCensusComplete=true;
+    codecShape(missing);
+    for(const auto fields:{0,16,26}) {
+        auto invalid=missing;invalid.fields=static_cast<std::uint8_t>(fields);
+        bool rejected=false;try{(void)encode(invalid);}catch(const std::exception&){rejected=true;}
+        check(rejected,"capture request rejects zero or unknown diagnostic bits");
+    }
     const std::vector<std::uint8_t> abc{'a','b','c'};
     check(desyncDigestHex(desyncSha256(abc))=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","production SHA256 matches independent standard abc vector");
     check(desyncDigestHex(desyncSha256({}))=="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","SHA256 empty input matches independent standard vector");
@@ -283,12 +292,12 @@ void testRequestBeforeRoster(){
 }
 void testProtocol5Refusal(){
     SessionConfig cfg;cfg.bindAddress="127.0.0.1";cfg.port=17813;cfg.gameBuild="desync-gate";cfg.modHash="m";cfg.contentHash="c";SessionHost relay(cfg);
-    check(relay.start(),"protocol-nine diagnostic gate relay starts with free capacity");if(!relay.isRunning())return;
+    check(relay.start(),"protocol-ten diagnostic gate relay starts with free capacity");if(!relay.isRunning())return;
     std::vector<ClientCloseInfo> closed;std::string reason;unsigned requests=0;ClientCallbacks callbacks;
     callbacks.onClosed=[&](const ClientCloseInfo& info){closed.push_back(info);};callbacks.onRejected=[&](const HelloReject& rejection){reason=rejection.reason;};callbacks.onDesyncCaptureRequest=[&](const auto&){++requests;};
     NetworkClient old("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"old-v5",SlotType::Friend1,callbacks,RuntimeMode::CampaignCoop,cfg.contentHash,5);
     old.connect();check(until([&]{return !closed.empty();},[&]{relay.tick(0);old.tick(0);}),"actual version-five endpoint receives protocol refusal");
-    check(PROTOCOL_VERSION==9&&closed.size()==1&&closed[0].reason==DisconnectReason::Incompatible&&reason=="Protocol mismatch: client=5 server="+std::to_string(PROTOCOL_VERSION)&&!old.ready()&&relay.verifiedPeerCount()==0&&requests==0,"v5 cannot advertise missing three-channel artifact semantics despite free capacity");
+    check(PROTOCOL_VERSION==10&&closed.size()==1&&closed[0].reason==DisconnectReason::Incompatible&&reason=="Protocol mismatch: client=5 server="+std::to_string(PROTOCOL_VERSION)&&!old.ready()&&relay.verifiedPeerCount()==0&&requests==0,"v5 cannot advertise missing three-channel artifact semantics despite free capacity");
     old.disconnect();relay.stop();
 }
 void testNetwork(const std::filesystem::path& root){testUpload();testProtocol5Refusal();testRequestBeforeRoster();runNetwork(root/"complete");testRawSender(root/"forged");}

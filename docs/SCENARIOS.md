@@ -21,6 +21,26 @@ instance references, and compiles expression syntax. It does not evaluate
 expressions, acquire the rig lock, inspect processes or saves, or launch
 anything. It does not establish live behavior or validate arbitrary CLI args.
 
+## Automatic reconnect: one cycle (2026-10-04)
+
+Run [20261004-213052](../build/scenarios/20261004-213052_outside_automatic_once_1/report.md)
+passed in 201 seconds with protocol 10. The host-outside setup was unchanged.
+Friend1's complete empty combat publications join through two distinct relay
+receives, comparisons and alarm to exactly one automatic request. No setup or
+manual request occurred. Friend1 loaded once for rejoin and once for Bootstrap;
+the other two games did not reload. Claims stayed held until all five original
+IDs matched HP17/max20. Final censuses were 5/5/5 with no extras/deaths, and the
+pack persisted through 120 live updates. All four protected saves were unchanged.
+See the [bounded result](../build/rig/reconnect-lead-20261005/automatic-result.md)
+and [Friend1 capture](../build/scenarios/20261004-213052_outside_automatic_once_1/automatic_recovered_1.png).
+
+Run 210134 remains FAIL: an HP-lag setup difference caused a false room reload.
+Protocol 10 limits automatic requests to complete absent living packs and counts
+only fresh client observations. Run 212553 remains FAIL: the game recovered, but
+the evidence reader mishandled continuously arriving unsealed log tails. The
+corrected one-cycle reader retains those tails and certifies through newer real
+post-census seals. Neither result qualifies the parked ten-cycle gates.
+
 ## Historical activation replay: single cycle (2026-10-04)
 
 `net_reconnect_shadows_activation_replay.json` is the current **98-step** bounded

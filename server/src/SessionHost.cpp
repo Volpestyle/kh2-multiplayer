@@ -4,6 +4,7 @@
 #include "kh2coop/SessionHost.hpp"
 #include "kh2coop/ProgressMirror.hpp"
 #include "kh2coop/ResyncEvidence.hpp"
+#include "kh2coop/AppliedStateHash.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -1065,7 +1066,11 @@ void SessionHost::hashDiagnostic(const char* action, const PeerState& client, co
            <<" hostRoom="<<(host?host->lastHash.roomId:0)<<" hostEnemiesHash="<<(host?host->lastHash.enemiesHash:0)
            <<" hostProgressHash="<<(host?host->lastHash.progressHash:0)<<" fields="<<unsigned(fields)
            <<" streakBefore="<<client.mismatchStreak<<" previousCompare="<<previousCompare<<" compare="<<compare
-           <<" coarseHintOnly=1";
+           <<" nativeComplete="<<client.lastHash.nativeCensusComplete<<" nativeLiving="<<client.lastHash.nativeLivingCount
+           <<" nativeCombat="<<client.lastHash.nativeCombatCount
+           <<" hostNativeComplete="<<(host?host->lastHash.nativeCensusComplete:false)
+           <<" hostNativeLiving="<<(host?host->lastHash.nativeLivingCount:0)
+           <<" hostNativeCombat="<<(host?host->lastHash.nativeCombatCount:0)<<" coarseHintOnly=1";
     });
 }
 
@@ -1075,11 +1080,35 @@ void SessionHost::compareWithHost(PeerState& client) {
     const auto& h = host->lastHash;
     const auto& c = client.lastHash;
     if (h.epoch != c.epoch) return;
+    // A new host hash cannot turn one cached client observation into two
+    // mismatch witnesses. This counter is independent of opt-in diagnostics.
+    if (!client.hashReceiptSeq || client.comparedHashReceiptSeq == client.hashReceiptSeq) return;
+    client.comparedHashReceiptSeq = client.hashReceiptSeq;
+    if (client.comparedHashEpoch != c.epoch) {
+        client.comparedHashEpoch = c.epoch;
+        client.mismatchStreak = 0;
+        client.reportedFields = 0;
+        client.mismatchFields = 0;
+        client.diagnosticPreviousCompare = 0;
+    }
     if(desyncComparisonSeq_!=UINT64_MAX)++desyncComparisonSeq_;
     std::uint8_t fields = 0;
     if (h.worldId != c.worldId || h.roomId != c.roomId) fields |= DesyncRoom;
     if (h.enemiesHash != c.enemiesHash) fields |= DesyncEnemies;
     if (h.progressHash != c.progressHash) fields |= DesyncProgress;
+    // The implemented native replay covers a complete absent living pack.
+    // HP lag, incomplete observations and partial/extra populations remain
+    // coarse diagnostics; they cannot request a Bootstrap room reload.
+    if ((fields & DesyncEnemies) && !(fields & DesyncRoom) &&
+        h.nativeCensusComplete && c.nativeCensusComplete &&
+        h.nativeLivingCount > 0 && c.nativeLivingCount == 0 &&
+        h.nativeCombatCount >= h.nativeLivingCount && c.nativeCombatCount == 0 &&
+        c.enemiesHash == hashAppliedEnemies({})) fields |= DesyncMissingEnemies;
+    if (client.mismatchFields != fields) {
+        client.mismatchFields = fields;
+        client.mismatchStreak = 0;
+        client.diagnosticPreviousCompare = 0;
+    }
     const auto previousCompare = client.diagnosticPreviousCompare;
     std::uint64_t comparisonRecord = 0;
     if (callbacks_.onHashDiagnostic) {

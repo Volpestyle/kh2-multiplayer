@@ -52,7 +52,8 @@ public:
         const auto slot = static_cast<std::size_t>(notice.slot);
         if (!current || !ValidHost(*current) || slot < 1 || slot > 2 ||
             !current->connections[slot] || !notice.epoch || notice.epoch != current->room.epoch ||
-            !(notice.fields & DesyncEnemies) || (notice.fields & ~std::uint8_t{7})) {
+            !(notice.fields & DesyncEnemies) || !(notice.fields & DesyncMissingEnemies) ||
+            (notice.fields & DesyncRoom) || (notice.fields & ~std::uint8_t{15})) {
             Emit("discard", "not-current-host-enemies-hint", candidate, 0, {}, busy);
             return;
         }
@@ -124,8 +125,8 @@ private:
         std::string session;
         std::uint64_t host {}, connection {};
         std::uint32_t epoch {};
-        std::array<std::uint64_t, 8> attempted {};
-        std::array<ResyncKey, 8> keys {};
+        std::array<std::uint64_t, 16> attempted {};
+        std::array<ResyncKey, 16> keys {};
         std::optional<Candidate> pending;
     };
     static bool ValidHost(const HostResyncContext& context) {

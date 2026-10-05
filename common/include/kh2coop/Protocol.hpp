@@ -8,7 +8,7 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 9;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 10;
 
 // ===========================================================================
 // Protocol v5 — typed closure/session-incarnation semantics; v4 byte layouts.
@@ -220,6 +220,7 @@ enum DesyncField : std::uint8_t {
     DesyncRoom = 1 << 0,
     DesyncEnemies = 1 << 1,
     DesyncProgress = 1 << 2,
+    DesyncMissingEnemies = 1 << 3,  // complete same-room host living > 0, client living == 0
 };
 
 struct StateHash {
@@ -228,6 +229,11 @@ struct StateHash {
     std::uint16_t roomId {0};
     std::uint32_t enemiesHash {0};   // actual live (netId, objectId, HP), including unmatched actors
     std::uint32_t progressHash {0};  // actual local SAVE bytes/bits inside the progress allow list
+    // Protocol 10: summary of the same checked native living rows as enemiesHash.
+    // Defaults mean unavailable, never evidence of a complete empty census.
+    bool nativeCensusComplete {false};
+    std::uint32_t nativeLivingCount {0};
+    std::uint32_t nativeCombatCount {0}; // includes dead/dying native combat rows
 };
 
 struct DesyncNotice {

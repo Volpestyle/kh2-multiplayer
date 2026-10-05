@@ -9,6 +9,7 @@
 using namespace kh2coop;
 namespace {
 int checks = 0, failures = 0;
+constexpr std::uint8_t recoveryFields = DesyncEnemies | DesyncMissingEnemies;
 void check(bool ok, const char* label) { ++checks; failures += !ok; std::cout << (ok ? "PASS " : "FAIL ") << label << '\n'; }
 HostResyncContext context() {
     HostResyncContext c;
@@ -29,7 +30,7 @@ struct Policy {
         generated->room = current.room; generated->connections = current.connections; generated->targetMask = mask;
         busy = sendOk; return sendOk;
     }
-    void Notice(unsigned slot = 1, std::uint8_t fields = DesyncEnemies, std::uint64_t now = 10) {
+    void Notice(unsigned slot = 1, std::uint8_t fields = recoveryFields, std::uint64_t now = 10) {
         policy.Notice({static_cast<SlotType>(slot), current.room.epoch, fields}, current, busy, now,
             [&](auto mask, auto* generated) { return Submit(mask, generated); });
     }
@@ -41,12 +42,12 @@ void policyControls() {
     { Policy p(false); p.Notice(); p.Finish(); p.Pump(); check(p.sends == 0 && p.events.empty(), "default-off policy has no request/receipt side effects"); }
     { Policy p; p.current.binding.selfSlot = 1; p.Notice(); check(p.sends == 0 && p.Last("discard", "not-current-host-enemies-hint"), "friend role cannot auto-submit"); }
     for (unsigned invalid : {0u, 3u, 255u}) { Policy p; p.Notice(invalid); check(!p.sends, "invalid target slot rejected without indexing state"); }
-    for (std::uint8_t fields : {std::uint8_t{0}, std::uint8_t{1}, std::uint8_t{4}, std::uint8_t{10}}) { Policy p; p.Notice(1, fields); check(!p.sends, "non-enemy/unknown field hints rejected"); }
+    for (std::uint8_t fields : {std::uint8_t{0}, std::uint8_t{1}, std::uint8_t{2}, std::uint8_t{4}, std::uint8_t{8}, std::uint8_t{11}, std::uint8_t{16}, std::uint8_t{26}}) { Policy p; p.Notice(1, fields); check(!p.sends, "HP-only, incomplete missing hints, room changes and unknown bits cannot reload"); }
     { Policy p; p.current.connections[1] = 0; p.Notice(); check(!p.sends, "absent target connection rejected"); }
-    { Policy p; auto old = context(); ++p.current.room.epoch; p.policy.Notice({SlotType::Friend1, old.room.epoch, DesyncEnemies}, p.current, false, 10, [&](auto m, auto* g) { return p.Submit(m, g); }); check(!p.sends, "stale epoch notice rejected"); }
+    { Policy p; auto old = context(); ++p.current.room.epoch; p.policy.Notice({SlotType::Friend1, old.room.epoch, recoveryFields}, p.current, false, 10, [&](auto m, auto* g) { return p.Submit(m, g); }); check(!p.sends, "stale epoch notice rejected"); }
     { Policy p; p.Notice(); check(p.sends == 1 && p.busy && p.events.back().key.requestId == 1 && p.events.back().candidate.context.connections[1] > UINT32_MAX, "immediate submission joins generated key and full-width incarnation"); p.Notice(); check(p.sends == 1 && p.Last("duplicate", "already-attempted"), "duplicate during request window never submits twice"); p.Finish(); p.Pump(); p.Notice(); check(p.sends == 1, "terminal failure/success does not reopen dedupe"); ++p.current.connections[1]; p.Notice(); check(p.sends == 2, "new admitted target incarnation has independent dedupe"); }
-    { Policy p; p.busy = true; p.Notice(); p.Notice(1, 2, 999); check(p.sends == 0 && p.policy.PendingCount() == 1 && p.events.back().relatedReceipt == 1, "busy duplicate coalesces without replacing original receipt time"); p.Pump(); check(!p.sends, "periodic pump is not a retry timer"); p.Finish(); check(!p.sends, "terminal callback defers submission until outside receive stack"); p.Pump(); check(p.sends == 1 && p.events.back().candidate.receivedMs == 10, "terminal drain retains first candidate and submits once"); }
-    { Policy p; p.busy = true; p.Notice(); p.Notice(1, 6); check(p.policy.PendingCount() == 1 && p.events[p.events.size()-2].relatedReceipt == 2, "changed fields explicitly supersede one pending slot"); p.Notice(2); check(p.policy.PendingCount() == 2, "two slots have bounded independent pending candidates"); p.Finish(); p.Pump(); check(p.sends == 1 && p.policy.PendingCount() == 1, "first drained slot occupies single global transaction"); p.Finish(); p.Pump(); check(p.sends == 2 && p.policy.PendingCount() == 0, "next terminal drains second slot without timer"); }
+    { Policy p; p.busy = true; p.Notice(); p.Notice(1, recoveryFields, 999); check(p.sends == 0 && p.policy.PendingCount() == 1 && p.events.back().relatedReceipt == 1, "busy duplicate coalesces without replacing original receipt time"); p.Pump(); check(!p.sends, "periodic pump is not a retry timer"); p.Finish(); check(!p.sends, "terminal callback defers submission until outside receive stack"); p.Pump(); check(p.sends == 1 && p.events.back().candidate.receivedMs == 10, "terminal drain retains first candidate and submits once"); }
+    { Policy p; p.busy = true; p.Notice(); p.Notice(1, recoveryFields | DesyncProgress); check(p.policy.PendingCount() == 1 && p.events[p.events.size()-2].relatedReceipt == 2, "changed fields explicitly supersede one pending slot"); p.Notice(2); check(p.policy.PendingCount() == 2, "two slots have bounded independent pending candidates"); p.Finish(); p.Pump(); check(p.sends == 1 && p.policy.PendingCount() == 1, "first drained slot occupies single global transaction"); p.Finish(); p.Pump(); check(p.sends == 2 && p.policy.PendingCount() == 0, "next terminal drains second slot without timer"); }
     for (unsigned mode = 0; mode < 6; ++mode) { Policy p; p.busy = true; p.Notice(); if (mode == 0) ++p.current.connections[1]; if (mode == 1) ++p.current.connections[2]; if (mode == 2) ++p.current.room.door; if (mode == 3) ++p.current.binding.deliverySerial; if (mode == 4) p.current.binding.sessionId[0] = 'b'; if (mode == 5) ++p.current.room.epoch; p.Finish(); p.Pump(); check(!p.sends && !p.policy.PendingCount() && p.Last("discard", "captured-context-changed"), "terminal revalidation refuses captured tuple/incarnation/roster drift"); }
     { Policy p; p.sendOk = false; p.Notice(); p.Notice(); p.Pump(); check(p.sends == 1 && !p.policy.PendingCount(), "failed send cannot become implicit repeated-notice retry"); }
     { Policy p; p.Notice(); p.policy.Pump(std::nullopt, [&] { return false; }, [&](auto m, auto* g) { return p.Submit(m,g); }); p.Finish(); p.Notice(); check(p.sends == 1, "temporary missing context does not erase consumed dedupe"); }
@@ -80,17 +81,17 @@ void realGenerator() {
                 return automaticResyncRuntimeCurrent(mode != 0, mode != 1, mode == 2, host) &&
                     host.requestWorldResync(mask, generated);
             };
-            retired.Notice({SlotType::Friend1,7,DesyncEnemies}, host.hostResyncContext(), false, 50, guarded);
+            retired.Notice({SlotType::Friend1,7,recoveryFields}, host.hostResyncContext(), false, 50, guarded);
             check(host.worldReady() && !host.resyncBusy() && host.nextResyncRequest_ == next && host.resyncDeadline_ == beforeDeadline,
                 "runtime stop/unadmitted/invalidated guard blocks immediate request despite network-ready");
             AutomaticResyncNotice pending(true, [](const auto&) {});
-            pending.Notice({SlotType::Friend1,7,DesyncEnemies}, host.hostResyncContext(), true, 60, guarded);
+            pending.Notice({SlotType::Friend1,7,recoveryFields}, host.hostResyncContext(), true, 60, guarded);
             ResyncResult terminal; terminal.key = {host.worldBinding()->sessionId,host.worldBinding()->hostConnectionId,99};
             pending.Terminal(terminal); pending.Pump(host.hostResyncContext(), [&] { return host.resyncBusy(); }, guarded);
             check(!pending.PendingCount() && !host.resyncBusy() && host.nextResyncRequest_ == next && host.resyncDeadline_ == beforeDeadline,
                 "runtime retirement blocks terminal-drained request without ID/deadline mutation");
         }
-        policy.Notice({SlotType::Friend1,7,DesyncEnemies}, host.hostResyncContext(), host.resyncBusy(), 100, submit);
+        policy.Notice({SlotType::Friend1,7,recoveryFields}, host.hostResyncContext(), host.resyncBusy(), 100, submit);
         check(host.resyncBusy() && host.requestedResync_ && !host.pendingResync(), "combined busy includes real generated request before first plan");
         const auto request = *host.requestedResync_; const auto deadline = host.resyncDeadline_;
         const auto eventCount = events.size(); const auto nextId = host.nextResyncRequest_;
@@ -101,11 +102,11 @@ void realGenerator() {
         check(host.resyncDeadline_ == deadline && host.nextResyncRequest_ == nextId && events.size() == eventCount && policy.PendingCount() == 0,
             "interval observation cannot submit, drain or change request/deadline state");
         check(events.back().key == request.key && request.targetMask == 2 && request.connections[1] == clients[1]->worldBinding()->selfConnectionId, "production generator emits the exact logged key/current target");
-        policy.Notice({SlotType::Friend1,7,DesyncEnemies}, host.hostResyncContext(), host.resyncBusy(), 200, submit);
+        policy.Notice({SlotType::Friend1,7,recoveryFields}, host.hostResyncContext(), host.resyncBusy(), 200, submit);
         check(host.resyncDeadline_ == deadline && host.requestedResync_->key == request.key, "duplicate hint cannot renew real request deadline or ID");
         check(wait([&] { return host.pendingResync().has_value(); }), "actual relay admits generated single-target Bootstrap plan");
         check(host.resyncBusy() && !host.requestedResync_ && host.pendingResync()->request.key == request.key, "combined busy covers plan after requested state clears");
-        policy.Notice({SlotType::Friend2,7,DesyncEnemies}, host.hostResyncContext(), host.resyncBusy(), 300, submit);
+        policy.Notice({SlotType::Friend2,7,recoveryFields}, host.hostResyncContext(), host.resyncBusy(), 300, submit);
         check(policy.PendingCount() == 1 && host.resyncDeadline_ == deadline, "second target coalesces without touching active deadline");
         const auto pendingSeal = formatAutomaticResyncInterval(policy, host, 2, 300, events.size(), 13, 3, request.connections);
         std::cout << pendingSeal << '\n';
@@ -119,7 +120,7 @@ void realGenerator() {
             "post-terminal seal does not drain even when a candidate is ready");
         policy.Pump(host.hostResyncContext(), [&] { return host.resyncBusy(); }, submit);
         check(host.requestedResync_ && host.requestedResync_->targetMask == 4 && host.requestedResync_->key.requestId > request.key.requestId, "terminal-only drain uses generator for next original slot");
-        policy.Notice({SlotType::Friend1,7,DesyncEnemies}, host.hostResyncContext(), host.resyncBusy(), 400, submit);
+        policy.Notice({SlotType::Friend1,7,recoveryFields}, host.hostResyncContext(), host.resyncBusy(), 400, submit);
         check(policy.PendingCount() == 0, "original failed transaction's same-key notice stays consumed");
     }
     policy.Shutdown(); for (auto& c : clients) c->disconnect(); relay.stop();

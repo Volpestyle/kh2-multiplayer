@@ -360,7 +360,7 @@ void testProtocolFourRefused() {
                          std::move(cb), RuntimeMode::CampaignCoop, cfg.contentHash, 4);
     client.connect(); const auto deadline = nowMs() + 3000;
     while (nowMs() < deadline && closed.empty()) { relay.tick(0); client.tick(0); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-    check(PROTOCOL_VERSION == 9 && closed.size() == 1 && closed[0].reason == DisconnectReason::Incompatible &&
+    check(PROTOCOL_VERSION == 10 && closed.size() == 1 && closed[0].reason == DisconnectReason::Incompatible &&
           rejection == "Protocol mismatch: client=4 server=" + std::to_string(PROTOCOL_VERSION) && !client.ready() && relay.verifiedPeerCount() == 0,
           "v4 cannot advertise old incarnation semantics to the current recovery client");
     client.disconnect(); relay.stop();

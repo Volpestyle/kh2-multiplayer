@@ -436,8 +436,9 @@ void writeKey(ByteWriter& w,const DesyncKey& k) { validateKey(k);w.writeString(k
 void readKey(ByteReader& r,DesyncKey& k) { k.sessionId=r.readString();k.reportId=r.readU64();validateKey(k); }
 void validateRequest(const DesyncCaptureRequest& m) {
     validateKey(m.key);
+    constexpr auto allowedFields = DesyncRoom | DesyncEnemies | DesyncProgress | DesyncMissingEnemies;
     diagnosticRequire(m.connections[0] && m.divergedSlot>0 && m.divergedSlot<3 && m.connections[m.divergedSlot] &&
-        m.fields && !(m.fields&~7u) && m.hostHash.epoch==m.epoch && m.clientHash.epoch==m.epoch &&
+        m.fields && !(m.fields&~allowedFields) && m.hostHash.epoch==m.epoch && m.clientHash.epoch==m.epoch &&
         m.triggerMs<=UINT64_MAX-DESYNC_DEADLINE_MS && m.deadlineMs==m.triggerMs+DESYNC_DEADLINE_MS &&
         m.remainingMs>0 && m.remainingMs<=DESYNC_DEADLINE_MS);
     for(std::size_t i=0;i<3;++i) for(std::size_t j=0;j<i;++j)
@@ -789,6 +790,9 @@ void write(ByteWriter& w, const StateHash& m) {
     w.writeU16(m.roomId);
     w.writeU32(m.enemiesHash);
     w.writeU32(m.progressHash);
+    w.writeBool(m.nativeCensusComplete);
+    w.writeU32(m.nativeLivingCount);
+    w.writeU32(m.nativeCombatCount);
 }
 
 void write(ByteWriter& w, const DesyncNotice& m) {
@@ -1053,11 +1057,18 @@ void read(ByteReader& r, ProgressUpdate& m) {
 }
 
 void read(ByteReader& r, StateHash& m) {
-    m.epoch = r.readU32();
-    m.worldId = r.readU16();
-    m.roomId = r.readU16();
-    m.enemiesHash = r.readU32();
-    m.progressHash = r.readU32();
+    StateHash decoded;
+    decoded.epoch = r.readU32();
+    decoded.worldId = r.readU16();
+    decoded.roomId = r.readU16();
+    decoded.enemiesHash = r.readU32();
+    decoded.progressHash = r.readU32();
+    const auto complete = r.readU8();
+    if (complete > 1) throw std::runtime_error("invalid native census completeness");
+    decoded.nativeCensusComplete = complete != 0;
+    decoded.nativeLivingCount = r.readU32();
+    decoded.nativeCombatCount = r.readU32();
+    m = decoded;
 }
 
 void read(ByteReader& r, DesyncNotice& m) {

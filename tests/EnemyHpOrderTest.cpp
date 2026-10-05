@@ -177,10 +177,10 @@ void testClientAdmission(){
     client.disconnect();enet_host_destroy(server);
 }
 void testVersion6Refusal(){
-    SessionConfig cfg;cfg.bindAddress="127.0.0.1";cfg.port=17824;cfg.gameBuild="ordered-wire";cfg.modHash="m";cfg.contentHash="c";SessionHost relay(cfg);check(relay.start(),"version9 ordered-HP gate relay starts with capacity");if(!relay.isRunning())return;
+    SessionConfig cfg;cfg.bindAddress="127.0.0.1";cfg.port=17824;cfg.gameBuild="ordered-wire";cfg.modHash="m";cfg.contentHash="c";SessionHost relay(cfg);check(relay.start(),"version10 ordered-HP gate relay starts with capacity");if(!relay.isRunning())return;
     std::vector<ClientCloseInfo> closed;std::string reason;ClientCallbacks cb;cb.onClosed=[&](const auto& info){closed.push_back(info);};cb.onRejected=[&](const HelloReject& r){reason=r.reason;};NetworkClient legacy("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"legacy-v6",SlotType::Friend1,cb,RuntimeMode::CampaignCoop,cfg.contentHash,6);legacy.connect();
     const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(4);while(closed.empty()&&std::chrono::steady_clock::now()<end){relay.tick(0);legacy.tick(0);std::this_thread::sleep_for(std::chrono::milliseconds(1));}
-    check(PROTOCOL_VERSION==9&&closed.size()==1&&closed[0].reason==DisconnectReason::Incompatible&&reason=="Protocol mismatch: client=6 server=9"&&!legacy.ready()&&relay.verifiedPeerCount()==0,"version6 cannot negotiate old unsequenced HP layout despite free capacity");legacy.disconnect();relay.stop();
+    check(PROTOCOL_VERSION==10&&closed.size()==1&&closed[0].reason==DisconnectReason::Incompatible&&reason=="Protocol mismatch: client=6 server=10"&&!legacy.ready()&&relay.verifiedPeerCount()==0,"version6 cannot negotiate old unsequenced HP layout despite free capacity");legacy.disconnect();relay.stop();
 }
 }
 int main(){if(enet_initialize()!=0){std::cerr<<"ENet initialization failed\n";return 2;}testSameRoomRollback();testCodec();testRelayWatermark();testClientAdmission();testVersion6Refusal();enet_deinitialize();std::cout<<checks-failures<<" PASS, "<<failures<<" FAIL\n";return failures?1:0;}

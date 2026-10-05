@@ -15,7 +15,7 @@ allocate, hash, format and flush on owner threads; their cost is unmeasured.
 | Family | Producer | Recorded facts |
 | --- | --- | --- |
 | `native-hash-publication` | DLL | Same census and single captured enqueue context as the published H, including lifecycle, full location, connection and source delivery. Only a complete whole-combat-census zero proves selected-empty. |
-| `relay-hash` | Relay | Actual admitted scope and receive sequence; both operands of each real comparison; both comparisons responsible for the emitted notice. |
+| `relay-hash` | Relay | Actual admitted scope and receive sequence; both operands and complete/living/combat census summaries of each real comparison; both distinct client observations responsible for the emitted notice. |
 | `resync-request` | Runtime | Each generator/direct submission or caller rejection, origin/outcome, exact allocated key/mask/roster, original owner-local start/deadline when available. |
 | `relay-cache-delivery` | Relay | Actual cached body and envelope SHA256, send scope, target/delivery and original send return/disposition. |
 | `world-envelope-admission` | Runtime | Original received outer-envelope and accepted inner-body lengths/SHA256, after existing scope/inner admission and before the original raw callback. |
@@ -23,8 +23,11 @@ allocate, hash, format and flush on owner threads; their cost is unmeasured.
 New records use `schema=1`. Automatic seals add request high-water, flush,
 drop and availability facts. Escaping request/cache construction exceptions
 preserve their original propagation and mark a sticky gap; no key or body is
-fabricated. No protocol, authority, native call, network flush, retry, rate or
-transaction deadline changes.
+fabricated. The original instrumentation changed no protocol, authority, native
+call, network flush, retry, rate or transaction deadline. Protocol 10 separately
+adds the census summaries to StateHash and bounds the automatic trigger to a
+complete absent living pack. Relay comparison receipts retain both peers'
+summaries; cached client reports cannot advance the two-observation debounce.
 
 Native `bridgeEnqueued=1` proves DLL-to-runtime enqueue only; `relayReceived`
 remains unproven until joined to the relay. Use the actual latest compared H,
@@ -82,6 +85,11 @@ and [independent review](../build/rig/causal-root-independent-review-20261004-01
 The original private evidence consumer remains BLOCKED on wrong-target,
 terminal-tail and changed-final-binding acceptance. A distinct corrected copy
 rejects all reproduced cases. Neither it nor the collector has live acceptance.
-First automatic qualification and the approved10 original-route plus10 outside
-resynced cycles remain open. Natural outside fails without skip/retry; v1 and
-historical FAILs stay unchanged.
+The bounded one-cycle automatic qualification passed in
+[run 213052](../build/scenarios/20261004-213052_outside_automatic_once_1/report.md).
+Its separate scratch reader retains full producer prefixes and certifies through
+strictly newer actual live seals beyond post-census watermarks. Later unsealed
+tails are retained and sequence-checked, not described as sealed. The parked
+consumer and collector were not extended. The approved10 original-route plus10
+outside resynced gates remain open and parked. Natural outside fails without
+skip/retry; v1 and historical FAILs stay unchanged.

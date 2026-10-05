@@ -1,11 +1,29 @@
 # Forced world resync
 
-The current protocol 9 candidate adds exact ordinary-record content
+Protocol 10 adds complete native census, living-count and combat-count summaries
+to StateHash. Protocol 9 added exact ordinary-record content
 to the fresh native-state transaction introduced in protocol 8. AvatarBridge
 remains 2, WorldBridge is 11 and CaptureChannel remains 1. All components must
 be rebuilt together. Older protocol peers or mappings cannot validate this
 candidate. The dated protocol-8 native results below retain their original
-scope; they are not native validation of protocol 9.
+scope; they are not native validation of the current protocol.
+
+Automatic recovery requires two distinct client observations. A newer host
+publication cannot count the same cached client report twice. Only a complete
+empty combat census, with the canonical empty enemy hash, against a complete
+host census with living enemies sets `DesyncMissingEnemies` (bit 8). The host
+policy requires this bit together with `DesyncEnemies`; HP lag, unavailable
+summaries, partial populations and dead or dying actors remain diagnostic
+differences. This bounds automatic replay to the absent living-pack case.
+The StateHash payload is now 25 bytes; every peer must rebuild together.
+
+One protocol-10 automatic host-outside cycle passed in
+[run 213052](../build/scenarios/20261004-213052_outside_automatic_once_1/report.md):
+one Friend1 request and extra Bootstrap load restored the original five HP17
+enemies, with claim hold/release, 120 live updates and unchanged saves checked.
+The [bounded result](../build/rig/reconnect-lead-20261005/automatic-result.md)
+retains the causal publication/relay/request join and earlier failures. The two
+ten-cycle gates remain parked.
 
 ## Native record-content candidate, 2026-10-04
 
@@ -182,9 +200,10 @@ The full Release build and **2,298 affected offline checks pass**, including
 checks. The [combined receipt](../build/rig/automatic-recovery-root-integration-20261004-01/cpp-validation.json)
 retains executed results; private sanitizer checks are scoped separately.
 The first combined build failed on a test adapter declaration; the corrected
-explicit-argument calls retain all assertions and pass the final build/run. No live
-automatic result is claimed. Both original and forced-outside ten-cycle gates
-remain open. James approved separate v2 natural/resynced accounting on2026-10-04
+explicit-argument calls retain all assertions and pass the final build/run. At
+that integration point no live automatic result was claimed; the later bounded
+protocol-10 result is recorded above. Both original and forced-outside ten-cycle
+gates remain open and parked. James approved separate v2 natural/resynced accounting on2026-10-04
 (VUH-1508 comment7ca6ae56): the original route requires10/10 passing cycles in
 any natural/resynced mix; the outside variant requires10 resynced cycles, with
 a natural cycle failing without a skip or retry. Every other classification

@@ -3174,6 +3174,11 @@ void PublishAppliedHash(std::uint32_t frame, const NativeCensus& beforeApply) {
     const auto unmatched = std::count_if(live.begin(), live.end(),
                                          [](const auto& record) { return record.netId == 0; });
     state.enemiesHash = hashAppliedEnemies(live);
+    // Reuse only the complete, instance-checked census and canonical living
+    // rows above. CaptureNativeCensus bounds their count by MAX_TRAVERSAL.
+    state.nativeCensusComplete = true;
+    state.nativeLivingCount = static_cast<std::uint32_t>(live.size());
+    state.nativeCombatCount = static_cast<std::uint32_t>(census.enemies.size());
     g_lastHashMs = now;
     // Keep the existing capture/enqueue sequence, exposing its exact context to diagnostics.
     const auto hashPacket = encode(state);
