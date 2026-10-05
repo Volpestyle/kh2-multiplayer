@@ -23,8 +23,8 @@ possibly enemies.
 | Friend control | Donald moves and animates under player control (F5). He cannot attack, jump, guard or cast. |
 | Animation control | Any motion can be set and held on a friend actor without the game resetting it (Session 5). |
 | Network layer | ENet relay server, codec, version gate; the 3-client fake-simulation test passes. |
-| Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Remote internet and controller playtests remain open. |
-| Hit claims | A client's hits on enemies are sent as claims; the host applies each once through the game's own damage routine and broadcasts absolute HP (protocol 9). Ordinary Shadow combat, including client kills, works on loopback. Attack-specific effects and boss finishers are open. |
+| Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Private Tailscale transport passed with one real game and a Mac synthetic avatar for two minutes, then two real local games through a Mac relay, normally and with delay/loss. Two separate Windows installations and controller playtests remain open. |
+| Hit claims | A client's hits on enemies are sent as claims; the host applies each once through the game's own damage routine and broadcasts absolute HP (protocol 10). Ordinary Shadow combat, including client kills, works on loopback. Attack-specific effects and boss finishers are open. |
 | Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. After checked native snapshots exposed five unmatched client enemies, scoped host activation passed the original strict 20-load route with empty enemy populations and a source-expiry control. Its unchanged native-wave regression then failed with different enemy identities and an alive host refill. Nonempty spawn/lifecycle authority remains open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
 | Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. A native host chest opening passed next-load client mirroring, late join and subsequent reload on three instances, with personal bytes preserved. A deliberate progress mismatch was detected and restoration verified. Broader story side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
@@ -37,21 +37,26 @@ recorded activation input through the client's own spawner, so the game respawns
 all five Shadows natively, reconciles HP and keeps them (`20261004-143903`, 5/5/5).
 It's default-off and covers one all-alive pack only.
 
-An automatic trigger (host answers the relay's enemies DesyncNotice with the
-existing resync request) and a generic claim hold on rejoin are committed
-(`f10b0d4`), with opt-in causal logging (`e2ac442`, see
-[CAUSAL_RECOVERY_DIAGNOSTICS.md](CAUSAL_RECOVERY_DIAGNOSTICS.md)). They haven't
-run live yet: the last four attempts failed in test setup (host walk, launch,
-idle host drift), not in recovery. James approved the v2 ten-cycle pass rules
-(VUH-1508 comment `7ca6ae56`): 10/10 natural-or-resynced on the original route,
-10 resynced with the host outside. Earlier FAILs stay FAIL.
+One automatic cycle passed (`20261004-213052`): a fresh complete empty client
+census triggered exactly one request and one Bootstrap load, hits stayed held
+until the original five enemies matched HP17, and the pack survived 120 live
+updates. All four protected saves were unchanged. The first attempt caught a
+false setup-time trigger; protocol 10 now requires distinct fresh observations
+and a complete empty enemy census instead of a generic hash difference
+(`8f905f7`). The product failure `210134` and evidence-helper failure `212553`
+remain FAIL. See the [automatic result](../build/rig/reconnect-lead-20261005/automatic-result.md).
+James's approved v2 ten-cycle gates (VUH-1508 comment `7ca6ae56`) are parked.
 
 Details, limits and evidence: [FORCED_RESYNC.md](FORCED_RESYNC.md), `SCENARIOS.md`
 and the VUH-1508 thread. The added-emitter/B1/loader-installer route is parked;
 its history is in FORCED_RESYNC.md.
 
-Still open beyond reconnect: internet play and the friend playtest (P1),
-cutscene hold, general waves and bosses, and the package.
+Private transport now works without a friend: the relay can run on the Mac,
+and the rig can script multiple real Windows games on this PC. A headless
+client can also supply avatar traffic. This permits automated network checks;
+the first human friend session and a second Windows installation remain open.
+See [private joining and simulation](JOIN_GUIDE.md). Cutscene hold, general
+waves and bosses, and the package also remain open.
 
 ## Prior art (researched 2026-10-01)
 

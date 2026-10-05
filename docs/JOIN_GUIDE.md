@@ -1,8 +1,9 @@
 # Playing together privately over Tailscale (VUH-1493)
 
-Hosting works like a Minecraft server. The host runs the relay
-(`kh2coop_server`) next to their game, and friends join by the host's
-address. There's no central service.
+The relay (`kh2coop_server`) can run next to the host's game or on a separate
+machine, including a Mac. Players join the relay's address. The host's KH2
+game runs the enemies and story; the relay forwards the session's traffic.
+There's no central service.
 
 This guide covers the **current dev build**: run from a built checkout with
 `kh2ctl`. Player packaging (P4) will replace these steps.
@@ -21,14 +22,46 @@ This guide covers the **current dev build**: run from a built checkout with
   compares reported versions; it does not inspect game executables or prove
   the DLLs match.
 
-A Mac can run a headless client for the transport check. Actual two-player
-gameplay requires a second Windows KH2 machine.
+A Mac can run the relay or a headless client for transport checks. Each human
+player needs a Windows KH2 game. For automated tests, the rig can run two or
+three real games on this PC and script each player's controls.
 
 The private transport check passed on 2026-10-04: a real Windows game displayed
 the Mac's moving Friend1 avatar for a full two-minute connection, and the Mac
 received 5,660 valid game poses. All four protected saves were unchanged.
 See the [result and captures](../build/rig/vuh1493-realgame-20261005-01/lead-result.md).
-Two Windows games playing together remain the next playtest.
+Two real games on this PC also passed scripted movement through a Mac relay,
+normally and with configured delay/loss. See [testing without a friend](#testing-without-a-friend).
+The first human friend session on a separate Windows PC remains open.
+
+## Testing without a friend
+
+The scenario rig can launch two real KH2 games and drive both native players.
+Each has its own runtime and sees the other as a puppet. The existing
+`net_two_instances.json` checks movement in both directions;
+`net_two_instances_impaired.json` adds 100 ms of configured delay across the
+two runtimes, 10 ms jitter and 2% loss per runtime. Run from the desktop session:
+
+```powershell
+python tools/scenario/run.py tools/scenario/scenarios/net_two_instances.json
+python tools/scenario/run.py tools/scenario/scenarios/net_two_instances_impaired.json
+```
+
+These fixtures start a local relay. Putting the relay on the Mac lets both
+real games exercise the Tailscale path to another machine and back. This
+checks real game networking while James plays alone; it does not check a
+second Windows installation or another person's experience of the controls.
+
+The bounded Mac-relay runs `20261004-221407` and `20261004-221645` both passed:
+more than 270 matched native puppet samples per direction, mean position errors
+below 3 game units, and all four protected saves unchanged. The second run
+confirmed both active player slots on the Mac and the configured impairment
+in both runtime logs. See the [result, captures and rerun instructions](../build/rig/vuh1493-two-game-mac-relay-20261005-01/lead-result.md).
+
+For a cheaper transport check, `kh2coop_fake_sim` runs test clients without
+KH2, and the cross-machine probe can send synthetic avatar poses. Those
+clients do not run KH2's enemies, story or combat. Renting a server would
+provide another relay location, but would not replace the host's game.
 
 ## Reaching the host: Tailscale (recommended)
 

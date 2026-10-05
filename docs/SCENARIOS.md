@@ -57,6 +57,27 @@ retains the Mac receipts, sampled/non-atomic measurement limits and earlier
 config/sample failures. This validates private avatar transport with one game.
 Two-Windows-game combat/progress and the friend playtest remain untested.
 
+## Two real games through a Mac relay (2026-10-04)
+
+James has no friend lined up yet. The rig ran two real KH2 games on this PC,
+scripted each native player and connected both to the actual relay on the Mac
+at `100.103.220.58:27795`. The relay used protocol 10, a Tailscale-only bind and
+no fake simulation flag. Existing reviewed product binaries were unchanged.
+
+Runs [20261004-221407](../build/scenarios/20261004-221407_two_games_mac_relay_normal_1/report.md)
+and [20261004-221645](../build/scenarios/20261004-221645_two_games_mac_relay_impaired_1/report.md)
+both passed in 96.8 seconds. Normal movement had 286/285 matched native puppet
+samples with mean errors 0.95/1.47 units. Configured delay/loss movement had
+280/279 samples with mean errors 1.34/2.53 units; both runtimes logged 50 ms
+delay, 10 ms jitter and 2% loss. Each native player travelled over 1,200 units.
+The impaired run's fresh Mac checkpoint confirmed both active player slots and
+the sole private listener. All four protected saves stayed unchanged in both runs.
+
+This is an automated movement/network check with two games on one Windows PC,
+not a human friend playtest, second-installation check or remote combat/progress
+validation. The lag-compensated sampled errors are not latency measurements.
+See the [result and rerun](../build/rig/vuh1493-two-game-mac-relay-20261005-01/lead-result.md).
+
 ## Historical activation replay: single cycle (2026-10-04)
 
 `net_reconnect_shadows_activation_replay.json` is the current **98-step** bounded
