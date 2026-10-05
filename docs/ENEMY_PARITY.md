@@ -245,6 +245,17 @@ so the combined profile remains FAIL/NOT_EXPOSED; after-predicate qualification
 is not established. No kill, reload, retry or crash; four saves unchanged. See the
 [native health result](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-health-live-root01/result.md).
 
+The single-kill diagnostic173000 then passed: five fresh HP20 Shadows, one canonical
+20-to-0 kill, one normal death-bookkeeping return and selected removal-predicate
+returns, followed by later zero-refusal/zero-reason samples from all three stores.
+Four living HP20 Shadows remained. The prior171900 pre-kill FAIL is retained; its
+fixture compared transient physics bit22 as identity. The corrected fixture permits
+only that bit to differ between completed qualifications; pointer, HP, deletion,
+membership and safety gates remain. No retry, reload, retired-pointer read or
+reconstruction; four saves unchanged. This qualifies the selected raw-return
+observer, not a complete emission history or dead-pack recovery. See the
+[selected native death result](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-health-death-live-root02/result.md).
+
 No lifetime, incarnation, creation or dead-pack recovery authority follows. See the
 [selected FLS review](../build/rig/vuh1508-dead-pack-prep-20261005-01/dead-pack-lifetime-observer-fls-review/result.md),
 [legacy source review](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-native-trace-fls-diagnostic-review/result.md),
