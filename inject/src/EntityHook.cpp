@@ -39,6 +39,7 @@
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
+#include "NativeLifetimeTrace.hpp"
 #include "NativeHitTrace.hpp"
 #include "DamagePolicy.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -2921,6 +2922,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
             if (addr == listHead && listHead != 0) {
                 ++g_frameCounter;
+                lifetimetrace::Drain(&Log); // Only actual registered owner drains.
                 if (g_inputTraceBase.load(std::memory_order_acquire)) {
                     g_inputTraceOwnerTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
                     g_inputTraceOwnerFrame.fetch_add(1, std::memory_order_release);
@@ -3085,15 +3087,15 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 // ============================================================================
 
 static void UninitializeMinHookUnlessRetained() {
-    if (resourcetrace::RetainsMinHookResources()) {
-        Log("[resourcetrace] global MinHook teardown retained until process exit");
+    if (resourcetrace::RetainsMinHookResources() || lifetimetrace::RetainsMinHookResources()) {
+        Log("[native-trace] global MinHook teardown retained until process exit");
         return;
     }
     MH_Uninitialize();
 }
 
 bool Initialize(uintptr_t exeBase) {
-    if (resourcetrace::RejectReinitialization()) return false;
+    if (resourcetrace::RejectReinitialization() || lifetimetrace::RetainsMinHookResources()) return false;
     if (g_initialized) return true;
 
     g_exeBase = exeBase;
@@ -3412,6 +3414,12 @@ bool Initialize(uintptr_t exeBase) {
                              &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace);
     resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
     lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
+    lifetimetrace::Initialize(exeBase);
+    if (lifetimetrace::GetStatistics().requested) {
+        const auto s = lifetimetrace::GetStatistics();
+        Log("[lifetimetrace] install verified=%u installed=%u failed=%u retained=%u diagnostic-only=1",
+            s.verified, s.installed, s.failed, s.retained);
+    }
     if (spawnTrace) {
         const auto coverage = lifecycletrace::GetStats();
         Log("[lifecycletrace] %s requested=%u verifiedMask=%u installedMask=%u failedMask=%u diagnostic-only=1",
@@ -3450,6 +3458,7 @@ void Shutdown() {
     AcquireSRWLockExclusive(&g_inputTraceLogLock);
     g_inputTraceBase.store(0, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_inputTraceLogLock);
+    lifetimetrace::StopRecording();
     resourcetrace::StopRecording(); // Retired callbacks use only process-lifetime storage.
     if (!g_initialized) return;
 

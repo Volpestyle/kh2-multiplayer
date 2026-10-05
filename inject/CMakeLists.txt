@@ -60,6 +60,7 @@ add_library(kh2coop_inject SHARED
     src/NativeOwnedEmitterGateway.cpp
     src/NativeOwnedEmitterGatewayRaw.asm
     src/NativeOwnedEmitterInstall.cpp
+    src/NativeLifetimeTrace.cpp
     src/NativeLifecycleTrace.cpp
     src/NativeHitTrace.cpp
     src/DamagePolicy.cpp
@@ -67,6 +68,7 @@ add_library(kh2coop_inject SHARED
 
 if(MSVC)
     set_source_files_properties(
+        src/NativeLifetimeTrace.cpp
         src/NativeOwnedEmitterGateway.cpp
         src/NativeOwnedEmitterInstall.cpp
         PROPERTIES COMPILE_OPTIONS "/W4;/WX"

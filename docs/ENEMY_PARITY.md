@@ -146,6 +146,43 @@ The whole-wave gate stays open; sampled roots do not prove incarnation or
 support deaths across an observation gap. See the
 [native binding audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/second-wave-binding-153018-audit/result.md).
 
+## Selected native lifetime observer, 2026-10-05
+
+Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
+destructor419AB0 and allocator19C470 only under the matching destructor scope
+and original return419ACD. Originals, arguments, returns, LastError and native
+SEH are preserved. A bounded POD queue drains on the owner frame; no native
+actor/header/domain is read after release. Exposed module, hooks, unwind metadata
+and MinHook dependencies remain retained until process exit.
+
+Scope storage uses a retained Windows FLS slot and fixed owned POD contexts,
+without retained pointers into any fiber stack. Thread/stack/key/token failures,
+pool contention/exhaustion and depth overflow refuse observation and report the
+first reason. Unknown stack changes and thread migration are unsupported. Windows
+FLS initialization can allocate internally; no allocation-free OS claim is made.
+
+The independent source review adopted the change. Normal137 controls and seven
+isolated ASan fiber boundary cases passed; the combined ASan fiber-stack-reuse
+run remains unqualified with its failures retained. Four current install-failure
+modes also pass normally and under ASan after a control-only retention fix.
+
+Live153816 qualified five courtyard Shadows and killed one natively, HP20 to0.
+It captured one raw factory-return pair for the actor, then the selected outer
+destructor and matching static-arena release pair on the same actual Windows
+fiber. Both returned once; no guard refusal, loss, unwind or exception occurred.
+No reload was needed; all four protected saves were unchanged. This is selected
+path evidence, not death-bookkeeping, native creation authority, OS deallocation,
+address-reuse proof or dead-pack recovery.150636 remains FAIL/NOT_EXPOSED.
+
+Legacy `SPAWN_TRACE` and `NATURAL_RESOURCE_TRACE` stayed OFF. Their optional
+factory/construction and predicate scopes retain stack pointers in TLS and have
+a separately demonstrated interleaving hazard; geometry uses TLS storage with
+stale-attribution risk. Fiber use alone does not prove those paths interleaved
+or caused a crash. Keep them disabled pending their own fix; the core activation
+update policy is separate. See the
+[FLS review](../build/rig/vuh1508-dead-pack-prep-20261005-01/dead-pack-lifetime-observer-fls-review/result.md)
+and [legacy scope audit](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-native-trace-fiber-audit/result.md).
+
 ## Current resync binding, 2026-10-04
 
 The current protocol9/WorldBridge11 resync path now qualifies the complete
