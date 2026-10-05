@@ -410,6 +410,9 @@ struct TraceStats {
     bool eventGateVerified = false, eventGateInstalled = false, eventGateFailed = false;
     std::uint64_t eventGateCoverageSerial = 0, eventGateForeign = 0;
     std::uint64_t eventGateUnwound = 0, eventGateDropped = 0;
+    // Process-lifetime cumulative FLS guard diagnostics; never reset by drains.
+    std::uint64_t flsRefused = 0;
+    std::uint32_t flsFirstReason = 0;
 };
 
 // Checked read-only snapshots, usable independently of hook installation.

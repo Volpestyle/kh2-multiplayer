@@ -2975,6 +2975,8 @@ TraceStats GetTraceStats() {
     stats.factoryForeignScopes = g_factoryForeign.load();
     stats.factoryUnwoundScopes = g_factoryUnwound.load();
     stats.factoryAmbiguousScopes = g_factoryAmbiguous.load();
+    stats.flsRefused = g_factoryStorage.refused.load();
+    stats.flsFirstReason = g_factoryStorage.firstReason.load();
     stats.available = g_fixedInstalled && g_generatedInstalled && g_dispatcherInstalled && g_scriptInstalled &&
         stats.factoryInstalledMask == FactoryAllHooks;
     stats.geometryRequested = g_geometryConfig.requested;

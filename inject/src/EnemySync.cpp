@@ -927,7 +927,7 @@ void DrainSpawnTrace(const NativeCensus& census) {
             stats.eventGateVerified ? 1U : 0U, stats.eventGateInstalled ? 1U : 0U, stats.eventGateFailed ? 1U : 0U,
             static_cast<unsigned long long>(stats.eventGateCoverageSerial), static_cast<unsigned long long>(stats.eventGateForeign),
             static_cast<unsigned long long>(stats.eventGateUnwound), static_cast<unsigned long long>(stats.eventGateDropped));
-        g_log("[spawntrace] summary available=%u fixedAvailable=%u generatedAvailable=%u dispatcherAvailable=%u scriptAvailable=%u started=%llu published=%llu drained=%llu dropped=%llu unsupportedCaller=%llu unavailable=%llu nativeFaults=%llu lastException=%08X factoryRequestedMask=%u factoryVerifiedMask=%u factoryInstalledMask=%u factoryFailedMask=%u factoryForeignScopes=%llu factoryUnwoundScopes=%llu factoryAmbiguousScopes=%llu",
+        g_log("[spawntrace] summary available=%u fixedAvailable=%u generatedAvailable=%u dispatcherAvailable=%u scriptAvailable=%u started=%llu published=%llu drained=%llu dropped=%llu unsupportedCaller=%llu unavailable=%llu nativeFaults=%llu lastException=%08X factoryRequestedMask=%u factoryVerifiedMask=%u factoryInstalledMask=%u factoryFailedMask=%u factoryForeignScopes=%llu factoryUnwoundScopes=%llu factoryAmbiguousScopes=%llu flsRefusedCumulative=%llu flsFirstReason=%u",
               stats.available ? 1u : 0u, stats.fixedAvailable ? 1u : 0u, stats.generatedAvailable ? 1u : 0u,
               stats.dispatcherAvailable ? 1u : 0u, stats.scriptAvailable ? 1u : 0u,
               static_cast<unsigned long long>(stats.started),
@@ -938,7 +938,8 @@ void DrainSpawnTrace(const NativeCensus& census) {
               stats.factoryVerifiedMask, stats.factoryInstalledMask, stats.factoryFailedMask,
               static_cast<unsigned long long>(stats.factoryForeignScopes),
               static_cast<unsigned long long>(stats.factoryUnwoundScopes),
-              static_cast<unsigned long long>(stats.factoryAmbiguousScopes));
+              static_cast<unsigned long long>(stats.factoryAmbiguousScopes),
+              static_cast<unsigned long long>(stats.flsRefused), stats.flsFirstReason);
         g_traceLastSummaryMs = now;
     }
     if (g_log && (stats.dropped != g_traceLastDropped || stats.nativeFaults != g_traceLastFaults)) {
@@ -1070,7 +1071,7 @@ void DrainLifecycleTrace(const NativeCensus& census) {
     if (!stats.requested) return;
     const auto now = GetTickCount64();
     if (g_log && (g_lifecycleLastSummaryMs == 0 || now - g_lifecycleLastSummaryMs >= 1000)) {
-        g_log("[lifecycletrace] summary requested=%u verifiedMask=%u installedMask=%u failedMask=%u started=%llu published=%llu drained=%llu dropped=%llu unavailable=%llu outOfScope=%llu nativeFaults=%llu unwound=%llu depthOverflow=%llu lastException=%08X predicateStarted=%llu predicatePublished=%llu predicateDropped=%llu predicateForeign=%llu predicateUnmatched=%llu predicateUnwound=%llu predicateDepthOverflow=%llu predicateCountOverflow=%llu",
+        g_log("[lifecycletrace] summary requested=%u verifiedMask=%u installedMask=%u failedMask=%u started=%llu published=%llu drained=%llu dropped=%llu unavailable=%llu outOfScope=%llu nativeFaults=%llu unwound=%llu depthOverflow=%llu lastException=%08X predicateStarted=%llu predicatePublished=%llu predicateDropped=%llu predicateForeign=%llu predicateUnmatched=%llu predicateUnwound=%llu predicateDepthOverflow=%llu predicateCountOverflow=%llu flsRefusedCumulative=%llu flsFirstReason=%u",
               stats.requested ? 1u : 0u, stats.verifiedMask, stats.installedMask, stats.failedMask,
               static_cast<unsigned long long>(stats.started), static_cast<unsigned long long>(stats.published),
               static_cast<unsigned long long>(g_lifecycleDrained), static_cast<unsigned long long>(stats.dropped),
@@ -1080,7 +1081,8 @@ void DrainLifecycleTrace(const NativeCensus& census) {
               static_cast<unsigned long long>(stats.predicateStarted), static_cast<unsigned long long>(stats.predicatePublished),
               static_cast<unsigned long long>(stats.predicateDropped), static_cast<unsigned long long>(stats.predicateForeign),
               static_cast<unsigned long long>(stats.predicateUnmatched), static_cast<unsigned long long>(stats.predicateUnwound),
-              static_cast<unsigned long long>(stats.predicateDepthOverflow), static_cast<unsigned long long>(stats.predicateCountOverflow));
+              static_cast<unsigned long long>(stats.predicateDepthOverflow), static_cast<unsigned long long>(stats.predicateCountOverflow),
+              static_cast<unsigned long long>(stats.flsRefused), stats.flsFirstReason);
         g_lifecycleLastSummaryMs = now;
     }
     lifecycletrace::Event event;
@@ -1211,14 +1213,15 @@ void DrainResourceTrace() {
         stats.status != g_resourceLog.summaryStatus || stats.generation != g_resourceLog.summaryGeneration)) {
         // Stats are sampled before Pop, not an atomic inventory. Failed installs
         // and retired recording still get summaries even with no child rows.
-        g_log("[resourcetrace] summary schema=1 status=%u generation=%llu recording=%u resourcesMayBeReferenced=%u modulePinned=%u installationIdentityVerified=%u producerEntered=%llu producerReturned=%llu producerUnwound=%llu producerDropped=%llu producerUnparented=%llu producerForeign=%llu producerPublished=%llu consumed=%llu logged=%llu suppressedNoLogger=%llu suppressedBudget=%llu logCap=%llu drainCap=%u emptyMeansAbsent=0 parentCompletenessProven=0 creationAuthority=0",
+        g_log("[resourcetrace] summary schema=1 status=%u generation=%llu recording=%u resourcesMayBeReferenced=%u modulePinned=%u installationIdentityVerified=%u producerEntered=%llu producerReturned=%llu producerUnwound=%llu producerDropped=%llu producerUnparented=%llu producerForeign=%llu producerPublished=%llu consumed=%llu logged=%llu suppressedNoLogger=%llu suppressedBudget=%llu logCap=%llu drainCap=%u emptyMeansAbsent=0 parentCompletenessProven=0 creationAuthority=0 flsRefusedCumulative=%llu flsFirstReason=%u",
             static_cast<unsigned>(stats.status), static_cast<unsigned long long>(stats.generation), stats.recording ? 1U : 0U,
             stats.resourcesMayBeReferenced ? 1U : 0U, stats.modulePinned ? 1U : 0U, stats.installationIdentityVerified ? 1U : 0U,
             static_cast<unsigned long long>(stats.entered), static_cast<unsigned long long>(stats.returned), static_cast<unsigned long long>(stats.unwound),
             static_cast<unsigned long long>(stats.dropped), static_cast<unsigned long long>(stats.unparented), static_cast<unsigned long long>(stats.foreign),
             static_cast<unsigned long long>(stats.published), static_cast<unsigned long long>(g_resourceLog.consumed), static_cast<unsigned long long>(g_resourceLog.logged),
             static_cast<unsigned long long>(g_resourceLog.suppressedNoLogger), static_cast<unsigned long long>(g_resourceLog.suppressedBudget),
-            static_cast<unsigned long long>(ResourceLogCap), ResourceDrainCap);
+            static_cast<unsigned long long>(ResourceLogCap), ResourceDrainCap,
+            static_cast<unsigned long long>(stats.flsRefused), stats.flsFirstReason);
         g_resourceLog.summaryMs = now; g_resourceLog.summaryStatus = stats.status; g_resourceLog.summaryGeneration = stats.generation;
     }
 }

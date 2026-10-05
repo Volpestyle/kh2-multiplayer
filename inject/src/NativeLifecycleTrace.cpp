@@ -528,6 +528,8 @@ Stats GetStats() {
     s.predicateUnmatched = g_predicateUnmatched.load(); s.predicateUnwound = g_predicateUnwound.load();
     s.predicateDepthOverflow = g_predicateDepthOverflow.load(); s.predicateCountOverflow = g_predicateCountOverflow.load();
     s.lastNativeException = g_exception.load();
+    s.flsRefused = g_storage.refused.load();
+    s.flsFirstReason = g_storage.firstReason.load();
     return s;
 }
 

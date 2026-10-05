@@ -334,6 +334,7 @@ bool Pop(ResourceObservation& out) {
 }
 Statistics GetStatistics() {
     return {g_status.load(),g_recording.load(),g_retained.load(),g_pinnedModule!=nullptr,g_identity.load(),
-        g_entered.load(),g_returned.load(),g_unwound.load(),g_dropped.load(),g_unparented.load(),g_foreign.load(),g_published.load(),g_generation.load()};
+        g_entered.load(),g_returned.load(),g_unwound.load(),g_dropped.load(),g_unparented.load(),g_foreign.load(),g_published.load(),g_generation.load(),
+        g_localStorage.refused.load(),g_localStorage.firstReason.load()};
 }
 } // namespace kh2coop::inject::resourcetrace

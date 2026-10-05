@@ -88,6 +88,9 @@ struct Stats {
     // Per-observer exception observations; nested hooks can observe one native
     // exception more than once. parentSequence/depth identify that nesting.
     std::uint32_t lastNativeException = 0;
+    // Process-lifetime cumulative FLS guard diagnostics; never reset by drains.
+    std::uint64_t flsRefused = 0;
+    std::uint32_t flsFirstReason = 0;
 };
 
 // MinHook must already be initialized. Each hook verifies and installs

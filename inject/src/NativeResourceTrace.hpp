@@ -55,6 +55,9 @@ struct Statistics {
     bool installationIdentityVerified=false;
     std::uint64_t entered=0, returned=0, unwound=0, dropped=0, unparented=0, foreign=0;
     std::uint64_t published=0, generation=0;
+    // Process-lifetime cumulative FLS guard diagnostics; never reset by drains.
+    std::uint64_t flsRefused = 0;
+    std::uint32_t flsFirstReason = 0;
 };
 
 // Root owns MinHook initialization and all global uninitialization guards.

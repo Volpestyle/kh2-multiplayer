@@ -18,7 +18,7 @@ samples 5.907 seconds apart showed the same host actor moving from radius
 58.208 to 224.005 before the first hit. The following read-only run `100816`
 collected a 3.5-second interval outside the original hit gate, then intentionally
 failed without issuing damage or correction. Its 140 rows included 138 qualified
-samples across owner frames 9340â€“9549. Those samples retained neutral raw and
+samples across owner frames 9340Ã¢â‚¬â€œ9549. Those samples retained neutral raw and
 processed input, idle motion and zero sampled velocity at actor+0xB98, while
 the actor moved 309.349 planar units. Actor, room, controller and camera
 identities stayed fixed. Two rows crossed frame boundaries and remain
@@ -220,17 +220,37 @@ PREPARE=1 refuses these diagnostics; core activation update policy is unchanged.
 The full Release DLL builds from91 pinned source inputs.168 normal and168
 isolated Windows ASan checks, plus nine installer controls, passed. Combined ASan
 fiber-stack-reuse remains unqualified. Installed native run164208 ended FAIL/NOT_EXPOSED without a crash. Five HP20
-Shadows qualified, and the target had removal-predicate/script return pairs, but
-the fixed-wrapper post-return actor metadata was unavailable. The required raw
-birth join was absent, so the fixture issued no kill or retry. Four saves and
-all91 source inputs stayed unchanged. The current logger does not export legacy
-guard-refusal counters, so raw scope observations cannot yet earn a guard-clean
-qualification. No lifetime,
-incarnation, creation or dead-pack recovery authority follows. See the
+Shadows qualified; no kill or retry was issued, and all four saves and91 source
+inputs stayed unchanged. Its parser required initialized actor metadata at
+wrapper return, exceeding the raw-return contract. Read-only inspection found
+the target's exact fixed-wrapper/factory return,55 construction rows,18 resource
+groups and later natural predicate/script return pairs. Wrapper-time status/HP
+metadata remains unavailable and cannot be filled from the later current list.
+The corrected parser retains that distinction and every scope/record/fiber check;
+the original failure remains. Generated-wrapper exposure is absent.
+
+The separately reviewed additive health export appends `flsRefusedCumulative`
+and `flsFirstReason` to each factory, lifecycle and resource owner summary.
+They sample existing process-lifetime atomics and never reset. They count refusal
+calls, not unique fibers or native calls; first reason follows successful CAS
+order. Require both zero from all three stores in a later owner summary after
+the selected observed returns. Missing/nonzero/unknown/regressing fields refuse
+qualification. Independent loads are not an atomic event seal; earlier zero
+samples cannot cover later calls. The seven-file delta builds in the full Release
+DLL, and18 focused actual-getter/log-format controls pass. No native hook, storage
+or activation behavior changes. Fresh no-kill run170022 observed one exact fixed raw return/construction/resource
+join and explicit zero count/reason samples from all three stores, with installation
+and loss checks passing. Its selected natural predicate was absent within15s,
+so the combined profile remains FAIL/NOT_EXPOSED; after-predicate qualification
+is not established. No kill, reload, retry or crash; four saves unchanged. See the
+[native health result](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-health-live-root01/result.md).
+
+No lifetime, incarnation, creation or dead-pack recovery authority follows. See the
 [selected FLS review](../build/rig/vuh1508-dead-pack-prep-20261005-01/dead-pack-lifetime-observer-fls-review/result.md),
-[legacy source review](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-native-trace-fls-diagnostic-review/result.md)
-[integrated build](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-fls-integration-root01/build-products.json)
-and [native raw result](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-fls-live-root01/result.md).
+[legacy source review](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-native-trace-fls-diagnostic-review/result.md),
+[native raw result](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-fls-live-root01/result.md),
+[parser correction](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-164208-audit/result.md)
+and [health export review](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-fls-health-review/result.md).
 
 ## Current resync binding, 2026-10-04
 
@@ -273,7 +293,7 @@ chosen ordinary key below retain their original historical scope.
   next.
 - Rooms: from `tools/scenario/spikes/combat_rooms.py`, a sweep of 224
   world/room pairs with default programs plus 144 with forced battle
-  programs 1â€“3.
+  programs 1Ã¢â‚¬â€œ3.
   - On this save, six rooms spawn enemies with default programs. Forced
     programs add many more.
   - 40 rooms were held by events or cutscenes.
@@ -299,7 +319,7 @@ chosen ordinary key below retain their original historical scope.
 Position deltas of a few units come from the instances first sighting an
 enemy at slightly different moments of its spawn animation (inputs run about
 1 s apart). 08/00 is left out: its type-3 actor `B_MU110` has no status block
-(HP reads âˆ’1) and isn't a combat enemy.
+(HP reads Ã¢Ë†â€™1) and isn't a combat enemy.
 
 ### Findings
 
@@ -307,10 +327,10 @@ enemy at slightly different moments of its spawn animation (inputs run about
   exactly on name and spawn order, with spawn positions equal within the
   sampling noise above. That includes a timed second sub-wave (12/0B:
   four M_EX900, then two M_EX920 about 3.8 s later).
-- **The battle program decides the set.** 05/00 spawns 4Ã— M_EX520 with the
+- **The battle program decides the set.** 05/00 spawns 4Ãƒâ€” M_EX520 with the
   save's program but M_EX050 + M_EX690 with btl 3. So it has to be in the
   key.
-- **Actor addresses are not a key.** Addresses matched 0â€“100% depending on
+- **Actor addresses are not a key.** Addresses matched 0Ã¢â‚¬â€œ100% depending on
   the room (05/0B: every address on one side offset by exactly 0xA0, i.e.
   one extra allocation). Actor pool slots depend on allocation history.
 - **Behaviour diverges immediately after spawn.** Positions drift apart
@@ -360,7 +380,7 @@ For rooms whose spawner emits enemies over time based on player position
 ## Step 1 implementation (VUH-1502)
 
 `inject/src/EnemySync.cpp`, over the WorldBridge. The role comes from the
-runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1â€“2 = client);
+runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1Ã¢â‚¬â€œ2 = client);
 `KH2COOP_ROLE=host|client` overrides it for tests.
 
 - **Room instance.** Native transition-request and load-completion hooks in
@@ -404,8 +424,8 @@ runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1â€“2 = client)
 
 Verified 2026-10-02 (`net_enemy_sync_courtyard`, `net_enemy_sync_waves`:
 host + 2 clients, relay, host-only damage):
-- **HP:** the same on all three after host damage (courtyard 20 â†’ 13,
-  12/0B 160 â†’ 153), read 0.4 s later.
+- **HP:** the same on all three after host damage (courtyard 20 Ã¢â€ â€™ 13,
+  12/0B 160 Ã¢â€ â€™ 153), read 0.4 s later.
 - **Deaths:** every host kill killed each client copy exactly once (5 and 6
   deaths per client).
 - **12/0B second wave:** spawned on all three, bound to the host's new
