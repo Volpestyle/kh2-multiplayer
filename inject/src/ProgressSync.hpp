@@ -26,6 +26,8 @@ bool StageFull(const ProgressUpdate& update, std::uint32_t generation);
 // Version-only changes are not material; malformed expected full content fails.
 bool DesiredMatchesFull(const ProgressUpdate& expected, std::uint32_t generation);
 bool ReadHash(std::uint32_t& hash); // actual live masked bytes
+// Read-only checked equality against the current complete client desired state.
+bool ClientConverged(std::uint32_t generation);
 // Warp calls at its safe pre-load boundary, before native room initialization.
 // False defers loading until the complete desired snapshot is applied safely.
 bool ApplyAtRoomBoundary(std::uint32_t generation);

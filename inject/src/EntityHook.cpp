@@ -35,6 +35,7 @@
 #include "SaveGuard.hpp"
 #include "CrashDump.hpp"
 #include "EnemySync.hpp"
+#include "EventHoldNativeInput.hpp"
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
@@ -2759,16 +2760,24 @@ static void TraceInputCallback() {
 
 static void __fastcall HookedInputCollector(void* inputStruct) {
     TraceInputCallback();
-    if (g_origInputCollector) {
-        g_origInputCollector(inputStruct);
-    }
-
+    const bool control = eventholdnative::EnterInput();
     __try {
-        if (PollMailbox()) {
-            ApplyPrimaryMailboxInput(inputStruct);
+        if (g_origInputCollector) g_origInputCollector(inputStruct);
+        __try {
+            const bool held = control && eventholdnative::HoldingInput();
+            if (PollMailbox() && !held) ApplyPrimaryMailboxInput(inputStruct);
+            if (control && eventholdnative::ApplyInput(inputStruct)) {
+                // Consume held automation, retaining friends' independent input.
+                // The original collector supplies fresh physical input every call.
+                g_primaryMailboxPad = {};
+                g_primaryRawButtons = 0;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            if (control) eventholdnative::AbortInput();
+            Log("EXCEPTION in HookedInputCollector post-call");
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("EXCEPTION in HookedInputCollector post-call");
+    } __finally {
+        if (control) eventholdnative::LeaveInput();
     }
 }
 
@@ -3123,6 +3132,7 @@ bool Initialize(uintptr_t exeBase) {
 
     // Before anything that can fail: an injected instance never writes saves.
     saveguard::Install(&Log);
+    eventholdnative::Install(exeBase, &Log);
     crashdump::Install(&Log);
 
     // --- Find PerEntityUpdate ---
@@ -3436,6 +3446,7 @@ bool Initialize(uintptr_t exeBase) {
 
 void Shutdown() {
     render::InvalidateCoopHud();
+    eventholdnative::Disable();
     AcquireSRWLockExclusive(&g_inputTraceLogLock);
     g_inputTraceBase.store(0, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_inputTraceLogLock);

@@ -26,7 +26,7 @@ possibly enemies.
 | Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Private Tailscale transport passed with one real game and a Mac synthetic avatar for two minutes, then two real local games through a Mac relay, normally and with delay/loss. Two separate Windows installations and controller playtests remain open. |
 | Hit claims | A client's hits on enemies are sent as claims; the host applies each once through the game's own damage routine and broadcasts absolute HP (protocol 10). Ordinary Shadow combat, including client kills, works on loopback. Attack-specific effects and boss finishers are open. |
 | Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. After checked native snapshots exposed five unmatched client enemies, scoped host activation passed the original strict 20-load route with empty enemy populations and a source-expiry control. Its unchanged native-wave regression then failed with different enemy identities and an alive host refill. Nonempty spawn/lifecycle authority remains open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
-| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected event delivery, cutscene hold and broader side effects remain open. |
+| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected story delivery and one empty-room native client hold also passed (`094229`); broader event side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
 **Reconnect recovery (VUH-1508), in plain terms.** If a client rejoins while the
@@ -94,8 +94,8 @@ bytes, then returned to GoA. A client that never loaded the event room applied
 the latest full snapshot before its join load and retained the story flag through
 reload. Native movement returned in the actual completed event tuple. Personal
 bytes and protected saves were unchanged. This proves acquired story state for
-late join/reload; connected event delivery, hold/skip and arbitrary story side
-effects remain open. See the [result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/story2-result.md)
+late join/reload. The connected hold result below extends event delivery; skip
+and arbitrary story side effects remain open. See the [result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/story2-result.md)
 and [independent review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/story2-acceptance-review.md).
 
 Five room-specific initial joins and same-room reloads also passed through the
@@ -117,7 +117,18 @@ retirement, contention and concurrent copies. Names, MP, downed/revive, reconnec
 and full HUD acceptance remain open. See the [HUD result](../build/rig/vuh1507-hud-prep-20261005-01/hud-root01/result.md)
 and [source review](../build/rig/vuh1507-hud-prep-20261005-01/independent-review.md).
 
-See [private joining and simulation](JOIN_GUIDE.md). Cutscene hold, general
+One connected native cutscene hold now passed through the impaired Mac relay
+(`094229`, two real games, normal process priorities). The client opened its
+own Pause menu, suppressed a tested movement command while the host completed
+08/0C evt1, then closed within 406 ms and stayed latched until actual arrival,
+complete empty enemy census and all 8,108 shared progress bytes matched. Fresh
+movement worked after release. Personal bytes and all four protected files
+stayed unchanged. The feature defaults off and covers one already-bound
+empty-room client/event; populated rooms, repeated events, skip and reconnect
+during a hold remain open. See the [hold result](../build/rig/vuh1498-cutscene-prep-20261005-01/client-hold-result.md)
+and [independent review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-client-candidate/acceptance-root15/review.md).
+
+See [private joining and simulation](JOIN_GUIDE.md). General cutscene support,
 waves and bosses, and the package also remain open.
 
 ## Prior art (researched 2026-10-01)

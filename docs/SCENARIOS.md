@@ -2730,6 +2730,48 @@ through states2/3/4. These fields are not a coherent ownership token and do not
 authorize world publication from the raw-input callback. See the
 [owner coverage result](../build/rig/vuh1498-input-callback-probe-20261005-01/owner-coverage-root01/result.md).
 
+## Connected native client hold (2026-10-05)
+
+`20261005-094229_mac_client_native_event_hold_entry_wait_1` passed all 55 steps
+with two real games through the Mac relay at 50 ms latency/10ms jitter/2% loss.
+Runner, games and client runtime used Normal priority. Both peers were admitted
+in empty GoA before the host entered the native08/0C evt1 event. Authenticated
+host Acquire, native input receipt and actual owner ACK preceded the client's
+menu10 pause. A 250 ms nonzero mailbox command was consumed while raw input stayed
+neutral and the client stayed stationary. Native captures and advancing input
+callbacks kept the bounded paused watchdog qualified.
+
+The host ended naturally at `[8,12,50,0,0,22]`. The client consumed the exact
+successor Transition and Release, closed its owned menu within 406 ms, and kept
+input neutral until native owner processing confirmed full arrival, complete
+empty manifest/census and current masked progress equality. All8108 shared bytes
+matched; story0->2 reached the connected client. Complete discarded the held
+sample. A subsequent fresh 250 ms movement command moved the same actor 127.79 units.
+No crash, personal-byte change or protected disk-save change occurred. Root
+inspected the host event, client pause, final gameplay and fresh-movement images.
+
+Both flags default off. In this development probe the host game had
+`KH2COOP_EVENT_HOLD_PRODUCER=1` and control0; the client game and its runtime had
+`KH2COOP_EVENT_HOLD_CONTROL=1` and producer0. The raw-input callback reads only
+the separate scoped control channel and overlays normal Start/neutral input;
+world delivery, arrival and progress servicing remain on the native owner path.
+The local heartbeat limit is 1500 ms and opening/closing limits are 1000 ms.
+Retirement, unsupported ownership, resync and overflow abort the one-shot interval.
+
+Acceptance is one already-bound empty-room client and one natural event, with
+sampled mailbox suppression. Physical-controller interference, populated rooms,
+repeated holds, skip/vote, reconnect during a hold and uncertain-menu cleanup are
+not covered. Earlier failed probes stay failed; `091838` independently passed
+with an AboveNormal client runtime. `093030` failed a premature harness callback
+pair check. The next-copy entry fix grants no paused-liveness credit while waiting
+for its second callback; the ordinary watchdog remains active with a fixed 5 s
+entry limit, deducted from the 120 s hold ceiling. The final result requires an
+explicit native close-clock bound rather than treating Complete as a timer proof.
+
+See the [hold result](../build/rig/vuh1498-cutscene-prep-20261005-01/client-hold-result.md),
+[Normal-priority review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-client-candidate/acceptance-root15/review.md)
+and [prior source review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-client-candidate/native-review.md).
+
 ## Known limits
 
 - `boot` loads whatever slot the save list opens on (the last used one) and

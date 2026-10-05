@@ -16,6 +16,7 @@
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
 #include "ProgressSync.hpp"
+#include "EventHoldNative.hpp"
 #include "Warp.hpp"
 
 #include "kh2coop/AppliedStateHash.hpp"
@@ -112,6 +113,18 @@ bool g_manifestSent = false;        // host: first manifest of the epoch went ou
 bool g_hostBeginPending = false;
 RoomTransition g_pendingHostRoom {};
 ProducerWorldContext g_pendingHostRoomContext {};
+// First bounded event-publication slice; client pause/control is separate.
+// Owner-thread state survives native room/key changes, but never a session reset.
+bool g_eventHoldProducerEnabled = false;
+struct HostEventPublication {
+    bool activePublished = false;
+    bool failed = false;
+    std::uint64_t retryDeadlineMs = 0;
+    std::optional<EventHold> pending;
+    ProducerWorldContext context {};
+    ProducerWorldContext admittedRoom {};
+};
+HostEventPublication g_hostEventPublication;
 std::uint64_t g_lastHashMs = 0;
 bool g_censusInterrupted = false;
 std::uint64_t g_lastCensusErrorMs = 0;
@@ -140,6 +153,8 @@ struct HostRoom {
     std::map<std::uint16_t, HostEnemy> enemies;  // by netId
 };
 HostRoom g_host;
+eventhold::Scope g_eventControlScope {};
+RoomTransition g_eventControlRoom {};
 
 ActivationLease g_activationLease;
 std::array<std::uint64_t, 2> g_activationIncarnation {};
@@ -320,6 +335,9 @@ bool EnsureClientClaimScope();
 bool ReleaseClientClaims(std::uint32_t frame);
 
 void RetireWorldSession() {
+    eventholdnative::RetireOwner();
+    g_eventControlScope = {}; g_eventControlRoom = {};
+    g_hostEventPublication = {};
     InvalidateClientClaims("world-session-retired");
     g_activationRecovery.reset();
     if (g_survivingPack.Intent()) g_survivingPack.Cancel();
@@ -1457,6 +1475,81 @@ void QueueHostBeginInstance(const RoomTransition& location) {
     }
 }
 
+struct HostEventObservation {
+    std::int32_t state = 0;
+    uintptr_t context = 0;
+    RoomTransition location {};
+};
+
+bool ReadHostEventObservation(HostEventObservation& out) {
+    return ReadNative(g_exeBase + offsets::CUTSCENE_STATE, out.state) &&
+        ReadNative(g_exeBase + offsets::EVENT_CONTEXT, out.context) &&
+        ReadLocationChecked(out.location);
+}
+
+bool SameHostEventObservation(const HostEventObservation& a, const HostEventObservation& b) {
+    return a.state == b.state && a.context == b.context && SameLocation(a.location, b.location);
+}
+
+// Called only by the admitted EnemySync owner. Early acquire bypasses gameplay
+// safety, not affinity/session ordering. Release follows progress/room commit.
+bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
+    if (!g_eventHoldProducerEnabled || g_role != Role::Host || !g_epoch) return true;
+    auto& publication = g_hostEventPublication;
+    // g_epoch intentionally survives session retirement for monotonic room IDs;
+    // it is not proof that this transport session admitted a room.
+    if (!WorldContextCurrent(publication.admittedRoom)) return true;
+    auto flush = [&]() {
+        if (publication.failed) return false; // retire the session to recover
+        if (!publication.pending) return true;
+        if (GetTickCount64() >= publication.retryDeadlineMs) {
+            publication.failed = true;
+            if (g_log) g_log("[event-hold] failed reason=enqueue-deadline epoch=%u active=%u",
+                publication.pending->epoch, publication.pending->active ? 1u : 0u);
+            return false;
+        }
+        if (!WorldContextCurrent(publication.context) || publication.pending->epoch != g_epoch) {
+            if (g_log) g_log("[event-hold] failed reason=retired-pending epoch=%u generation=%u delivery=%llu source=%llu",
+                publication.pending->epoch, publication.context.generation,
+                static_cast<unsigned long long>(publication.context.deliverySerial),
+                static_cast<unsigned long long>(publication.context.hostSourceSerial));
+            publication.failed = true;
+            return false;
+        }
+        if (!SendCapturedWorld(encode(*publication.pending), publication.context)) return false;
+        if (g_log) g_log("[event-hold] published active=%u epoch=%u evt=%u frame=%u tid=%lu generation=%u delivery=%llu source=%llu",
+            publication.pending->active ? 1u : 0u, publication.pending->epoch,
+            publication.pending->eventProgram, frame, GetCurrentThreadId(), publication.context.generation,
+            static_cast<unsigned long long>(publication.context.deliverySerial),
+            static_cast<unsigned long long>(publication.context.hostSourceSerial));
+        publication.activePublished = publication.pending->active;
+        publication.pending.reset();
+        publication.context = {};
+        return true;
+    };
+    // Never collapse an unqueued acquire into release or let later world
+    // publications overtake its retry. The captured context is never retagged.
+    if (!flush()) return false;
+    HostEventObservation before {}, after {};
+    if (!ReadHostEventObservation(before)) return true; // unknown is not idle
+    const bool active = (before.state >= 2 && before.state <= 4) || before.context != 0;
+    const bool idle = before.state == 0 && before.context == 0;
+    if ((!active && !idle) || active == publication.activePublished) return true;
+    if (!active && (!allowRelease || !SafeNativeGameplay() || g_hostBeginPending || !g_inst.live)) return true;
+    ProducerWorldContext captured;
+    if (!CaptureWorldContext(captured) || !ReadHostEventObservation(after) ||
+        !SameHostEventObservation(before, after) || !WorldContextCurrent(captured)) return true;
+    publication.pending = EventHold {g_epoch, active, before.location.eventProgram};
+    publication.context = captured;
+    publication.retryDeadlineMs = GetTickCount64() + 3000;
+    if (g_log) g_log("[event-hold] observed active=%u epoch=%u state=%d context=%llX evt=%u frame=%u tid=%lu generation=%u delivery=%llu source=%llu releaseAfterRoom=%u",
+        active ? 1u : 0u, g_epoch, before.state, static_cast<unsigned long long>(before.context),
+        before.location.eventProgram, frame, GetCurrentThreadId(), captured.generation,
+        static_cast<unsigned long long>(captured.deliverySerial),
+        static_cast<unsigned long long>(captured.hostSourceSerial), allowRelease ? 1u : 0u);
+    return flush();
+}
+
 bool HostBeginInstance() {
     if (!g_hostBeginPending) return g_epoch != 0;
     if (!SafeNativeGameplay() || !progresssync::HostReady()) return false;
@@ -1466,6 +1559,7 @@ bool HostBeginInstance() {
     const RoomTransition& t = g_pendingHostRoom;
     ClearPendingHits(); // claims captured for the previous epoch never migrate
     g_epoch = t.epoch;
+    g_hostEventPublication.admittedRoom = g_pendingHostRoomContext;
     g_hostBeginPending = false;
     if (g_log) g_log("[enemysync] host arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
                      t.epoch, t.worldId, t.roomId, t.door, t.mapProgram,
@@ -1475,6 +1569,18 @@ bool HostBeginInstance() {
 
 bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                const NativeCensus& census) {
+    // The bounded event-control lane needs an authenticated empty host roster
+    // before arming. An absent manifest is not evidence of an empty room.
+    if (g_eventHoldProducerEnabled && !g_manifestSent && newSpawns.empty() &&
+        g_inst.spawns.empty() && census.enemies.empty() && CensusMatchesInstance(census) &&
+        g_epoch && !g_hostBeginPending && WorldContextCurrent(g_hostEventPublication.admittedRoom)) {
+        EnemyManifest empty;
+        empty.epoch = g_epoch;
+        empty.replace = true;
+        if (!Send(encode(empty))) return false;
+        g_manifestSent = true;
+        SYNC_LOG("[enemysync] host manifest epoch %u frame %u: complete empty census", g_epoch, frame);
+    }
     if (!newSpawns.empty()) {
         EnemyManifest m;
         m.epoch = g_epoch;
@@ -2605,6 +2711,47 @@ void TickNativeResync(std::uint32_t frame, bool observed) {
     }
 }
 
+bool EventControlScopeCurrent(const eventhold::Scope& scope) {
+    const auto slot = g_bridge.LocalSlot();
+    return eventhold::ValidScope(scope) && scope.generation == WorldSessionGeneration() &&
+        slot == scope.slot && scope.hostConnection == g_bridge.ConnectionId(0) &&
+        scope.selfConnection == g_bridge.ConnectionId(slot) &&
+        scope.hostDelivery == g_bridge.PeerDeliverySerial(0) &&
+        scope.targetDelivery == g_bridge.DeliverySerial();
+}
+void ObserveEventControl(const WorldScope& source, eventhold::Kind kind, std::uint32_t epoch,
+                         const RoomTransition* room, std::uint16_t eventProgram) {
+    if (!eventholdnative::Enabled() || CurrentRole() != Role::Client || source.sessionId.size() != 32) return;
+    eventhold::Scope scope {};
+    std::memcpy(scope.session, source.sessionId.data(), sizeof(scope.session));
+    scope.generation = WorldSessionGeneration(); scope.slot = g_bridge.LocalSlot();
+    scope.hostConnection = source.sourceConnectionId; scope.selfConnection = source.targetConnectionId;
+    scope.hostDelivery = source.sourceDeliverySerial; scope.targetDelivery = source.targetDeliverySerial;
+    if (!EventControlScopeCurrent(scope)) return;
+    if (eventhold::ValidScope(g_eventControlScope) && g_eventControlScope != scope) {
+        eventholdnative::RetireOwner(); return;
+    }
+    g_eventControlScope = scope;
+    if (room) g_eventControlRoom = *room;
+    eventholdnative::Observe(scope, kind, source.hostSourceSerial, epoch, room, eventProgram);
+}
+void AckEventControl() {
+    if (!eventholdnative::Enabled() || g_role != Role::Client || !EventControlScopeCurrent(g_eventControlScope)) return;
+    const auto census = CaptureNativeCensus();
+    const bool eligible = !g_resyncPlan && !g_nativeResync && !PackPreparationActive() &&
+        g_resyncWriteFence == ResyncWriteFence::None && g_host.arrived && g_host.ackSent &&
+        g_host.epoch && warp::HostTransitionArrived(g_host.epoch) && g_inst.live &&
+        g_host.manifestComplete && g_host.enemies.empty() && CensusMatchesInstance(census) &&
+        census.enemies.empty() && g_eventControlRoom.epoch == g_host.epoch &&
+        SameLocation(census.location, g_eventControlRoom) && SafeNativeGameplay();
+    const bool converged = eligible && progresssync::ClientConverged(g_eventControlScope.generation);
+    // Repeat scope/census/lifecycle checks after masked SAVE readback. These are
+    // normal owner facts; the raw input path sees only the independent atomic ACK.
+    eventholdnative::OwnerAck(g_eventControlScope, g_host.epoch,
+        eligible && EventControlScopeCurrent(g_eventControlScope) && CensusMatchesInstance(census),
+        converged && EventControlScopeCurrent(g_eventControlScope) && CensusMatchesInstance(census));
+}
+
 bool ReceiveWorldPackets() {
     bool hostSessionReset = false;
     std::vector<std::uint8_t> packet;
@@ -2727,12 +2874,16 @@ bool ReceiveWorldPackets() {
                     ContinuePackPreparation(scope->hostSourceSerial, true);
                 continue;
             }
-            if (type == PacketType::EventHold && PackPreparationActive()) {
+            if (type == PacketType::EventHold) {
                 EventHold hold; read(r, hold);
-                if (r.atEnd() && hold.epoch == g_host.epoch)
-                    ContinuePackPreparation(scope->hostSourceSerial,
-                        hold.active != g_nativeResync->snapshot.hold.active ||
-                        hold.eventProgram != g_nativeResync->snapshot.hold.eventProgram);
+                if (r.atEnd() && hold.epoch == g_host.epoch) {
+                    if (PackPreparationActive())
+                        ContinuePackPreparation(scope->hostSourceSerial,
+                            hold.active != g_nativeResync->snapshot.hold.active ||
+                            hold.eventProgram != g_nativeResync->snapshot.hold.eventProgram);
+                    else ObserveEventControl(*scope, hold.active ? eventhold::Kind::Acquire : eventhold::Kind::Release,
+                                             hold.epoch, nullptr, hold.eventProgram);
+                }
                 continue;
             }
             if (type == PacketType::RoomTransition) {
@@ -2766,6 +2917,7 @@ bool ReceiveWorldPackets() {
                     SYNC_LOG("[enemysync] client: host epoch %u room %02X/%02X btl %u", t.epoch,
                              t.worldId, t.roomId, t.battleProgram);
                     ContinuePackPreparation(scope->hostSourceSerial, true);
+                    ObserveEventControl(*scope, eventhold::Kind::Transition, t.epoch, &t, t.eventProgram);
                 }
             } else if (type == PacketType::EnemyManifest) {
                 EnemyManifest m;
@@ -3392,6 +3544,10 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     g_log = log;
     g_applyStatDelta = applyStatDelta;
     g_takeDamage = takeDamage;
+    char eventHold[2] {};
+    g_eventHoldProducerEnabled = GetEnvironmentVariableA("KH2COOP_EVENT_HOLD_PRODUCER", eventHold, sizeof(eventHold)) == 1 && eventHold[0] == '1';
+    if (g_eventHoldProducerEnabled && g_log)
+        g_log("[event-hold] producer configured=1 clientControl=0 ownerFrameOnly=1");
     char prepare[4] {};
     g_survivingPackEnabled = GetEnvironmentVariableA("KH2COOP_SURVIVING_PACK_PREPARE", prepare, sizeof(prepare)) == 1 &&
         prepare[0] == '1';
@@ -3454,6 +3610,10 @@ void OnFrameStart(std::uint32_t frame) {
         if (frame % 120 == 0) LogClientClaim("seal", "frame-interval");
     }
     if (!WorldSessionGeneration()) { DrainPendingSpawnTrace(false); return; }
+    if (g_role == Role::Host && !TickHostEventHold(frame, false)) {
+        DrainPendingSpawnTrace(false);
+        return;
+    }
     // One world-ring consumer owns ordering: snapshot/deltas are consumed
     // before this tick, and host progress goes out before RoomTransition.
     progresssync::Tick(frame, g_role == Role::Host, g_role == Role::Client);
@@ -3539,6 +3699,7 @@ void OnFrameStart(std::uint32_t frame) {
         // Track while progress or ring capacity delays the announcement. No
         // manifest/HP/hash may escape under the previous room's epoch.
         if (!HostBeginInstance()) { DrainPendingSpawnTrace(false); return; }
+        if (!TickHostEventHold(frame, true)) { DrainPendingSpawnTrace(false); return; }
         if (!ProcessHostHitClaims(census)) { DrainPendingSpawnTrace(false); return; }
         // Native claim application may have emitted/removed actors. Rebuild
         // from the latest census tracking, never reuse pre-call fresh indices.
@@ -3567,6 +3728,7 @@ void OnFrameStart(std::uint32_t frame) {
     TickNativeResync(frame, true);
     if (g_role == Role::Client) {
         (void)ReleaseClientClaims(frame); // fresh readback after ClientFrame stores/replay reconciliation
+        AckEventControl();
     }
     // Read-only diagnostics drain after bindings have been announced/applied.
     DrainPendingSpawnTrace(true);

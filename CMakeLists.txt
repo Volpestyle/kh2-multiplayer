@@ -269,7 +269,7 @@ if(WIN32)
     # Real hit consumer/publisher and census over owned synthetic native memory;
     # only transport, lifecycle and unrelated diagnostic services are stubbed.
     add_executable(kh2coop_nativehit_test tests/NativeHitClaimTest.cpp inject/src/NativeHitTrace.cpp
-        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp)
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
     target_include_directories(kh2coop_nativehit_test PRIVATE runtime/include common/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(kh2coop_nativehit_test PRIVATE kh2coop_common)
@@ -280,7 +280,7 @@ if(WIN32)
 
     # Generic generation claim hold and complete native readback release.
     add_executable(kh2coop_claim_hold_test tests/ClientClaimHoldTest.cpp inject/src/NativeHitTrace.cpp
-        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp)
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
     target_include_directories(kh2coop_claim_hold_test PRIVATE runtime/include common/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(kh2coop_claim_hold_test PRIVATE kh2coop_common)
@@ -291,7 +291,7 @@ if(WIN32)
 
     # Native load attribution and interval seals over owned memory.
     add_executable(kh2coop_load_cause_test tests/NativeLoadCauseTest.cpp inject/src/NativeHitTrace.cpp
-        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp)
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
     target_include_directories(kh2coop_load_cause_test PRIVATE runtime/include common/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(kh2coop_load_cause_test PRIVATE kh2coop_common)
@@ -334,7 +334,7 @@ foreach(target kh2coop_causal_diagnostic_test kh2coop_causal_exception_test kh2c
 endforeach()
 if(WIN32)
     add_executable(kh2coop_native_hash_receipt_test tests/NativeHashReceiptTest.cpp
-        inject/src/NativeHitTrace.cpp inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp)
+        inject/src/NativeHitTrace.cpp inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
     target_include_directories(kh2coop_native_hash_receipt_test PRIVATE inject/src runtime/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_compile_definitions(kh2coop_native_hash_receipt_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
@@ -356,6 +356,20 @@ foreach(target kh2coop_causal_stream_boundary_test kh2coop_world_admission_recei
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
 endforeach()
+
+if(WIN32)
+    add_executable(kh2coop_event_hold_control_test tests/EventHoldControlTest.cpp)
+    target_include_directories(kh2coop_event_hold_control_test PRIVATE runtime/src)
+    target_link_libraries(kh2coop_event_hold_control_test PRIVATE kh2coop_common)
+    add_executable(kh2coop_event_hold_input_test tests/EventHoldNativeInputTest.cpp inject/src/EventHoldNative.cpp)
+    target_include_directories(kh2coop_event_hold_input_test PRIVATE inject/src runtime/include common/include)
+    foreach(target kh2coop_event_hold_control_test kh2coop_event_hold_input_test)
+        target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /WX)
+        endif()
+    endforeach()
+endif()
 
 # Owner-slot/HP projection and nonblocking render telemetry mailbox. No game.
 if(WIN32)

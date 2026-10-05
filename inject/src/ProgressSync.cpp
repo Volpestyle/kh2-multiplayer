@@ -379,6 +379,20 @@ bool ReadHash(std::uint32_t& hash) {
     return true;
 }
 
+bool ClientConverged(std::uint32_t generation) {
+    if (!generation || generation != enemysync::WorldSessionGeneration() ||
+        generation != g_desiredGeneration || g_role != Role::Client ||
+        !g_clientFull || !g_version || g_personalFailure || !SafeGameplay()) return false;
+    const auto version = g_version;
+    const auto transition = warp::TransitionSerial(), load = warp::LoadSerial();
+    Save before {}, after {};
+    return ReadSave(before) && before == g_desired && ReadSave(after) && after == before &&
+        g_version == version && g_desiredGeneration == generation && g_role == Role::Client &&
+        g_clientFull && !g_personalFailure && SafeGameplay() &&
+        transition == warp::TransitionSerial() && load == warp::LoadSerial() &&
+        generation == enemysync::WorldSessionGeneration();
+}
+
 bool MatchesFull(const ProgressUpdate& expected, std::uint32_t& hash) {
     const auto generation = enemysync::WorldSessionGeneration();
     if (!generation || !expected.full || !expected.version || !SafeGameplay() || g_personalFailure) return false;
