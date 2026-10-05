@@ -18,7 +18,7 @@ samples 5.907 seconds apart showed the same host actor moving from radius
 58.208 to 224.005 before the first hit. The following read-only run `100816`
 collected a 3.5-second interval outside the original hit gate, then intentionally
 failed without issuing damage or correction. Its 140 rows included 138 qualified
-samples across owner frames 9340–9549. Those samples retained neutral raw and
+samples across owner frames 9340â€“9549. Those samples retained neutral raw and
 processed input, idle motion and zero sampled velocity at actor+0xB98, while
 the actor moved 309.349 planar units. Actor, room, controller and camera
 identities stayed fixed. Two rows crossed frame boundaries and remain
@@ -96,13 +96,13 @@ and [direction audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/co
 
 ## Region-qualified kill and second-wave binding failure, 2026-10-05
 
-The first-pack kill fixture now checks fresh full original IDs/HP/native
+The first-pack kill fixture initially changed to check fresh full original IDs/HP/native
 provenance on all peers, gameplay safety, neutral host input and actual native
 region bit8 immediately before the canonical kill. The fixed 100-unit radius
-was a fixture stability convenience, not a native kill prerequisite; only this
-kill removes that radius gate and corrective input. Sora's position is observed
-and uncontrolled. Damage and later-kill gates, correction budgets and all death,
-second-wave, hash and save assertions remain. An out-of-region host still fails.
+was a fixture stability convenience, not a native kill prerequisite. That first
+change removed the radius gate and corrective input only for this kill. Sora's
+position was observed and uncontrolled; the remaining gates stayed unchanged.
+An out-of-region host still fails.
 See the [source decision](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-approach-feasibility/result.md).
 
 Run 143735 reached the kill with the original IDs 3 through 6 at HP153 on all three games,
@@ -146,6 +146,41 @@ The whole-wave gate stays open; sampled roots do not prove incarnation or
 support deaths across an observation gap. See the
 [native binding audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/second-wave-binding-153018-audit/result.md).
 
+The approved fixture extension now uses region bit8 for the remaining hits.
+Before each victim hit, reread the complete all-peer pack and require the saved
+IDs, expected HP, native actor/controller/record identities, neutral input and
+safe gameplay. An inward correction stops as soon as bit8 is true. The budget
+remains three 250ms pulses total per damage/kill step, with immediate outward
+or axis-overshoot refusal. The original first-pack region kill stays unchanged.
+The intermediate six-second post-kill wait can be removed, but the final pack
+retains a six-second quiet window followed by a complete all-peer census with
+no unexpected IDs and counts matching the host. A later replacement ID10
+cannot substitute for saved ID9. This is a declared fixture change that reduces
+drift exposure; it does not explain drift or establish a wave PASS.
+
+The first per-victim run,161016, reached exact all-peer HP153 for IDs3/4,
+then lost bit8 before ID5. Its first250ms pulse moved outward255.22 to264.32
+and correctly aborted before that hit. No kill or second pack was reached.
+The next approved fixture batches propagation: a client may lag only through
+values already issued for that victim, in order, and each native/publication
+observation stream must never regress after a newer value is seen. Full fresh
+pack reads and all identity/region/safety guards remain before every hit.
+Every lag must resolve at the unchanged exact all-peer phase checkpoints.
+The first-pack post-damage shortcut uses one fresh matching hash sample followed
+by an independent native HP snapshot that matches it exactly. Pack admission,
+next-pack and final checkpoints retain their two-fresh checks.
+
+The batched run,162442, applied all four original hits once and reached HP153
+on all three games with no correction pulses. It then lost bit8 before the
+first kill, at radius276.74, despite neutral input and qualified safety/identity.
+It correctly failed without any kill or second pack. Stop timing trims here;
+the next diagnostic is one native R1 lock-on/Cross attack with visual target
+confirmation. Damage-free homing is not required: a countable native hit could
+become the wave damage step, but this one-game probe cannot prove network claim
+handling. Sora's position remains uncontrolled. See the
+[per-victim result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-qualified-hits-root01/result.md)
+and [batched result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-batched-hits-root01/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
@@ -174,14 +209,28 @@ No reload was needed; all four protected saves were unchanged. This is selected
 path evidence, not death-bookkeeping, native creation authority, OS deallocation,
 address-reuse proof or dead-pack recovery.150636 remains FAIL/NOT_EXPOSED.
 
-Legacy `SPAWN_TRACE` and `NATURAL_RESOURCE_TRACE` stayed OFF. Their optional
-factory/construction and predicate scopes retain stack pointers in TLS and have
-a separately demonstrated interleaving hazard; geometry uses TLS storage with
-stale-attribution risk. Fiber use alone does not prove those paths interleaved
-or caused a crash. Keep them disabled pending their own fix; the core activation
-update policy is separate. See the
-[FLS review](../build/rig/vuh1508-dead-pack-prep-20261005-01/dead-pack-lifetime-observer-fls-review/result.md)
-and [legacy scope audit](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-native-trace-fiber-audit/result.md).
+Legacy `SPAWN_TRACE` and `NATURAL_RESOURCE_TRACE` stayed OFF in153816.
+Their earlier TLS stack-scope pointers had a separately demonstrated interleaving
+hazard; that did not establish a live crash cause. The separately reviewed legacy
+fix now uses retained FLS-owned POD for factory/construction, lifecycle/predicate
+and resource scopes. Its PREPARE=0 raw profile disables dispatcher/script hooks
+and tick, geometry, enrollment, original-phase and first-emission associations.
+PREPARE=1 refuses these diagnostics; core activation update policy is unchanged.
+
+The full Release DLL builds from91 pinned source inputs.168 normal and168
+isolated Windows ASan checks, plus nine installer controls, passed. Combined ASan
+fiber-stack-reuse remains unqualified. Installed native run164208 ended FAIL/NOT_EXPOSED without a crash. Five HP20
+Shadows qualified, and the target had removal-predicate/script return pairs, but
+the fixed-wrapper post-return actor metadata was unavailable. The required raw
+birth join was absent, so the fixture issued no kill or retry. Four saves and
+all91 source inputs stayed unchanged. The current logger does not export legacy
+guard-refusal counters, so raw scope observations cannot yet earn a guard-clean
+qualification. No lifetime,
+incarnation, creation or dead-pack recovery authority follows. See the
+[selected FLS review](../build/rig/vuh1508-dead-pack-prep-20261005-01/dead-pack-lifetime-observer-fls-review/result.md),
+[legacy source review](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-native-trace-fls-diagnostic-review/result.md)
+[integrated build](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-fls-integration-root01/build-products.json)
+and [native raw result](../build/rig/vuh1508-dead-pack-prep-20261005-01/legacy-fls-live-root01/result.md).
 
 ## Current resync binding, 2026-10-04
 
@@ -224,7 +273,7 @@ chosen ordinary key below retain their original historical scope.
   next.
 - Rooms: from `tools/scenario/spikes/combat_rooms.py`, a sweep of 224
   world/room pairs with default programs plus 144 with forced battle
-  programs 1–3.
+  programs 1â€“3.
   - On this save, six rooms spawn enemies with default programs. Forced
     programs add many more.
   - 40 rooms were held by events or cutscenes.
@@ -250,7 +299,7 @@ chosen ordinary key below retain their original historical scope.
 Position deltas of a few units come from the instances first sighting an
 enemy at slightly different moments of its spawn animation (inputs run about
 1 s apart). 08/00 is left out: its type-3 actor `B_MU110` has no status block
-(HP reads −1) and isn't a combat enemy.
+(HP reads âˆ’1) and isn't a combat enemy.
 
 ### Findings
 
@@ -258,10 +307,10 @@ enemy at slightly different moments of its spawn animation (inputs run about
   exactly on name and spawn order, with spawn positions equal within the
   sampling noise above. That includes a timed second sub-wave (12/0B:
   four M_EX900, then two M_EX920 about 3.8 s later).
-- **The battle program decides the set.** 05/00 spawns 4× M_EX520 with the
+- **The battle program decides the set.** 05/00 spawns 4Ã— M_EX520 with the
   save's program but M_EX050 + M_EX690 with btl 3. So it has to be in the
   key.
-- **Actor addresses are not a key.** Addresses matched 0–100% depending on
+- **Actor addresses are not a key.** Addresses matched 0â€“100% depending on
   the room (05/0B: every address on one side offset by exactly 0xA0, i.e.
   one extra allocation). Actor pool slots depend on allocation history.
 - **Behaviour diverges immediately after spawn.** Positions drift apart
@@ -311,7 +360,7 @@ For rooms whose spawner emits enemies over time based on player position
 ## Step 1 implementation (VUH-1502)
 
 `inject/src/EnemySync.cpp`, over the WorldBridge. The role comes from the
-runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1–2 = client);
+runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1â€“2 = client);
 `KH2COOP_ROLE=host|client` overrides it for tests.
 
 - **Room instance.** Native transition-request and load-completion hooks in
@@ -355,8 +404,8 @@ runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1–2 = client);
 
 Verified 2026-10-02 (`net_enemy_sync_courtyard`, `net_enemy_sync_waves`:
 host + 2 clients, relay, host-only damage):
-- **HP:** the same on all three after host damage (courtyard 20 → 13,
-  12/0B 160 → 153), read 0.4 s later.
+- **HP:** the same on all three after host damage (courtyard 20 â†’ 13,
+  12/0B 160 â†’ 153), read 0.4 s later.
 - **Deaths:** every host kill killed each client copy exactly once (5 and 6
   deaths per client).
 - **12/0B second wave:** spawned on all three, bound to the host's new
@@ -590,7 +639,10 @@ change has not established nonempty wave convergence. Creation, removal and
 controller bookkeeping need correlated native evidence. Supported nonempty
 activation and those new diagnostics are prepared offline, pending live runs.
 
-**Offline creation and lifecycle diagnostics.** Exact opt-in
+**Historical offline creation and lifecycle diagnostics.** The following records
+the earlier TLS profile, not the current PREPARE=0 FLS profile described above.
+Its dispatcher/script/tick associations are not certified by the current build.
+Exact opt-in
 `KH2COOP_SPAWN_TRACE=1` adds independent byte-verified observers for all callers
 of fixed wrapper `3FE590` and generated wrapper `3FE650`, dispatcher `3FE320`
 and script callback `42DC10`. Each original executes once with its return value

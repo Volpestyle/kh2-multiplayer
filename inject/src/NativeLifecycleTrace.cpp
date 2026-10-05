@@ -1,4 +1,5 @@
 #include "NativeLifecycleTrace.hpp"
+#include "NativeTraceFiber.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 
 #include <Windows.h>
@@ -63,11 +64,24 @@ std::atomic<std::uint64_t> g_predicateDepthOverflow {0}, g_predicateCountOverflo
 SRWLOCK g_queueLock = SRWLOCK_INIT;
 std::array<Event, kQueueCap> g_queue {};
 std::size_t g_read = 0, g_size = 0;
-struct Context { std::uint64_t sequence = 0; std::uint32_t depth = 0; };
-thread_local Context g_context;
-// Lives only while the actual parent is executing. Later bookkeeping is not
-// nested under this completed predicate, even when the actor address matches.
-thread_local Event* g_predicateContext = nullptr;
+struct Frame {Event event{};uintptr_t anchor{};std::uint64_t serial{};bool predicate{};};
+struct Local {unsigned depth{};std::array<Frame,kDepthCap> frames{};};
+tracefiber::Store<Local> g_storage;
+std::atomic<bool> g_recording{};
+std::atomic<std::uint32_t> g_enableAttempted{};
+std::atomic<std::uint64_t> g_scopeSerial{};
+Frame* Parent(Local*& local) {
+    local=g_storage.Current();if(!local || !local->depth || !g_recording)return nullptr;
+    if(local->depth>kDepthCap){g_storage.Reject(local);local=nullptr;return nullptr;}
+    auto& frame=local->frames[local->depth-1];
+    if(!g_storage.Anchor(frame.anchor)){g_storage.Reject(local);local=nullptr;return nullptr;}return &frame;
+}
+bool Current(Local* local,unsigned depth,std::uint64_t serial) {
+    const bool valid=g_storage.Same(local) && local->depth==depth && depth>0 && depth<=kDepthCap &&
+        local->frames[depth-1].serial==serial && g_storage.Anchor(local->frames[depth-1].anchor);
+    if(!valid)g_storage.Abandon(local);
+    return valid;
+}
 static_assert(std::is_trivially_copyable_v<Event> && std::is_trivially_destructible_v<Event>);
 RemovalOperands CaptureRemovalOperands(uintptr_t actor);
 
@@ -198,8 +212,8 @@ void CallOriginal(Event* event, void* controller, void* actor) {
 void BeginEvent(Event& event, Kind kind, void* controller, void* actor, uintptr_t caller) {
     event.kind = kind;
     event.sequence = ++g_started;
-    event.parentSequence = g_context.sequence;
-    event.depth = g_context.depth;
+    Local* local=nullptr;auto* parent=Parent(local);
+    event.parentSequence=parent?parent->event.sequence:0;event.depth=local?local->depth:0;
     event.actor = reinterpret_cast<uintptr_t>(actor);
     event.controller = reinterpret_cast<uintptr_t>(controller);
     event.callerInImage = g_imageSize && caller >= g_exeBase && caller - g_exeBase < g_imageSize;
@@ -263,28 +277,23 @@ void FinishEvent(Event& event, bool completed) {
 }
 
 // POD-only SEH scope: exactly one original invocation, no exception swallowing,
-// and TLS restoration on normal return or unwind. Events publish child-first;
+// and validated retained-frame restoration on normal return or unwind. Events publish child-first;
 // sequence/parent/depth express entry order rather than queue order.
-void Run(Kind kind, void* controller, void* actor, uintptr_t caller) {
-    if (g_context.depth >= kDepthCap) {
-        ++g_started;
-        ++g_depthOverflow;
-        ++g_dropped;
-        InvokeOriginal(kind, controller, actor);
-        return;
+void Run(Kind kind,void* controller,void* actor,uintptr_t caller) {
+    const auto error=GetLastError();Local* local=nullptr;(void)Parent(local);
+    if(!g_recording || !local || local->depth>=kDepthCap) {
+        if(local && local->depth>=kDepthCap)g_storage.Reject(local);
+        ++g_dropped;SetLastError(error);InvokeOriginal(kind,controller,actor);return;
     }
-    Event event;
-    const Context previous = g_context;
-    bool completed = false;
-    BeginEvent(event, kind, controller, actor, caller);
-    g_context.sequence = event.sequence;
-    g_context.depth = previous.depth + 1;
-    __try {
-        CallOriginal(&event, controller, actor);
-        completed = true;
-    } __finally {
-        g_context = previous;
-        FinishEvent(event, completed);
+    const unsigned index=local->depth;auto& frame=local->frames[index];frame={};
+    frame.anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());frame.serial=++g_scopeSerial;
+    BeginEvent(frame.event,kind,controller,actor,caller);const auto serial=frame.serial;++local->depth;
+    bool completed=false;
+    __try {SetLastError(error);CallOriginal(&frame.event,controller,actor);completed=true;}
+    __finally {const auto nativeError=GetLastError();
+        if(Current(local,index+1,serial)) {FinishEvent(frame.event,completed);frame={};local->depth=index;}
+        else ++g_dropped;
+        SetLastError(nativeError);
     }
 }
 
@@ -341,15 +350,17 @@ std::uint8_t CallPredicateOriginal(Event* event, PredicateFn fn, void* argument,
 }
 
 std::uint8_t RunPredicateChild(bool script, void* argument, uintptr_t caller) {
-    const auto fn = script ? g_script : g_auxiliary;
-    if (!spawncontroller::IsDiagnosticGameThread()) { ++g_predicateForeign; return fn(argument); }
-    auto* event = g_predicateContext;
+    const auto error=GetLastError();const auto fn = script ? g_script : g_auxiliary;
+    if (!spawncontroller::IsDiagnosticGameThread()) { ++g_predicateForeign;SetLastError(error); return fn(argument); }
+    Local* local=nullptr;auto* frame=Parent(local);
+    auto* event=frame && frame->predicate?&frame->event:nullptr;
     const auto bit = script ? ScriptPredicateHook : AuxiliaryPredicateHook;
     if (!event || caller != g_exeBase + (script ? 0x3DAC3E : 0x3DAC9C) ||
         (script && reinterpret_cast<uintptr_t>(argument) != event->actor)) {
         ++g_predicateUnmatched;
-        return fn(argument);
+        SetLastError(error);return fn(argument);
     }
+    const auto depth=local->depth;const auto serial=frame->serial;
     auto& p = event->removal;
     auto& calls = script ? p.scriptCalls : p.auxiliaryCalls;
     auto& returned = script ? p.scriptReturned : p.auxiliaryReturned;
@@ -363,10 +374,12 @@ std::uint8_t RunPredicateChild(bool script, void* argument, uintptr_t caller) {
     bool completed = false;
     std::uint8_t result = 0;
     __try {
-        result = CallPredicateOriginal(event, fn, argument, bit);
+        SetLastError(error);result = CallPredicateOriginal(event, fn, argument, bit);
         completed = true;
     } __finally {
-        if (completed) {
+        const auto nativeError=GetLastError();
+        if (!Current(local,depth,serial)) {++g_predicateDropped;}
+        else if (completed) {
             IncrementPredicateCount(p, returned);
             if (first) {
                 if (script) {
@@ -382,66 +395,49 @@ std::uint8_t RunPredicateChild(bool script, void* argument, uintptr_t caller) {
             // POD writes only; no native reads or helper replay during unwind.
             p.unwindMask |= bit;
         }
+        SetLastError(nativeError);
     }
     return result;
 }
 
 std::uint8_t PassPredicate(void* actor) {
-    // Even an unobserved recursive parent must not attribute children to an
-    // older parent. This scope ends before subsequent removal bookkeeping.
-    auto* previous = g_predicateContext;
-    if (previous) previous->removal.nestedAmbiguous = true;
-    g_predicateContext = nullptr;
-    std::uint8_t result = 0;
-    __try { result = g_predicate(actor); }
-    __finally { g_predicateContext = previous; }
-    return result;
+    const auto error=GetLastError();Local* local=nullptr;auto* parent=Parent(local);
+    if(parent && parent->predicate)parent->event.removal.nestedAmbiguous=true;
+    if(!local || local->depth>=kDepthCap){if(local)g_storage.Reject(local);SetLastError(error);return g_predicate(actor);}
+    const auto index=local->depth;auto& frame=local->frames[index];frame={};
+    frame.anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());frame.serial=++g_scopeSerial;
+    const auto serial=frame.serial;++local->depth;std::uint8_t result=0;
+    __try {SetLastError(error);result=g_predicate(actor);}
+    __finally {const auto nativeError=GetLastError();
+        if(Current(local,index+1,serial)){frame={};local->depth=index;}else ++g_predicateDropped;
+        SetLastError(nativeError);
+    }return result;
 }
-
-std::uint8_t RunPredicate(void* actor, uintptr_t caller) {
-    if (!spawncontroller::IsDiagnosticGameThread()) { ++g_predicateForeign; return PassPredicate(actor); }
-    // Verified type4 virtual+40 tail-thunk preserves the caller3BFD6F.
-    if (caller != g_exeBase + 0x3BFD6F) { ++g_predicateUnmatched; return PassPredicate(actor); }
-    ++g_predicateStarted;
-    if (g_context.depth >= kDepthCap) {
-        ++g_started; ++g_depthOverflow; ++g_dropped;
-        ++g_predicateDepthOverflow; ++g_predicateDropped;
-        return PassPredicate(actor);
-    }
-    Event event;
-    const Context previous = g_context;
-    auto* previousPredicate = g_predicateContext;
-    if (previousPredicate) previousPredicate->removal.nestedAmbiguous = true;
-    BeginEvent(event, Kind::RemovalPredicate, nullptr, actor, caller);
-    auto& p = event.removal;
-    p.coverageGeneration = g_coverageGeneration.load();
-    p.coverageMask = g_installed.load() & g_verified.load() & RemovalPredicateHooks;
-    p.before = CaptureRemovalOperands(event.actor);
-    g_context = {event.sequence, previous.depth + 1};
-    g_predicateContext = &event;
-    bool completed = false;
-    std::uint8_t result = 0;
-    __try {
-        result = CallPredicateOriginal(&event, g_predicate, actor, 0);
-        completed = true;
-    } __finally {
-        g_predicateContext = previousPredicate;
-        g_context = previous;
-        p.originalReturned = p.resultAvailable = completed;
-        if (completed) {
-            p.parentResult = result;
-            p.coverageStable = p.coverageGeneration == g_coverageGeneration.load() &&
-                p.coverageMask == (g_installed.load() & g_verified.load() & RemovalPredicateHooks);
-            p.branch = ClassifyRemoval(p);
-        } else {
-            p.after = {};
-            p.unwindMask |= HookBit(Kind::RemovalPredicate);
-            p.branch = RemovalBranch::Unknown;
-            ++g_predicateUnwound;
-        }
-        FinishEvent(event, completed);
-    }
-    return result;
+std::uint8_t RunPredicate(void* actor,uintptr_t caller) {
+    const auto error=GetLastError();
+    if(!g_recording || !spawncontroller::IsDiagnosticGameThread()){++g_predicateForeign;SetLastError(error);return PassPredicate(actor);}
+    if(caller!=g_exeBase+0x3BFD6F){++g_predicateUnmatched;SetLastError(error);return PassPredicate(actor);}
+    Local* local=nullptr;auto* parent=Parent(local);
+    if(!local || local->depth>=kDepthCap){++g_depthOverflow;++g_predicateDepthOverflow;SetLastError(error);return PassPredicate(actor);}
+    if(parent && parent->predicate)parent->event.removal.nestedAmbiguous=true;
+    ++g_predicateStarted;const auto index=local->depth;auto& frame=local->frames[index];frame={};
+    frame.anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());frame.serial=++g_scopeSerial;frame.predicate=true;
+    BeginEvent(frame.event,Kind::RemovalPredicate,nullptr,actor,caller);
+    auto& event=frame.event;auto& p=event.removal;
+    p.coverageGeneration=g_coverageGeneration.load();p.coverageMask=g_installed.load()&g_verified.load()&RemovalPredicateHooks;
+    p.before=CaptureRemovalOperands(event.actor);const auto serial=frame.serial;++local->depth;
+    bool completed=false;std::uint8_t result=0;
+    __try {SetLastError(error);result=CallPredicateOriginal(&event,g_predicate,actor,0);completed=true;}
+    __finally {const auto nativeError=GetLastError();
+        if(Current(local,index+1,serial)) {
+            p.originalReturned=p.resultAvailable=completed;
+            if(completed){p.parentResult=result;p.coverageStable=p.coverageGeneration==g_coverageGeneration.load() &&
+                p.coverageMask==(g_installed.load()&g_verified.load()&RemovalPredicateHooks);p.branch=ClassifyRemoval(p);}
+            else{p.after={};p.unwindMask|=HookBit(Kind::RemovalPredicate);p.branch=RemovalBranch::Unknown;++g_predicateUnwound;}
+            FinishEvent(event,completed);frame={};local->depth=index;
+        }else ++g_predicateDropped;
+        SetLastError(nativeError);
+    }return result;
 }
 
 std::uint8_t __fastcall Predicate(void* actor) { return RunPredicate(actor, reinterpret_cast<uintptr_t>(_ReturnAddress())); }
@@ -474,12 +470,14 @@ bool InstallOne(unsigned index, const std::uint8_t* bytes, std::size_t length, v
     }
     g_verified.fetch_or(bit);
     auto status = MH_CreateHook(target, hook, original);
-    if (status == MH_OK) {
+    const bool created = status == MH_OK;
+    if (created) {
+        g_enableAttempted.fetch_or(bit);
         status = MH_EnableHook(target);
-        if (status != MH_OK) MH_RemoveHook(target);
+        if (status != MH_OK) MH_DisableHook(target); // retain potentially exposed original
     }
     if (status == MH_OK) g_installed.fetch_or(bit);
-    else { g_failed.fetch_or(bit); *original = nullptr; }
+    else { g_failed.fetch_or(bit); if (!created) *original = nullptr; }
     if (g_log) g_log("[lifecycletrace] hook kind=%u rva=%llX verified=1 installed=%u status=%d",
                     index, static_cast<unsigned long long>(kRvas[index]),
                     status == MH_OK ? 1u : 0u, status);
@@ -494,8 +492,12 @@ bool InstallOne(Kind kind, const std::uint8_t* bytes, std::size_t length, void* 
 
 bool Install(uintptr_t exeBase, spawncontroller::LogFn log, spawncontroller::RoleFn role, bool trace) {
     if (g_installed.load()) return true;
+    if (g_enableAttempted.load()) {if(log)log("[lifecycletrace] unavailable reason=retained-partial-install");return false;}
     g_requested.store(trace);
     if (!trace) return false;
+    if(tracefiber::PrepareRequested()){if(log)log("[lifecycletrace] unavailable reason=PREPARE-enabled diagnostic-profile");return false;}
+    if(!g_storage.Init(reinterpret_cast<const void*>(&Install))){if(log)log("[lifecycletrace] unavailable reason=FLS-storage");return false;}
+    g_recording=true;
     g_exeBase = exeBase;
     g_imageSize = ReadImageSize(exeBase);
     g_log = log;
@@ -538,6 +540,11 @@ bool PopEvent(Event& event) {
 }
 
 void Shutdown() {
+    g_recording=false;
+    if(g_storage.Ready()) {++g_coverageGeneration;
+        for(unsigned i=0;i<kRvas.size();++i)if(g_enableAttempted.load()&(1u<<i))MH_DisableHook(reinterpret_cast<void*>(g_exeBase+kRvas[i]));
+        return; // originals/trampolines/FLS retained for suspended fibers
+    }
     ++g_coverageGeneration;
     const auto installed = g_installed.exchange(0);
     for (unsigned i = 0; i < kRvas.size(); ++i) {
@@ -550,8 +557,7 @@ void Shutdown() {
     g_removal = g_deathBook = nullptr;
     g_disposal = g_deathMark = g_count = nullptr;
     g_predicate = g_script = g_auxiliary = nullptr;
-    g_context = {};
-    g_predicateContext = nullptr;
+    // No stack-address scope remains.
 }
 
 } // namespace kh2coop::inject::lifecycletrace

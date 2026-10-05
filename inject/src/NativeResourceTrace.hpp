@@ -9,7 +9,8 @@ enum class Caller : std::uint8_t { Unknown, LookupZeroRoot, Recursive, Alternate
 enum class InstallStatus : std::uint8_t {
     Disabled, Ready, IdentityUnavailable, IdentityMismatch, CreateFailed,
     TrampolineMismatch, AllocationFailed, RegistrationFailed, PinFailed,
-    EnableFailedRetained, Retired, ReinitializationRejected, RollbackRetained
+    EnableFailedRetained, Retired, ReinitializationRejected, RollbackRetained,
+    DiagnosticProfileRejected, FiberStorageUnavailable
 };
 struct Parent {
     std::uint64_t serial=0, coverage=0, wrapperSequence=0;
@@ -46,6 +47,7 @@ struct ConstructionToken {
     std::uint64_t generation=0, outerBoundary=0;
     std::uint32_t previousDepth=0;
     bool entered=false;
+    uintptr_t context=0; // retained FLS-owned Local, never a stack address
 };
 struct Statistics {
     InstallStatus status=InstallStatus::Disabled;

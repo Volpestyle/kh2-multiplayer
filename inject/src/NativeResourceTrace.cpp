@@ -1,5 +1,6 @@
 #include "NativeResourceTrace.hpp"
 #include "NativeSpawnController.hpp"
+#include "NativeTraceFiber.hpp"
 #include <Windows.h>
 #include <MinHook.h>
 #include <intrin.h>
@@ -100,7 +101,7 @@ struct Local {
     std::size_t count=0;
     std::uint64_t generation=0,outer=0,callback=0,dropped=0;
 };
-thread_local Local g_local;
+tracefiber::Store<Local> g_localStorage;
 static_assert(std::is_trivially_copyable_v<Local> && std::is_trivially_destructible_v<Local>);
 void Increment(std::atomic<std::uint64_t>& value) {
     auto n=value.load(std::memory_order_relaxed);
@@ -144,12 +145,11 @@ void Sample(ResourceObservation& row) {
         row.currentPackageRead=Read(g_base+0x79CFE0+static_cast<uintptr_t>(row.sampledIndex)*8,&row.sampledCurrentPackage,8);
     String(row.filename,row.filenameSample);String(row.optionalRoot,row.rootSample);
 }
-ResourceObservation* Enter(uintptr_t package,uintptr_t filename,uintptr_t root,uintptr_t caller) {
+ResourceObservation* Enter(Local& l,uintptr_t package,uintptr_t filename,uintptr_t root,uintptr_t caller) {
     Increment(g_entered);
     if(!g_recording.load())return nullptr;
     const auto owner=g_ownerThread.load();const auto thread=GetCurrentThreadId();
     if(owner && thread!=owner)Increment(g_foreign);
-    auto& l=g_local;
     if(!l.constructionDepth || l.generation!=g_generation.load()) {Increment(g_unparented);return nullptr;}
     if(l.constructionDepth>DepthCap || l.callbackDepth>DepthCap || l.count>=ChildCap) {
         Increment(g_dropped);if(l.dropped!=UINT64_MAX)++l.dropped;return nullptr;
@@ -170,18 +170,24 @@ ResourceObservation* Enter(uintptr_t package,uintptr_t filename,uintptr_t root,u
 __declspec(noinline) std::uint64_t __fastcall Hook(void* package,const char* filename,const char* root) {
     const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     const DWORD beforeError=GetLastError();
-    auto& l=g_local;const auto previousDepth=l.callbackDepth;const auto previousCallback=l.callback;
+    auto* local=g_localStorage.Current();
+    if(!local){Increment(g_dropped);SetLastError(beforeError);return g_original(package,filename,root);}
+    auto& l=*local;
+    if(l.callbackDepth==UINT32_MAX){g_localStorage.Reject(local);Increment(g_dropped);SetLastError(beforeError);return g_original(package,filename,root);}
+    const auto previousDepth=l.callbackDepth;const auto previousCallback=l.callback;
     if(l.callbackDepth!=UINT32_MAX)++l.callbackDepth;
-    ResourceObservation* const row=Enter(reinterpret_cast<uintptr_t>(package),reinterpret_cast<uintptr_t>(filename),reinterpret_cast<uintptr_t>(root),caller);
-    l.callback=row?row->invocation:0; // overflow/unparented calls hide an ancestor
+    ResourceObservation* const row=Enter(l,reinterpret_cast<uintptr_t>(package),reinterpret_cast<uintptr_t>(filename),reinterpret_cast<uintptr_t>(root),caller);
+    const auto invocation=row?row->invocation:0;
+    l.callback=invocation; // overflow/unparented calls hide an ancestor
     std::uint64_t result=0;bool normal=false;
     SetLastError(beforeError);
     __try {result=g_original(package,filename,root);normal=true;}
     __finally {
         const DWORD afterError=GetLastError();
-        if(row){row->normalReturn=normal;row->unwound=!normal;if(normal){row->rawRax=result;row->al=static_cast<std::uint8_t>(result);}}
+        const bool current=g_localStorage.Same(local) && l.callbackDepth==previousDepth+1 && l.callback==invocation;
+        if(current && row && row->invocation==invocation){row->normalReturn=normal;row->unwound=!normal;if(normal){row->rawRax=result;row->al=static_cast<std::uint8_t>(result);}}
         normal?Increment(g_returned):Increment(g_unwound);
-        l.callbackDepth=previousDepth;l.callback=previousCallback;
+        if(current){l.callbackDepth=previousDepth;l.callback=previousCallback;}else {g_localStorage.Abandon(local);Increment(g_dropped);}
         SetLastError(afterError);
     }
     return result;
@@ -261,6 +267,8 @@ bool Initialize(uintptr_t exeBase,bool requested) {
     const auto error=GetLastError();bool result=false;
     if(g_retained.load()){g_status=InstallStatus::ReinitializationRejected;SetLastError(error);return false;}
     if(!requested){g_status=InstallStatus::Disabled;SetLastError(error);return true;}
+    if(tracefiber::PrepareRequested()){g_status=InstallStatus::DiagnosticProfileRejected;SetLastError(error);return false;}
+    if(!g_localStorage.Init(reinterpret_cast<const void*>(&Initialize))){g_status=InstallStatus::FiberStorageUnavailable;SetLastError(error);return false;}
     g_identity=false;
     std::array<std::uint8_t,984> bytes{};
     if(!exeBase || exeBase>UINTPTR_MAX-0x79D1E0 || !Read(exeBase+TargetRva,bytes.data(),bytes.size()))g_status=InstallStatus::IdentityUnavailable;
@@ -268,8 +276,9 @@ bool Initialize(uintptr_t exeBase,bool requested) {
     else {g_identity=true;result=InstallValidatedTarget(exeBase,reinterpret_cast<void*>(exeBase+TargetRva),InstallOps{});}
     SetLastError(error);return result;
 }
-bool RetainsMinHookResources(){return g_retained.load();}
-bool RejectReinitialization(){return g_retained.load();}
+// Existing EntityHook adapter now also retains legacy FLS diagnostic dependencies.
+bool RetainsMinHookResources(){return g_retained.load() || tracefiber::retained.load();}
+bool RejectReinitialization(){return g_retained.load() || tracefiber::retained.load();}
 void StopRecording() {
     const auto error=GetLastError();g_recording=false;
     auto n=g_generation.load();while(n!=UINT64_MAX && !g_generation.compare_exchange_weak(n,n+1)){}
@@ -277,10 +286,11 @@ void StopRecording() {
     g_status=InstallStatus::Retired;SetLastError(error);
 }
 ConstructionToken BeginConstruction() {
-    const auto error=GetLastError();ConstructionToken token{};auto& l=g_local;
+    const auto error=GetLastError();ConstructionToken token{};auto* local=g_localStorage.Current();
+    if(!local){Increment(g_dropped);SetLastError(error);return token;}auto& l=*local;
     if(!g_recording.load()){SetLastError(error);return token;}
     if(!l.constructionDepth){l.count=0;l.dropped=0;l.generation=g_generation.load();l.outer=Serial();}
-    token={l.generation,l.outer,l.constructionDepth,true};
+    token={l.generation,l.outer,l.constructionDepth,true,reinterpret_cast<uintptr_t>(local)};
     if(l.constructionDepth==UINT32_MAX){Increment(g_dropped);token.entered=false;SetLastError(error);return token;}
     ++l.constructionDepth;
     if(l.constructionDepth<=DepthCap){
@@ -298,10 +308,12 @@ ConstructionToken BeginConstruction() {
     SetLastError(error);return token;
 }
 void EndConstruction(ConstructionToken token,bool normalReturn) {
-    const auto error=GetLastError();auto& l=g_local;
+    const auto error=GetLastError();
     if(!token.entered){SetLastError(error);return;}
+    auto* local=g_localStorage.Current();
+    if(!local || reinterpret_cast<uintptr_t>(local)!=token.context){g_localStorage.Abandon(reinterpret_cast<const Local*>(token.context));Increment(g_dropped);SetLastError(error);return;}auto& l=*local;
     if(l.constructionDepth!=token.previousDepth+1 || token.outerBoundary!=l.outer || token.generation!=l.generation){
-        Increment(g_dropped);l.constructionDepth=0;l.count=0;SetLastError(error);return;}
+        Increment(g_dropped);g_localStorage.Abandon(local);SetLastError(error);return;}
     l.constructionDepth=token.previousDepth;
     if(l.constructionDepth){SetLastError(error);return;}
     AcquireSRWLockExclusive(&g_queueLock);

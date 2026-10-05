@@ -1,5 +1,6 @@
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
+#include "NativeTraceFiber.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
 #include "Warp.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -208,14 +209,33 @@ thread_local unsigned g_geometryPredicateDepth = 0;
 std::atomic<std::uint32_t> g_factoryVerified {0}, g_factoryInstalled {0}, g_factoryFailed {0};
 std::atomic<std::uint64_t> g_factoryCoverageSerial {0};
 std::atomic<std::uint64_t> g_factoryForeign {0}, g_factoryUnwound {0}, g_factoryAmbiguous {0};
-thread_local FactoryPredicates* g_factoryScope = nullptr;
-thread_local unsigned g_factoryDepth = 0;
+
 constexpr unsigned FACTORY_DEPTH_CAP = 32;
 constexpr unsigned CONSTRUCTION_DEPTH_CAP = 8;
 std::atomic<bool> g_constructionRequested {false}, g_constructionConfigured {false};
 std::atomic<std::uint64_t> g_constructionSerial {0}, g_constructionCoverage {0};
-thread_local NativeConstructionLineage* g_constructionScope = nullptr;
-thread_local unsigned g_constructionDepth = 0;
+struct FactoryFrame {
+    FactoryPredicates factory{};NativeConstructionLineage construction{};
+    uintptr_t anchor{};std::uint64_t serial{};bool constructionVisible{};
+};
+struct FactoryLocal {unsigned depth{};std::array<FactoryFrame,FACTORY_DEPTH_CAP> frames{};};
+tracefiber::Store<FactoryLocal> g_factoryStorage;
+std::atomic<std::uint64_t> g_factoryScopeSerial{};
+std::atomic<bool> g_rawDiagnosticEnabled{};
+FactoryFrame* FactoryParent(FactoryLocal*& local) {
+    local=g_factoryStorage.Current();
+    if(!g_rawDiagnosticEnabled || !local || !local->depth)return nullptr;
+    if(local->depth>FACTORY_DEPTH_CAP){g_factoryStorage.Reject(local);return nullptr;}
+    auto& frame=local->frames[local->depth-1];
+    if(!g_factoryStorage.Anchor(frame.anchor)){g_factoryStorage.Reject(local);return nullptr;}
+    return &frame;
+}
+bool FactoryCurrent(FactoryLocal* local,unsigned depth,std::uint64_t serial) {
+    const bool valid=g_factoryStorage.Same(local) && local->depth==depth && depth>0 && depth<=FACTORY_DEPTH_CAP &&
+        local->frames[depth-1].serial==serial && g_factoryStorage.Anchor(local->frames[depth-1].anchor);
+    if(!valid)g_factoryStorage.Abandon(local);
+    return valid;
+}
 constexpr std::size_t CONSTRUCTION_QUEUE_CAP = 32;
 SRWLOCK g_constructionLock = SRWLOCK_INIT;
 std::array<NativeConstructionLineage, CONSTRUCTION_QUEUE_CAP> g_constructionQueue {};
@@ -1208,58 +1228,43 @@ bool CountFactoryCall(std::uint16_t& count, FactoryPredicates& observation) {
 }
 
 std::uint8_t ObserveAdmission(float weight, uintptr_t caller) {
-    auto* const scope = g_factoryScope;
-    if (!scope || !(scope->coverageMask & FactoryAdmissionHook) ||
-        caller != g_exeBase + ADMISSION_RETURN_RVA) return g_originalAdmission(weight);
-    const bool first = CountFactoryCall(scope->admissionCalls, *scope);
-    std::uint8_t result = 0;
-    if (first) {
-        std::memcpy(&scope->weightBits, &weight, sizeof(weight));
-        if (ReadNative(g_exeBase + ADMISSION_LIMIT_RVA, scope->limitBeforeBits)) scope->operandMask |= 1;
-        if (ReadNative(g_exeBase + ADMISSION_USED_RVA, scope->usedBeforeBits)) scope->operandMask |= 2;
-    }
-    __try {
-        result = g_originalAdmission(weight);
-        if (first) {
-            scope->admissionResult = result;
-            scope->admissionReturned = true;
-            if (ReadNative(g_exeBase + ADMISSION_LIMIT_RVA, scope->limitAfterBits)) scope->operandMask |= 4;
-            if (ReadNative(g_exeBase + ADMISSION_USED_RVA, scope->usedAfterBits)) scope->operandMask |= 8;
-        }
-    } __finally {
-        if (AbnormalTermination()) scope->admissionFault = true;
-    }
-    return result;
+    const auto error=GetLastError();FactoryLocal* local=nullptr;auto* frame=FactoryParent(local);
+    if(!frame || !frame->factory.eligible || !(frame->factory.coverageMask&FactoryAdmissionHook) ||
+       caller!=g_exeBase+ADMISSION_RETURN_RVA){SetLastError(error);return g_originalAdmission(weight);}
+    const auto depth=local->depth;const auto serial=frame->serial;auto& scope=frame->factory;
+    const bool first=CountFactoryCall(scope.admissionCalls,scope);std::uint8_t result=0;bool returned=false;
+    if(first){std::memcpy(&scope.weightBits,&weight,sizeof(weight));
+        if(ReadNative(g_exeBase+ADMISSION_LIMIT_RVA,scope.limitBeforeBits))scope.operandMask|=1;
+        if(ReadNative(g_exeBase+ADMISSION_USED_RVA,scope.usedBeforeBits))scope.operandMask|=2;}
+    __try {SetLastError(error);result=g_originalAdmission(weight);returned=true;}
+    __finally {const auto nativeError=GetLastError();
+        if(FactoryCurrent(local,depth,serial)) {
+            if(!returned)scope.admissionFault=true;
+            else if(first){scope.admissionResult=result;scope.admissionReturned=true;
+                if(ReadNative(g_exeBase+ADMISSION_LIMIT_RVA,scope.limitAfterBits))scope.operandMask|=4;
+                if(ReadNative(g_exeBase+ADMISSION_USED_RVA,scope.usedAfterBits))scope.operandMask|=8;}
+        }else ++g_traceUnavailable;
+        SetLastError(nativeError);
+    }return result;
 }
-
-std::uint8_t __fastcall HookedAdmission(float weight) {
-    return ObserveAdmission(weight, reinterpret_cast<uintptr_t>(_ReturnAddress()));
-}
-
+std::uint8_t __fastcall HookedAdmission(float weight) {return ObserveAdmission(weight,reinterpret_cast<uintptr_t>(_ReturnAddress()));}
 void* ObserveAllocation(std::size_t size, uintptr_t caller) {
-    auto* const scope = g_factoryScope;
-    if (!scope || !(scope->coverageMask & FactoryAllocationHook) ||
-        caller != g_exeBase + ALLOCATION_RETURN_RVA) return g_originalAllocation(size);
-    const bool first = CountFactoryCall(scope->allocationCalls, *scope);
-    void* result = nullptr;
-    if (first) scope->allocationSize = size;
-    // No reads of allocator/returned memory, callbacks, logging, allocation or
-    // queue operations here: this globally hot hook only updates existing POD.
-    __try {
-        result = g_originalAllocation(size);
-        if (first) {
-            scope->allocationResult = reinterpret_cast<uintptr_t>(result);
-            scope->allocationReturned = true;
-        }
-    } __finally {
-        if (AbnormalTermination()) scope->allocationFault = true;
-    }
-    return result;
+    const auto error=GetLastError();FactoryLocal* local=nullptr;auto* frame=FactoryParent(local);
+    if(!frame || !frame->factory.eligible || !(frame->factory.coverageMask&FactoryAllocationHook) ||
+       caller!=g_exeBase+ALLOCATION_RETURN_RVA){SetLastError(error);return g_originalAllocation(size);}
+    const auto depth=local->depth;const auto serial=frame->serial;auto& scope=frame->factory;
+    const bool first=CountFactoryCall(scope.allocationCalls,scope);void* result=nullptr;bool returned=false;
+    if(first)scope.allocationSize=size;
+    __try {SetLastError(error);result=g_originalAllocation(size);returned=true;}
+    __finally {const auto nativeError=GetLastError();
+        if(FactoryCurrent(local,depth,serial)) {
+            if(!returned)scope.allocationFault=true;
+            else if(first){scope.allocationResult=reinterpret_cast<uintptr_t>(result);scope.allocationReturned=true;}
+        }else ++g_traceUnavailable;
+        SetLastError(nativeError);
+    }return result;
 }
-
-void* __fastcall HookedAllocation(std::size_t size) {
-    return ObserveAllocation(size, reinterpret_cast<uintptr_t>(_ReturnAddress()));
-}
+void* __fastcall HookedAllocation(std::size_t size) {return ObserveAllocation(size,reinterpret_cast<uintptr_t>(_ReturnAddress()));}
 
 void CompleteFactoryObservation(TraceEvent& event) {
     auto& f = event.factory;
@@ -1428,76 +1433,56 @@ void PublishConstructionLineage(const NativeConstructionLineage& out) {
     ReleaseSRWLockExclusive(&g_constructionLock);
 }
 
-void* RunFactoryWrapper(TraceEvent* event, const void* record, void* controller, const float* point) {
-    auto* const previous = g_factoryScope;
-    const unsigned previousDepth = g_factoryDepth;
-    void* result = nullptr;
-    event->factory.depth = previousDepth;
-    event->factory.coverageSerial = g_factoryCoverageSerial.load();
-    event->factory.coverageMask = g_factoryInstalled.load();
-    const bool ownerThread = IsDiagnosticGameThread();
-    event->factory.eligible = ownerThread && previousDepth < FACTORY_DEPTH_CAP;
-    if (!ownerThread) ++g_factoryForeign;
-    if (previousDepth >= FACTORY_DEPTH_CAP) event->factory.countOverflow = true;
-    // Even an ineligible nested wrapper hides the enclosing scope; its children
-    // must never be attributed to an ancestor's factory invocation.
-    g_factoryScope = event->factory.eligible ? &event->factory : nullptr;
-    if (previousDepth < FACTORY_DEPTH_CAP) g_factoryDepth = previousDepth + 1;
-    auto* const previousConstruction = g_constructionScope;
-    const auto previousConstructionDepth = g_constructionDepth;
-    NativeConstructionLineage construction;
-    resourcetrace::ConstructionToken resourceToken;
-    // Every nested wrapper hides its ancestor even if recording is disabled,
-    // foreign, or saturated. A child must not inherit an unrelated parent.
-    g_constructionScope = nullptr;
-    const bool constructionEnabled = g_constructionConfigured.load();
-    if (constructionEnabled) {
-        BeginConstructionLineage(construction, *event, reinterpret_cast<uintptr_t>(record),
-                                 reinterpret_cast<uintptr_t>(controller),
-                                 previousConstruction, previousConstructionDepth);
-        if (construction.candidateThreadParent) g_constructionScope = &construction;
-        if (previousConstructionDepth < CONSTRUCTION_DEPTH_CAP)
-            g_constructionDepth = previousConstructionDepth + 1;
-        resourceToken = resourcetrace::BeginConstruction();
+void* RunFactoryWrapper(TraceEvent* event,const void* record,void* controller,const float* point) {
+    const auto error=GetLastError();const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
+    auto* local=g_factoryStorage.Current();
+    if(!local || !g_rawDiagnosticEnabled || local->depth>=FACTORY_DEPTH_CAP) {
+        if(local && local->depth>=FACTORY_DEPTH_CAP)g_factoryStorage.Reject(local);
+        ++g_traceUnavailable;event->factory.countOverflow=true;
+        SetLastError(error);
+        auto* result=event->wrapper==TraceWrapper::Fixed?CallOriginalWrapper(record,controller):CallOriginalGenerated(record,controller,point);
+        event->actor=reinterpret_cast<uintptr_t>(result);event->wrapperComplete=true;return result;
     }
-    __try {
-        result = event->wrapper == TraceWrapper::Fixed ? CallOriginalWrapper(record, controller) :
-                                                       CallOriginalGenerated(record, controller, point);
-        event->actor = reinterpret_cast<uintptr_t>(result);
-        event->wrapperComplete = true;
-        if (constructionEnabled) {
-            CompleteConstructionLineage(construction);
-            PublishConstructionLineage(construction);
-        }
-    } __finally {
-        g_factoryScope = previous;
-        g_factoryDepth = previousDepth;
-        g_constructionScope = previousConstruction;
-        g_constructionDepth = previousConstructionDepth;
-        if (constructionEnabled)
-            resourcetrace::EndConstruction(resourceToken, AbnormalTermination() == FALSE);
-        if (AbnormalTermination()) {
-            if (constructionEnabled) {
-                construction.normalReturn = false;
-                construction.unwound = true;
-                construction.droppedAfter = g_constructionDropped.load();
-                construction.coverageAfter = g_constructionCoverage.load();
-                PublishConstructionLineage(construction);
+    const unsigned index=local->depth;
+    if(index && local->frames[index-1].anchor<=anchor){g_factoryStorage.Reject(local);
+        SetLastError(error);return event->wrapper==TraceWrapper::Fixed?CallOriginalWrapper(record,controller):CallOriginalGenerated(record,controller,point);}
+    auto& frame=local->frames[index];frame={};frame.anchor=anchor;frame.serial=++g_factoryScopeSerial;
+    frame.factory.depth=index;frame.factory.coverageSerial=g_factoryCoverageSerial.load();
+    frame.factory.coverageMask=g_factoryInstalled.load();frame.factory.eligible=IsDiagnosticGameThread();
+    if(!frame.factory.eligible)++g_factoryForeign;
+    event->factory=frame.factory;
+    const bool constructionEnabled=g_constructionConfigured.load();
+    if(constructionEnabled) {
+        const auto* previous=index && local->frames[index-1].constructionVisible?&local->frames[index-1].construction:nullptr;
+        BeginConstructionLineage(frame.construction,*event,reinterpret_cast<uintptr_t>(record),reinterpret_cast<uintptr_t>(controller),previous,index);
+        frame.constructionVisible=frame.construction.candidateThreadParent;
+    }
+    const auto serial=frame.serial;++local->depth;
+    resourcetrace::ConstructionToken resourceToken{};
+    if(constructionEnabled)resourceToken=resourcetrace::BeginConstruction();
+    void* result=nullptr;bool returned=false;
+    __try {SetLastError(error);
+        result=event->wrapper==TraceWrapper::Fixed?CallOriginalWrapper(record,controller):CallOriginalGenerated(record,controller,point);
+        returned=true;event->actor=reinterpret_cast<uintptr_t>(result);event->wrapperComplete=true;
+    } __finally {const auto nativeError=GetLastError();
+        const bool current=FactoryCurrent(local,index+1,serial);
+        if(current) {
+            event->factory=frame.factory;
+            if(constructionEnabled) {
+                if(returned)CompleteConstructionLineage(frame.construction);
+                else {frame.construction.unwound=true;frame.construction.normalReturn=false;
+                    frame.construction.droppedAfter=g_constructionDropped.load();frame.construction.coverageAfter=g_constructionCoverage.load();}
+                PublishConstructionLineage(frame.construction);
             }
-            RefuseHostEmission("native wrapper unwound");
-            event->factory.unwound = true;
-            event->factory.complete = false;
-            event->factory.outcome = FactoryOutcome::Unknown;
-            event->outcome = event->wrapperOutcome = TraceOutcome::Unavailable;
-            event->reason = "native wrapper interrupted";
-            ++g_factoryUnwound;
-            ++g_traceUnavailable;
-            // Already-captured POD only. No native reads or callbacks on unwind.
-            PublishTrace(*event);
-        }
+        }else {event->factory.complete=false;event->factory.countOverflow=true;++g_traceUnavailable;}
+        if(constructionEnabled)resourcetrace::EndConstruction(resourceToken,returned && current);
+        if(current){frame={};local->depth=index;}
+        if(!returned){event->factory.unwound=true;event->factory.complete=false;
+            event->factory.outcome=FactoryOutcome::Unknown;event->outcome=event->wrapperOutcome=TraceOutcome::Unavailable;
+            event->reason="native wrapper interrupted";++g_factoryUnwound;++g_traceUnavailable;PublishTrace(*event);}
+        SetLastError(nativeError);
     }
-    CompleteFactoryObservation(*event);
-    return result;
+    const auto nativeError=GetLastError();CompleteFactoryObservation(*event);SetLastError(nativeError);return result;
 }
 
 void ReadTraceActor(TraceEvent& event) {
@@ -1552,6 +1537,7 @@ bool ModuleRva(uintptr_t address, uintptr_t& rva) {
 
 void* ObserveWrapper(const void* record, void* controller, const float* point,
                      TraceWrapper wrapper, uintptr_t caller) {
+    const auto entryError=GetLastError();
     TraceEvent event;
     event.sequence = ++g_traceStarted;
     event.wrapper = wrapper;
@@ -1562,25 +1548,9 @@ void* ObserveWrapper(const void* record, void* controller, const float* point,
     event.controller = reinterpret_cast<uintptr_t>(controller);
     event.record = reinterpret_cast<uintptr_t>(record);
     event.stampAvailable = CaptureDiagnosticStamp(g_exeBase, event.stamp);
-    event.enclosingTick = g_traceTick.active && g_traceNestedDepth == 0 &&
-        g_traceTick.controller == event.controller && event.stampAvailable && g_traceTick.stampAvailable &&
-        event.stamp.transition == g_traceTick.stamp.transition && event.stamp.load == g_traceTick.stamp.load &&
-        event.stamp.location == g_traceTick.stamp.location;
-    if (event.enclosingTick) {
-        event.tickSequence = g_traceTick.sequence;
-        event.tickBefore = g_traceTick.before;
-    }
-    event.enclosingDispatcher = g_dispatcherScope.active && g_dispatcherScope.controller == event.controller;
-    if (event.enclosingDispatcher) {
-        event.dispatcherSequence = g_dispatcherScope.sequence;
-        event.dispatcherRegion = g_dispatcherScope.region;
-        event.dispatcherCallerRvaAvailable = ModuleRva(g_dispatcherScope.caller, event.dispatcherCallerRva);
-    }
-    event.enclosingScript42DC10 = g_scriptScope.active;
-    if (event.enclosingScript42DC10) {
-        event.scriptSequence = g_scriptScope.sequence;
-        event.scriptCallerRvaAvailable = ModuleRva(g_scriptScope.caller, event.scriptCallerRva);
-    }
+    // Diagnostic profile: TLS tick/dispatcher/script correlation is unsupported.
+    // Policy-facing g_traceTick storage and RunUpdate sequencing remain untouched.
+    event.enclosingTick=event.enclosingDispatcher=event.enclosingScript42DC10=false;
     event.wrapperBefore = CaptureTraceState(event.controller);
     event.recordAvailable = CopyNative(event.record, event.recordBytes.data(), event.recordBytes.size());
     if (event.recordAvailable) {
@@ -1606,7 +1576,9 @@ void* ObserveWrapper(const void* record, void* controller, const float* point,
         event.generatedPointAvailable = CopyNative(reinterpret_cast<uintptr_t>(point),
                                                   event.generatedPoint.data(), sizeof(event.generatedPoint));
     // This is the only original call on this path. No native retry or suppression.
+    SetLastError(entryError);
     void* const actor = RunFactoryWrapper(&event, record, controller, point);
+    const auto nativeError=GetLastError();
     ReadTraceActor(event);
     event.wrapperAfter = CaptureTraceState(event.controller);
     event.postStampAvailable = CaptureDiagnosticStamp(g_exeBase, event.postStamp);
@@ -1638,7 +1610,7 @@ void* ObserveWrapper(const void* record, void* controller, const float* point,
             event.outcome != TraceOutcome::OutOfScope) ++g_traceUnavailable;
         PublishTrace(event);
     }
-    return actor;
+    SetLastError(nativeError);return actor;
 }
 
 void* __fastcall HookedWrapper(const void* record, void* controller) {
@@ -2043,19 +2015,25 @@ void __fastcall HookedUpdate(void* controller, const float* nativePoint) {
 }
 
 template <std::size_t N, typename Fn>
-bool InstallDiagnosticHook(uintptr_t rva, const std::uint8_t (&bytes)[N], void* detour, Fn& original) {
+bool InstallDiagnosticHook(uintptr_t rva, const std::uint8_t (&bytes)[N], void* detour, Fn& original, bool retainOnExposure=false) {
     if (!Matches(g_exeBase + rva, bytes)) {
         if (g_log) g_log("[spawntrace] component-unavailable rva=%llX reason=byte-gate", static_cast<unsigned long long>(rva));
         return false;
     }
     auto* target = reinterpret_cast<void*>(g_exeBase + rva);
     auto status = MH_CreateHook(target, detour, reinterpret_cast<void**>(&original));
-    if (status == MH_OK) {
+    const bool created = status == MH_OK;
+    if (created) {
         status = MH_EnableHook(target);
-        if (status != MH_OK) MH_RemoveHook(target);
+        if (status != MH_OK) {
+            if (retainOnExposure) MH_DisableHook(target);
+            else MH_RemoveHook(target);
+        }
     }
     if (status != MH_OK) {
-        original = nullptr;
+        // A reported enable failure is not proof that no fiber entered.
+        // Only this raw profile opts in; known-mutation installation is unchanged.
+        if (!created || !retainOnExposure) original = nullptr;
         if (g_log) g_log("[spawntrace] component-unavailable rva=%llX status=%d", static_cast<unsigned long long>(rva), status);
         return false;
     }
@@ -2821,7 +2799,12 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
     g_log = log;
     g_knownMutationRequested = KnownMutationRequested();
     g_traceRequested = trace;
+    if(trace && g_knownMutationRequested){if(g_log)g_log("[legacytrace] unavailable reason=PREPARE-enabled diagnostic-profile requires=PREPARE0");trace=false;}
+    if(trace && !g_factoryStorage.Init(reinterpret_cast<const void*>(&Install))){if(g_log)g_log("[legacytrace] unavailable reason=FLS-storage");trace=false;}
+    g_rawDiagnosticEnabled=trace;
     g_geometryConfig = ReadGeometryConfig(trace);
+    g_geometryConfig.configured=false; // explicitly unsupported diagnostic eligibility
+    if(g_log && g_traceRequested)g_log("[legacytrace] profile=FLS-raw-only geometry=unsupported enrollment=unsupported originalPhase=unsupported dispatcher=unsupported script=unsupported tick=unsupported firstEmission=unsupported");
     g_enrollmentRequested = EnrollmentRequested();
     g_enrollmentConfigured = g_enrollmentRequested.load() && trace && g_geometryConfig.configured;
     g_geometryTerminal = !g_geometryConfig.requested ? GeometryTerminal::Disabled :
@@ -2873,22 +2856,20 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
             (allocationVerified ? FactoryAllocationHook : 0U);
         std::uint32_t factoryInstalled = 0;
         if (admissionVerified && InstallDiagnosticHook(ADMISSION_RVA, kAdmissionBytes,
-                reinterpret_cast<void*>(&HookedAdmission), g_originalAdmission))
+                reinterpret_cast<void*>(&HookedAdmission), g_originalAdmission, true))
             factoryInstalled |= FactoryAdmissionHook;
         if (allocationVerified && InstallDiagnosticHook(ALLOCATION_RVA, kAllocationBytes,
-                reinterpret_cast<void*>(&HookedAllocation), g_originalAllocation))
+                reinterpret_cast<void*>(&HookedAllocation), g_originalAllocation, true))
             factoryInstalled |= FactoryAllocationHook;
         g_factoryFailed = FactoryAllHooks & ~factoryInstalled;
         g_factoryInstalled = factoryInstalled;
         ++g_factoryCoverageSerial;
         g_fixedInstalled = Matches(exeBase + WRAPPER_CALL_RVA, kWrapperCallBytes) &&
-            InstallDiagnosticHook(WRAPPER_RVA, kWrapperBytes, reinterpret_cast<void*>(&HookedWrapper), g_originalWrapper);
+            InstallDiagnosticHook(WRAPPER_RVA, kWrapperBytes, reinterpret_cast<void*>(&HookedWrapper), g_originalWrapper, true);
         g_generatedInstalled = InstallDiagnosticHook(GENERATED_RVA, kGeneratedBytes,
-                                                     reinterpret_cast<void*>(&HookedGenerated), g_originalGenerated);
-        g_dispatcherInstalled = InstallDiagnosticHook(DISPATCHER_RVA, kDispatcherBytes,
-                                                      reinterpret_cast<void*>(&HookedDispatcher), g_originalDispatcher);
-        g_scriptInstalled = InstallDiagnosticHook(SCRIPT_RVA, kScriptBytes,
-                                                  reinterpret_cast<void*>(&HookedScript), g_originalScript);
+                                                     reinterpret_cast<void*>(&HookedGenerated), g_originalGenerated, true);
+        g_dispatcherInstalled=false;g_scriptInstalled=false;
+        (void)&HookedDispatcher;(void)&HookedScript; // unsupported, never installed
         g_traceInstalled = g_fixedInstalled || g_generatedInstalled;
         if (g_geometryConfig.configured) {
             g_geometryVerified = Matches(exeBase + BOX_RVA, kBoxBytes) &&
@@ -2905,12 +2886,11 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
                          g_dispatcherInstalled ? 1U : 0U, g_scriptInstalled ? 1U : 0U,
                          g_factoryVerified.load(), factoryInstalled, g_factoryFailed.load(), TRACE_QUEUE_CAP, TRACE_TICK_CAP);
     }
-    ConfigureOriginalPhase(trace);
+    ConfigureOriginalPhase(false);
     ConfigureConstructionLineage(trace);
     // Recording uses the already installed diagnostic return hooks. PREPARE
     // alone never quietly expands the installed trace profile.
-    g_hostEmissionConfigured = g_knownMutationRequested && trace && g_knownMutationInstalled == 7 &&
-        g_fixedInstalled.load() && g_generatedInstalled.load() && g_dispatcherInstalled.load() && g_scriptInstalled.load();
+    g_hostEmissionConfigured = false; // this profile supplies no policy-qualified first emission
     if (g_knownMutationRequested && g_log)
         g_log("[hostfirstemission] configured=%u requires=PREPARE+SPAWN_TRACE boundedCandidates=1 creationAuthority=0",
             g_hostEmissionConfigured.load() ? 1U : 0U);
@@ -2934,12 +2914,13 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
 
 bool CopyNativeConstructionLineage(NativeConstructionLineage& out) {
     out = {};
-    const auto* const scope = g_constructionScope;
-    if (!g_constructionConfigured.load() || !scope || !scope->captured || !scope->candidateThreadParent ||
-        scope->overflow || scope->threadId != GetCurrentThreadId() || !IsDiagnosticGameThread() ||
-        scope->coverage != g_constructionCoverage.load()) return false;
+    const auto error=GetLastError();FactoryLocal* local=nullptr;auto* frame=FactoryParent(local);
+    const auto* scope=frame && frame->constructionVisible?&frame->construction:nullptr;
+    if(!g_constructionConfigured.load() || !scope || !scope->captured || !scope->candidateThreadParent ||
+       scope->overflow || scope->threadId!=GetCurrentThreadId() || !IsDiagnosticGameThread() ||
+       scope->coverage!=g_constructionCoverage.load()){SetLastError(error);return false;}
     out = *scope;
-    return true;
+    SetLastError(error);return true;
 }
 
 bool PopNativeConstructionLineage(NativeConstructionLineage& out) {
@@ -3014,6 +2995,15 @@ TraceStats GetTraceStats() {
 }
 
 void Shutdown() {
+    if(g_factoryStorage.Ready()) {
+        g_rawDiagnosticEnabled=false;g_constructionConfigured=false;++g_constructionCoverage;
+        ++g_factoryCoverageSerial;
+        // Caller still owns quiescence. Disable entry, but do not remove trampolines
+        // or clear originals potentially retained by suspended native fibers.
+        const uintptr_t targets[]{WRAPPER_RVA,GENERATED_RVA,ADMISSION_RVA,ALLOCATION_RVA,UPDATE_RVA};
+        for(const auto rva:targets)MH_DisableHook(reinterpret_cast<void*>(g_exeBase+rva));
+        return;
+    }
     g_hostEmissionConfigured = false;
     g_hostEmissionPoison = true;
     g_hostEmissionTick = {};
@@ -3101,10 +3091,7 @@ void Shutdown() {
     g_traceNestedDepth = 0;
     g_dispatcherScope = {};
     g_scriptScope = {};
-    g_factoryScope = nullptr;
-    g_factoryDepth = 0;
-    g_constructionScope = nullptr;
-    g_constructionDepth = 0;
+    // FLS-owned scopes are permanently retained; no stack-pointer restoration.
     AcquireSRWLockExclusive(&g_constructionLock);
     g_constructionRead = g_constructionCount = 0;
     ReleaseSRWLockExclusive(&g_constructionLock);
