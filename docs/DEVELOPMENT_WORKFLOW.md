@@ -40,7 +40,9 @@ renderer, works behind other windows) or `kh2ctl clip --pid N` (MP4), and
 `kh2ctl overlay --pid N on` for pid, frame, world/room, fps and connected RTT/loss on screen.
 
 The D3D12 renderer selects fresh external DIRECT submissions from the Present
-thread and retains one queue/device/owner for its fence ring. It skips work
+thread and retains one queue/device/swapchain for its fence ring. A nonblocking
+gate serializes injected CPU work across the game's startup-to-main Present
+thread handoff; switching CPU callers does not switch the GPU queue. It skips work
 without an eligible submission and stops GPU work after a failed reset, close,
 signal, wait, or removed-device fence result; restart the instance after a GPU
 failure. Last queue references are intentionally retained at process teardown.

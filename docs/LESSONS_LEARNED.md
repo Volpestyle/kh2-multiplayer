@@ -247,6 +247,25 @@ completion after an event wakes, including the removed-device sentinel, before
 mapping or reusing resources. Never release a queue in a TLS destructor under
 loader teardown.
 
+KH2 can change Present threads during startup while keeping the same swapchain
+and DIRECT queue. Guide attempts `014643` and `015527` recorded this both before
+and after initial capture bound the queue. Permanent CPU-thread affinity blocked
+later captures. Serialize injected CPU state across callers while retaining the
+canonical queue and swapchain for the single GPU fence timeline; reject another
+swapchain before touching capture jobs or the ring. A CPU-thread change alone
+is not a GPU-queue migration.
+
+Shared GDI state needs that same serialization and a flush before handoff.
+Create the memory DC from a temporarily acquired screen DC, release the screen
+DC on the acquiring thread, and publish the memory DC only after its DIB is
+usable. A NULL-source memory DC becomes invalid when its creating thread exits.
+See Microsoft's [DC lifetime contract](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-createcompatibledc)
+and [flush requirement](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-gdiflush),
+and the [native source review](../build/rig/vuh1493-join-guide-dry-run-20261005-01/same-queue-handoff-review.md).
+An owned native control reproduced the permanent-thread rejection; the candidate
+completed capture and overlay refresh after that first thread exited. See the
+[bounded handoff result](../build/rig/overlay-gpu-probe-20261005-01/thread-handoff-full-20261005-01/root02-result.md).
+
 A title-menu timeout can be a capture failure: the current detector treats a
 failed capture as no highlighted menu row. Retain the actual capture reply and
 owner/freshness receipts before blaming loading or tracing. A puppet release

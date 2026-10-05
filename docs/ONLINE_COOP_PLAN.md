@@ -26,7 +26,7 @@ possibly enemies.
 | Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Private Tailscale transport passed with one real game and a Mac synthetic avatar for two minutes, then two real local games through a Mac relay, normally and with delay/loss. Two separate Windows installations and controller playtests remain open. |
 | Hit claims | A client's hits on enemies are sent as claims; the host applies each once through the game's own damage routine and broadcasts absolute HP (protocol 10). Ordinary Shadow combat, including client kills, works on loopback. Attack-specific effects and boss finishers are open. |
 | Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. After checked native snapshots exposed five unmatched client enemies, scoped host activation passed the original strict 20-load route with empty enemy populations and a source-expiry control. Its unchanged native-wave regression then failed with different enemy identities and an alive host refill. Nonempty spawn/lifecycle authority remains open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
-| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. A native host chest opening passed next-load client mirroring, late join and subsequent reload on three instances, with personal bytes preserved. A deliberate progress mismatch was detected and restoration verified. Broader story side effects remain open. |
+| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. Broader story flags and side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
 **Reconnect recovery (VUH-1508), in plain terms.** If a client rejoins while the
@@ -61,13 +61,39 @@ and native application, enemy HP matched, the target died once per game, and
 native chest opening persisted through client reloads. Both screens showed
 RTT/loss. No game crashed and all four protected saves were unchanged. The
 reviewed render fix uses fresh external DIRECT submissions on the Present
-thread, freezes the queue/fence owner, and stops GPU work on failed calls.
+thread, freezes the GPU queue/swapchain and fence timeline, and stops GPU work on failed calls.
 The old dump proved the previous retained queue differed from the swapchain's
 queue. The new run directly matched all three presentation queue slots on
 both games before and after gameplay. This is bounded acceptance, with startup
 capture failures still retained; earlier overlay-ON `000836` remains CRASH.
 See the [overlay-ON result](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-result.md)
 and [independent review](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-acceptance-review.md).
+
+The private development join guide also passed (`020845`), with bidirectional
+native movement and both RTT/loss overlays. Its preceding startup capture
+failures exposed the game's Present-thread handoff; injected CPU work is now
+serialized across callers while the GPU queue stays fixed. The passing guide
+did not expose a handoff after binding. A separate private native control then
+reproduced the old thread rejection while the candidate completed both captures
+after the first thread exited, with a healthy GPU and changed overlay pixels.
+See the [native handoff result](../build/rig/overlay-gpu-probe-20261005-01/thread-handoff-full-20261005-01/root02-result.md)
+and [independent review](../build/rig/overlay-gpu-probe-20261005-01/thread-handoff-full-20261005-01/handoff-regression-review.md),
+and [guide result and limits](../build/rig/vuh1493-join-guide-dry-run-20261005-01/guide3-result.md).
+
+Native visited progress passed over the impaired Mac relay (`021630`): the
+host acquired BC05/05's visited bit through native loading, and a client that
+never entered that room received it in GoA before its join load and retained
+it through reload. All shared ranges and personal apply invariants matched,
+and protected saves stayed unchanged. This covers visited/full-state bootstrap,
+with story-event effects still open. See the [result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/visited1-result.md)
+and [independent review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/visited1-acceptance-review.md).
+
+Five room-specific initial joins and same-room reloads also passed through the
+impaired Mac relay: GoA plus BC01/04/05/06. Full native tuples, latest progress
+application before client loading, raw shared bytes and fresh native hashes
+matched. These cases have matching empty enemy populations; populated joins,
+later waves and dead-pack recovery remain open. See the [five-room result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/five-room-result.md)
+and [independent review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/five-room-acceptance-review.md).
 
 See [private joining and simulation](JOIN_GUIDE.md). Cutscene hold, general
 waves and bosses, and the package also remain open.

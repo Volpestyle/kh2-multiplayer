@@ -34,6 +34,13 @@ Two real games on this PC also passed scripted movement through a Mac relay,
 normally and with configured delay/loss. See [testing without a friend](#testing-without-a-friend).
 The first human friend session on a separate Windows PC remains open.
 
+The development guide's game/runtime/relay flow also passed a two-game dry run
+through the Mac (`20261005-020845`): explicit matching protocol10 configuration,
+native movement in both directions, both overlays showing RTT/loss, no crash,
+and unchanged protected saves. See the [result and captures](../build/rig/vuh1493-join-guide-dry-run-20261005-01/guide3-result.md)
+and [independent review](../build/rig/vuh1493-join-guide-dry-run-20261005-01/guide3-acceptance-review.md).
+Account invitations and setup on a separate Windows PC still need that session.
+
 ## Testing without a friend
 
 The scenario rig can launch two real KH2 games and drive both native players.

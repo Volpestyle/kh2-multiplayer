@@ -97,9 +97,12 @@ struct ThreadSubmission {
 thread_local ThreadSubmission t_externalSubmission;
 ID3D12CommandQueue* g_boundQueue = nullptr;  // owned through outstanding GPU work
 IUnknown* g_boundQueueIdentity = nullptr;  // owned canonical identity
+IUnknown* g_boundSwapChainIdentity = nullptr;  // owned; do not redirect pending work
 ID3D12Device* g_boundDevice = nullptr;       // identity; bound queue retains device
-DWORD g_boundThread = 0;
+DWORD g_boundThread = 0;  // initial binding thread, diagnostic only
+unsigned g_sameQueueHandoffReceipts = 0;
 std::atomic<DWORD> g_renderOwner {0};
+unsigned g_ownerClaimReceipts = 0;
 std::atomic<unsigned> g_ownerRejectReceipts {0};
 unsigned g_noFreshReceipts = 0;
 bool g_bindingRejectedLogged = false;
@@ -146,6 +149,7 @@ CaptureJob g_job;
 
 // Overlay text, rendered with GDI into a DIB and converted to the
 // backbuffer's format.
+// All GDI access is serialized and flushed before releasing the Present gate.
 HDC g_overlayDc = nullptr;
 HBITMAP g_overlayBitmap = nullptr;
 HFONT g_overlayFont = nullptr;
@@ -648,27 +652,36 @@ ID3D12CommandQueue* FrameQueue() {
                   static_cast<unsigned long long>(g_presentIndex));
         return nullptr;
     }
-    if (candidate == g_boundQueue && g_device == g_boundDevice &&
-        GetCurrentThreadId() == g_boundThread) return g_boundQueue;
+    if (candidate == g_boundQueue && g_device == g_boundDevice) {
+        if (g_renderDiagnostics && GetCurrentThreadId() != g_boundThread &&
+            g_sameQueueHandoffReceipts++ < 4 && g_log)
+            g_log("[render-diag] same queue CPU handoff initialThread=%lu thread=%lu queue=%p swapchain=%p fresh=1",
+                  g_boundThread, GetCurrentThreadId(), g_boundQueue, g_swapChain3);
+        return g_boundQueue;
+    }
 
     ID3D12Device* device = nullptr;
     IUnknown* deviceIdentity = nullptr;
     IUnknown* swapIdentity = nullptr;
     IUnknown* queueIdentity = nullptr;
+    IUnknown* chainIdentity = nullptr;
     const HRESULT deviceHr = candidate->GetDevice(IID_PPV_ARGS(&device));
     const HRESULT deviceIdentityHr = device ? device->QueryInterface(IID_PPV_ARGS(&deviceIdentity)) : E_NOINTERFACE;
     const HRESULT swapIdentityHr = g_device->QueryInterface(IID_PPV_ARGS(&swapIdentity));
     const HRESULT queueIdentityHr = candidate->QueryInterface(IID_PPV_ARGS(&queueIdentity));
+    const HRESULT chainIdentityHr = g_swapChain3->QueryInterface(IID_PPV_ARGS(&chainIdentity));
     const bool sameDevice = SUCCEEDED(deviceHr) && SUCCEEDED(deviceIdentityHr) &&
                             SUCCEEDED(swapIdentityHr) && deviceIdentity == swapIdentity;
-    const bool compatible = sameDevice && SUCCEEDED(queueIdentityHr) &&
+    const bool compatible = sameDevice && SUCCEEDED(queueIdentityHr) && SUCCEEDED(chainIdentityHr) &&
                             (!g_boundQueue || (g_boundQueueIdentity == queueIdentity &&
-                                               GetCurrentThreadId() == g_boundThread));
+                                               g_boundSwapChainIdentity == chainIdentity));
     if (compatible && !g_boundQueue) {
         candidate->AddRef();
         g_boundQueue = candidate;
         g_boundQueueIdentity = queueIdentity;
         queueIdentity = nullptr;
+        g_boundSwapChainIdentity = chainIdentity;
+        chainIdentity = nullptr;
         g_boundDevice = g_device;
         g_boundThread = GetCurrentThreadId();
         if (g_log) g_log("[render] queue bound source=present-thread-external-direct "
@@ -686,6 +699,7 @@ ID3D12CommandQueue* FrameQueue() {
                          deviceIdentityHr, swapIdentityHr, queueIdentityHr);
     }
     if (queueIdentity) queueIdentity->Release();
+    if (chainIdentity) chainIdentity->Release();
     if (swapIdentity) swapIdentity->Release();
     if (deviceIdentity) deviceIdentity->Release();
     if (device) device->Release();
@@ -710,19 +724,42 @@ bool EnsureOverlayGdi() {
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB;
-    g_overlayDc = CreateCompatibleDC(nullptr);
-    if (!g_overlayDc) return false;
-    g_overlayBitmap = CreateDIBSection(g_overlayDc, &info, DIB_RGB_COLORS,
-                                       &g_overlayBits, nullptr, 0);
-    if (!g_overlayBitmap) return false;
-    SelectObject(g_overlayDc, g_overlayBitmap);
-    g_overlayFont = CreateFontW(-22, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                                CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY,
-                                FIXED_PITCH, L"Consolas");
-    if (g_overlayFont) SelectObject(g_overlayDc, g_overlayFont);
-    SetBkMode(g_overlayDc, TRANSPARENT);
-    SetTextColor(g_overlayDc, RGB(255, 255, 255));
+    // A NULL source would tie the memory DC's validity to the creating thread.
+    HDC screen = GetDC(nullptr);
+    if (!screen) return false;
+    HDC dc = CreateCompatibleDC(screen);
+    ReleaseDC(nullptr, screen);
+    if (!dc) return false;
+    void* bits = nullptr;
+    HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    const HGDIOBJ previous = bitmap && bits ? SelectObject(dc, bitmap) : nullptr;
+    if (!previous || previous == HGDI_ERROR) {
+        GdiFlush();
+        DeleteDC(dc);
+        if (bitmap) DeleteObject(bitmap);
+        return false;
+    }
+    HFONT font = CreateFontW(-22, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                             CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY,
+                             FIXED_PITCH, L"Consolas");
+    if (font) {
+        const HGDIOBJ oldFont = SelectObject(dc, font);
+        if (!oldFont || oldFont == HGDI_ERROR) { DeleteObject(font); font = nullptr; }
+    }
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(255, 255, 255));
+    if (!GdiFlush()) {
+        DeleteDC(dc);
+        DeleteObject(bitmap);
+        if (font) DeleteObject(font);
+        return false;
+    }
+    // Publish only a complete usable DC/DIB; allocation failure can retry later.
+    g_overlayDc = dc;
+    g_overlayBitmap = bitmap;
+    g_overlayFont = font;
+    g_overlayBits = bits;
     return true;
 }
 
@@ -955,7 +992,17 @@ void SubmitFrameWork(bool drawOverlay, bool captureFrame) {
     }
 }
 
+bool IsBoundSwapChain(IDXGISwapChain* swapChain) {
+    if (!g_boundSwapChainIdentity || swapChain == g_checkedSwapChain) return true;
+    IUnknown* identity = nullptr;
+    const HRESULT hr = swapChain->QueryInterface(IID_PPV_ARGS(&identity));
+    const bool same = SUCCEEDED(hr) && identity == g_boundSwapChainIdentity;
+    if (identity) identity->Release();
+    return same;
+}
+
 void OnPresent(IDXGISwapChain* swapChain) {
+    if (!IsBoundSwapChain(swapChain)) return;  // No job/ring mutation on another chain.
     const bool ready = PrepareSwapChain(swapChain);
     StartJobIfRequested();
 
@@ -1011,8 +1058,6 @@ void OnPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags) {
     const DWORD thread = GetCurrentThreadId();
     DWORD owner = 0;
     const bool claimed = g_renderOwner.compare_exchange_strong(owner, thread);
-    if (claimed && g_renderDiagnostics && g_log)
-        g_log("[render-diag] render owner claimed thread=%lu swapchain=%p", thread, swapChain);
     if (!claimed && owner != thread) {
         if (g_renderDiagnostics && g_ownerRejectReceipts.fetch_add(1) < 4 && g_log)
             g_log("[render-diag] render owner rejected owner=%lu thread=%lu swapchain=%p sequence=%llu previous=%llu queue=%p",
@@ -1020,16 +1065,28 @@ void OnPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags) {
                   static_cast<unsigned long long>(t_externalSubmission.previousPresent), t_externalSubmission.queue);
         return;
     }
-    // Only the claimed owner may inspect or mutate shared render state.
-    if (g_disabled) return;
-    if (!g_hooks[hook].seen) {
-        g_hooks[hook].seen = true;
-        if (g_log) g_log("  Render: game presents via %s", g_hooks[hook].label);
+    // Serialize CPU render state across KH2's startup/game Present-thread handoff.
+    // FrameQueue freezes the GPU queue and swapchain, not the calling CPU thread.
+    __try {
+        if (claimed && g_renderDiagnostics && g_ownerClaimReceipts++ < 4 && g_log)
+            g_log("[render-diag] render owner claimed thread=%lu swapchain=%p bound=%d",
+                  thread, swapChain, g_boundQueue != nullptr);
+        if (g_disabled) return;
+        if (!g_hooks[hook].seen) {
+            g_hooks[hook].seen = true;
+            if (g_log) g_log("  Render: game presents via %s", g_hooks[hook].label);
+        }
+        InterlockedIncrement(&g_channel->presentCount);
+        OnPresentGuarded(swapChain);
+        if (g_disabled && g_log) g_log("  Render: exception in the Present hook; capture disabled");
+        ++g_presentIndex;
+    } __finally {
+        __try {
+            if (g_overlayDc) GdiFlush();
+        } __finally {
+            g_renderOwner.store(0);
+        }
     }
-    InterlockedIncrement(&g_channel->presentCount);
-    OnPresentGuarded(swapChain);
-    if (g_disabled && g_log) g_log("  Render: exception in the Present hook; capture disabled");
-    ++g_presentIndex;
 }
 
 template <int N>
