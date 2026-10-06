@@ -21,8 +21,8 @@ The package adds no game-folder files, service, account, registry setting or fir
 
 ## Preview limits
 
-Follow James's selected route. If James sees five Shadows in the courtyard and you see none after joining, wait: James takes one short walk away from the circular patterned paving onto the nearby broad stone steps, then stops. Compare both games before fighting. This restored the same five enemies in three rig checks. If enemies are still missing, stop and report both screens and logs; do not keep walking or continue combat.
+Follow James's selected route. If James sees five Shadows in the courtyard and you see none after joining or reconnecting before a fight, wait: James takes one short walk away from the circular patterned paving onto the nearby broad stone steps, then stops. Compare both games before fighting. This has been checked with the complete living courtyard pack. If enemies are still missing, stop and report both screens and logs; do not keep walking or continue combat.
 
-Populated reconnect still fails, and that walk has not been qualified after reconnect. Do not reconnect mid-fight or after enemies die. Stop the session and report a dropped connection, missing enemies or enemies returning to life. Populated-room cutscene hold remains unqualified. No public-port forwarding is needed or supported.
+After a drop before combat, reconnect and compare both games; the courtyard walk above may be needed. Reconnecting after enemies die is unsupported. Do not reconnect mid-fight, after kills or with a partial pack. Stop and report missing enemies, enemies returning to life or a room mismatch. Populated-room cutscene hold remains unqualified. No public-port forwarding is needed or supported.
 
 Startup without adding `steam_appid.txt` has been checked; Steam app IDs are set only for the child game process. Startup can still fail during mod initialization; use the guidance above. HUD names/reset passed with two games on one Windows PC through the private Mac relay. A complete launcher-only session and reconnect rehearsal remain pending. **This is a rehearsal candidate, not a friend-ready release.**

@@ -89,7 +89,7 @@ The new path must preserve normal recovery, never reset or mutate world state
 while collecting content, bind fresh complete living records to current scope
 and manifest/HP values, and remain default off until source review and fresh
 controls. All protocol 10 evidence stays scoped to its original products.
-Three unchanged-product checks retained the original empty-join FAIL, then restored
+Four unchanged-product checks retained the original empty-join FAIL, then restored
 the exact five living Shadows after one bounded Host walk onto the nearby steps.
 The second run passed strict reload but stopped before the reconnect checkpoint
 because no Mac ACK was observed after timeout retirement. Read-only triage found
@@ -98,10 +98,16 @@ The third check fetched that ACK within the original 45-second deadline and pass
 transport, native re-entry and progress. Its reconnect checkpoint again found an
 empty Client, then the walk diagnostic refused before movement because current
 activation or cache state was present. Reconnect restoration is still untested;
-that exact controller state is under investigation. The known-issues instruction
-is limited to the tested all-alive courtyard join. The source-reviewed protocol11
-candidate shares this admission guard and is undergoing private build/headless
-checks; it has no proven reconnect coverage and is absent from the package. Its
+read-only triage established marker1 with all caches empty. Native dispatch still
+reaches the emitter at marker1. The adopted reconnect-only fresh-lifetime fixture
+correction kept caches and all parity assertions exact. Walk04 then passed all41
+diagnostic steps: each original join/reconnect checkpoint failed empty, then one
+900ms Host walk restored the exact five living enemies with fresh hashes/native
+rounds and no extras or deaths. This is four join restorations and one all-alive
+reconnect restoration, not a passing automatic gate. The known-issues instruction
+is limited to that complete living courtyard pack. The source-reviewed protocol11
+candidate has built and passed39 codec plus66 loopback controls; its native paths
+remain unexecuted and marker0 join-only. It is absent from the package. Its
 adopted R1 uses the original five-second request deadline without renewal and logs
 sampled-prefix expiry outcomes. Fresh live controls remain required before enable.
 See the [activation diagnosis](../build/rig/vuh1495-courtyard-activation-diag01-triage-20261006-01/result.md)
@@ -109,7 +115,9 @@ and [source feasibility](../build/rig/vuh1495-geometry-bootstrap-candidate-20261
 [join restoration](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-01/root-result.md),
 [reconnect probe](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-02/root-result.md),
 [ACK-corrected reconnect refusal](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-03/root-result.md)
-and [protocol11 source review](../build/rig/vuh1495-geometry-bootstrap-candidate-20261006-01/protocol11/advisor-review.md).
+and [marker1 walk restoration](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-04/root-result.md),
+plus the [protocol11 build](../build/rig/vuh1495-geometry-bootstrap-candidate-20261006-01/protocol11/r1/windows-build-02/result.md)
+and [source review](../build/rig/vuh1495-geometry-bootstrap-candidate-20261006-01/protocol11/advisor-review.md).
 HUD names and reset passed all 32 steps and eight inspected native images,
 including natural runtime exit and cleared text. The earlier 020047 FAIL remains
 recorded; see the [accepted names/reset run](../build/rig/vuh1507-hud-names-static-crt-prep-20261006-02/live-root01/root-result.md).

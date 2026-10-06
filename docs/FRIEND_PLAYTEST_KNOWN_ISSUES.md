@@ -25,22 +25,25 @@ open. This list will be updated before the package is handed to a friend.
   normally or removing the package.
 - **Reconnect before defeating a pack.** Recovery with defeated enemy packs is
   unsupported. A courtyard timeout/rejoin also returned without Client enemies
-  while everyone was alive; basic populated reconnect is still being fixed.
-  Stop and report a drop after kills, missing enemies, or enemies returning to
-  life rather than continuing that room.
+  while everyone was alive. One unchanged-product check restored the exact
+  complete living courtyard pack after reconnect with the short Host walk below.
+  Other rooms, partial packs and reconnect after kills are not covered. Stop and
+  report missing enemies or enemies returning to life.
 - **A populated join can miss enemies.** Courtyard joins have both passed and
   left the joining game with an empty pack, including a trace-off diagnostic.
   An empty pack also occurred after reconnect with that logging off. For an
   all-alive courtyard join where the Host sees five Shadows and the friend sees
-  none, the Host can take one short walk away from the circular patterned paving
+  none after joining or reconnecting before combat, the Host can take one short
+  walk away from the circular patterned paving
   onto the nearby broad stone steps, then stop and compare both games. This
-  restored the exact pack in three rig checks. Do not keep walking or start combat
+  restored the exact pack in four join checks and one reconnect check. Do not
+  keep walking or start combat
   if they still differ; stop and report both screens and logs. This instruction
-  has not passed on reconnect or after kills. The latest reconnect check refused
-  before walking because the empty Client still had activation or cache state;
-  that state is under investigation. The protocol11 geometry candidate shares
-  the same admission guard, is undergoing private build checks and is absent
-  from this package.
+  is limited to the complete living courtyard pack. The earlier marker-only
+  reconnect refusal remains recorded; the adopted fresh-lifetime precondition
+  allowed marker1 with empty caches without changing parity assertions. The
+  protocol11 geometry candidate is built and transport-tested, still requires
+  native live controls, and is absent from this package.
 - **Names use plain ASCII.** Use different names made from letters, digits,
   spaces, `_`, `.` or `-`; the HUD shows at most 23 characters. MP,
   downed/revive and the full multiplayer HUD remain unfinished.
