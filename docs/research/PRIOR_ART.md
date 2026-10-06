@@ -171,3 +171,24 @@ Not real-time, but the most mature networked KH2 memory client
 
 One advantage: KH2's enemies already target party members, so friend-slot
 puppets should work as aggro targets on the host.
+
+### Local native-Sora probe, 2026-10-06 (VUH-1489)
+
+One reviewed, protected Steam probe replaced GoA friend1's Donald selector
+`01` with contextual playable selector `00` at RVA `0x9ACDF5`, reloaded once,
+then restored `01` and immediately killed the owned game. KH2 spawned a second
+native `P_EX100` Sora. Existing AvatarBridge logs bind the synth to that clone and show
+sampled transform application; Goofy remained. The strict run stays FAIL:
+its radius assertion included the native state before first pose application.
+All four save files and the sandbox were unchanged.
+
+GO for a default-off, known-room visual candidate, estimated at 1–2 focused
+engineering days plus review and qualification; NO-GO for package enable.
+The two Soras share native status/HP storage. Room lifetimes, multiple-owner
+binding, teardown/reconnect and combat/spells remain gates. Contextual Roxas
+and independent per-player selection were not tested. Every receiver needs
+an agreed archetype/moveset and verified owner-to-native-actor binding;
+existing character bytes do not provide this behavior.
+
+Evidence and limits: `build/rig/native-avatar-slot-spike-20261006-01/root-result.md`
+and run `20261006-165347_native_sora_goa_friend1_replacement_once_1`.
