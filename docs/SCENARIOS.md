@@ -2283,12 +2283,30 @@ second-wave acceptance. Four saves and owned PC/Mac closure passed. The advisor
 reviewed one new protected BB04 no-kill control and a full five-then-three run
 only if it passes, with every original check retained. See the [passive result](../build/rig/populated-room-stability-launch-prep-20261006-01/live-root01/result.md).
 
+The protected control `021001` failed its final15-second fresh bit8 check.
+All six samples kept the exact five-enemy pack and HP; Sora was alive/team0
+but outside the selected region. Its one control is consumed, with no full or
+retry. The source audit separates the diagnostic hit entry from ordinary
+region-gated emission; displacement cause remains unproved. Under the advisor's
+explicit goal clarification, a new fixture will require fresh native bit8 at
+emission points while retaining every acceptance assertion, safety/read guard
+and budget. It needs a fresh control; no old FAIL becomes PASS. See the
+[closed protected FAIL](../build/rig/vuh1502-bb04-control-prep-20261006-01/live-root01/result.md)
+and [audit](../build/rig/vuh1502-bb04-displacement-review-20261006-01/result.md).
+
 The [HUD names live preparation](../build/rig/vuh1507-hud-names-live-prep-20261006-01/result.md)
 is accepted offline:32 steps, exact matched private AvatarBridge-v3 products,
 literal admitted peer IDs and eight canonical capture attestations. Collection
 PASS alone is not names acceptance. Root must inspect actual names/owner rows,
 departure/expiry/reset, unchanged HP and labels; missing transient exposure
-fails. No names live run or v3 deployment has occurred.
+fails. The matched private v3 collection `020047` now remains FAIL: seven
+actual name/owner/HP, movement, Waiting/Open and expiry captures were inspected,
+but natural host exit0 was unqualified after the150-second reset deadline and
+the reset capture is missing. The reset step's initial pass label is not proof
+of completion. Runtime iteration count does not establish a wall-clock exit;
+the final poll value was not retained. No eight-image or whole names acceptance
+is claimed. Saves and owned PC/Mac closure passed. See the [live result](../build/rig/vuh1507-hud-names-launch-prep-20261006-01/live-root01/result.md)
+and [bounded shutdown audit](../build/rig/vuh1507-hud-names-shutdown-audit-20261006-01/result.md).
 
 The helper treats `entities` as candidates only. Checked reads validate native
 HEAD/TAIL, every next handle and its region-table resolution, terminal handle0,

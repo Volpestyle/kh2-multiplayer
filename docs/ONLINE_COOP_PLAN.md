@@ -150,9 +150,19 @@ scope. AvatarBridge is now v3, so DLL, runtime and avatarctl must match. The
 exact reviewed patch linked all three Release products privately, and 62 name
 controls passed normally and with Windows ASan; the existing 52 HUD controls
 also passed with ASan. Accepted older products and `073856` remain unchanged.
-No new product was deployed or tested in KH2. Names on the correct owner rows,
-departure/reset/stopped-runtime expiry, and readable captures remain live gates;
-VUH-1507 stays open. See the [source review](../build/rig/vuh1507-hud-names-review-20261006-01/result.md)
+The matched private v3 products were tested in `020047`, which remains FAIL.
+Root inspected seven actual captures: both games showed the correct admitted
+names, Host/You labels and owner HP before and after movement; departure showed
+Waiting then Open, and stopped-runtime expiry showed Name unavailable while
+retaining HP. The reset capture is absent. The owned host did not provide a
+qualified natural exit0 within the unchanged 150-second reset deadline; its
+actual final poll value was not retained. A bounded source audit establishes
+that 7,500 runtime iterations at tick16 do not promise a 120-second wall-clock
+exit, but leaves the failure mechanism unproved. Reset, the eight-image gate,
+MP and full HUD acceptance remain open. All saves were unchanged and owned
+resources closed. See the [live FAIL](../build/rig/vuh1507-hud-names-launch-prep-20261006-01/live-root01/result.md),
+[shutdown audit](../build/rig/vuh1507-hud-names-shutdown-audit-20261006-01/result.md),
+[source review](../build/rig/vuh1507-hud-names-review-20261006-01/result.md)
 and [matched build](../build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/result.md).
 
 The strict impaired Mac-relay two-pack wave gate remains unpassed. Corrected
@@ -215,6 +225,23 @@ BB04 no-kill control using the unchanged accepted wave protection baseline,
 then a five-then-three full gate only if it passes. Fresh native bit8 remains
 required; region exits must be retained without correction. All saves and
 owned-resource closure passed. See the [passive FAIL](../build/rig/populated-room-stability-launch-prep-20261006-01/live-root01/result.md).
+
+That protected control `021001` also remains FAIL. All six samples retained the
+exact five enemies and HP. At 15 seconds Sora was alive at HP24 and team0, but
+fresh header25 bit8 was false after outward displacement. The sequential
+entities and raw position replies differ; they are not one atomic pose. The
+bounded audit cannot attribute the movement to input, contact or a hit. Its one
+control is consumed, with no full run or retry. Source review shows no bit8
+precondition in the selected diagnostic damage/kill entry, while ordinary
+region admission gates emission separately from cooldown and stage conditions.
+The advisor clarified that no loosening binds the acceptance assertions and
+approved a new fixture locating fresh native bit8 at emission points. Every
+all-peer HP/ID, death, second-pack, no-extra and quiet assertion remains. The
+new method needs one fresh control; old failures are not reclassified. A quick
+native entrance lookup found no deeper supported placement preserving this
+pack. See the [protected FAIL](../build/rig/vuh1502-bb04-control-prep-20261006-01/live-root01/result.md),
+[audit](../build/rig/vuh1502-bb04-displacement-review-20261006-01/result.md)
+and [entrance consumer lookup](../build/rig/vuh1502-bb04-entry-consumer-lookup-20261006-01/result.md).
 
 Populated joins have a separately declared variant: capture the exact living
 host pack after fresh hashes and independent native qualification, then require

@@ -403,6 +403,23 @@ BB04 control with the existing unchanged wave protection; a full five-then-three
 gate follows only its PASS. Every fresh region, identity, HP/death and no-extras
 guard stays. See the [closed passive result](../build/rig/populated-room-stability-launch-prep-20261006-01/live-root01/result.md).
 
+Protected BB04 control `021001` remains FAIL at the terminal15-second fresh
+bit8 check. The same five enemies kept exact native/publication bindings and
+HP20/98; Sora remained alive at HP24 and team0. Position moved outside the
+region, but the retained sequential reads and logs do not establish its cause.
+Its one control is consumed; no full gate or retry followed. All saves and
+owned PC/Mac closure passed. The bounded source review finds no region-bit
+precondition in the selected diagnostic hit entry; ordinary emission instead
+uses region admission with separate cooldown, weight/cache and stage gates.
+The advisor clarified the original goal and approved relocating fresh bit8 to
+emission points in a new declared fixture. Every HP/ID convergence, original
+binding, exactly-once HP0 death, second-pack, no-extra and quiet acceptance
+assertion stays. The changed method requires a fresh control; `021001` is not
+requalified. No deeper entrance preserving this pack was established by the
+bounded native lookup. See the [control FAIL](../build/rig/vuh1502-bb04-control-prep-20261006-01/live-root01/result.md),
+[native-versus-fixture audit](../build/rig/vuh1502-bb04-displacement-review-20261006-01/result.md)
+and [entrance lookup](../build/rig/vuh1502-bb04-entry-consumer-lookup-20261006-01/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
