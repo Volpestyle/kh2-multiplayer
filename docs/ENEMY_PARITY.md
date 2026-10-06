@@ -298,10 +298,31 @@ Its motion timeline does not show idle with continuing displacement: all61
 qualified idle0/0 samples had exactly the same position. Earlier motion41/164
 has the retained local REFLECT label; the native selection cause is unknown.
 Movement resumed before the later kill gate, outside the sampled attack window.
-The next diagnostic keeps natural team1 with a one-time HP-only survival budget
+The follow-up diagnostic kept natural team1 with a one-time HP-only survival budget
 before the original3.5s endpoint interval. Both clients also died in142114, so
 each owned game's local Sora needs that budget to preserve the all-peer census
 guards. This control does not establish protection causality or wave acceptance.
+
+Run195832 exposed356.879 units of displacement during qualified3.5s endpoints
+without a team writer. One native48-HP application occurred inside the frame
+bracket, but endpoints could not locate movement onset. Run201526 added a
+bounded read-only50ms timeline using the identical reviewed HP leaf. All71
+samples qualified: Sora remained exactly stationary at600HP through frame6617;
+the recorded native hit applied at6618, and frame6619 first showed552HP,
+displacement and motion10/DAMAGE_S_FRONT (variant42). Displacement decayed to
+a stable position before LAND2 and idle; sampled inputs and B98 velocity stayed
+neutral/zero. The later already-applied callback caused no additional HP loss.
+This establishes hit-associated onset to the sampled resolution, not the
+responsible position writer or an explanation of every earlier protected run.
+The external S0/solver debugger probe is parked. See the
+[timeline and frame join](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/hp-only-team1-timeline-root01/result.md).
+
+Both full profiles remain FAIL: complete/safe native censuses changed six to
+four on all peers, losing original IDs16/17; no native-six guard was weakened.
+Protected saves and production sources stayed unchanged. No validated native
+invulnerability/no-reaction setter was found; the next fixture accepts native
+reaction and restores the required region through bounded native movement,
+then retains the original fresh pack/HP/census checks before each kill.
 
 ## Selected native lifetime observer, 2026-10-05
 

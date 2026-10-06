@@ -704,10 +704,12 @@ To block limits while puppets are active, hook `0x3D88E0` and return `5` for any
 | Bit | Effect |
 |---|---|
 | 6 (`0x40`) | Skips the `0x3B81D0` surface-derived addition in `0x3B89A0`. In `0x3B9090`, selects unfiltered integrated + local supplied + linked movement for `+0x6E0`, then still reaches `0x16FEC0`. Does not itself exclude the earlier `0x3BA970` / `0x40AD70` actor-pair path. Also gates later contact/support handling; not a general collision or ground-snap disable. The handler resolved from `actor+0x0C` has a `+0x0C & 2` test in these surface/selection guards; this is not a proven universal equivalent. |
-| 14 (`0x4000`) | TakeDamage (`0x3D5E50`) passes reactFlag 0, so no hit reaction |
+| 14 (`0x4000`) | TakeDamage (`0x3D5E50`) passes reactFlag 0 to ApplyStatDelta. This is a downstream argument gate, not a validated way to prevent Sora's knockback or contact displacement. |
 | `0x1000020` | Participates in `0x3BA9A0`'s unfiltered-movement selection and later contact/support guards in `0x3B9090`; does not bypass the earlier actor-pair loop or the `0x16FEC0` call. |
 
 The post-solver contact/notification branch requires handler `+0x0C` bits 0/1 clear, `actor+0x18C & 0x1000020 == 0`, and bit 6 clear; failure can enter alternative notification handling. Later support-handle handling requires `0x3BA9A0` false, handler bit 1 clear, actor bit 6 clear and nonnull `actor+0x748`. These are selective guards after the solved-position copy, not proof that all terrain correction or ground snap is suppressed. See the [byte-check note and retained provenance](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-calculator-upstream-audit/pointer-map-note.md).
+
+The 2026-10-05 [bounded no-reaction lookup](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-no-reaction-lookup/result.md) found no validated setter or lifetime contract for bit 14. ResolveHit and Sora's OnHit can run before this helper, and retained Sora damage already reaches ApplyStatDelta with `react=0`. The serialized `ActorState.invuln` field is not populated from native state or applied by the bridge; its value is not evidence of native invulnerability.
 
 ### Native enemy provenance and appearance cache (`[GHIDRA]`, 2026-10-02)
 
