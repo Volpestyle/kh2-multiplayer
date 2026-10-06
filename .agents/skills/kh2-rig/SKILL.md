@@ -17,12 +17,16 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 | Overlay / HUD | `kh2ctl overlay --pid N on` | It's drawn into the backbuffer, so it shows in captures. |
 | Scripted runs | `python -B tools/scenario/run.py <scenario.json>` | Steps, assertions, report and captures go to `build/scenarios/<stamp>_<name>_<n>/`. |
 | Puppet without network | `avatarctl` (`synth`, `record`/`replay`, `peek`) | Usage is in `tools/avatarctl/main.cpp`. |
-| Mac relay (private, Tailscale) | `build/rig/vuh1493-two-game-mac-relay-20261005-01/relay.ps1 -Action start / stop / fetch` | Reuse it; don't hand-roll SSH. Stop, then fetch, by the exact run ID. |
+| Mac relay (private, Tailscale) | `tools/rig/relay.ps1 -Action start -RunId UNIQUE` (also `status`, `stop`, `fetch`), with required producer/script/receipt paths from `tools/rig/README.md` | Existing installed producer only. Stop, then fetch, by exact run ID. The helper exits its PowerShell host: use separate invocations for subsequent checks. |
+| Physical keyboard stand-in | `tools/rig/rehearsal-key.ps1` | Explicit rehearsal/game-view/receipt paths; exact owned process, scan/focus/modifier checks and finally-UP. Rehearsal10 allowlist,80–1500ms; no Alt. |
+| Relative mouse stand-in | `tools/rig/rehearsal-mouse.ps1` | Pure `-ValidateOnly`, authorized root `-Execute`; exact owned HWND, one nonzero event with total counts<=32, no focus takeover. Shared-read startup-log fix retained. |
+| Local safety inventory | `tools/rig/check-safety.ps1` | Explicit complete pre-run save/foreign/game-root/assets baselines and fresh output path. Process inventory alone does not assert closure. |
+| Final private relay receipt | `python -B tools/rig/verify-relay-closed.py ...` | After exact owned stop/fetch: explicit run/ready/fetched/output/SSH paths; hashes, exits, PID/supervisor absence and UDP27795. Never stops anything. |
 | Friend package | `tools/packaging/build_friend.py`, `tools/launcher/friend.py` | The portable kh2ctl only allows `launch / instances / kill / overlay`. |
 
 ## Gotchas (each cost real attempts)
 
-- **Window/desktop recorders:** ffmpeg `gdigrab` records **black** frames from the D3D12 game. Use `kh2ctl clip`. Even on a package-launched game, the rig `kh2ctl clip --pid N` is a read-only capture you can declare as a rehearsal aid.
+- **Window/desktop recorders:** ffmpeg `gdigrab` records **black** frames from the D3D12 game. Use `kh2ctl clip`. On a package-launched game, the rig recorder can be declared as a rehearsal aid: bind `--pid N` to the launcher's retained owned process and creation time. It writes the mod's capture channel, not gameplay or save memory; it adds no proof of desktop-only gameplay control. Never use auto-selection or capture an unowned game.
 - **Synthetic keys:** KH2 reads scan codes. A VK-only `SendInput` (scan 0) does nothing. Set `wScan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)`, add `KEYEVENTF_EXTENDEDKEY` for arrows, and bring the game to the foreground. `kh2ctl` does this already (`main.cpp` `SendVk`).
 - **Combat by stand-in:** one key per process invocation, with deliberation between keys, is too slow, and Sora dies. Live combat should come from scenarios, not hand-driven rehearsal.
 - **Lone Alt** can put a window into menu mode. Check pixels before sending more keys, and don't press Escape blindly (it's also pause).
@@ -30,13 +34,16 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 - **`boot-load-save` is broken.** Load saves through the scenario `boot` step.
 - **Relay lifetime** is about 12 minutes (720 s). Don't explore routes on the relay clock; work routes out offline first.
 - **MP4s can't be decoded until finalized** (the `moov` atom). Stop a short sample before checking it.
+- **Clip timing:** `kh2ctl clip` and the scenario `clip` step block while recording and encoding. To film an action, start the canonical clip command as a runner-owned helper before that action, and collect it before any screenshot on the same instance. Each clip is limited to30 seconds. Check finalized early frames for real game motion; retain the reported before/during capture frame rates.
 
 ## Safety (unchanged rules, so you don't re-derive them)
 
 - **James's saves:** never write to `OneDrive/Documents/My Games/KINGDOM HEARTS HD 1.5+2.5 ReMIX/`. Saveguard redirects writes, but treat it as a backstop.
 - **Closure checks:** after every live run, check that the four protected saves, the foreign files, the game-root entries and the asset targets are unchanged. Owned PIDs must be gone, the relay stopped and the port free.
-- **Private game view:** `kh2-readonly-view-DO-NOT-RECURSE` contains junctions to the real Image/STEAM folders. A recursive delete wipes the real game.
+- **Private game view:** `kh2-readonly-view-DO-NOT-RECURSE` contains junctions to the real Image/STEAM folders. A recursive delete can delete their real contents. Remove each junction only as a link, never recursively, and verify both targets afterwards.
 - **One rig lock:** only live runs are serialized.
+
+Canonical helper argument examples and limits: `tools/rig/README.md`. Pin the promoted helper bytes in new packets; old frozen packets retain their original lane paths and hashes.
 
 ## Publishing evidence to Linear
 
