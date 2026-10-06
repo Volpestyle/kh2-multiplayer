@@ -14,7 +14,7 @@ with their own camera and full controls. Then widen who you can play as: three
 recolored Soras first, then Roxas and Riku, party and world characters, and
 possibly enemies.
 
-## Where the project stands (updated 2026-10-05)
+## Where the project stands (updated 2026-10-06)
 
 | Area | State |
 |---|---|
@@ -28,6 +28,27 @@ possibly enemies.
 | Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. After checked native snapshots exposed five unmatched client enemies, scoped host activation passed the original strict 20-load route with empty enemy populations and a source-expiry control. Its unchanged native-wave regression then failed with different enemy identities and an alive host refill. Nonempty spawn/lifecycle authority remains open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
 | Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected story delivery and one empty-room native client hold also passed (`094229`); broader event side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
+
+**First friend preview (VUH-1494).** The self-contained Windows release03 ZIP
+and guide are ready for rehearsal, with an exact game-EXE allowlist, package-local
+owned launch/cleanup and saveguard attestation. A clean package started the
+private game view without `steam_appid.txt`; the launcher-only session is still
+unproven. One startup stopped after Warp initialization and remains an unexplained
+FAIL. The later single diagnostic startup completed, so no hang dump was captured.
+See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release03-result.md)
+and [startup diagnostic](../build/rig/vuh1494-friend-playtest-20261006-01/startup-diagnostic05/result.md).
+
+Courtyard qualification passed all 14 steps. The full run passed late populated
+join and progress delivery, then failed its reload comparison: a previously
+damaged enemy was 18/20 before reload and 20/20 on both peers in the new native
+lifetime. Reconnect was not reached. The original FAIL is retained while the
+per-lifetime HP fixture proposal is reviewed; see the [triage](../build/rig/vuh1495-courtyard-full02-triage-20261006-01/result.md).
+HUD names and reset passed all 32 steps and eight inspected native images,
+including natural runtime exit and cleared text. The earlier 020047 FAIL remains
+recorded; see the [accepted names/reset run](../build/rig/vuh1507-hud-names-static-crt-prep-20261006-02/live-root01/root-result.md).
+These runs used two games on one Windows PC through the private Mac relay, with
+unchanged saves and clean owned-process closure. Friend relay access still needs
+James's decision before any external playtest.
 
 **Reconnect recovery (VUH-1508), in plain terms.** If a client rejoins while the
 host stands away from the enemy spawn area, the client's room comes back without

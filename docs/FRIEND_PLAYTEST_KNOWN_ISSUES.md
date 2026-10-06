@@ -1,7 +1,7 @@
 # First friend playtest: known issues
 
-The package and launcher-only rehearsal are still being prepared. This list will
-be updated with the rehearsal result before the package is handed to a friend.
+The package candidate is built; the launcher-only session rehearsal is still
+open. This list will be updated before the package is handed to a friend.
 
 - **Supported game build only.** This first package targets the exact tested
   Steam KH2 Final Mix executable. Epic and other Steam patches are unsupported;
@@ -13,6 +13,11 @@ be updated with the rehearsal result before the package is handed to a friend.
   launcher or DLL injection. Report the exact warning to James. Do not disable
   antivirus or firewall protection. Any approved exclusion would be limited to
   the unpacked package folder.
+- **Startup can fail during mod initialization.** One observed startup stopped
+  after Warp initialization; its cause remains unknown. The launcher refuses
+  connection and attempts to close only its owned game. Use **Exit & close game**
+  to resolve pending ownership. If the game is still open, exit normally and do
+  not save. Send the package logs to James before trying again.
 - **Do not save during co-op.** The mod's saveguard redirects game save writes
   into the package's sandbox and blocks save-file deletion, moves and copies.
   This session's progress is temporary. Close the co-op game before playing
