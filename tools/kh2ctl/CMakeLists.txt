@@ -10,6 +10,9 @@ target_link_libraries(kh2ctl PRIVATE
     dbghelp
 )
 
-target_compile_definitions(kh2ctl PRIVATE
-    KH2COOP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
+option(KH2COOP_PORTABLE_PACKAGE "Require package-root cwd and keep canonical rig state there" OFF)
+if(KH2COOP_PORTABLE_PACKAGE)
+    target_compile_definitions(kh2ctl PRIVATE KH2COOP_PORTABLE_PACKAGE=1)
+else()
+    target_compile_definitions(kh2ctl PRIVATE KH2COOP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+endif()

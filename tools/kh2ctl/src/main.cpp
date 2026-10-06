@@ -160,8 +160,37 @@ std::optional<std::string> ConsumeOption(std::vector<std::string>& args,
 }
 
 std::filesystem::path RepoRoot() {
+#ifdef KH2COOP_PORTABLE_PACKAGE
+    // The launcher supplies package-root cwd; make the inherited log path
+    // absolute before KH2 starts with its own game-directory cwd.
+    return std::filesystem::current_path();
+#else
     return std::filesystem::path(KH2COOP_SOURCE_DIR);
+#endif
 }
+
+#ifdef KH2COOP_PORTABLE_PACKAGE
+void RequirePortablePackageRoot() {
+    const auto root = std::filesystem::canonical(RepoRoot());
+    std::array<wchar_t, 32768> module {};
+    const DWORD count = GetModuleFileNameW(nullptr, module.data(),
+                                         static_cast<DWORD>(module.size()));
+    if (count == 0 || count >= module.size()) {
+        throw std::runtime_error("Cannot identify the packaged game helper.");
+    }
+    const auto executable = std::filesystem::canonical(module.data());
+    std::ifstream marker(root / "KH2COOP-PACKAGE");
+    std::string tag;
+    std::getline(marker, tag);
+    if (tag != "kh2coop-friend-package-v1" ||
+        !std::filesystem::is_regular_file(root / "package.json") ||
+        executable.parent_path().filename() != L"bin" ||
+        !std::filesystem::equivalent(executable.parent_path().parent_path(), root)) {
+        throw std::runtime_error("Open Start KH2 Co-op.cmd from the unpacked package. "
+                                 "The portable helper requires its own package folder.");
+    }
+}
+#endif
 
 std::uint64_t NowMs() {
     using namespace std::chrono;
@@ -1257,6 +1286,16 @@ bool WriteMailboxPulse(std::uint32_t mailboxSlot, const InputFrame& frame,
 // playing), kill rig-owned instances, rebuild the DLL, launch and inject.
 CommandResult RigRestart(bool noBuild, bool killOnly, const LaunchOptions& options,
                          const char* command) {
+#ifdef KH2COOP_PORTABLE_PACKAGE
+    // A friend package has frozen products and no source tree. Refuse before
+    // discovery or termination; even direct callers cannot rebuild/restart it.
+    (void)noBuild;
+    (void)killOnly;
+    (void)options;
+    (void)command;
+    return MakeError("Restart/build is unavailable in the friend package. "
+                     "Use Exit & close game, then Start game.");
+#else
     const auto owned = PruneOwned();
     std::vector<DWORD> unowned;
     for (const auto& proc : ListKh2Processes()) {
@@ -1296,6 +1335,7 @@ CommandResult RigRestart(bool noBuild, bool killOnly, const LaunchOptions& optio
     }
 
     return LaunchInstance(options, command);
+#endif
 }
 
 bool DriveLoadSaveMenu(GameBridgePC& game, int slot, const KeySpec& confirmSpec,
@@ -2885,6 +2925,10 @@ CommandResult CmdWorldResync(std::vector<std::string> args) {
 }
 
 void PrintUsage() {
+#ifdef KH2COOP_PORTABLE_PACKAGE
+    std::cout << "KH2 Co-op package helper. Open Start KH2 Co-op.cmd.\n"
+                 "Internal commands: launch, instances, kill, help.\n";
+#else
     std::cout
         << "kh2ctl commands:\n"
         << "  (game commands take --pid N to pick an instance; required when\n"
@@ -2942,18 +2986,31 @@ void PrintUsage() {
         << "  press --slot friend1|friend2 --button NAME [--duration-ms N]\n"
         << "\n"
         << "All successful commands print a single JSON object to stdout.\n";
+#endif
 }
 
 } // namespace
 
 int main(int argc, char* argv[]) {
     try {
+#ifdef KH2COOP_PORTABLE_PACKAGE
+        RequirePortablePackageRoot();  // before help, discovery, or any state write
+#endif
         if (argc < 2) {
             PrintUsage();
             return 0;
         }
 
         const std::string command = ToLower(argv[1]);
+#ifdef KH2COOP_PORTABLE_PACKAGE
+        if (command != "launch" && command != "instances" && command != "kill" &&
+            command != "help" && command != "--help" && command != "-h") {
+            const auto error = MakeError("Command unavailable in the friend package. "
+                                         "Open Start KH2 Co-op.cmd.");
+            std::cout << error.json << std::endl;
+            return error.exitCode;
+        }
+#endif
         std::vector<std::string> args(argv + 2, argv + argc);
 
         // Rig commands manage processes themselves (inject/kill take their

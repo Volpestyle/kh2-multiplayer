@@ -1,5 +1,12 @@
 # KH2 development launcher
 
+The self-contained friend preview uses [friend.py](friend.py) and the separate
+[one-page guide](../../docs/FRIEND_PLAYTEST.md). Its bundled Python needs no install;
+it verifies the supported game EXE and starts/injects/closes only its own game
+through the portable canonical CLI. Build instructions and provenance rules are
+in [tools/packaging](../packaging/README.md). The developer launcher below retains
+its existing already-injected-game workflow.
+
 Dependency-free Python 3.10+ / Tkinter launcher for the existing Windows development binaries. Host or join from the UI without editing a runtime config. Use the existing desktop session, after the live-lane owner releases the rig.
 
 ```powershell
