@@ -287,6 +287,22 @@ HP result before the original fresh region/native kill checks. These observation
 do not identify the movement writer. See the
 [second attempt](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-neutral-wait-root02/result.md).
 
+The full-wave native-attack attempt193532 also failed before the first kill.
+One R1/Cross sequence completed; the enclosing three-hook trace qualified zero
+callbacks, and two fresh all-peer samples plus two independent native censuses
+retained original IDs3/4/5/6 at HP153. The later current region bit was false,
+so no kill or second wave occurred. No attack retry or timing trim followed.
+See [the result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-wave-approach-kill-root01/result.md).
+
+Its motion timeline does not show idle with continuing displacement: all61
+qualified idle0/0 samples had exactly the same position. Earlier motion41/164
+has the retained local REFLECT label; the native selection cause is unknown.
+Movement resumed before the later kill gate, outside the sampled attack window.
+The next diagnostic keeps natural team1 with a one-time HP-only survival budget
+before the original3.5s endpoint interval. Both clients also died in142114, so
+each owned game's local Sora needs that budget to preserve the all-peer census
+guards. This control does not establish protection causality or wave acceptance.
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
