@@ -114,6 +114,15 @@ review's replay/record-alias failures are retained. No product change or live
 run occurred. Populated join/reload behavior remains open. See the [fixture](../build/rig/vuh1495-populated-join-prep-20261006-01/result.md)
 and [accepted recheck](../build/rig/vuh1495-populated-join-review-20261006-01/recheck-01/result.md).
 
+The fixture's single live attempt `233433` failed at host admission before the
+late client started. Two fresh host hashes contained four object-309/HP160 rows;
+the unchanged required two309/two311 shape refused them. No independent census,
+late join or reload ran. The host-first population recipe is unqualified, with
+no cause assigned and no retry or relaxed predicate. All 127 pins, four saves
+and 16 foreign files stayed unchanged; three owned PC processes and the owned
+Mac relay/supervisor are absent. See the [closed attempt](../build/rig/vuh1495-populated-join-prep-20261006-01/live-root01/result.md)
+and [independent result review](../build/rig/vuh1495-populated-join-review-20261006-01/live-review-01/result.md).
+
 The overlay now shows the actual network player slots and owner HP. The bounded
 HUD run `073856` passed through the impaired Mac relay: both games showed their
 correct Host/You labels and two 24/24 bars, independently distinguished from the
