@@ -39,12 +39,19 @@ walking into Entrance Hall with the Guest following, and an empty-room GUI
 reconnect that preserved Hide until explicitly shown. Combat, chest and natural
 cutscene checks are still incomplete; this is not friend readiness or populated
 reconnect acceptance. The portable CLI/launcher HUD change leaves the adopted
-DLL unchanged. One startup stopped after Warp initialization and remains an unexplained
+DLL unchanged. Rehearsal09 repeated fresh startup, automatic HUD and native room
+follow, but again did not reach the courtyard session. Its finalized window-only
+recording sample was black and dropped; the project update uses reviewed stills,
+clearly labeled as screenshots. The planned closure reserve was missed and the
+relay self-stopped at its lifetime limit before both launcher Exits. Closed safety
+checks remained clean. One startup stopped after Warp initialization and remains an unexplained
 FAIL. The later single diagnostic startup completed, so no hang dump was captured.
-The closed startup ledger records launcher 7/8 with a 15-second initialization
-wait and rig 14/14 with a 60-second wait; those limits stay separate.
+The closed startup ledger records launcher 9/10 with a 15-second initialization
+wait and rig 16/16 with a 60-second wait; those limits stay separate.
 See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release06-result.md),
 [desktop HUD/room rehearsal](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal08/result.md)
+and [closed rehearsal09](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal09/result.md),
+plus the [26-boot ledger](../build/rig/vuh1510-static-crt-startup-diagnosis-20261006-01/static-startup-ledger-26.md)
 and [startup diagnostic](../build/rig/vuh1494-friend-playtest-20261006-01/startup-diagnostic05/result.md).
 
 Courtyard qualification passed all 14 steps. The full run passed late populated
@@ -65,6 +72,23 @@ the empty-pack symptom is now also recorded with hit logging off. See the
 [reload triage](../build/rig/vuh1495-courtyard-full02-triage-20261006-01/result.md)
 and [empty-pack triage](../build/rig/vuh1495-courtyard-full04-triage-20261006-01/result.md),
 plus the [trace-off reconnect failure](../build/rig/vuh1495-courtyard-static-crt-root-live-20261006-03/live-full-root03/root-result.md).
+The unchanged-products activation diagnostic also failed populated join. Its
+Client controller stayed empty while the real leased Host point was outside all
+seven captured trigger boxes. This supports the current-point explanation but
+does not establish the unknown historical emission point. Ordinary manifests
+carry first-observed actor positions and observation-order indexes, not native
+record identity, so they cannot safely authorize geometry activation. The
+unbuilt fix will use an explicit protocol 11 observation request and the existing
+record-content representation in a separate read-only lifecycle. Reusing the
+old resync request would enter Bootstrap, increment delivery and quarantine;
+an externally selected profile would leave the same bytes with two meanings.
+The new path must preserve normal recovery, never reset or mutate world state
+while collecting content, bind fresh complete living records to current scope
+and manifest/HP values, and remain default off until source review and fresh
+controls. All protocol 10 evidence stays scoped to its original products. An
+unchanged-products Host-walk workaround is being checked before any guide advice.
+See the [activation diagnosis](../build/rig/vuh1495-courtyard-activation-diag01-triage-20261006-01/result.md)
+and [source feasibility](../build/rig/vuh1495-geometry-bootstrap-candidate-20261006-01/checkpoint-feasibility.md).
 HUD names and reset passed all 32 steps and eight inspected native images,
 including natural runtime exit and cleared text. The earlier 020047 FAIL remains
 recorded; see the [accepted names/reset run](../build/rig/vuh1507-hud-names-static-crt-prep-20261006-02/live-root01/root-result.md).
