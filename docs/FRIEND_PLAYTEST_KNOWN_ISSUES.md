@@ -34,10 +34,13 @@ open. This list will be updated before the package is handed to a friend.
   all-alive courtyard join where the Host sees five Shadows and the friend sees
   none, the Host can take one short walk away from the circular patterned paving
   onto the nearby broad stone steps, then stop and compare both games. This
-  restored the exact pack in two rig checks. Do not keep walking or start combat
+  restored the exact pack in three rig checks. Do not keep walking or start combat
   if they still differ; stop and report both screens and logs. This instruction
-  has not passed on reconnect or after kills. The protocol11 geometry fix is
-  source-reviewed, unbuilt and absent from this package.
+  has not passed on reconnect or after kills. The latest reconnect check refused
+  before walking because the empty Client still had activation or cache state;
+  that state is under investigation. The protocol11 geometry candidate shares
+  the same admission guard, is undergoing private build checks and is absent
+  from this package.
 - **Names use plain ASCII.** Use different names made from letters, digits,
   spaces, `_`, `.` or `-`; the HUD shows at most 23 characters. MP,
   downed/revive and the full multiplayer HUD remain unfinished.

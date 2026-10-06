@@ -21,6 +21,8 @@ The package adds no game-folder files, service, account, registry setting or fir
 
 ## Preview limits
 
-Follow James's selected route. Reconnect support is limited to all-alive packs; this package's reconnect rehearsal is still pending. Do not reconnect after enemies die or mid-fight. Populated-room cutscene hold remains unqualified. Stop and report the room, visible symptom and package logs if anything goes wrong. No public-port forwarding is needed or supported.
+Follow James's selected route. If James sees five Shadows in the courtyard and you see none after joining, wait: James takes one short walk away from the circular patterned paving onto the nearby broad stone steps, then stops. Compare both games before fighting. This restored the same five enemies in three rig checks. If enemies are still missing, stop and report both screens and logs; do not keep walking or continue combat.
+
+Populated reconnect still fails, and that walk has not been qualified after reconnect. Do not reconnect mid-fight or after enemies die. Stop the session and report a dropped connection, missing enemies or enemies returning to life. Populated-room cutscene hold remains unqualified. No public-port forwarding is needed or supported.
 
 Startup without adding `steam_appid.txt` has been checked; Steam app IDs are set only for the child game process. Startup can still fail during mod initialization; use the guidance above. HUD names/reset passed with two games on one Windows PC through the private Mac relay. A complete launcher-only session and reconnect rehearsal remain pending. **This is a rehearsal candidate, not a friend-ready release.**

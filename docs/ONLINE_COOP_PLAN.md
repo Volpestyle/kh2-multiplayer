@@ -46,14 +46,15 @@ clearly labeled as screenshots. The planned closure reserve was missed and the
 relay self-stopped at its lifetime limit before both launcher Exits. Closed safety
 checks remained clean. One startup stopped after Warp initialization and remains an unexplained
 FAIL. The later single diagnostic startup completed, so no hang dump was captured.
-The 29-start ledger records launcher 10/11 with a 15-second initialization
-wait and rig 18/18 with a 60-second wait; those limits stay separate. The later
-offline route check and two reconnect-probe starts also completed; their
-individual receipts remain in those closed runs pending the next ledger update.
+The 35-start ledger records launcher 12/13 with a 15-second initialization
+wait and rig 22/22 with a 60-second wait; those limits stay separate. Three
+offline route checks reached Entrance Hall but did not qualify combat, chest
+or a cutscene. Save04 naturally selects Hall battle1; older chest and cutscene
+packets used forced setup and do not provide a launcher route.
 See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release06-result.md),
 [desktop HUD/room rehearsal](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal08/result.md)
 and [closed rehearsal09](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal09/result.md),
-plus the [29-boot ledger](../build/rig/vuh1510-static-crt-startup-diagnosis-20261006-01/static-startup-ledger-29.md)
+plus the [35-boot ledger](../build/rig/vuh1510-static-crt-startup-diagnosis-20261006-01/static-startup-ledger-35.md)
 and [startup diagnostic](../build/rig/vuh1494-friend-playtest-20261006-01/startup-diagnostic05/result.md).
 
 Courtyard qualification passed all 14 steps. The full run passed late populated
@@ -88,18 +89,26 @@ The new path must preserve normal recovery, never reset or mutate world state
 while collecting content, bind fresh complete living records to current scope
 and manifest/HP values, and remain default off until source review and fresh
 controls. All protocol 10 evidence stays scoped to its original products.
-Two unchanged-product checks retained the original empty-join FAIL, then restored
+Three unchanged-product checks retained the original empty-join FAIL, then restored
 the exact five living Shadows after one bounded Host walk onto the nearby steps.
 The second run passed strict reload but stopped before the reconnect checkpoint
-because no Mac ACK was observed after timeout retirement. Reconnect restoration
-is still untested; the narrow ACK triage comes first. The known-issues instruction
+because no Mac ACK was observed after timeout retirement. Read-only triage found
+the new ACK immediately after the stale fetched prefix; the original FAIL stays.
+The third check fetched that ACK within the original 45-second deadline and passed
+transport, native re-entry and progress. Its reconnect checkpoint again found an
+empty Client, then the walk diagnostic refused before movement because current
+activation or cache state was present. Reconnect restoration is still untested;
+that exact controller state is under investigation. The known-issues instruction
 is limited to the tested all-alive courtyard join. The source-reviewed protocol11
-candidate remains unbuilt and off the playtest critical path; its fixed interval
-must gain slower-frame-rate margin and partial-expiry logging before friend enable.
+candidate shares this admission guard and is undergoing private build/headless
+checks; it has no proven reconnect coverage and is absent from the package. Its
+adopted R1 uses the original five-second request deadline without renewal and logs
+sampled-prefix expiry outcomes. Fresh live controls remain required before enable.
 See the [activation diagnosis](../build/rig/vuh1495-courtyard-activation-diag01-triage-20261006-01/result.md)
 and [source feasibility](../build/rig/vuh1495-geometry-bootstrap-candidate-20261006-01/checkpoint-feasibility.md),
 [join restoration](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-01/root-result.md),
-[reconnect probe](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-02/root-result.md)
+[reconnect probe](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-02/root-result.md),
+[ACK-corrected reconnect refusal](../build/rig/vuh1495-host-walk-bootstrap-probe-20261006-03/root-result.md)
 and [protocol11 source review](../build/rig/vuh1495-geometry-bootstrap-candidate-20261006-01/protocol11/advisor-review.md).
 HUD names and reset passed all 32 steps and eight inspected native images,
 including natural runtime exit and cleared text. The earlier 020047 FAIL remains
