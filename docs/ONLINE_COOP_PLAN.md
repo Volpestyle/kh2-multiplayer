@@ -730,6 +730,10 @@ Format: decision — why (rejected alternative).
   next to their game and friends join by address; no central service.
   Friends reach the host over Tailscale (first test) or, if the host chooses,
   a forwarded UDP port (VUH-1493).
+  **Revised by James, 2026-10-06:** no Tailscale or port forwarding for
+  friends. Steam P2P networking (Steam Datagram Relay through the game's own
+  Steam session) is the preferred transport, pending the VUH-1493 feasibility
+  spike; ENet stays as the fallback and the test-rig transport.
   The relay now removes all old co-op connections on clean host departure or
   heartbeat expiry, clears cached world/progress state and keeps listening for
   fresh joins. Headless loopback teardown/rejoin controls cover this boundary;
@@ -1173,6 +1177,9 @@ loaded, get several instances into a known room, act, look, and judge.
 - The package is an OpenKH-style mod (puppet objentries, recolors) plus our
   loader and DLL. Ship patches and recipes rather than extracted game files
   wherever possible.
+- Friends download the package from a GitHub release on the public repo
+  (James, 2026-10-06). Publishing a release stays James's call. The first
+  friend playtest is deferred until the roster and a fuller playthrough exist.
 
 ## Risk register
 
@@ -1273,7 +1280,7 @@ live behavior; unit tests cover stabilized boundaries such as the codec.
 |---|---|---|
 | ~~Actor model: local-primary (D3) or canonical slots?~~ | Decided 2026-10-02 | Local-primary, with flexible parties (D3) |
 | Enemy→player hits: victim-side or host-side detection? | VUH-1500 | Victim-side if puppet motions spawn hitboxes |
-| Connectivity: how friends reach a Minecraft-style host | VUH-1493, James for accounts | Tailscale first; port forwarding documented as the host's choice; VPS for a dedicated server |
+| Connectivity: how friends reach a Minecraft-style host | VUH-1493, James for accounts | Steam P2P (James, 2026-10-06; Tailscale and port forwarding declined), pending the feasibility spike; ENet fallback |
 | Save policy after the MVP: a dedicated co-op save, or mirroring host story into each player's own save? | VUH-1495 | Dedicated co-op save; character import later |
 | Drive, summons, limits: disable or support? | VUH-1509 | Disabled for the MVP; drive forms first after |
 | Pause: does the host's pause stop the world, and does a client's stay local? | VUH-1509 | Host pause stops the world; a client's pause is local (their avatar stands still) |
