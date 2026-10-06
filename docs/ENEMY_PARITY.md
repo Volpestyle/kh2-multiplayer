@@ -257,6 +257,36 @@ the exact positive127/damage5 comparison was not exposed, so that control remain
 unqualified for the specific client concern. See the [passing client result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-client-network-root04/result.md)
 and [host comparison](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-host-buffer-root01/result.md).
 
+Native185918 retained the original all-peer HP153 wave checkpoint, then used
+one host R1/Cross and a full five-second observer. The unchanged strict trace
+seal qualifies zero covered callbacks across the three damage hooks: eight
+advancing owner summaries, activity0 unchanged, unmatched4 unchanged from setup,
+all other loss counters0, and no event or unknown rows. All four original IDs
+and native identities remain at153 in two fresh samples and two independent
+censuses. Its canonical nonempty-hit FAIL stays unchanged. Of81 post-Cross
+samples,79 pass the frame bracket; only the last two show bit8 true. The sampled
+return is not proof that the attack caused it. See the
+[zero-window audit](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/native-wave-region-homing-zero-audit/result.md).
+
+The approved next wave fixture adds a fixed maximum five-second neutral region
+wait at the first kill and second-pack damage/kill gates. It records every
+sample and adds no input or writer. A successful wait still requires the full
+original pack reread and a fresh immediate bit8/neutral/safety check; a flag
+lost during that reread fails without another wait or correction fallback.
+Original IDs, HP, deaths, correction bounds and the final six-second quiet
+census remain required. Two failures of the same kind end this approach without
+changing the wait length; native attack with full HP accounting is next.
+
+Both unchanged attempts,191401 and191801, failed at the first kill's five-second
+region deadline. Their46 samples each never showed bit8 true;45 and46 samples,
+respectively, passed the frame bracket. Measured radius grew221.58-to-791.84 and
+288.34-to-942.98, with no sampled decrease. Neither run killed an enemy or reached
+the second wave. Sources and protected saves stayed unchanged. The neutral wait
+is retired; the next fixture uses one native attack and accounts for its exact
+HP result before the original fresh region/native kill checks. These observations
+do not identify the movement writer. See the
+[second attempt](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/region-neutral-wait-root02/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
