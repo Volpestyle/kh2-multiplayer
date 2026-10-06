@@ -338,6 +338,25 @@ adds one shared3x250ms budget across the four first-kill victims; existing
 protection and fresh per-victim pack checks remain. See the
 [closed run result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/camera-region-approach-root01/result.md).
 
+The bounded input interpretation found that native processing removes the small
+X component, while B98 velocity points inward along sampled camera-forward.
+The native transfer threshold and full camera/input transform remain unproved;
+this supports neither an LY flip nor an explanation for outward position.
+The one corrected attempt `211819` used deliberate `(0,+1)` only after fresh
+forward/target alignment passed `.95`. Ten qualified samples witnessed raw
+left bytes `128/1` and processed `(0,-1)`; neutral release followed in 16 ms.
+All 13 samples qualified, but sampled radius increased 282.612 to 310.758, so
+the unchanged position-closing guard failed at step 45. All original IDs
+3/4/5/6 again matched HP 153 on all three games and the independent native
+checkpoint. No kill, second pack or retry followed. Available receipts have
+no known hit/reaction, without sealing absence; B98 still points inward and
+does not identify total displacement. Saves, sources and the preserved 203609
+fixture are unchanged. The interpretation, one correction and one live attempt
+are complete; the strict two-pack gate remains open. Next candidates are a
+fully reviewed one-shot fixture position restore or a qualified alternate room,
+with the original failure retained. See the
+[corrected run and options](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/effective-input-region-approach-root01/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer

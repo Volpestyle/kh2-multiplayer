@@ -117,6 +117,21 @@ retirement, contention and concurrent copies. Names, MP, downed/revive, reconnec
 and full HUD acceptance remain open. See the [HUD result](../build/rig/vuh1507-hud-prep-20261005-01/hud-root01/result.md)
 and [source review](../build/rig/vuh1507-hud-prep-20261005-01/independent-review.md).
 
+The bounded names/MP source check found that admitted owner peer IDs can supply
+labels, but distinct display names need additional roster transport. Protocol 10
+already carries MP fields; native capture currently leaves them at placeholder
+0/0. Numeric MP needs calibrated owner and native-friend mappings before HUD
+acceptance. See the [next HUD slice](../build/rig/vuh1507-hud-prep-20261005-01/names-mp-next-20261006/result.md).
+
+The strict impaired Mac-relay two-pack wave gate remains unpassed. Corrected
+attempt `211819` passed its effective input witness and neutral release but
+failed the position-closing guard before any kill. Original first-pack IDs
+3/4/5/6 matched HP 153 on all three games and the independent native checkpoint;
+later waves remain unexposed. One input interpretation, one fixture correction
+and one live attempt are complete, with no retry. The next decision is a reviewed
+one-shot fixture position restore or qualification of another two-pack room,
+retaining the original failures. See the [run and options](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/effective-input-region-approach-root01/result.md).
+
 One connected native cutscene hold now passed through the impaired Mac relay
 (`094229`, two real games, normal process priorities). The client opened its
 own Pause menu, suppressed a tested movement command while the host completed

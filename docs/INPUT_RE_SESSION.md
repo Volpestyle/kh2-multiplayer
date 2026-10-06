@@ -151,8 +151,8 @@ Layout per entry:
 | `+0x08` | ulonglong | Newly pressed this frame |
 | `+0x10` | ulonglong | Released this frame |
 | `+0x18` | ulonglong | Auto-repeat trigger |
-| `+0x20` | 16 bytes | Left stick analog (4 floats) |
-| `+0x30` | 16 bytes | Right stick analog (4 floats) |
+| `+0x20` | 16 bytes | Physical right stick / camera (native field named left; 4 floats) |
+| `+0x30` | 16 bytes | Physical left stick / movement (native field named right; 4 floats) |
 | `+0x40` | pointer | Context/mode reference |
 | `+0x48` | dword | Flags (bit 0=disabled, bit 1=Steam-vs-XInput) |
 
