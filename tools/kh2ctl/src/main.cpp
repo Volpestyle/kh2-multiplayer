@@ -16,6 +16,10 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <charconv>
+#include <cmath>
+#include <limits>
+#include <string_view>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -2594,8 +2598,43 @@ CommandResult CmdPeek(std::vector<std::string> args) {
     return {0, out.str()};
 }
 
+// f32x3 accepts one comma-separated decimal/general-format token: X,Y,Z.
+// Parsing and range checks are vector-only; existing scalar behavior is unchanged.
+std::array<float, 3> ParsePokeF32x3(std::string_view value) {
+    static_assert(sizeof(float) == 4 && sizeof(std::array<float, 3>) == 12);
+    std::array<float, 3> result {};
+    for (std::size_t i = 0; i < result.size(); ++i) {
+        const auto comma = value.find(',');
+        if ((i < 2) != (comma != std::string_view::npos))
+            throw std::runtime_error("f32x3 needs exactly X,Y,Z (no whitespace)");
+        const auto token = value.substr(0, comma);
+        if (token.empty()) throw std::runtime_error("f32x3 component is empty");
+        const auto parsed = std::from_chars(token.data(), token.data() + token.size(),
+                                             result[i], std::chars_format::general);
+        if (parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size() ||
+            !std::isfinite(result[i]))
+            throw std::runtime_error("f32x3 components must be finite in-range decimal f32 values");
+        if (i < 2) value.remove_prefix(comma + 1);
+    }
+    return result;
+}
+
+std::uint64_t ParsePokeVectorAddress(std::string_view value) {
+    int radix = 10;
+    if (value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) {
+        radix = 16;
+        value.remove_prefix(2);
+    }
+    if (value.empty()) throw std::runtime_error("f32x3 address/RVA is empty");
+    std::uint64_t result {};
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result, radix);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
+        throw std::runtime_error("f32x3 address/RVA must be an unsigned decimal or 0x hexadecimal integer");
+    return result;
+}
+
 // poke: write one value into a rig instance (test fixtures and RE).
-//   kh2ctl poke --pid N (--rva 0x... | --addr 0x...) --type u8|u16|u32|i32|f32 --value V
+//   kh2ctl poke --pid N (--rva 0x... | --addr 0x...) --type u8|u16|u32|i32|f32|f32x3 --value V
 CommandResult CmdPoke(std::vector<std::string> args) {
     const auto rvaRaw = ConsumeOption(args, "--rva");
     const auto addrRaw = ConsumeOption(args, "--addr");
@@ -2605,6 +2644,10 @@ CommandResult CmdPoke(std::vector<std::string> args) {
     if ((rvaRaw.has_value() == addrRaw.has_value()) || !valueRaw) {
         throw std::runtime_error("poke needs exactly one of --rva/--addr, and --value");
     }
+    // Reject malformed vector input before opening a process.
+    const bool vectorWrite = type == "f32x3";
+    const auto vector = vectorWrite ? ParsePokeF32x3(*valueRaw) : std::array<float, 3>{};
+    const auto vectorOffset = vectorWrite ? ParsePokeVectorAddress(rvaRaw ? *rvaRaw : *addrRaw) : 0;
     const DWORD pid = ResolveTargetPid();
     // Writes go only to instances the rig launched.
     bool owned = false;
@@ -2616,6 +2659,36 @@ CommandResult CmdPoke(std::vector<std::string> args) {
     HANDLE process = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_VM_READ |
                                  PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (!process) return MakeError("OpenProcess failed for PID " + std::to_string(pid));
+    if (vectorWrite) {
+        std::uint64_t address {};
+        try {
+            const std::uint64_t base = rvaRaw ? ModuleBase(process) : 0;
+            constexpr auto maximum = (std::numeric_limits<std::uintptr_t>::max)();
+            if ((rvaRaw && base == 0) || base > maximum || vectorOffset > maximum - base)
+                throw std::runtime_error("f32x3 address addition overflow/unavailable module");
+            address = base + vectorOffset;
+            if (address == 0 || address > maximum - (sizeof(vector) - 1))
+                throw std::runtime_error("f32x3 12-byte address span invalid/overflow");
+        } catch (...) {
+            CloseHandle(process);
+            throw;
+        }
+        SIZE_T written = 0;
+        // Exactly one request; this does not guarantee atomicity or roll back partial writes.
+        const BOOL ok = WriteProcessMemory(process, reinterpret_cast<LPVOID>(address),
+                                           vector.data(), sizeof(vector), &written);
+        const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+        CloseHandle(process);
+        if (!ok || written != sizeof(vector))
+            return MakeError("f32x3 WriteProcessMemory failed/partial: error=" + std::to_string(error) +
+                             " bytesWritten=" + std::to_string(written) + " expected=12; no retry");
+        std::ostringstream out;
+        out << "{\"ok\":true,\"processId\":" << pid << ",\"address\":\"0x" << std::hex
+            << std::uppercase << address << std::dec << "\",\"type\":" << JsonString(type)
+            << ",\"value\":" << JsonString(*valueRaw)
+            << ",\"bytesRequested\":12,\"bytesWritten\":12,\"writeCalls\":1}";
+        return {0, out.str()};
+    }
     const std::uint64_t address = rvaRaw ? ModuleBase(process) + std::stoull(*rvaRaw, nullptr, 0)
                                          : std::stoull(*addrRaw, nullptr, 0);
     std::uint8_t bytes[4] {};
@@ -2835,7 +2908,7 @@ void PrintUsage() {
         << "  peek --rva RVA[:u8|u16|i16|u32|i32|f32|u64][,...] [--samples N]\n"
         << "       [--interval-ms N]    sample exe-relative memory\n"
         << "  entities                  every actor on the active entity list\n"
-        << "  poke (--rva R | --addr A) --type u8|u16|u32|i32|f32 --value V\n"
+        << "  poke (--rva R | --addr A) --type u8|u16|u32|i32|f32|f32x3 --value V\n"
         << "                            write one value (rig-launched instances only)\n"
         << "  watch --addr A [--seconds S]  hardware write breakpoint; report writer RIPs\n"
         << "  restart [--no-build] [--kill] [LAUNCH_OPTS]\n"

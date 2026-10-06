@@ -237,7 +237,7 @@ no retained child, so host damage evidence is the claim/application join and HP
 convergence, without a whole-host clean-trace claim.
 
 The corrected diagnostic scopes no-death to the admitted original pack and
-explicitly retains outside-pack IDs1/2 despawn receipts. Complete initial/final
+explicitly retains outside-pack IDs 1/2 despawn receipts. Complete initial/final
 native and published samples must exclude outside IDs, extras and replacements;
 this is not continuous room-wide lifecycle coverage. The old FAIL is unchanged.
 The zero callback used the same observed hit/attack buffer but a different target.
@@ -374,13 +374,22 @@ is complete; persistence and the strict two-pack gate remain unproved. See the
 The later reviewed single-call XYZ control `004941` passed without kills:
 original3/4/5/6 remained HP153 on all three games in fresh hashes and two
 independent native rounds. Its unchanged full wave gate `010014` failed the
-canonical living-set equality at step45 after issued kills3/4, before ID5.
+canonical living-set equality at step 45 after issued kills3/4, before ID5.
 The last host native round has original5/6 living at HP153 and3/4 dead at0;
 pending client streams had not all settled. The fresh failing canonical reply
 is missing, so no mismatch cause is assigned. This leaves final first-wave
 death parity, second-wave IDs/HP/deaths and quiet/no-extras unproved. All earlier
 FAILs remain. Both runs are closed with saves unchanged. See the [control](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-control-root01/result.md)
 and [full result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-full-root01/result.md).
+
+The logging-only candidate required a fresh control for its changed signature.
+That control `012309` failed the exact XYZ readback before any kill or later
+region/enemy qualification. One 12-byte request succeeded, but the qualified
+frame 6750 sample was 555.928955/-1100/-2353.774170, not 555/-1100/-2356.
+No retry, restore adjustment, tolerance or dependent full gate follows. The
+agreed fallback is another two-pack room; a passive host stability observation
+alone cannot qualify two waves. All checks and recorded FAILs remain. See the
+[closed FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-canonical-logging-control-root01/result.md).
 
 ## Selected native lifetime observer, 2026-10-05
 

@@ -291,6 +291,19 @@ each. Sora could move after every one.
   (`objentry+0x04`) is 3 (boss) or 4 (mob). `kh2ctl entities` lists every
   actor with name, type, team (`actor+0x4DC`: 1 party, 2 enemy) and move
   state.
+- **Contiguous XYZ fixture write:** source now supports `poke --pid N
+  --addr <actor+0x670> --type f32x3 --value "555,-1100,-2356"`. It requires
+  exactly three finite, in-range decimal float32 values without whitespace,
+  an unsigned decimal or hexadecimal address/RVA, and a valid 12-byte address
+  span. The existing PID creation-time ownership check remains. Exactly one
+  12-byte WriteProcessMemory request must return success and 12 written bytes;
+  there is no retry or rollback and no atomicity or position-persistence claim.
+  Scalar poke behavior is unchanged. The reviewed private CLI passed 94 normal
+  and 94 Windows-ASan controls and the bounded 004941 live control; later 012309
+  correctly refused a differing XYZ readback. Accepted old EXEs remain frozen;
+  rebuild source or select the reviewed private CLI explicitly to use f32x3.
+  See the [memory-code review](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-control-root01/root-review.json)
+  and [later control FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-canonical-logging-control-root01/result.md).
 - **Safe-state gate:** a request is handed over only when nothing is
   frozen (`0x2A171E8` == 0), the room is live (`0x9BA8D0` != 0), no menu is
   open (`0x7435D0` == `0xFF`), timeline state is idle (`0xB65210` == 0)

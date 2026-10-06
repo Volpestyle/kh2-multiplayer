@@ -175,7 +175,7 @@ The reviewed single-call 12-byte XYZ write passed its one no-kill control
 `004941`: exact readback, natural native bit8, and original four enemies at
 HP153 on all three games in fresh hashes and independent native rounds. This
 does not prove atomicity or lasting position. The unchanged full gate `010014`
-then failed at step45 after two issued kills, IDs3/4, before the call for ID5.
+then failed at step 45 after two issued kills, IDs3/4, before the call for ID5.
 Its last host native census retained only original5/6 living at HP153 and3/4
 dead at HP0. The failing fresh canonical living-set reply was not saved, so
 the cause is unproved. First-wave final death parity, second-wave IDs/HP/deaths
@@ -191,6 +191,18 @@ failure gets one logged full run; changing rooms needs evidence pointing at
 spawn behavior. A failed single control ends that approach without restore
 tweaks. Push/release, machine/system changes, account/network exposure and
 writing James's saves still require James. All prior failures remain FAIL.
+
+The logging candidate's fresh control `012309` failed at step 45: its successful
+single 12-byte request was followed by a qualified same-frame readback of
+555.928955/-1100/-2353.774170 instead of 555/-1100/-2356. No kill, retry or
+later region/enemy control ran. Its one control is consumed; no dependent full
+run follows, and 004941 cannot qualify the changed signature. Exact equality
+is retained, with no tolerance or restore tweak. The reviewed next method is
+one host-only observation of two or three other prespecified populated rooms,
+each declared activation followed by 15 seconds neutral sampling. Stable host
+membership is only fixture evidence; actual two-wave and join parity still
+need their full gates. Saves stayed unchanged and owned resources closed. See
+the [closed control FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-canonical-logging-control-root01/result.md).
 
 Populated joins have a separately declared variant: capture the exact living
 host pack after fresh hashes and independent native qualification, then require
@@ -208,6 +220,15 @@ settle-only variant is being prepared: one evidence-sized fixed wait before
 the same exact qualification and immutable freeze, no recapture or retry. See
 the [closed FAIL](../build/rig/vuh1495-host-qualified-join-prep-20261006-01/live-root01/result.md)
 and [independent review](../build/rig/vuh1495-host-qualified-join-review-20261006-01/result.md).
+
+The new settle-only attempt `012035` also failed before admission. Its fixed
+7144ms wait was sized from twice the largest retained sampling envelope,
+then the unchanged death-history guard refused original IDs 1/2 leaving the
+list at last HP160 and being reported as despawned. This is not native HP-zero
+kill proof; no reference froze, late runtime started or join/reload ran. The
+one settle attempt is consumed, without another 18/11 timing variant. Saves
+and owned-resource closure passed. Independent result review adopted the
+FAIL. See the [settle result](../build/rig/vuh1495-host-qualified-join-settle-prep-20261006-01/live-root01/result.md).
 
 One connected native cutscene hold now passed through the impaired Mac relay
 (`094229`, two real games, normal process priorities). The client opened its

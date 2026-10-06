@@ -2252,13 +2252,25 @@ The next timing-only candidate adds one fixed settle before the unchanged
 freshness/record/HP qualification, with no candidate recapture or retry. See
 the [closed result](../build/rig/vuh1495-host-qualified-join-prep-20261006-01/live-root01/result.md).
 
+The settle-only 33-step candidate `012035` used a 7144ms fixed no-input wait,
+then failed the unchanged death-history guard before freeze or late runtime.
+Original IDs 1/2 left the current list with last HP160 and were reported as
+despawned; no native HP-zero kill is inferred. No join/reload proof or retry.
+See the [closed settle FAIL](../build/rig/vuh1495-host-qualified-join-settle-prep-20261006-01/live-root01/result.md).
+
 Wave control `004941` passed with the reviewed single-call XYZ CLI. Full run
-`010014` then failed at step45 after two issued kills,3/4, on the canonical
+`010014` then failed at step 45 after two issued kills,3/4, on the canonical
 living-set equality before ID5. The failing canonical reply was not retained;
 the next candidate must save that exact reply before checking it, preserving
 every predicate and requiring a fresh control for its changed signature.
 Both runs are closed, saves unchanged; the complete two-wave gate remains
 unpassed. See the [full result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-full-root01/result.md).
+
+The new logging signature's control `012309` failed exact XYZ readback at
+step 45 before kills or later region/enemy qualification. Its one control is
+consumed. 004941 cannot be reused and no full attempt follows. The fixture
+keeps exact equality; the next method qualifies another two-pack room. All
+owned processes/relay closed and saves stayed unchanged. See the [control FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-canonical-logging-control-root01/result.md).
 
 The [HUD names live preparation](../build/rig/vuh1507-hud-names-live-prep-20261006-01/result.md)
 is accepted offline:32 steps, exact matched private AvatarBridge-v3 products,
