@@ -21,7 +21,7 @@ The package adds no game-folder files, service, account, registry setting or fir
 
 ## Preview limits
 
-Follow James's selected route. If James sees five Shadows in the courtyard and you see none after joining or reconnecting before a fight, wait: James takes one short walk away from the circular patterned paving onto the nearby broad stone steps, then stops. Compare both games before fighting. This has been checked with the complete living courtyard pack. If enemies are still missing, stop and report both screens and logs; do not keep walking or continue combat.
+Follow James's selected route. If James sees five Shadows in the courtyard and you see none after joining or reconnecting before a fight, wait: James takes one short walk away from the circular patterned paving onto the nearby broad stone steps, then stops. The enemies should appear for you, and both games should have the same five living Shadows. Compare both games before fighting. This workaround is tested only in the courtyard, before any kills. If walking does not restore the enemies, **do not save**; report the room, what each player sees and the package logs. Stop there; do not keep walking or continue combat.
 
 After a drop before combat, reconnect and compare both games; the courtyard walk above may be needed. Reconnecting after enemies die is unsupported. Do not reconnect mid-fight, after kills or with a partial pack. Stop and report missing enemies, enemies returning to life or a room mismatch. Populated-room cutscene hold remains unqualified. No public-port forwarding is needed or supported.
 
