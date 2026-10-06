@@ -8,6 +8,7 @@ python tools/scenario/run.py tools/scenario/scenarios/boot_to_goa.json --repeat 
 ```
 - A scenario is JSON steps (boot, warp, input, press, wait, assert, capture, …) with Python assertions over live state. Format, helpers and the example scenarios: `docs/SCENARIOS.md`.
 - Each run writes `build/scenarios/<stamp>_<name>_<n>/report.md` + `report.json` with captures and logs. A crash or hang produces a bundle (minidump + inject log), fails the run, kills its instances, and the runner moves on.
+- **Rig capabilities:** before a live run, rehearsal, demo or evidence post, read the `kh2-rig` skill (`.agents/skills/kh2-rig/SKILL.md`). It indexes existing tools (launch, capture, in-renderer video `kh2ctl clip`, scenarios, Mac relay, input stand-ins, closure, Linear media upload) and their gotchas. Extend it instead of rediscovering.
 - **Evidence:** close a live-behavior issue with a passing scenario report (and its captures/clips) attached to the Linear issue. Write the scenario first when the behavior can be checked from memory or the hit log; add it under `tools/scenario/scenarios/` so it joins the suite.
 - Exit codes: 0 pass, 1 fail (or save changed), 2 crash/hang, 3 rig unavailable (lock held or a non-rig KH2 is running — James may be playing; wait).
 
