@@ -105,6 +105,15 @@ matched. These cases have matching empty enemy populations; populated joins,
 later waves and dead-pack recovery remain open. See the [five-room result](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/five-room-result.md)
 and [independent review](../build/rig/vuh1497-native-progress-mac-relay-20261005-01/five-room-acceptance-review.md).
 
+A populated-room join fixture is now accepted offline: one late initial join
+into the admitted four-enemy 18/11 pack and one explicit same-room reload. It
+requires original host bindings through join, a qualified rebuilt lifetime on
+reload, strict per-peer read-time/publication floors and four distinct native
+records. All 67 controls and 14 independent focused rechecks pass; the first
+review's replay/record-alias failures are retained. No product change or live
+run occurred. Populated join/reload behavior remains open. See the [fixture](../build/rig/vuh1495-populated-join-prep-20261006-01/result.md)
+and [accepted recheck](../build/rig/vuh1495-populated-join-review-20261006-01/recheck-01/result.md).
+
 The overlay now shows the actual network player slots and owner HP. The bounded
 HUD run `073856` passed through the impaired Mac relay: both games showed their
 correct Host/You labels and two 24/24 bars, independently distinguished from the
@@ -163,6 +172,16 @@ stayed unchanged. The feature defaults off and covers one already-bound
 empty-room client/event; populated rooms, repeated events, skip and reconnect
 during a hold remain open. See the [hold result](../build/rig/vuh1498-cutscene-prep-20261005-01/client-hold-result.md)
 and [independent review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-client-candidate/acceptance-root15/review.md).
+
+Populated hold prep is accepted offline, with 29 controls and a strict ordinary
+populated-admission checkpoint. Its 59-step scaffold refuses before boot and
+preserves all 55 accepted hold steps. A live populated hold needs three concrete
+prerequisites: reviewed populated event eligibility/convergence (current ACKs
+require both enemy lists empty), a qualified pause/event membership reader
+(current census requires ordinary gameplay), and an observed natural event
+recipe with an explicit enemy-lifetime outcome. No product change or populated
+hold run occurred; `094229` remains empty-room evidence. See the [prep and prerequisites](../build/rig/vuh1498-populated-hold-prep-20261006-01/result.md)
+and [offline adoption](../build/rig/vuh1498-populated-hold-review-20261006-01/result.json).
 
 See [private joining and simulation](JOIN_GUIDE.md). General cutscene support,
 waves and bosses, and the package also remain open.

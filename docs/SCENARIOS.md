@@ -2234,6 +2234,16 @@ peers concurrently, with a 30-second bound per peer/sample. Its artifact always
 retains errors and partial observations. Successful collection proves neither
 peer parity nor enemy absence by itself.
 
+Acceptance wrappers that compare native checkpoints must retain read-time
+freshness separately from stable identity. Require each peer's next read to
+start strictly after its prior read finished, carry those floors across
+checkpoints and explicit reloads, and retain publication-frame floors within
+one epoch. Two copies of one retained census are not independent samples.
+Original actor/netID membership also needs distinct native controller/record
+pointer and index associations; unique netIDs alone do not establish four
+records. The [populated join recheck](../build/rig/vuh1495-populated-join-review-20261006-01/recheck-01/result.md)
+retains the replay and record-alias counterexamples and their corrections.
+
 The helper treats `entities` as candidates only. Checked reads validate native
 HEAD/TAIL, every next handle and its region-table resolution, terminal handle0,
 object descriptors including the `F_` prefix, status and actual HP, and stable
