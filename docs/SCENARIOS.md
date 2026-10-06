@@ -2244,6 +2244,29 @@ pointer and index associations; unique netIDs alone do not establish four
 records. The [populated join recheck](../build/rig/vuh1495-populated-join-review-20261006-01/recheck-01/result.md)
 retains the replay and record-alias counterexamples and their corrections.
 
+The exact-host-pack populated join variant `005739` correctly refused a pack
+that changed from four309 to four309 plus two311 during qualification. Each
+native round agreed with its own publication; no reference froze and no late
+client runtime/join/reload ran. The one attempt is consumed and remains FAIL.
+The next timing-only candidate adds one fixed settle before the unchanged
+freshness/record/HP qualification, with no candidate recapture or retry. See
+the [closed result](../build/rig/vuh1495-host-qualified-join-prep-20261006-01/live-root01/result.md).
+
+Wave control `004941` passed with the reviewed single-call XYZ CLI. Full run
+`010014` then failed at step45 after two issued kills,3/4, on the canonical
+living-set equality before ID5. The failing canonical reply was not retained;
+the next candidate must save that exact reply before checking it, preserving
+every predicate and requiring a fresh control for its changed signature.
+Both runs are closed, saves unchanged; the complete two-wave gate remains
+unpassed. See the [full result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-full-root01/result.md).
+
+The [HUD names live preparation](../build/rig/vuh1507-hud-names-live-prep-20261006-01/result.md)
+is accepted offline:32 steps, exact matched private AvatarBridge-v3 products,
+literal admitted peer IDs and eight canonical capture attestations. Collection
+PASS alone is not names acceptance. Root must inspect actual names/owner rows,
+departure/expiry/reset, unchanged HP and labels; missing transient exposure
+fails. No names live run or v3 deployment has occurred.
+
 The helper treats `entities` as candidates only. Checked reads validate native
 HEAD/TAIL, every next handle and its region-table resolution, terminal handle0,
 object descriptors including the `F_` prefix, status and actual HP, and stable

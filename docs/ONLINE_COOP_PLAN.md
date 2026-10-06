@@ -171,6 +171,44 @@ A different write method needs independent review and a passing control before
 full waves. See the [restore control](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/position-restore-control-root01/result.md)
 and [prior run/options](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/effective-input-region-approach-root01/result.md).
 
+The reviewed single-call 12-byte XYZ write passed its one no-kill control
+`004941`: exact readback, natural native bit8, and original four enemies at
+HP153 on all three games in fresh hashes and independent native rounds. This
+does not prove atomicity or lasting position. The unchanged full gate `010014`
+then failed at step45 after two issued kills, IDs3/4, before the call for ID5.
+Its last host native census retained only original5/6 living at HP153 and3/4
+dead at HP0. The failing fresh canonical living-set reply was not saved, so
+the cause is unproved. First-wave final death parity, second-wave IDs/HP/deaths
+and final quiet checks remain open. Both runs used Mac50/10/2; all saves stayed
+unchanged and owned processes/relay closed. See the [passing control](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-control-root01/result.md)
+and [full FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-full-root01/result.md).
+
+Technical test choices belong to the lead; the advisor reviews non-obvious
+tradeoffs or check changes. The agreed next step is one bounded offline audit
+of010014, then a candidate retaining the canonical reply with every predicate
+unchanged and a fresh control for its new execution signature. An unexplained
+failure gets one logged full run; changing rooms needs evidence pointing at
+spawn behavior. A failed single control ends that approach without restore
+tweaks. Push/release, machine/system changes, account/network exposure and
+writing James's saves still require James. All prior failures remain FAIL.
+
+Populated joins have a separately declared variant: capture the exact living
+host pack after fresh hashes and independent native qualification, then require
+the late client to match its count, original IDs, types and HP exactly. The
+existing record, freshness, progress, lifecycle, no-extra and no-death checks
+remain. This variant gets one live attempt; it does not reclassify `233433`.
+
+That attempt `005739` failed before freezing the reference or starting the
+late-client runtime: two fresh hashes and native round0 had four309/HP160,
+then native round1 had six, adding two311/HP160. Native and publication agreed
+within each round; the pack changed between admission observations. No join or
+reload parity was exercised. Independent review adopted that refusal. Its one
+attempt is consumed, with saves unchanged and owned resources closed. A new
+settle-only variant is being prepared: one evidence-sized fixed wait before
+the same exact qualification and immutable freeze, no recapture or retry. See
+the [closed FAIL](../build/rig/vuh1495-host-qualified-join-prep-20261006-01/live-root01/result.md)
+and [independent review](../build/rig/vuh1495-host-qualified-join-review-20261006-01/result.md).
+
 One connected native cutscene hold now passed through the impaired Mac relay
 (`094229`, two real games, normal process priorities). The client opened its
 own Pause menu, suppressed a tested movement command while the host completed

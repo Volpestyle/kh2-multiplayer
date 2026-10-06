@@ -371,6 +371,17 @@ are unchanged, and owned processes are closed. The one-shot scalar assessment
 is complete; persistence and the strict two-pack gate remain unproved. See the
 [closed restore control](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/position-restore-control-root01/result.md).
 
+The later reviewed single-call XYZ control `004941` passed without kills:
+original3/4/5/6 remained HP153 on all three games in fresh hashes and two
+independent native rounds. Its unchanged full wave gate `010014` failed the
+canonical living-set equality at step45 after issued kills3/4, before ID5.
+The last host native round has original5/6 living at HP153 and3/4 dead at0;
+pending client streams had not all settled. The fresh failing canonical reply
+is missing, so no mismatch cause is assigned. This leaves final first-wave
+death parity, second-wave IDs/HP/deaths and quiet/no-extras unproved. All earlier
+FAILs remain. Both runs are closed with saves unchanged. See the [control](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-control-root01/result.md)
+and [full result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-full-root01/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
