@@ -29,33 +29,48 @@ possibly enemies.
 | Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected story delivery and one empty-room native client hold also passed (`094229`); broader event side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
-**First friend preview (VUH-1494).** The self-contained Windows release06 ZIP
-and guide are ready for rehearsal, with an exact game-EXE allowlist, package-local
-owned launch/cleanup and saveguard attestation. A clean package started the
-private game view without `steam_appid.txt`; two fresh copies then loaded the
-existing Parlor save and connected through the desktop launchers and Mac relay.
-Rehearsal08 passed automatic names/HP on both games, visible Hide/Show, normal
-walking into Entrance Hall with the Guest following, and an empty-room GUI
-reconnect that preserved Hide until explicitly shown. Combat, chest and natural
-cutscene checks are still incomplete; this is not friend readiness or populated
-reconnect acceptance. The portable CLI/launcher HUD change leaves the adopted
-DLL unchanged. Rehearsal09 repeated fresh startup, automatic HUD and native room
-follow, but again did not reach the courtyard session. Its finalized window-only
-recording sample was black and dropped; the project update uses reviewed stills,
-clearly labeled as screenshots. The planned closure reserve was missed and the
-relay self-stopped at its lifetime limit before both launcher Exits. Closed safety
-checks remained clean. One startup stopped after Warp initialization and remains an unexplained
-FAIL. The later single diagnostic startup completed, so no hang dump was captured.
-The 35-start ledger records launcher 12/13 with a 15-second initialization
-wait and rig 22/22 with a 60-second wait; those limits stay separate. Three
-offline route checks reached Entrance Hall but did not qualify combat, chest
-or a cutscene. Save04 naturally selects Hall battle1; older chest and cutscene
-packets used forced setup and do not provide a launcher route.
-See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release06-result.md),
-[desktop HUD/room rehearsal](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal08/result.md)
-and [closed rehearsal09](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal09/result.md),
-plus the [35-boot ledger](../build/rig/vuh1510-static-crt-startup-diagnosis-20261006-01/static-startup-ledger-35.md)
-and [startup diagnostic](../build/rig/vuh1494-friend-playtest-20261006-01/startup-diagnostic05/result.md).
+**First friend preview (VUH-1494).** Release09 is sealed for the adopted bounded
+preview, pending package handoff and private relay-access approval. It includes
+Python/Tk, an exact game-EXE allowlist, package-local owned launch/cleanup,
+SaveGuard attestation and role-based user text. Five launcher literal changes
+and the guide are the only content changes from rehearsed release08; all native
+products, CLI, other scripts, dependencies and licenses are byte-identical.
+The decompressed ZIP passed private-path and personal-host-name gates.
+
+Rehearsal10 passed on two fresh package folders sharing one Windows game install:
+desktop-only startup without `steam_appid.txt`, save attestation, Mac-relay
+connection, automatic names/HP, visible Hide/Show, native Parlor-to-Hall follow,
+empty-room GUI reconnect preserving Hide, and clean GUI Exit. It did not drive
+combat, a chest or a story event through the desktop launcher. Those now have
+current-product rig coverage: the unchanged 012155 combat/chest fixture passed
+all 100 steps and the unchanged 040303 story fixture passed all 82 steps through
+the impaired Mac relay. The latter retained actual latest-host apply before the
+client's native load, all 8108 shared bytes and reload/personal invariants.
+Earlier older-build passes are not substituted for these new results. HUD02 and
+courtyard walk04 use the same inject/runtime/avatarctl and actual Mac relay pins.
+
+This qualifies a short host-led preview with the tested before-kills courtyard
+walk, not an automatic recovery gate or separate-PC acceptance. After-kill,
+partial-pack and mid-fight reconnect, broader event side effects and populated
+cutscene hold remain unsupported. Event hold is OFF; the guide tells the friend
+to stand still during the host's cutscene. The packaged local Windows relay was
+not exercised and must stay unchecked. The HUD may briefly report status
+unavailable during reward/menu transitions. All runs closed their owned
+processes/relays with saves, game files and foreign workspace files unchanged.
+
+One launcher startup stopped after Warp initialization and remains an unexplained
+FAIL. The later diagnostic succeeded and captured no hang dump. The 44-start
+ledger records launcher 15/16 with a 15-second initialization wait, legacy
+combat rig 2/2 with a 15-second wait, and rig 26/26 with a 60-second wait. Limits
+and rig DLL-to-PID attribution uncertainties stay explicit; no hook margin is
+inferred. Prior failed route attempts and the black window-only recording sample
+remain recorded. The published update uses reviewed stills labeled as screenshots.
+See the [sealed package](../build/rig/vuh1510-friend-package-20261006-01/release09-result.md),
+[desktop rehearsal](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal10/result.md),
+[current combat/chest](../build/rig/vuh1494-release08-combat-chest-regression-20261006-01/root-result.md),
+[current story](../build/rig/vuh1494-release08-story-regression-20261006-01/root-result.md),
+[44-boot ledger](../build/rig/vuh1510-static-crt-startup-diagnosis-20261006-01/static-startup-ledger-44.md)
+and [known issues](FRIEND_PLAYTEST_KNOWN_ISSUES.md).
 
 Courtyard qualification passed all 14 steps. The full run passed late populated
 join and progress delivery, then failed its reload comparison: a previously
@@ -69,7 +84,7 @@ the mismatch value 2 is the DesyncEnemies bit. Hook logging is a possible timing
 confound, not a proven cause. The previously unused trace-off full03 passed
 populated join and the new-lifetime reload, then failed after a real all-alive
 timeout/rejoin: roster, room ACK and progress recovered, but the Client pack was
-empty while the Host retained five enemies. Basic populated reconnect remains
+empty while the Host retained five enemies. Automatic populated reconnect remains
 unpassed. Keep the full04 populated-join failure as an intermittent known issue;
 the empty-pack symptom is now also recorded with hit logging off. See the
 [reload triage](../build/rig/vuh1495-courtyard-full02-triage-20261006-01/result.md)
@@ -81,7 +96,7 @@ seven captured trigger boxes. This supports the current-point explanation but
 does not establish the unknown historical emission point. Ordinary manifests
 carry first-observed actor positions and observation-order indexes, not native
 record identity, so they cannot safely authorize geometry activation. The
-unbuilt fix will use an explicit protocol 11 observation request and the existing
+candidate uses an explicit protocol 11 observation request and the existing
 record-content representation in a separate read-only lifecycle. Reusing the
 old resync request would enter Bootstrap, increment delivery and quarantine;
 an externally selected profile would leave the same bytes with two meanings.
@@ -97,7 +112,7 @@ the new ACK immediately after the stale fetched prefix; the original FAIL stays.
 The third check fetched that ACK within the original 45-second deadline and passed
 transport, native re-entry and progress. Its reconnect checkpoint again found an
 empty Client, then the walk diagnostic refused before movement because current
-activation or cache state was present. Reconnect restoration is still untested;
+activation or cache state was present. Reconnect restoration was then untested;
 read-only triage established marker1 with all caches empty. Native dispatch still
 reaches the emitter at marker1. The adopted reconnect-only fresh-lifetime fixture
 correction kept caches and all parity assertions exact. Walk04 then passed all41
