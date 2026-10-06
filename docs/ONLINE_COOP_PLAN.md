@@ -128,9 +128,16 @@ attempt `211819` passed its effective input witness and neutral release but
 failed the position-closing guard before any kill. Original first-pack IDs
 3/4/5/6 matched HP 153 on all three games and the independent native checkpoint;
 later waves remain unexposed. One input interpretation, one fixture correction
-and one live attempt are complete, with no retry. The next decision is a reviewed
-one-shot fixture position restore or qualification of another two-pack room,
-retaining the original failures. See the [run and options](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/effective-input-region-approach-root01/result.md).
+and one live attempt are complete, with no retry. James selected assessment of
+the reviewed one-shot fixture position restore, retaining the original failures.
+Its no-kill control `215309` failed: all three scalar responses/readbacks passed,
+but X changed between writes, and the final full-XYZ read crossed a native frame.
+The required post-restore region/enemy control was not reached. No retry or full
+run followed; saves, sources and pinned inputs remain unchanged and owned
+processes are closed. The scalar restore assessment is complete but unqualified.
+A different write method needs independent review and a passing control before
+full waves. See the [restore control](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/position-restore-control-root01/result.md)
+and [prior run/options](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/effective-input-region-approach-root01/result.md).
 
 One connected native cutscene hold now passed through the impaired Mac relay
 (`094229`, two real games, normal process priorities). The client opened its

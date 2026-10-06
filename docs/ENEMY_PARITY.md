@@ -352,10 +352,24 @@ checkpoint. No kill, second pack or retry followed. Available receipts have
 no known hit/reaction, without sealing absence; B98 still points inward and
 does not identify total displacement. Saves, sources and the preserved 203609
 fixture are unchanged. The interpretation, one correction and one live attempt
-are complete; the strict two-pack gate remains open. Next candidates are a
-fully reviewed one-shot fixture position restore or a qualified alternate room,
-with the original failure retained. See the
+are complete; the strict two-pack gate remains open. James selected assessment
+of a fully reviewed one-shot fixture position restore, with the original failure
+retained. See the
 [corrected run and options](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/effective-input-region-approach-root01/result.md).
+
+The reviewed XYZ-only scalar restore control `215309` failed at step 45 before
+any kill. Original IDs 3/4/5/6 again matched HP 153 on all three games and the
+independent native checkpoint. Three f32 pokes to canonical unparented host
+Sora targeted 555/-1100/-2356; each response and axis readback passed. X then
+changed from 555 to 556.9389 between writes. The qualified post-Z sample already
+differed from the full target, and the final full-XYZ read crossed a native frame
+and was refused. A frame-timing correction alone cannot qualify these retained
+observations. Native bit8 became true before Z, without a flag write, but the
+required later-frame post-XYZ region window and post-restore enemy control were
+not reached. No retry or full wave run followed. Saves, sources and pinned inputs
+are unchanged, and owned processes are closed. The one-shot scalar assessment
+is complete; persistence and the strict two-pack gate remain unproved. See the
+[closed restore control](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/position-restore-control-root01/result.md).
 
 ## Selected native lifetime observer, 2026-10-05
 
