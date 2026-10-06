@@ -1,7 +1,7 @@
 {
   "avatarBridgeVersion": 3,
   "products": {
-    "dll": {"path": "build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/build/inject/staging/kh2coop_inject.dll", "sha256": "99b32e718b2b7952d4139207d09988828573bc5e61c1098ea7d035d8b28013d7"},
+    "dll": {"path": "build/rig/vuh1510-static-crt-20261006-01/build/inject/staging/kh2coop_inject.dll", "sha256": "edd135d5499cb61803bc508c5636a88b1e9b37a5b58e431daa2590677c21cfb6"},
     "runtime": {"path": "build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/build/Release/kh2coop_runtime_scaffold.exe", "sha256": "d1b621e74d55254af75a0c1a4cb91ecd85d93918c37e1812cf59d37734430454"},
     "avatarctl": {"path": "build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/build/Release/avatarctl.exe", "sha256": "61c9a802b34ba263b85093290e2b712596071bb857a5ed6db87385100b6300bc"},
     "server": {"path": "build/Release/kh2coop_server.exe", "sha256": "7798aa42c14072e067dfd962d68a6be5403473d7e7730d123c846d10ebf53cd8"}

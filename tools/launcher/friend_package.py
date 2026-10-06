@@ -56,9 +56,6 @@ def child_environment(root):
     # Do not inherit a developer's test/trace/write-policy switches into a friend game.
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith('KH2COOP_')}
     env['SteamAppId'] = env['SteamGameId'] = '2552430'
-    # The injected DLL also uses the bundled MSVC runtime. KH2 keeps its game
-    # cwd; dependency lookup receives this package path only in the child env.
-    env['PATH'] = str(Path(root).resolve()/'bin') + os.pathsep + env.get('PATH', '')
     return env
 
 

@@ -108,7 +108,7 @@ class Safety(unittest.TestCase):
             env=f.child_environment(self.root)
             self.assertNotIn('KH2COOP_SAVEGUARD_TEST_DIR',env)
             self.assertEqual(env['SteamAppId'],'2552430');self.assertEqual(env['SteamGameId'],'2552430')
-            self.assertEqual(env['PATH'].split(os.pathsep)[0],str(self.root/'bin'))
+            self.assertEqual(env.get('PATH'),os.environ.get('PATH'))
             self.assertEqual(os.environ['SteamAppId'],'other')
     def test_private_endpoint_only(self):
         for address in ('0.0.0.0','127.0.0.1','8.8.8.8','example.com'):

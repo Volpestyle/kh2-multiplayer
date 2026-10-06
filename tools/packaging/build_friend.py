@@ -8,7 +8,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
+import subprocess
 import sys
 import zipfile
 
@@ -59,6 +61,30 @@ def scan_zip(path):
                       'no site-packages/cache/pyc/developer logs/configs']}
 
 
+def crt_closure(products, crt, dumpbin, evidence):
+    available={p.name.casefold():p for p in crt.glob('*.dll')}
+    pending=list(products); visited=set(); needed=set(); rows=[]
+    while pending:
+        source=pending.pop(0).resolve()
+        if source in visited:continue
+        visited.add(source)
+        result=subprocess.run([str(dumpbin),'/dependents',str(source)],capture_output=True,
+                              text=True,errors='replace',timeout=15,check=True)
+        imports=sorted(set(s.casefold() for s in re.findall(r'^\s+([\w.-]+\.dll)\s*$',result.stdout,re.MULTILINE|re.IGNORECASE)))
+        if not imports:raise ValueError(f'No dependency evidence for {source.name}')
+        rows.append({'source':str(source),'sha256':digest(source),'imports':imports,'stdout':result.stdout})
+        for name in imports:
+            if name in available and name not in needed:
+                needed.add(name);pending.append(available[name])
+            elif name.startswith(('msvcp','vcruntime','concrt','vccorlib')) and name not in available:
+                raise ValueError(f'Missing imported CRT dependency: {name}')
+    receipt={'dumpbin':str(dumpbin),'dumpbinSHA256':digest(dumpbin),'retainedBinCrtDlls':sorted(needed),
+             'omittedBinCrtDlls':sorted(set(available)-needed),'imports':rows,
+             'scope':'Direct product imports and transitive CRT imports; Windows API/UCRT remain OS dependencies. Python remains separate.'}
+    (evidence/'crt-imports.json').write_text(json.dumps(receipt,indent=2),encoding='utf-8')
+    return [available[name] for name in sorted(needed)]
+
+
 def build(args):
     output, evidence = Path(args.output).resolve(), Path(args.evidence).resolve()
     output.mkdir(parents=True, exist_ok=False); evidence.mkdir(parents=True, exist_ok=False)
@@ -89,7 +115,8 @@ def build(args):
         for source in installed_files(python/'tcl'/tree):
             relative=source.relative_to(python)
             if source.is_file() and allowed(relative):copy(source, 'python/'+relative.as_posix())
-    for source in sorted(crt.glob('*.dll')):copy(source, 'bin/'+source.name)
+    for source in crt_closure([output/name for name in products.values()],crt,Path(args.dumpbin).resolve(),evidence):
+        copy(source, 'bin/'+source.name)
     copy(python/'LICENSE.txt','licenses/CPython-and-bundled-components.txt')
     copy(python/'tcl/tk8.6/license.terms','licenses/Tcl-Tk-license.terms')
     copy(Path(args.vs_licenses)/'Redist.txt','licenses/MSVC-Redist.txt')
@@ -122,5 +149,5 @@ def build(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    for name in ('output','evidence','python-home','crt','vs-licenses','cli','cli-sha256'):p.add_argument('--'+name,required=True)
+    for name in ('output','evidence','python-home','crt','dumpbin','vs-licenses','cli','cli-sha256'):p.add_argument('--'+name,required=True)
     build(p.parse_args())

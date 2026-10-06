@@ -6,6 +6,15 @@ opens a listener or writes the game folder. `friend-products.json` pins the
 matched AvatarBridge v3 DLL/runtime/avatarctl and protocol-10 relay. Updating
 those products requires an explicitly reviewed matched set.
 
+Release02 selects the private static-CRT build of the same reviewed v3 inject
+source. Runtime/avatarctl stay on the original matched v3 products. The game
+child's PATH is unchanged; the injected DLL does not depend on a dynamically
+selected system MSVC runtime. The bundled helper EXEs continue to use their
+adjacent MSVC redistributable DLLs. Release01 remains historical offline evidence.
+Only the direct/transitive CRT import closure from the shipped products is copied
+to `bin`; `crt-imports.json` retains each dumpbin output and the kept/omitted set
+outside the ZIP. Python's own runtime DLLs remain in its separate directory.
+
 Build the canonical CLI in a private CMake directory with
 `-DKH2COOP_PORTABLE_PACKAGE=ON`. This changes only its package-root guard,
 absolute rig root, portable command allowlist and disabled rebuild/restart path.
@@ -23,6 +32,7 @@ python -B tools/packaging/build_friend.py `
   --output <new-parent>/KH2-Co-op --evidence <new-local-evidence-dir> `
   --python-home <installed-CPython311-directory> `
   --crt <installed-x64-Microsoft.VC145.CRT-directory> `
+  --dumpbin <installed-MSVC-x64-dumpbin.exe> `
   --vs-licenses <installed-VS-Licenses/1033-directory> `
   --cli <private-portable-kh2ctl.exe> --cli-sha256 <its-reviewed-SHA256>
 <new-parent>/KH2-Co-op/python/python.exe -I -B <new-parent>/KH2-Co-op/tools/launcher/friend.py --self-check
