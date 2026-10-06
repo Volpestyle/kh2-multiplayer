@@ -324,6 +324,20 @@ invulnerability/no-reaction setter was found; the next fixture accepts native
 reaction and restores the required region through bounded native movement,
 then retains the original fresh pack/HP/census checks before each kill.
 
+The camera-relative fixture203609 failed before the first kill. Its four
+original damage calls reached exact all-peer HP153 with the independent native
+checkpoint. The first250ms correction delivered the requested raw bytes140/2,
+but sampled processed movement was0/-1 rather than the fixture's expected
+0.09377/-0.99559 within0.05 per axis. Neutral release was observed. The pulse
+remains unqualified; no retry, kill or second pack followed. Sampled radius
+increased279.725-to-348.959, but the closing/direction guard was not reached.
+No known hit appeared in the available pulse receipts; they do not seal hit
+absence. Check native axis processing and the actual input transform before
+loosening the witness or changing steering. The private variant explicitly
+adds one shared3x250ms budget across the four first-kill victims; existing
+protection and fresh per-victim pack checks remain. See the
+[closed run result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/camera-region-approach-root01/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
