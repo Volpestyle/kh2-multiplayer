@@ -337,6 +337,32 @@ One fresh matching control precedes one full only after PASS. All acceptance
 assertions and recorded FAILs remain unchanged.
 
 
+Fresh control `042344` and full `042645` now PASS the declared BB04
+five-then-three gate through the private Mac relay. All77 steps completed on
+three real KH2 instances on the Windows PC, with50ms delay,10ms jitter and2%
+configured loss confirmed in each runtime log. Original IDs1-5 matched on all
+three games at HP98/20/20/20/20, then91/13/13/13/13. Second-wave IDs6-8 matched
+at HP98 each, then91 each, with original native bindings and no extras.
+All eight lethal calls reached hostHP0 and applied exactly once per client.
+The living-empty gap was observed before actual second-pack admission. After
+the6.031s no-refill window, two fresh all-peer empty hashes and two complete
+native censuses had zero living and zero native enemy rows. Final weight,
+source-backed eligibility, fresh bit8 and QPC emission checks passed.
+
+Independent review ADOPT and179 reviewed hashes matched. Four-phase census
+discards were zero; the narrow re-read branch remains unexercised. Raw links
+changed between separate censuses, but neither omitted comparison encountered
+a mismatch here. Full198 execution pins/91 historical sources matched, saves
+and16 foreign files remained unchanged, and all owned PC/Mac resources closed
+with25 fetched hashes matching. Every earlier FAIL stays. See the
+[accepted result](../build/rig/vuh1502-bb04-linkidentity-wave-launch-prep-20261006-01/live-root01/result.md),
+[fresh control](../build/rig/vuh1502-bb04-linkidentity-control-prep-20261006-01/live-root01/result.md)
+and [independent review](../build/rig/vuh1502-bb04-linkidentity-full-review-20261006-01/result.md).
+This qualifies the automated same-PC rig gate. Separate-PC friend play and
+reconnect remain outside this evidence; retained relay divergence captures
+also prevent an uninterrupted-equality or desync-free claim.
+
+
 Populated joins have a separately declared variant: capture the exact living
 host pack after fresh hashes and independent native qualification, then require
 the late client to match its count, original IDs, types and HP exactly. The
