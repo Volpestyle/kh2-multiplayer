@@ -2294,6 +2294,23 @@ and budget. It needs a fresh control; no old FAIL becomes PASS. See the
 [closed protected FAIL](../build/rig/vuh1502-bb04-control-prep-20261006-01/live-root01/result.md)
 and [audit](../build/rig/vuh1502-bb04-displacement-review-20261006-01/result.md).
 
+Fresh emission-scoped control `023926` passed: all six samples retained the
+original five enemies and HP, with bit8 required at admission and the later
+false value retained. Full `025347` remains FAIL before the third damage call.
+The first two host applications were98->91 and20->13; the exact whole-phase
+checkpoint, deaths and second pack were not reached. Actual entry weights
+were8/15, unchanged. Its two-round reader refused one raw flags9B8 change,
+`0x4C83 -> 0x483` (xor`0x4800`), while the other returned fields agreed.
+This does not establish the flag cause or final all-peer damage convergence.
+Independent review accepted the closed FAIL; saves, execution pins and owned
+PC/Mac closure passed. The advisor approved a new fixture comparison using
+source-backed native eligibility bits, retaining raw words and every acceptance
+assertion, followed by one fresh control and one full only after PASS. Old
+FAILs remain. See the [control PASS](../build/rig/vuh1502-bb04-emission-control-prep-20261006-01/live-root01/result.md),
+[full FAIL](../build/rig/vuh1502-bb04-emission-wave-launch-prep-20261006-01/live-root01/result.md)
+and [independent review](../build/rig/vuh1502-bb04-emission-full-review-20261006-01/result.md).
+
+
 The [HUD names live preparation](../build/rig/vuh1507-hud-names-live-prep-20261006-01/result.md)
 is accepted offline:32 steps, exact matched private AvatarBridge-v3 products,
 literal admitted peer IDs and eight canonical capture attestations. Collection
