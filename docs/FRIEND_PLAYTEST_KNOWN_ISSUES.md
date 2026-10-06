@@ -28,9 +28,10 @@ open. This list will be updated before the package is handed to a friend.
   while everyone was alive; basic populated reconnect is still being fixed.
   Stop and report a drop after kills, missing enemies, or enemies returning to
   life rather than continuing that room.
-- **A populated join can miss enemies.** One courtyard join passed and another
+- **A populated join can miss enemies.** Two courtyard joins passed and another
   left the joining game with an empty pack. Extra hook logging is a possible
-  timing factor, not a proven cause. If players see different enemies, stop and
+  timing factor, not a proven cause; an empty pack also occurred after reconnect
+  with that logging off. If players see different enemies, stop and
   report both screens and logs; do not continue combat in that room.
 - **Names use plain ASCII.** Use different names made from letters, digits,
   spaces, `_`, `.` or `-`; the HUD shows at most 23 characters. MP,

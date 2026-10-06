@@ -29,17 +29,22 @@ possibly enemies.
 | Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected story delivery and one empty-room native client hold also passed (`094229`); broader event side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
-**First friend preview (VUH-1494).** The self-contained Windows release04 ZIP
+**First friend preview (VUH-1494).** The self-contained Windows release06 ZIP
 and guide are ready for rehearsal, with an exact game-EXE allowlist, package-local
 owned launch/cleanup and saveguard attestation. A clean package started the
 private game view without `steam_appid.txt`; two fresh copies then loaded the
 existing Parlor save and connected through the desktop launchers and Mac relay.
-The short gameplay session is still unproven. The package's co-op display was
-off; a reviewed launcher-only overlay correction is being prepared without
-changing the adopted DLL. One startup stopped after Warp initialization and remains an unexplained
+Rehearsal08 passed automatic names/HP on both games, visible Hide/Show, normal
+walking into Entrance Hall with the Guest following, and an empty-room GUI
+reconnect that preserved Hide until explicitly shown. Combat, chest and natural
+cutscene checks are still incomplete; this is not friend readiness or populated
+reconnect acceptance. The portable CLI/launcher HUD change leaves the adopted
+DLL unchanged. One startup stopped after Warp initialization and remains an unexplained
 FAIL. The later single diagnostic startup completed, so no hang dump was captured.
-See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release04-result.md),
-[desktop connection rehearsal](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal07/result.md)
+The closed startup ledger records launcher 7/8 with a 15-second initialization
+wait and rig 14/14 with a 60-second wait; those limits stay separate.
+See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release06-result.md),
+[desktop HUD/room rehearsal](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal08/result.md)
 and [startup diagnostic](../build/rig/vuh1494-friend-playtest-20261006-01/startup-diagnostic05/result.md).
 
 Courtyard qualification passed all 14 steps. The full run passed late populated
@@ -67,13 +72,23 @@ These runs used two games on one Windows PC through the private Mac relay, with
 unchanged saves and clean owned-process closure. Friend relay access still needs
 James's decision before any external playtest.
 
-**Reconnect recovery (VUH-1508), in plain terms.** If a client rejoins while the
+**Earlier reconnect recovery prototype (VUH-1508).** If a client rejoins while the
 host stands away from the enemy spawn area, the client's room comes back without
 its enemies: the native spawn trigger never fires for it. This reproduces on
 demand (control `20261004-143318`, 5/0/5). A forced resync now replays the host's
 recorded activation input through the client's own spawner, so the game respawns
 all five Shadows natively, reconciles HP and keeps them (`20261004-143903`, 5/5/5).
 It's default-off and covers one all-alive pack only.
+
+The current matched v3 products do not enable that prototype's first-emission
+recorder. Full03's empty pack and full04's populated-join failure share the fresh
+native-bootstrap/activation path. Current activation leases feed the Host's
+current position, which can differ from the traversal that emitted its pack.
+That is a hypothesis awaiting a read-only controller census and historical log
+comparison, not a demonstrated cause or an adopted product fix. The offline
+[emission-point sketch](../build/rig/vuh1495-emission-point-fix-sketch-20261006-01/result.md)
+requires a separately reviewed grant, lifetime/death safeguards and fresh control;
+it cannot silently substitute an old point into protocol10's freshness contract.
 
 One automatic cycle passed (`20261004-213052`): a fresh complete empty client
 census triggered exactly one request and one Bootstrap load, hits stayed held
