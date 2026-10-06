@@ -23,9 +23,19 @@ def check(cli, output):
         run('wrong-marker',['help'],root,False,'package folder')
         (root/'KH2COOP-PACKAGE').write_text('kh2coop-friend-package-v1\n')
         run('wrong-cwd',['help'],root/'bin',False,'package folder')
-        run('help',['help'],root,True,'Internal commands: launch, instances, kill, help.')
+        run('help',['help'],root,True,'Internal commands: launch, instances, kill, overlay on|off --pid N, help.')
         for command in ('restart','boot-load-save','inject','poke','player-input','world-resync','capture'):
             run('blocked-'+command,[command],root,False,'Command unavailable')
+        for args in ([],['on'],['off'],['toggle','--pid','42'],['ON','--pid','42'],
+                     ['--pid','42','on'],['on','--pid'],['on','--pid','42','extra'],
+                     ['off','--pid','42','--pid','43']):
+            run('overlay-shape-'+str(args),['overlay',*args],root,False,'Portable overlay takes')
+        for pid in ('0','-1','+42','0x2a','42x','4294967296',' 42','42 '):
+            run('overlay-pid-'+pid,['overlay','on','--pid',pid],root,False,'positive decimal PID')
+        # No owned.txt: these exact valid forms refuse before opening a process
+        # or channel. No discovery or live game operation is performed.
+        for value in ('on','off'):
+            run('overlay-unowned-'+value,['overlay',value,'--pid','42'],root,False,"package's owned game")
     result={'ok':True,'scope':'CLI usage and refusal paths only; no game discovery, launch, memory or network', 'cases':rows}
     Path(output).write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps({'ok':True,'checks':len(rows)}))
 

@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -42,7 +44,7 @@ class Safety(unittest.TestCase):
         self.calls.append(args)
         if args[0]=='kill':self.win.live=False;return {'ok':True,'killed':[42]}
         if args[0]=='instances':return {'ok':True,'instances':[{'processId':42,'owned':True}]}
-        log=self.root/'build/rig/logs/kh2coop_inject_42.log';log.parent.mkdir(parents=True);log.write_text('Save guard installed: fixture')
+        log=self.root/'build/rig/logs/kh2coop_inject_42.log';log.parent.mkdir(parents=True,exist_ok=True);log.write_text('Save guard installed: fixture')
         return {'ok':True,'processId':42,'hooksInstalled':True,'errors':[],'log':str(log)}
     def test_package_integrity_and_bridge_mix(self):
         f.verify_package(self.root)
@@ -160,6 +162,91 @@ class Safety(unittest.TestCase):
             self.assertEqual(env['SteamAppId'],'2552430');self.assertEqual(env['SteamGameId'],'2552430')
             self.assertEqual(env.get('PATH'),os.environ.get('PATH'))
             self.assertEqual(os.environ['SteamAppId'],'other')
+    def hud_setup(self, response=None):
+        o=self.owner()
+        with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME):
+            o.launch('unused',self.root/'launch')
+        session=SimpleNamespace(lock=threading.RLock(),plan={'options':{'pid':42}},
+            started=threading.Event(),stopping=threading.Event(),done=threading.Event(),
+            processes={'runtime':SimpleNamespace(poll=lambda:None)},path=self.root/'session')
+        session.started.set();session.path.mkdir();self.calls.clear()
+        def command(root,cli,args,**kw):
+            self.calls.append(args)
+            self.assertEqual(kw['timeout'],8)
+            return response if response is not None else {'ok':True,'processId':42,'overlay':args[1]=='on'}
+        o.command=command
+        return o,session,'[Runtime] Network: SessionState session=123 actors=2 room=fixture'
+    def test_hud_auto_once_then_manual_off_on_exact_receipts(self):
+        o,s,line=self.hud_setup()
+        o.set_overlay(True,s,line,automatic=True)
+        self.assertIsNone(o.set_overlay(True,s,line,automatic=True))
+        o.set_overlay(False,s,line);o.set_overlay(True,s,line)
+        self.assertEqual(self.calls,[['overlay',v,'--pid','42'] for v in ('on','off','on')])
+        rows=[json.loads(r) for r in (s.path/'overlay.jsonl').read_text().splitlines()]
+        self.assertEqual(len(rows),3)
+        self.assertTrue(all(r['confirmed'] and r['receipt']['processId']==42 and
+                            r['finishedNs']>=r['startedNs'] for r in rows))
+        self.assertEqual([r['automatic'] for r in rows],[True,False,False])
+    def test_hud_refuses_unprepared_unconnected_wrong_owner_or_stopped(self):
+        o,s,line=self.hud_setup()
+        changes=[(o,'ready',False),(o,'unresolved_launch',True),(o,'handle',None),
+                 (self.win,'live',False),(s,'plan',{'options':{'pid':43}}),
+                 (s,'processes',{}),(s,'processes',{'runtime':SimpleNamespace(poll=lambda:0)})]
+        for obj,key,value in changes:
+            with self.subTest(key=key),patch.object(obj,key,value),self.assertRaises(ValueError):
+                o.set_overlay(True,s,line)
+        for flag in (s.stopping,s.done):
+            flag.set()
+            with self.assertRaises(ValueError):o.set_overlay(True,s,line)
+            flag.clear()
+        s.started.clear()
+        with self.assertRaises(ValueError):o.set_overlay(True,s,line)
+        s.started.set()
+        with self.assertRaises(ValueError):o.set_overlay(True,s,'Connecting')
+        with self.assertRaises(ValueError):o.set_overlay('on',s,line)
+        self.assertEqual(self.calls,[])
+    def test_hud_hide_survives_reconnect_but_new_game_resets_preference(self):
+        o,s,line=self.hud_setup()
+        overlay_command=o.command
+        o.set_overlay(True,s,line,automatic=True);o.set_overlay(False,s,line)
+        s.done.set()
+        second=SimpleNamespace(**vars(s));second.done=threading.Event()
+        self.assertIsNone(o.set_overlay(True,second,line,automatic=True))
+        self.assertFalse(o.overlay_enabled);self.assertEqual(len(self.calls),2)
+        self.win.live=False;o.close_game()  # verified closure of original handle
+        self.win.live=True;o.command=self.command
+        with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME):
+            o.launch('unused',self.root/'launch2')
+        self.assertIsNone(o.overlay_enabled);self.assertIsNone(o.overlay_auto_session)
+        o.command=overlay_command
+        o.set_overlay(True,second,line,automatic=True)
+        self.assertTrue(o.overlay_enabled)
+        self.assertEqual([a for a in self.calls if a[0]=='overlay'],
+                         [['overlay',v,'--pid','42'] for v in ('on','off','on')])
+    def test_hud_rechecks_guard_and_package_before_flag(self):
+        o,s,line=self.hud_setup()
+        log=Path(o.receipt['log']);log.write_text('guard unavailable')
+        with self.assertRaises(ValueError):o.set_overlay(True,s,line)
+        log.write_text('Save guard installed')
+        (self.root/'bin/cli').write_bytes(b'changed')
+        with self.assertRaises(ValueError):o.set_overlay(True,s,line)
+        self.assertEqual(self.calls,[])
+    def test_hud_wrong_receipt_unknown_and_no_automatic_retry(self):
+        o,s,line=self.hud_setup({'ok':True,'processId':43,'overlay':True})
+        with self.assertRaises(ValueError):o.set_overlay(True,s,line,automatic=True)
+        self.assertIsNone(o.set_overlay(True,s,line,automatic=True))
+        self.assertIsNone(o.overlay_enabled);self.assertEqual(len(self.calls),1)
+        row=json.loads((s.path/'overlay.jsonl').read_text())
+        self.assertFalse(row['confirmed']);self.assertEqual(row['receipt']['processId'],43)
+        for receipt in ({'ok':True,'processId':42,'overlay':False},
+                        {'ok':True,'processId':42,'overlay':1}, {'ok':False,'processId':42,'overlay':True}):
+            o.command=lambda *a,**k:receipt
+            with self.assertRaises(ValueError):o.set_overlay(True,s,line)
+        def fail(*a,**k):raise f.CanonicalFailure('refused',{'ok':False,'error':'refused'})
+        o.command=fail
+        with self.assertRaises(f.CanonicalFailure):o.set_overlay(False,s,line)
+        row=json.loads((s.path/'overlay.jsonl').read_text().splitlines()[-1])
+        self.assertEqual(row['receipt'],{'ok':False,'error':'refused'})
     def test_private_endpoint_only(self):
         for address in ('0.0.0.0','127.0.0.1','8.8.8.8','example.com'):
             with self.assertRaises(ValueError):make_plan(Options(42,'join',address),self.root,runtime=Path('runtime'),server=Path('server'))

@@ -68,7 +68,7 @@ def main():
     ttk.Label(frame,text='Disconnect leaves the game open. Exit & close game closes only the game started here.\n'
               'Session limit: 30 minutes. Logs stay in this package. No save is committed.',wraplength=630).grid(row=13,columnspan=3,sticky='w')
     events=queue.Queue();busy=False;session=None;closing=False
-    log_offset=0;log_fragment='';roster=False;last_rtt='';rtt_at=0.
+    log_offset=0;log_fragment='';roster=False;last_rtt='';rtt_at=0.;connection_line=''
     def run_work(fn,label):
         nonlocal busy
         if busy:return
@@ -87,7 +87,7 @@ def main():
             return f'Game {r["processId"]} prepared with save protection. Load your save manually, then Connect.'
         run_work(action,'Checking the exact game build and starting KH2…')
     def connect():
-        nonlocal session,log_offset,log_fragment,roster,last_rtt,rtt_at
+        nonlocal session,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line
         if busy:return
         try:
             if not owner.ready or not win.alive(owner.handle):raise ValueError('Start and prepare your game here first.')
@@ -98,7 +98,7 @@ def main():
             plan=make_plan(opt,fresh_dir(),runtime=owner.product('runtime'),server=owner.product('server'))
             verify_package(ROOT)
             session=Session(win,plan,owner.product('cli'))
-            log_offset=0;log_fragment='';roster=False;last_rtt='';rtt_at=0.
+            log_offset=0;log_fragment='';roster=False;last_rtt='';rtt_at=0.;connection_line=''
             run_work(lambda:(session.start() or session.error or 'Connecting; waiting for verified roster.'),'Starting private session…')
         except Exception as error:messagebox.showerror('Cannot connect',str(error))
     def disconnect():
@@ -112,11 +112,20 @@ def main():
             if session:session.stop('launcher closing')
             result=owner.close_game();return json.dumps(result)
         run_work(action,'Closing owned helpers and game…')
+    def hud(enabled, automatic=False):
+        if busy or closing or not roster or not session:return
+        current=session;line=connection_line
+        def action():
+            owner.set_overlay(enabled,current,line,automatic=automatic)
+            return 'HUD '+('on' if enabled else 'off')+' requested. Receipt saved in session logs.'
+        run_work(action,'Updating HUD…')
     buttons=ttk.Frame(frame);buttons.grid(row=11,columnspan=3,sticky='ew')
     for label,fn in [('Start game',launch),('Connect',connect),('Disconnect',disconnect),('Exit & close game',close)]:
         ttk.Button(buttons,text=label,command=fn).pack(side='left',padx=(0,8))
+    hud_button=ttk.Button(buttons,text='Show HUD',command=lambda:hud(owner.overlay_enabled is not True),state='disabled')
+    hud_button.pack(side='left')
     def tick():
-        nonlocal busy,closing,log_offset,log_fragment,roster,last_rtt,rtt_at
+        nonlocal busy,closing,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line
         try:
             kind,text=events.get_nowait();busy=False
             if kind=='error':
@@ -139,11 +148,19 @@ def main():
                     import re
                     rtt=re.findall(r'\[Runtime\] Net: rtt=(\d+)ms',text)
                     if rtt:last_rtt=rtt[-1];rtt_at=time.monotonic()
-                    if 'SessionState session=' in text:roster=True
-                    if 'Network: closed ' in text or 'refused by relay:' in text:roster=False;last_rtt=''
+                    for line in text.splitlines():
+                        if line.startswith('[Runtime] Network: SessionState session='):
+                            roster=True;connection_line=line
+                        if 'Network: closed ' in line or 'refused by relay:' in line:
+                            roster=False;last_rtt='';connection_line=''
                     status.set(('Connected — roster verified' if roster else 'Waiting for verified roster')+
                                (f' · RTT {last_rtt} ms'+(' (stale)' if time.monotonic()-rtt_at>5 else '') if last_rtt else '')+'\n'+str(session.path))
+                    if roster and owner.overlay_enabled is None and owner.overlay_auto_session is not session:
+                        hud(True,automatic=True)
             elif session.done.is_set():status.set(session.error or 'Disconnected. Game remains open; do not save.')
+        hud_button.configure(text='Hide HUD' if owner.overlay_enabled is True else 'Show HUD',
+            state='normal' if not busy and not closing and roster and session and
+            session.started.is_set() and not session.stopping.is_set() and not session.done.is_set() else 'disabled')
         app.after(500,tick)
     app.protocol('WM_DELETE_WINDOW',close);app.after(500,tick)
     try:app.mainloop()

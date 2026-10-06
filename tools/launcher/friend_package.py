@@ -104,6 +104,8 @@ class GameOwner:
         self.ready = False
         self.receipt = None
         self.unresolved_launch = False
+        self.overlay_auto_session = None
+        self.overlay_enabled = None
 
     def product(self, name):
         return self.root / self.manifest['products'][name]
@@ -147,6 +149,8 @@ class GameOwner:
                 raise ValueError('Canonical ownership was not confirmed.')
             self.ready = True
             self.unresolved_launch = False
+            self.overlay_auto_session = None
+            self.overlay_enabled = None  # a new attested game starts a new HUD preference
         except Exception as error:
             # An injected game without confirmed protection must not be left
             # playable silently. Canonical kill still checks retained ownership.
@@ -166,6 +170,49 @@ class GameOwner:
             (receipt_dir / 'launch-result.json').write_text(json.dumps({'receipt':receipt,
                 'ready':self.ready,'cleanup':cleanup,'finishedNs':time.perf_counter_ns()}, indent=2), encoding='utf-8')
         return receipt
+
+    def set_overlay(self, enabled, session, connection_line, *, automatic=False):
+        """One mod-channel flag request, only for this attested, connected game.
+
+        The session lock excludes its timer/stop; the UI busy gate excludes
+        Exit and other button work. A receipt confirms the flag, not pixels.
+        """
+        if type(enabled) is not bool:
+            raise ValueError('HUD choice must be on or off.')
+        with session.lock:
+            if automatic:
+                if self.overlay_enabled is not None or self.overlay_auto_session is session:
+                    return None
+                self.overlay_auto_session = session  # a failure is not auto-retried
+            argv = ['overlay', 'on' if enabled else 'off', '--pid', str(self.pid)]
+            record = {'argv':argv, 'automatic':automatic, 'startedNs':time.perf_counter_ns(),
+                      'connectionLine':connection_line, 'confirmed':False}
+            try:
+                if (not self.ready or self.unresolved_launch or not self.handle or
+                        not self.win.alive(self.handle) or session.plan['options']['pid'] != self.pid or
+                        not session.started.is_set() or session.stopping.is_set() or session.done.is_set() or
+                        not connection_line.startswith('[Runtime] Network: SessionState session=') or
+                        any(p.poll() is not None for p in session.processes.values()) or
+                        'runtime' not in session.processes):
+                    raise ValueError('HUD requires this launcher\'s prepared game and a connected session.')
+                verify_package(self.root)
+                attest_guard(self.root, self.pid, self.receipt)
+                receipt = self.command(self.root, self.product('cli'), argv, timeout=8)
+                record['receipt'] = receipt
+                if (receipt.get('ok') is not True or type(receipt.get('processId')) is not int or
+                        receipt['processId'] != self.pid or receipt.get('overlay') is not enabled):
+                    raise ValueError('HUD helper receipt did not match the owned game and requested flag.')
+                self.overlay_enabled = enabled
+                record['confirmed'] = True
+                return receipt
+            except Exception as error:
+                record['error'] = str(error)
+                if isinstance(error, CanonicalFailure):record['receipt'] = error.receipt
+                raise
+            finally:
+                record['finishedNs'] = time.perf_counter_ns()
+                with (session.path / 'overlay.jsonl').open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(record) + '\n')
 
     def close_game(self):
         self.ready = False

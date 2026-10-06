@@ -25,6 +25,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -2235,6 +2236,25 @@ CommandResult CmdOverlay(std::vector<std::string> args) {
         throw std::runtime_error("overlay takes on|off");
     }
     const DWORD pid = ResolveTargetPid();
+#ifdef KH2COOP_PORTABLE_PACKAGE
+    // Explicit package ownership before opening the mod channel. Retain the
+    // process object through the flag write so a recycled PID cannot qualify.
+    const auto owned = ReadOwned();
+    const auto owner = std::find_if(owned.begin(), owned.end(), [pid](const auto& row) {
+        return row.pid == pid && row.creationTime != 0;
+    });
+    if (owner == owned.end()) return MakeError("Overlay requires this package's owned game.");
+    const std::unique_ptr<void, decltype(&CloseHandle)> process(
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid), &CloseHandle);
+    std::array<wchar_t, 32768> image {};
+    DWORD length = static_cast<DWORD>(image.size());
+    if (!process || ProcessCreationTime(process.get()) != owner->creationTime ||
+        WaitForSingleObject(process.get(), 0) != WAIT_TIMEOUT ||
+        !QueryFullProcessImageNameW(process.get(), 0, image.data(), &length) ||
+        _wcsicmp(std::filesystem::path(image.data()).filename().c_str(), kKh2ExeName) != 0) {
+        return MakeError("Overlay owned game identity is unavailable or changed.");
+    }
+#endif
     CaptureChannelView channel(pid);
     if (!channel.get()) return OpenChannelError(pid);
     InterlockedExchange(&channel.get()->overlay, args[0] == "on" ? 1 : 0);
@@ -2927,7 +2947,7 @@ CommandResult CmdWorldResync(std::vector<std::string> args) {
 void PrintUsage() {
 #ifdef KH2COOP_PORTABLE_PACKAGE
     std::cout << "KH2 Co-op package helper. Open Start KH2 Co-op.cmd.\n"
-                 "Internal commands: launch, instances, kill, help.\n";
+                 "Internal commands: launch, instances, kill, overlay on|off --pid N, help.\n";
 #else
     std::cout
         << "kh2ctl commands:\n"
@@ -3002,16 +3022,27 @@ int main(int argc, char* argv[]) {
         }
 
         const std::string command = ToLower(argv[1]);
+        std::vector<std::string> args(argv + 2, argv + argc);
 #ifdef KH2COOP_PORTABLE_PACKAGE
         if (command != "launch" && command != "instances" && command != "kill" &&
-            command != "help" && command != "--help" && command != "-h") {
+            command != "overlay" && command != "help" && command != "--help" && command != "-h") {
             const auto error = MakeError("Command unavailable in the friend package. "
                                          "Open Start KH2 Co-op.cmd.");
             std::cout << error.json << std::endl;
             return error.exitCode;
         }
+        if (command == "overlay") {
+            // Refuse malformed or implicit targets before any game discovery.
+            std::uint32_t pid = 0;
+            const bool shape = args.size() == 3 && (args[0] == "on" || args[0] == "off") &&
+                               args[1] == "--pid" && !args[2].empty();
+            if (!shape) throw std::runtime_error("Portable overlay takes on|off --pid DECIMAL_PID.");
+            const auto parsed = std::from_chars(args[2].data(), args[2].data() + args[2].size(), pid);
+            if (parsed.ec != std::errc{} || parsed.ptr != args[2].data() + args[2].size() || pid == 0) {
+                throw std::runtime_error("Portable overlay requires a positive decimal PID.");
+            }
+        }
 #endif
-        std::vector<std::string> args(argv + 2, argv + argc);
 
         // Rig commands manage processes themselves (inject/kill take their
         // own --pid). Every other command attaches to one instance: the one
