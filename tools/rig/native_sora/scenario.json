@@ -1,0 +1,39 @@
+{
+  "name": "native_sora_network_visual_goa",
+  "description": "VUH-1489 default-off known-room visual-only profile; two real peers, no synth/combat/spells/reconnect claim.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26,
+      "door": 0,
+      "map": 0,
+      "btl": 0,
+      "evt": 0
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26,
+      "door": 0,
+      "map": 0,
+      "btl": 0,
+      "evt": 0
+    },
+    {
+      "do": "native_sora_visual"
+    }
+  ]
+}
