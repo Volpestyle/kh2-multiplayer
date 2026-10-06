@@ -26,6 +26,7 @@ untested; the preview uses the limits below.
   into the package's sandbox and blocks save-file deletion, moves and copies.
   This session's progress is temporary. Close the co-op game before playing
   normally or removing the package.
+- **Enemies move independently.** HP and deaths are shared, but enemy movement and attacks run separately on each computer; matching the host's enemy movement and AI remains planned (VUH-1515).
 - **Reconnect before defeating a pack.** Recovery with defeated enemy packs is
   unsupported. A courtyard timeout/rejoin also returned without client enemies
   while everyone was alive. One unchanged-product check restored the exact
