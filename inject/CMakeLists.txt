@@ -46,6 +46,7 @@ set_target_properties(minhook_lib PROPERTIES
 # ---------------------------------------------------------------------------
 add_library(kh2coop_inject SHARED
     src/DllMain.cpp
+    src/SteamCapabilityProbe.cpp
     src/EntityHook.cpp
     src/RenderHook.cpp
     src/Warp.cpp

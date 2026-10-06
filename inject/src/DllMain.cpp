@@ -15,6 +15,7 @@
 #include <Windows.h>
 #include <atomic>
 #include "EntityHook.hpp"
+#include "SteamCapabilityProbe.hpp"
 
 namespace {
 
@@ -97,7 +98,10 @@ DWORD WINAPI InitThread(LPVOID /*param*/) {
         if (g_shutdownRequested.load(std::memory_order_acquire)) {
             return 0;
         }
-        if (TryInit()) return 0;
+        if (TryInit()) {
+            kh2coop::steamprobe::Run(g_stopEvent);
+            return 0;
+        }
     }
     // Failed to initialize within timeout.
     // This is not fatal — the DLL just won't hook anything.
