@@ -2310,6 +2310,36 @@ FAILs remain. See the [control PASS](../build/rig/vuh1502-bb04-emission-control-
 [full FAIL](../build/rig/vuh1502-bb04-emission-wave-launch-prep-20261006-01/live-root01/result.md)
 and [independent review](../build/rig/vuh1502-bb04-emission-full-review-20261006-01/result.md).
 
+Fresh semantic-mask control `030712` passed. Full `030933` remains FAIL,
+although all five first-wave enemies reached exact all-peer damage HP and
+exactly-once deaths on both clients. It stopped at step47 before proving an
+empty gap: consecutive native reads shared the coarse `time.monotonic()`
+value, and the strict ordering guard refused. The second pack was unobserved;
+the initialized step status does not prove completion. Closed independent
+review adopted that scope. The advisor approved a new fixture that brackets
+each actual native read with `perf_counter_ns()` and requires strictly ordered,
+non-overlapping reads, retaining the coarse fields and every acceptance check.
+One fresh control precedes one full run. No pauses or budgets were added.
+See the [control PASS](../build/rig/vuh1502-bb04-eligibility-control-prep-20261006-01/live-root01/result.md),
+[full FAIL](../build/rig/vuh1502-bb04-eligibility-wave-launch-prep-20261006-01/live-root01/result.md)
+and [independent review](../build/rig/vuh1502-bb04-eligibility-full-review-20261006-01/result.md).
+
+The fresh QPC no-kill control `032130` passed and its closed evidence was
+requalified by the actual full launcher. Full `032656` remains FAIL at initial
+count convergence, before strict admission or any hit: the saved counts were
+empty in all three games, and retained host publications stayed empty. All
+three peers were verified. The final sampled host point was about20 units
+short of the retained activation cylinder; why movement differed is unproved.
+No QPC emission read or wave acceptance was exercised. Execution pins, four saves,
+six owned PC closures and the closed Mac relay receipts passed. No retry.
+See the [fresh control](../build/rig/vuh1502-bb04-qpc-control-prep-20261006-01/live-root01/result.md)
+and [full FAIL](../build/rig/vuh1502-bb04-qpc-wave-launch-prep-20261006-01/live-root01/result.md).
+The [independent review](../build/rig/vuh1502-bb04-qpc-full-review-20261006-01/result.md)
+adopted that scope. The advisor approved a new fixed fourth900ms activation
+round with position logging after every round, a fresh control and one full
+after PASS. A further activation miss calls for a capped native-activation
+stop, not another fixed round. All original acceptance checks remain.
+
 
 The [HUD names live preparation](../build/rig/vuh1507-hud-names-live-prep-20261006-01/result.md)
 is accepted offline:32 steps, exact matched private AvatarBridge-v3 products,
