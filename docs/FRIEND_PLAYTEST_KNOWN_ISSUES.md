@@ -24,11 +24,19 @@ open. This list will be updated before the package is handed to a friend.
   This session's progress is temporary. Close the co-op game before playing
   normally or removing the package.
 - **Reconnect before defeating a pack.** Recovery with defeated enemy packs is
-  unsupported. Stop and report a drop after kills, missing enemies, or enemies
-  returning to life rather than continuing that room.
+  unsupported. A courtyard timeout/rejoin also returned without Client enemies
+  while everyone was alive; basic populated reconnect is still being fixed.
+  Stop and report a drop after kills, missing enemies, or enemies returning to
+  life rather than continuing that room.
+- **A populated join can miss enemies.** One courtyard join passed and another
+  left the joining game with an empty pack. Extra hook logging is a possible
+  timing factor, not a proven cause. If players see different enemies, stop and
+  report both screens and logs; do not continue combat in that room.
 - **Names use plain ASCII.** Use different names made from letters, digits,
   spaces, `_`, `.` or `-`; the HUD shows at most 23 characters. MP,
   downed/revive and the full multiplayer HUD remain unfinished.
+- **HUD performance.** If the game stutters or crashes with the HUD shown, use
+  **Hide HUD**.
 - **Keep the session short and host-led.** Broader story events, populated-room
   cutscene hold, bosses and finishers have incomplete coverage. Report the room,
   what each player did, a screenshot if possible, and the package's log folder

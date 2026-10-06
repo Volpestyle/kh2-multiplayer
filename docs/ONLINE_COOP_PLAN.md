@@ -29,13 +29,17 @@ possibly enemies.
 | Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected story delivery and one empty-room native client hold also passed (`094229`); broader event side effects remain open. |
 | Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
 
-**First friend preview (VUH-1494).** The self-contained Windows release03 ZIP
+**First friend preview (VUH-1494).** The self-contained Windows release04 ZIP
 and guide are ready for rehearsal, with an exact game-EXE allowlist, package-local
 owned launch/cleanup and saveguard attestation. A clean package started the
-private game view without `steam_appid.txt`; the launcher-only session is still
-unproven. One startup stopped after Warp initialization and remains an unexplained
+private game view without `steam_appid.txt`; two fresh copies then loaded the
+existing Parlor save and connected through the desktop launchers and Mac relay.
+The short gameplay session is still unproven. The package's co-op display was
+off; a reviewed launcher-only overlay correction is being prepared without
+changing the adopted DLL. One startup stopped after Warp initialization and remains an unexplained
 FAIL. The later single diagnostic startup completed, so no hang dump was captured.
-See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release03-result.md)
+See the [package candidate](../build/rig/vuh1510-friend-package-20261006-01/release04-result.md),
+[desktop connection rehearsal](../build/rig/vuh1494-friend-playtest-20261006-01/rehearsal07/result.md)
 and [startup diagnostic](../build/rig/vuh1494-friend-playtest-20261006-01/startup-diagnostic05/result.md).
 
 Courtyard qualification passed all 14 steps. The full run passed late populated
@@ -43,8 +47,19 @@ join and progress delivery, then failed its reload comparison: a previously
 damaged enemy was 18/20 before reload and 20/20 on both peers in the new native
 lifetime. Reconnect was not reached. The original FAIL is retained while the
 adopted fixture freezes the Host's HP once per native lifetime, retaining exact HP
-through late join and reconnect within that lifetime. A fresh trace-enabled
-qualification and full run are next; see the [triage](../build/rig/vuh1495-courtyard-full02-triage-20261006-01/result.md).
+through late join and reconnect within that lifetime. Both later qualifications
+passed. The trace-enabled full04 then failed at populated join: 25 client
+publications remained empty despite activation-lease application. Epochs agreed;
+the mismatch value 2 is the DesyncEnemies bit. Hook logging is a possible timing
+confound, not a proven cause. The previously unused trace-off full03 passed
+populated join and the new-lifetime reload, then failed after a real all-alive
+timeout/rejoin: roster, room ACK and progress recovered, but the Client pack was
+empty while the Host retained five enemies. Basic populated reconnect remains
+unpassed. Keep the full04 populated-join failure as an intermittent known issue;
+the empty-pack symptom is now also recorded with hit logging off. See the
+[reload triage](../build/rig/vuh1495-courtyard-full02-triage-20261006-01/result.md)
+and [empty-pack triage](../build/rig/vuh1495-courtyard-full04-triage-20261006-01/result.md),
+plus the [trace-off reconnect failure](../build/rig/vuh1495-courtyard-static-crt-root-live-20261006-03/live-full-root03/root-result.md).
 HUD names and reset passed all 32 steps and eight inspected native images,
 including natural runtime exit and cleared text. The earlier 020047 FAIL remains
 recorded; see the [accepted names/reset run](../build/rig/vuh1507-hud-names-static-crt-prep-20261006-02/live-root01/root-result.md).
