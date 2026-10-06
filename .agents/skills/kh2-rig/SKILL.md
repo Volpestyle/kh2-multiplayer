@@ -34,6 +34,7 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 - **`boot-load-save` is broken.** Load saves through the scenario `boot` step.
 - **Relay lifetime** is about 12 minutes (720 s). Don't explore routes on the relay clock; work routes out offline first.
 - **MP4s can't be decoded until finalized** (the `moov` atom). Stop a short sample before checking it.
+- **Clip-helper cleanup:** if a runner-owned `kh2ctl clip` is terminated during encoding, its ffmpeg child can survive. At closure, query children by the retained helper PID, creation time and clip command; stop only verified owned children and confirm their exit. Never kill every ffmpeg process.
 - **Clip timing:** `kh2ctl clip` and the scenario `clip` step block while recording and encoding. To film an action, start the canonical clip command as a runner-owned helper before that action, and collect it before any screenshot on the same instance. Each clip is limited to30 seconds. Check finalized early frames for real game motion; retain the reported before/during capture frame rates.
 
 ## Safety (unchanged rules, so you don't re-derive them)
