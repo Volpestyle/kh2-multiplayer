@@ -489,6 +489,31 @@ per phase. Complete native acceptance remains mandatory, with a fresh control
 and one full only after PASS. No hit is reissued and no deadline is renewed.
 
 
+Fresh linkpoll control `040051` passed and the full consumer requalified its
+closed evidence. Full `040547` passed original all-peer admission and exact
+damage HP91/13/13/13/13, then issued three lethal calls for IDs1/2/3. Each
+reached hostHP0 and applied once on each client. It remains FAIL before the
+fourth call: complete census03 and its canonical living reply retained two
+survivors, but the first weight snapshot found a changed nextHandle on living
+netId5/record55. Core identity pointers matched. This comparison was against
+the fresh census, not admission; mutation cause and successor are unproved.
+Census discards were zero in both reached phases, so the narrow classifier
+was not exercised live. Whole-wave deaths, empty gap, second pack and final
+quiet acceptance remain unproved. Saves, foreign files and owned PC/Mac closure
+passed; no unchanged retry. See the
+[control](../build/rig/vuh1502-bb04-linkpoll-control-prep-20261006-01/live-root01/result.md),
+[full FAIL](../build/rig/vuh1502-bb04-linkpoll-wave-launch-prep-20261006-01/live-root01/result.md)
+and [independent review](../build/rig/vuh1502-bb04-linkpoll-full-review-20261006-01/result.md).
+
+The advisor approved a new fixture that retains raw nextHandle but excludes
+it from identity equality between the census and weight read, and between
+two independent weight snapshots. Core pointers, native weights, eligibility,
+HP, list bounds and all remaining guards stay. Within-walk list consistency
+and its existing narrowly bounded whole-census re-read remain mandatory.
+One fresh matching control precedes one full only after PASS. All acceptance
+assertions and recorded FAILs remain unchanged.
+
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer
