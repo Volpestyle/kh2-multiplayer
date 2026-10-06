@@ -30,10 +30,14 @@ open. This list will be updated before the package is handed to a friend.
   life rather than continuing that room.
 - **A populated join can miss enemies.** Courtyard joins have both passed and
   left the joining game with an empty pack, including a trace-off diagnostic.
-  An empty pack also occurred after reconnect with that logging off. The current
-  Host position can miss the native spawn trigger; the geometry fix and a
-  Host-walking workaround are not yet proven. If players see different enemies, stop and
-  report both screens and logs; do not continue combat in that room.
+  An empty pack also occurred after reconnect with that logging off. For an
+  all-alive courtyard join where the Host sees five Shadows and the friend sees
+  none, the Host can take one short walk away from the circular patterned paving
+  onto the nearby broad stone steps, then stop and compare both games. This
+  restored the exact pack in two rig checks. Do not keep walking or start combat
+  if they still differ; stop and report both screens and logs. This instruction
+  has not passed on reconnect or after kills. The protocol11 geometry fix is
+  source-reviewed, unbuilt and absent from this package.
 - **Names use plain ASCII.** Use different names made from letters, digits,
   spaces, `_`, `.` or `-`; the HUD shows at most 23 characters. MP,
   downed/revive and the full multiplayer HUD remain unfinished.
