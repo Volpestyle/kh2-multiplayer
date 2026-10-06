@@ -63,6 +63,25 @@ bool argumentsPreserved = true;
 void* expectedActor = nullptr;
 void* expectedController = nullptr;
 
+// Scopes live in the retained FLS-owned frame store (NativeTraceFiber.hpp), not
+// thread_local stack pointers. Idle means this fiber's retained store is still
+// usable and has no open lifecycle or predicate frame.
+bool Idle() {
+    auto* local = g_storage.Current();
+    return local && local->depth == 0;
+}
+// Runs fn on a fresh thread (fresh FLS cell) and returns its exit code.
+DWORD RunOnThread(LPTHREAD_START_ROUTINE fn, void* argument) {
+    HANDLE thread = CreateThread(nullptr, 0, fn, argument, 0, nullptr);
+    if (!thread) return 0xFFFF;
+    // Do not release stack-owned synthetic memory while worker may use it.
+    if (WaitForSingleObject(thread, 10000) != WAIT_OBJECT_0) ExitProcess(1);
+    DWORD code = 0xFFFF;
+    if (!GetExitCodeThread(thread, &code)) code = 0xFFFF;
+    CloseHandle(thread);
+    return code;
+}
+
 template <typename T, std::size_t N> void Put(std::array<std::uint8_t, N>& bytes, std::size_t offset, T value) {
     std::memcpy(bytes.data() + offset, &value, sizeof(value));
 }
@@ -115,7 +134,24 @@ DWORD WINAPI ForeignObservation(void*) {
     // First registration already belongs to main; foreign callers cannot steal it.
     kh2coop::inject::spawncontroller::RegisterDiagnosticGameThread();
     Run(Kind::RemovalBookkeeping, expectedController, expectedActor, g_exeBase + 0x41181D);
-    return g_context.sequence == 0 && g_context.depth == 0 ? 0 : 1;
+    return Idle() ? 0 : 1;
+}
+// Fills this fresh thread's retained store to the depth cap with a valid
+// enclosing frame, then observes once. Exit 0: the original ran, nothing was
+// recorded, and the overfull store was abandoned (fail-closed, never reused).
+DWORD WINAPI DepthCapObservation(void* predicate) {
+    auto* local = g_storage.Current();
+    if (!local || local->depth) return 2;
+    if (predicate) diagnosticThread.store(GetCurrentThreadId());
+    auto& top = local->frames[kDepthCap - 1];
+    top = {};
+    top.anchor = reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
+    top.serial = ++g_scopeSerial;
+    top.event.sequence = predicate ? 77 : 999;
+    local->depth = kDepthCap;
+    if (predicate) RunPredicate(expectedActor, g_exeBase + 0x3BFD6F);
+    else if (CatchRemoval()) return 3;
+    return g_storage.Current() == nullptr ? 0 : 1;
 }
 
 unsigned predicateCalls = 0, scriptCalls = 0, auxiliaryCalls = 0;
@@ -179,7 +215,7 @@ bool CatchPredicate(std::uint8_t* result) {
 }
 DWORD WINAPI ForeignPredicateObservation(void*) {
     RunPredicate(expectedActor, g_exeBase + 0x3BFD6F);
-    return !g_predicateContext && !g_context.sequence && !g_context.depth ? 0 : 1;
+    return Idle() ? 0 : 1;
 }
 
 void TestPredicates() {
@@ -221,7 +257,7 @@ void TestPredicates() {
               event.removal.scriptCalls == 1 && event.removal.scriptReturned == 1 &&
               event.removal.coverageMask == RemovalPredicateHooks && event.removal.coverageStable &&
               event.removal.afterScript.scriptTest == 0x12345678 && event.removal.after.availableMask == 31 &&
-              !event.beforeActor.available && !g_predicateContext && !g_context.sequence && !g_context.depth,
+              !event.beforeActor.available && Idle(),
               "each of five normal removal outcomes uses genuine AL and calls each actual original once without HP gating");
         if (i == 2 || i == 3)
             Check(event.removal.auxiliaryArgument == reinterpret_cast<uintptr_t>(auxiliary.data()) &&
@@ -267,15 +303,27 @@ void TestPredicates() {
           "unmatched child caller passes through without supplement reads or attribution");
     wrongScriptActor = false;
 
-    Event unmatched;
-    unmatched.actor = reinterpret_cast<uintptr_t>(actor.data());
-    g_predicateContext = &unmatched;
-    expectedActor = otherActor.data(); // Synthetic original expects the distinct argument.
-    const auto unmatchedCalls = scriptCalls;
-    Check(RunPredicateChild(true, expectedActor, g_exeBase + 0x3DAC3E) == scriptByte &&
-          scriptCalls == unmatchedCalls + 1 && unmatched.removal.scriptCalls == 0,
-          "exact child caller with another actor cannot attach observations to the current parent");
-    expectedActor = actor.data(); g_predicateContext = nullptr;
+    // Open a synthetic retained predicate parent frame for the current actor,
+    // anchored at this test frame so the parent validates as live.
+    auto* scope = g_storage.Current();
+    Check(scope && scope->depth == 0, "retained scope store is idle before synthetic predicate parent");
+    if (scope && scope->depth == 0) {
+        auto& unmatched = scope->frames[0];
+        unmatched = {};
+        unmatched.anchor = reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
+        unmatched.serial = ++g_scopeSerial;
+        unmatched.predicate = true;
+        unmatched.event.actor = reinterpret_cast<uintptr_t>(actor.data());
+        scope->depth = 1;
+        expectedActor = otherActor.data(); // Synthetic original expects the distinct argument.
+        const auto unmatchedCalls = scriptCalls;
+        Check(RunPredicateChild(true, expectedActor, g_exeBase + 0x3DAC3E) == scriptByte &&
+              scriptCalls == unmatchedCalls + 1 && unmatched.event.removal.scriptCalls == 0 &&
+              g_storage.Current() == scope && scope->depth == 1,
+              "exact child caller with another actor cannot attach observations to the current parent");
+        unmatched = {}; scope->depth = 0;
+    }
+    expectedActor = actor.data();
 
     predicateCase = 3; parentByte = scriptByte = 1; auxiliaryByte = 0;
     expectedAuxiliary = reinterpret_cast<void*>(1); auxiliaryNoWrite = true;
@@ -292,14 +340,14 @@ void TestPredicates() {
     const auto calls = predicateCalls;
     RunPredicate(actor.data(), g_exeBase + 0x3BFD70);
     Check(predicateCalls == calls + 1 && !PopEvent(event) && stateReads == reads && serialReads.load() == serials &&
-          roleCalls.load() == roles && !g_predicateContext,
+          roleCalls.load() == roles && Idle(),
           "unmatched parent executes once without snapshot/role callbacks or inherited child attribution");
     nestedPredicate = true;
     RunPredicate(actor.data(), g_exeBase + 0x3BFD6F);
     Event nested;
     Check(PopEvent(nested) && PopEvent(event) && nested.parentSequence == event.sequence && nested.depth == 1 &&
           nested.removal.scriptCalls == 1 && event.removal.scriptCalls == 1 &&
-          event.removal.nestedAmbiguous && event.removal.branch == RemovalBranch::Unknown && !g_predicateContext,
+          event.removal.nestedAmbiguous && event.removal.branch == RemovalBranch::Unknown && Idle(),
           "recursive parents bind children to the top scope and explicitly invalidate outer branch inference");
     nestedPredicate = false;
     RemovalPredicates saturated;
@@ -321,7 +369,7 @@ void TestPredicates() {
               !event.removal.resultAvailable && event.removal.branch == RemovalBranch::Unknown &&
               event.removal.after.availableMask == 0 && !event.afterStampAvailable &&
               !event.afterState.controllerAvailable && stateReads == beforeReads + 1 && serialReads.load() == beforeSerials + 1 &&
-              !g_predicateContext && !g_context.sequence && !g_context.depth,
+              Idle(),
               "parent or child native exception propagates unchanged with no post-read cleanup or stale TLS");
         if (site != 0) {
             const auto bit = site == 1 ? ScriptPredicateHook : AuxiliaryPredicateHook;
@@ -342,7 +390,7 @@ void TestPredicates() {
     const auto drops = GetStats().predicateDropped;
     const auto originalCalls = predicateCalls;
     RunPredicate(actor.data(), g_exeBase + 0x3BFD6F);
-    Check(GetStats().predicateDropped == drops + 1 && predicateCalls == originalCalls + 1 && !g_predicateContext,
+    Check(GetStats().predicateDropped == drops + 1 && predicateCalls == originalCalls + 1 && Idle(),
           "full predicate queue exposes loss without replacing records or suppressing native execution");
     while (PopEvent(event)) {}
     event.kind = Kind::RemovalPredicate;
@@ -351,17 +399,20 @@ void TestPredicates() {
     std::uint8_t ignored = 0xEE;
     const auto faultDrops = GetStats().predicateDropped;
     Check(CatchPredicate(&ignored) && GetStats().predicateDropped == faultDrops + 1 &&
-          !g_predicateContext && !g_context.depth && ignored == 0xEE,
+          Idle() && ignored == 0xEE,
           "predicate queue loss during unwind preserves original exception and restores scopes");
     parentFault = false;
     while (PopEvent(event)) {}
-    g_context = {77, kDepthCap};
+    // A depth-cap store is fail-closed: run it on its own fiber-local cell so the
+    // main thread's retained store stays usable for the remaining checks.
     const auto depthDrops = GetStats().predicateDepthOverflow;
-    RunPredicate(actor.data(), g_exeBase + 0x3BFD6F);
-    Check(GetStats().predicateDepthOverflow == depthDrops + 1 && !PopEvent(event) && !g_predicateContext &&
-          g_context.sequence == 77 && g_context.depth == kDepthCap,
-          "predicate depth loss preserves enclosing context and hides unobserved children");
-    g_context = {};
+    const auto depthPredicateCalls = predicateCalls;
+    const auto registered = diagnosticThread.load();
+    const auto depthCode = RunOnThread(DepthCapObservation, reinterpret_cast<void*>(1));
+    diagnosticThread.store(registered);
+    Check(depthCode == 0 && GetStats().predicateDepthOverflow == depthDrops + 1 &&
+          predicateCalls == depthPredicateCalls + 1 && !PopEvent(event) && Idle(),
+          "predicate depth loss calls the original once, hides unobserved children and abandons the overfull scope");
 
     diagnosticThread.store(0);
     const auto unknownReads = stateReads, unknownSerials = serialReads.load(), unknownRoles = roleCalls.load();
@@ -426,6 +477,12 @@ int main() {
 
     Check(!Install(g_exeBase, nullptr, Role, false) && hookCalls == 0 && !GetStats().requested,
           "explicit opt-out performs no hook or native operation");
+    // Install() would arm recording and the retained FLS store before hooking;
+    // the headless test arms only those two so no MinHook call is made.
+    Check(!g_recording && !g_storage.Ready(), "opt-out leaves recording and retained scope storage unarmed");
+    Check(g_storage.Init(reinterpret_cast<const void*>(&Install)) && Idle(),
+          "retained fiber-local scope storage initializes idle");
+    g_recording = true;
     const auto snap = CaptureActor(reinterpret_cast<uintptr_t>(actor.data()));
     Check(snap.available && snap.classificationAvailable && snap.combat && snap.recordAvailable &&
           snap.hp == 160 && snap.recordId == 23 && snap.recordMode == 2 && snap.recordStage == 3 &&
@@ -438,7 +495,7 @@ int main() {
           normal.beforeState.cacheIds[0] == 23 && normal.afterState.cacheIds[0] == 0 && normal.afterState.cooldown == 8 &&
           normal.callerInImage && normal.callerRva == 0x41181D && normal.depth == 0 && normal.parentSequence == 0,
           "normal event retains truthful before/after native state and caller");
-    Check(!g_context.sequence && !g_context.depth, "normal completion restores TLS");
+    Check(Idle(), "normal completion restores TLS");
 
     Run(Kind::DeathMark, nullptr, actor.data(), g_exeBase + 0x42DD6F);
     Event countEvent, bookEvent, markEvent;
@@ -482,7 +539,7 @@ int main() {
           interruptedCount.unwound && interruptedRemoval.unwound && !interruptedRemoval.originalReturned &&
           !interruptedRemoval.afterStampAvailable && !interruptedRemoval.afterState.cacheAvailable &&
           !interruptedRemoval.afterActor.available && interruptedRemoval.exceptionCode == deliberateException &&
-          GetStats().nativeFaults == faultsBefore + 2 && !g_context.sequence && !g_context.depth,
+          GetStats().nativeFaults == faultsBefore + 2 && Idle(),
           "native unwind publishes unavailable nested events and restores TLS (faults are per-observer)");
     nestedCount = faultCount = false;
     Check(!CatchRemoval() && PopEvent(normal) && normal.originalReturned && !normal.unwound,
@@ -500,18 +557,18 @@ int main() {
           "successfully checked noncombat classification is explicit");
     object[offsets::objentry::TYPE_FLAGS] = offsets::objentry::TYPE_MOB;
 
-    g_context = {999, kDepthCap};
+    // Depth cap runs on its own fiber-local cell: the overfull store is abandoned
+    // (fail-closed) and must not disturb the main thread's retained scopes.
     const auto droppedBefore = GetStats().dropped;
     const auto depthCalls = removalCalls;
-    Check(!CatchRemoval() && removalCalls == depthCalls + 1 && g_context.sequence == 999 &&
-          g_context.depth == kDepthCap && GetStats().dropped == droppedBefore + 1 && GetStats().depthOverflow == 1,
-          "depth cap preserves original call and enclosing TLS while exposing loss");
-    g_context = {};
+    Check(RunOnThread(DepthCapObservation, nullptr) == 0 && removalCalls == depthCalls + 1 &&
+          GetStats().dropped == droppedBefore + 1 && !PopEvent(unknown) && Idle(),
+          "depth cap preserves original call, exposes loss and abandons the overfull retained scope");
 
     for (std::size_t i = 0; i < kQueueCap; ++i) Publish(normal);
     const auto fullDrops = GetStats().dropped;
     nestedCount = faultCount = true;
-    Check(CatchRemoval() && GetStats().dropped == fullDrops + 2 && !g_context.sequence && !g_context.depth,
+    Check(CatchRemoval() && GetStats().dropped == fullDrops + 2 && Idle(),
           "queue overflow during unwind preserves exception/TLS and counts both lost observations");
     unsigned retained = 0;
     while (PopEvent(unknown)) ++retained;
