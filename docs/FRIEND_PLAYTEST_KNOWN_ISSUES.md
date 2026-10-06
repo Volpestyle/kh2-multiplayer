@@ -17,7 +17,8 @@ open. This list will be updated before the package is handed to a friend.
   after Warp initialization; its cause remains unknown. The launcher refuses
   connection and attempts to close only its owned game. Use **Exit & close game**
   to resolve pending ownership. If the game is still open, exit normally and do
-  not save. Send the package logs to James before trying again.
+  not save. If Start reports that setup did not finish, press Start again once
+  the previous game has closed. Report repeated failures with the package logs.
 - **Do not save during co-op.** The mod's saveguard redirects game save writes
   into the package's sandbox and blocks save-file deletion, moves and copies.
   This session's progress is temporary. Close the co-op game before playing

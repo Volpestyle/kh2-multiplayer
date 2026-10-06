@@ -42,7 +42,9 @@ Courtyard qualification passed all 14 steps. The full run passed late populated
 join and progress delivery, then failed its reload comparison: a previously
 damaged enemy was 18/20 before reload and 20/20 on both peers in the new native
 lifetime. Reconnect was not reached. The original FAIL is retained while the
-per-lifetime HP fixture proposal is reviewed; see the [triage](../build/rig/vuh1495-courtyard-full02-triage-20261006-01/result.md).
+adopted fixture freezes the Host's HP once per native lifetime, retaining exact HP
+through late join and reconnect within that lifetime. A fresh trace-enabled
+qualification and full run are next; see the [triage](../build/rig/vuh1495-courtyard-full02-triage-20261006-01/result.md).
 HUD names and reset passed all 32 steps and eight inspected native images,
 including natural runtime exit and cleared text. The earlier 020047 FAIL remains
 recorded; see the [accepted names/reset run](../build/rig/vuh1507-hud-names-static-crt-prep-20261006-02/live-root01/root-result.md).
