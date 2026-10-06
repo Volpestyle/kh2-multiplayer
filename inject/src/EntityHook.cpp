@@ -1080,6 +1080,7 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     input.localAvailable = true;
     input.gameplayCurrent = !g_puppetsSuspended && !warp::TransitionPending();
     input.local = local;
+    (void)g_avatarBridge.TryReadRosterNames(input.names);
     for (int i = 0; i < 2; ++i) {
         auto& remote = input.remote[static_cast<std::size_t>(i)];
         remote.active = IsPuppetActive(i);

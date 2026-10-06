@@ -123,6 +123,20 @@ already carries MP fields; native capture currently leaves them at placeholder
 0/0. Numeric MP needs calibrated owner and native-friend mappings before HUD
 acceptance. See the [next HUD slice](../build/rig/vuh1507-hud-prep-20261005-01/names-mp-next-20261006/result.md).
 
+The reviewed HUD name implementation now uses admitted user-chosen peer IDs
+under protocol 10. Labels are tied to the current owner connections and session
+generation, expire after 1,000 ms, and clear on retirement. Invalid labels leave
+owner HP intact. This first increment accepts trimmed printable ASCII and shows
+at most 23 characters; separate display names and Unicode remain outside its
+scope. AvatarBridge is now v3, so DLL, runtime and avatarctl must match. The
+exact reviewed patch linked all three Release products privately, and 62 name
+controls passed normally and with Windows ASan; the existing 52 HUD controls
+also passed with ASan. Accepted older products and `073856` remain unchanged.
+No new product was deployed or tested in KH2. Names on the correct owner rows,
+departure/reset/stopped-runtime expiry, and readable captures remain live gates;
+VUH-1507 stays open. See the [source review](../build/rig/vuh1507-hud-names-review-20261006-01/result.md)
+and [matched build](../build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/result.md).
+
 The strict impaired Mac-relay two-pack wave gate remains unpassed. Corrected
 attempt `211819` passed its effective input witness and neutral release but
 failed the position-closing guard before any kill. Original first-pack IDs
@@ -374,8 +388,10 @@ Format: decision — why (rejected alternative).
   convergence ACKs, with one non-reloading Checkpoint. The operator uses a
   separate CAS mailbox; queued is not success. Cancellation unarms native
   authority and lazy attachment retains bounded post-cut continuation. The
-  current versions are protocol 9 / AvatarBridge 2 / WorldBridge 11 /
-  Capture 1. Protocol 9 adds the full record-content witness and guarded native
+  current versions are protocol 10 / AvatarBridge 3 / WorldBridge 11 /
+  Capture 1. Protocol 10 requires fresh automatic-resync observations; local
+  AvatarBridge 3 adds copied HUD roster labels. Protocol 9 added the full
+  record-content witness and guarded native
   consumer described above; its bounded local living Bootstrap passed, while
   absent-pack reconnect recovery remains open.
   The relay defaults to native traffic; `--simulate` is explicit legacy mode.
@@ -643,7 +659,7 @@ loaded, get several instances into a known room, act, look, and judge.
   full connection ID and slot; the receiver admits only its current roster.
   Slot removal/replacement retires that interpolation buffer, while host,
   self or session changes retire all buffers. Sampled poses retain the admitted
-  ID through AvatarBridge v2, together with the receiver's session generation
+  ID through AvatarBridge, together with the receiver's session generation
   and binding. The DLL checks cached provenance on every drive use against
   current WorldBridge v11; no new pose publication is needed to invalidate an old connection.
   Explicit standalone tooling requires a positively Off, never-armed bridge.

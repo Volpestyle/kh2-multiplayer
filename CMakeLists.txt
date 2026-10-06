@@ -373,6 +373,15 @@ endif()
 
 # Owner-slot/HP projection and nonblocking render telemetry mailbox. No game.
 if(WIN32)
+    # Admitted peer labels, expiry and bounded shared-slot concurrency.
+    add_executable(kh2coop_hud_names_test tests/HudNamesTest.cpp)
+    target_include_directories(kh2coop_hud_names_test PRIVATE inject/src common/include)
+    target_compile_definitions(kh2coop_hud_names_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        # AvatarBridge's existing cache-line padding is intentional (C4324).
+        target_compile_options(kh2coop_hud_names_test PRIVATE /W4 /WX /wd4324)
+    endif()
+
     add_executable(kh2coop_hud_cpu_test tests/CoopHudStateTest.cpp)
     target_include_directories(kh2coop_hud_cpu_test PRIVATE inject/src common/include)
     target_compile_definitions(kh2coop_hud_cpu_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

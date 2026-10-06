@@ -19,6 +19,7 @@
 
 #include "kh2coop/Types.hpp"
 #include "kh2coop/PuppetProvenance.hpp"
+#include "kh2coop/HudRosterSlot.hpp"
 
 // Lean Windows headers so ENet's winsock2 can be included alongside.
 #ifndef WIN32_LEAN_AND_MEAN
@@ -43,7 +44,7 @@ static_assert(std::is_trivially_copyable_v<AvatarState>,
 
 static constexpr const char* AVATAR_BRIDGE_PREFIX = "Local\\kh2coop_avatar_";
 static constexpr std::uint32_t AVATAR_BRIDGE_MAGIC = 0x42564B32; // "2KVB"
-static constexpr std::uint32_t AVATAR_BRIDGE_VERSION = 2;
+static constexpr std::uint32_t AVATAR_BRIDGE_VERSION = 3;
 static constexpr int AVATAR_BRIDGE_PUPPETS = 2; // friend slots 1 and 2
 
 // A pose the DLL should apply to a friend-slot puppet.
@@ -92,6 +93,7 @@ struct AvatarBridgeLayout {
     std::uint32_t _reserved[14];
     SeqlockSlot<AvatarState> local;
     SeqlockSlot<PuppetPose> puppets[AVATAR_BRIDGE_PUPPETS];
+    hudnames::Slot rosterNames; // v3 append; v2 peers must reject, never silently mix.
 };
 
 class AvatarBridge {
@@ -152,6 +154,15 @@ public:
     bool TryReadPuppet(int index, PuppetPose& out) {
         if (!view_ || index < 0 || index >= AVATAR_BRIDGE_PUPPETS) return false;
         return view_->puppets[index].tryRead(out, lastPuppetSeq_[index]);
+    }
+
+    // Names never use last-value caching: partial publication is unavailable.
+    bool TryReadRosterNames(hudnames::Roster& out) {
+        out = {};
+        return view_ && view_->rosterNames.TryRead(out);
+    }
+    bool PublishRosterNames(const hudnames::Roster& names) {
+        return view_ && view_->rosterNames.TryWrite(names);
     }
 
     // Runtime side.

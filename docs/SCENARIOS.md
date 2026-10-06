@@ -233,9 +233,33 @@ the location's `btl` value alone is not battle-state parity. The older B1 creato
 loader-installation and spatial-bypass work below is parked research for an
 added-dispatch alternative, not a prerequisite for this scheduled-update policy.
 
+## HUD peer labels: offline implementation (2026-10-06)
+
+Build and run the retained CPU regressions without a game:
+
+```powershell
+cmake --build build --config Release --target kh2coop_hud_names_test kh2coop_hud_cpu_test
+./build/Release/kh2coop_hud_names_test.exe
+./build/Release/kh2coop_hud_cpu_test.exe
+```
+
+The name controls check admitted-session/connection/generation binding, owner-row
+projection, malformed and colliding ASCII labels, retirement, the 1,000 ms expiry,
+partial publication, sequence exhaustion and concurrent copied reads. The exact
+name test passed 62 checks normally and under Windows ASan; existing HUD controls
+passed 52 ASan checks. The matched private DLL/runtime/avatarctl Release build uses
+AvatarBridge **3** and protocol **10**. These are offline results, with no deploy.
+
+A fresh live names run must use matching v3 readers and distinct short peer IDs,
+show both names on their owner HP rows in both games, retain Host/You and RTT/loss,
+verify departure/reset and stopped-runtime expiry, and inspect readable captures.
+The accepted `073856` run proves owner HP and departure only; it does not validate
+these new labels. See the [source review](../build/rig/vuh1507-hud-names-review-20261006-01/result.md)
+and [matched build](../build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/result.md).
+
 ## Native record-content resync: offline candidate (2026-10-04)
 
-The current candidate uses protocol **9**, AvatarBridge **2**,
+This dated candidate used protocol **9**, AvatarBridge **2**,
 WorldBridge **11** and CaptureChannel **1**. The dated protocol-8 results below
 remain historical evidence for their exact binaries and fixtures; they do not
 validate this new candidate. All components must use compatible rebuilt

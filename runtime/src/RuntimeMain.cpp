@@ -830,7 +830,10 @@ int main(int argc, char* argv[]) {
     std::function<void(const char*)> observeIdentity;
 #ifdef _WIN32
     kh2coop::AvatarBridge avatarBridge;
+    kh2coop::hudnames::Roster admittedHudNames;
+    std::string admittedHudNameSession; // exact admitted session, never a native actor name
     const auto publishInactiveAvatars = [&avatarBridge]() {
+        (void)avatarBridge.PublishRosterNames({});
         for (int index = 0; index < kh2coop::AVATAR_BRIDGE_PUPPETS; ++index)
             avatarBridge.PublishPuppet(index, kh2coop::PuppetPose {});
     };
@@ -1249,6 +1252,8 @@ int main(int argc, char* argv[]) {
         avatarSessionId.clear();
         avatarSync.setRoster(static_cast<kh2coop::SlotType>(0xFF), {});
 #ifdef _WIN32
+        admittedHudNames = {};
+        admittedHudNameSession.clear();
         closeMailbox();
         worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
         worldSessionHost.clear();
@@ -1378,6 +1383,12 @@ int main(int argc, char* argv[]) {
                         worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Network);
                 }
             }
+#endif
+            // Display-only copy after the original network admission/reset path.
+#ifdef _WIN32
+            admittedHudNames = kh2coop::hudnames::FromSession(ss, slot);
+            admittedHudNameSession = ss.sessionId;
+            (void)avatarBridge.PublishRosterNames({}); // retire old labels immediately
 #endif
             observeIdentity("roster-admitted");
         };
@@ -1691,6 +1702,12 @@ int main(int argc, char* argv[]) {
             publishInactiveAvatars();
             return;
         }
+        // Network callbacks and this pump run on the same runtime thread. Names
+        // renew independently of a new local avatar; resets publish an empty slot.
+        const kh2coop::PuppetAuthority hudAuthority {kh2coop::PuppetAuthorityMode::Network,
+            worldSessionSlot, worldSessionGeneration, worldConnectionIds};
+        (void)avatarBridge.PublishRosterNames(kh2coop::hudnames::Bind(
+            admittedHudNames, hudAuthority, GetTickCount64(), admittedHudNameSession, worldSessionId));
         kh2coop::AvatarState local;
         if (avatarBridge.TryReadLocal(local)) {
             // Network seq is per send (sendAvatar restamps 0), so receivers can

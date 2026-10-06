@@ -767,7 +767,9 @@ bool EnsureOverlayGdi() {
 
 void PollCoopHud() {
     hud::Snapshot snapshot;
-    (void)g_hudMailbox.TryCopy(GetTickCount64(), snapshot);
+    const auto nowMs = GetTickCount64();
+    (void)g_hudMailbox.TryCopy(nowMs, snapshot);
+    hud::ExpireNames(snapshot, nowMs);
     if (!hud::SameDisplayScope(snapshot, g_renderHud)) g_overlayValid = false;
     g_renderHud = snapshot;
 }
@@ -791,7 +793,7 @@ void DrawCoopHudRows() {
         SetTextColor(g_overlayDc, row.showBar ? RGB(255, 255, 255) : RGB(170, 170, 170));
         draw(row.label, 8, 190);
         draw(row.health, 440, 568);
-        draw(row.status, 575, 812);
+        draw(row.name[0] ? row.name : row.status, 575, 812);
         if (row.showBar) {
             const auto brush = static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
             RECT track {200, top + 14, 420, top + 22};

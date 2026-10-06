@@ -130,8 +130,12 @@ Reliable equal-sequence cache replay remains supported; see `HP_ORDERING.md`.
 That ordering result alone does not prove native convergence; the protocol 8
 transaction adds separate source cuts and per-target delivery fences.
 
-The current candidate uses protocol **9**, AvatarBridge **2**,
-WorldBridge **11** and CaptureChannel **1**. Runtime, relay, inject DLL and avatarctl must be rebuilt
+The current source uses protocol **10**, AvatarBridge **3**,
+WorldBridge **11** and CaptureChannel **1**. AvatarBridge v3 appends the bounded
+HUD roster-label slot; mixed v2/v3 mappings are refused. The reviewed name patch
+has a matched private Release DLL/runtime/avatarctl build, but no live names
+acceptance or deployment. Protocol 10 retains the fresh-observation requirement
+for automatic resync. Runtime, relay, inject DLL and avatarctl must be rebuilt
 together. Shared mappings with incompatible versions fail their version checks;
 the changed WorldBridge layout rejects older mappings. An already injected
 older DLL is not current validation. Existing protocol-v3 native receipts stay

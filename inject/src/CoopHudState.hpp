@@ -2,6 +2,7 @@
 
 #include "kh2coop/Types.hpp"
 #include "kh2coop/PuppetProvenance.hpp"
+#include "kh2coop/HudRoster.hpp"
 
 #include <array>
 #include <cstdint>
@@ -18,9 +19,10 @@ struct Member {
     RowState state {RowState::Open};
     bool hpValid {};
     std::int32_t hp {}, maxHp {};
+    hudnames::Name name {};
 };
 struct Snapshot {
-    std::uint64_t sampledAtMs {};
+    std::uint64_t sampledAtMs {}, namesSampledAtMs {};
     std::uint32_t frame {}, generation {};
     std::uint8_t localSlot {255};
     bool locationValid {}, networkCurrent {};
@@ -38,6 +40,7 @@ struct Input {
     PuppetAuthority before {}, after {};
     bool localAvailable {}, gameplayCurrent {};
     AvatarState local {};
+    hudnames::Roster names {};
     std::array<Remote, 2> remote {};
 };
 
@@ -74,9 +77,12 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
     out.networkCurrent = true;
     out.generation = authority.generation;
     out.localSlot = authority.localSlot;
+    const bool namesCurrent = hudnames::Matches(in.names, authority, nowMs);
+    if (namesCurrent) out.namesSampledAtMs = in.names.sampledAtMs;
     for (std::size_t slot = 0; slot < 3; ++slot) {
         auto& row = out.members[slot];
         row.connectionId = authority.connectionIds[slot];
+        if (namesCurrent) row.name = in.names.names[slot];
         row.state = row.connectionId ? RowState::Waiting : RowState::Open;
     }
     auto& local = out.members[out.localSlot];
@@ -99,6 +105,15 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
 inline bool Fresh(const Snapshot& value, std::uint64_t nowMs) noexcept {
     return nowMs >= value.sampledAtMs && nowMs - value.sampledAtMs < FreshMs;
 }
+// Check name age again at Present: a newer owner snapshot does not renew the
+// runtime metadata, and a stalled owner must not extend name freshness.
+inline void ExpireNames(Snapshot& snapshot, std::uint64_t nowMs) noexcept {
+    if (!snapshot.namesSampledAtMs || nowMs < snapshot.namesSampledAtMs ||
+        nowMs - snapshot.namesSampledAtMs >= hudnames::FreshMs) {
+        snapshot.namesSampledAtMs = 0;
+        for (auto& member : snapshot.members) member.name = {};
+    }
+}
 // Changes that must invalidate rendered pixels immediately, not on the 15-Present cadence.
 inline bool SameDisplayScope(const Snapshot& a, const Snapshot& b) noexcept {
     if (a.locationValid != b.locationValid || a.networkCurrent != b.networkCurrent ||
@@ -106,13 +121,14 @@ inline bool SameDisplayScope(const Snapshot& a, const Snapshot& b) noexcept {
         a.localSlot != b.localSlot) return false;
     for (std::size_t i = 0; i < 3; ++i)
         if (a.members[i].connectionId != b.members[i].connectionId ||
-            a.members[i].state != b.members[i].state || a.members[i].hpValid != b.members[i].hpValid)
+            a.members[i].state != b.members[i].state || a.members[i].hpValid != b.members[i].hpValid ||
+            a.members[i].name != b.members[i].name)
             return false;
     return true;
 }
 
 struct RowText {
-    wchar_t label[24] {}, health[32] {}, status[24] {};
+    wchar_t label[24] {}, health[32] {}, status[24] {}, name[hudnames::NameBytes] {};
     bool showBar {}, lowHealth {};
     int fillPixels {};
 };
@@ -129,6 +145,14 @@ inline Text Format(const Snapshot& snapshot) noexcept {
         const auto& member = snapshot.members[slot];
         (void)std::swprintf(text.label, 24, L"P%u%ls%ls", static_cast<unsigned>(slot + 1),
             slot == 0 ? L" Host" : L"", slot == snapshot.localSlot ? L" You" : L"");
+        if (member.state == RowState::Available) {
+            if (member.name[0]) {
+                for (std::size_t i = 0; i + 1 < hudnames::NameBytes; ++i)
+                    text.name[i] = static_cast<unsigned char>(member.name[i]);
+            } else {
+                (void)std::swprintf(text.name, hudnames::NameBytes, L"Name unavailable");
+            }
+        }
         if (member.state == RowState::Open) {
             (void)std::swprintf(text.status, 24, L"Open slot");
         } else if (member.state == RowState::Waiting) {
