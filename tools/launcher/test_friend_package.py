@@ -16,6 +16,10 @@ from plan import Options, make_plan
 
 class Win:
     live=True
+    def __init__(self):self.k=self;self.wait_calls=[]
+    def WaitForSingleObject(self,handle,milliseconds):
+        self.wait_calls.append((handle,milliseconds))
+        return 258 if self.live else 0
     def alive(self, handle):return self.live
     def open_query(self,pid):return 'retained'
     def close(self,handle):self.closed=handle
@@ -69,6 +73,52 @@ class Safety(unittest.TestCase):
         o=self.owner(lambda *a,**k:{'killed':[]});o.handle='retained';o.pid=42
         with self.assertRaises(ValueError):o.close_game()
         self.assertEqual(o.handle,'retained')
+    def test_delayed_termination_waits_same_handle_once(self):
+        o=self.owner(lambda *a,**k:{'ok':True,'killed':[42]});o.handle='retained';o.pid=42
+        def wait(handle,ms):
+            self.win.wait_calls.append((handle,ms))
+            return 258 if ms==0 else 0
+        self.win.WaitForSingleObject=wait
+        result=o.close_game()
+        self.assertEqual(self.win.wait_calls,[('retained',0),('retained',2000)])
+        self.assertTrue(result['closureVerified']);self.assertIsNone(o.handle)
+    def test_termination_still_pending_refuses_without_retry(self):
+        o=self.owner(lambda *a,**k:{'ok':True,'killed':[42]});o.handle='retained';o.pid=42
+        with self.assertRaises(f.CanonicalFailure) as error:o.close_game()
+        self.assertEqual(error.exception.receipt['exitWaitCode'],258)
+        self.assertEqual(error.exception.receipt['canonicalKill']['killed'],[42])
+        self.assertEqual(self.win.wait_calls,[('retained',0),('retained',2000)])
+        self.assertEqual(o.handle,'retained')
+    def test_late_exit_retry_resolves_same_retained_handle(self):
+        def pending(*args,**kw):
+            self.calls.append(args[2])
+            if args[2][0]=='launch':raise f.CanonicalFailure('guard failed',{'command':'launch','processId':42})
+            return {'ok':True,'killed':[42]}
+        o=self.owner(pending)
+        with patch.object(self.win,'open_query',wraps=self.win.open_query) as opened:
+            with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME), self.assertRaisesRegex(ValueError,'If the game is still open'):
+                o.launch('unused',self.root/'run')
+            self.assertTrue(o.unresolved_launch);self.assertEqual(o.handle,'retained')
+            with self.assertRaisesRegex(ValueError,'Use Exit & close game'):o.launch('unused',self.root/'run2')
+            self.win.live=False  # original process exits after the bounded wait
+            result=o.close_game()  # same GameOwner called again by Exit
+            opened.assert_called_once_with(42)
+        self.assertTrue(result['closureVerified']);self.assertEqual(result['exitWaitCode'],0)
+        self.assertFalse(o.unresolved_launch);self.assertIsNone(o.handle)
+        self.assertEqual([a[0] for a in self.calls],['launch','kill'])
+        self.assertEqual(self.win.wait_calls,[('retained',0),('retained',2000),('retained',0)])
+    def test_invalid_retained_handle_is_not_exited(self):
+        o=self.owner();o.handle='retained';o.pid=42
+        self.win.WaitForSingleObject=lambda handle,ms:0xFFFFFFFF
+        with self.assertRaises(f.CanonicalFailure):o.close_game()
+        self.assertEqual(o.handle,'retained');self.assertEqual(self.calls,[])
+    def test_postkill_wait_error_and_missing_kill_receipt_refuse(self):
+        for killed,final_code in (([42],0xFFFFFFFF),([],0)):
+            with self.subTest(killed=killed,final_code=final_code):
+                o=self.owner(lambda *a,**k:{'ok':True,'killed':killed});o.handle='retained';o.pid=42
+                codes=iter((258,final_code));self.win.WaitForSingleObject=lambda handle,ms:next(codes)
+                with self.assertRaises(f.CanonicalFailure):o.close_game()
+                self.assertEqual(o.handle,'retained')
     def test_missing_guard_never_ready(self):
         def bad(*args,**kw):
             r=self.command(*args,**kw)
@@ -100,7 +150,7 @@ class Safety(unittest.TestCase):
             if args[2][0]=='launch':raise f.CanonicalFailure('guard failed',{'command':'launch','processId':42})
             raise ValueError('canonical kill failed')
         o=self.owner(fail)
-        with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME), self.assertRaisesRegex(ValueError,'Exit that game normally'):
+        with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME), self.assertRaisesRegex(ValueError,'If the game is still open'):
             o.launch('unused',self.root/'run')
         self.assertTrue(o.unresolved_launch);self.assertEqual(o.handle,'retained')
     def test_child_env_only_and_no_test_switches(self):

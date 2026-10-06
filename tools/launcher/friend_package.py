@@ -110,7 +110,7 @@ class GameOwner:
 
     def launch(self, game_dir, receipt_dir):
         if self.unresolved_launch:
-            raise ValueError('A previous start has no verified completion. Exit its game normally and reopen the launcher; do not start another copy.')
+            raise ValueError('A previous start has no verified completion. Use Exit & close game before reopening the launcher; do not start another copy. If the game is still open, exit it normally; do not save.')
         if self.handle and self.win.alive(self.handle):
             raise ValueError('This launcher already owns a game. Close it before starting another.')
         exe = verify_game(game_dir, self.root)  # must precede every launch/injection
@@ -154,10 +154,13 @@ class GameOwner:
                 if not self.handle:
                     raise ValueError('No retained game handle; ownership could not be confirmed')
                 cleanup = self.close_game()
-                self.unresolved_launch = False  # close_game verified the retained game exited
             except Exception as stop_error:
                 cleanup = {'error':str(stop_error),'closureVerified':False}
-                raise ValueError(f'{error} Closure failed: {stop_error}. Exit that game normally; do not save.') from error
+                if isinstance(stop_error, CanonicalFailure):cleanup['receipt']=stop_error.receipt
+                detail = str(stop_error)
+                warning = 'If the game is still open, exit it normally; do not save.'
+                if warning not in detail:detail += '. ' + warning
+                raise ValueError(f'{error} Closure failed: {detail}') from error
             raise ValueError(f'{error} The owned game was closed; connection was not started.') from error
         finally:
             (receipt_dir / 'launch-result.json').write_text(json.dumps({'receipt':receipt,
@@ -168,12 +171,23 @@ class GameOwner:
         self.ready = False
         if not self.handle:
             return {'killed': [], 'note': 'No retained game ownership.'}
-        if self.win.alive(self.handle):
+        wait_code = self.win.k.WaitForSingleObject(self.handle, 0)
+        if wait_code == 258:  # WAIT_TIMEOUT: retained game has not exited
             result = self.command(self.root, self.product('cli'), ['kill', '--pid', str(self.pid)], timeout=12)
-            if self.pid not in result.get('killed', []) or self.win.alive(self.handle):
-                raise ValueError('Owned game closure was not established. Exit that game normally; no other PID will be stopped.')
+            # Canonical ownership/termination is unchanged. Its wait result is
+            # not reported; confirm termination on our original retained handle.
+            wait_ms = 2000 if self.pid in result.get('killed', []) else 0
+            wait_code = self.win.k.WaitForSingleObject(self.handle, wait_ms)
+            closure = {'processId':self.pid,'canonicalKill':result,'exitWaitMs':wait_ms,'exitWaitCode':wait_code}
+            if self.pid not in result.get('killed', []) or wait_code != 0:
+                raise CanonicalFailure('Owned game closure was not established; no other PID will be stopped. If the game is still open, exit it normally; do not save.', closure)
+            result = {**result, 'closureVerified':True,'exitWaitMs':wait_ms,'exitWaitCode':wait_code}
+        elif wait_code == 0:  # WAIT_OBJECT_0 only; WAIT_FAILED is never closure
+            result = {'killed': [], 'note': 'Owned game already exited.', 'closureVerified':True,'exitWaitCode':wait_code}
         else:
-            result = {'killed': [], 'note': 'Owned game already exited.'}
+            raise CanonicalFailure('Owned game handle wait failed; closure is unknown. If the game is still open, exit it normally; do not save.',
+                                   {'processId':self.pid,'exitWaitMs':0,'exitWaitCode':wait_code})
+        self.unresolved_launch = False  # only after confirmed WAIT_OBJECT_0
         self.win.close(self.handle)
         self.handle = None
         return result
