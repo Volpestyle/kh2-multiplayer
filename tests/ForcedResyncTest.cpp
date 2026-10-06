@@ -386,10 +386,10 @@ bool serverSend(Rig& r, std::size_t slot, const std::vector<std::uint8_t>& bytes
     if (!peer) return false;
     auto* packet = enet_packet_create(bytes.data(), bytes.size(), ENET_PACKET_FLAG_RELIABLE);
     if (!packet) return false;
-    if (enet_peer_send(peer->enetPeer, 0, packet) < 0) {
+    if (enet_peer_send(reinterpret_cast<ENetPeer*>(peer->transportPeer), 0, packet) < 0) {
         enet_packet_destroy(packet); return false;
     }
-    enet_host_flush(peer->enetPeer->host); return true;
+    enet_host_flush(reinterpret_cast<ENetPeer*>(peer->transportPeer)->host); return true;
 }
 bool clientMarker(Rig& r, std::size_t slot, std::uint32_t seq) {
     AvatarRelay marker;
@@ -467,7 +467,7 @@ void expiredOutbound(unsigned mode,std::uint16_t port) {
     AvatarState marker;marker.ownerSlot=static_cast<SlotType>(sender);marker.seq=9292;marker.serverTimeMs=9292;
     client.sendRawPacket(encode(marker, PacketType::AvatarState),true);
     check(queued&&client.outbound_.pending()>=2,"resync control and reliable marker physically queued before original deadline");
-    auto* serverHost=r.relay->peerBySlot(static_cast<SlotType>(sender))->enetPeer->host;
+    auto* serverHost=reinterpret_cast<ENetPeer*>(r.relay->peerBySlot(static_cast<SlotType>(sender))->transportPeer)->host;
     client.setClockSkewMs(70000);
     client.tick(0);
     unsigned forbidden=0;bool sawMarker=false;

@@ -5,6 +5,7 @@
 #include "kh2coop/PeerState.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
+#include "kh2coop/Transport.hpp"
 #include "kh2coop/DesyncCapture.hpp"
 
 #include <cstdint>
@@ -15,7 +16,6 @@
 #include <string>
 #include <vector>
 
-struct _ENetHost; // forward-declare
 
 namespace kh2coop {
 
@@ -66,7 +66,8 @@ struct SessionCallbacks {
 class SessionHost {
 public:
     explicit SessionHost(const SessionConfig& config,
-                         SessionCallbacks callbacks = {});
+                         SessionCallbacks callbacks = {},
+                         std::unique_ptr<Transport> transport = {});
     ~SessionHost();
 
     void sealHashDiagnostics(const char* action = "interval") { hashDiagnostics_.seal(callbacks_.onHashDiagnostic,"relay-hash",action); }
@@ -132,21 +133,21 @@ public:
 private:
     CausalStream cacheDiagnostics_;
     // ENet event handlers
-    void onConnect(_ENetPeer* peer);
-    void onDisconnect(_ENetPeer* peer);
-    void onReceive(_ENetPeer* peer, const std::uint8_t* data, std::size_t size, const WorldScope* admittedScope = nullptr);
+    void onConnect(TransportPeer* peer);
+    void onDisconnect(TransportPeer* peer);
+    void onReceive(TransportPeer* peer, const std::uint8_t* data, std::size_t size, const WorldScope* admittedScope = nullptr);
 
     // Peer helpers
-    PeerState* findPeer(_ENetPeer* peer);
+    PeerState* findPeer(TransportPeer* peer);
     PeerState* findPeerById(const std::string& peerId);
     std::optional<SlotType> firstFreeSlot() const;
     bool isSlotTaken(SlotType slot) const;
     void rebuildSessionActors();
     void expireStalePeers(std::uint64_t nowMs);
-    void removePeer(_ENetPeer* peer);
+    void removePeer(TransportPeer* peer);
 
     // Packet send helpers
-    bool sendTo(_ENetPeer* peer, const std::vector<std::uint8_t>& packet,
+    bool sendTo(TransportPeer* peer, const std::vector<std::uint8_t>& packet,
                 bool reliable, bool cached = false);
     void broadcastToVerified(const std::vector<std::uint8_t>& packet,
                              bool reliable);
@@ -154,15 +155,15 @@ private:
     void log(const std::string& msg);
     // Logs, reports, sends HelloReject{code, reason}, then disconnects once
     // queued packets have gone out.
-    void rejectPeer(_ENetPeer* peer, const std::string& peerId,
+    void rejectPeer(TransportPeer* peer, const std::string& peerId,
                     const std::string& reason, std::uint8_t code);
 
     // World sync helpers
     bool fromHost(const PeerState& ps) const;
     PeerState* hostPeer();
-    void forwardToOthers(_ENetPeer* sender, const std::vector<std::uint8_t>& packet,
+    void forwardToOthers(TransportPeer* sender, const std::vector<std::uint8_t>& packet,
                          bool reliable);
-    void sendWorldStateTo(_ENetPeer* peer);
+    void sendWorldStateTo(TransportPeer* peer);
     void clearWorldState();
     CausalStream hashDiagnostics_;
     void hashDiagnostic(const char* action, const PeerState& client, const PeerState* host,
@@ -194,7 +195,7 @@ private:
     SessionCallbacks callbacks_;
     SessionState session_;
     std::vector<PeerState> peers_;
-    _ENetHost* enetHost_{nullptr};
+    std::unique_ptr<Transport> transport_;
     bool running_{false};
     std::uint32_t nextSnapshotId_{1};
     std::uint64_t nextConnectionId_{1}; // never reset on room/session/stop boundaries
@@ -226,7 +227,7 @@ private:
         ActivationRequest request;
         std::uint64_t receivedMs = 0;
     };
-    std::map<_ENetPeer*, std::vector<PendingActivation>> pendingActivation_;
+    std::map<TransportPeer*, std::vector<PendingActivation>> pendingActivation_;
 };
 
 } // namespace kh2coop

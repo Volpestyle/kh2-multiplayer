@@ -1,7 +1,5 @@
 #include "kh2coop/NetworkClient.hpp"
 
-#include <enet/enet.h>
-
 #include <chrono>
 #include <utility>
 #include <algorithm>
@@ -135,7 +133,8 @@ NetworkClient::NetworkClient(const std::string& hostAddress, std::uint16_t port,
                              RuntimeMode requestedMode,
                              std::string contentHash,
                              std::uint16_t protocolVersion,
-                             std::string peerName)
+                             std::string peerName,
+                             std::unique_ptr<Transport> transport)
     : hostAddress_(hostAddress),
       port_(port),
       gameBuild_(gameBuild),
@@ -146,7 +145,8 @@ NetworkClient::NetworkClient(const std::string& hostAddress, std::uint16_t port,
       requestedSlot_(requestedSlot),
       requestedMode_(requestedMode),
       protocolVersion_(protocolVersion),
-      callbacks_(std::move(callbacks)) {}
+      callbacks_(std::move(callbacks)),
+      transport_(transport ? std::move(transport) : makeEnetTransport()) {}
 
 NetworkClient::~NetworkClient() { disconnect(); }
 
@@ -160,28 +160,20 @@ bool NetworkClient::connect() {
     // unfinished connection attempt. No old conditioned packet may cross this.
     disconnect();
 
-    enetHost_ = enet_host_create(nullptr /* client, no bind */, 1 /* one peer */,
-                                 3 /* gameplay reliable/unreliable + diagnostics */, 0, 0);
-    if (!enetHost_) {
+    if (!transport_->createClient(1, 3)) {
         log("Failed to create ENet client host.");
         return false;
     }
-
-    ENetAddress address {};
-    if (enet_address_set_host(&address, hostAddress_.c_str()) != 0) {
+    bool resolved = false;
+    transportPeer_ = transport_->connect(hostAddress_, port_, 3, resolved);
+    if (!resolved) {
         log("Failed to resolve host address: " + hostAddress_);
-        enet_host_destroy(enetHost_);
-        enetHost_ = nullptr;
+        transport_->close();
         return false;
     }
-    address.port = port_;
-
-    enetPeer_ = enet_host_connect(enetHost_, &address, 3 /* channels */, 0);
-    if (!enetPeer_) {
-        log("Failed to initiate connection to " + hostAddress_ + ":" +
-            std::to_string(port_));
-        enet_host_destroy(enetHost_);
-        enetHost_ = nullptr;
+    if (!transportPeer_) {
+        log("Failed to initiate connection to " + hostAddress_ + ":" + std::to_string(port_));
+        transport_->close();
         return false;
     }
 
@@ -196,12 +188,12 @@ bool NetworkClient::connect() {
 // ---------------------------------------------------------------------------
 
 void NetworkClient::tick(std::uint32_t timeoutMs) {
-    if (!enetHost_) return;
+    if (!transport_->isOpen()) return;
     // Retire the local transaction before ENet or conditioned callbacks can
     // publish a delayed snapshot. onReceive repeats this after blocking waits.
     if((resyncPlan_||requestedResync_) && localTimeMs()>=resyncDeadline_)
         abortResync(ResyncResultReason::Deadline,"local resync deadline");
-    if (!enetHost_) return;
+    if (!transport_->isOpen()) return;
 
     if (connected_) {
         // Fast pings until the estimate settles, then a slow refresh.
@@ -209,32 +201,32 @@ void NetworkClient::tick(std::uint32_t timeoutMs) {
         if (localTimeMs() - lastPingMs_ >= interval) sendClockPing();
     }
 
-    ENetEvent event;
+    TransportEvent event;
     const auto generation = transportGeneration_;
-    while (enetHost_ && enet_host_service(enetHost_, &event, timeoutMs) > 0) {
+    while (transport_->isOpen() && transport_->service(event, timeoutMs) > 0) {
         switch (event.type) {
-            case ENET_EVENT_TYPE_CONNECT:
+            case TransportEventType::Connect:
                 onConnect();
                 break;
-            case ENET_EVENT_TYPE_DISCONNECT:
+            case TransportEventType::Disconnect:
                 onDisconnect(event.data);
                 break;
-            case ENET_EVENT_TYPE_RECEIVE:
+            case TransportEventType::Receive:
                 if (inbound_.conditions().active()) {
                     // Both gameplay channel 0 and diagnostic channel 2 are reliable.
                     inbound_.enqueue(
                         localTimeMs(),
                         std::vector<std::uint8_t>(
-                            event.packet->data,
-                            event.packet->data + event.packet->dataLength),
-                        (event.packet->flags & ENET_PACKET_FLAG_RELIABLE) != 0);
+                            event.packet.data,
+                            event.packet.data + event.packet.size),
+                        event.packet.reliable);
                 } else {
-                    onReceive(event.packet->data, event.packet->dataLength,
-                              (event.packet->flags & ENET_PACKET_FLAG_RELIABLE) != 0);
+                    onReceive(event.packet.data, event.packet.size,
+                              event.packet.reliable);
                 }
-                enet_packet_destroy(event.packet);
+                event.packet.reset();
                 break;
-            case ENET_EVENT_TYPE_NONE:
+            case TransportEventType::None:
                 break;
         }
         // A callback may disconnect/reconnect, replacing the host and queues.
@@ -445,13 +437,12 @@ void NetworkClient::onClockPong(const ClockPong& pong) {
 
 NetworkClient::LinkStats NetworkClient::linkStats() const {
     LinkStats s;
-    if (!connected_ || !enetPeer_) return s;
+    if (!connected_ || !transportPeer_) return s;
     s.valid = true;
-    s.rttMs = enetPeer_->roundTripTime;
-    s.rttVarMs = enetPeer_->roundTripTimeVariance;
-    s.lossPermille = static_cast<std::uint32_t>(
-        (static_cast<std::uint64_t>(enetPeer_->packetLoss) * 1000u) /
-        ENET_PEER_PACKET_LOSS_SCALE);
+    const auto stats = transport_->stats(transportPeer_);
+    s.rttMs = stats.rttMs;
+    s.rttVarMs = stats.rttVarianceMs;
+    s.lossPermille = stats.lossPermille;
     s.appRttMs = lastRttMs_;
     for (const auto& w : avatarLoss_) {
         if (w.lastLossPermille == kNoAvatarLoss) continue;
@@ -542,7 +533,7 @@ bool NetworkClient::matchesResumePin(const SessionState& session) const {
 }
 
 void NetworkClient::closeChangedSession() {
-    if (enetPeer_) enet_peer_disconnect(enetPeer_, static_cast<std::uint32_t>(DisconnectReason::SessionChanged));
+    if (transportPeer_) transport_->disconnect(transportPeer_, static_cast<std::uint32_t>(DisconnectReason::SessionChanged));
     onDisconnect(static_cast<std::uint32_t>(DisconnectReason::SessionChanged), true);
 }
 
@@ -625,21 +616,20 @@ void NetworkClient::disconnect() {
     attemptActive_ = false;
     connected_ = false;
     resetTransportState();
-    if (enetPeer_) {
-        enet_peer_disconnect(enetPeer_, 0);
+    if (transportPeer_) {
+        transport_->disconnect(transportPeer_, 0);
         // Flush.
-        if (enetHost_) {
-            ENetEvent event;
-            while (enet_host_service(enetHost_, &event, 100) > 0) {
-                if (event.type == ENET_EVENT_TYPE_RECEIVE)
-                    enet_packet_destroy(event.packet);
+        if (transport_->isOpen()) {
+            TransportEvent event;
+            while (transport_->service(event, 100) > 0) {
+                if (event.type == TransportEventType::Receive)
+                    event.packet.reset();
             }
         }
-        enetPeer_ = nullptr;
+        transportPeer_ = nullptr;
     }
-    if (enetHost_) {
-        enet_host_destroy(enetHost_);
-        enetHost_ = nullptr;
+    if (transport_->isOpen()) {
+        transport_->close();
     }
     connected_ = false;
 }
@@ -683,7 +673,7 @@ void NetworkClient::onDisconnect(std::uint32_t code, bool local) {
     info.local = local;
     attemptActive_ = false;
     connected_ = false;
-    enetPeer_ = nullptr;
+    transportPeer_ = nullptr;
     resetTransportState();
     log(code == 0 ? std::string("Disconnected from host.")
                   : "Disconnected from host (code " + std::to_string(code) + ").");
@@ -1035,7 +1025,7 @@ bool NetworkClient::sendPacket(const std::vector<std::uint8_t>& packet,
 
 bool NetworkClient::sendNow(const std::vector<std::uint8_t>& packet,
                             bool reliable) {
-    if (!connected_ || !enetPeer_ || packet.empty()) return false;
+    if (!connected_ || !transportPeer_ || packet.empty()) return false;
     const auto type = static_cast<PacketType>(packet.front());
     if (!ready() && type != PacketType::ClientHello && type != PacketType::Heartbeat &&
         type != PacketType::ClockPing) return false;
@@ -1079,16 +1069,8 @@ bool NetworkClient::sendNow(const std::vector<std::uint8_t>& packet,
             if(!worldBinding_ || m.scope.sessionId!=avatarSessionId_ || m.scope.sourceConnectionId!=worldBinding_->selfConnectionId || m.scope.sourceDeliverySerial!=worldBinding_->deliverySerial)return false;
         }catch(const std::exception&){return false;}
     }
-    auto* enetPacket = enet_packet_create(
-        packet.data(), packet.size(),
-        reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
-    if (!enetPacket) return false;
-    // Only successful submission transfers packet ownership to ENet.
-    if (enet_peer_send(enetPeer_, isDesyncDiagnosticPacket(type) ? 2 : (reliable ? 0 : 1), enetPacket) < 0) {
-        enet_packet_destroy(enetPacket);
-        return false;
-    }
-    return true;
+    return transport_->send(transportPeer_, packet.data(), packet.size(),
+                            isDesyncDiagnosticPacket(type) ? 2 : (reliable ? 0 : 1), reliable);
 }
 
 void NetworkClient::log(const std::string& msg) {

@@ -26,7 +26,18 @@ add_library(kh2coop_common
     common/src/Protocol.cpp
     common/src/Codec.cpp
     common/src/NetworkClient.cpp
+    common/src/EnetTransport.cpp
 )
+
+add_executable(kh2coop_transport_test tests/TransportTest.cpp)
+target_link_libraries(kh2coop_transport_test PRIVATE kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_transport_test PRIVATE /W4 /WX)
+    set_source_files_properties(common/src/EnetTransport.cpp PROPERTIES COMPILE_OPTIONS "/W4;/WX")
+else()
+    target_compile_options(kh2coop_transport_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    set_source_files_properties(common/src/EnetTransport.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic;-Werror")
+endif()
 
 target_include_directories(kh2coop_common PUBLIC
     common/include

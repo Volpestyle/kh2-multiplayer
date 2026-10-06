@@ -4,6 +4,7 @@
 #include "kh2coop/LinkConditioner.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
+#include "kh2coop/Transport.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -11,8 +12,6 @@
 #include <string>
 #include <vector>
 
-struct _ENetHost;
-struct _ENetPeer;
 
 namespace kh2coop {
 
@@ -99,7 +98,8 @@ public:
                   RuntimeMode requestedMode = RuntimeMode::CampaignCoop,
                   std::string contentHash = {},
                   std::uint16_t protocolVersion = PROTOCOL_VERSION,
-                  std::string peerName = {});
+                  std::string peerName = {},
+                  std::unique_ptr<Transport> transport = {});
     ~NetworkClient();
 
     // Non-copyable
@@ -266,8 +266,8 @@ private:
     std::uint16_t protocolVersion_{PROTOCOL_VERSION};
     ClientCallbacks callbacks_;
 
-    _ENetHost* enetHost_{nullptr};
-    _ENetPeer* enetPeer_{nullptr};
+    std::unique_ptr<Transport> transport_;
+    TransportPeer* transportPeer_{nullptr};
     bool connected_{false};
     bool attemptActive_{false};
     bool hadReady_{false};

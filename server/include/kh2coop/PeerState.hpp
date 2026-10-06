@@ -1,11 +1,11 @@
 #pragma once
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/Types.hpp"
+#include "kh2coop/Transport.hpp"
 
 #include <cstdint>
 #include <string>
 
-struct _ENetPeer; // forward-declare without pulling in enet headers
 
 namespace kh2coop {
 
@@ -22,7 +22,7 @@ enum class PeerStatus : std::uint8_t {
 // Per-peer state tracked by the session host.
 // ---------------------------------------------------------------------------
 struct PeerState {
-    _ENetPeer* enetPeer{nullptr};
+    TransportPeer* transportPeer{nullptr};
 
     // Identity
     std::string peerId;

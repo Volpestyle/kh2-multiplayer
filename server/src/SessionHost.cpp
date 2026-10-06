@@ -11,7 +11,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <cerrno>
-#include <enet/enet.h>
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -23,7 +22,7 @@ namespace kh2coop {
 
 void SessionHost::sendBinding(PeerState& ps) {
     auto* host=hostPeer();if(!host||ps.status!=PeerStatus::Verified)return;
-    sendTo(ps.enetPeer,encode(WorldBinding{session_.sessionId,host->connectionId,ps.connectionId,
+    sendTo(ps.transportPeer,encode(WorldBinding{session_.sessionId,host->connectionId,ps.connectionId,
         static_cast<std::uint8_t>(ps.assignedSlot),ps.deliverySerial}),true);
 }
 void SessionHost::finishResync(ResyncResultReason reason,const std::string& error) {
@@ -38,7 +37,7 @@ void SessionHost::finishResync(ResyncResultReason reason,const std::string& erro
     resyncContinuationBytes_={};resyncAcks_={};
     lastResyncResult_=result;
     // Immutable original target denominator survives disconnect and failures.
-    for(auto& ps:peers_)if(ps.status==PeerStatus::Verified){bool selected=ps.connectionId==result.key.hostConnectionId;for(std::size_t i=0;i<result.targetCount;++i)selected=selected||ps.connectionId==result.targets[i].target.connectionId;if(selected)sendTo(ps.enetPeer,encode(result),true);}
+    for(auto& ps:peers_)if(ps.status==PeerStatus::Verified){bool selected=ps.connectionId==result.key.hostConnectionId;for(std::size_t i=0;i<result.targetCount;++i)selected=selected||ps.connectionId==result.targets[i].target.connectionId;if(selected)sendTo(ps.transportPeer,encode(result),true);}
     log(formatResyncResultEvidence(result,"relay"));
     if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(result);
 }
@@ -70,9 +69,9 @@ void SessionHost::publishResyncPlan() {
     resyncPlan_->remainingMs=static_cast<std::uint32_t>(resyncDeadline_-static_cast<std::uint64_t>(now));
     for(auto& peer:peers_)if(peer.status==PeerStatus::Verified){
         bool target=false;for(std::size_t i=0;i<resyncPlan_->targetCount;++i)target=target||resyncPlan_->targets[i].connectionId==peer.connectionId;
-        if(target){sendBinding(peer);auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::Fenced;if(!sendTo(peer.enetPeer,encode(plan),true)){finishResync(ResyncResultReason::Overflow,"plan submission failed");return;}}
+        if(target){sendBinding(peer);auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::Fenced;if(!sendTo(peer.transportPeer,encode(plan),true)){finishResync(ResyncResultReason::Overflow,"plan submission failed");return;}}
     }
-    if(auto* host=hostPeer()){auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::CaptureRequested;if(!sendTo(host->enetPeer,encode(plan),true))finishResync(ResyncResultReason::Overflow,"capture request submission failed");}
+    if(auto* host=hostPeer()){auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::CaptureRequested;if(!sendTo(host->transportPeer,encode(plan),true))finishResync(ResyncResultReason::Overflow,"capture request submission failed");}
 }
 bool SessionHost::resyncMaterialDifference(PacketType type,const std::vector<std::uint8_t>& bytes) const {
     if(!resyncSnapshot_)return true;
@@ -97,7 +96,7 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
         if(resyncPlan_){if(encode(request)==encode(resyncPlan_->request))return true;
             ResyncResult busy;busy.key=request.key;busy.reason=ResyncResultReason::Busy;
             for(std::size_t slot=1;slot<3;++slot)if(request.targetMask&(1u<<slot)){const auto* target=peerBySlot(static_cast<SlotType>(slot));if(target){auto& t=busy.targets[busy.targetCount++];t.target={static_cast<std::uint8_t>(slot),target->connectionId,target->deliverySerial};t.error="another transaction is active";}}
-            lastResyncResult_=busy;sendTo(ps.enetPeer,encode(busy),true);if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(busy);++rejectedWorld_;return false;}
+            lastResyncResult_=busy;sendTo(ps.transportPeer,encode(busy),true);if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(busy);++rejectedWorld_;return false;}
         if(request.key.requestId<=lastResyncRequestId_){++rejectedWorld_;return false;}
         ResyncPlan plan;plan.request=request;plan.remainingMs=RESYNC_TIMEOUT_MS;
         for(std::size_t slot=1;slot<3;++slot)if(request.targetMask&(1u<<slot)){
@@ -105,9 +104,9 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
             if(it==peers_.end()||it->deliverySerial==UINT64_MAX){++rejectedWorld_;return false;}
             plan.targets[plan.targetCount++]={static_cast<std::uint8_t>(slot),it->connectionId,it->deliverySerial+1};
         }
-        if(simulationActive_){ResyncResult unavailable;unavailable.key=request.key;unavailable.reason=ResyncResultReason::CaptureUnavailable;unavailable.targetCount=plan.targetCount;for(std::size_t i=0;i<plan.targetCount;++i){unavailable.targets[i].target=plan.targets[i];--unavailable.targets[i].target.deliverySerial;unavailable.targets[i].error="legacy simulation is active";}lastResyncRequestId_=request.key.requestId;lastResyncResult_=unavailable;sendTo(ps.enetPeer,encode(unavailable),true);if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(unavailable);return false;}
+        if(simulationActive_){ResyncResult unavailable;unavailable.key=request.key;unavailable.reason=ResyncResultReason::CaptureUnavailable;unavailable.targetCount=plan.targetCount;for(std::size_t i=0;i<plan.targetCount;++i){unavailable.targets[i].target=plan.targets[i];--unavailable.targets[i].target.deliverySerial;unavailable.targets[i].error="legacy simulation is active";}lastResyncRequestId_=request.key.requestId;lastResyncResult_=unavailable;sendTo(ps.transportPeer,encode(unavailable),true);if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(unavailable);return false;}
         lastResyncRequestId_=request.key.requestId;resyncPlan_=plan;resyncDeadline_=now+RESYNC_TIMEOUT_MS;resyncAcks_={};resyncMaterialChanged_=false;resyncBegin_.reset();resyncSnapshot_.reset();resyncAssembler_.Reset();
-        for(std::size_t i=0;i<plan.targetCount;++i)for(auto& peer:peers_)if(peer.connectionId==plan.targets[i].connectionId){peer.deliverySerial=plan.targets[i].deliverySerial;peer.worldQuarantined=true;peer.hasHash=false;pendingActivation_.erase(peer.enetPeer);}
+        for(std::size_t i=0;i<plan.targetCount;++i)for(auto& peer:peers_)if(peer.connectionId==plan.targets[i].connectionId){peer.deliverySerial=plan.targets[i].deliverySerial;peer.worldQuarantined=true;peer.hasHash=false;pendingActivation_.erase(peer.transportPeer);}
         publishResyncPlan();return true;
     }
     if(!resyncPlan_){++rejectedWorld_;return false;}
@@ -135,11 +134,11 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
         lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,resyncBegin_->snapshotCut);
         auto bytes=encodeResyncSnapshot(*snapshot);const auto begin=*resyncBegin_;
         for(std::size_t i=0;resyncPlan_&&i<resyncPlan_->targetCount;++i){auto* target=const_cast<PeerState*>(peerBySlot(static_cast<SlotType>(resyncPlan_->targets[i].slot)));if(!target||target->connectionId!=resyncPlan_->targets[i].connectionId){finishResync(ResyncResultReason::TargetChanged,"target missing");return false;}
-            bool sent=sendTo(target->enetPeer,encode(begin),true);
-            for(std::size_t off=0;sent&&off<bytes.size();off+=RESYNC_MAX_PART_BYTES){const auto end=(std::min)(bytes.size(),off+RESYNC_MAX_PART_BYTES);sent=sendTo(target->enetPeer,encode(ResyncPart{begin.key,begin.phase,begin.snapshotCut,static_cast<std::uint32_t>(off),{bytes.begin()+off,bytes.begin()+end}}),true);}
-            sent=sent&&sendTo(target->enetPeer,encode(e),true);if(!sent){finishResync(ResyncResultReason::Overflow,"snapshot forwarding failed");return false;}
+            bool sent=sendTo(target->transportPeer,encode(begin),true);
+            for(std::size_t off=0;sent&&off<bytes.size();off+=RESYNC_MAX_PART_BYTES){const auto end=(std::min)(bytes.size(),off+RESYNC_MAX_PART_BYTES);sent=sendTo(target->transportPeer,encode(ResyncPart{begin.key,begin.phase,begin.snapshotCut,static_cast<std::uint32_t>(off),{bytes.begin()+off,bytes.begin()+end}}),true);}
+            sent=sent&&sendTo(target->transportPeer,encode(e),true);if(!sent){finishResync(ResyncResultReason::Overflow,"snapshot forwarding failed");return false;}
             target->hostSourceFloor=begin.snapshotCut;target->worldQuarantined=false;
-            for(const auto& item:resyncContinuation_[i])if(item.scope.hostSourceSerial>begin.snapshotCut&&!sendTo(target->enetPeer,encode(item),true)){finishResync(ResyncResultReason::Overflow,"continuation forwarding failed");return false;}
+            for(const auto& item:resyncContinuation_[i])if(item.scope.hostSourceSerial>begin.snapshotCut&&!sendTo(target->transportPeer,encode(item),true)){finishResync(ResyncResultReason::Overflow,"continuation forwarding failed");return false;}
             resyncContinuation_[i].clear();resyncContinuationBytes_[i]=0;
         }
         return true;
@@ -260,8 +259,10 @@ const char* runtimeModeName(RuntimeMode mode) {
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-SessionHost::SessionHost(const SessionConfig& config, SessionCallbacks callbacks)
-    : config_(config), callbacks_(std::move(callbacks)) {
+SessionHost::SessionHost(const SessionConfig& config, SessionCallbacks callbacks,
+                         std::unique_ptr<Transport> transport)
+    : config_(config), callbacks_(std::move(callbacks)),
+      transport_(transport ? std::move(transport) : makeEnetTransport()) {
     const auto* hashOptIn = std::getenv("KH2COOP_CAUSAL_DIAGNOSTICS");
     if (!hashOptIn || std::string(hashOptIn) != "1") callbacks_.onHashDiagnostic = {};
     session_.gameBuild = config_.gameBuild;
@@ -283,19 +284,12 @@ bool SessionHost::start() {
         return false;
     }
 
-    ENetAddress address;
-    address.host = ENET_HOST_ANY;
-    address.port = config_.port;
-    if (!config_.bindAddress.empty() &&
-        enet_address_set_host_ip(&address, config_.bindAddress.c_str()) != 0) {
+    const auto opened = transport_->listen(config_.bindAddress, config_.port, config_.maxPeers, 3);
+    if (opened == TransportOpenResult::InvalidAddress) {
         log("Invalid bind address: " + config_.bindAddress);
         return false;
     }
-
-    enetHost_ = enet_host_create(&address, config_.maxPeers, 3 /* channels */,
-                                 0 /* unlimited downstream */,
-                                 0 /* unlimited upstream */);
-    if (!enetHost_) {
+    if (opened != TransportOpenResult::Ok) {
         log("Failed to create ENet host on port " + std::to_string(config_.port));
         return false;
     }
@@ -311,24 +305,24 @@ bool SessionHost::start() {
 }
 
 void SessionHost::tick(std::uint32_t timeoutMs) {
-    if (!running_ || !enetHost_) return;
+    if (!running_ || !transport_->isOpen()) return;
     pumpDesyncCapture();
     pumpResync(currentTimeMs());
 
-    ENetEvent event;
-    while (enet_host_service(enetHost_, &event, timeoutMs) > 0) {
+    TransportEvent event;
+    while (transport_->service(event, timeoutMs) > 0) {
         switch (event.type) {
-            case ENET_EVENT_TYPE_CONNECT:
+            case TransportEventType::Connect:
                 onConnect(event.peer);
                 break;
-            case ENET_EVENT_TYPE_DISCONNECT:
+            case TransportEventType::Disconnect:
                 onDisconnect(event.peer);
                 break;
-            case ENET_EVENT_TYPE_RECEIVE:
-                onReceive(event.peer, event.packet->data, event.packet->dataLength);
-                enet_packet_destroy(event.packet);
+            case TransportEventType::Receive:
+                onReceive(event.peer, event.packet.data, event.packet.size);
+                event.packet.reset();
                 break;
-            case ENET_EVENT_TYPE_NONE:
+            case TransportEventType::None:
                 break;
         }
         // After first event, poll remaining without blocking.
@@ -349,21 +343,20 @@ void SessionHost::stop() {
 
     // Disconnect all peers gracefully.
     for (auto& ps : peers_) {
-        if (ps.enetPeer) {
-            enet_peer_disconnect(ps.enetPeer, disconnectCode(DisconnectReason::RelayStopping));
+        if (ps.transportPeer) {
+            transport_->disconnect(ps.transportPeer, disconnectCode(DisconnectReason::RelayStopping));
         }
     }
 
     // Flush disconnects.
-    if (enetHost_) {
-        ENetEvent event;
-        while (enet_host_service(enetHost_, &event, 100) > 0) {
-            if (event.type == ENET_EVENT_TYPE_RECEIVE) {
-                enet_packet_destroy(event.packet);
+    if (transport_->isOpen()) {
+        TransportEvent event;
+        while (transport_->service(event, 100) > 0) {
+            if (event.type == TransportEventType::Receive) {
+                event.packet.reset();
             }
         }
-        enet_host_destroy(enetHost_);
-        enetHost_ = nullptr;
+        transport_->close();
     }
 
     peers_.clear();
@@ -444,21 +437,18 @@ std::optional<SlotType> SessionHost::firstFreeSlot() const {
 // ENet event handlers
 // ---------------------------------------------------------------------------
 
-void SessionHost::onConnect(ENetPeer* peer) {
+void SessionHost::onConnect(TransportPeer* peer) {
     if (peers_.size() >= config_.maxPeers) {
         log("Rejecting connection: lobby full.");
-        enet_peer_disconnect(peer, disconnectCode(DisconnectReason::LobbyFull));
+        transport_->disconnect(peer, disconnectCode(DisconnectReason::LobbyFull));
         return;
     }
 
     // Create a temporary peer id from the address until the client sends its
     // real identity in the version handshake.
-    std::ostringstream oss;
-    oss << "peer_" << peer->address.host << ":" << peer->address.port;
-
     PeerState ps;
-    ps.enetPeer = peer;
-    ps.peerId = oss.str();
+    ps.transportPeer = peer;
+    ps.peerId = transport_->pendingPeerLabel(peer);
     ps.status = PeerStatus::PendingVersion;
     ps.lastHeartbeatMs = currentTimeMs();
     peers_.push_back(std::move(ps));
@@ -466,7 +456,7 @@ void SessionHost::onConnect(ENetPeer* peer) {
     log("Peer connected: " + peers_.back().peerId + " (pending version check)");
 }
 
-void SessionHost::onDisconnect(ENetPeer* peer) {
+void SessionHost::onDisconnect(TransportPeer* peer) {
     auto* ps = findPeer(peer);
     if (ps) {
         std::string id = ps->peerId;
@@ -479,7 +469,7 @@ void SessionHost::onDisconnect(ENetPeer* peer) {
     }
 }
 
-void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
+void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                             std::size_t size, const WorldScope* admittedScope) {
     auto* ps = findPeer(peer);
     if (!ps) return;
@@ -772,7 +762,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     })) return; // duplicates never renew a routing lease
                 if (pending.size() == ACTIVATION_MAX_OUTSTANDING) pending.erase(pending.begin());
                 pending.push_back({request, now});
-                sendTo(host->enetPeer, encode(request), false);
+                sendTo(host->transportPeer, encode(request), false);
                 break;
             }
 
@@ -793,7 +783,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                            static_cast<std::uint8_t>(other.assignedSlot) == point.request.requesterSlot;
                 });
                 if (target == peers_.end()) { ++rejectedWorld_; return; }
-                auto pending = pendingActivation_.find(target->enetPeer);
+                auto pending = pendingActivation_.find(target->transportPeer);
                 if (pending == pendingActivation_.end()) { ++rejectedWorld_; return; }
                 const auto now = currentTimeMs();
                 std::erase_if(pending->second, [now](const PendingActivation& entry) {
@@ -805,7 +795,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                     });
                 if (match == pending->second.end()) { ++rejectedWorld_; return; }
                 pending->second.erase(match); // a response can be routed only once
-                sendTo(target->enetPeer, encode(point), false);
+                sendTo(target->transportPeer, encode(point), false);
                 break;
             }
 
@@ -843,7 +833,7 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 claim.attackerSlot = ps->assignedSlot; // never trust the claim
                 // Consume before forwarding. Room changes never reset this watermark.
                 ps->lastHitClaimSeq = claim.seq;
-                sendTo(host->enetPeer, encode(claim), true);
+                sendTo(host->transportPeer, encode(claim), true);
                 break;
             }
 
@@ -937,9 +927,9 @@ void SessionHost::onReceive(ENetPeer* peer, const std::uint8_t* data,
                 avatar.ownerSlot = ps->assignedSlot;
                 const auto relay = encode(AvatarRelay {ps->connectionId, avatar});
                 for (auto& other : peers_) {
-                    if (other.enetPeer != peer &&
-                        other.status == PeerStatus::Verified && other.enetPeer) {
-                        sendTo(other.enetPeer, relay, false);
+                    if (other.transportPeer != peer &&
+                        other.status == PeerStatus::Verified && other.transportPeer) {
+                        sendTo(other.transportPeer, relay, false);
                     }
                 }
                 ++relayedAvatars_;
@@ -981,19 +971,19 @@ const PeerState* SessionHost::peerBySlot(SlotType slot) const {
     return nullptr;
 }
 
-void SessionHost::forwardToOthers(ENetPeer* sender,
+void SessionHost::forwardToOthers(TransportPeer* sender,
                                   const std::vector<std::uint8_t>& packet,
                                   bool reliable) {
     for (auto& other : peers_) {
-        if (other.enetPeer != sender && other.status == PeerStatus::Verified &&
-            other.enetPeer) {
-            if(!sendTo(other.enetPeer,packet,reliable)&&resyncPlan_&&isMaterialWorldPacket(static_cast<PacketType>(packet.front()))) {finishResync(ResyncResultReason::Overflow,"material forwarding failed");return;}
+        if (other.transportPeer != sender && other.status == PeerStatus::Verified &&
+            other.transportPeer) {
+            if(!sendTo(other.transportPeer,packet,reliable)&&resyncPlan_&&isMaterialWorldPacket(static_cast<PacketType>(packet.front()))) {finishResync(ResyncResultReason::Overflow,"material forwarding failed");return;}
         }
     }
 }
 
 // Catch a late joiner up: room, hold, enemy set, HP, deaths.
-void SessionHost::sendWorldStateTo(ENetPeer* peer) try {
+void SessionHost::sendWorldStateTo(TransportPeer* peer) try {
     if (!progress_.empty()) {
         // Coalesce the merged byte map into spans, then chunk under the
         // packet size limit; the first chunk replaces the joiner's state.
@@ -1167,8 +1157,8 @@ void SessionHost::pumpDesyncCapture() {
         for(const auto& peer:peers_)if(peer.status==PeerStatus::Verified &&
             request->connections[static_cast<std::size_t>(peer.assignedSlot)]==peer.connectionId)
             {
-                if(peer.enetPeer->channelCount<3)desyncCapture_->Reject(peer.connectionId,"diagnostic channel unavailable");
-                else sendTo(peer.enetPeer,encode(*request),true);
+                if(transport_->stats(peer.transportPeer).channelCount<3)desyncCapture_->Reject(peer.connectionId,"diagnostic channel unavailable");
+                else sendTo(peer.transportPeer,encode(*request),true);
             }
     }
     if(auto result=desyncCapture_->TakeFinalized()) {
@@ -1192,9 +1182,9 @@ void SessionHost::clearWorldState() {
 // Peer helpers
 // ---------------------------------------------------------------------------
 
-PeerState* SessionHost::findPeer(ENetPeer* peer) {
+PeerState* SessionHost::findPeer(TransportPeer* peer) {
     for (auto& ps : peers_) {
-        if (ps.enetPeer == peer) return &ps;
+        if (ps.transportPeer == peer) return &ps;
     }
     return nullptr;
 }
@@ -1230,7 +1220,7 @@ void SessionHost::rebuildSessionActors() {
 
 void SessionHost::expireStalePeers(std::uint64_t nowMs) {
     struct ExpiredPeer {
-        ENetPeer* peer{nullptr};
+        TransportPeer* peer{nullptr};
         std::string peerId;
         PeerStatus status{PeerStatus::PendingVersion};
         std::string reason;
@@ -1252,7 +1242,7 @@ void SessionHost::expireStalePeers(std::uint64_t nowMs) {
         }
 
         ExpiredPeer expiredPeer;
-        expiredPeer.peer = peer.enetPeer;
+        expiredPeer.peer = peer.transportPeer;
         expiredPeer.peerId = peer.peerId;
         expiredPeer.status = peer.status;
         expiredPeer.reason = peer.status == PeerStatus::Verified
@@ -1268,7 +1258,7 @@ void SessionHost::expireStalePeers(std::uint64_t nowMs) {
         // Do not disconnect or notify entries from that stale snapshot twice.
         if (!findPeer(expiredPeer.peer)) continue;
         if (expiredPeer.peer) {
-            enet_peer_disconnect(expiredPeer.peer, disconnectCode(
+            transport_->disconnect(expiredPeer.peer, disconnectCode(
                 expiredPeer.status == PeerStatus::Verified ? DisconnectReason::PeerIdleTimeout
                                                           : DisconnectReason::HandshakeTimeout));
         }
@@ -1296,7 +1286,7 @@ void SessionHost::expireStalePeers(std::uint64_t nowMs) {
     }
 }
 
-void SessionHost::removePeer(ENetPeer* peer) {
+void SessionHost::removePeer(TransportPeer* peer) {
     if(auto* ps=findPeer(peer);ps&&resyncPlan_) {
         if(fromHost(*ps))finishResync(ResyncResultReason::HostChanged,"host retired");
         else for(std::size_t i=0;resyncPlan_&&i<resyncPlan_->targetCount;++i)if(resyncPlan_->targets[i].connectionId==ps->connectionId){finishResync(ResyncResultReason::TargetChanged,"target retired");break;}
@@ -1322,12 +1312,12 @@ void SessionHost::removePeer(ENetPeer* peer) {
             session_.actors.clear();
             progressVersion_ = 0;
             for (const auto& remaining : departed) {
-                if (remaining.enetPeer == peer) continue;
-                if (remaining.enetPeer)
-                    enet_peer_disconnect(remaining.enetPeer, disconnectCode(DisconnectReason::HostSessionEnded));
+                if (remaining.transportPeer == peer) continue;
+                if (remaining.transportPeer)
+                    transport_->disconnect(remaining.transportPeer, disconnectCode(DisconnectReason::HostSessionEnded));
             }
             for (const auto& remaining : departed) {
-                if (remaining.enetPeer == peer) continue;
+                if (remaining.transportPeer == peer) continue;
                 log("Session ended after host loss: " + remaining.peerId);
                 if (callbacks_.onPeerLeft) callbacks_.onPeerLeft(remaining.peerId);
             }
@@ -1337,7 +1327,7 @@ void SessionHost::removePeer(ENetPeer* peer) {
     }
     peers_.erase(
         std::remove_if(peers_.begin(), peers_.end(),
-                        [peer](const PeerState& ps) { return ps.enetPeer == peer; }),
+                        [peer](const PeerState& ps) { return ps.transportPeer == peer; }),
         peers_.end());
 }
 
@@ -1345,7 +1335,7 @@ void SessionHost::removePeer(ENetPeer* peer) {
 // Send helpers
 // ---------------------------------------------------------------------------
 
-bool SessionHost::sendTo(ENetPeer* peer,const std::vector<std::uint8_t>& packet,bool reliable,bool cached) {
+bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& packet,bool reliable,bool cached) {
     std::optional<WorldScope> emittedScope;
     const auto finish=[&](bool result,const char* disposition,const std::vector<std::uint8_t>* wire=nullptr) {
         if(cached)cacheDiagnostics_.emit(callbacks_.onCausalDiagnostic,"relay-cache-delivery",[&](std::ostream& out){
@@ -1393,22 +1383,19 @@ bool SessionHost::sendTo(ENetPeer* peer,const std::vector<std::uint8_t>& packet,
     }
     const bool diagnostic=isDesyncDiagnosticPacket(type);
     if(diagnostic)reliable=true;
-    auto* enetPacket=enet_packet_create(packet.data(),packet.size(),reliable?ENET_PACKET_FLAG_RELIABLE:0);
-    if(!enetPacket)return false;
-    if(enet_peer_send(peer,diagnostic?2:(reliable?0:1),enetPacket)<0){enet_packet_destroy(enetPacket);return false;}
-    return true;
+    return transport_->send(peer, packet.data(), packet.size(), diagnostic ? 2 : (reliable ? 0 : 1), reliable);
 }
 
 void SessionHost::broadcastToVerified(
     const std::vector<std::uint8_t>& packet, bool reliable) {
     for (auto& ps : peers_) {
-        if (ps.status == PeerStatus::Verified && ps.enetPeer) {
-            sendTo(ps.enetPeer, packet, reliable);
+        if (ps.status == PeerStatus::Verified && ps.transportPeer) {
+            sendTo(ps.transportPeer, packet, reliable);
         }
     }
 }
 
-void SessionHost::rejectPeer(ENetPeer* peer, const std::string& peerId,
+void SessionHost::rejectPeer(TransportPeer* peer, const std::string& peerId,
                              const std::string& reason, std::uint8_t code) {
     // A refused handshake cannot become verified through a second packet
     // already queued before the delayed ENet disconnect is observed.
@@ -1421,7 +1408,7 @@ void SessionHost::rejectPeer(ENetPeer* peer, const std::string& peerId,
     reject.reason = reason;
     sendTo(peer, encode(reject), true);
     // disconnect_later lets the reject packet go out first.
-    enet_peer_disconnect_later(peer, code);
+    transport_->disconnectLater(peer, code);
 }
 
 void SessionHost::log(const std::string& msg) {

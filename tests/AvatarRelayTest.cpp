@@ -393,8 +393,8 @@ void testAvatarBridge() {
               got.pose.ownerSlot == SlotType::Friend2 && got.pose.position.x == 9.0f,
           "DLL reads puppet 1's pose");
     PuppetAuthority authority {PuppetAuthorityMode::Network, 0, 17, kRoster};
-    check(AVATAR_BRIDGE_VERSION == 2 && ValidPuppetProvenance(got.provenance, 2, 1, authority),
-          "bridge v2 preserves full network provenance");
+    check(AVATAR_BRIDGE_VERSION == 3 && ValidPuppetProvenance(got.provenance, 2, 1, authority),
+          "bridge v3 preserves full network provenance");
     check(!dll.TryReadPuppet(1, got), "cached puppet has no new shared-memory sample");
     authority.connectionIds[2] += 0x100000000ULL;
     check(!ValidPuppetProvenance(got.provenance, 2, 1, authority) && got.pose.position.x == 9.0f,

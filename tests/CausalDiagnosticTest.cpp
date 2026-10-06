@@ -41,11 +41,11 @@ int main(){
         check(field(rows.back(),"highWater")=="4"&&field(rows.back(),"dropped")=="0",
             "flushed coverage seal accounts manual automatic and direct attempts");
         host.requestedResync_.reset();host.setLinkConditions({},{});
-        auto* peer=host.enetPeer_;host.enetPeer_=nullptr;
+        auto* peer=host.transportPeer_;host.transportPeer_=nullptr;
         check(!host.requestWorldResync(2,&generated,ResyncRequestOrigin::OperatorMailbox)&&generated.key.requestId&&
             field(rows.back(),"keyAvailable")=="1"&&field(rows.back(),"disposition")=="submission-failed"&&
             field(rows.back(),"deadlineAvailable")=="1","failed real send retains allocated key and assigned deadline");
-        host.enetPeer_=peer;host.sealRequestDiagnostics();
+        host.transportPeer_=peer;host.sealRequestDiagnostics();
     }
     {
         CausalStream stream;
