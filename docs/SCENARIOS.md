@@ -2340,6 +2340,28 @@ round with position logging after every round, a fresh control and one full
 after PASS. A further activation miss calls for a capped native-activation
 stop, not another fixed round. All original acceptance checks remain.
 
+Fresh four-round control `034300` passed with four actual XYZ logs and the
+same five enemies/HP in all six samples. Full `034523` activated the pack and
+passed exact all-peer damage HP91/13/13/13/13. It remains FAIL after lethal
+calls for IDs1/2, before the third call: one client native census changed during
+its read, so the reader refused complete absence evidence. All four round-end
+positions are retained for all three games. Whole first-wave death, empty gap,
+second pack and final quiet acceptance remain unproved. All197 execution pins,
+four saves and16 foreign files are unchanged; six owned PC processes and the
+Mac relay are closed. No retry. See the
+[control](../build/rig/vuh1502-bb04-activation4-control-prep-20261006-01/live-root01/result.md)
+and [full FAIL](../build/rig/vuh1502-bb04-activation4-wave-launch-prep-20261006-01/live-root01/result.md).
+The [independent review](../build/rig/vuh1502-bb04-activation4-full-review-20261006-01/result.md)
+adopted this scope: both issued deaths applied once per client. The sole
+changing field was nextHandle on an original client actor already issued
+lethal. Its mutation cause and successor identity remain unproved. The advisor
+approved a new narrow adapter that retains such incomplete reads and polls a
+fresh whole census within the original20s/48-round bounds, before any new hit.
+Only that field on an already-issued-death actor is eligible; every other
+changing field or failed guard still refuses. Discard counts must be reported
+per phase. Complete native acceptance remains mandatory, with a fresh control
+and one full only after PASS. No hit is reissued and no deadline is renewed.
+
 
 The [HUD names live preparation](../build/rig/vuh1507-hud-names-live-prep-20261006-01/result.md)
 is accepted offline:32 steps, exact matched private AvatarBridge-v3 products,
