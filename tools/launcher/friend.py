@@ -57,12 +57,12 @@ def main():
     field(2,'Your KH2 game folder',ttk.Entry(frame,textvariable=values['game']))
     ttk.Button(frame,text='Browse…',command=lambda:values['game'].set(filedialog.askdirectory() or values['game'].get())).grid(row=3,column=2,sticky='e')
     field(4,'Play as',ttk.Combobox(frame,textvariable=values['mode'],values=('host','join'),state='readonly'))
-    field(5,'Relay address from James',ttk.Entry(frame,textvariable=values['endpoint']))
+    field(5,'Relay address from your host',ttk.Entry(frame,textvariable=values['endpoint']))
     field(6,'Port',ttk.Entry(frame,textvariable=values['port']))
-    field(7,'Your name / peer ID',ttk.Entry(frame,textvariable=values['name']))
+    field(7,'Your name',ttk.Entry(frame,textvariable=values['name']))
     field(8,'Join slot',ttk.Combobox(frame,textvariable=values['slot'],values=('friend1','friend2'),state='readonly'))
-    ttk.Checkbutton(frame,text='Host only: run the relay here on the tailnet address above',variable=relay).grid(row=9,columnspan=3,sticky='w')
-    ttk.Checkbutton(frame,text='I loaded my save and James says the room is ready to join',variable=loaded).grid(row=10,columnspan=3,sticky='w',pady=10)
+    ttk.Checkbutton(frame,text='Host only: run the relay here (not supported in this preview)',variable=relay).grid(row=9,columnspan=3,sticky='w')
+    ttk.Checkbutton(frame,text='I loaded my save and the host says the room is ready to join',variable=loaded).grid(row=10,columnspan=3,sticky='w',pady=10)
     status=tk.StringVar(value='Nothing starts automatically. Steam and Tailscale must already be ready.')
     ttk.Label(frame,textvariable=status,wraplength=630).grid(row=12,columnspan=3,sticky='w',pady=10)
     ttk.Label(frame,text='Disconnect leaves the game open. Exit & close game closes only the game started here.\n'
@@ -91,7 +91,7 @@ def main():
         if busy:return
         try:
             if not owner.ready or not win.alive(owner.handle):raise ValueError('Start and prepare your game here first.')
-            if not loaded.get():raise ValueError('Load your save and wait for James, then check the ready box.')
+            if not loaded.get():raise ValueError('Load your save and wait for your host, then check the ready box.')
             if session and not session.done.is_set():raise ValueError('Already connected or connecting.')
             opt=Options(owner.pid,values['mode'].get(),values['endpoint'].get(),int(values['port'].get()),
                         values['name'].get(),values['slot'].get(),relay.get(),1800)

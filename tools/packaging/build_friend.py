@@ -20,6 +20,17 @@ from friend_package import SUPPORTED_GAME, digest
 
 FORBIDDEN_PARTS = {'site-packages', '__pycache__', 'ensurepip', 'idlelib', 'test', 'tests', 'demos', '.local', '.git', 'pip'}
 FORBIDDEN_SUFFIXES = {'.pyc', '.pyo', '.pdb', '.lib', '.exp', '.obj', '.log'}
+TEXT_SUFFIXES = {'.py', '.txt', '.md', '.rst', '.cmd', '.bat', '.ps1', '.json', '.ini', '.cfg', '.xml', '.html', '.htm', '.tcl', '.terms', '._pth'}
+# Only the personal-host wording check exempts these bundled attributions.
+# The full private-name/repository-path scan still covers their entire contents.
+ATTRIBUTION_FILES = {
+    'licenses/cpython-and-bundled-components.txt', 'licenses/tcl-tk-license.terms',
+    'licenses/msvc-redist.txt', 'licenses/msvc-thirdpartynotices.txt',
+    'licenses/enet.txt', 'licenses/minhook.txt',
+    'python/lib/gettext.py', 'python/lib/profile.py', 'python/lib/pstats.py',
+    'python/lib/turtledemo/fractalcurves.py', 'python/lib/xmlrpc/client.py',
+    'python/lib/xml/parsers/__init__.py',
+}
 
 
 def allowed(path):
@@ -47,6 +58,15 @@ def leakage(name, data, repo=ROOT):
         raise ValueError(f'Forbidden package entry: {name}')
 
 
+def user_text_leakage(relative_name, data):
+    name = relative_name.replace('\\', '/').casefold()
+    if name in ATTRIBUTION_FILES or Path(name).suffix not in TEXT_SUFFIXES:
+        return
+    if any('james'.encode(encoding) in data.lower()
+           for encoding in ('utf-8', 'utf-16-le', 'utf-16-be')):
+        raise ValueError(f'Personal host name in user-facing text: {relative_name}')
+
+
 def scan_zip(path):
     entries = 0; pe = 0
     with zipfile.ZipFile(path) as archive:
@@ -55,10 +75,13 @@ def scan_zip(path):
             data = archive.read(info)
             leakage(info.filename, info.filename.encode('utf-8'))
             leakage(info.filename, data)
+            # build() writes exactly one output-directory prefix into the ZIP.
+            user_text_leakage(info.filename.partition('/')[2], data)
             entries += 1; pe += int(data.startswith(b'MZ'))
-    return {'decompressedEntries':entries, 'peFiles':pe, 'privatePathLeaks':0,
+    return {'decompressedEntries':entries, 'peFiles':pe, 'privatePathLeaks':0, 'personalHostTextLeaks':0,
             'checks':['case-insensitive ASCII/UTF8/UTF16LE/UTF16BE', 'entry names and full decompressed contents',
-                      'no site-packages/cache/pyc/developer logs/configs']}
+                      'no site-packages/cache/pyc/developer logs/configs',
+                      'case-insensitive James in text; explicit license/attribution exemptions only for this check']}
 
 
 def crt_closure(products, crt, dumpbin, evidence):
