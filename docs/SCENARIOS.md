@@ -2272,6 +2272,17 @@ consumed. 004941 cannot be reused and no full attempt follows. The fixture
 keeps exact equality; the next method qualifies another two-pack room. All
 owned processes/relay closed and saves stayed unchanged. See the [control FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-canonical-logging-control-root01/result.md).
 
+Passive room collection `015317` remains FAIL. BC05/04's exact five installed
+stage0 records qualified in fresh independent samples at0/3/6/9/12 seconds,
+with enemy HP20 for four object302 and HP98 for one object303. At the terminal
+15-second read, native safe gameplay failed after a logged hit killed Sora
+(frame1399, HP24 to0). The collection correctly aborted before05/06. There
+was no protect step, memory writer, kill, rescue or recapture. This is partial
+host fixture evidence, not complete stability, populated cutscene, join or
+second-wave acceptance. Four saves and owned PC/Mac closure passed. The advisor
+reviewed one new protected BB04 no-kill control and a full five-then-three run
+only if it passes, with every original check retained. See the [passive result](../build/rig/populated-room-stability-launch-prep-20261006-01/live-root01/result.md).
+
 The [HUD names live preparation](../build/rig/vuh1507-hud-names-live-prep-20261006-01/result.md)
 is accepted offline:32 steps, exact matched private AvatarBridge-v3 products,
 literal admitted peer IDs and eight canonical capture attestations. Collection

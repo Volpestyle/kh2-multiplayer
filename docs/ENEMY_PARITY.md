@@ -391,6 +391,18 @@ agreed fallback is another two-pack room; a passive host stability observation
 alone cannot qualify two waves. All checks and recorded FAILs remain. See the
 [closed FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-canonical-logging-control-root01/result.md).
 
+Passive `015317` activated BC05/04's exact header25 stage0 pack: records
+55/70/71/72/object302 at HP20 and73/object303 at HP98. Five independent fresh
+samples through12 seconds kept exact native/publication IDs, HP, actor/status/
+controller bindings and full record bytes. Native bit8 was true initially,
+false at offset9 and true again at12. The terminal15-second census was unsafe
+after a native frame1399 hit took Sora from HP24 to0. The no-writer collection
+aborted globally before courtyard05/06. It remains FAIL, with no complete
+stability, second-pack or join proof. The reviewed next step is one no-kill
+BB04 control with the existing unchanged wave protection; a full five-then-three
+gate follows only its PASS. Every fresh region, identity, HP/death and no-extras
+guard stays. See the [closed passive result](../build/rig/populated-room-stability-launch-prep-20261006-01/live-root01/result.md).
+
 ## Selected native lifetime observer, 2026-10-05
 
 Default-OFF `KH2COOP_LIFETIME_TRACE=1` observes factory3DF930, selected outer

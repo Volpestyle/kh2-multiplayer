@@ -184,13 +184,13 @@ unchanged and owned processes/relay closed. See the [passing control](../build/r
 and [full FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-single-call-full-root01/result.md).
 
 Technical test choices belong to the lead; the advisor reviews non-obvious
-tradeoffs or check changes. The agreed next step is one bounded offline audit
-of010014, then a candidate retaining the canonical reply with every predicate
-unchanged and a fresh control for its new execution signature. An unexplained
-failure gets one logged full run; changing rooms needs evidence pointing at
-spawn behavior. A failed single control ends that approach without restore
-tweaks. Push/release, machine/system changes, account/network exposure and
-writing James's saves still require James. All prior failures remain FAIL.
+tradeoffs or check changes. The bounded audit of010014 found no deterministic
+harness defect, and the missing reply leaves its cause unproved. The resulting
+logging-only candidate retained every predicate and required a fresh control
+for its changed execution signature. A failed single control ends that approach
+without restore tweaks. Push/release, machine/system changes, account/network
+exposure and writing James's saves still require James. All prior failures
+remain FAIL.
 
 The logging candidate's fresh control `012309` failed at step 45: its successful
 single 12-byte request was followed by a qualified same-frame readback of
@@ -203,6 +203,18 @@ each declared activation followed by 15 seconds neutral sampling. Stable host
 membership is only fixture evidence; actual two-wave and join parity still
 need their full gates. Saves stayed unchanged and owned resources closed. See
 the [closed control FAIL](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/xyz-canonical-logging-control-root01/result.md).
+
+The first passive collection `015317` failed in BC05/04. Its exact installed
+five-enemy first pack qualified in five independent samples through 12 seconds:
+four object302 at HP20 and one object303 at HP98, with unchanged IDs, bindings
+and full record bytes. The terminal 15-second sample was unsafe after the native
+log recorded Sora taking 24 damage, HP24 to0. No protection, writer, kill or
+rescue was issued; global abort left courtyard05/06 unattempted. This is neither
+a stable-window PASS nor a populated event result. The advisor agreed one fresh
+BB04 no-kill control using the unchanged accepted wave protection baseline,
+then a five-then-three full gate only if it passes. Fresh native bit8 remains
+required; region exits must be retained without correction. All saves and
+owned-resource closure passed. See the [passive FAIL](../build/rig/populated-room-stability-launch-prep-20261006-01/live-root01/result.md).
 
 Populated joins have a separately declared variant: capture the exact living
 host pack after fresh hashes and independent native qualification, then require
