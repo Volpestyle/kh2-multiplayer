@@ -52,6 +52,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/PatternScan.hpp` | 126 | AOB pattern scanner for finding functions in the .text section |
 | `src/RenderHook.cpp` | | D3D12 capture (screenshots/clips) and debug overlay |
 | `src/Warp.cpp` | | Room warp requests via the game's transition function |
+| `src/PlayerKit.cpp` | | VUH-1513 default-off (`KH2COOP_PLAYER_KIT=0x5A`) player kit: post-hook on the MEMT resolver `3E2EB0` sets resolved member 0 to Roxas in world 4; blocks native-Sora clone puppets while set (docs/PLAYER_KITS.md) |
 | `src/SaveGuard.cpp` | ~520 | Redirects write opens under the KH2 save folder to a sandbox, denies deletes/moves/copies (installed first at init) |
 | `src/CrashDump.cpp` | ~90 | Minidump on unhandled exceptions, chained ahead of the game's filter |
 | `src/EnemySync.cpp` | | Checked native census, shared HP/deaths, actual-state hashes and activation leases; default-off all-alive historical-input recovery inside explicit ResyncPlan, exact full-set HP/claim hold, bounded completed-update/live-input hold and diagnostic receipts; automatic cached-world rejoin does not start this path |

@@ -47,6 +47,7 @@
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/AvatarCapture.hpp"
+#include "PlayerKit.hpp"
 #include "kh2coop/HitChannel.hpp"
 
 #include <Windows.h>
@@ -1122,6 +1123,10 @@ static void BeginCloneFrame() {
 static void NoteActorForClones(uintptr_t actor) {
     if (warp::TransitionPending()) return;
     if (actor != g_soraActor && g_cloneCountNow < 2 && IsPlayerClassActor(actor)) {
+        if (playerkit::BlocksNativeSoraPuppets()) {
+            playerkit::NoteRefusedClone(actor); // never collected; PuppetTarget refuses it live
+            return;
+        }
         g_clonesNow[g_cloneCountNow++] = actor;
     }
 }
@@ -1129,8 +1134,14 @@ static void NoteActorForClones(uintptr_t actor) {
 // The actor puppet i drives: Sora clones when the room has any, otherwise
 // the friend-slot actors (Donald/Goofy).
 static uintptr_t PuppetTarget(int index) {
-    if (g_clones[0] != 0) return g_clones[index];
-    return index == 0 ? g_friend1Actor : g_friend2Actor;
+    const uintptr_t target = g_clones[0] != 0 ? g_clones[index]
+                                              : (index == 0 ? g_friend1Actor : g_friend2Actor);
+    // VUH-1513 guard, checked live on every call (no latch): with a player kit
+    // requested, a player-class puppet target would be the kit (a selector-0
+    // friend resolves through member 0), so refuse it. Friend-class targets
+    // (Donald/Goofy) are unaffected. Per-puppet member slots: VUH-1519.
+    if (target != 0 && playerkit::BlocksNativeSoraPuppets() && IsPlayerClassActor(target)) return 0;
+    return target;
 }
 
 static int PuppetIndexFor(uintptr_t actor) {
@@ -3050,6 +3061,9 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             AvatarState avatar = captureAvatar(DirectMemory {}, g_exeBase, g_soraActor,
                                                inEvent, false);
             avatar.seq = g_frameCounter;
+            // VUH-1513: only with a kit requested does the roster byte report the
+            // actual native player kit; default off keeps captureAvatar's value.
+            if (playerkit::KitRequested()) avatar.character = playerkit::RosterForActor(g_soraActor);
             g_avatarBridge.PublishLocal(avatar);
             PublishCoopHud(avatar, hudAuthority);
         }
@@ -3424,7 +3438,11 @@ bool Initialize(uintptr_t exeBase) {
                              &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace);
     resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
     lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
-    if (!privatestatus::Initialize(exeBase)) Log("[privatestatus] initialization refused; profile unqualified");
+    playerkit::Install(exeBase, &Log); // VUH-1513: default off (KH2COOP_PLAYER_KIT); before privatestatus, whose guard reads it
+    if (!privatestatus::Initialize(exeBase))
+        Log(playerkit::BlocksNativeSoraPuppets()
+                ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
+                : "[privatestatus] initialization refused; profile unqualified");
     lifetimetrace::Initialize(exeBase);
     if (lifetimetrace::GetStatistics().requested) {
         const auto s = lifetimetrace::GetStatistics();
@@ -3492,6 +3510,7 @@ void Shutdown() {
     ClearNativeAiStamps();
     lifecycletrace::Shutdown();
     spawncontroller::Shutdown();
+    playerkit::Shutdown(); // disable its hook, then restore member 0 if still ours
     warp::Shutdown();
     enemysync::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);

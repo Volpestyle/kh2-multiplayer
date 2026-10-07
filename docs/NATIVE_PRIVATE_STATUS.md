@@ -30,6 +30,8 @@ the fixed factory return on the native owner thread, in the same load/transition
 stamp as a freshly completed local actor, and distinct from it. Anything else
 keeps the ordinary native (shared) construction.
 
+Initialization also refuses while `KH2COOP_PLAYER_KIT` is set (VUH-1513). With a player kit the Friend1 clone would be the kit, not Sora; see `PLAYER_KITS.md`.
+
 ## What it changes natively
 
 | Native boundary | Action | Preserved |

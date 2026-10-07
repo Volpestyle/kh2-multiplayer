@@ -140,7 +140,7 @@ class Profile:
                 log=inst.inject_log.read_text(errors='replace')
                 if 'Save guard installed: writes under' not in log or 'Initialization complete' not in log or re.search(r'\[saveguard\].*(redirected|blocked)',log,re.I):raise Refused('guard/init/save attempt')
             self.actors(False)
-            self.leaf=PartyLeaf(lambda:self.ram.read(self.ram.base+ROW_RVA,4),self.ram.identity,self.poke,self.emit)
+            self.leaf=PartyLeaf(lambda:self.ram.read(self.ram.base+ROW_RVA,4),self.ram.identity,self.poke,self.emit,self.log)
             self.safe();self.leaf.replace()
             count=self.log().count('[warp] load complete')
             self.r.STEPS['warp'](ctx,{'instance':1,'world':4,'room':26,'door':0,'map':0,'btl':0,'evt':0})

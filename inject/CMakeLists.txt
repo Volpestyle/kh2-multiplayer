@@ -51,6 +51,7 @@ add_library(kh2coop_inject SHARED
     src/EntityHook.cpp
     src/RenderHook.cpp
     src/Warp.cpp
+    src/PlayerKit.cpp
     src/SaveGuard.cpp
     src/CrashDump.cpp
     src/EnemySync.cpp

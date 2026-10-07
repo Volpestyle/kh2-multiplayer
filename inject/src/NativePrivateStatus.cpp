@@ -1,6 +1,7 @@
 #include "NativePrivateStatus.hpp"
 #include "NativePrivateStatusPins.hpp"
 #include "NativeSpawnController.hpp"
+#include "PlayerKit.hpp"
 #include "Warp.hpp"
 #include <Windows.h>
 #include <MinHook.h>
@@ -380,6 +381,9 @@ bool Enabled(const char* name){char v[2]{};return GetEnvironmentVariableA(name,v
 bool Initialize(uintptr_t base) {
     const DWORD error=GetLastError();
     if(!Enabled("KH2COOP_NATIVE_SORA_PRIVATE_STATUS")){SetLastError(error);return true;}
+    // VUH-1513: with a player kit requested, the Friend1 clone would be the kit (selector 0
+    // resolves through member 0). Refuse before any hook or allocation; the caller logs it.
+    if(playerkit::BlocksNativeSoraPuppets()){SetLastError(error);return false;}
     g_requested=true;g_base=base;
     bool ok=!g_attempted.exchange(true) && !Enabled("KH2COOP_LIFETIME_TRACE") && !Enabled("KH2COOP_SPAWN_TRACE") &&
         !Enabled("KH2COOP_NATURAL_RESOURCE_TRACE") && !Enabled("KH2COOP_SURVIVING_PACK_PREPARE") && VerifyImage() && PinModule();

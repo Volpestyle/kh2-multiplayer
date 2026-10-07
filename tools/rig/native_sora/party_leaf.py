@@ -4,15 +4,22 @@ TARGET_RVA = ROW_RVA + 1
 ORIGINAL = bytes([0, 1, 2, 0x12])
 class Refused(RuntimeError): pass
 
+# The DLL logs this exactly when the game process has a non-"0" KH2COOP_PLAYER_KIT (VUH-1513):
+# a selector-0 friend would then resolve to the local kit, so the leaf refuses before writing.
+PLAYER_KIT_MARK = '[playerkit] native-Sora clone puppets REFUSED'
+
 class PartyLeaf:
-    def __init__(self, read_row, identity, poke, record):
+    def __init__(self, read_row, identity, poke, record, read_log=None):
         self.read_row, self.identity, self.poke, self.record = read_row, identity, poke, record
+        self.read_log = read_log
         self.attempted = False
         self.restore_attempted = False
         self.original = None
 
     def replace(self):
         if self.attempted: raise Refused('replacement already spent')
+        if self.read_log is not None and PLAYER_KIT_MARK in self.read_log():
+            raise Refused('player kit set in the target process; selector-0 puppet refused (VUH-1513/VUH-1519)')
         self.identity()
         first, second = self.read_row(), self.read_row()
         self.record('replacement_pre', {'first': list(first), 'second': list(second)})

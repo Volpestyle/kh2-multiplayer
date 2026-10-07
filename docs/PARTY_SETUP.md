@@ -87,6 +87,18 @@ clear on room/roster/reset/resync, and recheck actual actor/program safety befor
 any application. It must not reapply on duplicate versions. No apply ACK or
 success inference is present; receipt is not proof of native application.
 
+## Player kits and puppet member slots (VUH-1513)
+
+A local player kit (`KH2COOP_PLAYER_KIT`, VUH-1513) replaces resolved member 0
+(`exe+0x2A25300`) after each area load. A friend slot whose party selector is 0
+(the VUH-1489 native-Sora puppet) resolves through that same member, so with a
+kit active it would spawn as the local kit. Until this contract assigns each
+remote puppet its own member index, the DLL refuses native-Sora clone puppets
+whenever `KH2COOP_PLAYER_KIT` is set to anything but `0`. VUH-1519 owns that
+per-puppet member slot (for example a spare index such as 3 where the room has
+no guest) and the kit each remote puppet must show, carried in
+`AvatarState.character` (0 Sora, 1 Roxas, 2 dual-wield Roxas, 3 Mickey).
+
 ## Offline evidence
 
 `kh2coop_party_test` checks every authored rule with all player-presence sets
