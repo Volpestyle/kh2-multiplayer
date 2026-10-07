@@ -69,7 +69,7 @@ public:
                 command.kind = hold.active ? Kind::Acquire : Kind::Release;
                 command.epoch = hold.epoch; command.eventProgram = hold.eventProgram;
             } else {
-                RoomTransition room {}; read(reader, room);
+                RoomTransition room {}; readRoomTransitionPacket(reader, room);
                 command.kind = Kind::Transition; command.epoch = room.epoch;
                 command.world = room.worldId; command.room = room.roomId; command.door = room.door;
                 command.map = room.mapProgram; command.battle = room.battleProgram; command.eventProgram = room.eventProgram;

@@ -498,6 +498,11 @@ void SetTransitionObserver(void (*observer)()) { g_transitionObserver = observer
 
 std::uint32_t TransitionSerial() { return g_transitionSerial; }
 
+void HostTargetSpawnPick(std::uint8_t& shared, std::uint32_t& saltTag) {
+    shared = g_hostTarget.spawnPickShared;
+    saltTag = g_hostTarget.spawnPickSaltTag;
+}
+
 std::uint32_t HostIssuedLoadEpoch(const RoomTransition& loading) {
     if (!g_hostGeneration || enemysync::WorldSessionGeneration() != g_hostGeneration) return 0;
     if (!g_hostIssued || g_hostIssueLoad != g_loadSerial || !g_transitionPending || !g_hostCause.issued ||

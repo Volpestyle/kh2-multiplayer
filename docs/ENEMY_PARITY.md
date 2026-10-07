@@ -837,6 +837,15 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
   - It still advances the native LCG once per op, registers the chosen group with the native `FUN_1403a4e80`, and returns what the native op returns.
   - **Fallback.** Every other opcode, and any op without a salt, session or host-issued epoch (for example the first, pre-session load), runs the original. The dispatcher entry, both case bodies and the register prologue are shape-checked, and their rip-relative targets are tied to the LCG and the register function, before the detour installs.
   - **Logs:** `[spawn-pick] configured=1 hooked=1`, and one line per shared pick with the index (or fired) and the native index it replaced.
+  - **Shared bit (landed with the spawn picks, default off; follow-up to review F1).** A friend following into a room the host loaded *natively* used to draw the shared pick, which matched the host only 1/n of the time. Run 111055 hit this on its first follow, at epoch 1; fixture-06 (run 121709) confirmed the fix live (`reason=host-native` at the join). Now:
+    - The host stamps its own load's outcome on the `RoomTransition` packet: `spawnPickShared` is 1 only if every random op of that load took the shared path under the current salt, and `spawnPickSaltTag` carries the low 32 bits of that salt.
+    - A client in a host-issued load uses the shared pick only if the bit is set and the tag equals its own salt's. Otherwise it keeps its native draw, logged `reason=host-native` or `reason=salt-tag`.
+    - The bit is 0 when the host's own spawn-pick hook is not live (flag off, or the shape check refused). A hook that never ran sees no op, which does not mean the room has no random op.
+    - A load whose shared ops ran under two salts counts as native.
+    - A resync bootstrap target is the embedded form, with no trailer. It reuses the trailer of the last accepted `RoomTransition` packet for the same epoch and location. Otherwise the client keeps its native draw, logged `reason=resync-unknown`.
+    - The fields travel only in the `RoomTransition` packet (a 5-byte trailer, `writeRoomTransitionPacket`), so the relay's late-join replay keeps them. Embedded `RoomTransition`s (activation, resync, party) keep their 16-byte form, and location comparisons ignore the new fields.
+    - **Protocol v14, unshipped.** The trailer changes the v14 `RoomTransition` packet without a version bump. Builds from before and after it reject each other's room transitions (wrong length), so host and friend must run matching builds.
+    - A retired world session clears the stored packet (`RetireWorldSession`).
 - **Run 092758 never reached the Gargoyles (367/368).** It stopped before their boxes: one Large Body hit (24 damage) killed the host's Sora at 24 max HP, and the death removed the field actors.
 - **Gargoyle Warrior `M_BB010_AX` (368) is allowlisted.** The configured line reads `families=302,4,301,1838,1839,1849,17,303,368`. Two runs, both with the spawn-pick variant and both Soras at 999 max HP:
   - **121127, visit 1:** motion agreement 94/94, position p95 0.

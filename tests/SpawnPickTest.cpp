@@ -111,6 +111,70 @@ int main() {
     CHECK(!OpOffset(0x2000, 0x1000, off) && off == 7);             // op below the base: native
     CHECK(!OpOffset(0x1000, 0x7FF600000000ull, off));              // a heap distance: native
 
+    // ---- the shared bit (follow-up to review F1): the host's own load decides the client's path
+    const std::uint64_t saltA = 0x1122334455667788ull, saltB = 0x99AABBCC55667788ull;  // different salts, same low 32 bits
+    CHECK(SaltTag(saltA) == 0x55667788u && SaltTag(saltB) == 0x55667788u);         // the tag is the low 32 bits
+    const std::uint64_t saltC = 0x1122334400000001ull;
+    LoadOutcome o;
+    NoteOp(o, 4, true, saltA); NoteOp(o, 4, true, saltA);
+    CHECK(o.transition == 4 && o.sharedOps == 2 && o.nativeOps == 0 && o.saltTag == SaltTag(saltA));
+    CHECK(HostLoadShared(o, saltA));                       // every op shared under the current salt
+    CHECK(!HostLoadShared(o, saltC));                      // session reset after the load: old picks are foreign
+    CHECK(!HostLoadShared(o, 0));                          // no salt now: never claim shared
+    NoteOp(o, 4, false, 0);
+    CHECK(o.nativeOps == 1 && !HostLoadShared(o, saltA));  // one native op makes the whole load native
+    NoteOp(o, 5, true, saltC);                             // a new load starts a fresh record
+    CHECK(o.transition == 5 && o.sharedOps == 1 && o.nativeOps == 0 && o.saltTag == SaltTag(saltC));
+    CHECK(HostLoadShared(LoadOutcome {9, 0, 0, 0}, saltA)); // a room without random ops (bit never consulted)
+    CHECK(ClientGate(true, SaltTag(saltA), saltA) == Gate::Shared);
+    CHECK(ClientGate(false, SaltTag(saltA), saltA) == Gate::HostNative);  // 111055 epoch 1: the host loaded natively
+    CHECK(ClientGate(true, SaltTag(saltC), saltA) == Gate::SaltTag);      // the host picked under another incarnation
+    CHECK(ClientGate(false, 0, 0) == Gate::HostNative);
+
+    // ---- rev2, review F1: no live detour, no shared bit (flag off or shape refused on the host)
+    CHECK(HostStamp(false, LoadOutcome {9, 0, 0, 0}, saltA).shared == 0);  // "no op seen" is not "no random op"
+    CHECK(HostStamp(true, LoadOutcome {9, 0, 0, 0}, saltA).shared == 1 &&
+          HostStamp(true, LoadOutcome {9, 0, 0, 0}, saltA).saltTag == SaltTag(saltA));
+    {
+        LoadOutcome live;
+        NoteOp(live, 3, true, saltA);
+        CHECK(HostStamp(true, live, saltA).shared == 1 && HostStamp(false, live, saltA).shared == 0);
+        CHECK(HostStamp(true, live, saltC).shared == 0 && HostStamp(true, live, saltC).saltTag == SaltTag(saltA));
+    }
+    // ---- review F3: a shared op under another salt than the load's earlier shared ops counts native
+    {
+        LoadOutcome mixed;
+        NoteOp(mixed, 6, true, saltA);
+        NoteOp(mixed, 6, true, saltC);
+        CHECK(mixed.sharedOps == 1 && mixed.nativeOps == 1 && mixed.saltTag == SaltTag(saltA));
+        CHECK(!HostLoadShared(mixed, saltA) && !HostLoadShared(mixed, saltC));
+    }
+    // ---- review F2: a resync bootstrap reuses the last accepted packet's trailer only for the same load
+    {
+        const kh2coop::RoomTransition snap {12, 5, 0, 2, 0, 3, 5};  // embedded form: no trailer
+        kh2coop::RoomTransition packet = snap;
+        packet.spawnPickShared = 1;
+        packet.spawnPickSaltTag = SaltTag(saltA);
+        const auto same = ResyncTrailer(&packet, snap);
+        CHECK(same.known && same.shared == 1 && same.saltTag == SaltTag(saltA) && ClientGate(same, saltA) == Gate::Shared);
+        auto otherEpoch = packet; otherEpoch.epoch = 11;
+        auto otherBtl = packet; otherBtl.battleProgram = 4;
+        auto otherDoor = packet; otherDoor.door = 1;
+        CHECK(!ResyncTrailer(&otherEpoch, snap).known && !ResyncTrailer(&otherBtl, snap).known &&
+              !ResyncTrailer(&otherDoor, snap).known && !ResyncTrailer(nullptr, snap).known);
+        auto otherWorld = packet; otherWorld.worldId = 6;
+        auto otherRoom = packet; otherRoom.roomId = 1;
+        auto otherMap = packet; otherMap.mapProgram = 1;
+        auto otherEvt = packet; otherEvt.eventProgram = 4;
+        CHECK(!ResyncTrailer(&otherWorld, snap).known && !ResyncTrailer(&otherRoom, snap).known &&
+              !ResyncTrailer(&otherMap, snap).known && !ResyncTrailer(&otherEvt, snap).known);  // review N2
+        CHECK(ClientGate(ResyncTrailer(&otherEpoch, snap), saltA) == Gate::ResyncUnknown);
+        CHECK(ResyncTrailer(nullptr, snap).shared == 0);
+        auto native = packet; native.spawnPickShared = 0;
+        CHECK(ClientGate(ResyncTrailer(&native, snap), saltA) == Gate::HostNative);  // known, host drew natively
+        CHECK(ClientGate(Trailer {1, SaltTag(saltA), false}, saltA) == Gate::ResyncUnknown);  // unknown wins
+    }
+
     // ---- the salt: the runtime's bridge value and the DLL's rule are one function
     const std::string id = "0123456789abcdef0123456789abcdef";
     CHECK(SaltFromSession(id.data(), id.size()) == kh2coop::WorldBridge::SpawnPickSaltFromSession(id));

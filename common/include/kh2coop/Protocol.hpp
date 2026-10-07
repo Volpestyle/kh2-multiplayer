@@ -117,6 +117,12 @@ struct RoomTransition {
     std::uint16_t mapProgram {0};
     std::uint16_t battleProgram {0};
     std::uint16_t eventProgram {0};
+    // VUH-1515 spawn-pick follow-up (shared bit): whether the HOST's own load of this room made every
+    // random spawn pick through the shared path, and the low 32 bits of the salt it used. Carried only
+    // by the RoomTransition packet (writeRoomTransitionPacket); location comparisons and every embedded
+    // RoomTransition (activation, resync, party) ignore both, and the generic codec does not write them.
+    std::uint8_t spawnPickShared {0};
+    std::uint32_t spawnPickSaltTag {0};
 };
 
 // Ephemeral native activation challenge. The requester owns the deadline on

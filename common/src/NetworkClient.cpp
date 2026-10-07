@@ -22,7 +22,7 @@ bool NetworkClient::sendNativeWorld(const std::vector<std::uint8_t>& bytes,const
     if(!isScopedWorldPacket(type)||(worldQuarantined_&&!isEphemeralWorldPacket(type)))return false;
     try {
         validateScopedWorldPacket(bytes);
-        if(type==PacketType::RoomTransition && avatarLocalSlot_==0){const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader r(p,n);RoomTransition room;read(r,room);if(!r.atEnd())return false;hostRoom_=room;}
+        if(type==PacketType::RoomTransition && avatarLocalSlot_==0){const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader r(p,n);RoomTransition room;readRoomTransitionPacket(r,room);if(!r.atEnd())return false;hostRoom_=room;}
         WorldEnvelope e{{avatarSessionId_,worldBinding_->selfConnectionId,c.deliverySerial,c.hostSourceSerial,0,0},bytes};
         const bool material=resyncPlan_&&avatarLocalSlot_==0&&isMaterialWorldPacket(type);
         const bool sent=sendPacket(encode(e),reliable||material);
@@ -777,7 +777,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
         std::optional<EnemyHp> admittedHp;
         if (type == PacketType::RoomTransition) {
             RoomTransition room;
-            read(reader, room);
+            readRoomTransitionPacket(reader, room);
             if (!reader.atEnd() || size != payloadSize + 3)
                 throw std::runtime_error("RoomTransition: wrong frame/payload length");
             partyLayout_.reset();

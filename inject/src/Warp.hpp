@@ -53,6 +53,8 @@ RoomTransition ReadLocation();
 // VUH-1515 spawn picks: while the client executes the load the host issued (between its issue and
 // CompleteLoad) and the native location equals that target, the host's epoch for it; else 0.
 std::uint32_t HostIssuedLoadEpoch(const RoomTransition& loading);
+// The spawn-pick shared bit and salt tag the host stamped on the transition the client is following.
+void HostTargetSpawnPick(std::uint8_t& shared, std::uint32_t& saltTag);
 
 void Shutdown();
 

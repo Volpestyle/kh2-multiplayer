@@ -364,9 +364,11 @@ void testWorldCacheEpoch() {
     host.sendEnemyHp(EnemyHp {11, {{1, 41, 100}, {2, 51, 100}}, ++hpSequence});
     check(wait([&] { return !friendSeen.hps.empty() && friendSeen.hps.back().epoch == 11; }),
           "actual unreliable old-room HP is positively received");
-    host.sendRoomTransition(RoomTransition {12, 4, 27, 0, 0, 3, 0});
+    host.sendRoomTransition(RoomTransition {12, 4, 27, 0, 0, 3, 0, 1, 0xA5A55A5Au});  // spawn-pick shared bit + salt tag
     check(wait([&] { return !friendSeen.rooms.empty() && friendSeen.rooms.back().epoch == 12; }),
           "new room retires the old manifest before the delayed HP controls");
+    check(friendSeen.rooms.back().spawnPickShared == 1 && friendSeen.rooms.back().spawnPickSaltTag == 0xA5A55A5Au,
+          "the RoomTransition packet carries the spawn-pick shared bit and salt tag through the relay");
     rejectedBefore = relay.rejectedWorldMessages();
     worldfixture::send(host, encode(EnemyHp {12, {{1, 998, 1000}}, ++hpSequence}), true);
     check(orderedBarrier() && relay.rejectedWorldMessages() == rejectedBefore + 1,
@@ -503,6 +505,30 @@ void testWorldCacheEpoch() {
               lateSeen.holds.back().active && lateSeen.holds.back().eventProgram == 0x33 &&
               lateSeen.deaths.size() == 1 && lateSeen.deaths.back().epoch == 12 && lateSeen.deaths.back().netId == 2,
           "late join reconstructs exactly the original current manifest/hold/death cache");
+    check(!lateSeen.rooms.empty() && lateSeen.rooms.back().epoch == 12 && lateSeen.rooms.back().spawnPickShared == 1 &&
+              lateSeen.rooms.back().spawnPickSaltTag == 0xA5A55A5Au,
+          "a late joiner's replayed room keeps the spawn-pick shared bit and salt tag");
+    {   // codec: the packet trailer round-trips; embedded RoomTransitions keep the 16-byte generic form
+        const RoomTransition shared {13, 5, 0, 0, 0, 3, 5, 1, 0x01020304u};
+        const auto frame = encode(shared);
+        const std::uint8_t* body = nullptr; std::size_t n = 0;
+        const bool header = decodePacketHeader(frame.data(), frame.size(), body, n) == PacketType::RoomTransition;
+        ByteReader r(body, n);
+        RoomTransition back;
+        readRoomTransitionPacket(r, back);
+        check(header && n == 16 + 5 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
+                  back.spawnPickSaltTag == 0x01020304u, "RoomTransition packet: 16 generic bytes + u8 shared + u32 salt tag");
+        ByteWriter generic;
+        write(generic, shared);
+        check(generic.data().size() == 16, "embedded RoomTransition (activation/resync/party) stays 16 bytes");
+        auto bad = frame;
+        bad[3 + 16] = 2;  // shared must be 0 or 1
+        ByteReader rb(bad.data() + 3, bad.size() - 3);
+        RoomTransition ignored;
+        bool threw = false;
+        try { readRoomTransitionPacket(rb, ignored); } catch (const std::exception&) { threw = true; }
+        check(threw, "a shared byte other than 0/1 is rejected");
+    }
 
     // Existing semantics deliberately retained: current-epoch unknown IDs may
     // arrive before an appended manifest, and duplicate entries are last-wins.

@@ -140,6 +140,10 @@ struct SpawnPickInputs {
     std::uint8_t role = 0;
 };
 bool SpawnPickContext(SpawnPickInputs& out, const char*& reason);
+// The spawn-pick hook reports each random spawn op's path (shared or native) for the current load.
+void NoteSpawnPickOp(bool shared, std::uint64_t salt);
+// Review F1: whether the spawn-pick detour is live (spawnpick::Install's result); the host stamps the bit only then.
+void SetSpawnPickLive(bool live);
 void CaptureHostActivation(const float* position4);
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence);
 

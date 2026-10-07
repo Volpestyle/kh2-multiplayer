@@ -55,7 +55,7 @@ void SessionHost::refreshResyncCache(const ResyncSnapshot& s,const std::vector<W
     // admission. Reapply once without a second publication or sequence mint.
     for(const auto& e:continuation)if(e.scope.hostSourceSerial>cut){
         const std::uint8_t* p;std::size_t n;const auto type=decodePacketHeader(e.packet.data(),e.packet.size(),p,n);ByteReader r(p,n);
-        if(type==PacketType::RoomTransition){RoomTransition m;read(r,m);clearWorldState();room_=m;}
+        if(type==PacketType::RoomTransition){RoomTransition m;readRoomTransitionPacket(r,m);clearWorldState();room_=m;}
         else if(type==PacketType::EventHold){EventHold m;read(r,m);hold_=m;}
         else if(type==PacketType::EnemyManifest){EnemyManifest m;read(r,m);if(m.replace){manifest_=m;enemyHp_.clear();deadEnemies_.clear();}else manifest_.entries.insert(manifest_.entries.end(),m.entries.begin(),m.entries.end());}
         else if(type==PacketType::EnemyHp){EnemyHp m;read(r,m);for(const auto& hp:m.entries)enemyHp_[hp.netId]=hp;}
@@ -79,7 +79,7 @@ bool SessionHost::resyncMaterialDifference(PacketType type,const std::vector<std
     if(!resyncSnapshot_)return true;
     try {
         const auto& s=*resyncSnapshot_;const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader r(p,n);
-        if(type==PacketType::RoomTransition){RoomTransition m;read(r,m);return !sameResyncRoom(m,s.room);}
+        if(type==PacketType::RoomTransition){RoomTransition m;readRoomTransitionPacket(r,m);return !sameResyncRoom(m,s.room);}
         if(type==PacketType::EventHold){EventHold m;read(r,m);return m.epoch!=s.hold.epoch||m.active!=s.hold.active||m.eventProgram!=s.hold.eventProgram;}
         if(type==PacketType::EnemyHp){EnemyHp m;read(r,m);for(const auto& e:m.entries){auto i=std::find_if(s.enemies.begin(),s.enemies.end(),[&](const auto& v){return v.identity.netId==e.netId;});if(i==s.enemies.end()||i->hp!=e.hp||i->maxHp!=e.maxHp)return true;}return false;}
         if(type==PacketType::EnemyDeath){EnemyDeath m;read(r,m);auto i=std::find_if(s.enemies.begin(),s.enemies.end(),[&](const auto& v){return v.identity.netId==m.netId;});return i==s.enemies.end()||i->life!=ResyncLife::ObservedDeadHistory;}
@@ -687,7 +687,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 bool reliable = true;
                 if (type == PacketType::RoomTransition) {
                     RoomTransition m;
-                    read(reader, m);
+                    readRoomTransitionPacket(reader, m);
                     if (!reader.atEnd()) { ++rejectedWorld_; return; }
                     if(resyncPlan_&&!sameResyncRoom(m,resyncPlan_->request.room))finishResync(ResyncResultReason::RoomChanged,"host room changed");
                     clearWorldState();

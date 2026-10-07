@@ -164,7 +164,8 @@ RoomTransition ReadLocation() {
     enemysync::ReadLocationChecked(result);
     return result;
 }
-std::uint32_t HostIssuedLoadEpoch(const RoomTransition&) { return 0; }  // VUH-1515 spawn picks: no host-issued load here
+std::uint32_t HostIssuedLoadEpoch(const RoomTransition&) { return 0; }
+void HostTargetSpawnPick(std::uint8_t& shared, std::uint32_t& saltTag) { shared = 0; saltTag = 0; }  // VUH-1515 spawn picks: no host-issued load here
 }
 namespace kh2coop::inject::lifecycletrace {
 bool PopEvent(Event&) { return false; }

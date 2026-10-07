@@ -3542,13 +3542,14 @@ bool Initialize(uintptr_t exeBase) {
     spawncontroller::Install(exeBase, &Log, &enemysync::ActivationRole,
                              &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace);
     // VUH-1515: host-agreed random spawn picks; default off (KH2COOP_SPAWN_PICK)
-    spawnpick::Install(exeBase, &Log, [](spawnpick::Context& out, const char*& reason) {
+    const bool spawnPickLive = spawnpick::Install(exeBase, &Log, [](spawnpick::Context& out, const char*& reason) {
         enemysync::SpawnPickInputs in;
         if (!enemysync::SpawnPickContext(in, reason)) return false;
         out.salt = in.salt; out.epoch = in.epoch; out.role = in.role;
         out.world = in.world; out.room = in.room; out.map = in.map; out.btl = in.btl; out.evt = in.evt;
         return true;
-    });
+    }, &enemysync::NoteSpawnPickOp);
+    enemysync::SetSpawnPickLive(spawnPickLive);  // review F1: no detour, no shared bit
     resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
     lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
     // VUH-1519: default off (KH2COOP_PARTY_NATIVE); registers its observer on the playerkit resolver hook.

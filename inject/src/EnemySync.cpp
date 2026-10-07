@@ -14,6 +14,7 @@
 #include "EnemySync.hpp"
 #include "OrdinaryEnemyBinding.hpp"
 #include "SpawnRowIdentity.hpp"
+#include "SpawnPick.hpp"
 #include "EnemyMirrorState.hpp"
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
@@ -135,6 +136,10 @@ struct Instance {
 };
 
 Instance g_inst;
+spawnpick::LoadOutcome g_spawnPickOutcome {};  // the latest load's random spawn ops (game thread)
+bool g_spawnPickLive = false;                   // review F1: the spawn-pick detour is installed (EntityHook)
+std::optional<RoomTransition> g_lastRoomPacket; // review F2: the last accepted RoomTransition packet (client)
+std::uint32_t g_spawnPickUnknownEpoch = 0;      // review F2: a resync target whose trailer is unknown
 std::uint32_t g_seenTransition = 0;
 std::uint32_t g_seenLoad = 0;
 std::uint32_t g_epoch = 0;          // host: current epoch
@@ -417,6 +422,8 @@ void RetireWorldSession() {
     if (g_resyncWriteFence == ResyncWriteFence::Exact) g_resyncWriteFence = ResyncWriteFence::Waiting;
     g_resyncOutput.clear(); g_resyncOutputContext = {};
     g_host = {};
+    g_lastRoomPacket.reset();      // shared-bit review N1: a retired session's trailer never reaches a resync
+    g_spawnPickUnknownEpoch = 0;
     g_mirror.Reset(0);  // VUH-1515 S4: a restarted host reuses epochs, sequences and frames
     g_population.Rebase(0);  // VUH-1788 C1: planning restarts; forced entries stay until removed
     ClearActivation();
@@ -1544,6 +1551,16 @@ void QueueHostBeginInstance(const RoomTransition& location) {
     CaptureWorldContext(g_pendingHostRoomContext);
     g_pendingHostRoom.epoch = g_epoch + 1;
     if (g_pendingHostRoom.epoch == 0) ++g_pendingHostRoom.epoch;
+    // Spawn-pick shared bit: did THIS host load make every random pick through the shared path? A friend that
+    // follows into a natively-picked room then keeps its own native draw instead of a mismatched shared pick.
+    {
+        const auto transition = warp::TransitionSerial();
+        const auto outcome = g_spawnPickOutcome.transition == transition ? g_spawnPickOutcome
+                                                                         : spawnpick::LoadOutcome {transition, 0, 0, 0};
+        const auto stamp = spawnpick::HostStamp(g_spawnPickLive, outcome, g_bridge.SpawnPickSalt());
+        g_pendingHostRoom.spawnPickShared = stamp.shared;
+        g_pendingHostRoom.spawnPickSaltTag = stamp.saltTag;
+    }
     g_hostBeginPending = true;
     g_lastHashMs = 0;
     g_manifestSent = false;
@@ -2580,13 +2597,20 @@ void ReceiveResyncSnapshot(const std::vector<std::uint8_t>& packet) {
         enemy.hpSourceSequence = snapshot.hpSequence;
         staged.enemies.emplace(row.identity.netId, enemy);
     }
+    // Review F2: the snapshot room is the embedded form (no spawn-pick trailer); take the last accepted
+    // RoomTransition packet's when it is this load, else the client's picks stay native (resync-unknown).
+    RoomTransition resyncRoom = snapshot.room;
+    const auto trailer = spawnpick::ResyncTrailer(g_lastRoomPacket ? &*g_lastRoomPacket : nullptr, snapshot.room);
+    resyncRoom.spawnPickShared = trailer.shared;
+    resyncRoom.spawnPickSaltTag = trailer.saltTag;
     if (!WorldContextCurrent(context) || !progresssync::StageFull(snapshot.progress, context.generation) ||
-        !WorldContextCurrent(context) || !warp::QueueHostTransition(snapshot.room, context, nullptr, &begin, &*target)) {
+        !WorldContextCurrent(context) || !warp::QueueHostTransition(resyncRoom, context, nullptr, &begin, &*target)) {
         progresssync::Reset();
         warp::SetClientAuthority(false);
         QueueNativeAck(ResyncAckStatus::Unavailable, "native bootstrap context or progress unavailable"); return;
     }
     g_host = std::move(staged); g_hostHpSequence = snapshot.hpSequence;
+    g_spawnPickUnknownEpoch = trailer.known ? 0 : snapshot.room.epoch;
     AdvanceClientManifestRevision(); InvalidateClientClaims("bootstrap-admitted");
     g_resyncRecordAuthority = ResyncRecordAuthority {snapshot, context};
     g_resyncWriteFence = ResyncWriteFence::Exact;
@@ -3403,7 +3427,7 @@ bool ReceiveWorldPackets() {
             }
             if (type == PacketType::RoomTransition) {
                 RoomTransition t;
-                read(r, t);
+                readRoomTransitionPacket(r, t);
                 // Reliable delivery normally orders these, but never let an
                 // old/replayed epoch roll back authority. Epoch zero is unset.
                 const auto advance = t.epoch - g_host.epoch;
@@ -3414,6 +3438,8 @@ bool ReceiveWorldPackets() {
                         if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
                         continue;
                     }
+                    g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
+                    g_spawnPickUnknownEpoch = 0;
                     g_host = {};
                     g_mirror.Reset(0);  // VUH-1515 S4
                     g_population.Rebase(0);
@@ -4763,6 +4789,12 @@ std::uint8_t ActivationRole() {
     return static_cast<std::uint8_t>(CurrentRole());
 }
 
+void SetSpawnPickLive(bool live) { g_spawnPickLive = live; }
+
+void NoteSpawnPickOp(bool shared, std::uint64_t salt) {
+    spawnpick::NoteOp(g_spawnPickOutcome, warp::TransitionSerial(), shared, salt);
+}
+
 bool SpawnPickContext(SpawnPickInputs& out, const char*& reason) {
     out = {};
     if (!WorldSessionGeneration()) { reason = "no-session"; return false; }
@@ -4784,6 +4816,16 @@ bool SpawnPickContext(SpawnPickInputs& out, const char*& reason) {
         out.role = 2;
         out.epoch = warp::HostIssuedLoadEpoch(location);
         if (!out.epoch) { reason = "not-host-issued-load"; return false; }
+        std::uint8_t shared = 0;
+        std::uint32_t tag = 0;
+        warp::HostTargetSpawnPick(shared, tag);
+        const spawnpick::Trailer trailer {shared, tag, g_spawnPickUnknownEpoch == 0 || g_spawnPickUnknownEpoch != out.epoch};
+        switch (spawnpick::ClientGate(trailer, out.salt)) {
+        case spawnpick::Gate::HostNative: reason = "host-native"; return false;
+        case spawnpick::Gate::SaltTag: reason = "salt-tag"; return false;
+        case spawnpick::Gate::ResyncUnknown: reason = "resync-unknown"; return false;
+        case spawnpick::Gate::Shared: break;
+        }
         return true;
     }
     reason = "role-off";

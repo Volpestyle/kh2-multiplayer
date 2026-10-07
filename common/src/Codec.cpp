@@ -221,7 +221,8 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
     rsRequire(bytes.size()==n+3&&isScopedWorldPacket(type));ByteReader r(p,n);
     switch(type) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
-        RS_INNER(RoomTransition) RS_INNER(EventHold) RS_INNER(EnemyManifest)
+        case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
+        RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
         RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
@@ -1114,6 +1115,19 @@ void read(ByteReader& r, RoomTransition& m) {
     m.eventProgram = r.readU16();
 }
 
+void writeRoomTransitionPacket(ByteWriter& w, const RoomTransition& m) {
+    write(w, m);
+    w.writeU8(m.spawnPickShared);
+    w.writeU32(m.spawnPickSaltTag);
+}
+
+void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
+    read(r, m);
+    m.spawnPickShared = r.readU8();
+    if (m.spawnPickShared > 1) throw std::runtime_error("RoomTransition: spawnPickShared not 0/1");
+    m.spawnPickSaltTag = r.readU32();
+}
+
 void read(ByteReader& r, TransitionAck& m) {
     m.epoch = r.readU32();
     m.worldId = r.readU16();
@@ -1349,7 +1363,7 @@ std::vector<std::uint8_t> encode(const AvatarState& a, PacketType type) {
 
 std::vector<std::uint8_t> encode(const RoomTransition& m) {
     ByteWriter w;
-    write(w, m);
+    writeRoomTransitionPacket(w, m);
     return encodePacket(PacketType::RoomTransition, w.data());
 }
 

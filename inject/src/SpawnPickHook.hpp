@@ -16,9 +16,10 @@ struct Context {
     std::uint8_t role = 0;  // 1 host, 2 client
 };
 using ContextFn = bool (*)(Context& out, const char*& reason);
+using NoteFn = void (*)(bool shared, std::uint64_t salt);  // EnemySync keys each op to the current load
 
 // Shape-checks the native bytes and installs the detour when KH2COOP_SPAWN_PICK=1. Logs one
 // "[spawn-pick] configured=..." line either way. Returns true only when the detour is live.
-bool Install(std::uintptr_t exeBase, LogFn log, ContextFn context);
+bool Install(std::uintptr_t exeBase, LogFn log, ContextFn context, NoteFn note);
 
 }  // namespace kh2coop::inject::spawnpick

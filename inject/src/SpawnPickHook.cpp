@@ -23,6 +23,7 @@ using RegisterFn = void(__fastcall*)(std::uint32_t groupName, char flag);
 
 LogFn g_log = nullptr;
 ContextFn g_context = nullptr;
+NoteFn g_note = nullptr;
 std::uintptr_t g_exeBase = 0;
 DispatchFn g_original = nullptr;
 RegisterFn g_register = nullptr;
@@ -98,24 +99,27 @@ char __fastcall Detour(void* script, void* op) {
     const bool inside = OpOffset(reinterpret_cast<std::uintptr_t>(script), reinterpret_cast<std::uintptr_t>(op), offset);
     if (!inside) reason = "offset";  // review F2: not a script-relative op; native, like every other unknown
     if (!inside || !g_context || !g_context(c, reason) || !c.salt || !c.epoch) {
+        if (g_note) g_note(false, 0);
         if (g_log && g_logs < kLogBudget) {
             ++g_logs;
             g_log("[spawn-pick] native op=%d n=%d reason=%s", opcode, n, reason ? reason : "-");
         }
         return g_original(script, op);
     }
+    if (g_note) g_note(true, c.salt);
     return Shared(script, op, c);
 }
 
 }  // namespace
 
-bool Install(std::uintptr_t exeBase, LogFn log, ContextFn context) {
+bool Install(std::uintptr_t exeBase, LogFn log, ContextFn context, NoteFn note) {
     g_log = log;
     char setting[2] {};
     const bool requested = GetEnvironmentVariableA("KH2COOP_SPAWN_PICK", setting, sizeof(setting)) == 1 && setting[0] == '1';
     if (!requested) return false;  // default off: no detour, no log line, vanilla behaviour
     g_exeBase = exeBase;
     g_context = context;
+    g_note = note;
     bool shape = ShapeTargetsConsistent();
     for (const auto& s : kShapes) {
         std::uint8_t bytes[96] {};

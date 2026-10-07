@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <intrin.h>
+#include "kh2coop/Protocol.hpp"
 
 namespace kh2coop::inject::spawnpick {
 
@@ -85,6 +86,73 @@ inline bool OpOffset(std::uintptr_t script, std::uintptr_t op, std::uint32_t& ou
     if (op < script || op - script >= kMaxOpOffset) return false;
     out = static_cast<std::uint32_t>(op - script);
     return true;
+}
+
+// ---- the shared bit (follow-up to review F1): the host's own load decides the client's path ----------
+inline std::uint32_t SaltTag(std::uint64_t salt) noexcept { return static_cast<std::uint32_t>(salt); }
+// What one load (one transition serial) did with its random spawn ops.
+struct LoadOutcome {
+    std::uint32_t transition = 0;
+    std::uint32_t sharedOps = 0, nativeOps = 0;
+    std::uint32_t saltTag = 0;  // the salt the shared ops used
+};
+// The host's load counts as shared when no op fell back to native and, if it made shared picks, they used the
+// salt it has now (a session reset between the load and the RoomTransition makes the old picks foreign).
+// A room with no random op is shared whenever a salt exists (the bit is then never consulted).
+inline bool HostLoadShared(const LoadOutcome& o, std::uint64_t saltNow) noexcept {
+    if (o.nativeOps != 0 || saltNow == 0) return false;
+    return o.sharedOps == 0 || o.saltTag == SaltTag(saltNow);
+}
+enum class Gate { Shared, HostNative, SaltTag, ResyncUnknown };
+// A client in a host-issued load uses the shared pick only if the host's own load was shared under its salt.
+inline Gate ClientGate(bool hostShared, std::uint32_t hostSaltTag, std::uint64_t ownSalt) noexcept {
+    if (!hostShared) return Gate::HostNative;
+    if (hostSaltTag != SaltTag(ownSalt)) return Gate::SaltTag;
+    return Gate::Shared;
+}
+// Folds one op's path into the record of its load (a new transition serial starts a fresh record).
+inline void NoteOp(LoadOutcome& o, std::uint32_t transition, bool shared, std::uint64_t salt) noexcept {
+    if (o.transition != transition) o = LoadOutcome {transition, 0, 0, 0};
+    // Review F3: one load whose shared ops ran under two salts (a session reset mid-load) is not one shared
+    // load; a shared op under another salt than the load's earlier shared ops counts as native.
+    if (shared && o.sharedOps != 0 && o.saltTag != SaltTag(salt)) shared = false;
+    if (shared) { ++o.sharedOps; o.saltTag = SaltTag(salt); } else { ++o.nativeOps; }
+}
+
+// ---- rev2 (review F1, F2) ----------------------------------------------------------------------------
+// F1: the host stamps the bit only when its own spawn-pick detour is live (KH2COOP_SPAWN_PICK=1 and the
+// shape check passed). A host without the detour observes no op, which must not read as "a room without
+// random ops": its picks were native.
+struct Stamp {
+    std::uint8_t shared = 0;
+    std::uint32_t saltTag = 0;
+};
+inline Stamp HostStamp(bool hookLive, const LoadOutcome& o, std::uint64_t saltNow) noexcept {
+    return Stamp {static_cast<std::uint8_t>(hookLive && HostLoadShared(o, saltNow) ? 1 : 0),
+                  o.sharedOps ? o.saltTag : SaltTag(saltNow)};
+}
+// F2: the trailer a client acts on. known == false: the target came from a resync bootstrap, whose snapshot
+// room (the embedded 16-byte form) carries no trailer, and no accepted RoomTransition packet matched it.
+struct Trailer {
+    std::uint8_t shared = 0;
+    std::uint32_t saltTag = 0;
+    bool known = true;
+};
+// The same load: epoch and location (Warp's SameLoadRoom), never the trailer fields.
+inline bool SameLoad(const kh2coop::RoomTransition& a, const kh2coop::RoomTransition& b) noexcept {
+    return a.epoch == b.epoch && a.worldId == b.worldId && a.roomId == b.roomId && a.door == b.door &&
+        a.mapProgram == b.mapProgram && a.battleProgram == b.battleProgram && a.eventProgram == b.eventProgram;
+}
+// Resync bootstrap: copy the trailer of the last accepted RoomTransition packet when it is the snapshot's
+// load (same epoch and location); otherwise the host's path is unknown and the client stays native.
+inline Trailer ResyncTrailer(const kh2coop::RoomTransition* lastPacket, const kh2coop::RoomTransition& snapshotRoom) noexcept {
+    if (lastPacket && SameLoad(*lastPacket, snapshotRoom))
+        return Trailer {lastPacket->spawnPickShared, lastPacket->spawnPickSaltTag, true};
+    return Trailer {0, 0, false};
+}
+inline Gate ClientGate(const Trailer& t, std::uint64_t ownSalt) noexcept {
+    if (!t.known) return Gate::ResyncUnknown;
+    return ClientGate(t.shared != 0, t.saltTag, ownSalt);
 }
 
 // RandomSpawn: an index in [0, n); n must be >= 1.

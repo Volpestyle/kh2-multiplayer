@@ -139,6 +139,10 @@ void read(ByteReader& r, EnemyManifest& m);
 // Requires a complete payload and nonzero source sequence; no partial assignment.
 void read(ByteReader& r, EnemyHp& m);
 void read(ByteReader& r, EnemyMotion& m);
+// The RoomTransition PACKET body: the generic RoomTransition fields plus the spawn-pick trailer (u8 shared,
+// u32 salt tag). Embedded RoomTransitions (activation, resync, party) keep the generic 16-byte form.
+void writeRoomTransitionPacket(ByteWriter& w, const RoomTransition& m);
+void readRoomTransitionPacket(ByteReader& r, RoomTransition& m);
 void read(ByteReader& r, EnemyDeath& m);
 void read(ByteReader& r, PartyLayout& m);
 void read(ByteReader& r, PartyReapply& m);
