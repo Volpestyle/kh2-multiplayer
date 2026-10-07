@@ -850,6 +850,7 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 - **Gargoyle Warrior `M_BB010_AX` (368) is allowlisted.** The configured line reads `families=302,4,301,1838,1839,1849,17,303,368`. Two runs, both with the spawn-pick variant and both Soras at 999 max HP:
   - **121127, visit 1:** motion agreement 94/94, position p95 0.
   - **121709, both visits:** motion 235/235, p95 0. The Warrior engaged Sora on both screens.
+- **Nightwalker `M_EX580` (10) is allowlisted** (census T1 batch 3). The configured line reads `families=302,4,301,1838,1839,1849,17,303,368,10`. Live run 20261007-131606 (Land of Dragons 08/03 btl 1, LoD fixture-01) mirrored it on both visits: motion agreement 50/50 and 78/78, position p95 0, and 30/30 hits attributed. The Shadow control passed as well. Rapid Thruster `M_EX660` (304) stays off until its own run.
 - **Gargoyle Knight `M_BB010_SWORD` (367) stays off.** In 121127 visit 2 it mirrored (106/106), but it stayed a dormant statue the whole segment, so it was never seen engaging.
 
 **Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.

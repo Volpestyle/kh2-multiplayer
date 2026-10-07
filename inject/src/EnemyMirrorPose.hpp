@@ -40,10 +40,15 @@ inline constexpr std::uint32_t kSoldierSkinObjectIds[] = {1838, 1839, 1849};
 inline constexpr std::uint32_t kLanceSoldierObjectId = 17;
 inline constexpr std::uint32_t kLargeBodyObjectId = 303;
 inline constexpr std::uint32_t kGargoyleWarriorObjectId = 368;
+// T1 batch 3: Nightwalker M_EX580 (10; Land of Dragons 08/03 btl 1) is type 4 as well: live run 20261007-131606
+// mirrored it on both visits with motion agreement 50/50 and 78/78, position p95 0, 30/30 hits attributed.
+// Rapid Thruster M_EX660 (304) stays off until its own run.
+inline constexpr std::uint32_t kNightwalkerObjectId = 10;
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
-                                              kLanceSoldierObjectId, kLargeBodyObjectId, kGargoyleWarriorObjectId};
+                                              kLanceSoldierObjectId, kLargeBodyObjectId, kGargoyleWarriorObjectId,
+                                              kNightwalkerObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;
