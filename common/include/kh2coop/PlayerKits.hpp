@@ -18,7 +18,7 @@ namespace kh2coop {
 
 struct KitProfile {
     std::uint16_t member;     // objentry id; also the resolved member value and the actor's objectId
-    std::uint8_t roster;      // AvatarState.character code and the 2-bit party plan code
+    std::uint8_t roster;      // AvatarState.character code and the 3-bit party plan code (7 = invalid; must stay < 7)
     const char* name;         // objentry model name (descriptor +8)
     std::uint16_t statusKey;  // status key (descriptor +0x4C, status +0x260); = NeoStatus
     std::uint8_t neoMoveset;
@@ -35,6 +35,11 @@ inline constexpr KitProfile kKits[] = {
     {0x323, 2, "P_EX110_BTLF", 14, 10, 10, true, false},  // Roxas dual-wield: form machinery (VUH-1509) first
     {0x5B, 3, "P_EX200", 4, 28, 11, true, false},         // Mickey: status key 4 unmeasured
 };
+
+// The party plan packs a roster code into 3 bits with 7 reserved for "invalid" (PartyNative KIT_CODE_INVALID):
+// every listed roster code must stay below it, or a future kit would alias under `& 7`.
+constexpr bool kitRostersBelowInvalidCode() { for (const auto& k : kKits) if (k.roster >= 7) return false; return true; }
+static_assert(kitRostersBelowInvalidCode(), "a kit roster code collides with the plan's invalid code 7");
 
 // The qualified player-class profile of a member/objentry value, or nullptr.
 inline const KitProfile* qualifiedKit(std::uint16_t member) {

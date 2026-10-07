@@ -45,7 +45,7 @@ struct Selection {
     Stamp stamp{};
     uintptr_t actor{},local{},localStatus{},descriptor{},status{};
     std::uint64_t serial{};
-    int key{1}; // status key of the selected clone descriptor (1 Sora; 14 Roxas, remote kit only)
+    int key{1}; // status key of the selected descriptor (1 Sora; other qualified kits' keys from kh2coop/PlayerKits.hpp)
     bool selected{},constructor{},fresh{},used{};
     // VUH-1519 party profile: an ordinary factory call in a party stamp (candidate); the
     // constructor promotes a Sora build to selected (a clone) or partyLocal (the last one).
@@ -63,8 +63,9 @@ Pending g_pending{}; // Only verified native diagnostic owner accesses this POD.
 // VUH-1519 party profile (two clones). Owner thread only, like g_pending. In a party stamp
 // every Sora built before the last is a clone: 3A7AF4 stores each player-class actor as
 // [2A105D0], so the last Sora built keeps the canonical pointer (VUH-1489 actor fix; on main
-// the player seat is built first). Sora (key 1) always; Roxas (key 14) only with party kits, where
-// the canonical local may itself be Roxas and each clone's key must match the kit written for it.
+// the player seat is built first). Sora (key 1) always; any other qualified kit's key (PlayerKits.hpp) only
+// with party kits, where the canonical local may itself be that kit and each clone's key must match the kit
+// written for it.
 constexpr unsigned PartyClones=2;
 struct PartyPending { Stamp stamp{}; std::array<uintptr_t,PartyClones> actor{},status{}; std::array<std::uint64_t,PartyClones> serial{};
     std::array<int,PartyClones> key{}; unsigned claimed{},count{},builds{},canonicalFrames{}; bool open{},bound{}; };
@@ -135,9 +136,9 @@ bool PartyProfile(Stamp& s) {
         Read(g_base+0x9A98B0,magic) && magic==std::array<std::uint8_t,4>{'K','H','2','J'} &&
         Read(g_base+0x9A98B0+0x3534+4*4,row) && row==partynative::DEFAULT_ROW;
 }
-// Vanilla player-class descriptor with its status key: Sora (84, key 1) always; Roxas
-// (90, key 14, P_EX110) only while the remote kit member or party kits are active. Both keys
-// are the SAVE-bound player keys in 3C03F0. key==0 means "not a selectable clone descriptor".
+// Vanilla player-class descriptor with its status key, from the reviewed kit table (PlayerKits.hpp):
+// Sora (84, key 1) always; any other qualified kit (Roxas 90/key 14) only while the remote kit member
+// or party kits are active. key==0 means "not a selectable clone descriptor".
 bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::KitsActive();}
 int KeyForKit(std::uint16_t kit) {return kh2coop::kitStatusKey(kit);} // the reviewed kit table
 // Party kits: the clones' key multiset equals the keys of the kits the observer wrote.
@@ -148,7 +149,7 @@ bool PartyKeysMatch(const std::array<int,2>& keys) {
 }
 int CloneDescriptorKey(uintptr_t p) {
     std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,8> name{};
-    if(!Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || form!=0 || !Read(p+8,name))return 0;
+    if(!Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || !Read(p+8,name))return 0; // form: per kit row (the table)
     return kh2coop::kitDescriptorKey(id,type,key,form,name.data(),name.size(),RoxasAllowed()); // the reviewed kit table
 }
 bool SoraDescriptor(uintptr_t p) {return CloneDescriptorKey(p)==1;}
@@ -237,7 +238,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             if(!top->used || !result || result!=top->actor || !PlayerActor(result,actual,top->key) || actual!=top->status || !Owned(actual) ||
                !StampNow(after) || !Same(after,top->stamp))Fault();
             else if(top->candidate) {
-                if(g_party.count>=PartyClones || !Same(g_party.stamp,top->stamp) || (top->key!=1 && !(top->key==14 && partynative::KitsActive())))Fault();
+                if(g_party.count>=PartyClones || !Same(g_party.stamp,top->stamp) || (top->key!=1 && !(top->key!=0 && partynative::KitsActive())))Fault(); // any qualified kit key (the table)
                 else {const unsigned k=g_party.count++;g_party.actor[k]=top->actor;g_party.status[k]=top->status;g_party.serial[k]=top->serial;g_party.key[k]=top->key;
                     PublishBuild(++g_party.builds,top->factoryId,1,top->actor,top->serial);}
             }
@@ -284,7 +285,7 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
     const DWORD error=GetLastError();const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     auto* parent=Current(anchor);Selection s{};
     if(parent && parent->candidate && !parent->selected && !parent->partyLocal && !parent->used && g_ready.load() &&
-       actor && form==0 && (CloneDescriptorKey(descriptor)==1 || (CloneDescriptorKey(descriptor)==14 && partynative::KitsActive()))) {
+       actor && form==0 && (CloneDescriptorKey(descriptor)==1 || (CloneDescriptorKey(descriptor)!=0 && partynative::KitsActive()))) { // qualified kits only (CloneDescriptorKey)
         const int k=CloneDescriptorKey(descriptor); // party kits: each build keeps its own descriptor's key
         Stamp now{};
         if(!StampNow(now) || !Same(now,parent->stamp) || !g_party.open || !Same(now,g_party.stamp))Fault();

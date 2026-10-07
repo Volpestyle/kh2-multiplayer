@@ -264,7 +264,7 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
             if (log) log("[playerkit] native-Sora clone puppets REFUSED while KH2COOP_PLAYER_KIT=%s is set (VUH-1519 owns per-puppet member slots)", text);
         }
         if (n >= sizeof(text) || !ParseKit(text, kit)) {
-            if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT=%s is not 0 or 0x5A (puppets stay blocked)", text);
+            if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT=%s is not 0 or a qualified kit of the PlayerKits table (puppets stay blocked)", text);
             return false;
         }
         if (kit != 0 && flags.party && !combined) {

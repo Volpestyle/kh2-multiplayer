@@ -176,7 +176,7 @@ std::array<std::uint8_t, 2> OtherSlots(std::uint8_t localSlot) {
 std::uint8_t KitCode(std::uint16_t kit) {
     if (kit == 0) return 0;
     const auto* k = qualifiedKit(kit);
-    return k ? k->roster : 3;
+    return k ? k->roster : KIT_CODE_INVALID;
 }
 std::uint16_t KitFromCode(std::uint8_t code) {
     const auto* k = qualifiedKitByRoster(code);
@@ -192,7 +192,7 @@ Plan ProjectIntent(const PartyIntent& m, std::uint8_t localSlot, bool kitsAllowe
         const bool player = i == 0 || m.seats[i].kind == PartyMemberKind::RemotePlayer;
         const std::uint16_t kit = i == 0 && m.kits[0] == 0 ? SORA : m.kits[i];
         if (!player) continue;
-        if (KitCode(kit) > 1) return Plan::Unsupported;                // unqualified kit
+        if (KitCode(kit) == KIT_CODE_INVALID) return Plan::Unsupported; // not a qualified kit (the table)
         if (kit != SORA && !kitsAllowed) return Plan::Unsupported;     // party kits off here: native
     }
     return Project(probe, localSlot);
@@ -246,9 +246,9 @@ void PackPlanTable(const Intent& intent, PlanTable& out, bool kitsMode) {
         for (const auto k : intent.slotKits) if (k != SORA) foreignKits = true;
     if (kitsMode && intent.kitsKnown && intent.localSlot < 3) {
         const auto o = OtherSlots(intent.localSlot);
-        kitBits = (static_cast<std::uint64_t>(KitCode(intent.slotKits[o[0]]) & 3) << 48) |
-                  (static_cast<std::uint64_t>(KitCode(intent.slotKits[o[1]]) & 3) << 50) |
-                  (static_cast<std::uint64_t>(KitCode(intent.slotKits[intent.localSlot]) & 3) << 52);
+        kitBits = (static_cast<std::uint64_t>(KitCode(intent.slotKits[o[0]]) & 7) << 48) |
+                  (static_cast<std::uint64_t>(KitCode(intent.slotKits[o[1]]) & 7) << 51) |
+                  (static_cast<std::uint64_t>(KitCode(intent.slotKits[intent.localSlot]) & 7) << 54);
     }
     if (intent.plan != Plan::None) {
         // Party kits: a layout carries no kits; in kits mode it may only borrow the roster's kits.
@@ -270,8 +270,8 @@ PlanChoice SelectPlan(const PlanTable& table, std::uint16_t world, std::uint16_t
         return PlanChoice {source == PlanSource::Hold ? Plan::None : static_cast<Plan>(v.key & 0xFF),
                            static_cast<std::uint16_t>((v.key >> 8) & 0xFF), static_cast<std::uint16_t>((v.key >> 16) & 0xFF),
                            static_cast<std::uint16_t>((v.key >> 24) & 0xFFFF), source, v.seq,
-                           KitFromCode(static_cast<std::uint8_t>((v.key >> 48) & 3)), KitFromCode(static_cast<std::uint8_t>((v.key >> 50) & 3)),
-                           KitFromCode(static_cast<std::uint8_t>((v.key >> 52) & 3))};
+                           KitFromCode(static_cast<std::uint8_t>((v.key >> 48) & 7)), KitFromCode(static_cast<std::uint8_t>((v.key >> 51) & 7)),
+                           KitFromCode(static_cast<std::uint8_t>((v.key >> 54) & 7))};
     };
     PlanChoice best; bool found = false;
     for (const auto& v : table) {
@@ -362,7 +362,7 @@ Load Decide(const LoadInput& in) {
     // Party kits: member 0 must already be this machine's own kit (PlayerKit writes it first in the
     // same hook scope). Kits off: localKit is Sora, i.e. the VUH-1519 rule.
     if (in.resolved[0] != in.localKit)
-        return in.resolved[0] == SORA || in.resolved[0] == ROXAS ? Load::LocalKitMismatch : Load::NativeNotDefault;
+        return qualifiedKit(in.resolved[0]) ? Load::LocalKitMismatch : Load::NativeNotDefault; // any qualified kit (the table)
     return Load::Applied;
 }
 
@@ -398,7 +398,7 @@ void RestoreMembers(Originals& original, std::uint16_t* resolved) {
 
 bool HostKits(std::uint16_t ownKit, std::uint8_t localSlot, const RemoteKits& remote, std::array<std::uint16_t, 3>& kits) {
     kits = {};
-    if (localSlot > 2 || KitCode(ownKit) > 1) return false;
+    if (localSlot > 2 || KitCode(ownKit) == KIT_CODE_INVALID) return false; // own kit must be a qualified kit (or legacy 0)
     kits[localSlot] = ownKit == 0 ? SORA : ownKit;
     const auto o = OtherSlots(localSlot);
     for (unsigned i = 0; i < 2; ++i) {
@@ -601,8 +601,8 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
             return false;
         }
         g_kits.store(true, std::memory_order_release);
-        if (log) log("[partynative] party kits: each seat shows its owner's chosen kit (Sora 0x54 or Roxas 0x5A); local kit 0x%X%s",
-                     flags.kit ? 0x5Au : 0x54u, flags.kit ? " (KH2COOP_PLAYER_KIT, checked by PlayerKit)" : "");
+        if (log) log("[partynative] party kits: each seat shows its owner's chosen kit (a qualified kit of the PlayerKits table); local kit %s",
+                     flags.kit ? "from KH2COOP_PLAYER_KIT (checked by PlayerKit)" : "Sora 0x54");
     }
     playerkit::SetResolveObserver(&Observer, &ObserverLog);
     g_requested.store(true, std::memory_order_release);
@@ -859,8 +859,9 @@ void NoteRemoteKit(int index, std::uint8_t roster) {
     k.seen[static_cast<unsigned>(index)] = true; k.roster[static_cast<unsigned>(index)] = roster;
     if (change) {
         g_kitsUnknownLogged = false;
-        if (g_log) g_log("[partynative] remote kit puppet %d: roster %u (%s)", index, roster,
-                         roster == 0 ? "Sora 0x54" : roster == 1 ? "Roxas 0x5A" : "unsupported: no party kits plan");
+        const auto* row = qualifiedKitByRoster(roster);
+        if (g_log) g_log("[partynative] remote kit puppet %d: roster %u (%s 0x%X)", index, roster,
+                         row ? row->name : "unsupported: not a qualified kit, no party kits plan", row ? row->member : 0u);
     }
 }
 

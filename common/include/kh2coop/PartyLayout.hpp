@@ -40,9 +40,9 @@ struct PartyReapply {
 // room loads (the per-load resolver runs before a room-pinned PartyLayout can
 // exist). Room-independent: no epoch/door. Own version namespace per host
 // connection. kits: objentry per seat (party kits): the player in each seat shows its
-// owner's chosen kit. Seat 0 (the host's own player): 0 (legacy, = Sora), Sora or Roxas;
-// a remote-player seat: Sora or Roxas; AI/empty seats: 0. Other kits need their own
-// fixture first. Receivers without KH2COOP_PARTY_KITS refuse any non-Sora kit natively.
+// owner's chosen kit. Seat 0 (the host's own player): 0 (legacy, = Sora) or a qualified kit;
+// a remote-player seat: a qualified kit (kh2coop/PlayerKits.hpp); AI/empty seats: 0. Kits are
+// qualified there, one live fixture each. Receivers without KH2COOP_PARTY_KITS refuse any non-Sora kit natively.
 struct PartyIntentTarget {
     std::uint16_t worldId{0}, roomId{0}, eventProgram{0};
     bool operator==(const PartyIntentTarget&) const = default;

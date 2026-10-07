@@ -63,7 +63,9 @@ struct Intent {
 // Party kits: the two other network slots of `localSlot`, ascending (= puppet 0, puppet 1 = the clone
 // kits written to members 0, 1; rev3).
 std::array<std::uint8_t, 2> OtherSlots(std::uint8_t localSlot);
-// 2-bit codes in the plan key: 0 Sora, 1 Roxas (3 = invalid).
+// 3-bit codes in the plan key: a qualified kit's roster code (kh2coop/PlayerKits.hpp), 0 = legacy Sora,
+// KIT_CODE_INVALID (7) for anything else. (Was 2 bits with 3 = invalid: collided with roster 3, Mickey.)
+constexpr std::uint8_t KIT_CODE_INVALID = 7;
 std::uint8_t KitCode(std::uint16_t kit);
 std::uint16_t KitFromCode(std::uint8_t code);
 // True when a layout plan, a stored intent or a story hold exists.
@@ -87,7 +89,7 @@ const char* PlanSourceName(PlanSource s);
 constexpr unsigned PLAN_TABLE = 2 + MAX_INTENT_TARGETS;
 struct PlanEntry { std::uint64_t key = 0, seq = 0; };
 using PlanTable = std::array<PlanEntry, PLAN_TABLE>;
-// Party kits: key bits 48-49 / 50-51 / 52-53 = kit codes of clone 1 (member 0) / clone 2 (member 1) / this
+// Party kits: key bits 48-50 / 51-53 / 54-56 = kit codes of clone 1 (member 0) / clone 2 (member 1) / this
 // machine's own kit (expected in member 0 at entry, written to member 2) (from intent.slotKits). In kitsMode a
 // layout plan with no kits yet is Unsupported.
 void PackPlanTable(const Intent& intent, PlanTable& out, bool kitsMode = false);
