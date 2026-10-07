@@ -145,6 +145,36 @@ then version refusal/avatar/world-cache exchange and owned closure/save guards.
 No friend-readiness claim.
 
 
+## Reconnect controls and the listener probe (offline)
+
+`kh2coop_steam_broker_test` also covers reconnection through the real broker core, transport,
+NetworkClient and SessionHost (only the Steam API and the OS pipe are mocked). Two cases:
+
+- **A peer-level Steam drop with the pipe still alive.** The friend sees one disconnect, and the host
+  session and the friend's attachment stay up.
+  - **As built, an in-place rejoin is terminal.** `NetworkClient::connect()` first calls `disconnect()`,
+    and a remote `SteamTransport::close()` fails its hub. So the attempt closes the live attachment, and
+    the runtime's bounded recovery cannot rejoin over Steam.
+  - The control records this behaviour. A fix (a non-terminal client close that keeps the attachment)
+    must flip it deliberately.
+- **Loss of the broker attachment (pipe).** That runtime's session ends and cannot reconnect in place. A
+  fresh runtime attachment to the same broker (the launcher's next Connect) is re-admitted by the
+  unchanged host session.
+
+Neither case is proven live.
+
+A single-account live fixture, **probe 03** (listener only, PENDING), is designed. It starts the friend
+launcher's Steam host runtime twice against one game at the title screen and requires these receipts:
+- the broker ready receipt;
+- `listen ... iceCreation=0`;
+- an ICE readback of `value=0 verified=1` on the real P2P listener;
+- the runtime's Steam identity equal to the broker's;
+- verified membership;
+- a detach that closes the listener.
+
+A readback other than 0 stops the run without relaxing admission. A draft Steam playtest text lives in
+`FRIEND_PLAYTEST_STEAM.md`; it is unreleased.
+
 ## First two-account live-run checklist (not yet executed)
 
 Lead re-review ADOPT is recorded in the **Delta re-review** section of

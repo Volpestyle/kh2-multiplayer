@@ -135,6 +135,36 @@ class Ownership(unittest.TestCase):
         self.assertEqual(o.transport,'enet');self.assertEqual(o.steam_identity,'')
 
 
+class Reconnect(unittest.TestCase):
+    """VUH-1493 G7 at the launcher boundary: Connect after a dead session is a fresh runtime with the same
+    Steam arguments, its own run directory, and the cached broker identity (no second broker-log read)."""
+    setUp = fixtures.Safety.setUp
+    save_manifest = fixtures.Safety.save_manifest
+    owner = fixtures.Safety.owner
+    command = fixtures.Safety.command
+    launch_steam = Ownership.launch_steam
+    def test_second_connect_is_a_fresh_runtime_with_identical_steam_arguments(self):
+        o=self.launch_steam()
+        o.read_steam_identity(read=lambda p:(READY,o.launch_wall_ns+1))
+        plans=[]
+        for n in (1,2):
+            with patch.object(f,'read_shared_prefix',side_effect=AssertionError('identity must be cached')):
+                identity=o.connection_identity('steam')
+            opt=Options(42,'join','',27795,'friend','friend1',False,1800,transport='steam',steam_self=identity,steam_host=FRIEND)
+            plans.append(make_plan(opt,Path(f'run{n}'),runtime=Path('runtime'),server=Path('server')))
+        a,b=(p['runtime_argv'] for p in plans)
+        self.assertEqual(a[a.index('--steam-join'):a.index('--steam-join')+2],b[b.index('--steam-join'):b.index('--steam-join')+2])
+        self.assertEqual(a[a.index('--steam-join')+1],FRIEND)
+        self.assertNotEqual(a[a.index('--config')+1],b[b.index('--config')+1])
+        self.assertNotEqual(a[a.index('--desync-dir')+1],b[b.index('--desync-dir')+1])
+        self.assertIsNone(plans[0]['relay_argv']);self.assertIsNone(plans[1]['relay_argv'])
+
+    def test_reconnect_after_game_exit_refuses_stale_identity(self):
+        o=self.launch_steam();o.read_steam_identity(read=lambda p:(READY,o.launch_wall_ns+1))
+        self.win.live=False
+        with self.assertRaises(ValueError):o.connection_identity('steam')
+
+
 class Receipts(unittest.TestCase):
     def test_only_exact_complete_app_identity_line(self):
         self.assertEqual(f.parse_broker_identity(READY),SELF)

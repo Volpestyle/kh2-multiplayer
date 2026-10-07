@@ -165,6 +165,46 @@ int main(){
         check(server.verifiedPeerCount()==2&&host.isConnected()&&newcomer.isConnected(),"one real protocol peer leaves without retiring host and other friend");
         host.disconnect();pump();check(server.verifiedPeerCount()==0,"host retirement closes remote session");
     }
+    // VUH-1493 G7/G8 reconnect controls through the actual broker core, transport,
+    // NetworkClient and SessionHost; only the Steam API and the OS pipe are replaced.
+    {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
+        auto ht=makeSteamTransports(std::make_unique<Link>(a),true,{Guest});
+        SessionConfig config;config.gameBuild="build";config.modHash="none";config.contentHash="none";config.authenticatedHostIdentity="steam:"+std::to_string(Host);
+        SessionHost server(config,{},std::move(ht.server));server.start();
+        NetworkClient host("local",0,"build","none",config.authenticatedHostIdentity,SlotType::Player,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));
+        host.connect();
+        // G8: a peer-level Steam drop (the host side closes the connection; the friend's pipe stays alive).
+        auto link1=std::make_unique<Link>(b);auto* l1=link1.get();auto ct=makeSteamTransports(std::move(link1),false,{});
+        unsigned closes=0;ClientCallbacks cb;cb.onDisconnected=[&]{++closes;};
+        auto friend1=std::make_unique<NetworkClient>(std::to_string(Host),std::uint16_t{0},"build","none","steam:"+std::to_string(Guest),SlotType::Friend1,cb,RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Friend",std::move(ct.client));
+        friend1->connect();
+        auto pump=[&](NetworkClient* c){for(unsigned n=0;n<80;++n){server.tick();host.tick();if(c)c->tick();}};
+        pump(friend1.get());check(server.verifiedPeerCount()==2,"reconnect control: friend admitted over mocked Steam");
+        std::uint32_t hostSide=0;for(const auto& [h,route]:bus.routes)if(route.first==&b){hostSide=h;break;}
+        check(hostSide!=0,"reconnect control: host-side Steam connection located");
+        {const auto [to,remote]=bus.routes.at(hostSide);(void)to; // Steam reports ProblemDetectedLocally on both ends
+         a.events.push_back({hostSide,0,Guest,4,true,true,0});b.events.push_back({remote,0,Host,4,true,true,0});
+         bus.routes.erase(remote);bus.routes.erase(hostSide);}
+        pump(friend1.get());
+        check(closes==1&&!friend1->isConnected()&&server.verifiedPeerCount()==1&&l1->connected(),"G8: peer-level Steam drop reaches the friend once; pipe and host session stay up");
+        // G8 as built: NetworkClient::connect() first calls disconnect(), and a remote SteamTransport::close()
+        // fails its hub, so an in-place rejoin closes the live attachment. The runtime's bounded recovery
+        // therefore cannot rejoin over Steam; the launcher's next Connect (G7) is the recovery path. This
+        // control records the current behaviour; a fix (non-terminal client close) must flip it deliberately.
+        check(!friend1->connect()&&!l1->connected(),"G8 (current): in-place rejoin after a Steam drop closes the attachment");
+        check(server.verifiedPeerCount()==1&&host.isConnected(),"G8 (current): the host session is unaffected");
+        // G7: the attachment is dead (pipe loss). The launcher's next Connect is a fresh runtime with a fresh
+        // attachment to the same in-game broker.
+        l1->close();pump(friend1.get());
+        check(!friend1->isConnected()&&!friend1->connect(),"G7: the dead attachment cannot reconnect in place");
+        friend1.reset();
+        auto fresh=makeSteamTransports(std::make_unique<Link>(b),false,{});
+        check(fresh.client!=nullptr&&fresh.identity==Guest,"G7: fresh runtime attachment to the same broker");
+        NetworkClient again(std::to_string(Host),0,"build","none","steam:"+std::to_string(Guest),SlotType::Friend1,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Friend",std::move(fresh.client));
+        again.connect();pump(&again);
+        check(again.isConnected()&&server.verifiedPeerCount()==2,"G7: fresh runtime re-admitted by the unchanged host session");
+        again.disconnect();host.disconnect();pump(nullptr);
+    }
     // Same core with malicious protocol identity, separately from Steam auth.
     for(const auto test:{0,1,2}){
         Bus bus;Endpoint a(bus,Host),b(bus,Guest);auto ht=makeSteamTransports(std::make_unique<Link>(a),true,{Guest});auto ct=makeSteamTransports(std::make_unique<Link>(b),false,{});
