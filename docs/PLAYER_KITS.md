@@ -25,6 +25,13 @@ own fixture before being allowed.
 
 `KH2COOP_REMOTE_KIT_SLOT` stays exclusive with party-native.
 
+**Kit table.** `common/include/kh2coop/PlayerKits.hpp` is the one reviewed list of kits.
+- **Form check:** private-status admission compares the descriptor's objentry Form byte (+0x57) with the row's base form.
+  - Sora and Roxas are 0 (`SoraRoxasDefault`).
+  - Mickey is 11 (OpenKH `Objentry.Form.Default`, the non-Sora characters' base form, not a drive form).
+  - Dual-wield Roxas is 10 (`RoxasDualWield`).
+- **Qualification:** a row is qualified only by its own live fixture.
+
 ## How it works
 
 On every area load, `39C860` calls `3E2EB0`. That function resolves the MEMT into

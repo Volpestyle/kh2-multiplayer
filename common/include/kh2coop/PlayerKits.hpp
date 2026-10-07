@@ -22,7 +22,8 @@ struct KitProfile {
     const char* name;         // objentry model name (descriptor +8)
     std::uint16_t statusKey;  // status key (descriptor +0x4C, status +0x260); = NeoStatus
     std::uint8_t neoMoveset;
-    std::uint8_t form;        // objentry form (0 = none for Sora/Roxas; 10 RoxasDualWield; 11 = n/a)
+    std::uint8_t form;        // objentry Form (+0x57; OpenKH Objentry.Form): 0 SoraRoxasDefault, 10 RoxasDualWield,
+                              // 11 Default (the non-Sora characters' base form, not a drive form)
     bool playerClass;         // PLAYER-type row: may be a clone or a local
     bool qualified;           // admitted by every gate; flipped only with its own live fixture
 };
@@ -54,16 +55,23 @@ inline bool kitNameIs(const KitProfile& k, const char* name, std::size_t availab
     const std::size_t n = std::strlen(k.name) + 1; // including the NUL
     return n <= available && std::memcmp(name, k.name, n) == 0;
 }
-// Private-status admission (pure): the status key of a qualified player-class descriptor
-// (type 0, form 0, id + key + name of one row), else 0. Every non-Sora row needs `nonSoraAllowed`
-// (party kits or the VUH-1513 remote kit member active on this machine).
-inline int kitDescriptorKey(std::uint32_t id, std::uint8_t type, std::uint16_t key, std::int8_t form,
-                            const char* name, std::size_t available, bool nonSoraAllowed) {
-    if (type != 0 || form != 0) return 0;
-    for (const auto& k : kKits)
-        if (k.playerClass && k.qualified && k.member == id && k.statusKey == key && kitNameIs(k, name, available) &&
+// Private-status admission (pure): the status key of a qualified player-class descriptor (type 0;
+// id + key + name + FORM of one row: the descriptor form byte must equal the row's base form), else 0.
+// Every non-Sora row needs `nonSoraAllowed` (party kits or the VUH-1513 remote kit member active here).
+// Core over any table, so checks can evaluate a candidate row before it is qualified.
+template <std::size_t N>
+inline int kitDescriptorKeyIn(const KitProfile (&table)[N], std::uint32_t id, std::uint8_t type, std::uint16_t key,
+                              std::int8_t form, const char* name, std::size_t available, bool nonSoraAllowed) {
+    if (type != 0) return 0;
+    for (const auto& k : table)
+        if (k.playerClass && k.qualified && k.member == id && k.statusKey == key &&
+            static_cast<std::uint8_t>(form) == k.form && kitNameIs(k, name, available) &&
             (k.member == KIT_SORA || nonSoraAllowed)) return key;
     return 0;
+}
+inline int kitDescriptorKey(std::uint32_t id, std::uint8_t type, std::uint16_t key, std::int8_t form,
+                            const char* name, std::size_t available, bool nonSoraAllowed) {
+    return kitDescriptorKeyIn(kKits, id, type, key, form, name, available, nonSoraAllowed);
 }
 // Clone-neutral-input admission (pure): same rows, matched on id, type 0 and name (no key read).
 inline bool kitNeutralDescriptor(std::uint32_t id, std::uint8_t type, const char* name, std::size_t available, bool nonSoraAllowed) {
