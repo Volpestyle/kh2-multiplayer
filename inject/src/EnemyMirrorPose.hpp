@@ -48,12 +48,20 @@ inline constexpr std::uint32_t kGargoyleWarriorObjectId = 368;
 inline constexpr std::uint32_t kNightwalkerObjectId = 10;
 inline constexpr std::uint32_t kRapidThrusterObjectId = 304;
 inline constexpr std::uint32_t kRapidThrusterSkinObjectIds[] = {1843, 1889};
+// T1 batch 4 (candidate, test-only until the batch-4 fixture passes; legs from the no-mirror sweep-02): Armored Knight
+// M_EX760 (305; HB 04/02 btl 1), Driller Mole M_EX700 (18; TT 02/0D btl 4), Neoshadow M_EX420 (120; TT 02/1F btl 5)
+// and the Gargoyle Knight M_BB010_SWORD (367; BB 05/09 btl 10, the engagement retry). All objentry type 4.
+inline constexpr std::uint32_t kArmoredKnightObjectId = 305;
+inline constexpr std::uint32_t kDrillerMoleObjectId = 18;
+inline constexpr std::uint32_t kNeoshadowObjectId = 120;
+inline constexpr std::uint32_t kGargoyleKnightObjectId = 367;
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
                                               kLanceSoldierObjectId, kLargeBodyObjectId, kGargoyleWarriorObjectId,
                                               kNightwalkerObjectId, kRapidThrusterObjectId, kRapidThrusterSkinObjectIds[0],
-                                              kRapidThrusterSkinObjectIds[1]};
+                                              kRapidThrusterSkinObjectIds[1], kArmoredKnightObjectId, kDrillerMoleObjectId,
+                                              kNeoshadowObjectId, kGargoyleKnightObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;

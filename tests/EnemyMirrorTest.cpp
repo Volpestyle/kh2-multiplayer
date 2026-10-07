@@ -254,22 +254,24 @@ void testHelpers() {
           "take-over blend weight rises monotonically to the stream pose");
     check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && em::FamilyAllowed(301) && em::FamilyAllowed(1838) &&
               em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0) &&
-              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(305) &&
+              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(306) &&
               !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
               !em::FamilyAllowed(1850),
           "allowlist keeps Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849): not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
-    check(em::FamilyAllowed(17) && em::FamilyAllowed(303) && em::FamilyAllowed(368) && !em::FamilyAllowed(367) &&
-              !em::FamilyAllowed(16) && !em::FamilyAllowed(18) && !em::FamilyAllowed(2025) && !em::FamilyAllowed(2409) &&
+    check(em::FamilyAllowed(17) && em::FamilyAllowed(303) && em::FamilyAllowed(368) && em::FamilyAllowed(367) &&
+              !em::FamilyAllowed(16) && em::FamilyAllowed(18) && !em::FamilyAllowed(2025) && !em::FamilyAllowed(2409) &&
+              em::FamilyAllowed(305) && em::FamilyAllowed(120) && !em::FamilyAllowed(119) && !em::FamilyAllowed(121) &&
+              !em::FamilyAllowed(1833) && !em::FamilyAllowed(1836) && !em::FamilyAllowed(1845) && !em::FamilyAllowed(366) &&
               !em::FamilyAllowed(122) && !em::FamilyAllowed(73) && !em::FamilyAllowed(369) &&
               em::FamilyAllowed(10) && !em::FamilyAllowed(9) && !em::FamilyAllowed(11) &&
               em::FamilyAllowed(304) && em::FamilyAllowed(1843) && em::FamilyAllowed(1889) && !em::FamilyAllowed(1842) &&
               !em::FamilyAllowed(1844) && !em::FamilyAllowed(1888) && !em::FamilyAllowed(1890),
-          "batches 2-3 allow Lance Soldier (17), Large Body (303), Gargoyle Warrior (368), Nightwalker (10) and Rapid Thruster (304) with its skins 1843/1889: not the Knight (367), neighbours, other skins (2025, 2409) or type-21 122/73");
+          "batches 2-4 allow 17, 303, 368, 10, 304 (+1843/1889) and the batch-4 test families 305, 18, 120, 367: not their skins (1833, 1836, 1845), neighbours, other skins (2025, 2409) or type-21 122/73");
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -281,19 +283,20 @@ void testHelpers() {
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 40;
         for (const std::uint32_t oid : {em::kLanceSoldierObjectId, em::kLargeBodyObjectId, em::kGargoyleWarriorObjectId,
-                                        em::kNightwalkerObjectId, em::kRapidThrusterObjectId}) {
+                                        em::kNightwalkerObjectId, em::kRapidThrusterObjectId, em::kArmoredKnightObjectId,
+                                        em::kDrillerMoleObjectId, em::kNeoshadowObjectId, em::kGargoyleKnightObjectId}) {
             auto r = row(net++, 0.0f);
             r.objectId = oid;
             rows.push_back(r);
         }
-        auto ignored = row(45, 0.0f);
+        auto ignored = row(49, 0.0f);
         ignored.objectId = 309;
         rows.push_back(ignored);
         b2.Ingest(motion(3, 1, 10, rows), 1); b2.Ingest(motion(3, 2, 13, rows), 2); b2.Tick(2);
         em::Pose bp;
-        bool all = !b2.Drivable(45, 2);
-        for (std::uint16_t n = 40; n < 45; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
-        check(all, "Lance Soldier, Large Body, Gargoyle Warrior, Nightwalker and Rapid Thruster streams are tracked and drivable; 309 is not");
+        bool all = !b2.Drivable(49, 2);
+        for (std::uint16_t n = 40; n < 49; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
+        check(all, "batch 2-4 family streams (17, 303, 368, 10, 304, 305, 18, 120, 367) are tracked and drivable; 309 is not");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins;

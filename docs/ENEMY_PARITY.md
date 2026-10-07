@@ -854,7 +854,14 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 - **Rapid Thruster `M_EX660` (304) and its skins `M_EX660_WI` (1843) and `M_EX660_AL` (1889) are allowlisted** (census T1 batch 3). The configured line reads `families=302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889`.
   - Live run 20261007-132550 (LoD fixture-02) passed every criterion. 304 passed at 08/05 btl 1, 08/06 btl 1 and the 08/05 revisit, with position p95 0. The Nightwalker and Shadow regressions, walkaway, mute, re-take and friend-bound all passed.
   - The skins share 304's enemy stats id (neoStatus 1020), so they follow the family pass without their own run, as the Soldier skins did.
-- **Gargoyle Knight `M_BB010_SWORD` (367) stays off.** In 121127 visit 2 it mirrored (106/106), but it stayed a dormant statue the whole segment, so it was never seen engaging.
+- **T1 batch 4: Armored Knight `M_EX760` (305), Driller Mole `M_EX700` (18), Neoshadow `M_EX420` (120) and Gargoyle Knight `M_BB010_SWORD` (367) are allowlisted.** The configured line reads `families=302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367`. Their skins (1833, 1836, 1845) and the neighbours 306, 119, 121 and 366 stay off. The batch-4 fixture-01 used the rooms from the no-mirror sweep-02:
+  - HB 04/02 btl 1: 12 Armored Knights and nothing else.
+  - TT 02/0D btl 4: 6 Driller Moles and 2 Soldiers.
+  - TT 02/1F btl 5: 2 Neoshadows and 2 Crimson Jazz, which run native.
+  - BB 05/09 btl 10: 4 Gargoyle Knights.
+  - Live run 20261007-141148 (batch-4 fixture-01) passed every criterion. Motion agreement was complete for every driven enemy, with position p95 0: 305 (7 netIds, 51/51 each), 18 (3 netIds, 52/52), 120 (2 netIds, 60/60) and 367 (3 netIds, 157-159 each). The Soldier control, walkaway, mute, re-take and friend-bound all passed; 54 of 56 hits were attributed.
+  - The Gargoyle Knight engaged this time: it moved 3626 units through 11 motion ids. It had been held back after 121127 visit 2, where it mirrored (106/106) but stayed a dormant statue.
+  - The 10 Hz frame sampler had full coverage (1799 rows, none null). Pauses of 0.3-1.7 s came in pairs on both games about every 35 s, consistent with room loads. One host-only 0.55 s pause at +136 s is not attributed yet. The run did not reproduce a multi-second host-only stall.
 
 **Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.
 - **The failure:** from friend frame 4106 to 7120, the trace stopped for *every* netId, Shadow 7 included.
