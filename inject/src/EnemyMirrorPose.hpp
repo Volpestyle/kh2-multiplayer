@@ -21,11 +21,20 @@ namespace kh2coop::inject::enemymirror {
 // type 4: the generic factory 0x3DF930 builds every type-4 enemy with constructor
 // 0x419E30, whose handler 0x7528E8 has vtable 0x5D2D68, so the Hook Bat's brain
 // (+0x20 = 0x419B10 -> 0x3B4460) and removal predicate (+0x40 = 0x419B90 ->
-// 0x3DAC30) are the same shape-checked thunks the Shadow uses.
+// 0x3DAC30) are the same shape-checked thunks the Shadow uses. M_EX010, the real
+// Soldier, is object 301: also type 4, same class (enemy family census T1; BB
+// courtyard battle program 2, groups 68/69; live run 085322). Its world skins M_EX010_NM (1838, Halloween
+// Town), M_EX010_TR (1839, Space Paranoids) and M_EX010_WI (1849, Timeless River) share its enemy stats id
+// (neoStatus 1000), so the same AI and motion layout: allowlisted with it, without a separate live run.
 inline constexpr std::uint32_t kShadowObjectId = 302;
 inline constexpr std::uint32_t kHookBatObjectId = 4;
+inline constexpr std::uint32_t kSoldierObjectId = 301;
+inline constexpr std::uint32_t kSoldierSkinObjectIds[] = {1838, 1839, 1849};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
-    return objectId == kShadowObjectId || objectId == kHookBatObjectId;
+    if (objectId == kShadowObjectId || objectId == kHookBatObjectId || objectId == kSoldierObjectId) return true;
+    for (const auto skin : kSoldierSkinObjectIds)
+        if (objectId == skin) return true;
+    return false;
 }
 
 inline constexpr std::uint32_t kPublishInterval = 3;  // host frames between EnemyMotion packets

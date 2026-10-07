@@ -195,6 +195,11 @@ void testStream() {
     batStream.Ingest(motion(3, 1, 10, {bat}), 1); batStream.Ingest(motion(3, 2, 13, {bat}), 2); batStream.Tick(2);
     em::Pose sp;
     check(batStream.Drivable(8, 2) && batStream.PoseAt(8, 2, sp) && sp.objectId == em::kHookBatObjectId, "a Hook Bat (objectId 4) stream is tracked and drivable");
+    em::Stream soldierStream;
+    auto soldier = row(9, 0.0f); soldier.objectId = em::kSoldierObjectId;
+    soldierStream.Ingest(motion(3, 1, 10, {soldier, other}), 1); soldierStream.Ingest(motion(3, 2, 13, {soldier, other}), 2); soldierStream.Tick(2);
+    check(soldierStream.Drivable(9, 2) && soldierStream.PoseAt(9, 2, sp) && sp.objectId == em::kSoldierObjectId && !soldierStream.Drivable(4, 2),
+          "a Soldier (objectId 301) stream is tracked and drivable beside an ignored family");
     // A new epoch resets everything.
     s.Ingest(motion(8, 1, 5, {row(1, 0.0f)}), 1060);
     check(s.epoch() == 8 && !s.Drivable(1, 1060) && s.stats().resets >= 1, "a new epoch resets the stream and its sequence floor");
@@ -246,9 +251,27 @@ void testHelpers() {
     check(em::BlendWeight(em::kBlendFrames) > 0.0f && em::BlendWeight(em::kBlendFrames) < em::BlendWeight(1) &&
               em::BlendWeight(1) < 1.0f && em::BlendWeight(0) == 1.0f,
           "take-over blend weight rises monotonically to the stream pose");
-    check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0) &&
-              !em::FamilyAllowed(5) && !em::FamilyAllowed(84),
-          "only the Shadow (302) and Hook Bat (4) families are allowlisted, never the player (84)");
+    check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && em::FamilyAllowed(301) && em::FamilyAllowed(1838) &&
+              em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0) &&
+              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(303) &&
+              !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
+              !em::FamilyAllowed(1850),
+          "allowlist is Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849) only: not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
+    {  // each Soldier skin streams like the base family
+        em::Stream skins;
+        std::vector<EnemyMotionEntry> rows;
+        std::uint16_t net = 30;
+        for (const auto oid : em::kSoldierSkinObjectIds) {
+            auto r = row(net++, 0.0f);
+            r.objectId = oid;
+            rows.push_back(r);
+        }
+        skins.Ingest(motion(3, 1, 10, rows), 1); skins.Ingest(motion(3, 2, 13, rows), 2); skins.Tick(2);
+        em::Pose sk;
+        bool all = true;
+        for (std::uint16_t n = 30; n < 33; ++n) all = all && skins.Drivable(n, 2) && skins.PoseAt(n, 2, sk) && sk.objectId == rows[n - 30].objectId;
+        check(all, "Soldier skins 1838, 1839 and 1849 are tracked and drivable");
+    }
     // Hook Bat lane rev2: a HOST stall (frames stop, then resume at the normal rate from where they
     // stopped) must not pin the cursor at newest-1 forever: the lag returns to about DELAY-3 and trace frames
     // (cursor % 30 == 0) come back; the motion-time overflow goes back to 0.

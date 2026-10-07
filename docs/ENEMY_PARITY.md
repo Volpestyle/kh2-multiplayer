@@ -815,6 +815,12 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 
 **Hook Bat `M_EX520` (objectId 4) is allowlisted for the mirror** (candidate). It is a winged flyer with the "Bat Cry" reaction command; it was first mis-named a Soldier here. It is objentry type 4 and is built by the same factory path as the Shadow: constructor `0x419E30`, handler `0x7528E8`, vtable `0x5D2D68`. So its brain (`+0x20`) and removal predicate (`+0x40`) are the same shape-checked thunks, and the configured line reads `families=302,4`.
 
+**Soldier `M_EX010` (objectId 301) is allowlisted for the mirror** (candidate, the first T1 family of the enemy family census). It is objentry type 4, so it has the same class and hooks as the Shadow and the Hook Bat. 
+- In the BB courtyard (05/06), Soldiers are only in battle program 2 (`b_01`), in spawn groups 68 (three at the west corner) and 69 (two, plus two Hook Bats, at the east end). Each group fires when the player enters its activator box.
+- The save's own program is 1 (`b_00`: groups 30/31 near the centre, 32/33 at the same corners with Shadows and Hook Bats). So live run 075643 never spawned a Soldier. The Soldier fixture warps with `btl 2` and places the host in the two boxes.
+- **Live run 085322 passed** every log criterion: 5 Soldiers judged, motion agreement 100% per netId, position p95 0, hits 16/21. The `btl 2` override worked on both games.
+- The skins (`_NM` 1838, `_TR` 1839, `_WI` 1849) are allowlisted with it, with no separate live run: they share its enemy stats id (neoStatus 1000), so the same AI and motion layout. The configured line reads `families=302,4,301,1838,1839,1849`.
+
 **Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.
 - **The failure:** from friend frame 4106 to 7120, the trace stopped for *every* netId, Shadow 7 included.
 - **The cause:** a host stall (host frames stopped, here around the host's clip capture) left the client's natural cursor permanently ahead of the host clock.
