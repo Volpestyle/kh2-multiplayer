@@ -13,6 +13,9 @@ namespace kh2coop::inject::hud {
 
 inline constexpr std::uint64_t FreshMs = 1000;
 inline constexpr int Width = 820, Height = 130, TrackWidth = 220;
+// The HP column (RenderHook DrawCoopHudRows, x 440..568) fits 10 cells of the
+// 22-px Consolas overlay font (~12 px each); longer text is ellipsized.
+inline constexpr std::size_t HealthColumnChars = 10;
 enum class RowState : std::uint8_t { Open, Waiting, Available };
 struct Member {
     std::uint64_t connectionId {};
@@ -28,6 +31,10 @@ struct Snapshot {
     bool locationValid {}, networkCurrent {};
     std::uint16_t world {}, room {};
     std::array<Member, 3> members {}; // Network owner slot, never native friend index.
+    // VUH-1504 revive prompt (KH2COOP_REVIVE_PROMPT=1): 0 hidden, 1 "hold to revive", 2 "reviving".
+    std::uint8_t promptKind {};
+    std::uint8_t promptSlot {255};
+    std::uint16_t promptProgress {}; // 0..1000 of the Triangle hold
 };
 static_assert(std::is_trivially_copyable_v<Snapshot> && std::is_standard_layout_v<Snapshot>);
 
@@ -119,6 +126,8 @@ inline bool SameDisplayScope(const Snapshot& a, const Snapshot& b) noexcept {
     if (a.locationValid != b.locationValid || a.networkCurrent != b.networkCurrent ||
         a.world != b.world || a.room != b.room || a.generation != b.generation ||
         a.localSlot != b.localSlot) return false;
+    if (a.promptKind != b.promptKind || a.promptSlot != b.promptSlot ||
+        a.promptProgress / 100 != b.promptProgress / 100) return false; // the fill bar advances in 10 steps
     for (std::size_t i = 0; i < 3; ++i)
         if (a.members[i].connectionId != b.members[i].connectionId ||
             a.members[i].state != b.members[i].state || a.members[i].hpValid != b.members[i].hpValid ||
@@ -130,6 +139,7 @@ inline bool SameDisplayScope(const Snapshot& a, const Snapshot& b) noexcept {
 struct RowText {
     wchar_t label[24] {}, health[32] {}, status[24] {}, name[hudnames::NameBytes] {};
     bool showBar {}, lowHealth {};
+    bool prompt {};   // VUH-1504: this row shows the revive hold (label + fill bar) instead of HP
     int fillPixels {};
 };
 struct Text {
@@ -165,6 +175,17 @@ inline Text Format(const Snapshot& snapshot) noexcept {
         } else {
             (void)std::swprintf(text.health, 32, L"HP --");
         }
+    }
+    // VUH-1504 revive prompt: drawn inside the downed teammate's own row (its HP is 0),
+    // so the 130-px overlay layout is unchanged with or without the prompt.
+    if (snapshot.promptKind && snapshot.promptSlot < 3) {
+        auto& text = out.rows[snapshot.promptSlot];
+        (void)std::swprintf(text.health, 32, snapshot.promptKind == 2 ? L"Reviving" : L"Hold \u25B3"); // <= HealthColumnChars
+        text.showBar = true;
+        text.prompt = true;
+        text.lowHealth = false;
+        const int progress = snapshot.promptProgress > 1000 ? 1000 : snapshot.promptProgress;
+        text.fillPixels = snapshot.promptKind == 2 ? TrackWidth : progress * TrackWidth / 1000;
     }
     return out;
 }

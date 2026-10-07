@@ -14,7 +14,7 @@ namespace kh2coop::inject::downedspike {
 // is requested and KH2COOP_DOWNED_SPIKE_FIXTURE=1 (or _CONTROL=1) is set. [client] fields are written by the fixture, [dll] by the DLL.
 constexpr const wchar_t* kChannelPrefix = L"Local\\kh2coop_downed_";
 constexpr std::uint32_t kChannelMagic = 0x4E574448;  // "HDWN"
-constexpr std::uint32_t kChannelVersion = 5;
+constexpr std::uint32_t kChannelVersion = 7;
 
 enum class Command : std::uint32_t { None = 0, Kill = 1, Revive = 2, RequestRevive = 3 /* arg = target slot */ };
 enum class Result : std::int32_t {
@@ -96,9 +96,16 @@ struct Channel {
     // v5 (round-5 review S1): episodes re-minted while still downed
     std::uint32_t episodeRemints;
     std::uint32_t episodeFrames;  // frames since the current episode was minted
+    // v6: player-facing revive prompt (KH2COOP_REVIVE_PROMPT=1)
+    std::uint32_t promptKind, promptSlot, promptProgress, promptHide;
+    std::uint32_t triangleFrames; // frames whose raw slot-0 input had Triangle (after the mailbox apply)
+    std::uint32_t promptFires;    // requests sent by a completed hold
+    // v7: native reaction-command candidates, recorded for calibration only (UNVERIFIED;
+    // the yield uses neither): [KH2LIB] 0x2A110E2 and the 0x80-shifted 0x2A11162.
+    std::uint32_t reactCmdLib, reactCmdShifted;
 };
 #pragma pack(pop)
-static_assert(sizeof(Channel) == 328, "fixture channel layout is mirrored in run_downed.py");
+static_assert(sizeof(Channel) == 360, "fixture channel layout is mirrored in run_downed.py");
 static_assert(offsetof(Channel, actor) == 32 && offsetof(Channel, gameOverTask) == 64 &&
               offsetof(Channel, episode) == 72, "layout");
 

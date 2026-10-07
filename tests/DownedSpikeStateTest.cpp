@@ -155,6 +155,14 @@ int main() {
     std::printf("%s\"localSlot\":%zu", ",", offsetof(Channel, localSlot));
     std::printf("%s\"episodeRemints\":%zu", ",", offsetof(Channel, episodeRemints));
     std::printf("%s\"episodeFrames\":%zu", ",", offsetof(Channel, episodeFrames));
+    std::printf("%s\"promptKind\":%zu", ",", offsetof(Channel, promptKind));
+    std::printf("%s\"promptSlot\":%zu", ",", offsetof(Channel, promptSlot));
+    std::printf("%s\"promptProgress\":%zu", ",", offsetof(Channel, promptProgress));
+    std::printf("%s\"promptHide\":%zu", ",", offsetof(Channel, promptHide));
+    std::printf("%s\"triangleFrames\":%zu", ",", offsetof(Channel, triangleFrames));
+    std::printf("%s\"promptFires\":%zu", ",", offsetof(Channel, promptFires));
+    std::printf("%s\"reactCmdLib\":%zu", ",", offsetof(Channel, reactCmdLib));
+    std::printf("%s\"reactCmdShifted\":%zu", ",", offsetof(Channel, reactCmdShifted));
     std::puts("}}");
     return failures ? 1 : 0;
 }

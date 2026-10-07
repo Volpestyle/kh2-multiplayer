@@ -146,6 +146,18 @@ struct NetState {
 };
 static NetState g_net;
 
+// Revive prompt state (KH2COOP_REVIVE_PROMPT=1); see PromptTick.
+struct PromptRuntime {
+    bool requested = false;
+    reviveprompt::State state {};
+    reviveprompt::Output out {};
+    uint32_t triangleFrames = 0, fires = 0, logs = 0, reactLogs = 0;
+    uint16_t reactLib = 0, reactShifted = 0;
+    reviveprompt::Hide lastHide = reviveprompt::Hide::Off;
+};
+static PromptRuntime g_prompt;
+static std::atomic<bool> g_promptTriangle {false};
+
 static bool GraceActive() { return g_down.graceActor != 0 && g_down.invulnTimer > 0.0f; }
 
 static bool Matches(uintptr_t exeBase, uint64_t rva, const uint8_t* bytes, size_t n) {
@@ -287,6 +299,14 @@ static void Publish(const Snap& s) {
     c->localSlot = g_net.localSlot;
     c->episodeRemints = g_down.episodeRemints;
     c->episodeFrames = g_down.episodeFrames;
+    c->promptKind = static_cast<uint32_t>(g_prompt.out.kind);
+    c->promptSlot = g_prompt.out.slot;
+    c->promptProgress = g_prompt.out.progress;
+    c->promptHide = static_cast<uint32_t>(g_prompt.out.hide);
+    c->triangleFrames = g_prompt.triangleFrames;
+    c->promptFires = g_prompt.fires;
+    c->reactCmdLib = g_prompt.reactLib;
+    c->reactCmdShifted = g_prompt.reactShifted;
     InterlockedExchange(&c->liveFrame, static_cast<long>(g_frameCounter));
 }
 
@@ -614,6 +634,86 @@ static Result RequestRevive(uint32_t targetSlot) {
     return Result::NotCanonical;
 }
 
+// ---------------------------------------------------------------------------
+// Player-facing revive prompt (VUH-1504). Default off: KH2COOP_REVIVE_PROMPT=1,
+// effective only with KH2COOP_DOWNED_SPIKE=1 and outside the control run.
+// Reads only; the one action is the existing RequestRevive(slot).
+// ---------------------------------------------------------------------------
+
+// HookedInputCollector, after ApplyPrimaryMailboxInput: the raw slot-0 buttons the
+// game will consume this frame (local pad, or the runtime/kh2ctl mailbox override).
+static void PromptInput(void* inputStruct) {
+    if (!g_prompt.requested || !inputStruct) return;
+    uint16_t buttons = 0;
+    if (ReadHitTrace(reinterpret_cast<uintptr_t>(inputStruct) + offsets::input::RAW_SLOT0 + offsets::input::BUTTONS, buttons) &&
+        reviveprompt::TriangleHeld(buttons)) // L1+Triangle is the native shortcut, not a revive
+        g_promptTriangle.store(true, std::memory_order_release);
+}
+
+static void PromptTick(const Snap& s) {
+    if (!g_prompt.requested) return;
+    reviveprompt::Facts f {};
+    f.enabled = !g_down.control && g_down.state == State::Ready;
+    f.localCanonical = s.canonical;
+    f.localDowned = (s.flags & 4U) != 0;
+    f.inEvent = s.inEvent;
+    uint8_t menu = 0xFF;
+    f.menuOpen = !ReadHitTrace(g_exeBase + offsets::OPEN_MENU, menu) || menu != 0xFF;
+    f.transition = warp::TransitionPending();
+    // Native reaction command: both candidate addresses are read and recorded for
+    // calibration; the yield is UNVERIFIED and uses neither (avoids a false hide).
+    uint16_t reactLib = 0, reactShifted = 0;
+    ReadHitTrace(g_exeBase + offsets::REACT_CMD, reactLib);           // [KH2LIB] 0x2A110E2
+    ReadHitTrace(g_exeBase + offsets::REACT_CMD + 0x80, reactShifted); // likely Steam address 0x2A11162
+    if ((reactLib != g_prompt.reactLib || reactShifted != g_prompt.reactShifted) && g_prompt.reactLogs < 32) {
+        ++g_prompt.reactLogs;
+        Log("[revive-prompt] native-rc candidates (UNVERIFIED, not used) 0x2A110E2=%04X 0x2A11162=%04X frame=%u",
+            reactLib, reactShifted, g_frameCounter);
+    }
+    g_prompt.reactLib = reactLib;
+    g_prompt.reactShifted = reactShifted;
+    f.nativeReaction = 0;
+    f.localHp = s.hp;
+    f.triangle = g_promptTriangle.exchange(false, std::memory_order_acq_rel);
+    if (f.triangle) ++g_prompt.triangleFrames;
+    for (const auto& d : g_puppets) {
+        const auto& a = d.pose.pose;
+        if (!d.have || g_frameCounter - d.poseFrame > 30 || !(a.flags & kh2coop::AvatarDowned) ||
+            (a.flags & kh2coop::AvatarInCutscene) || !a.downedEpisode ||
+            a.worldId != s.room.world || a.roomId != s.room.room) continue;
+        const float dx = a.position.x - s.pos[0], dy = a.position.y - s.pos[1], dz = a.position.z - s.pos[2];
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (!std::isfinite(dist) || dist >= f.distance) continue;
+        f.targetValid = true;
+        f.targetSlot = static_cast<uint8_t>(a.ownerSlot);
+        f.targetEpisode = a.downedEpisode;
+        f.distance = dist;
+    }
+    g_prompt.out = reviveprompt::Step(g_prompt.state, f);
+    if (g_prompt.out.hide != g_prompt.lastHide && g_prompt.logs < 32) {
+        ++g_prompt.logs;
+        Log("[revive-prompt] %s slot=%u episode=%llX dist=%.1f nativeRC=%u", reviveprompt::HideName(g_prompt.out.hide),
+            static_cast<unsigned>(f.targetSlot), static_cast<unsigned long long>(f.targetEpisode), f.distance,
+            static_cast<unsigned>(f.nativeReaction));
+    }
+    g_prompt.lastHide = g_prompt.out.hide;
+    if (g_prompt.out.fire) {
+        const Result r = RequestRevive(g_prompt.out.slot);
+        ++g_prompt.fires;
+        Log("[revive-prompt] hold complete -> RequestRevive(slot=%u episode=%llX) result=%d", static_cast<unsigned>(g_prompt.out.slot),
+            static_cast<unsigned long long>(f.targetEpisode), static_cast<int>(r));
+    }
+}
+
+// EntityHook PublishCoopHud: the HUD fields for this frame's prompt.
+static void PromptHud(uint8_t& kind, uint8_t& slot, uint16_t& progress) {
+    kind = 0; slot = 255; progress = 0;
+    if (!g_prompt.requested) return;
+    kind = static_cast<uint8_t>(g_prompt.out.kind);
+    slot = g_prompt.out.slot;
+    progress = g_prompt.out.progress;
+}
+
 // HookedPerEntityUpdate, head-of-frame block, after g_soraActor is updated.
 static void Tick(uintptr_t head) {
     if (!g_down.requested || g_down.state == State::Off) return;
@@ -673,6 +773,7 @@ static void Tick(uintptr_t head) {
         }
     }
     PublishLocalDownedState(PublishFor(g_down.state, s.actor != 0 && (s.flags & 4U) != 0), g_down.episode);
+    PromptTick(s);
     Channel* c = g_down.ch;
     if (c && c->requestSeq != c->doneSeq) {
         const long seq = c->requestSeq;
@@ -782,6 +883,11 @@ static void Install(uintptr_t exeBase) {
         }
     }
     if (!g_down.control) enemysync::SetReviveApply(&ApplyReviveRequest);
+    char rp[2] {};
+    g_prompt.requested = !g_down.control &&
+        GetEnvironmentVariableA("KH2COOP_REVIVE_PROMPT", rp, sizeof(rp)) == 1 && rp[0] == '1';
+    if (g_prompt.requested) Log("[revive-prompt] configure requested=1 range=%.0f holdFrames=%u nativeRcYield=unverified(disabled)",
+                                reviveprompt::kRange, reviveprompt::kHoldFrames);
     g_down.installMask = mask;
     const uint32_t needed = g_down.control ? (InstallResolve | InstallStatHook | InstallChannel)
                                            : (fixture ? InstallAll : (InstallAll & ~InstallChannel));

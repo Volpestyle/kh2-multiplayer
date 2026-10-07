@@ -144,10 +144,12 @@ mismatch logs `[downed] configure ... REFUSED` and installs nothing):
 shared-memory channel `Local\kh2coop_downed_<pid>` mapped. It carries per-frame
 readouts and three debug commands: `Kill` (native ApplyStatDelta to 0 HP),
 `Revive` (TryRevive on the current episode) and `RequestRevive(slot)` (sends a
-ReviveRequest for a teammate's streamed episode; there is no product UI yet).
+ReviveRequest for a teammate's streamed episode, the same call the revive
+prompt below makes).
 `_CONTROL=1` installs only the channel and Kill, so the native game over runs.
 Product play never maps the channel. `kh2coop_downed_state_test` covers the
-pure rules and pins the 328-byte channel layout the live fixture mirrors.
+pure rules and pins the 360-byte channel layout (version 7) the live fixture
+mirrors.
 
 **Live evidence (2026-10-06, Steam build, one rig).** Single-game treatment
 214522: PASS_NOT_EXERCISED (two 24 s holds, one scripted and one natural death,
@@ -171,8 +173,67 @@ round, whose paths it does not exercise.
 - All-party down, mission deaths (mode 3 with an actor is gated; arg 0 stays
   native), drive forms, summons, the `g_sys400` bit-17 branch and non-Sora
   player classes are out of scope. The debug Kill refuses those branches.
-- No revive UI/button, range or liveness cross-check on the owner side, and no
-  refusal ACK back to the requester. A live negative control of the owner gate
+- No range or liveness cross-check on the owner side (the requester's prompt
+  checks range), and no refusal ACK back to the requester. A live negative control of the owner gate
   is still open. Only the 1-host/1-friend pair on the local relay is proven;
   three players and Steam cross-account are not.
 - The hooks stay installed as pass-throughs until process exit.
+
+## Revive prompt (`KH2COOP_REVIVE_PROMPT=1`)
+
+The player-facing trigger for a ReviveRequest. Default off; it needs
+`KH2COOP_DOWNED_SPIKE=1` and is never active in the `_CONTROL` run. When off,
+`PromptInput` and `PromptTick` return on their first test and the HUD snapshot
+carries `promptKind = 0`, so the overlay is unchanged.
+
+- **Rules** (`inject/src/RevivePrompt.hpp`, pure). The prompt targets the nearest
+  fresh (pose within 30 frames), downed, non-cutscene teammate puppet in the same
+  world and room, within **150 units**. That's under SessionHost's 200-unit
+  admission policy. Hold **Triangle for 60 game frames**. The request fires on
+  **release** after a full hold, never while held. The hold must start with a
+  fresh press. L1+Triangle (the native shortcut) never counts.
+- **Cancels.** The hold resets if you leave range, take damage, open a menu,
+  enter an event or transition, go down yourself, or the target or episode
+  changes.
+- **One request per episode.** Each target episode fires at most once. A
+  re-minted episode (see Episodes) re-arms the prompt.
+- **Sending and logging.** The one action is the existing `RequestRevive(slot)`.
+  Hide reasons and the fire are logged as `[revive-prompt] ...`, capped at
+  32 lines each.
+- **Input.** `HookedInputCollector` reads the raw slot-0 buttons after the
+  mailbox/event-hold apply. That's the same buttons the game consumes, whether
+  from the local pad or the kh2ctl/runtime override.
+- **HUD.** The prompt is drawn in the downed teammate's own co-op HUD row, whose
+  HP is 0. So the 130-px overlay layout is the same with or without it.
+  - The HP column shows `Hold △`, then `Reviving` for up to 120 frames after a
+    fire.
+  - The row's bar fills yellow with the hold progress. `Snapshot` carries
+    `promptKind/promptSlot/promptProgress`, and the display scope changes in
+    10% steps.
+  - Labels must fit `hud::HealthColumnChars` (10 cells), or they are ellipsized.
+- **Native reaction command: not handled.** The game's own reaction command
+  (RC) also uses Triangle. The prompt has a yield rule for it, but the address
+  is unverified, so the adapter passes 0 and the prompt never yields. Both
+  candidates, the `[KH2LIB]` `0x2A110E2` and the 0x80-shifted `0x2A11162`, are
+  logged and published in the fixture channel for calibration. The latter read
+  `0x37` at startup with no RC on screen.
+- `kh2coop_revive_prompt_test` covers the rules, cancels, latch, hide reasons,
+  L1 exclusion and the HUD row (fill, label width, scope).
+
+**Live evidence (2026-10-07, Steam build, one rig, local relay).** Pair-hold
+000112 and 001034: PASS. The host held a scripted Triangle 90 units from the
+downed friend1:
+- 78 Triangle frames, progress 1000, exactly one fire and one request;
+- friend1 revived at 6/24, grace 118, stood and moved 474 units;
+- no game over.
+
+In 001034 the host overlay was on, and the clip shows the row's yellow fill
+growing, then `Reviving`. That run used the longer labels, which the column
+truncated; the shortened labels are offline-checked only.
+
+**Prompt limits.**
+- The native RC yield is not active. If an RC and a downed teammate are both in
+  range, a Triangle hold may also trigger the RC.
+- A manual pad press is unverified; only the kh2ctl input override was tested.
+- The prompt is not hidden while the local player is in an event-hold.
+- Only 1 host + 1 friend has been tested.

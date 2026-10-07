@@ -444,6 +444,14 @@ if(WIN32)
     if(MSVC)
         target_compile_options(kh2coop_hud_cpu_test PRIVATE /W4 /WX)
     endif()
+
+    # VUH-1504 revive prompt: hold/latch/cancel rules and its HUD row.
+    add_executable(kh2coop_revive_prompt_test tests/RevivePromptTest.cpp)
+    target_include_directories(kh2coop_revive_prompt_test PRIVATE inject/src common/include)
+    target_compile_definitions(kh2coop_revive_prompt_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        target_compile_options(kh2coop_revive_prompt_test PRIVATE /W4 /WX)
+    endif()
 endif()
 
 # Register every headless kh2coop_*_test executable defined above with CTest

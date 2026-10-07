@@ -800,7 +800,8 @@ void DrawCoopHudRows() {
             SetDCBrushColor(g_overlayDc, RGB(65, 65, 65));
             FillRect(g_overlayDc, &track, brush);
             track.right = track.left + row.fillPixels;
-            SetDCBrushColor(g_overlayDc, row.lowHealth ? RGB(235, 185, 60) : RGB(100, 215, 110));
+            SetDCBrushColor(g_overlayDc, row.prompt ? RGB(255, 210, 90)
+                                                    : (row.lowHealth ? RGB(235, 185, 60) : RGB(100, 215, 110)));
             if (row.fillPixels) FillRect(g_overlayDc, &track, brush);
         }
     }

@@ -59,6 +59,7 @@
 #include <cstdio>
 #include <cstring>
 #include "DownedSpikeState.hpp"
+#include "RevivePrompt.hpp"
 
 namespace kh2coop {
 namespace inject {
@@ -1095,7 +1096,9 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
         remote.avatar = g_puppets[i].pose.pose;
     }
     input.after = enemysync::CapturePuppetAuthority();
-    render::PublishCoopHud(hud::Project(input, GetTickCount64(), g_frameCounter));
+    auto snapshot = hud::Project(input, GetTickCount64(), g_frameCounter);
+    downedspike::PromptHud(snapshot.promptKind, snapshot.promptSlot, snapshot.promptProgress);
+    render::PublishCoopHud(snapshot);
 }
 
 // Sora clones: player-class actors (objentry type 0) other than the real
@@ -2791,6 +2794,8 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
                 g_primaryMailboxPad = {};
                 g_primaryRawButtons = 0;
             }
+            // VUH-1504 revive prompt: raw slot-0 buttons after the mailbox/event-hold apply.
+            downedspike::PromptInput(inputStruct);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             if (control) eventholdnative::AbortInput();
             Log("EXCEPTION in HookedInputCollector post-call");
