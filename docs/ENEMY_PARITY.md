@@ -821,6 +821,11 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 - **Live run 085322 passed** every log criterion: 5 Soldiers judged, motion agreement 100% per netId, position p95 0, hits 16/21. The `btl 2` override worked on both games.
 - The skins (`_NM` 1838, `_TR` 1839, `_WI` 1849) are allowlisted with it, with no separate live run: they share its enemy stats id (neoStatus 1000), so the same AI and motion layout. The configured line reads `families=302,4,301,1838,1839,1849`.
 
+**T1 batch 2: Lance Soldier `M_EX690` (17) and Large Body `M_EX050` (303) are allowlisted**, from the enemy family census. Both are objentry type 4, so they use the Shadow's class and hooks.
+- The allowlist is one array, `kFamilies`, and the configured line prints it: `families=302,4,301,1838,1839,1849,17,303`.
+- **Live run 092758** (BB Entrance Hall 05/00, battle program 3, both Soras placed in each group's activator box): both families passed. Lance Soldier netIds 1 and 4 matched 89/89 and 64/64; Large Body netIds 2, 3 and 5 matched 20/20, 16/16 and 63/63. Position p95 was 0, and 9 of 14 hits were attributed.
+- **The Gargoyles (367/368) are not allowlisted yet.** The run stopped before their boxes: one Large Body hit (24 damage) killed the host's Sora at 24 max HP, and the death removed the field actors.
+
 **Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.
 - **The failure:** from friend frame 4106 to 7120, the trace stopped for *every* netId, Shadow 7 included.
 - **The cause:** a host stall (host frames stopped, here around the host's clip capture) left the client's natural cursor permanently ahead of the host clock.

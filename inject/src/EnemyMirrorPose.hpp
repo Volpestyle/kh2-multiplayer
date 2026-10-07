@@ -8,6 +8,7 @@
 #include "kh2coop/Types.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -30,11 +31,36 @@ inline constexpr std::uint32_t kShadowObjectId = 302;
 inline constexpr std::uint32_t kHookBatObjectId = 4;
 inline constexpr std::uint32_t kSoldierObjectId = 301;
 inline constexpr std::uint32_t kSoldierSkinObjectIds[] = {1838, 1839, 1849};
+// T1 batch 2 (enemy family census; BB Entrance Hall 05/00, battle program 3; live run 092758): Lance Soldier
+// M_EX690 (17) and Large Body M_EX050 (303). Both objentry type 4: the same class (0x5D2D68) and shape-checked
+// hooks as the Shadow. The Gargoyles (367/368) stay off until a run reaches their spawn boxes.
+inline constexpr std::uint32_t kLanceSoldierObjectId = 17;
+inline constexpr std::uint32_t kLargeBodyObjectId = 303;
+// The whole allowlist, in the order the configured line prints it.
+inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
+                                              kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
+                                              kLanceSoldierObjectId, kLargeBodyObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
-    if (objectId == kShadowObjectId || objectId == kHookBatObjectId || objectId == kSoldierObjectId) return true;
-    for (const auto skin : kSoldierSkinObjectIds)
-        if (objectId == skin) return true;
+    for (const auto family : kFamilies)
+        if (objectId == family) return true;
     return false;
+}
+// "302,4,..." into out (always NUL-terminated when cap > 0); returns the characters written. A family that
+// would not fit is dropped whole, never cut, so a short buffer cannot print a wrong id.
+inline std::size_t FormatFamilies(char* out, std::size_t cap) noexcept {
+    if (!out || cap == 0) return 0;
+    std::size_t at = 0;
+    for (const auto family : kFamilies) {
+        char digits[10];
+        std::size_t n = 0;
+        for (std::uint32_t v = family; n == 0 || v != 0; v /= 10) digits[n++] = static_cast<char>('0' + v % 10);
+        const std::size_t need = n + (at ? 1 : 0);
+        if (at + need + 1 > cap) break;
+        if (at) out[at++] = ',';
+        while (n) out[at++] = digits[--n];
+    }
+    out[at] = '\0';
+    return at;
 }
 
 inline constexpr std::uint32_t kPublishInterval = 3;  // host frames between EnemyMotion packets

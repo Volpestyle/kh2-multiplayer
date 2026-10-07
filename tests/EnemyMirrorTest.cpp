@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <string>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -253,10 +254,43 @@ void testHelpers() {
           "take-over blend weight rises monotonically to the stream pose");
     check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && em::FamilyAllowed(301) && em::FamilyAllowed(1838) &&
               em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0) &&
-              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(303) &&
+              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(304) &&
               !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
               !em::FamilyAllowed(1850),
-          "allowlist is Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849) only: not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
+          "allowlist keeps Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849): not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
+    check(em::FamilyAllowed(17) && em::FamilyAllowed(303) && !em::FamilyAllowed(367) && !em::FamilyAllowed(368) &&
+              !em::FamilyAllowed(16) && !em::FamilyAllowed(18) && !em::FamilyAllowed(2025) && !em::FamilyAllowed(2409) &&
+              !em::FamilyAllowed(122) && !em::FamilyAllowed(73),
+          "batch 2 adds Lance Soldier (17) and Large Body (303) only: not the untested Gargoyles (367/368), neighbours, skins (2025, 2409) or type-21 122/73");
+    {
+        char line[128] {};
+        const auto n = em::FormatFamilies(line, sizeof(line));
+        check(n == std::string("302,4,301,1838,1839,1849,17,303").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303",
+              "the configured line prints every allowlisted family, in order");
+        char tiny[9] {};
+        em::FormatFamilies(tiny, sizeof(tiny));
+        check(std::string(tiny) == "302,4", "a short buffer drops whole families, never prints a cut id");
+        check(em::FormatFamilies(nullptr, 8) == 0 && em::FormatFamilies(tiny, 0) == 0, "no buffer: nothing written");
+    }
+    {  // batch 2: each new family streams beside an ignored family (309)
+        em::Stream b2;
+        std::vector<EnemyMotionEntry> rows;
+        std::uint16_t net = 40;
+        for (const std::uint32_t oid : {em::kLanceSoldierObjectId, em::kLargeBodyObjectId}) {
+            auto r = row(net++, 0.0f);
+            r.objectId = oid;
+            rows.push_back(r);
+        }
+        auto ignored = row(42, 0.0f);
+        ignored.objectId = 309;
+        rows.push_back(ignored);
+        b2.Ingest(motion(3, 1, 10, rows), 1); b2.Ingest(motion(3, 2, 13, rows), 2); b2.Tick(2);
+        em::Pose bp;
+        bool all = !b2.Drivable(42, 2);
+        for (std::uint16_t n = 40; n < 42; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
+        check(all, "Lance Soldier and Large Body streams are tracked and drivable; 309 is not");
+    }
     {  // each Soldier skin streams like the base family
         em::Stream skins;
         std::vector<EnemyMotionEntry> rows;
