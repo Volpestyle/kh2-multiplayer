@@ -46,6 +46,7 @@ struct Selection {
     uintptr_t actor{},local{},localStatus{},descriptor{},status{};
     std::uint64_t serial{};
     int key{1}; // status key of the selected descriptor (1 Sora; other qualified kits' keys from kh2coop/PlayerKits.hpp)
+    int form{}; // the constructor's form argument (= the descriptor's +0x57 byte), passed on to the allocator
     bool selected{},constructor{},fresh{},used{};
     // VUH-1519 party profile: an ordinary factory call in a party stamp (candidate); the
     // constructor promotes a Sora build to selected (a clone) or partyLocal (the last one).
@@ -153,6 +154,11 @@ int CloneDescriptorKey(uintptr_t p) {
     return kh2coop::kitDescriptorKey(id,type,key,form,name.data(),name.size(),RoxasAllowed()); // the reviewed kit table
 }
 bool SoraDescriptor(uintptr_t p) {return CloneDescriptorKey(p)==1;}
+// The constructor's form argument is the descriptor's +0x57 byte (3DF930 case 0 and its raw566 path
+// pass (int)(char)desc[0x57]: 0 for Sora/Roxas, 11 "Default" for Mickey), and 3A7A40 hands it to the
+// allocator (3A7B1B). CloneDescriptorKey already ties that byte to the kit row's form (the table), so a
+// selectable build's form argument must equal it; a mismatch stays ordinary.
+bool ConstructorForm(uintptr_t descriptor,int form) {std::int8_t f=-1;return Read(descriptor+0x57,f) && form==f;}
 // expectKey: 1 for the local Sora; the selected clone's key for the clone.
 bool PlayerActor(uintptr_t actor,uintptr_t& status,int expectKey) {
     uintptr_t descriptor=0;int key=0,refs=0,hp=0,maxHp=0;
@@ -285,7 +291,7 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
     const DWORD error=GetLastError();const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     auto* parent=Current(anchor);Selection s{};
     if(parent && parent->candidate && !parent->selected && !parent->partyLocal && !parent->used && g_ready.load() &&
-       actor && form==0 && (CloneDescriptorKey(descriptor)==1 || (CloneDescriptorKey(descriptor)!=0 && partynative::KitsActive()))) { // qualified kits only (CloneDescriptorKey)
+       actor && ConstructorForm(descriptor,form) && (CloneDescriptorKey(descriptor)==1 || (CloneDescriptorKey(descriptor)!=0 && partynative::KitsActive()))) { // qualified kits only (CloneDescriptorKey)
         const int k=CloneDescriptorKey(descriptor); // party kits: each build keeps its own descriptor's key
         Stamp now{};
         if(!StampNow(now) || !Same(now,parent->stamp) || !g_party.open || !Same(now,g_party.stamp))Fault();
@@ -298,8 +304,8 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
     if(parent && parent->selected && !parent->constructor && !parent->used && g_ready.load()) {
         Stamp now{};
         const int key=CloneDescriptorKey(descriptor);
-        if(actor && form==0 && key!=0 && StampNow(now) && Same(now,parent->stamp))
-            {s=*parent;s.actor=actor;s.descriptor=descriptor;s.key=key;s.constructor=true;}
+        if(actor && key!=0 && ConstructorForm(descriptor,form) && StampNow(now) && Same(now,parent->stamp))
+            {s=*parent;s.actor=actor;s.descriptor=descriptor;s.key=key;s.form=form;s.constructor=true;}
         else Fault();
     }
     const auto token=PushScope(&s,anchor);
@@ -327,7 +333,7 @@ uintptr_t __fastcall Allocate(int key,int form) {
         SetLastError(error);return g_allocate(key,form);
     }
     Stamp now{};uintptr_t empty=1;
-    if(key!=s->key || form!=0 || !StampNow(now) || !Same(now,s->stamp) || !Read(s->actor+0x5C0,empty) || empty || !HasFreeRecord()) {
+    if(key!=s->key || form!=s->form || !StampNow(now) || !Same(now,s->stamp) || !Read(s->actor+0x5C0,empty) || empty || !HasFreeRecord()) {
         Fault();SetLastError(error);return g_allocate(key,form);
     }
     // Own POD frame stays in FLS pool across actual SwitchToFiber. Nested constructors hide it.

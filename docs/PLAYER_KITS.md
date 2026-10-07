@@ -30,6 +30,7 @@ own fixture before being allowed.
   - Sora and Roxas are 0 (`SoraRoxasDefault`).
   - Mickey is 11 (OpenKH `Objentry.Form.Default`, the non-Sora characters' base form, not a drive form).
   - Dual-wield Roxas is 10 (`RoxasDualWield`).
+  - The factory passes the same byte as the constructor's form argument (`3DF930` case 0 and its raw566 path), and the constructor passes it on to the status allocator (`3C0620` from `3A7B1B`). Promotion, selection and allocation therefore require the argument to equal the descriptor's byte, not 0. Mickey trial-2 (run 20261007-112653) failed on exactly this: his form-11 build was never promoted (bindFault 15).
 - **Qualification:** a row is qualified only by its own live fixture.
 
 ## How it works
