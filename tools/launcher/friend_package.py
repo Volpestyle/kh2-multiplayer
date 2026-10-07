@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import re
+
+from plan import steam_id
 
 GAME_NAME = 'KINGDOM HEARTS II FINAL MIX.exe'
 SUPPORTED_GAME = '9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed'
@@ -52,9 +55,13 @@ def verify_game(game_dir, package_root):
     return exe
 
 
-def child_environment(root):
+def child_environment(root, *, steam_broker=False):
     # Do not inherit a developer's test/trace/write-policy switches into a friend game.
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith('KH2COOP_')}
+    if type(steam_broker) is not bool:
+        raise ValueError('Steam broker opt-in must be explicit.')
+    if steam_broker:
+        env['KH2COOP_STEAM_BROKER'] = '1'
     env['SteamAppId'] = env['SteamGameId'] = '2552430'
     return env
 
@@ -65,8 +72,10 @@ class CanonicalFailure(ValueError):
         self.receipt = receipt
 
 
-def canonical(root, cli, args, *, timeout, run=subprocess.run):
-    result = run([str(cli), *args], cwd=str(root), env=child_environment(root),
+def canonical(root, cli, args, *, timeout, run=subprocess.run, steam_broker=False):
+    if steam_broker and (not args or args[0] != 'launch'):
+        raise ValueError('Steam broker opt-in is only for an owned game launch.')
+    result = run([str(cli), *args], cwd=str(root), env=child_environment(root, steam_broker=steam_broker),
                  stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding='utf-8',
                  errors='replace', timeout=timeout, shell=False,
                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -106,11 +115,16 @@ class GameOwner:
         self.unresolved_launch = False
         self.overlay_auto_session = None
         self.overlay_enabled = None
+        self.transport = None
+        self.launch_wall_ns = 0
+        self.steam_identity = ''
 
     def product(self, name):
         return self.root / self.manifest['products'][name]
 
-    def launch(self, game_dir, receipt_dir):
+    def launch(self, game_dir, receipt_dir, *, transport='enet'):
+        if transport not in ('enet', 'steam'):
+            raise ValueError('Choose ENet / relay or Steam (beta).')
         if self.unresolved_launch:
             raise ValueError('A previous start has no verified completion. Use Exit & close game before reopening the launcher; do not start another copy. If the game is still open, exit it normally; do not save.')
         if self.handle and self.win.alive(self.handle):
@@ -119,12 +133,17 @@ class GameOwner:
         verify_package(self.root)
         receipt_dir = Path(receipt_dir); receipt_dir.mkdir(parents=True, exist_ok=False)
         argv = ['launch', '--game-dir', str(exe.parent), '--dll', str(self.product('dll'))]
+        self.launch_wall_ns = time.time_ns()
+        self.transport = transport
+        self.steam_identity = ''
         (receipt_dir / 'launch-request.json').write_text(json.dumps({'argv':argv,'gameSHA256':SUPPORTED_GAME,
-            'startedNs':time.perf_counter_ns()}, indent=2), encoding='utf-8')
+            'startedNs':time.perf_counter_ns(), 'startedWallNs':self.launch_wall_ns,
+            'transport':transport, 'steamBroker':transport == 'steam'}, indent=2), encoding='utf-8')
         self.unresolved_launch = True
         launch_failure = None
         try:
-            receipt = self.command(self.root, self.product('cli'), argv, timeout=105)
+            opt_in = {'steam_broker':True} if transport == 'steam' else {}
+            receipt = self.command(self.root, self.product('cli'), argv, timeout=105, **opt_in)
         except Exception as error:
             (receipt_dir / 'launch-error.json').write_text(json.dumps({'error':str(error),
                 'ownershipUnresolved':True,'note':'No guessed PID is adopted or killed.'},indent=2),encoding='utf-8')
@@ -170,6 +189,35 @@ class GameOwner:
             (receipt_dir / 'launch-result.json').write_text(json.dumps({'receipt':receipt,
                 'ready':self.ready,'cleanup':cleanup,'finishedNs':time.perf_counter_ns()}, indent=2), encoding='utf-8')
         return receipt
+
+    def read_steam_identity(self, *, read=None):
+        """Read only the broker log for this attested game. No IPC/API attachment."""
+        if (self.transport != 'steam' or not self.ready or self.unresolved_launch or
+                not self.handle or not self.win.alive(self.handle)):
+            raise ValueError('Start an owned game in Steam (beta) mode first.')
+        if self.steam_identity:
+            return self.steam_identity
+        path = self.root / 'build/rig/logs' / f'steam-broker_{self.pid}.log'
+        # The broker opens wx: an old PID log prevents creation, never qualifies.
+        text, created_ns = (read or read_shared_prefix)(path)
+        if created_ns < self.launch_wall_ns:
+            raise ValueError('Broker receipt predates this owned game. Restart with a fresh package log path.')
+        identity = parse_broker_identity(text)
+        if identity:
+            self.steam_identity = identity
+        return identity
+
+    def connection_identity(self, transport):
+        if not self.ready or not self.handle or not self.win.alive(self.handle):
+            raise ValueError('Start and prepare your game here first.')
+        if transport != self.transport:
+            raise ValueError('Connection mode changed. Close this owned game before starting in the new mode.')
+        if transport == 'steam':
+            identity = self.read_steam_identity()
+            if not identity:
+                raise ValueError('Steam broker is not ready. Wait for the game Steam session; matching broker DLL/runtime are required.')
+            return identity
+        return ''
 
     def set_overlay(self, enabled, session, connection_line, *, automatic=False):
         """One mod-channel flag request, only for this attested, connected game.
@@ -238,3 +286,43 @@ class GameOwner:
         self.win.close(self.handle)
         self.handle = None
         return result
+
+
+def parse_broker_identity(text):
+    # Ignore partial trailing lines. Never use IDs in incoming-peer messages.
+    lines = text.split('\n')[:-1]
+    identities = []
+    for line in lines:
+        match = re.fullmatch(r'\[steam-broker\] ready appId=2552430 identity=([0-9]{17}) modulePinnedUntilExit=1', line.rstrip('\r'))
+        if match:
+            identities.append(steam_id(match[1]))
+        if line.startswith(('[steam-broker] unavailable ', '[steam-broker] refused pipe-create', '[steam-broker] exception ')):
+            raise ValueError('Steam broker is unavailable; see the owned game broker log.')
+    if len(identities) > 1:
+        raise ValueError('Ambiguous Steam broker identity receipt.')
+    return identities[0] if identities else ''
+
+
+def read_shared_prefix(path):
+    """One bounded read, with write sharing for the live log; never retry/block on a lock."""
+    import ctypes as c
+    from ctypes import wintypes as w
+    k = c.WinDLL('kernel32', use_last_error=True)
+    k.CreateFileW.argtypes = [w.LPCWSTR,w.DWORD,w.DWORD,c.c_void_p,w.DWORD,w.DWORD,w.HANDLE]
+    k.CreateFileW.restype = w.HANDLE
+    k.ReadFile.argtypes = [w.HANDLE,c.c_void_p,w.DWORD,c.POINTER(w.DWORD),c.c_void_p]
+    k.ReadFile.restype = w.BOOL
+    k.GetFileTime.argtypes = [w.HANDLE,c.POINTER(w.FILETIME),c.c_void_p,c.c_void_p]
+    k.GetFileTime.restype = w.BOOL
+    k.CloseHandle.argtypes = [w.HANDLE]; k.CloseHandle.restype = w.BOOL
+    handle = k.CreateFileW(str(path),0x80000000,1|2|4,None,3,0,None)
+    if handle == c.c_void_p(-1).value:
+        raise c.WinError(c.get_last_error())
+    try:
+        created = w.FILETIME(); count = w.DWORD(); buf = c.create_string_buffer(8192)
+        if not k.GetFileTime(handle,c.byref(created),None,None) or not k.ReadFile(handle,buf,8192,c.byref(count),None):
+            raise c.WinError(c.get_last_error())
+        stamp = ((created.dwHighDateTime << 32) | created.dwLowDateTime) * 100 - 11644473600000000000
+        return buf.raw[:count.value].decode('utf-8',errors='replace'), stamp
+    finally:
+        k.CloseHandle(handle)

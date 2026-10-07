@@ -43,3 +43,39 @@ python -B tools/launcher/launcher.py --plan --mode host --local-relay --pid 1234
 ```
 
 These are examples, not adopted endpoint/readiness/PID receipts. Runtime uses structured argv without a shell. Offline syntax/config checks and the earlier actual Session1 GUI roster/ping/disconnect/close/time-limit runs passed. The new creation-time helper path has separate headless evidence above; the post-fix Session1 GUI check053047 also passed. Source/data map and preparation result: `build/rig/vuh1507-launcher-20261005-01/`.
+
+
+## Steam (beta), opt-in source UI
+
+The friend launcher source now offers **Connection: Steam (beta)**. It defaults
+to ENet / relay every time. This is not in sealed release09, and no new package
+has been built. A future private package must select the reviewed broker DLL and
+matching runtime; old products do not qualify a Steam broker receipt.
+
+Choose the connection mode **before Start game**. Only that canonical launch
+child receives `KH2COOP_STEAM_BROKER=1`; inherited diagnostic switches remain
+filtered. The launcher still verifies the game/package, saveguard and retained
+ownership. Changing modes requires closing the owned game and starting it again.
+
+After the game authenticates with Steam, **Your SteamID** displays the complete
+app-2552430 broker-ready receipt for that owned PID. Copy shares that ID. Host
+mode accepts one or two comma-separated friend SteamID64s; join mode takes the
+host SteamID64 and the existing friend slot. Both friends can copy their own ID
+for the host allowlist. IDs/URLs/friend codes outside the exact desktop-account
+format, duplicate entries and self-admission are refused. IDs are not discovered
+from another process or from the clipboard.
+
+Connect builds `--steam-host --steam-allow ID ...` or `--steam-join ID`, with
+explicit owned PID and the existing campaign/compatibility/runtime limits. Steam
+uses Valve relays only and does not launch an ENet server. The existing relay
+fields retain their values and behavior in ENet mode; they are unused by Steam,
+and the local-relay checkbox must be off. There is no automatic fallback.
+
+The owned broker log is read with write sharing, a bounded 8-KiB prefix and a
+creation-time floor from the launch request. Missing, locked, stale or incomplete
+receipts cannot supply an identity. Runtime/broker authentication remains the
+connection authority. A ready ID or roster is not native gameplay acceptance.
+Busy/close handling, helper jobs, HUD controls and retained game cleanup are
+unchanged. Offline tests and real Tk sample-ID screenshots are in
+`build/rig/vuh1493-steam-p2p-20261006-01/launcher-candidate/`. Two-account Steam
+connection and the future matched package still require live qualification.

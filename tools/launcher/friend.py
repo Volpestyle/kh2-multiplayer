@@ -17,6 +17,98 @@ from launcher import Session, require_idle_rig
 from plan import ROOT, LOCAL, Options, make_plan
 
 
+
+class SteamFields:
+    """Default-off connection choice, used by the real UI and its offline screenshot."""
+    def __init__(self, parent, tk, ttk, role):
+        self.role=role;self.locked=False
+        self.mode=tk.StringVar(value='ENet / relay')
+        self.identity=tk.StringVar();self.host=tk.StringVar();self.allow=tk.StringVar()
+        self.note=tk.StringVar(value='Choose Steam before Start game. Requires a broker-enabled build; release09 is unchanged.')
+        self.frame=ttk.Frame(parent);self.frame.columnconfigure(1,weight=1)
+        ttk.Label(self.frame,text='Connection').grid(row=0,column=0,sticky='w',pady=5)
+        self.choice=ttk.Combobox(self.frame,textvariable=self.mode,values=('ENet / relay','Steam (beta)'),state='readonly')
+        self.choice.grid(row=0,column=1,columnspan=2,sticky='ew',padx=(15,0))
+        self.body=ttk.Frame(self.frame);self.body.columnconfigure(1,weight=1)
+        ttk.Label(self.body,text='Your SteamID').grid(row=0,column=0,sticky='w')
+        self.own=ttk.Entry(self.body,textvariable=self.identity,state='readonly')
+        self.own.grid(row=0,column=1,sticky='ew',padx=10)
+        self.copy=ttk.Button(self.body,text='Copy',command=self.copy_identity,state='disabled')
+        self.copy.grid(row=0,column=2)
+        self.host_label=ttk.Label(self.body,text='Host SteamID')
+        self.host_entry=ttk.Entry(self.body,textvariable=self.host)
+        self.allow_label=ttk.Label(self.body,text='Allowed friend IDs')
+        self.allow_entry=ttk.Entry(self.body,textvariable=self.allow)
+        ttk.Label(self.body,text='SteamID64 only. Host allows 1-2 friends, separated by commas. Valve relays only.',wraplength=670).grid(row=2,columnspan=3,sticky='w',pady=(5,0))
+        ttk.Label(self.body,textvariable=self.note,wraplength=670).grid(row=3,columnspan=3,sticky='w',pady=(3,5))
+        for var in (self.mode,self.role,self.identity):var.trace_add('write',lambda *args:self.refresh())
+        self.refresh()
+
+    def transport(self):
+        modes={'ENet / relay':'enet','Steam (beta)':'steam'}
+        if self.mode.get() not in modes:raise ValueError('Choose a connection mode.')
+        return modes[self.mode.get()]
+
+    def copy_identity(self):
+        from plan import steam_id
+        value=steam_id(self.identity.get())
+        self.frame.clipboard_clear();self.frame.clipboard_append(value)
+
+    def set_locked(self, locked):
+        self.locked=locked;self.refresh()
+
+    def refresh(self):
+        self.choice.configure(state='disabled' if self.locked else 'readonly')
+        if self.mode.get() == 'Steam (beta)':
+            self.body.grid(row=1,columnspan=3,sticky='ew',pady=6)
+        else:self.body.grid_remove()
+        host=self.role.get() == 'host'
+        for widget in (self.host_label,self.host_entry,self.allow_label,self.allow_entry):widget.grid_remove()
+        label,entry=(self.allow_label,self.allow_entry) if host else (self.host_label,self.host_entry)
+        label.grid(row=1,column=0,sticky='w',pady=5);entry.grid(row=1,column=1,columnspan=2,sticky='ew',padx=10)
+        entry.configure(state='disabled' if self.locked else 'normal')
+        self.copy.configure(state='normal' if self.identity.get() else 'disabled')
+
+
+def make_view(tk, ttk, browse):
+    """Construct the real launcher widgets only. No discovery, files, game or network."""
+    app = tk.Tk(); app.title('KH2 Co-op — friend preview'); app.geometry('740x860')
+    frame=ttk.Frame(app,padding=20);frame.pack(fill='both',expand=True);frame.columnconfigure(1,weight=1)
+    ttk.Label(frame,text='KH2 Co-op',font=('Segoe UI',20,'bold')).grid(row=0,columnspan=3,sticky='w')
+    ttk.Label(frame,text='Start your game, load your save, then connect. Do not save during this preview.',
+              wraplength=630).grid(row=1,columnspan=3,sticky='w',pady=(5,15))
+    values={k:tk.StringVar(value=v) for k,v in {'game':'','mode':'join','endpoint':'','port':'27795','name':'Friend','slot':'friend1'}.items()}
+    relay=tk.BooleanVar(value=False);loaded=tk.BooleanVar(value=False)
+    def field(n,title,widget):
+        ttk.Label(frame,text=title).grid(row=n,column=0,sticky='w',pady=7)
+        widget.grid(row=n,column=1,columnspan=2,sticky='ew',padx=(15,0))
+    field(2,'Your KH2 game folder',ttk.Entry(frame,textvariable=values['game']))
+    ttk.Button(frame,text='Browse…',command=browse).grid(row=3,column=2,sticky='e')
+    field(4,'Play as',ttk.Combobox(frame,textvariable=values['mode'],values=('host','join'),state='readonly'))
+    steam = SteamFields(frame, tk, ttk, values['mode'])
+    steam.frame.grid(row=5,columnspan=3,sticky='ew',pady=4)
+    field(6,'Relay address from your host',ttk.Entry(frame,textvariable=values['endpoint']))
+    field(7,'Port',ttk.Entry(frame,textvariable=values['port']))
+    field(8,'Your name',ttk.Entry(frame,textvariable=values['name']))
+    field(9,'Join slot',ttk.Combobox(frame,textvariable=values['slot'],values=('friend1','friend2'),state='readonly'))
+    ttk.Checkbutton(frame,text='Host only: run the relay here (not supported in this preview)',variable=relay).grid(row=10,columnspan=3,sticky='w')
+    ttk.Checkbutton(frame,text='I loaded my save and the host says the room is ready to join',variable=loaded).grid(row=11,columnspan=3,sticky='w',pady=10)
+    status=tk.StringVar(value='Nothing starts automatically. ENet uses Tailscale; Steam (beta) uses your game Steam session.')
+    ttk.Label(frame,textvariable=status,wraplength=630).grid(row=13,columnspan=3,sticky='w',pady=10)
+    ttk.Label(frame,text='Disconnect leaves the game open. Exit & close game closes only the game started here.\n'
+              'Session limit: 30 minutes. Logs stay in this package. No save is committed.',wraplength=630).grid(row=14,columnspan=3,sticky='w')
+    buttons=ttk.Frame(frame);buttons.grid(row=12,columnspan=3,sticky='ew')
+    actions={}
+    for key,label in [('launch','Start game'),('connect','Connect'),('disconnect','Disconnect'),('close','Exit & close game'),('hud','Show HUD')]:
+        actions[key]=ttk.Button(buttons,text=label)
+        actions[key].pack(side='left',padx=(0,8))
+    actions['hud'].configure(state='disabled')
+    from types import SimpleNamespace
+    return SimpleNamespace(app=app,frame=frame,values=values,relay=relay,loaded=loaded,
+                           status=status,actions=actions,steam=steam)
+
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--self-check', action='store_true')
@@ -44,29 +136,9 @@ def main():
     key = int(hashlib.sha256(str(ROOT).casefold().encode()).hexdigest()[:12],16)
     package_lock = win.mutex('package_'+str(key))
     owner = GameOwner(ROOT, manifest, win)
-    app = tk.Tk(); app.title('KH2 Co-op — friend preview'); app.geometry('690x635')
-    frame=ttk.Frame(app,padding=20);frame.pack(fill='both',expand=True);frame.columnconfigure(1,weight=1)
-    ttk.Label(frame,text='KH2 Co-op',font=('Segoe UI',20,'bold')).grid(row=0,columnspan=3,sticky='w')
-    ttk.Label(frame,text='Start your game, load your save, then connect. Do not save during this preview.',
-              wraplength=630).grid(row=1,columnspan=3,sticky='w',pady=(5,15))
-    values={k:tk.StringVar(value=v) for k,v in {'game':'','mode':'join','endpoint':'','port':'27795','name':'Friend','slot':'friend1'}.items()}
-    relay=tk.BooleanVar(value=False);loaded=tk.BooleanVar(value=False)
-    def field(n,title,widget):
-        ttk.Label(frame,text=title).grid(row=n,column=0,sticky='w',pady=7)
-        widget.grid(row=n,column=1,columnspan=2,sticky='ew',padx=(15,0))
-    field(2,'Your KH2 game folder',ttk.Entry(frame,textvariable=values['game']))
-    ttk.Button(frame,text='Browse…',command=lambda:values['game'].set(filedialog.askdirectory() or values['game'].get())).grid(row=3,column=2,sticky='e')
-    field(4,'Play as',ttk.Combobox(frame,textvariable=values['mode'],values=('host','join'),state='readonly'))
-    field(5,'Relay address from your host',ttk.Entry(frame,textvariable=values['endpoint']))
-    field(6,'Port',ttk.Entry(frame,textvariable=values['port']))
-    field(7,'Your name',ttk.Entry(frame,textvariable=values['name']))
-    field(8,'Join slot',ttk.Combobox(frame,textvariable=values['slot'],values=('friend1','friend2'),state='readonly'))
-    ttk.Checkbutton(frame,text='Host only: run the relay here (not supported in this preview)',variable=relay).grid(row=9,columnspan=3,sticky='w')
-    ttk.Checkbutton(frame,text='I loaded my save and the host says the room is ready to join',variable=loaded).grid(row=10,columnspan=3,sticky='w',pady=10)
-    status=tk.StringVar(value='Nothing starts automatically. Steam and Tailscale must already be ready.')
-    ttk.Label(frame,textvariable=status,wraplength=630).grid(row=12,columnspan=3,sticky='w',pady=10)
-    ttk.Label(frame,text='Disconnect leaves the game open. Exit & close game closes only the game started here.\n'
-              'Session limit: 30 minutes. Logs stay in this package. No save is committed.',wraplength=630).grid(row=13,columnspan=3,sticky='w')
+    view = make_view(tk, ttk, lambda: view.values['game'].set(filedialog.askdirectory() or view.values['game'].get()))
+    app,frame,values,relay,loaded,status = view.app,view.frame,view.values,view.relay,view.loaded,view.status
+    steam=view.steam
     events=queue.Queue();busy=False;session=None;closing=False
     log_offset=0;log_fragment='';roster=False;last_rtt='';rtt_at=0.;connection_line=''
     def run_work(fn,label):
@@ -81,9 +153,12 @@ def main():
         return LOCAL/'runs'/(dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8])
     def launch():
         directory=values['game'].get()
+        transport=steam.transport()
+        steam.identity.set('')
+        steam.note.set('Waiting for the owned game broker receipt.')
         def action():
             require_idle_rig(win)
-            r=owner.launch(directory,fresh_dir())
+            r=owner.launch(directory,fresh_dir(),transport=transport)
             return f'Game {r["processId"]} prepared with save protection. Load your save manually, then Connect.'
         run_work(action,'Checking the exact game build and starting KH2…')
     def connect():
@@ -93,8 +168,13 @@ def main():
             if not owner.ready or not win.alive(owner.handle):raise ValueError('Start and prepare your game here first.')
             if not loaded.get():raise ValueError('Load your save and wait for your host, then check the ready box.')
             if session and not session.done.is_set():raise ValueError('Already connected or connecting.')
-            opt=Options(owner.pid,values['mode'].get(),values['endpoint'].get(),int(values['port'].get()),
-                        values['name'].get(),values['slot'].get(),relay.get(),1800)
+            transport=steam.transport()
+            identity=owner.connection_identity(transport)
+            opt=Options(owner.pid,values['mode'].get(),values['endpoint'].get(),
+                        int(values['port'].get()) if transport == 'enet' else 27795,
+                        values['name'].get(),values['slot'].get(),relay.get(),1800,
+                        transport=transport,steam_self=identity,
+                        steam_host=steam.host.get(),steam_allow=steam.allow.get())
             plan=make_plan(opt,fresh_dir(),runtime=owner.product('runtime'),server=owner.product('server'))
             verify_package(ROOT)
             session=Session(win,plan,owner.product('cli'))
@@ -119,11 +199,10 @@ def main():
             owner.set_overlay(enabled,current,line,automatic=automatic)
             return 'HUD '+('on' if enabled else 'off')+' requested. Receipt saved in session logs.'
         run_work(action,'Updating HUD…')
-    buttons=ttk.Frame(frame);buttons.grid(row=11,columnspan=3,sticky='ew')
-    for label,fn in [('Start game',launch),('Connect',connect),('Disconnect',disconnect),('Exit & close game',close)]:
-        ttk.Button(buttons,text=label,command=fn).pack(side='left',padx=(0,8))
-    hud_button=ttk.Button(buttons,text='Show HUD',command=lambda:hud(owner.overlay_enabled is not True),state='disabled')
-    hud_button.pack(side='left')
+    for key,fn in [('launch',launch),('connect',connect),('disconnect',disconnect),('close',close)]:
+        view.actions[key].configure(command=fn)
+    hud_button=view.actions['hud']
+    hud_button.configure(command=lambda:hud(owner.overlay_enabled is not True))
     def tick():
         nonlocal busy,closing,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line
         try:
@@ -158,6 +237,18 @@ def main():
                     if roster and owner.overlay_enabled is None and owner.overlay_auto_session is not session:
                         hud(True,automatic=True)
             elif session.done.is_set():status.set(session.error or 'Disconnected. Game remains open; do not save.')
+        active = bool(session and not session.done.is_set())
+        steam.set_locked(busy or closing or active)
+        if not busy and not closing and owner.ready and owner.transport == 'steam':
+            try:
+                identity=owner.read_steam_identity()
+                steam.identity.set(identity)
+                steam.note.set('Your game Steam session is ready. Hosting requires your friends IDs.' if identity else 'Waiting for the game Steam session (broker cap: 60 seconds).')
+            except (OSError, ValueError) as error:
+                steam.identity.set('')
+                steam.note.set('Steam ID unavailable: '+str(error))
+        elif not owner.ready:
+            steam.identity.set('')
         hud_button.configure(text='Hide HUD' if owner.overlay_enabled is True else 'Show HUD',
             state='normal' if not busy and not closing and roster and session and
             session.started.is_set() and not session.stopping.is_set() and not session.done.is_set() else 'disabled')
