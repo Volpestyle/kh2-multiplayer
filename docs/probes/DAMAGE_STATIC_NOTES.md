@@ -117,7 +117,7 @@ instruction, at `0x3C0884` (the trap reported `0x3C0888`). Decompiled from there
 | RVA | Role |
 |---|---|
 | `0x3C0860(stats, delta, idx)` | clamped stat add on 12-byte triplets `[cur, max, min]`; `idx 0` = HP. Damage is a negative delta |
-| `0x3D2EB0(actor, delta, idx, reactFlag)` | ApplyStatDelta, the single HP funnel (~28 callers). Skipped when `actor+0x9B8` bit 2 is set (HP lock). Damage → `0x3DCC10`, heal → `0x3DCBB0`. HP 0 on idx 0 → `vtable+0xB0(actor)` (death) |
+| `0x3D2EB0(actor, delta, idx, reactFlag)` | ApplyStatDelta, the single HP funnel (~28 callers). Skipped when `actor+0x9B8` bit 2 is set: the native dead flag, set by `0x3D2E80` in the common death path and cleared by the player revive `0x3AA8D0` (VUH-1504 spike result). Damage → `0x3DCC10`, heal → `0x3DCBB0`. HP 0 on idx 0 → `vtable+0xB0(actor)` (death) |
 | `0x3D5E50(actor, delta, idx, reactFlag)` | Four-argument TakeDamage helper: adds drive gauge to the victim (`0x3D3CF0`, scaled by `status+0x22C`), then tail-jumps to `0x3D2EB0`. `actor+0x18C` bit 14 suppresses the react flag |
 
 The attacker-side resolver calls TakeDamage through a vtable; find it from a stack trace in a `0x3D2EB0` hook.
