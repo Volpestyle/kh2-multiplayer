@@ -211,14 +211,22 @@ carries `promptKind = 0`, so the overlay is unchanged.
     `promptKind/promptSlot/promptProgress`, and the display scope changes in
     10% steps.
   - Labels must fit `hud::HealthColumnChars` (10 cells), or they are ellipsized.
-- **Native reaction command: not handled.** The game's own reaction command
-  (RC) also uses Triangle. The prompt has a yield rule for it, but the address
-  is unverified, so the adapter passes 0 and the prompt never yields. Both
-  candidates, the `[KH2LIB]` `0x2A110E2` and the 0x80-shifted `0x2A11162`, are
-  logged and published in the fixture channel for calibration. The latter read
-  `0x37` at startup with no RC on screen.
+- **Native reaction command (RC): the prompt yields.** The game's own RC also uses
+  Triangle, so a prompt that would show is hidden while the RC is up. The hide
+  reason is `native-reaction`, and each suppression is logged as
+  `[revive-prompt] yield to native RC 0x2A11162=…`, at most 256 times per process.
+  - The address is `offsets::REACT_CMD_STEAM` = `0x2A11162` (u16), calibrated in
+    run 004215 at the GoA flag409 chest: it read `0x20` with "Open" showing and
+    through its popup, and 0 away from it.
+  - KH2Lib's `REACT_CMD` `0x2A110E2` stayed 0 throughout, so it is documented as
+    wrong for Steam. It is still recorded in the fixture channel.
+  - `0x2A11162` reads a stale `0x37` at boot, so it is trusted only in settled
+    field play: the local player is canonical and not downed, with no event,
+    menu or transition, for 30 consecutive frames (`NativeReactionFor`). Outside
+    field play it counts as 0.
 - `kh2coop_revive_prompt_test` covers the rules, cancels, latch, hide reasons,
-  L1 exclusion and the HUD row (fill, label width, scope).
+  L1 exclusion, the RC gate and yield, and the HUD row (fill, label width,
+  scope).
 
 **Live evidence (2026-10-07, Steam build, one rig, local relay).** Pair-hold
 000112 and 001034: PASS. The host held a scripted Triangle 90 units from the
@@ -232,8 +240,10 @@ growing, then `Reviving`. That run used the longer labels, which the column
 truncated; the shortened labels are offline-checked only.
 
 **Prompt limits.**
-- The native RC yield is not active. If an RC and a downed teammate are both in
-  range, a Triangle hold may also trigger the RC.
+- The RC yield has been calibrated on one object RC only (the GoA chest's
+  "Open"). Enemy and other RCs are assumed to use the same field.
 - A manual pad press is unverified; only the kh2ctl input override was tested.
 - The prompt is not hidden while the local player is in an event-hold.
-- Only 1 host + 1 friend has been tested.
+- Tested live (2026-10-07, main `24a00cc`): host revives friend1 (000112,
+  001034), friend1 revives the host (003536), and three players where friend2
+  revives friend1 while the host observes (003832).

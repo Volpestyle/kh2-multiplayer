@@ -206,7 +206,13 @@ constexpr std::uint64_t SOFT_RESET     = 0x0ABABDA;   // [KH2LIB] Soft reset tri
 // Music / UI
 // --------------------------------------------------------------------------
 constexpr std::uint64_t MUSIC          = 0x0ABACC4;   // [KH2LIB] Background music ID
-constexpr std::uint64_t REACT_CMD      = 0x2A110E2;   // [KH2LIB] Reaction command
+// REACT_CMD is the KH2Lib Steam Global value and is WRONG for this Steam build: it
+// read 0 with the native "Open" RC on screen (VUH-1504 calibration run 004215).
+constexpr std::uint64_t REACT_CMD      = 0x2A110E2;   // [KH2LIB] Reaction command (wrong on Steam; see below)
+// [CONFIRMED] u16 reaction command on Steam, REACT_CMD + 0x80 like the rest of this
+// block. GoA flag409 chest: 0x20 with "Open" showing and through its popup, 0 away
+// from it (run 004215). Reads 0x37 at boot before field play, so gate it on gameplay.
+constexpr std::uint64_t REACT_CMD_STEAM = 0x2A11162;
 constexpr std::uint64_t TEXTBOX        = 0x074DF20;   // [KH2LIB] Last displayed textbox
 constexpr std::uint64_t MENU1          = 0x2A11090;   // [KH2LIB] Main command menu
 constexpr std::uint64_t MENU_STRIDE    = 0x8;         // [KH2LIB] Stride between menu slots

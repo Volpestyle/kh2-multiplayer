@@ -151,8 +151,9 @@ struct PromptRuntime {
     bool requested = false;
     reviveprompt::State state {};
     reviveprompt::Output out {};
-    uint32_t triangleFrames = 0, fires = 0, logs = 0, reactLogs = 0;
+    uint32_t triangleFrames = 0, fires = 0, logs = 0, reactLogs = 0, yieldLogs = 0;
     uint16_t reactLib = 0, reactShifted = 0;
+    reviveprompt::RcGate rcGate {};
     reviveprompt::Hide lastHide = reviveprompt::Hide::Off;
 };
 static PromptRuntime g_prompt;
@@ -660,19 +661,21 @@ static void PromptTick(const Snap& s) {
     uint8_t menu = 0xFF;
     f.menuOpen = !ReadHitTrace(g_exeBase + offsets::OPEN_MENU, menu) || menu != 0xFF;
     f.transition = warp::TransitionPending();
-    // Native reaction command: both candidate addresses are read and recorded for
-    // calibration; the yield is UNVERIFIED and uses neither (avoids a false hide).
+    // Native reaction command (calibrated, run 004215): the prompt yields while
+    // REACT_CMD_STEAM is nonzero in settled field play. The KH2Lib address is still
+    // recorded beside it for the fixture channel only.
     uint16_t reactLib = 0, reactShifted = 0;
-    ReadHitTrace(g_exeBase + offsets::REACT_CMD, reactLib);           // [KH2LIB] 0x2A110E2
-    ReadHitTrace(g_exeBase + offsets::REACT_CMD + 0x80, reactShifted); // likely Steam address 0x2A11162
+    ReadHitTrace(g_exeBase + offsets::REACT_CMD, reactLib);              // KH2Lib 0x2A110E2 (wrong on Steam)
+    if (!ReadHitTrace(g_exeBase + offsets::REACT_CMD_STEAM, reactShifted)) reactShifted = 0; // 0x2A11162
     if ((reactLib != g_prompt.reactLib || reactShifted != g_prompt.reactShifted) && g_prompt.reactLogs < 32) {
         ++g_prompt.reactLogs;
-        Log("[revive-prompt] native-rc candidates (UNVERIFIED, not used) 0x2A110E2=%04X 0x2A11162=%04X frame=%u",
-            reactLib, reactShifted, g_frameCounter);
+        Log("[revive-prompt] native-rc 0x2A11162=%04X (kh2lib 0x2A110E2=%04X) frame=%u",
+            reactShifted, reactLib, g_frameCounter);
     }
     g_prompt.reactLib = reactLib;
     g_prompt.reactShifted = reactShifted;
-    f.nativeReaction = 0;
+    const bool fieldPlay = f.enabled && f.localCanonical && !f.localDowned && !f.inEvent && !f.menuOpen && !f.transition;
+    f.nativeReaction = reviveprompt::NativeReactionFor(g_prompt.rcGate, reactShifted, fieldPlay);
     f.localHp = s.hp;
     f.triangle = g_promptTriangle.exchange(false, std::memory_order_acq_rel);
     if (f.triangle) ++g_prompt.triangleFrames;
@@ -690,6 +693,13 @@ static void PromptTick(const Snap& s) {
         f.distance = dist;
     }
     g_prompt.out = reviveprompt::Step(g_prompt.state, f);
+    if (g_prompt.out.hide == reviveprompt::Hide::NativeReaction &&
+        g_prompt.lastHide != reviveprompt::Hide::NativeReaction && g_prompt.yieldLogs < 256) {
+        ++g_prompt.yieldLogs;  // every suppression episode, bounded per process
+        Log("[revive-prompt] yield to native RC 0x2A11162=%04X slot=%u episode=%llX dist=%.1f frame=%u",
+            static_cast<unsigned>(f.nativeReaction), static_cast<unsigned>(f.targetSlot),
+            static_cast<unsigned long long>(f.targetEpisode), f.distance, g_frameCounter);
+    }
     if (g_prompt.out.hide != g_prompt.lastHide && g_prompt.logs < 32) {
         ++g_prompt.logs;
         Log("[revive-prompt] %s slot=%u episode=%llX dist=%.1f nativeRC=%u", reviveprompt::HideName(g_prompt.out.hide),
@@ -886,8 +896,8 @@ static void Install(uintptr_t exeBase) {
     char rp[2] {};
     g_prompt.requested = !g_down.control &&
         GetEnvironmentVariableA("KH2COOP_REVIVE_PROMPT", rp, sizeof(rp)) == 1 && rp[0] == '1';
-    if (g_prompt.requested) Log("[revive-prompt] configure requested=1 range=%.0f holdFrames=%u nativeRcYield=unverified(disabled)",
-                                reviveprompt::kRange, reviveprompt::kHoldFrames);
+    if (g_prompt.requested) Log("[revive-prompt] configure requested=1 range=%.0f holdFrames=%u nativeRcYield=0x2A11162 settle=%u",
+                                reviveprompt::kRange, reviveprompt::kHoldFrames, reviveprompt::kRcSettleFrames);
     g_down.installMask = mask;
     const uint32_t needed = g_down.control ? (InstallResolve | InstallStatHook | InstallChannel)
                                            : (fixture ? InstallAll : (InstallAll & ~InstallChannel));

@@ -33,7 +33,7 @@ struct Facts {
     bool menuOpen = false;         // menu id only: OPEN_MENU != 0xFF (pause stops Tick itself)
     bool transition = false;       // warp/room transition pending
     std::uint16_t nativeReaction = 0; // native RC id; nonzero = the game's RC owns Triangle.
-                                      // UNVERIFIED address: the adapter passes 0 until calibrated.
+                                      // From NativeReactionFor (REACT_CMD_STEAM, field play only).
     int localHp = 0;
     bool targetValid = false;      // nearest validated, fresh, downed teammate puppet
     std::uint8_t targetSlot = 0xFF;
@@ -81,6 +81,17 @@ constexpr const char* HideName(Hide h) noexcept {
 
 inline void Cancel(State& s) noexcept { s.held = 0; s.full = false; }
 
+// Native reaction command gate. REACT_CMD_STEAM is trusted only in settled field play
+// (canonical, not downed, no event/menu/transition for kRcSettleFrames in a row): it reads
+// a stale nonzero (0x37) at boot, and loads and events are not field play.
+constexpr std::uint32_t kRcSettleFrames = 30;
+struct RcGate { std::uint32_t fieldFrames = 0; };
+inline std::uint16_t NativeReactionFor(RcGate& g, std::uint16_t raw, bool fieldPlay) noexcept {
+    if (!fieldPlay) { g.fieldFrames = 0; return 0; }
+    if (g.fieldFrames < kRcSettleFrames) ++g.fieldFrames;
+    return g.fieldFrames >= kRcSettleFrames ? raw : 0;
+}
+
 // One game frame. Pure; deterministic for the same (state, facts).
 inline Output Step(State& s, const Facts& f) noexcept {
     Output out {};
@@ -98,9 +109,9 @@ inline Output Step(State& s, const Facts& f) noexcept {
     else if (f.inEvent) hide = Hide::Event;
     else if (f.menuOpen) hide = Hide::Menu;
     else if (f.transition) hide = Hide::Transition;
-    else if (f.nativeReaction) hide = Hide::NativeReaction;
     else if (!f.targetValid || f.targetSlot >= 3 || !f.targetEpisode) hide = Hide::NoTarget;
     else if (!(f.distance <= kRange)) hide = Hide::OutOfRange;
+    else if (f.nativeReaction) hide = Hide::NativeReaction; // a prompt the native RC suppressed
     else if (s.firedEpisode[f.targetSlot] == f.targetEpisode) hide = Hide::Fired;
 
     if (hide != Hide::None) {

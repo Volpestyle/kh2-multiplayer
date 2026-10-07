@@ -91,6 +91,23 @@ int main() {
       CHECK(!Step(s, Good(false)).fire);
       CHECK(HoldRelease(s, 60).fire); }
 
+    // Calibrated native RC (REACT_CMD_STEAM): only trusted in settled field play.
+    { RcGate g; CHECK(NativeReactionFor(g, 0x37, false) == 0);              // boot value outside field play
+      for (std::uint32_t i = 1; i < kRcSettleFrames; ++i) CHECK(NativeReactionFor(g, 0x20, true) == 0);
+      CHECK(NativeReactionFor(g, 0x20, true) == 0x20);                        // settled: the RC counts
+      CHECK(NativeReactionFor(g, 0, true) == 0);
+      CHECK(NativeReactionFor(g, 0x20, false) == 0);                          // menu/event/load resets
+      CHECK(NativeReactionFor(g, 0x20, true) == 0); }
+    // The yield names only prompts it actually suppressed.
+    { State s; auto f = Good(); f.nativeReaction = 0x20; f.targetValid = false; CHECK(Step(s, f).hide == Hide::NoTarget); }
+    { State s; auto f = Good(); f.nativeReaction = 0x20; f.distance = kRange + 1.0f; CHECK(Step(s, f).hide == Hide::OutOfRange); }
+    // Next to the chest's "Open" RC the prompt hides; away from it, it shows and a fresh hold fires.
+    { State s; auto rc = Good(); rc.nativeReaction = 0x20; Output o {};
+      for (int i = 0; i < 30; ++i) { auto f = rc; f.triangle = (i % 2) == 0; o = Step(s, f); CHECK(!o.fire); }
+      CHECK(o.kind == Kind::Hidden && o.hide == Hide::NativeReaction && o.progress == 0);
+      o = Step(s, Good()); CHECK(o.kind == Kind::Prompt && o.hide == Hide::None);
+      CHECK(HoldRelease(s, 60).fire); }
+
     // L1+Triangle (native shortcut) never counts as a revive hold.
     CHECK(TriangleHeld(0x1000) && !TriangleHeld(0x1400) && !TriangleHeld(0x0400) && !TriangleHeld(0));
     // HUD: the overlay stays 130 px; the prompt lives in the downed teammate's row.

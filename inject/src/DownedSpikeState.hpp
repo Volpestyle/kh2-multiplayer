@@ -100,8 +100,8 @@ struct Channel {
     std::uint32_t promptKind, promptSlot, promptProgress, promptHide;
     std::uint32_t triangleFrames; // frames whose raw slot-0 input had Triangle (after the mailbox apply)
     std::uint32_t promptFires;    // requests sent by a completed hold
-    // v7: native reaction-command candidates, recorded for calibration only (UNVERIFIED;
-    // the yield uses neither): [KH2LIB] 0x2A110E2 and the 0x80-shifted 0x2A11162.
+    // v7: native reaction command. reactCmdShifted is REACT_CMD_STEAM 0x2A11162 (the
+    // calibrated address the prompt yields to); reactCmdLib is KH2Lib's 0x2A110E2 (wrong on Steam).
     std::uint32_t reactCmdLib, reactCmdShifted;
 };
 #pragma pack(pop)
