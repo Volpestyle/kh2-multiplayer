@@ -202,6 +202,11 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 
 ## tests/
 
+Every `kh2coop_*_test` executable (plus each `kh2coop_resourcetrace_test`
+failure mode) is registered with CTest; after a Release build run
+`ctest --test-dir build -C Release` serially (several tests bind fixed
+loopback ports). None launches or attaches to KH2.
+
 | File | What |
 |------|------|
 | `FakeSimulation.cpp` (772 lines) | E2E test: 3 clients + server, verifies handshake, input exchange, snapshot consistency, event delivery |

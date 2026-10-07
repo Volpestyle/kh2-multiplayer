@@ -445,3 +445,21 @@ if(WIN32)
         target_compile_options(kh2coop_hud_cpu_test PRIVATE /W4 /WX)
     endif()
 endif()
+
+# Register every headless kh2coop_*_test executable defined above with CTest
+# (ctest -C Release). None launches or attaches to the game. Several bind
+# fixed loopback ports, so run serially (no -j).
+enable_testing()
+get_property(_kh2coop_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_kh2coop_target IN LISTS _kh2coop_targets)
+    if(_kh2coop_target MATCHES "^kh2coop_.*_test$")
+        add_test(NAME ${_kh2coop_target} COMMAND ${_kh2coop_target})
+    endif()
+endforeach()
+if(TARGET kh2coop_resourcetrace_test)
+    # Each retained-install failure boundary runs in its own process.
+    foreach(_kh2coop_mode identity allocate register pin enable)
+        add_test(NAME kh2coop_resourcetrace_test_${_kh2coop_mode}
+                 COMMAND kh2coop_resourcetrace_test ${_kh2coop_mode})
+    endforeach()
+endif()
