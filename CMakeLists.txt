@@ -373,6 +373,15 @@ if(WIN32)
     if(MSVC)
         target_compile_options(kh2coop_downed_state_test PRIVATE /W4 /WX)
     endif()
+
+    # VUH-1489 clone neutral input: Gate (+0xDB8) and the 0x3A89A0 detour over fake game
+    # memory with MinHook/warp/playerkit stand-ins; no game process, no installed hooks.
+    add_executable(kh2coop_clone_neutral_test tests/CloneNeutralInputTest.cpp)
+    target_include_directories(kh2coop_clone_neutral_test PRIVATE inject/src runtime/include)
+    target_compile_definitions(kh2coop_clone_neutral_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_clone_neutral_test PRIVATE /W4 /WX /wd4505)
+    endif()
 endif()
 
 # Causal receipts: actual codec/ENet and owned-memory native boundary controls.

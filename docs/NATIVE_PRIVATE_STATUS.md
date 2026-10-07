@@ -73,7 +73,8 @@ shutdown, and the MinHook-retention checks.
   not proof of absence.
 - Pool operations are natively unsynchronized; only the registered game thread
   is admitted. A foreign-thread private commit is vetoed but fails health.
-- Open follow-ups: the unbound clone reads pad 0; EntityHook drove Donald for
-  one frame after a reload.
+- Open follow-up: EntityHook drove Donald for one frame after a reload. The
+  unbound clone reading pad 0 is handled by the default-off
+  `KH2COOP_CLONE_NEUTRAL_INPUT` (`CLONE_NEUTRAL_INPUT.md`).
 - Never save while it's active; the SaveGuard and save-hash checks stay
   mandatory.

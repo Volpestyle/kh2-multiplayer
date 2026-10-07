@@ -1155,6 +1155,8 @@ static int PuppetIndexFor(uintptr_t actor) {
     return -1;
 }
 
+#include "CloneNeutralInput.inl"
+
 // Permission to treat a native friend as AI-owned is positive, frame-local
 // evidence from the branch which actually invokes the original friend AI.
 // Cached poses and a negative PuppetIndexFor result cannot grant permission.
@@ -2986,6 +2988,9 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         // Refresh friend pointers (direct memory dereference, negligible)
         RefreshFriendPointers();
 
+        // VUH-1489: a P_EX100 clone reads neutral input, not pad 0 (default off).
+        cloneneutral::Gate(addr);
+
         // Identify friend entities
         if (g_friend1Actor != 0 && addr == g_friend1Actor) {
             g_currentFriendSlot = 1;
@@ -3448,6 +3453,7 @@ bool Initialize(uintptr_t exeBase) {
         Log(playerkit::BlocksNativeSoraPuppets()
                 ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
                 : "[privatestatus] initialization refused; profile unqualified");
+    cloneneutral::Install(exeBase); // VUH-1489: default off (KH2COOP_CLONE_NEUTRAL_INPUT)
     lifetimetrace::Initialize(exeBase);
     if (lifetimetrace::GetStatistics().requested) {
         const auto s = lifetimetrace::GetStatistics();
