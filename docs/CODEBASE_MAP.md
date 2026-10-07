@@ -64,6 +64,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/NativeLifecycleTrace.cpp` | ~340 | Five independently byte-verified opt-in removal/death/count probes, nested pre/post actor/controller/cache evidence and native unwind/loss reporting |
 | `src/NativeHitTrace.cpp` | | Opt-in bounded ApplyHitDamage/TakeDamage/ApplyStatDelta observations, plus copied policy decisions and actual operation outcomes; separate incoming-delta/HP and checked-zero evidence, no ownership-rule changes |
 | `src/DamagePolicy.cpp` | | Copied-facts active-session HP ownership matrix and fault-contained, exact-record amount-zero leaf; EntityHook owns current actor/companion evidence |
+| `src/DownedSpike.inl`, `src/DownedSpikeState.hpp` | | VUH-1504 downed/revive owner side behind `KH2COOP_DOWNED_SPIKE=1`: game-over request gate, held downed episodes, LocalDownedState publication, native revive at 25% HP with grace and stand-up; test channel only with `_FIXTURE=1` (docs/DOWNED_REVIVE.md) |
 
 EntityHook.cpp also holds the VUH-1501 hit-ownership hooks (BuildHit `0x3D23C0` log, ApplyHitDamage `0x3D3BA0` drop filter + claims, host apply), driven through `common/include/kh2coop/HitChannel.hpp`.
 Those diagnostic claims/manual apply requests remain separate from protocol
@@ -215,6 +216,7 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 | `NativeLifecycleTraceTest.cpp` | Windows-only headless nested lifecycle/original-call, unavailable state, thread-affinity and queue/unwind controls using synthetic originals; no installed hooks |
 | `NativeHitClaimTest.cpp` | Production claim consumer/publisher and read-only native-hit/damage context with all three full-width roster IDs over owned memory and headless transport; no game or installed hooks |
 | `DamagePolicyTest.cpp` | Production policy matrix and owned-record zero-leaf controls; explicitly synthetic original/claim harness, no production membership adapter or game hooks |
+| `DownedSpikeStateTest.cpp` | VUH-1504 downed/revive pure rules: gate decision, revive HP rewrite, publish kinds, episode minting/re-minting and the pinned fixture channel layout |
 | `NativeHitTraceTest.cpp` | Production hit trace/policy serializer and owned zero leaf; synthetic original/argument/return/SEH, scope/queue and outcome controls; baseline and policy-veto emitter modes |
 | `test_trace_audit.py` | Saved-log envelope/provenance, predicate and native-hit schema, coverage, HP/delta, ambiguity and historical-limit controls |
 

@@ -5,10 +5,10 @@ is **12** (party setup), with AvatarBridge **4**. Older network
 peers and avatar mappings refuse the new contract. The sealed friend packages
 are unchanged. ENet and the default-off Steam backend use the same policy.
 
-This is the network/bridge implementation. It does not intercept death, change
-HP, suppress game-over, choose a button, or invoke a native revive function.
-Those actions remain with the native owner and require separate review/live
-qualification. No `inject/` or launcher code changed here.
+The sections below up to "Offline verification" are the network/bridge
+contract. The native owner side (death intercept, held downed state, native
+revive) is in `inject/` behind its own feature flag; see
+[Native owner side](#native-owner-side-inject) at the end.
 
 ## Native producer hook
 
@@ -93,3 +93,86 @@ SessionHost stack with mocked Valve and IPC-link boundaries in
 
 Existing avatar, world-sync, and HUD-name suites remain required. This evidence
 does not qualify the native intercept or a real cross-account Steam session.
+
+## Native owner side (`inject/`)
+
+The native producer, consumer and requester described above exist in
+`inject/src/DownedSpike.inl` (adapter, included in `EntityHook.cpp`),
+`inject/src/DownedSpikeState.hpp` (pure rules) and the ReviveRequest admission
+in `inject/src/EnemySync.cpp`. The names say "spike" because the live evidence
+was gathered under them; they are the feature, not throwaway code.
+
+**Feature flag: `KH2COOP_DOWNED_SPIKE=1`.** Default off. Unless the variable is
+exactly `1`, `Install` returns before any byte check, hook, mapping or log;
+`Tick`, `StatDelta` and `NoteHit` return on their first test, no publication is
+made, no ReviveRequest is applied, and the game-over functions are untouched.
+The cost when off is one bool test per frame and per ApplyStatDelta call.
+
+When on (Steam build only; every native site is byte-checked at install, and a
+mismatch logs `[downed] configure ... REFUSED` and installs nothing):
+
+- **Intercept.** MinHook detours on the game-over requests `0x3FCD20` (mode 0)
+  and `0x3FCAD0` (mode 3) skip the request only for the canonical local player
+  (`g_soraActor` == `[0x2A105D0]` == entity-list head), on the game thread,
+  after the native death has set the dead flag (`actor+0x9B8` bit 2), with no
+  game-over task. Everything else (including mission failure, `arg == 0`) calls
+  the original. Sora stays natively dead: DEADSORA action, controller off,
+  enemies' damage blocked by the dead flag.
+- **Episodes.** Seeded per boot (`nonce << 32`), +1 per intercept, never reused.
+  While still downed, the owner **re-mints** a new episode after a native revive
+  refusal or after 1,800 frames (~30 s) without an accepted request, so a lost
+  or refused request can't strand the player. Requesters must always target the
+  latest streamed episode; all the reservation floors above are `<=`, so they
+  accept the larger value.
+- **Publication.** Every owner frame, `LocalDownedState` goes through
+  `AvatarBridge::SetLocalDownedState` with the scope from
+  `enemysync::CaptureDownedScope`. Alive is published only after a successful
+  native revive; natively dead but not held (refused) publishes `{}`.
+- **Consume.** `enemysync::AdmitReviveRequest` admits the source (current roster
+  peer, delivery serial, host cut / requester floor, body slot and connection
+  match), then `ReviveOwnerGate::Consume` reserves the episode before exactly one
+  `TryRevive(episode)`, which reruns every native check (owner thread, same
+  episode, canonical actor, outside events, dead flag, live pointers, no task).
+- **Revive.** Native `0x3AA8D0(actor)`, with its one `+max` heal rewritten in
+  `HookedApplyStatDelta` to land on **25% of max HP (at least 1)**; then the
+  game's own ignore-hit timer `0x3D7E40(actor, 120.0f)` (~2 s grace) and one
+  idle motion request `0x3C86A0(actor+0x158, 0, 0.0f, 0.0f)` so a networked
+  client stands up without input.
+
+**Test channel: `KH2COOP_DOWNED_SPIKE_FIXTURE=1`** (or
+`KH2COOP_DOWNED_SPIKE_CONTROL=1`, which implies it). Only then is the
+shared-memory channel `Local\kh2coop_downed_<pid>` mapped. It carries per-frame
+readouts and three debug commands: `Kill` (native ApplyStatDelta to 0 HP),
+`Revive` (TryRevive on the current episode) and `RequestRevive(slot)` (sends a
+ReviveRequest for a teammate's streamed episode; there is no product UI yet).
+`_CONTROL=1` installs only the channel and Kill, so the native game over runs.
+Product play never maps the channel. `kh2coop_downed_state_test` covers the
+pure rules and pins the 328-byte channel layout the live fixture mirrors.
+
+**Live evidence (2026-10-06, Steam build, one rig).** Single-game treatment
+214522: PASS_NOT_EXERCISED (two 24 s holds, one scripted and one natural death,
+no game over, no input drift, revive at 6/24 HP, control back). Two-player pair
+230440: PASS (friend1 downed and streamed to the host in 0.11 s, host
+ReviveRequest forwarded through every hop, consumed once, 6/24 HP, grace 118,
+friend1 stood up and moved 474 units, no game over on either game). The pair
+run used the final source; the treatment ran before the grace/stand-up/network
+round, whose paths it does not exercise.
+
+**Limits.**
+
+- Invulnerability while downed is NOT_EXERCISED: enemies never attacked a
+  downed Sora in any run. It rests on the native dead-flag gate (static
+  reading of `0x3D60C0`/`0x3D2EB0`) plus party Cures being observed blocked.
+- A teammate's Cure does not revive; only `TryRevive` does. Donald will spend
+  casts on a downed Sora.
+- A room change, actor change or fault while downed marks the feature Refused
+  for the rest of the process (no retry, no auto-revive on transition); the
+  player may stay natively dead with no game over.
+- All-party down, mission deaths (mode 3 with an actor is gated; arg 0 stays
+  native), drive forms, summons, the `g_sys400` bit-17 branch and non-Sora
+  player classes are out of scope. The debug Kill refuses those branches.
+- No revive UI/button, range or liveness cross-check on the owner side, and no
+  refusal ACK back to the requester. A live negative control of the owner gate
+  is still open. Only the 1-host/1-friend pair on the local relay is proven;
+  three players and Steam cross-account are not.
+- The hooks stay installed as pass-throughs until process exit.

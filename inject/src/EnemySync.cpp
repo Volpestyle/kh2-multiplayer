@@ -24,6 +24,7 @@
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/Revive.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
 #include "kh2coop/SurvivingPackPreparation.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -71,6 +72,20 @@ StatDeltaFn g_applyStatDelta = nullptr;
 TakeDamageFn g_takeDamage = nullptr;
 Role g_role = Role::Off;
 WorldBridge g_bridge;
+// VUH-1504 revive owner state; game lifetime (never reset with sessions or rooms).
+ReviveApplyFn g_reviveApply = nullptr;         // set once by EntityHook
+ReviveOwnerGate g_reviveGate;
+LocalDownedState g_localDowned {};             // this frame's owner publication
+std::string g_reviveSession;                   // latched per session generation
+std::uint32_t g_reviveSessionGeneration = 0;
+std::uint64_t g_reviveRequestSeq = 0;          // requester: DLL lifetime; never recycled
+ReviveStats g_reviveStats {};
+std::uint32_t g_reviveLogs = 0, g_reviveLogGeneration = 0;  // peer-driven lines: 16 per generation
+bool ReviveLogAllowed() {
+    const auto generation = g_bridge.SessionGeneration();
+    if (generation != g_reviveLogGeneration) { g_reviveLogGeneration = generation; g_reviveLogs = 0; }
+    return g_log && g_reviveLogs++ < 16;
+}
 
 // One enemy as this machine saw it spawn in the current room instance.
 struct Spawn {
@@ -2759,6 +2774,69 @@ void AckEventControl() {
         converged && EventControlScopeCurrent(g_eventControlScope) && CensusMatchesInstance(census));
 }
 
+// VUH-1504: a ReviveRequest may come from any teammate (host or client), so it
+// skips the host-only client branch below and gets its own source admission:
+// the source is a current roster peer other than us, at its published delivery
+// serial; a host source also passes the client cut, a client source carries no
+// host serial and (on the host) its requester delivery floor.
+void AdmitReviveRequest(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {
+    ++g_reviveStats.seen;
+    if (ReviveLogAllowed())
+        g_log("[downed] revive-hop dll receive source=%llu delivery=%llu hostSource=%llu bytes=%zu",
+              static_cast<unsigned long long>(scope.sourceConnectionId), static_cast<unsigned long long>(scope.sourceDeliverySerial),
+              static_cast<unsigned long long>(scope.hostSourceSerial), size);
+    const auto local = g_bridge.LocalSlot();
+    std::uint8_t source = 0xFF;
+    for (std::uint8_t slot = 0; slot < 3; ++slot)
+        if (slot != local && scope.sourceConnectionId && g_bridge.ConnectionId(slot) == scope.sourceConnectionId) source = slot;
+    bool ok = local < 3 && source < 3 && scope.sourceDeliverySerial &&
+        scope.sourceDeliverySerial == g_bridge.PeerDeliverySerial(source);
+    if (ok && source == 0) ok = CurrentRole() == Role::Client && scope.hostSourceSerial > g_resyncAppliedCut;
+    else if (ok) ok = !scope.hostSourceSerial &&
+        (CurrentRole() != Role::Host || RequesterCurrent(source, scope.sourceConnectionId, scope.sourceDeliverySerial));
+    ReviveRequest request;
+    if (ok) {
+        ByteReader reader(payload, size);
+        read(reader, request);
+        ok = reader.atEnd() && request.requesterSlot == source && request.requesterConnectionId == scope.sourceConnectionId;
+    }
+    DownedScope current;
+    if (ok) ok = g_reviveApply && CaptureDownedScope(current);
+    if (!ok) {
+        ++g_reviveStats.admissionRefused;
+        if (ReviveLogAllowed()) g_log("[downed] revive-request admission refused source=%u local=%u apply=%u",
+                         static_cast<unsigned>(source), static_cast<unsigned>(local), g_reviveApply ? 1u : 0u);
+        return;
+    }
+    // Consistency latch, not authentication: NetworkClient already drops any
+    // envelope whose session differs from the runtime's before the WorldInbox.
+    // The DLL holds no runtime session string (see the [client-claims] note);
+    // the first admitted ReviveRequest of a session generation latches it, and
+    // a later one under another session ID in that generation is refused.
+    if (g_reviveSessionGeneration != current.context.generation) {
+        g_reviveSessionGeneration = current.context.generation;
+        g_reviveSession = scope.sessionId;
+    }
+    if (!g_reviveGate.Consume(request, scope, g_reviveSession, current.context, current.connections,
+                              current.localSlot, g_localDowned, GetTickCount64())) {
+        ++g_reviveStats.gateRefused;
+        if (ReviveLogAllowed()) g_log("[downed] revive-request gate refused requester=%u seq=%llu episode=%llX localEpisode=%llX downed=%u",
+                         static_cast<unsigned>(request.requesterSlot), static_cast<unsigned long long>(request.seq),
+                         static_cast<unsigned long long>(request.targetEpisode),
+                         static_cast<unsigned long long>(g_localDowned.episode), g_localDowned.downed ? 1u : 0u);
+        return;
+    }
+    ++g_reviveStats.consumed; // episode reserved; exactly one native attempt, never retried
+    // Runs inside the ReceiveWorldPackets drain: the native revive re-enters
+    // HookedApplyStatDelta/hit trace only; nothing there touches this drain's
+    // local packet buffer or enemysync state (round-5 review N5, checked).
+    const int result = g_reviveApply(request.targetEpisode, request.requesterSlot, request.seq);
+    if (result == 1) ++g_reviveStats.applied;
+    if (g_log) g_log("[downed] revive-request consumed requester=%u seq=%llu episode=%llX native=%d",
+                     static_cast<unsigned>(request.requesterSlot), static_cast<unsigned long long>(request.seq),
+                     static_cast<unsigned long long>(request.targetEpisode), result);
+}
+
 bool ReceiveWorldPackets() {
     bool hostSessionReset = false;
     std::vector<std::uint8_t> packet;
@@ -2776,10 +2854,21 @@ bool ReceiveWorldPackets() {
                 if (scope->kind != WorldSourceKind::Native ||
                     scope->targetConnectionId != g_bridge.ConnectionId(g_bridge.LocalSlot()) ||
                     scope->targetDeliverySerial != g_bridge.DeliverySerial() ||
-                    (g_resyncPlan && scope->sessionId != g_resyncPlan->request.key.sessionId)) continue;
+                    (g_resyncPlan && scope->sessionId != g_resyncPlan->request.key.sessionId)) {
+                    // VUH-1504 hop log (diagnostic only, bounded): envelope-level drop of a ReviveRequest.
+                    if (!envelope.packet.empty() && envelope.packet.front() == static_cast<std::uint8_t>(PacketType::ReviveRequest) &&
+                        ReviveLogAllowed())
+                        g_log("[downed] revive-hop dll envelope drop kind=%u target=%llu/%llu delivery=%llu/%llu",
+                              static_cast<unsigned>(scope->kind), static_cast<unsigned long long>(scope->targetConnectionId),
+                              static_cast<unsigned long long>(g_bridge.ConnectionId(g_bridge.LocalSlot())),
+                              static_cast<unsigned long long>(scope->targetDeliverySerial),
+                              static_cast<unsigned long long>(g_bridge.DeliverySerial()));
+                    continue;
+                }
                 packet = std::move(envelope.packet);
                 type = decodePacketHeader(packet.data(), packet.size(), payload, size);
                 if (packet.size() != size + 3 || !isScopedWorldPacket(type)) continue;
+                if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
                 if (CurrentRole() == Role::Client) {
                     if (scope->sourceConnectionId != g_bridge.ConnectionId(0) || !scope->hostSourceSerial ||
                         scope->sourceDeliverySerial != g_bridge.PeerDeliverySerial(0) ||
@@ -4183,6 +4272,56 @@ void Shutdown() {
     g_hostBeginPending = false;
     g_lastHashMs = 0;
     g_bridge.Close();
+}
+
+bool CaptureDownedScope(DownedScope& out) noexcept {
+    out = {};
+    try {
+        const auto role = CurrentRole();
+        const auto generation = WorldSessionGeneration();
+        const auto delivery = g_bridge.DeliverySerial();
+        const auto local = g_bridge.LocalSlot();
+        if (role == Role::Off || !generation || !delivery || local >= 3) return false;
+        DownedScope s {};
+        s.context = {generation, delivery, 0};
+        s.localSlot = local;
+        for (std::uint8_t slot = 0; slot < 3; ++slot) s.connections[slot] = g_bridge.ConnectionId(slot);
+        RoomTransition room;
+        if (!s.connections[local] || !ActivationContext(role, room) || !room.epoch) return false;
+        if (WorldSessionGeneration() != generation || g_bridge.DeliverySerial() != delivery ||
+            g_bridge.LocalSlot() != local) return false;
+        s.epoch = room.epoch; s.worldId = room.worldId; s.roomId = room.roomId; s.door = room.door;
+        s.mapProgram = room.mapProgram; s.battleProgram = room.battleProgram; s.eventProgram = room.eventProgram;
+        out = s;
+        return true;
+    } catch (...) {
+        out = {};
+        return false;
+    }
+}
+
+void NoteLocalDownedState(const LocalDownedState& state) noexcept { g_localDowned = state; }
+void SetReviveApply(ReviveApplyFn apply) noexcept { g_reviveApply = apply; }
+ReviveStats GetReviveStats() noexcept { return g_reviveStats; }
+
+bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut) {
+    seqOut = 0;
+    DownedScope s;
+    if (!targetEpisode || !CaptureDownedScope(s) || targetSlot >= 3 || targetSlot == s.localSlot ||
+        !s.connections[targetSlot] || g_reviveRequestSeq == UINT64_MAX) return false;
+    ProducerWorldContext context;
+    if (!CaptureWorldContext(context) || context.generation != s.context.generation ||
+        context.deliverySerial != s.context.deliverySerial) return false;
+    ReviveRequest request;
+    request.location = {s.epoch, s.worldId, s.roomId, s.door, s.mapProgram, s.battleProgram, s.eventProgram};
+    request.seq = ++g_reviveRequestSeq; // consumed even if the send fails
+    request.requesterConnectionId = s.connections[s.localSlot];
+    request.targetConnectionId = s.connections[targetSlot];
+    request.targetEpisode = targetEpisode;
+    request.requesterSlot = s.localSlot;
+    request.targetSlot = targetSlot;
+    seqOut = request.seq;
+    return SendCapturedWorld(encode(request), context);
 }
 
 } // namespace enemysync

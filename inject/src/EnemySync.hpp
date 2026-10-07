@@ -31,6 +31,8 @@
 #include "NativeHitTrace.hpp"
 #include "kh2coop/PuppetProvenance.hpp"
 #include "kh2coop/WorldContext.hpp"
+#include "kh2coop/DownedState.hpp" // Types + WorldContext only; safe beside HitChannel
+#include <array>
 
 namespace kh2coop {
 namespace inject {
@@ -107,6 +109,34 @@ void CaptureHostActivation(const float* position4);
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence);
 
 void Shutdown();
+
+// VUH-1504 downed/revive native integration (docs/DOWNED_REVIVE.md). Game thread.
+// The checked scope the downed owner publishes with: session generation and
+// delivery (hostSourceSerial 0), the admitted room epoch and full tuple, the
+// three roster connection IDs and the local slot. False = unavailable ({}).
+struct DownedScope {
+    ProducerWorldContext context {};
+    std::uint32_t epoch = 0;
+    std::uint16_t worldId = 0, roomId = 0, door = 0, mapProgram = 0, battleProgram = 0, eventProgram = 0;
+    std::array<std::uint64_t, 3> connections {};
+    std::uint8_t localSlot = 0xFF;
+};
+bool CaptureDownedScope(DownedScope& out) noexcept;
+// The owner's publication this frame (the same value given to
+// AvatarBridge::SetLocalDownedState); ReviveOwnerGate::Consume judges against it.
+void NoteLocalDownedState(const LocalDownedState& state) noexcept;
+// After envelope admission and ReviveOwnerGate::Consume (episode reserved),
+// enemysync calls this exactly once; it must run the fresh native checks
+// (downed::TryRevive). Returns the native result code (1 = revived).
+using ReviveApplyFn = int (*)(std::uint64_t episode, std::uint8_t requesterSlot, std::uint64_t seq);
+void SetReviveApply(ReviveApplyFn apply) noexcept;
+struct ReviveStats {
+    std::uint64_t seen = 0, admissionRefused = 0, gateRefused = 0, consumed = 0, applied = 0;
+};
+ReviveStats GetReviveStats() noexcept;
+// Requester side: builds and sends one ReviveRequest for a teammate's streamed
+// downed episode through the captured-context owner ring. seqOut = its sequence.
+bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut);
 
 } // namespace enemysync
 } // namespace inject

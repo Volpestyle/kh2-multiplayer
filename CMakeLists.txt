@@ -366,6 +366,13 @@ if(WIN32)
     if(MSVC)
         target_compile_options(kh2coop_damagepolicy_test PRIVATE /W4 /WX)
     endif()
+
+    # VUH-1504 downed/revive pure rules (gate, revive HP, episodes, channel layout).
+    add_executable(kh2coop_downed_state_test tests/DownedSpikeStateTest.cpp)
+    target_include_directories(kh2coop_downed_state_test PRIVATE inject/src)
+    if(MSVC)
+        target_compile_options(kh2coop_downed_state_test PRIVATE /W4 /WX)
+    endif()
 endif()
 
 # Causal receipts: actual codec/ENet and owned-memory native boundary controls.

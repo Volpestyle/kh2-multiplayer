@@ -56,6 +56,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include "DownedSpikeState.hpp"
 
 namespace kh2coop {
 namespace inject {
@@ -562,7 +563,10 @@ static int ApplyStatDeltaBody(void* actor, int delta, int idx, int reactFlag) {
     return result;
 }
 
+#include "DownedSpike.inl"
+
 static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
+    delta = downedspike::StatDelta(actor, delta, idx);
     using namespace nativehittrace;
     if (!CanCaptureChild()) return ApplyStatDeltaBody(actor, delta, idx, reactFlag);
     const auto address = reinterpret_cast<uintptr_t>(actor);
@@ -648,6 +652,7 @@ static LastHit g_lastHit = {};
 static uintptr_t __fastcall HookedBuildHit(void* atk, void* victim, uint32_t a3, uint32_t a4) {
     const uintptr_t hit = g_origBuildHit(atk, victim, a3, a4);
     if (hit == 0) return hit;
+    downedspike::NoteHit(atk, victim);
     __try {
         const auto A = reinterpret_cast<uintptr_t>(atk);
         const uint32_t ownerHandle = *reinterpret_cast<const uint32_t*>(A + 0x10);
@@ -2934,6 +2939,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 // Track Sora's actor — he's always the entity list head.
                 // Needed for entity-level movement suppression.
                 g_soraActor = addr;
+                downedspike::Tick(addr);
 
                 // Hand pending room warps to the game on its own thread.
                 enemysync::OnFrameStart(g_frameCounter);
@@ -3407,6 +3413,7 @@ bool Initialize(uintptr_t exeBase) {
 
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
+    downedspike::Install(exeBase);
     char spawnTraceSetting[2] {};
     const bool spawnTrace = GetEnvironmentVariableA("KH2COOP_SPAWN_TRACE", spawnTraceSetting,
                                                    sizeof(spawnTraceSetting)) == 1 &&
