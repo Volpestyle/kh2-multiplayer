@@ -1,8 +1,8 @@
 # Steam transport work (VUH-1493)
 
 Steam connectivity is not available to friends yet. ENet remains the default
-packet transport. The opt-in Steam implementation awaits native review and
-cross-account validation. Protocol10, its channel assignments,
+packet transport. Native delta `fff108b` has lead re-review ADOPT with no blockers;
+cross-account validation waits on James's second account. Protocol10, its channel assignments,
 session/cache/resync authority and all existing admission checks are unchanged.
 
 `NetworkClient` and `SessionHost` accept an optional owned `Transport` as their
@@ -53,7 +53,8 @@ single-account socket-pair success cannot prove SDR cross-account routing.
 Set `KH2COOP_STEAM_BROKER=1` **only in the owned game's launch environment**.
 Use the reviewed broker DLL and wait for its `steam-broker_<pid>.log` readiness
 receipt. Do not enable the capability probe at the same time. The default is off;
-there is no new hook, game-memory/input/save writer or launcher change.
+there is no new hook or game-memory/input/save writer. The source launcher offers
+a default-off Steam (beta) mode; sealed release09 remains unchanged.
 
 Start the matching runtime with its existing config/build/content/mod arguments:
 
@@ -137,11 +138,57 @@ remain unchanged.
 Validation covers mocked Steam authentication/admission/ICE failure, actual Windows
 pipe ownership/closure, protocol admission, avatars and late-join room/manifest/
 progress caching. It does not prove cross-account SDR routing or native callback
-liveness. Required next evidence after native review: two authorized logged-on
+liveness. Required next evidence after the adopted native review: two authorized logged-on
 Steam accounts with KH2 app2552430 on separate machines, explicit host allowlist,
 matched protocol/build/content/mod, ICE verification on real handles, relayed flags,
 then version refusal/avatar/world-cache exchange and owned closure/save guards.
 No friend-readiness claim.
+
+
+## First two-account live-run checklist (not yet executed)
+
+Lead re-review ADOPT is recorded in the **Delta re-review** section of
+`build/rig/vuh1493-steam-p2p-20261006-01/broker-candidate/lead-review-findings.md`.
+This checklist does not grant the live lane. Wait for James's second authorized
+account/machine and a lead-assigned run; use the reviewed, pinned products and
+existing ownership/save guards. Do not enable the capability probe alongside
+the broker. Keep all prior FAILs.
+
+1. Confirm app2552430 authentication and SDR readiness for both actual accounts,
+   the explicit host allowlist and matching protocol/build/content/mod. Retain
+   effective ICE=0 receipts on the real P2P listener and connections, plus
+   authenticated/encrypted/relayed connected-state flags. No app480 or direct-IP
+   fallback.
+2. **N6: incoming authentication.** Retain the host's actual Connecting-state
+   `callback handle=` record (`state=1`), SteamID, listener and raw flags before
+   acceptance. Check unauthenticated/unencrypted bits are clear (`flags & 3 == 0`)
+   and that acceptance belongs to that allowlisted account. If Steam reports a
+   different state/flag sequence, preserve the refusal; do not relax admission.
+3. **N5: callback cadence.** Retain callback state transitions and timestamped
+   observation intervals during connection and gameplay. Report observed delivery
+   cadence/delays and any pending timeout; untimed line order or auth/SDR readiness
+   alone does not prove the game's callback-pump rate. Do not add RunCallbacks.
+4. Check version refusal, verified roster/ownership, avatar exchange and the
+   existing world-cache/admission behavior. Record each peer departure and the
+   remaining session state; do not claim a three-peer result from two accounts.
+5. **D3: frame pacing.** Watch for hitches during active traffic, connection and
+   departure, retaining available frame-timing/capture evidence. Distinguish
+   observed hitches from an attributed lock/IPC cause; do not claim a quantitative
+   pacing result without measurements. The callback lock can wait if its worker
+   is preempted even though the critical section is O(1).
+6. **D1: graceful game exit while the session is still active.** Use the game's
+   normal exit without saving, then read the broker log after exit (or with
+   write sharing). Require an actual `runtime-detached steamPipeAlive=0` receipt
+   to qualify observation of Steam-pipe invalidation. Forced canonical cleanup
+   is not this test. Missing/`1` output leaves this guard unverified; process exit,
+   lack of a crash, or a final file timestamp cannot substitute. Retain any crash
+   and complete owned cleanup/save checks. Even `0` does not eliminate the
+   documented check-to-call race.
+
+Optional D2 (stale send during a replacement connection), D4 (non-allowlisted
+flood can end an attachment), and D5 (best-effort error delivery under saturation)
+remain recorded nits, not claimed fixed or exercised. No new live result or
+friend readiness follows from this checklist.
 
 First-party contracts: [Steam sockets](https://partner.steamgames.com/doc/api/ISteamNetworkingSockets),
 [configuration API](https://partner.steamgames.com/doc/api/ISteamNetworkingUtils),
