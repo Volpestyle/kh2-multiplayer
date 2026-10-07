@@ -938,8 +938,7 @@ Format: decision — why (rejected alternative).
   run-level suppression remains partial. Physical remote delivery and general
   gameplay convergence remain open; diagnostic collection does not establish
   those acceptance gates.
-- **D11. PvP is the next goal after the co-op vision; Public Realm stays parked**
-  (James, 2026-10-06). Co-op comes first: a full playthrough with friends as any
+- **D11. After the co-op vision: the Realm track and PvP** (James, 2026-10-06). Co-op comes first: a full playthrough with friends as any
   party member. PvP follows, and the co-op work should not close doors on it.
   Choices that matter for PvP later:
   - Avatars stay owner-authoritative (D3). PvP needs a player-vs-player hit rule
@@ -952,6 +951,21 @@ Format: decision — why (rejected alternative).
   - Sessions stay host-run (D10): the host's game owns the world, and a relay
     or Steam P2P only carries traffic. KH2 can't run headless, so a central
     MMO-style server can't simulate the world; at most it can broker and relay.
+  The Realm track (parked until co-op is done) lets each player keep their own
+  story and party while seeing and meeting others, in stages:
+  1. **Visit mode:** your own story and save; other players in the same room are
+     visible as puppets, with no shared enemies.
+  2. **Drop-in parties:** join another player's room and fight their enemies under
+     their room authority; leaving returns you to your own story. Shared enemies
+     only exist when the party shares the room's story state.
+  3. **Presence and hubs:** a light central service tracks who's online and in
+     which room/story state, matches players and relays traffic. It never runs
+     the world.
+  4. **PvP:** opt-in, on top of 2 or 3.
+  Co-op choices that keep this open: per-player save and story state (not only
+  host-mirrored progress), extra puppet actors beyond the two party slots
+  (VUH-1519's stretch goal), and room authority that can belong to a party
+  leader rather than a single session host.
 - **D12. Autonomy first.** P0 makes every later phase verifiable by an agent
   alone; live RE and gameplay work wait for it.
 
@@ -1285,7 +1299,7 @@ live behavior; unit tests cover stabilized boundaries such as the codec.
 | `CameraController`, camera retarget | Not needed under local-primary; kept for debugging and spectating. |
 | F5 friend control | Dev tool; the basis for playing party members (P5). |
 | Server-side `SimulationState` | Test double only. |
-| Tracks B–D (realm, PvP) | PvP is the next goal after co-op; realm parked (D11). |
+| Tracks B–D (realm, PvP) | Next after co-op: Realm stages then PvP (D11). |
 
 ## Open questions
 
