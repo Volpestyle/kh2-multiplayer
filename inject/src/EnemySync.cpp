@@ -4170,8 +4170,8 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
         ? GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR_CONTROL", g_mirrorControlPath, sizeof(g_mirrorControlPath)) : 0;
     if (controlLength == 0 || controlLength >= sizeof(g_mirrorControlPath)) g_mirrorControlPath[0] = '\0';
     if (g_mirrorRequested && g_log)
-        g_log("[enemy-mirror] configured=1 families=%u interval=%u delay=%u maxLag=%u stale=%u retake=%u gap=%u settle=%u "
-              "trace=%d control=%d", enemymirror::kShadowObjectId, enemymirror::kPublishInterval, enemymirror::kDelay,
+        g_log("[enemy-mirror] configured=1 families=%u,%u interval=%u delay=%u maxLag=%u stale=%u retake=%u gap=%u settle=%u "
+              "trace=%d control=%d", enemymirror::kShadowObjectId, enemymirror::kHookBatObjectId, enemymirror::kPublishInterval, enemymirror::kDelay,
               enemymirror::kMaxLag, enemymirror::kStaleFrames, enemymirror::kRetake, enemymirror::kGapTolerance,
               enemymirror::kSpawnSettleFrames, g_mirrorTrace ? 1 : 0, g_mirrorControlPath[0] ? 1 : 0);
     g_envRole = ReadEnvRole();

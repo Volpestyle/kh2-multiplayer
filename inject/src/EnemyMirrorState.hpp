@@ -51,7 +51,10 @@ public:
         if (m.epoch != epoch_) Reset(m.epoch);
         if (m.sequence <= sequence_) { ++stats_.rejected; return false; }
         sequence_ = m.sequence;
-        if (!haveNewest_ || static_cast<std::int32_t>(m.hostFrame - newest_) > 0) newest_ = m.hostFrame;
+        if (!haveNewest_ || static_cast<std::int32_t>(m.hostFrame - newest_) > 0) {
+            newest_ = m.hostFrame;
+            newestLocal_ = localFrame;
+        }
         haveNewest_ = true;
         for (const auto& e : m.entries) {
             if (!e.netId || !FamilyAllowed(e.objectId)) continue;
@@ -91,7 +94,15 @@ public:
                 haveCursor_ = true;
             } else {
                 const double lag = newest - natural_;
-                natural_ += lag > static_cast<double>(kDelay + 3) ? 2.0 : 1.0;  // gentle catch-up after a burst
+                // Gentle catch-up after a burst (+2). And, rev2 of the Hook Bat lane: while the stream is
+                // live (newest advanced within a publish interval) but the natural cursor sits too close
+                // to (or past) the newest sample, hold it a frame (+0). A HOST stall (its frames stop, e.g.
+                // a capture hitch) otherwise leaves natural permanently ahead of the host clock: the
+                // displayed cursor pins at newest-1 (never a trace frame, % 30), and the overflow pushes
+                // the motion time ahead by the stall length for good (fixture 073546: every netId).
+                const bool live = localFrame - newestLocal_ <= kPublishInterval + 1;
+                natural_ += lag > static_cast<double>(kDelay + 3) ? 2.0
+                          : (live && lag < static_cast<double>(kDelay) - 3.0) ? 0.0 : 1.0;
                 if (natural_ < newest - kMaxLag) natural_ = newest - kDelay;
                 if (natural_ > newest + kStaleFrames) natural_ = newest + kStaleFrames;  // bounded overflow
             }
@@ -171,6 +182,7 @@ private:
     std::uint32_t newest_ = 0;
     bool haveNewest_ = false, haveCursor_ = false;
     double cursor_ = 0.0, natural_ = 0.0;  // integral host frames; double: exact for 2^53 frames (N7)
+    std::uint32_t newestLocal_ = 0;  // local frame at which newest_ last advanced
     StreamStats stats_ {};
 };
 

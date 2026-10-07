@@ -813,7 +813,14 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 - Why it stays off: in live runs 063223 and 065831 the friend's own game spawned every later-wave enemy natively, through the type-2 controller on the host's spawn-authority lease.
 - The one miss (fixture-05) is unexplained, and no forced copy has been created live.
 
-**Not yet mirrored:** the Soldier `M_EX520` (objectId 4). It is not allowlisted, so its copies run on local AI. The design and the static evidence are in the VUH-1788 rig lane (`design.md`).
+**Hook Bat `M_EX520` (objectId 4) is allowlisted for the mirror** (candidate). It is a winged flyer with the "Bat Cry" reaction command; it was first mis-named a Soldier here. It is objentry type 4 and is built by the same factory path as the Shadow: constructor `0x419E30`, handler `0x7528E8`, vtable `0x5D2D68`. So its brain (`+0x20`) and removal predicate (`+0x40`) are the same shape-checked thunks, and the configured line reads `families=302,4`.
+
+**Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.
+- **The failure:** from friend frame 4106 to 7120, the trace stopped for *every* netId, Shadow 7 included.
+- **The cause:** a host stall (host frames stopped, here around the host's clip capture) left the client's natural cursor permanently ahead of the host clock.
+  - The displayed cursor pinned at newest−1. Newest is a multiple of 3, so newest−1 is never a trace frame.
+  - The motion-time overflow grew by the stall length.
+- **The fix:** while the stream is live and the lag is under DELAY−3, the natural cursor holds a frame (+0) until it is about DELAY−3 behind again.
 
 **Static findings** (saved PE `9002B2DE…`):
 - **Alive removal is AI-script driven.** Generic actor update `0x3BFD30` asks handler slot `+0x40` (Shadow class: tail thunk `0x419B90` → `0x3DAC30`) only when actor `+0x120` bit 28 is set, and calls slot `+0x48` (`0x419BA0` → `0x411800`: controller bookkeeping if `+0x9E8`, then dispose) when it answers true.

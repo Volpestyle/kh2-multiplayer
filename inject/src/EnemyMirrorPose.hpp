@@ -15,9 +15,18 @@ namespace kh2coop::inject::enemymirror {
 
 
 // Per-family opt-in (family = native objentry object id). M_EX020 Shadow is
-// object 302 in both live probe runs (20261006-203449, -205838).
+// object 302 in both live probe runs (20261006-203449, -205838). M_EX520, the
+// Hook Bat (a winged flyer with the "Bat Cry" reaction command; live run 073546;
+// first mis-named Soldier), is object 4 (BB courtyard second wave). Both are objentry
+// type 4: the generic factory 0x3DF930 builds every type-4 enemy with constructor
+// 0x419E30, whose handler 0x7528E8 has vtable 0x5D2D68, so the Hook Bat's brain
+// (+0x20 = 0x419B10 -> 0x3B4460) and removal predicate (+0x40 = 0x419B90 ->
+// 0x3DAC30) are the same shape-checked thunks the Shadow uses.
 inline constexpr std::uint32_t kShadowObjectId = 302;
-inline bool FamilyAllowed(std::uint32_t objectId) noexcept { return objectId == kShadowObjectId; }
+inline constexpr std::uint32_t kHookBatObjectId = 4;
+inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
+    return objectId == kShadowObjectId || objectId == kHookBatObjectId;
+}
 
 inline constexpr std::uint32_t kPublishInterval = 3;  // host frames between EnemyMotion packets
 // Render cursor behind the newest host frame: two packet intervals plus jitter

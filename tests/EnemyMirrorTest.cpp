@@ -172,8 +172,12 @@ void testStream() {
     for (std::uint32_t f = 4; f <= 13; ++f) m.Tick(f);                     // 14
     check(m.PoseAt(1, 13, p) && p.cursor == 14.0 && p.motionId == 2 && std::fabs(p.motionTime - 14.0f) < 1e-3f,
           "motion change: the bracket's first motion keeps advancing");
-    m.Ingest(motion(3, 4, 19, {row(1, 0.0f, 9, 3.0f)}), 14); m.Tick(14); m.Tick(15);  // 16
-    check(m.PoseAt(1, 15, p) && p.motionId == 9 && std::fabs(p.motionTime) < 1e-3f, "after the boundary the new motion is rendered");
+    // Live stream with the cursor only 5 behind: it holds (rev2 stall rule) until the stream goes
+    // quiet for more than a publish interval, then advances to 16.
+    m.Ingest(motion(3, 4, 19, {row(1, 0.0f, 9, 3.0f)}), 14);
+    for (std::uint32_t f = 14; f <= 20; ++f) m.Tick(f);  // 14 held x5, then 15, 16
+    check(m.PoseAt(1, 20, p) && p.cursor == 16.0 && p.motionId == 9 && std::fabs(p.motionTime) < 1e-3f,
+          "after the boundary the new motion is rendered");
     // Held inside the last bracket: position between the two newest, time running.
     em::Stream h;
     h.Ingest(motion(3, 1, 10, {row(2, 5.0f, 2, 1.0f)}), 1); h.Tick(1);
@@ -186,6 +190,11 @@ void testStream() {
     auto other = row(4, 0.0f); other.objectId = 309;
     f.Ingest(motion(3, 1, 10, {other}), 1); f.Ingest(motion(3, 2, 13, {other}), 2); f.Tick(2);
     check(!f.Drivable(4, 2), "non-allowlisted family is ignored");
+    em::Stream batStream;
+    auto bat = row(8, 0.0f); bat.objectId = em::kHookBatObjectId;
+    batStream.Ingest(motion(3, 1, 10, {bat}), 1); batStream.Ingest(motion(3, 2, 13, {bat}), 2); batStream.Tick(2);
+    em::Pose sp;
+    check(batStream.Drivable(8, 2) && batStream.PoseAt(8, 2, sp) && sp.objectId == em::kHookBatObjectId, "a Hook Bat (objectId 4) stream is tracked and drivable");
     // A new epoch resets everything.
     s.Ingest(motion(8, 1, 5, {row(1, 0.0f)}), 1060);
     check(s.epoch() == 8 && !s.Drivable(1, 1060) && s.stats().resets >= 1, "a new epoch resets the stream and its sequence floor");
@@ -237,7 +246,44 @@ void testHelpers() {
     check(em::BlendWeight(em::kBlendFrames) > 0.0f && em::BlendWeight(em::kBlendFrames) < em::BlendWeight(1) &&
               em::BlendWeight(1) < 1.0f && em::BlendWeight(0) == 1.0f,
           "take-over blend weight rises monotonically to the stream pose");
-    check(em::FamilyAllowed(302) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0), "only the Shadow family is allowlisted");
+    check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0) &&
+              !em::FamilyAllowed(5) && !em::FamilyAllowed(84),
+          "only the Shadow (302) and Hook Bat (4) families are allowlisted, never the player (84)");
+    // Hook Bat lane rev2: a HOST stall (frames stop, then resume at the normal rate from where they
+    // stopped) must not pin the cursor at newest-1 forever: the lag returns to about DELAY-3 and trace frames
+    // (cursor % 30 == 0) come back; the motion-time overflow goes back to 0.
+    {
+        em::Stream st;
+        std::uint32_t local = 1, host = 300;
+        std::uint64_t seq = 1;
+        auto feed = [&](int frames, bool hostRuns) {
+            for (int k = 0; k < frames; ++k, ++local) {
+                if (hostRuns) {
+                    ++host;
+                    if (host % em::kPublishInterval == 0) st.Ingest(motion(3, seq++, host, {row(1, 0.0f, 2, static_cast<float>(host))}), local);
+                }
+                st.Tick(local);
+            }
+        };
+        feed(300, true);
+        em::Pose pre;
+        check(st.PoseAt(1, local - 1, pre) && host - pre.cursor <= em::kDelay + 3, "steady stream: cursor about DELAY behind");
+        feed(25, false);  // a 25-frame host stall (under the 30-frame release)
+        feed(600, true);  // the host resumes at the normal rate
+        em::Pose post;
+        const bool drivable = st.PoseAt(1, local - 1, post);
+        check(drivable && host - post.cursor >= em::kDelay - 3 && host - post.cursor <= em::kDelay + 3,
+              "after a host stall the cursor returns to about DELAY-3 behind (not pinned at newest-1)");
+        check(drivable && std::fabs(post.motionTime - static_cast<float>(post.cursor)) < 1.5f,
+              "after a host stall the motion time matches the cursor again (no permanent overflow)");
+        bool traceFrame = false;
+        for (int k = 0; k < 60 && !traceFrame; ++k) {
+            feed(1, true);
+            em::Pose p30;
+            traceFrame = st.PoseAt(1, local - 1, p30) && std::fmod(p30.cursor, 30.0) == 0.0;
+        }
+        check(traceFrame, "after a host stall the cursor reaches trace frames (% 30) again");
+    }
     // Live fixture-03: host Shadows chased the host's Sora 3103 u from their BB-courtyard spawns.
     check(em::kMaxFromSpawn >= 2.0f * 3103.0f && em::kMaxFromSpawn < ENEMY_MOTION_MAX_COORD,
           "the S5 spawn bound is a garbage bound, not a leash (2x the live courtyard chase, below the codec bound)");
