@@ -69,6 +69,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/DownedSpike.inl`, `src/DownedSpikeState.hpp` | | VUH-1504 downed/revive owner side behind `KH2COOP_DOWNED_SPIKE=1`: game-over request gate, held downed episodes, LocalDownedState publication, native revive at 25% HP with grace and stand-up; test channel only with `_FIXTURE=1` (docs/DOWNED_REVIVE.md) |
 | `src/RevivePrompt.hpp` | | VUH-1504 player-facing revive trigger behind `KH2COOP_REVIVE_PROMPT=1`: pure Triangle-hold rules (range, cancels, one request per episode); drawn in the co-op HUD row (docs/DOWNED_REVIVE.md) |
 | `src/CloneNeutralInput.inl` | | VUH-1489 default-off (`KH2COOP_CLONE_NEUTRAL_INPUT=1`) neutral input for a native P_EX100 clone: its own pad pointer `+0xDB8` goes to a neutral entry, and a pinned `0x3A89A0` movement-update detour runs it with FIELD_COMMAND's command record and stick neutralised (docs/CLONE_NEUTRAL_INPUT.md) |
+| `src/EnemyMirror.inl`, `src/EnemyMirrorState.hpp`, `src/EnemyMirrorPose.hpp` | | VUH-1515 step 2 default-off (`KH2COOP_ENEMY_MIRROR=1`) mirrored Shadows: host `EnemyMotion` capture (EnemySync), client stream ring/render cursor, per-class brain-thunk skip, motion guard and post-update pose write (docs/ENEMY_PARITY.md) |
 
 EntityHook.cpp also holds the VUH-1501 hit-ownership hooks (BuildHit `0x3D23C0` log, ApplyHitDamage `0x3D3BA0` drop filter + claims, host apply), driven through `common/include/kh2coop/HitChannel.hpp`.
 Those diagnostic claims/manual apply requests remain separate from protocol
@@ -227,6 +228,8 @@ loopback ports). None launches or attaches to KH2.
 | `DamagePolicyTest.cpp` | Production policy matrix and owned-record zero-leaf controls; explicitly synthetic original/claim harness, no production membership adapter or game hooks |
 | `DownedSpikeStateTest.cpp` | VUH-1504 downed/revive pure rules: gate decision, revive HP rewrite, publish kinds, episode minting/re-minting and the pinned fixture channel layout |
 | `CloneNeutralInputTest.cpp` | VUH-1489 clone neutral input: install refusals, `+0xDB8` Gate and the `0x3A89A0` detour (neutralise/restore, exception, nested call, pass-through) over fake game memory with MinHook/warp/playerkit stand-ins |
+| `EnemyMirrorTest.cpp` | VUH-1515 `EnemyMotion` codec, loopback relay forwarding rules (host-only, epoch, sequence, no late-join replay) and the pure client stream state |
+| `EnemyMirrorDriverTest.cpp` | VUH-1515 native mirror driver over fake game memory: brain skip/pass-through, motion guard, death, blend, clamp, class refusal |
 | `NativeHitTraceTest.cpp` | Production hit trace/policy serializer and owned zero leaf; synthetic original/argument/return/SEH, scope/queue and outcome controls; baseline and policy-veto emitter modes |
 | `test_trace_audit.py` | Saved-log envelope/provenance, predicate and native-hit schema, coverage, HP/delta, ambiguity and historical-limit controls |
 

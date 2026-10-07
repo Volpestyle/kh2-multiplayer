@@ -222,7 +222,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
     switch(type) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         RS_INNER(RoomTransition) RS_INNER(EventHold) RS_INNER(EnemyManifest)
-        RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(ProgressUpdate)
+        RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
         RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(ReviveRequest) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
@@ -757,6 +757,48 @@ void write(ByteWriter& w, const EnemyHp& m) {
     }
 }
 
+namespace {
+void checkEnemyMotion(const EnemyMotion& m) {
+    if (!m.epoch) throw std::runtime_error("EnemyMotion: zero epoch");
+    if (!m.sequence) throw std::runtime_error("EnemyMotion: zero sequence");
+    if (m.entries.size() > ENEMY_MOTION_MAX_ENTRIES) throw std::runtime_error("EnemyMotion too large");
+    for (std::size_t i = 0; i < m.entries.size(); ++i) {
+        const auto& e = m.entries[i];
+        if (!e.netId || !e.objectId) throw std::runtime_error("EnemyMotion: zero netId/objectId");
+        if (e.flags != ENEMY_MOTION_ALIVE) throw std::runtime_error("EnemyMotion: bad flags");
+        if (!std::isfinite(e.motionTime) || !std::isfinite(e.rotationY) || !std::isfinite(e.position.x) ||
+            !std::isfinite(e.position.y) || !std::isfinite(e.position.z))
+            throw std::runtime_error("EnemyMotion: non-finite value");
+        if (e.motionId >= ENEMY_MOTION_MAX_MOTION_ID) throw std::runtime_error("EnemyMotion: motion id out of range");
+        if (e.motionTime < 0.0f || e.motionTime > ENEMY_MOTION_MAX_TIME)
+            throw std::runtime_error("EnemyMotion: motion time out of range");
+        if (std::fabs(e.rotationY) > ENEMY_MOTION_MAX_ROTATION) throw std::runtime_error("EnemyMotion: rotation out of range");
+        if (std::fabs(e.position.x) > ENEMY_MOTION_MAX_COORD || std::fabs(e.position.y) > ENEMY_MOTION_MAX_COORD ||
+            std::fabs(e.position.z) > ENEMY_MOTION_MAX_COORD)
+            throw std::runtime_error("EnemyMotion: position out of range");
+        for (std::size_t j = 0; j < i; ++j)
+            if (m.entries[j].netId == e.netId) throw std::runtime_error("EnemyMotion: duplicate netId");
+    }
+}
+} // namespace
+
+void write(ByteWriter& w, const EnemyMotion& m) {
+    checkEnemyMotion(m);
+    w.writeU32(m.epoch);
+    w.writeU64(m.sequence);
+    w.writeU32(m.hostFrame);
+    w.writeU16(static_cast<std::uint16_t>(m.entries.size()));
+    for (const auto& e : m.entries) {
+        w.writeU16(e.netId);
+        w.writeU32(e.objectId);
+        w.writeU32(e.motionId);
+        w.writeF32(e.motionTime);
+        write(w, e.position);
+        w.writeF32(e.rotationY);
+        w.writeU8(e.flags);
+    }
+}
+
 void write(ByteWriter& w, const EnemyDeath& m) {
     w.writeU32(m.epoch);
     w.writeU16(m.netId);
@@ -1061,6 +1103,28 @@ void read(ByteReader& r, EnemyManifest& m) {
     }
 }
 
+void read(ByteReader& r, EnemyMotion& m) {
+    EnemyMotion decoded;
+    decoded.epoch = r.readU32();
+    decoded.sequence = r.readU64();
+    decoded.hostFrame = r.readU32();
+    const auto n = r.readU16();
+    if (n > ENEMY_MOTION_MAX_ENTRIES || r.remaining() != static_cast<std::size_t>(n) * ENEMY_MOTION_ENTRY_BYTES)
+        throw std::runtime_error("EnemyMotion: wrong payload length");
+    decoded.entries.resize(n);
+    for (auto& e : decoded.entries) {
+        e.netId = r.readU16();
+        e.objectId = r.readU32();
+        e.motionId = r.readU32();
+        e.motionTime = r.readF32();
+        read(r, e.position);
+        e.rotationY = r.readF32();
+        e.flags = r.readU8();
+    }
+    checkEnemyMotion(decoded);
+    m = std::move(decoded);
+}
+
 void read(ByteReader& r, EnemyHp& m) {
     EnemyHp decoded;
     decoded.epoch = r.readU32();
@@ -1279,6 +1343,12 @@ std::vector<std::uint8_t> encode(const EnemyHp& m) {
     return encodePacket(PacketType::EnemyHp, w.data());
 }
 
+std::vector<std::uint8_t> encode(const EnemyMotion& m) {
+    ByteWriter w;
+    write(w, m);
+    return encodePacket(PacketType::EnemyMotion, w.data());
+}
+
 std::vector<std::uint8_t> encode(const EnemyDeath& m) {
     ByteWriter w;
     write(w, m);
@@ -1335,6 +1405,10 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("HitClaim: wrong frame length");
     if (type == PacketType::EnemyHp && (len < 14 || size != kHeaderSize + len))
         throw std::runtime_error("EnemyHp: wrong frame length");
+    if (type == PacketType::EnemyMotion &&
+        (len < ENEMY_MOTION_HEADER_BYTES || (len - ENEMY_MOTION_HEADER_BYTES) % ENEMY_MOTION_ENTRY_BYTES != 0 ||
+         size != kHeaderSize + len))
+        throw std::runtime_error("EnemyMotion: wrong frame length");
     if (type == PacketType::AvatarRelay &&
         (len != AVATAR_RELAY_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("AvatarRelay: wrong frame length");

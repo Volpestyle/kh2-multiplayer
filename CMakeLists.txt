@@ -175,6 +175,17 @@ else()
     target_compile_options(kh2coop_hp_order_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# VUH-1515 step 2: EnemyMotion codec, relay forwarding rules and the pure
+# client stream state (inject/src/EnemyMirrorState.hpp). Loopback ENet, no KH2.
+add_executable(kh2coop_enemy_mirror_test tests/EnemyMirrorTest.cpp)
+target_link_libraries(kh2coop_enemy_mirror_test PRIVATE kh2coop_server_core kh2coop_common)
+target_include_directories(kh2coop_enemy_mirror_test PRIVATE inject/src)
+if(MSVC)
+    target_compile_options(kh2coop_enemy_mirror_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_enemy_mirror_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 add_executable(kh2coop_resync_test tests/ForcedResyncTest.cpp)
 target_link_libraries(kh2coop_resync_test PRIVATE kh2coop_server_core kh2coop_common)
 if(MSVC)
@@ -376,6 +387,15 @@ if(WIN32)
 
     # VUH-1489 clone neutral input: Gate (+0xDB8) and the 0x3A89A0 detour over fake game
     # memory with MinHook/warp/playerkit stand-ins; no game process, no installed hooks.
+    # VUH-1515 step 2: the native mirrored-enemy driver (EnemyMirror.inl) over fake
+    # game memory with MinHook/resolver/setter/MirrorPose stand-ins; no game, no hooks.
+    add_executable(kh2coop_enemy_mirror_driver_test tests/EnemyMirrorDriverTest.cpp)
+    target_include_directories(kh2coop_enemy_mirror_driver_test PRIVATE inject/src runtime/include common/include)
+    target_compile_definitions(kh2coop_enemy_mirror_driver_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_enemy_mirror_driver_test PRIVATE /W4 /WX /wd4505)
+    endif()
+
     add_executable(kh2coop_clone_neutral_test tests/CloneNeutralInputTest.cpp)
     target_include_directories(kh2coop_clone_neutral_test PRIVATE inject/src runtime/include)
     target_compile_definitions(kh2coop_clone_neutral_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

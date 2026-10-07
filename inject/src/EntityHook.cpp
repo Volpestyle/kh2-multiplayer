@@ -652,6 +652,14 @@ static void ActorName(uintptr_t actor, char* out) {
 struct LastHit { uintptr_t hit; uintptr_t victim; uintptr_t attacker; uint32_t atkpId; };
 static LastHit g_lastHit = {};
 
+// VUH-1515 step 2 (EnemyMirror.inl, included below): per-hit attribution for
+// tracked mirrored attackers. Both return at once with the mirror off.
+namespace enemymirror {
+bool Tracked(uintptr_t attacker) noexcept;
+void NoteHit(uintptr_t attacker, uintptr_t victim, std::uint32_t atkpId, const char* victimName, std::int32_t damage,
+             std::uint32_t stat) noexcept;
+}  // namespace enemymirror
+
 static uintptr_t __fastcall HookedBuildHit(void* atk, void* victim, uint32_t a3, uint32_t a4) {
     const uintptr_t hit = g_origBuildHit(atk, victim, a3, a4);
     if (hit == 0) return hit;
@@ -663,6 +671,12 @@ static uintptr_t __fastcall HookedBuildHit(void* atk, void* victim, uint32_t a3,
         const uint32_t atkpId = atkp ? *reinterpret_cast<const uint16_t*>(atkp + 2) : 0xFFFF;
         const uintptr_t attackerActor = ActorForHandle(ownerHandle);
         g_lastHit = {hit, reinterpret_cast<uintptr_t>(victim), attackerActor, atkpId};
+        if (enemymirror::Tracked(attackerActor)) {  // own budget, before the [hit] log limit
+            char victimName[32];
+            ActorName(reinterpret_cast<uintptr_t>(victim), victimName);
+            enemymirror::NoteHit(attackerActor, reinterpret_cast<uintptr_t>(victim), atkpId, victimName,
+                                 *reinterpret_cast<const int32_t*>(hit + 0x28), *reinterpret_cast<const uint8_t*>(hit + 0x25));
+        }
         if (g_hitsLogged >= HIT_LOG_LIMIT) return hit;
         const int32_t damage = *reinterpret_cast<const int32_t*>(hit + 0x28);
         const uint8_t stat = *reinterpret_cast<const uint8_t*>(hit + 0x25);
@@ -1156,6 +1170,7 @@ static int PuppetIndexFor(uintptr_t actor) {
 }
 
 #include "CloneNeutralInput.inl"
+#include "EnemyMirror.inl" // VUH-1515 step 2: mirrored enemies on clients (default off)
 
 // Permission to treat a native friend as AI-owned is positive, frame-local
 // evidence from the branch which actually invokes the original friend AI.
@@ -2265,6 +2280,7 @@ static uint8_t __fastcall HookedMotionChainSetAnim(void* motCtrl, int animId,
     {
         // Derive actor address from motCtrl: actor = motCtrl - 0x158
         auto actorAddr = reinterpret_cast<uintptr_t>(motCtrl) - 0x158;
+        if (enemymirror::BlockMotion(actorAddr)) return 1; // VUH-1515: driven mirrored enemy
 
         int friendSlot = 0;
         if (g_friend1Actor != 0 && actorAddr == g_friend1Actor) friendSlot = 1;
@@ -2991,6 +3007,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
         // VUH-1489: a P_EX100 clone reads neutral input, not pad 0 (default off).
         cloneneutral::Gate(addr);
+        enemymirror::PreUpdate(addr); // VUH-1515 step 2 (default off)
 
         // Identify friend entities
         if (g_friend1Actor != 0 && addr == g_friend1Actor) {
@@ -3110,6 +3127,12 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         render::InvalidateCoopHud();
         Log("EXCEPTION in post-update override");
+    }
+    // VUH-1515 step 2: final pose/motion for a driven mirrored enemy (default off).
+    __try {
+        enemymirror::PostUpdate(reinterpret_cast<uintptr_t>(actorObj));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("EXCEPTION in enemy-mirror post-update");
     }
 
     // Reset slot indicator

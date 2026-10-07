@@ -496,6 +496,7 @@ void NetworkClient::resetTransportState() {
     enemyHpSessionId_.clear();
     enemyHpHostConnectionId_ = 0;
     enemyHpSequence_ = 0;
+    enemyMotionSequence_ = 0;
     enemyHpRoomEpoch_ = 0;
     desyncRequest_.reset();
     desyncDeadlineMs_ = 0;
@@ -582,6 +583,7 @@ bool NetworkClient::updateAvatarRoster(const SessionState& session) {
         enemyHpSessionId_ = session.sessionId;
         enemyHpHostConnectionId_ = connections[0];
         enemyHpSequence_ = 0;
+        enemyMotionSequence_ = 0;
         enemyHpRoomEpoch_ = 0;
     }
     const bool namespaceChanged = !valid || !avatarRosterValid_ ||
@@ -777,6 +779,14 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             // restore state after a targeted resend without minting a sequence.
             enemyHpSequence_ = hp.sequence;
             admittedHp = std::move(hp);
+        } else if (type == PacketType::EnemyMotion) {
+            // VUH-1515: periodic host pose/motion. Current room epoch and a
+            // strictly increasing sequence; never cached, never replayed.
+            EnemyMotion motion;
+            read(reader, motion);
+            if (!reader.atEnd() || size != payloadSize + 3 || !motion.epoch ||
+                motion.epoch != enemyHpRoomEpoch_ || motion.sequence <= enemyMotionSequence_) return;
+            enemyMotionSequence_ = motion.sequence;
         }
 
         if(type==PacketType::PartyLayout) {
@@ -1033,6 +1043,8 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 if (callbacks_.onEnemyDeath) callbacks_.onEnemyDeath(m);
                 break;
             }
+            case PacketType::EnemyMotion:
+                break; // raw world delivery only (VUH-1515)
             case PacketType::PartyLayout: {
                 PartyLayout m;read(reader,m);if(callbacks_.onPartyLayout)callbacks_.onPartyLayout(m);break;
             }

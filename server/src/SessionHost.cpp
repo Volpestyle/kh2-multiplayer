@@ -365,6 +365,7 @@ void SessionHost::stop() {
     session_.actors.clear();
     session_.sessionId.clear();
     lastEnemyHpSequence_ = 0;
+    lastEnemyMotionSequence_ = 0;
     room_.reset();
     clearWorldState();
     progress_.clear();
@@ -617,7 +618,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                         return;
                     }
                     session_.sessionId = *incarnation;
-                    lastEnemyHpSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
+                    lastEnemyHpSequence_ = 0;lastEnemyMotionSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
                     log("New world incarnation " + session_.sessionId + " (label=" + config_.sessionId + ")");
                 }
                 ps->gameBuild = hello.gameBuild;
@@ -762,6 +763,22 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 }
                 forwardToOthers(peer, packet, reliable);
                 if(type==PacketType::RoomTransition)invalidateParty(PartyApplyReason::RoomChanged);
+                break;
+            }
+
+            case PacketType::EnemyMotion: {
+                // VUH-1515: host-only periodic pose/motion for the current room
+                // epoch. Forwarded unreliably, never cached or replayed to late
+                // joiners, never material for resync.
+                if (size != payloadSize + 3) { ++rejectedWorld_; return; }
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps)) { ++rejectedWorld_; return; }
+                EnemyMotion m;
+                read(reader, m);
+                if (!reader.atEnd() || !room_ || m.epoch != room_->epoch || m.epoch != manifest_.epoch ||
+                    m.sequence <= lastEnemyMotionSequence_) { ++rejectedWorld_; return; }
+                lastEnemyMotionSequence_ = m.sequence;
+                if(admittedScope)lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
+                forwardToOthers(peer, std::vector<std::uint8_t>(data, data + size), false);
                 break;
             }
 
@@ -1444,6 +1461,7 @@ void SessionHost::removePeer(TransportPeer* peer) {
     if (auto* ps = findPeer(peer); ps && fromHost(*ps)) {
         session_.sessionId.clear();
         lastEnemyHpSequence_ = 0;
+        lastEnemyMotionSequence_ = 0;
         room_.reset();
         clearWorldState();
         progress_.clear();

@@ -13,6 +13,7 @@
 
 #include "EnemySync.hpp"
 #include "OrdinaryEnemyBinding.hpp"
+#include "EnemyMirrorState.hpp"
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
@@ -124,6 +125,26 @@ std::uint32_t g_epoch = 0;          // host: current epoch
 // Source ordering belongs to this DLL lifetime, not a room, manifest or
 // transport generation. Failed enqueue attempts consume their sample number.
 std::uint64_t g_hpSourceSequence = 0;
+// VUH-1515 step 2 (KH2COOP_ENEMY_MIRROR=1 on host and client). Host: own EnemyMotion
+// producer sequence. Client: decoded stream state, sampled at the frame-start frame.
+bool g_mirrorRequested = false;
+std::uint64_t g_motionSourceSequence = 0;
+std::uint64_t g_motionPublished = 0, g_motionSendFailures = 0;
+enemymirror::Stream g_mirror;
+std::uint32_t g_mirrorFrame = 0;
+// Fixture controls (review B1). KH2COOP_ENEMY_MIRROR_TRACE=1 logs host/client
+// positions on host frames % kTraceEvery. KH2COOP_ENEMY_MIRROR_CONTROL=<file>:
+// the host polls the file every 30 frames; first word "mute" pauses publishing
+// (the stale-release test without stopping the runtime); any other word is a
+// fixture phase name, logged once per change with the host frame.
+bool g_mirrorTrace = false;
+char g_mirrorControlPath[260] {};
+char g_mirrorPhase[24] {};
+bool g_mirrorMuted = false;
+std::uint64_t g_motionMutedFrames = 0, g_motionTruncated = 0, g_motionOutOfBounds = 0;
+std::size_t g_motionRoundRobin = 0;
+std::uint64_t g_mirrorRefusedFar = 0;
+bool g_mirrorIgnoredLogged = false, g_mirrorFirstPacketLogged = false, g_mirrorSilentLogged = false;
 bool g_hpSourceExhaustionLogged = false;
 // Independent of HostRoom so replacement manifests and room changes cannot
 // admit older HP. Only an actual bridge generation change retires this floor.
@@ -365,6 +386,7 @@ void RetireWorldSession() {
     if (g_resyncWriteFence == ResyncWriteFence::Exact) g_resyncWriteFence = ResyncWriteFence::Waiting;
     g_resyncOutput.clear(); g_resyncOutputContext = {};
     g_host = {};
+    g_mirror.Reset(0);  // VUH-1515 S4: a restarted host reuses epochs, sequences and frames
     ClearActivation();
     ClearPendingHits();
     progresssync::Reset();
@@ -1690,6 +1712,127 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
     return true;
 }
 
+// VUH-1515 fixture control file (host): first word, lower-cased; "" if absent.
+void PollMirrorControl(std::uint32_t frame) {
+    if (!g_mirrorControlPath[0] || frame % 30 != 0) return;
+    char word[sizeof(g_mirrorPhase)] {};
+    const HANDLE file = CreateFileA(g_mirrorControlPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    // A pipe or device could block ReadFile on the game thread: disk files only.
+    if (file != INVALID_HANDLE_VALUE && GetFileType(file) != FILE_TYPE_DISK) {
+        CloseHandle(file);
+        return;
+    }
+    if (file != INVALID_HANDLE_VALUE) {
+        char buffer[64] {};
+        DWORD got = 0;
+        if (ReadFile(file, buffer, sizeof(buffer) - 1, &got, nullptr)) {
+            std::size_t n = 0;
+            for (DWORD i = 0; i < got && n + 1 < sizeof(word); ++i) {
+                const char c = buffer[i];
+                if (c == ' ' || c == '\r' || c == '\n' || c == '\t') { if (n) break; continue; }
+                word[n++] = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+            }
+        }
+        CloseHandle(file);
+    }
+    if (std::strcmp(word, g_mirrorPhase) == 0) return;
+    std::memcpy(g_mirrorPhase, word, sizeof(g_mirrorPhase));
+    g_mirrorMuted = std::strcmp(word, "mute") == 0;
+    if (g_log) g_log("[enemy-mirror] phase name=%s hostFrame=%u epoch=%u muted=%d", word[0] ? word : "-", frame, g_epoch,
+                     g_mirrorMuted ? 1 : 0);
+}
+
+// Host values the codec would refuse never reach the wire (S3/S5 bounds).
+bool MotionEntryInBounds(const EnemyMotionEntry& e) {
+    const auto coord = [](float v) { return std::isfinite(v) && std::fabs(v) <= ENEMY_MOTION_MAX_COORD; };
+    return e.motionId < ENEMY_MOTION_MAX_MOTION_ID && std::isfinite(e.motionTime) && e.motionTime >= 0.0f &&
+        e.motionTime <= ENEMY_MOTION_MAX_TIME && std::isfinite(e.rotationY) &&
+        std::fabs(e.rotationY) <= ENEMY_MOTION_MAX_ROTATION && coord(e.position.x) && coord(e.position.y) &&
+        coord(e.position.z);
+}
+
+// VUH-1515 step 2: host pose/motion for bound, announced, living, allowlisted
+// spawns, read from the census actors (frame-start: last frame's final pose).
+void PublishHostMotion(std::uint32_t frame, const NativeCensus& census) {
+    if (!g_mirrorRequested || g_role != Role::Host) return;
+    PollMirrorControl(frame);
+    if (frame % enemymirror::kPublishInterval != 0) return;
+    EnemyMotion m;
+    m.epoch = g_epoch;
+    m.hostFrame = frame;
+    const std::size_t count = g_inst.spawns.size();
+    const std::size_t first = count ? g_motionRoundRobin % count : 0;
+    bool truncated = false;
+    for (std::size_t k = 0; k < count; ++k) {
+        const Spawn& s = g_inst.spawns[(first + k) % count];
+        if (!s.present || !s.announced || s.deathSent || !enemymirror::FamilyAllowed(s.objectId)) continue;
+        const auto* native = FindNativeEnemy(census, s);
+        if (!native || native->hp <= 0) continue;
+        std::uint32_t parent = 0;
+        EnemyMotionEntry e;
+        const auto transform = native->actor + offsets::actor::ENTITY_TRANSFORM;
+        if (!ReadNative(native->actor + 0x6A0, parent) || parent != 0 ||  // parented actors use +0x70: not mirrored
+            !ReadNative(native->actor + offsets::actor::ANIM_ID, e.motionId) ||
+            !ReadNative(native->actor + 0x158 + 0x44, e.motionTime) ||
+            !ReadNative(transform + offsets::entity::POS_X, e.position.x) ||
+            !ReadNative(transform + offsets::entity::POS_Y, e.position.y) ||
+            !ReadNative(transform + offsets::entity::POS_Z, e.position.z) ||
+            !ReadNative(transform + offsets::entity::ROT_Y, e.rotationY)) continue;
+        if (!MotionEntryInBounds(e)) { ++g_motionOutOfBounds; continue; }
+        if (m.entries.size() >= ENEMY_MOTION_MAX_ENTRIES) { truncated = true; break; }
+        e.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
+        e.objectId = s.objectId;
+        e.flags = ENEMY_MOTION_ALIVE;
+        m.entries.push_back(e);
+        if (g_mirrorTrace && frame % enemymirror::kTraceEvery == 0 && g_log)
+            g_log("[enemy-mirror] trace-host netId=%u hostFrame=%u pos=%.1f,%.1f,%.1f motion=%u time=%.1f", e.netId, frame,
+                  e.position.x, e.position.y, e.position.z, e.motionId, e.motionTime);
+    }
+    if (truncated) {  // N3: rotate the start so no netId is starved for good
+        if (!g_motionTruncated && g_log) g_log("[enemy-mirror] host truncated frame=%u eligible>%zu", frame, ENEMY_MOTION_MAX_ENTRIES);
+        ++g_motionTruncated;
+        g_motionRoundRobin += ENEMY_MOTION_MAX_ENTRIES;
+    }
+    if (g_mirrorMuted) { g_motionMutedFrames += enemymirror::kPublishInterval; return; }  // fixture stale test
+    if (m.entries.empty() || !m.epoch || g_motionSourceSequence == std::numeric_limits<std::uint64_t>::max()) return;
+    m.sequence = ++g_motionSourceSequence;  // a failed enqueue consumes its number
+    if (Send(encode(m))) ++g_motionPublished;
+    else ++g_motionSendFailures;
+    if (g_log && frame % 600 == 0)
+        g_log("[enemy-mirror] host frame=%u epoch=%u entries=%zu published=%llu sendFailures=%llu muted=%llu "
+              "outOfBounds=%llu truncated=%llu", frame, m.epoch, m.entries.size(),
+              static_cast<unsigned long long>(g_motionPublished), static_cast<unsigned long long>(g_motionSendFailures),
+              static_cast<unsigned long long>(g_motionMutedFrames), static_cast<unsigned long long>(g_motionOutOfBounds),
+              static_cast<unsigned long long>(g_motionTruncated));
+}
+
+// Client: advance the render cursor once per frame after this frame's packets.
+void TickMirror(std::uint32_t frame) {
+    g_mirrorFrame = frame;
+    if (!g_mirrorRequested || g_role != Role::Client) return;
+    if (g_mirror.epoch() != g_host.epoch) g_mirror.Reset(g_host.epoch);
+    g_mirror.Tick(frame);
+    // N2: on, arrived, and still no stream after 10 s: say so once (host flag off?).
+    static std::uint32_t arrivedSince = 0;
+    if (!g_host.arrived) arrivedSince = 0;
+    else if (!arrivedSince) arrivedSince = frame ? frame : 1;
+    else if (!g_mirrorFirstPacketLogged && !g_mirrorSilentLogged && frame - arrivedSince > 600) {
+        g_mirrorSilentLogged = true;
+        if (g_log) g_log("[enemy-mirror] client no-stream frame=%u arrivedFrame=%u (is KH2COOP_ENEMY_MIRROR=1 on the host?)",
+                         frame, arrivedSince);
+    }
+    if (g_log && frame % 600 == 0) {
+        const auto& st = g_mirror.stats();
+        g_log("[enemy-mirror] client frame=%u epoch=%u accepted=%llu rejected=%llu stale=%llu releases=%llu retakes=%llu "
+              "resets=%llu refusedFar=%llu",
+              frame, g_mirror.epoch(), static_cast<unsigned long long>(st.accepted), static_cast<unsigned long long>(st.rejected),
+              static_cast<unsigned long long>(st.staleSamples), static_cast<unsigned long long>(st.releases),
+              static_cast<unsigned long long>(st.retakes), static_cast<unsigned long long>(st.resets),
+              static_cast<unsigned long long>(g_mirrorRefusedFar));
+    }
+}
+
 // ---- Client -----------------------------------------------------------------
 
 void ReceiveHostHitClaim(const HitClaim& claim, std::uint64_t requesterDelivery) {
@@ -2996,6 +3139,7 @@ bool ReceiveWorldPackets() {
                         continue;
                     }
                     g_host = {};
+                    g_mirror.Reset(0);  // VUH-1515 S4
                     if (!g_resyncPlan) {
                         g_resyncWriteFence = ResyncWriteFence::None;
                         g_resyncRecordAuthority.reset();
@@ -3067,8 +3211,25 @@ bool ReceiveWorldPackets() {
                 if (m.epoch != g_host.epoch) continue;
                 auto it = g_host.enemies.find(m.netId);
                 if (it != g_host.enemies.end()) { it->second.dead = true; AdvanceClientManifestRevision(); }
+                g_mirror.Erase(m.netId);  // VUH-1515 N6: a death is not a stream release
                 SYNC_LOG("[enemysync] client: host death epoch %u netId %u", m.epoch, m.netId);
                 ContinuePackPreparation(scope->hostSourceSerial, true);
+            } else if (type == PacketType::EnemyMotion) {
+                // VUH-1515: pose/motion only; never HP, binding, manifest or hash state.
+                if (!g_mirrorRequested) {  // N2: a flag mismatch is visible and costs no parse
+                    if (!g_mirrorIgnoredLogged && g_log)
+                        g_log("[enemy-mirror] stream-ignored flag=0 (the host has KH2COOP_ENEMY_MIRROR=1)");
+                    g_mirrorIgnoredLogged = true;
+                    continue;
+                }
+                EnemyMotion m;
+                read(r, m);
+                if (packet.size() != size + 3 || r.remaining() != 0 || !m.epoch || m.epoch != g_host.epoch) continue;
+                if (g_mirror.Ingest(m, g_hitTraceFrame) && !g_mirrorFirstPacketLogged) {
+                    g_mirrorFirstPacketLogged = true;
+                    if (g_log) g_log("[enemy-mirror] client first-stream frame=%u epoch=%u hostFrame=%u entries=%zu",
+                                     g_hitTraceFrame, m.epoch, m.hostFrame, m.entries.size());
+                }
             }
         } catch (const std::exception&) {
             SYNC_LOG("[enemysync] client: malformed world packet");
@@ -3706,6 +3867,19 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     g_survivingPackEnabled = GetEnvironmentVariableA("KH2COOP_SURVIVING_PACK_PREPARE", prepare, sizeof(prepare)) == 1 &&
         prepare[0] == '1';
     progresssync::Install(exeBase, log, SendCapturedWorld);
+    char mirror[2] {};
+    g_mirrorRequested = GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR", mirror, sizeof(mirror)) == 1 && mirror[0] == '1';
+    char mirrorTrace[2] {};
+    g_mirrorTrace = g_mirrorRequested &&
+        GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR_TRACE", mirrorTrace, sizeof(mirrorTrace)) == 1 && mirrorTrace[0] == '1';
+    const DWORD controlLength = g_mirrorRequested
+        ? GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR_CONTROL", g_mirrorControlPath, sizeof(g_mirrorControlPath)) : 0;
+    if (controlLength == 0 || controlLength >= sizeof(g_mirrorControlPath)) g_mirrorControlPath[0] = '\0';
+    if (g_mirrorRequested && g_log)
+        g_log("[enemy-mirror] configured=1 families=%u interval=%u delay=%u maxLag=%u stale=%u retake=%u gap=%u settle=%u "
+              "trace=%d control=%d", enemymirror::kShadowObjectId, enemymirror::kPublishInterval, enemymirror::kDelay,
+              enemymirror::kMaxLag, enemymirror::kStaleFrames, enemymirror::kRetake, enemymirror::kGapTolerance,
+              enemymirror::kSpawnSettleFrames, g_mirrorTrace ? 1 : 0, g_mirrorControlPath[0] ? 1 : 0);
     g_envRole = ReadEnvRole();
     try {
         std::random_device random;
@@ -3758,6 +3932,7 @@ void OnFrameStart(std::uint32_t frame) {
     // the next packet, and no later frame-level reset can erase a new command.
     becameHost = ReceiveWorldPackets() || becameHost;
     CheckActivationGeneration();
+    TickMirror(frame);
     TickNativeResync(frame);
     if (g_role == Role::Client) {
         (void)EnsureClientClaimScope();
@@ -3868,6 +4043,7 @@ void OnFrameStart(std::uint32_t frame) {
         // their bindings reach the peer would report a transport backlog as a
         // native population mismatch.
         if (!HostFrame(frame, fresh, census)) { DrainPendingSpawnTrace(false); return; }
+        PublishHostMotion(frame, census);
         FlushActivationResponses();
     } else if (g_role == Role::Client) {
         for (const std::size_t i : fresh) {
@@ -3886,6 +4062,38 @@ void OnFrameStart(std::uint32_t frame) {
     }
     // Read-only diagnostics drain after bindings have been announced/applied.
     DrainPendingSpawnTrace(true);
+}
+
+bool MirrorRequested() noexcept { return g_mirrorRequested; }
+
+bool MirrorTrace() noexcept { return g_mirrorTrace; }
+double MirrorCursor() noexcept { return g_mirror.cursor(); }
+
+enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
+    using enemymirror::Gate;
+    if (!g_mirrorRequested || g_role != Role::Client || !g_inst.live || !g_host.arrived || actor == 0) return Gate::None;
+    if (!spawncontroller::IsDiagnosticGameThread()) return Gate::None;
+    const auto found = g_inst.byActor.find(actor);
+    if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return Gate::None;
+    const Spawn& s = g_inst.spawns[found->second];
+    if (s.actor != actor || !s.present || s.killed || s.netId <= 0 || s.netId > 0xFFFF ||
+        !enemymirror::FamilyAllowed(s.objectId)) return Gate::None;
+    const auto host = g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
+    if (host == g_host.enemies.end() || host->second.dead || host->second.objectId != s.objectId) return Gate::None;
+    // N5: the live status pointer must still be this binding's (closes a mid-frame reuse window).
+    uintptr_t liveStatus = 0;
+    std::int32_t hp = 0;
+    if (!s.status || !ReadNative(actor + 0x5C0, liveStatus) || liveStatus != s.status || !ReadNative(s.status, hp) ||
+        hp <= 0) return Gate::None;
+    out.netId = static_cast<std::uint16_t>(s.netId);
+    if (!g_mirror.PoseAt(out.netId, g_mirrorFrame, out) || out.objectId != s.objectId) return Gate::Bound;
+    // S5: a stream pose far from where this spawn appeared is refused, never driven.
+    const float dx = out.position.x - s.spawnPos.x, dy = out.position.y - s.spawnPos.y, dz = out.position.z - s.spawnPos.z;
+    if (!(dx * dx + dy * dy + dz * dz <= enemymirror::kMaxFromSpawn * enemymirror::kMaxFromSpawn)) {
+        ++g_mirrorRefusedFar;
+        return Gate::Bound;
+    }
+    return Gate::Drive;
 }
 
 bool DropLocalEnemyDamage(uintptr_t victim) {

@@ -32,6 +32,7 @@
 #include "kh2coop/PuppetProvenance.hpp"
 #include "kh2coop/WorldContext.hpp"
 #include "kh2coop/DownedState.hpp" // Types + WorldContext only; safe beside HitChannel
+#include "EnemyMirrorPose.hpp" // VUH-1515: Pose only (no Protocol.hpp beside HitChannel)
 #include <array>
 
 namespace kh2coop {
@@ -67,6 +68,18 @@ void NoteActor(uintptr_t actor);
 // True on a client with enemy sync running: its own hits on enemies must
 // not change their HP (the host owns it).
 bool DropLocalEnemyDamage(uintptr_t victim);
+
+// VUH-1515 step 2 (KH2COOP_ENEMY_MIRROR=1). Owner thread only. True when
+// `actor` is a bound, living, allowlisted host enemy on this client whose
+// stream is fresh; `out` is the host pose/motion at the render cursor.
+bool MirrorRequested() noexcept;
+// Gate for one actor this frame (EnemyMirror.inl PreUpdate). Fills out.netId
+// for Bound and Drive, the full pose for Drive only.
+// Freshness uses EnemySync's own frame clock, the one that stamps arrivals (not
+// EntityHook's counter, which Panacea's loader also advances).
+enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept;
+bool MirrorTrace() noexcept;  // KH2COOP_ENEMY_MIRROR_TRACE=1: fixture position trace lines
+double MirrorCursor() noexcept;  // the stream's displayed host-frame cursor; < 0 when none
 
 // Copied diagnostic context on the registered game thread. Partial observations
 // retain their masks; this never advances authority or performs a census.

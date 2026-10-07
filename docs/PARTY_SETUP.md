@@ -1,8 +1,9 @@
 # Host party setup contract (VUH-1519)
 
-Protocol **12** adds `PartyLayout` (type42, 68 payload bytes) and
+Protocol **12** added `PartyLayout` (type42, 68 payload bytes) and
 `PartyReapply` (type43, 25 bytes). AvatarBridge remains4. All session peers
-must use protocol12; older binaries refuse admission. Sealed packages and
+must use the same protocol, now **13** (VUH-1515 `EnemyMotion`; contract and
+history in `ENEMY_PARITY.md`); older binaries refuse admission. Sealed packages and
 native products have not been rebuilt or changed for this task.
 
 This is a host-authoritative session policy and bridge contract, **not native

@@ -290,6 +290,7 @@ private:
     // newly verified host/world identity change may retire the HP floor.
     std::string enemyHpSessionId_;
     std::uint64_t enemyHpHostConnectionId_{0}, enemyHpSequence_{0};
+    std::uint64_t enemyMotionSequence_{0}; // VUH-1515: strictly increasing admitted EnemyMotion
     std::uint32_t enemyHpRoomEpoch_{0};
     std::optional<DesyncCaptureRequest> desyncRequest_;
     std::uint64_t lastDesyncReportId_{0};

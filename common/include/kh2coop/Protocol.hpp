@@ -8,10 +8,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 12;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 13;
 
 // ===========================================================================
-// Protocol v12 adds versioned host party layout and reapplication events.
+// Protocol v13 adds EnemyMotion (VUH-1515 step 2, periodic host enemy pose/motion).
+// v12 added versioned host party layout and reapplication events.
 // v11 added streamed downed epoch/episode/delivery and ReviveRequest.
 // ===========================================================================
 
@@ -182,6 +183,35 @@ struct EnemyHp {
 struct EnemyDeath {
     std::uint32_t epoch {0};
     std::uint16_t netId {0};
+};
+
+// VUH-1515 step 2: host pose/motion for bound, allowlisted, living enemies.
+// Periodic and unreliable (stale motion is worthless). Not material world
+// state: never cached by the relay, never part of resync or StateHash.
+inline constexpr std::size_t ENEMY_MOTION_MAX_ENTRIES = 32;
+inline constexpr std::size_t ENEMY_MOTION_ENTRY_BYTES = 31;
+inline constexpr std::size_t ENEMY_MOTION_HEADER_BYTES = 18; // epoch, sequence, hostFrame, count
+inline constexpr std::uint8_t ENEMY_MOTION_ALIVE = 1;
+// Sanity bounds (VUH-1515 review S3/S5): a host value outside these is refused,
+// never driven into a native call. Motion ids seen live are < 300; 4096 caps garbage.
+inline constexpr std::uint32_t ENEMY_MOTION_MAX_MOTION_ID = 4096;
+inline constexpr float ENEMY_MOTION_MAX_TIME = 10000.0f;      // frames, [0, max]
+inline constexpr float ENEMY_MOTION_MAX_COORD = 100000.0f;    // |x|, |y|, |z|
+inline constexpr float ENEMY_MOTION_MAX_ROTATION = 64.0f;     // |rotationY| radians
+struct EnemyMotionEntry {
+    std::uint16_t netId {0};          // bound host spawn (spawn index + 1)
+    std::uint32_t objectId {0};       // native objentry id, type-checked by clients
+    std::uint32_t motionId {0};       // actor+0x180
+    float motionTime {0.0f};          // actor+0x19C, frames
+    Vec3 position {};                 // entity+0x30
+    float rotationY {0.0f};           // entity+0x4C
+    std::uint8_t flags {ENEMY_MOTION_ALIVE}; // bit0 alive; other bits must be zero
+};
+struct EnemyMotion {
+    std::uint32_t epoch {0};
+    std::uint64_t sequence {0};       // nonzero, strictly increasing per producer lifetime
+    std::uint32_t hostFrame {0};      // host DLL frame counter at capture
+    std::vector<EnemyMotionEntry> entries;
 };
 
 // Reliable, scoped teammate request. Relay stamps requesterSlot and forwards

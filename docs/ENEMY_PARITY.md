@@ -747,6 +747,60 @@ For rooms whose spawner emits enemies over time based on player position
   continuous spawners diverge.
 - No boss fight was reachable on this save (see VUH-1501).
 
+## Step 2 candidate: mirrored Shadows (VUH-1515, default off, not live-verified)
+
+`KH2COOP_ENEMY_MIRROR=1` on the host and on each client. The full design note, the fixture and its parser are in the VUH-1515 step-2 rig lane (`design.md`, `fixture_check.py`).
+
+**Protocol 13 contract: `EnemyMotion` (type 44).**
+- Payload: epoch, a nonzero producer sequence, host frame, and up to 32 rows of `{netId, objectId, motionId, motionTime, position, rotationY, alive}` (18 + 31·n bytes).
+- Codec bounds: `motionId < 4096`, `0 <= motionTime <= 10000`, `|rotationY| <= 64`, `|x|,|y|,|z| <= 1e5`, finite values, unique nonzero netIds.
+- The host sends it every 3 frames, for each bound spawn that is announced, living, unparented and allowlisted (round-robin start past 32). The allowlist is objectId 302, `M_EX020` Shadow.
+- **Relay:** accepts it from the host only, for the current room/manifest epoch, with a strictly increasing sequence. It forwards it unreliably and never caches or replays it.
+- It is not material world state, so resync and StateHash are unchanged.
+- The version bump is not flag-gated: every v13 build refuses v12 peers, so friend packages and the relay are rebuilt together.
+
+| Date | Protocol | Change |
+| --- | --- | --- |
+| 2026-10-06 | 12 | VUH-1519 `PartyLayout` (42), `PartyReapply` (43) |
+| 2026-10-07 | 13 | VUH-1515 step 2 `EnemyMotion` (44), candidate, default off |
+
+**Client stream state.** `inject/src/EnemyMirrorState.hpp`:
+- An 8-sample ring per netId.
+- A host-frame render cursor 9 frames behind the newest sample (catch-up past 12, snap past 18). The displayed cursor holds at newest-1 while the stream stalls, and the overflow keeps the motion time running.
+- A track is released after 30 frames without a sample, and needs 2 samples to be taken again. It resets on session retire and room transition; a host death erases its track.
+
+**Client driver.** `inject/src/EnemyMirror.inl`. It drives a bound, living, allowlisted Shadow whose stream is fresh, after a 60-frame spawn settle:
+- skips the brain through a per-class `+0x20` thunk hook, shape-checked as in the VUH-1500 probe;
+- swallows the game's motion sets (death motions always pass);
+- after the update, sets the host motion (forced on each take-over and on a same-motion restart) and time (clamped inside a finite motion end), and writes position, facing and the zeroed motion terms, with an 8-frame take-over blend. Missed updates of up to 4 frames are gaps, not take-overs.
+- Logs per-actor counters (updates, skips, bound pass-throughs, sets) and one attribution line per hit by a tracked attacker, each on its own budget.
+
+The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored attack therefore hits the client's own Sora natively, through DamagePolicy `LocalVictim`.
+
+**Death, spawn and fallback.**
+- Death is unchanged: it comes from the host's `EnemyDeath`, and a dead copy is never driven.
+- A new spawn runs local AI until it is bound, settled and its stream is fresh.
+- A stream gap releases the Shadow to local AI (step 1).
+
+**Fixture controls.** `KH2COOP_ENEMY_MIRROR_TRACE=1` logs host positions and every tracked client copy's position (with `driven=0/1`) on host frames that are multiples of 30. `KH2COOP_ENEMY_MIRROR_CONTROL=<file>` (host) reads a phase word from a disk file every 30 frames; `mute` pauses publishing. Use kh2ctl injection for fixtures (Panacea's double frame tick suppresses the client trace).
+
+**Known gaps.**
+- Host enemies only target the host's Sora (aggro).
+- Projectiles and other script-spawned attacks are not mirrored.
+- FIELD_COMMAND/time-snap edge triggers can repeat VFX/SFX.
+- Whether skipping the brain during spawn bookkeeping leaves a copy un-hittable is unknown; the settle is a time bound.
+
+**Controls:** `kh2coop_enemy_mirror_test` and `kh2coop_enemy_mirror_driver_test`.
+
+**Live result (2026-10-07, live-fixture-01, PASS, one attempt; run `build/scenarios/20261007-041214_vuh1515_enemy_mirror_courtyard_two_1`).** Two games in 05/06, five to six Shadows:
+- Brain off: every driven Shadow had skips equal to updates (for example 3707/3707), `noBrain` 0 and no gaps.
+- Native hit: 1 of 2 hits on the friend's Sora came from a driven Shadow whose attack motion our set entered mid-run; the other came from an undriven Shadow.
+- Mute: each driven copy was released and re-taken in place.
+- Walkaway: the host moved 365 u and was 262 u from the friend.
+- Safety: saves unchanged; SaveGuard on with no save attempts.
+
+**Caveat on the position numbers.** The colocated and walkaway median and p95 of 0.0 compare `trace-client` with `trace-host`. `trace-client` reads back the pose our own driver wrote the frame before, so 0.0 proves the driver applied the stream, frame-matched and through the full pipeline, and that nothing native moved the copy afterwards. It does **not** show that the result looks right on screen: animation blending, VFX, camera and collision push-out are not measured. The `driven` coverage, the walkaway negative control and the native-hit attribution carry that claim, and clips (live-fixture-02) are the visual check.
+
 ## Step 1 implementation (VUH-1502)
 
 `inject/src/EnemySync.cpp`, over the WorldBridge. The role comes from the

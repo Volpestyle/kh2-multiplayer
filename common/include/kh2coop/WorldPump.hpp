@@ -4,7 +4,7 @@
 // packets from the DLL to the relay, and from the relay to the DLL.
 //
 // DLL -> relay: only world packet types pass (anything else the DLL emits is
-// dropped and counted); EnemyHp, StateHash and activation challenges/responses
+// dropped and counted); EnemyHp, EnemyMotion, StateHash and activation challenges/responses
 // go unreliable, everything else reliable.
 // Host-only enforcement stays in the relay, so a client DLL that emits host
 // messages is harmless.
@@ -106,7 +106,8 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
                 continue;
             } else {
                 if (isEphemeralWorldPacket(type)) validateActivationPacket(packet);
-                const bool periodic = type == PacketType::EnemyHp || type == PacketType::StateHash ||
+                const bool periodic = type == PacketType::EnemyHp || type == PacketType::EnemyMotion ||
+                                      type == PacketType::StateHash ||
                                       isEphemeralWorldPacket(type);
                 submitted = net.sendNativeWorld(packet, context, !periodic);
                 reviveHop(packet, submitted ? "submitted" : "rejected:sendNativeWorld");

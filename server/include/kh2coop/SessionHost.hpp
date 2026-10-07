@@ -215,6 +215,7 @@ private:
     // Host connection/world lifetime, not room/cache lifetime. Cached union
     // replays carry this admitted producer sequence without restamping.
     std::uint64_t lastEnemyHpSequence_{0};
+    std::uint64_t lastEnemyMotionSequence_{0}; // VUH-1515, forwarded only
     std::set<std::uint16_t> deadEnemies_;
     std::uint64_t rejectedWorld_{0};
     std::map<std::uint32_t, std::uint8_t> progress_; // merged host flags

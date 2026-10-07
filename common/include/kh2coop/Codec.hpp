@@ -56,6 +56,7 @@ enum class PacketType : std::uint8_t {
     ResyncAck = 39, ResyncResult = 40,
     ReviveRequest = 41, // teammate -> relay validation -> target owner only
     PartyLayout = 42, PartyReapply = 43,
+    EnemyMotion = 44, // host -> relay -> others, periodic (VUH-1515)
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
 inline bool isDesyncDiagnosticPacket(PacketType type) {
@@ -103,6 +104,7 @@ void write(ByteWriter& w, const TransitionAck& m);
 void write(ByteWriter& w, const EventHold& m);
 void write(ByteWriter& w, const EnemyManifest& m);
 void write(ByteWriter& w, const EnemyHp& m);
+void write(ByteWriter& w, const EnemyMotion& m);
 void write(ByteWriter& w, const EnemyDeath& m);
 void write(ByteWriter& w, const PartyLayout& m);
 void write(ByteWriter& w, const PartyReapply& m);
@@ -130,6 +132,7 @@ void read(ByteReader& r, EventHold& m);
 void read(ByteReader& r, EnemyManifest& m);
 // Requires a complete payload and nonzero source sequence; no partial assignment.
 void read(ByteReader& r, EnemyHp& m);
+void read(ByteReader& r, EnemyMotion& m);
 void read(ByteReader& r, EnemyDeath& m);
 void read(ByteReader& r, PartyLayout& m);
 void read(ByteReader& r, PartyReapply& m);
@@ -208,6 +211,7 @@ std::vector<std::uint8_t> encode(const TransitionAck& m);
 std::vector<std::uint8_t> encode(const EventHold& m);
 std::vector<std::uint8_t> encode(const EnemyManifest& m);
 std::vector<std::uint8_t> encode(const EnemyHp& m);
+std::vector<std::uint8_t> encode(const EnemyMotion& m);
 std::vector<std::uint8_t> encode(const EnemyDeath& m);
 std::vector<std::uint8_t> encode(const PartyLayout& m);
 std::vector<std::uint8_t> encode(const PartyReapply& m);
@@ -233,6 +237,7 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::EnemyManifest:
         case PacketType::EnemyHp:
         case PacketType::EnemyDeath:
+        case PacketType::EnemyMotion:
         case PacketType::ProgressUpdate:
         case PacketType::PartyLayout:
         case PacketType::PartyReapply:
