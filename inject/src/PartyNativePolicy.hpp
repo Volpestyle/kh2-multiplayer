@@ -3,6 +3,7 @@
 #include "PartyNative.hpp"
 #include "kh2coop/PartyLayout.hpp"
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 namespace kh2coop::inject::partynative {
@@ -24,28 +25,110 @@ Plan Project(const PartyLayout& layout, std::uint8_t localSlot);
 // Standing intent (lead decision, scoped to this GoA-only candidate): the newest
 // accepted layout of this session generation, roster and host connection,
 // pinned to the layout's own world/room/evt. Applies only at a load of that
-// same room (epoch and door ignored, so a same-room reload matches). A
-// room-independent PartyIntent message is required before a second room.
+// same room (epoch and door ignored, so a same-room reload matches).
+// VUH-1786: one stored host PartyIntent per target room (room-independent), so the
+// first load of another pinned room needs no extra reload.
+struct StoredIntent {
+    bool valid = false;
+    PartyIntentTarget target {};
+    Plan plan = Plan::None;
+    std::uint64_t version = 0, seq = 0; // seq: local acceptance order (shared with the layout)
+};
+constexpr unsigned MAX_INTENT_TARGETS = 4;
+// VUH-1786 rev2 (B1): a story-forced reapply wins exactly one load of its room. The hold is
+// selected like a plan (newest seq wins) and resolves natively; it is released after one load
+// of that room (any evt), or when a newer layout or intent for that room is accepted.
+struct StoryHold {
+    bool valid = false;
+    std::uint16_t world = 0xFFFF, room = 0xFFFF, evt = 0xFFFF;
+    std::uint64_t seq = 0;
+};
 struct Intent {
     std::uint32_t generation = 0;
     std::array<std::uint64_t, 3> roster {};
     std::uint8_t localSlot = 0xFF;
-    std::uint64_t version = 0; // version floor for this generation and host connection
+    std::uint64_t version = 0; // layout version floor for this generation and host connection
     Plan plan = Plan::None;
     std::uint16_t world = 0xFFFF, room = 0xFFFF, evt = 0xFFFF;
+    // VUH-1786
+    std::array<StoredIntent, MAX_INTENT_TARGETS> targets {};
+    std::uint64_t intentVersion = 0; // PartyIntent floor (its own namespace)
+    std::uint64_t layoutSeq = 0, seq = 0; // seq: monotonic for the process (kept across every reset)
+    StoryHold hold {};
 };
+// True when a layout plan, a stored intent or a story hold exists.
+bool HasPlans(const Intent& intent);
+unsigned IntentCount(const Intent& intent);
+// S4: re-keys the store to (generation, roster, localSlot). Same key: no-op. Same generation and host
+// connection: layout plan, intents and hold retired, both version floors kept. Otherwise the floors
+// reset too. seq is always kept. True when a plan, intent or hold was retired.
+bool Rebase(Intent& intent, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot);
+// Pinned qualified rooms (authored rule DEFAULT, no evt program 0 Party opcode, world-4 row
+// 00/01/02/12): GoA 04/1A and 04/0A (hb10), both at evt 0.
+bool QualifiedRoom(std::uint16_t world, std::uint16_t room, std::uint16_t evt);
+// The plan for a PartyIntent on this machine (same projection as a layout).
+Plan ProjectIntent(const PartyIntent& intent, std::uint8_t localSlot);
+// Plan source table published to the loading thread: entry 0 = the room-pinned layout, entry 1 =
+// the story hold, entries 2.. = stored intents. key = plan | world<<8 | room<<16 | evt<<24 | source<<40;
+// seq is the full 64-bit local acceptance order (S3: no truncation).
+enum class PlanSource : std::uint8_t { None = 0, Layout = 1, Intent = 2, Hold = 3 };
+const char* PlanSourceName(PlanSource s);
+constexpr unsigned PLAN_TABLE = 2 + MAX_INTENT_TARGETS;
+struct PlanEntry { std::uint64_t key = 0, seq = 0; };
+using PlanTable = std::array<PlanEntry, PLAN_TABLE>;
+void PackPlanTable(const Intent& intent, PlanTable& out);
+struct PlanChoice {
+    Plan plan = Plan::None; std::uint16_t world = 0xFFFF, room = 0xFFFF, evt = 0xFFFF;
+    PlanSource source = PlanSource::None; std::uint64_t seq = 0;
+};
+// The most recently accepted entry for the load's room (a hold matches its world/room at any evt;
+// it selects Plan::None); if none, the layout entry (so Decide reports intent-other-room), else none.
+PlanChoice SelectPlan(const PlanTable& table, std::uint16_t world, std::uint16_t room, std::uint16_t evt);
+// S3: the table is published as one set. Seqlock: one writer (game thread), any reader (loading
+// thread). A reader that cannot get a stable copy in maxTries gets an empty table (native load).
+class PlanTableCell {
+public:
+    void Publish(const PlanTable& table); // single writer
+    bool Read(PlanTable& out, unsigned maxTries = 64) const;
+    std::uint32_t Version() const { return version_.load(std::memory_order_acquire); }
+private:
+    std::atomic<std::uint32_t> version_ {0}; // odd while a write is in progress; full 32-bit, wraps
+    std::array<std::atomic<std::uint64_t>, 2 * PLAN_TABLE> words_ {};
+};
+// B1: release the story hold once the loading thread has used it (consumedSeq == hold.seq).
+bool ReleaseHold(Intent& intent, std::uint64_t consumedSeq);
+// True when a story hold covers this world/room (any evt).
+bool HoldCovers(const Intent& intent, std::uint16_t world, std::uint16_t room);
+// Rev3 F1: the visit a story hold resolved. After the host's held load of R, the host publishes no layout
+// or intent for R until a new epoch of R (or another room): a host post-load layout would otherwise clear
+// the clients' holds before their own load (asymmetric session). epoch 0 = not yet seen.
+struct StoryVisit { bool valid = false; std::uint16_t world = 0xFFFF, room = 0xFFFF; std::uint32_t epoch = 0; };
+// Host publication gate: true while a hold covers `location`'s room, or for the held visit itself (the
+// first epoch of that room seen after the release). A later epoch or another room ends the visit.
+bool StorySuppresses(StoryVisit& visit, const Intent& intent, const RoomTransition& location);
+bool StoryVisitCovers(const StoryVisit& visit, std::uint16_t world, std::uint16_t room);
+
 enum class Accept : std::uint8_t { Accepted, NoGeneration, RosterMismatch, LocalSlot, StaleVersion, Invalid };
 const char* AcceptName(Accept a);
 Accept AcceptLayout(Intent& intent, const PartyLayout& layout, std::uint8_t localSlot,
                     std::uint32_t generation, const std::array<std::uint64_t, 3>& roster);
+// VUH-1786: store one host intent per target (own version floor; same session rules as a layout).
+Accept AcceptIntent(Intent& intent, const PartyIntent& m, std::uint8_t localSlot,
+                    std::uint32_t generation, const std::array<std::uint64_t, 3>& roster);
+// B2: an echo marks the host's publication echoed only when it was adopted (Accepted), or refused
+// as StaleVersion for exactly the version the host sent (already adopted).
+bool EchoConfirms(Accept a, std::uint64_t echoedVersion, std::uint64_t sentVersion);
+// Rev3 N-a: an own intent echo confirms only when the store now holds that target at the version sent.
+bool IntentEchoConfirms(const Intent& intent, Accept a, const PartyIntentTarget& target, std::uint64_t sentVersion);
 // generation 0 means "unknown": the intent is held. It is cleared on a different
 // non-zero generation, a roster or local-slot change, or the bridge closing.
-// True when a plan was cleared.
+// True when a plan, intent or hold was cleared.
 bool ObserveSession(Intent& intent, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,
                     std::uint8_t localSlot, bool bridgeOpen);
-// Relay-authored PartyReapply. StoryForced/RosterChanged clear the plan (version
-// floor kept and raised to afterVersion); RoomChanged/HostChoice are logged only
-// (the room pin already refuses another room).
+// Relay-authored PartyReapply. StoryForced/RosterChanged clear the layout plan (version
+// floor kept and raised to afterVersion). StoryForced also sets a one-load hold on its room
+// (intents kept); RosterChanged retires the intents and any hold. RoomChanged/HostChoice are
+// logged only (the room pin already refuses another room).
 enum class Reapply : std::uint8_t { Cleared, LoggedOnly, OtherGeneration };
 const char* ReapplyName(Reapply r);
 Reapply ApplyReapply(Intent& intent, const PartyReapply& reapply, std::uint32_t generation);
@@ -68,6 +151,7 @@ struct LoadInput {
     std::uint16_t resolved[3] {}; // what 3E2EB0 just resolved for members 0..2
     Plan plan = Plan::None;
     std::uint16_t intentWorld = 0xFFFF, intentRoom = 0xFFFF, intentEvt = 0xFFFF;
+    PlanSource source = PlanSource::None; // VUH-1786: which stored plan this load uses
 };
 Load Decide(const LoadInput& in);
 struct Originals { bool valid = false; std::uint16_t member1 = 0, member2 = 0; };
@@ -92,6 +176,9 @@ struct HostPublished {
     PartyApplyReason reason = PartyApplyReason::HostChoice;
     bool any = false, echoed = false;
 };
+// VUH-1786 host: is the intent for a target due (first send, new generation/roster, or an unechoed retry)?
+bool HostIntentDue(const HostPublished& last, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,
+                   std::uint64_t nowMs);
 bool HostShouldPublish(const HostPublished& last, std::uint32_t generation, const RoomTransition& location,
                        const std::array<std::uint64_t, 3>& roster, bool rowRead,
                        const std::array<std::uint8_t, 4>& row, std::uint64_t nowMs, PartyApplyReason& reason);
@@ -112,6 +199,12 @@ void NoteReapply(const PartyReapply& reapply, std::uint32_t generation);
 // Game thread, every frame while requested.
 void Observe(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot,
              bool bridgeOpen);
+// VUH-1786. Game thread. Client: an admitted host PartyIntent. Host: the relay's echo (own=true).
+void NoteIntent(const PartyIntent& intent, std::uint8_t localSlot, std::uint32_t generation,
+                const std::array<std::uint64_t, 3>& roster, bool own);
+// Host, game thread: the next due intent for a pinned qualified room, or false.
+bool HostIntentToPublish(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, PartyIntent& out);
+void NoteHostIntentSent(const PartyIntent& intent, std::uint32_t generation);
 // Game thread, host role only: returns a layout to publish, or false.
 bool HostLayoutToPublish(std::uint32_t generation, const RoomTransition& location,
                          const std::array<std::uint64_t, 3>& roster, PartyLayout& out);

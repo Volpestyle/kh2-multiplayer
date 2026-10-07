@@ -223,7 +223,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         RS_INNER(RoomTransition) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(ReviveRequest) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -831,6 +831,27 @@ void read(ByteReader& r, PartyReapply& out) {
 }
 std::vector<std::uint8_t> encode(const PartyLayout& m){ByteWriter w;write(w,m);return encodePacket(PacketType::PartyLayout,w.data());}
 std::vector<std::uint8_t> encode(const PartyReapply& m){ByteWriter w;write(w,m);return encodePacket(PacketType::PartyReapply,w.data());}
+void write(ByteWriter& w, const PartyIntent& m) {
+    if(!validPartyIntent(m,m.connections))throw std::runtime_error("PartyIntent: invalid policy/identity");
+    w.writeU64(m.version);
+    for(auto c:m.connections)w.writeU64(c);
+    w.writeU16(m.target.worldId);w.writeU16(m.target.roomId);w.writeU16(m.target.eventProgram);
+    w.writeU8(static_cast<std::uint8_t>(m.rule));
+    for(const auto& s:m.seats){w.writeU8(static_cast<std::uint8_t>(s.kind));w.writeU8(s.playerSlot);w.writeU32(s.objectId);}
+    for(auto k:m.kits)w.writeU16(k);
+}
+void read(ByteReader& r, PartyIntent& out) {
+    if(r.remaining()!=PARTY_INTENT_PAYLOAD)throw std::runtime_error("PartyIntent: wrong payload size");
+    PartyIntent m;m.version=r.readU64();
+    for(auto& c:m.connections)c=r.readU64();
+    m.target.worldId=r.readU16();m.target.roomId=r.readU16();m.target.eventProgram=r.readU16();
+    m.rule=static_cast<PartyRule>(r.readU8());
+    for(auto& s:m.seats){s.kind=static_cast<PartyMemberKind>(r.readU8());s.playerSlot=r.readU8();s.objectId=r.readU32();}
+    for(auto& k:m.kits)k=r.readU16();
+    if(!validPartyIntent(m,m.connections))throw std::runtime_error("PartyIntent: invalid policy/identity");
+    out=m;
+}
+std::vector<std::uint8_t> encode(const PartyIntent& m){ByteWriter w;write(w,m);return encodePacket(PacketType::PartyIntent,w.data());}
 
 void write(ByteWriter& w, const ReviveRequest& m) {
     write(w, m.location);
@@ -1397,7 +1418,7 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
     if (size < kHeaderSize + len) {
         throw std::runtime_error("decodePacketHeader: buffer too small for payload");
     }
-    if ((type == PacketType::PartyLayout || type == PacketType::PartyReapply) && size != kHeaderSize + len)
+    if ((type == PacketType::PartyLayout || type == PacketType::PartyReapply || type == PacketType::PartyIntent) && size != kHeaderSize + len)
         throw std::runtime_error("Party: wrong frame length");
     if (type == PacketType::ReviveRequest && (len != 50 || size != kHeaderSize + len))
         throw std::runtime_error("ReviveRequest: wrong frame length");

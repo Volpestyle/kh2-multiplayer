@@ -57,6 +57,8 @@ enum class PacketType : std::uint8_t {
     ReviveRequest = 41, // teammate -> relay validation -> target owner only
     PartyLayout = 42, PartyReapply = 43,
     EnemyMotion = 44, // host -> relay -> others, periodic (VUH-1515)
+    // 45/46 are reserved for the enemy-target-remote lane (RemoteHit, TargetAuthority, v14).
+    PartyIntent = 47, // host -> relay (cached per target, replayed to joiners) -> all incl. host (VUH-1786)
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
 inline bool isDesyncDiagnosticPacket(PacketType type) {
@@ -108,6 +110,7 @@ void write(ByteWriter& w, const EnemyMotion& m);
 void write(ByteWriter& w, const EnemyDeath& m);
 void write(ByteWriter& w, const PartyLayout& m);
 void write(ByteWriter& w, const PartyReapply& m);
+void write(ByteWriter& w, const PartyIntent& m);
 void write(ByteWriter& w, const ReviveRequest& m);
 void write(ByteWriter& w, const HitClaim& m);
 void write(ByteWriter& w, const ProgressUpdate& m);
@@ -136,6 +139,7 @@ void read(ByteReader& r, EnemyMotion& m);
 void read(ByteReader& r, EnemyDeath& m);
 void read(ByteReader& r, PartyLayout& m);
 void read(ByteReader& r, PartyReapply& m);
+void read(ByteReader& r, PartyIntent& m);
 void read(ByteReader& r, ReviveRequest& m);
 void read(ByteReader& r, HitClaim& m);
 void read(ByteReader& r, ProgressUpdate& m);
@@ -215,6 +219,7 @@ std::vector<std::uint8_t> encode(const EnemyMotion& m);
 std::vector<std::uint8_t> encode(const EnemyDeath& m);
 std::vector<std::uint8_t> encode(const PartyLayout& m);
 std::vector<std::uint8_t> encode(const PartyReapply& m);
+std::vector<std::uint8_t> encode(const PartyIntent& m);
 std::vector<std::uint8_t> encode(const ReviveRequest& m);
 std::vector<std::uint8_t> encode(const HitClaim& m);
 std::vector<std::uint8_t> encode(const ProgressUpdate& m);
@@ -241,6 +246,7 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::ProgressUpdate:
         case PacketType::PartyLayout:
         case PacketType::PartyReapply:
+        case PacketType::PartyIntent:
         case PacketType::ReviveRequest:
         case PacketType::HitClaim:
         case PacketType::TransitionAck:

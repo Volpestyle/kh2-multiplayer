@@ -315,6 +315,11 @@ bool NetworkClient::sendPartyLayout(const PartyLayout& m) {
     try { return sendNativeWorld(encode(m),makeTestingWorldContext(),true); }
     catch(const std::exception&) { return false; }
 }
+bool NetworkClient::sendPartyIntent(const PartyIntent& m) {
+    if(avatarLocalSlot_!=0)return false;
+    try { return sendNativeWorld(encode(m),makeTestingWorldContext(),true); }
+    catch(const std::exception&) { return false; }
+}
 bool NetworkClient::requestPartyReapply(const PartyReapply& m) {
     if(avatarLocalSlot_!=0 || m.reason!=PartyApplyReason::StoryForced)return false;
     try { return sendNativeWorld(encode(m),makeTestingWorldContext(),true); }
@@ -517,6 +522,7 @@ void NetworkClient::resetTransportState() {
     }
     avatarSeq_ = 0;
     partyLayout_.reset(); partyVersion_=0;
+    partyIntents_.clear(); partyIntentVersion_=0;
     reviveLocal_ = {}; reviveLocalMs_ = 0; receivedReviveEpisode_ = 0;
     clockOffsetMs_ = 0;
     bestRttMs_ = 0;
@@ -594,12 +600,13 @@ bool NetworkClient::updateAvatarRoster(const SessionState& session) {
         if(pendingDesyncRequest_)log("Pending desync capture retired with roster authority");
         pendingDesyncRequest_.reset();desyncRequest_.reset();
     }
-    if (namespaceChanged) { partyLayout_.reset(); partyVersion_=0; }
+    if (namespaceChanged) { partyLayout_.reset(); partyVersion_=0; partyIntents_.clear(); partyIntentVersion_=0; }
     if (namespaceChanged) { reviveLocal_ = {}; reviveLocalMs_ = 0; }
     if (namespaceChanged) outbound_.reset(); // retire already-conditioned authoritative sends
     for (std::size_t i = 0; i < 3; ++i) {
         if (namespaceChanged || avatarConnections_[i] != connections[i]) {
             partyLayout_.reset();
+            partyIntents_.clear(); // roster-pinned; the version floor stays with the host connection
             avatarLastSeq_[i] = 0;
             avatarLoss_[i] = {};
 
@@ -796,6 +803,19 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                admittedScope->sourceConnectionId!=avatarConnections_[0] || !hostRoom_ ||
                !sameResyncRoom(m.location,*hostRoom_) || !validPartyLayout(m,roster) || m.version<=partyVersion_)return;
             partyVersion_=m.version;partyLayout_=m;reader=ByteReader(payload,payloadSize);
+        } else if(type==PacketType::PartyIntent) {
+            // VUH-1786: room-independent, so no hostRoom_ match; never cleared by a room transition.
+            PartyIntent m;read(reader,m);
+            std::array<std::uint64_t,3> roster{avatarConnections_[0],avatarConnections_[1],avatarConnections_[2]};
+            if(!reader.atEnd() || !admittedScope || admittedScope->kind!=WorldSourceKind::Native ||
+               admittedScope->sourceConnectionId!=avatarConnections_[0] || !validPartyIntent(m,roster) ||
+               m.version<=partyIntentVersion_)return;
+            auto same=std::find_if(partyIntents_.begin(),partyIntents_.end(),[&](const PartyIntent& x){return x.target==m.target;});
+            if(same==partyIntents_.end() && partyIntents_.size()>=8)return; // store full: refused, not forwarded
+            partyIntentVersion_=m.version;
+            if(same!=partyIntents_.end())*same=m;
+            else partyIntents_.push_back(m);
+            reader=ByteReader(payload,payloadSize);
         } else if(type==PacketType::PartyReapply) {
             PartyReapply m;read(reader,m);
             if(!admittedScope || admittedScope->kind!=WorldSourceKind::Relay ||
@@ -1050,6 +1070,9 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             }
             case PacketType::PartyReapply: {
                 PartyReapply m;read(reader,m);if(callbacks_.onPartyReapply)callbacks_.onPartyReapply(m);break;
+            }
+            case PacketType::PartyIntent: {
+                PartyIntent m;read(reader,m);if(callbacks_.onPartyIntent)callbacks_.onPartyIntent(m);break;
             }
             case PacketType::ReviveRequest: {
                 ReviveRequest m; read(reader,m);

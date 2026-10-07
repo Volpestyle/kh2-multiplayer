@@ -8,10 +8,12 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 13;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 14;
 
 // ===========================================================================
-// Protocol v13 adds EnemyMotion (VUH-1515 step 2, periodic host enemy pose/motion).
+// Protocol v14 adds PartyIntent = 47 (VUH-1786, host intended party for a target room;
+// v14 is shared with the enemy-target-remote lane's RemoteHit = 45 / TargetAuthority = 46).
+// v13 added EnemyMotion (VUH-1515 step 2, periodic host enemy pose/motion).
 // v12 added versioned host party layout and reapplication events.
 // v11 added streamed downed epoch/episode/delivery and ReviveRequest.
 // ===========================================================================

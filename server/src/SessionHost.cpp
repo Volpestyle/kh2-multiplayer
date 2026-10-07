@@ -368,6 +368,7 @@ void SessionHost::stop() {
     lastEnemyMotionSequence_ = 0;
     room_.reset();
     clearWorldState();
+    partyIntents_.clear(); partyIntentVersion_ = 0; partyIntentHost_ = 0;
     progress_.clear();
     progressVersion_ = 0;
     pendingActivation_.clear();
@@ -859,6 +860,24 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     " benchedMask="+std::to_string(partyBenchedMask(layout)));
                 break;
             }
+            case PacketType::PartyIntent: {
+                PartyIntent intent;read(reader,intent);
+                std::array<std::uint64_t,3> roster{};
+                for(const auto& p:peers_)if(p.status==PeerStatus::Verified)roster[static_cast<std::uint8_t>(p.assignedSlot)]=p.connectionId;
+                if(!reader.atEnd() || !fromHost(*ps) || !admittedScope || resyncPlan_ || !validPartyIntent(intent,roster)){++rejectedWorld_;return;}
+                if(partyIntentHost_!=ps->connectionId){partyIntentHost_=ps->connectionId;partyIntentVersion_=0;partyIntents_.clear();}
+                if(intent.version<=partyIntentVersion_){++rejectedWorld_;return;}
+                auto same=std::find_if(partyIntents_.begin(),partyIntents_.end(),[&](const PartyIntent& x){return x.target==intent.target;});
+                if(same==partyIntents_.end() && partyIntents_.size()>=8){++rejectedWorld_;return;} // bound first: the floor is not raised by a refusal
+                partyIntentVersion_=intent.version;
+                if(same!=partyIntents_.end())*same=intent;
+                else partyIntents_.push_back(intent);
+                lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
+                broadcastToVerified(encode(intent),true);
+                log("PartyIntent version="+std::to_string(intent.version)+" target="+std::to_string(intent.target.worldId)+"/"+
+                    std::to_string(intent.target.roomId)+"/"+std::to_string(intent.target.eventProgram)+" rule="+std::to_string(static_cast<unsigned>(intent.rule)));
+                break;
+            }
             case PacketType::PartyReapply: {
                 PartyReapply request;read(reader,request);
                 if(!fromHost(*ps) || !admittedScope || !room_ || resyncPlan_ ||
@@ -1160,6 +1179,9 @@ void SessionHost::sendWorldStateTo(TransportPeer* peer) try {
             sendTo(peer, encode(u), true, true);
         }
     }
+    // VUH-1786: no intent replay here. Every verification mints a fresh connection id, so a cached
+    // intent's roster can never equal the roster this peer joins; the host republishes its intents
+    // on the roster change (HostIntentDue). The cache only bounds targets and keeps the version floor.
     if (!room_) return;
     sendTo(peer, encode(*room_), true, true);
     if (hold_ && hold_->epoch == room_->epoch) sendTo(peer, encode(*hold_), true, true);
@@ -1460,6 +1482,7 @@ void SessionHost::removePeer(TransportPeer* peer) {
     pendingActivation_.erase(peer);
     if (auto* ps = findPeer(peer); ps && fromHost(*ps)) {
         session_.sessionId.clear();
+        partyIntents_.clear(); partyIntentVersion_ = 0; partyIntentHost_ = 0; // VUH-1786: host gone
         lastEnemyHpSequence_ = 0;
         lastEnemyMotionSequence_ = 0;
         room_.reset();

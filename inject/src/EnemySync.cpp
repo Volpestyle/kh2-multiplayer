@@ -3001,6 +3001,15 @@ void ReceivePartyPacket(const WorldScope& scope, PacketType type, const std::uin
         } else if (role != Role::Host || local != 0) return;
         PartyLayout layout; read(r, layout);
         if (r.atEnd()) partynative::NoteLayout(layout, local, WorldSessionGeneration(), PartyRoster(), role == Role::Host);
+    } else if (type == PacketType::PartyIntent) { // VUH-1786: same admission as a host PartyLayout
+        if (scope.kind != WorldSourceKind::Native || scope.sourceConnectionId != g_bridge.ConnectionId(0) ||
+            !scope.hostSourceSerial) return;
+        if (role == Role::Client) {
+            if (scope.sourceDeliverySerial != g_bridge.PeerDeliverySerial(0) ||
+                scope.hostSourceSerial <= g_resyncAppliedCut) return;
+        } else if (role != Role::Host || local != 0) return;
+        PartyIntent intent; read(r, intent);
+        if (r.atEnd()) partynative::NoteIntent(intent, local, WorldSessionGeneration(), PartyRoster(), role == Role::Host);
     } else if (type == PacketType::PartyReapply) {
         if (scope.kind != WorldSourceKind::Relay || scope.sourceConnectionId != g_bridge.ConnectionId(0)) return;
         PartyReapply reapply; read(r, reapply);
@@ -3013,6 +3022,13 @@ void ReceivePartyPacket(const WorldScope& scope, PacketType type, const std::uin
 // host world context.
 void TickHostPartyLayout() {
     if (!partynative::Requested() || CurrentRole() != Role::Host) return;
+    { // VUH-1786: room-independent intents for the pinned rooms, one per frame while due
+        PartyIntent intent;
+        const auto generation = WorldSessionGeneration();
+        ProducerWorldContext context;
+        if (partynative::HostIntentToPublish(generation, PartyRoster(), intent) && CaptureWorldContext(context) &&
+            SendCapturedWorld(encode(intent), context)) partynative::NoteHostIntentSent(intent, generation);
+    }
     RoomTransition location;
     if (!ActivationContext(Role::Host, location)) return;
     const auto generation = WorldSessionGeneration();
@@ -3057,7 +3073,8 @@ bool ReceiveWorldPackets() {
                 type = decodePacketHeader(packet.data(), packet.size(), payload, size);
                 if (packet.size() != size + 3 || !isScopedWorldPacket(type)) continue;
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
-                if (partynative::Requested() && (type == PacketType::PartyLayout || type == PacketType::PartyReapply)) {
+                if (partynative::Requested() && (type == PacketType::PartyLayout || type == PacketType::PartyReapply ||
+                                                  type == PacketType::PartyIntent)) {
                     ReceivePartyPacket(*scope, type, payload, size); // VUH-1519: before the role branches (host echo)
                     continue;
                 }

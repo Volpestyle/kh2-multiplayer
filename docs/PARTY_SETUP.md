@@ -71,7 +71,9 @@ publishes a relay-authored `PartyReapply` with the current room and version
 floor. It is **not** permission to apply the previous room's rule/model. A
 newer checked `PartyLayout` must follow. A late join/rejoin starts unavailable;
 old cached layout is never relabeled with the new roster. Host retirement,
-transport retirement and resync also retire party authority.
+transport retirement and resync also retire party authority. Exception
+(VUH-1786): a resync does not retire stored `PartyIntent`s. They are pinned to a
+roster, not a room, and a roster change retires them anyway.
 
 For a story-forced native party change within the same room, the host first
 sends `PartyReapply{currentRoom,currentVersion,StoryForced}` through the same
@@ -118,7 +120,7 @@ Every other room, rule or layout resolves natively, and so does any later load: 
 - StoryForced and RosterChanged `PartyReapply` clear it.
 - The host adopts its own layout only from the relay's echo, and re-sends at most 6 times.
 
-**A room-independent PartyIntent message (VUH-1786) is required before any second qualified room or mixed layout.** No new packet types or protocol version: it uses `PartyLayout` 42 and `PartyReapply` 43 at protocol 13.
+VUH-1519 itself added no packet type: it uses `PartyLayout` 42 and `PartyReapply` 43 at protocol 13. Crossing into a second qualified room without an extra reload needs the room-independent `PartyIntent` (VUH-1786, below).
 
 **Live result, 2026-10-07: PASS.** Run `build/scenarios/20261007-044847_vuh1519_party_native_goa_three_1`, fixture `build/rig/vuh1519-party-native-20261007-01/live-fixture-05`, DLL `d0d28019…` (lane pins `a1466dd3…`). Three games in GoA:
 - **controls:** flag off, no private status, and party + remote kit;
@@ -141,6 +143,60 @@ Earlier attempts 01–04 failed on fixture expectations, which were fixed one at
 - 02: client post-load match ordering;
 - 03: a single hit never commits through `3C2120`;
 - 04: a benign stream-gap puppet rebind.
+
+## PartyIntent (VUH-1786, protocol 14, type 47)
+
+Default off, under `KH2COOP_PARTY_NATIVE`. A host `PartyIntent` is the intended party for **one target room** (`worldId/roomId/eventProgram`, with no epoch or door). Its fields:
+- seats, using the `PartyLayout` encoding and policy;
+- per-seat kits (seat 0 = 0, a remote player = Sora `0x54`, AI or empty = 0);
+- the authored rule;
+- the roster;
+- a version in its own namespace per host connection.
+
+It is a 63-byte payload.
+
+**Relay.**
+- **Admission:** host only, outside a resync, with the roster equal to the verified roster.
+- **Cache:** one intent per target (up to 8), kept across room changes and cleared on host departure or stop. A refusal (full cache, stale version) never raises the version floor.
+- **Broadcast:** to all peers, the host included (that copy is the echo).
+- **No replay to joiners.** Every verification mints a fresh connection id, so a cached intent's roster can never match the roster a joiner joins. The host republishes for the new roster instead (`HostIntentDue` fires on a roster change). The cache only bounds targets and keeps the version floor.
+
+**Host.**
+- **Publication:** one intent per pinned qualified room, GoA `04/1A` and `04/0A` (hb10 has no evt program 0, and the row is DEFAULT). It publishes per generation and roster, only while it is locally ready, and re-sends at most 6 times while no echo has arrived.
+- **Echo:** an echo stops the re-sends only when the host adopted it (`accepted`), or refused it as `stale-version` for exactly the version it sent. For example, a `no-generation` refusal during a generation flicker keeps the re-sends going. Layout echoes use the same rule.
+- **Repair:** each room-change layout (`reason=RoomChanged`) re-arms both pinned-room intents with fresh versions, at two extra reliable packets per transition. A client that lost its store is therefore repaired at the next transition.
+
+**Client.** A client admits an intent with the same rules as a layout. Room transitions never clear intents. The 8-entry store refuses (and does not forward) a new target once full. The DLL refuses targets outside the pinned rooms.
+
+**DLL.**
+- **Load:** at every load, the `3E2EB0` observer takes the most recently accepted plan for the load's room. That is the room-pinned layout, the intent for that room, or a story hold. The load line names it (`source=layout|intent|hold|none`). Every native gate is then re-checked. So the **first** load of `04/0A` applies the party with no extra reload.
+- **Publication:** the game thread publishes the plan table to the loading thread as one set, behind a seqlock with a 32-bit counter. Each entry carries the full 64-bit acceptance sequence. A reader that cannot get a stable copy resolves natively.
+- **Roster:** any acceptance for a roster that differs from the stored one, in any seat, first retires every plan, intent and hold of the old roster. The version floors are kept for the same generation and host connection.
+
+**Story-forced (rev2).** A `StoryForced` reapply wins exactly **one load** of its room:
+- It clears the room-pinned layout plan and sets a hold on its world/room, at any evt, with a fresh sequence. The hold is selected like a plan and resolves natively (`source=hold result=no-intent`).
+- The hold is released after one load of that room uses it (`story hold released`), or when a newer layout or intent for that room is accepted. After that, the stored intents apply again.
+- While a hold is active, the host does not republish the intent for that room.
+- **Rev3 (F1):** after the host's own held load of that room, the host publishes **no layout and no intent for that room for the rest of that visit**, through that epoch's retries, including the S2 re-arm. A post-load host layout would otherwise clear the clients' holds before their own (later) load, leaving the host native and the clients with clones. The quiet visit ends at the next epoch of the room, or when the host enters another room.
+- **Rev3 (N-a):** an own intent echo stops the host's re-sends only when the stored target now holds exactly the sent version. This does not depend on echo order across the shared intent floor.
+- **Rev3 (N-b):** the load line ends with `misses=N`, the count of seqlock reads that fell back to an empty table (that is, a native load).
+
+**Open risks for a future StoryForced producer.** No DLL code produces `StoryForced` today. The only source is `NetworkClient::requestPartyReapply`. Hold, release and the quiet visit are therefore proven offline only (policy, end-to-end and mutants), and a producer must close these before shipping:
+- **One hold slot:** a second story reapply for another room replaces the first hold, so the first room's story party can lose to a stored intent.
+- **Supersession:** a newer layout or intent for the held room releases the hold, per the VUH-1519 "until a newer layout" contract. A producer must send the reapply before the host publishes for that room. Otherwise the reapply arrives after a fresh plan, and the story loses on every machine.
+- **Quiet visit:** after the host's held load, the host withholds its layout and intent for that room for the whole visit, by design. The story party rules that visit, and clients get no re-validating layout until the next epoch.
+- **Release timing:** the hold is released by the first load of its room at any evt, even if that load was already native for another reason (for example an event program). A story party that needs more than one load must re-send the reapply for each load.
+- **Live test:** no live fixture has exercised a hold. The first StoryForced producer needs one, with a hold on a client that loads after the host.
+- There is one hold slot: a later story reapply for another room replaces it.
+- A story-forced party that shows in the native row, members or event state also wins at any load.
+- `RosterChanged` retires the intents and the hold.
+
+**Merge plan (lead decision, 2026-10-07).** VUH-1786 and enemy-target-remote (`RemoteHit` 45, `TargetAuthority` 46) both take protocol 14, and they ship at v14 **together**:
+- Never publish a v14 package that contains only one of them. If that happens, bump to v15.
+- Whichever lands second merges the `PacketType` enum, the `Protocol.hpp` version comment, the `RS_INNER` line and the `HudNamesTest` message, then rebuilds and re-runs the full CTest and the offline controls on the merged products.
+- Each lane's pinned DLL predates the merge.
+
+PartyIntent leaves VUH-1519's own open items open: mixed layouts, empty seats and per-seat kits.
 
 **Static audit: `resolved[]` does not reach SAVE (2026-10-07).** This was owed since the VUH-1513 review. Evidence is in `build/rig/vuh1519-resolved-save-audit-20261007-01/`, run against Steam exe `9002b2de`.
 
@@ -176,7 +232,7 @@ Earlier attempts 01–04 failed on fixture expectations, which were fixed one at
 - The save-file writer itself was not traced. The array lies outside the SAVE body, so it reaches a save file only if something copies it into SAVE, and no such writer was found.
 
 **Open:**
-- VUH-1786 PartyIntent.
+- VUH-1786 PartyIntent: see the PartyIntent section (candidate).
 - VUH-1787 stale-puppet hold. A host stall over 1 s makes AvatarSync (`staleAfterMs`) release and rebind remote puppets; the rebind keeps the same clone.
 - Per-seat kits: the last-built seat is the local player.
 - Mixed layouts: `PuppetTarget` is all clones or all friends.

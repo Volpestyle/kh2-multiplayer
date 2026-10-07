@@ -172,6 +172,9 @@ namespace kh2coop::inject::partynative {
 bool Requested() { return false; }
 void NoteLayout(const PartyLayout&, std::uint8_t, std::uint32_t, const std::array<std::uint64_t, 3>&, bool) {}
 void NoteReapply(const PartyReapply&, std::uint32_t) {}
+void NoteIntent(const PartyIntent&, std::uint8_t, std::uint32_t, const std::array<std::uint64_t, 3>&, bool) {}
+bool HostIntentToPublish(std::uint32_t, const std::array<std::uint64_t, 3>&, PartyIntent&) { return false; }
+void NoteHostIntentSent(const PartyIntent&, std::uint32_t) {}
 void Observe(std::uint32_t, const std::array<std::uint64_t, 3>&, std::uint8_t, bool) {}
 bool HostLayoutToPublish(std::uint32_t, const RoomTransition&, const std::array<std::uint64_t, 3>&, PartyLayout&) { return false; }
 void NoteHostSent(const PartyLayout&, std::uint32_t) {}

@@ -163,6 +163,13 @@ private:
     void invalidateParty(PartyApplyReason reason);
     std::optional<PartyLayout> partyLayout_;
     std::uint64_t partyVersion_{0}, partyHostConnection_{0};
+    // VUH-1786: host party intents, one per target room. Room-independent: kept across
+    // room changes, replayed to joiners whose roster matches, cleared on host change/stop.
+    std::vector<PartyIntent> partyIntents_;
+    std::uint64_t partyIntentVersion_{0}, partyIntentHost_{0};
+public:
+    const std::vector<PartyIntent>& partyIntents() const { return partyIntents_; }
+private:
 
     // World sync helpers
     bool fromHost(const PeerState& ps) const;

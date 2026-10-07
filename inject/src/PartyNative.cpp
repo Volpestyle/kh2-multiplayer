@@ -1,6 +1,7 @@
 // PartyNative — see PartyNative.hpp (VUH-1519).
 #include "PartyNativePolicy.hpp"
 
+#include <atomic>
 #include <cstring>
 
 #ifndef KH2COOP_PARTYNATIVE_POLICY_ONLY
@@ -62,6 +63,20 @@ const char* LoadName(Load r) {
     return "?";
 }
 
+const char* PlanSourceName(PlanSource s) {
+    switch (s) {
+    case PlanSource::None: return "none";
+    case PlanSource::Layout: return "layout";
+    case PlanSource::Intent: return "intent";
+    case PlanSource::Hold: return "hold";
+    }
+    return "?";
+}
+
+bool QualifiedRoom(std::uint16_t world, std::uint16_t room, std::uint16_t evt) {
+    return world == 4 && evt == 0 && (room == 0x1A || room == 0x0A);
+}
+
 Plan Project(const PartyLayout& layout, std::uint8_t localSlot) {
     if (localSlot > 2 || !layout.connections[localSlot]) return Plan::Unsupported;
     if (!validPartyLayout(layout, layout.connections)) return Plan::Unsupported;
@@ -75,39 +90,190 @@ Plan Project(const PartyLayout& layout, std::uint8_t localSlot) {
     return Plan::TwoClones;
 }
 
+bool HasPlans(const Intent& intent) {
+    return intent.plan != Plan::None || intent.hold.valid || IntentCount(intent) != 0;
+}
+
+unsigned IntentCount(const Intent& intent) {
+    unsigned n = 0;
+    for (const auto& t : intent.targets) n += t.valid ? 1u : 0u;
+    return n;
+}
+
+bool Rebase(Intent& intent, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot) {
+    if (intent.generation == generation && intent.roster == roster && intent.localSlot == localSlot) return false;
+    const bool had = HasPlans(intent);
+    // Versions are one namespace per host connection within a generation.
+    const bool keepFloor = intent.generation == generation && intent.roster[0] == roster[0];
+    const auto floor = intent.version, intentFloor = intent.intentVersion, seq = intent.seq;
+    intent = {};
+    intent.generation = generation; intent.roster = roster; intent.localSlot = localSlot; intent.seq = seq;
+    if (keepFloor) { intent.version = floor; intent.intentVersion = intentFloor; }
+    return had;
+}
+
+bool HoldCovers(const Intent& intent, std::uint16_t world, std::uint16_t room) {
+    return intent.hold.valid && (intent.hold.world & 0xFF) == (world & 0xFF) && (intent.hold.room & 0xFF) == (room & 0xFF);
+}
+
+bool ReleaseHold(Intent& intent, std::uint64_t consumedSeq) {
+    if (!intent.hold.valid || consumedSeq != intent.hold.seq) return false;
+    intent.hold = {};
+    return true;
+}
+
+bool StoryVisitCovers(const StoryVisit& v, std::uint16_t world, std::uint16_t room) {
+    return v.valid && (v.world & 0xFF) == (world & 0xFF) && (v.room & 0xFF) == (room & 0xFF);
+}
+
+bool StorySuppresses(StoryVisit& v, const Intent& intent, const RoomTransition& l) {
+    if (HoldCovers(intent, l.worldId, l.roomId)) return true; // the hold has not had its load yet
+    if (!v.valid) return false;
+    if (StoryVisitCovers(v, l.worldId, l.roomId)) {
+        if (v.epoch == 0) { v.epoch = l.epoch; return true; } // the held visit's own tuple
+        if (l.epoch == v.epoch) return true;
+    }
+    v = {}; // a new epoch of the room, or another room: the visit is over
+    return false;
+}
+
+bool IntentEchoConfirms(const Intent& intent, Accept a, const PartyIntentTarget& target, std::uint64_t sentVersion) {
+    if (a != Accept::Accepted && a != Accept::StaleVersion) return false;
+    for (const auto& t : intent.targets)
+        if (t.valid && t.target == target) return t.version == sentVersion;
+    return false;
+}
+
+bool EchoConfirms(Accept a, std::uint64_t echoedVersion, std::uint64_t sentVersion) {
+    return a == Accept::Accepted || (a == Accept::StaleVersion && echoedVersion == sentVersion);
+}
+
 Accept AcceptLayout(Intent& intent, const PartyLayout& layout, std::uint8_t localSlot,
                     std::uint32_t generation, const std::array<std::uint64_t, 3>& roster) {
     if (!generation) return Accept::NoGeneration;
     if (localSlot > 2 || !roster[localSlot]) return Accept::LocalSlot;
     if (layout.connections != roster) return Accept::RosterMismatch;
     if (!validPartyLayout(layout, roster)) return Accept::Invalid;
-    // Versions are one namespace per host connection within a generation.
-    if (intent.generation == generation && intent.roster[0] == roster[0] && layout.version <= intent.version)
-        return Accept::StaleVersion;
-    intent.generation = generation;
-    intent.roster = roster;
-    intent.localSlot = localSlot;
+    Rebase(intent, generation, roster, localSlot); // S4: nothing pinned to another roster survives
+    if (layout.version <= intent.version) return Accept::StaleVersion;
     intent.version = layout.version;
     intent.plan = Project(layout, localSlot);
     intent.world = layout.location.worldId;
     intent.room = layout.location.roomId;
     intent.evt = layout.location.eventProgram;
+    intent.layoutSeq = ++intent.seq;
+    if (HoldCovers(intent, intent.world, intent.room)) intent.hold = {}; // B1: a newer layout supersedes the hold
     return Accept::Accepted;
+}
+
+Plan ProjectIntent(const PartyIntent& m, std::uint8_t localSlot) {
+    PartyLayout probe {};
+    probe.location.epoch = 1; probe.location.worldId = m.target.worldId; probe.location.roomId = m.target.roomId;
+    probe.location.eventProgram = m.target.eventProgram;
+    probe.version = m.version; probe.connections = m.connections; probe.rule = m.rule; probe.seats = m.seats;
+    for (unsigned i = 1; i < 3; ++i)
+        if (m.seats[i].kind == PartyMemberKind::RemotePlayer && m.kits[i] != SORA) return Plan::Unsupported; // Sora-only kits
+    return Project(probe, localSlot);
+}
+
+Accept AcceptIntent(Intent& intent, const PartyIntent& m, std::uint8_t localSlot,
+                    std::uint32_t generation, const std::array<std::uint64_t, 3>& roster) {
+    if (!generation) return Accept::NoGeneration;
+    if (localSlot > 2 || !roster[localSlot]) return Accept::LocalSlot;
+    if (m.connections != roster) return Accept::RosterMismatch;
+    if (!validPartyIntent(m, roster)) return Accept::Invalid;
+    if (!QualifiedRoom(m.target.worldId, m.target.roomId, m.target.eventProgram)) return Accept::Invalid; // N2: pinned rooms only
+    Rebase(intent, generation, roster, localSlot); // S4
+    if (m.version <= intent.intentVersion) return Accept::StaleVersion;
+    intent.intentVersion = m.version;
+    StoredIntent* slot = nullptr;
+    for (auto& t : intent.targets) if (t.valid && t.target == m.target) slot = &t;
+    if (!slot) for (auto& t : intent.targets) if (!t.valid) { slot = &t; break; }
+    if (!slot) { // replace the oldest
+        slot = &intent.targets[0];
+        for (auto& t : intent.targets) if (t.seq < slot->seq) slot = &t;
+    }
+    *slot = {true, m.target, ProjectIntent(m, localSlot), m.version, ++intent.seq};
+    if (HoldCovers(intent, m.target.worldId, m.target.roomId)) intent.hold = {}; // B1: a newer intent supersedes the hold
+    return Accept::Accepted;
+}
+
+namespace {
+std::uint64_t PlanKey(Plan p, std::uint16_t w, std::uint16_t r, std::uint16_t e, PlanSource s) {
+    return static_cast<std::uint64_t>(p) | (static_cast<std::uint64_t>(w & 0xFF) << 8) | (static_cast<std::uint64_t>(r & 0xFF) << 16) |
+        (static_cast<std::uint64_t>(e) << 24) | (static_cast<std::uint64_t>(s) << 40);
+}
+} // namespace
+
+void PackPlanTable(const Intent& intent, PlanTable& out) {
+    out = {};
+    if (intent.plan != Plan::None) out[0] = {PlanKey(intent.plan, intent.world, intent.room, intent.evt, PlanSource::Layout), intent.layoutSeq};
+    if (intent.hold.valid) out[1] = {PlanKey(Plan::None, intent.hold.world, intent.hold.room, intent.hold.evt, PlanSource::Hold), intent.hold.seq};
+    for (unsigned i = 0; i < MAX_INTENT_TARGETS; ++i) {
+        const auto& t = intent.targets[i];
+        if (t.valid && t.plan != Plan::None)
+            out[2 + i] = {PlanKey(t.plan, t.target.worldId, t.target.roomId, t.target.eventProgram, PlanSource::Intent), t.seq};
+    }
+}
+
+PlanChoice SelectPlan(const PlanTable& table, std::uint16_t world, std::uint16_t room, std::uint16_t evt) {
+    const auto decode = [](const PlanEntry& v) {
+        const auto source = static_cast<PlanSource>((v.key >> 40) & 0xFF);
+        return PlanChoice {source == PlanSource::Hold ? Plan::None : static_cast<Plan>(v.key & 0xFF),
+                           static_cast<std::uint16_t>((v.key >> 8) & 0xFF), static_cast<std::uint16_t>((v.key >> 16) & 0xFF),
+                           static_cast<std::uint16_t>((v.key >> 24) & 0xFFFF), source, v.seq};
+    };
+    PlanChoice best; bool found = false;
+    for (const auto& v : table) {
+        const PlanChoice c = decode(v);
+        if (c.source == PlanSource::None) continue;
+        if (c.world != (world & 0xFF) || c.room != (room & 0xFF)) continue;
+        if (c.source != PlanSource::Hold && c.evt != evt) continue; // a hold covers its room at any evt
+        if (!found || c.seq > best.seq) { best = c; found = true; }
+    }
+    if (found) return best;
+    const PlanChoice layout = decode(table[0]);
+    return layout.source == PlanSource::Layout ? layout : PlanChoice {};
+}
+
+void PlanTableCell::Publish(const PlanTable& table) {
+    const auto v = version_.load(std::memory_order_relaxed);
+    version_.store(v + 1, std::memory_order_relaxed); // odd: write in progress
+    std::atomic_thread_fence(std::memory_order_release);
+    for (unsigned i = 0; i < PLAN_TABLE; ++i) {
+        words_[2 * i].store(table[i].key, std::memory_order_relaxed);
+        words_[2 * i + 1].store(table[i].seq, std::memory_order_relaxed);
+    }
+    version_.store(v + 2, std::memory_order_release);
+}
+
+bool PlanTableCell::Read(PlanTable& out, unsigned maxTries) const {
+    for (unsigned k = 0; k < maxTries; ++k) {
+        const auto v1 = version_.load(std::memory_order_acquire);
+        if (v1 & 1u) continue;
+        PlanTable t {};
+        for (unsigned i = 0; i < PLAN_TABLE; ++i) {
+            t[i].key = words_[2 * i].load(std::memory_order_relaxed);
+            t[i].seq = words_[2 * i + 1].load(std::memory_order_relaxed);
+        }
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (version_.load(std::memory_order_relaxed) == v1) { out = t; return true; }
+    }
+    out = {};
+    return false;
 }
 
 bool ObserveSession(Intent& intent, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,
                     std::uint8_t localSlot, bool bridgeOpen) {
-    if (intent.generation == 0 && intent.plan == Plan::None) return false;
-    const bool hadPlan = intent.plan != Plan::None;
-    if (!bridgeOpen) { intent = {}; return hadPlan; }
+    if (intent.generation == 0 && !HasPlans(intent)) return false;
+    if (!bridgeOpen) {
+        const bool had = HasPlans(intent);
+        const auto seq = intent.seq;
+        intent = {}; intent.seq = seq;
+        return had;
+    }
     if (generation == 0) return false; // unknown (ordering/delivery flicker): hold
-    if (generation == intent.generation && roster == intent.roster && localSlot == intent.localSlot) return false;
-    // Keep the version floor only for the same generation and host connection.
-    const bool keepFloor = generation == intent.generation && roster[0] == intent.roster[0];
-    const auto floor = intent.version;
-    intent = {};
-    if (keepFloor) { intent.generation = generation; intent.roster = roster; intent.localSlot = localSlot; intent.version = floor; }
-    return hadPlan;
+    return Rebase(intent, generation, roster, localSlot);
 }
 
 Reapply ApplyReapply(Intent& intent, const PartyReapply& reapply, std::uint32_t generation) {
@@ -117,13 +283,19 @@ Reapply ApplyReapply(Intent& intent, const PartyReapply& reapply, std::uint32_t 
     intent.plan = Plan::None;
     intent.world = intent.room = intent.evt = 0xFFFF;
     if (intent.generation == generation && reapply.afterVersion > intent.version) intent.version = reapply.afterVersion;
+    if (reapply.reason == PartyApplyReason::RosterChanged) { // roster-pinned: retired
+        intent.targets = {};
+        intent.hold = {};
+    } else { // B1: the story-forced party wins the next load of its room; the intents stay for later loads
+        intent.hold = {true, reapply.location.worldId, reapply.location.roomId, reapply.location.eventProgram, ++intent.seq};
+    }
     return Reapply::Cleared;
 }
 
 Load Decide(const LoadInput& in) {
     if (in.plan == Plan::None) return Load::NoIntent;
     if (in.plan != Plan::TwoClones) return Load::Unsupported;
-    if (in.world != 4 || in.room != 0x1A) return Load::WorldNotQualified; // GoA only
+    if (!QualifiedRoom(in.world, in.room, 0)) return Load::WorldNotQualified; // pinned rooms only (GoA 04/1A, 04/0A); evt next
     if (in.evtProgram != 0) return Load::EventRoom;
     if (in.eventContext != 0 || in.cutsceneState != 0) return Load::EventActive;
     // The intent is pinned to the room its layout was authored for (lead decision).
@@ -162,7 +334,7 @@ void RestoreMembers(Originals& original, std::uint16_t* resolved) {
 }
 
 PartyRule PinnedRule(const RoomTransition& l) {
-    return l.worldId == 4 && l.roomId == 0x1A && l.eventProgram == 0 ? PartyRule::Default : PartyRule::Unavailable;
+    return QualifiedRoom(l.worldId, l.roomId, l.eventProgram) ? PartyRule::Default : PartyRule::Unavailable;
 }
 
 namespace {
@@ -190,6 +362,15 @@ bool HostShouldPublish(const HostPublished& last, std::uint32_t generation, cons
     return true;
 }
 
+bool HostIntentDue(const HostPublished& last, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,
+                   std::uint64_t nowMs) {
+    if (!generation) return false;
+    for (const auto c : roster) if (!c) return false;
+    if (!last.any || last.generation != generation || last.roster != roster) return true;
+    if (last.echoed || last.resends >= HOST_ECHO_MAX_RESENDS) return false;
+    return nowMs - last.sentMs >= HOST_ECHO_RETRY_MS;
+}
+
 bool HostEchoGivenUp(const HostPublished& last, std::uint32_t generation, const RoomTransition& location,
                      const std::array<std::uint64_t, 3>& roster) {
     return last.any && !last.echoed && last.resends >= HOST_ECHO_MAX_RESENDS && last.generation == generation &&
@@ -212,9 +393,19 @@ bool LocallyReady() { return g_requested.load(std::memory_order_acquire) && priv
 Intent g_intent {};
 HostPublished g_hostLast {};
 std::uint64_t g_hostVersion = 0;
-// Published by the game thread, read by the loading thread at each resolve:
-// plan | world << 8 | room << 24 | evt << 40.
-std::atomic<std::uint64_t> g_loadPlan {0};
+// Published by the game thread as one set (S3 seqlock), read by the loading thread at each resolve.
+PlanTableCell g_planCell {};
+PlanTable g_lastPublished {};
+bool g_publishedOnce = false;
+// Loading thread -> game thread: the seq of the last story hold a load used (B1 release).
+std::atomic<std::uint64_t> g_holdConsumed {0};
+std::atomic<std::uint32_t> g_tableMisses {0}; // reads that fell back to an empty table (logged: misses=)
+StoryVisit g_storyVisit {}; // rev3 F1, game thread
+bool g_storyQuietLogged = false;
+// VUH-1786 host intents: one per pinned qualified room.
+constexpr std::array<PartyIntentTarget, 2> INTENT_ROOMS {{{4, 0x1A, 0}, {4, 0x0A, 0}}};
+std::array<HostPublished, 2> g_hostIntent {};
+std::uint64_t g_hostIntentVersion = 0;
 // Loading thread (hook); Shutdown runs after the hook is disabled.
 Originals g_original {};
 std::atomic<bool> g_applied {false};
@@ -224,9 +415,13 @@ bool g_lastOk = false;
 std::uint32_t g_loads = 0, g_appliedLoads = 0;
 
 void PublishIntent() {
-    const std::uint64_t v = static_cast<std::uint64_t>(g_intent.plan) | (static_cast<std::uint64_t>(g_intent.world) << 8) |
-        (static_cast<std::uint64_t>(g_intent.room) << 24) | (static_cast<std::uint64_t>(g_intent.evt) << 40);
-    g_loadPlan.store(v, std::memory_order_release);
+    PlanTable table {};
+    PackPlanTable(g_intent, table);
+    bool same = g_publishedOnce;
+    for (unsigned i = 0; same && i < PLAN_TABLE; ++i) same = table[i].key == g_lastPublished[i].key && table[i].seq == g_lastPublished[i].seq;
+    if (same) return; // only real changes are published (the reader retries only around a write)
+    g_planCell.Publish(table);
+    g_lastPublished = table; g_publishedOnce = true;
 }
 
 bool ReadBytes(std::uintptr_t p, void* out, std::size_t n) {
@@ -247,11 +442,12 @@ void Observer(std::uint16_t* resolved, const playerkit::LoadContext& c) {
     LoadInput in;
     in.world = c.world; in.room = c.room; in.evtProgram = c.evtProgram;
     in.eventContext = c.eventContext; in.cutsceneState = c.cutsceneState;
-    const std::uint64_t packed = g_loadPlan.load(std::memory_order_acquire);
-    in.plan = static_cast<Plan>(packed & 0xFF);
-    in.intentWorld = static_cast<std::uint16_t>(packed >> 8);
-    in.intentRoom = static_cast<std::uint16_t>(packed >> 24);
-    in.intentEvt = static_cast<std::uint16_t>(packed >> 40);
+    PlanTable table {};
+    if (!g_planCell.Read(table)) g_tableMisses.fetch_add(1, std::memory_order_relaxed); // empty table: native load
+    const PlanChoice choice = SelectPlan(table, in.world, in.room, in.evtProgram);
+    if (choice.source == PlanSource::Hold) g_holdConsumed.store(choice.seq, std::memory_order_release); // B1: this load was the story's
+    in.plan = choice.plan; in.source = choice.source;
+    in.intentWorld = choice.world; in.intentRoom = choice.room; in.intentEvt = choice.evt;
     in.privateStatusReady = privatestatus::Ready();
     in.neutralInputReady = NeutralReady();
     bool ok = false;
@@ -275,12 +471,12 @@ void Observer(std::uint16_t* resolved, const playerkit::LoadContext& c) {
 void ObserverLog(playerkit::LogFn log) {
     if (!log || !g_requested.load(std::memory_order_acquire)) return;
     const auto& in = g_lastIn;
-    log("[partynative] load world=%u room=%u evt=%u eventCtx=%d cutscene=%d private=%u neutral=%u intent=%02X/%02X/%u row=%02X/%02X/%02X/%02X native=0x%X/0x%X/0x%X plan=%s result=%s set=0x%X/0x%X loads=%u applied=%u",
+    log("[partynative] load world=%u room=%u evt=%u eventCtx=%d cutscene=%d private=%u neutral=%u intent=%02X/%02X/%u row=%02X/%02X/%02X/%02X native=0x%X/0x%X/0x%X plan=%s result=%s set=0x%X/0x%X loads=%u applied=%u source=%s misses=%u",
         in.world, in.room, in.evtProgram, in.eventContext != 0, in.cutsceneState, in.privateStatusReady ? 1u : 0u,
         in.neutralInputReady ? 1u : 0u, in.intentWorld & 0xFF, in.intentRoom & 0xFF, in.intentEvt, in.row[0], in.row[1], in.row[2], in.row[3],
         in.resolved[0], in.resolved[1], in.resolved[2], PlanName(in.plan), g_lastOk ? LoadName(g_lastResult) : "fault",
         g_lastResult == Load::Applied ? SORA : in.resolved[1], g_lastResult == Load::Applied ? SORA : in.resolved[2],
-        g_loads, g_appliedLoads);
+        g_loads, g_appliedLoads, PlanSourceName(in.source), g_tableMisses.load(std::memory_order_relaxed));
 }
 
 bool Enabled(const char* name) { char v[2] {}; return GetEnvironmentVariableA(name, v, 2) == 1 && v[0] == '1'; }
@@ -309,7 +505,7 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
     }
     playerkit::SetResolveObserver(&Observer, &ObserverLog);
     g_requested.store(true, std::memory_order_release);
-    if (log) log("[partynative] requested: GoA 04/1A only, layout '3 players, no NPCs' -> members 1/2 = Sora on the next qualified load of the layout's own room; party row and MEMT never written");
+    if (log) log("[partynative] requested: pinned rooms 04/1A and 04/0A, layout/intent '3 players, no NPCs' -> members 1/2 = Sora on the next qualified load of a planned room; party row and MEMT never written");
     return true;
 }
 
@@ -339,8 +535,9 @@ void NoteLayout(const PartyLayout& layout, std::uint8_t localSlot, std::uint32_t
     }
     const Accept a = AcceptLayout(g_intent, layout, localSlot, generation, roster);
     if (a == Accept::Accepted) PublishIntent();
-    if (own && g_hostLast.any && SameTuple(layout.location, g_hostLast.location) && layout.connections == g_hostLast.roster)
-        g_hostLast.echoed = true;
+    if (own && g_hostLast.any && SameTuple(layout.location, g_hostLast.location) && layout.connections == g_hostLast.roster &&
+        EchoConfirms(a, layout.version, g_hostLast.version))
+        g_hostLast.echoed = true; // B2: only an adopted (or already adopted) echo stops the re-sends
     const bool applied = g_applied.load(std::memory_order_acquire) && AppliedClones() == 2;
     const Plan want = a == Accept::Accepted ? g_intent.plan : Plan::None;
     const bool match = (want == Plan::TwoClones) == applied;
@@ -355,6 +552,70 @@ void NoteLayout(const PartyLayout& layout, std::uint8_t localSlot, std::uint32_t
               a == Accept::Accepted && !match ? " reapply-needed: the next qualified load of this room applies the plan" : "");
 }
 
+void NoteIntent(const PartyIntent& m, std::uint8_t localSlot, std::uint32_t generation,
+                const std::array<std::uint64_t, 3>& roster, bool own) {
+    if (!Requested()) return;
+    if (own && !LocallyReady()) {
+        if (g_log) g_log("[partynative] intent version=%llu own=1 NOT adopted: host not locally ready",
+                         static_cast<unsigned long long>(m.version));
+        return;
+    }
+    const Accept a = AcceptIntent(g_intent, m, localSlot, generation, roster);
+    if (a == Accept::Accepted) PublishIntent();
+    if (own)
+        for (unsigned i = 0; i < INTENT_ROOMS.size(); ++i)
+            if (INTENT_ROOMS[i] == m.target && g_hostIntent[i].any && g_hostIntent[i].roster == m.connections &&
+                IntentEchoConfirms(g_intent, a, m.target, g_hostIntent[i].version))
+                g_hostIntent[i].echoed = true; // B2: a refused echo keeps the re-sends going
+    if (g_log)
+        g_log("[partynative] intent version=%llu own=%u target=%02X/%02X/%u rule=%u seats=%u:%u,%u:%u kits=0x%X/0x%X local=%u plan=%s accept=%s",
+              static_cast<unsigned long long>(m.version), own ? 1u : 0u, m.target.worldId, m.target.roomId, m.target.eventProgram,
+              static_cast<unsigned>(m.rule), static_cast<unsigned>(m.seats[1].kind), m.seats[1].playerSlot,
+              static_cast<unsigned>(m.seats[2].kind), m.seats[2].playerSlot, m.kits[1], m.kits[2], localSlot,
+              PlanName(a == Accept::Accepted ? ProjectIntent(m, localSlot) : Plan::None), AcceptName(a));
+}
+
+bool HostIntentToPublish(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, PartyIntent& out) {
+    if (!LocallyReady()) return false;
+    const auto now = GetTickCount64();
+    for (unsigned i = 0; i < INTENT_ROOMS.size(); ++i) {
+        if (!HostIntentDue(g_hostIntent[i], generation, roster, now)) continue;
+        if (HoldCovers(g_intent, INTENT_ROOMS[i].worldId, INTENT_ROOMS[i].roomId)) continue; // B1: never override a story hold
+        if (StoryVisitCovers(g_storyVisit, INTENT_ROOMS[i].worldId, INTENT_ROOMS[i].roomId)) continue; // F1: nor during the held visit
+        if (g_hostIntentVersion == UINT64_MAX) return false;
+        RoomTransition room {}; room.epoch = 1; room.worldId = INTENT_ROOMS[i].worldId; room.roomId = INTENT_ROOMS[i].roomId;
+        room.eventProgram = INTENT_ROOMS[i].eventProgram;
+        const auto layout = defaultPartyLayout(room, g_hostIntentVersion + 1, PartyApplyReason::HostChoice, PinnedRule(room), 0, roster, {1, 2});
+        if (!layout) continue;
+        PartyIntent m {};
+        m.version = g_hostIntentVersion + 1; m.connections = roster; m.target = INTENT_ROOMS[i]; m.rule = layout->rule; m.seats = layout->seats;
+        for (unsigned s = 1; s < 3; ++s) m.kits[s] = m.seats[s].kind == PartyMemberKind::RemotePlayer ? SORA : 0;
+        if (!validPartyIntent(m, roster)) continue;
+        out = m;
+        return true;
+    }
+    return false;
+}
+
+void NoteHostIntentSent(const PartyIntent& m, std::uint32_t generation) {
+    if (!Requested()) return;
+    g_hostIntentVersion = m.version;
+    for (unsigned i = 0; i < INTENT_ROOMS.size(); ++i) {
+        if (!(INTENT_ROOMS[i] == m.target)) continue;
+        auto& last = g_hostIntent[i];
+        const bool same = last.any && last.generation == generation && last.roster == m.connections;
+        last.resends = same ? last.resends + 1 : 0;
+        last.generation = generation; last.roster = m.connections; last.version = m.version; last.sentMs = GetTickCount64();
+        last.any = true; last.echoed = false;
+        if (last.resends >= HOST_ECHO_MAX_RESENDS && g_log)
+            g_log("[partynative] ECHO MISSING: host intent version=%llu for %02X/%02X not echoed after %u re-sends",
+                  static_cast<unsigned long long>(m.version), m.target.worldId, m.target.roomId, HOST_ECHO_MAX_RESENDS);
+    }
+    if (g_log)
+        g_log("[partynative] host sent intent version=%llu target=%02X/%02X/%u; adopted only when the relay echoes it",
+              static_cast<unsigned long long>(m.version), m.target.worldId, m.target.roomId, m.target.eventProgram);
+}
+
 void NoteReapply(const PartyReapply& reapply, std::uint32_t generation) {
     if (!Requested()) return;
     const Reapply r = ApplyReapply(g_intent, reapply, generation);
@@ -363,24 +624,38 @@ void NoteReapply(const PartyReapply& reapply, std::uint32_t generation) {
         g_log("[partynative] reapply reason=%u afterVersion=%llu room=%02X/%02X epoch=%u result=%s%s",
               static_cast<unsigned>(reapply.reason), static_cast<unsigned long long>(reapply.afterVersion),
               reapply.location.worldId, reapply.location.roomId, reapply.location.epoch, ReapplyName(r),
-              r == Reapply::Cleared ? "; the next load resolves natively until a newer layout" : "");
+              r != Reapply::Cleared ? ""
+              : reapply.reason == PartyApplyReason::StoryForced ? "; story hold: the next load of this room resolves natively, then stored intents apply again"
+                                                                : "; layout and intents retired: the next load resolves natively until a newer layout or intent");
 }
 
 void Observe(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot,
              bool bridgeOpen) {
     if (!Requested()) return;
-    if (ObserveSession(g_intent, generation, roster, localSlot, bridgeOpen)) {
-        PublishIntent();
-        if (g_log) g_log("[partynative] intent cleared generation=%u local=%u bridge=%u; the next load resolves natively",
-                         generation, localSlot, bridgeOpen ? 1u : 0u);
-    } else if (g_intent.plan == Plan::None) {
-        PublishIntent();
+    const unsigned layoutBefore = g_intent.plan != Plan::None ? 1u : 0u, intentsBefore = IntentCount(g_intent);
+    const unsigned holdBefore = g_intent.hold.valid ? 1u : 0u;
+    if (ObserveSession(g_intent, generation, roster, localSlot, bridgeOpen) && g_log)
+        g_log("[partynative] intent cleared generation=%u local=%u bridge=%u layout=%u intents=%u hold=%u; the next load resolves natively",
+              generation, localSlot, bridgeOpen ? 1u : 0u, layoutBefore, intentsBefore, holdBefore); // N4: counts
+    const StoryHold hold = g_intent.hold;
+    if (ReleaseHold(g_intent, g_holdConsumed.load(std::memory_order_acquire))) {
+        g_storyVisit = {true, hold.world, hold.room, 0}; g_storyQuietLogged = false; // F1: the host stays quiet for this visit
+        if (g_log)
+            g_log("[partynative] story hold released room=%02X/%02X evt=%u after one native load; stored intents apply again; host publishes nothing for this room until its next epoch",
+                  hold.world & 0xFF, hold.room & 0xFF, hold.evt);
     }
+    PublishIntent(); // publishes only on a change
 }
 
 bool HostLayoutToPublish(std::uint32_t generation, const RoomTransition& location,
                          const std::array<std::uint64_t, 3>& roster, PartyLayout& out) {
     if (!LocallyReady()) return false; // R2
+    if (StorySuppresses(g_storyVisit, g_intent, location)) { // F1: never supersede a client's story hold
+        if (!g_storyQuietLogged && g_log)
+            g_log("[partynative] host layout suppressed room=%02X/%02X epoch=%u: story hold or held visit", location.worldId, location.roomId, location.epoch);
+        g_storyQuietLogged = true;
+        return false;
+    }
     if (HostEchoGivenUp(g_hostLast, generation, location, roster)) {
         if (!g_echoGiveUpLogged && g_log)
             g_log("[partynative] ECHO MISSING: host layout version=%llu for %02X/%02X epoch=%u not echoed after %u re-sends; the host stays native (clients may apply: asymmetric)",
@@ -415,6 +690,10 @@ void NoteHostSent(const PartyLayout& layout, std::uint32_t generation) {
     g_hostLast.reason = layout.reason;
     g_hostLast.any = true;
     g_hostLast.echoed = false;
+    // S2: each room-change layout re-arms the pinned-room intents (fresh versions), so a client that
+    // lost its store is repaired at the next transition. Two extra reliable packets per transition.
+    if (!same && layout.reason == PartyApplyReason::RoomChanged)
+        for (auto& h : g_hostIntent) h.any = false;
     if (g_log)
         g_log("[partynative] host sent version=%llu reason=%u room=%02X/%02X epoch=%u resend=%u; adopted only when the relay echoes it",
               static_cast<unsigned long long>(layout.version), static_cast<unsigned>(layout.reason),

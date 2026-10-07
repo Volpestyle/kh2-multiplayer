@@ -110,7 +110,7 @@ bool Profile(Stamp& s) {
 // load, and the native save row is the untouched DEFAULT row (never written by us).
 bool PartyProfile(Stamp& s) {
     std::array<std::uint8_t,4> row{},magic{};
-    return partynative::AppliedClones()==PartyClones && StampNow(s) && s.now[0]==4 && s.now[1]==0x1A &&
+    return partynative::AppliedClones()==PartyClones && StampNow(s) && s.now[0]==4 && (s.now[1]==0x1A || s.now[1]==0x0A) && // VUH-1786: 04/0A
         Read(g_base+0x9A98B0,magic) && magic==std::array<std::uint8_t,4>{'K','H','2','J'} &&
         Read(g_base+0x9A98B0+0x3534+4*4,row) && row==partynative::DEFAULT_ROW;
 }

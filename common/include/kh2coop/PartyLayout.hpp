@@ -35,6 +35,25 @@ struct PartyReapply {
     std::uint64_t afterVersion{0};
     PartyApplyReason reason{PartyApplyReason::RoomChanged};
 };
+// VUH-1786: the host's intended party for one TARGET room, published before the
+// room loads (the per-load resolver runs before a room-pinned PartyLayout can
+// exist). Room-independent: no epoch/door. Own version namespace per host
+// connection. kits: objentry per seat; seat0 = 0; a remote-player seat must be
+// Sora (per-seat kits are later work); AI/empty seats = 0.
+struct PartyIntentTarget {
+    std::uint16_t worldId{0}, roomId{0}, eventProgram{0};
+    bool operator==(const PartyIntentTarget&) const = default;
+};
+inline constexpr std::uint16_t PARTY_INTENT_KIT_SORA = 0x54;
+inline constexpr std::size_t PARTY_INTENT_PAYLOAD = 63;
+struct PartyIntent {
+    std::uint64_t version{0};
+    std::array<std::uint64_t,3> connections{};
+    PartyIntentTarget target{};
+    PartyRule rule{PartyRule::Unavailable};
+    std::array<PartyMember,3> seats{};
+    std::array<std::uint16_t,3> kits{};
+};
 inline bool partyForcedAlly(PartyRule r) {
     return r==PartyRule::WorldIn || r==PartyRule::WorldFixed || r==PartyRule::WorldOnly;
 }
@@ -76,6 +95,21 @@ inline bool validPartyLayout(const PartyLayout& p, const std::array<std::uint64_
     const unsigned players=unsigned(roster[1]!=0)+unsigned(roster[2]!=0);
     const unsigned capacity=unsigned((free&2)!=0)+unsigned((free&4)!=0);
     return occupiedPlayers==(std::min)(players,capacity); // no AI/empty displaces a legal player
+}
+// Same seat policy as a PartyLayout for the target room, plus the kit rule.
+inline bool validPartyIntent(const PartyIntent& m, const std::array<std::uint64_t,3>& roster) {
+    PartyLayout probe{};
+    probe.location.epoch=1; probe.location.worldId=m.target.worldId; probe.location.roomId=m.target.roomId;
+    probe.location.eventProgram=m.target.eventProgram;
+    probe.version=m.version; probe.connections=m.connections; probe.rule=m.rule; probe.reason=PartyApplyReason::HostChoice;
+    probe.seats=m.seats;
+    if(!validPartyLayout(probe,roster) || m.target.worldId==0xFFFF || m.target.roomId==0xFFFF)return false;
+    if(m.kits[0]!=0)return false;
+    for(unsigned i=1;i<3;++i){
+        const bool player=m.seats[i].kind==PartyMemberKind::RemotePlayer;
+        if(player ? m.kits[i]!=PARTY_INTENT_KIT_SORA : m.kits[i]!=0)return false;
+    }
+    return true;
 }
 inline std::optional<PartyLayout> defaultPartyLayout(RoomTransition room, std::uint64_t version,
         PartyApplyReason reason, PartyRule rule, std::uint32_t forcedAllyObject,

@@ -181,7 +181,7 @@ void SlotAndConcurrency() {
     Check(AVATAR_BRIDGE_VERSION == 4 && sizeof(hudnames::Roster) == 112 && sizeof(hudnames::Slot) == 128 &&
           offsetof(AvatarBridgeLayout, rosterNames) == offsetof(AvatarBridgeLayout, puppets) +
               sizeof(AvatarBridgeLayout::puppets), "v4 preserves roster layout before new downed slot");
-    Check(PROTOCOL_VERSION == 13, "network protocol13 (v12 party contract plus v13 EnemyMotion)");
+    Check(PROTOCOL_VERSION == 14, "network protocol14 (v12 party contract, v13 EnemyMotion, v14 PartyIntent)");
     std::printf("ABI avatarVersion=%u layoutBytes=%zu rosterOffset=%zu rosterPayload=%zu rosterSlot=%zu protocol=%u\n",
         AVATAR_BRIDGE_VERSION, sizeof(AvatarBridgeLayout), offsetof(AvatarBridgeLayout, rosterNames),
         sizeof(hudnames::Roster), sizeof(hudnames::Slot), PROTOCOL_VERSION);

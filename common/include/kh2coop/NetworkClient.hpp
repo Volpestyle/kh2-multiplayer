@@ -66,6 +66,7 @@ struct ClientCallbacks {
     std::function<void(const ReviveRequest&)> onReviveRequest;
     std::function<void(const PartyLayout&)> onPartyLayout;
     std::function<void(const PartyReapply&)> onPartyReapply;
+    std::function<void(const PartyIntent&)> onPartyIntent; // VUH-1786
     std::function<void(const ProgressUpdate&)> onProgressUpdate;
     std::function<void(const DesyncNotice&)> onDesyncNotice;
     std::function<void(const DesyncCaptureRequest&)> onDesyncCaptureRequest;
@@ -141,6 +142,9 @@ public:
     bool sendPartyLayout(const PartyLayout& m);
     bool requestPartyReapply(const PartyReapply& m); // host story-forced change only
     const std::optional<PartyLayout>& partyLayout() const { return partyLayout_; }
+    bool sendPartyIntent(const PartyIntent& m); // host only (VUH-1786)
+    // Admitted host intents, one per target room (empty when unavailable).
+    const std::vector<PartyIntent>& partyIntents() const { return partyIntents_; }
     void sendTransitionAck(const TransitionAck& m);
     void sendProgressUpdate(const ProgressUpdate& m); // host only
     void sendStateHash(const StateHash& m);
@@ -321,6 +325,8 @@ private:
     std::uint32_t avatarSeq_{0};
     std::optional<PartyLayout> partyLayout_;
     std::uint64_t partyVersion_{0};
+    std::vector<PartyIntent> partyIntents_; // VUH-1786, one per target, roster-pinned
+    std::uint64_t partyIntentVersion_{0};
     AvatarState reviveLocal_{};
     std::uint64_t reviveLocalMs_{0}, receivedReviveEpisode_{0};
 };
