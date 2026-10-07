@@ -739,11 +739,16 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                m.scope.targetConnectionId!=worldBinding_->selfConnectionId ||
                m.scope.targetDeliverySerial!=worldBinding_->deliverySerial) return;
             bool source=false;for(std::size_t i=0;i<3;++i)if(avatarConnections_[i]&&avatarConnections_[i]==m.scope.sourceConnectionId&&m.scope.sourceDeliverySerial==remoteDeliverySerials_[i])source=true;
-            if(!source)return;
             const auto inner=static_cast<PacketType>(m.packet.front());
+            // VUH-1504 hop log (diagnostic only, bounded): envelope-level drops of a ReviveRequest.
+            static unsigned reviveEnvelopeLogs = 0;
+            const auto reviveDrop = [&](const char* why) {
+                if (inner == PacketType::ReviveRequest && reviveEnvelopeLogs < 32) { ++reviveEnvelopeLogs; log(std::string("[revive-hop] envelope drop reason=") + why); }
+            };
+            if(!source){reviveDrop("source-not-roster-or-delivery");return;}
             if(m.scope.sourceConnectionId==avatarConnections_[0] && m.scope.kind==WorldSourceKind::Native && inner!=PacketType::DesyncNotice &&
-               (!m.scope.hostSourceSerial || m.scope.hostSourceSerial<=worldSourceFloor_))return;
-            if(worldQuarantined_ && !isEphemeralWorldPacket(inner))return;
+               (!m.scope.hostSourceSerial || m.scope.hostSourceSerial<=worldSourceFloor_)){reviveDrop("host-source-floor");return;}
+            if(worldQuarantined_ && !isEphemeralWorldPacket(inner)){reviveDrop("quarantined");return;}
             onReceive(m.packet.data(),m.packet.size(),reliable,&m.scope,data,size);return;
         }
         if (isEphemeralWorldPacket(type))
@@ -802,8 +807,38 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 reviveLocal_.hp != 0 || reviveLocal_.downedDelivery != deliverySerial() || reviveLocal_.downedEpoch != revive.location.epoch ||
                 reviveLocal_.worldId != revive.location.worldId || reviveLocal_.roomId != revive.location.roomId ||
                 !revive.targetEpisode || revive.targetEpisode != reviveLocal_.downedEpisode ||
-                revive.targetEpisode <= receivedReviveEpisode_) return;
+                revive.targetEpisode <= receivedReviveEpisode_) {
+                // VUH-1504 hop log (diagnostic only, bounded): name the first failing check.
+                static unsigned reviveDropLogs = 0;
+                if (reviveDropLogs < 32) {
+                    ++reviveDropLogs;
+                    const char* why = !admittedScope ? "no-scope" : !hostRoom_ ? "no-host-room" :
+                        !sameResyncRoom(revive.location,*hostRoom_) ? "room-mismatch" :
+                        revive.targetSlot != avatarLocalSlot_ ? "not-our-slot" :
+                        revive.requesterSlot >= 3 || revive.requesterSlot == avatarLocalSlot_ ? "requester-slot" :
+                        !revive.seq ? "sequence" :
+                        !revive.requesterConnectionId || revive.requesterConnectionId != avatarConnections_[revive.requesterSlot] ||
+                            admittedScope->sourceConnectionId != revive.requesterConnectionId ? "requester-connection" :
+                        !revive.targetConnectionId || revive.targetConnectionId != avatarConnections_[avatarLocalSlot_] ? "target-connection" :
+                        !reviveLocalMs_ || now < reviveLocalMs_ || now-reviveLocalMs_ > REVIVE_AVATAR_MAX_AGE_MS ? "local-avatar-stale" :
+                        !(reviveLocal_.flags & AvatarDowned) ? "local-not-downed" :
+                        (reviveLocal_.flags & AvatarInCutscene) ? "local-in-cutscene" :
+                        reviveLocal_.hp != 0 ? "local-hp-nonzero" :
+                        reviveLocal_.downedDelivery != deliverySerial() ? "local-delivery" :
+                        reviveLocal_.downedEpoch != revive.location.epoch ? "local-epoch" :
+                        reviveLocal_.worldId != revive.location.worldId || reviveLocal_.roomId != revive.location.roomId ? "local-room" :
+                        !revive.targetEpisode || revive.targetEpisode != reviveLocal_.downedEpisode ? "episode-mismatch" : "episode-already-received";
+                    log(std::string("[revive-hop] target drop reason=") + why + " hp=" + std::to_string(reviveLocal_.hp) +
+                        " flags=" + std::to_string(reviveLocal_.flags) + " episode=" + std::to_string(revive.targetEpisode) +
+                        " localEpisode=" + std::to_string(reviveLocal_.downedEpisode));
+                }
+                return;
+            }
             receivedReviveEpisode_ = revive.targetEpisode;
+            {
+                static unsigned reviveDeliverLogs = 0;
+                if (reviveDeliverLogs < 32) { ++reviveDeliverLogs; log("[revive-hop] target deliver episode=" + std::to_string(revive.targetEpisode) + " seq=" + std::to_string(revive.seq)); }
+            }
             reader = ByteReader(payload,payloadSize);
         }
 

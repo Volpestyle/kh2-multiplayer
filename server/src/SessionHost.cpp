@@ -853,11 +853,31 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
 
             case PacketType::ReviveRequest: {
                 ReviveRequest request; read(reader,request);
+                // VUH-1504 hop log (diagnostic only, bounded per process): every refusal names its reason.
+                static unsigned reviveLogs = 0;
+                const auto reviveRefuse = [&](const char* why) {
+                    if (reviveLogs < 32) {
+                        ++reviveLogs;
+                        log(std::string("ReviveRequest refused reason=") + why + " requester=" +
+                            std::to_string(static_cast<int>(ps->assignedSlot)) + " target=" +
+                            std::to_string(request.targetSlot) + " seq=" + std::to_string(request.seq) +
+                            " episode=" + std::to_string(request.targetEpisode));
+                    }
+                    ++rejectedWorld_;
+                };
                 if (ps->status != PeerStatus::Verified || ps->worldQuarantined || !admittedScope ||
                     !room_ || !room_->epoch || !sameResyncRoom(request.location,*room_) ||
                     (hold_ && hold_->active) || !request.seq || request.seq <= ps->lastReviveSeq ||
                     request.requesterConnectionId != ps->connectionId || request.targetSlot >= 3 ||
-                    request.targetSlot == static_cast<std::uint8_t>(ps->assignedSlot)) { ++rejectedWorld_; return; }
+                    request.targetSlot == static_cast<std::uint8_t>(ps->assignedSlot)) {
+                    reviveRefuse(ps->status != PeerStatus::Verified || ps->worldQuarantined ? "requester-not-verified-or-quarantined" :
+                                 !admittedScope ? "no-scope" : !room_ || !room_->epoch ? "no-room" :
+                                 !sameResyncRoom(request.location,*room_) ? "room-mismatch" :
+                                 (hold_ && hold_->active) ? "event-hold" :
+                                 !request.seq || request.seq <= ps->lastReviveSeq ? "sequence" :
+                                 request.requesterConnectionId != ps->connectionId ? "requester-connection" : "target-slot");
+                    return;
+                }
                 // Consume authenticated sequence even on gameplay refusal; it
                 // cannot become valid later after a peer moves or becomes downed.
                 ps->lastReviveSeq = request.seq;
@@ -883,7 +903,26 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     !(target->reviveAvatar.flags & AvatarDowned) || target->reviveAvatar.hp!=0 ||
                     !request.targetEpisode || request.targetEpisode!=target->reviveAvatar.downedEpisode ||
                     request.targetEpisode<=target->revivedEpisode || !reviveInRange(ps->reviveAvatar,target->reviveAvatar)) {
-                    ++rejectedWorld_; return;
+                    std::string why = target==peers_.end() ? "target-missing" :
+                        !arrived(*ps) ? "requester-not-arrived" : !arrived(*target) ? "target-not-arrived" :
+                        (ps->reviveAvatar.flags & AvatarDowned) || ps->reviveAvatar.hp<=0 ? "requester-not-alive" :
+                        !(target->reviveAvatar.flags & AvatarDowned) ? "target-not-downed" :
+                        target->reviveAvatar.hp!=0 ? "target-hp-nonzero" :
+                        !request.targetEpisode || request.targetEpisode!=target->reviveAvatar.downedEpisode ? "episode-mismatch" :
+                        request.targetEpisode<=target->revivedEpisode ? "episode-reserved" : "out-of-range";
+                    if (target!=peers_.end()) {
+                        const auto& a = ps->reviveAvatar; const auto& b = target->reviveAvatar;
+                        why += " reqAgeMs=" + std::to_string(ps->reviveAvatarMs ? now-ps->reviveAvatarMs : 0) +
+                               " tgtAgeMs=" + std::to_string(target->reviveAvatarMs ? now-target->reviveAvatarMs : 0) +
+                               " reqAck=" + std::to_string(ps->ackArrived) + " tgtAck=" + std::to_string(target->ackArrived) +
+                               " tgtHp=" + std::to_string(b.hp) + " tgtFlags=" + std::to_string(b.flags) +
+                               " tgtEpisode=" + std::to_string(b.downedEpisode) + " tgtDelivery=" + std::to_string(b.downedDelivery) +
+                               "/" + std::to_string(target->deliverySerial) + " reqDelivery=" + std::to_string(a.downedDelivery) +
+                               "/" + std::to_string(ps->deliverySerial) + " reqEpoch=" + std::to_string(a.downedEpoch) +
+                               " roomEpoch=" + std::to_string(room_->epoch);
+                    }
+                    reviveRefuse(why.c_str());
+                    return;
                 }
                 target->revivedEpisode=request.targetEpisode; // reserve before send, no second teammate application
                 request.requesterSlot=static_cast<std::uint8_t>(ps->assignedSlot);

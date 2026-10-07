@@ -15,6 +15,7 @@
 #include "kh2coop/WorldBridge.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <stdexcept>
 #include <vector>
@@ -54,10 +55,20 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
     }
     std::vector<std::uint8_t> packet;
     ProducerWorldContext context;
+    // VUH-1504 hop log (diagnostic only, bounded): the DLL's ReviveRequest into NetworkClient.
+    static unsigned reviveHopLogs = 0;
+    const auto reviveHop = [](const std::vector<std::uint8_t>& p, const char* what) {
+        if (!p.empty() && p.front() == static_cast<std::uint8_t>(PacketType::ReviveRequest) && reviveHopLogs < 32) {
+            ++reviveHopLogs;
+            std::printf("[revive-hop] runtime dll->net %s bytes=%zu\n", what, p.size());
+            std::fflush(stdout);
+        }
+    };
     while (bridge.ReceiveFromDll(packet, context)) {
         if (!net.ready() || !context.generation || context.generation != bridge.SessionGeneration() ||
             !context.deliverySerial || context.deliverySerial != bridge.DeliverySerial() ||
             context.deliverySerial != net.deliverySerial()) {
+            reviveHop(packet, !net.ready() ? "retired:net-not-ready" : "retired:context-mismatch");
             ++stats.retiredOutgoing;
             continue;
         }
@@ -98,6 +109,7 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
                 const bool periodic = type == PacketType::EnemyHp || type == PacketType::StateHash ||
                                       isEphemeralWorldPacket(type);
                 submitted = net.sendNativeWorld(packet, context, !periodic);
+                reviveHop(packet, submitted ? "submitted" : "rejected:sendNativeWorld");
             }
             if (submitted) ++stats.toNet;
             else {
