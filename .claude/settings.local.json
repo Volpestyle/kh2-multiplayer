@@ -7,5 +7,10 @@
       "Bash(winget install:*)",
       "Bash(winget search:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "kh2ctl",
+    "cheatengine",
+    "ghidra"
+  ]
 }
