@@ -49,6 +49,10 @@ namespace playerkit {
 static bool g_blocks = false;
 static bool BlocksNativeSoraPuppets() { return g_blocks; }
 }  // namespace playerkit
+namespace partynative {
+static bool g_kits = false;
+static bool KitsActive() { return g_kits; }
+}  // namespace partynative
 #include "CloneNeutralInput.inl"
 }  // namespace inject
 }  // namespace kh2coop
@@ -196,6 +200,16 @@ static int Run(bool on) {
         CHECK(Q(clone + 0xDB8) == neutral && Q(clone2 + 0xDB8) == neutral);
         CHECK(cloneneutral::g_stats->neutralized == 2 && cloneneutral::g_stats->refusedPointer == 1 &&
               cloneneutral::g_stats->restored == 0);
+        {   // Party kits (rev3): a Roxas clone (90, P_EX110) is neutralized only while party kits are active.
+            const uintptr_t roxas = descriptor(0x1000400, 90, 0, "P_EX110");
+            const uintptr_t roxasClone = actor(9, roxas, entry0);
+            partynative::g_kits = false; cloneneutral::Gate(roxasClone);
+            CHECK(Q(roxasClone + 0xDB8) == entry0 && cloneneutral::g_stats->neutralized == 2);
+            partynative::g_kits = true; cloneneutral::Gate(roxasClone); cloneneutral::Gate(otherPlayer);
+            CHECK(Q(roxasClone + 0xDB8) == neutral && cloneneutral::g_stats->neutralized == 3);
+            CHECK(Q(otherPlayer + 0xDB8) == entry0);   // id 85 with P_EX110: still never a clone
+            partynative::g_kits = false;
+        }
         std::uint8_t zero[0x40] {};
         CHECK(std::memcmp(cloneneutral::g_neutral, zero, 0x40) == 0);
         CHECK(std::memcmp(cloneneutral::g_neutral + 0x40, entrySnapshot + 0x40, 0x28) == 0);

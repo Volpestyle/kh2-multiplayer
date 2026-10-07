@@ -62,7 +62,8 @@ Pending g_pending{}; // Only verified native diagnostic owner accesses this POD.
 // VUH-1519 party profile (two clones). Owner thread only, like g_pending. In a party stamp
 // every Sora built before the last is a clone: 3A7AF4 stores each player-class actor as
 // [2A105D0], so the last Sora built keeps the canonical pointer (VUH-1489 actor fix; on main
-// the player seat is built first). Only Sora (key 1) is promoted while per-seat kits are out.
+// the player seat is built first). Sora (key 1) always; Roxas (key 14) only with party kits, where
+// the canonical local may itself be Roxas and each clone's key must match the kit written for it.
 constexpr unsigned PartyClones=2;
 struct PartyPending { Stamp stamp{}; std::array<uintptr_t,PartyClones> actor{},status{}; std::array<std::uint64_t,PartyClones> serial{};
     std::array<int,PartyClones> key{}; unsigned claimed{},count{},builds{},canonicalFrames{}; bool open{},bound{}; };
@@ -72,7 +73,9 @@ PartyPending g_party{};
 // 8 stamp changed, 9 second raw566 while pending, 10 new stamp while pending.
 // Party profile: 11 stamp ended with unbound clones, 12 last Sora before both clones,
 // 13 extra Sora after binding, 14 clone record changed or not owned at binding,
-// 15 the canonical player holds a claimed private record (the third Sora never came).
+// 15 the canonical player holds a claimed private record (the third Sora never came),
+// 16 party kits: the clones' descriptor keys differ from the clone kits written (members 0/1), or the
+//    canonical local's key differs from this machine's expected own kit.
 std::atomic<unsigned> g_bindFault{};
 struct Event { unsigned kind{},thread{}; std::uint64_t serial{}; uintptr_t actor{},local{},status{},localStatus{}; int index{},hp{},localHp{};
     std::uint32_t factoryId{}; unsigned order{},role{},frame{}; }; // kind 4 (party build order) only
@@ -132,13 +135,21 @@ bool PartyProfile(Stamp& s) {
         Read(g_base+0x9A98B0+0x3534+4*4,row) && row==partynative::DEFAULT_ROW;
 }
 // Vanilla player-class descriptor with its status key: Sora (84, key 1) always; Roxas
-// (90, key 14, P_EX110) only while the remote kit member is active. Both keys are the
-// SAVE-bound player keys in 3C03F0. key==0 means "not a selectable clone descriptor".
+// (90, key 14, P_EX110) only while the remote kit member or party kits are active. Both keys
+// are the SAVE-bound player keys in 3C03F0. key==0 means "not a selectable clone descriptor".
+bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::KitsActive();}
+int KeyForKit(std::uint16_t kit) {return kit==partynative::SORA?1:kit==partynative::ROXAS?14:0;}
+// Party kits: the clones' key multiset equals the keys of the kits the observer wrote.
+bool PartyKeysMatch(const std::array<int,2>& keys) {
+    std::uint16_t m1=0,m2=0;if(!partynative::AppliedMembers(m1,m2))return false;
+    const int a=KeyForKit(m1),b=KeyForKit(m2);
+    return a && b && ((keys[0]==a && keys[1]==b) || (keys[0]==b && keys[1]==a));
+}
 int CloneDescriptorKey(uintptr_t p) {
     std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,8> name{};
     if(!Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || form!=0 || !Read(p+8,name))return 0;
     if(id==84 && key==1 && name==std::array<char,8>{'P','_','E','X','1','0','0',0})return 1;
-    if(playerkit::RemoteKitMemberActive() && id==90 && key==14 && name==std::array<char,8>{'P','_','E','X','1','1','0',0})return 14;
+    if(RoxasAllowed() && id==90 && key==14 && name==std::array<char,8>{'P','_','E','X','1','1','0',0})return 14;
     return 0;
 }
 bool SoraDescriptor(uintptr_t p) {return CloneDescriptorKey(p)==1;}
@@ -227,7 +238,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             if(!top->used || !result || result!=top->actor || !PlayerActor(result,actual,top->key) || actual!=top->status || !Owned(actual) ||
                !StampNow(after) || !Same(after,top->stamp))Fault();
             else if(top->candidate) {
-                if(g_party.count>=PartyClones || !Same(g_party.stamp,top->stamp) || top->key!=1)Fault();
+                if(g_party.count>=PartyClones || !Same(g_party.stamp,top->stamp) || (top->key!=1 && !(top->key==14 && partynative::KitsActive())))Fault();
                 else {const unsigned k=g_party.count++;g_party.actor[k]=top->actor;g_party.status[k]=top->status;g_party.serial[k]=top->serial;g_party.key[k]=top->key;
                     PublishBuild(++g_party.builds,top->factoryId,1,top->actor,top->serial);}
             }
@@ -241,7 +252,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             uintptr_t status=0,player=0;Stamp after{};unsigned reason=0;
             if(p.count!=PartyClones)reason=12;
             else if(!result || result==p.actor[0] || result==p.actor[1])reason=1;
-            else if(!SoraActor(result,status))reason=2;
+            else if(!PlayerActor(result,status,top->key))reason=2; // the canonical local, with its own kit's key
             else if(Owned(status))reason=3;
             else if(status==p.status[0] || status==p.status[1])reason=4;
             else {
@@ -249,6 +260,8 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
                     if(!PlayerActor(p.actor[k],clone,p.key[k]) || clone!=p.status[k] || !Owned(clone))reason=14;}
                 if(!reason && (!Read(g_base+PlayerRva,player) || player!=result))reason=7;
                 if(!reason && (!StampNow(after) || !Same(after,p.stamp)))reason=8;
+                if(!reason && !PartyKeysMatch(p.key))reason=16;
+                if(!reason && top->key!=KeyForKit(partynative::AppliedLocal()))reason=16; // rev2 S3: the canonical local is this machine's own kit
             }
             if(reason)BindFault(reason);
             else for(unsigned k=0;k<PartyClones;++k){Selection b{};b.serial=p.serial[k];b.actor=p.actor[k];b.status=p.status[k];b.local=result;b.localStatus=status;Publish(3,b);}
@@ -272,14 +285,15 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
     const DWORD error=GetLastError();const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     auto* parent=Current(anchor);Selection s{};
     if(parent && parent->candidate && !parent->selected && !parent->partyLocal && !parent->used && g_ready.load() &&
-       actor && form==0 && CloneDescriptorKey(descriptor)==1) { // Sora only (per-seat kits are not in this candidate)
+       actor && form==0 && (CloneDescriptorKey(descriptor)==1 || (CloneDescriptorKey(descriptor)==14 && partynative::KitsActive()))) {
+        const int k=CloneDescriptorKey(descriptor); // party kits: each build keeps its own descriptor's key
         Stamp now{};
         if(!StampNow(now) || !Same(now,parent->stamp) || !g_party.open || !Same(now,g_party.stamp))Fault();
         else if(g_party.bound)BindFault(13); // a fourth Sora: stays ordinary (shared), profile fails
         else if(g_party.claimed<PartyClones) {
-            if(HasFreeRecord()){++g_party.claimed;parent->selected=true;parent->key=1;parent->serial=g_serial.fetch_add(1)+1;}
+            if(HasFreeRecord()){++g_party.claimed;parent->selected=true;parent->key=k;parent->serial=g_serial.fetch_add(1)+1;}
             else Fault();
-        } else parent->partyLocal=true;
+        } else {parent->partyLocal=true;parent->key=k;}
     }
     if(parent && parent->selected && !parent->constructor && !parent->used && g_ready.load()) {
         Stamp now{};

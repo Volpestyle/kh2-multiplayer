@@ -38,13 +38,17 @@ struct PartyReapply {
 // VUH-1786: the host's intended party for one TARGET room, published before the
 // room loads (the per-load resolver runs before a room-pinned PartyLayout can
 // exist). Room-independent: no epoch/door. Own version namespace per host
-// connection. kits: objentry per seat; seat0 = 0; a remote-player seat must be
-// Sora (per-seat kits are later work); AI/empty seats = 0.
+// connection. kits: objentry per seat (party kits): the player in each seat shows its
+// owner's chosen kit. Seat 0 (the host's own player): 0 (legacy, = Sora), Sora or Roxas;
+// a remote-player seat: Sora or Roxas; AI/empty seats: 0. Other kits need their own
+// fixture first. Receivers without KH2COOP_PARTY_KITS refuse any non-Sora kit natively.
 struct PartyIntentTarget {
     std::uint16_t worldId{0}, roomId{0}, eventProgram{0};
     bool operator==(const PartyIntentTarget&) const = default;
 };
 inline constexpr std::uint16_t PARTY_INTENT_KIT_SORA = 0x54;
+inline constexpr std::uint16_t PARTY_INTENT_KIT_ROXAS = 0x5A; // P_EX110, the one qualified non-Sora kit
+inline bool partyKitAllowed(std::uint16_t kit) { return kit==PARTY_INTENT_KIT_SORA || kit==PARTY_INTENT_KIT_ROXAS; }
 inline constexpr std::size_t PARTY_INTENT_PAYLOAD = 63;
 struct PartyIntent {
     std::uint64_t version{0};
@@ -104,10 +108,10 @@ inline bool validPartyIntent(const PartyIntent& m, const std::array<std::uint64_
     probe.version=m.version; probe.connections=m.connections; probe.rule=m.rule; probe.reason=PartyApplyReason::HostChoice;
     probe.seats=m.seats;
     if(!validPartyLayout(probe,roster) || m.target.worldId==0xFFFF || m.target.roomId==0xFFFF)return false;
-    if(m.kits[0]!=0)return false;
+    if(m.kits[0]!=0 && !partyKitAllowed(m.kits[0]))return false; // 0 = legacy Sora (VUH-1786 hosts)
     for(unsigned i=1;i<3;++i){
         const bool player=m.seats[i].kind==PartyMemberKind::RemotePlayer;
-        if(player ? m.kits[i]!=PARTY_INTENT_KIT_SORA : m.kits[i]!=0)return false;
+        if(player ? !partyKitAllowed(m.kits[i]) : m.kits[i]!=0)return false;
     }
     return true;
 }

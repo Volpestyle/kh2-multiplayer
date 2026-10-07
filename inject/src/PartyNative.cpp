@@ -59,6 +59,7 @@ const char* LoadName(Load r) {
     case Load::ReadFault: return "read-fault";
     case Load::PrivateStatusUnavailable: return "private-status-unavailable";
     case Load::NeutralInputUnavailable: return "neutral-input-unavailable";
+    case Load::LocalKitMismatch: return "local-kit-mismatch";
     }
     return "?";
 }
@@ -166,18 +167,31 @@ Accept AcceptLayout(Intent& intent, const PartyLayout& layout, std::uint8_t loca
     return Accept::Accepted;
 }
 
-Plan ProjectIntent(const PartyIntent& m, std::uint8_t localSlot) {
+std::array<std::uint8_t, 2> OtherSlots(std::uint8_t localSlot) {
+    std::array<std::uint8_t, 2> out {0xFF, 0xFF}; unsigned n = 0;
+    for (std::uint8_t s = 0; s < 3; ++s) if (s != localSlot && n < 2) out[n++] = s;
+    return out;
+}
+std::uint8_t KitCode(std::uint16_t kit) { return kit == SORA || kit == 0 ? 0 : kit == ROXAS ? 1 : 3; }
+std::uint16_t KitFromCode(std::uint8_t code) { return code == 0 ? SORA : code == 1 ? ROXAS : 0; }
+
+Plan ProjectIntent(const PartyIntent& m, std::uint8_t localSlot, bool kitsAllowed) {
     PartyLayout probe {};
     probe.location.epoch = 1; probe.location.worldId = m.target.worldId; probe.location.roomId = m.target.roomId;
     probe.location.eventProgram = m.target.eventProgram;
     probe.version = m.version; probe.connections = m.connections; probe.rule = m.rule; probe.seats = m.seats;
-    for (unsigned i = 1; i < 3; ++i)
-        if (m.seats[i].kind == PartyMemberKind::RemotePlayer && m.kits[i] != SORA) return Plan::Unsupported; // Sora-only kits
+    for (unsigned i = 0; i < 3; ++i) {
+        const bool player = i == 0 || m.seats[i].kind == PartyMemberKind::RemotePlayer;
+        const std::uint16_t kit = i == 0 && m.kits[0] == 0 ? SORA : m.kits[i];
+        if (!player) continue;
+        if (KitCode(kit) > 1) return Plan::Unsupported;                // unqualified kit
+        if (kit != SORA && !kitsAllowed) return Plan::Unsupported;     // party kits off here: native
+    }
     return Project(probe, localSlot);
 }
 
 Accept AcceptIntent(Intent& intent, const PartyIntent& m, std::uint8_t localSlot,
-                    std::uint32_t generation, const std::array<std::uint64_t, 3>& roster) {
+                    std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, bool kitsAllowed) {
     if (!generation) return Accept::NoGeneration;
     if (localSlot > 2 || !roster[localSlot]) return Accept::LocalSlot;
     if (m.connections != roster) return Accept::RosterMismatch;
@@ -193,7 +207,15 @@ Accept AcceptIntent(Intent& intent, const PartyIntent& m, std::uint8_t localSlot
         slot = &intent.targets[0];
         for (auto& t : intent.targets) if (t.seq < slot->seq) slot = &t;
     }
-    *slot = {true, m.target, ProjectIntent(m, localSlot), m.version, ++intent.seq};
+    *slot = {true, m.target, ProjectIntent(m, localSlot, kitsAllowed), m.version, ++intent.seq};
+    // Party kits: the roster's kits, keyed by each seat's own network slot (newest intent wins).
+    std::array<std::uint16_t, 3> kits {SORA, SORA, SORA};
+    for (unsigned i = 0; i < 3; ++i) {
+        const auto& seat = m.seats[i];
+        const bool player = i == 0 || seat.kind == PartyMemberKind::RemotePlayer;
+        if (player && seat.playerSlot < 3) kits[seat.playerSlot] = i == 0 && m.kits[0] == 0 ? SORA : m.kits[i];
+    }
+    intent.slotKits = kits; intent.kitsKnown = true;
     if (HoldCovers(intent, m.target.worldId, m.target.roomId)) intent.hold = {}; // B1: a newer intent supersedes the hold
     return Accept::Accepted;
 }
@@ -205,14 +227,32 @@ std::uint64_t PlanKey(Plan p, std::uint16_t w, std::uint16_t r, std::uint16_t e,
 }
 } // namespace
 
-void PackPlanTable(const Intent& intent, PlanTable& out) {
+void PackPlanTable(const Intent& intent, PlanTable& out, bool kitsMode) {
     out = {};
-    if (intent.plan != Plan::None) out[0] = {PlanKey(intent.plan, intent.world, intent.room, intent.evt, PlanSource::Layout), intent.layoutSeq};
+    std::uint64_t kitBits = 0; // member 1, member 2, expected local member 0 for this machine
+    // Rev2 B1: a machine WITHOUT party kits never applies a roster that holds a non-Sora kit, through ANY
+    // entry (a later layout borrows the roster's kits). Kits off: no kit bits at all, so a legacy
+    // all-Sora roster stays bit-identical to VUH-1786.
+    bool foreignKits = false;
+    if (!kitsMode && intent.kitsKnown)
+        for (const auto k : intent.slotKits) if (k != SORA) foreignKits = true;
+    if (kitsMode && intent.kitsKnown && intent.localSlot < 3) {
+        const auto o = OtherSlots(intent.localSlot);
+        kitBits = (static_cast<std::uint64_t>(KitCode(intent.slotKits[o[0]]) & 3) << 48) |
+                  (static_cast<std::uint64_t>(KitCode(intent.slotKits[o[1]]) & 3) << 50) |
+                  (static_cast<std::uint64_t>(KitCode(intent.slotKits[intent.localSlot]) & 3) << 52);
+    }
+    if (intent.plan != Plan::None) {
+        // Party kits: a layout carries no kits; in kits mode it may only borrow the roster's kits.
+        const Plan p = intent.plan == Plan::TwoClones && ((kitsMode && !intent.kitsKnown) || foreignKits) ? Plan::Unsupported : intent.plan;
+        out[0] = {PlanKey(p, intent.world, intent.room, intent.evt, PlanSource::Layout) | kitBits, intent.layoutSeq};
+    }
     if (intent.hold.valid) out[1] = {PlanKey(Plan::None, intent.hold.world, intent.hold.room, intent.hold.evt, PlanSource::Hold), intent.hold.seq};
     for (unsigned i = 0; i < MAX_INTENT_TARGETS; ++i) {
         const auto& t = intent.targets[i];
         if (t.valid && t.plan != Plan::None)
-            out[2 + i] = {PlanKey(t.plan, t.target.worldId, t.target.roomId, t.target.eventProgram, PlanSource::Intent), t.seq};
+            out[2 + i] = {PlanKey(t.plan == Plan::TwoClones && foreignKits ? Plan::Unsupported : t.plan, t.target.worldId, t.target.roomId,
+                                  t.target.eventProgram, PlanSource::Intent) | kitBits, t.seq};
     }
 }
 
@@ -221,7 +261,9 @@ PlanChoice SelectPlan(const PlanTable& table, std::uint16_t world, std::uint16_t
         const auto source = static_cast<PlanSource>((v.key >> 40) & 0xFF);
         return PlanChoice {source == PlanSource::Hold ? Plan::None : static_cast<Plan>(v.key & 0xFF),
                            static_cast<std::uint16_t>((v.key >> 8) & 0xFF), static_cast<std::uint16_t>((v.key >> 16) & 0xFF),
-                           static_cast<std::uint16_t>((v.key >> 24) & 0xFFFF), source, v.seq};
+                           static_cast<std::uint16_t>((v.key >> 24) & 0xFFFF), source, v.seq,
+                           KitFromCode(static_cast<std::uint8_t>((v.key >> 48) & 3)), KitFromCode(static_cast<std::uint8_t>((v.key >> 50) & 3)),
+                           KitFromCode(static_cast<std::uint8_t>((v.key >> 52) & 3))};
     };
     PlanChoice best; bool found = false;
     for (const auto& v : table) {
@@ -307,7 +349,12 @@ Load Decide(const LoadInput& in) {
     if (!in.neutralInputReady) return Load::NeutralInputUnavailable;
     if (!in.rowRead) return Load::ReadFault;
     if (in.row != DEFAULT_ROW) return Load::RowNotDefault; // NO_FRIEND / guest / forced rows: native
-    if (in.resolved[0] != SORA || in.resolved[1] != DONALD || in.resolved[2] != GOOFY) return Load::NativeNotDefault;
+    if (in.resolved[1] != DONALD || in.resolved[2] != GOOFY) return Load::NativeNotDefault;
+    if (!in.kit1 || !in.kit2 || !in.localKit) return Load::Unsupported; // an invalid kit code
+    // Party kits: member 0 must already be this machine's own kit (PlayerKit writes it first in the
+    // same hook scope). Kits off: localKit is Sora, i.e. the VUH-1519 rule.
+    if (in.resolved[0] != in.localKit)
+        return in.resolved[0] == SORA || in.resolved[0] == ROXAS ? Load::LocalKitMismatch : Load::NativeNotDefault;
     return Load::Applied;
 }
 
@@ -320,17 +367,37 @@ Load ApplyAfterResolve(const LoadInput& in, std::uint16_t* resolved, Originals& 
     if (!resolved) return Load::ReadFault;
     if (resolved[0] != in.resolved[0] || resolved[1] != in.resolved[1] || resolved[2] != in.resolved[2])
         return Load::ChangedUnderUs; // never guess
-    original = {true, resolved[1], resolved[2]};
-    resolved[1] = SORA;
-    resolved[2] = SORA;
+    // Rev3: in a party stamp the game builds member 0 first (raw566, a clone), member 1 next (raw567, a clone)
+    // and member 2 LAST (raw568). Every player-class constructor stores the canonical pointer, so the local
+    // player is built from member 2 (live run 20261007-084248: a Roxas member 0 became a clone and a Roxas
+    // member 2 became the local). Members 0/1 = the other players' kits, member 2 = this machine's own kit.
+    // Kits off: all three are Sora, i.e. exactly the VUH-1519 write (member 0 untouched).
+    // R3-1: member 0's original is the PRE-KIT native value, so member 0 ends native in either shutdown order.
+    original = {true, in.native0 ? in.native0 : resolved[0], resolved[1], resolved[2], in.kit1, in.kit2, in.localKit};
+    if (resolved[0] != in.kit1) resolved[0] = in.kit1;
+    resolved[1] = in.kit2;
+    resolved[2] = in.localKit;
     return r;
 }
 
 void RestoreMembers(Originals& original, std::uint16_t* resolved) {
     if (!original.valid || !resolved) { original = {}; return; }
-    if (resolved[1] == SORA) resolved[1] = original.member1;
-    if (resolved[2] == SORA) resolved[2] = original.member2;
+    if (resolved[0] == original.set0) resolved[0] = original.member0; // only while still ours
+    if (resolved[1] == original.set1) resolved[1] = original.member1;
+    if (resolved[2] == original.set2) resolved[2] = original.member2;
     original = {};
+}
+
+bool HostKits(std::uint16_t ownKit, std::uint8_t localSlot, const RemoteKits& remote, std::array<std::uint16_t, 3>& kits) {
+    kits = {};
+    if (localSlot > 2 || KitCode(ownKit) > 1) return false;
+    kits[localSlot] = ownKit == 0 ? SORA : ownKit;
+    const auto o = OtherSlots(localSlot);
+    for (unsigned i = 0; i < 2; ++i) {
+        if (!remote.seen[i] || remote.roster[i] > 1) return false; // unknown or unsupported (dual-wield, Mickey)
+        kits[o[i]] = remote.roster[i] == 1 ? ROXAS : SORA;
+    }
+    return true;
 }
 
 PartyRule PinnedRule(const RoomTransition& l) {
@@ -363,10 +430,10 @@ bool HostShouldPublish(const HostPublished& last, std::uint32_t generation, cons
 }
 
 bool HostIntentDue(const HostPublished& last, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,
-                   std::uint64_t nowMs) {
+                   std::uint64_t nowMs, const std::array<std::uint16_t, 3>& kits) {
     if (!generation) return false;
     for (const auto c : roster) if (!c) return false;
-    if (!last.any || last.generation != generation || last.roster != roster) return true;
+    if (!last.any || last.generation != generation || last.roster != roster || last.kits != kits) return true;
     if (last.echoed || last.resends >= HOST_ECHO_MAX_RESENDS) return false;
     return nowMs - last.sentMs >= HOST_ECHO_RETRY_MS;
 }
@@ -413,10 +480,17 @@ LoadInput g_lastIn {};
 Load g_lastResult = Load::NoIntent;
 bool g_lastOk = false;
 std::uint32_t g_loads = 0, g_appliedLoads = 0;
+// Party kits.
+std::atomic<bool> g_kits {false};                 // KH2COOP_PARTY_KITS=1 accepted
+std::atomic<std::uint32_t> g_appliedSet {0};      // member1 | member2 << 16 of the last applied load
+std::atomic<std::uint16_t> g_appliedLocal {0};    // rev2 S3: the expected local member 0 of that load
+std::uint32_t g_kitsGeneration = 0; std::array<std::uint64_t, 3> g_kitsRoster {}; std::uint8_t g_kitsSlot = 0xFF; // rev2 S1
+RemoteKits g_remoteKits {};                       // game thread (PollPuppetPoses)
+bool g_kitsUnknownLogged = false;
 
 void PublishIntent() {
     PlanTable table {};
-    PackPlanTable(g_intent, table);
+    PackPlanTable(g_intent, table, g_kits.load(std::memory_order_acquire));
     bool same = g_publishedOnce;
     for (unsigned i = 0; same && i < PLAN_TABLE; ++i) same = table[i].key == g_lastPublished[i].key && table[i].seq == g_lastPublished[i].seq;
     if (same) return; // only real changes are published (the reader retries only around a write)
@@ -448,6 +522,8 @@ void Observer(std::uint16_t* resolved, const playerkit::LoadContext& c) {
     if (choice.source == PlanSource::Hold) g_holdConsumed.store(choice.seq, std::memory_order_release); // B1: this load was the story's
     in.plan = choice.plan; in.source = choice.source;
     in.intentWorld = choice.world; in.intentRoom = choice.room; in.intentEvt = choice.evt;
+    in.kit1 = choice.kit1; in.kit2 = choice.kit2; in.localKit = choice.localKit;
+    in.native0 = c.resolved0; // R3-1: PlayerKit captured it before its own member-0 write
     in.privateStatusReady = privatestatus::Ready();
     in.neutralInputReady = NeutralReady();
     bool ok = false;
@@ -461,6 +537,9 @@ void Observer(std::uint16_t* resolved, const playerkit::LoadContext& c) {
         g_original = {};
         r = Load::ReadFault;
     }
+    g_appliedSet.store(ok && r == Load::Applied ? static_cast<std::uint32_t>(in.kit1) | (static_cast<std::uint32_t>(in.kit2) << 16) : 0u,
+                       std::memory_order_release);
+    g_appliedLocal.store(ok && r == Load::Applied ? in.localKit : 0, std::memory_order_release);
     g_applied.store(ok && r == Load::Applied, std::memory_order_release);
     g_lastIn = in; g_lastResult = r; g_lastOk = ok;
     ++g_loads;
@@ -475,7 +554,7 @@ void ObserverLog(playerkit::LogFn log) {
         in.world, in.room, in.evtProgram, in.eventContext != 0, in.cutsceneState, in.privateStatusReady ? 1u : 0u,
         in.neutralInputReady ? 1u : 0u, in.intentWorld & 0xFF, in.intentRoom & 0xFF, in.intentEvt, in.row[0], in.row[1], in.row[2], in.row[3],
         in.resolved[0], in.resolved[1], in.resolved[2], PlanName(in.plan), g_lastOk ? LoadName(g_lastResult) : "fault",
-        g_lastResult == Load::Applied ? SORA : in.resolved[1], g_lastResult == Load::Applied ? SORA : in.resolved[2],
+        g_lastResult == Load::Applied ? in.kit1 : in.resolved[1], g_lastResult == Load::Applied ? in.kit2 : in.resolved[2],
         g_loads, g_appliedLoads, PlanSourceName(in.source), g_tableMisses.load(std::memory_order_relaxed));
 }
 
@@ -507,9 +586,18 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
         if (log) log("[partynative] REFUSED: requires KH2COOP_CLONE_NEUTRAL_INPUT=1 (undriven clones would execute the local player's field commands)");
         return false;
     }
+    if (flags.partyKits) { // party kits: exactly "1", and only on top of everything above
+        if (!Enabled("KH2COOP_PARTY_KITS")) {
+            if (log) log("[partynative] REFUSED: KH2COOP_PARTY_KITS is set but not exactly 1; no observer");
+            return false;
+        }
+        g_kits.store(true, std::memory_order_release);
+        if (log) log("[partynative] party kits: each seat shows its owner's chosen kit (Sora 0x54 or Roxas 0x5A); local kit 0x%X%s",
+                     flags.kit ? 0x5Au : 0x54u, flags.kit ? " (KH2COOP_PLAYER_KIT, checked by PlayerKit)" : "");
+    }
     playerkit::SetResolveObserver(&Observer, &ObserverLog);
     g_requested.store(true, std::memory_order_release);
-    if (log) log("[partynative] requested: pinned rooms 04/1A and 04/0A, layout/intent '3 players, no NPCs' -> members 1/2 = Sora on the next qualified load of a planned room; party row and MEMT never written");
+    if (log) log("[partynative] requested: pinned rooms 04/1A and 04/0A, layout/intent '3 players, no NPCs' -> members 1/2 = the other players' kits (Sora unless party kits) on the next qualified load of a planned room; party row and MEMT never written");
     return true;
 }
 
@@ -564,7 +652,7 @@ void NoteIntent(const PartyIntent& m, std::uint8_t localSlot, std::uint32_t gene
                          static_cast<unsigned long long>(m.version));
         return;
     }
-    const Accept a = AcceptIntent(g_intent, m, localSlot, generation, roster);
+    const Accept a = AcceptIntent(g_intent, m, localSlot, generation, roster, g_kits.load(std::memory_order_acquire));
     if (a == Accept::Accepted) PublishIntent();
     if (own)
         for (unsigned i = 0; i < INTENT_ROOMS.size(); ++i)
@@ -572,18 +660,28 @@ void NoteIntent(const PartyIntent& m, std::uint8_t localSlot, std::uint32_t gene
                 IntentEchoConfirms(g_intent, a, m.target, g_hostIntent[i].version))
                 g_hostIntent[i].echoed = true; // B2: a refused echo keeps the re-sends going
     if (g_log)
-        g_log("[partynative] intent version=%llu own=%u target=%02X/%02X/%u rule=%u seats=%u:%u,%u:%u kits=0x%X/0x%X local=%u plan=%s accept=%s",
+        g_log("[partynative] intent version=%llu own=%u target=%02X/%02X/%u rule=%u seats=%u:%u,%u:%u kits=0x%X/0x%X/0x%X local=%u plan=%s accept=%s",
               static_cast<unsigned long long>(m.version), own ? 1u : 0u, m.target.worldId, m.target.roomId, m.target.eventProgram,
               static_cast<unsigned>(m.rule), static_cast<unsigned>(m.seats[1].kind), m.seats[1].playerSlot,
-              static_cast<unsigned>(m.seats[2].kind), m.seats[2].playerSlot, m.kits[1], m.kits[2], localSlot,
-              PlanName(a == Accept::Accepted ? ProjectIntent(m, localSlot) : Plan::None), AcceptName(a));
+              static_cast<unsigned>(m.seats[2].kind), m.seats[2].playerSlot, m.kits[0], m.kits[1], m.kits[2], localSlot,
+              PlanName(a == Accept::Accepted ? ProjectIntent(m, localSlot, g_kits.load(std::memory_order_acquire)) : Plan::None), AcceptName(a));
 }
 
 bool HostIntentToPublish(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, PartyIntent& out) {
     if (!LocallyReady()) return false;
     const auto now = GetTickCount64();
+    // kits off: the VUH-1786 encoding, unchanged. NB: HostPublished.kits is compared seat-indexed and `kits`
+    // is slot-indexed; they coincide because the host is slot 0 and defaultPartyLayout seats slots {1, 2}.
+    std::array<std::uint16_t, 3> kits {0, SORA, SORA};
+    if (g_kits.load(std::memory_order_acquire) && !HostKits(playerkit::LocalKit(), 0, g_remoteKits, kits)) {
+        if (!g_kitsUnknownLogged && g_log)
+            g_log("[partynative] host intents withheld: party kits not known yet (seen=%u/%u roster=%u/%u)",
+                  g_remoteKits.seen[0] ? 1u : 0u, g_remoteKits.seen[1] ? 1u : 0u, g_remoteKits.roster[0], g_remoteKits.roster[1]);
+        g_kitsUnknownLogged = true;
+        return false;
+    }
     for (unsigned i = 0; i < INTENT_ROOMS.size(); ++i) {
-        if (!HostIntentDue(g_hostIntent[i], generation, roster, now)) continue;
+        if (!HostIntentDue(g_hostIntent[i], generation, roster, now, kits)) continue;
         if (HoldCovers(g_intent, INTENT_ROOMS[i].worldId, INTENT_ROOMS[i].roomId)) continue; // B1: never override a story hold
         if (StoryVisitCovers(g_storyVisit, INTENT_ROOMS[i].worldId, INTENT_ROOMS[i].roomId)) continue; // F1: nor during the held visit
         if (g_hostIntentVersion == UINT64_MAX) return false;
@@ -593,7 +691,9 @@ bool HostIntentToPublish(std::uint32_t generation, const std::array<std::uint64_
         if (!layout) continue;
         PartyIntent m {};
         m.version = g_hostIntentVersion + 1; m.connections = roster; m.target = INTENT_ROOMS[i]; m.rule = layout->rule; m.seats = layout->seats;
-        for (unsigned s = 1; s < 3; ++s) m.kits[s] = m.seats[s].kind == PartyMemberKind::RemotePlayer ? SORA : 0;
+        m.kits[0] = kits[0];
+        for (unsigned s = 1; s < 3; ++s)
+            m.kits[s] = m.seats[s].kind == PartyMemberKind::RemotePlayer && m.seats[s].playerSlot < 3 ? kits[m.seats[s].playerSlot] : 0;
         if (!validPartyIntent(m, roster)) continue;
         out = m;
         return true;
@@ -607,9 +707,10 @@ void NoteHostIntentSent(const PartyIntent& m, std::uint32_t generation) {
     for (unsigned i = 0; i < INTENT_ROOMS.size(); ++i) {
         if (!(INTENT_ROOMS[i] == m.target)) continue;
         auto& last = g_hostIntent[i];
-        const bool same = last.any && last.generation == generation && last.roster == m.connections;
+        const bool same = last.any && last.generation == generation && last.roster == m.connections && last.kits == m.kits;
         last.resends = same ? last.resends + 1 : 0;
         last.generation = generation; last.roster = m.connections; last.version = m.version; last.sentMs = GetTickCount64();
+        last.kits = m.kits; // party kits: HostIntentDue compares against what was sent
         last.any = true; last.echoed = false;
         if (last.resends >= HOST_ECHO_MAX_RESENDS && g_log)
             g_log("[partynative] ECHO MISSING: host intent version=%llu for %02X/%02X not echoed after %u re-sends",
@@ -636,6 +737,13 @@ void NoteReapply(const PartyReapply& reapply, std::uint32_t generation) {
 void Observe(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot,
              bool bridgeOpen) {
     if (!Requested()) return;
+    // Rev2 S1: a remote kit is the previous occupant's after any generation, roster, slot or bridge change.
+    if (!bridgeOpen || (generation != 0 && (generation != g_kitsGeneration || roster != g_kitsRoster || localSlot != g_kitsSlot))) {
+        if ((g_remoteKits.seen[0] || g_remoteKits.seen[1]) && g_log)
+            g_log("[partynative] remote kits reset (generation=%u local=%u bridge=%u): withheld until each new owner's pose", generation, localSlot, bridgeOpen ? 1u : 0u);
+        g_remoteKits = {}; g_kitsUnknownLogged = false;
+        g_kitsGeneration = bridgeOpen ? generation : 0; g_kitsRoster = bridgeOpen ? roster : std::array<std::uint64_t, 3>{}; g_kitsSlot = bridgeOpen ? localSlot : 0xFF;
+    }
     const unsigned layoutBefore = g_intent.plan != Plan::None ? 1u : 0u, intentsBefore = IntentCount(g_intent);
     const unsigned holdBefore = g_intent.hold.valid ? 1u : 0u;
     if (ObserveSession(g_intent, generation, roster, localSlot, bridgeOpen) && g_log)
@@ -654,6 +762,8 @@ void Observe(std::uint32_t generation, const std::array<std::uint64_t, 3>& roste
 bool HostLayoutToPublish(std::uint32_t generation, const RoomTransition& location,
                          const std::array<std::uint64_t, 3>& roster, PartyLayout& out) {
     if (!LocallyReady()) return false; // R2
+    { std::array<std::uint16_t, 3> kits {}; // party kits: never publish a (Sora-implied) layout before the kits are known
+      if (g_kits.load(std::memory_order_acquire) && !HostKits(playerkit::LocalKit(), 0, g_remoteKits, kits)) return false; }
     if (StorySuppresses(g_storyVisit, g_intent, location)) { // F1: never supersede a client's story hold
         if (!g_storyQuietLogged && g_log)
             g_log("[partynative] host layout suppressed room=%02X/%02X epoch=%u: story hold or held visit", location.worldId, location.roomId, location.epoch);
@@ -705,10 +815,44 @@ void NoteHostSent(const PartyLayout& layout, std::uint32_t generation) {
 }
 
 unsigned AppliedClones() {
-    if (!Requested() || !g_applied.load(std::memory_order_acquire)) return 0;
+    std::uint16_t m1 = 0, m2 = 0;
+    if (!AppliedMembers(m1, m2)) return 0;
     std::uint16_t members[3] {};
     if (!ReadBytes(g_base + RVA_RESOLVED, members, sizeof(members))) return 0;
-    return members[1] == SORA && members[2] == SORA ? 2u : 0u;
+    return members[0] == m1 && members[1] == m2 && members[2] == AppliedLocal() ? 2u : 0u; // still holds what this load wrote (rev3)
+}
+
+bool KitsActive() { return Requested() && g_kits.load(std::memory_order_acquire); }
+
+std::uint16_t AppliedLocal() {
+    std::uint16_t m1 = 0, m2 = 0;
+    return AppliedMembers(m1, m2) ? g_appliedLocal.load(std::memory_order_acquire) : 0;
+}
+
+bool AppliedMembers(std::uint16_t& member1, std::uint16_t& member2) {
+    member1 = member2 = 0;
+    if (!Requested() || !g_applied.load(std::memory_order_acquire)) return false;
+    const std::uint32_t v = g_appliedSet.load(std::memory_order_acquire);
+    member1 = static_cast<std::uint16_t>(v & 0xFFFF); member2 = static_cast<std::uint16_t>(v >> 16);
+    return member1 != 0 && member2 != 0;
+}
+
+std::uint16_t PuppetKit(int index) {
+    std::uint16_t m1 = 0, m2 = 0;
+    if (index < 0 || index > 1 || !AppliedMembers(m1, m2)) return 0;
+    return index == 0 ? m1 : m2;
+}
+
+void NoteRemoteKit(int index, std::uint8_t roster) {
+    if (index < 0 || index > 1 || !KitsActive()) return;
+    auto& k = g_remoteKits;
+    const bool change = !k.seen[static_cast<unsigned>(index)] || k.roster[static_cast<unsigned>(index)] != roster;
+    k.seen[static_cast<unsigned>(index)] = true; k.roster[static_cast<unsigned>(index)] = roster;
+    if (change) {
+        g_kitsUnknownLogged = false;
+        if (g_log) g_log("[partynative] remote kit puppet %d: roster %u (%s)", index, roster,
+                         roster == 0 ? "Sora 0x54" : roster == 1 ? "Roxas 0x5A" : "unsupported: no party kits plan");
+    }
 }
 
 void Shutdown() {
@@ -725,9 +869,10 @@ void Shutdown() {
         ok = false;
     }
     g_applied.store(false, std::memory_order_release);
+    g_remoteKits = {}; // rev2 S1
     if (g_log)
-        g_log("[partynative] shutdown: members 0x%X/0x%X -> 0x%X/0x%X ok=%u (live clones keep their actors until the next load)",
-              before[1], before[2], after[1], after[2], ok ? 1u : 0u);
+        g_log("[partynative] shutdown: members 0x%X/0x%X -> 0x%X/0x%X ok=%u member0 0x%X -> 0x%X (live clones keep their actors until the next load)",
+              before[1], before[2], after[1], after[2], ok ? 1u : 0u, before[0], after[0]);
 }
 #endif
 

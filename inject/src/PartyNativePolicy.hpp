@@ -55,7 +55,17 @@ struct Intent {
     std::uint64_t intentVersion = 0; // PartyIntent floor (its own namespace)
     std::uint64_t layoutSeq = 0, seq = 0; // seq: monotonic for the process (kept across every reset)
     StoryHold hold {};
+    // Party kits: each network slot's kit (objentry), from the newest accepted intent of this
+    // roster. Kits belong to the roster, not the room: layout plans borrow them. Rebase clears.
+    std::array<std::uint16_t, 3> slotKits {};
+    bool kitsKnown = false;
 };
+// Party kits: the two other network slots of `localSlot`, ascending (= puppet 0, puppet 1 = the clone
+// kits written to members 0, 1; rev3).
+std::array<std::uint8_t, 2> OtherSlots(std::uint8_t localSlot);
+// 2-bit codes in the plan key: 0 Sora, 1 Roxas (3 = invalid).
+std::uint8_t KitCode(std::uint16_t kit);
+std::uint16_t KitFromCode(std::uint8_t code);
 // True when a layout plan, a stored intent or a story hold exists.
 bool HasPlans(const Intent& intent);
 unsigned IntentCount(const Intent& intent);
@@ -67,7 +77,8 @@ bool Rebase(Intent& intent, std::uint32_t generation, const std::array<std::uint
 // 00/01/02/12): GoA 04/1A and 04/0A (hb10), both at evt 0.
 bool QualifiedRoom(std::uint16_t world, std::uint16_t room, std::uint16_t evt);
 // The plan for a PartyIntent on this machine (same projection as a layout).
-Plan ProjectIntent(const PartyIntent& intent, std::uint8_t localSlot);
+// Party kits: a non-Sora kit is Unsupported unless `kitsAllowed` (KH2COOP_PARTY_KITS on this machine).
+Plan ProjectIntent(const PartyIntent& intent, std::uint8_t localSlot, bool kitsAllowed = false);
 // Plan source table published to the loading thread: entry 0 = the room-pinned layout, entry 1 =
 // the story hold, entries 2.. = stored intents. key = plan | world<<8 | room<<16 | evt<<24 | source<<40;
 // seq is the full 64-bit local acceptance order (S3: no truncation).
@@ -76,10 +87,14 @@ const char* PlanSourceName(PlanSource s);
 constexpr unsigned PLAN_TABLE = 2 + MAX_INTENT_TARGETS;
 struct PlanEntry { std::uint64_t key = 0, seq = 0; };
 using PlanTable = std::array<PlanEntry, PLAN_TABLE>;
-void PackPlanTable(const Intent& intent, PlanTable& out);
+// Party kits: key bits 48-49 / 50-51 / 52-53 = kit codes of clone 1 (member 0) / clone 2 (member 1) / this
+// machine's own kit (expected in member 0 at entry, written to member 2) (from intent.slotKits). In kitsMode a
+// layout plan with no kits yet is Unsupported.
+void PackPlanTable(const Intent& intent, PlanTable& out, bool kitsMode = false);
 struct PlanChoice {
     Plan plan = Plan::None; std::uint16_t world = 0xFFFF, room = 0xFFFF, evt = 0xFFFF;
     PlanSource source = PlanSource::None; std::uint64_t seq = 0;
+    std::uint16_t kit1 = SORA, kit2 = SORA, localKit = SORA; // party kits (Sora when off)
 };
 // The most recently accepted entry for the load's room (a hold matches its world/room at any evt;
 // it selects Plan::None); if none, the layout entry (so Decide reports intent-other-room), else none.
@@ -114,7 +129,7 @@ Accept AcceptLayout(Intent& intent, const PartyLayout& layout, std::uint8_t loca
                     std::uint32_t generation, const std::array<std::uint64_t, 3>& roster);
 // VUH-1786: store one host intent per target (own version floor; same session rules as a layout).
 Accept AcceptIntent(Intent& intent, const PartyIntent& m, std::uint8_t localSlot,
-                    std::uint32_t generation, const std::array<std::uint64_t, 3>& roster);
+                    std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, bool kitsAllowed = false);
 // B2: an echo marks the host's publication echoed only when it was adopted (Accepted), or refused
 // as StaleVersion for exactly the version the host sent (already adopted).
 bool EchoConfirms(Accept a, std::uint64_t echoedVersion, std::uint64_t sentVersion);
@@ -136,7 +151,7 @@ Reapply ApplyReapply(Intent& intent, const PartyReapply& reapply, std::uint32_t 
 enum class Load : std::uint8_t {
     Applied, NoIntent, Unsupported, WorldNotQualified, EventRoom, EventActive, IntentOtherRoom,
     RowNotDefault, NativeNotDefault, ChangedUnderUs, ReadFault, PrivateStatusUnavailable,
-    NeutralInputUnavailable
+    NeutralInputUnavailable, LocalKitMismatch
 };
 const char* LoadName(Load r);
 struct LoadInput {
@@ -152,11 +167,18 @@ struct LoadInput {
     Plan plan = Plan::None;
     std::uint16_t intentWorld = 0xFFFF, intentRoom = 0xFFFF, intentEvt = 0xFFFF;
     PlanSource source = PlanSource::None; // VUH-1786: which stored plan this load uses
+    // Party kits (rev3 mapping): kit1/kit2 = the clone kits written to members 0/1; localKit = this
+    // machine's own kit, expected in member 0 at entry (PlayerKit) and written to member 2 (canonical).
+    std::uint16_t kit1 = SORA, kit2 = SORA, localKit = SORA;
+    // R3-1: member 0 as 3E2EB0 resolved it, BEFORE PlayerKit's kit write (0 = unknown: use resolved[0]).
+    std::uint16_t native0 = 0;
 };
 Load Decide(const LoadInput& in);
-struct Originals { bool valid = false; std::uint16_t member1 = 0, member2 = 0; };
-// Applies to a real or synthetic resolved array. On Applied writes members 1/2
-// only, after re-reading that they still hold the decided native values.
+// Rev3: the observer writes members 0, 1 (the clones, built first) and 2 (the canonical local, built
+// last: raw568, live run 20261007-084248). set0/set1 = clone kits, set2 = this machine's own kit.
+struct Originals { bool valid = false; std::uint16_t member0 = 0, member1 = 0, member2 = 0, set0 = 0, set1 = 0, set2 = 0; };
+// Applies to a real or synthetic resolved array. On Applied writes members 0..2 (rev3: clones on 0/1, own
+// kit on 2; kits off = members 1/2 only, all Sora), after re-reading that they still hold the decided values.
 Load ApplyAfterResolve(const LoadInput& in, std::uint16_t* resolved, Originals& original);
 // Restores each member only while it still holds our Sora; never overwrites a
 // later native value. Clears `original`.
@@ -175,10 +197,16 @@ struct HostPublished {
     unsigned resends = 0; // re-sends of this same (generation, tuple, roster)
     PartyApplyReason reason = PartyApplyReason::HostChoice;
     bool any = false, echoed = false;
+    std::array<std::uint16_t, 3> kits {}; // party kits: the kit vector this intent carried
 };
+// Party kits, host: kits[slot] from the own kit and the latched remote rosters. False while any
+// remote slot's kit is unknown or unsupported (the host then publishes nothing in kits mode).
+struct RemoteKits { std::array<bool, 2> seen {}; std::array<std::uint8_t, 2> roster {}; };
+bool HostKits(std::uint16_t ownKit, std::uint8_t localSlot, const RemoteKits& remote, std::array<std::uint16_t, 3>& kits);
 // VUH-1786 host: is the intent for a target due (first send, new generation/roster, or an unechoed retry)?
+// Party kits: also due when `kits` differs from the vector last published for that target.
 bool HostIntentDue(const HostPublished& last, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,
-                   std::uint64_t nowMs);
+                   std::uint64_t nowMs, const std::array<std::uint16_t, 3>& kits = {});
 bool HostShouldPublish(const HostPublished& last, std::uint32_t generation, const RoomTransition& location,
                        const std::array<std::uint64_t, 3>& roster, bool rowRead,
                        const std::array<std::uint8_t, 4>& row, std::uint64_t nowMs, PartyApplyReason& reason);

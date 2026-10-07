@@ -77,11 +77,21 @@ Stats GetStats();
 std::uint8_t RosterForActor(std::uintptr_t actor);
 // True once a kit was requested (non-"0" env): only then may callers read the roster.
 bool KitRequested();
+// Party kits: the roster byte this machine streams in AvatarState.character. In the combined
+// party-kits path it is the CHOSEN kit (stable per launch; peers build our clone from it);
+// otherwise the actual descriptor of `actor` (VUH-1513).
+std::uint8_t StreamRoster(std::uintptr_t actor);
+// Party kits: this machine's own player kit as an objentry (Sora 0x54 when no kit is installed).
+std::uint16_t LocalKit();
+// Party kits: KH2COOP_PLAYER_KIT is installed together with KH2COOP_PARTY_NATIVE (KH2COOP_PARTY_KITS=1).
+bool PartyKitsCombined();
 
 // VUH-1519 flag matrix: KH2COOP_PARTY_NATIVE is mutually exclusive with KH2COOP_PLAYER_KIT and
 // KH2COOP_REMOTE_KIT_SLOT. "Set" = present, non-empty and not exactly "0" (over-long counts as set).
 // Every conflicting combination refuses each side that conflicts (fail closed, logged).
-struct FlagMatrix { bool kit = false, remote = false, party = false; };
+// Party kits: KH2COOP_PARTY_KITS lifts ONLY the PARTY_NATIVE/PLAYER_KIT exclusion (the combined
+// path); REMOTE_KIT_SLOT stays exclusive. PartyNative requires PARTY_KITS to be exactly "1".
+struct FlagMatrix { bool kit = false, remote = false, party = false, partyKits = false; };
 bool FlagSet(const char* text);
 // Pure: the flags `party` conflicts with (bit0 kit, bit1 remote); 0 when none or party unset.
 unsigned PartyConflicts(const FlagMatrix& f);

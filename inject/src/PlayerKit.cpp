@@ -31,7 +31,7 @@ bool KitEnvBlocksPuppets(const char* text) { return text && *text && std::strcmp
 
 bool FlagSet(const char* text) { return text && *text && std::strcmp(text, "0") != 0; }
 unsigned PartyConflicts(const FlagMatrix& f) {
-    return f.party ? (f.kit ? 1u : 0u) | (f.remote ? 2u : 0u) : 0u;
+    return f.party ? (f.kit && !f.partyKits ? 1u : 0u) | (f.remote ? 2u : 0u) : 0u;
 }
 
 Reason Decide(std::uint16_t kit, const LoadContext& c) {
@@ -155,6 +155,8 @@ std::uint16_t g_kit = 0;
 std::uint16_t g_original0 = 0;  // exact replaced value of the last application (0 = none)
 Stats g_stats {};
 std::atomic<bool> g_blockPuppets {false};
+std::atomic<bool> g_kitRequested {false}; // any non-"0" KH2COOP_PLAYER_KIT (streaming), in both modes
+std::atomic<bool> g_combined {false};     // party kits: kit installed with the party-native observer
 std::atomic<std::uint32_t> g_cloneLogLoad {0xFFFFFFFFu};
 std::atomic<std::uint32_t> g_refusedClones {0};
 std::atomic<bool> g_remote {false};
@@ -234,6 +236,7 @@ FlagMatrix ReadFlagMatrix() {
     f.kit = set("KH2COOP_PLAYER_KIT");
     f.remote = set("KH2COOP_REMOTE_KIT_SLOT");
     f.party = set("KH2COOP_PARTY_NATIVE");
+    f.partyKits = set("KH2COOP_PARTY_KITS");
     return f;
 }
 
@@ -250,14 +253,18 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
     const DWORD rn = GetEnvironmentVariableA("KH2COOP_REMOTE_KIT_SLOT", remoteText, sizeof(remoteText));
     if (n == 0 && rn == 0 && !g_observer) return true; // default OFF: no hook, no reads
     const FlagMatrix flags = ReadFlagMatrix(); // VUH-1519 flag matrix
-    if (g_observer && (flags.kit || flags.remote)) {
+    if (g_observer && ((flags.kit && !flags.partyKits) || flags.remote)) {
         if (log) log("[playerkit] REFUSED: the party-native observer cannot combine with KH2COOP_PLAYER_KIT/KH2COOP_REMOTE_KIT_SLOT; not hooked");
         return false;
     }
+    // Party kits: the clones come from members 0/1 written by the observer on the DEFAULT row (the local
+    // from member 2), never from a selector-0 friend, so the VUH-1513 puppet hazard does not exist here.
+    const bool combined = g_observer && flags.kit && flags.partyKits;
     std::uint16_t kit = 0;
     if (n != 0) {
         g_stats.requested = true;
-        if (n >= sizeof(text) || KitEnvBlocksPuppets(text)) {
+        if (n >= sizeof(text) || KitEnvBlocksPuppets(text)) g_kitRequested.store(true, std::memory_order_release);
+        if (!combined && (n >= sizeof(text) || KitEnvBlocksPuppets(text))) {
             g_blockPuppets.store(true, std::memory_order_release);
             if (log) log("[playerkit] native-Sora clone puppets REFUSED while KH2COOP_PLAYER_KIT=%s is set (VUH-1519 owns per-puppet member slots)", text);
         }
@@ -265,7 +272,7 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
             if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT=%s is not 0 or 0x5A (puppets stay blocked)", text);
             return false;
         }
-        if (kit != 0 && flags.party) {
+        if (kit != 0 && flags.party && !combined) {
             if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT conflicts with KH2COOP_PARTY_NATIVE (VUH-1519 flag matrix); not hooked");
             return false;
         }
@@ -297,11 +304,15 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
         return false;
     }
     g_kit = kit; g_stats.kit = kit; g_stats.installed = true;
+    g_combined.store(combined && kit != 0, std::memory_order_release);
     g_remote.store(remote, std::memory_order_release);
     g_active.store(true, std::memory_order_release);
     if (kit != 0 && log) log("[playerkit] installed kit=0x%X (roster %u); applies on the next area load in world 4, outside events",
                              kit, RosterFromObjectId(kit));
     if (g_observer && log) log("[playerkit] resolver hook installed for the party-native observer (VUH-1519)");
+    if (combined && kit != 0 && log)
+        log("[playerkit] party kits: kit 0x%X is this player's party seat on every machine (streamed roster %u); native-Sora clone puppets not blocked (party members come from the observer)",
+            kit, RosterFromObjectId(kit));
     if (remote && log) log("[playerkit] remote kit member installed: GoA row 00/03/02/12; member 0 (clone, puppet target) shows the streamed kit (roster 1 -> 0x5A, else 0x54), member %u (own player) stays Sora",
                            OWN_PLAYER_MEMBER);
     return true;
@@ -334,7 +345,12 @@ void Shutdown() {
 Stats GetStats() { return g_stats; }
 
 bool BlocksNativeSoraPuppets() { return g_blockPuppets.load(std::memory_order_acquire); }
-bool KitRequested() { return g_blockPuppets.load(std::memory_order_acquire); }
+bool KitRequested() { return g_kitRequested.load(std::memory_order_acquire); }
+bool PartyKitsCombined() { return g_combined.load(std::memory_order_acquire); }
+std::uint16_t LocalKit() { return g_stats.installed && g_kit != 0 ? g_kit : SORA; }
+std::uint8_t StreamRoster(std::uintptr_t actor) {
+    return PartyKitsCombined() ? RosterFromObjectId(g_kit) : RosterForActor(actor);
+}
 bool RemoteKitMemberActive() { return g_remote.load(std::memory_order_acquire); }
 void NoteRemoteRoster(int index, std::uint8_t roster) {
     if (index != 0 || roster > 3 || !g_remote.load(std::memory_order_acquire)) return;

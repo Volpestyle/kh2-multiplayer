@@ -1176,11 +1176,27 @@ static void NoteActorForClones(uintptr_t actor) {
     }
 }
 
+static std::uint32_t PlayerClassObjectId(uintptr_t actor) {
+    if (!actor) return 0;
+    const auto obj = *reinterpret_cast<const uintptr_t*>(actor + offsets::actor::OBJENTRY_PTR);
+    if (obj <= g_exeBase || obj >= g_exeBase + 0x3000000) return 0;
+    return *reinterpret_cast<const std::uint32_t*>(obj);
+}
+
 // The actor puppet i drives: Sora clones when the room has any, otherwise
 // the friend-slot actors (Donald/Goofy).
 static uintptr_t PuppetTarget(int index) {
-    const uintptr_t target = g_clones[0] != 0 ? g_clones[index]
-                                              : (index == 0 ? g_friend1Actor : g_friend2Actor);
+    uintptr_t target = g_clones[0] != 0 ? g_clones[index]
+                                        : (index == 0 ? g_friend1Actor : g_friend2Actor);
+    // Party kits: with clones of DIFFERENT kits, each puppet drives the clone of its owner's kit
+    // (entity-list order says nothing about which member built which clone). Rev2 S2: this holds as
+    // soon as ANY clone is collected; no match (e.g. only the other kit's clone so far): drive none.
+    if (g_clones[0] != 0 && partynative::KitsActive()) {
+        const std::uint16_t want = partynative::PuppetKit(index), other = partynative::PuppetKit(1 - index);
+        if (want && other && want != other)
+            target = PlayerClassObjectId(g_clones[0]) == want ? g_clones[0]
+                   : g_clones[1] != 0 && PlayerClassObjectId(g_clones[1]) == want ? g_clones[1] : 0;
+    }
     // VUH-1513 guard, checked live on every call (no latch): with a player kit
     // requested, a player-class puppet target would be the kit (a selector-0
     // friend resolves through member 0), so refuse it. Friend-class targets
@@ -1421,7 +1437,9 @@ static void RestorePuppetTeam(PuppetDriver& d, int index) {
         ReadDamageFriends(friends) && friends[0] != friends[1] && friends[index] == d.actor;
     // Cached clone selection is only a candidate. Reuse the existing complete
     // canonical census to prove current membership, then reread actor metadata.
-    const bool currentClone = eligible && g_clones[0] != 0 && g_clones[index] == d.actor &&
+    // N1 (party kits): with kit-matched binding the puppet's clone need not sit at g_clones[index]; prove
+    // membership in the clone set, not position.
+    const bool currentClone = eligible && g_clones[0] != 0 && (d.actor == g_clones[0] || d.actor == g_clones[1]) &&
         bound.type == 0 && enemysync::CurrentPuppetActor(d.actor, transition, load);
     const auto now = CaptureHitActor(currentFriend || currentClone ? d.actor : 0);
     constexpr auto metadata = nativehittrace::ActorObject | nativehittrace::ActorStatus |
@@ -1432,7 +1450,7 @@ static void RestorePuppetTeam(PuppetDriver& d, int index) {
     const bool membership =
         (currentFriend && now.type == 1 && ReadDamageFriends(repeated) &&
          repeated[0] == friends[0] && repeated[1] == friends[1]) ||
-        (currentClone && now.type == 0 && g_clones[0] != 0 && g_clones[index] == d.actor);
+        (currentClone && now.type == 0 && g_clones[0] != 0 && (d.actor == g_clones[0] || d.actor == g_clones[1]));
     if (membership && same && PuppetReleaseCanonicalCurrent(d.actor) &&
         PuppetReleaseLifecycleCurrent(transition, load)) {
         if (d.teamSaved) *reinterpret_cast<uint32_t*>(d.actor + ACTOR_TEAM) = d.savedTeam;
@@ -1512,6 +1530,7 @@ static void PollPuppetPoses() {
                     static_cast<std::uint8_t>(pose.pose.ownerSlot), i, enemysync::CapturePuppetAuthority())) {
                 driver.pose = pose;
                 playerkit::NoteRemoteRoster(i, pose.pose.character); // VUH-1513 remote kit member (default off)
+                partynative::NoteRemoteKit(i, pose.pose.character);  // party kits: the owner's chosen kit (default off)
                 driver.have = true;
                 driver.poseFrame = g_frameCounter;
             } else {
@@ -3137,7 +3156,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             avatar.seq = g_frameCounter;
             // VUH-1513: only with a kit requested does the roster byte report the
             // actual native player kit; default off keeps captureAvatar's value.
-            if (playerkit::KitRequested()) avatar.character = playerkit::RosterForActor(g_soraActor);
+            if (playerkit::KitRequested()) avatar.character = playerkit::StreamRoster(g_soraActor); // party kits: chosen kit
             // VUH-1787: an own room load stops this stream; flag it so peers hide, not hold.
             avatar = g_localAvatar.Captured(avatar, warp::LoadPending());
             g_avatarBridge.PublishLocal(avatar);
@@ -3603,7 +3622,7 @@ void Shutdown() {
     lifecycletrace::Shutdown();
     spawncontroller::Shutdown();
     playerkit::Shutdown(); // disable its hook, then restore member 0 if still ours
-    partynative::Shutdown(); // after the shared hook is disabled: restore members 1/2 if still ours
+    partynative::Shutdown(); // after the shared hook is disabled: restore members 0..2 if still ours (R3-1: member 0 to its pre-kit native value)
     warp::SetTransitionObserver(nullptr);
     warp::Shutdown();
     enemysync::Shutdown();

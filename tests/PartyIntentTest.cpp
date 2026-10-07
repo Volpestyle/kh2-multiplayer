@@ -41,8 +41,12 @@ void rules() {
     check(roundtrip(goa, back, n) && n == PARTY_INTENT_PAYLOAD && n == 63 && sameIntent(back, goa), "exact 63-byte codec roundtrip");
     auto two = makeIntent(2, {11, 12, 0}, {4, 0x0A, 0});
     check(validPartyIntent(two, {11, 12, 0}) && two.kits[1] == 0x54 && two.kits[2] == 0, "two players: remote seat kit Sora, Goofy seat kit 0");
-    auto bad = goa; bad.kits[1] = 0x5A; check(!validPartyIntent(bad, ids), "non-Sora remote kit refused (per-seat kits are later work)");
-    bad = goa; bad.kits[0] = 0x54; check(!validPartyIntent(bad, ids), "seat0 kit must be 0");
+    auto kit = goa; kit.kits[1] = 0x5A; check(validPartyIntent(kit, ids), "party kits: a Roxas remote seat is valid");
+    kit = goa; kit.kits = {0x5A, 0x54, 0x5A}; check(validPartyIntent(kit, ids), "party kits: explicit seat-0 kit (Roxas host) is valid");
+    kit = goa; kit.kits[0] = 0x54; check(validPartyIntent(kit, ids), "party kits: explicit seat-0 Sora is valid; legacy 0 stays valid");
+    auto bad = goa; bad.kits[1] = 0x5B; check(!validPartyIntent(bad, ids), "unqualified kit (Mickey) refused");
+    bad = goa; bad.kits[0] = 0x323; check(!validPartyIntent(bad, ids), "unqualified seat-0 kit (dual-wield Roxas) refused");
+    bad = goa; bad.kits[2] = 0; check(!validPartyIntent(bad, ids), "a remote-player seat needs a kit");
     bad = two; bad.kits[2] = 0x54; check(!validPartyIntent(bad, {11, 12, 0}), "AI seat kit must be 0");
     bad = goa; bad.connections[2] = 99; check(!validPartyIntent(bad, ids), "intent pins the whole roster");
     bad = goa; bad.seats[2] = bad.seats[1]; check(!validPartyIntent(bad, ids), "one player cannot hold two seats");

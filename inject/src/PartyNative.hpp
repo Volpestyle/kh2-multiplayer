@@ -33,6 +33,7 @@ namespace kh2coop::inject::partynative {
 using LogFn = void (*)(const char* fmt, ...);
 
 constexpr std::uint16_t SORA = 0x54, DONALD = 0x5C, GOOFY = 0x5D;
+constexpr std::uint16_t ROXAS = 0x5A; // party kits: the one qualified non-Sora seat kit (P_EX110)
 constexpr std::uint64_t RVA_SAVE = 0x9A98B0, SAVE_PARTY_ROWS = 0x3534; // row = SAVE+0x3534+4*world
 constexpr std::array<std::uint8_t, 4> DEFAULT_ROW {0, 1, 2, 0x12};
 
@@ -55,6 +56,19 @@ void ConfirmLocalReadiness(bool resolverHookInstalled, ReadyProbe neutralInputCo
 // 2 while the last area load applied TwoClones and members 1/2 still hold Sora;
 // otherwise 0. Read by NativePrivateStatus on the game thread.
 unsigned AppliedClones();
+// Party kits (KH2COOP_PARTY_KITS=1 accepted at Install): per-seat kits are on for this machine.
+bool KitsActive();
+// Party kits: the clone kits the last applied load wrote (rev3: members 0/1; member 2 = AppliedLocal()).
+// False when not applied.
+bool AppliedMembers(std::uint16_t& member1, std::uint16_t& member2);
+// Rev2 S3: the local member 0 the applied load expected (this machine's own kit); 0 when not applied.
+std::uint16_t AppliedLocal();
+// Party kits: the kit of puppet `index`'s player in the applied load (puppet 0 = the lower other
+// network slot = clone kit 1 (member 0), puppet 1 = clone kit 2 (member 1)); 0 when nothing is applied.
+std::uint16_t PuppetKit(int index);
+// Party kits, owner thread: the latest VALIDATED pose roster byte of puppet `index` (0 Sora,
+// 1 Roxas; anything else = unsupported). The host builds its intent kits from these.
+void NoteRemoteKit(int index, std::uint8_t roster);
 // After playerkit::Shutdown disabled the shared hook.
 void Shutdown();
 #endif
