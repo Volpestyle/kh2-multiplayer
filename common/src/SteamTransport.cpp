@@ -89,7 +89,8 @@ public:
             if(!hub_->command({steam::Op::Close,id,1})){terminate();return;}
             ++stale_[id]; // the broker answers our Close with one Disconnected
         }
-        queue().clear();
+        // Keep queued frames: a Disconnected already queued for a peer we just closed is the broker's
+        // retirement of that connection (it then answers our Close with nothing), so it must repay the debt.
     }
     int service(TransportEvent& e,std::uint32_t)override{
         e={};if(!open_)return 0;hub_->pump();

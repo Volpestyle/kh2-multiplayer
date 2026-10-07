@@ -268,6 +268,38 @@ int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reach
         t.disconnect(live,0);t.createClient(1,3);t.connect(std::to_string(Host),0,3,resolved);drain(80);
         check(connects==4&&losses==1&&lf->connected(),"race C: disconnect(peer)'s own answer is not taken as a loss of the re-Join");
         host.disconnect();drain(10);}
+    // Nit 1 (review): a genuine Disconnected already queued in the hub when the joiner closes must survive.
+    // The broker retired that connection, so it never answers our Close; the queued Disconnected repays
+    // the debt. Clearing the queue would leak the debt and swallow the next connection's frames.
+    {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
+        auto ht=makeSteamTransports(std::make_unique<Link>(a),true,{Guest});
+        SessionConfig config;config.gameBuild="build";config.modHash="none";config.contentHash="none";config.authenticatedHostIdentity="steam:"+std::to_string(Host);
+        SessionHost server(config,{},std::move(ht.server));server.start();
+        NetworkClient host("local",0,"build","none",config.authenticatedHostIdentity,SlotType::Player,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));host.connect();
+        auto link=std::make_unique<Link>(b);auto* lf=link.get();auto ct=makeSteamTransports(std::move(link),false,{});auto& t=*ct.client;
+        TransportEvent e;unsigned connects=0,losses=0,receives=0;
+        auto count=[&]{if(e.type==TransportEventType::Connect)++connects;else if(e.type==TransportEventType::Disconnect)++losses;
+            else if(e.type==TransportEventType::Receive){++receives;e.packet.reset();}};
+        auto drain=[&](unsigned rounds){for(unsigned n=0;n<rounds;++n){server.tick();host.tick();while(t.service(e,0)>0)count();}};
+        auto hostSide=[&]{std::uint32_t h=0;for(const auto& [k,route]:bus.routes)if(route.first==&b){h=k;break;}return h;};
+        bool resolved=false;t.createClient(1,3);t.connect(std::to_string(Host),0,3,resolved);drain(80);
+        check(connects==1,"queued drop: connected");
+        const auto h=hostSide();const std::vector<std::uint8_t> data{0x4b,0x53,1,0,1,0,0,0,5};
+        check(h&&a.send(h,data,true),"queued drop: host data in flight");
+        lf->broker.tick(++lf->clock);                                  // Data now waits in the broker
+        if(bus.routes.count(h)){const auto [to,remote]=bus.routes.at(h);(void)to; // then Steam drops the connection
+            a.events.push_back({h,0,Guest,4,true,true,0});b.events.push_back({remote,0,Host,4,true,true,0});bus.routes.erase(remote);bus.routes.erase(h);}
+        lf->broker.tick(++lf->clock);                                  // Disconnected queued behind the Data
+        check(t.service(e,0)==1&&e.type==TransportEventType::Receive,"queued drop: one service delivers the Data, the Disconnected stays queued");
+        count();
+        t.close();drain(20);                                           // our Close meets an already-retired connection
+        check(losses==0&&lf->connected(),"queued drop: the queued Disconnected repays our Close (no extra loss)");
+        t.createClient(1,3);t.connect(std::to_string(Host),0,3,resolved);drain(80);
+        check(connects==2,"queued drop: the re-Join is delivered (no leaked debt)");
+        if(const auto h2=hostSide();h2&&bus.routes.count(h2)){const auto [to,remote]=bus.routes.at(h2);(void)to;
+            a.events.push_back({h2,0,Guest,4,true,true,0});b.events.push_back({remote,0,Host,4,true,true,0});bus.routes.erase(remote);bus.routes.erase(h2);}
+        drain(40);check(losses==1,"queued drop: a later genuine drop is still delivered");
+        host.disconnect();drain(10);}
     // VUH-1493 G7/G8 reconnect controls through the actual broker core, transport,
     // NetworkClient and SessionHost; only the Steam API and the OS pipe are replaced.
     {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
