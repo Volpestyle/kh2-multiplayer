@@ -93,3 +93,18 @@ See `docs/DEVELOPMENT_WORKFLOW.md` for the full inject/test loop.
 | `docs/ACCEPTANCE_TESTS.md` | Pass/fail criteria for each milestone |
 | `docs/KH2_CONTROL_CLI.md` | kh2ctl command reference |
 | `AGENTS.md` | AI agent rules (CE/Ghidra usage, swarm coordination) |
+
+## License
+
+Copyright (C) 2026 Volpestyle. This project is free software: you can
+redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. It is distributed WITHOUT ANY
+WARRANTY; see [`LICENSE`](LICENSE) for details. SPDX: `GPL-3.0-or-later`.
+
+The license covers this repository's code and docs only. Kingdom Hearts and
+Kingdom Hearts II are the property of Square Enix and Disney; this is an
+unofficial fan project, not affiliated with or endorsed by them. No game assets,
+game files or executables are included or distributed — you need your own copy
+of the game. Bundled dependencies (ENet, MinHook, CPython and others) keep
+their own licenses, which ship in the player package's `licenses/` folder.
