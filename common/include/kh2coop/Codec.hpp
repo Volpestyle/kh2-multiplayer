@@ -58,7 +58,7 @@ enum class PacketType : std::uint8_t {
     PartyLayout = 42, PartyReapply = 43,
     EnemyMotion = 44, // host -> relay -> others, periodic (VUH-1515)
     // 45/46 are reserved for the enemy-target-remote lane (RemoteHit, TargetAuthority, v14).
-    PartyIntent = 47, // host -> relay (cached per target, replayed to joiners) -> all incl. host (VUH-1786)
+    PartyIntent = 47, // host -> relay (cached per target; no joiner replay, the host republishes) -> all incl. host (VUH-1786)
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
 inline bool isDesyncDiagnosticPacket(PacketType type) {
