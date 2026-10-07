@@ -938,7 +938,20 @@ Format: decision — why (rejected alternative).
   run-level suppression remains partial. Physical remote delivery and general
   gameplay convergence remain open; diagnostic collection does not establish
   those acceptance gates.
-- **D11. Public Realm and PvP stay parked** until the P4 playtest gate passes.
+- **D11. PvP is the next goal after the co-op vision; Public Realm stays parked**
+  (James, 2026-10-06). Co-op comes first: a full playthrough with friends as any
+  party member. PvP follows, and the co-op work should not close doors on it.
+  Choices that matter for PvP later:
+  - Avatars stay owner-authoritative (D3). PvP needs a player-vs-player hit rule
+    on top of the current one, which vetoes hits on remote players by design.
+  - Remote players must become real, targetable native actors with their own
+    status/HP (VUH-1489 status isolation, enemy targeting of remote puppets).
+    The same work serves co-op enemies that chase friends.
+  - Owner-authoritative avatars trust each player's game, so a fair PvP mode will
+    need host-side plausibility checks on claimed hits and movement.
+  - Sessions stay host-run (D10): the host's game owns the world, and a relay
+    or Steam P2P only carries traffic. KH2 can't run headless, so a central
+    MMO-style server can't simulate the world; at most it can broker and relay.
 - **D12. Autonomy first.** P0 makes every later phase verifiable by an agent
   alone; live RE and gameplay work wait for it.
 
@@ -1272,7 +1285,7 @@ live behavior; unit tests cover stabilized boundaries such as the codec.
 | `CameraController`, camera retarget | Not needed under local-primary; kept for debugging and spectating. |
 | F5 friend control | Dev tool; the basis for playing party members (P5). |
 | Server-side `SimulationState` | Test double only. |
-| Tracks B–D (realm, PvP) | Parked (D11). |
+| Tracks B–D (realm, PvP) | PvP is the next goal after co-op; realm parked (D11). |
 
 ## Open questions
 
