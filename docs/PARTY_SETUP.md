@@ -142,8 +142,40 @@ Earlier attempts 01–04 failed on fixture expectations, which were fixed one at
 - 03: a single hit never commits through `3C2120`;
 - 04: a benign stream-gap puppet rebind.
 
+**Static audit: `resolved[]` does not reach SAVE (2026-10-07).** This was owed since the VUH-1513 review. Evidence is in `build/rig/vuh1519-resolved-save-audit-20261007-01/`, run against Steam exe `9002b2de`.
+
+**Method.**
+- A byte scan of `.text` for every RIP-relative displacement into `exe+0x2A25200..0x2A25400`, which covers `resolved[18]` at `0x2A25300..0x2A25323` and the MEMT pointer at `0x2A252E0`.
+- A scan of `.data` and `.rdata` for absolute pointers into that window. There are none.
+- Each candidate was then checked by `dumpbin` disassembly, and every direct caller of every accessor was disassembled.
+
+**Every instruction that touches the array:**
+
+| Function | What it does with the array |
+|---|---|
+| Resolver `3E2EB0`/`3E2EFA` | Zeroes it, then fills it from MEMT entries. It writes nothing else except the pool-size tail `39E270`, which takes its sizes from MEMT `+8`/`+0xC`, not from members. |
+| `3E2E40` | Returns `&0x2A252F0`, the struct that holds the array at `+0x10`. |
+| `3E2E50` | Returns the member id for an index. |
+| `3E3180` | Returns the member id for a role. |
+| `3E2E60`, `3E3680`, `3E3830` | Return objentry `+0x4C`, the **status key**, or a seat index. They never return the id itself. |
+
+**The 16 sites that consume a member id.** Callers of `3E2E40`, `3E2E50` and `3E3180`, plus `3C32E0`/`3C3320`, all of which were disassembled:
+- None writes into the SAVE body (`exe+0x9A98B0`, `0x10FC0` bytes) through a RIP-relative address.
+- An id is only used for the following:
+  - objentry lookup (`3DFEB0`);
+  - comparisons, such as checking for Sora `0x54`;
+  - the factory (`3C2FC0`);
+  - one store into a heap task object (`36B460`: `[rsi+0x20]`, where `rsi` comes from a fresh `14F8A0` allocation).
+- `419290` reads the SAVE byte at `SAVE+0x3524` to pick a form member, and reads it only.
+- The only party-row writer reached from these sites is `3E38D0`. It swaps two selector bytes of the SAVE row; it never stores a member id.
+
+**What does reach SAVE.** Only the status key that `3E2E60`/`3E3680` derive. Through the status pool it selects a SAVE character record, and `3C2120` commits status bytes into that record. That is the path `NativePrivateStatus` vetoes for private clone records: live, the settle commits were vetoed and the clone's personal SAVE bytes were unchanged across damage.
+
+**Limits.**
+- This covers direct references and direct `E8`/`E9` calls only. Indirect calls into the accessors, and a struct pointer from `3E2E40` held elsewhere, were not enumerated.
+- The save-file writer itself was not traced. The array lies outside the SAVE body, so it reaches a save file only if something copies it into SAVE, and no such writer was found.
+
 **Open:**
-- Proof that `resolved[]` never serializes into SAVE (xref audit).
 - VUH-1786 PartyIntent.
 - VUH-1787 stale-puppet hold. A host stall over 1 s makes AvatarSync (`staleAfterMs`) release and rebind remote puppets; the rebind keeps the same clone.
 - Per-seat kits: the last-built seat is the local player.
