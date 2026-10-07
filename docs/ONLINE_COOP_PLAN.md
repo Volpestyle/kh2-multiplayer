@@ -1069,7 +1069,11 @@ loaded, get several instances into a known room, act, look, and judge.
      playable-character selector into a companion entry of the world party
      table in the save region before a room load (Expert595; the GoA ROM sets
      whole parties through the same save bytes). The game spawns a native Sora.
-     Never save while it's active.
+     Never save while it's active. That clone natively shares the local Sora's
+     status record (hitting it drops the local HP). The default-off
+     `KH2COOP_NATIVE_SORA_PRIVATE_STATUS=1` profile gives the GoA Friend1 clone
+     its own native status record, live-proven once on 2026-10-06 for one
+     executable, party row and room; see `NATIVE_PRIVATE_STATUS.md`.
   2. Rewrite an objentry's model name before the room loads, as the GoA ROM
      does for party costumes — the route to recolored Soras.
   3. Replace the companion's model and moveset files, as Master-Trio does for

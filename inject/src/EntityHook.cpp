@@ -40,6 +40,7 @@
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
 #include "NativeLifetimeTrace.hpp"
+#include "NativePrivateStatus.hpp"
 #include "NativeHitTrace.hpp"
 #include "DamagePolicy.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -2928,7 +2929,8 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
             if (addr == listHead && listHead != 0) {
                 ++g_frameCounter;
-                lifetimetrace::Drain(&Log); // Only actual registered owner drains.
+                lifetimetrace::Drain(&Log);
+                privatestatus::Drain(&Log); // Only actual registered owner drains.
                 if (g_inputTraceBase.load(std::memory_order_acquire)) {
                     g_inputTraceOwnerTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
                     g_inputTraceOwnerFrame.fetch_add(1, std::memory_order_release);
@@ -3094,7 +3096,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 // ============================================================================
 
 static void UninitializeMinHookUnlessRetained() {
-    if (resourcetrace::RetainsMinHookResources() || lifetimetrace::RetainsMinHookResources()) {
+    if (resourcetrace::RetainsMinHookResources() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) {
         Log("[native-trace] global MinHook teardown retained until process exit");
         return;
     }
@@ -3102,7 +3104,7 @@ static void UninitializeMinHookUnlessRetained() {
 }
 
 bool Initialize(uintptr_t exeBase) {
-    if (resourcetrace::RejectReinitialization() || lifetimetrace::RetainsMinHookResources()) return false;
+    if (resourcetrace::RejectReinitialization() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) return false;
     if (g_initialized) return true;
 
     g_exeBase = exeBase;
@@ -3422,6 +3424,7 @@ bool Initialize(uintptr_t exeBase) {
                              &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace);
     resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
     lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
+    if (!privatestatus::Initialize(exeBase)) Log("[privatestatus] initialization refused; profile unqualified");
     lifetimetrace::Initialize(exeBase);
     if (lifetimetrace::GetStatistics().requested) {
         const auto s = lifetimetrace::GetStatistics();
@@ -3466,6 +3469,7 @@ void Shutdown() {
     AcquireSRWLockExclusive(&g_inputTraceLogLock);
     g_inputTraceBase.store(0, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_inputTraceLogLock);
+    privatestatus::StopNewAllocations();
     lifetimetrace::StopRecording();
     resourcetrace::StopRecording(); // Retired callbacks use only process-lifetime storage.
     if (!g_initialized) return;

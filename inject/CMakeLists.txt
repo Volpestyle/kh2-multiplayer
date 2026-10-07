@@ -62,6 +62,7 @@ add_library(kh2coop_inject SHARED
     src/NativeOwnedEmitterGateway.cpp
     src/NativeOwnedEmitterGatewayRaw.asm
     src/NativeOwnedEmitterInstall.cpp
+    src/NativePrivateStatus.cpp
     src/NativeLifetimeTrace.cpp
     src/NativeLifecycleTrace.cpp
     src/NativeHitTrace.cpp
@@ -103,3 +104,7 @@ set_target_properties(kh2coop_inject PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/inject/staging"
     LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/inject/staging"
 )
+
+if(MSVC)
+    set_source_files_properties(src/NativePrivateStatus.cpp PROPERTIES COMPILE_OPTIONS "/W4;/WX")
+endif()
