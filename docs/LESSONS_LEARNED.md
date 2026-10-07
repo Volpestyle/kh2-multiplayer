@@ -272,3 +272,18 @@ owner/freshness receipts before blaming loading or tracing. A puppet release
 can also precede reactivation without retiring the network session; check role
 and runtime identity separately, and scope puppet damage to actual ownership.
 See the [reviewed overlay run](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-acceptance-review.md).
+
+## Close the pre-injection save window (2026-10-07)
+
+Installing the save guard after a game window appears leaves boot code free to
+create, delete or rewrite save containers. An existing, nonempty container is
+not a safety gate: invalid headers or a zero decoded payload can still trigger
+destructive paths. Launch suspended, finish guard installation and initialization,
+require its acknowledgement, then resume; fail closed if any step fails.
+
+Verify explicit receipts: the DLL acknowledgement QPC must precede the launcher's
+resume receipt, and guard installation must precede the first hooked Present.
+Save hashes remain a backstop, not permission to save. PC1 run `20261007-172006`
+loaded an existing save, passed both ordering checks and preserved every save
+hash; see the [live result](../build/rig/vuh-saveguard-preinject-20261007-01/live-pc1/output/result.json).
+This evidence does not include OS-wide transient-write tracing.
