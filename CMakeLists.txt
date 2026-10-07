@@ -27,6 +27,9 @@ add_library(kh2coop_common
     common/src/Codec.cpp
     common/src/NetworkClient.cpp
     common/src/EnetTransport.cpp
+    common/src/SteamBroker.cpp
+    common/src/SteamPipe.cpp
+    common/src/SteamTransport.cpp
 )
 
 add_executable(kh2coop_transport_test tests/TransportTest.cpp)
@@ -48,7 +51,7 @@ target_link_libraries(kh2coop_common PUBLIC enet)
 
 # ENet requires Winsock2 and winmm on Windows.
 if(WIN32)
-    target_link_libraries(kh2coop_common PUBLIC ws2_32 winmm)
+    target_link_libraries(kh2coop_common PUBLIC ws2_32 winmm advapi32)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -65,6 +68,25 @@ target_include_directories(kh2coop_server_core PUBLIC
 )
 
 target_link_libraries(kh2coop_server_core PUBLIC kh2coop_common Threads::Threads)
+
+add_executable(kh2coop_steam_broker_test tests/SteamBrokerTest.cpp)
+target_link_libraries(kh2coop_steam_broker_test PRIVATE kh2coop_server_core)
+if(WIN32)
+    add_executable(kh2coop_steam_pipe_test tests/SteamPipeTest.cpp)
+    target_link_libraries(kh2coop_steam_pipe_test PRIVATE kh2coop_common)
+    add_executable(kh2coop_steam_native_test tests/SteamNativeAdapterTest.cpp)
+    target_link_libraries(kh2coop_steam_native_test PRIVATE kh2coop_common)
+    target_compile_options(kh2coop_steam_pipe_test PRIVATE /W4 /WX)
+    target_compile_options(kh2coop_steam_native_test PRIVATE /W4 /WX)
+    target_compile_definitions(kh2coop_steam_native_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+endif()
+if(MSVC)
+    target_compile_options(kh2coop_steam_broker_test PRIVATE /W4 /WX)
+    set_source_files_properties(common/src/SteamBroker.cpp common/src/SteamPipe.cpp common/src/SteamTransport.cpp PROPERTIES COMPILE_OPTIONS "/W4;/WX")
+else()
+    target_compile_options(kh2coop_steam_broker_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    set_source_files_properties(common/src/SteamBroker.cpp common/src/SteamPipe.cpp common/src/SteamTransport.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic;-Werror")
+endif()
 
 # ---------------------------------------------------------------------------
 # kh2coop_server — the host-authoritative relay executable.
@@ -97,7 +119,7 @@ add_executable(kh2coop_runtime_scaffold
     runtime/src/RuntimeMain.cpp
 )
 
-target_link_libraries(kh2coop_runtime_scaffold PRIVATE kh2coop_runtime)
+target_link_libraries(kh2coop_runtime_scaffold PRIVATE kh2coop_runtime kh2coop_server_core)
 
 # ---------------------------------------------------------------------------
 # kh2coop_fake_sim — end-to-end test: 3 fake clients + server, no KH2.

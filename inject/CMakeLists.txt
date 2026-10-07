@@ -47,6 +47,7 @@ set_target_properties(minhook_lib PROPERTIES
 add_library(kh2coop_inject SHARED
     src/DllMain.cpp
     src/SteamCapabilityProbe.cpp
+    src/SteamBrokerNative.cpp
     src/EntityHook.cpp
     src/RenderHook.cpp
     src/Warp.cpp
@@ -69,6 +70,7 @@ add_library(kh2coop_inject SHARED
 
 if(MSVC)
     set_source_files_properties(
+        src/SteamBrokerNative.cpp
         src/NativeLifetimeTrace.cpp
         src/NativeOwnedEmitterGateway.cpp
         src/NativeOwnedEmitterInstall.cpp

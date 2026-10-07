@@ -16,6 +16,7 @@
 #include <atomic>
 #include "EntityHook.hpp"
 #include "SteamCapabilityProbe.hpp"
+#include "SteamBrokerNative.hpp"
 
 namespace {
 
@@ -100,6 +101,7 @@ DWORD WINAPI InitThread(LPVOID /*param*/) {
         }
         if (TryInit()) {
             kh2coop::steamprobe::Run(g_stopEvent);
+            kh2coop::steambroker::Run(g_stopEvent);
             return 0;
         }
     }

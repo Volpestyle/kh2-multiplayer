@@ -76,6 +76,9 @@ public:
     virtual void disconnectLater(TransportPeer*, std::uint32_t reason) = 0;
     virtual TransportStats stats(TransportPeer*) const = 0;
     virtual std::string pendingPeerLabel(TransportPeer*) const = 0;
+    // Empty for unauthenticated transports (ENet). Steam supplies the identity
+    // from its authenticated connection, never from protocol payloads.
+    virtual std::string authenticatedIdentity(TransportPeer*) const { return {}; }
 };
 std::unique_ptr<Transport> makeEnetTransport();
 } // namespace kh2coop

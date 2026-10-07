@@ -511,6 +511,16 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 ClientHello hello;
                 read(reader, hello);
 
+                if (!config_.authenticatedHostIdentity.empty()) {
+                    const auto identity = transport_->authenticatedIdentity(peer);
+                    if (identity.empty() || hello.peerId != identity ||
+                        (identity == config_.authenticatedHostIdentity) !=
+                            (hello.requestedSlot == static_cast<std::uint8_t>(SlotType::Player))) {
+                        rejectPeer(peer, ps->peerId, "Authenticated Steam identity/host slot mismatch", 1);
+                        return;
+                    }
+                }
+
                 if (hello.protocolVersion != config_.protocolVersion) {
                     const std::string reason =
                         "Protocol mismatch: client=" +
@@ -569,6 +579,12 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     }
                 }
 
+                if (!config_.authenticatedHostIdentity.empty() &&
+                    (transport_->authenticatedIdentity(peer) == config_.authenticatedHostIdentity) !=
+                        (*requestedSlot == SlotType::Player)) {
+                    rejectPeer(peer, ps->peerId, "Steam host slot is reserved for local authenticated owner", 1);
+                    return;
+                }
                 if (isSlotTaken(*requestedSlot)) {
                     const std::string reason =
                         "Requested slot " +

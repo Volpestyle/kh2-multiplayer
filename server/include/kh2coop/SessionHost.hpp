@@ -35,6 +35,7 @@ struct SessionConfig {
     std::string sessionId; // configured display label; wire incarnation is minted per host
     RuntimeMode runtimeMode{RuntimeMode::CampaignCoop};
     std::string desyncOutputRoot; // empty disables collection; executable supplies explicit local root
+    std::string authenticatedHostIdentity; // Steam opt-in; empty preserves ENet behavior
 };
 
 // ---------------------------------------------------------------------------

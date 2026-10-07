@@ -1,7 +1,8 @@
 # Steam transport work (VUH-1493)
 
 Steam connectivity is not available to friends yet. ENet remains the default
-and only implemented packet transport. Protocol10, its channel assignments,
+packet transport. The opt-in Steam implementation awaits native review and
+cross-account validation. Protocol10, its channel assignments,
 session/cache/resync authority and all existing admission checks are unchanged.
 
 `NetworkClient` and `SessionHost` accept an optional owned `Transport` as their
@@ -18,7 +19,8 @@ game's existing app2552430 Steam session. The host runtime retains session,
 cache and resync logic. Joining starts with a pasted SteamID and explicit host
 admission. Routing must be relay-only with ICE disabled and verified; unsupported
 privacy settings refuse. No app480, second Steam initialization or Steam shutdown.
-This broker and its runtime link are not implemented by the transport extraction.
+The broker and its runtime link are implemented behind explicit opt-in below.
+They do not move session/cache/resync authority into the game.
 
 ## Opt-in capability probe
 
@@ -45,3 +47,82 @@ Lead native-code review and an explicitly assigned live lane are required before
 the first game probe. No live result is claimed by the offline checks. An eventual
 friend connectivity test still needs two authorized Steam accounts/machines;
 single-account socket-pair success cannot prove SDR cross-account routing.
+
+## Opt-in broker (offline-tested, not live accepted)
+
+Set `KH2COOP_STEAM_BROKER=1` **only in the owned game's launch environment**.
+Use the reviewed broker DLL and wait for its `steam-broker_<pid>.log` readiness
+receipt. Do not enable the capability probe at the same time. The default is off;
+there is no new hook, game-memory/input/save writer or launcher change.
+
+Start the matching runtime with its existing config/build/content/mod arguments:
+
+```text
+kh2coop_runtime_scaffold.exe --pid HOST_PID --role player --steam-host --steam-allow FRIEND_STEAMID64
+kh2coop_runtime_scaffold.exe --pid FRIEND_PID --role friend1 --steam-join HOST_STEAMID64
+```
+
+A second friend uses `--role friend2` and a second `--steam-allow` on the host. The allowlist is explicit and immutable for that runtime session (maximum
+two public individual SteamID64s). No IP address, public port bind, app480, lobby,
+invite service or account creation is involved. The number27795 here is a Steam
+**virtual port**, not a UDP listener.
+
+The game uses its already initialized app2552430 session. After authentication
+and SDR readiness, the broker exposes one local Windows message pipe scoped by
+PID and process creation time, current-user ACL, first-instance ownership and
+remote-client rejection. Both ends check OS-reported peer PIDs and retain peer
+process handles. This protects against remote clients and stale PID endpoints;
+it is not a sandbox against malicious code already running as the same user.
+Only packet data and transport operations cross IPC, never native pointers or
+memory/input commands.
+
+`CreateListenSocketP2P` and `ConnectP2P` receive ICE=0 in their **creation options**.
+The broker checks the effective int32 value on the actual listen/connection
+handles, including incoming connections before acceptance. Unsupported/nonzero
+settings refuse and close owned handles. Connected and data-path checks require
+an authenticated, encrypted, relayed connection. A missing callback never creates
+admission; pending connections time out after15seconds. Steam invokes the callback
+through the game's own pump. Its bounded queue copies status only; contention or
+overflow closes the broker instead of silently losing lifecycle events. Enabled
+mode pins the DLL until process exit to keep queued callback code alive.
+
+The host runtime owns `SessionHost` and a local Player transport. Its authenticated
+identity is reserved for Player; remote Hello identity must equal the SteamID
+from the authenticated connection and cannot claim Player. Existing protocol10,
+build/content/mod, roster, epoch, cache, quarantine and resync checks still apply.
+Remote protocol bytes retain the original codec inside a small Steam envelope.
+Reliable traffic is ordered on one Steam connection (potential additional
+cross-channel head-of-line blocking); ENet's three-channel behavior is unchanged.
+Steam link statistics sample SDK ping and local end-to-end delivery quality once
+per second. Loss is derived from that quality, not an injected impairment setting.
+RTT variance is unavailable (zero); initial/missing statistics are also zero, not
+measured zero latency/loss. Protocol clock sync still runs.
+
+IPC payloads are capped at64KiB, application packets at65528bytes, and queues at128
+messages. SDK send buffering is capped at512KiB per connection. Queue/IO failure,
+account change, loss of auth/relay readiness or runtime heartbeat expiry closes
+all owned sockets. Runtime heartbeat is1second with a5second expiry; initial IPC
+hello also has a5second deadline. Shutdown signals the existing initialization
+worker and joins it. Synchronous SDK calls and OS cancellation completion cannot
+be externally preempted by these logical deadlines. No shared global Steam
+configuration, Init, Shutdown, RunCallbacks or network-facing IP socket is used.
+
+A terminal Steam IPC/transport failure requires a fresh runtime attachment;
+there is no automatic ENet fallback. Existing ENet recovery behavior is untouched.
+The gameplay constraints on reconnect/resync and unsupported dead reconstruction
+remain unchanged.
+
+Validation covers mocked Steam authentication/admission/ICE failure, actual Windows
+pipe ownership/closure, protocol admission, avatars and late-join room/manifest/
+progress caching. It does not prove cross-account SDR routing or native callback
+liveness. Required next evidence after native review: two authorized logged-on
+Steam accounts with KH2 app2552430 on separate machines, explicit host allowlist,
+matched protocol/build/content/mod, ICE verification on real handles, relayed flags,
+then version refusal/avatar/world-cache exchange and owned closure/save guards.
+No friend-readiness claim.
+
+First-party contracts: [Steam sockets](https://partner.steamgames.com/doc/api/ISteamNetworkingSockets),
+[configuration API](https://partner.steamgames.com/doc/api/ISteamNetworkingUtils),
+and Valve's [networking type definitions](https://github.com/ValveSoftware/GameNetworkingSockets/blob/master/include/steam/steamnetworkingtypes.h).
+The narrow native flat ABI is pinned against the retained Valve headers and
+shipped exports in `build/rig/vuh1493-steam-p2p-20261006-01/valve-reference/`.

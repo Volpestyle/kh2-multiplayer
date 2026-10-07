@@ -14,6 +14,9 @@
 #include "kh2coop/DesyncUpload.hpp"
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/SteamTransport.hpp"
+#include "kh2coop/SteamBroker.hpp"
+#include "kh2coop/SessionHost.hpp"
 #include "kh2coop/ReplicaController.hpp"
 #include "kh2coop/ResyncEvidence.hpp"
 #include "kh2coop/Types.hpp"
@@ -169,6 +172,9 @@ struct LaunchOptions {
     // them to the input mailbox and send InputFrames. Off by default; the
     // avatar path (local-primary) replaces it.
     bool legacyReplica {false};
+    bool steamHost {false};
+    std::optional<std::string> steamJoin;
+    std::vector<std::uint64_t> steamAllow;
     // Applied to both directions when any field is set.
     kh2coop::LinkConditions link {};
 };
@@ -296,6 +302,9 @@ void printUsage() {
         << "  --inject-log <path>   Exact log registered by the launcher, if available\n"
         << "  --network             Enable networking (connect to server)\n"
         << "  --pid <pid>           Attach to this KH2 process (several instances)\n"
+        << "  --steam-host         Opt-in broker host; requires --pid and Player role\n"
+        << "  --steam-allow <ID64>  Explicitly admit a Steam friend (up to two)\n"
+        << "  --steam-join <ID64>   Paste host SteamID; requires --pid and Friend role\n"
         << "  --legacy-replica      Also run the old actor-snapshot replica path\n"
         << "  --link-latency-ms <n> Add one-way latency, both directions\n"
         << "  --link-jitter-ms <n>  Add uniform jitter in [0, n] ms\n"
@@ -477,6 +486,14 @@ bool parseArgs(int argc, char* argv[], LaunchOptions& options,
                std::string& error) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
+        if (arg == "--steam-host") { options.steamHost = true; continue; }
+        if ((arg == "--steam-join" || arg == "--steam-allow") && i + 1 < argc) {
+            const std::string value = argv[++i]; std::uint64_t id = 0;
+            if (!kh2coop::steam::parseId(value, id)) { error = "Expected public individual SteamID64"; return false; }
+            if (arg == "--steam-join") { if (options.steamJoin) { error="Duplicate Steam target"; return false; } options.steamJoin=value; }
+            else { if (options.steamAllow.size() >= 2 || std::find(options.steamAllow.begin(),options.steamAllow.end(),id)!=options.steamAllow.end()) { error="At most two distinct admitted SteamIDs";return false; } options.steamAllow.push_back(id); }
+            continue;
+        }
         if (arg == "--help" || arg == "-h") {
             options.helpRequested = true;
             return false;
@@ -743,6 +760,35 @@ int main(int argc, char* argv[]) {
     }
     if (options.desyncDirOverride) options.config.desyncDir = *options.desyncDirOverride;
     if (options.injectLogPathOverride) options.config.injectLogPath = *options.injectLogPathOverride;
+
+    const bool steamEnabled = options.steamHost || options.steamJoin.has_value();
+    kh2coop::SteamTransports steamTransports;
+    std::unique_ptr<kh2coop::SessionHost> steamHost;
+    if (steamEnabled || !options.steamAllow.empty()) {
+        if (!options.pid || !*options.pid || options.steamHost == options.steamJoin.has_value() ||
+            (options.steamHost ? options.steamAllow.empty() : !options.steamAllow.empty()) ||
+            (!options.steamHost && options.config.ownedSlot == kh2coop::SlotType::Player) ||
+            (options.steamHost && options.config.ownedSlot != kh2coop::SlotType::Player)) {
+            std::cerr << "[Runtime] Steam requires explicit --pid, host Player with --steam-allow, or join Friend slot\n"; return 1;
+        }
+        steamTransports = kh2coop::makeSteamTransports(*options.pid, options.steamHost, options.steamAllow);
+        if (!steamTransports.client) { std::cerr << "[Runtime] Steam broker unavailable; ENet fallback not attempted\n";return 1; }
+        options.config.peerId = "steam:" + std::to_string(steamTransports.identity);
+        options.config.serverHost = options.steamHost ? "local" : *options.steamJoin;
+        options.config.networkingEnabled = true;
+        std::cout << "[Runtime] Steam identity=" << steamTransports.identity << " host=" << options.steamHost << " relayOnly=required\n";
+        if (options.steamHost) {
+            kh2coop::SessionConfig config;
+            config.gameBuild=options.config.gameBuild;config.contentHash=options.config.contentHash;
+            config.modHash=options.config.modHash;config.runtimeMode=options.config.runtimeMode;
+            config.authenticatedHostIdentity=options.config.peerId;
+            config.desyncOutputRoot=options.config.desyncDir;
+            kh2coop::SessionCallbacks cb;
+            cb.onLog=[](const std::string& s){std::cout << "[SteamHost] " << s << '\n';};
+            steamHost=std::make_unique<kh2coop::SessionHost>(config,std::move(cb),std::move(steamTransports.server));
+            if (!steamHost->start()) { std::cerr << "[Runtime] Steam host refused\n";return 1; }
+        }
+    }
 
     std::cout << "[Runtime] Booting runtime scaffold\n";
     std::cout << "[Runtime] config=" << options.configPath
@@ -1649,7 +1695,8 @@ int main(int argc, char* argv[]) {
             options.config.ownedSlot,
             std::move(callbacks),
             options.config.runtimeMode,
-            options.config.contentHash);
+            options.config.contentHash,
+            kh2coop::PROTOCOL_VERSION, std::string{}, std::move(steamTransports.client));
         if (causalDiagnosticsEnabled) {
             netClient->sealRequestDiagnostics("begin");
             netClient->sealWorldAdmissionDiagnostics("begin");
@@ -1766,6 +1813,7 @@ int main(int argc, char* argv[]) {
 
         // Pump network events every tick, even before KH2 is attached.
         if (netClient) {
+            if (steamHost) steamHost->tick(0);
             eventHoldTimed("network-outer", [&] { netClient->tick(0); });
             if (automaticRecoveryEnabled) automaticRecovery.Pump(netClient->hostResyncContext(),
                 [&]() { return netClient->resyncBusy(); }, submitAutomaticResync);
@@ -2065,7 +2113,7 @@ int main(int argc, char* argv[]) {
                              std::chrono::milliseconds(options.config.tickMs);
         while (g_running && std::chrono::steady_clock::now() < tickEnd) {
             eventHoldTimed("pump-sleep", [&] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
-            if (netClient) eventHoldTimed("network-inner", [&] { netClient->tick(0); });
+            if (netClient) eventHoldTimed("network-inner", [&] { if (steamHost) steamHost->tick(0); netClient->tick(0); });
             pulseEventHoldControl();
             eventHoldTimed("avatar-inner", [&] { pumpAvatars(pumpWorld, pumpRoom); });
         }
