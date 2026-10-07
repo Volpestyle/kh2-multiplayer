@@ -6,7 +6,9 @@
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/SessionHost.hpp"
 #include <algorithm>
+#include <chrono>
 #include <iostream>
+#include <thread>
 #include <map>
 #include <utility>
 
@@ -188,6 +190,45 @@ int main(){
         check(host.isConnected()&&server.verifiedPeerCount()==1,"probe: the local Player is the only verified member");
         check(!foreign.isConnected()&&a.accepts==0,"probe: a foreign Steam account is never accepted or admitted");
         host.disconnect();for(unsigned n=0;n<20;++n){server.tick();host.tick();foreign.tick();}}
+    // G8: a broker attachment may re-Join only its own host, and only once the previous connection is gone.
+    {Mock m;Broker b(m);b.command({Op::Hello},100);Frame f;b.pop(f);
+        check(b.command({Op::Join,Guest},100),"rejoin rule: first Join");
+        check(!b.command({Op::Join,Guest},101)&&b.failed(),"rejoin rule: a second Join while connected is refused");}
+    {Mock m;Broker b(m);b.command({Op::Hello},100);Frame f;b.pop(f);b.command({Op::Join,Guest},100);
+        check(b.command({Op::Close,Guest},101),"rejoin rule: Close the host connection");while(b.pop(f)){}
+        check(b.command({Op::Join,Guest},102)&&!b.failed(),"rejoin rule: Join the same host again after Close");}
+    {Mock m;Broker b(m);b.command({Op::Hello},100);Frame f;b.pop(f);b.command({Op::Join,Guest},100);
+        b.command({Op::Close,Guest},101);while(b.pop(f)){}
+        check(!b.command({Op::Join,Other},102)&&b.failed(),"rejoin rule: a different host is refused");}
+    {Mock m;Broker b(m);start(b);
+        check(!b.command({Op::Join,Guest},101)&&b.failed(),"rejoin rule: a hosting attachment can never Join");}
+    {Mock m;bool closed=false;
+        struct FlagLink:Link{bool* flag;FlagLink(Api& a,bool* f):Link(a),flag(f){}void close()override{*flag=true;Link::close();}};
+        {auto t=makeSteamTransports(std::make_unique<FlagLink>(m,&closed),false,{});check(t.client&&t.client->createClient(1,3),"destruction: open joiner transport");}
+        check(closed,"destruction: the transport's destructor still ends the attachment");}
+    // G8 race: data and the Close answer still in the broker queue when the joiner closes are swallowed,
+    // not delivered as a loss and not a protocol failure; the same transport then re-Joins.
+    {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
+        auto ht=makeSteamTransports(std::make_unique<Link>(a),true,{Guest});
+        SessionConfig config;config.gameBuild="build";config.modHash="none";config.contentHash="none";config.authenticatedHostIdentity="steam:"+std::to_string(Host);
+        SessionHost server(config,{},std::move(ht.server));server.start();
+        NetworkClient host("local",0,"build","none",config.authenticatedHostIdentity,SlotType::Player,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));host.connect();
+        auto link=std::make_unique<Link>(b);auto* lf=link.get();auto ct=makeSteamTransports(std::move(link),false,{});auto& t=*ct.client;
+        TransportEvent e;unsigned connects=0,losses=0,receives=0;
+        auto drain=[&](unsigned rounds){for(unsigned n=0;n<rounds;++n){server.tick();host.tick();while(t.service(e,0)>0){
+            if(e.type==TransportEventType::Connect)++connects;else if(e.type==TransportEventType::Disconnect)++losses;
+            else if(e.type==TransportEventType::Receive){++receives;e.packet.reset();}}}};
+        bool resolved=false;check(t.createClient(1,3)&&t.connect(std::to_string(Host),0,3,resolved)&&resolved,"race: joiner connects");
+        drain(80);check(connects==1&&losses==0,"race: connected once");
+        std::uint32_t hostSide=0;for(const auto& [h,route]:bus.routes)if(route.first==&b){hostSide=h;break;}
+        const std::vector<std::uint8_t> wire{0x4b,0x53,1,0,1,0,0,0,7};
+        check(hostSide&&a.send(hostSide,wire,true),"race: host data in flight");
+        lf->broker.tick(++lf->clock); // the friend broker queued the data; the transport has not read it
+        const auto before=receives;t.close();drain(40);
+        check(losses==0&&receives==before&&lf->connected(),"race: in-flight data and the Close answer swallowed; attachment healthy");
+        check(t.createClient(1,3)&&t.connect(std::to_string(Host),0,3,resolved),"race: same transport re-Joins");
+        drain(80);check(connects==2&&losses==0&&lf->connected(),"race: second connection established");
+        host.disconnect();drain(10);}
     // VUH-1493 G7/G8 reconnect controls through the actual broker core, transport,
     // NetworkClient and SessionHost; only the Steam API and the OS pipe are replaced.
     {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
@@ -210,12 +251,24 @@ int main(){
          bus.routes.erase(remote);bus.routes.erase(hostSide);}
         pump(friend1.get());
         check(closes==1&&!friend1->isConnected()&&server.verifiedPeerCount()==1&&l1->connected(),"G8: peer-level Steam drop reaches the friend once; pipe and host session stay up");
-        // G8 as built: NetworkClient::connect() first calls disconnect(), and a remote SteamTransport::close()
-        // fails its hub, so an in-place rejoin closes the live attachment. The runtime's bounded recovery
-        // therefore cannot rejoin over Steam; the launcher's next Connect (G7) is the recovery path. This
-        // control records the current behaviour; a fix (non-terminal client close) must flip it deliberately.
-        check(!friend1->connect()&&!l1->connected(),"G8 (current): in-place rejoin after a Steam drop closes the attachment");
-        check(server.verifiedPeerCount()==1&&host.isConnected(),"G8 (current): the host session is unaffected");
+        // G8 (fixed, flipped deliberately): a joiner's close is per peer while the attachment is healthy, so the
+        // runtime's bounded recovery re-Joins the same host on the same broker attachment.
+        check(friend1->connect()&&l1->connected(),"G8: in-place rejoin after a Steam drop keeps the attachment");
+        pump(friend1.get());
+        check(friend1->isConnected()&&server.verifiedPeerCount()==2&&closes==1,"G8: allowlisted friend re-admitted on the same attachment");
+        // A user-initiated disconnect sends Close for the live peer; the broker's Disconnected answer is
+        // swallowed, the host sees the friend leave, and the next connect re-admits.
+        friend1->disconnect();pump(friend1.get());
+        check(!friend1->isConnected()&&server.verifiedPeerCount()==1&&l1->connected()&&closes==1,
+              "G8: local disconnect closes only the peer; its own Close answer is not a second loss");
+        check(friend1->connect(),"G8: reconnect after a local disconnect");pump(friend1.get());
+        check(friend1->isConnected()&&server.verifiedPeerCount()==2&&closes==1,"G8: re-admitted after a local disconnect, no stale loss delivered");
+        // Between attempts the closed joiner still services its hub, so broker heartbeats continue.
+        friend1->disconnect();const auto txBefore=l1->tx;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));friend1->tick();
+        check(l1->tx>txBefore&&l1->connected(),"G8: a closed joiner keeps pinging its broker between attempts");
+        check(friend1->connect(),"G8: connect after an idle gap");pump(friend1.get());
+        check(friend1->isConnected()&&server.verifiedPeerCount()==2,"G8: re-admitted after an idle gap");
         // G7: the attachment is dead (pipe loss). The launcher's next Connect is a fresh runtime with a fresh
         // attachment to the same in-game broker.
         l1->close();pump(friend1.get());

@@ -152,11 +152,15 @@ NetworkClient and SessionHost (only the Steam API and the OS pipe are mocked). T
 
 - **A peer-level Steam drop with the pipe still alive.** The friend sees one disconnect, and the host
   session and the friend's attachment stay up.
-  - **As built, an in-place rejoin is terminal.** `NetworkClient::connect()` first calls `disconnect()`,
-    and a remote `SteamTransport::close()` fails its hub. So the attempt closes the live attachment, and
-    the runtime's bounded recovery cannot rejoin over Steam.
-  - The control records this behaviour. A fix (a non-terminal client close that keeps the attachment)
-    must flip it deliberately.
+  - **G8 fix (candidate):** while the attachment is healthy, a joiner's close is per peer. It sends
+    `Op::Close` for each live peer and keeps servicing the hub, so broker heartbeats continue between
+    rejoin attempts.
+  - The broker lets a joiner Join its **same** host again once the previous connection is gone. Another
+    host, a second Join while connected, and a Join from a hosting attachment are still refused.
+  - The broker's answer to the joiner's own Close, and data that the Close overtakes, are swallowed.
+    They are not reported as a loss or a protocol failure.
+  - IPC errors and transport destruction still end the attachment.
+  - The runtime's bounded recovery therefore re-Joins over Steam.
 - **Loss of the broker attachment (pipe).** That runtime's session ends and cannot reconnect in place. A
   fresh runtime attachment to the same broker (the launcher's next Connect) is re-admitted by the
   unchanged host session.

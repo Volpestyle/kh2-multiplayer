@@ -64,8 +64,10 @@ bool Broker::command(const Frame& f,std::uint64_t now){
         configured_=true;return emit({Op::Ready,identity_});
     }
     if(f.op==Op::Join){
-        if(configured_||!validId(f.peer)||f.peer==identity_||!f.bytes.empty())return fail("bad-join");
-        target_=f.peer;admitted_.push_back(f.peer);const auto h=api_.connect(target_);if(!h)return fail("connect-failed");
+        // VUH-1493 G8: a joiner may Join its SAME host again once its previous connection is gone.
+        const bool rejoin=configured_&&target_&&f.peer==target_&&peers_.empty()&&!listener_;
+        if((configured_&&!rejoin)||!validId(f.peer)||f.peer==identity_||!f.bytes.empty())return fail("bad-join");
+        target_=f.peer;if(!rejoin)admitted_.push_back(f.peer);const auto h=api_.connect(target_);if(!h)return fail("connect-failed");
         try {peers_.emplace(target_,Peer{h,false,now});} catch(...) {api_.close(h,false);throw;}
         if(!api_.iceOff(h,false))return fail("connect-ice-off-unverified");
         configured_=true;return true;

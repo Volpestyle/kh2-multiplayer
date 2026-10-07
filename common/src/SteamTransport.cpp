@@ -46,12 +46,20 @@ struct Peer {std::uint64_t id;bool connected=false,closed=false;};
 class SteamTransport final:public Transport {
     std::shared_ptr<Hub> hub_;bool server_=false,local_=false,open_=false;
     std::map<std::uint64_t,std::unique_ptr<Peer>> peers_;
+    std::map<std::uint64_t,unsigned> stale_; // Disconnected receipts owed for peers this joiner closed itself
+    bool joiner()const{return !server_&&!local_;}
+    void terminate(){ // the original close: the attachment ends (host, local Player, destruction)
+        if(!open_)return;open_=false;
+        if(local_){if(hub_->localConnected){hub_->push(hub_->server,{steam::Op::Disconnected,hub_->identity,1});hub_->localConnected=false;}}
+        else {hub_->fail();}
+        queue().clear();for(auto& [id,p]:peers_){(void)id;p->connected=false;p->closed=true;}
+    }
     std::deque<steam::Frame>& queue(){return server_?hub_->server:hub_->client;}
     Peer* find(TransportPeer* p)const{for(const auto& [id,v]:peers_){(void)id;if(reinterpret_cast<TransportPeer*>(v.get())==p)return v.get();}return nullptr;}
     Peer* peer(std::uint64_t id){auto& p=peers_[id];if(!p)p=std::make_unique<Peer>(Peer{id});return p.get();}
 public:
     SteamTransport(std::shared_ptr<Hub> h,bool s,bool l):hub_(std::move(h)),server_(s),local_(l){}
-    ~SteamTransport()override{close();}
+    ~SteamTransport()override{terminate();}
     bool createClient(std::size_t n,std::size_t channels)override{if(server_||n!=1||channels!=3||hub_->dead)return false;open_=true;return true;}
     TransportOpenResult listen(const std::string&,std::uint16_t,std::size_t n,std::size_t channels)override{
         if(!server_||n>3||channels!=3||hub_->dead||hub_->listening)return TransportOpenResult::CreateFailed;
@@ -68,16 +76,31 @@ public:
         resolved=true;auto* p=peer(id);p->closed=false;return reinterpret_cast<TransportPeer*>(p);
     }
     bool isOpen()const override{return open_;} // service must deliver loss before client retires
+    // VUH-1493 G8: a joiner's close is per peer while its broker attachment is healthy. Each live peer gets
+    // Op::Close; the transport stays open so service() keeps the broker heartbeat alive between rejoin
+    // attempts, and the next createClient/connect re-Joins the same host. IPC errors still fail() the hub.
     void close()override{
-        if(!open_)return;open_=false;
-        if(local_){if(hub_->localConnected){hub_->push(hub_->server,{steam::Op::Disconnected,hub_->identity,1});hub_->localConnected=false;}}
-        else {hub_->fail();}
-        queue().clear();for(auto& [id,p]:peers_){(void)id;p->connected=false;p->closed=true;}
+        if(!open_)return;
+        if(!joiner()||hub_->dead){terminate();return;}
+        for(auto& [id,p]:peers_){
+            if(p->closed)continue;
+            p->connected=false;p->closed=true;
+            if(!hub_->command({steam::Op::Close,id,1})){terminate();return;}
+            ++stale_[id]; // the broker answers our Close with one Disconnected
+        }
+        queue().clear();
     }
     int service(TransportEvent& e,std::uint32_t)override{
         e={};if(!open_)return 0;hub_->pump();
         if(hub_->dead){for(auto& [id,p]:peers_)if(!p->closed){p->connected=false;p->closed=true;e.type=TransportEventType::Disconnect;e.peer=reinterpret_cast<TransportPeer*>(p.get());e.data=0;return 1;}return -1;}
-        auto& q=queue();if(q.empty())return 0;auto f=std::move(q.front());q.pop_front();auto* p=peer(f.peer);e.peer=reinterpret_cast<TransportPeer*>(p);
+        auto& q=queue();steam::Frame f;Peer* p=nullptr;
+        for(;;){
+            if(q.empty())return 0;f=std::move(q.front());q.pop_front();p=peer(f.peer);
+            if(joiner()&&f.op==steam::Op::Disconnected&&stale_[f.peer]){--stale_[f.peer];continue;} // answer to our own Close
+            if(joiner()&&f.op==steam::Op::Data&&p->closed)continue; // overtaken by our own Close
+            break;
+        }
+        e.peer=reinterpret_cast<TransportPeer*>(p);
         if(f.op==steam::Op::Connected){p->connected=true;p->closed=false;e.type=TransportEventType::Connect;}
         else if(f.op==steam::Op::Disconnected){p->connected=false;p->closed=true;e.type=TransportEventType::Disconnect;e.data=f.reason;}
         else if(f.op==steam::Op::Data&&p->connected){e.type=TransportEventType::Receive;auto* b=new std::vector<std::uint8_t>(std::move(f.bytes));e.packet=TransportPacket(b,[](void* v){delete static_cast<std::vector<std::uint8_t>*>(v);},b->data(),b->size(),f.reliable);}
