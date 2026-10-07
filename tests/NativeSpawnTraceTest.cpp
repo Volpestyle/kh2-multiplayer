@@ -66,6 +66,35 @@ MH_STATUS WINAPI MH_RemoveHook(LPVOID) {
 namespace {
 using namespace kh2coop::inject::spawncontroller;
 
+// 497beb6 replaced the thread_local factory/construction scope pointers with
+// one retained FLS-owned frame store (NativeTraceFiber.hpp). These helpers read
+// this fiber's retained store the way the production observers do.
+FactoryLocal* Scopes() { return g_factoryStorage.Current(); }
+unsigned FactoryDepth() { auto* local = Scopes(); return local ? local->depth : ~0U; }
+// Idle: the retained store is still usable and has no open wrapper frame.
+bool Idle() { auto* local = Scopes(); return local && local->depth == 0; }
+FactoryFrame* TopFrame() {
+    auto* local = Scopes();
+    return local && local->depth && local->depth <= FACTORY_DEPTH_CAP ? &local->frames[local->depth - 1] : nullptr;
+}
+// The collection scope a child hook would attribute to (eligible frames only).
+FactoryPredicates* FactoryScope() { auto* top = TopFrame(); return top && top->factory.eligible ? &top->factory : nullptr; }
+// Opens `depth` synthetic retained frames anchored at a caller frame so that
+// production parent validation accepts them; returns the top frame.
+FactoryFrame* ParkFrames(unsigned depth, uintptr_t anchor) {
+    auto* local = Scopes();
+    if (!local || local->depth || !depth || depth > FACTORY_DEPTH_CAP) return nullptr;
+    for (unsigned i = 0; i < depth; ++i) {
+        auto& frame = local->frames[i];
+        frame = {}; frame.anchor = anchor; frame.serial = ++g_factoryScopeSerial;
+    }
+    local->depth = depth;
+    return &local->frames[depth - 1];
+}
+void UnparkFrames() {
+    if (auto* local = Scopes()) { for (auto& frame : local->frames) frame = {}; local->depth = 0; }
+}
+
 unsigned updateCalls = 0, wrapperCalls = 0, depthSeen = 0;
 unsigned generatedCalls = 0, dispatcherCalls = 0, scriptCalls = 0;
 bool faultUpdate = false, faultWrapper = false;
@@ -119,9 +148,9 @@ void* SyntheticFactoryBody() {
     float weight = 0;
     std::memcpy(&weight, &inputWeightBits, sizeof(weight));
     if ((factoryMode == FactoryTestMode::Nested || factoryMode == FactoryTestMode::NestedFault) &&
-        g_factoryDepth == 1) {
+        FactoryDepth() == 1) {
         const auto savedMode = factoryMode;
-        auto* const parent = g_factoryScope;
+        auto* const parent = FactoryScope();
         nestedFactoryEvent = {};
         nestedFactoryEvent.recordAvailable = true;
         nestedFactoryEvent.objectId = 0x309;
@@ -135,11 +164,11 @@ void* SyntheticFactoryBody() {
                 reinterpret_cast<void*>(expectedController), expectedPoint);
             nestedScopeRestored = true;
         }
-        nestedScopeRestored = nestedScopeRestored && g_factoryScope == parent && g_factoryDepth == 1;
+        nestedScopeRestored = nestedScopeRestored && parent && FactoryScope() == parent && FactoryDepth() == 1;
         factoryMode = savedMode;
     }
-    if (factoryMode == FactoryTestMode::Overflow && g_factoryScope)
-        g_factoryScope->admissionCalls = 0xFFFFU;
+    if (factoryMode == FactoryTestMode::Overflow)
+        if (auto* const scope = FactoryScope()) scope->admissionCalls = 0xFFFFU;
     const uintptr_t callerOffset = factoryMode == FactoryTestMode::WrongCaller ? 1 : 0;
     const auto admitted = ObserveAdmission(weight, g_exeBase + ADMISSION_RETURN_RVA + callerOffset);
     if (factoryMode == FactoryTestMode::Repeated)
@@ -1602,9 +1631,10 @@ void* __fastcall LineageOriginal(const void* record, void* controller) {
         reinterpret_cast<uintptr_t>(record) == lineageRecord;
     NativeConstructionLineage current;
     const bool copied = CopyNativeConstructionLineage(current);
-    if (g_constructionDepth == 1) { lineageEntry = current; lineageEntryCopied = copied; }
+    // Construction lineage now shares the retained wrapper frame depth.
+    if (FactoryDepth() == 1) { lineageEntry = current; lineageEntryCopied = copied; }
     else lineageNestedEntry = current;
-    if (lineageMode == LineageMode::Nested && g_constructionDepth == 1) {
+    if (lineageMode == LineageMode::Nested && FactoryDepth() == 1) {
         TraceEvent nested;
         nested.sequence = 42;
         nested.wrapper = TraceWrapper::Generated;
@@ -1646,10 +1676,10 @@ void ConstructionLineageControls(std::uint8_t* image) {
     const auto oldConfigured = g_constructionConfigured.load();
     const auto oldCoverage = g_constructionCoverage.load();
     const auto oldSerial = g_constructionSerial.load();
-    const auto oldDepth = g_constructionDepth;
-    auto* const oldScope = g_constructionScope;
-    auto* const oldFactoryScope = g_factoryScope;
-    const auto oldFactoryDepth = g_factoryDepth;
+    // Synthetic parked frames are anchored here, above every wrapper this
+    // function (and its run lambda) enters.
+    const auto frameAnchor = reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
+    Check(Idle(), "construction controls start with an idle retained scope store");
     g_originalWrapper = &LineageOriginal;
     g_originalGenerated = [](const void* record, void* controller, const float*) -> void* {
         return LineageOriginal(record, controller);
@@ -1657,8 +1687,6 @@ void ConstructionLineageControls(std::uint8_t* image) {
     g_constructionConfigured = true;
     g_constructionCoverage = 101;
     g_constructionSerial = 0;
-    g_constructionScope = nullptr; g_constructionDepth = 0;
-    g_factoryScope = nullptr; g_factoryDepth = 0;
     RegisterDiagnosticGameThread();
     Controller controller;
     std::array<std::uint8_t, 44 + 5 * 64> definition {};
@@ -1716,7 +1744,7 @@ void ConstructionLineageControls(std::uint8_t* image) {
           !terminal.atomic && !terminal.creationAuthority,
           "full sampled construction lineage never grants fiber continuity lifetime exclusion or creation");
     NativeConstructionLineage absent;
-    Check(!CopyNativeConstructionLineage(absent) && !absent.captured && !g_constructionScope && g_constructionDepth == 0,
+    Check(!CopyNativeConstructionLineage(absent) && !absent.captured && Idle(),
           "resource child outside an actual wrapper cannot borrow a terminal or stale parent");
     lineageMode = LineageMode::Nested; run();
     Check(lineageNestedEntry.captured && lineageNestedEntry.wrapper == TraceWrapper::Generated &&
@@ -1749,11 +1777,18 @@ void ConstructionLineageControls(std::uint8_t* image) {
           "six-row definition is unavailable to the fixed five-row diagnostic bound without truncation");
     std::memcpy(definition.data() + 4, &count, 2);
     NativeConstructionLineage parked; parked.captured = parked.candidateThreadParent = true; parked.serial = 777;
-    g_constructionScope = &parked; g_constructionDepth = CONSTRUCTION_DEPTH_CAP; run();
-    Check(!lineageEntryCopied && terminal.overflow && !terminal.candidateThreadParent &&
-          g_constructionScope == &parked && g_constructionDepth == CONSTRUCTION_DEPTH_CAP,
+    // Park CONSTRUCTION_DEPTH_CAP retained frames (below FACTORY_DEPTH_CAP, so the
+    // store stays usable) with a visible parked construction parent on top.
+    auto* parkedTop = ParkFrames(CONSTRUCTION_DEPTH_CAP, frameAnchor);
+    if (parkedTop) { parkedTop->construction = parked; parkedTop->constructionVisible = true; }
+    const auto parkedSerial = parkedTop ? parkedTop->serial : 0;
+    run();
+    Check(parkedTop && !lineageEntryCopied && !lineageNestedEntry.captured && terminal.overflow &&
+          !terminal.candidateThreadParent && terminal.enclosingThreadSerial == 777 &&
+          FactoryDepth() == CONSTRUCTION_DEPTH_CAP && parkedTop->serial == parkedSerial &&
+          parkedTop->constructionVisible && parkedTop->construction.serial == 777,
           "depth saturation hides parked ancestry while executing the native original and restoring the parent");
-    g_constructionScope = nullptr; g_constructionDepth = 0;
+    UnparkFrames();
     g_constructionSerial = UINT64_MAX; run();
     Check(terminal.overflow && !terminal.serial && !lineageEntryCopied,
           "saturated construction serial never wraps into a reusable parent identity");
@@ -1785,10 +1820,12 @@ void ConstructionLineageControls(std::uint8_t* image) {
     Check(lineageParentFiber && lineageChildFiber, "owned two-fiber construction ancestry control starts");
     if (lineageChildFiber) {
         lineageMode = LineageMode::FiberSwitch; run();
-        Check(lineageInheritedCopied && lineageInherited.serial == lineageEntry.serial &&
-              lineageInherited.parentFiberAncestryUnproven && !lineageInherited.fiberContinuityProven &&
-              !terminal.fiberContinuityProven && !terminal.creationAuthority,
-              "real different fiber inherits TLS but neither parent copy nor terminal certifies fiber ancestry");
+        // Scopes are fiber-local since 497beb6: the other fiber owns a separate
+        // retained cell and cannot borrow the suspended fiber's parent.
+        Check(!lineageInheritedCopied && !lineageInherited.captured && lineageEntryCopied &&
+              terminal.normalReturn && terminal.serial == lineageEntry.serial &&
+              !terminal.fiberContinuityProven && !terminal.creationAuthority && Idle(),
+              "real different fiber cannot borrow the suspended fiber's lineage and terminal certifies no fiber ancestry");
         DeleteFiber(lineageChildFiber);
     }
     if (lineageParentFiber && !wasFiber) ConvertFiberToThread();
@@ -1804,7 +1841,7 @@ void ConstructionLineageControls(std::uint8_t* image) {
     event = {}; event.sequence = 71;
     Check(RunFactoryWrapper(&event, reinterpret_cast<const void*>(lineageRecord), &controller, nullptr) == &actorToken &&
           lineageOriginalCalls == callsBeforeDrop + 1 && g_constructionDropped.load() == beforeDrop + 1 &&
-          !g_constructionScope && !g_constructionDepth,
+          Idle(),
           "full independent construction queue drops only diagnostics and preserves native call and scope cleanup");
     std::size_t retained = 0;
     bool preservedOrder = true;
@@ -1820,14 +1857,14 @@ void ConstructionLineageControls(std::uint8_t* image) {
     RunFactoryWrapper(&event, reinterpret_cast<const void*>(lineageRecord), &controller, nullptr);
     ReleaseSRWLockExclusive(&g_constructionLock);
     Check(g_constructionDropped.load() == lockedDropBefore + 1 && !PopNativeConstructionLineage(terminal) &&
-          !g_constructionScope && !g_constructionDepth,
+          Idle(),
           "contended construction publication never waits or retries inside the native wrapper boundary");
     lineageMode = LineageMode::Fault; event = {}; event.sequence = 51;
     const auto faultCalls = lineageOriginalCalls;
     const bool faultCaught = CatchLineageException(&event);
     const bool faultTerminal = PopNativeConstructionLineage(terminal);
     Check(faultCaught && faultTerminal && lineageOriginalCalls == faultCalls + 1 &&
-          !g_constructionScope && !g_constructionDepth && terminal.unwound &&
+          Idle() && terminal.unwound &&
           !terminal.normalReturn && !terminal.samples[1].controllerRead,
           "native SEH propagates once and terminal parent marks unwind without post-fault native reads");
     TraceEvent interrupted;
@@ -1835,10 +1872,14 @@ void ConstructionLineageControls(std::uint8_t* image) {
           terminal.unwound && !terminal.normalReturn,
           "existing bounded trace queue retains an interrupted construction sidecar");
     lineageMode = LineageMode::Normal;
-    g_constructionConfigured = false; g_constructionScope = &parked; run();
-    Check(!terminal.captured && g_constructionScope == &parked,
+    g_constructionConfigured = false;
+    parkedTop = ParkFrames(1, frameAnchor);
+    if (parkedTop) { parkedTop->construction = parked; parkedTop->constructionVisible = true; }
+    run();
+    Check(parkedTop && !terminal.captured && !lineageNestedEntry.captured && FactoryDepth() == 1 &&
+          parkedTop->constructionVisible && parkedTop->construction.serial == 777,
           "disabled sidecar leaves original dispatch intact and hides ancestry during a nested native call");
-    g_constructionScope = nullptr;
+    UnparkFrames();
     g_constructionConfigured = true;
     lineageMode = LineageMode::Normal;
     const auto rolesBefore = roleReads.load(), transitionsBefore = transitionReads.load(), loadsBefore = loadReads.load();
@@ -1856,8 +1897,35 @@ void ConstructionLineageControls(std::uint8_t* image) {
     }
     g_originalWrapper = oldWrapper; g_originalGenerated = oldGenerated;
     g_constructionConfigured = oldConfigured; g_constructionCoverage = oldCoverage; g_constructionSerial = oldSerial;
-    g_constructionScope = oldScope; g_constructionDepth = oldDepth;
-    g_factoryScope = oldFactoryScope; g_factoryDepth = oldFactoryDepth;
+    Check(Idle(), "construction controls leave the retained scope store idle and usable");
+}
+
+struct FactoryDepthCapRun {
+    void* controller = nullptr;
+    void* result = nullptr;
+    TraceEvent event;
+    bool prepared = false, abandoned = false, parkedSerialKept = false;
+    std::uint16_t parkedAdmissionCalls = 0xFFFFU;
+};
+// Fills this fresh thread's retained store to FACTORY_DEPTH_CAP with valid
+// eligible enclosing frames, then enters one more wrapper.
+DWORD WINAPI FactoryDepthCapObservation(void* argument) {
+    auto& run = *static_cast<FactoryDepthCapRun*>(argument);
+    auto* local = Scopes();
+    if (!local || local->depth) return 1;
+    auto* top = ParkFrames(FACTORY_DEPTH_CAP, reinterpret_cast<uintptr_t>(_AddressOfReturnAddress()));
+    if (!top) return 1;
+    top->factory.eligible = true;
+    top->factory.coverageMask = FactoryAllHooks;
+    top->factory.coverageSerial = g_factoryCoverageSerial.load();
+    const auto serial = top->serial;
+    run.prepared = true;
+    run.result = RunFactoryWrapper(&run.event, expectedRecord, run.controller, nullptr);
+    // The rejected store's memory is never reused, so the parked frame is intact.
+    run.parkedAdmissionCalls = top->factory.admissionCalls;
+    run.parkedSerialKept = top->serial == serial && local->depth == FACTORY_DEPTH_CAP;
+    run.abandoned = Scopes() == nullptr;
+    return 0;
 }
 
 int main() {
@@ -1879,6 +1947,12 @@ int main() {
     g_originalAllocation = &SyntheticAllocation;
     g_factoryInstalled = g_factoryVerified = FactoryAllHooks;
     g_factoryCoverageSerial = 1;
+    // Arm the retained FLS scope store and the raw diagnostic gate directly, as
+    // Install() would, without any MinHook call. Without this every wrapper
+    // takes the unavailable pass-through and no factory scope is ever opened.
+    Check(g_factoryStorage.Init(reinterpret_cast<const void*>(&Install)) && Idle(),
+          "retained fiber scope store initialized and idle");
+    g_rawDiagnosticEnabled = true;
     image[kh2coop::offsets::NOW] = 5;
     image[kh2coop::offsets::NOW + 1] = 6;
     // Unknown thread: real observer must call original once, retain raw NOW,
@@ -1898,7 +1972,7 @@ int main() {
           "unregistered diagnostics retain raw NOW but never query role or native serials");
     Check(!unregistered.factory.eligible && !unregistered.factory.complete &&
           unregistered.factory.admissionCalls == 0 && admissionOriginalCalls == 1 &&
-          admissionArgumentBits == inputWeightBits && g_factoryScope == nullptr && g_factoryDepth == 0,
+          admissionArgumentBits == inputWeightBits && Idle(),
           "unregistered factory executes genuine child once without reading operands or retaining scope");
     factoryMode = FactoryTestMode::Off;
     fixedResult = &actorToken;
@@ -2052,11 +2126,13 @@ int main() {
           dispatcherCalls == 1 && dispatcherArgumentsPreserved && scriptArgumentsPreserved &&
           !g_scriptScope.active && !g_dispatcherScope.active,
           "script/dispatcher scope preserves native arguments and full 64-bit RAX exactly once");
-    Check(PopTraceEvent(extra) && extra.enclosingScript42DC10 && extra.enclosingDispatcher &&
-          extra.scriptSequence != 0 && extra.dispatcherSequence != 0 &&
-          extra.scriptCallerRvaAvailable && extra.scriptCallerRva == 0x551111 &&
-          !extra.dispatcherCallerRvaAvailable && extra.dispatcherCallerRva == 0 && !extra.enclosingTick,
-          "explicit script TLS identifies ancestry while real dispatcher hook sees an unknown DLL return address");
+    // 497beb6 limits the legacy trace to the FLS raw-only profile: TLS
+    // tick/dispatcher/script correlation is explicitly unsupported, so the
+    // wrapper event must not claim any enclosing ancestry.
+    Check(PopTraceEvent(extra) && !extra.enclosingScript42DC10 && !extra.enclosingDispatcher &&
+          extra.scriptSequence == 0 && extra.dispatcherSequence == 0 &&
+          !extra.scriptCallerRvaAvailable && !extra.dispatcherCallerRvaAvailable && !extra.enclosingTick,
+          "raw-only profile reports no script/dispatcher/tick ancestry even inside explicit scopes");
 
     g_dispatcherScope = {true, 111, 222, 333, 444};
     g_scriptScope = {true, 555, 666};
@@ -2093,7 +2169,7 @@ int main() {
         TraceEvent event;
         const unsigned expectedCalls = mode == FactoryTestMode::Nested ? 2U : 1U;
         Check(result == expectedReturn && wrapperCalls == calls + expectedCalls && factoryArgumentsPreserved &&
-              PopTraceEvent(event) && !g_factoryScope && g_factoryDepth == 0,
+              PopTraceEvent(event) && Idle(),
               "factory wrapper preserves original arguments/result once and restores scope");
         return event;
     };
@@ -2176,7 +2252,7 @@ int main() {
     faultAdmission = true;
     const auto faultAdmissionBefore = admissionOriginalCalls;
     Check(CatchFactoryException(&faultedFactory) && admissionOriginalCalls == faultAdmissionBefore + 1 &&
-          !g_factoryScope && g_factoryDepth == 0 && PopTraceEvent(extra) && extra.factory.unwound &&
+          Idle() && PopTraceEvent(extra) && extra.factory.unwound &&
           extra.factory.admissionFault && !extra.factory.admissionReturned && !extra.wrapperComplete &&
           !extra.factory.complete && !extra.postStampAvailable && !extra.tickComplete,
           "admission SEH propagates once and publishes captured POD without poststate or stale TLS");
@@ -2185,7 +2261,7 @@ int main() {
     faultedFactory = {};
     const auto faultAllocationBefore = allocationOriginalCalls;
     Check(CatchFactoryException(&faultedFactory) && allocationOriginalCalls == faultAllocationBefore + 1 &&
-          !g_factoryScope && g_factoryDepth == 0 && PopTraceEvent(extra) && extra.factory.unwound &&
+          Idle() && PopTraceEvent(extra) && extra.factory.unwound &&
           extra.factory.admissionReturned && extra.factory.allocationFault && !extra.factory.allocationReturned &&
           !extra.factory.complete, "allocator SEH propagates once with explicit interrupted child outcome");
     faultAllocation = false;
@@ -2194,7 +2270,7 @@ int main() {
     recoveredOuter.recordAvailable = true;
     recoveredOuter.objectId = 0x309;
     Check(RunFactoryWrapper(&recoveredOuter, expectedRecord, &controller, nullptr) == combatActor.data() &&
-          nestedScopeRestored && !g_factoryScope && g_factoryDepth == 0 &&
+          nestedScopeRestored && Idle() &&
           recoveredOuter.factory.outcome == FactoryOutcome::AllocationPassed &&
           recoveredOuter.factory.admissionCalls == 1 && PopTraceEvent(extra) && extra.factory.unwound &&
           extra.factory.depth == 1, "caught nested native fault restores outer scope without mixing child facts");
@@ -2202,24 +2278,29 @@ int main() {
     Check(factory.factory.complete && factory.factory.outcome == FactoryOutcome::AllocationPassed,
           "normal factory observation remains usable after nested native unwind");
 
-    FactoryPredicates parkedParent;
-    g_factoryScope = &parkedParent;
-    g_factoryDepth = FACTORY_DEPTH_CAP;
-    TraceEvent depthLimited;
-    Check(RunFactoryWrapper(&depthLimited, expectedRecord, &controller, nullptr) == combatActor.data() &&
-          !depthLimited.factory.eligible && depthLimited.factory.countOverflow &&
-          depthLimited.factory.outcome == FactoryOutcome::Ambiguous &&
-          !depthLimited.factory.admissionCalls && !parkedParent.admissionCalls &&
-          g_factoryScope == &parkedParent && g_factoryDepth == FACTORY_DEPTH_CAP,
-          "depth cap suppresses child attribution and restores parked parent without overwriting it");
-    g_factoryScope = nullptr;
-    g_factoryDepth = 0;
+    // A store at FACTORY_DEPTH_CAP is rejected fail-closed (never reused), so run
+    // the cap on a fresh thread (own FLS cell) and keep this store usable.
+    FactoryDepthCapRun capRun;
+    capRun.controller = &controller;
+    const auto capAdmissionsBefore = admissionOriginalCalls, capWrappersBefore = wrapperCalls;
+    HANDLE capThread = CreateThread(nullptr, 0, &FactoryDepthCapObservation, &capRun, 0, nullptr);
+    const bool capJoined = capThread && WaitForSingleObject(capThread, 5000) == WAIT_OBJECT_0;
+    if (capThread) CloseHandle(capThread);
+    // The overflow pass-through returns before CompleteFactoryObservation, so
+    // its outcome stays Unknown (pre-497beb6 classified it Ambiguous).
+    Check(capJoined && capRun.prepared && capRun.result == combatActor.data() &&
+          wrapperCalls == capWrappersBefore + 1 && admissionOriginalCalls == capAdmissionsBefore + 1 &&
+          !capRun.event.factory.eligible && capRun.event.factory.countOverflow && !capRun.event.factory.complete &&
+          capRun.event.factory.outcome != FactoryOutcome::AllocationPassed &&
+          !capRun.event.factory.admissionCalls && !capRun.parkedAdmissionCalls && capRun.parkedSerialKept &&
+          capRun.abandoned && Idle(),
+          "depth cap suppresses child attribution, runs the original once and abandons the overfull store");
     for (std::size_t i = 0; i < TRACE_QUEUE_CAP; ++i) PublishTrace(completed);
     const auto factoryDropsBefore = g_traceDropped.load();
     faultAdmission = true;
     faultedFactory = {};
     Check(CatchFactoryException(&faultedFactory) && g_traceDropped.load() == factoryDropsBefore + 1 &&
-          !g_factoryScope && g_factoryDepth == 0,
+          Idle(),
           "interrupted factory reports queue loss and restores scope even under full queue pressure");
     faultAdmission = false;
     drained = 0;
@@ -2234,7 +2315,7 @@ int main() {
           admissionOriginalCalls == outsideAdmissionCalls + 1 &&
           allocationOriginalCalls == outsideAllocationCalls + 1 &&
           allocationArgument == wideAllocationSize && admissionArgumentBits == inputWeightBits &&
-          !g_factoryScope, "real child hook entries preserve full arguments/results for unmatched DLL callers");
+          Idle(), "real child hook entries preserve full arguments/results for unmatched DLL callers");
 
     // Child hooks execute on the foreign thread, but that thread has no eligible
     // collection scope and must not read budget operands or native serials.

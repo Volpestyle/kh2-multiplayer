@@ -25,12 +25,18 @@ const char* optionalRoot="root";
 bool inputsOkay=true,recurse=false,throwNative=false,stopInside=false;
 unsigned desiredDepth=0;
 DWORD inputLastError=0,outputLastError=0x1234;
+// 497beb6 moved the per-thread scope into the retained FLS-owned store
+// (NativeTraceFiber.hpp). Returns this fiber's retained Local, or nullptr if
+// the store refused it (which the checks below then treat as a failure).
+rt::Local* Scope(){return rt::g_localStorage.Current();}
+std::uint32_t CallbackDepth(){auto* l=Scope();return l?l->callbackDepth:UINT32_MAX;}
+std::uint32_t ConstructionDepth(){auto* l=Scope();return l?l->constructionDepth:UINT32_MAX;}
 __declspec(noinline) std::uint64_t __fastcall Model(void* p,const char* n,const char* r){
     ++calls;inputsOkay=inputsOkay && p==object && n==name && r==optionalRoot;
     if(GetLastError()!=inputLastError)inputsOkay=false;
     if(stopInside)rt::StopRecording();
-    if(throwNative && rt::g_local.callbackDepth==desiredDepth){SetLastError(outputLastError);RaiseException(0xE0107240,0,0,nullptr);}
-    if(recurse && rt::g_local.callbackDepth<desiredDepth){SetLastError(inputLastError);if(target(p,n,r)!=rawReturn)inputsOkay=false;}
+    if(throwNative && CallbackDepth()==desiredDepth){SetLastError(outputLastError);RaiseException(0xE0107240,0,0,nullptr);}
+    if(recurse && CallbackDepth()<desiredDepth){SetLastError(inputLastError);if(target(p,n,r)!=rawReturn)inputsOkay=false;}
     SetLastError(outputLastError);return rawReturn;
 }
 struct OwnedTarget {std::uint8_t* code=nullptr;RUNTIME_FUNCTION* table=nullptr;};
@@ -75,10 +81,13 @@ int main(int argc,char** argv){
     if(mode=="identity"){
         SetLastError(91);Check(rt::Initialize(0,false) && GetLastError()==91 && !rt::RetainsMinHookResources(),"default-off performs no install and preserves last-error");
         Check(!rt::Initialize(0,true) && rt::GetStatistics().status==rt::InstallStatus::IdentityUnavailable,"unreadable identity fails before create");
+        // 497beb6: a requested install initializes (and permanently retains) the
+        // FLS scope store before identity checks; no MinHook hook is retained.
+        Check(rt::g_localStorage.Ready() && !rt::g_retained.load() && rt::RetainsMinHookResources(),"requested install retains fiber storage but no hook before identity");
         auto* image=static_cast<std::uint8_t*>(VirtualAlloc(nullptr,0x108000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
         Check(image!=nullptr,"owned runtime identity image allocated");if(!image)return 1;
         std::memcpy(image+rt::TargetRva,rt::kBody.data(),rt::kBody.size());image[rt::TargetRva+983]^=1;
-        Check(!rt::Initialize(reinterpret_cast<uintptr_t>(image),true) && rt::GetStatistics().status==rt::InstallStatus::IdentityMismatch && !rt::RetainsMinHookResources(),"changed last body byte fails exact984-byte identity despite matching prefix");
+        Check(!rt::Initialize(reinterpret_cast<uintptr_t>(image),true) && rt::GetStatistics().status==rt::InstallStatus::IdentityMismatch && !rt::g_retained.load(),"changed last body byte fails exact984-byte identity despite matching prefix");
         image[rt::TargetRva+983]^=1;
         Check(rt::Initialize(reinterpret_cast<uintptr_t>(image),true),"public production initializer qualifies exact984 bytes including14-byte prefix");
         Check(rt::RetainsMinHookResources() && rt::GetStatistics().modulePinned,"public initializer pins actual containing module before exposure");
@@ -105,6 +114,10 @@ int main(int argc,char** argv){
                 Check(MH_Uninitialize()==MH_OK,"preexposure owner may globally uninitialize");FreeUnexposed(owned);
             }
         }else{
+            // The owned-target seam bypasses Initialize(), so arm the retained
+            // FLS scope store as Initialize() would before any observation.
+            Check(rt::g_localStorage.Init(reinterpret_cast<const void*>(&rt::Initialize)) && Scope() && Scope()->constructionDepth==0,
+                "retained fiber scope store initialized and idle");
             Check(installed && rt::GetStatistics().modulePinned && rt::RetainsMinHookResources(),"actual production install pins module and retains real MinHook resources");
             // This private seam uses owned synthetic code, not native identity.
             Check(!rt::GetStatistics().installationIdentityVerified,"synthetic target seam does not invent native body identity");
@@ -125,7 +138,7 @@ int main(int argc,char** argv){
             rt::ResourceObservation rootRow{},childRow{};const bool two=rt::Pop(rootRow)&&rt::Pop(childRow)&&!rt::Pop(row);
             Check(two && childRow.parentCallback==rootRow.invocation && calls-beforeCalls==2,"actual recursive patched callback preserves parent ID and exactly once per call");
             Lineage();boundary=rt::BeginConstruction();desiredDepth=2;recurse=true;throwNative=true;Throwing();recurse=false;throwNative=false;rt::EndConstruction(boundary,false);
-            Check(rt::Pop(rootRow)&&rt::Pop(childRow) && rootRow.unwound && childRow.unwound && !rootRow.normalReturn && !childRow.normalReturn && !rt::g_local.callbackDepth,"nested SEH marks each actual production callback unwind and restores depth");Drain();
+            Check(rt::Pop(rootRow)&&rt::Pop(childRow) && rootRow.unwound && childRow.unwound && !rootRow.normalReturn && !childRow.normalReturn && CallbackDepth()==0,"nested SEH marks each actual production callback unwind and restores depth");Drain();
             Lineage();boundary=rt::BeginConstruction();desiredDepth=10;recurse=true;Invoke();recurse=false;rt::EndConstruction(boundary,true);
             Check(Drain(&row)==8 && row.boundaryDropped==2,"eight callback-depth cap retains rows and counts deeper pass-throughs");
             Lineage();boundary=rt::BeginConstruction();for(unsigned i=0;i<65;++i){SetLastError(inputLastError);target(object,name,optionalRoot);}rt::EndConstruction(boundary,true);
@@ -134,7 +147,7 @@ int main(int argc,char** argv){
             Check(Drain()==0 && rt::GetStatistics().unparented!=0,"ineligible nested boundary hides eligible ancestor");
             Lineage();std::array<rt::ConstructionToken,9> scopes{};for(auto& s:scopes)s=rt::BeginConstruction();SetLastError(inputLastError);target(object,name,optionalRoot);
             for(auto i=scopes.size();i>0;--i)rt::EndConstruction(scopes[i-1],true);
-            Check(Drain()==0 && !rt::g_local.constructionDepth,"construction-depth overflow hides parent and restores all scopes");
+            Check(Drain()==0 && ConstructionDepth()==0,"construction-depth overflow hides parent and restores all scopes");
             const auto services=lineageCalls.load();HANDLE worker=CreateThread(nullptr,0,Foreign,nullptr,0,nullptr);
             Check(worker && WaitForSingleObject(worker,5000)==WAIT_OBJECT_0,"foreign owned callback worker joined");if(worker)CloseHandle(worker);
             Check(rt::GetStatistics().foreign>0 && lineageCalls==services,"foreign/unparented callback does not invoke root lineage services");
