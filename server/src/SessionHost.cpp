@@ -866,9 +866,13 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                         p.status==PeerStatus::Verified && p.connectionId==request.targetConnectionId;
                 });
                 const auto now = currentTimeMs();
+                // The native host never sends TransitionAck (only clients do), so the
+                // host is arrived in the room it announced; its avatar freshness,
+                // delivery, epoch, room and cutscene checks below still apply (VUH-1504).
                 const auto arrived = [&](const PeerState& p) {
-                    return !p.worldQuarantined && p.ackArrived && p.ackEpoch==room_->epoch &&
-                        p.ackWorldId==room_->worldId && p.ackRoomId==room_->roomId &&
+                    return !p.worldQuarantined &&
+                        (fromHost(p) || (p.ackArrived && p.ackEpoch==room_->epoch &&
+                                         p.ackWorldId==room_->worldId && p.ackRoomId==room_->roomId)) &&
                         p.reviveAvatarMs && now>=p.reviveAvatarMs && now-p.reviveAvatarMs<=REVIVE_AVATAR_MAX_AGE_MS &&
                         p.reviveAvatar.downedDelivery==p.deliverySerial &&
                         p.reviveAvatar.downedEpoch==room_->epoch && p.reviveAvatar.worldId==room_->worldId &&

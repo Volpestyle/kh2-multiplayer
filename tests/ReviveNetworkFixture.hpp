@@ -15,7 +15,8 @@ void reviveNetworkChecks(kh2coop::SessionHost& server,
     using namespace kh2coop;
     const RoomTransition room{20,5,4,0,0,1,0};
     clients[0]->sendRoomTransition(room); pump();
-    for (auto* client:clients) client->sendTransitionAck({room.epoch,5,4,true});
+    // Only clients acknowledge arrival; the native host never sends TransitionAck.
+    for (unsigned i=1;i<3;++i) clients[i]->sendTransitionAck({room.epoch,5,4,true});
     pump();
     std::array<std::uint64_t,3> ids{};
     for (unsigned i=0;i<3;++i) ids[i]=server.peerBySlot(static_cast<SlotType>(i))->connectionId;
@@ -58,12 +59,18 @@ void reviveNetworkChecks(kh2coop::SessionHost& server,
     check(total()==1,"gameplay-refused sequence cannot become valid after moving");
     ++request.seq;clients[1]->sendReviveRequest(request);pump();
     check(total()==2 && received[2].size()==2,"new downed episode can be revived with fresh request");
+    // VUH-1504: the host is a valid requester without its own TransitionAck.
+    avatars[2].downedEpisode=3;publish();
+    ReviveRequest fromHost{room,2,ids[0],ids[2],3,0,2};
+    clients[0]->sendReviveRequest(fromHost);pump();
+    check(total()==3 && received[2].size()==3 && received[2].back().requesterSlot==0,
+          "host revives downed friend without sending TransitionAck");
     // The host is also a target owner, not a special revive authority bypass.
     avatars[2].flags=0;avatars[2].hp=20;
     avatars[0].flags=AvatarDowned;avatars[0].hp=0;avatars[0].downedEpisode=3;publish();
     request.targetSlot=0;request.targetConnectionId=ids[0];request.targetEpisode=3;++request.seq;
     clients[1]->sendReviveRequest(request);pump();
-    check(total()==3 && received[0].size()==1,"friend can revive downed host through same validation");
+    check(total()==4 && received[0].size()==1,"friend can revive downed host through same validation");
     // No revive replay in late-join or world caches.
     check(server.currentRoom()->epoch==20,"revive does not mutate room authority");
 }
