@@ -1,8 +1,12 @@
 # KH2 Multiplayer
 
-Online co-op mod for Kingdom Hearts II Final Mix (PC, Steam Global). The goal:
-each player runs their own game, sees the others in the same room, fights the
-same enemies and travels the story together, then plays as other characters.
+Online multiplayer mod for Kingdom Hearts II Final Mix (PC, Steam Global).
+The grand vision is PvP: players fighting each other as Sora, Roxas, Riku and
+other characters, in arenas and public realms. The road there runs through
+co-op, because PvP needs the same groundwork: every player's character synced
+live, shared enemies and rooms, and authority over damage. So the first goal
+is story co-op: each player runs their own game, sees the others in the same
+room, fights the same enemies and travels the story together.
 
 Two real games on one Windows PC pass movement, shared combat, chests and story
 progress through a private Mac relay, with and without added delay and loss.
@@ -62,8 +66,9 @@ runtime layers (`docs/IMPLEMENTATION_BACKLOG.md`).
 Every player is the native player character on their own machine and streams
 it; other players appear as puppets in the friend slots. The host's game owns
 enemies, rooms and story state; the relay forwards session traffic and checks
-versions. Public Realm and PvP (`docs/ARCHITECTURE_MODES.md`) are parked until
-co-op is playable.
+versions. PvP and Public Realm (`docs/ARCHITECTURE_MODES.md`) build on this
+model with arena instances and server-validated damage; they start once co-op
+passes its friend playtest.
 
 ```
   Player's PC                                         Any machine (PC or Mac)
@@ -130,7 +135,7 @@ See `docs/DEVELOPMENT_WORKFLOW.md` for the full inject/test loop and
 | `docs/IMPLEMENTATION_BACKLOG.md` | Milestone history (M0–M3); M4+ superseded by the plan |
 | `docs/ACCEPTANCE_TESTS.md` | Original milestone criteria; phase gates and Linear now supersede them |
 | `docs/kh2_three_client_coop_design.md` | Original 3-client co-op design (authority and actor model superseded) |
-| `docs/ARCHITECTURE_MODES.md` | CampaignCoop vs PublicRealm architecture |
+| `docs/ARCHITECTURE_MODES.md` | CampaignCoop vs PublicRealm and PvP architecture |
 | `docs/ROXAS_DUAL_WIELD_FORM.md` | Parked Roxas form design |
 | `docs/archive/`, `docs/probes/` | Retired plans and one-off RE session notes |
 | `AGENTS.md` | AI agent rules: safety, scenarios, CE/Ghidra, rig, swarm coordination |
