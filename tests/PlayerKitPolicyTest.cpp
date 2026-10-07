@@ -118,7 +118,8 @@ int main() {
         res[0] = SORA; res[3] = 0x5E; CHECK("remote changed under us", ApplyRemote(R(4, 3, 1), res, &rorig, &set) == RemoteReason::ChangedUnderUs && res[0] == SORA && res[3] == 0x5E);
         res[0] = ROXAS; res[3] = 0x819; CHECK("remote member0 changed under us", ApplyRemote(R(4, 3, 1), res, &rorig, &set) == RemoteReason::ChangedUnderUs && res[0] == ROXAS);
     }
-    CHECK("member roles", PUPPET_TARGET_MEMBER == 0 && OWN_PLAYER_MEMBER == 3 && FRIEND1_SELECTOR == 3);
+    // Compile-time facts: a constant CHECK condition trips C4127 under /WX on VS 2022.
+    static_assert(PUPPET_TARGET_MEMBER == 0 && OWN_PLAYER_MEMBER == 3 && FRIEND1_SELECTOR == 3, "member roles");
     CHECK("reason names", std::strcmp(RemoteReasonName(RemoteReason::ChangedUnderUs), "changed-under-us") == 0 &&
           std::strcmp(RemoteReasonName(RemoteReason::NativeNotSora), "native-not-sora") == 0);
 

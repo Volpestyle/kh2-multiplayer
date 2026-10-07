@@ -58,7 +58,8 @@ int main() {
 
     // ---- the shape bytes are tied to the LCG and the register function by their own rip targets
     CHECK(ShapeTargetsConsistent());
-    CHECK(sizeof(kCase2) == 71 && sizeof(kCase3) == 56 && sizeof(kDispatchEntry) == 30 && sizeof(kRegisterEntry) == 15);
+    // Compile-time facts: a constant CHECK condition trips C4127 under /WX on VS 2022.
+    static_assert(sizeof(kCase2) == 71 && sizeof(kCase3) == 56 && sizeof(kDispatchEntry) == 30 && sizeof(kRegisterEntry) == 15, "shape byte sizes");
     CHECK(kCase2[14] == 0x69 && kCase2[20] == 0xCD && kCase2[66] == 0xE8 && kCase3[0] == 0x69 && kCase3[49] == 0xE8);
 
     // ---- the shared pick: both machines agree; inputs change it
