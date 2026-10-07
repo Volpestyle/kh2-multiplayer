@@ -42,6 +42,11 @@ bool HostTransitionArrived(std::uint32_t epoch);
 // only owned lifecycle state; caller must separately check native safe state.
 bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept;
 bool TransitionPending();
+// VUH-1787 sender flag: a verified own room load is pending (request issued or
+// not in field). Unlike TransitionPending, unverified hooks do not count.
+bool LoadPending();
+// Called on the game thread whenever a room transition is requested.
+void SetTransitionObserver(void (*observer)());
 std::uint32_t TransitionSerial();
 std::uint32_t LoadSerial();
 RoomTransition ReadLocation();

@@ -233,7 +233,9 @@ void testAvatarSync() {
     check(!t[1].active, "puppet 1 hidden: its owner is in another room");
 
     t = sync.sample(3000, 4, 26);
-    check(!t[0].active, "puppet hidden once its stream is stale");
+    check(t[0].active && (t[0].pose.flags & AvatarHeld), "stalled stream holds its puppet (VUH-1787)");
+    t = sync.sample(4200, 4, 26);
+    check(!t[0].active, "puppet hidden once its stream is past the hold window");
 
     sync.onRemote(snap(SlotType::Player, 3000, 0.0f, 26, AvatarInCutscene));
     sync.onRemote(snap(SlotType::Player, 3100, 0.0f, 26, AvatarInCutscene));

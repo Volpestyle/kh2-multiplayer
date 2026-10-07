@@ -4,9 +4,10 @@
 //
 // Keeps one AvatarInterpolator per remote owner, assigns remote owners to the
 // two friend-slot puppets (lowest slot first, stable while both stay), and
-// decides each puppet's visibility: shown only with fresh data, in the local
-// player's room, and not flagged as in a cutscene/load. Platform-free so it
-// can be tested without KH2 or shared memory.
+// decides each puppet's visibility: shown in the local player's room and not
+// flagged as in a cutscene/load. A stream silent past staleAfterMs is held at
+// its newest pose, marked AvatarHeld, until releaseAfterMs (VUH-1787).
+// Platform-free so it can be tested without KH2 or shared memory.
 // ============================================================================
 
 #include "kh2coop/AvatarInterpolator.hpp"
@@ -15,8 +16,24 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 namespace kh2coop {
+
+// KH2COOP_AVATAR_HOLD_MS (VUH-1787): decimal digits only, 1000..10000.
+// Anything else (empty, signs, spaces, out of range) is rejected.
+inline constexpr std::uint32_t kAvatarHoldMinMs = 1000;
+inline constexpr std::uint32_t kAvatarHoldMaxMs = 10000;
+inline std::optional<std::uint32_t> parseAvatarHoldMs(std::string_view text) {
+    if (text.empty() || text.size() > 5) return std::nullopt;
+    std::uint32_t parsed = 0;
+    for (const char c : text) {
+        if (c < '0' || c > '9') return std::nullopt;
+        parsed = parsed * 10 + static_cast<std::uint32_t>(c - '0');
+    }
+    if (parsed < kAvatarHoldMinMs || parsed > kAvatarHoldMaxMs) return std::nullopt;
+    return parsed;
+}
 
 struct PuppetTarget {
     bool active {false};
@@ -28,7 +45,8 @@ class AvatarSync {
 public:
     struct Config {
         std::uint32_t renderDelayMs {120};  // behind estimated server time
-        std::uint32_t staleAfterMs {1000};  // hide when no data for this long
+        std::uint32_t staleAfterMs {1000};   // past this, hold the newest pose (AvatarHeld)
+        std::uint32_t releaseAfterMs {3000}; // past this, hide; <= staleAfterMs disables the hold
     };
 
     explicit AvatarSync(SlotType localSlot) : AvatarSync(localSlot, Config {}) {}
@@ -64,7 +82,9 @@ public:
         const int owner = static_cast<int>(s.ownerSlot);
         if (!rosterValid_ || owner < 0 || owner > 2 || s.ownerSlot == localSlot_ ||
             relay.ownerConnectionId == 0 || relay.ownerConnectionId != roster_[owner]) return false;
-        if (!interp_[owner].push(s)) return false;
+        AvatarState admitted = s;
+        admitted.flags = static_cast<std::uint8_t>(admitted.flags & ~AvatarHeld); // receiver-local marker
+        if (!interp_[owner].push(admitted)) return false;
         admittedIds_[owner] = relay.ownerConnectionId;
         return true;
     }
@@ -94,7 +114,12 @@ public:
             const auto& buf = interp_[owners[i]];
             const AvatarState* newest = buf.latest();
             if (!newest) continue;
-            if (serverNowMs > newest->serverTimeMs + config_.staleAfterMs) continue;
+            const std::uint64_t age =
+                serverNowMs > newest->serverTimeMs ? serverNowMs - newest->serverTimeMs : 0;
+            if (age > releaseAfterMs()) continue;
+            // Stalled stream: the interpolator already holds its capped (100 ms)
+            // extrapolation of the newest pose, so the held pose is continuous.
+            const bool held = age > config_.staleAfterMs;
             const auto pose = buf.sample(renderMs);
             if (!pose) continue;
             if (pose->worldId != localWorld || pose->roomId != localRoom) continue;
@@ -102,8 +127,16 @@ public:
             out[i].active = true;
             out[i].ownerConnectionId = admittedIds_[owners[i]];
             out[i].pose = *pose;
+            if (held) {
+                out[i].pose.flags = static_cast<std::uint8_t>(out[i].pose.flags | AvatarHeld);
+                out[i].pose.velocity = {}; // a held puppet is not moving
+            }
         }
         return out;
+    }
+
+    [[nodiscard]] std::uint32_t releaseAfterMs() const {
+        return config_.releaseAfterMs > config_.staleAfterMs ? config_.releaseAfterMs : config_.staleAfterMs;
     }
 
     // On a local room change old snapshots describe the previous room.

@@ -83,6 +83,7 @@ LoadCompleteDirectFn g_loadCompleteDirect = nullptr;
 bool g_ready = false;
 bool g_clientAuthority = false;
 bool g_transitionPending = false;
+void (*g_transitionObserver)() = nullptr;
 std::uint32_t g_transitionSerial = 0;
 std::uint32_t g_loadSerial = 0;
 std::uint32_t g_blockedNativeExits = 0;
@@ -204,6 +205,7 @@ bool SafeToWarp() {
 void BeginTransition() {
     ++g_transitionSerial;
     g_transitionPending = true;
+    if (g_transitionObserver) g_transitionObserver();
 }
 
 void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t fade,
@@ -487,6 +489,12 @@ bool TransitionPending() {
     // suspended: reverting to NOW/timing guesses would reintroduce stale pointers.
     return !g_ready || g_transitionPending || ReadExe<std::uint8_t>(offsets::IN_FIELD) == 0;
 }
+
+bool LoadPending() {
+    return g_ready && (g_transitionPending || ReadExe<std::uint8_t>(offsets::IN_FIELD) == 0);
+}
+
+void SetTransitionObserver(void (*observer)()) { g_transitionObserver = observer; }
 
 std::uint32_t TransitionSerial() { return g_transitionSerial; }
 std::uint32_t LoadSerial() { return g_loadSerial; }

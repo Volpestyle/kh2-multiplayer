@@ -74,6 +74,7 @@ int main() {
     { auto g = f; g.inCutscene = true; CHECK("cutscene clone skipped", !R::CloneCandidate(g)); }
     { auto g = f; g.distinctStatus = false; CHECK("shared status skipped", !R::CloneCandidate(g)); }
     { auto g = f; g.poseFresh = false; CHECK("stale pose skipped", !R::CloneCandidate(g)); }
+    { auto g = f; g.held = true; CHECK("held pose (stalled owner, VUH-1787) skipped", !R::CloneCandidate(g)); }
     { auto g = f; g.sameRoom = false; CHECK("other room skipped", !R::CloneCandidate(g)); }
     { auto g = f; g.playerClass = false; CHECK("companion puppet skipped", !R::CloneCandidate(g)); }
     { auto g = f; g.ownerSlot = 0; CHECK("owner slot 0 (host) skipped", !R::CloneCandidate(g)); }

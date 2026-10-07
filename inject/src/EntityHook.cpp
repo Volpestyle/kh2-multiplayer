@@ -62,6 +62,7 @@
 #include <cstring>
 #include "DownedSpikeState.hpp"
 #include "RevivePrompt.hpp"
+#include "PuppetHold.hpp"
 
 namespace kh2coop {
 namespace inject {
@@ -417,9 +418,15 @@ struct PuppetDriver {
     bool noCollideSaved = false;
     bool applied = false;       // prior native drive, independent of current pose permission
     nativehittrace::ActorSnapshot boundActor {}; // checked metadata for bounded release
+    puppethold::HeldClock heldClock {}; // VUH-1787: frames the pose has been AvatarHeld
 };
 static PuppetDriver g_puppets[2];
 static bool g_inPuppetAnimSet = false;
+
+// VUH-1787 sender side: the last published local avatar, re-published with
+// AvatarInCutscene when this game requests a room transition (game thread).
+static puppethold::LocalPublisher g_localAvatar;
+static void PublishLocalForTransition();
 
 // Team 0 can't be hit: no attack's hit mask includes bit 0 (repos-60's
 // static analysis, VUH-1491). Party members are team 1, enemies team 2.
@@ -1111,6 +1118,12 @@ static bool IsPuppetActive(int index) {
 }
 
 // Owner-thread projection only: already captured avatar values, never extra native reads.
+// warp's transition observer: game thread, inside the requesting entity update.
+static void PublishLocalForTransition() {
+    if (!g_avatarBridge.IsOpen()) return;
+    if (const auto flagged = g_localAvatar.OnTransition(g_frameCounter)) g_avatarBridge.PublishLocal(*flagged);
+}
+
 static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& before) {
     hud::Input input;
     input.before = before;
@@ -1461,6 +1474,7 @@ static bool UpdatePuppetSuspension() {
             d.pose = {};
             d.have = false;
             d.poseFrame = 0;
+            d.heldClock = {};
         }
         g_clones[0] = g_clones[1] = 0;
         g_clonesNow[0] = g_clonesNow[1] = 0;
@@ -1505,6 +1519,7 @@ static void PollPuppetPoses() {
                 driver.have = false;
             }
         }
+        driver.heldClock.Note(driver.have && (driver.pose.pose.flags & kh2coop::AvatarHeld), g_frameCounter);
         const bool active = IsPuppetActive(i);
         if (wasApplied && !active) {
             RestorePuppetTeam(driver, i);
@@ -2500,6 +2515,8 @@ static void DrivePuppetMotion(void* actorObj, int index) {
         const float speed2 = pose.velocity.x * pose.velocity.x + pose.velocity.z * pose.velocity.z;
         motion = speed2 > 1.0f ? ANIM_RUN : ANIM_IDLE;
     }
+    // VUH-1787: a held pose idles in place after a short grace (downed keeps its clip).
+    motion = puppethold::HeldMotion(motion, pose.flags, d.heldClock.Frames(g_frameCounter), ANIM_IDLE);
 
     auto* motCtrl = reinterpret_cast<void*>(actor + ACTOR_MOTCTRL);
     auto* time = reinterpret_cast<float*>(actor + ACTOR_MOTCTRL + MOTCTRL_CURRENT_TIME);
@@ -2513,7 +2530,10 @@ static void DrivePuppetMotion(void* actorObj, int index) {
         g_inOurAnimSet = false;
         d.lastAnim = static_cast<int>(motion);
     }
-    if (motion == pose.motionId && std::fabs(*time - pose.motionTime) > PUPPET_TIME_DRIFT_FRAMES) {
+    // A held pose (VUH-1787) has a frozen motionTime; snapping to it every few
+    // frames would stutter, so the clip plays on until it idles or resumes.
+    if (motion == pose.motionId && puppethold::SnapMotionTime(pose.flags) &&
+        std::fabs(*time - pose.motionTime) > PUPPET_TIME_DRIFT_FRAMES) {
         *time = pose.motionTime;
     }
 }
@@ -2536,12 +2556,14 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
     const auto actor = reinterpret_cast<uintptr_t>(actorObj);
     const uintptr_t entity = actor + offsets::actor::ENTITY_TRANSFORM;
     if (index == 0 && PuppetTraceBudget() > 0) {
-        Log("[ptrace] f=%u t=%llu game=(%.1f,%.1f,%.1f) pose=(%.1f,%.1f,%.1f) motion=%u",
+        // flags: AvatarFlags of the driven pose (8 = AvatarHeld, VUH-1787 live fixture).
+        Log("[ptrace] f=%u t=%llu game=(%.1f,%.1f,%.1f) pose=(%.1f,%.1f,%.1f) motion=%u flags=%u",
             g_frameCounter, static_cast<unsigned long long>(GetTickCount64()),
             *reinterpret_cast<float*>(entity + offsets::entity::POS_X),
             *reinterpret_cast<float*>(entity + offsets::entity::POS_Y),
             *reinterpret_cast<float*>(entity + offsets::entity::POS_Z),
-            pose.position.x, pose.position.y, pose.position.z, pose.motionId);
+            pose.position.x, pose.position.y, pose.position.z, pose.motionId,
+            static_cast<unsigned>(pose.flags));
     }
     *reinterpret_cast<float*>(entity + offsets::entity::POS_X) = pose.position.x;
     *reinterpret_cast<float*>(entity + offsets::entity::POS_Y) = pose.position.y;
@@ -3116,6 +3138,8 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             // VUH-1513: only with a kit requested does the roster byte report the
             // actual native player kit; default off keeps captureAvatar's value.
             if (playerkit::KitRequested()) avatar.character = playerkit::RosterForActor(g_soraActor);
+            // VUH-1787: an own room load stops this stream; flag it so peers hide, not hold.
+            avatar = g_localAvatar.Captured(avatar, warp::LoadPending());
             g_avatarBridge.PublishLocal(avatar);
             PublishCoopHud(avatar, hudAuthority);
         }
@@ -3488,6 +3512,7 @@ bool Initialize(uintptr_t exeBase) {
 
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
+    warp::SetTransitionObserver(&PublishLocalForTransition);
     downedspike::Install(exeBase);
     char spawnTraceSetting[2] {};
     const bool spawnTrace = GetEnvironmentVariableA("KH2COOP_SPAWN_TRACE", spawnTraceSetting,
@@ -3579,6 +3604,7 @@ void Shutdown() {
     spawncontroller::Shutdown();
     playerkit::Shutdown(); // disable its hook, then restore member 0 if still ours
     partynative::Shutdown(); // after the shared hook is disabled: restore members 1/2 if still ours
+    warp::SetTransitionObserver(nullptr);
     warp::Shutdown();
     enemysync::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);

@@ -67,6 +67,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/DamagePolicy.cpp` | | Copied-facts active-session HP ownership matrix and fault-contained, exact-record amount-zero leaf; EntityHook owns current actor/companion evidence |
 | `src/NativePrivateStatus.cpp` (+ `Pins.hpp`, `Scope.inc`) | | VUH-1489 default-off (`KH2COOP_NATIVE_SORA_PRIVATE_STATUS=1`) private native status record for the GoA Friend1 native Sora on Steam `9002b2de`; byte-pinned pool/lookup/commit/free hooks, no native pool writes (docs/NATIVE_PRIVATE_STATUS.md) |
 | `src/DownedSpike.inl`, `src/DownedSpikeState.hpp` | | VUH-1504 downed/revive owner side behind `KH2COOP_DOWNED_SPIKE=1`: game-over request gate, held downed episodes, LocalDownedState publication, native revive at 25% HP with grace and stand-up; test channel only with `_FIXTURE=1` (docs/DOWNED_REVIVE.md) |
+| `src/PuppetHold.hpp` | | VUH-1787 pure DLL rules: flag the local avatar `AvatarInCutscene` on the own transition request and while a load is pending (no door ghost); a held puppet idles after `kHeldIdleFrames` unless downed and stops snapping its motion clock |
 | `src/RevivePrompt.hpp` | | VUH-1504 player-facing revive trigger behind `KH2COOP_REVIVE_PROMPT=1`: pure Triangle-hold rules (range, cancels, one request per episode); drawn in the co-op HUD row (docs/DOWNED_REVIVE.md) |
 | `src/CloneNeutralInput.inl` | | VUH-1489 default-off (`KH2COOP_CLONE_NEUTRAL_INPUT=1`) neutral input for a native P_EX100 clone: its own pad pointer `+0xDB8` goes to a neutral entry, and a pinned `0x3A89A0` movement-update detour runs it with FIELD_COMMAND's command record and stick neutralised (docs/CLONE_NEUTRAL_INPUT.md) |
 | `src/EnemyPopulation.hpp` | | VUH-1788 default-off (`KH2COOP_ENEMY_POPULATION=1`) client population planner (force-spawn missing host enemies via the native factory) and the cull-hold decision used by EnemyMirror.inl's removal-predicate hook (docs/ENEMY_PARITY.md) |
@@ -178,7 +179,7 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 | `include/kh2coop/NetworkClient.hpp` | ~155 | ENet client: callbacks, avatars, clock sync, world sync, raw packets, link-conditioner test hook |
 | `include/kh2coop/LinkConditioner.hpp` | ~90 | Seeded latency/jitter/loss per direction for repeatable network tests |
 | `include/kh2coop/AvatarInterpolator.hpp` | ~115 | Per-avatar snapshot buffer sampled at a render delay |
-| `include/kh2coop/AvatarSync.hpp` | | Current-roster admission, per-connection interpolation retirement and immutable sampled owner identity |
+| `include/kh2coop/AvatarSync.hpp` | | Current-roster admission, per-connection interpolation retirement and immutable sampled owner identity; VUH-1787 holds a stalled stream's newest pose (`AvatarHeld`, receiver-local) from 1 s until `releaseAfterMs` (3 s default, `KH2COOP_AVATAR_HOLD_MS`) |
 | `include/kh2coop/AvatarBridge.hpp` | | Version 2 shared memory DLL/runtime: unchanged local avatar, provenance-tagged puppet poses (seqlock) |
 | `include/kh2coop/PuppetProvenance.hpp` | | Platform-free network/standalone pose eligibility against explicit receiver authority and slot mapping |
 | `include/kh2coop/PacketRing.hpp` | ~125 | Lock-free SPSC ring of variable-length packets in shared memory |
@@ -217,6 +218,7 @@ loopback ports). None launches or attaches to KH2.
 |------|------|
 | `FakeSimulation.cpp` (772 lines) | E2E test: 3 clients + server, verifies handshake, input exchange, snapshot consistency, event delivery |
 | `AvatarRelayTest.cpp` | Avatar codec, LinkConditioner, interpolation, AvatarSync, AvatarBridge; 3 clients at 100 ms + 2% loss with skewed clocks |
+| `AvatarHoldTest.cpp` | VUH-1787 pure stall rules: injected 1-3 s stalls held, release past `releaseAfterMs`, immediate room/world/cutscene/roster/session/connection exits, peer cannot set `AvatarHeld`, moved-owner resume, `KH2COOP_AVATAR_HOLD_MS` parsing, own-load door flag and held idle (`PuppetHold.hpp`), seeded 60 Hz 10-minute stall soak |
 | `WorldSyncTest.cpp` | Host-only world sync, claim epoch/slot routing, late-join state, co-op disconnect/expiry/rejoin, acks and ProgressMirror policy |
 | `ForcedResyncTest.cpp` | Actual codec/staging/ENet transaction, deadline/conditioning/fixed-target controls; native facts explicitly synthetic |
 | `WorldWireFixture.hpp` | Test-only authenticated raw endpoint access for malformed and retained scoped records |

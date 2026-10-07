@@ -159,11 +159,12 @@ inline bool ActorLive(std::uint32_t flags120, std::uint32_t flags9b8, std::int32
 struct CloneFacts {
     bool puppetActive = false, playerClass = false, distinctStatus = false, actorLive = false;
     bool poseFresh = false, sameRoom = false, downed = false, inCutscene = false;
+    bool held = false; // VUH-1787: AvatarHeld, the owner's stream has stalled
     std::uint8_t ownerSlot = 0xFF;
 };
 inline bool CloneCandidate(const CloneFacts& f) noexcept {
     return f.puppetActive && f.playerClass && f.distinctStatus && f.actorLive && f.poseFresh &&
-           f.sameRoom && !f.downed && !f.inCutscene && (f.ownerSlot == 1 || f.ownerSlot == 2);
+           !f.held && f.sameRoom && !f.downed && !f.inCutscene && (f.ownerSlot == 1 || f.ownerSlot == 2);
 }
 
 // ---- Owner side: a forwarded hit ------------------------------------------------------------

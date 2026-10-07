@@ -92,6 +92,20 @@ inline std::uint16_t NativeReactionFor(RcGate& g, std::uint16_t raw, bool fieldP
     return g.fieldFrames >= kRcSettleFrames ? raw : 0;
 }
 
+// A teammate puppet as a revive target, before distance. A held pose (VUH-1787)
+// is republished every tick, but its silent owner may no longer be downed.
+struct TargetFacts {
+    bool have = false;
+    std::uint32_t poseAgeFrames = 0xFFFFFFFFu; // DLL frames since the pose was read
+    bool downed = false, inCutscene = false, held = false, sameRoom = false;
+    std::uint64_t episode = 0;
+};
+constexpr std::uint32_t kTargetPoseFrames = 30;
+inline bool TargetCandidate(const TargetFacts& t) noexcept {
+    return t.have && t.poseAgeFrames <= kTargetPoseFrames && t.downed && !t.inCutscene && !t.held &&
+           t.episode != 0 && t.sameRoom;
+}
+
 // One game frame. Pure; deterministic for the same (state, facts).
 inline Output Step(State& s, const Facts& f) noexcept {
     Output out {};

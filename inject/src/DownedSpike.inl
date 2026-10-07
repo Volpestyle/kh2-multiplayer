@@ -681,9 +681,15 @@ static void PromptTick(const Snap& s) {
     if (f.triangle) ++g_prompt.triangleFrames;
     for (const auto& d : g_puppets) {
         const auto& a = d.pose.pose;
-        if (!d.have || g_frameCounter - d.poseFrame > 30 || !(a.flags & kh2coop::AvatarDowned) ||
-            (a.flags & kh2coop::AvatarInCutscene) || !a.downedEpisode ||
-            a.worldId != s.room.world || a.roomId != s.room.room) continue;
+        reviveprompt::TargetFacts t {};
+        t.have = d.have;
+        t.poseAgeFrames = g_frameCounter - d.poseFrame;
+        t.downed = (a.flags & kh2coop::AvatarDowned) != 0;
+        t.inCutscene = (a.flags & kh2coop::AvatarInCutscene) != 0;
+        t.held = (a.flags & kh2coop::AvatarHeld) != 0;
+        t.episode = a.downedEpisode;
+        t.sameRoom = a.worldId == s.room.world && a.roomId == s.room.room;
+        if (!reviveprompt::TargetCandidate(t)) continue;
         const float dx = a.position.x - s.pos[0], dy = a.position.y - s.pos[1], dz = a.position.z - s.pos[2];
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         if (!std::isfinite(dist) || dist >= f.distance) continue;

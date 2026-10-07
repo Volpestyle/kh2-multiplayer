@@ -164,6 +164,17 @@ add_executable(kh2coop_avatar_test
 
 target_link_libraries(kh2coop_avatar_test PRIVATE kh2coop_server_core kh2coop_runtime)
 
+# kh2coop_avatar_hold_test — VUH-1787 stalled-stream hold and release rules
+# plus a seeded stall soak. Pure AvatarSync: no sockets.
+add_executable(kh2coop_avatar_hold_test tests/AvatarHoldTest.cpp)
+target_link_libraries(kh2coop_avatar_hold_test PRIVATE kh2coop_common)
+target_include_directories(kh2coop_avatar_hold_test PRIVATE inject/src)
+if(MSVC)
+    target_compile_options(kh2coop_avatar_hold_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_avatar_hold_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 # ---------------------------------------------------------------------------
 # kh2coop_world_test — host-authored transitions, cutscene holds, enemy
 # manifest/HP/deaths, hit claims and late-joiner catch-up via the relay.

@@ -88,7 +88,7 @@ The host's `KH2COOP_ENEMY_MIRROR` decides the mode. The host carries the mode in
   - an active, player-class puppet;
   - a native status distinct from the local player's;
   - a live actor;
-  - a fresh pose (within 30 frames) from the same world and room;
+  - a fresh pose (within 30 frames, and not an `AvatarHeld` pose from a stalled stream, VUH-1787) from the same world and room;
   - an owner that is neither downed nor in a cutscene, in slot 1 or 2;
   - a list handle that resolves back to the clone.
 

@@ -77,6 +77,29 @@ bool exactEnvironmentOne(const char* name) {
 #endif
 }
 
+// VUH-1787: KH2COOP_AVATAR_HOLD_MS sets how long a stalled avatar stream keeps
+// its puppet held before release. 1000..10000; 1000 restores the old 1 s release.
+kh2coop::AvatarSync::Config avatarSyncConfigFromEnvironment() {
+    kh2coop::AvatarSync::Config config;
+    std::string text;
+#ifdef _WIN32
+    char* value = nullptr; std::size_t length = 0;
+    if (_dupenv_s(&value, &length, "KH2COOP_AVATAR_HOLD_MS") == 0 && value) text = value;
+    std::free(value);
+#else
+    if (const char* value = std::getenv("KH2COOP_AVATAR_HOLD_MS")) text = value;
+#endif
+    if (text.empty()) return config;
+    if (const auto parsed = kh2coop::parseAvatarHoldMs(text)) {
+        config.releaseAfterMs = *parsed;
+        std::cout << "[avatar] KH2COOP_AVATAR_HOLD_MS=" << *parsed << " (release after " << *parsed << " ms)\n";
+    } else {
+        std::cout << "[avatar] KH2COOP_AVATAR_HOLD_MS ignored (want 1000..10000); release after "
+                  << config.releaseAfterMs << " ms\n";
+    }
+    return config;
+}
+
 std::atomic_bool g_running {true};
 
 // Retain actual runtime output independently of stdout redirection. Only a
@@ -869,7 +892,7 @@ int main(int argc, char* argv[]) {
     // Avatar path (plan D2/D9): the DLL publishes the local avatar into the
     // bridge; we send it to the relay, feed received avatars to AvatarSync and
     // publish interpolated puppet poses back for the DLL to apply.
-    kh2coop::AvatarSync avatarSync(options.config.ownedSlot);
+    kh2coop::AvatarSync avatarSync(options.config.ownedSlot, avatarSyncConfigFromEnvironment());
     std::string avatarSessionId;
     // Assigned after the existing diagnostic binding is available. Earlier
     // world-reset lambdas invoke it only at their actual state boundaries.

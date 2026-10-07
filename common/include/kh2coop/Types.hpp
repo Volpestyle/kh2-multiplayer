@@ -143,6 +143,7 @@ enum AvatarFlags : std::uint8_t {
     AvatarAirborne = 1 << 0,
     AvatarDowned = 1 << 1,
     AvatarInCutscene = 1 << 2, // owner can't be shown (event, load)
+    AvatarHeld = 1 << 3,       // receiver-local (VUH-1787): stream stalled, newest pose held; stripped on admission
 };
 
 struct AvatarState {

@@ -28,6 +28,17 @@ static Output HoldRelease(State& s, int n, Facts base = Good()) {
 }
 
 int main() {
+    // VUH-1787 target eligibility: a held (stalled) pose is never a revive target.
+    { TargetFacts t {}; t.have = t.downed = t.sameRoom = true; t.poseAgeFrames = 0; t.episode = 0xAB00000001ull;
+      CHECK(TargetCandidate(t));
+      { auto u = t; u.held = true; CHECK(!TargetCandidate(u)); }
+      { auto u = t; u.inCutscene = true; CHECK(!TargetCandidate(u)); }
+      { auto u = t; u.downed = false; CHECK(!TargetCandidate(u)); }
+      { auto u = t; u.episode = 0; CHECK(!TargetCandidate(u)); }
+      { auto u = t; u.sameRoom = false; CHECK(!TargetCandidate(u)); }
+      { auto u = t; u.have = false; CHECK(!TargetCandidate(u)); }
+      { auto u = t; u.poseAgeFrames = kTargetPoseFrames; CHECK(TargetCandidate(u)); }
+      { auto u = t; u.poseAgeFrames = kTargetPoseFrames + 1; CHECK(!TargetCandidate(u)); } }
     { State s; auto o = Step(s, Good()); CHECK(o.kind == Kind::Prompt && o.slot == 1 && o.progress == 0 && !o.fire); }
     // Timing: a full 60-frame hold fires on RELEASE, never while held.
     { State s; Output o {}; (void)Step(s, Good());

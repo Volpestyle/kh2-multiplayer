@@ -339,6 +339,8 @@ static void RefreshCandidates() {
         f.actorLive = actor && ReadLive(actor, status);
         f.distinctStatus = f.actorLive && soraStatus && status && status != soraStatus;
         f.poseFresh = d.have && g_frameCounter - d.poseFrame <= POSE_FRESH_FRAMES;
+        // A held pose (VUH-1787) is republished every tick but its owner is silent.
+        f.held = (d.pose.pose.flags & kh2coop::AvatarHeld) != 0;
         f.sameRoom = haveLocation && d.pose.pose.worldId == loc[0] && d.pose.pose.roomId == loc[1];
         f.downed = (d.pose.pose.flags & kh2coop::AvatarDowned) != 0;
         f.inCutscene = (d.pose.pose.flags & kh2coop::AvatarInCutscene) != 0;

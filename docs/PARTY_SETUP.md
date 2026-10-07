@@ -233,7 +233,7 @@ PartyIntent leaves VUH-1519's own open items open: mixed layouts, empty seats an
 
 **Open:**
 - VUH-1786 PartyIntent: see the PartyIntent section (candidate).
-- VUH-1787 stale-puppet hold. A host stall over 1 s makes AvatarSync (`staleAfterMs`) release and rebind remote puppets; the rebind keeps the same clone.
+- VUH-1787 stale-puppet hold (candidate). AvatarSync now holds a puppet whose owner's stream has been silent for more than 1 s (`staleAfterMs`). It keeps the newest pose, marked `AvatarHeld`, and releases only after `releaseAfterMs`: 3000 ms by default, set with `KH2COOP_AVATAR_HOLD_MS` (1000..10000; 1000 restores the old receiver behaviour only, and the sender's load flag below stays on). Room, cutscene, roster, session and connection exits still release immediately. An owner's own room load is flagged `AvatarInCutscene` by its DLL (on the transition request and while the load is pending), so receivers hide it instead of holding a ghost at the door. A held puppet's velocity is zeroed and it idles after about 15 frames unless downed. Enemy targeting (`CloneCandidate`) and the revive prompt (`TargetCandidate`) skip held poses. Offline tests only (`kh2coop_avatar_hold_test`); not yet live-verified.
 - Per-seat kits: the last-built seat is the local player.
 - Mixed layouts: `PuppetTarget` is all clones or all friends.
 - Empty seats.
