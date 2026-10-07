@@ -12,8 +12,10 @@
 #
 # RVAs are relative to the image base (0x140000000), matching
 # docs/pointer_map_v1.md and KH2Offsets.hpp. The project lives in
-# build/ghidra/kh2_full (gitignored) and is opened read-only for queries, so
-# several agents can query it at once.
+# build/ghidra/kh2_full (gitignored) and is opened read-only for queries.
+# Read-only queries still take kh2_full.lock: a second concurrent query fails
+# with LockException. To query in parallel, copy kh2_full.gpr + kh2_full.rep
+# to your scratch dir and run analyzeHeadless against the copy (2026-10-06).
 #
 # Ghidra: $env:GHIDRA_HOME, else the newest ~\ghidra_*_PUBLIC.
 # Game:   $env:KH2_GAME_DIR, else the default Steam install.
