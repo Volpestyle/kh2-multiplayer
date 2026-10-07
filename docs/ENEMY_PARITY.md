@@ -838,6 +838,10 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
   - **Fallback.** Every other opcode, and any op without a salt, session or host-issued epoch (for example the first, pre-session load), runs the original. The dispatcher entry, both case bodies and the register prologue are shape-checked, and their rip-relative targets are tied to the LCG and the register function, before the detour installs.
   - **Logs:** `[spawn-pick] configured=1 hooked=1`, and one line per shared pick with the index (or fired) and the native index it replaced.
 - **The Gargoyles (367/368) are not allowlisted yet.** The run stopped before their boxes: one Large Body hit (24 damage) killed the host's Sora at 24 max HP, and the death removed the field actors.
+- **Gargoyle Warrior `M_BB010_AX` (368) is allowlisted.** The configured line reads `families=302,4,301,1838,1839,1849,17,303,368`. Two runs, both with the spawn-pick variant and both Soras at 999 max HP:
+  - **121127, visit 1:** motion agreement 94/94, position p95 0.
+  - **121709, both visits:** motion 235/235, p95 0. The Warrior engaged Sora on both screens.
+- **Gargoyle Knight `M_BB010_SWORD` (367) stays off.** In 121127 visit 2 it mirrored (106/106), but it stayed a dormant statue the whole segment, so it was never seen engaging.
 
 **Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.
 - **The failure:** from friend frame 4106 to 7120, the trace stopped for *every* netId, Shadow 7 included.

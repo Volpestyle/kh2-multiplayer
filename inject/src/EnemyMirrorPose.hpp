@@ -33,13 +33,17 @@ inline constexpr std::uint32_t kSoldierObjectId = 301;
 inline constexpr std::uint32_t kSoldierSkinObjectIds[] = {1838, 1839, 1849};
 // T1 batch 2 (enemy family census; BB Entrance Hall 05/00, battle program 3; live run 092758): Lance Soldier
 // M_EX690 (17) and Large Body M_EX050 (303). Both objentry type 4: the same class (0x5D2D68) and shape-checked
-// hooks as the Shadow. The Gargoyles (367/368) stay off until a run reaches their spawn boxes.
+// hooks as the Shadow. Gargoyle Warrior M_BB010_AX (368; a statue that wakes, BB Entrance Hall b_81) is type 4
+// as well: live runs 20261007-121127 (visit 1) and 121709 (both visits) mirrored it with motion agreement 94/94
+// and 235/235, position p95 0. Gargoyle Knight M_BB010_SWORD (367) stays off until a run sees it engage (it
+// stayed a dormant statue in 121127 visit 2).
 inline constexpr std::uint32_t kLanceSoldierObjectId = 17;
 inline constexpr std::uint32_t kLargeBodyObjectId = 303;
+inline constexpr std::uint32_t kGargoyleWarriorObjectId = 368;
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
-                                              kLanceSoldierObjectId, kLargeBodyObjectId};
+                                              kLanceSoldierObjectId, kLargeBodyObjectId, kGargoyleWarriorObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;

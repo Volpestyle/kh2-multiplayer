@@ -258,15 +258,15 @@ void testHelpers() {
               !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
               !em::FamilyAllowed(1850),
           "allowlist keeps Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849): not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
-    check(em::FamilyAllowed(17) && em::FamilyAllowed(303) && !em::FamilyAllowed(367) && !em::FamilyAllowed(368) &&
+    check(em::FamilyAllowed(17) && em::FamilyAllowed(303) && em::FamilyAllowed(368) && !em::FamilyAllowed(367) &&
               !em::FamilyAllowed(16) && !em::FamilyAllowed(18) && !em::FamilyAllowed(2025) && !em::FamilyAllowed(2409) &&
-              !em::FamilyAllowed(122) && !em::FamilyAllowed(73),
-          "batch 2 adds Lance Soldier (17) and Large Body (303) only: not the untested Gargoyles (367/368), neighbours, skins (2025, 2409) or type-21 122/73");
+              !em::FamilyAllowed(122) && !em::FamilyAllowed(73) && !em::FamilyAllowed(369),
+          "batch 2 allows Lance Soldier (17), Large Body (303) and the Gargoyle Warrior (368): not the Knight (367), neighbours, skins (2025, 2409) or type-21 122/73");
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -277,19 +277,19 @@ void testHelpers() {
         em::Stream b2;
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 40;
-        for (const std::uint32_t oid : {em::kLanceSoldierObjectId, em::kLargeBodyObjectId}) {
+        for (const std::uint32_t oid : {em::kLanceSoldierObjectId, em::kLargeBodyObjectId, em::kGargoyleWarriorObjectId}) {
             auto r = row(net++, 0.0f);
             r.objectId = oid;
             rows.push_back(r);
         }
-        auto ignored = row(42, 0.0f);
+        auto ignored = row(43, 0.0f);
         ignored.objectId = 309;
         rows.push_back(ignored);
         b2.Ingest(motion(3, 1, 10, rows), 1); b2.Ingest(motion(3, 2, 13, rows), 2); b2.Tick(2);
         em::Pose bp;
-        bool all = !b2.Drivable(42, 2);
-        for (std::uint16_t n = 40; n < 42; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
-        check(all, "Lance Soldier and Large Body streams are tracked and drivable; 309 is not");
+        bool all = !b2.Drivable(43, 2);
+        for (std::uint16_t n = 40; n < 43; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
+        check(all, "Lance Soldier, Large Body and Gargoyle Warrior streams are tracked and drivable; 309 is not");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins;
