@@ -515,6 +515,13 @@ if(WIN32)
         target_compile_options(kh2coop_enemy_target_test PRIVATE /W4 /WX)
     endif()
 
+    # VUH-1515 spawn-row identity on a recycled actor address (SpawnRowIdentity.hpp): pure rules.
+    add_executable(kh2coop_spawnrow_identity_test tests/SpawnRowIdentityTest.cpp)
+    target_include_directories(kh2coop_spawnrow_identity_test PRIVATE inject/src)
+    if(MSVC)
+        target_compile_options(kh2coop_spawnrow_identity_test PRIVATE /W4 /WX)
+    endif()
+
     # VUH-1504 revive prompt: hold/latch/cancel rules and its HUD row.
     add_executable(kh2coop_revive_prompt_test tests/RevivePromptTest.cpp)
     target_include_directories(kh2coop_revive_prompt_test PRIVATE inject/src common/include)

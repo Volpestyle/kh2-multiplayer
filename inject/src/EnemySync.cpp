@@ -13,6 +13,7 @@
 
 #include "EnemySync.hpp"
 #include "OrdinaryEnemyBinding.hpp"
+#include "SpawnRowIdentity.hpp"
 #include "EnemyMirrorState.hpp"
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
@@ -108,6 +109,8 @@ struct Spawn {
     std::uint32_t objectType = 0;
     uintptr_t actor = 0;
     uintptr_t objentry = 0, status = 0; // metadata at this binding's creation
+    uintptr_t controller = 0, record = 0; // native spawn controller (+0x9E8) / record (+0x9F0) at creation
+    bool identityRead = false;            // both were readable at creation (else the old reuse rule decides)
     Vec3 spawnPos {};         // where it first appeared (identical across instances)
     bool present = false;     // in the latest complete native census
     std::int32_t lastHp = 1;  // HP when last seen (<= 0: dead, the slot may be reused)
@@ -3964,6 +3967,10 @@ void PublishAppliedHash(std::uint32_t frame, const NativeCensus& beforeApply) {
     }
 }
 
+spawnrow::Row SpawnRowOf(const Spawn& s) {
+    return {{s.objectId, s.objentry, s.status, s.controller, s.record, s.identityRead}, s.present, s.lastHp};
+}
+
 // Commit presence only from a complete native list; callbacks are not a census.
 std::vector<std::size_t> TrackSpawns(const NativeCensus& census) {
     std::vector<std::size_t> fresh;
@@ -3974,13 +3981,28 @@ std::vector<std::size_t> TrackSpawns(const NativeCensus& census) {
         std::size_t index;
         // An address seen before is the same enemy: still in the list (a
         // dying enemy stays there at 0 HP through its death animation), or
-        // back after leaving it alive (e.g. burrowed). Changed checked metadata or
-        // a slot whose enemy left the list dead is a new spawn.
-        const bool same = it != g_inst.byActor.end() &&
-                          g_inst.spawns[it->second].objectId == native.objectId &&
-                          g_inst.spawns[it->second].objentry == native.objentry &&
-                          g_inst.spawns[it->second].status == native.status &&
-                          (g_inst.spawns[it->second].present || g_inst.spawns[it->second].lastHp > 0);
+        // back after leaving it alive (e.g. burrowed). Changed checked metadata,
+        // a slot whose enemy left the list dead, or (094908) a recycled address
+        // with a different native spawn controller/record is a new spawn
+        // (SpawnRowIdentity.hpp; unreadable controller/record: the old rule alone).
+        spawnrow::Sample now {native.objectId, native.objentry, native.status, 0, 0, false};
+        now.identityRead = ReadNative(actor + 0x9E8, now.controller) && ReadNative(actor + 0x9F0, now.record);
+        const bool known = it != g_inst.byActor.end();
+        const bool same = known && spawnrow::SameSpawnRow(SpawnRowOf(g_inst.spawns[it->second]), now);
+        if (known && !same) {
+            const auto& old = g_inst.spawns[it->second];
+            if (old.objectId == now.objectId && old.objentry == now.objentry && old.status == now.status &&
+                (old.present || old.lastHp > 0))  // the old rule would have kept this row
+                SYNC_LOG("[enemysync] spawn %u @%llX recycled: controller %llX -> %llX record %llX -> %llX (new row)",
+                         old.spawnIndex, static_cast<unsigned long long>(actor),
+                         static_cast<unsigned long long>(old.controller), static_cast<unsigned long long>(now.controller),
+                         static_cast<unsigned long long>(old.record), static_cast<unsigned long long>(now.record));
+            // Recycled while still listed: the old row leaves now, but its actor stays in `present` under the new
+            // row, so the absence loop below would not log it (review nit).
+            if (old.present)
+                SYNC_LOG("[enemysync] spawn %u @%llX left the list (recycled while listed, last hp %d)", old.spawnIndex,
+                         static_cast<unsigned long long>(actor), old.lastHp);
+        }
         if (same) {
             index = it->second;
         } else {
@@ -3989,6 +4011,9 @@ std::vector<std::size_t> TrackSpawns(const NativeCensus& census) {
             s.actor = actor;
             s.objentry = native.objentry;
             s.status = native.status;
+            s.controller = now.controller;
+            s.record = now.record;
+            s.identityRead = now.identityRead;
             s.objectId = native.objectId;
             s.objectType = native.objectType;
             s.spawnPos = native.position;
