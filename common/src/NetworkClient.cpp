@@ -310,6 +310,16 @@ void NetworkClient::sendEnemyDeath(const EnemyDeath& m) {
     if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
 
+bool NetworkClient::sendPartyLayout(const PartyLayout& m) {
+    if(avatarLocalSlot_!=0)return false;
+    try { return sendNativeWorld(encode(m),makeTestingWorldContext(),true); }
+    catch(const std::exception&) { return false; }
+}
+bool NetworkClient::requestPartyReapply(const PartyReapply& m) {
+    if(avatarLocalSlot_!=0 || m.reason!=PartyApplyReason::StoryForced)return false;
+    try { return sendNativeWorld(encode(m),makeTestingWorldContext(),true); }
+    catch(const std::exception&) { return false; }
+}
 void NetworkClient::sendReviveRequest(const ReviveRequest& m) {
     sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
@@ -505,6 +515,7 @@ void NetworkClient::resetTransportState() {
         avatarLoss_[i] = {};
     }
     avatarSeq_ = 0;
+    partyLayout_.reset(); partyVersion_=0;
     reviveLocal_ = {}; reviveLocalMs_ = 0; receivedReviveEpisode_ = 0;
     clockOffsetMs_ = 0;
     bestRttMs_ = 0;
@@ -581,10 +592,12 @@ bool NetworkClient::updateAvatarRoster(const SessionState& session) {
         if(pendingDesyncRequest_)log("Pending desync capture retired with roster authority");
         pendingDesyncRequest_.reset();desyncRequest_.reset();
     }
+    if (namespaceChanged) { partyLayout_.reset(); partyVersion_=0; }
     if (namespaceChanged) { reviveLocal_ = {}; reviveLocalMs_ = 0; }
     if (namespaceChanged) outbound_.reset(); // retire already-conditioned authoritative sends
     for (std::size_t i = 0; i < 3; ++i) {
         if (namespaceChanged || avatarConnections_[i] != connections[i]) {
+            partyLayout_.reset();
             avatarLastSeq_[i] = 0;
             avatarLoss_[i] = {};
 
@@ -745,6 +758,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             read(reader, room);
             if (!reader.atEnd() || size != payloadSize + 3)
                 throw std::runtime_error("RoomTransition: wrong frame/payload length");
+            partyLayout_.reset();
             enemyHpRoomEpoch_ = room.epoch;
             hostRoom_=room;
             admittedRoom = room;
@@ -760,6 +774,20 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             admittedHp = std::move(hp);
         }
 
+        if(type==PacketType::PartyLayout) {
+            PartyLayout m;read(reader,m);
+            std::array<std::uint64_t,3> roster{avatarConnections_[0],avatarConnections_[1],avatarConnections_[2]};
+            if(!admittedScope || admittedScope->kind!=WorldSourceKind::Native ||
+               admittedScope->sourceConnectionId!=avatarConnections_[0] || !hostRoom_ ||
+               !sameResyncRoom(m.location,*hostRoom_) || !validPartyLayout(m,roster) || m.version<=partyVersion_)return;
+            partyVersion_=m.version;partyLayout_=m;reader=ByteReader(payload,payloadSize);
+        } else if(type==PacketType::PartyReapply) {
+            PartyReapply m;read(reader,m);
+            if(!admittedScope || admittedScope->kind!=WorldSourceKind::Relay ||
+               admittedScope->sourceConnectionId!=avatarConnections_[0] || !hostRoom_ ||
+               !sameResyncRoom(m.location,*hostRoom_) || m.afterVersion<partyVersion_)return;
+            partyVersion_=m.afterVersion;partyLayout_.reset();reader=ByteReader(payload,payloadSize);
+        }
         if (type == PacketType::ReviveRequest) {
             ReviveRequest revive; read(reader, revive);
             const auto now = localTimeMs();
@@ -843,6 +871,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 for(std::size_t i=0;i<m.targetCount;++i)remoteDeliverySerials_[m.targets[i].slot]=m.targets[i].deliverySerial;
                 lastResyncPlanId_=m.request.key.requestId;
                 requestedResync_.reset();
+                partyLayout_.reset(); // only an admitted plan retires authority
                 resyncPlan_=m;
                 if(avatarLocalSlot_!=0)worldQuarantined_=true;
                 if(localTimeMs()>=resyncDeadline_){abortResync(ResyncResultReason::Deadline,"local resync deadline before phase delivery");return;}
@@ -968,6 +997,12 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 read(reader, m);
                 if (callbacks_.onEnemyDeath) callbacks_.onEnemyDeath(m);
                 break;
+            }
+            case PacketType::PartyLayout: {
+                PartyLayout m;read(reader,m);if(callbacks_.onPartyLayout)callbacks_.onPartyLayout(m);break;
+            }
+            case PacketType::PartyReapply: {
+                PartyReapply m;read(reader,m);if(callbacks_.onPartyReapply)callbacks_.onPartyReapply(m);break;
             }
             case PacketType::ReviveRequest: {
                 ReviveRequest m; read(reader,m);

@@ -223,7 +223,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         RS_INNER(RoomTransition) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(ProgressUpdate)
-        RS_INNER(ReviveRequest) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(ReviveRequest) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -235,7 +235,7 @@ void write(ByteWriter& w,const ResyncRequest& m){rsRequest(w,m);}
 void read(ByteReader& r,ResyncRequest& out){ResyncRequest m;rsRequest(r,m);rsEnd(r);out=std::move(m);}
 void write(ByteWriter& w,const WorldBinding& m){rsSession(m.sessionId);rsRequire(m.hostConnectionId&&m.selfConnectionId&&m.selfSlot<3&&m.deliverySerial);w.writeString(m.sessionId);w.writeU64(m.hostConnectionId);w.writeU64(m.selfConnectionId);w.writeU8(m.selfSlot);w.writeU64(m.deliverySerial);}
 void read(ByteReader& r,WorldBinding& out){WorldBinding m;m.sessionId=r.readString();m.hostConnectionId=r.readU64();m.selfConnectionId=r.readU64();m.selfSlot=r.readU8();m.deliverySerial=r.readU64();rsEnd(r);ByteWriter w;write(w,m);out=std::move(m);}
-void write(ByteWriter& w,const WorldEnvelope& m){const auto& s=m.scope;rsSession(s.sessionId);rsRequire(s.sourceConnectionId&&s.sourceDeliverySerial&&m.packet.size()<=62000);const std::uint8_t* p;std::size_t n;auto t=decodePacketHeader(m.packet.data(),m.packet.size(),p,n);rsRequire(isScopedWorldPacket(t)&&m.packet.size()==n+3);validateScopedWorldPacket(m.packet);const bool legacy=t==PacketType::ActorSnapshot||t==PacketType::EnemySnapshot||t==PacketType::EventMessage;rsRequire((s.kind==WorldSourceKind::Native&&!legacy&&t!=PacketType::DesyncNotice)||(s.kind==WorldSourceKind::Simulation&&legacy)||(s.kind==WorldSourceKind::Relay&&t==PacketType::DesyncNotice));w.writeString(s.sessionId);w.writeU64(s.sourceConnectionId);w.writeU64(s.sourceDeliverySerial);w.writeU64(s.hostSourceSerial);w.writeU64(s.targetConnectionId);w.writeU64(s.targetDeliverySerial);w.writeU8(static_cast<std::uint8_t>(s.kind));w.writeU16(static_cast<std::uint16_t>(m.packet.size()));for(auto b:m.packet)w.writeU8(b);}
+void write(ByteWriter& w,const WorldEnvelope& m){const auto& s=m.scope;rsSession(s.sessionId);rsRequire(s.sourceConnectionId&&s.sourceDeliverySerial&&m.packet.size()<=62000);const std::uint8_t* p;std::size_t n;auto t=decodePacketHeader(m.packet.data(),m.packet.size(),p,n);rsRequire(isScopedWorldPacket(t)&&m.packet.size()==n+3);validateScopedWorldPacket(m.packet);const bool legacy=t==PacketType::ActorSnapshot||t==PacketType::EnemySnapshot||t==PacketType::EventMessage;rsRequire((s.kind==WorldSourceKind::Native&&!legacy&&t!=PacketType::DesyncNotice)||(s.kind==WorldSourceKind::Simulation&&legacy)||(s.kind==WorldSourceKind::Relay&&(t==PacketType::DesyncNotice||t==PacketType::PartyReapply)));w.writeString(s.sessionId);w.writeU64(s.sourceConnectionId);w.writeU64(s.sourceDeliverySerial);w.writeU64(s.hostSourceSerial);w.writeU64(s.targetConnectionId);w.writeU64(s.targetDeliverySerial);w.writeU8(static_cast<std::uint8_t>(s.kind));w.writeU16(static_cast<std::uint16_t>(m.packet.size()));for(auto b:m.packet)w.writeU8(b);}
 void read(ByteReader& r,WorldEnvelope& out){WorldEnvelope m;auto& s=m.scope;s.sessionId=r.readString();s.sourceConnectionId=r.readU64();s.sourceDeliverySerial=r.readU64();s.hostSourceSerial=r.readU64();s.targetConnectionId=r.readU64();s.targetDeliverySerial=r.readU64();s.kind=static_cast<WorldSourceKind>(r.readU8());auto n=r.readU16();rsRequire(n<=62000&&n==r.remaining());m.packet.reserve(n);while(!r.atEnd())m.packet.push_back(r.readU8());ByteWriter w;write(w,m);out=std::move(m);}
 void write(ByteWriter& w,const ResyncPlan& m){rsRequest(w,m.request);rsTargets(w,m.targets,m.targetCount);rsRequire(m.remainingMs&&m.remainingMs<=RESYNC_TIMEOUT_MS&&static_cast<unsigned>(m.stage)<=1);w.writeU32(m.remainingMs);rsPhase(w,m.phase);w.writeU8(static_cast<std::uint8_t>(m.stage));}
 void read(ByteReader& r,ResyncPlan& out){ResyncPlan m;rsRequest(r,m.request);rsTargets(r,m.targets,m.targetCount);m.remainingMs=r.readU32();rsPhase(r,m.phase);m.stage=static_cast<ResyncPlanStage>(r.readU8());rsEnd(r);ByteWriter w;write(w,m);out=std::move(m);}
@@ -761,6 +761,34 @@ void write(ByteWriter& w, const EnemyDeath& m) {
     w.writeU32(m.epoch);
     w.writeU16(m.netId);
 }
+
+void write(ByteWriter& w, const PartyLayout& m) {
+    if(!validPartyLayout(m,m.connections))throw std::runtime_error("PartyLayout: invalid policy/identity");
+    write(w,m.location);w.writeU64(m.version);
+    for(auto c:m.connections)w.writeU64(c);
+    w.writeU8(static_cast<std::uint8_t>(m.rule));w.writeU8(static_cast<std::uint8_t>(m.reason));
+    for(const auto& s:m.seats){w.writeU8(static_cast<std::uint8_t>(s.kind));w.writeU8(s.playerSlot);w.writeU32(s.objectId);}
+}
+void read(ByteReader& r, PartyLayout& out) {
+    if(r.remaining()!=68)throw std::runtime_error("PartyLayout: wrong payload size");
+    PartyLayout m;read(r,m.location);m.version=r.readU64();
+    for(auto& c:m.connections)c=r.readU64();
+    m.rule=static_cast<PartyRule>(r.readU8());m.reason=static_cast<PartyApplyReason>(r.readU8());
+    for(auto& s:m.seats){s.kind=static_cast<PartyMemberKind>(r.readU8());s.playerSlot=r.readU8();s.objectId=r.readU32();}
+    if(!validPartyLayout(m,m.connections))throw std::runtime_error("PartyLayout: invalid policy/identity");
+    out=m;
+}
+void write(ByteWriter& w, const PartyReapply& m) {
+    if(!m.location.epoch || static_cast<unsigned>(m.reason)>3)throw std::runtime_error("PartyReapply: invalid context");
+    write(w,m.location);w.writeU64(m.afterVersion);w.writeU8(static_cast<std::uint8_t>(m.reason));
+}
+void read(ByteReader& r, PartyReapply& out) {
+    if(r.remaining()!=25)throw std::runtime_error("PartyReapply: wrong payload size");
+    PartyReapply m;read(r,m.location);m.afterVersion=r.readU64();m.reason=static_cast<PartyApplyReason>(r.readU8());
+    ByteWriter check;write(check,m);out=m;
+}
+std::vector<std::uint8_t> encode(const PartyLayout& m){ByteWriter w;write(w,m);return encodePacket(PacketType::PartyLayout,w.data());}
+std::vector<std::uint8_t> encode(const PartyReapply& m){ByteWriter w;write(w,m);return encodePacket(PacketType::PartyReapply,w.data());}
 
 void write(ByteWriter& w, const ReviveRequest& m) {
     write(w, m.location);
@@ -1299,6 +1327,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
     if (size < kHeaderSize + len) {
         throw std::runtime_error("decodePacketHeader: buffer too small for payload");
     }
+    if ((type == PacketType::PartyLayout || type == PacketType::PartyReapply) && size != kHeaderSize + len)
+        throw std::runtime_error("Party: wrong frame length");
     if (type == PacketType::ReviveRequest && (len != 50 || size != kHeaderSize + len))
         throw std::runtime_error("ReviveRequest: wrong frame length");
     if (type == PacketType::HitClaim && (len != 43 || size != kHeaderSize + len))

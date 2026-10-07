@@ -1573,7 +1573,9 @@ int main(int argc, char* argv[]) {
         };
         callbacks.onWorldEnvelope = [&](const kh2coop::WorldEnvelope& envelope) {
             if (!netReady || worldSessionSlot == kh2coop::WORLD_SLOT_UNKNOWN ||
-                envelope.scope.kind != kh2coop::WorldSourceKind::Native) return;
+                (envelope.scope.kind != kh2coop::WorldSourceKind::Native &&
+                 !(envelope.scope.kind == kh2coop::WorldSourceKind::Relay && !envelope.packet.empty() &&
+                   envelope.packet.front() == static_cast<std::uint8_t>(kh2coop::PacketType::PartyReapply)))) return;
             if (worldQuarantined && (!netClient || !netClient->pendingResync())) return;
             if (pendingNativeSnapshot && !worldBridge.IsOpen()) {
                 const auto& begin = pendingNativeSnapshot->first;

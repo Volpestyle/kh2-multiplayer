@@ -118,6 +118,7 @@ public:
     // SlotType::Player; world messages from anyone else are dropped.
     [[nodiscard]] std::uint64_t rejectedWorldMessages() const { return rejectedWorld_; }
     [[nodiscard]] const std::optional<RoomTransition>& currentRoom() const { return room_; }
+    const std::optional<PartyLayout>& partyLayout() const { return partyLayout_; }
     [[nodiscard]] std::size_t manifestSize() const { return manifest_.entries.size(); }
     [[nodiscard]] std::size_t progressBytes() const { return progress_.size(); }
     [[nodiscard]] std::uint64_t desyncNoticeCount() const { return desyncNotices_; }
@@ -158,6 +159,10 @@ private:
     // queued packets have gone out.
     void rejectPeer(TransportPeer* peer, const std::string& peerId,
                     const std::string& reason, std::uint8_t code);
+
+    void invalidateParty(PartyApplyReason reason);
+    std::optional<PartyLayout> partyLayout_;
+    std::uint64_t partyVersion_{0}, partyHostConnection_{0};
 
     // World sync helpers
     bool fromHost(const PeerState& ps) const;

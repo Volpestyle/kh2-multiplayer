@@ -1,3 +1,4 @@
+#include "PartyNetworkFixture.hpp"
 #include "ReviveNetworkFixture.hpp"
 #include "kh2coop/SteamBroker.hpp"
 #include "kh2coop/SteamPipe.hpp"
@@ -154,6 +155,9 @@ int main(){
         for(unsigned n=0;n<80;++n){server.tick();host.tick();client.tick();newcomer.tick();}
         check(server.verifiedPeerCount()==3&&rooms&&manifests&&progress,"three-peer late join reuses actual room/manifest/progress cache through broker");
         reviveNetworkChecks(server,{&host,&client,&newcomer},revives,[&]{
+            for(unsigned n=0;n<80;++n){server.tick();host.tick();client.tick();newcomer.tick();}
+        },check);
+        partyNetworkChecks(server,{&host,&client,&newcomer},[&]{
             for(unsigned n=0;n<80;++n){server.tick();host.tick();client.tick();newcomer.tick();}
         },check);
         client.disconnect();

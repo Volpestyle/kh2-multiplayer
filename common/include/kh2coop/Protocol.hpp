@@ -8,10 +8,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 11;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 12;
 
 // ===========================================================================
-// Protocol v11 adds streamed downed epoch/episode/delivery and ReviveRequest.
+// Protocol v12 adds versioned host party layout and reapplication events.
+// v11 added streamed downed epoch/episode/delivery and ReviveRequest.
 // ===========================================================================
 
 // Network-only owner envelope. AvatarBridge v4 is required for v11 avatar state.

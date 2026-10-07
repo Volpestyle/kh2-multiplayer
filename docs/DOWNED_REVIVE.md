@@ -1,6 +1,7 @@
 # Downed / revive network contract (VUH-1504)
 
-Protocol **11** and AvatarBridge **4** are required together. Older network
+The downed contract was introduced in protocol11; the current session protocol
+is **12** (party setup), with AvatarBridge **4**. Older network
 peers and avatar mappings refuse the new contract. The sealed friend packages
 are unchanged. ENet and the default-off Steam backend use the same policy.
 

@@ -127,7 +127,7 @@ void enetChecks(){
     SessionHost newer(config);check(newer.start(),"fresh host for protocol compatibility refusal");
     NetworkClient old("127.0.0.1",config.port,"revive-test","none","old",SlotType::Player,{},RuntimeMode::CampaignCoop,"",10);
     old.connect();for(unsigned i=0;i<60;++i){newer.tick();old.tick();std::this_thread::sleep_for(std::chrono::milliseconds(1));}
-    check(newer.verifiedPeerCount()==0 && !old.ready(),"protocol10 peer cannot join protocol11 session");old.disconnect();newer.stop();
+    check(newer.verifiedPeerCount()==0 && !old.ready(),"protocol10 peer cannot join current session");old.disconnect();newer.stop();
 }
 }
 int main(){if(enet_initialize()!=0)return 2;unitChecks();enetChecks();enet_deinitialize();std::cout<<"failures="<<errors<<'\n';return errors?1:0;}

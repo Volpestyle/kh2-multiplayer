@@ -65,6 +65,7 @@ void SessionHost::refreshResyncCache(const ResyncSnapshot& s,const std::vector<W
 }
 void SessionHost::publishResyncPlan() {
     if(!resyncPlan_)return;
+    invalidateParty(PartyApplyReason::RoomChanged);
     const auto now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     if(static_cast<std::uint64_t>(now)>=resyncDeadline_){finishResync(ResyncResultReason::Deadline,"fixed transaction deadline");return;}
     resyncPlan_->remainingMs=static_cast<std::uint32_t>(resyncDeadline_-static_cast<std::uint64_t>(now));
@@ -378,10 +379,19 @@ void SessionHost::stop() {
 // Outbound broadcasting
 // ---------------------------------------------------------------------------
 
+void SessionHost::invalidateParty(PartyApplyReason reason) {
+    partyLayout_.reset();
+    const auto* host=hostPeer();
+    if(!host || !room_ || !room_->epoch)return;
+    if(partyHostConnection_!=host->connectionId){partyHostConnection_=host->connectionId;partyVersion_=0;}
+    broadcastToVerified(encode(PartyReapply{*room_,partyVersion_,reason}),true);
+}
+
 void SessionHost::broadcastSessionState() {
     auto pkt = encode(session_);
     broadcastToVerified(pkt, true /* reliable */);
     for(auto& ps:peers_)if(ps.status==PeerStatus::Verified)sendBinding(ps);
+    invalidateParty(PartyApplyReason::RosterChanged);
 }
 
 void SessionHost::broadcastActorSnapshots(
@@ -751,6 +761,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     if(resyncPlan_->phase==ResyncPhase::Checkpoint)finishResync(ResyncResultReason::NativeFailed,"material change after checkpoint cut");
                 }
                 forwardToOthers(peer, packet, reliable);
+                if(type==PacketType::RoomTransition)invalidateParty(PartyApplyReason::RoomChanged);
                 break;
             }
 
@@ -813,6 +824,30 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 if (match == pending->second.end()) { ++rejectedWorld_; return; }
                 pending->second.erase(match); // a response can be routed only once
                 sendTo(target->transportPeer, encode(point), false);
+                break;
+            }
+
+            case PacketType::PartyLayout: {
+                PartyLayout layout;read(reader,layout);
+                std::array<std::uint64_t,3> roster{};
+                for(const auto& p:peers_)if(p.status==PeerStatus::Verified)roster[static_cast<std::uint8_t>(p.assignedSlot)]=p.connectionId;
+                if(!fromHost(*ps) || !admittedScope || !room_ || resyncPlan_ ||
+                   !sameResyncRoom(layout.location,*room_) || !validPartyLayout(layout,roster)) {++rejectedWorld_;return;}
+                if(partyHostConnection_!=ps->connectionId){partyHostConnection_=ps->connectionId;partyVersion_=0;}
+                if(layout.version<=partyVersion_){++rejectedWorld_;return;}
+                partyVersion_=layout.version;partyLayout_=layout;
+                lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
+                broadcastToVerified(encode(layout),true);
+                log("PartyLayout version="+std::to_string(layout.version)+" rule="+std::to_string(static_cast<unsigned>(layout.rule))+
+                    " benchedMask="+std::to_string(partyBenchedMask(layout)));
+                break;
+            }
+            case PacketType::PartyReapply: {
+                PartyReapply request;read(reader,request);
+                if(!fromHost(*ps) || !admittedScope || !room_ || resyncPlan_ ||
+                   !sameResyncRoom(request.location,*room_) || request.afterVersion!=partyVersion_ ||
+                   request.reason!=PartyApplyReason::StoryForced){++rejectedWorld_;return;}
+                invalidateParty(PartyApplyReason::StoryForced);
                 break;
             }
 
@@ -1236,6 +1271,7 @@ void SessionHost::pumpDesyncCapture() {
 }
 
 void SessionHost::clearWorldState() {
+    partyLayout_.reset();
     pendingActivation_.clear();
     for (auto& p:peers_) p.reviveAvatarMs=0;
     hold_.reset();
@@ -1431,7 +1467,7 @@ bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& pa
         WorldScope scope=forwardingScope_.value_or(WorldScope{session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0});
         const bool simulation=type==PacketType::ActorSnapshot||type==PacketType::EnemySnapshot||type==PacketType::EventMessage;
         if(simulation){scope.kind=WorldSourceKind::Simulation;scope.hostSourceSerial=simulationSourceSerial_;}
-        if(type==PacketType::DesyncNotice){scope={session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0};scope.kind=WorldSourceKind::Relay;}
+        if(type==PacketType::DesyncNotice || type==PacketType::PartyReapply){scope={session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0};scope.kind=WorldSourceKind::Relay;}
         scope.targetConnectionId=target->connectionId;scope.targetDeliverySerial=target->deliverySerial;
         if(cached && callbacks_.onCausalDiagnostic){try{emittedScope=scope;}catch(...){cacheDiagnostics_.gap();}}
         if(scope.sourceConnectionId==host->connectionId && scope.kind==WorldSourceKind::Native && type!=PacketType::DesyncNotice && scope.hostSourceSerial<=target->hostSourceFloor)return finish(true,"source-floor-suppressed");

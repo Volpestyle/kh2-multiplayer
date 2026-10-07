@@ -1,6 +1,7 @@
 #pragma once
 #include "kh2coop/ByteBuffer.hpp"
 #include "kh2coop/Protocol.hpp"
+#include "kh2coop/PartyLayout.hpp"
 #include "kh2coop/DesyncProtocol.hpp"
 #include "kh2coop/ResyncProtocol.hpp"
 #include "kh2coop/Types.hpp"
@@ -54,6 +55,7 @@ enum class PacketType : std::uint8_t {
     ResyncBegin = 36, ResyncPart = 37, ResyncEnd = 38,
     ResyncAck = 39, ResyncResult = 40,
     ReviveRequest = 41, // teammate -> relay validation -> target owner only
+    PartyLayout = 42, PartyReapply = 43,
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
 inline bool isDesyncDiagnosticPacket(PacketType type) {
@@ -102,6 +104,8 @@ void write(ByteWriter& w, const EventHold& m);
 void write(ByteWriter& w, const EnemyManifest& m);
 void write(ByteWriter& w, const EnemyHp& m);
 void write(ByteWriter& w, const EnemyDeath& m);
+void write(ByteWriter& w, const PartyLayout& m);
+void write(ByteWriter& w, const PartyReapply& m);
 void write(ByteWriter& w, const ReviveRequest& m);
 void write(ByteWriter& w, const HitClaim& m);
 void write(ByteWriter& w, const ProgressUpdate& m);
@@ -127,6 +131,8 @@ void read(ByteReader& r, EnemyManifest& m);
 // Requires a complete payload and nonzero source sequence; no partial assignment.
 void read(ByteReader& r, EnemyHp& m);
 void read(ByteReader& r, EnemyDeath& m);
+void read(ByteReader& r, PartyLayout& m);
+void read(ByteReader& r, PartyReapply& m);
 void read(ByteReader& r, ReviveRequest& m);
 void read(ByteReader& r, HitClaim& m);
 void read(ByteReader& r, ProgressUpdate& m);
@@ -203,6 +209,8 @@ std::vector<std::uint8_t> encode(const EventHold& m);
 std::vector<std::uint8_t> encode(const EnemyManifest& m);
 std::vector<std::uint8_t> encode(const EnemyHp& m);
 std::vector<std::uint8_t> encode(const EnemyDeath& m);
+std::vector<std::uint8_t> encode(const PartyLayout& m);
+std::vector<std::uint8_t> encode(const PartyReapply& m);
 std::vector<std::uint8_t> encode(const ReviveRequest& m);
 std::vector<std::uint8_t> encode(const HitClaim& m);
 std::vector<std::uint8_t> encode(const ProgressUpdate& m);
@@ -226,6 +234,8 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::EnemyHp:
         case PacketType::EnemyDeath:
         case PacketType::ProgressUpdate:
+        case PacketType::PartyLayout:
+        case PacketType::PartyReapply:
         case PacketType::ReviveRequest:
         case PacketType::HitClaim:
         case PacketType::TransitionAck:

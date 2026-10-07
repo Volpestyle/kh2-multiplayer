@@ -64,6 +64,8 @@ struct ClientCallbacks {
     // Host only: a client's hit claim, attackerSlot stamped by the relay
     std::function<void(const HitClaim&)> onHitClaim;
     std::function<void(const ReviveRequest&)> onReviveRequest;
+    std::function<void(const PartyLayout&)> onPartyLayout;
+    std::function<void(const PartyReapply&)> onPartyReapply;
     std::function<void(const ProgressUpdate&)> onProgressUpdate;
     std::function<void(const DesyncNotice&)> onDesyncNotice;
     std::function<void(const DesyncCaptureRequest&)> onDesyncCaptureRequest;
@@ -136,6 +138,9 @@ public:
     void sendEnemyDeath(const EnemyDeath& m);
     void sendHitClaim(const HitClaim& m);
     void sendReviveRequest(const ReviveRequest& m);
+    bool sendPartyLayout(const PartyLayout& m);
+    bool requestPartyReapply(const PartyReapply& m); // host story-forced change only
+    const std::optional<PartyLayout>& partyLayout() const { return partyLayout_; }
     void sendTransitionAck(const TransitionAck& m);
     void sendProgressUpdate(const ProgressUpdate& m); // host only
     void sendStateHash(const StateHash& m);
@@ -313,6 +318,8 @@ private:
     std::uint32_t clockSamples_{0};
     std::uint64_t lastPingMs_{0};
     std::uint32_t avatarSeq_{0};
+    std::optional<PartyLayout> partyLayout_;
+    std::uint64_t partyVersion_{0};
     AvatarState reviveLocal_{};
     std::uint64_t reviveLocalMs_{0}, receivedReviveEpisode_{0};
 };
