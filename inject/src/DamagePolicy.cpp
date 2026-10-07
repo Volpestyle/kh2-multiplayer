@@ -23,6 +23,8 @@ Decision Evaluate(const Facts& f) noexcept {
     if (Remote(f.victim)) return {Action::ZeroHp, Reason::RemoteVictim, true};
     if (Remote(f.source)) return {Action::ZeroHp, Reason::RemoteSource, true};
     if (!KnownNative(f.source)) return {Action::ZeroHp, Reason::UnknownSource, true};
+    if (f.role == Role::Client && f.victim == ActorClass::LocalAvatar && f.source == ActorClass::Enemy &&
+        f.hostEnemyAuthority) return {Action::ZeroHp, Reason::HostEnemyAuthority, true};
     if (f.victim == ActorClass::LocalAvatar) return {Action::Native, Reason::LocalVictim, true};
     if (f.victim == ActorClass::Enemy) {
         if (f.role == Role::Host && f.source == ActorClass::LocalAvatar)

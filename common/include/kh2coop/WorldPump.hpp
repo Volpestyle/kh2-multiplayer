@@ -56,11 +56,21 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
     std::vector<std::uint8_t> packet;
     ProducerWorldContext context;
     // VUH-1504 hop log (diagnostic only, bounded): the DLL's ReviveRequest into NetworkClient.
-    static unsigned reviveHopLogs = 0;
+    static unsigned reviveHopLogs = 0, remoteHitHopLogs = 0, targetAuthorityHopLogs = 0;
     const auto reviveHop = [](const std::vector<std::uint8_t>& p, const char* what) {
         if (!p.empty() && p.front() == static_cast<std::uint8_t>(PacketType::ReviveRequest) && reviveHopLogs < 32) {
             ++reviveHopLogs;
             std::printf("[revive-hop] runtime dll->net %s bytes=%zu\n", what, p.size());
+            std::fflush(stdout);
+        } else if (!p.empty() && p.front() == static_cast<std::uint8_t>(PacketType::RemoteHit) && remoteHitHopLogs < 32) {
+            // VUH-1515 hop log (diagnostic only, bounded): the host DLL's RemoteHit into NetworkClient.
+            ++remoteHitHopLogs;
+            std::printf("[remote-hit] runtime dll->net %s bytes=%zu\n", what, p.size());
+            std::fflush(stdout);
+        } else if (!p.empty() && p.front() == static_cast<std::uint8_t>(PacketType::TargetAuthority) && targetAuthorityHopLogs < 32) {
+            // VUH-1515 hop log (diagnostic only, bounded): the host DLL's TargetAuthority into NetworkClient.
+            ++targetAuthorityHopLogs;
+            std::printf("[target-authority] runtime dll->net %s bytes=%zu\n", what, p.size());
             std::fflush(stdout);
         }
     };

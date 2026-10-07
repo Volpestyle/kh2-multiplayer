@@ -11,8 +11,8 @@ namespace kh2coop {
 inline constexpr std::uint16_t PROTOCOL_VERSION = 14;
 
 // ===========================================================================
-// Protocol v14 adds PartyIntent = 47 (VUH-1786, host intended party for a target room;
-// v14 is shared with the enemy-target-remote lane's RemoteHit = 45 / TargetAuthority = 46).
+// Protocol v14 adds RemoteHit (45) and TargetAuthority (46) (VUH-1515, enemy targeting of remote players)
+// and PartyIntent = 47 (VUH-1786, host intended party for a target room).
 // v13 added EnemyMotion (VUH-1515 step 2, periodic host enemy pose/motion).
 // v12 added versioned host party layout and reapplication events.
 // v11 added streamed downed epoch/episode/delivery and ReviveRequest.
@@ -228,6 +228,47 @@ struct ReviveRequest {
     std::uint8_t requesterSlot{0xFF};
     std::uint8_t targetSlot{0xFF};
 };
+// Reliable, scoped host report (VUH-1515): an enemy on the host hit the
+// host-side native clone of targetSlot's player. The relay validates it
+// against the admitted room, roster, arrival and current EnemyManifest and
+// forwards it once to targetConnectionId only; the target owner applies the
+// damage to its own real player. Wire order is field order: 55 payload bytes.
+// seq is host-minted, nonzero and strictly increasing within the host connection.
+struct RemoteHit {
+    RoomTransition location{};          // host's admitted room tuple
+    std::uint64_t seq{0};
+    std::uint64_t hostConnectionId{0};  // host's roster identity at detection
+    std::uint64_t targetConnectionId{0};
+    std::uint8_t targetSlot{0xFF};      // 1 or 2
+    std::uint16_t netId{0};             // host enemy identity from the current EnemyManifest
+    std::uint32_t objectId{0};
+    std::uint32_t attackId{0};          // atkp entry id
+    std::int32_t damage{0};             // HP to apply, > 0
+};
+inline constexpr std::uint16_t REMOTE_HIT_PAYLOAD_SIZE = 55;
+inline constexpr std::int32_t REMOTE_HIT_MAX_DAMAGE = 9999;
+// Reliable, scoped, periodic host statement (VUH-1515): which remote players'
+// host clones the host currently targets and covers, per enemy family. The
+// relay validates it against the admitted room and forwards it to every
+// verified client; it is never cached or replayed to late joiners. Wire order
+// is field order: 38 payload bytes. seq is host-minted, nonzero and strictly
+// increasing within the host connection.
+struct TargetAuthority {
+    RoomTransition location{};          // host's admitted room tuple
+    std::uint64_t seq{0};
+    std::uint64_t hostConnectionId{0};
+    std::uint8_t slotMask{0};           // bit k (k = 1, 2): host targets and covers slot k's clone
+    std::uint32_t familyMask{0};        // bit 0 = Shadow objectId 302; other bits must be 0 for now
+    std::uint8_t mode{0};               // TargetAuthorityMode
+};
+enum class TargetAuthorityMode : std::uint8_t {
+    Forward = 0, // host forwards RemoteHit; owner cancels the local family hit
+    Mirror = 1,  // target choice only
+};
+inline constexpr std::uint16_t TARGET_AUTHORITY_PAYLOAD_SIZE = 38;
+inline constexpr std::uint8_t TARGET_AUTHORITY_SLOT_BITS = 0x06;
+inline constexpr std::uint32_t TARGET_AUTHORITY_FAMILY_BITS = 0x1u;
+inline constexpr std::uint8_t TARGET_AUTHORITY_MAX_MODE = 1;
 inline constexpr float REVIVE_RANGE = 200.0f; // native world units; initial policy
 inline constexpr std::uint64_t REVIVE_AVATAR_MAX_AGE_MS = 1000;
 

@@ -15,6 +15,9 @@
 #include <type_traits>
 
 namespace kh2coop::inject::privatestatus {
+// VUH-1515 (KH2COOP_ENEMY_TARGET_REMOTE): widens Profile, see EnemyTargetProfile below.
+static std::atomic<bool> g_enemyTargetScope{};
+void EnableEnemyTargetScope(){g_enemyTargetScope=true;}
 namespace {
 constexpr unsigned DepthCap=8, PoolCount=80, HookCount=8;
 constexpr uintptr_t PoolRva=0x2A17290, FreeRva=0x2A23810, CountRva=0x2A23950;
@@ -98,7 +101,21 @@ bool StampNow(Stamp& s) {
     return Read(g_base+0x717008,s.now);
 }
 bool Same(const Stamp& a,const Stamp& b){return a.now==b.now && a.transition==b.transition && a.load==b.load;}
+// VUH-1515 enemy targeting (KH2COOP_ENEMY_TARGET_REMOTE), review S2: only verified rooms, each with
+// its exact leaf row (SAVE+0x3534+4*world, getter 0x3E2E20): Sora in friend slot 1, Goofy in slot 2,
+// and the room's own ally byte. BC courtyard 05/06: 00/00/02/12, after the fixture's leaf write of the
+// native row 00/01/02/12 (run 20261007-033207).
+struct EnemyTargetRoom { std::uint8_t world,room; std::array<std::uint8_t,4> row; };
+constexpr EnemyTargetRoom kEnemyTargetRooms[]={{5,6,{0,0,2,0x12}}};
+bool EnemyTargetProfile(Stamp& s) {
+    std::array<std::uint8_t,4> row{},magic{};
+    if(!StampNow(s) || !Read(g_base+0x9A98B0,magic) || magic!=std::array<std::uint8_t,4>{'K','H','2','J'})return false;
+    for(const auto& r:kEnemyTargetRooms)
+        if(s.now[0]==r.world && s.now[1]==r.room)return Read(g_base+0x9A98B0+0x3534+4*r.world,row) && row==r.row;
+    return false;
+}
 bool Profile(Stamp& s) {
+    if(g_enemyTargetScope.load() && EnemyTargetProfile(s))return true; // VUH-1515
     std::array<std::uint8_t,4> row{},magic{};
     return StampNow(s) && s.now[0]==4 && s.now[1]==0x1A &&
         Read(g_base+0x9A98B0,magic) && magic==std::array<std::uint8_t,4>{'K','H','2','J'} &&

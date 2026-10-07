@@ -81,6 +81,18 @@ LocalDownedState g_localDowned {};             // this frame's owner publication
 std::string g_reviveSession;                   // latched per session generation
 std::uint32_t g_reviveSessionGeneration = 0;
 std::uint64_t g_reviveRequestSeq = 0;          // requester: DLL lifetime; never recycled
+RemoteHitApplyFn g_remoteHitApply = nullptr;   // VUH-1515: set once by EntityHook when requested
+std::uint64_t g_remoteHitSeq = 0;              // host: DLL lifetime; never recycled
+std::uint64_t g_remoteHitLastSeq = 0;          // owner: last admitted seq for g_remoteHitHost
+std::uint64_t g_remoteHitHost = 0;             // owner: host connection that seq belongs to
+RemoteHitStats g_remoteHitStats {};
+std::uint64_t g_authoritySeq = 0;              // host: DLL lifetime; never recycled
+struct HeldAuthority { std::uint64_t rxMs = 0, hostConnection = 0, seq = 0; std::uint32_t epoch = 0, familyMask = 0;
+                       std::uint16_t worldId = 0, roomId = 0; std::uint8_t slotMask = 0, mode = 0; };
+HeldAuthority g_authority {};                  // owner: latest admitted advertisement
+std::uint64_t g_authorityFloor = 0, g_authorityFloorHost = 0;
+unsigned g_authorityLogs = 0;
+unsigned g_remoteHitLogs = 0;
 ReviveStats g_reviveStats {};
 std::uint32_t g_reviveLogs = 0, g_reviveLogGeneration = 0;  // peer-driven lines: 16 per generation
 bool ReviveLogAllowed() {
@@ -442,6 +454,8 @@ void CheckActivationGeneration() {
 }
 
 bool ActivationContext(Role role, RoomTransition& location);
+void AdmitRemoteHit(const WorldScope& scope, const std::uint8_t* payload, std::size_t size); // VUH-1515
+void AdmitTargetAuthority(const WorldScope& scope, const std::uint8_t* payload, std::size_t size); // VUH-1515
 void RequestActivation();
 void FlushActivationResponses();
 
@@ -3362,6 +3376,8 @@ bool ReceiveWorldPackets() {
                     ReceiveHostHitClaim(claim, scope->sourceDeliverySerial);
                 continue;
             }
+            if (type == PacketType::RemoteHit) { AdmitRemoteHit(*scope, payload, size); continue; } // VUH-1515
+            if (type == PacketType::TargetAuthority) { AdmitTargetAuthority(*scope, payload, size); continue; } // VUH-1515
             if (CurrentRole() != Role::Client) continue;
             ByteReader r(payload, size);
             if (progresssync::HandlePacket(type, r)) {
@@ -4852,6 +4868,163 @@ bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std
     seqOut = request.seq;
     return SendCapturedWorld(encode(request), context);
 }
+
+namespace {
+// VUH-1515: RemoteHit from the host to us (the owner of the hit clone). Source admission is the
+// host branch's (host connection, its delivery serial, a host source serial past the resync cut);
+// then the message must name us, the host connection, our admitted host epoch and room, and a
+// sequence above the last admitted one from that host connection.
+void AdmitRemoteHit(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {
+    ++g_remoteHitStats.seen;
+    const auto local = g_bridge.LocalSlot();
+    const char* why = nullptr;  // first failing admission rule (logged)
+    if (!(CurrentRole() == Role::Client && local < 3 && local != 0)) why = "role-or-slot";
+    else if (!(scope.sourceConnectionId && scope.sourceConnectionId == g_bridge.ConnectionId(0) && scope.hostSourceSerial &&
+               scope.sourceDeliverySerial == g_bridge.PeerDeliverySerial(0) && scope.hostSourceSerial > g_resyncAppliedCut)) why = "source";
+    RemoteHit hit;
+    if (!why) {
+        ByteReader reader(payload, size);
+        read(reader, hit);
+        if (!reader.atEnd()) why = "payload";
+    }
+    if (!why && !(hit.targetSlot == local && hit.targetConnectionId == g_bridge.ConnectionId(local) &&
+                  hit.hostConnectionId == scope.sourceConnectionId && hit.seq != 0 && hit.damage > 0 && hit.damage <= 9999)) why = "fields";
+    if (!why && !(g_host.arrived && g_host.epoch != 0)) why = "not-arrived";
+    if (!why && hit.location.epoch != g_host.epoch) why = "epoch";
+    RoomTransition room;
+    if (!why && !(ActivationContext(Role::Client, room) && room.epoch == hit.location.epoch &&
+                  room.worldId == hit.location.worldId && room.roomId == hit.location.roomId)) why = "room";
+    if (!why && hit.hostConnectionId != g_remoteHitHost) { g_remoteHitHost = hit.hostConnectionId; g_remoteHitLastSeq = 0; }
+    if (!why && hit.seq <= g_remoteHitLastSeq) why = "sequence";
+    if (!why) g_remoteHitLastSeq = hit.seq;  // consumed even if the native checks refuse it
+    if (!why && !g_remoteHitApply) why = "apply-unset";
+    if (why) {
+        ++g_remoteHitStats.admissionRefused;
+        if (g_log && g_remoteHitLogs < 32) {
+            ++g_remoteHitLogs;
+            g_log("[enemy-target] remote-hit admission refused reason=%s local=%u seq=%llu epoch=%u/%u apply=%u", why,
+                  static_cast<unsigned>(local), static_cast<unsigned long long>(hit.seq), hit.location.epoch, g_host.epoch,
+                  g_remoteHitApply ? 1u : 0u);
+        }
+        return;
+    }
+    const int result = g_remoteHitApply(hit.damage, hit.attackId, hit.objectId, hit.seq);
+    if (result == 1) ++g_remoteHitStats.applied; else ++g_remoteHitStats.nativeRefused;
+}
+
+// VUH-1515: TargetAuthority from the host (same host-source admission as RemoteHit). A refused or
+// absent advertisement simply leaves the previous one to age out: the owner then never cancels.
+void AdmitTargetAuthority(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {
+    const auto local = g_bridge.LocalSlot();
+    const char* why = nullptr;  // first failing admission rule (logged)
+    if (!(CurrentRole() == Role::Client && local < 3 && local != 0)) why = "role-or-slot";
+    else if (!(scope.sourceConnectionId && scope.sourceConnectionId == g_bridge.ConnectionId(0) && scope.hostSourceSerial &&
+               scope.sourceDeliverySerial == g_bridge.PeerDeliverySerial(0) && scope.hostSourceSerial > g_resyncAppliedCut)) why = "source";
+    TargetAuthority a;
+    if (!why) {
+        ByteReader reader(payload, size);
+        read(reader, a);
+        if (!reader.atEnd()) why = "payload";
+    }
+    if (!why && !(a.hostConnectionId == scope.sourceConnectionId && a.seq != 0 && (a.slotMask & ~0x06u) == 0 &&
+                  (a.familyMask & ~1u) == 0 && a.mode <= 1)) why = "fields";
+    // Expected right after a load: advertisements that arrive before our own room arrival is admitted.
+    if (!why && !(g_host.arrived && g_host.epoch != 0)) why = "not-arrived";
+    if (!why && a.location.epoch != g_host.epoch) why = "epoch";
+    RoomTransition room;
+    if (!why && !(ActivationContext(Role::Client, room) && room.epoch == a.location.epoch &&
+                  room.worldId == a.location.worldId && room.roomId == a.location.roomId)) why = "room";
+    if (!why && a.hostConnectionId != g_authorityFloorHost) { g_authorityFloorHost = a.hostConnectionId; g_authorityFloor = 0; }
+    if (!why && a.seq <= g_authorityFloor) why = "sequence";
+    if (why) {
+        if (g_log && g_authorityLogs < 32) {
+            ++g_authorityLogs;
+            g_log("[enemy-target] authority admission refused reason=%s local=%u seq=%llu epoch=%u/%u arrived=%u", why,
+                  static_cast<unsigned>(local), static_cast<unsigned long long>(a.seq), a.location.epoch, g_host.epoch,
+                  g_host.arrived ? 1u : 0u);
+        }
+        return;
+    }
+    g_authorityFloor = a.seq;
+    g_authority = {GetTickCount64(), a.hostConnectionId, a.seq, a.location.epoch, a.familyMask, a.location.worldId,
+                   a.location.roomId, a.slotMask, a.mode};
+}
+} // namespace
+
+std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept {
+    if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending || !actor) return 0;
+    const auto found = g_inst.byActor.find(actor);
+    if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return 0;
+    const auto& spawn = g_inst.spawns[found->second];
+    if (!spawn.present || !spawn.announced || spawn.objectId != objectId || spawn.spawnIndex + 1 > 0xFFFF) return 0;
+    return static_cast<std::uint16_t>(spawn.spawnIndex + 1);
+}
+
+bool SendRemoteHit(std::uint8_t targetSlot, std::uint16_t netId, std::uint32_t objectId, std::uint32_t attackId,
+                   std::int32_t damage, std::uint64_t& seqOut) {
+    seqOut = 0;
+    DownedScope s;
+    if (CurrentRole() != Role::Host || !netId || damage <= 0 || damage > 9999 || !CaptureDownedScope(s) ||
+        targetSlot == 0 || targetSlot >= 3 || targetSlot == s.localSlot || !s.connections[targetSlot] ||
+        g_remoteHitSeq == UINT64_MAX) { ++g_remoteHitStats.sendFailed; return false; }
+    ProducerWorldContext context;
+    if (!CaptureWorldContext(context) || context.generation != s.context.generation ||
+        context.deliverySerial != s.context.deliverySerial) { ++g_remoteHitStats.sendFailed; return false; }
+    RemoteHit hit;
+    hit.location = {s.epoch, s.worldId, s.roomId, s.door, s.mapProgram, s.battleProgram, s.eventProgram};
+    hit.seq = ++g_remoteHitSeq;  // consumed even if the send fails
+    hit.hostConnectionId = s.connections[s.localSlot];
+    hit.targetConnectionId = s.connections[targetSlot];
+    hit.targetSlot = targetSlot;
+    hit.netId = netId;
+    hit.objectId = objectId;
+    hit.attackId = attackId;
+    hit.damage = damage;
+    seqOut = hit.seq;
+    const bool sent = SendCapturedWorld(encode(hit), context);
+    if (sent) ++g_remoteHitStats.sent; else ++g_remoteHitStats.sendFailed;
+    return sent;
+}
+
+bool SendTargetAuthority(std::uint8_t slotMask, std::uint32_t familyMask, std::uint8_t mode, std::uint64_t& seqOut) {
+    seqOut = 0;
+    DownedScope s;
+    if (CurrentRole() != Role::Host || (slotMask & ~0x06u) != 0 || (familyMask & ~1u) != 0 || mode > 1 ||
+        !CaptureDownedScope(s) || s.localSlot != 0 || !s.connections[0] || g_authoritySeq == UINT64_MAX) return false;
+    ProducerWorldContext context;
+    if (!CaptureWorldContext(context) || context.generation != s.context.generation ||
+        context.deliverySerial != s.context.deliverySerial) return false;
+    TargetAuthority a;
+    a.location = {s.epoch, s.worldId, s.roomId, s.door, s.mapProgram, s.battleProgram, s.eventProgram};
+    a.seq = ++g_authoritySeq;  // consumed even if the send fails
+    a.hostConnectionId = s.connections[0];
+    a.slotMask = slotMask;
+    a.familyMask = familyMask;
+    a.mode = mode;
+    seqOut = a.seq;
+    return SendCapturedWorld(encode(a), context);
+}
+
+TargetAuthorityView CurrentTargetAuthority(std::uint64_t maxAgeMs) noexcept {
+    TargetAuthorityView v;
+    try {
+        v.localSlot = g_bridge.LocalSlot();
+        const auto& a = g_authority;
+        RoomTransition room;
+        const auto now = GetTickCount64();
+        v.held = CurrentRole() == Role::Client && a.rxMs != 0 && now >= a.rxMs && now - a.rxMs <= maxAgeMs &&
+            a.hostConnection != 0 && a.hostConnection == g_bridge.ConnectionId(0) && g_host.arrived &&
+            a.epoch == g_host.epoch && ActivationContext(Role::Client, room) && room.epoch == a.epoch &&
+            room.worldId == a.worldId && room.roomId == a.roomId;
+        if (v.held) { v.slotMask = a.slotMask; v.mode = a.mode; v.familyMask = a.familyMask; v.seq = a.seq; v.rxMs = a.rxMs; }
+    } catch (...) {
+        v = {};
+    }
+    return v;
+}
+
+void SetRemoteHitApply(RemoteHitApplyFn apply) noexcept { g_remoteHitApply = apply; }
+RemoteHitStats GetRemoteHitStats() noexcept { return g_remoteHitStats; }
 
 } // namespace enemysync
 } // namespace inject

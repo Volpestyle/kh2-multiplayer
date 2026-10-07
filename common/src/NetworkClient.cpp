@@ -328,6 +328,12 @@ bool NetworkClient::requestPartyReapply(const PartyReapply& m) {
 void NetworkClient::sendReviveRequest(const ReviveRequest& m) {
     sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
+void NetworkClient::sendRemoteHit(const RemoteHit& m) {
+    if (ready() && avatarLocalSlot_ == 0) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
+}
+void NetworkClient::sendTargetAuthority(const TargetAuthority& m) {
+    if (ready() && avatarLocalSlot_ == 0) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
+}
 void NetworkClient::sendHitClaim(const HitClaim& m) {
     if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
@@ -524,6 +530,8 @@ void NetworkClient::resetTransportState() {
     partyLayout_.reset(); partyVersion_=0;
     partyIntents_.clear(); partyIntentVersion_=0;
     reviveLocal_ = {}; reviveLocalMs_ = 0; receivedReviveEpisode_ = 0;
+    receivedRemoteHitHost_ = 0; receivedRemoteHitSeq_ = 0;
+    receivedTargetAuthorityHost_ = 0; receivedTargetAuthoritySeq_ = 0;
     clockOffsetMs_ = 0;
     bestRttMs_ = 0;
     lastRttMs_ = 0;
@@ -872,6 +880,54 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             reader = ByteReader(payload,payloadSize);
         }
 
+        if (type == PacketType::RemoteHit) {
+            RemoteHit hit; read(reader, hit);
+            const auto host = avatarConnections_[0];
+            const auto floor = host == receivedRemoteHitHost_ ? receivedRemoteHitSeq_ : 0;
+            const char* why = !admittedScope || admittedScope->kind != WorldSourceKind::Native ? "no-native-scope" :
+                !host || admittedScope->sourceConnectionId != host || hit.hostConnectionId != host ? "host-connection" :
+                !hostRoom_ || !sameResyncRoom(hit.location,*hostRoom_) ? "room-mismatch" :
+                avatarLocalSlot_ == 0 || avatarLocalSlot_ >= 3 || hit.targetSlot != avatarLocalSlot_ ? "not-our-slot" :
+                !hit.targetConnectionId || hit.targetConnectionId != avatarConnections_[avatarLocalSlot_] ? "target-connection" :
+                !hit.seq || hit.seq <= floor ? "sequence" :
+                hit.damage < 1 || hit.damage > REMOTE_HIT_MAX_DAMAGE ? "damage" : nullptr;
+            static unsigned remoteHitLogs = 0;
+            if (why) {
+                // VUH-1515 (diagnostic only, bounded): name the first failing check.
+                if (remoteHitLogs < 32) { ++remoteHitLogs; log(std::string("[remote-hit] target drop reason=") + why + " seq=" + std::to_string(hit.seq)); }
+                return;
+            }
+            receivedRemoteHitHost_ = host; receivedRemoteHitSeq_ = hit.seq;
+            if (remoteHitLogs < 32) {
+                ++remoteHitLogs;
+                log("[remote-hit] target deliver seq=" + std::to_string(hit.seq) + " netId=" + std::to_string(hit.netId) +
+                    " damage=" + std::to_string(hit.damage));
+            }
+            reader = ByteReader(payload,payloadSize);
+        }
+        if (type == PacketType::TargetAuthority) {
+            TargetAuthority authority; read(reader, authority);
+            const auto host = avatarConnections_[0];
+            const auto floor = host == receivedTargetAuthorityHost_ ? receivedTargetAuthoritySeq_ : 0;
+            const char* why = !admittedScope || admittedScope->kind != WorldSourceKind::Native ? "no-native-scope" :
+                !host || admittedScope->sourceConnectionId != host || authority.hostConnectionId != host ? "host-connection" :
+                !hostRoom_ || !sameResyncRoom(authority.location,*hostRoom_) ? "room-mismatch" :
+                !authority.seq || authority.seq <= floor ? "sequence" : nullptr;
+            static unsigned targetAuthorityLogs = 0;
+            if (why) {
+                // VUH-1515 (diagnostic only, bounded): name the first failing check.
+                if (targetAuthorityLogs < 32) { ++targetAuthorityLogs; log(std::string("[target-authority] drop reason=") + why + " seq=" + std::to_string(authority.seq)); }
+                return;
+            }
+            receivedTargetAuthorityHost_ = host; receivedTargetAuthoritySeq_ = authority.seq;
+            if (targetAuthorityLogs < 32) {
+                ++targetAuthorityLogs;
+                log("[target-authority] deliver seq=" + std::to_string(authority.seq) + " slotMask=" +
+                    std::to_string(authority.slotMask) + " mode=" + std::to_string(authority.mode));
+            }
+            reader = ByteReader(payload,payloadSize);
+        }
+
         // Actual accepted inner body and original received envelope, before bridge callbacks.
         // Diagnostic failure must neither fabricate a delivery nor change admission.
         if (admittedScope && callbacks_.onCausalDiagnostic) {
@@ -1077,6 +1133,16 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             case PacketType::ReviveRequest: {
                 ReviveRequest m; read(reader,m);
                 if (callbacks_.onReviveRequest) callbacks_.onReviveRequest(m);
+                break;
+            }
+            case PacketType::RemoteHit: {
+                RemoteHit m; read(reader,m);
+                if (callbacks_.onRemoteHit) callbacks_.onRemoteHit(m);
+                break;
+            }
+            case PacketType::TargetAuthority: {
+                TargetAuthority m; read(reader,m);
+                if (callbacks_.onTargetAuthority) callbacks_.onTargetAuthority(m);
                 break;
             }
             case PacketType::HitClaim: {

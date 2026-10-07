@@ -223,7 +223,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         RS_INNER(RoomTransition) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -870,6 +870,38 @@ std::vector<std::uint8_t> encode(const ReviveRequest& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::ReviveRequest, w.data());
 }
 
+void write(ByteWriter& w, const RemoteHit& m) {
+    write(w, m.location);
+    w.writeU64(m.seq); w.writeU64(m.hostConnectionId); w.writeU64(m.targetConnectionId);
+    w.writeU8(m.targetSlot); w.writeU16(m.netId); w.writeU32(m.objectId);
+    w.writeU32(m.attackId); w.writeI32(m.damage);
+}
+void read(ByteReader& r, RemoteHit& m) {
+    if (r.remaining() != REMOTE_HIT_PAYLOAD_SIZE) throw std::runtime_error("RemoteHit: wrong payload length");
+    read(r, m.location);
+    m.seq = r.readU64(); m.hostConnectionId = r.readU64(); m.targetConnectionId = r.readU64();
+    m.targetSlot = r.readU8(); m.netId = r.readU16(); m.objectId = r.readU32();
+    m.attackId = r.readU32(); m.damage = r.readI32();
+}
+std::vector<std::uint8_t> encode(const RemoteHit& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::RemoteHit, w.data());
+}
+
+void write(ByteWriter& w, const TargetAuthority& m) {
+    write(w, m.location);
+    w.writeU64(m.seq); w.writeU64(m.hostConnectionId);
+    w.writeU8(m.slotMask); w.writeU32(m.familyMask); w.writeU8(m.mode);
+}
+void read(ByteReader& r, TargetAuthority& m) {
+    if (r.remaining() != TARGET_AUTHORITY_PAYLOAD_SIZE) throw std::runtime_error("TargetAuthority: wrong payload length");
+    read(r, m.location);
+    m.seq = r.readU64(); m.hostConnectionId = r.readU64();
+    m.slotMask = r.readU8(); m.familyMask = r.readU32(); m.mode = r.readU8();
+}
+std::vector<std::uint8_t> encode(const TargetAuthority& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::TargetAuthority, w.data());
+}
+
 void write(ByteWriter& w, const HitClaim& m) {
     w.writeU32(m.epoch);
     w.writeU32(m.seq);
@@ -1422,6 +1454,10 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("Party: wrong frame length");
     if (type == PacketType::ReviveRequest && (len != 50 || size != kHeaderSize + len))
         throw std::runtime_error("ReviveRequest: wrong frame length");
+    if (type == PacketType::RemoteHit && (len != REMOTE_HIT_PAYLOAD_SIZE || size != kHeaderSize + len))
+        throw std::runtime_error("RemoteHit: wrong frame length");
+    if (type == PacketType::TargetAuthority && (len != TARGET_AUTHORITY_PAYLOAD_SIZE || size != kHeaderSize + len))
+        throw std::runtime_error("TargetAuthority: wrong frame length");
     if (type == PacketType::HitClaim && (len != 43 || size != kHeaderSize + len))
         throw std::runtime_error("HitClaim: wrong frame length");
     if (type == PacketType::EnemyHp && (len < 14 || size != kHeaderSize + len))

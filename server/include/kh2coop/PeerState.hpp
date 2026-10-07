@@ -35,6 +35,8 @@ struct PeerState {
     std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
 
     std::uint64_t lastReviveSeq{0}, revivedEpisode{0};
+    std::uint64_t lastRemoteHitSeq{0}; // VUH-1515 host-minted RemoteHit, connection-wide
+    std::uint64_t lastTargetAuthoritySeq{0}; // VUH-1515 host-minted TargetAuthority, connection-wide
     AvatarState reviveAvatar{};
     std::uint64_t reviveAvatarMs{0};
     std::uint32_t reviveAvatarSeq{0};

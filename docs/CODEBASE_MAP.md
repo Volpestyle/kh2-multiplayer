@@ -71,6 +71,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/CloneNeutralInput.inl` | | VUH-1489 default-off (`KH2COOP_CLONE_NEUTRAL_INPUT=1`) neutral input for a native P_EX100 clone: its own pad pointer `+0xDB8` goes to a neutral entry, and a pinned `0x3A89A0` movement-update detour runs it with FIELD_COMMAND's command record and stick neutralised (docs/CLONE_NEUTRAL_INPUT.md) |
 | `src/EnemyPopulation.hpp` | | VUH-1788 default-off (`KH2COOP_ENEMY_POPULATION=1`) client population planner (force-spawn missing host enemies via the native factory) and the cull-hold decision used by EnemyMirror.inl's removal-predicate hook (docs/ENEMY_PARITY.md) |
 | `src/EnemyMirror.inl`, `src/EnemyMirrorState.hpp`, `src/EnemyMirrorPose.hpp` | | VUH-1515 step 2 default-off (`KH2COOP_ENEMY_MIRROR=1`) mirrored Shadows: host `EnemyMotion` capture (EnemySync), client stream ring/render cursor, per-class brain-thunk skip, motion guard and post-update pose write (docs/ENEMY_PARITY.md) |
+| `src/EnemyTargetRemote.inl`, `src/EnemyTargetRemote.hpp` | | VUH-1515 default-off (`KH2COOP_ENEMY_TARGET_REMOTE=1`, every machine): host enemies on the allowlist (Shadow 302) choose the nearest live player or remote clone at bdscript `target_search` (`exe+0x755B00` swap); one damage path per mode: Forward forwards zeroed clone hits as `RemoteHit` (type 45) and the owner cancels its local copy only under a fresh `TargetAuthority` (type 46, protocol v14) naming its slot; Mirror mode chooses targets only (docs/ENEMY_TARGET_REMOTE.md) |
 
 EntityHook.cpp also holds the VUH-1501 hit-ownership hooks (BuildHit `0x3D23C0` log, ApplyHitDamage `0x3D3BA0` drop filter + claims, host apply), driven through `common/include/kh2coop/HitChannel.hpp`.
 Those diagnostic claims/manual apply requests remain separate from protocol
@@ -232,6 +233,7 @@ loopback ports). None launches or attaches to KH2.
 | `EnemyMirrorTest.cpp` | VUH-1515 `EnemyMotion` codec, loopback relay forwarding rules (host-only, epoch, sequence, no late-join replay) and the pure client stream state |
 | `EnemyPopulationTest.cpp` | VUH-1788 population planner (missing clock, spawn gap, attempt/forced caps, retry wait) and the cull/force-remove decisions |
 | `EnemyMirrorDriverTest.cpp` | VUH-1515 native mirror driver over fake game memory: brain skip/pass-through, motion guard, death, blend, clamp, class refusal |
+| `EnemyTargetRemoteTest.cpp` | VUH-1515 enemy targeting pure policy: allowlist, player form, nearest/hold/hysteresis/per-clone cap, clone candidacy (downed, cutscene, shared status, stale), owner apply refusals |
 | `NativeHitTraceTest.cpp` | Production hit trace/policy serializer and owned zero leaf; synthetic original/argument/return/SEH, scope/queue and outcome controls; baseline and policy-veto emitter modes |
 | `test_trace_audit.py` | Saved-log envelope/provenance, predicate and native-hit schema, coverage, HP/delta, ambiguity and historical-limit controls |
 

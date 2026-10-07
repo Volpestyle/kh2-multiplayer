@@ -968,6 +968,107 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::RemoteHit: {
+                RemoteHit hit; read(reader,hit);
+                // VUH-1515 (diagnostic only, bounded per process): every refusal names its reason.
+                static unsigned remoteHitLogs = 0;
+                const auto remoteHitRefuse = [&](const char* why) {
+                    if (remoteHitLogs < 32) {
+                        ++remoteHitLogs;
+                        log(std::string("RemoteHit refused reason=") + why + " sender=" +
+                            std::to_string(static_cast<int>(ps->assignedSlot)) + " target=" +
+                            std::to_string(hit.targetSlot) + " seq=" + std::to_string(hit.seq) +
+                            " netId=" + std::to_string(hit.netId) + " damage=" + std::to_string(hit.damage));
+                    }
+                    ++rejectedWorld_;
+                };
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined || !admittedScope ||
+                    !room_ || !room_->epoch || !sameResyncRoom(hit.location,*room_) || (hold_ && hold_->active) ||
+                    !hit.seq || hit.seq <= ps->lastRemoteHitSeq) {
+                    remoteHitRefuse(ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined ? "sender-not-verified-host" :
+                                    !admittedScope ? "no-scope" : !room_ || !room_->epoch ? "no-room" :
+                                    !sameResyncRoom(hit.location,*room_) ? "room-mismatch" :
+                                    (hold_ && hold_->active) ? "event-hold" : "sequence");
+                    return;
+                }
+                // Consume the authenticated sequence even on a later refusal; a
+                // refused report cannot become valid when the room state changes.
+                ps->lastRemoteHitSeq = hit.seq;
+                auto target = std::find_if(peers_.begin(),peers_.end(),[&](const auto& p) {
+                    return p.status==PeerStatus::Verified && !fromHost(p) &&
+                        static_cast<std::uint8_t>(p.assignedSlot)==hit.targetSlot;
+                });
+                const auto matchingIdCount = std::count_if(manifest_.entries.begin(), manifest_.entries.end(),
+                    [&](const EnemyManifestEntry& entry) { return entry.netId == hit.netId; });
+                const bool enemyKnown = manifest_.epoch == room_->epoch && matchingIdCount == 1 &&
+                    std::any_of(manifest_.entries.begin(), manifest_.entries.end(), [&](const EnemyManifestEntry& entry) {
+                        return entry.netId == hit.netId && entry.objectId == hit.objectId;
+                    });
+                const char* why = hit.hostConnectionId != ps->connectionId ? "host-connection" :
+                    (hit.targetSlot != 1 && hit.targetSlot != 2) || hit.targetSlot == static_cast<std::uint8_t>(ps->assignedSlot) ? "target-slot" :
+                    target == peers_.end() || target->connectionId != hit.targetConnectionId ? "target-connection" :
+                    target->worldQuarantined ? "target-quarantined" :
+                    !(target->ackArrived && target->ackEpoch == room_->epoch && target->ackWorldId == room_->worldId &&
+                      target->ackRoomId == room_->roomId) ? "target-not-arrived" :
+                    hit.damage < 1 || hit.damage > REMOTE_HIT_MAX_DAMAGE ? "damage" :
+                    !enemyKnown ? "enemy-unknown" : deadEnemies_.count(hit.netId) != 0 ? "enemy-dead" : nullptr;
+                if (why) { remoteHitRefuse(why); return; }
+                sendTo(target->transportPeer,encode(hit),true);
+                static unsigned remoteHitForwardLogs = 0;
+                if (remoteHitForwardLogs < 32) {
+                    ++remoteHitForwardLogs;
+                    log("RemoteHit forwarded target="+std::to_string(hit.targetSlot)+" seq="+std::to_string(hit.seq)+
+                        " netId="+std::to_string(hit.netId)+" attackId="+std::to_string(hit.attackId)+
+                        " damage="+std::to_string(hit.damage));
+                }
+                break;
+            }
+
+            case PacketType::TargetAuthority: {
+                TargetAuthority authority; read(reader,authority);
+                // VUH-1515 (diagnostic only, bounded per process): every refusal names its reason.
+                static unsigned targetAuthorityLogs = 0;
+                const auto targetAuthorityRefuse = [&](const char* why) {
+                    if (targetAuthorityLogs < 32) {
+                        ++targetAuthorityLogs;
+                        log(std::string("TargetAuthority refused reason=") + why + " sender=" +
+                            std::to_string(static_cast<int>(ps->assignedSlot)) + " seq=" + std::to_string(authority.seq) +
+                            " slotMask=" + std::to_string(authority.slotMask) + " mode=" + std::to_string(authority.mode));
+                    }
+                    ++rejectedWorld_;
+                };
+                // S8: held during an active event hold, like RemoteHit (which is dropped there), so the
+                // owner's advertisement ages out and it stops cancelling while no forward can arrive.
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined || !admittedScope ||
+                    !room_ || !room_->epoch || !sameResyncRoom(authority.location,*room_) || (hold_ && hold_->active) ||
+                    !authority.seq || authority.seq <= ps->lastTargetAuthoritySeq) {
+                    targetAuthorityRefuse(ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined ? "sender-not-verified-host" :
+                                          !admittedScope ? "no-scope" : !room_ || !room_->epoch ? "no-room" :
+                                          !sameResyncRoom(authority.location,*room_) ? "room-mismatch" :
+                                          (hold_ && hold_->active) ? "event-hold" : "sequence");
+                    return;
+                }
+                // Consume the authenticated sequence even on a later refusal.
+                ps->lastTargetAuthoritySeq = authority.seq;
+                const char* why = authority.hostConnectionId != ps->connectionId ? "host-connection" :
+                    (authority.slotMask & ~TARGET_AUTHORITY_SLOT_BITS) != 0 ? "slot-mask" :
+                    (authority.familyMask & ~TARGET_AUTHORITY_FAMILY_BITS) != 0 ? "family-mask" :
+                    authority.mode > TARGET_AUTHORITY_MAX_MODE ? "mode" : nullptr;
+                if (why) { targetAuthorityRefuse(why); return; }
+                // Live statement only: never cached, never replayed to late joiners.
+                const auto packet = encode(authority);
+                for (auto& other : peers_)
+                    if (other.status == PeerStatus::Verified && !fromHost(other) && other.transportPeer)
+                        sendTo(other.transportPeer, packet, true);
+                static unsigned targetAuthorityForwardLogs = 0;
+                if (targetAuthorityForwardLogs < 32) {
+                    ++targetAuthorityForwardLogs;
+                    log("TargetAuthority forwarded seq="+std::to_string(authority.seq)+" slotMask="+std::to_string(authority.slotMask)+
+                        " familyMask="+std::to_string(authority.familyMask)+" mode="+std::to_string(authority.mode));
+                }
+                break;
+            }
+
             case PacketType::HitClaim: {
                 if (ps->status != PeerStatus::Verified || fromHost(*ps)) {
                     // The host applies its own hits natively.

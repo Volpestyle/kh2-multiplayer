@@ -164,6 +164,34 @@ ReviveStats GetReviveStats() noexcept;
 // downed episode through the captured-context owner ring. seqOut = its sequence.
 bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut);
 
+// VUH-1515 RemoteHit (KH2COOP_ENEMY_TARGET_REMOTE). Game thread.
+// Host: the announced netId of a host enemy actor in the current epoch, 0 = unknown.
+std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept;
+// Host: sends one RemoteHit for the owner of a hit clone through the captured-context ring.
+bool SendRemoteHit(std::uint8_t targetSlot, std::uint16_t netId, std::uint32_t objectId, std::uint32_t attackId,
+                   std::int32_t damage, std::uint64_t& seqOut);
+// Owner: after envelope/source/epoch/sequence admission enemysync calls this exactly once per
+// RemoteHit. Returns 1 when applied to the local player, 0 when refused by the native checks.
+using RemoteHitApplyFn = int (*)(std::int32_t damage, std::uint32_t attackId, std::uint32_t objectId, std::uint64_t seq);
+void SetRemoteHitApply(RemoteHitApplyFn apply) noexcept;
+struct RemoteHitStats {
+    std::uint64_t seen = 0, admissionRefused = 0, applied = 0, nativeRefused = 0, sent = 0, sendFailed = 0;
+};
+RemoteHitStats GetRemoteHitStats() noexcept;
+// VUH-1515 TargetAuthority (review B2/B3). Host: one reliable advertisement of which slots' clones
+// it currently targets and covers (slotMask bit = owner slot), the families and the damage mode
+// (0 forward: RemoteHit + owner cancel; 1 mirror: target choice only). Game thread.
+bool SendTargetAuthority(std::uint8_t slotMask, std::uint32_t familyMask, std::uint8_t mode, std::uint64_t& seqOut);
+// Owner: the latest admitted advertisement, only while it is from the current host connection,
+// for our admitted host epoch and room, and at most maxAgeMs old. held = false otherwise.
+struct TargetAuthorityView {
+    bool held = false;
+    std::uint8_t slotMask = 0, mode = 0, localSlot = 0xFF;
+    std::uint32_t familyMask = 0;
+    std::uint64_t seq = 0, rxMs = 0;  // rxMs: DLL admission time (GetTickCount64)
+};
+TargetAuthorityView CurrentTargetAuthority(std::uint64_t maxAgeMs) noexcept;
+
 } // namespace enemysync
 } // namespace inject
 } // namespace kh2coop

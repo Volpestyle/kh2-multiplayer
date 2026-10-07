@@ -57,7 +57,8 @@ enum class PacketType : std::uint8_t {
     ReviveRequest = 41, // teammate -> relay validation -> target owner only
     PartyLayout = 42, PartyReapply = 43,
     EnemyMotion = 44, // host -> relay -> others, periodic (VUH-1515)
-    // 45/46 are reserved for the enemy-target-remote lane (RemoteHit, TargetAuthority, v14).
+    RemoteHit = 45, // host -> relay validation -> target owner only
+    TargetAuthority = 46, // host -> relay validation -> clients (reliable, periodic)
     PartyIntent = 47, // host -> relay (cached per target; no joiner replay, the host republishes) -> all incl. host (VUH-1786)
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
@@ -112,6 +113,8 @@ void write(ByteWriter& w, const PartyLayout& m);
 void write(ByteWriter& w, const PartyReapply& m);
 void write(ByteWriter& w, const PartyIntent& m);
 void write(ByteWriter& w, const ReviveRequest& m);
+void write(ByteWriter& w, const RemoteHit& m);
+void write(ByteWriter& w, const TargetAuthority& m);
 void write(ByteWriter& w, const HitClaim& m);
 void write(ByteWriter& w, const ProgressUpdate& m);
 void write(ByteWriter& w, const StateHash& m);
@@ -141,6 +144,8 @@ void read(ByteReader& r, PartyLayout& m);
 void read(ByteReader& r, PartyReapply& m);
 void read(ByteReader& r, PartyIntent& m);
 void read(ByteReader& r, ReviveRequest& m);
+void read(ByteReader& r, RemoteHit& m);
+void read(ByteReader& r, TargetAuthority& m);
 void read(ByteReader& r, HitClaim& m);
 void read(ByteReader& r, ProgressUpdate& m);
 void read(ByteReader& r, StateHash& m);
@@ -221,6 +226,8 @@ std::vector<std::uint8_t> encode(const PartyLayout& m);
 std::vector<std::uint8_t> encode(const PartyReapply& m);
 std::vector<std::uint8_t> encode(const PartyIntent& m);
 std::vector<std::uint8_t> encode(const ReviveRequest& m);
+std::vector<std::uint8_t> encode(const RemoteHit& m);
+std::vector<std::uint8_t> encode(const TargetAuthority& m);
 std::vector<std::uint8_t> encode(const HitClaim& m);
 std::vector<std::uint8_t> encode(const ProgressUpdate& m);
 std::vector<std::uint8_t> encode(const StateHash& m);
@@ -248,6 +255,8 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::PartyReapply:
         case PacketType::PartyIntent:
         case PacketType::ReviveRequest:
+        case PacketType::RemoteHit:
+        case PacketType::TargetAuthority:
         case PacketType::HitClaim:
         case PacketType::TransitionAck:
         case PacketType::StateHash:

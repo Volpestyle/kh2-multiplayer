@@ -46,9 +46,15 @@ for keys 1 and 14 alike. The commit veto is keyed by pool-slot ownership, so it
 covers a key-14 private record in the same way.
 
 Live, the key-14 clone's HP stayed independent of the local Sora. The key-14 SAVE
-veto itself wasn't exercised. **Merge point:** `vuh1515-target-remote` also widens
-`Profile()`'s row gate, for the BB courtyard. Whichever lands second must keep both
-alternatives.
+veto itself wasn't exercised.
+
+**Enemy-target profile (VUH-1515).** With `KH2COOP_ENEMY_TARGET_REMOTE=1`, `enemytarget::Configure`
+calls `EnableEnemyTargetScope()`, and `Profile()` also qualifies a verified room with its exact leaf
+row: today only BC courtyard 05/06 with world-5 row `00/00/02/12` (the fixture's leaf write of the
+native `00/01/02/12`). The GoA 04/1A rule and the VUH-1519 party profile below are unchanged; both
+alternatives are kept. The enemy-target flag and `KH2COOP_PARTY_NATIVE` refuse each other for now
+(no joint fixture): `enemytarget::Configure` and `PartyNative::Install` each stay off when the other
+flag is set, so a process uses at most one of these two widenings.
 
 **Two-clone party profile (VUH-1519).** With `KH2COOP_PARTY_NATIVE=1`, a second profile also qualifies when all of these hold:
 - GoA;

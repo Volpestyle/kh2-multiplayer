@@ -495,6 +495,10 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
                      conflict & 1 ? " KH2COOP_PLAYER_KIT" : "", conflict & 2 ? " KH2COOP_REMOTE_KIT_SLOT" : "");
         return false;
     }
+    if (Enabled("KH2COOP_ENEMY_TARGET_REMOTE")) {  // VUH-1515: no joint fixture yet; both flags refuse each other
+        if (log) log("[partynative] REFUSED: KH2COOP_PARTY_NATIVE conflicts with KH2COOP_ENEMY_TARGET_REMOTE (no joint fixture); no observer");
+        return false;
+    }
     if (!Enabled("KH2COOP_NATIVE_SORA_PRIVATE_STATUS")) {
         if (log) log("[partynative] REFUSED: requires KH2COOP_NATIVE_SORA_PRIVATE_STATUS=1 (clones would share Sora's SAVE-bound status)");
         return false;

@@ -496,6 +496,14 @@ if(WIN32)
         target_compile_options(kh2coop_playerkit_test PRIVATE /W4 /WX)
     endif()
 
+    # VUH-1515 enemy targeting of remote clones: pure policy (EnemyTargetRemote.hpp).
+    add_executable(kh2coop_enemy_target_test tests/EnemyTargetRemoteTest.cpp)
+    target_include_directories(kh2coop_enemy_target_test PRIVATE inject/src)
+    target_compile_definitions(kh2coop_enemy_target_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        target_compile_options(kh2coop_enemy_target_test PRIVATE /W4 /WX)
+    endif()
+
     # VUH-1504 revive prompt: hold/latch/cancel rules and its HUD row.
     add_executable(kh2coop_revive_prompt_test tests/RevivePromptTest.cpp)
     target_include_directories(kh2coop_revive_prompt_test PRIVATE inject/src common/include)

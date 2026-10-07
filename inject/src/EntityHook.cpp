@@ -43,6 +43,7 @@
 #include "NativePrivateStatus.hpp"
 #include "NativeHitTrace.hpp"
 #include "DamagePolicy.hpp"
+#include "EnemyTargetRemote.hpp" // VUH-1515 (default off)
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
@@ -855,6 +856,12 @@ struct DamageObservation {
 static DamageObservation CaptureDamagePolicy(uintptr_t victim, uintptr_t hit);
 static bool DamageObservationCurrent(const DamageObservation& observation);
 
+// VUH-1515 (EnemyTargetRemote.inl, default off): forward a zeroed hit on a remote clone to its owner.
+namespace enemytarget {
+static void ForwardHit(uintptr_t victim, const nativehittrace::ActorSnapshot& source, std::uint32_t attackId,
+                       std::int32_t amount);
+static void NoteVeto(uintptr_t attacker, std::uint32_t objectId, std::int32_t amount) noexcept;
+}
 static uintptr_t ApplyHitDamageBody(void* victim, void* hit, nativehittrace::HitSnapshot* observation,
                                    nativehittrace::PolicyObservation* policyObservation) {
     const DamageObservation authority = CaptureDamagePolicy(reinterpret_cast<uintptr_t>(victim),
@@ -941,6 +948,13 @@ static uintptr_t ApplyHitDamageBody(void* victim, void* hit, nativehittrace::Hit
             if (policyObservation) policyObservation->zeroAttempted = true;
             const auto zeroResult = damagepolicy::TryZeroHp(reinterpret_cast<uintptr_t>(hit), authority.facts.hit);
             if (policyObservation) policyObservation->zeroResult = zeroResult;
+            if (zeroResult == damagepolicy::ZeroResult::Zeroed && authority.facts.role == damagepolicy::Role::Host &&
+                authority.decision.reason == damagepolicy::Reason::RemoteVictim &&
+                authority.facts.source == damagepolicy::ActorClass::Enemy)
+                enemytarget::ForwardHit(reinterpret_cast<uintptr_t>(victim), authority.source, authority.hit.attackId,
+                                        authority.facts.hit.amount);
+            if (zeroResult == damagepolicy::ZeroResult::Zeroed && authority.decision.reason == damagepolicy::Reason::HostEnemyAuthority)
+                enemytarget::NoteVeto(authority.source.actor, authority.source.objectId, authority.facts.hit.amount);
         }
     }
     return g_origApplyHitDamage(victim, hit);
@@ -1172,6 +1186,7 @@ static int PuppetIndexFor(uintptr_t actor) {
 
 #include "CloneNeutralInput.inl"
 #include "EnemyMirror.inl" // VUH-1515 step 2: mirrored enemies on clients (default off)
+#include "EnemyTargetRemote.inl" // VUH-1515: KH2COOP_ENEMY_TARGET_REMOTE, default off
 
 // Permission to treat a native friend as AI-owned is positive, frame-local
 // evidence from the branch which actually invokes the original friend AI.
@@ -1314,6 +1329,9 @@ static DamageObservation CaptureDamagePolicy(uintptr_t victim, uintptr_t hit) {
     f.contextAvailable = enemysync::CaptureDamageContext(after, repeated) && SameDamageContext(before, after) &&
         std::memcmp(roster, repeated, sizeof(roster)) == 0;
     if (f.contextAvailable) { out.context = after; std::memcpy(out.roster, repeated, sizeof(out.roster)); }
+    // VUH-1515 (client, default off): allowlisted families are host-authoritative for our player.
+    f.hostEnemyAuthority = f.source == damagepolicy::ActorClass::Enemy &&
+        enemytarget::OwnerVetoesLocalFamily(captured.source.objectId, f.victim == damagepolicy::ActorClass::LocalAvatar);
     out.decision = damagepolicy::Evaluate(f);
     return out;
 }
@@ -2550,7 +2568,9 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
         d.savedTeam = *team == 0 ? 1 : *team;
         d.teamSaved = true;
     }
-    *team = 0;
+    // VUH-1515 (default off): a host target candidate keeps its native team, so enemies can hit it.
+    if (!enemytarget::KeepNativeTeam(actor)) *team = 0;
+    else if (d.teamSaved) *team = d.savedTeam;
 
     // Non-colliding while driven; the original bit comes back on release.
     auto* collision = reinterpret_cast<uint8_t*>(actor + ACTOR_COLLISION_FLAGS);
@@ -2558,7 +2578,9 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
         d.savedNoCollide = (*collision & ACTOR_NO_COLLIDE) != 0;
         d.noCollideSaved = true;
     }
-    *collision |= ACTOR_NO_COLLIDE;
+    // VUH-1515 (default off): ... and its native collision bit (the attempt07 live configuration).
+    if (!enemytarget::KeepNativeCollision(actor)) *collision |= ACTOR_NO_COLLIDE;
+    else if (d.noCollideSaved && !d.savedNoCollide) *collision &= ~ACTOR_NO_COLLIDE;
 }
 
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
@@ -2984,6 +3006,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 warp::OnFrameStart(g_frameCounter, addr);
                 BeginCloneFrame();
                 PollPuppetPoses();
+                enemytarget::OnFrameStart(); // VUH-1515 (default off), after poses
                 ProcessHitRequest();
                 BeginHandleFrame();
             }
@@ -3438,6 +3461,7 @@ bool Initialize(uintptr_t exeBase) {
         }
         OpenHitChannel();
         enemysync::Install(exeBase, &Log, g_origApplyStatDelta, verifiedTakeDamage);
+        enemytarget::Install(); // VUH-1515: default off (KH2COOP_ENEMY_TARGET_REMOTE)
         enemysync::SetHashDiagnosticSink([](const std::string& row) {
             if (!g_logFile) return false;
             const bool written = fprintf(g_logFile,"%s\n",row.c_str()) >= 0;
@@ -3547,6 +3571,7 @@ void Shutdown() {
         Log("  Network input mailbox closed");
     }
 
+    enemytarget::Shutdown(); // VUH-1515: restore the target_search slot (no actor writes here)
     render::Shutdown();
     nativehittrace::Shutdown(); // Quiescent teardown: stop observations before hooks/context retire.
     ClearNativeAiStamps();

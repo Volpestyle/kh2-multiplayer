@@ -315,8 +315,30 @@ void ExecutionBoundary() {
 }
 }
 
+// VUH-1515: host-authoritative enemy family on the owner. Only Client + LocalAvatar victim + Enemy
+// source is affected; every other combination keeps its matrix decision.
+void HostEnemyAuthority() {
+    using A = dp::Action;
+    using C = dp::ActorClass;
+    auto f = Active(); f.hostEnemyAuthority = true;
+    Expect(f, A::ZeroHp, dp::Reason::HostEnemyAuthority, true, "client: allowlisted enemy on the local player is zeroed (host forwards it)");
+    f.hostEnemyAuthority = false;
+    Expect(f, A::Native, dp::Reason::LocalVictim, true, "client: without the fact the local victim stays native");
+    f = Active(dp::Role::Host); f.hostEnemyAuthority = true;
+    Expect(f, A::Native, dp::Reason::LocalVictim, true, "host: the fact never vetoes the host's own player");
+    f = Active(); f.hostEnemyAuthority = true; f.source = C::NativeCompanion;
+    Expect(f, A::Native, dp::Reason::LocalVictim, true, "client: a companion source is unaffected");
+    f = Active(); f.hostEnemyAuthority = true; f.victim = C::Enemy; f.source = C::LocalAvatar;
+    Expect(f, A::ClaimThenZeroHp, dp::Reason::ClientClaim, true, "client: our own attack on an enemy still claims");
+    f = Active(); f.hostEnemyAuthority = true; f.hit.stat = 1;
+    Expect(f, A::Native, dp::Reason::NonHp, false, "client: non-HP hits are outside the veto");
+    f = Active(); f.hostEnemyAuthority = true; f.source = C::RemoteRepresentation;
+    Expect(f, A::ZeroHp, dp::Reason::RemoteSource, true, "client: a remote source keeps its earlier veto");
+}
+
 int main() {
     Matrix();
+    HostEnemyAuthority();
     ScopeAndAmounts();
     CheckedZeroLeaf();
     ExecutionBoundary();

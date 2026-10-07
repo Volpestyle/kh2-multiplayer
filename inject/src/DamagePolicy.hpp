@@ -14,7 +14,8 @@ enum class Action : std::uint8_t { Native, ZeroHp, ClaimThenZeroHp };
 enum class Reason : std::uint8_t {
     Off, ForeignThread, ContextUnavailable, HitUnavailable, AlreadyApplied,
     NonHp, ZeroAmount, RemoteVictim, RemoteSource, UnknownSource, LocalVictim,
-    HostLocalAttack, HostCompanionAttack, ClientClaim, OtherActiveHit
+    HostLocalAttack, HostCompanionAttack, ClientClaim, OtherActiveHit,
+    HostEnemyAuthority  // VUH-1515: the host forwards this family's hits on our clone; local copy zeroed
 };
 constexpr std::uint32_t FlagsAvailable = 1, StatAvailable = 2,
     AmountAvailable = 4, KindAvailable = 8, RequiredHitReads = 7;
@@ -28,6 +29,9 @@ struct Facts {
     bool ownerThread = false, contextAvailable = false;
     ActorClass victim = ActorClass::Unknown, source = ActorClass::Unknown;
     Hit hit {};
+    // VUH-1515 (KH2COOP_ENEMY_TARGET_REMOTE, client): the source enemy's family is host-authoritative
+    // for hits on this player. Only consulted for Client + LocalAvatar victim + Enemy source.
+    bool hostEnemyAuthority = false;
 };
 struct Decision {
     Action action = Action::Native;
