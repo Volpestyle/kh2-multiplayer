@@ -67,9 +67,9 @@ Pending g_pending{}; // Only verified native diagnostic owner accesses this POD.
 // the player seat is built first). Sora (key 1) always; any other qualified kit's key (PlayerKits.hpp) only
 // with party kits, where the canonical local may itself be that kit and each clone's key must match the kit
 // written for it.
-constexpr unsigned PartyClones=2;
+constexpr unsigned PartyClones=2; // the most (three players); a stamp expects AppliedClones() (two players: 1)
 struct PartyPending { Stamp stamp{}; std::array<uintptr_t,PartyClones> actor{},status{}; std::array<std::uint64_t,PartyClones> serial{};
-    std::array<int,PartyClones> key{}; unsigned claimed{},count{},builds{},canonicalFrames{}; bool open{},bound{}; };
+    std::array<int,PartyClones> key{}; unsigned claimed{},count{},builds{},canonicalFrames{},expected{}; bool open{},bound{}; };
 PartyPending g_party{};
 // First binding refusal reason, logging only: 1 null/same actor, 2 not Sora, 3 status owned,
 // 4 status shared with clone, 5 clone status changed, 6 clone not owned, 7 player pointer,
@@ -133,7 +133,8 @@ bool Profile(Stamp& s) {
 // load, and the native save row is the untouched DEFAULT row (never written by us).
 bool PartyProfile(Stamp& s) {
     std::array<std::uint8_t,4> row{},magic{};
-    return partynative::AppliedClones()==PartyClones && StampNow(s) && s.now[0]==4 && (s.now[1]==0x1A || s.now[1]==0x0A) && // VUH-1786: 04/0A
+    const unsigned clones=partynative::AppliedClones();
+    return (clones==1 || clones==PartyClones) && StampNow(s) && s.now[0]==4 && (s.now[1]==0x1A || s.now[1]==0x0A) && // VUH-1786: 04/0A
         Read(g_base+0x9A98B0,magic) && magic==std::array<std::uint8_t,4>{'K','H','2','J'} &&
         Read(g_base+0x9A98B0+0x3534+4*4,row) && row==partynative::DEFAULT_ROW;
 }
@@ -143,10 +144,12 @@ bool PartyProfile(Stamp& s) {
 bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::KitsActive();}
 int KeyForKit(std::uint16_t kit) {return kh2coop::kitStatusKey(kit);} // the reviewed kit table
 // Party kits: the clones' key multiset equals the keys of the kits the observer wrote.
-bool PartyKeysMatch(const std::array<int,2>& keys) {
+bool PartyKeysMatch(const std::array<int,2>& keys,unsigned count) {
     std::uint16_t m1=0,m2=0;if(!partynative::AppliedMembers(m1,m2))return false;
-    const int a=KeyForKit(m1),b=KeyForKit(m2);
-    return a && b && ((keys[0]==a && keys[1]==b) || (keys[0]==b && keys[1]==a));
+    const int a=KeyForKit(m1);
+    if(count==1)return m2==0 && a && keys[0]==a; // two players: the one clone's key equals its kit's
+    const int b=KeyForKit(m2);
+    return count==2 && a && b && ((keys[0]==a && keys[1]==b) || (keys[0]==b && keys[1]==a));
 }
 int CloneDescriptorKey(uintptr_t p) {
     std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,8> name{};
@@ -224,7 +227,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
         g_party={};if(unbound)BindFault(canonical?15:11);
     }
     if(ordinary && g_ready.load() && PartyProfile(stamp)) {
-        if(!g_party.open || !Same(g_party.stamp,stamp)){g_party={};g_party.stamp=stamp;g_party.open=true;}
+        if(!g_party.open || !Same(g_party.stamp,stamp)){g_party={};g_party.stamp=stamp;g_party.open=true;g_party.expected=partynative::AppliedClones();}
         s.candidate=true;s.stamp=stamp;s.factoryId=id; // promoted (or not) by the constructor, by descriptor
     } else if(ordinary && id==566 && g_ready.load() && Profile(stamp)) {
         if((!g_spent || !Same(g_spentStamp,stamp)) && HasFreeRecord()) {
@@ -245,7 +248,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             if(!top->used || !result || result!=top->actor || !PlayerActor(result,actual,top->key) || actual!=top->status || !Owned(actual) ||
                !StampNow(after) || !Same(after,top->stamp))Fault();
             else if(top->candidate) {
-                if(g_party.count>=PartyClones || !Same(g_party.stamp,top->stamp) || (top->key!=1 && !(top->key!=0 && partynative::KitsActive())))Fault(); // any qualified kit key (the table)
+                if(g_party.count>=g_party.expected || !Same(g_party.stamp,top->stamp) || (top->key!=1 && !(top->key!=0 && partynative::KitsActive())))Fault(); // any qualified kit key (the table)
                 else {const unsigned k=g_party.count++;g_party.actor[k]=top->actor;g_party.status[k]=top->status;g_party.serial[k]=top->serial;g_party.key[k]=top->key;
                     PublishBuild(++g_party.builds,top->factoryId,1,top->actor,top->serial,top->key);}
             }
@@ -257,21 +260,21 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             const PartyPending p=g_party;g_party.bound=true;
             PublishBuild(++g_party.builds,top->factoryId,2,result,0,top->key);
             uintptr_t status=0,player=0;Stamp after{};unsigned reason=0;
-            if(p.count!=PartyClones)reason=12;
-            else if(!result || result==p.actor[0] || result==p.actor[1])reason=1;
+            if(!p.expected || p.count!=p.expected)reason=12;
+            else if(!result || result==p.actor[0] || (p.expected==2 && result==p.actor[1]))reason=1;
             else if(!PlayerActor(result,status,top->key))reason=2; // the canonical local, with its own kit's key
             else if(Owned(status))reason=3;
-            else if(status==p.status[0] || status==p.status[1])reason=4;
+            else if(status==p.status[0] || (p.expected==2 && status==p.status[1]))reason=4;
             else {
-                for(unsigned k=0;k<PartyClones && !reason;++k){uintptr_t clone=0;
+                for(unsigned k=0;k<p.expected && !reason;++k){uintptr_t clone=0;
                     if(!PlayerActor(p.actor[k],clone,p.key[k]) || clone!=p.status[k] || !Owned(clone))reason=14;}
                 if(!reason && (!Read(g_base+PlayerRva,player) || player!=result))reason=7;
                 if(!reason && (!StampNow(after) || !Same(after,p.stamp)))reason=8;
-                if(!reason && !PartyKeysMatch(p.key))reason=16;
+                if(!reason && !PartyKeysMatch(p.key,p.expected))reason=16;
                 if(!reason && top->key!=KeyForKit(partynative::AppliedLocal()))reason=16; // rev2 S3: the canonical local is this machine's own kit
             }
             if(reason)BindFault(reason);
-            else for(unsigned k=0;k<PartyClones;++k){Selection b{};b.serial=p.serial[k];b.actor=p.actor[k];b.status=p.status[k];b.local=result;b.localStatus=status;Publish(3,b);}
+            else for(unsigned k=0;k<p.expected;++k){Selection b{};b.serial=p.serial[k];b.actor=p.actor[k];b.status=p.status[k];b.local=result;b.localStatus=status;Publish(3,b);}
         } else if(ordinary && id==567 && g_pending.armed) {
             // Exactly one later Sora construction must take the canonical player pointer away
             // from the clone and receive an ordinary, distinct status. Otherwise refuse.
@@ -297,7 +300,7 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
         Stamp now{};
         if(!StampNow(now) || !Same(now,parent->stamp) || !g_party.open || !Same(now,g_party.stamp))Fault();
         else if(g_party.bound)BindFault(13); // a fourth Sora: stays ordinary (shared), profile fails
-        else if(g_party.claimed<PartyClones) {
+        else if(g_party.claimed<g_party.expected) {
             if(HasFreeRecord()){++g_party.claimed;parent->selected=true;parent->key=k;parent->serial=g_serial.fetch_add(1)+1;}
             else Fault();
         } else {parent->partyLocal=true;parent->key=k;}

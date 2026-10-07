@@ -61,6 +61,16 @@ int main() {
     CHECK("policy: never widens a native refusal", Decide(Pair{Mode::CoOp, Side::RemotePlayer, Side::LocalPlayer, false, 0}) == Verdict::Native);
     CHECK("policy: enemies stay native", Decide(Pair{Mode::CoOp, Side::Other, Side::LocalPlayer, true, 0}) == Verdict::Native &&
                                        Decide(Pair{Mode::CoOp, Side::RemotePlayer, Side::Other, true, 0}) == Verdict::Native);
+    // Gap 2 (two players: a clone beside native Goofy): a clone never hits a team-1 non-player.
+    unsigned gap2 = 0, gap2Cells = 0;
+    for (auto m : M) for (auto a : S) for (std::uint32_t team : {0u, 1u, 2u}) for (bool n : {false, true}) for (int ki : {0, 5}) {
+        ++gap2Cells; const auto k = static_cast<std::uint8_t>(ki);
+        const bool refuse = Decide(Pair{m, a, Side::Other, n, k, team}) == Verdict::Refuse;
+        const bool want = m == Mode::CoOp && n && a == Side::RemotePlayer && team == 1 && k != 5;
+        if (refuse != want) { ++g_fail; std::printf("FAIL gap2 m=%u a=%u team=%u n=%u k=%u\n", unsigned(m), unsigned(a), team, unsigned(n), unsigned(k)); }
+        gap2 += refuse;
+    }
+    CHECK("gap 2 grid: refuses exactly co-op, native-allowed, clone -> team-1 non-player, non-5/6", gap2 == 1 && gap2Cells == 3 * 3 * 3 * 2 * 2);
     bool ok = false;
     CHECK("parse: unset/0 off", ParseMode(nullptr, ok) == Mode::Off && ok && ParseMode("0", ok) == Mode::Off && ok);
     CHECK("parse: 1 co-op, trace", ParseMode("1", ok) == Mode::CoOp && ok && ParseMode("trace", ok) == Mode::Trace && ok);
@@ -127,6 +137,17 @@ int main() {
     g_nativeAnswer = 1;
     HookedCanHit(Attack(60, 2, 0, 1500, 0), g_local);
     CHECK("gap 4: a refusal is still traced after the cap", Has("atkp=1500 native=1 verdict=refuse"));
+
+    // Gap 2 through the hook: native Goofy (objentry type 1, team 1) beside a clone.
+    g_nativeAnswer = 1;
+    const auto goofyObj = Objentry(4, 1, "P_EX030"); const auto goofy = Actor(5, goofyObj, 1);
+    CHECK("gap 2: clone -> Goofy refused", HookedCanHit(Attack(70, 2, 0, 1600, 0), goofy) == 0 && Has("victim=P_EX030@") && Has("(other team=1) atkTeam=0 mask=0xFE kind=0 atkp=1600 native=1 verdict=refuse"));
+    CHECK("gap 2: local -> Goofy native (its own mask decides)", HookedCanHit(Attack(71, 1, 0, 1601, 1), goofy) == 1);
+    CHECK("gap 2: enemy -> Goofy native", HookedCanHit(Attack(72, 4, 0, 1602, 2), goofy) == 1);
+    CHECK("gap 2: clone heal (kind 5) -> Goofy native", HookedCanHit(Attack(73, 2, 5, 1603, 0), goofy) == 1);
+    const auto propObj = Objentry(5, 7, "F_PROP"); const auto prop = Actor(6, propObj, 0);
+    const auto before2 = GetStats().playerPairs;
+    CHECK("gap 2: a team-0 non-player victim stays native and uncounted", HookedCanHit(Attack(74, 2, 0, 1604, 0), prop) == 1 && GetStats().playerPairs == before2);
 
     CHECK("trace mode installs", InstallMode("trace") && CurrentMode() == Mode::Trace);
     g_nativeAnswer = 1;

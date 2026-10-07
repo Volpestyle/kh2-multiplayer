@@ -276,10 +276,10 @@ lands once and rarely reached anyone. The local's attacks never hit a clone (bit
 - Trace budget: rows the native check already refused use at most 32 of the 160 lines, and an attack on its own
   owner is never traced. Every swing is asked about every player before the collision test, so those rows would
   otherwise crowd out the refusals.
+- A clone never hits a team-1 non-player either (Donald, Goofy, world allies): its team-0 mask includes team 1,
+  which its native party mask `~((1 << 1) | 1)` excludes. Reachable since the two-player party keeps Goofy beside a
+  clone. The row shows `victim=…(other team=1)`.
 - Not covered:
-  - Clone attacks on Donald, Goofy or other team-1 allies (objentry type 1) stay native, because the clone's
-    team-0 mask includes team 1. None appears in the eight party runs' logs. Follow-up: evaluate clone-owned
-    attacks against the clone's saved native team.
   - Atkp kinds 5/6 (Cure/CCure) between players stay native, as on main. Check for a double heal before
     networked ally heals ship.
 - PvP (reserved): `allyhit::Decide` would return Native for a remote player's attack on the local player,
@@ -288,8 +288,32 @@ lands once and rarely reached anyone. The local's attacks never hit a clone (bit
 **Private status.** In kits mode, Roxas (90, key 14) and Mickey (91, key 4, form 11) clones and canonical locals are promoted, each checked against its own key (the build line names it: `key=`). The clone keys must equal the kits written, or `BindFault(16)`.
 
 **Live status:** Roxas passed live in run `20261007-090953`, and Mickey in run `20261007-115923` (see `PLAYER_KITS.md`, Evidence).
+
+**Two players (mixed layout, `one-clone`, live-qualified on the host side).** With two players, `defaultPartyLayout` puts the remote in
+seat 1 and keeps Goofy in seat 2. On each machine the observer writes:
+
+- member 0: the other player's kit, built first, as the clone;
+- member 1: native Goofy, `0x5D`;
+- member 2: own kit, built last, as the canonical local.
+
+The gates are the same as for `two-clones`. Notes:
+
+- **Host publication:** the host publishes with one remote connected. In kits mode it needs only that remote's kit.
+- **Private status:** expects one clone, so a stamp logs `party=1/1/1`. Goofy's construction stays ordinary.
+- **Puppets:** while a plan is applied they drive clones only. The present remote's puppet drives the one clone, and
+  Goofy keeps his native AI.
+- **Restore:** when the remote leaves, the roster-pinned intents retire. The next load is native (Donald + Goofy),
+  and shutdown restores members 0..2 while still ours.
+- **Not supported:** any other two-player layout stays `unsupported` until it has its own run: Donald kept, or an
+  empty seat.
 - **Unknowns:** a Roxas canonical local in a party stamp, a Roxas clone among three players, the key-14 clone's SAVE veto, and 04/0A with Roxas.
 - **Command menu:** it is still unguarded with a kit (VUH-1509).
+- **Live evidence:**
+  - **Run 20261007-175931 (rev5) passed:** host Sora, client Roxas, GoA then Borough 04/0A then GoA again, then the client leaves and the host restores Donald and Goofy natively.
+  - **Earlier run 20261007-165859** passed every applied-visit gate on both machines: one-clone shape, puppet to remote kit, Goofy HP/max stable, completed native Goofy AI, and clone-to-ally refusals. Its restore step failed only because the fixture hard-killed the client runtime.
+  - **Not yet handled:**
+    - **Client-side restore after an abrupt runtime death is UNQUALIFIED.** A Windows TerminateProcess skips the runtime's shutdown publication, so the client DLL's world bridge stays stale. See `build/rig/party2-20261007-01/rev4/diagnosis.md`.
+    - **Retiring a disconnected client's party explicitly** is still open.
 
 ## Offline evidence
 

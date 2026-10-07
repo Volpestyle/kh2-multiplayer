@@ -12,14 +12,20 @@ namespace kh2coop::inject::partynative {
 enum class Plan : std::uint8_t {
     None,         // no accepted layout: native party
     Unsupported,  // accepted, but not the qualified case: native party
-    TwoClones     // both native friend seats are remote-player Sora clones
+    TwoClones,    // both native friend seats are remote-player clones (three players)
+    OneClone      // two players: member 0 = the other player's clone, member 1 = native Goofy, member 2 = own kit
 };
+// A plan that spawns clones, and how many.
+constexpr bool ClonePlan(Plan p) { return p == Plan::TwoClones || p == Plan::OneClone; }
+constexpr unsigned PlanClones(Plan p) { return p == Plan::TwoClones ? 2u : p == Plan::OneClone ? 1u : 0u; }
 const char* PlanName(Plan p);
 
 // Machine-local projection. Host-view seats are translated so this machine's
 // own player stays the canonical (last-built) player; the two friend seats
 // then hold the other two network slots. Only rule DEFAULT with every seat a
 // player is TwoClones.
+// Two players (one remote; defaultPartyLayout: the remote in seat 1, Goofy in seat 2) is OneClone; any other
+// two-player layout (Donald kept, an empty seat) stays Unsupported until its own run.
 Plan Project(const PartyLayout& layout, std::uint8_t localSlot);
 
 // Standing intent (lead decision, scoped to this GoA-only candidate): the newest
@@ -205,6 +211,13 @@ struct HostPublished {
 // remote slot's kit is unknown or unsupported (the host then publishes nothing in kits mode).
 struct RemoteKits { std::array<bool, 2> seen {}; std::array<std::uint8_t, 2> roster {}; };
 bool HostKits(std::uint16_t ownKit, std::uint8_t localSlot, const RemoteKits& remote, std::array<std::uint16_t, 3>& kits);
+// Two players: only the CONNECTED remote slots of `roster` need a kit; an absent slot's kit is 0.
+bool HostKits(std::uint16_t ownKit, std::uint8_t localSlot, const RemoteKits& remote, std::array<std::uint16_t, 3>& kits,
+              const std::array<std::uint64_t, 3>& roster);
+// The other network slots (ascending = puppet order) that are connected in `roster`; 0xFF pads.
+std::array<std::uint8_t, 2> PresentOtherSlots(const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot);
+// The puppet index (OtherSlots order) of the one connected other slot, or -1 (none or two).
+int PresentIndex(const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot);
 // VUH-1786 host: is the intent for a target due (first send, new generation/roster, or an unechoed retry)?
 // Party kits: also due when `kits` differs from the vector last published for that target.
 bool HostIntentDue(const HostPublished& last, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,

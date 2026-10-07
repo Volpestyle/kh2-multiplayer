@@ -31,6 +31,7 @@ struct Pair {
     Side attacker = Side::Other, victim = Side::Other;
     bool nativeAllows = false; // the original 3D2060 result
     std::uint8_t kind = 0;     // atkp +0x04; 5/6 bypass the native mask
+    std::uint32_t victimTeam = 0xFFFFFFFF; // victim actor+0x4DC (1 = party: Donald, Goofy, world allies)
 };
 
 constexpr bool PlayerSide(Side s) { return s == Side::LocalPlayer || s == Side::RemotePlayer; }
@@ -39,6 +40,10 @@ constexpr bool BypassKind(std::uint8_t kind) { return kind == 5 || kind == 6; }
 // Only ever narrows the native answer.
 constexpr Verdict Decide(const Pair& p) {
     if (p.mode != Mode::CoOp || !p.nativeAllows) return Verdict::Native;
+    // Gap 2 (two-player party: a clone beside native Goofy): a clone's team-0 mask (~1) includes team 1, which its
+    // native mask ~((1 << 1) | 1) excludes. A clone never hits a team-1 non-player (atkp kinds 5/6 aside).
+    if (p.attacker == Side::RemotePlayer && p.victim == Side::Other && p.victimTeam == 1 && !BypassKind(p.kind))
+        return Verdict::Refuse;
     if (!PlayerSide(p.attacker) || !PlayerSide(p.victim)) return Verdict::Native;
     if (BypassKind(p.kind)) return Verdict::Native; // kept native (heal-like kinds; their effect between players is untested)
     return Verdict::Refuse; // clone -> local, local -> clone, clone -> clone

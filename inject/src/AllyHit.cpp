@@ -79,7 +79,7 @@ std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t vict
     const std::uintptr_t player = Player();
     ActorFacts v {};
     if (!ReadActor(victim, player, v)) { g_faults.fetch_add(1); return native; }
-    if (!PlayerSide(v.side)) return native; // cheap exit: only player-class victims matter
+    if (!PlayerSide(v.side) && v.team != 1) return native; // cheap exit: player-class or team-1 (party) victims only
     AttackFacts a {};
     if (!ReadAttack(attack, a)) { g_faults.fetch_add(1); return native; }
     // The attacker: the owner (+0x10), or, as native also checks, the source (+0x14) when the owner is not a
@@ -96,7 +96,7 @@ std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t vict
     g_pairs.fetch_add(1, std::memory_order_relaxed);
     const bool allows = (native & 0xFF) != 0;
     if (allows) g_allowed.fetch_add(1, std::memory_order_relaxed);
-    const Verdict verdict = Decide(Pair{mode, o.side, v.side, allows, a.kind});
+    const Verdict verdict = Decide(Pair{mode, o.side, v.side, allows, a.kind, v.team});
     if (allows && mode == Mode::CoOp && BypassKind(a.kind)) g_kindKept.fetch_add(1, std::memory_order_relaxed);
     if (verdict == Verdict::Refuse) g_refused.fetch_add(1, std::memory_order_relaxed);
     if (viaSource) g_viaSource.fetch_add(1, std::memory_order_relaxed);

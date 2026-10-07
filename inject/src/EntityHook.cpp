@@ -1189,8 +1189,15 @@ static std::uint32_t PlayerClassObjectId(uintptr_t actor) {
 // The actor puppet i drives: Sora clones when the room has any, otherwise
 // the friend-slot actors (Donald/Goofy).
 static uintptr_t PuppetTarget(int index) {
-    uintptr_t target = g_clones[0] != 0 ? g_clones[index]
-                                        : (index == 0 ? g_friend1Actor : g_friend2Actor);
+    // A party plan applied: puppets drive clones only, never a native friend. Two players (one clone): the one
+    // present remote's puppet drives the clone and native Goofy keeps his own AI.
+    const unsigned planned = partynative::AppliedClones();
+    if (planned == 1) {
+        const uintptr_t one = index == partynative::PresentPuppetIndex() ? g_clones[0] : 0;
+        return one != 0 && playerkit::BlocksNativeSoraPuppets() ? 0 : one;
+    }
+    uintptr_t target = g_clones[0] != 0 || planned == 2 ? g_clones[index]
+                                                         : (index == 0 ? g_friend1Actor : g_friend2Actor);
     // Party kits: with clones of DIFFERENT kits, each puppet drives the clone of its owner's kit
     // (entity-list order says nothing about which member built which clone). Rev2 S2: this holds as
     // soon as ANY clone is collected; no match (e.g. only the other kit's clone so far): drive none.
@@ -2721,6 +2728,15 @@ static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
         bool normal = false;
         __try { g_origFriendAI(typeHandler, actorObj); normal = true; }
         __finally { EndNativeAiStamp(stamp, normal && !AbnormalTermination()); }
+        // Positive observation of completed original AI, never a suppression receipt.
+        // Bounded cadence keeps the diagnostic available on each applied visit.
+        if (normal && partynative::AppliedClones() == 1 && g_frameCounter % 120 == 0) {
+            const auto actor = CaptureHitActor(reinterpret_cast<uintptr_t>(actorObj));
+            if ((actor.readMask & (nativehittrace::ActorId | nativehittrace::ActorType)) ==
+                    (nativehittrace::ActorId | nativehittrace::ActorType) && actor.objectId == 93 && actor.type == 1)
+                Log("[friendai] original-complete frame=%u actor=%llX objectId=93 load=%u",
+                    g_frameCounter, static_cast<unsigned long long>(actor.actor), warp::LoadSerial());
+        }
     }
 }
 

@@ -53,13 +53,15 @@ bool Requested();
 // no member write, no publication, no adoption. Logged.
 using ReadyProbe = bool (*)();
 void ConfirmLocalReadiness(bool resolverHookInstalled, ReadyProbe neutralInputConfigured);
-// 2 while the last area load applied TwoClones and members 1/2 still hold Sora;
-// otherwise 0. Read by NativePrivateStatus on the game thread.
+// The clones the last applied load spawned while the members still hold what it wrote: 2 (TwoClones),
+// 1 (OneClone: [clone kit, Goofy, own kit]), otherwise 0. Read by NativePrivateStatus and EntityHook (game thread).
 unsigned AppliedClones();
+// Two players: the puppet index of the one connected other player (the clone's owner), or -1.
+int PresentPuppetIndex();
 // Party kits (KH2COOP_PARTY_KITS=1 accepted at Install): per-seat kits are on for this machine.
 bool KitsActive();
 // Party kits: the clone kits the last applied load wrote (rev3: members 0/1; member 2 = AppliedLocal()).
-// False when not applied.
+// OneClone: member2 = 0 (member 1 is native Goofy). False when not applied.
 bool AppliedMembers(std::uint16_t& member1, std::uint16_t& member2);
 // Rev2 S3: the local member 0 the applied load expected (this machine's own kit); 0 when not applied.
 std::uint16_t AppliedLocal();
