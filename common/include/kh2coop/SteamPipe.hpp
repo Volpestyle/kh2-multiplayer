@@ -13,6 +13,7 @@ public:
     virtual bool connected() const=0;
     virtual bool send(const Frame&)=0;
     virtual bool receive(Frame&)=0;
+    virtual std::size_t queued() const { return 0; }
     virtual void close()=0;
 };
 class Pipe final: public BrokerLink {
@@ -25,6 +26,7 @@ public:
     bool connected() const override;
     bool send(const Frame&) override;
     bool receive(Frame&) override;
+    std::size_t queued() const override;
     void close() override;
 private:
     struct State; std::unique_ptr<State> s_;

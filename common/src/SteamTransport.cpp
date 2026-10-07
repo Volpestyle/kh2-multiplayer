@@ -15,15 +15,21 @@ struct Hub {
     bool host=false,dead=false,listening=false,localConnected=false,configured=false;
     std::vector<std::uint64_t> allowed;
     std::map<std::uint64_t,TransportStats> quality;
-    std::deque<steam::Frame> server,client;
+    std::deque<steam::Frame> server,client,commands;
     void fail(){dead=true;pipe->close();}
     bool push(std::deque<steam::Frame>& q,steam::Frame f){if(q.size()>=steam::MaxQueue){fail();return false;}q.push_back(std::move(f));return true;}
-    bool command(const steam::Frame& f){if(dead||!pipe->send(f)){fail();return false;}return true;}
+    bool command(const steam::Frame& f){if(dead||commands.size()>=steam::MaxQueue){fail();return false;}commands.push_back(f);return true;}
     bool pump(){
         if(dead)return false;
         if(now()-lastPing>=1000){lastPing=now();if(!command({steam::Op::Ping}))return false;}
-        if(!pipe->pump()){fail();return false;}steam::Frame f;
-        for(unsigned i=0;i<64&&pipe->receive(f);++i){
+        // The owner loop must service within the existing five-second heartbeat.
+        // Do not pull another burst into a saturated application or pipe queue.
+        if(!pipe->pump()){fail();return false;}
+        while(!commands.empty()&&pipe->queued()<steam::MaxQueue){
+            if(!pipe->send(commands.front())){fail();return false;}commands.pop_front();
+        }
+        steam::Frame f;
+        for(unsigned i=0;i<64&&(host?server:client).size()<steam::MaxQueue-32&&pipe->receive(f);++i){
             if(f.op==steam::Op::Error){fail();return false;}
             if(f.op==steam::Op::Ready){if(f.peer!=identity){fail();return false;}configured=true;continue;}
             if(f.op==steam::Op::Stats){

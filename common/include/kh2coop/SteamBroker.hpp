@@ -39,6 +39,8 @@ class Api {
 public:
     virtual ~Api()=default;
     virtual std::uint64_t readyIdentity()=0;
+    // Established identity: no transient auth/relay-availability gate.
+    virtual std::uint64_t currentIdentity() { return readyIdentity(); }
     virtual std::uint32_t listen()=0;
     virtual std::uint32_t connect(std::uint64_t)=0;
     virtual bool iceOff(std::uint32_t, bool listener)=0;
@@ -46,9 +48,10 @@ public:
     virtual void close(std::uint32_t, bool linger, std::uint32_t reason=0)=0;
     virtual void closeListener(std::uint32_t)=0;
     virtual bool nextStatus(Status&)=0;
-    virtual bool healthy() const=0; // callback overflow is fatal, never silent
+    virtual bool healthy() const=0; // callback loss ends this attached session, never silent
     virtual bool receive(std::uint32_t, Message&)=0;
     virtual bool send(std::uint32_t, std::span<const std::uint8_t>, bool)=0;
+    virtual bool congested() const { return false; } // last send: explicit SDK LimitExceeded
     virtual bool quality(std::uint32_t, std::uint32_t& rttMs, std::uint32_t& lossPermille) { (void)rttMs;(void)lossPermille;return false; }
 };
 class Broker {
@@ -56,20 +59,28 @@ public:
     explicit Broker(Api& api):api_(api){}
     ~Broker(){stop();}
     bool command(const Frame&, std::uint64_t nowMs);
-    bool tick(std::uint64_t nowMs);
+    bool tick(std::uint64_t nowMs, std::size_t ipcBacklog=0);
+    bool canCommand(std::size_t ipcBacklog=0) const;
     bool pop(Frame&);
     void stop();
     bool failed() const {return failed_;}
 private:
-    struct Peer { std::uint32_t handle; bool connected; std::uint64_t started; std::uint64_t lastStats=0; };
+    struct Pending { std::vector<std::uint8_t> bytes; bool reliable; };
+    struct Peer {
+        std::uint32_t handle; bool connected; std::uint64_t started; std::uint64_t lastStats=0;
+        std::deque<Pending> pending;
+        Peer(std::uint32_t h,bool c,std::uint64_t t):handle(h),connected(c),started(t){}
+    };
     Api& api_;
-    std::uint64_t identity_=0, target_=0, lastCommand_=0, firstTick_=0;
+    std::uint64_t identity_=0, target_=0, lastCommand_=0, firstTick_=0, lastIdentityCheck_=0;
     std::uint32_t listener_=0;
     bool configured_=false, failed_=false;
-    std::vector<std::uint64_t> allowed_;
+    std::vector<std::uint64_t> allowed_, admitted_; // <=2 fixed-authority identities per configuration
     std::map<std::uint64_t,Peer> peers_;
     std::deque<Frame> out_;
     bool emit(Frame);
+    bool retire(std::uint64_t identity, std::uint32_t reason=0);
+    bool identityCurrent(std::uint64_t nowMs);
     bool fail(const char*);
 };
 } // namespace kh2coop::steam

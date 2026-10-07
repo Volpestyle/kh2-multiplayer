@@ -82,8 +82,10 @@ handles, including incoming connections before acceptance. Unsupported/nonzero
 settings refuse and close owned handles. Connected and data-path checks require
 an authenticated, encrypted, relayed connection. A missing callback never creates
 admission; pending connections time out after15seconds. Steam invokes the callback
-through the game's own pump. Its bounded queue copies status only; contention or
-overflow closes the broker instead of silently losing lifecycle events. Enabled
+through the game's own pump. Its 64-entry ring copies status only, using an O(1) lock-protected section.
+Overflow ends the attached session, closes its owned handles, then clears the
+lost history and serves a fresh runtime attachment. It does not require a game
+restart. Late events cannot adopt unknown handles. Enabled
 mode pins the DLL until process exit to keep queued callback code alive.
 
 The host runtime owns `SessionHost` and a local Player transport. Its authenticated
@@ -99,12 +101,32 @@ RTT variance is unavailable (zero); initial/missing statistics are also zero, no
 measured zero latency/loss. Protocol clock sync still runs.
 
 IPC payloads are capped at64KiB, application packets at65528bytes, and queues at128
-messages. SDK send buffering is capped at512KiB per connection. Queue/IO failure,
-account change, loss of auth/relay readiness or runtime heartbeat expiry closes
-all owned sockets. Runtime heartbeat is1second with a5second expiry; initial IPC
-hello also has a5second deadline. Shutdown signals the existing initialization
-worker and joins it. Synchronous SDK calls and OS cancellation completion cannot
-be externally preempted by these logical deadlines. No shared global Steam
+messages. SDK send buffering is capped at512KiB per connection. Broker receiving
+backs off at a combined broker/pipe backlog of96; pipe and runtime consumers stop
+reading saturated queues. Explicit SDK `LimitExceeded` queues ordered sends for
+retry, up to128 per peer; other send failures close that peer. Hard queue caps,
+invalid authority and IO failures remain fail-closed. No reliable packet is
+silently discarded as congestion recovery. Long consumer stalls can still expire
+the existing heartbeat; these are bounded queues, not an indefinite spool.
+
+Normal peer churn does not close the host session: queued Send/Close for a
+previously admitted, now-retired identity is ignored; a never-admitted identity
+is still a protocol error. A failed accept or15-second pending timeout retires
+only that peer. An established connection's identity/app/log-on status is checked
+once per second; transient SDR/auth availability changes are not an established
+identity failure. Initial attachment still requires authenticated SDR readiness.
+Runtime heartbeat is1second with a5second expiry; the runtime loop must service
+within that limit. Initial IPC hello also has a5second deadline.
+
+The worker compares the game's current Steam pipe to the captured nonzero pipe
+before every tick/API group and skips even cleanup API calls after observed pipe
+loss. **A residual shutdown race remains:** the game may call `SteamAPI_Shutdown`
+after this check and before the following SDK call. There is no shared SDK
+lifetime lock. Explicit mod shutdown signals/joins the initialization worker;
+ordinary game exit does not promise to do so before the game's own Steam teardown.
+A future live run must include graceful game exit with a session active and watch
+for hitches/crashes. Synchronous SDK calls and OS cancellation completion cannot
+be externally preempted by logical deadlines. No shared global Steam
 configuration, Init, Shutdown, RunCallbacks or network-facing IP socket is used.
 
 A terminal Steam IPC/transport failure requires a fresh runtime attachment;
