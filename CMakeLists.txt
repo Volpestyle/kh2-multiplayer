@@ -499,6 +499,13 @@ if(WIN32)
         target_compile_options(kh2coop_hud_cpu_test PRIVATE /W4 /WX)
     endif()
 
+    # Ally player-to-player hits: pure policy (AllyHitPolicy.hpp) and the 3D2060 hook body over owned memory.
+    add_executable(kh2coop_allyhit_test tests/AllyHitPolicyTest.cpp inject/src/AllyHit.cpp)
+    target_include_directories(kh2coop_allyhit_test PRIVATE inject/src)
+    target_compile_definitions(kh2coop_allyhit_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN KH2COOP_ALLYHIT_TESTING)
+    if(MSVC)
+        target_compile_options(kh2coop_allyhit_test PRIVATE /W4 /WX)
+    endif()
     # VUH-1513 player kits: pure PlayerKit policy (local kit, puppet guard, remote layout).
     add_executable(kh2coop_playerkit_test tests/PlayerKitPolicyTest.cpp)
     target_include_directories(kh2coop_playerkit_test PRIVATE inject/src common/include) # kit table

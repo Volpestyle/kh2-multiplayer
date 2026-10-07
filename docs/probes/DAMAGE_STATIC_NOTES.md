@@ -44,6 +44,34 @@ sites (`0x53AA40`, `0x4372E0`, `0x4371B0`, `0x3D0780`, `0x1B8250`, `0x538920`,
 | `+0xC0` | `1.0f` (a damage/scale multiplier, by its default) |
 
 - `actor + 0x4DC` holds the actor's team; the hit mask above is built from it.
+
+## Hit eligibility `FUN_1403d2060(attack, victim)` (VUH-1808)
+
+Every native hit path asks it:
+
+- the per-frame hit loop `0x3CFF40` (then collision `0x40B050`, then `ResolveHit 0x3D1730`), `0x3D0AC0`,
+  `0x3D0780` and `BuildHit 0x3D23C0`;
+- `0x1B82F0`, a direct "hit this target" path (nearest collision node, `BuildHit`, the victim's vtable
+  `+0xC0` apply), reached from `0x1B8250`, which builds attack 0x373;
+- `0x1CAAC0`, an area hit over the entity list (its own attack at `+0x630`, atkp 0x4BA, owner the object at
+  `+8`), called from the object-class vtable slots `0x1CA6E0`, `0x1C8440` and `0x1C8700`;
+- `0x432990`, a script-VM builtin (table entry `0x756C80`, 2 args, returns an int) beside `0x4328E0`, the
+  builtin that applies a hit through `0x3D23C0`: the script-side "can this attack hit that target"
+  query (bdscript, inferred).
+
+None is a lock-on or AI targeting path. It returns 1 when:
+
+1. the global `[0x2AE8050]` is 0 (`0x3FCAC0`), and the victim's per-attack bitset at `victim+0xC98`
+   does not yet hold the attack's index `attack+0x20` (`0x3CF7D0`: one hit per attack per victim);
+2. atkp kind (`*(attack+0x30)+4`) is 5 or 6: hit regardless of team; otherwise
+3. the victim is hittable (`0x3BA900`: `+0x9B8` bit 2 and `+0x120` bit 3 clear, a non-empty
+   collision list at `+0x640`), is not the attack's owner (`+0x10`) or source (`+0x14`), and its team
+   bit `1 << victim+0x4DC` is set in the mask `attack+0x39`; and
+4. not (`0x3BA720(owner)` and `0x3BAAD0(owner)`): an attacker-state veto (flags `+0x120`, `+0x6C8`).
+
+With one player-class actor (vanilla) the owner check was the only thing between a player's attack
+and the player. Party-native clones are a second and third player-class actor: see `PARTY_SETUP.md`,
+"Ally hits".
 - atkp `+0x12` bit 1/bit 3 and `+0x2C` change the target node and `p7`.
 - OpenKH documents the on-disk atkp layout (`OpenKh.Kh2/Battle/Atkp.cs`): power,
   element, team, knockback, flags. `FUN_1403eafc0` is the runtime lookup into it.

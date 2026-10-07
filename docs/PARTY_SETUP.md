@@ -258,6 +258,33 @@ Default off. **`KH2COOP_PARTY_KITS=1` on every machine** of a party-native sessi
 
 **Puppets.** With two clones of different kits, each puppet drives the clone whose objentry equals its owner's kit (`PuppetKit`). The entity-list order no longer matters.
 
+**Ally hits (VUH-1808, `KH2COOP_ALLY_HIT`, default off; meant on in co-op).** Clones are player-class actors,
+and the puppet driver keeps them on team 0 so nothing hits them. Their own replayed attacks then carry
+team 0, whose hit mask (`~((1 << team) | 1)` = `~1`) includes the local player's team 1, so a clone's swing
+that overlaps the local player creates a native hit. `DamagePolicy` zeroes its HP (`RemoteSource`), but the
+reaction still plays (star burst, red portrait flash). Run `20261007-115923` logged 15 on one machine: the
+Mickey clone's attack motion 186 lands twice (6, then 2) and reached the host on 8 of 9 swings; Sora's 151
+lands once and rarely reached anyone. The local's attacks never hit a clone (bit 0 is never in a mask).
+- `=1` refuses every native-allowed hit between two distinct player-class actors (clone → local, local →
+  clone, clone → clone) at `3D2060`, after the original ran, so no hit record, `[hit]` line or reaction exists.
+  Atkp kinds 5/6 (they bypass the mask natively) stay native. Enemies are untouched either way.
+- `=trace` changes nothing and logs the same pairs. Both log one `[allyhit] f=… attacker=…(side team=…) ->
+  victim=…(side team=…) atkTeam=… mask=0x.. kind=… atkp=… native=… verdict=… via=owner|source` line per
+  (attack, victim) pair (160 lines), and a stats line every 600 frames while counts change.
+- The attacker is the attack's owner (`+0x10`), or its source (`+0x14`) when the owner is not a player, the way
+  the native check also excludes both. A player's projectile or magic owned by another object counts (`via=source`).
+- Trace budget: rows the native check already refused use at most 32 of the 160 lines, and an attack on its own
+  owner is never traced. Every swing is asked about every player before the collision test, so those rows would
+  otherwise crowd out the refusals.
+- Not covered:
+  - Clone attacks on Donald, Goofy or other team-1 allies (objentry type 1) stay native, because the clone's
+    team-0 mask includes team 1. None appears in the eight party runs' logs. Follow-up: evaluate clone-owned
+    attacks against the clone's saved native team.
+  - Atkp kinds 5/6 (Cure/CCure) between players stay native, as on main. Check for a double heal before
+    networked ally heals ship.
+- PvP (reserved): `allyhit::Decide` would return Native for a remote player's attack on the local player,
+  and `DamagePolicy`'s `RemoteSource` branch would route that damage on purpose instead of zeroing it.
+
 **Private status.** In kits mode, Roxas (90, key 14) and Mickey (91, key 4, form 11) clones and canonical locals are promoted, each checked against its own key (the build line names it: `key=`). The clone keys must equal the kits written, or `BindFault(16)`.
 
 **Live status:** Roxas passed live in run `20261007-090953`, and Mickey in run `20261007-115923` (see `PLAYER_KITS.md`, Evidence).

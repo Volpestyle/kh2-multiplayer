@@ -44,6 +44,7 @@
 #include "NativeHitTrace.hpp"
 #include "DamagePolicy.hpp"
 #include "EnemyTargetRemote.hpp" // VUH-1515 (default off)
+#include "AllyHit.hpp" // ally player-to-player hits (default off)
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
@@ -2604,6 +2605,8 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
 
     // Untouchable: team 0 is in no attack's hit mask. Re-applied every frame
     // in case the game resets it; the original team comes back on release.
+    // Side effect (VUH-1808): the clone's OWN attacks then carry team 0, whose mask ~1 includes
+    // the local player (team 1). KH2COOP_ALLY_HIT=1 refuses those pairs at 3D2060 (AllyHit.cpp).
     PuppetDriver& d = g_puppets[index];
     auto* team = reinterpret_cast<uint32_t*>(actor + ACTOR_TEAM);
     if (d.actor == actor && !d.teamSaved) {
@@ -3052,6 +3055,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 enemytarget::OnFrameStart(); // VUH-1515 (default off), after poses
                 ProcessHitRequest();
                 BeginHandleFrame();
+                allyhit::Tick(g_frameCounter); // stats line (default off)
             }
         }
         NoteActorForClones(addr);
@@ -3561,6 +3565,8 @@ bool Initialize(uintptr_t exeBase) {
                 ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
                 : "[privatestatus] initialization refused; profile unqualified");
     cloneneutral::Install(exeBase); // VUH-1489: default off (KH2COOP_CLONE_NEUTRAL_INPUT)
+    // Ally player-to-player hits (KH2COOP_ALLY_HIT, default off): after the handle resolver is verified.
+    allyhit::Install(exeBase, &Log, g_resolveHandle, []() -> uint32_t { return g_frameCounter; });
     // VUH-1519 R1/R2: party-native stays requested only if its hook, private status and the
     // module's own neutral-input state are all ready (no-op when party-native is off).
     partynative::ConfirmLocalReadiness(playerkit::GetStats().installed, &cloneneutral::Enabled);

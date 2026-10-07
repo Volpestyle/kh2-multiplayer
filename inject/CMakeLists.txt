@@ -70,6 +70,7 @@ add_library(kh2coop_inject SHARED
     src/NativeLifecycleTrace.cpp
     src/NativeHitTrace.cpp
     src/DamagePolicy.cpp
+    src/AllyHit.cpp
 )
 
 if(MSVC)
