@@ -40,6 +40,7 @@ struct Selection {
     Stamp stamp{};
     uintptr_t actor{},local{},localStatus{},descriptor{},status{};
     std::uint64_t serial{};
+    int key{1}; // status key of the selected clone descriptor (1 Sora; 14 Roxas, remote kit only)
     bool selected{},constructor{},fresh{},used{};
 };
 // Never stores caller stack pointers, only numeric stack anchors and owned POD.
@@ -47,7 +48,7 @@ struct Selection {
 // The raw566 construction is the clone: the later raw567 Sora construction overwrites the
 // canonical player pointer and becomes the active-list head, which EntityHook keeps local.
 // Binding is published only after that later construction proves it. No pointer is rebound.
-struct Pending { Stamp stamp{}; uintptr_t actor{},status{}; std::uint64_t serial{}; bool armed{}; };
+struct Pending { Stamp stamp{}; uintptr_t actor{},status{}; std::uint64_t serial{}; bool armed{}; int key{1}; };
 Stamp g_spentStamp{};bool g_spent{};
 Pending g_pending{}; // Only verified native diagnostic owner accesses this POD.
 // First binding refusal reason, logging only: 1 null/same actor, 2 not Sora, 3 status owned,
@@ -83,18 +84,29 @@ bool Profile(Stamp& s) {
     std::array<std::uint8_t,4> row{},magic{};
     return StampNow(s) && s.now[0]==4 && s.now[1]==0x1A &&
         Read(g_base+0x9A98B0,magic) && magic==std::array<std::uint8_t,4>{'K','H','2','J'} &&
-        Read(g_base+0x9A98B0+0x3534+4*4,row) && row==std::array<std::uint8_t,4>{0,0,2,0x12};
+        Read(g_base+0x9A98B0+0x3534+4*4,row) && (row==std::array<std::uint8_t,4>{0,0,2,0x12} ||
+        // VUH-1513 remote kit member: Friend1 = member 3 (row 00/03/02/12), only in that mode.
+        (playerkit::RemoteKitMemberActive() && row==std::array<std::uint8_t,4>{0,3,2,0x12}));
 }
-bool SoraDescriptor(uintptr_t p) {
+// Vanilla player-class descriptor with its status key: Sora (84, key 1) always; Roxas
+// (90, key 14, P_EX110) only while the remote kit member is active. Both keys are the
+// SAVE-bound player keys in 3C03F0. key==0 means "not a selectable clone descriptor".
+int CloneDescriptorKey(uintptr_t p) {
     std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,8> name{};
-    return Read(p,id) && Read(p+4,type) && Read(p+0x4C,key) && Read(p+0x57,form) && id==84 && type==0 && key==1 && form==0 && Read(p+8,name) && name==std::array<char,8>{'P','_','E','X','1','0','0',0};
+    if(!Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || form!=0 || !Read(p+8,name))return 0;
+    if(id==84 && key==1 && name==std::array<char,8>{'P','_','E','X','1','0','0',0})return 1;
+    if(playerkit::RemoteKitMemberActive() && id==90 && key==14 && name==std::array<char,8>{'P','_','E','X','1','1','0',0})return 14;
+    return 0;
 }
-bool SoraActor(uintptr_t actor,uintptr_t& status) {
+bool SoraDescriptor(uintptr_t p) {return CloneDescriptorKey(p)==1;}
+// expectKey: 1 for the local Sora; the selected clone's key for the clone.
+bool PlayerActor(uintptr_t actor,uintptr_t& status,int expectKey) {
     uintptr_t descriptor=0;int key=0,refs=0,hp=0,maxHp=0;
-    return Read(actor+0x918,descriptor) && SoraDescriptor(descriptor) &&
-        Read(actor+0x5C0,status) && Index(status)>=0 && Read(status+0x260,key) && key==1 &&
+    return Read(actor+0x918,descriptor) && CloneDescriptorKey(descriptor)==expectKey &&
+        Read(actor+0x5C0,status) && Index(status)>=0 && Read(status+0x260,key) && key==expectKey &&
         Read(status+0x264,refs) && refs>0 && Read(status,hp) && Read(status+4,maxHp) && hp>0 && hp<=maxHp;
 }
+bool SoraActor(uintptr_t actor,uintptr_t& status) {return PlayerActor(actor,status,1);}
 void Publish(unsigned kind,const Selection& s) {
     Event e{};e.kind=kind;e.thread=GetCurrentThreadId();e.serial=s.serial;e.actor=s.actor;e.local=s.local;
     e.status=s.status;e.localStatus=s.localStatus;e.index=Index(s.status);
@@ -147,16 +159,16 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
         if(!returned){Fault();}
         else if(top && top->selected) {
             uintptr_t actual=0;Stamp after{};
-            if(!top->used || !result || result!=top->actor || !SoraActor(result,actual) || actual!=top->status || !Owned(actual) ||
+            if(!top->used || !result || result!=top->actor || !PlayerActor(result,actual,top->key) || actual!=top->status || !Owned(actual) ||
                !StampNow(after) || !Same(after,top->stamp))Fault();
-            else g_pending={top->stamp,top->actor,top->status,top->serial,true};
+            else g_pending={top->stamp,top->actor,top->status,top->serial,true,top->key};
         } else if(ordinary && id==567 && g_pending.armed) {
             // Exactly one later Sora construction must take the canonical player pointer away
             // from the clone and receive an ordinary, distinct status. Otherwise refuse.
             const Pending p=g_pending;g_pending={};
             uintptr_t status=0,clone=0,player=0;Stamp after{};
             const unsigned reason=!result || result==p.actor?1:!SoraActor(result,status)?2:Owned(status)?3:status==p.status?4:
-                !SoraActor(p.actor,clone) || clone!=p.status?5:!Owned(clone)?6:!Read(g_base+PlayerRva,player) || player!=result?7:
+                !PlayerActor(p.actor,clone,p.key) || clone!=p.status?5:!Owned(clone)?6:!Read(g_base+PlayerRva,player) || player!=result?7:
                 !StampNow(after) || !Same(after,p.stamp)?8:0;
             if(reason)BindFault(reason);
             else {Selection b{};b.serial=p.serial;b.actor=p.actor;b.status=p.status;b.local=result;b.localStatus=status;Publish(3,b);}
@@ -171,8 +183,9 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
     auto* parent=Current(anchor);Selection s{};
     if(parent && parent->selected && !parent->constructor && !parent->used && g_ready.load()) {
         Stamp now{};
-        if(actor && form==0 && SoraDescriptor(descriptor) && StampNow(now) && Same(now,parent->stamp))
-            {s=*parent;s.actor=actor;s.descriptor=descriptor;s.constructor=true;}
+        const int key=CloneDescriptorKey(descriptor);
+        if(actor && form==0 && key!=0 && StampNow(now) && Same(now,parent->stamp))
+            {s=*parent;s.actor=actor;s.descriptor=descriptor;s.key=key;s.constructor=true;}
         else Fault();
     }
     const auto token=PushScope(&s,anchor);
@@ -186,7 +199,7 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
         // Revalidate the outer FLS frame; never restore a saved stack pointer.
         auto* outer=Current(anchor);
         if(done.selected && outer && outer->selected && outer->serial==done.serial) {
-            outer->used=done.used;outer->actor=done.actor;outer->status=done.status;
+            outer->used=done.used;outer->actor=done.actor;outer->status=done.status;outer->key=done.key;
         }
         SetLastError(nativeError);
     }
@@ -200,7 +213,7 @@ uintptr_t __fastcall Allocate(int key,int form) {
         SetLastError(error);return g_allocate(key,form);
     }
     Stamp now{};uintptr_t empty=1;
-    if(key!=1 || form!=0 || !StampNow(now) || !Same(now,s->stamp) || !Read(s->actor+0x5C0,empty) || empty || !HasFreeRecord()) {
+    if(key!=s->key || form!=0 || !StampNow(now) || !Same(now,s->stamp) || !Read(s->actor+0x5C0,empty) || empty || !HasFreeRecord()) {
         Fault();SetLastError(error);return g_allocate(key,form);
     }
     // Own POD frame stays in FLS pool across actual SwitchToFiber. Nested constructors hide it.
@@ -212,7 +225,7 @@ uintptr_t __fastcall Allocate(int key,int form) {
         else {
             current->fresh=false;std::int32_t refs=0,actualKey=0;
             if(result!=current->status || !Owned(result) || result==current->localStatus ||
-               !Read(result+0x264,refs) || refs!=1 || !Read(result+0x260,actualKey) || actualKey!=1)Fault();
+               !Read(result+0x264,refs) || refs!=1 || !Read(result+0x260,actualKey) || actualKey!=current->key)Fault();
             else Publish(2,*current);
         }
         SetLastError(nativeError);

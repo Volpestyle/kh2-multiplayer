@@ -56,6 +56,56 @@ anything but `0`, three things refuse it:
 Per-puppet member slots belong to the party-setup contract (`PARTY_SETUP.md`,
 VUH-1519).
 
+## Seeing a remote player's kit (receiver side)
+
+**`KH2COOP_REMOTE_KIT_SLOT=1`** on the receiving game. Default off. It is refused
+while the same game has a local `KH2COOP_PLAYER_KIT`, because a receiver that is
+itself a kit isn't enabled yet. The flag makes the Friend1 native puppet show the
+remote player's kit; the receiver itself stays Sora. Scope: world 4 and Roxas only.
+
+**Layout.** Before the session, the rig or party setup writes Friend1 selector 3,
+giving the GoA row `00/03/02/12`. Member 3 is the native world-ally member, which
+nothing spawns while the world slot is `0x12`. With two player-class spawns the
+game builds them in this order:
+
+1. The player-slot actor, from **member 0**, is built first (raw566). It becomes
+   the clone that the puppet driver binds.
+2. The Friend1 actor, from **member 3**, is built last (raw567). Every player-class
+   constructor stores the canonical player pointer, so this one becomes the
+   receiver's own player.
+
+**What the hook writes.** After each area load, the remote branch of the
+`3E2EB0` post-hook checks that all of these hold:
+
+- world 4;
+- NOW event program 0;
+- no event context or cutscene;
+- row exactly `00/03/02/12`;
+- native member 0 is Sora.
+
+If they do, it writes:
+
+- **member 0 = the remote kit:** `0x5A` when puppet 0's streamed roster byte is 1,
+  otherwise Sora `0x54`;
+- **member 3 = Sora `0x54`.**
+
+Both originals are recorded. Shutdown restores each member only while it still
+holds our value. Each load logs one line:
+
+`[playerkit] remote load world=… row=… roster=… native0=… native3=… set0=… set3=… result=applied|world-not-qualified|event-room|event-active|row-not-remote-layout|native-not-sora|changed-under-us`
+
+**Where the roster comes from.** `PollPuppetPoses` latches the roster byte from
+each validated pose. A change is logged as
+`[playerkit] remote roster puppet 0: <old> -> <new>`.
+
+**When it takes effect.** The roster only reaches the DLL after the session's
+first host-room load has finished: poses are admitted only after the client
+arrives. The Roxas clone therefore needs one more **host-led** room load after
+the latch. A client can't warp itself while the host owns its room.
+
+`NativePrivateStatus` keeps the clone's status private in this mode (see
+`NATIVE_PRIVATE_STATUS.md`).
+
 ## Evidence
 
 Live on Steam `9002b2de`, 2026-10-06 (`build/scenarios/20261006-233415_vuh1513_player_kit_dll_live_world4_1`):
@@ -66,6 +116,23 @@ Live on Steam `9002b2de`, 2026-10-06 (`build/scenarios/20261006-233415_vuh1513_p
   - GoA became Roxas, with member 0 `0x5A`, HP equal to the control, and move and jump;
   - the BB courtyard was Sora after the world change;
   - GoA became Roxas again.
+
+Remote kit, live on 2026-10-07
+(`build/scenarios/20261007-011457_vuh1513_remote_kit_puppet_goa_1`). The host had
+`KH2COOP_PLAYER_KIT=0x5A`; the friend had `KH2COOP_REMOTE_KIT_SLOT=1` and private
+status. The run showed:
+
+- **Kit reload:** the friend logged `remote load … roster=1 set0=0x5A set3=0x54 applied`.
+- **Clone:** the Friend1 clone was Roxas (object 90, status key 14), driven by the
+  stream. It played motions 0, 2, 3, 4, 5, 6 and 151 itself.
+- **Private status:** one damage on the clone took it 24 → 23 while the friend's
+  own Sora stayed at 24/24.
+- **Clip:** the friend's clip shows the host as Roxas.
+- **SAVE:** the clone (key 14) and the local Sora (key 1) share the same personal
+  SAVE pointer. The private-status commit veto for key 14 wasn't exercised in this
+  run.
+- **Teardown:** the runtimes missed the fixture's natural-exit deadline and were
+  stopped. This is a harness timing issue.
 
 The earlier rig-poke experiments (E1-02/03) showed the same chain from a MEMT
 edit, with exact restores. Roxas uses Sora's own status record and HP, so Sora's
@@ -87,5 +154,12 @@ stats and progression carry over.
   with presses about 380 ms apart and a Shadow in range. The next combo attempt
   should use that cadence with ≥6 presses against an engaged Shadow, judged by
   motion IDs and `[hit]` lines.
+- **Remote kit limits:**
+  - one puppet (Friend1), one room, Roxas only, and a Sora receiver only;
+  - the roster latch isn't reset on disconnect;
+  - a skipped remote branch leaves the members native (in GoA, member 3 would be
+    Riku), so rigs must treat any non-`applied` remote line with the remote row as
+    refuse-and-restore;
+  - per-puppet member slots for more remotes belong to VUH-1519.
 - Cutscenes that start later in an applied room still have the kit as the player.
   Story events use the high-poly Sora member, which the kit doesn't touch.

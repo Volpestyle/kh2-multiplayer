@@ -1463,6 +1463,7 @@ static void PollPuppetPoses() {
             if (!suspended && pose.active && ValidPuppetProvenance(pose.provenance,
                     static_cast<std::uint8_t>(pose.pose.ownerSlot), i, enemysync::CapturePuppetAuthority())) {
                 driver.pose = pose;
+                playerkit::NoteRemoteRoster(i, pose.pose.character); // VUH-1513 remote kit member (default off)
                 driver.have = true;
                 driver.poseFrame = g_frameCounter;
             } else {

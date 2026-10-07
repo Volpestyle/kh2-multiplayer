@@ -454,6 +454,14 @@ if(WIN32)
         target_compile_options(kh2coop_hud_cpu_test PRIVATE /W4 /WX)
     endif()
 
+    # VUH-1513 player kits: pure PlayerKit policy (local kit, puppet guard, remote layout).
+    add_executable(kh2coop_playerkit_test tests/PlayerKitPolicyTest.cpp)
+    target_include_directories(kh2coop_playerkit_test PRIVATE inject/src)
+    target_compile_definitions(kh2coop_playerkit_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        target_compile_options(kh2coop_playerkit_test PRIVATE /W4 /WX)
+    endif()
+
     # VUH-1504 revive prompt: hold/latch/cancel rules and its HUD row.
     add_executable(kh2coop_revive_prompt_test tests/RevivePromptTest.cpp)
     target_include_directories(kh2coop_revive_prompt_test PRIVATE inject/src common/include)

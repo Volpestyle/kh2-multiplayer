@@ -32,6 +32,24 @@ keeps the ordinary native (shared) construction.
 
 Initialization also refuses while `KH2COOP_PLAYER_KIT` is set (VUH-1513). With a player kit the Friend1 clone would be the kit, not Sora; see `PLAYER_KITS.md`.
 
+**Remote kit mode (VUH-1513).** This applies only while `KH2COOP_REMOTE_KIT_SLOT=1`
+has installed the receiver-side remote layout. The selection then also accepts:
+
+- the party row `00/03/02/12`;
+- a raw566 clone descriptor of **Roxas**: object 90, key 14, `P_EX110`.
+
+The selected status key travels with the selection, so allocation, init and the
+binding check compare against that key instead of a hard-coded 1. The local raw567
+player must still be Sora with key 1. In the pool lookup `3C04E0`, records are
+shared only on an exact key match. Fresh-record init `3C03F0` binds the SAVE data
+for keys 1 and 14 alike. The commit veto is keyed by pool-slot ownership, so it
+covers a key-14 private record in the same way.
+
+Live, the key-14 clone's HP stayed independent of the local Sora. The key-14 SAVE
+veto itself wasn't exercised. **Merge point:** `vuh1515-target-remote` also widens
+`Profile()`'s row gate, for the BB courtyard. Whichever lands second must keep both
+alternatives.
+
 ## What it changes natively
 
 | Native boundary | Action | Preserved |

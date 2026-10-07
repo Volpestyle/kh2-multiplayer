@@ -86,4 +86,40 @@ bool BlocksNativeSoraPuppets();
 // Game thread: called when a player-class clone was refused; logs once per area load.
 void NoteRefusedClone(std::uintptr_t actor);
 
+// ---------------------------------------------------------------- remote kit (VUH-1513 step 3, rev 4)
+// Receiving side, default OFF (KH2COOP_REMOTE_KIT_SLOT=1, refused while a local kit is set).
+// Layout: the rig/party setup writes Friend1 selector 3 (GoA row 00/03/02/12; 3 is the native
+// "world ally" member, unused while the world slot is 0x12). With two player-class spawns the
+// game builds the player-slot actor (member 0) FIRST (raw566) and the Friend1 actor (member 3)
+// LAST (raw567); every player-class constructor stores [exe+0x2A105D0], so the LAST one becomes
+// the canonical player and the first one becomes the clone the puppet driver binds
+// (VUH-1489 actor-fix; live VUH-1513 attempt 03). Therefore, after each area load:
+//   member 0 (feeds the clone = puppet target) := remote kit (0x5A for roster 1, else Sora 0x54)
+//   member 3 (feeds the receiver's own player) := Sora 0x54
+constexpr std::uint8_t FRIEND1_SELECTOR = 3;
+constexpr std::uint8_t PUPPET_TARGET_MEMBER = 0;           // raw566 -> clone -> puppet target
+constexpr std::uint8_t OWN_PLAYER_MEMBER = FRIEND1_SELECTOR; // raw567 -> canonical player
+constexpr std::uint64_t RVA_SAVE = 0x9A98B0, PARTY_ROWS_OFFSET = 0x3534;
+enum class RemoteReason : std::uint8_t {
+    Applied, WorldNotQualified, EventRoom, EventActive, RowNotRemoteLayout, NativeNotSora, ChangedUnderUs
+};
+struct RemoteValues { std::uint16_t member0 = 0, member3 = 0; };
+struct RemoteContext {
+    LoadContext load{};        // load.resolved0 = what 3E2EB0 resolved for member 0
+    std::uint8_t row[4]{};     // SAVE party row for the current world
+    std::uint16_t native3 = 0; // what 3E2EB0 resolved for member 3
+    std::uint8_t roster = 0;   // latest streamed roster byte for puppet 0
+};
+// Pure: on Applied, *set holds the two member values to write.
+RemoteReason DecideRemote(const RemoteContext& c, RemoteValues* set);
+const char* RemoteReasonName(RemoteReason r);
+RemoteReason ApplyRemote(const RemoteContext& c, std::uint16_t* resolved, RemoteValues* original, RemoteValues* set);
+// Restores each member only while it still holds the value we wrote.
+bool RestoreRemote(const RemoteValues& set, const RemoteValues& original, bool recorded, std::uint16_t* resolved);
+bool RemoteEnvRequested(const char* text);
+// True once remote mode is installed (env set, no local kit, hook live).
+bool RemoteKitMemberActive();
+// Owner thread: the latest validated pose roster byte for puppet `index` (only 0 is used).
+void NoteRemoteRoster(int index, std::uint8_t roster);
+
 } // namespace kh2coop::inject::playerkit
