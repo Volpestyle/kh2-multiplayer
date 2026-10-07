@@ -17,6 +17,14 @@ struct Hub {
     std::map<std::uint64_t,TransportStats> quality;
     std::deque<steam::Frame> server,client,commands;
     void fail(){dead=true;pipe->close();}
+    // VUH-1493 host leave: before a terminal close, push queued commands (e.g. SessionHost::stop()'s RelayStopping
+    // Close per peer) through the pipe and let in-flight overlapped writes complete. Closing the pipe cancels them,
+    // and the broker would then close the peers itself with reason 0, which the friend treats as TransportLost and
+    // retries instead of ending the session. Bounded; the owner loop is already shutting down.
+    void flush(std::uint64_t budgetMs=500){
+        const auto end=now()+budgetMs;
+        while(!dead&&(!commands.empty()||pipe->queued())&&now()<end){if(!pump())return;std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+    }
     bool push(std::deque<steam::Frame>& q,steam::Frame f){if(q.size()>=steam::MaxQueue){fail();return false;}q.push_back(std::move(f));return true;}
     bool command(const steam::Frame& f){if(dead||commands.size()>=steam::MaxQueue){fail();return false;}commands.push_back(f);return true;}
     bool pump(){
@@ -51,7 +59,7 @@ class SteamTransport final:public Transport {
     void terminate(){ // the original close: the attachment ends (host, local Player, destruction)
         if(!open_)return;open_=false;
         if(local_){if(hub_->localConnected){hub_->push(hub_->server,{steam::Op::Disconnected,hub_->identity,1});hub_->localConnected=false;}}
-        else {hub_->fail();}
+        else {hub_->flush();hub_->fail();}
         queue().clear();for(auto& [id,p]:peers_){(void)id;p->connected=false;p->closed=true;}
     }
     std::deque<steam::Frame>& queue(){return server_?hub_->server:hub_->client;}

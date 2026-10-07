@@ -5,6 +5,10 @@
 #include "kh2coop/SteamTransport.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/SessionHost.hpp"
+#include "kh2coop/ClientRecovery.hpp"
+#include <deque>
+#include <optional>
+#include <tuple>
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -65,6 +69,24 @@ struct Link:BrokerLink {
     bool receive(Frame& f)override{Frame raw;if(!broker.pop(raw))return false;++rx;return decode(encode(raw,rx),rx,f);}
     bool pump()override{return opened&&broker.tick(++clock);}
     void close()override{opened=false;broker.stop();}
+};
+// VUH-1493 host leave: models SteamPipe exactly where it matters for teardown. Sends queue in user space, one
+// overlapped write is in flight and completes on a LATER pump, and close() cancels the in-flight write and drops
+// the queue (CancelIoEx + CloseHandle); the broker then sees pipe loss and stops (native close reason 0).
+struct QueuedLink:BrokerLink {
+    Broker broker;bool opened=true;std::uint64_t clock=100,tx=0,rx=0;std::deque<Frame> outgoing;std::optional<Frame> inflight;
+    explicit QueuedLink(Api& a):broker(a){}
+    bool connected()const override{return opened;}
+    bool send(const Frame& f)override{if(!opened)return false;Frame c;++tx;if(!decode(encode(f,tx),tx,c))return false;outgoing.push_back(std::move(c));return true;}
+    bool receive(Frame& f)override{Frame raw;if(!broker.pop(raw))return false;++rx;return decode(encode(raw,rx),rx,f);}
+    std::size_t queued()const override{return outgoing.size()+(inflight?1:0);}
+    bool pump()override{
+        if(!opened)return false;
+        if(inflight){broker.command(*inflight,clock);inflight.reset();}          // the previous write completes now
+        if(!outgoing.empty()){inflight=std::move(outgoing.front());outgoing.pop_front();} // the next one is pending
+        return broker.tick(++clock);
+    }
+    void close()override{if(!opened)return;opened=false;outgoing.clear();inflight.reset();broker.stop();}
 };
 }
 int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reaches the log
@@ -351,6 +373,39 @@ int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reach
         again.connect();pump(&again);
         check(again.isConnected()&&server.verifiedPeerCount()==2,"G7: fresh runtime re-admitted by the unchanged host session");
         again.disconnect();host.disconnect();pump(nullptr);
+    }
+    // VUH-1493 host leave: RuntimeMain's graceful shutdown (local Player client disconnect + destroy, then
+    // ~SessionHost: stop() sends RelayStopping to every peer, then the server transport is torn down) must reach the
+    // friend as a terminal session close (ClientRecovery: no rejoin), not as TransportLost (reason 0, retries).
+    auto hostLeave=[&](bool runtimeOrder){
+        Bus bus;Endpoint a(bus,Host),b(bus,Guest);
+        auto ht=makeSteamTransports(std::make_unique<QueuedLink>(a),true,{Guest});
+        SessionConfig config;config.gameBuild="build";config.modHash="none";config.contentHash="none";config.authenticatedHostIdentity="steam:"+std::to_string(Host);
+        auto server=std::make_unique<SessionHost>(config,SessionCallbacks{},std::move(ht.server));server->start();
+        auto host=std::make_unique<NetworkClient>("local",std::uint16_t{0},"build","none",config.authenticatedHostIdentity,SlotType::Player,ClientCallbacks{},
+                                                  RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));
+        host->connect();
+        std::optional<ClientCloseInfo> closed;ClientCallbacks cb;cb.onClosed=[&](const ClientCloseInfo& i){closed=i;};
+        auto ct=makeSteamTransports(std::make_unique<Link>(b),false,{});
+        NetworkClient friend1(std::to_string(Host),std::uint16_t{0},"build","none","steam:"+std::to_string(Guest),SlotType::Friend1,cb,RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Friend",std::move(ct.client));
+        ClientRecovery rec(SlotType::Friend1);const std::uint64_t t0=1000;(void)rec.start(t0);friend1.connect();
+        for(unsigned n=0;n<200;++n){server->tick();host->tick();friend1.tick();}
+        const bool admitted=server->verifiedPeerCount()==2&&friend1.isConnected();
+        rec.connected(t0+10);rec.admitted(t0+20,1);
+        if(runtimeOrder){host->disconnect();host.reset();server.reset();}   // RuntimeMain: netClient first, ~SessionHost at scope exit
+        else {server.reset();host.reset();}                                  // the session host torn down first
+        for(unsigned n=0;n<100&&!closed;++n)friend1.tick();
+        if(closed)rec.closed(t0+30,*closed);
+        const auto act=rec.tick(t0+20000);
+        return std::tuple{admitted,closed?static_cast<int>(closed->rawCode):-1,
+                          rec.state()==ClientRecovery::State::Terminal&&rec.terminalReason()=="terminal relay/session close"&&act!=ClientRecovery::Action::Connect};
+    };
+    for(const bool order:{true,false}){
+        const auto [admitted,code,terminal]=hostLeave(order);
+        std::cout<<"host leave ("<<(order?"runtime order":"session host first")<<"): friend close code "<<code<<'\n';
+        check(admitted,"host leave: friend admitted before the host stops");
+        check(code==static_cast<int>(DisconnectReason::RelayStopping),"host leave: the friend's close carries RelayStopping, not TransportLost");
+        check(terminal,"host leave: ClientRecovery ends with terminal relay/session close and never schedules a rejoin");
     }
     // Same core with malicious protocol identity, separately from Steam auth.
     for(const auto test:{0,1,2}){
