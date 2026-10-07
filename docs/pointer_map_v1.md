@@ -163,8 +163,10 @@ Disassembly around **`KINGDOM HEARTS II FINAL MIX.exe+0x15112C`** (live MCP capt
 | `0x07535C0` | `RNG` | `[KH2LIB]` |
 | `0x2AE5CF8` | `SPAWNS` | `[KH2LIB]` |
 | `0x2A0F7A8` | `ARD_POINTER` — room script data | `[KH2LIB]` |
-| `0x2A24FB0` | `OBJENTRY_POINTER` (`00objentry.bin`) | `[KH2LIB]` |
-| `0x2AE5DD0` / `0x2AE5DD8` | `SYS3_POINTER` / `BTL0_POINTER` (`03system.bin` / `00battle.bin`) | `[KH2LIB]` |
+| `0x2A25030` | `OBJENTRY_POINTER` (`00objentry.bin`), first of three slots filled by `3E0E00`. The KH2 Lua library's `0x2A24FB0` is `0x80` low on this build and reads ASCII | `[GHIDRA]`; live E1-02 matched rows 84/90 |
+| `0x2AE5E50` / `0x2AE5E58` | `SYS3_POINTER` / `BTL0_POINTER` (`03system.bin` / `00battle.bin`), stored by loader `3F4C30`. The library's `0x2AE5DD0`/`0x2AE5DD8` are `0x80` low and not pointers on this build (E1, 2026-10-06) | `[GHIDRA]` |
+| `0x2A252E0` / `0x2A252E8` | `MEMT_POINTER` / `MEMT_END` (03system `memt`): `3E2E90` stores the section and `section + 8 + count*0x34` | `[CONFIRMED]` (Ghidra + live E1-02) |
+| `0x2A25300` | `RESOLVED_PARTY_MEMBERS`: u16[18] object IDs (player, Donald, Goofy, world ally, forms...) resolved by `3E2EB0` on every area load (`39C860`). Entries match on world 0 or the current world, flag set and negation clear; later non-zero members override. Writing MEMT entry 6 member 0 = `0x5A` made the GoA player Roxas after a same-room reload | `[CONFIRMED]` (VUH-1513 E1-02, 2026-10-06) |
 
 `CONTROLLABLE` reads `3` during cutscenes and `0` when a minigame starts (GoA ROM
 script). Writing `2` to `PAUSE_STATUS` disables pausing (GoA ROM script).

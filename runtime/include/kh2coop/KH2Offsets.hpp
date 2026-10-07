@@ -36,9 +36,19 @@ namespace offsets {
 constexpr std::uint64_t NOW            = 0x0717008;   // [CONFIRMED] Current location state
 constexpr std::uint64_t SAVE           = 0x09A9830;   // [KH2LIB] Save file base
 constexpr std::uint64_t SVE            = 0x2A0C4C0;   // [KH2LIB] Saved location
-constexpr std::uint64_t OBJ0_PTR       = 0x2A24FB0;   // [KH2LIB] 00objentry.bin pointer
-constexpr std::uint64_t SYS3_PTR       = 0x2AE5DD0;   // [KH2LIB] 03system.bin pointer
-constexpr std::uint64_t BTL0_PTR       = 0x2AE5DD8;   // [KH2LIB] 00battle.bin pointer
+// Table pointers below were wrong in the KH2 Lua library for this Steam Global
+// build (exe SHA256 9002b2de...): each sat 0x80 low, like SAVE/Slot1. Verified
+// in Ghidra (VUH-1513 e1-02/static-re) and live by E1-02 (2026-10-06).
+constexpr std::uint64_t OBJ0_PTR       = 0x2A25030;   // [GHIDRA] 00objentry.bin, first of 3 slots (3E0E00); live row 84 matched
+constexpr std::uint64_t SYS3_PTR       = 0x2AE5E50;   // [GHIDRA] 03system.bin buffer (loader 3F4C30)
+constexpr std::uint64_t BTL0_PTR       = 0x2AE5E58;   // [GHIDRA] 00battle.bin buffer (loader 3F4C30)
+// MEMT (03system 'memt'): 3E2E90 stores the section and its end. 3E2EB0, called
+// on every area load from 39C860, resolves matching entries (world 0 or the
+// current world, flag set, negation clear) into 18 u16 member object IDs;
+// later non-zero members override. Entries are 0x34 bytes, members at +0x10.
+constexpr std::uint64_t MEMT_PTR       = 0x2A252E0;   // [CONFIRMED] qword -> memt section (version 5, count 37)
+constexpr std::uint64_t MEMT_END_PTR   = 0x2A252E8;   // [CONFIRMED] qword = MEMT_PTR + 8 + count*0x34
+constexpr std::uint64_t RESOLVED_PARTY_MEMBERS = 0x2A25300; // [CONFIRMED] u16[18]: [0] player, [1] Donald, [2] Goofy, [3] world ally...
 constexpr std::uint64_t ARD_PTR        = 0x2A0F7A8;   // [KH2LIB] ARD pointer
 constexpr std::uint64_t SPAWNS         = 0x2AE5CF8;   // [KH2LIB] Spawn data
 
