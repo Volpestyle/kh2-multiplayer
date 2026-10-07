@@ -397,6 +397,12 @@ if(WIN32)
     # memory with MinHook/warp/playerkit stand-ins; no game process, no installed hooks.
     # VUH-1515 step 2: the native mirrored-enemy driver (EnemyMirror.inl) over fake
     # game memory with MinHook/resolver/setter/MirrorPose stand-ins; no game, no hooks.
+    add_executable(kh2coop_enemy_population_test tests/EnemyPopulationTest.cpp)
+    target_include_directories(kh2coop_enemy_population_test PRIVATE inject/src common/include)
+    if(MSVC)
+        target_compile_options(kh2coop_enemy_population_test PRIVATE /W4 /WX)
+    endif()
+
     add_executable(kh2coop_enemy_mirror_driver_test tests/EnemyMirrorDriverTest.cpp)
     target_include_directories(kh2coop_enemy_mirror_driver_test PRIVATE inject/src runtime/include common/include)
     target_compile_definitions(kh2coop_enemy_mirror_driver_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

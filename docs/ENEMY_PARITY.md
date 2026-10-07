@@ -802,6 +802,66 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 
 **Caveat on the position numbers.** The colocated and walkaway median and p95 of 0.0 compare `trace-client` with `trace-host`. `trace-client` reads back the pose our own driver wrote the frame before, so 0.0 proves the driver applied the stream, frame-matched and through the full pipeline, and that nothing native moved the copy afterwards. It does **not** show that the result looks right on screen: animation blending, VFX, camera and collision push-out are not measured. The `driven` coverage, the walkaway negative control and the native-hit attribution carry that claim, and clips (live-fixture-02) are the visual check.
 
+## Population follows the host (VUH-1788 candidate, default off, not live-verified)
+
+`KH2COOP_ENEMY_POPULATION=1` on the client, which also needs `KH2COOP_ENEMY_MIRROR=1`. There is no protocol change: it is still protocol 13.
+
+**What is on by default under the flag.** The cull hold and the forced-copy cleanup run with `KH2COOP_ENEMY_POPULATION=1` alone.
+
+**Force-spawn needs its own sub-flag,** `KH2COOP_ENEMY_POPULATION_SPAWN=1`, default off.
+- Without it the factory is never verified or called, and the configured line says `spawn=0`.
+- Why it stays off: in live runs 063223 and 065831 the friend's own game spawned every later-wave enemy natively, through the type-2 controller on the host's spawn-authority lease.
+- The one miss (fixture-05) is unexplained, and no forced copy has been created live.
+
+**Not yet mirrored:** the Soldier `M_EX520` (objectId 4). It is not allowlisted, so its copies run on local AI. The design and the static evidence are in the VUH-1788 rig lane (`design.md`).
+
+**Static findings** (saved PE `9002B2DE…`):
+- **Alive removal is AI-script driven.** Generic actor update `0x3BFD30` asks handler slot `+0x40` (Shadow class: tail thunk `0x419B90` → `0x3DAC30`) only when actor `+0x120` bit 28 is set, and calls slot `+0x48` (`0x419BA0` → `0x411800`: controller bookkeeping if `+0x9E8`, then dispose) when it answers true.
+  - `0x3DAC30` steps the actor's AI script (`0x3B4420` → `0x3E1C80`) and answers true once the live script-thread count `+0x5B8` is zero, `+0x80`/`+0x98` allow it and the `+0xBB4` child does not object.
+  - So the "too far, vanish" decision is in the enemy's AI script data, not in a distance constant in the executable.
+  - Slot `+0x38` (fade complete, `+0xA08`/`+0xAAC` zero) is a second, separate disposal route.
+  - In live fixture-04 the friend's copies were removed alive about 50 frames after release to local AI, roughly 3000 u from their player.
+- **Spawn controllers in 05/06.** Two controllers reach `0x3FF000`: header 30 (type 2, the five-Shadow first wave, mirrored by the spawn-authority lease) and header 1 (type 1: dispatcher case `0x3FFB40`, a room-exit/transition controller, not a wave).
+  - The later Shadow at (−40, −1, −349) (host frames ≈6366–6539 in three of six runs, y on the floor rather than the records' y −130) is not one of header 30's five fixed records. Its emitter is not identified statically.
+  - The fixture enables `KH2COOP_SPAWN_TRACE=1` on both games to name it.
+
+**Client behaviour (rev 2):**
+- **Missing host enemies.** A host manifest enemy qualifies when it is:
+  - alive, and of an allowlisted family (Shadow 302) whose object id this client's own game has already spawned in this instance, so its resources are loaded;
+  - has a fresh EnemyMotion stream;
+  - has had no local binding for 600 frames. That gives its own controller's fixed emitter (`0x3FE83F`, fed by the host's spawn-authority lease) its chance; in live run 063223 the friend's game spawned the later wave natively about 30–200 frames after the host.
+
+  It is then created with the native generic factory `0x3DF930(objectId, point4, yaw)` at its host spawn point.
+  - The factory entry is byte-checked at install; the call runs on the game thread from the client frame, behind `SafeNativeGameplay`.
+  - A fault disables the factory for the session.
+  - Before each call the client reads the factory's own admission (`0x3A1F00`): weight (objentry `+0x54`) must be at most limit (`0x2A0F7DC`) minus used (`0x2A0F830`). While it is not, the client waits (`budget-wait`), with no call and no counted attempt.
+  - A null return is logged with the budget (`factory-null`). Null with admission available means the `0xD50` allocation failed.
+  - The ordinary binding (objectId plus spawn point within 8 u) binds the new copy, and the mirror drives it.
+  - Limits: one creation per 30 frames, at most 8 per epoch, at most 3 attempts per netId, and a retry only after the earlier copy has gone and 900 frames have passed.
+- **Forced-copy identity.** A forced copy is identified by actor + objentry + status, never the address alone. The status is logged at creation.
+  - An entry is forgotten when its copy leaves any complete census (any role), or when the cull hook commits its removal.
+  - A copy not bound to any netId within 300 binding-resolved frames, while its host enemy lives, is removed (`unbound-timeout`). Frames under a resync fence do not count, and planning pauses then too.
+  - The table is cleared only by this client's own transition or load (the native teardown).
+  - It survives an epoch change or session retire inside the same instance, so those copies are still removed.
+- **Cull hold.** Per class, the removal predicate (handler `+0x40`, shape `mov rcx,rdx; jmp 0x3DAC30`) runs natively. It is then refused (held) for a living copy that is:
+  - a forced copy whose host enemy lives, from creation, through its settle;
+  - or bound within the last 30 frames, so one None-gate frame does not count, and driven now or within 1800 frames, using per-netId drive history.
+
+  Dying actors, other actors and other classes keep the native answer.
+- **Removal with the host.** A forced copy is removed through the native slot `+0x48` (forced predicate) once:
+  - its host enemy is dead or unknown, the epoch moves, or there is no client session;
+  - or a native local copy claims its netId (the forced copy yields).
+
+  Forcing overrides only the script-thread term. The native `+0x80`/`+0x98` term and the `+0xBB4` child-busy check (child `+0x14`) still apply; otherwise the removal is retried on the next update. Ordinary copies keep the step-1 path: the host reports an alive despawn as a death after 3 s.
+- **Logging.** The `[enemy-mirror] stats` line is unchanged. While population is on, a separate `[enemy-pop] stats` line carries the cull counters.
+
+**Known gaps:**
+- **Provenance.** The generic factory skips the wrapper's `+0x68` provenance call (`0x3B4BD0`). So `+0x9E8`/`+0x9F0` and the AI parameters `+0x620`/`+0x9F8`/`+0x9FC` keep their constructor defaults. A forced copy belongs to no controller, so its natural respawn, rewards and count bookkeeping stay on the host.
+- **No death animation.** A forced copy whose host enemy is killed is removed alive, without one (S3).
+- **Not held:** the fade-complete route (`+0x38`).
+
+**Controls:** `kh2coop_enemy_population_test` (planner, identity, rebase/clear, yield, hold and cull decisions) and `kh2coop_enemy_mirror_driver_test` (cull hook: hold, pass, dying, forced hold, force with the native terms, bind-gap tolerance, refusal).
+
 ## Step 1 implementation (VUH-1502)
 
 `inject/src/EnemySync.cpp`, over the WorldBridge. The role comes from the

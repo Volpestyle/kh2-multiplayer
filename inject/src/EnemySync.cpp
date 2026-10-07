@@ -132,6 +132,21 @@ bool g_mirrorRequested = false;
 std::uint64_t g_motionSourceSequence = 0;
 std::uint64_t g_motionPublished = 0, g_motionSendFailures = 0;
 enemymirror::Stream g_mirror;
+// VUH-1788: client population follows the host (KH2COOP_ENEMY_POPULATION=1).
+bool g_populationRequested = false;
+// Force-spawn has its own sub-flag (default off): the cull hold and forced-copy cleanup run with
+// KH2COOP_ENEMY_POPULATION=1 alone; creation needs KH2COOP_ENEMY_POPULATION_SPAWN=1 as well.
+bool g_populationSpawnRequested = false;
+enemypop::Planner g_population;
+using EnemyFactoryFn = void*(__fastcall*)(std::uint32_t objectId, const float* point4, float yaw);
+EnemyFactoryFn g_enemyFactory = nullptr;  // 0x3DF930, byte-checked at install
+constexpr uintptr_t RVA_ENEMY_FACTORY = 0x3DF930;
+constexpr std::uint8_t kEnemyFactoryBytes[] = {0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40,
+                                               0x0F, 0x29, 0x74, 0x24, 0x30};
+std::uint64_t g_popSpawns = 0, g_popSpawnFailures = 0, g_popForcedGone = 0, g_popYields = 0, g_popBudgetWaits = 0;
+std::uint16_t g_popBudgetWaitNetId = 0;
+std::uint32_t g_popBudgetGeneration = 0;
+constexpr uintptr_t RVA_ADMISSION_LIMIT = 0x2A0F7DC, RVA_ADMISSION_USED = 0x2A0F830;  // 0x3A1F00 operands
 std::uint32_t g_mirrorFrame = 0;
 // Fixture controls (review B1). KH2COOP_ENEMY_MIRROR_TRACE=1 logs host/client
 // positions on host frames % kTraceEvery. KH2COOP_ENEMY_MIRROR_CONTROL=<file>:
@@ -388,6 +403,7 @@ void RetireWorldSession() {
     g_resyncOutput.clear(); g_resyncOutputContext = {};
     g_host = {};
     g_mirror.Reset(0);  // VUH-1515 S4: a restarted host reuses epochs, sequences and frames
+    g_population.Rebase(0);  // VUH-1788 C1: planning restarts; forced entries stay until removed
     ClearActivation();
     ClearPendingHits();
     progresssync::Reset();
@@ -1808,6 +1824,181 @@ void PublishHostMotion(std::uint32_t frame, const NativeCensus& census) {
               static_cast<unsigned long long>(g_motionTruncated));
 }
 
+bool CopyCodeBytes(const std::uint8_t* at, std::uint8_t* out, std::size_t n) noexcept {
+    __try {
+        std::memcpy(out, at, n);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// VUH-1788: the one native creation call, POD only so SEH is allowed. Game thread.
+void* CallEnemyFactory(std::uint32_t objectId, const float* point4, float yaw, bool& fault) noexcept {
+    fault = false;
+    __try {
+        return g_enemyFactory(objectId, point4, yaw);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        fault = true;
+        return nullptr;
+    }
+}
+
+bool CensusHasActor(const NativeCensus& census, uintptr_t actor) {
+    for (const auto& e : census.enemies) if (e.actor == actor) return true;
+    return false;
+}
+
+// Actor + objentry + status, read now (C1: never the address alone).
+enemypop::Identity ReadPopulationIdentity(uintptr_t actor) noexcept {
+    enemypop::Identity id;
+    uintptr_t objentry = 0, status = 0;
+    if (!actor || !ReadNative(actor + offsets::actor::OBJENTRY_PTR, objentry) || !ReadNative(actor + 0x5C0, status))
+        return id;
+    id.actor = actor;
+    id.objentry = objentry;
+    id.status = status;
+    return id;
+}
+
+// Any role, every complete census: a forced entry whose actor left the list is forgotten,
+// so a later actor reusing its address/status slot is never mistaken for it (rev3 C1).
+void PopulationPrune(std::uint32_t frame, const NativeCensus& census) {
+    if (!g_populationRequested || census.state != CensusState::Complete) return;
+    for (const auto& f : g_population.forced()) {
+        if (f.id.actor && !CensusHasActor(census, f.id.actor)) {
+            ++g_popForcedGone;
+            if (g_log) g_log("[enemy-pop] forced-gone frame=%u netId=%u actor=%llX", frame, f.netId,
+                             static_cast<unsigned long long>(f.id.actor));
+            g_population.Forget(f.id.actor);
+        }
+    }
+}
+
+// Client, after a successful ClientFrame (bindings resolved for this census).
+void PopulationTick(std::uint32_t frame, const NativeCensus& census) {
+    if (!g_populationRequested || g_role != Role::Client) return;
+    if (g_population.epoch() != g_host.epoch) g_population.Rebase(g_host.epoch);
+    const auto isForced = [&](const Spawn& s) {
+        for (const auto& f : g_population.forced())
+            if (f.id.actor && f.id.actor == s.actor && f.id.objentry == s.objentry && f.id.status == s.status) return true;
+        return false;
+    };
+    // S1: a native local copy claiming a forced copy's netId wins; the forced one goes.
+    for (const auto& f : g_population.forced()) {
+        if (!f.id.actor || f.yield) continue;
+        for (const Spawn& s : g_inst.spawns) {
+            if (s.present && s.actor != f.id.actor && !isForced(s) && s.objectId != 0 &&  // rev3: never itself
+                (s.netId == f.netId || s.ordinaryLogCandidate == static_cast<int>(f.netId))) {
+                ++g_popYields;
+                if (g_log) g_log("[enemy-pop] yield frame=%u netId=%u forced=%llX native=%llX", frame, f.netId,
+                                 static_cast<unsigned long long>(f.id.actor), static_cast<unsigned long long>(s.actor));
+                g_population.MarkYield(f.id.actor);
+                break;
+            }
+        }
+    }
+    // rev4 R2: the deadline and the planner act only on frames whose ordinary bindings were really
+    // resolved (no resync fence: ObserveOnly/content resync publish every netId as -1).
+    const bool bindingsResolved = g_resyncWriteFence == ResyncWriteFence::None;
+    if (g_popBudgetGeneration != g_population.generation()) {  // rev4: a reset re-arms the budget-wait log
+        g_popBudgetGeneration = g_population.generation();
+        g_popBudgetWaitNetId = 0;
+    }
+    // rev3 C2: a forced copy that never bound within kBindDeadline resolved frames (host enemy alive) is removed.
+    for (const auto& f : g_population.forced()) {
+        if (!bindingsResolved || !f.id.actor || f.yield || f.boundOnce) continue;
+        bool bound = false;
+        for (const Spawn& s : g_inst.spawns)  // rev4 R1: any binding counts (it may serve another netId)
+            if (s.present && s.actor == f.id.actor && s.netId > 0) { bound = true; break; }
+        if (bound) { g_population.MarkBound(f.id.actor); continue; }
+        const auto ticks = g_population.NoteUnbound(f.id.actor);
+        if (ticks <= enemypop::kBindDeadline) continue;
+        if (g_log) g_log("[enemy-pop] unbound-timeout frame=%u netId=%u actor=%llX age=%u resolvedFrames=%u", frame,
+                         f.netId, static_cast<unsigned long long>(f.id.actor), frame - f.frame, ticks);
+        g_population.MarkYield(f.id.actor);
+    }
+    std::vector<enemypop::HostView> views;
+    for (const auto& [id, h] : g_host.enemies) {
+        if (h.battleProgram != g_inst.btl) continue;
+        enemypop::HostView v;
+        v.netId = id;
+        v.objectId = h.objectId;
+        v.allowed = enemymirror::FamilyAllowed(h.objectId);
+        v.dead = h.dead;
+        for (const Spawn& s : g_inst.spawns) if (s.present && s.netId == id) { v.boundLocally = true; break; }
+        // C5: only an object id this instance's own game already spawned (its resources are loaded).
+        for (const Spawn& s : g_inst.spawns) if (s.objectId == h.objectId && !isForced(s)) { v.loadedObject = true; break; }
+        v.streamFresh = g_mirror.Drivable(id, g_mirrorFrame);
+        for (const auto& f : g_population.forced())
+            if (f.id.actor && f.netId == id && CensusHasActor(census, f.id.actor)) { v.forcedPresent = true; break; }
+        views.push_back(v);
+    }
+    const bool safe = g_enemyFactory && g_inst.live && g_host.arrived && SafeNativeGameplay() &&
+                      spawncontroller::IsDiagnosticGameThread();
+    const std::uint16_t pick = bindingsResolved ? g_population.Plan(views, frame, safe) : std::uint16_t {0};  // rev4 R2
+    bool budgetWait = false;
+    if (pick) {
+        const HostEnemy& h = g_host.enemies[pick];
+        // rev3: the factory's admission (0x3A1F00) is a float budget; read it first. A refusal is not
+        // an attempt: wait (no call) until the budget frees, logged once per netId per wait.
+        uintptr_t objentry = 0;
+        for (const Spawn& s : g_inst.spawns) if (s.objectId == h.objectId && s.objentry && !isForced(s)) { objentry = s.objentry; break; }
+        float limit = 0.0f, used = 0.0f;
+        std::uint8_t weight = 0;
+        const bool budgetRead = objentry && ReadNative(g_exeBase + RVA_ADMISSION_LIMIT, limit) &&
+                                ReadNative(g_exeBase + RVA_ADMISSION_USED, used) && ReadNative(objentry + 0x54, weight);
+        if (!budgetRead || !enemypop::BudgetAllows(limit, used, weight)) {
+            if (g_popBudgetWaitNetId != pick && g_log)
+                g_log("[enemy-pop] budget-wait frame=%u netId=%u read=%d limit=%.2f used=%.2f weight=%u", frame, pick,
+                      budgetRead ? 1 : 0, limit, used, weight);
+            g_popBudgetWaitNetId = pick;
+            ++g_popBudgetWaits;
+            budgetWait = true;  // rev4: no call, but the status line below still runs
+        }
+    }
+    if (pick && !budgetWait) {
+        const HostEnemy& h = g_host.enemies[pick];
+        enemymirror::Pose pose {};
+        const float yaw = g_mirror.PoseAt(pick, g_mirrorFrame, pose) ? pose.rotationY : 0.0f;
+        alignas(16) float point[4] = {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z, 1.0f};
+        uintptr_t objentry = 0;
+        for (const Spawn& s : g_inst.spawns) if (s.objectId == h.objectId && s.objentry && !isForced(s)) { objentry = s.objentry; break; }
+        std::uint8_t weight = 0;
+        (void)(objentry && ReadNative(objentry + 0x54, weight));
+        g_popBudgetWaitNetId = 0;
+        bool fault = false;
+        void* actor = CallEnemyFactory(h.objectId, point, yaw, fault);
+        if (!actor && !fault && g_log) {  // rev3: say why a null came back
+            float limitAfter = 0.0f, usedAfter = 0.0f;
+            (void)ReadNative(g_exeBase + RVA_ADMISSION_LIMIT, limitAfter);
+            (void)ReadNative(g_exeBase + RVA_ADMISSION_USED, usedAfter);
+            g_log("[enemy-pop] factory-null frame=%u netId=%u limit=%.2f used=%.2f weight=%u admission=%d "
+                  "(null with admission=1 means the 0xD50 allocation failed)", frame, pick, limitAfter, usedAfter, weight,
+                  enemypop::BudgetAllows(limitAfter, usedAfter, weight) ? 1 : 0);
+        }
+        if (fault) {  // C3: never retry a faulted native constructor
+            g_enemyFactory = nullptr;
+            actor = nullptr;
+            if (g_log) g_log("[enemy-pop] factory-disabled frame=%u netId=%u (fault)", frame, pick);
+        }
+        const auto identity = ReadPopulationIdentity(reinterpret_cast<uintptr_t>(actor));
+        g_population.Attempted(pick, identity, frame);
+        if (identity.actor) ++g_popSpawns; else ++g_popSpawnFailures;
+        if (g_log)
+            g_log("[enemy-pop] force-spawn frame=%u netId=%u objectId=%u point=%.1f,%.1f,%.1f yaw=%.2f actor=%llX fault=%d "
+                  "forced=%zu objentry=%llX status=%llX", frame, pick, h.objectId, point[0], point[1], point[2], yaw,
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(actor)), fault ? 1 : 0,
+                  g_population.forcedCount(), static_cast<unsigned long long>(identity.objentry),
+                  static_cast<unsigned long long>(identity.status));
+    }
+    if (g_log && frame % 600 == 0)
+        g_log("[enemy-pop] client frame=%u epoch=%u hostEnemies=%zu spawns=%llu failures=%llu forcedGone=%llu yields=%llu "
+              "forced=%zu factory=%d", frame, g_host.epoch, views.size(), static_cast<unsigned long long>(g_popSpawns),
+              static_cast<unsigned long long>(g_popSpawnFailures), static_cast<unsigned long long>(g_popForcedGone),
+              static_cast<unsigned long long>(g_popYields), g_population.forcedCount(), g_enemyFactory ? 1 : 0);
+}
+
 // Client: advance the render cursor once per frame after this frame's packets.
 void TickMirror(std::uint32_t frame) {
     g_mirrorFrame = frame;
@@ -3206,6 +3397,7 @@ bool ReceiveWorldPackets() {
                     }
                     g_host = {};
                     g_mirror.Reset(0);  // VUH-1515 S4
+                    g_population.Rebase(0);
                     if (!g_resyncPlan) {
                         g_resyncWriteFence = ResyncWriteFence::None;
                         g_resyncRecordAuthority.reset();
@@ -3935,6 +4127,26 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     progresssync::Install(exeBase, log, SendCapturedWorld);
     char mirror[2] {};
     g_mirrorRequested = GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR", mirror, sizeof(mirror)) == 1 && mirror[0] == '1';
+    char population[2] {};
+    g_populationRequested = g_mirrorRequested &&
+        GetEnvironmentVariableA("KH2COOP_ENEMY_POPULATION", population, sizeof(population)) == 1 && population[0] == '1';
+    char populationSpawn[2] {};
+    g_populationSpawnRequested = g_populationRequested &&
+        GetEnvironmentVariableA("KH2COOP_ENEMY_POPULATION_SPAWN", populationSpawn, sizeof(populationSpawn)) == 1 &&
+        populationSpawn[0] == '1';
+    if (g_populationSpawnRequested) {
+        const auto* entry = reinterpret_cast<const std::uint8_t*>(exeBase + RVA_ENEMY_FACTORY);
+        std::uint8_t bytes[sizeof(kEnemyFactoryBytes)] {};
+        const bool readable = CopyCodeBytes(entry, bytes, sizeof(bytes));
+        g_enemyFactory = readable && std::memcmp(bytes, kEnemyFactoryBytes, sizeof(bytes)) == 0
+            ? reinterpret_cast<EnemyFactoryFn>(exeBase + RVA_ENEMY_FACTORY) : nullptr;
+        if (g_log)
+            g_log("[enemy-pop] configured=1 factory=%d missing=%u gap=%u maxForced=%zu cullHold=%u", g_enemyFactory ? 1 : 0,
+                  enemypop::kMissingFrames, enemypop::kSpawnGap, enemypop::kMaxForced, enemypop::kCullHoldFrames);
+    } else if (g_populationRequested && g_log) {
+        g_log("[enemy-pop] configured=1 spawn=0 cullHold=%u (force-spawn needs KH2COOP_ENEMY_POPULATION_SPAWN=1)",
+              enemypop::kCullHoldFrames);
+    }
     char mirrorTrace[2] {};
     g_mirrorTrace = g_mirrorRequested &&
         GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR_TRACE", mirrorTrace, sizeof(mirrorTrace)) == 1 && mirrorTrace[0] == '1';
@@ -4023,6 +4235,7 @@ void OnFrameStart(std::uint32_t frame) {
         // Requests invalidate cached pointers before the native fade/teardown;
         // load callbacks do the same for initial loads and same-room reloads.
         g_inst = {};
+        g_population.Clear();  // VUH-1788 C1: the native teardown owns every forced copy
         ClearActivation();
         ClearPendingHits();
         g_hostBeginPending = false;
@@ -4036,6 +4249,7 @@ void OnFrameStart(std::uint32_t frame) {
     if (!warp::TransitionPending() && (newLoad || g_inst.world == 0xFFFF) &&
         location.worldId != 0xFF && location.roomId != 0xFF) {
         g_inst = {};
+        g_population.Clear();
         g_inst.world = location.worldId;
         g_inst.room = location.roomId;
         g_inst.door = location.door;
@@ -4073,7 +4287,15 @@ void OnFrameStart(std::uint32_t frame) {
                                  location.mapProgram, location.battleProgram, location.eventProgram);
             }
         }
-        if (!g_host.arrived) { DrainPendingSpawnTrace(false); return; }
+        if (!g_host.arrived) {
+            // rev3 C1: a client not (or no longer) in the host's room still prunes forced entries.
+            if (g_populationRequested && g_population.hasForced() && g_inst.live) {
+                const auto pruneCensus = CaptureNativeCensus();
+                if (CensusMatchesInstance(pruneCensus)) PopulationPrune(frame, pruneCensus);
+            }
+            DrainPendingSpawnTrace(false);
+            return;
+        }
         RequestActivation();
     }
     if (!g_inst.live) { DrainPendingSpawnTrace(false); return; }
@@ -4092,6 +4314,7 @@ void OnFrameStart(std::uint32_t frame) {
         g_censusInterrupted = false;
     }
     auto fresh = TrackSpawns(census);
+    PopulationPrune(frame, census);  // VUH-1788 rev3 C1: any role, every complete census
     if (g_role == Role::Host) {
         // Track while progress or ring capacity delays the announcement. No
         // manifest/HP/hash may escape under the previous room's epoch.
@@ -4122,6 +4345,7 @@ void OnFrameStart(std::uint32_t frame) {
                      g_inst.spawns[i].spawnPos.x, g_inst.spawns[i].spawnPos.y, g_inst.spawns[i].spawnPos.z);
         }
         if (!ClientFrame(census)) { DrainPendingSpawnTrace(false); return; }
+        PopulationTick(frame, census);  // VUH-1788 (default off)
     }
     PublishAppliedHash(frame, census);
     TickNativeResync(frame, true);
@@ -4136,6 +4360,30 @@ void OnFrameStart(std::uint32_t frame) {
 bool MirrorRequested() noexcept { return g_mirrorRequested; }
 
 bool MirrorTrace() noexcept { return g_mirrorTrace; }
+bool PopulationRequested() noexcept { return g_populationRequested; }
+// C1: works in every role, so a forced copy left behind by a retired session is still removed.
+bool PopulationForceRemove(uintptr_t actor) noexcept {
+    if (!g_populationRequested) return false;
+    const auto* f = g_population.ForcedFor(ReadPopulationIdentity(actor));
+    if (!f) return false;
+    const bool client = g_role == Role::Client;
+    const auto host = g_host.enemies.find(f->netId);
+    const bool known = client && host != g_host.enemies.end();
+    return enemypop::ForceRemove(*f, known, known && host->second.dead, client ? g_host.epoch : 0);
+}
+void PopulationForget(uintptr_t actor) noexcept {
+    if (!g_populationRequested) return;
+    if (const auto* f = g_population.ForcedFor(ReadPopulationIdentity(actor))) g_population.Forget(f->id.actor);
+}
+std::uint32_t PopulationGeneration() noexcept { return g_population.generation(); }
+bool PopulationForcedHold(uintptr_t actor) noexcept {
+    if (!g_populationRequested || g_role != Role::Client) return false;
+    const auto* f = g_population.ForcedFor(ReadPopulationIdentity(actor));
+    if (!f) return false;
+    const auto host = g_host.enemies.find(f->netId);
+    const bool known = host != g_host.enemies.end();
+    return enemypop::ForcedHold(*f, known, known && host->second.dead, g_host.epoch);
+}
 double MirrorCursor() noexcept { return g_mirror.cursor(); }
 
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {

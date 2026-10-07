@@ -20,6 +20,14 @@
 // still run, so the host's attack hitbox hits this client's own Sora natively
 // (DamagePolicy LocalVictim). Nothing is written to team, collision, HP or flags.
 //
+// VUH-1788 (KH2COOP_ENEMY_POPULATION=1, enemysync::PopulationRequested):
+//   CullDetour  the class's removal predicate (handler +0x40, `mov rcx,rdx; jmp
+//               0x3DAC30`: "AI script threads ended") runs as native; a mirrored
+//               copy that is bound now, living and driven within kCullHoldFrames
+//               is refused removal (the generic update 0x3BFD30 only calls the
+//               removal slot +0x48 when +0x40 says so). A forced copy whose host
+//               enemy is gone is removed through that same native slot.
+//
 // Log channels (each with its own limit, so one never starves another):
 //   events  brain hook / refusal lines, kLogBudget total
 //   runs    take-over / run end / retire lines with per-actor counters, kRunLogBudget
@@ -31,6 +39,8 @@
 namespace enemymirror {
 
 constexpr uintptr_t RVA_BRAIN = 0x3B4460;           // shared enemy brain entry (spike d5/d6)
+constexpr uintptr_t RVA_REMOVE_PREDICATE = 0x3DAC30; // removal predicate (VUH-1788 d_3DAC30.txt)
+constexpr uintptr_t HANDLER_REMOVE_SLOT = 0x40;
 constexpr uintptr_t ACTOR_MOTION_CTRL = 0x158;
 constexpr uintptr_t MOTION_END = 0x40, MOTION_TIME = 0x44;
 constexpr uintptr_t ENTITY_COS = 0x40, ENTITY_SIN = 0x48;
@@ -64,12 +74,16 @@ struct Driven {
                   restarts = 0, settleHolds = 0;
     // Driven updates whose brain was not called (hit-stop, reaction states, another path): rev-2 F3.
     std::uint64_t noBrain = 0, maxNoBrainRun = 0;
+    std::uint64_t cullHolds = 0;  // VUH-1788: native removals refused for this copy
 };
 struct BrainHook { uintptr_t target = 0; Brain original = nullptr; };
+using Predicate = bool(__fastcall*)(void* handler, void* actor);
+struct CullHook { uintptr_t target = 0; Predicate original = nullptr; };
 struct Stats {
     std::uint64_t driven = 0, skips = 0, passBound = 0, blocked = 0, ourSets = 0, setFaults = 0, writes = 0,
                   writeFaults = 0, takeovers = 0, gaps = 0, restarts = 0, settleHolds = 0, refusedClass = 0,
                   tableFull = 0, retired = 0, hits = 0, runLogDropped = 0, hitLogDropped = 0;
+    std::uint64_t cullHolds = 0, cullPassed = 0, forceRemoves = 0, cullRefused = 0, cullLogDropped = 0, forceWaits = 0;
 };
 
 static Driven g_driven[kMaxDriven] {};
@@ -78,6 +92,11 @@ static unsigned g_brainCount = 0;
 static uintptr_t g_refusedTargets[kMaxBrains] {};
 static unsigned g_refusedCount = 0;
 static bool g_guard = false;
+static CullHook g_culls[kMaxBrains] {};
+static unsigned g_cullCount = 0;
+static uintptr_t g_cullRefusedTargets[kMaxBrains] {};
+static unsigned g_cullRefusedCount = 0;
+static unsigned g_cullLogBudget = 256;
 static Stats g_mstats {};
 static unsigned g_mlogBudget = kLogBudget, g_runLogBudget = kRunLogBudget, g_hitLogBudget = kHitLogBudget;
 static std::uint32_t g_lastStatsFrame = 0;
@@ -159,6 +178,9 @@ static void LogStats() {
         g_mstats.setFaults, g_mstats.writes, g_mstats.writeFaults, g_mstats.takeovers, g_mstats.gaps, g_mstats.restarts,
         g_mstats.settleHolds, g_mstats.refusedClass, g_brainCount, g_mstats.tableFull, g_mstats.retired, g_mstats.hits,
         g_mstats.runLogDropped, g_mstats.hitLogDropped);
+    if (enemysync::PopulationRequested())  // VUH-1788 counters, only while population is on (S4)
+        Log("[enemy-pop] stats frame=%u cullHolds=%llu cullPassed=%llu forceRemoves=%llu forceWaits=%llu culls=%u",
+            g_frameCounter, g_mstats.cullHolds, g_mstats.cullPassed, g_mstats.forceRemoves, g_mstats.forceWaits, g_cullCount);
     for (const auto& d : g_driven) if (d.actor) ActorLine("actor", d);
 }
 static void MaybeStats() {
@@ -200,6 +222,156 @@ static bool EnsureBrainHook(uintptr_t actor) {
     g_brains[slot].target = target;
     g_brainCount = slot + 1;  // published after the original is set: the detour only runs once enabled
     NoteLog("brain-hook", actor, target - g_exeBase, vtable - g_exeBase);
+    return true;
+}
+
+static bool LivingNow(uintptr_t actor) noexcept;
+
+static void CullLog(const char* what, uintptr_t actor, std::uint16_t netId, std::uint32_t since) {
+    if (g_cullLogBudget == 0) { ++g_mstats.cullLogDropped; return; }
+    --g_cullLogBudget;
+    Log("[enemy-pop] %s frame=%u actor=%llX netId=%u sinceDriven=%u holds=%llu passed=%llu forced=%llu", what,
+        g_frameCounter, static_cast<unsigned long long>(actor), netId, since, g_mstats.cullHolds, g_mstats.cullPassed,
+        g_mstats.forceRemoves);
+}
+
+// S2: per-actor bind history and per-netId drive history, kept across a Driven
+// slot's retirement, so a one-frame None gate (e.g. a binding holdAll) cannot wipe a hold.
+struct RecentBind { uintptr_t actor = 0; std::uint16_t netId = 0; std::uint32_t frame = 0; };
+struct NetDrive { std::uint16_t netId = 0; std::uint32_t frame = 0; };
+static RecentBind g_recent[64] {};
+static NetDrive g_netDrive[64] {};
+static std::uint32_t g_historyGeneration = 0;
+// rev3 S2: netIds are reused across epochs and rooms; a planner Rebase/Clear drops the history.
+static void SyncHistory() noexcept {
+    const std::uint32_t generation = enemysync::PopulationGeneration();
+    if (generation == g_historyGeneration) return;
+    g_historyGeneration = generation;
+    for (auto& r : g_recent) r = {};
+    for (auto& n : g_netDrive) n = {};
+}
+template <class T, class Match> static T* Slot(T (&table)[64], Match match) noexcept {
+    for (auto& e : table) if (match(e)) return &e;
+    T* oldest = &table[0];
+    for (auto& e : table) {
+        if (e.frame == 0) return &e;  // free
+        if (g_frameCounter - e.frame > g_frameCounter - oldest->frame) oldest = &e;
+    }
+    return oldest;
+}
+static void NoteBound(uintptr_t actor, std::uint16_t netId) noexcept {
+    RecentBind* r = Slot(g_recent, [&](const RecentBind& e) { return e.actor == actor && e.frame; });
+    if (r->actor != actor) *r = {actor, netId, 0};
+    if (netId) r->netId = netId;
+    r->frame = g_frameCounter ? g_frameCounter : 1;
+}
+static const RecentBind* FindRecent(uintptr_t actor) noexcept {
+    for (const auto& r : g_recent) if (r.frame && r.actor == actor) return &r;
+    return nullptr;
+}
+static void NoteDriven(std::uint16_t netId) noexcept {
+    if (!netId) return;
+    NetDrive* n = Slot(g_netDrive, [&](const NetDrive& e) { return e.netId == netId && e.frame; });
+    n->netId = netId;
+    n->frame = g_frameCounter ? g_frameCounter : 1;
+}
+static std::uint32_t SinceDriven(std::uint16_t netId) noexcept {
+    for (const auto& n : g_netDrive) if (netId && n.frame && n.netId == netId) return g_frameCounter - n.frame;
+    return 0xFFFFFFFFu;
+}
+// C4: a forced removal overrides only the script-thread term of 0x3DAC30. The
+// native +0x80/+0x98 term and the +0xBB4 child-busy check (child +0x14) still apply.
+static bool NativeRemovalTermsAllow(uintptr_t actor) noexcept {
+    uintptr_t p80 = 0, p98 = 0;
+    std::uint32_t childHandle = 0;
+    if (!ReadHitTrace(actor + 0x80, p80) || !ReadHitTrace(actor + 0x98, p98)) return false;
+    if (p80 != 0 && p98 != 0) return false;
+    if (!ReadHitTrace(actor + 0xBB4, childHandle)) return false;
+    if (childHandle && g_resolveHandle) {
+        uintptr_t child = 0;
+        __try { child = g_resolveHandle(childHandle); } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        std::uint32_t busy = 0;
+        if (child && (!ReadHitTrace(child + 0x14, busy) || busy != 0)) return false;
+    }
+    return true;
+}
+
+// Native first (the predicate also steps the actor's AI script), then the override.
+static bool CullBody(void* handler, void* actor, Predicate original) {
+    const bool native = original(handler, actor);
+    if (!OwnerThread()) return native;
+    const auto a = reinterpret_cast<uintptr_t>(actor);
+    SyncHistory();
+    const Driven* d = Find(a);
+    const RecentBind* r = FindRecent(a);
+    const std::uint16_t netId = d && d->netId ? d->netId : (r ? r->netId : 0);
+    const bool recent = r && g_frameCounter - r->frame <= enemypop::kBindGap;
+    const bool force = enemysync::PopulationForceRemove(a);
+    const bool forcedHold = !force && enemysync::PopulationForcedHold(a);
+    const std::uint32_t since = SinceDriven(netId);
+    const bool living = (native || force) ? LivingNow(a) : false;
+    const int decision = enemypop::CullDecision(native, force, recent, living, d && d->running, since, forcedHold);
+    if (decision == 1) {
+        if (!NativeRemovalTermsAllow(a)) {  // retried on its next update (C4); counted, logged sparsely
+            if (g_mstats.forceWaits++ % 300 == 0) CullLog("force-remove-wait", a, netId, since);
+            return native;
+        }
+        ++g_mstats.forceRemoves;
+        CullLog("force-remove", a, netId, since);
+        enemysync::PopulationForget(a);  // rev3 C1: the +0x48 dispose always follows a true return
+        return true;
+    }
+    if (decision == 0) {
+        if (d) { if (const_cast<Driven*>(d)->cullHolds++ == 0) CullLog("cull-hold", a, netId, since); }
+        else if (g_mstats.cullHolds == 0 || forcedHold) CullLog(forcedHold ? "cull-hold-forced" : "cull-hold", a, netId, since);
+        ++g_mstats.cullHolds;
+        return false;
+    }
+    if (native && (d || r)) {
+        ++g_mstats.cullPassed;
+        CullLog("cull-pass", a, netId, since);
+    }
+    if (native) enemysync::PopulationForget(a);  // rev4 C1: any true return is followed by the +0x48 dispose
+    return native;
+}
+template <unsigned I> static bool __fastcall CullDetour(void* handler, void* actor) {
+    return CullBody(handler, actor, g_culls[I].original);
+}
+using CullFn = bool(__fastcall*)(void*, void*);
+static constexpr CullFn kCullDetours[kMaxBrains] = {&CullDetour<0>, &CullDetour<1>, &CullDetour<2>, &CullDetour<3>,
+                                                    &CullDetour<4>, &CullDetour<5>, &CullDetour<6>, &CullDetour<7>};
+
+// Same discovery and refusal rules as the brain hook, on handler slot +0x40.
+static bool EnsureCullHook(uintptr_t actor) {
+    std::uint32_t handle = 0;
+    uintptr_t handler = 0, vtable = 0, target = 0;
+    std::uint8_t bytes[8] {};
+    if (!g_resolveHandle || !ReadHitTrace(actor, handle) || handle == 0) return false;
+    __try { handler = g_resolveHandle(handle); } __except (EXCEPTION_EXECUTE_HANDLER) { handler = 0; }
+    if (!handler || !ReadHitTrace(handler, vtable) || !ReadHitTrace(vtable + HANDLER_REMOVE_SLOT, target)) return false;
+    for (unsigned i = 0; i < g_cullCount; ++i) if (g_culls[i].target == target) return true;
+    for (unsigned i = 0; i < g_cullRefusedCount; ++i) if (g_cullRefusedTargets[i] == target) return false;
+    const bool shape = target >= g_exeBase && target < g_exeBase + 0x3000000 &&
+        ReadHitTraceMemory(target, bytes, sizeof(bytes)) && BrainThunk(bytes, target, g_exeBase + RVA_REMOVE_PREDICATE);
+    if (!shape || g_cullCount >= kMaxBrains) {
+        if (g_cullRefusedCount < kMaxBrains) g_cullRefusedTargets[g_cullRefusedCount++] = target;
+        ++g_mstats.cullRefused;
+        NoteLog(shape ? "cull-refused-full" : "cull-refused-shape", actor, target - g_exeBase, vtable - g_exeBase);
+        return false;
+    }
+    const unsigned slot = g_cullCount;
+    MH_STATUS st = MH_CreateHook(reinterpret_cast<void*>(target), reinterpret_cast<void*>(kCullDetours[slot]),
+                                 reinterpret_cast<void**>(&g_culls[slot].original));
+    if (st == MH_OK) st = MH_EnableHook(reinterpret_cast<void*>(target));
+    if (st != MH_OK) {
+        if (g_cullRefusedCount < kMaxBrains) g_cullRefusedTargets[g_cullRefusedCount++] = target;
+        ++g_mstats.cullRefused;
+        NoteLog("cull-hook-failed", actor, target - g_exeBase, static_cast<uintptr_t>(st));
+        return false;
+    }
+    g_culls[slot].target = target;
+    g_cullCount = slot + 1;
+    NoteLog("cull-hook", actor, target - g_exeBase, vtable - g_exeBase);
     return true;
 }
 
@@ -257,6 +429,7 @@ void PreUpdate(uintptr_t actor) {
     if (!d) { ++g_mstats.tableFull; return; }
     if (!d->firstBound) d->firstBound = g_frameCounter ? g_frameCounter : 1;
     d->boundFrame = g_frameCounter;
+    if (enemysync::PopulationRequested()) { SyncHistory(); NoteBound(actor, pose.netId); }
     if (pose.netId) d->netId = pose.netId;
     bool drive = gate == Gate::Drive;
     if (drive && g_frameCounter - d->firstBound < kSpawnSettleFrames) {  // let the local spawn-in finish (S7)
@@ -264,6 +437,7 @@ void PreUpdate(uintptr_t actor) {
         ++d->settleHolds;
         ++g_mstats.settleHolds;
     }
+    if (enemysync::PopulationRequested()) (void)EnsureCullHook(actor);  // bound copies, driven or not
     if (drive && !EnsureBrainHook(actor)) drive = false;
     NoteSeen(actor, *d, drive);
     if (!drive) {
@@ -292,6 +466,7 @@ void PreUpdate(uintptr_t actor) {
         }
     }
     d->frame = g_frameCounter;
+    if (enemysync::PopulationRequested()) NoteDriven(d->netId);
     d->pose = pose;
     ++d->drivenUpdates;
     ++g_mstats.driven;

@@ -33,6 +33,7 @@
 #include "kh2coop/WorldContext.hpp"
 #include "kh2coop/DownedState.hpp" // Types + WorldContext only; safe beside HitChannel
 #include "EnemyMirrorPose.hpp" // VUH-1515: Pose only (no Protocol.hpp beside HitChannel)
+#include "EnemyPopulation.hpp" // VUH-1788: pure planner/cull decision (Types.hpp only)
 #include <array>
 
 namespace kh2coop {
@@ -80,6 +81,18 @@ bool MirrorRequested() noexcept;
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept;
 bool MirrorTrace() noexcept;  // KH2COOP_ENEMY_MIRROR_TRACE=1: fixture position trace lines
 double MirrorCursor() noexcept;  // the stream's displayed host-frame cursor; < 0 when none
+// VUH-1788 (KH2COOP_ENEMY_POPULATION=1 with KH2COOP_ENEMY_MIRROR=1; client only).
+bool PopulationRequested() noexcept;
+// Owner thread: `actor` (matched by actor + objentry + status) is a copy this
+// client force-spawned whose host enemy is now dead or unknown, the epoch moved,
+// or a native duplicate claims it: the removal predicate forces true.
+bool PopulationForceRemove(uintptr_t actor) noexcept;
+// Owner thread: `actor` is a live forced copy whose host enemy lives (held from creation).
+bool PopulationForcedHold(uintptr_t actor) noexcept;
+// Owner thread: the cull hook committed a forced removal of `actor` (its +0x48 dispose follows): forget it.
+void PopulationForget(uintptr_t actor) noexcept;
+// Planner generation (Rebase/Clear count); the cull hook drops its history when it changes.
+std::uint32_t PopulationGeneration() noexcept;
 
 // Copied diagnostic context on the registered game thread. Partial observations
 // retain their masks; this never advances authority or performs a census.

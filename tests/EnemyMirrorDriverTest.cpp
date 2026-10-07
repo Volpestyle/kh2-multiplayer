@@ -10,6 +10,7 @@
 #include <initializer_list>
 #include "kh2coop/KH2Offsets.hpp"
 #include "EnemyMirrorPose.hpp"
+#include "EnemyPopulation.hpp"
 
 enum MH_STATUS { MH_OK = 0, MH_ERROR_NOT_EXECUTABLE = 9 };
 static int g_mhCreate = 0;
@@ -61,6 +62,16 @@ static bool g_trace = false;
 static double g_cursor = 30.0;
 static bool MirrorTrace() noexcept { return g_trace; }
 static double MirrorCursor() noexcept { return g_cursor; }
+static bool g_popRequested = false;
+static uintptr_t g_forceRemoveActor = 0;
+static bool PopulationRequested() noexcept { return g_popRequested; }
+static bool PopulationForceRemove(uintptr_t actor) noexcept { return actor && actor == g_forceRemoveActor; }
+static uintptr_t g_forcedHoldActor = 0;
+static bool PopulationForcedHold(uintptr_t actor) noexcept { return actor && actor == g_forcedHoldActor; }
+static uintptr_t g_forgotten = 0;
+static std::uint32_t g_popGeneration = 0;
+static void PopulationForget(uintptr_t actor) noexcept { g_forgotten = actor; }
+static std::uint32_t PopulationGeneration() noexcept { return g_popGeneration; }
 static enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     if (actor != g_for) return enemymirror::Gate::None;
     out.netId = g_pose.netId;
@@ -295,6 +306,110 @@ int main() {
     ++g_frameCounter;
     enemymirror::PreUpdate(other);
     CHECK(!enemymirror::DrivenNow(other) && enemymirror::g_brainCount == 1 && enemymirror::g_mstats.refusedClass == 2);
+    // ---- VUH-1788: the removal-predicate (cull) hook --------------------------------------
+    g_mhResult = MH_OK;
+    const uintptr_t predThunk = g_exeBase + 0x419B90, predicate = g_exeBase + 0x3DAC30;
+    std::memcpy(image + 0x419B90, head, 4);
+    const std::int32_t relP = static_cast<std::int32_t>(static_cast<std::intptr_t>(predicate) - static_cast<std::intptr_t>(predThunk + 8));
+    std::memcpy(image + 0x419B94, &relP, 4);
+    Q(vtable + 0x40) = predThunk;
+    Q(g_handler) = vtable;  // the ZAKO-like class: brain already hooked
+    const uintptr_t pop = reinterpret_cast<uintptr_t>(heap) + 0xA000;
+    U(pop) = 0x80001234; Q(pop + 0x5C0) = status;
+    U(pop + 0x180) = 2;
+    enemysync::g_for = pop; enemysync::g_gate = enemymirror::Gate::Drive;
+    enemysync::g_pose.netId = 9;
+    const int createsBefore = g_mhCreate;
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);  // population off: no cull hook
+    CHECK(g_mhCreate == createsBefore && enemymirror::g_cullCount == 0);
+    enemysync::g_popRequested = true;
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);
+    CHECK(g_mhCreate == createsBefore + 1 && enemymirror::g_cullCount == 1);
+    static bool s_native = false;
+    struct FakePred { static bool __fastcall Call(void*, void*) { return s_native; } };
+    *g_mhOriginal = reinterpret_cast<void*>(&FakePred::Call);
+    auto cull = reinterpret_cast<bool(__fastcall*)(void*, void*)>(g_mhDetour);
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);  // settled? not yet: firstBound recent -> bound, not running
+    s_native = false;
+    CHECK(!cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)));  // native keep stays keep
+    s_native = true;
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)));    // never driven yet: native removal
+    g_frameCounter += enemymirror::kSpawnSettleFrames;
+    enemymirror::PreUpdate(pop);  // now driven
+    enemymirror::Driven* pd = enemymirror::Find(pop);
+    CHECK(pd && pd->running);
+    CHECK(!cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)) && pd->cullHolds == 1 &&
+          enemymirror::g_mstats.cullHolds == 1);  // driven copy: removal refused
+    enemysync::g_gate = enemymirror::Gate::Bound;  // stream lost: bound, released
+    g_frameCounter += 100;
+    enemymirror::PreUpdate(pop);
+    CHECK(!pd->running && !cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)));  // recently driven: held
+    g_frameCounter += enemypop::kCullHoldFrames;
+    enemymirror::PreUpdate(pop);
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)) && enemymirror::g_mstats.cullPassed >= 1);  // too long: native
+    enemysync::g_gate = enemymirror::Gate::Drive;
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);  // driven again (a re-take)
+    *reinterpret_cast<std::int32_t*>(status) = 0;
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)));  // dying: native removal, never held
+    *reinterpret_cast<std::int32_t*>(status) = 20;
+    enemysync::g_forceRemoveActor = pop;
+    s_native = false;
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)) && enemymirror::g_mstats.forceRemoves == 1);  // forced copy, host gone
+    // C4: forcing overrides only the script term: +0x80/+0x98 both set, or a busy +0xBB4 child, keep it.
+    Q(pop + 0x80) = 1; Q(pop + 0x98) = 1;
+    CHECK(!cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)) && enemymirror::g_mstats.forceRemoves == 1);
+    Q(pop + 0x80) = 0; Q(pop + 0x98) = 0;
+    U(pop + 0xBB4) = 0x80000001; U(g_handler + 0x14) = 1;  // child (fake resolver -> handler) busy
+    CHECK(!cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)) && enemymirror::g_mstats.forceRemoves == 1);
+    CHECK(enemymirror::g_mstats.forceWaits == 2);  // both refusals counted (C4 retry counter)
+    U(g_handler + 0x14) = 0;
+    enemysync::g_forgotten = 0;
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)) && enemymirror::g_mstats.forceRemoves == 2);
+    CHECK(enemysync::g_forgotten == pop);  // rev3 C1: a committed forced removal forgets the entry
+    enemysync::g_forgotten = 0;
+    U(pop + 0xBB4) = 0;
+    enemysync::g_forceRemoveActor = 0;
+    // S2: one None-gate frame retires the slot but not the hold history.
+    enemysync::g_gate = enemymirror::Gate::None;
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);
+    s_native = true;
+    CHECK(!enemymirror::Find(pop) && !cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)));
+    ++enemysync::g_popGeneration;  // rev3 S2: a planner Rebase/Clear drops the bind/drive history
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)));
+    g_frameCounter += enemypop::kBindGap + 1;  // unbound for longer than the gap: native
+    enemymirror::PreUpdate(pop);
+    enemysync::g_forgotten = 0;
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop)) && enemysync::g_forgotten == pop);  // rev4 C1
+    // C2: a forced copy is held from creation (never driven, still settling) while its host enemy lives.
+    const uintptr_t pop2 = reinterpret_cast<uintptr_t>(heap) + 0xC000;
+    U(pop2) = 0x80001234; Q(pop2 + 0x5C0) = status;
+    enemysync::g_for = pop2; enemysync::g_gate = enemymirror::Gate::Bound; enemysync::g_pose.netId = 11;
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop2);
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop2)));  // not forced: native
+    enemysync::g_forcedHoldActor = pop2;
+    CHECK(!cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop2)));  // forced: held
+    *reinterpret_cast<std::int32_t*>(status) = 0;
+    CHECK(cull(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(pop2)));   // dying: never held
+    *reinterpret_cast<std::int32_t*>(status) = 20;
+    enemysync::g_forcedHoldActor = 0;
+    enemysync::g_for = pop;
+    // A class whose +0x40 is not the predicate thunk is refused once (remembered).
+    const uintptr_t vtable4 = g_exeBase + 0x5CA000;
+    Q(vtable4 + 0x20) = thunk; Q(vtable4 + 0x40) = g_exeBase + 0x3DB4C0;  // 0xCC bytes
+    Q(g_handler) = vtable4;
+    enemysync::g_gate = enemymirror::Gate::Bound;
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);
+    CHECK(enemymirror::g_mstats.cullRefused == 1 && enemymirror::g_cullCount == 1);
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);
+    CHECK(enemymirror::g_mstats.cullRefused == 1);
     std::printf("EnemyMirrorDriverTest: %s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }
