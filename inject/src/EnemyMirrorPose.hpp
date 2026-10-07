@@ -42,13 +42,18 @@ inline constexpr std::uint32_t kLargeBodyObjectId = 303;
 inline constexpr std::uint32_t kGargoyleWarriorObjectId = 368;
 // T1 batch 3: Nightwalker M_EX580 (10; Land of Dragons 08/03 btl 1) is type 4 as well: live run 20261007-131606
 // mirrored it on both visits with motion agreement 50/50 and 78/78, position p95 0, 30/30 hits attributed.
-// Rapid Thruster M_EX660 (304) stays off until its own run.
+// Rapid Thruster M_EX660 (304; LoD 08/05 and 08/06 btl 1) passed LoD fixture-02 (run 20261007-132550) at three
+// visits with position p95 0. Its world skins M_EX660_WI (1843, Timeless River) and M_EX660_AL (1889, Agrabah)
+// share its enemy stats id (neoStatus 1020): allowlisted with it, as the Soldier skins were.
 inline constexpr std::uint32_t kNightwalkerObjectId = 10;
+inline constexpr std::uint32_t kRapidThrusterObjectId = 304;
+inline constexpr std::uint32_t kRapidThrusterSkinObjectIds[] = {1843, 1889};
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
                                               kLanceSoldierObjectId, kLargeBodyObjectId, kGargoyleWarriorObjectId,
-                                              kNightwalkerObjectId};
+                                              kNightwalkerObjectId, kRapidThrusterObjectId, kRapidThrusterSkinObjectIds[0],
+                                              kRapidThrusterSkinObjectIds[1]};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;

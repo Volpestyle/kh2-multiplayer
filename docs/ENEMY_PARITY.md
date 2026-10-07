@@ -851,6 +851,9 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
   - **121127, visit 1:** motion agreement 94/94, position p95 0.
   - **121709, both visits:** motion 235/235, p95 0. The Warrior engaged Sora on both screens.
 - **Nightwalker `M_EX580` (10) is allowlisted** (census T1 batch 3). The configured line reads `families=302,4,301,1838,1839,1849,17,303,368,10`. Live run 20261007-131606 (Land of Dragons 08/03 btl 1, LoD fixture-01) mirrored it on both visits: motion agreement 50/50 and 78/78, position p95 0, and 30/30 hits attributed. The Shadow control passed as well. Rapid Thruster `M_EX660` (304) stays off until its own run.
+- **Rapid Thruster `M_EX660` (304) and its skins `M_EX660_WI` (1843) and `M_EX660_AL` (1889) are allowlisted** (census T1 batch 3). The configured line reads `families=302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889`.
+  - Live run 20261007-132550 (LoD fixture-02) passed every criterion. 304 passed at 08/05 btl 1, 08/06 btl 1 and the 08/05 revisit, with position p95 0. The Nightwalker and Shadow regressions, walkaway, mute, re-take and friend-bound all passed.
+  - The skins share 304's enemy stats id (neoStatus 1020), so they follow the family pass without their own run, as the Soldier skins did.
 - **Gargoyle Knight `M_BB010_SWORD` (367) stays off.** In 121127 visit 2 it mirrored (106/106), but it stayed a dormant statue the whole segment, so it was never seen engaging.
 
 **Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.

@@ -254,20 +254,22 @@ void testHelpers() {
           "take-over blend weight rises monotonically to the stream pose");
     check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && em::FamilyAllowed(301) && em::FamilyAllowed(1838) &&
               em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0) &&
-              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(304) &&
+              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(305) &&
               !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
               !em::FamilyAllowed(1850),
           "allowlist keeps Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849): not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
     check(em::FamilyAllowed(17) && em::FamilyAllowed(303) && em::FamilyAllowed(368) && !em::FamilyAllowed(367) &&
               !em::FamilyAllowed(16) && !em::FamilyAllowed(18) && !em::FamilyAllowed(2025) && !em::FamilyAllowed(2409) &&
               !em::FamilyAllowed(122) && !em::FamilyAllowed(73) && !em::FamilyAllowed(369) &&
-              em::FamilyAllowed(10) && !em::FamilyAllowed(9) && !em::FamilyAllowed(11),
-          "batches 2-3 allow Lance Soldier (17), Large Body (303), Gargoyle Warrior (368) and Nightwalker (10): not the Knight (367), Rapid Thruster (304), neighbours, skins (2025, 2409) or type-21 122/73");
+              em::FamilyAllowed(10) && !em::FamilyAllowed(9) && !em::FamilyAllowed(11) &&
+              em::FamilyAllowed(304) && em::FamilyAllowed(1843) && em::FamilyAllowed(1889) && !em::FamilyAllowed(1842) &&
+              !em::FamilyAllowed(1844) && !em::FamilyAllowed(1888) && !em::FamilyAllowed(1890),
+          "batches 2-3 allow Lance Soldier (17), Large Body (303), Gargoyle Warrior (368), Nightwalker (10) and Rapid Thruster (304) with its skins 1843/1889: not the Knight (367), neighbours, other skins (2025, 2409) or type-21 122/73");
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -279,19 +281,19 @@ void testHelpers() {
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 40;
         for (const std::uint32_t oid : {em::kLanceSoldierObjectId, em::kLargeBodyObjectId, em::kGargoyleWarriorObjectId,
-                                        em::kNightwalkerObjectId}) {
+                                        em::kNightwalkerObjectId, em::kRapidThrusterObjectId}) {
             auto r = row(net++, 0.0f);
             r.objectId = oid;
             rows.push_back(r);
         }
-        auto ignored = row(44, 0.0f);
+        auto ignored = row(45, 0.0f);
         ignored.objectId = 309;
         rows.push_back(ignored);
         b2.Ingest(motion(3, 1, 10, rows), 1); b2.Ingest(motion(3, 2, 13, rows), 2); b2.Tick(2);
         em::Pose bp;
-        bool all = !b2.Drivable(44, 2);
-        for (std::uint16_t n = 40; n < 44; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
-        check(all, "Lance Soldier, Large Body, Gargoyle Warrior and Nightwalker streams are tracked and drivable; 309 is not");
+        bool all = !b2.Drivable(45, 2);
+        for (std::uint16_t n = 40; n < 45; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
+        check(all, "Lance Soldier, Large Body, Gargoyle Warrior, Nightwalker and Rapid Thruster streams are tracked and drivable; 309 is not");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins;
@@ -307,6 +309,21 @@ void testHelpers() {
         bool all = true;
         for (std::uint16_t n = 30; n < 33; ++n) all = all && skins.Drivable(n, 2) && skins.PoseAt(n, 2, sk) && sk.objectId == rows[n - 30].objectId;
         check(all, "Soldier skins 1838, 1839 and 1849 are tracked and drivable");
+    }
+    {  // each Rapid Thruster skin streams like the base family
+        em::Stream skins;
+        std::vector<EnemyMotionEntry> rows;
+        std::uint16_t net = 34;
+        for (const auto oid : em::kRapidThrusterSkinObjectIds) {
+            auto r = row(net++, 0.0f);
+            r.objectId = oid;
+            rows.push_back(r);
+        }
+        skins.Ingest(motion(3, 1, 10, rows), 1); skins.Ingest(motion(3, 2, 13, rows), 2); skins.Tick(2);
+        em::Pose sk;
+        bool all = true;
+        for (std::uint16_t n = 34; n < 36; ++n) all = all && skins.Drivable(n, 2) && skins.PoseAt(n, 2, sk) && sk.objectId == rows[n - 34].objectId;
+        check(all, "Rapid Thruster skins 1843 and 1889 are tracked and drivable");
     }
     // Hook Bat lane rev2: a HOST stall (frames stop, then resume at the normal rate from where they
     // stopped) must not pin the cursor at newest-1 forever: the lag returns to about DELAY-3 and trace frames
