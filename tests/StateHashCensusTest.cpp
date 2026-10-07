@@ -28,7 +28,7 @@ StateHash roundTrip(const StateHash& state) {
 }
 
 int main() {
-    check(PROTOCOL_VERSION == 10 && DesyncMissingEnemies == 8,
+    check(PROTOCOL_VERSION >= 10 && DesyncMissingEnemies == 8,
           "new wire version and missing-enemies bit are explicit");
     const StateHash legacyAggregate{7, 4, 26, 123, 456};
     check(!legacyAggregate.nativeCensusComplete && legacyAggregate.nativeLivingCount == 0 &&

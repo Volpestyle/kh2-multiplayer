@@ -507,9 +507,20 @@ void TestWorldRetirement() {
     ResetWorld(); g_host.enemies[1].hp = 100;
     Check(ClientFrame(CaptureNativeCensus()) && Read<int>(status) == 100,
           "current-generation client HP application remains enabled");
-    ResetWorld(); g_host.enemies[1].dead = true;
+    // 8f6a386: an ordinary host tombstone applies only to a body with a
+    // continuous living binding from the immediately preceding frame.
+    ResetWorld(); g_hitTraceFrame = 40; g_host.enemies[1].dead = true;
+    Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 0 && Read<int>(status) == 1000,
+          "current-generation death without an established binding is held");
+    ResetWorld(); g_hitTraceFrame = 40; g_host.enemies[1].hp = 1000;
+    Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 0 && Read<int>(status) == 1000,
+          "current-generation live frame establishes a continuous ordinary binding");
+    g_host.enemies[1].dead = true; g_hitTraceFrame = 41;
     Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 1 && Read<int>(status) == 0,
           "current-generation native death remains enabled exactly once");
+    g_hitTraceFrame = 42;
+    ClientFrame(CaptureNativeCensus());
+    Check(deathCalls == 1 && Read<int>(status) == 0, "applied native death is never repeated");
 
     ResetWorld(); p::g_desired[0x10] = 1; p::g_desired[0x11] = 2;
     g_bridge.replaceGenerationOnRead = 5;

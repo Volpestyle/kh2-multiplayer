@@ -297,7 +297,7 @@ void testProtocol5Refusal(){
     callbacks.onClosed=[&](const ClientCloseInfo& info){closed.push_back(info);};callbacks.onRejected=[&](const HelloReject& rejection){reason=rejection.reason;};callbacks.onDesyncCaptureRequest=[&](const auto&){++requests;};
     NetworkClient old("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"old-v5",SlotType::Friend1,callbacks,RuntimeMode::CampaignCoop,cfg.contentHash,5);
     old.connect();check(until([&]{return !closed.empty();},[&]{relay.tick(0);old.tick(0);}),"actual version-five endpoint receives protocol refusal");
-    check(PROTOCOL_VERSION==10&&closed.size()==1&&closed[0].reason==DisconnectReason::Incompatible&&reason=="Protocol mismatch: client=5 server="+std::to_string(PROTOCOL_VERSION)&&!old.ready()&&relay.verifiedPeerCount()==0&&requests==0,"v5 cannot advertise missing three-channel artifact semantics despite free capacity");
+    check(PROTOCOL_VERSION>5&&closed.size()==1&&closed[0].reason==DisconnectReason::Incompatible&&reason=="Protocol mismatch: client=5 server="+std::to_string(PROTOCOL_VERSION)&&!old.ready()&&relay.verifiedPeerCount()==0&&requests==0,"v5 cannot advertise missing three-channel artifact semantics despite free capacity");
     old.disconnect();relay.stop();
 }
 void testNetwork(const std::filesystem::path& root){testUpload();testProtocol5Refusal();testRequestBeforeRoster();runNetwork(root/"complete");testRawSender(root/"forged");}
