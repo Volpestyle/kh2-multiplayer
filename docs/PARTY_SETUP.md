@@ -241,12 +241,12 @@ PartyIntent leaves VUH-1519's own open items open: mixed layouts, empty seats an
 
 ## Per-seat kits (party kits, candidate)
 
-Default off. **`KH2COOP_PARTY_KITS=1` on every machine** of a party-native session lets each seat show its owner's chosen kit. The owner chooses with `KH2COOP_PLAYER_KIT=0x5A`. That flag is now allowed with `KH2COOP_PARTY_NATIVE`, but only when `PARTY_KITS` is set. `KH2COOP_REMOTE_KIT_SLOT` stays exclusive. Qualified kits are Sora `0x54` and Roxas `0x5A`, in the pinned rooms only.
+Default off. **`KH2COOP_PARTY_KITS=1` on every machine** of a party-native session lets each seat show its owner's chosen kit. The owner chooses with `KH2COOP_PLAYER_KIT=0x5A`. That flag is now allowed with `KH2COOP_PARTY_NATIVE`, but only when `PARTY_KITS` is set. `KH2COOP_REMOTE_KIT_SLOT` stays exclusive. Qualified kits are Sora `0x54`, Roxas `0x5A` and Mickey `0x5B`, in the pinned rooms only.
 
 **Signal.**
 - **Owner:** in the combined path, it streams its chosen kit in `AvatarState.character`. That is roster 1 for Roxas, and it is stable per launch, not the per-frame actual member 0.
 - **Host:** latches each remote's roster from validated poses only. It publishes intents and layouts only once every remote's kit is known and supported. Every kit vector it publishes goes into `PartyIntent.kits`, with seat 0 being the host itself. A changed vector produces new versions.
-- **Wire:** the rule allows Sora or Roxas in any player seat, and the legacy `kits[0]=0` still means Sora. No protocol change: still v14, no new packet.
+- **Wire:** the rule allows any qualified kit in any player seat, and the legacy `kits[0]=0` still means Sora. No protocol change: still v14, no new packet.
 
 **Each machine.**
 - Kits belong to the roster. They are stored from the newest accepted intent, retired on a roster change, and a layout plan borrows them. In kits mode a layout plan with no kits yet is Unsupported.
@@ -258,9 +258,9 @@ Default off. **`KH2COOP_PARTY_KITS=1` on every machine** of a party-native sessi
 
 **Puppets.** With two clones of different kits, each puppet drives the clone whose objentry equals its owner's kit (`PuppetKit`). The entity-list order no longer matters.
 
-**Private status.** In kits mode, Roxas (90, key 14) clones and a Roxas canonical local are promoted, each checked against its own key. The clone keys must equal the kits written, or `BindFault(16)`.
+**Private status.** In kits mode, Roxas (90, key 14) and Mickey (91, key 4, form 11) clones and canonical locals are promoted, each checked against its own key (the build line names it: `key=`). The clone keys must equal the kits written, or `BindFault(16)`.
 
-**Live status: unproven.** Party kits have not run live. Their first live run is a three-game fixture with slot 1 as Roxas.
+**Live status:** Roxas passed live in run `20261007-090953`, and Mickey in run `20261007-115923` (see `PLAYER_KITS.md`, Evidence).
 - **Unknowns:** a Roxas canonical local in a party stamp, a Roxas clone among three players, the key-14 clone's SAVE veto, and 04/0A with Roxas.
 - **Command menu:** it is still unguarded with a kit (VUH-1509).
 

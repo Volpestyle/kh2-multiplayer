@@ -16,6 +16,7 @@ namespace kh2coop::inject::playerkit {
 // ---------------------------------------------------------------- policy
 // A qualified non-Sora kit of the reviewed table (kh2coop/PlayerKits.hpp); 0x323/0x5B: one fixture each.
 bool KitAllowed(std::uint16_t kit) { const auto* k = kh2coop::qualifiedKit(kit); return k && k->member != SORA; }
+bool SoloKitAllowed(std::uint16_t kit) { return KitAllowed(kit) && kh2coop::soloQualifiedKit(kit) != nullptr; }
 
 bool ParseKit(const char* text, std::uint16_t& kit) {
     kit = 0;
@@ -265,6 +266,10 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
         }
         if (n >= sizeof(text) || !ParseKit(text, kit)) {
             if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT=%s is not 0 or a qualified kit of the PlayerKits table (puppets stay blocked)", text);
+            return false;
+        }
+        if (kit != 0 && !combined && !SoloKitAllowed(kit)) {
+            if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT=%s (0x%X) is qualified for party kits only (KH2COOP_PARTY_NATIVE=1 + KH2COOP_PARTY_KITS=1); the solo path needs its own live run; not hooked", text, kit);
             return false;
         }
         if (kit != 0 && flags.party && !combined) {

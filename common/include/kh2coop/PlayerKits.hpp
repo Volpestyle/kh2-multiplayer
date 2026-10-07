@@ -6,8 +6,9 @@
 // look kits up here. Facts per row: vanilla 00objentry (VUH-1513 offline parse,
 // build/rig/vuh1513-player-class-kit-route-20261006-01/objentry-player-rows.tsv).
 //
-// A row's `qualified` flag changes ONLY in a commit whose evidence names that kit's own live
-// fixture run. Unqualified rows are listed (their stream roster code is real) but refused by
+// A row's `qualified` / `soloQualified` flag changes ONLY in a commit whose evidence names that kit's own
+// live fixture run on that path (`qualified`: party kits / any gate; `soloQualified`: the solo
+// KH2COOP_PLAYER_KIT path without party kits). Unqualified rows are listed (their stream roster code is real) but refused by
 // every admission gate. Standalone header: no protocol dependency (EntityHook cannot include
 // Protocol.hpp alongside HitChannel.hpp).
 // ============================================================================
@@ -26,14 +27,15 @@ struct KitProfile {
                               // 11 Default (the non-Sora characters' base form, not a drive form)
     bool playerClass;         // PLAYER-type row: may be a clone or a local
     bool qualified;           // admitted by every gate; flipped only with its own live fixture
+    bool soloQualified;       // also the solo KH2COOP_PLAYER_KIT path (no party kits); its own solo run
 };
 
 inline constexpr std::uint16_t KIT_SORA = 0x54;
 inline constexpr KitProfile kKits[] = {
-    {0x54, 0, "P_EX100", 1, 1, 0, true, true},            // Sora: VUH-1519/1786 live
-    {0x5A, 1, "P_EX110", 14, 9, 0, true, true},           // Roxas: party kits live PASS 20261007-090953
-    {0x323, 2, "P_EX110_BTLF", 14, 10, 10, true, false},  // Roxas dual-wield: form machinery (VUH-1509) first
-    {0x5B, 3, "P_EX200", 4, 28, 11, true, false},         // Mickey: status key 4 unmeasured
+    {0x54, 0, "P_EX100", 1, 1, 0, true, true, true},             // Sora: VUH-1519/1786 live
+    {0x5A, 1, "P_EX110", 14, 9, 0, true, true, true},            // Roxas: solo 20261006-233415, party kits 20261007-090953
+    {0x323, 2, "P_EX110_BTLF", 14, 10, 10, true, false, false},  // Roxas dual-wield: form machinery (VUH-1509) first
+    {0x5B, 3, "P_EX200", 4, 28, 11, true, true, false},          // Mickey: party kits fixture-03 PASS (20261007-115923); no solo run
 };
 
 // The party plan packs a roster code into 3 bits with 7 reserved for "invalid" (PartyNative KIT_CODE_INVALID):
@@ -45,6 +47,11 @@ static_assert(kitRostersBelowInvalidCode(), "a kit roster code collides with the
 inline const KitProfile* qualifiedKit(std::uint16_t member) {
     for (const auto& k : kKits) if (k.member == member && k.playerClass && k.qualified) return &k;
     return nullptr;
+}
+// The qualified profile that is also qualified for the solo KH2COOP_PLAYER_KIT path (no party kits), or nullptr.
+inline const KitProfile* soloQualifiedKit(std::uint16_t member) {
+    const auto* k = qualifiedKit(member);
+    return k && k->soloQualified ? k : nullptr;
 }
 // The qualified player-class profile with this roster/plan code, or nullptr.
 inline const KitProfile* qualifiedKitByRoster(std::uint8_t roster) {

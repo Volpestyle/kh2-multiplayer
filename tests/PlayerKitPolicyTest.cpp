@@ -25,7 +25,8 @@ int main() {
     CHECK("parse 90", ParseKit("90", k) && k == ROXAS);
     CHECK("refuse 803 (first run: Roxas only)", !ParseKit("803", k));
     CHECK("refuse 0x323", !ParseKit("0x323", k));
-    CHECK("refuse 91 (Mickey later)", !ParseKit("91", k));
+    CHECK("Mickey 91 accepted (qualified, run 20261007-115923)", ParseKit("91", k) && k == 91);
+    CHECK("refuse 803 (dual-wield later)", !ParseKit("803", k));
     CHECK("refuse sora id 84", !ParseKit("84", k));
     CHECK("refuse donald 92", !ParseKit("92", k));
     CHECK("refuse riku 2073", !ParseKit("2073", k));
@@ -38,7 +39,11 @@ int main() {
     CHECK("apply GoA", Decide(ROXAS, Ctx(4, SORA)) == Reason::Applied);
     CHECK("BB not qualified in the first run", Decide(ROXAS, Ctx(5, SORA)) == Reason::WorldNotQualified);
     CHECK("dual-wield disabled", Decide(ROXAS_DW, Ctx(4, SORA)) == Reason::Disabled);
-    CHECK("mickey disabled", Decide(MICKEY, Ctx(4, SORA)) == Reason::Disabled);
+    CHECK("Mickey applies", Decide(MICKEY, Ctx(4, SORA)) == Reason::Applied);
+    CHECK("solo: Roxas allowed", SoloKitAllowed(ROXAS));
+    CHECK("solo: Mickey refused (party kits only until a solo run)", !SoloKitAllowed(MICKEY));
+    CHECK("solo: Sora/0 are not kits", !SoloKitAllowed(SORA) && !SoloKitAllowed(0));
+    CHECK("dual-wield disabled", Decide(ROXAS_DW, Ctx(4, SORA)) == Reason::Disabled);
     CHECK("disabled kit 0", Decide(0, Ctx(4, SORA)) == Reason::Disabled);
     CHECK("world TT refused", Decide(ROXAS, Ctx(2, SORA)) == Reason::WorldNotQualified);
     CHECK("world NM refused", Decide(ROXAS, Ctx(14, 0x2B5)) == Reason::WorldNotQualified);

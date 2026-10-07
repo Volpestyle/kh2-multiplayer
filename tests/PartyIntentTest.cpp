@@ -44,7 +44,7 @@ void rules() {
     auto kit = goa; kit.kits[1] = 0x5A; check(validPartyIntent(kit, ids), "party kits: a Roxas remote seat is valid");
     kit = goa; kit.kits = {0x5A, 0x54, 0x5A}; check(validPartyIntent(kit, ids), "party kits: explicit seat-0 kit (Roxas host) is valid");
     kit = goa; kit.kits[0] = 0x54; check(validPartyIntent(kit, ids), "party kits: explicit seat-0 Sora is valid; legacy 0 stays valid");
-    auto bad = goa; bad.kits[1] = 0x5B; check(!validPartyIntent(bad, ids), "unqualified kit (Mickey) refused");
+    auto bad = goa; bad.kits[1] = 0x323; check(!validPartyIntent(bad, ids), "unqualified kit (dual-wield Roxas) refused");
     bad = goa; bad.kits[0] = 0x323; check(!validPartyIntent(bad, ids), "unqualified seat-0 kit (dual-wield Roxas) refused");
     bad = goa; bad.kits[2] = 0; check(!validPartyIntent(bad, ids), "a remote-player seat needs a kit");
     bad = two; bad.kits[2] = 0x54; check(!validPartyIntent(bad, {11, 12, 0}), "AI seat kit must be 0");

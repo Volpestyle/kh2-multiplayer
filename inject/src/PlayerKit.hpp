@@ -14,8 +14,8 @@
 //   is the same downstream state E1 produced by editing the MEMT entry.
 //   The MEMT itself is never written.
 //
-// Kits: the qualified non-Sora rows of kh2coop/PlayerKits.hpp (today Roxas 0x5A, P_EX110); other
-// listed kits (dual-wield Roxas 0x323, Mickey 0x5B) are refused until each has its own fixture.
+// Kits: the qualified non-Sora rows of kh2coop/PlayerKits.hpp (today Roxas 0x5A, P_EX110, and Mickey 0x5B,
+// P_EX200); dual-wield Roxas 0x323 is refused until it has its own fixture.
 // 0 / unset = Sora (no hook, no reads).
 // ============================================================================
 
@@ -43,6 +43,8 @@ struct LoadContext {
     std::uint16_t resolved0 = 0;   // what 3E2EB0 just resolved for member 0
 };
 bool KitAllowed(std::uint16_t kit);
+// The solo path (KH2COOP_PLAYER_KIT without party kits): KitAllowed and the row's soloQualified flag.
+bool SoloKitAllowed(std::uint16_t kit);
 // A qualified non-Sora kit (e.g. "0x5A"/"90" -> Roxas), "0"/empty -> off; false on anything else.
 bool ParseKit(const char* text, std::uint16_t& kit);
 bool WorldQualified(std::uint8_t world);   // first live run: HB(4) only; BB(5) later

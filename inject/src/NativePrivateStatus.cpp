@@ -81,7 +81,7 @@ PartyPending g_party{};
 //    canonical local's key differs from this machine's expected own kit.
 std::atomic<unsigned> g_bindFault{};
 struct Event { unsigned kind{},thread{}; std::uint64_t serial{}; uintptr_t actor{},local{},status{},localStatus{}; int index{},hp{},localHp{};
-    std::uint32_t factoryId{}; unsigned order{},role{},frame{}; }; // kind 4 (party build order) only
+    std::uint32_t factoryId{}; unsigned order{},role{},frame{}; int key{}; }; // kind 4 (party build order) only
 std::atomic<unsigned> g_ownerFrames{}; // owner Drain calls (one per game frame); N-c build-line frame
 std::array<Event,128> g_queue{};
 SRWLOCK g_queueLock=SRWLOCK_INIT;
@@ -178,8 +178,9 @@ void Publish(unsigned kind,const Selection& s) {
     ReleaseSRWLockExclusive(&g_queueLock);
 }
 // Owner thread. Build order of every Sora in a party stamp (S1 evidence: which seat is last).
-void PublishBuild(unsigned order,std::uint32_t id,unsigned role,uintptr_t actor,std::uint64_t serial) {
-    Event e{};e.kind=4;e.thread=GetCurrentThreadId();e.order=order;e.factoryId=id;e.role=role;e.actor=actor;e.serial=serial;e.frame=g_ownerFrames.load();
+// key: the promoted build's status key (the clone's private record; the local's own record), from its descriptor.
+void PublishBuild(unsigned order,std::uint32_t id,unsigned role,uintptr_t actor,std::uint64_t serial,int key) {
+    Event e{};e.kind=4;e.thread=GetCurrentThreadId();e.order=order;e.factoryId=id;e.role=role;e.actor=actor;e.serial=serial;e.frame=g_ownerFrames.load();e.key=key;
     if(!TryAcquireSRWLockExclusive(&g_queueLock)){g_drops.fetch_add(1);return;}
     if(g_count==g_queue.size())g_drops.fetch_add(1);
     else {g_queue[(g_read+g_count)%g_queue.size()]=e;++g_count;}
@@ -246,7 +247,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             else if(top->candidate) {
                 if(g_party.count>=PartyClones || !Same(g_party.stamp,top->stamp) || (top->key!=1 && !(top->key!=0 && partynative::KitsActive())))Fault(); // any qualified kit key (the table)
                 else {const unsigned k=g_party.count++;g_party.actor[k]=top->actor;g_party.status[k]=top->status;g_party.serial[k]=top->serial;g_party.key[k]=top->key;
-                    PublishBuild(++g_party.builds,top->factoryId,1,top->actor,top->serial);}
+                    PublishBuild(++g_party.builds,top->factoryId,1,top->actor,top->serial,top->key);}
             }
             else g_pending={top->stamp,top->actor,top->status,top->serial,true,top->key};
         } else if(top && top->partyLocal) {
@@ -254,7 +255,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             // records, and this construction must take the canonical pointer with an
             // ordinary, distinct record. Otherwise refuse; nothing is rebound.
             const PartyPending p=g_party;g_party.bound=true;
-            PublishBuild(++g_party.builds,top->factoryId,2,result,0);
+            PublishBuild(++g_party.builds,top->factoryId,2,result,0,top->key);
             uintptr_t status=0,player=0;Stamp after{};unsigned reason=0;
             if(p.count!=PartyClones)reason=12;
             else if(!result || result==p.actor[0] || result==p.actor[1])reason=1;
@@ -544,7 +545,7 @@ void Drain(LogFn log) {
             ReleaseSRWLockExclusive(&g_queueLock);
         }
         if(!have)break;
-        if(e.kind==4){log("[privatestatus] party build order=%u id=%u role=%s actor=%llX serial=%llu tid=%u frame=%u",e.order,e.factoryId,e.role==2?"local":"clone",e.actor,e.serial,e.thread,e.frame);continue;}
+        if(e.kind==4){log("[privatestatus] party build order=%u id=%u role=%s actor=%llX serial=%llu tid=%u frame=%u key=%d",e.order,e.factoryId,e.role==2?"local":"clone",e.actor,e.serial,e.thread,e.frame,e.key);continue;}
         log("[privatestatus] kind=%u serial=%llu tid=%u actor=%llX local=%llX status=%llX localStatus=%llX index=%d hp=%d localHp=%d",e.kind,e.serial,e.thread,e.actor,e.local,e.status,e.localStatus,e.index,e.hp,e.localHp);
     }
     // S2: claimed clones whose third Sora never came. Once the canonical pointer has rested on a
