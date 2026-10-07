@@ -55,7 +55,8 @@ class SteamTransport final:public Transport {
         queue().clear();for(auto& [id,p]:peers_){(void)id;p->connected=false;p->closed=true;}
     }
     std::deque<steam::Frame>& queue(){return server_?hub_->server:hub_->client;}
-    Peer* find(TransportPeer* p)const{for(const auto& [id,v]:peers_){(void)id;if(reinterpret_cast<TransportPeer*>(v.get())==p)return v.get();}return nullptr;}
+    Peer* find(TransportPeer* p)const{ // non-const Peer: joiner disconnect() marks it closed
+for(const auto& [id,v]:peers_){(void)id;if(reinterpret_cast<TransportPeer*>(v.get())==p)return v.get();}return nullptr;}
     Peer* peer(std::uint64_t id){auto& p=peers_[id];if(!p)p=std::make_unique<Peer>(Peer{id});return p.get();}
 public:
     SteamTransport(std::shared_ptr<Hub> h,bool s,bool l):hub_(std::move(h)),server_(s),local_(l){}
@@ -96,8 +97,9 @@ public:
         auto& q=queue();steam::Frame f;Peer* p=nullptr;
         for(;;){
             if(q.empty())return 0;f=std::move(q.front());q.pop_front();p=peer(f.peer);
-            if(joiner()&&f.op==steam::Op::Disconnected&&stale_[f.peer]){--stale_[f.peer];continue;} // answer to our own Close
-            if(joiner()&&f.op==steam::Op::Data&&p->closed)continue; // overtaken by our own Close
+            // The broker answers each Close in order, before any later Join: while an answer is owed, every
+            // frame for that peer (Connected, Data, Disconnected) belongs to the old connection.
+            if(joiner()&&stale_[f.peer]){if(f.op==steam::Op::Disconnected)--stale_[f.peer];continue;}
             break;
         }
         e.peer=reinterpret_cast<TransportPeer*>(p);
@@ -114,9 +116,14 @@ public:
         f.op=steam::Op::Send;return hub_->command(f);
     }
     void disconnect(TransportPeer* p,std::uint32_t reason)override{
-        const auto* v=find(p);if(!v||hub_->dead)return;
+        auto* v=find(p);if(!v||hub_->dead)return;
         if(local_||(server_&&v->id==hub_->identity)){
             hub_->localConnected=false;hub_->push(hub_->server,{steam::Op::Disconnected,v->id,reason});hub_->push(hub_->client,{steam::Op::Disconnected,v->id,reason});
+        }else if(joiner()){ // one Close per live peer; its answer is owed (see service)
+            if(v->closed)return;
+            v->connected=false;v->closed=true;
+            if(!hub_->command({steam::Op::Close,v->id,reason})){terminate();return;}
+            ++stale_[v->id];
         }else hub_->command({steam::Op::Close,v->id,reason});
     }
     void disconnectLater(TransportPeer* p,std::uint32_t reason)override{disconnect(p,reason);}

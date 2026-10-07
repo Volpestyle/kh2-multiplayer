@@ -67,7 +67,7 @@ struct Link:BrokerLink {
     void close()override{opened=false;broker.stop();}
 };
 }
-int main(){
+int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reaches the log
     std::uint64_t id=0;check(parseId(std::to_string(Host),id)&&id==Host,"SteamID64 parsed exactly");
     for(const auto& s:{"480","0","+76561198000000001","76561198000000001x","76561198000000001 ","76561198000000000"}){
         if(std::string(s)=="76561198000000000")continue;check(!parseId(s,id),"invalid Steam ID refused");}
@@ -229,6 +229,45 @@ int main(){
         check(t.createClient(1,3)&&t.connect(std::to_string(Host),0,3,resolved),"race: same transport re-Joins");
         drain(80);check(connects==2&&losses==0&&lf->connected(),"race: second connection established");
         host.disconnect();drain(10);}
+    // G8 rev2 races (review): while a Close answer is owed, every frame for that peer belongs to the old
+    // connection. A: a Connected that overtook our Close at the connect deadline. B: old Data after an
+    // immediate re-connect. C: a joiner's disconnect(peer) owes its own answer too.
+    {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
+        auto ht=makeSteamTransports(std::make_unique<Link>(a),true,{Guest});
+        SessionConfig config;config.gameBuild="build";config.modHash="none";config.contentHash="none";config.authenticatedHostIdentity="steam:"+std::to_string(Host);
+        SessionHost server(config,{},std::move(ht.server));server.start();
+        NetworkClient host("local",0,"build","none",config.authenticatedHostIdentity,SlotType::Player,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));host.connect();
+        auto link=std::make_unique<Link>(b);auto* lf=link.get();auto ct=makeSteamTransports(std::move(link),false,{});auto& t=*ct.client;
+        TransportEvent e;unsigned connects=0,losses=0;
+        auto drain=[&](unsigned rounds){for(unsigned n=0;n<rounds;++n){server.tick();host.tick();while(t.service(e,0)>0){
+            if(e.type==TransportEventType::Connect)++connects;else if(e.type==TransportEventType::Disconnect)++losses;
+            else if(e.type==TransportEventType::Receive)e.packet.reset();}}};
+        auto hostSide=[&]{std::uint32_t h=0;for(const auto& [k,route]:bus.routes)if(route.first==&b){h=k;break;}return h;};
+        bool resolved=false;
+        // A: Join, the host accepts, the friend broker has queued Connected; the deadline closes first.
+        t.createClient(1,3);auto* p1=t.connect(std::to_string(Host),0,3,resolved);
+        t.service(e,0);                       // pump: the Join reaches the broker (nothing to read yet)
+        for(unsigned n=0;n<4;++n){server.tick();host.tick();}
+        lf->broker.tick(++lf->clock);         // Connected now waits in the friend broker
+        t.close();drain(40);
+        check(p1&&connects==0&&losses==0&&lf->connected(),"race A: a Connected that overtook our Close is swallowed with its answer");
+        t.createClient(1,3);t.connect(std::to_string(Host),0,3,resolved);drain(80);
+        check(connects==1&&losses==0,"race A: the re-Join connects once");
+        if(const auto h=hostSide();h&&bus.routes.count(h)){const auto [to,remote]=bus.routes.at(h);(void)to; // test-only drop; a missing route fails below
+         a.events.push_back({h,0,Guest,4,true,true,0});b.events.push_back({remote,0,Host,4,true,true,0});bus.routes.erase(remote);bus.routes.erase(h);}
+        drain(40);check(losses==1,"race A: a later genuine drop is still delivered (no leaked Close debt)");
+        // B: connected again, host Data in flight, close() then an immediate re-connect before any service.
+        t.createClient(1,3);t.connect(std::to_string(Host),0,3,resolved);drain(80);
+        check(connects==2,"race B: connected");
+        const std::vector<std::uint8_t> oldData{0x4b,0x53,1,0,1,0,0,0,9};check(a.send(hostSide(),oldData,true),"race B: host data in flight");
+        lf->broker.tick(++lf->clock);
+        t.close();t.createClient(1,3);auto* live=t.connect(std::to_string(Host),0,3,resolved);drain(80);
+        check(connects==3&&losses==1&&lf->connected(),"race B: old data after an immediate re-connect is swallowed; new connection up");
+        // C: the joiner's own disconnect(peer), then an immediate re-connect; the answer arrives late.
+        check(live!=nullptr,"race C: live peer from race B");
+        t.disconnect(live,0);t.createClient(1,3);t.connect(std::to_string(Host),0,3,resolved);drain(80);
+        check(connects==4&&losses==1&&lf->connected(),"race C: disconnect(peer)'s own answer is not taken as a loss of the re-Join");
+        host.disconnect();drain(10);}
     // VUH-1493 G7/G8 reconnect controls through the actual broker core, transport,
     // NetworkClient and SessionHost; only the Steam API and the OS pipe are replaced.
     {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
@@ -246,7 +285,7 @@ int main(){
         pump(friend1.get());check(server.verifiedPeerCount()==2,"reconnect control: friend admitted over mocked Steam");
         std::uint32_t hostSide=0;for(const auto& [h,route]:bus.routes)if(route.first==&b){hostSide=h;break;}
         check(hostSide!=0,"reconnect control: host-side Steam connection located");
-        {const auto [to,remote]=bus.routes.at(hostSide);(void)to; // Steam reports ProblemDetectedLocally on both ends
+        if(bus.routes.count(hostSide)){const auto [to,remote]=bus.routes.at(hostSide);(void)to; // Steam reports ProblemDetectedLocally on both ends
          a.events.push_back({hostSide,0,Guest,4,true,true,0});b.events.push_back({remote,0,Host,4,true,true,0});
          bus.routes.erase(remote);bus.routes.erase(hostSide);}
         pump(friend1.get());

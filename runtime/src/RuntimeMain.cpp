@@ -797,7 +797,7 @@ int main(int argc, char* argv[]) {
             (!options.steamHost && !options.steamAllow.empty()) ||
             (!options.steamHost && options.config.ownedSlot == kh2coop::SlotType::Player) ||
             (options.steamHost && options.config.ownedSlot != kh2coop::SlotType::Player)) {
-            std::cerr << "[Runtime] Steam requires explicit --pid, host Player with --steam-allow, or join Friend slot\n"; return 1;
+            std::cerr << "[Runtime] Steam requires explicit --pid and either a host Player with --steam-allow (or --steam-listener-probe alone) or --steam-join with a Friend slot\n"; return 1;
         }
         steamTransports = kh2coop::makeSteamTransports(*options.pid, options.steamHost, options.steamAllow,
                                                        options.steamListenerProbe);

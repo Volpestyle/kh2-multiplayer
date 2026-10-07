@@ -157,8 +157,12 @@ NetworkClient and SessionHost (only the Steam API and the OS pipe are mocked). T
     rejoin attempts.
   - The broker lets a joiner Join its **same** host again once the previous connection is gone. Another
     host, a second Join while connected, and a Join from a hosting attachment are still refused.
-  - The broker's answer to the joiner's own Close, and data that the Close overtakes, are swallowed.
-    They are not reported as a loss or a protocol failure.
+  - Every Close a joiner sends, from `close()` or `disconnect(peer)`, owes one answer. The broker answers
+    each Close in order, before any later Join. So while an answer is owed, every frame for that peer
+    (Connected, Data, Disconnected) belongs to the old connection and is dropped. The owed Disconnected
+    clears the debt.
+  - A Connected that overtook the Close at the connect deadline cannot leave a debt that would later
+    swallow a genuine drop. Old Data that arrives after an immediate re-connect cannot fail the hub.
   - IPC errors and transport destruction still end the attachment.
   - The runtime's bounded recovery therefore re-Joins over Steam.
 - **Loss of the broker attachment (pipe).** That runtime's session ends and cannot reconnect in place. A
