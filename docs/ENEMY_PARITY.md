@@ -754,6 +754,7 @@ For rooms whose spawner emits enemies over time based on player position
 **Protocol 13 contract: `EnemyMotion` (type 44).**
 - Payload: epoch, a nonzero producer sequence, host frame, and up to 32 rows of `{netId, objectId, motionId, motionTime, position, rotationY, alive}` (18 + 31·n bytes).
 - Codec bounds: `motionId < 4096`, `0 <= motionTime <= 10000`, `|rotationY| <= 64`, `|x|,|y|,|z| <= 1e5`, finite values, unique nonzero netIds.
+- Client spawn bound: a stream pose more than 8000 u from the copy's spawn point is refused (the copy stays on local AI), and the first 16 refusals are logged as `refused-far`. It was 2000 until live fixture-03, where it acted as a leash: the host's Sora drifted about 1300 u while "colocated", its Shadows chased him up to 3103 u from their spawns, and 4112 refused poses sent those copies back to local AI. Positions and the negative control then failed, and nothing was driven when the mute began.
 - The host sends it every 3 frames, for each bound spawn that is announced, living, unparented and allowlisted (round-robin start past 32). The allowlist is objectId 302, `M_EX020` Shadow.
 - **Relay:** accepts it from the host only, for the current room/manifest epoch, with a strictly increasing sequence. It forwards it unreliably and never caches or replays it.
 - It is not material world state, so resync and StateHash are unchanged.

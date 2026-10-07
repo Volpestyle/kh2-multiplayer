@@ -4141,8 +4141,12 @@ enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     if (!g_mirror.PoseAt(out.netId, g_mirrorFrame, out) || out.objectId != s.objectId) return Gate::Bound;
     // S5: a stream pose far from where this spawn appeared is refused, never driven.
     const float dx = out.position.x - s.spawnPos.x, dy = out.position.y - s.spawnPos.y, dz = out.position.z - s.spawnPos.z;
-    if (!(dx * dx + dy * dy + dz * dz <= enemymirror::kMaxFromSpawn * enemymirror::kMaxFromSpawn)) {
-        ++g_mirrorRefusedFar;
+    const float d2 = dx * dx + dy * dy + dz * dz;
+    if (!(d2 <= enemymirror::kMaxFromSpawn * enemymirror::kMaxFromSpawn)) {
+        // The first few are logged: a refusal releases the copy to local AI, so it must be visible.
+        if (g_mirrorRefusedFar++ < 16 && g_log)
+            g_log("[enemy-mirror] refused-far frame=%u netId=%u distance=%.0f limit=%.0f", g_mirrorFrame, out.netId,
+                  std::isfinite(d2) ? std::sqrt(d2) : -1.0f, enemymirror::kMaxFromSpawn);
         return Gate::Bound;
     }
     return Gate::Drive;

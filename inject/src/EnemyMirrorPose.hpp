@@ -31,7 +31,12 @@ inline constexpr std::uint32_t kBlendFrames = 8;      // take-over position blen
 inline constexpr std::uint32_t kGapTolerance = 4;     // missed updates within a run (S6), not a take-over
 inline constexpr std::uint32_t kSpawnSettleFrames = 60; // bound this long before the first take-over (S7)
 inline constexpr float kRestartBackFrames = 10.0f;    // same id, time back by more: re-issue the set (S2)
-inline constexpr float kMaxFromSpawn = 2000.0f;       // client refuses a stream pose farther from the spawn point (S5)
+// Client refuses a stream pose farther than this from the spawn point (S5, a
+// sanity bound against garbage, not a leash). 2000 was a leash: in live
+// fixture-03 the host's Sora drifted ~1300 u during a colocated segment and its
+// Shadows legitimately chased him up to 3103 u from their BB-courtyard spawns, so
+// the client refused 4112 poses and those copies fell back to local AI.
+inline constexpr float kMaxFromSpawn = 8000.0f;
 inline constexpr std::uint32_t kTraceEvery = 30;      // trace lines on host frames that are multiples of this
 inline constexpr std::size_t kRing = 8;
 inline constexpr std::size_t kMaxTracks = 256;        // client stream tracks per epoch (defence in depth)

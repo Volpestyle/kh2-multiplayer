@@ -238,6 +238,9 @@ void testHelpers() {
               em::BlendWeight(1) < 1.0f && em::BlendWeight(0) == 1.0f,
           "take-over blend weight rises monotonically to the stream pose");
     check(em::FamilyAllowed(302) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0), "only the Shadow family is allowlisted");
+    // Live fixture-03: host Shadows chased the host's Sora 3103 u from their BB-courtyard spawns.
+    check(em::kMaxFromSpawn >= 2.0f * 3103.0f && em::kMaxFromSpawn < ENEMY_MOTION_MAX_COORD,
+          "the S5 spawn bound is a garbage bound, not a leash (2x the live courtyard chase, below the codec bound)");
 }
 
 void testRelay() {
