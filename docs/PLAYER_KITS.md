@@ -17,6 +17,8 @@ Qualified scope: **world 4 (Hollow Bastion, including GoA `04/1A`) and kit 0x5A
 only**. World 5, dual-wield Roxas (`0x323`) and Mickey (`0x5B`) each need their
 own fixture before being allowed.
 
+**VUH-1519 flag matrix.** `KH2COOP_PLAYER_KIT`, `KH2COOP_REMOTE_KIT_SLOT` and `KH2COOP_PARTY_NATIVE` are mutually exclusive, and each conflicting side refuses. The party-native observer shares this module's `3E2EB0` post-hook. The order per load is kit, then remote, then observer, all inside one SEH scope.
+
 ## How it works
 
 On every area load, `39C860` calls `3E2EB0`. That function resolves the MEMT into

@@ -78,6 +78,27 @@ std::uint8_t RosterForActor(std::uintptr_t actor);
 // True once a kit was requested (non-"0" env): only then may callers read the roster.
 bool KitRequested();
 
+// VUH-1519 flag matrix: KH2COOP_PARTY_NATIVE is mutually exclusive with KH2COOP_PLAYER_KIT and
+// KH2COOP_REMOTE_KIT_SLOT. "Set" = present, non-empty and not exactly "0" (over-long counts as set).
+// Every conflicting combination refuses each side that conflicts (fail closed, logged).
+struct FlagMatrix { bool kit = false, remote = false, party = false; };
+bool FlagSet(const char* text);
+// Pure: the flags `party` conflicts with (bit0 kit, bit1 remote); 0 when none or party unset.
+unsigned PartyConflicts(const FlagMatrix& f);
+// Native: reads the three environment variables (no game memory).
+FlagMatrix ReadFlagMatrix();
+
+// VUH-1519: a second consumer of the same per-load resolver post-hook (MinHook
+// allows one hook per target). Hook order per load, one SEH scope: local kit,
+// then remote kit member, then the observer. The observer runs on the loading
+// thread, must not log or allocate; its log callback runs after the kit and
+// remote lines, outside SEH. Must be set before Install: with an observer set,
+// Install hooks 3E2EB0 even when no kit is requested, and refuses to combine
+// it with a kit or remote mode.
+using ResolveObserver = void (*)(std::uint16_t* resolved, const LoadContext& context);
+using ResolveObserverLog = void (*)(LogFn log);
+void SetResolveObserver(ResolveObserver observer, ResolveObserverLog log);
+
 // Puppet collision guard (lead decision, VUH-1513): a selector-0 friend puppet
 // resolves through the same member 0, so with any non-zero KH2COOP_PLAYER_KIT
 // (even a refused one) the native-Sora clone puppet path must refuse instead of

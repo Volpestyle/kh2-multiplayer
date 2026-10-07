@@ -167,6 +167,15 @@ namespace kh2coop::inject::lifecycletrace {
 bool PopEvent(Event&) { return false; }
 Stats GetStats() { return {}; }
 }
+// VUH-1519 party-native is default off; these harnesses keep it inert (its policy has its own controls).
+namespace kh2coop::inject::partynative {
+bool Requested() { return false; }
+void NoteLayout(const PartyLayout&, std::uint8_t, std::uint32_t, const std::array<std::uint64_t, 3>&, bool) {}
+void NoteReapply(const PartyReapply&, std::uint32_t) {}
+void Observe(std::uint32_t, const std::array<std::uint64_t, 3>&, std::uint8_t, bool) {}
+bool HostLayoutToPublish(std::uint32_t, const RoomTransition&, const std::array<std::uint64_t, 3>&, PartyLayout&) { return false; }
+void NoteHostSent(const PartyLayout&, std::uint32_t) {}
+}
 
 namespace {
 std::deque<kh2coop::inject::spawncontroller::NativeConstructionLineage> constructionRows;

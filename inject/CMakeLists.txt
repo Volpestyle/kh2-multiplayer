@@ -52,6 +52,7 @@ add_library(kh2coop_inject SHARED
     src/RenderHook.cpp
     src/Warp.cpp
     src/PlayerKit.cpp
+    src/PartyNative.cpp
     src/SaveGuard.cpp
     src/CrashDump.cpp
     src/EnemySync.cpp
@@ -107,5 +108,5 @@ set_target_properties(kh2coop_inject PROPERTIES
 )
 
 if(MSVC)
-    set_source_files_properties(src/NativePrivateStatus.cpp PROPERTIES COMPILE_OPTIONS "/W4;/WX")
+    set_source_files_properties(src/NativePrivateStatus.cpp src/PartyNative.cpp PROPERTIES COMPILE_OPTIONS "/W4;/WX")
 endif()

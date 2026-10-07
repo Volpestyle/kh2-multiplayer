@@ -50,6 +50,23 @@ veto itself wasn't exercised. **Merge point:** `vuh1515-target-remote` also wide
 `Profile()`'s row gate, for the BB courtyard. Whichever lands second must keep both
 alternatives.
 
+**Two-clone party profile (VUH-1519).** With `KH2COOP_PARTY_NATIVE=1`, a second profile also qualifies when all of these hold:
+- GoA;
+- the native row `00/01/02/12`, untouched;
+- PartyNative replaced members 1/2 with Sora for this load.
+
+In such a load the constructor promotes the first two Sora builds to clones, and the third must take the canonical pointer. Failures each have a reason code:
+
+| Reason | Meaning |
+|---|---|
+| 11 | The stamp ended unbound |
+| 12 | The local Sora arrived before both clones |
+| 13 | An extra Sora appeared |
+| 14 | A clone record changed |
+| 15 | The canonical player holds a private record (missing third Sora) |
+
+Each reason disarms selection, and `Ready()` then turns party-native off for later loads. A `party build order=… frame=…` receipt is logged per Sora, and the stats line ends with `party=claimed/count/bound`. A damage1 hit does not commit through `3C2120`: the vetoes counted are the settle commits, one per private record. See `PARTY_SETUP.md` for the live PASS.
+
 ## What it changes natively
 
 | Native boundary | Action | Preserved |

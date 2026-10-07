@@ -1,6 +1,7 @@
 #include "NativePrivateStatus.hpp"
 #include "NativePrivateStatusPins.hpp"
 #include "NativeSpawnController.hpp"
+#include "PartyNative.hpp"
 #include "PlayerKit.hpp"
 #include "Warp.hpp"
 #include <Windows.h>
@@ -42,6 +43,10 @@ struct Selection {
     std::uint64_t serial{};
     int key{1}; // status key of the selected clone descriptor (1 Sora; 14 Roxas, remote kit only)
     bool selected{},constructor{},fresh{},used{};
+    // VUH-1519 party profile: an ordinary factory call in a party stamp (candidate); the
+    // constructor promotes a Sora build to selected (a clone) or partyLocal (the last one).
+    bool candidate{},partyLocal{};
+    std::uint32_t factoryId{};
 };
 // Never stores caller stack pointers, only numeric stack anchors and owned POD.
 #include "NativePrivateStatusScope.inc"
@@ -51,11 +56,24 @@ struct Selection {
 struct Pending { Stamp stamp{}; uintptr_t actor{},status{}; std::uint64_t serial{}; bool armed{}; int key{1}; };
 Stamp g_spentStamp{};bool g_spent{};
 Pending g_pending{}; // Only verified native diagnostic owner accesses this POD.
+// VUH-1519 party profile (two clones). Owner thread only, like g_pending. In a party stamp
+// every Sora built before the last is a clone: 3A7AF4 stores each player-class actor as
+// [2A105D0], so the last Sora built keeps the canonical pointer (VUH-1489 actor fix; on main
+// the player seat is built first). Only Sora (key 1) is promoted while per-seat kits are out.
+constexpr unsigned PartyClones=2;
+struct PartyPending { Stamp stamp{}; std::array<uintptr_t,PartyClones> actor{},status{}; std::array<std::uint64_t,PartyClones> serial{};
+    std::array<int,PartyClones> key{}; unsigned claimed{},count{},builds{},canonicalFrames{}; bool open{},bound{}; };
+PartyPending g_party{};
 // First binding refusal reason, logging only: 1 null/same actor, 2 not Sora, 3 status owned,
 // 4 status shared with clone, 5 clone status changed, 6 clone not owned, 7 player pointer,
 // 8 stamp changed, 9 second raw566 while pending, 10 new stamp while pending.
+// Party profile: 11 stamp ended with unbound clones, 12 last Sora before both clones,
+// 13 extra Sora after binding, 14 clone record changed or not owned at binding,
+// 15 the canonical player holds a claimed private record (the third Sora never came).
 std::atomic<unsigned> g_bindFault{};
-struct Event { unsigned kind{},thread{}; std::uint64_t serial{}; uintptr_t actor{},local{},status{},localStatus{}; int index{},hp{},localHp{}; };
+struct Event { unsigned kind{},thread{}; std::uint64_t serial{}; uintptr_t actor{},local{},status{},localStatus{}; int index{},hp{},localHp{};
+    std::uint32_t factoryId{}; unsigned order{},role{},frame{}; }; // kind 4 (party build order) only
+std::atomic<unsigned> g_ownerFrames{}; // owner Drain calls (one per game frame); N-c build-line frame
 std::array<Event,128> g_queue{};
 SRWLOCK g_queueLock=SRWLOCK_INIT;
 unsigned g_read{},g_count{};
@@ -88,6 +106,14 @@ bool Profile(Stamp& s) {
         // VUH-1513 remote kit member: Friend1 = member 3 (row 00/03/02/12), only in that mode.
         (playerkit::RemoteKitMemberActive() && row==std::array<std::uint8_t,4>{0,3,2,0x12}));
 }
+// Party profile: the resolver post-hook (PartyNative) replaced members 1/2 with Sora for this
+// load, and the native save row is the untouched DEFAULT row (never written by us).
+bool PartyProfile(Stamp& s) {
+    std::array<std::uint8_t,4> row{},magic{};
+    return partynative::AppliedClones()==PartyClones && StampNow(s) && s.now[0]==4 && s.now[1]==0x1A &&
+        Read(g_base+0x9A98B0,magic) && magic==std::array<std::uint8_t,4>{'K','H','2','J'} &&
+        Read(g_base+0x9A98B0+0x3534+4*4,row) && row==partynative::DEFAULT_ROW;
+}
 // Vanilla player-class descriptor with its status key: Sora (84, key 1) always; Roxas
 // (90, key 14, P_EX110) only while the remote kit member is active. Both keys are the
 // SAVE-bound player keys in 3C03F0. key==0 means "not a selectable clone descriptor".
@@ -117,6 +143,20 @@ void Publish(unsigned kind,const Selection& s) {
     else {g_queue[(g_read+g_count)%g_queue.size()]=e;++g_count;}
     ReleaseSRWLockExclusive(&g_queueLock);
 }
+// Owner thread. Build order of every Sora in a party stamp (S1 evidence: which seat is last).
+void PublishBuild(unsigned order,std::uint32_t id,unsigned role,uintptr_t actor,std::uint64_t serial) {
+    Event e{};e.kind=4;e.thread=GetCurrentThreadId();e.order=order;e.factoryId=id;e.role=role;e.actor=actor;e.serial=serial;e.frame=g_ownerFrames.load();
+    if(!TryAcquireSRWLockExclusive(&g_queueLock)){g_drops.fetch_add(1);return;}
+    if(g_count==g_queue.size())g_drops.fetch_add(1);
+    else {g_queue[(g_read+g_count)%g_queue.size()]=e;++g_count;}
+    ReleaseSRWLockExclusive(&g_queueLock);
+}
+// True when the canonical player is one of the claimed (private) party actors.
+bool CanonicalIsClaimed() {
+    uintptr_t player=0;if(!Read(g_base+PlayerRva,player) || !player)return false;
+    for(unsigned k=0;k<g_party.count;++k)if(g_party.actor[k]==player)return true;
+    return false;
+}
 Selection* Top(const Scope& token) {
     auto* c=ContextFor();
     if(!c || c!=token.context || c->depth!=token.index+1 || c->frames[token.index].serial!=token.serial){Fault();return nullptr;}
@@ -143,7 +183,15 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
     const bool ordinary=owner && caller==g_base+0x3FE5F0;
     // An unbound clone may not outlive its stamp or see a second raw566 construction.
     if(ordinary && g_pending.armed && (id==566 || !StampNow(stamp) || !Same(stamp,g_pending.stamp))){g_pending={};BindFault(id==566?9:10);}
-    if(ordinary && id==566 && g_ready.load() && Profile(stamp)) {
+    // Party clones may not outlive their stamp unbound. A stamp with no Sora yet just resets.
+    if(ordinary && g_party.open && !g_party.bound && (!StampNow(stamp) || !Same(stamp,g_party.stamp))){
+        const bool unbound=g_party.claimed!=0;const bool canonical=unbound && CanonicalIsClaimed();
+        g_party={};if(unbound)BindFault(canonical?15:11);
+    }
+    if(ordinary && g_ready.load() && PartyProfile(stamp)) {
+        if(!g_party.open || !Same(g_party.stamp,stamp)){g_party={};g_party.stamp=stamp;g_party.open=true;}
+        s.candidate=true;s.stamp=stamp;s.factoryId=id; // promoted (or not) by the constructor, by descriptor
+    } else if(ordinary && id==566 && g_ready.load() && Profile(stamp)) {
         if((!g_spent || !Same(g_spentStamp,stamp)) && HasFreeRecord()) {
             g_spent=true;g_spentStamp=stamp;
             s.selected=true;s.stamp=stamp;s.serial=g_serial.fetch_add(1)+1;
@@ -161,7 +209,32 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
             uintptr_t actual=0;Stamp after{};
             if(!top->used || !result || result!=top->actor || !PlayerActor(result,actual,top->key) || actual!=top->status || !Owned(actual) ||
                !StampNow(after) || !Same(after,top->stamp))Fault();
+            else if(top->candidate) {
+                if(g_party.count>=PartyClones || !Same(g_party.stamp,top->stamp) || top->key!=1)Fault();
+                else {const unsigned k=g_party.count++;g_party.actor[k]=top->actor;g_party.status[k]=top->status;g_party.serial[k]=top->serial;g_party.key[k]=top->key;
+                    PublishBuild(++g_party.builds,top->factoryId,1,top->actor,top->serial);}
+            }
             else g_pending={top->stamp,top->actor,top->status,top->serial,true,top->key};
+        } else if(top && top->partyLocal) {
+            // The last Sora of a party stamp: both clones must already hold owned private
+            // records, and this construction must take the canonical pointer with an
+            // ordinary, distinct record. Otherwise refuse; nothing is rebound.
+            const PartyPending p=g_party;g_party.bound=true;
+            PublishBuild(++g_party.builds,top->factoryId,2,result,0);
+            uintptr_t status=0,player=0;Stamp after{};unsigned reason=0;
+            if(p.count!=PartyClones)reason=12;
+            else if(!result || result==p.actor[0] || result==p.actor[1])reason=1;
+            else if(!SoraActor(result,status))reason=2;
+            else if(Owned(status))reason=3;
+            else if(status==p.status[0] || status==p.status[1])reason=4;
+            else {
+                for(unsigned k=0;k<PartyClones && !reason;++k){uintptr_t clone=0;
+                    if(!PlayerActor(p.actor[k],clone,p.key[k]) || clone!=p.status[k] || !Owned(clone))reason=14;}
+                if(!reason && (!Read(g_base+PlayerRva,player) || player!=result))reason=7;
+                if(!reason && (!StampNow(after) || !Same(after,p.stamp)))reason=8;
+            }
+            if(reason)BindFault(reason);
+            else for(unsigned k=0;k<PartyClones;++k){Selection b{};b.serial=p.serial[k];b.actor=p.actor[k];b.status=p.status[k];b.local=result;b.localStatus=status;Publish(3,b);}
         } else if(ordinary && id==567 && g_pending.armed) {
             // Exactly one later Sora construction must take the canonical player pointer away
             // from the clone and receive an ordinary, distinct status. Otherwise refuse.
@@ -181,6 +254,16 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
 uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,uintptr_t arg4,const float* point,float yaw) {
     const DWORD error=GetLastError();const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     auto* parent=Current(anchor);Selection s{};
+    if(parent && parent->candidate && !parent->selected && !parent->partyLocal && !parent->used && g_ready.load() &&
+       actor && form==0 && CloneDescriptorKey(descriptor)==1) { // Sora only (per-seat kits are not in this candidate)
+        Stamp now{};
+        if(!StampNow(now) || !Same(now,parent->stamp) || !g_party.open || !Same(now,g_party.stamp))Fault();
+        else if(g_party.bound)BindFault(13); // a fourth Sora: stays ordinary (shared), profile fails
+        else if(g_party.claimed<PartyClones) {
+            if(HasFreeRecord()){++g_party.claimed;parent->selected=true;parent->key=1;parent->serial=g_serial.fetch_add(1)+1;}
+            else Fault();
+        } else parent->partyLocal=true;
+    }
     if(parent && parent->selected && !parent->constructor && !parent->used && g_ready.load()) {
         Stamp now{};
         const int key=CloneDescriptorKey(descriptor);
@@ -413,9 +496,10 @@ bool Initialize(uintptr_t base) {
 }
 void StopNewAllocations(){g_ready=false;}
 bool RetainsMinHookResources(){return g_retained.load();}
+bool Ready(){return g_ready.load();}
 void Drain(LogFn log) {
     if(!g_requested.load() || !log || !spawncontroller::IsDiagnosticGameThread())return;
-    const DWORD error=GetLastError();
+    const DWORD error=GetLastError();g_ownerFrames.fetch_add(1);
     for(unsigned i=0;i<8;++i) {
         Event e{};bool have=false;
         if(TryAcquireSRWLockExclusive(&g_queueLock)) {
@@ -423,12 +507,24 @@ void Drain(LogFn log) {
             ReleaseSRWLockExclusive(&g_queueLock);
         }
         if(!have)break;
+        if(e.kind==4){log("[privatestatus] party build order=%u id=%u role=%s actor=%llX serial=%llu tid=%u frame=%u",e.order,e.factoryId,e.role==2?"local":"clone",e.actor,e.serial,e.thread,e.frame);continue;}
         log("[privatestatus] kind=%u serial=%llu tid=%u actor=%llX local=%llX status=%llX localStatus=%llX index=%d hp=%d localHp=%d",e.kind,e.serial,e.thread,e.actor,e.local,e.status,e.localStatus,e.index,e.hp,e.localHp);
+    }
+    // S2: claimed clones whose third Sora never came. Once the canonical pointer has rested on a
+    // claimed (private, vetoed) actor for 30 owner frames, or the stamp moved, fail loudly.
+    if(g_party.open && !g_party.bound && g_party.claimed!=0 && g_party.count==g_party.claimed) {
+        Stamp now{};const bool same=StampNow(now) && Same(now,g_party.stamp);
+        if(CanonicalIsClaimed()) {
+            if(++g_party.canonicalFrames>=30 || !same) {
+                g_party.bound=true;BindFault(15);
+                log("[privatestatus] FAULT 15: the canonical player holds a private record (no third Sora in the party stamp); its commits stay vetoed this room, selection disarmed");
+            }
+        } else g_party.canonicalFrames=0;
     }
     unsigned owned=0;for(unsigned i=0;i<PoolCount;++i)owned+=_InterlockedCompareExchange8(&g_owned[i],0,0)!=0;
     static std::uint64_t last=~std::uint64_t{0};
-    const auto value=owned+static_cast<std::uint64_t>(_InterlockedCompareExchange64(&g_excluded,0,0))+g_serial.load()+g_faults.load()+g_guardCount.load()+g_drops.load()+g_stale.load()+g_vetoes.load()+static_cast<std::uint64_t>(_InterlockedCompareExchange64(&g_retired,0,0))+(g_pending.armed?1u:0u)*0x100000000ULL+static_cast<std::uint64_t>(g_bindFault.load())*0x1000000000ULL;
-    if(value!=last){last=value;log("[privatestatus] stats requested=1 ready=%u installed=%u faults=%llu guards=%llu guardReason=%u dropped=%llu vetoes=%llu excluded=%lld retired=%lld foreign=%llu contexts=%u stale=%llu owned=%u pending=%u bindFault=%u",g_ready.load(),g_installed.load(),g_faults.load(),g_guardCount.load(),g_guardState.load()==2?static_cast<unsigned>(g_firstGuard.reason):0,g_drops.load(),g_vetoes.load(),_InterlockedCompareExchange64(&g_excluded,0,0),_InterlockedCompareExchange64(&g_retired,0,0),g_foreign.load(),g_contextCount.load(),g_stale.load(),owned,g_pending.armed?1u:0u,g_bindFault.load());}
+    const auto value=owned+static_cast<std::uint64_t>(_InterlockedCompareExchange64(&g_excluded,0,0))+g_serial.load()+g_faults.load()+g_guardCount.load()+g_drops.load()+g_stale.load()+g_vetoes.load()+static_cast<std::uint64_t>(_InterlockedCompareExchange64(&g_retired,0,0))+(g_pending.armed?1u:0u)*0x100000000ULL+static_cast<std::uint64_t>(g_bindFault.load())*0x1000000000ULL+(static_cast<std::uint64_t>(g_party.claimed)|(static_cast<std::uint64_t>(g_party.count)<<4)|(g_party.bound?0x100ULL:0)|(g_party.open?0x200ULL:0))*0x100000000000ULL;
+    if(value!=last){last=value;log("[privatestatus] stats requested=1 ready=%u installed=%u faults=%llu guards=%llu guardReason=%u dropped=%llu vetoes=%llu excluded=%lld retired=%lld foreign=%llu contexts=%u stale=%llu owned=%u pending=%u bindFault=%u party=%u/%u/%u",g_ready.load(),g_installed.load(),g_faults.load(),g_guardCount.load(),g_guardState.load()==2?static_cast<unsigned>(g_firstGuard.reason):0,g_drops.load(),g_vetoes.load(),_InterlockedCompareExchange64(&g_excluded,0,0),_InterlockedCompareExchange64(&g_retired,0,0),g_foreign.load(),g_contextCount.load(),g_stale.load(),owned,g_pending.armed?1u:0u,g_bindFault.load(),g_party.claimed,g_party.count,g_party.bound?1u:0u);}
     SetLastError(error);
 }
 } // namespace kh2coop::inject::privatestatus

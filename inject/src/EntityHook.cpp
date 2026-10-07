@@ -48,6 +48,7 @@
 #include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/AvatarCapture.hpp"
 #include "PlayerKit.hpp"
+#include "PartyNative.hpp"
 #include "kh2coop/HitChannel.hpp"
 
 #include <Windows.h>
@@ -3472,12 +3473,18 @@ bool Initialize(uintptr_t exeBase) {
                              &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace);
     resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
     lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
+    // VUH-1519: default off (KH2COOP_PARTY_NATIVE); registers its observer on the playerkit resolver hook.
+    const bool partyNativeOk = partynative::Install(exeBase, &Log);
     playerkit::Install(exeBase, &Log); // VUH-1513: default off (KH2COOP_PLAYER_KIT); before privatestatus, whose guard reads it
+    (void)partyNativeOk; // readiness is confirmed below, once every prerequisite module has installed
     if (!privatestatus::Initialize(exeBase))
         Log(playerkit::BlocksNativeSoraPuppets()
                 ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
                 : "[privatestatus] initialization refused; profile unqualified");
     cloneneutral::Install(exeBase); // VUH-1489: default off (KH2COOP_CLONE_NEUTRAL_INPUT)
+    // VUH-1519 R1/R2: party-native stays requested only if its hook, private status and the
+    // module's own neutral-input state are all ready (no-op when party-native is off).
+    partynative::ConfirmLocalReadiness(playerkit::GetStats().installed, &cloneneutral::Enabled);
     lifetimetrace::Initialize(exeBase);
     if (lifetimetrace::GetStatistics().requested) {
         const auto s = lifetimetrace::GetStatistics();
@@ -3546,6 +3553,7 @@ void Shutdown() {
     lifecycletrace::Shutdown();
     spawncontroller::Shutdown();
     playerkit::Shutdown(); // disable its hook, then restore member 0 if still ours
+    partynative::Shutdown(); // after the shared hook is disabled: restore members 1/2 if still ours
     warp::Shutdown();
     enemysync::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);

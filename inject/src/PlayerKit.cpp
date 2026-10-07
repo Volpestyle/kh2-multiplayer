@@ -29,6 +29,11 @@ bool WorldQualified(std::uint8_t world) { return world == 4; } // BB (5) after i
 
 bool KitEnvBlocksPuppets(const char* text) { return text && *text && std::strcmp(text, "0") != 0; }
 
+bool FlagSet(const char* text) { return text && *text && std::strcmp(text, "0") != 0; }
+unsigned PartyConflicts(const FlagMatrix& f) {
+    return f.party ? (f.kit ? 1u : 0u) | (f.remote ? 2u : 0u) : 0u;
+}
+
 Reason Decide(std::uint16_t kit, const LoadContext& c) {
     if (!KitAllowed(kit)) return Reason::Disabled;
     if (!WorldQualified(c.world)) return Reason::WorldNotQualified;
@@ -153,6 +158,8 @@ std::atomic<bool> g_blockPuppets {false};
 std::atomic<std::uint32_t> g_cloneLogLoad {0xFFFFFFFFu};
 std::atomic<std::uint32_t> g_refusedClones {0};
 std::atomic<bool> g_remote {false};
+ResolveObserver g_observer = nullptr;    // VUH-1519 party-native; set once before Install
+ResolveObserverLog g_observerLog = nullptr;
 std::atomic<std::uint8_t> g_remoteRoster {0};
 RemoteValues g_remoteSet{}, g_remoteOriginal{};
 bool g_remoteRecorded = false;
@@ -199,6 +206,7 @@ void HookedResolveMembers() {
             } else { ++g_remoteSkipped; g_remoteRecorded = false; }
         }
         ok = true;
+        if (g_observer) g_observer(resolved, c); // VUH-1519, after kit and remote
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ++g_stats.faults;
     }
@@ -212,8 +220,27 @@ void HookedResolveMembers() {
               c.world, c.room, c.evtProgram, rc.row[0], rc.row[1], rc.row[2], rc.row[3], rc.roster, rc.load.resolved0, rc.native3,
               rr == RemoteReason::Applied ? rv.member0 : rc.load.resolved0, rr == RemoteReason::Applied ? rv.member3 : rc.native3,
               RemoteReasonName(rr));
+    if (ok && g_observerLog) g_observerLog(g_log);
 }
 } // namespace
+
+FlagMatrix ReadFlagMatrix() {
+    FlagMatrix f;
+    const auto set = [](const char* name) {
+        char v[16] {};
+        const DWORD n = GetEnvironmentVariableA(name, v, sizeof(v));
+        return n >= sizeof(v) || (n != 0 && FlagSet(v));
+    };
+    f.kit = set("KH2COOP_PLAYER_KIT");
+    f.remote = set("KH2COOP_REMOTE_KIT_SLOT");
+    f.party = set("KH2COOP_PARTY_NATIVE");
+    return f;
+}
+
+void SetResolveObserver(ResolveObserver observer, ResolveObserverLog log) {
+    if (g_stats.installed) return; // only before Install
+    g_observer = observer; g_observerLog = log;
+}
 
 bool Install(std::uintptr_t exeBase, LogFn log) {
     g_base = exeBase; g_log = log;
@@ -221,7 +248,12 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
     const DWORD n = GetEnvironmentVariableA("KH2COOP_PLAYER_KIT", text, sizeof(text));
     char remoteText[4] {};
     const DWORD rn = GetEnvironmentVariableA("KH2COOP_REMOTE_KIT_SLOT", remoteText, sizeof(remoteText));
-    if (n == 0 && rn == 0) return true; // default OFF: no hook, no reads
+    if (n == 0 && rn == 0 && !g_observer) return true; // default OFF: no hook, no reads
+    const FlagMatrix flags = ReadFlagMatrix(); // VUH-1519 flag matrix
+    if (g_observer && (flags.kit || flags.remote)) {
+        if (log) log("[playerkit] REFUSED: the party-native observer cannot combine with KH2COOP_PLAYER_KIT/KH2COOP_REMOTE_KIT_SLOT; not hooked");
+        return false;
+    }
     std::uint16_t kit = 0;
     if (n != 0) {
         g_stats.requested = true;
@@ -233,19 +265,25 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
             if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT=%s is not 0 or 0x5A (puppets stay blocked)", text);
             return false;
         }
-        if (kit == 0 && log) log("[playerkit] kit 0 (Sora): not installed%s", BlocksNativeSoraPuppets() ? "; puppets stay blocked (non-literal 0)" : "");
+        if (kit != 0 && flags.party) {
+            if (log) log("[playerkit] REFUSED: KH2COOP_PLAYER_KIT conflicts with KH2COOP_PARTY_NATIVE (VUH-1519 flag matrix); not hooked");
+            return false;
+        }
+        if (kit == 0 && log && !g_observer) log("[playerkit] kit 0 (Sora): not installed%s", BlocksNativeSoraPuppets() ? "; puppets stay blocked (non-literal 0)" : "");
     }
     bool remote = false;
     if (rn != 0) {
         if (rn >= sizeof(remoteText) || !RemoteEnvRequested(remoteText)) {
             if (log) log("[playerkit] REFUSED: KH2COOP_REMOTE_KIT_SLOT must be exactly 1");
+        } else if (flags.party) {
+            if (log) log("[playerkit] REFUSED: KH2COOP_REMOTE_KIT_SLOT conflicts with KH2COOP_PARTY_NATIVE (VUH-1519 flag matrix)");
         } else if (BlocksNativeSoraPuppets()) {
             if (log) log("[playerkit] REFUSED: remote kit member needs native puppets, but KH2COOP_PLAYER_KIT blocks them");
         } else {
             remote = true;
         }
     }
-    if (kit == 0 && !remote) return true;
+    if (kit == 0 && !remote && !g_observer) return true;
     const void* target = reinterpret_cast<const void*>(exeBase + RVA_RESOLVE_MEMBERS);
     if (std::memcmp(target, kResolveMembersBytes, sizeof(kResolveMembersBytes)) != 0) {
         if (log) log("[playerkit] REFUSED: 3E2EB0 bytes differ from 9002b2de; not hooked");
@@ -263,6 +301,7 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
     g_active.store(true, std::memory_order_release);
     if (kit != 0 && log) log("[playerkit] installed kit=0x%X (roster %u); applies on the next area load in world 4, outside events",
                              kit, RosterFromObjectId(kit));
+    if (g_observer && log) log("[playerkit] resolver hook installed for the party-native observer (VUH-1519)");
     if (remote && log) log("[playerkit] remote kit member installed: GoA row 00/03/02/12; member 0 (clone, puppet target) shows the streamed kit (roster 1 -> 0x5A, else 0x54), member %u (own player) stays Sora",
                            OWN_PLAYER_MEMBER);
     return true;

@@ -20,6 +20,7 @@
 #include "ProgressSync.hpp"
 #include "EventHoldNative.hpp"
 #include "Warp.hpp"
+#include "PartyNativePolicy.hpp"
 
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
@@ -2980,6 +2981,48 @@ void AdmitReviveRequest(const WorldScope& scope, const std::uint8_t* payload, st
                      static_cast<unsigned long long>(request.targetEpisode), result);
 }
 
+std::array<std::uint64_t, 3> PartyRoster() {
+    return {g_bridge.ConnectionId(0), g_bridge.ConnectionId(1), g_bridge.ConnectionId(2)};
+}
+
+// VUH-1519 (KH2COOP_PARTY_NATIVE=1 only). PartyLayout: host-authored Native scope from the
+// host connection; a client applies it, and the host adopts only the relay's echo of its
+// own layout. PartyReapply: relay-authored only.
+void ReceivePartyPacket(const WorldScope& scope, PacketType type, const std::uint8_t* payload, std::size_t size) {
+    const Role role = CurrentRole();
+    const auto local = g_bridge.LocalSlot();
+    ByteReader r(payload, size);
+    if (type == PacketType::PartyLayout) {
+        if (scope.kind != WorldSourceKind::Native || scope.sourceConnectionId != g_bridge.ConnectionId(0) ||
+            !scope.hostSourceSerial) return;
+        if (role == Role::Client) {
+            if (scope.sourceDeliverySerial != g_bridge.PeerDeliverySerial(0) ||
+                scope.hostSourceSerial <= g_resyncAppliedCut) return;
+        } else if (role != Role::Host || local != 0) return;
+        PartyLayout layout; read(r, layout);
+        if (r.atEnd()) partynative::NoteLayout(layout, local, WorldSessionGeneration(), PartyRoster(), role == Role::Host);
+    } else if (type == PacketType::PartyReapply) {
+        if (scope.kind != WorldSourceKind::Relay || scope.sourceConnectionId != g_bridge.ConnectionId(0)) return;
+        PartyReapply reapply; read(r, reapply);
+        if (r.atEnd()) partynative::NoteReapply(reapply, WorldSessionGeneration());
+    }
+}
+
+// VUH-1519 host producer (KH2COOP_PARTY_NATIVE=1 only): the default layout for the one pinned
+// room, once per generation/room tuple/roster (re-sent if not echoed), through the captured
+// host world context.
+void TickHostPartyLayout() {
+    if (!partynative::Requested() || CurrentRole() != Role::Host) return;
+    RoomTransition location;
+    if (!ActivationContext(Role::Host, location)) return;
+    const auto generation = WorldSessionGeneration();
+    PartyLayout layout;
+    if (!partynative::HostLayoutToPublish(generation, location, PartyRoster(), layout)) return;
+    ProducerWorldContext context;
+    if (!CaptureWorldContext(context)) return;
+    if (SendCapturedWorld(encode(layout), context)) partynative::NoteHostSent(layout, generation);
+}
+
 bool ReceiveWorldPackets() {
     bool hostSessionReset = false;
     std::vector<std::uint8_t> packet;
@@ -2994,7 +3037,9 @@ bool ReceiveWorldPackets() {
                 ByteReader envelopeReader(payload, size); WorldEnvelope envelope; read(envelopeReader, envelope);
                 if (!envelopeReader.atEnd() || packet.size() != size + 3 || !WorldSessionGeneration()) continue;
                 scope = envelope.scope;
-                if (scope->kind != WorldSourceKind::Native ||
+                const bool partyRelay = partynative::Requested() && scope->kind == WorldSourceKind::Relay &&
+                    !envelope.packet.empty() && envelope.packet.front() == static_cast<std::uint8_t>(PacketType::PartyReapply);
+                if ((scope->kind != WorldSourceKind::Native && !partyRelay) ||
                     scope->targetConnectionId != g_bridge.ConnectionId(g_bridge.LocalSlot()) ||
                     scope->targetDeliverySerial != g_bridge.DeliverySerial() ||
                     (g_resyncPlan && scope->sessionId != g_resyncPlan->request.key.sessionId)) {
@@ -3012,6 +3057,10 @@ bool ReceiveWorldPackets() {
                 type = decodePacketHeader(packet.data(), packet.size(), payload, size);
                 if (packet.size() != size + 3 || !isScopedWorldPacket(type)) continue;
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
+                if (partynative::Requested() && (type == PacketType::PartyLayout || type == PacketType::PartyReapply)) {
+                    ReceivePartyPacket(*scope, type, payload, size); // VUH-1519: before the role branches (host echo)
+                    continue;
+                }
                 if (CurrentRole() == Role::Client) {
                     if (scope->sourceConnectionId != g_bridge.ConnectionId(0) || !scope->hostSourceSerial ||
                         scope->sourceDeliverySerial != g_bridge.PeerDeliverySerial(0) ||
@@ -3915,7 +3964,7 @@ void OnFrameStart(std::uint32_t frame) {
     spawncontroller::RegisterDiagnosticGameThread();
     nativehittrace::RegisterOwnerThread();
     g_hitTraceFrame = frame;
-    if (!g_bridge.IsOpen()) { DrainPendingSpawnTrace(false); return; }
+    if (!g_bridge.IsOpen()) { partynative::Observe(0, {}, 0xFF, false); DrainPendingSpawnTrace(false); return; }
     CheckActivationGeneration();
     const Role role = CurrentRole();
     bool becameHost = role == Role::Host && g_role != Role::Host;
@@ -3933,6 +3982,8 @@ void OnFrameStart(std::uint32_t frame) {
     becameHost = ReceiveWorldPackets() || becameHost;
     CheckActivationGeneration();
     TickMirror(frame);
+    if (partynative::Requested()) // VUH-1519, default off
+        partynative::Observe(WorldSessionGeneration(), PartyRoster(), g_bridge.LocalSlot(), true);
     TickNativeResync(frame);
     if (g_role == Role::Client) {
         (void)EnsureClientClaimScope();
@@ -4045,6 +4096,7 @@ void OnFrameStart(std::uint32_t frame) {
         if (!HostFrame(frame, fresh, census)) { DrainPendingSpawnTrace(false); return; }
         PublishHostMotion(frame, census);
         FlushActivationResponses();
+        TickHostPartyLayout();
     } else if (g_role == Role::Client) {
         for (const std::size_t i : fresh) {
             SYNC_LOG("[enemysync] client: local spawn %u frame %u objectId %u @%llX at (%.0f,%.0f,%.0f)",

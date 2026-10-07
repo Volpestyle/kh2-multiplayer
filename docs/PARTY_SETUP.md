@@ -100,6 +100,57 @@ per-puppet member slot (for example a spare index such as 3 where the room has
 no guest) and the kit each remote puppet must show, carried in
 `AvatarState.character` (0 Sora, 1 Roxas, 2 dual-wield Roxas, 3 Mickey).
 
+## Native application (VUH-1519)
+
+`inject/src/PartyNative.*` applies the host layout natively. It is **default off**: `KH2COOP_PARTY_NATIVE=1`, which also requires `KH2COOP_NATIVE_SORA_PRIVATE_STATUS=1` and `KH2COOP_CLONE_NEUTRAL_INPUT=1`, and the module's live private-status and neutral-input state.
+
+It qualifies one case only: "3 players, no NPCs" in GoA `04/1A`, evt 0, with the native DEFAULT row `00/01/02/12`. On such a load, an observer on PlayerKit's per-load `3E2EB0` resolver post-hook does the following:
+- sets resolved members 1/2 (Donald/Goofy) to Sora `0x54`, so both friend seats spawn as player-class Sora clones;
+- leaves the save-backed party row and MEMT unwritten.
+
+`NativePrivateStatus` gives both clones private status records. In a party load, the last Sora built is the canonical player.
+
+Every other room, rule or layout resolves natively, and so does any later load: the native party returns by itself.
+
+**Flags.** `KH2COOP_PARTY_NATIVE`, `KH2COOP_REMOTE_KIT_SLOT` and `KH2COOP_PLAYER_KIT` are mutually exclusive. Each conflicting side refuses and logs it.
+
+**Timing (scoped lead decision).** The resolver runs during an area load, before the host can publish that room's layout. So each machine applies the **newest accepted layout** of the same generation, roster and local slot, **pinned to that layout's own world/room/evt**. Epoch and door are ignored, so a same-room reload matches. The layout is re-checked against the native row and members read at that load.
+- StoryForced and RosterChanged `PartyReapply` clear it.
+- The host adopts its own layout only from the relay's echo, and re-sends at most 6 times.
+
+**A room-independent PartyIntent message (VUH-1786) is required before any second qualified room or mixed layout.** No new packet types or protocol version: it uses `PartyLayout` 42 and `PartyReapply` 43 at protocol 13.
+
+**Live result, 2026-10-07: PASS.** Run `build/scenarios/20261007-044847_vuh1519_party_native_goa_three_1`, fixture `build/rig/vuh1519-party-native-20261007-01/live-fixture-05`, DLL `d0d28019…` (lane pins `a1466dd3…`). Three games in GoA:
+- **controls:** flag off, no private status, and party + remote kit;
+- **apply:** host layout echo, one host same-room reload, then on every machine:
+  - the build order clone, clone, local;
+  - two private bindings, with no reason 15;
+  - a census of three Soras and no Donald/Goofy;
+  - puppets on the two clones;
+  - neutral input on both;
+- **interval:**
+  - one damage1 per clone, on two machines, with the clone's personal SAVE commit bytes unchanged;
+  - an unchanged in-memory SAVE hash, outside the enumerated exclusions;
+  - follow p95 4–7.5;
+  - no rebinds;
+- **restore leg:** after one runtime left and the host reloaded, the remaining machines resolved members 1/2 natively to `0x5C/0x5D`, and Donald/Goofy were back;
+- **closure:** clips on all three sides, saves unchanged, SaveGuard on, and no save attempts.
+
+Earlier attempts 01–04 failed on fixture expectations, which were fixed one at a time:
+- 01: kill ordering;
+- 02: client post-load match ordering;
+- 03: a single hit never commits through `3C2120`;
+- 04: a benign stream-gap puppet rebind.
+
+**Open:**
+- Proof that `resolved[]` never serializes into SAVE (xref audit).
+- VUH-1786 PartyIntent.
+- VUH-1787 stale-puppet hold. A host stall over 1 s makes AvatarSync (`staleAfterMs`) release and rebind remote puppets; the rebind keeps the same clone.
+- Per-seat kits: the last-built seat is the local player.
+- Mixed layouts: `PuppetTarget` is all clones or all friends.
+- Empty seats.
+- Restore-on-exit of members 1/2 is untested (owned kill).
+
 ## Offline evidence
 
 `kh2coop_party_test` checks every authored rule with all player-presence sets
