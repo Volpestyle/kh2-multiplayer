@@ -1,5 +1,6 @@
 // PlayerKit — see PlayerKit.hpp (VUH-1513 step 2).
 #include "PlayerKit.hpp"
+#include "kh2coop/PlayerKits.hpp"
 
 #include <Windows.h>
 #include <atomic>
@@ -13,7 +14,8 @@
 namespace kh2coop::inject::playerkit {
 
 // ---------------------------------------------------------------- policy
-bool KitAllowed(std::uint16_t kit) { return kit == ROXAS; } // 0x323/0x5B: later, one fixture each
+// A qualified non-Sora kit of the reviewed table (kh2coop/PlayerKits.hpp); 0x323/0x5B: one fixture each.
+bool KitAllowed(std::uint16_t kit) { const auto* k = kh2coop::qualifiedKit(kit); return k && k->member != SORA; }
 
 bool ParseKit(const char* text, std::uint16_t& kit) {
     kit = 0;
@@ -57,14 +59,7 @@ const char* ReasonName(Reason r) {
     return "?";
 }
 
-std::uint8_t RosterFromObjectId(std::uint32_t objectId) {
-    switch (objectId) {
-    case ROXAS: return 1;
-    case ROXAS_DW: return 2;
-    case MICKEY: return 3;
-    default: return 0;
-    }
-}
+std::uint8_t RosterFromObjectId(std::uint32_t objectId) { return kh2coop::kitRosterForObject(objectId); } // the kit table
 
 Reason ApplyAfterResolve(std::uint16_t kit, const LoadContext& c, std::uint16_t* resolved,
                          std::uint16_t* original) {

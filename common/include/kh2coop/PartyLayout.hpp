@@ -1,4 +1,5 @@
 #pragma once
+#include "kh2coop/PlayerKits.hpp"
 #include "kh2coop/Protocol.hpp"
 #include <algorithm>
 #include <optional>
@@ -48,7 +49,7 @@ struct PartyIntentTarget {
 };
 inline constexpr std::uint16_t PARTY_INTENT_KIT_SORA = 0x54;
 inline constexpr std::uint16_t PARTY_INTENT_KIT_ROXAS = 0x5A; // P_EX110, the one qualified non-Sora kit
-inline bool partyKitAllowed(std::uint16_t kit) { return kit==PARTY_INTENT_KIT_SORA || kit==PARTY_INTENT_KIT_ROXAS; }
+inline bool partyKitAllowed(std::uint16_t kit) { return qualifiedKit(kit)!=nullptr; } // the reviewed kit table (PlayerKits.hpp)
 inline constexpr std::size_t PARTY_INTENT_PAYLOAD = 63;
 struct PartyIntent {
     std::uint64_t version{0};

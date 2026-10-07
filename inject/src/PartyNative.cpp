@@ -172,8 +172,16 @@ std::array<std::uint8_t, 2> OtherSlots(std::uint8_t localSlot) {
     for (std::uint8_t s = 0; s < 3; ++s) if (s != localSlot && n < 2) out[n++] = s;
     return out;
 }
-std::uint8_t KitCode(std::uint16_t kit) { return kit == SORA || kit == 0 ? 0 : kit == ROXAS ? 1 : 3; }
-std::uint16_t KitFromCode(std::uint8_t code) { return code == 0 ? SORA : code == 1 ? ROXAS : 0; }
+// The reviewed kit table (kh2coop/PlayerKits.hpp): a qualified kit's code is its roster code; 0 is legacy Sora.
+std::uint8_t KitCode(std::uint16_t kit) {
+    if (kit == 0) return 0;
+    const auto* k = qualifiedKit(kit);
+    return k ? k->roster : 3;
+}
+std::uint16_t KitFromCode(std::uint8_t code) {
+    const auto* k = qualifiedKitByRoster(code);
+    return k ? k->member : 0;
+}
 
 Plan ProjectIntent(const PartyIntent& m, std::uint8_t localSlot, bool kitsAllowed) {
     PartyLayout probe {};
@@ -394,8 +402,9 @@ bool HostKits(std::uint16_t ownKit, std::uint8_t localSlot, const RemoteKits& re
     kits[localSlot] = ownKit == 0 ? SORA : ownKit;
     const auto o = OtherSlots(localSlot);
     for (unsigned i = 0; i < 2; ++i) {
-        if (!remote.seen[i] || remote.roster[i] > 1) return false; // unknown or unsupported (dual-wield, Mickey)
-        kits[o[i]] = remote.roster[i] == 1 ? ROXAS : SORA;
+        const auto* k = remote.seen[i] ? qualifiedKitByRoster(remote.roster[i]) : nullptr;
+        if (!k) return false; // unknown, or not a qualified kit in the reviewed table (dual-wield, Mickey)
+        kits[o[i]] = k->member;
     }
     return true;
 }

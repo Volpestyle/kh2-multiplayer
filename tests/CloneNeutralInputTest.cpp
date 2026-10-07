@@ -12,6 +12,7 @@
 #include <cstring>
 #include <initializer_list>
 #include "kh2coop/KH2Offsets.hpp"
+#include "kh2coop/PlayerKits.hpp"
 
 // MinHook stand-ins (the real header is included by EntityHook.cpp).
 enum MH_STATUS { MH_OK = 0, MH_ERROR_NOT_EXECUTABLE = 9 };

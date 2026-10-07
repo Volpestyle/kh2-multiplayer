@@ -55,7 +55,6 @@ static constexpr size_t PAD_STATE_BYTES = 0x40;            // buttons, edges, re
 static constexpr size_t STATS_OFFSET = 0x100;
 static constexpr std::uint32_t STATS_MAGIC = 0x33494E43;   // "CNI3"
 static constexpr std::uint32_t SORA_OBJECT_ID = 84;        // P_EX100
-static constexpr std::uint32_t ROXAS_OBJECT_ID = 90;       // P_EX110 (party kits only)
 static constexpr std::uint32_t IMAGE_TIMESTAMP = 0x669E384A, IMAGE_SIZE = 0x2C2B000;  // exe 9002b2de
 static constexpr unsigned LOG_BUDGET = 32;
 // 0x3A89A0..+0x30 of exe 9002b2de: push rdi; sub rsp,50h; test [rcx+9B8h] bit 2; the
@@ -94,12 +93,11 @@ static bool SoraDescriptor(uintptr_t actor) {
     const auto obj = *reinterpret_cast<const uintptr_t*>(actor + offsets::actor::OBJENTRY_PTR);
     if (obj <= g_exeBase || obj >= g_exeBase + 0x3000000) return false;
     const auto id = *reinterpret_cast<const std::uint32_t*>(obj + offsets::objentry::OBJECT_ID);
-    if (*reinterpret_cast<const std::uint8_t*>(obj + offsets::objentry::TYPE_FLAGS) != 0) return false;
+    const auto type = *reinterpret_cast<const std::uint8_t*>(obj + offsets::objentry::TYPE_FLAGS);
     const char* name = reinterpret_cast<const char*>(obj + offsets::objentry::NAME);
-    if (id == SORA_OBJECT_ID && std::memcmp(name, "P_EX100", 8) == 0) return true;
-    // Party kits (rev3): a Roxas clone reads the same local pad/FIELD_COMMAND records (live run 084248:
-    // a never-neutralized Roxas clone). Only while party kits are active on this machine.
-    return partynative::KitsActive() && id == ROXAS_OBJECT_ID && std::memcmp(name, "P_EX110", 8) == 0;
+    // The reviewed kit table: Sora always; any other qualified kit (Roxas: live run 084248 showed a
+    // never-neutralized Roxas clone) only while party kits are active on this machine.
+    return kh2coop::kitNeutralDescriptor(id, type, name, 8, partynative::KitsActive());
 }
 
 static bool CanonicalActor(uintptr_t actor) {

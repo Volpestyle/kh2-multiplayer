@@ -50,6 +50,7 @@
 #include "kh2coop/AvatarCapture.hpp"
 #include "PlayerKit.hpp"
 #include "PartyNative.hpp"
+#include "kh2coop/PlayerKits.hpp"
 #include "kh2coop/HitChannel.hpp"
 
 #include <Windows.h>

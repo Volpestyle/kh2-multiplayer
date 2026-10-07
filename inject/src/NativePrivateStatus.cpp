@@ -1,3 +1,4 @@
+#include "kh2coop/PlayerKits.hpp"
 #include "NativePrivateStatus.hpp"
 #include "NativePrivateStatusPins.hpp"
 #include "NativeSpawnController.hpp"
@@ -138,7 +139,7 @@ bool PartyProfile(Stamp& s) {
 // (90, key 14, P_EX110) only while the remote kit member or party kits are active. Both keys
 // are the SAVE-bound player keys in 3C03F0. key==0 means "not a selectable clone descriptor".
 bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::KitsActive();}
-int KeyForKit(std::uint16_t kit) {return kit==partynative::SORA?1:kit==partynative::ROXAS?14:0;}
+int KeyForKit(std::uint16_t kit) {return kh2coop::kitStatusKey(kit);} // the reviewed kit table
 // Party kits: the clones' key multiset equals the keys of the kits the observer wrote.
 bool PartyKeysMatch(const std::array<int,2>& keys) {
     std::uint16_t m1=0,m2=0;if(!partynative::AppliedMembers(m1,m2))return false;
@@ -148,9 +149,7 @@ bool PartyKeysMatch(const std::array<int,2>& keys) {
 int CloneDescriptorKey(uintptr_t p) {
     std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,8> name{};
     if(!Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || form!=0 || !Read(p+8,name))return 0;
-    if(id==84 && key==1 && name==std::array<char,8>{'P','_','E','X','1','0','0',0})return 1;
-    if(RoxasAllowed() && id==90 && key==14 && name==std::array<char,8>{'P','_','E','X','1','1','0',0})return 14;
-    return 0;
+    return kh2coop::kitDescriptorKey(id,type,key,form,name.data(),name.size(),RoxasAllowed()); // the reviewed kit table
 }
 bool SoraDescriptor(uintptr_t p) {return CloneDescriptorKey(p)==1;}
 // expectKey: 1 for the local Sora; the selected clone's key for the clone.

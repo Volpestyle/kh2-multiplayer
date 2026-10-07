@@ -422,7 +422,7 @@ if(WIN32)
     endif()
 
     add_executable(kh2coop_clone_neutral_test tests/CloneNeutralInputTest.cpp)
-    target_include_directories(kh2coop_clone_neutral_test PRIVATE inject/src runtime/include)
+    target_include_directories(kh2coop_clone_neutral_test PRIVATE inject/src runtime/include common/include) # kit table
     target_compile_definitions(kh2coop_clone_neutral_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     if(MSVC)
         target_compile_options(kh2coop_clone_neutral_test PRIVATE /W4 /WX /wd4505)
@@ -501,7 +501,7 @@ if(WIN32)
 
     # VUH-1513 player kits: pure PlayerKit policy (local kit, puppet guard, remote layout).
     add_executable(kh2coop_playerkit_test tests/PlayerKitPolicyTest.cpp)
-    target_include_directories(kh2coop_playerkit_test PRIVATE inject/src)
+    target_include_directories(kh2coop_playerkit_test PRIVATE inject/src common/include) # kit table
     target_compile_definitions(kh2coop_playerkit_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     if(MSVC)
         target_compile_options(kh2coop_playerkit_test PRIVATE /W4 /WX)
