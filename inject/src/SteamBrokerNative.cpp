@@ -1,4 +1,5 @@
 #include "SteamBrokerNative.hpp"
+#include "SharedLogFile.hpp"
 #include "kh2coop/SteamBroker.hpp"
 #include "kh2coop/SteamPipe.hpp"
 #include <array>
@@ -207,7 +208,7 @@ void Run(HANDLE stop) noexcept {
     wchar_t directory[32768]{};const auto n=GetEnvironmentVariableW(L"KH2COOP_LOG_DIR",directory,32768);
     if(!n||n>=32768)return;wchar_t path[32768]{};
     if(swprintf_s(path,L"%s\\steam-broker_%lu.log",directory,GetCurrentProcessId())<0)return;
-    FILE* log=nullptr;if(_wfopen_s(&log,path,L"wx")||!log)return;setvbuf(log,nullptr,_IONBF,0);
+    FILE* log=CreateSharedLogW(path);if(!log)return; // create-new, unbuffered, readable by the rig while the game runs
     try{run(log,stop);}catch(...){std::fprintf(log,"[steam-broker] exception stopped\n");}std::fclose(log);
 }
 } // namespace kh2coop::steambroker

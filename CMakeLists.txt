@@ -544,6 +544,14 @@ if(WIN32)
     if(MSVC)
         target_compile_options(kh2coop_revive_prompt_test PRIVATE /W4 /WX)
     endif()
+
+    # VUH-1493: the Steam broker log is create-new and readable by the rig while the game runs.
+    add_executable(kh2coop_shared_log_test tests/SharedLogFileTest.cpp)
+    target_include_directories(kh2coop_shared_log_test PRIVATE inject/src)
+    target_compile_definitions(kh2coop_shared_log_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        target_compile_options(kh2coop_shared_log_test PRIVATE /W4 /WX)
+    endif()
 endif()
 
 # Register every headless kh2coop_*_test executable defined above with CTest
