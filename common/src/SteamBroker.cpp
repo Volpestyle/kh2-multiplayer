@@ -56,7 +56,9 @@ bool Broker::command(const Frame& f,std::uint64_t now){
     if(f.op==Op::Ping)return f.bytes.empty()||fail("bad-ping");
     if(f.op==Op::Stop){stop();return true;}
     if(f.op==Op::Host){
-        if(configured_||f.peer||f.bytes.empty()||f.bytes.size()>MaxPeers*8||f.bytes.size()%8)return fail("bad-host-allowlist");
+        // An empty allowlist (runtime --steam-listener-probe) still listens and verifies ICE, but the
+        // Connecting check below then refuses every identity before accept.
+        if(configured_||f.peer||f.bytes.size()>MaxPeers*8||f.bytes.size()%8)return fail("bad-host-allowlist");
         for(std::size_t i=0;i<f.bytes.size();i+=8){const auto id=get(f.bytes,i,8);if(!validId(id)||id==identity_||std::find(allowed_.begin(),allowed_.end(),id)!=allowed_.end())return fail("bad-host-allowlist");allowed_.push_back(id);}
         listener_=api_.listen();if(!listener_||!api_.iceOff(listener_,true))return fail("listen-ice-off-unverified");
         configured_=true;return emit({Op::Ready,identity_});

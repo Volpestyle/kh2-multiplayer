@@ -102,12 +102,15 @@ public:
     std::string authenticatedIdentity(TransportPeer* p)const override{return pendingPeerLabel(p);}
 };
 }
-SteamTransports makeSteamTransports(std::uint32_t pid,bool host,const std::vector<std::uint64_t>& allowed){
+SteamTransports makeSteamTransports(std::uint32_t pid,bool host,const std::vector<std::uint64_t>& allowed,bool listenerProbe){
+    if(listenerProbe&&(!host||!allowed.empty()))return {};
     auto pipe=std::make_unique<steam::Pipe>();if(!pipe->attach(pid))return {};
-    return makeSteamTransports(std::move(pipe),host,allowed);
+    return makeSteamTransports(std::move(pipe),host,allowed,listenerProbe);
 }
-SteamTransports makeSteamTransports(std::unique_ptr<steam::BrokerLink> pipe,bool host,const std::vector<std::uint64_t>& allowed){
-    SteamTransports result;if(host&&(allowed.empty()||allowed.size()>steam::MaxPeers))return result;
+SteamTransports makeSteamTransports(std::unique_ptr<steam::BrokerLink> pipe,bool host,const std::vector<std::uint64_t>& allowed,bool listenerProbe){
+    SteamTransports result;
+    if(listenerProbe&&(!host||!allowed.empty()))return result; // probe: host with an empty allowlist only
+    if(host&&((!listenerProbe&&allowed.empty())||allowed.size()>steam::MaxPeers))return result;
     auto hub=std::make_shared<Hub>();hub->host=host;hub->allowed=allowed;
     hub->pipe=std::move(pipe);if(!hub->pipe||!hub->pipe->connected()||!hub->pipe->send({steam::Op::Hello}))return result;
     const auto end=now()+5000;steam::Frame f;bool ready=false;

@@ -52,7 +52,7 @@ struct Endpoint:Mock {
 struct Bus {std::map<std::uint64_t,Endpoint*> endpoints;std::map<std::uint32_t,std::pair<Endpoint*,std::uint32_t>> routes;std::uint32_t next=100;};
 Endpoint::Endpoint(Bus& b,std::uint64_t who):bus(b){id=who;bus.endpoints[who]=this;}
 std::uint32_t Endpoint::connect(std::uint64_t target){auto it=bus.endpoints.find(target);if(it==bus.endpoints.end())return 0;auto* to=it->second;auto a=bus.next++,b=bus.next++;bus.routes[a]={to,b};bus.routes[b]={this,a};to->events.push_back({b,to->listener,id,1,true,false});return a;}
-bool Endpoint::accept(std::uint32_t h){auto [to,remote]=bus.routes.at(h);events.push_back({h,listener,to->id,3,true,true});to->events.push_back({remote,0,id,3,true,true});return true;}
+bool Endpoint::accept(std::uint32_t h){++accepts;auto [to,remote]=bus.routes.at(h);events.push_back({h,listener,to->id,3,true,true});to->events.push_back({remote,0,id,3,true,true});return true;}
 bool Endpoint::send(std::uint32_t h,std::span<const std::uint8_t>b,bool reliable){auto it=bus.routes.find(h);if(it==bus.routes.end())return false;auto [to,remote]=it->second;to->messages.push_back({remote,id,reliable,{b.begin(),b.end()}});return true;}
 void Endpoint::close(std::uint32_t h,bool,std::uint32_t reason){auto it=bus.routes.find(h);if(it==bus.routes.end())return;auto [to,remote]=it->second;to->events.push_back({remote,0,id,4,true,true,reason});bus.routes.erase(remote);bus.routes.erase(it);}
 struct Link:BrokerLink {
@@ -165,6 +165,29 @@ int main(){
         check(server.verifiedPeerCount()==2&&host.isConnected()&&newcomer.isConnected(),"one real protocol peer leaves without retiring host and other friend");
         host.disconnect();pump();check(server.verifiedPeerCount()==0,"host retirement closes remote session");
     }
+    // VUH-1493 probe 03: listener probe with an EMPTY allowlist admits nobody.
+    {Mock m;Broker b(m);check(b.command({Op::Hello},100),"probe: hello");Frame f;b.pop(f);
+        check(b.command({Op::Host},100)&&b.pop(f)&&f.op==Op::Ready,"probe: empty allowlist still listens and verifies ICE");
+        for(const auto who:{Guest,Other,Host+77}){m.events.push_back({20,10,who,1,true,false});m.events.push_back({21,10,who,1,false,false});}
+        check(b.tick(101)&&!b.failed(),"probe: refused connections do not end the probe session");
+        check(m.accepts==0&&m.closes==6,"probe: every authenticated or unauthenticated identity closed before accept");}
+    {Mock m;m.ice=false;Broker b(m);b.command({Op::Hello},100);check(!b.command({Op::Host},100)&&m.listensClosed==1,"probe: ICE readback failure still refuses the listener");}
+    {Mock m;check(!makeSteamTransports(std::make_unique<Link>(m),true,{}).client,"empty allowlist refused without the explicit probe flag");}
+    {Mock m;check(!makeSteamTransports(std::make_unique<Link>(m),true,{Guest},true).client,"probe flag refuses any allowlisted identity");}
+    {Mock m;check(!makeSteamTransports(std::make_unique<Link>(m),false,{},true).client,"probe flag refuses a joining runtime");}
+    {Bus bus;Endpoint a(bus,Host),b(bus,Guest);
+        auto ht=makeSteamTransports(std::make_unique<Link>(a),true,{},true);
+        check(ht.server&&ht.client,"probe: host transports with an empty allowlist");
+        SessionConfig config;config.gameBuild="build";config.modHash="none";config.contentHash="none";config.authenticatedHostIdentity="steam:"+std::to_string(Host);
+        SessionHost server(config,{},std::move(ht.server));check(server.start(),"probe: SessionHost listens through the broker");
+        NetworkClient host("local",0,"build","none",config.authenticatedHostIdentity,SlotType::Player,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));
+        auto ct=makeSteamTransports(std::make_unique<Link>(b),false,{});
+        NetworkClient foreign(std::to_string(Host),0,"build","none","steam:"+std::to_string(Guest),SlotType::Friend1,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Foreign",std::move(ct.client));
+        host.connect();foreign.connect();
+        for(unsigned n=0;n<120;++n){server.tick();host.tick();foreign.tick();}
+        check(host.isConnected()&&server.verifiedPeerCount()==1,"probe: the local Player is the only verified member");
+        check(!foreign.isConnected()&&a.accepts==0,"probe: a foreign Steam account is never accepted or admitted");
+        host.disconnect();for(unsigned n=0;n<20;++n){server.tick();host.tick();foreign.tick();}}
     // VUH-1493 G7/G8 reconnect controls through the actual broker core, transport,
     // NetworkClient and SessionHost; only the Steam API and the OS pipe are replaced.
     {Bus bus;Endpoint a(bus,Host),b(bus,Guest);

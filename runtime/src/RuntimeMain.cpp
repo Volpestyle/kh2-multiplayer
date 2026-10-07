@@ -196,6 +196,7 @@ struct LaunchOptions {
     // avatar path (local-primary) replaces it.
     bool legacyReplica {false};
     bool steamHost {false};
+    bool steamListenerProbe {false}; // VUH-1493 probe 03: host listener with an empty allowlist
     std::optional<std::string> steamJoin;
     std::vector<std::uint64_t> steamAllow;
     // Applied to both directions when any field is set.
@@ -328,6 +329,7 @@ void printUsage() {
         << "  --steam-host         Opt-in broker host; requires --pid and Player role\n"
         << "  --steam-allow <ID64>  Explicitly admit a Steam friend (up to two)\n"
         << "  --steam-join <ID64>   Paste host SteamID; requires --pid and Friend role\n"
+        << "  --steam-listener-probe  Diagnostic host listener with NO allowlist (admits nobody)\n"
         << "  --legacy-replica      Also run the old actor-snapshot replica path\n"
         << "  --link-latency-ms <n> Add one-way latency, both directions\n"
         << "  --link-jitter-ms <n>  Add uniform jitter in [0, n] ms\n"
@@ -510,6 +512,7 @@ bool parseArgs(int argc, char* argv[], LaunchOptions& options,
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--steam-host") { options.steamHost = true; continue; }
+        if (arg == "--steam-listener-probe") { options.steamListenerProbe = true; continue; }
         if ((arg == "--steam-join" || arg == "--steam-allow") && i + 1 < argc) {
             const std::string value = argv[++i]; std::uint64_t id = 0;
             if (!kh2coop::steam::parseId(value, id)) { error = "Expected public individual SteamID64"; return false; }
@@ -787,19 +790,23 @@ int main(int argc, char* argv[]) {
     const bool steamEnabled = options.steamHost || options.steamJoin.has_value();
     kh2coop::SteamTransports steamTransports;
     std::unique_ptr<kh2coop::SessionHost> steamHost;
-    if (steamEnabled || !options.steamAllow.empty()) {
+    if (steamEnabled || !options.steamAllow.empty() || options.steamListenerProbe) {
         if (!options.pid || !*options.pid || options.steamHost == options.steamJoin.has_value() ||
-            (options.steamHost ? options.steamAllow.empty() : !options.steamAllow.empty()) ||
+            (options.steamListenerProbe && (!options.steamHost || !options.steamAllow.empty())) ||
+            (options.steamHost && !options.steamListenerProbe && options.steamAllow.empty()) ||
+            (!options.steamHost && !options.steamAllow.empty()) ||
             (!options.steamHost && options.config.ownedSlot == kh2coop::SlotType::Player) ||
             (options.steamHost && options.config.ownedSlot != kh2coop::SlotType::Player)) {
             std::cerr << "[Runtime] Steam requires explicit --pid, host Player with --steam-allow, or join Friend slot\n"; return 1;
         }
-        steamTransports = kh2coop::makeSteamTransports(*options.pid, options.steamHost, options.steamAllow);
+        steamTransports = kh2coop::makeSteamTransports(*options.pid, options.steamHost, options.steamAllow,
+                                                       options.steamListenerProbe);
         if (!steamTransports.client) { std::cerr << "[Runtime] Steam broker unavailable; ENet fallback not attempted\n";return 1; }
         options.config.peerId = "steam:" + std::to_string(steamTransports.identity);
         options.config.serverHost = options.steamHost ? "local" : *options.steamJoin;
         options.config.networkingEnabled = true;
         std::cout << "[Runtime] Steam identity=" << steamTransports.identity << " host=" << options.steamHost << " relayOnly=required\n";
+        if (options.steamListenerProbe) std::cout << "[Runtime] Steam listener probe: empty allowlist, no remote admission\n";
         if (options.steamHost) {
             kh2coop::SessionConfig config;
             config.gameBuild=options.config.gameBuild;config.contentHash=options.config.contentHash;
