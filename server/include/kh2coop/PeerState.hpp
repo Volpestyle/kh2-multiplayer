@@ -34,6 +34,11 @@ struct PeerState {
     std::uint64_t hostSourceFloor{0};
     std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
 
+    std::uint64_t lastReviveSeq{0}, revivedEpisode{0};
+    AvatarState reviveAvatar{};
+    std::uint64_t reviveAvatarMs{0};
+    std::uint32_t reviveAvatarSeq{0};
+
     // Version gate — set on first message from peer
     std::string gameBuild;
     std::string modHash;

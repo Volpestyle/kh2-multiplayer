@@ -2,6 +2,7 @@
 #define _CRT_RAND_S
 #endif
 #include "kh2coop/SessionHost.hpp"
+#include "kh2coop/Revive.hpp"
 #include "kh2coop/ProgressMirror.hpp"
 #include "kh2coop/ResyncEvidence.hpp"
 #include "kh2coop/AppliedStateHash.hpp"
@@ -815,6 +816,44 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::ReviveRequest: {
+                ReviveRequest request; read(reader,request);
+                if (ps->status != PeerStatus::Verified || ps->worldQuarantined || !admittedScope ||
+                    !room_ || !room_->epoch || !sameResyncRoom(request.location,*room_) ||
+                    (hold_ && hold_->active) || !request.seq || request.seq <= ps->lastReviveSeq ||
+                    request.requesterConnectionId != ps->connectionId || request.targetSlot >= 3 ||
+                    request.targetSlot == static_cast<std::uint8_t>(ps->assignedSlot)) { ++rejectedWorld_; return; }
+                // Consume authenticated sequence even on gameplay refusal; it
+                // cannot become valid later after a peer moves or becomes downed.
+                ps->lastReviveSeq = request.seq;
+                auto target = std::find_if(peers_.begin(),peers_.end(),[&](const auto& p) {
+                    return static_cast<std::uint8_t>(p.assignedSlot)==request.targetSlot &&
+                        p.status==PeerStatus::Verified && p.connectionId==request.targetConnectionId;
+                });
+                const auto now = currentTimeMs();
+                const auto arrived = [&](const PeerState& p) {
+                    return !p.worldQuarantined && p.ackArrived && p.ackEpoch==room_->epoch &&
+                        p.ackWorldId==room_->worldId && p.ackRoomId==room_->roomId &&
+                        p.reviveAvatarMs && now>=p.reviveAvatarMs && now-p.reviveAvatarMs<=REVIVE_AVATAR_MAX_AGE_MS &&
+                        p.reviveAvatar.downedDelivery==p.deliverySerial &&
+                        p.reviveAvatar.downedEpoch==room_->epoch && p.reviveAvatar.worldId==room_->worldId &&
+                        p.reviveAvatar.roomId==room_->roomId && !(p.reviveAvatar.flags & AvatarInCutscene);
+                };
+                if (target==peers_.end() || !arrived(*ps) || !arrived(*target) ||
+                    (ps->reviveAvatar.flags & AvatarDowned) || ps->reviveAvatar.hp<=0 ||
+                    !(target->reviveAvatar.flags & AvatarDowned) || target->reviveAvatar.hp!=0 ||
+                    !request.targetEpisode || request.targetEpisode!=target->reviveAvatar.downedEpisode ||
+                    request.targetEpisode<=target->revivedEpisode || !reviveInRange(ps->reviveAvatar,target->reviveAvatar)) {
+                    ++rejectedWorld_; return;
+                }
+                target->revivedEpisode=request.targetEpisode; // reserve before send, no second teammate application
+                request.requesterSlot=static_cast<std::uint8_t>(ps->assignedSlot);
+                sendTo(target->transportPeer,encode(request),true);
+                log("ReviveRequest forwarded requester="+std::to_string(request.requesterSlot)+
+                    " target="+std::to_string(request.targetSlot)+" episode="+std::to_string(request.targetEpisode));
+                break;
+            }
+
             case PacketType::HitClaim: {
                 if (ps->status != PeerStatus::Verified || fromHost(*ps)) {
                     // The host applies its own hits natively.
@@ -941,6 +980,16 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 read(reader, avatar);
                 // The owner is whoever sent it, never what the packet claims.
                 avatar.ownerSlot = ps->assignedSlot;
+                if (!reader.atEnd()) return;
+                // Existing relay behavior stays intact. Only revive authority
+                // requires an advancing sequence and finite, valid health.
+                if (avatar.seq>ps->reviveAvatarSeq) {
+                    ps->reviveAvatarSeq=avatar.seq;
+                    ps->reviveAvatarMs=0;
+                    if (revivePosition(avatar) && avatar.maxHp>0 && avatar.hp>=0 && avatar.hp<=avatar.maxHp) {
+                        ps->reviveAvatar=avatar; ps->reviveAvatarMs=currentTimeMs();
+                    }
+                }
                 const auto relay = encode(AvatarRelay {ps->connectionId, avatar});
                 for (auto& other : peers_) {
                     if (other.transportPeer != peer &&
@@ -1188,6 +1237,7 @@ void SessionHost::pumpDesyncCapture() {
 
 void SessionHost::clearWorldState() {
     pendingActivation_.clear();
+    for (auto& p:peers_) p.reviveAvatarMs=0;
     hold_.reset();
     manifest_ = {};
     enemyHp_.clear();

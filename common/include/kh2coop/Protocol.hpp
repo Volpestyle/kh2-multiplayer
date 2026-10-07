@@ -8,13 +8,13 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 10;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 11;
 
 // ===========================================================================
-// Protocol v5 — typed closure/session-incarnation semantics; v4 byte layouts.
+// Protocol v11 adds streamed downed epoch/episode/delivery and ReviveRequest.
 // ===========================================================================
 
-// Network-only envelope. AvatarState and its shared-memory layout are unchanged.
+// Network-only owner envelope. AvatarBridge v4 is required for v11 avatar state.
 // The relay stamps both this connection identity and avatar.ownerSlot.
 struct AvatarRelay {
     std::uint64_t ownerConnectionId {0};
@@ -182,6 +182,21 @@ struct EnemyDeath {
     std::uint32_t epoch {0};
     std::uint16_t netId {0};
 };
+
+// Reliable, scoped teammate request. Relay stamps requesterSlot and forwards
+// once to targetConnectionId only. Episode is minted by the target owner,
+// strictly increasing for that game lifetime, never an HP write authority.
+struct ReviveRequest {
+    RoomTransition location{};
+    std::uint64_t seq{0};
+    std::uint64_t requesterConnectionId{0};
+    std::uint64_t targetConnectionId{0};
+    std::uint64_t targetEpisode{0};
+    std::uint8_t requesterSlot{0xFF};
+    std::uint8_t targetSlot{0xFF};
+};
+inline constexpr float REVIVE_RANGE = 200.0f; // native world units; initial policy
+inline constexpr std::uint64_t REVIVE_AVATAR_MAX_AGE_MS = 1000;
 
 // A client's hit on a replica enemy (plan D4). attackerSlot is stamped by
 // the relay. Wire order: epoch, seq, netId, objectId, requesterConnectionId,

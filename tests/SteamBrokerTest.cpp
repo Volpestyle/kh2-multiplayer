@@ -1,3 +1,4 @@
+#include "ReviveNetworkFixture.hpp"
 #include "kh2coop/SteamBroker.hpp"
 #include "kh2coop/SteamPipe.hpp"
 #include "kh2coop/SteamTransport.hpp"
@@ -135,21 +136,26 @@ int main(){
         check(ht.server&&ht.client&&ct.client,"broker-link transport factories");
         SessionConfig config;config.gameBuild="build";config.modHash="none";config.contentHash="none";config.authenticatedHostIdentity="steam:"+std::to_string(Host);
         SessionHost server(config,{},std::move(ht.server));check(server.start(),"SessionHost through Steam broker");
-        unsigned avatars=0;ClientCallbacks cb;cb.onAvatarState=[&](const AvatarRelay& r){if(r.avatar.ownerSlot==SlotType::Player&&r.avatar.position.x==12)++avatars;};
-        NetworkClient host("local",0,"build","none",config.authenticatedHostIdentity,SlotType::Player,{},RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));
+        std::array<std::vector<ReviveRequest>,3> revives;
+        ClientCallbacks hcb;hcb.onReviveRequest=[&](const auto& r){revives[0].push_back(r);};
+        unsigned avatars=0;ClientCallbacks cb;cb.onReviveRequest=[&](const auto& r){revives[1].push_back(r);};cb.onAvatarState=[&](const AvatarRelay& r){if(r.avatar.ownerSlot==SlotType::Player&&r.avatar.position.x==12)++avatars;};
+        NetworkClient host("local",0,"build","none",config.authenticatedHostIdentity,SlotType::Player,hcb,RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Host",std::move(ht.client));
         NetworkClient client(std::to_string(Host),0,"build","none","steam:"+std::to_string(Guest),SlotType::Friend1,cb,RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Friend",std::move(ct.client));
         check(host.connect()&&client.connect(),"both transports initiate");
         auto pump=[&]{for(unsigned n=0;n<80;++n){server.tick();host.tick();client.tick();}};pump();
-        check(server.verifiedPeerCount()==2,"actual protocol10 admission over mocked Steam");
+        check(server.verifiedPeerCount()==2,"actual current protocol admission over mocked Steam");
         AvatarState v;v.position.x=12;v.worldId=4;v.roomId=26;host.sendAvatar(v);pump();check(avatars>0,"avatar bytes/ownership exchanged through actual session host");
         host.sendRoomTransition({1,4,26,0,0,0,0});host.sendEnemyManifest({1,true,{{7,0,0,309,{}}}});host.sendProgressUpdate({1,true,{{0x1cff,{2}}}});pump();
         auto lt=makeSteamTransports(std::make_unique<Link>(late),false,{});unsigned rooms=0,manifests=0,progress=0;
-        ClientCallbacks lcb;lcb.onRoomTransition=[&](const RoomTransition& r){if(r.epoch==1&&r.worldId==4&&r.roomId==26)++rooms;};
+        ClientCallbacks lcb;lcb.onReviveRequest=[&](const auto& r){revives[2].push_back(r);};lcb.onRoomTransition=[&](const RoomTransition& r){if(r.epoch==1&&r.worldId==4&&r.roomId==26)++rooms;};
         lcb.onEnemyManifest=[&](const EnemyManifest& m){if(m.replace&&m.entries.size()==1&&m.entries[0].netId==7)++manifests;};
         lcb.onProgressUpdate=[&](const ProgressUpdate& p){if(p.full&&p.version==1)++progress;};
         NetworkClient newcomer(std::to_string(Host),0,"build","none","steam:"+std::to_string(Other),SlotType::Friend2,lcb,RuntimeMode::CampaignCoop,"none",PROTOCOL_VERSION,"Late",std::move(lt.client));newcomer.connect();
         for(unsigned n=0;n<80;++n){server.tick();host.tick();client.tick();newcomer.tick();}
         check(server.verifiedPeerCount()==3&&rooms&&manifests&&progress,"three-peer late join reuses actual room/manifest/progress cache through broker");
+        reviveNetworkChecks(server,{&host,&client,&newcomer},revives,[&]{
+            for(unsigned n=0;n<80;++n){server.tick();host.tick();client.tick();newcomer.tick();}
+        },check);
         client.disconnect();
         for(unsigned n=0;n<80;++n){server.tick();host.tick();newcomer.tick();}
         check(server.verifiedPeerCount()==2&&host.isConnected()&&newcomer.isConnected(),"one real protocol peer leaves without retiring host and other friend");

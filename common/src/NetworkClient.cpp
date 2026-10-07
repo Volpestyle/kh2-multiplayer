@@ -1,4 +1,5 @@
 #include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/Revive.hpp"
 
 #include <chrono>
 #include <utility>
@@ -284,6 +285,8 @@ void NetworkClient::sendAvatar(AvatarState avatar) {
         avatar.seq = ++avatarSeq_;
     }
     if (avatar.serverTimeMs == 0) avatar.serverTimeMs = estimatedServerTimeMs();
+    reviveLocal_ = avatar;
+    reviveLocalMs_ = localTimeMs();
     sendPacket(encode(avatar, PacketType::AvatarState), false);
 }
 
@@ -307,6 +310,9 @@ void NetworkClient::sendEnemyDeath(const EnemyDeath& m) {
     if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
 
+void NetworkClient::sendReviveRequest(const ReviveRequest& m) {
+    sendNativeWorld(encode(m), makeTestingWorldContext(), true);
+}
 void NetworkClient::sendHitClaim(const HitClaim& m) {
     if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
@@ -499,6 +505,7 @@ void NetworkClient::resetTransportState() {
         avatarLoss_[i] = {};
     }
     avatarSeq_ = 0;
+    reviveLocal_ = {}; reviveLocalMs_ = 0; receivedReviveEpisode_ = 0;
     clockOffsetMs_ = 0;
     bestRttMs_ = 0;
     lastRttMs_ = 0;
@@ -574,6 +581,7 @@ bool NetworkClient::updateAvatarRoster(const SessionState& session) {
         if(pendingDesyncRequest_)log("Pending desync capture retired with roster authority");
         pendingDesyncRequest_.reset();desyncRequest_.reset();
     }
+    if (namespaceChanged) { reviveLocal_ = {}; reviveLocalMs_ = 0; }
     if (namespaceChanged) outbound_.reset(); // retire already-conditioned authoritative sends
     for (std::size_t i = 0; i < 3; ++i) {
         if (namespaceChanged || avatarConnections_[i] != connections[i]) {
@@ -750,6 +758,25 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             // restore state after a targeted resend without minting a sequence.
             enemyHpSequence_ = hp.sequence;
             admittedHp = std::move(hp);
+        }
+
+        if (type == PacketType::ReviveRequest) {
+            ReviveRequest revive; read(reader, revive);
+            const auto now = localTimeMs();
+            if (!admittedScope || !hostRoom_ || !sameResyncRoom(revive.location,*hostRoom_) ||
+                revive.targetSlot != avatarLocalSlot_ || revive.requesterSlot >= 3 ||
+                revive.requesterSlot == avatarLocalSlot_ || !revive.seq ||
+                !revive.requesterConnectionId || revive.requesterConnectionId != avatarConnections_[revive.requesterSlot] ||
+                admittedScope->sourceConnectionId != revive.requesterConnectionId ||
+                !revive.targetConnectionId || revive.targetConnectionId != avatarConnections_[avatarLocalSlot_] ||
+                !reviveLocalMs_ || now < reviveLocalMs_ || now-reviveLocalMs_ > REVIVE_AVATAR_MAX_AGE_MS ||
+                !(reviveLocal_.flags & AvatarDowned) || (reviveLocal_.flags & AvatarInCutscene) ||
+                reviveLocal_.hp != 0 || reviveLocal_.downedDelivery != deliverySerial() || reviveLocal_.downedEpoch != revive.location.epoch ||
+                reviveLocal_.worldId != revive.location.worldId || reviveLocal_.roomId != revive.location.roomId ||
+                !revive.targetEpisode || revive.targetEpisode != reviveLocal_.downedEpisode ||
+                revive.targetEpisode <= receivedReviveEpisode_) return;
+            receivedReviveEpisode_ = revive.targetEpisode;
+            reader = ByteReader(payload,payloadSize);
         }
 
         // Actual accepted inner body and original received envelope, before bridge callbacks.
@@ -940,6 +967,11 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 EnemyDeath m;
                 read(reader, m);
                 if (callbacks_.onEnemyDeath) callbacks_.onEnemyDeath(m);
+                break;
+            }
+            case PacketType::ReviveRequest: {
+                ReviveRequest m; read(reader,m);
+                if (callbacks_.onReviveRequest) callbacks_.onReviveRequest(m);
                 break;
             }
             case PacketType::HitClaim: {

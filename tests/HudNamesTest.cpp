@@ -178,10 +178,10 @@ void SlotAndConcurrency() {
     Check(reads > 0 && mismatches == 0, "concurrent atomic payload copies cannot mix names/binding");
     Check(concurrent.TryWrite({}) && concurrent.TryRead(out) && !hudnames::Valid(out),
           "explicit reset retires names with empty publication");
-    Check(AVATAR_BRIDGE_VERSION == 3 && sizeof(hudnames::Roster) == 112 && sizeof(hudnames::Slot) == 128 &&
+    Check(AVATAR_BRIDGE_VERSION == 4 && sizeof(hudnames::Roster) == 112 && sizeof(hudnames::Slot) == 128 &&
           offsetof(AvatarBridgeLayout, rosterNames) == offsetof(AvatarBridgeLayout, puppets) +
-              sizeof(AvatarBridgeLayout::puppets), "v3 append layout explicit; wire remains10");
-    Check(PROTOCOL_VERSION == 10, "network protocol10 unchanged");
+              sizeof(AvatarBridgeLayout::puppets), "v4 preserves roster layout before new downed slot");
+    Check(PROTOCOL_VERSION == 11, "network protocol11 downed incarnation");
     std::printf("ABI avatarVersion=%u layoutBytes=%zu rosterOffset=%zu rosterPayload=%zu rosterSlot=%zu protocol=%u\n",
         AVATAR_BRIDGE_VERSION, sizeof(AvatarBridgeLayout), offsetof(AvatarBridgeLayout, rosterNames),
         sizeof(hudnames::Roster), sizeof(hudnames::Slot), PROTOCOL_VERSION);

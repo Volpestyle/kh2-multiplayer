@@ -69,6 +69,14 @@ target_include_directories(kh2coop_server_core PUBLIC
 
 target_link_libraries(kh2coop_server_core PUBLIC kh2coop_common Threads::Threads)
 
+add_executable(kh2coop_revive_test tests/ReviveTest.cpp)
+target_link_libraries(kh2coop_revive_test PRIVATE kh2coop_server_core)
+if(MSVC)
+    target_compile_options(kh2coop_revive_test PRIVATE /W4 /WX /wd4324) # existing cache-line padding in AvatarBridge
+else()
+    target_compile_options(kh2coop_revive_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 add_executable(kh2coop_steam_broker_test tests/SteamBrokerTest.cpp)
 target_link_libraries(kh2coop_steam_broker_test PRIVATE kh2coop_server_core)
 if(WIN32)

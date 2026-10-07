@@ -63,6 +63,7 @@ struct ClientCallbacks {
     std::function<void(const EnemyDeath&)> onEnemyDeath;
     // Host only: a client's hit claim, attackerSlot stamped by the relay
     std::function<void(const HitClaim&)> onHitClaim;
+    std::function<void(const ReviveRequest&)> onReviveRequest;
     std::function<void(const ProgressUpdate&)> onProgressUpdate;
     std::function<void(const DesyncNotice&)> onDesyncNotice;
     std::function<void(const DesyncCaptureRequest&)> onDesyncCaptureRequest;
@@ -134,6 +135,7 @@ public:
     void sendEnemyHp(const EnemyHp& m);
     void sendEnemyDeath(const EnemyDeath& m);
     void sendHitClaim(const HitClaim& m);
+    void sendReviveRequest(const ReviveRequest& m);
     void sendTransitionAck(const TransitionAck& m);
     void sendProgressUpdate(const ProgressUpdate& m); // host only
     void sendStateHash(const StateHash& m);
@@ -311,6 +313,8 @@ private:
     std::uint32_t clockSamples_{0};
     std::uint64_t lastPingMs_{0};
     std::uint32_t avatarSeq_{0};
+    AvatarState reviveLocal_{};
+    std::uint64_t reviveLocalMs_{0}, receivedReviveEpisode_{0};
 };
 
 } // namespace kh2coop

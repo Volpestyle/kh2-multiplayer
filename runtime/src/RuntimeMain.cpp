@@ -1759,6 +1759,10 @@ int main(int argc, char* argv[]) {
         if (avatarBridge.TryReadLocal(local)) {
             // Network seq is per send (sendAvatar restamps 0), so receivers can
             // count gaps as loss; the DLL's frame counter stays in recordings.
+            kh2coop::LocalDownedState downed;
+            (void)avatarBridge.ReadLocalDownedState(downed);
+            kh2coop::projectLocalDowned(local, downed,
+                {worldSessionGeneration, worldBridge.DeliverySerial(), 0}, GetTickCount64());
             local.seq = 0;
             local.serverTimeMs = 0; // stamped by sendAvatar
             netClient->sendAvatar(local);

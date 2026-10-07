@@ -223,7 +223,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         RS_INNER(RoomTransition) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(ProgressUpdate)
-        RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(ReviveRequest) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -679,6 +679,9 @@ void write(ByteWriter& w, const AvatarState& a) {
     w.writeI32(a.maxHp);
     w.writeI32(a.mp);
     w.writeI32(a.maxMp);
+    w.writeU32(a.downedEpoch);
+    w.writeU64(a.downedEpisode);
+    w.writeU64(a.downedDelivery);
 }
 
 void write(ByteWriter& w, const ClockPing& p) { w.writeU64(p.clientSendMs); }
@@ -757,6 +760,23 @@ void write(ByteWriter& w, const EnemyHp& m) {
 void write(ByteWriter& w, const EnemyDeath& m) {
     w.writeU32(m.epoch);
     w.writeU16(m.netId);
+}
+
+void write(ByteWriter& w, const ReviveRequest& m) {
+    write(w, m.location);
+    w.writeU64(m.seq); w.writeU64(m.requesterConnectionId);
+    w.writeU64(m.targetConnectionId); w.writeU64(m.targetEpisode);
+    w.writeU8(m.requesterSlot); w.writeU8(m.targetSlot);
+}
+void read(ByteReader& r, ReviveRequest& m) {
+    if (r.remaining() != 50) throw std::runtime_error("ReviveRequest: wrong payload length");
+    read(r, m.location);
+    m.seq = r.readU64(); m.requesterConnectionId = r.readU64();
+    m.targetConnectionId = r.readU64(); m.targetEpisode = r.readU64();
+    m.requesterSlot = r.readU8(); m.targetSlot = r.readU8();
+}
+std::vector<std::uint8_t> encode(const ReviveRequest& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::ReviveRequest, w.data());
 }
 
 void write(ByteWriter& w, const HitClaim& m) {
@@ -949,6 +969,9 @@ void read(ByteReader& r, AvatarState& a) {
     a.maxHp = r.readI32();
     a.mp = r.readI32();
     a.maxMp = r.readI32();
+    a.downedEpoch = r.readU32();
+    a.downedEpisode = r.readU64();
+    a.downedDelivery = r.readU64();
 }
 
 void read(ByteReader& r, ClockPing& p) { p.clientSendMs = r.readU64(); }
@@ -1276,6 +1299,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
     if (size < kHeaderSize + len) {
         throw std::runtime_error("decodePacketHeader: buffer too small for payload");
     }
+    if (type == PacketType::ReviveRequest && (len != 50 || size != kHeaderSize + len))
+        throw std::runtime_error("ReviveRequest: wrong frame length");
     if (type == PacketType::HitClaim && (len != 43 || size != kHeaderSize + len))
         throw std::runtime_error("HitClaim: wrong frame length");
     if (type == PacketType::EnemyHp && (len < 14 || size != kHeaderSize + len))

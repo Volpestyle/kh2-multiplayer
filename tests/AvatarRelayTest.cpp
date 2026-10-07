@@ -86,7 +86,7 @@ void testCodec() {
     AvatarRelay received;
     read(r, received);
     const auto& b = received.avatar;
-    check(size == 84 && pkt.size() == 87 && r.atEnd(), "v4 relay has exact 84-byte payload");
+    check(size == 104 && pkt.size() == 107 && r.atEnd(), "v11 relay has exact 104-byte payload");
     check(received.ownerConnectionId == sent.ownerConnectionId, "relay preserves full 64-bit connection identity");
     check(type == PacketType::AvatarRelay, "avatar relay packet type");
     check(b.seq == a.seq && b.serverTimeMs == a.serverTimeMs &&
@@ -126,7 +126,7 @@ void testCodec() {
     auto extraPayload = relayWriter.data(); extraPayload.push_back(0);
     check(rejectPayload(extraPayload), "relay rejects an extra payload byte");
     ByteWriter oldWriter; write(oldWriter, a);
-    check(oldWriter.size() == 76 && rejectPayload(oldWriter.data()), "relay rejects the old untagged 76-byte payload");
+    check(oldWriter.size() == 96 && rejectPayload(oldWriter.data()), "relay rejects the untagged 96-byte payload");
     auto trailingFrame = pkt; trailingFrame.push_back(0);
     threw = false;
     try { decodePacketHeader(trailingFrame.data(), trailingFrame.size(), payload, size); }
@@ -393,8 +393,8 @@ void testAvatarBridge() {
               got.pose.ownerSlot == SlotType::Friend2 && got.pose.position.x == 9.0f,
           "DLL reads puppet 1's pose");
     PuppetAuthority authority {PuppetAuthorityMode::Network, 0, 17, kRoster};
-    check(AVATAR_BRIDGE_VERSION == 3 && ValidPuppetProvenance(got.provenance, 2, 1, authority),
-          "bridge v3 preserves full network provenance");
+    check(AVATAR_BRIDGE_VERSION == 4 && ValidPuppetProvenance(got.provenance, 2, 1, authority),
+          "bridge v4 preserves full network provenance");
     check(!dll.TryReadPuppet(1, got), "cached puppet has no new shared-memory sample");
     authority.connectionIds[2] += 0x100000000ULL;
     check(!ValidPuppetProvenance(got.provenance, 2, 1, authority) && got.pose.position.x == 9.0f,
@@ -876,7 +876,7 @@ void testVersionReject() {
     while (steadyMs() < legacyDeadline && !disconnected) {
         host.tick(0); legacy.tick(0); std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    check(PROTOCOL_VERSION == 10 && disconnected && reason == "Protocol mismatch: client=3 server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
+    check(PROTOCOL_VERSION == 11 && disconnected && reason == "Protocol mismatch: client=3 server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
           "otherwise matching legacy v3 peer is rejected for exact protocol mismatch with free capacity");
 }
 

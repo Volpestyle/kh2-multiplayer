@@ -164,6 +164,10 @@ struct AvatarState {
     std::int32_t maxHp {0};
     std::int32_t mp {0};
     std::int32_t maxMp {0};
+    // v11: current admitted epoch and owner-minted downed incarnation.
+    std::uint32_t downedEpoch {0};
+    std::uint64_t downedEpisode {0};
+    std::uint64_t downedDelivery {0}; // captured transport lifetime, not retagged
 };
 
 struct InputButtons {

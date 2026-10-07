@@ -18,6 +18,7 @@
 // ============================================================================
 
 #include "kh2coop/Types.hpp"
+#include "kh2coop/DownedState.hpp"
 #include "kh2coop/PuppetProvenance.hpp"
 #include "kh2coop/HudRosterSlot.hpp"
 
@@ -44,7 +45,7 @@ static_assert(std::is_trivially_copyable_v<AvatarState>,
 
 static constexpr const char* AVATAR_BRIDGE_PREFIX = "Local\\kh2coop_avatar_";
 static constexpr std::uint32_t AVATAR_BRIDGE_MAGIC = 0x42564B32; // "2KVB"
-static constexpr std::uint32_t AVATAR_BRIDGE_VERSION = 3;
+static constexpr std::uint32_t AVATAR_BRIDGE_VERSION = 4;
 static constexpr int AVATAR_BRIDGE_PUPPETS = 2; // friend slots 1 and 2
 
 // A pose the DLL should apply to a friend-slot puppet.
@@ -94,6 +95,7 @@ struct AvatarBridgeLayout {
     SeqlockSlot<AvatarState> local;
     SeqlockSlot<PuppetPose> puppets[AVATAR_BRIDGE_PUPPETS];
     hudnames::Slot rosterNames; // v3 append; v2 peers must reject, never silently mix.
+    SeqlockSlot<LocalDownedState> localDowned; // v4; native owner is sole writer
 };
 
 class AvatarBridge {
@@ -163,6 +165,17 @@ public:
     }
     bool PublishRosterNames(const hudnames::Roster& names) {
         return view_ && view_->rosterNames.TryWrite(names);
+    }
+
+    // Native integration hook: call from the checked world owner every frame.
+    void SetLocalDownedState(const LocalDownedState& state) {
+        if (view_) view_->localDowned.write(state);
+    }
+    bool ReadLocalDownedState(LocalDownedState& out) const {
+        out = {};
+        if (!view_) return false;
+        std::uint32_t sequence = 0; // snapshot, not last-value caching
+        return view_->localDowned.tryRead(out, sequence);
     }
 
     // Runtime side.
