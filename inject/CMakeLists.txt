@@ -56,6 +56,7 @@ add_library(kh2coop_inject SHARED
     src/SaveGuard.cpp
     src/CrashDump.cpp
     src/EnemySync.cpp
+    src/SpawnPickHook.cpp
     src/ProgressSync.cpp
     src/EventHoldNative.cpp
     src/NativeSpawnController.cpp

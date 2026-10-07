@@ -50,6 +50,9 @@ void SetTransitionObserver(void (*observer)());
 std::uint32_t TransitionSerial();
 std::uint32_t LoadSerial();
 RoomTransition ReadLocation();
+// VUH-1515 spawn picks: while the client executes the load the host issued (between its issue and
+// CompleteLoad) and the native location equals that target, the host's epoch for it; else 0.
+std::uint32_t HostIssuedLoadEpoch(const RoomTransition& loading);
 
 void Shutdown();
 

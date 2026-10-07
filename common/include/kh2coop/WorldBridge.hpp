@@ -33,6 +33,10 @@
 // the ordered plan. Already queued reverse claims can retire immediately.
 // Bytes [88,116) hold a separate operator mailbox: state32, generation32,
 // delivery64, hostConnection64, targetMask32. CLI never writes either SPSC ring.
+// Bytes [120,128) hold the spawn-pick salt (VUH-1515): FNV-1a64 of the relay's
+// world incarnation id, published by the runtime before it advances the session
+// generation. Zero means none (an older runtime, or no session); the DLL then
+// keeps the native random spawn draw. Layout-compatible: no version change.
 // ============================================================================
 
 #include "kh2coop/PacketRing.hpp"
@@ -50,6 +54,7 @@
 #include <cstdint>
 #include <array>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace kh2coop {
@@ -99,6 +104,7 @@ public:
             SetDeliverySerial(0);
             SetConnectionIds({});
             SetPeerDeliverySerials({});
+            SetSpawnPickSalt(0);
             *reinterpret_cast<volatile LONG*>(view_ + 88) = 0;
             std::atomic_thread_fence(std::memory_order_release);
             header[0] = WORLD_BRIDGE_MAGIC;
@@ -221,6 +227,26 @@ public:
         if (!view_) return WORLD_SLOT_UNKNOWN;
         return static_cast<std::uint8_t>(
             reinterpret_cast<const volatile std::uint32_t*>(view_)[2]);
+    }
+
+    // Runtime is the sole writer (VUH-1515 spawn picks); published before the
+    // session generation advances, so a reader under the new generation sees it.
+    void SetSpawnPickSalt(std::uint64_t salt) {
+        if (!view_) return;
+        auto* word = reinterpret_cast<volatile LONG64*>(view_ + 120);
+        InterlockedExchange64(word, static_cast<LONG64>(salt));
+    }
+    [[nodiscard]] std::uint64_t SpawnPickSalt() const {
+        if (!view_) return 0;
+        auto* word = reinterpret_cast<volatile LONG64*>(view_ + 120);
+        return static_cast<std::uint64_t>(InterlockedCompareExchange64(word, 0, 0));
+    }
+    // FNV-1a 64 of the relay's world incarnation id; 0 only for an empty id.
+    static std::uint64_t SpawnPickSaltFromSession(const std::string& id) {
+        if (id.empty()) return 0;
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (const unsigned char c : id) { h ^= c; h *= 0x100000001b3ull; }
+        return h ? h : 1;
     }
 
     // Runtime is the sole writer. Interlocked access gives both processes an

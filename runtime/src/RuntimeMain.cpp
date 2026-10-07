@@ -994,6 +994,7 @@ int main(int argc, char* argv[]) {
         worldInbox.Clear();
         worldBridge.SetDeliverySerial(worldDeliverySerial);
         worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+        worldBridge.SetSpawnPickSalt(kh2coop::WorldBridge::SpawnPickSaltFromSession(worldSessionId)); // VUH-1515
         worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
         worldBridge.SetConnectionIds(worldConnectionIds);
         worldBridge.SetLocalSlot(slot);
@@ -1108,6 +1109,7 @@ int main(int argc, char* argv[]) {
             worldInbox.Clear();
             worldBridge.SetDeliverySerial(worldDeliverySerial);
             worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+            worldBridge.SetSpawnPickSalt(kh2coop::WorldBridge::SpawnPickSaltFromSession(worldSessionId)); // VUH-1515
             worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
             worldBridge.SetConnectionIds(worldConnectionIds);
             worldBridge.SetLocalSlot(worldSessionSlot);
@@ -1993,6 +1995,7 @@ int main(int argc, char* argv[]) {
                 if (worldBridge.Open(static_cast<DWORD>(game.ProcessId()))) {
                     const auto priorGeneration = worldSessionGeneration;
                     worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                    worldBridge.SetSpawnPickSalt(kh2coop::WorldBridge::SpawnPickSaltFromSession(worldSessionId)); // VUH-1515
                     worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
                     worldBridge.SetConnectionIds(worldConnectionIds);
                     const auto nativeDelivery = worldQuarantined ? 0 : worldDeliverySerial;

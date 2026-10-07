@@ -130,6 +130,14 @@ void testVersion11Layout() {
     check(consumer.DeliverySerial() == wide && consumer.PeerDeliverySerial(0) == wide &&
           consumer.PeerDeliverySerial(1) == 0x100000001ULL && consumer.PeerDeliverySerial(2) == 0x200000002ULL && consumer.PeerDeliverySerial(3) == 0,
           "all aligned delivery fields preserve full64-bit values independently");
+    // VUH-1515 spawn-pick salt at [120,128): zero when formatted, full 64-bit, independent of the other fields
+    check(consumer.SpawnPickSalt() == 0, "spawn-pick salt formats to zero (no salt)");
+    producer.SetSpawnPickSalt(wide ^ 0x0F0F0F0F0F0F0F0FULL);
+    check(consumer.SpawnPickSalt() == (wide ^ 0x0F0F0F0F0F0F0F0FULL) && consumer.DeliverySerial() == wide &&
+          consumer.PeerDeliverySerial(2) == 0x200000002ULL, "spawn-pick salt round-trips without touching the delivery fields");
+    check(WorldBridge::SpawnPickSaltFromSession("") == 0 &&
+          WorldBridge::SpawnPickSaltFromSession("0123456789abcdef0123456789abcdef") != 0,
+          "spawn-pick salt from the incarnation id: zero only for an empty id");
     producer.SetPeerDeliverySerials({wide, 0, 0x300000003ULL});
     check(consumer.PeerDeliverySerial(1) == 0 && consumer.PeerDeliverySerial(2) == 0x300000003ULL,
           "atomic requester floors retire one peer without aliasing another");

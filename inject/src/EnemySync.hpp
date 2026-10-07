@@ -131,6 +131,15 @@ bool SendCapturedWorld(const std::vector<std::uint8_t>& packet, const ProducerWo
 // accepted client challenge; a client copy never falls back to its local point.
 // Role values: 0 off, 1 host, 2 client. Called on the native game thread.
 std::uint8_t ActivationRole();
+// VUH-1515 spawn picks (SpawnPickHook): the shared salt, this visit's host epoch and the location,
+// on the game thread during an area load. False with a short reason keeps the native draw.
+struct SpawnPickInputs {
+    std::uint64_t salt = 0;
+    std::uint32_t epoch = 0;
+    std::uint16_t world = 0, room = 0, map = 0, btl = 0, evt = 0;
+    std::uint8_t role = 0;
+};
+bool SpawnPickContext(SpawnPickInputs& out, const char*& reason);
 void CaptureHostActivation(const float* position4);
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence);
 

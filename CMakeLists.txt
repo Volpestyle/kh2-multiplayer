@@ -515,6 +515,14 @@ if(WIN32)
         target_compile_options(kh2coop_enemy_target_test PRIVATE /W4 /WX)
     endif()
 
+    # VUH-1515 host-agreed random spawn picks (SpawnPick.hpp): pure rules, native-formula parity, shape bytes.
+    add_executable(kh2coop_spawnpick_test tests/SpawnPickTest.cpp)
+    target_include_directories(kh2coop_spawnpick_test PRIVATE inject/src common/include)
+    target_compile_definitions(kh2coop_spawnpick_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        target_compile_options(kh2coop_spawnpick_test PRIVATE /W4 /WX)
+    endif()
+
     # VUH-1515 spawn-row identity on a recycled actor address (SpawnRowIdentity.hpp): pure rules.
     add_executable(kh2coop_spawnrow_identity_test tests/SpawnRowIdentityTest.cpp)
     target_include_directories(kh2coop_spawnrow_identity_test PRIVATE inject/src)

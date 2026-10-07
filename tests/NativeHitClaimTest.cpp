@@ -50,6 +50,8 @@ public:
         return generation;
     }
     PuppetAuthorityMode GetPuppetAuthorityMode() const { return puppetMode; }
+    std::uint64_t spawnPickSalt = 0; // VUH-1515 spawn picks: none unless a test sets it
+    std::uint64_t SpawnPickSalt() const { return spawnPickSalt; }
     std::uint64_t ConnectionId(std::uint8_t index) const {
         if (index == 2 && ++thirdConnectionReads == replaceThirdOnRead) connections[2] += 0x100000000ULL;
         return index < connections.size() ? connections[index] : 0;
@@ -162,6 +164,7 @@ RoomTransition ReadLocation() {
     enemysync::ReadLocationChecked(result);
     return result;
 }
+std::uint32_t HostIssuedLoadEpoch(const RoomTransition&) { return 0; }  // VUH-1515 spawn picks: no host-issued load here
 }
 namespace kh2coop::inject::lifecycletrace {
 bool PopEvent(Event&) { return false; }

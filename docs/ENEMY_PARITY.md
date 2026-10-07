@@ -828,6 +828,15 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
   - Rows now record the native spawn controller (`+0x9E8`) and record (`+0x9F0`) at creation. A known address that comes back with a different controller or record is a new row: new index, first-seen point taken now. A burrowed enemy keeps both, so it stays the same row. If either side can't read them, the old rule decides.
   - The same rule fixes the host side: before, a recycled address revived the old host row (often already `deathSent`), so the new enemy was never announced. Now it's announced as an append, and the old row takes the normal despawn path.
   - Rules: `SpawnRowIdentity.hpp`; tests: `kh2coop_spawnrow_identity_test`. This runs in spawn tracking for every enemy-sync session, with or without the mirror flag. It's step-1 binding, not the mirror. The controller and record are written only by the actor constructor (zeroed) and the provenance setter `0x3B4BD0`.
+- **Random spawn picks (candidate, `KH2COOP_SPAWN_PICK=1`, default off).** Live run 102159: the host drew the Gargoyle Knights (`b_80`) and the friend the Warriors (`b_81`). The friend's Warriors never bound.
+  - **Where the draw happens.** The area-script opcode dispatcher `FUN_1403a24c0` draws RandomSpawn (opcode 2, one of n groups) and CasualSpawn (opcode 3, p%) from the game-wide LCG at `0x783CA0`. That LCG has 274 references, so the two games' states never agree. The draw happens at area load, before any spawn controller exists. 42 sites across 23 areas (bb, ca, hb, lk, mu) use it.
+  - **The fix.** `SpawnPickHook.cpp` detours the dispatcher. For opcodes 2 and 3 it replaces the draw with `SpawnPick.hpp`'s shared pick, a hash of:
+    - the salt: FNV-1a64 of the relay's world incarnation id, published by each runtime at world-bridge bytes [120,128); no protocol change;
+    - the host's instance epoch for this visit (the host predicts `g_epoch + 1`; a client uses the epoch of the host-issued load it is executing);
+    - the location, opcode, op offset, n and the group names.
+  - It still advances the native LCG once per op, registers the chosen group with the native `FUN_1403a4e80`, and returns what the native op returns.
+  - **Fallback.** Every other opcode, and any op without a salt, session or host-issued epoch (for example the first, pre-session load), runs the original. The dispatcher entry, both case bodies and the register prologue are shape-checked, and their rip-relative targets are tied to the LCG and the register function, before the detour installs.
+  - **Logs:** `[spawn-pick] configured=1 hooked=1`, and one line per shared pick with the index (or fired) and the native index it replaced.
 - **The Gargoyles (367/368) are not allowlisted yet.** The run stopped before their boxes: one Large Body hit (24 damage) killed the host's Sora at 24 max HP, and the death removed the field actors.
 
 **Live run 073546.** The bats were driven with motion agreement 66/66 and position p95 0, and 14 of 17 hits were attributed.

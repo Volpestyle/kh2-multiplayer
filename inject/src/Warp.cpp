@@ -497,6 +497,16 @@ bool LoadPending() {
 void SetTransitionObserver(void (*observer)()) { g_transitionObserver = observer; }
 
 std::uint32_t TransitionSerial() { return g_transitionSerial; }
+
+std::uint32_t HostIssuedLoadEpoch(const RoomTransition& loading) {
+    if (!g_hostGeneration || enemysync::WorldSessionGeneration() != g_hostGeneration) return 0;
+    if (!g_hostIssued || g_hostIssueLoad != g_loadSerial || !g_transitionPending || !g_hostCause.issued ||
+        g_hostCause.issueTransition != g_transitionSerial) return 0;  // not inside the host-issued load
+    const bool same = loading.worldId == g_hostTarget.worldId && loading.roomId == g_hostTarget.roomId &&
+        loading.door == g_hostTarget.door && loading.mapProgram == g_hostTarget.mapProgram &&
+        loading.battleProgram == g_hostTarget.battleProgram && loading.eventProgram == g_hostTarget.eventProgram;
+    return same ? g_hostTarget.epoch : 0;
+}
 std::uint32_t LoadSerial() { return g_loadSerial; }
 
 void Shutdown() {

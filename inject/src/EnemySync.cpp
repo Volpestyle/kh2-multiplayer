@@ -4763,6 +4763,33 @@ std::uint8_t ActivationRole() {
     return static_cast<std::uint8_t>(CurrentRole());
 }
 
+bool SpawnPickContext(SpawnPickInputs& out, const char*& reason) {
+    out = {};
+    if (!WorldSessionGeneration()) { reason = "no-session"; return false; }
+    out.salt = g_bridge.SpawnPickSalt();
+    if (!out.salt) { reason = "no-salt"; return false; }
+    const auto location = warp::ReadLocation();
+    out.world = location.worldId; out.room = location.roomId; out.map = location.mapProgram;
+    out.btl = location.battleProgram; out.evt = location.eventProgram;
+    const auto role = CurrentRole();
+    if (role == Role::Host) {
+        // The epoch this load's RoomTransition will carry: QueueHostBeginInstance takes g_epoch + 1 at load
+        // completion, and HostBeginInstance cannot commit during the load (SafeNativeGameplay is false).
+        out.role = 1;
+        out.epoch = g_epoch + 1;
+        if (out.epoch == 0) out.epoch = 1;
+        return true;
+    }
+    if (role == Role::Client) {
+        out.role = 2;
+        out.epoch = warp::HostIssuedLoadEpoch(location);
+        if (!out.epoch) { reason = "not-host-issued-load"; return false; }
+        return true;
+    }
+    reason = "role-off";
+    return false;
+}
+
 void CaptureHostActivation(const float* position4) {
     // The hook provides a checked, aligned local copy of its actual native
     // argument. Never read an avatar bridge or answer from a cached old point.
