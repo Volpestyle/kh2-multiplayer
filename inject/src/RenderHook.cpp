@@ -1098,6 +1098,16 @@ struct PresentHook {
 };
 PresentHook g_hooks[kMaxHooks];
 thread_local int t_presentDepth = 0;
+std::atomic<bool> g_firstPresentReceipt {false};
+
+void LogFirstPresent(const char* api, UINT flags) {
+    if (!g_log || g_firstPresentReceipt.exchange(true)) return;
+    LARGE_INTEGER first {};
+    QueryPerformanceCounter(&first);
+    g_log("[render] first Present pid=%lu qpc=%llu tickMs=%llu api=%s flags=%u",
+          GetCurrentProcessId(), static_cast<unsigned long long>(first.QuadPart),
+          static_cast<unsigned long long>(GetTickCount64()), api, flags);
+}
 
 void OnPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags) {
     if (t_presentDepth > 1 || !g_channel || !swapChain || (flags & DXGI_PRESENT_TEST)) return;
@@ -1138,6 +1148,7 @@ void OnPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags) {
 template <int N>
 HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInterval,
                                         UINT flags) {
+    LogFirstPresent("Present", flags);
     ++t_presentDepth;
     if (g_renderDiagnostics && t_presentDepth == 1) {
         DiagnosticPresentEntry(N, swapChain, flags, nullptr, false);
@@ -1154,6 +1165,7 @@ HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInte
 template <int N>
 HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* swapChain, UINT syncInterval,
                                          UINT flags, const DXGI_PRESENT_PARAMETERS* params) {
+    LogFirstPresent("Present1", flags);
     ++t_presentDepth;
     if (g_renderDiagnostics && t_presentDepth == 1) {
         DiagnosticPresentEntry(N, swapChain, flags, params, true);

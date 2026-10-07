@@ -25,6 +25,10 @@ using LogFn = void (*)(const char* fmt, ...);
 // can reach its save code. Returns false (logged) if any hook failed.
 bool Install(LogFn log);
 
+// After Install succeeded AND every initialization failure/MinHook teardown
+// path has been passed, authorize a suspended kh2ctl child to begin boot.
+void AcknowledgeLaunch();
+
 // Number of operations denied so far (redirects aren't counted).
 std::uint32_t BlockedCount();
 

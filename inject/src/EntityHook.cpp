@@ -3263,7 +3263,7 @@ bool Initialize(uintptr_t exeBase) {
     Log("  MinHook initialized");
 
     // Before anything that can fail: an injected instance never writes saves.
-    saveguard::Install(&Log);
+    if (!saveguard::Install(&Log)) return false;
     eventholdnative::Install(exeBase, &Log);
     crashdump::Install(&Log);
 
@@ -3605,6 +3605,7 @@ bool Initialize(uintptr_t exeBase) {
     }
 
     g_initialized = true;
+    saveguard::AcknowledgeLaunch();
     return true;
 }
 

@@ -1731,7 +1731,19 @@ save changed, 2 a scenario crashed or hung, 3 rig unavailable.
 
 ## Save safety
 
-Two independent layers:
+Three layers:
+
+- **Pre-boot launch protection** (2026-10-07 candidate): `kh2ctl` creates KH2
+  suspended and injects before the main thread runs. It resumes only after the
+  DLL acknowledges that the save guard and hook initialization succeeded. An
+  old DLL, incomplete guard, missing acknowledgement or launch failure terminates
+  the new owned child; `--no-inject` is refused. This closes the earlier
+  window-before-injection gap. Revision 3 adds explicit DLL acknowledgement
+  (PID/QPC before SetEvent), launcher observed-wait/resume QPC receipts in JSON
+  and its own log, and a first hooked Present receipt. The live judge requires
+  matching PIDs/log objects, strict ack-before-resume QPC ordering and the
+  installed-guard line before first Present. Offline controls and limits are in
+  `build/rig/vuh-saveguard-preinject-20261007-01/`; live qualification is PENDING.
 
 - **The DLL's save guard** (`inject/src/SaveGuard.cpp`) is installed first
   at init and covers everything under the save folder from inside the game.
@@ -1764,7 +1776,12 @@ Two independent layers:
   - `FUN_1400fef80` opens the save container read-only (CRT
     `_sopen_dispatch`). If the file reads as empty, it calls `DeleteFileA` on
     it.
-  - `FUN_140100810` creates the folder and checks free space.
+  - `FUN_140100810` creates the folder, checks free space **and writes the PNG**
+    through `FUN_140145170`. Boot invokes it when decoded payload size is zero;
+    a nonempty container is therefore not sufficient protection.
+  - `FUN_140101000` also invokes the deleting helper `FUN_1401007a0` after
+    initialization errors or a decoded account/header mismatch. These are
+    conditional boot paths, not proof that a valid existing PC1 save is mutated.
   - The PNG writer `FUN_140145170` opens the file with ucrtbase
     `_wfopen_s(path, L"r+b")`, then `L"wb"`. Both reach KernelBase
     `CreateFileW` with write access, which the guard redirects.

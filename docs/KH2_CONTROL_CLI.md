@@ -108,7 +108,7 @@ All successful commands print a single JSON object to stdout.
 
 ```powershell
 kh2ctl launch                   # launch KH2, inject the current DLL build
-kh2ctl launch --no-inject       # launch only
+kh2ctl launch --no-inject       # refused: boot requires the save guard
 kh2ctl inject --pid 1234        # inject into a running KH2
 kh2ctl instances                # list KH2 processes and whether the rig owns them
 kh2ctl kill --pid 1234          # kill one rig-launched instance
@@ -116,9 +116,19 @@ kh2ctl kill --all               # kill every rig-launched instance
 ```
 
 `launch` starts the exe directly (`steam_appid.txt` in the game directory skips
-the launcher; Steam must be running), waits for the game window, then injects
-with `LoadLibraryW` from a remote thread. It reports the process id, the
-per-PID log and the hooks that installed:
+the launcher; Steam must be running) with `CREATE_SUSPENDED`, then injects
+with `LoadLibraryW` from a remote thread. The main thread resumes only after
+the DLL acknowledges a complete save guard and successful hook initialization.
+Missing/older DLLs, failed hooks, timeouts and exceptions terminate only the
+new owned child. It then waits for the window and reports the process id,
+per-PID log and hooks, with `saveGuardBeforeResume:true`. Revision 3 also
+returns `preinject:{ackWaitMs,ackObserved,resumePrevCount,resumedAtTick,clock}`
+and `launcherLog`, which contains the same per-PID receipt. `resumedAtTick`
+is the QPC counter sampled immediately after ResumeThread returns; `clock`
+is `QPC`. The DLL logs `[saveguard] ack signalled` with PID/QPC just before
+SetEvent, after full successful initialization. The first hooked Present
+entry logs `[render] first Present`; live qualification requires guard install
+before that entry and ack QPC strictly before resume QPC:
 
 ```json
 {"ok":true,"command":"launch","processId":70260,"dll":".../build/rig/dll/kh2coop_inject_<ms>.dll",
@@ -140,9 +150,12 @@ per-PID log and the hooks that installed:
   playing.
 - Options: `--game-dir DIR` (or `KH2_GAME_DIR`), `--window-timeout-ms`,
   `--settle-ms` (wait after the window appears, default 1500),
-  `--init-timeout-ms` (wait for the DLL's hooks, default 15000).
-- Injection happens once the window is up, not suspended before game init.
-  Startup hooks would need the early path; multi-instance doesn't (below).
+  `--init-timeout-ms` (1..60000, default 15000; bounds the pre-resume
+  acknowledgement and the post-window hook-log check independently).
+- `--no-inject` is refused, including through restart and boot-load-save.
+  Attaching with `inject --pid` protects only subsequent operations; it cannot
+  retroactively protect boot writes. Suspended KH2/Steam startup still requires
+  separate live qualification; the offline controls use a harmless test process.
 
 ### Several instances
 
@@ -370,7 +383,7 @@ the filter.
 kh2ctl restart              # kill rig instances, rebuild the DLL, launch + inject
 kh2ctl restart --no-build
 kh2ctl restart --kill       # kill rig instances only
-kh2ctl restart --no-inject
+kh2ctl restart --no-inject   # refused
 ```
 
 `restart` refuses (`"phase":"preflight"`, exit 1) when a KH2 process the rig

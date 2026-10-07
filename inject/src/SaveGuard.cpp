@@ -10,6 +10,7 @@
 // ============================================================================
 
 #include "SaveGuard.hpp"
+#include "kh2coop/SaveGuardReady.hpp"
 
 #include <Windows.h>
 #include <MinHook.h>
@@ -519,6 +520,29 @@ bool Install(LogFn log) {
     }
     if (ok && g_testDir[0] && g_log) SelfTest();
     return ok;
+}
+
+void AcknowledgeLaunch() {
+    // Signal only after all initialization that could tear down MinHook has
+    // succeeded. Otherwise a later failure could remove the guard after resume.
+    HANDLE ready = OpenEventW(EVENT_MODIFY_STATE, FALSE,
+        preinject::ReadyEventName(GetCurrentProcessId()).c_str());
+    if (ready) {
+        LARGE_INTEGER ack {};
+        if (!QueryPerformanceCounter(&ack)) {
+            if (g_log) g_log("[saveguard] ERROR: acknowledgement QPC unavailable pid=%lu", GetCurrentProcessId());
+            CloseHandle(ready);
+            return;
+        }
+        if (g_log) g_log("[saveguard] ack signalled pid=%lu qpc=%llu tickMs=%llu",
+            GetCurrentProcessId(), static_cast<unsigned long long>(ack.QuadPart),
+            static_cast<unsigned long long>(GetTickCount64()));
+        // This line records the signal attempt. The launcher's successful wait
+        // is the independent receipt that the signal was actually observed.
+        if (!SetEvent(ready) && g_log)
+            g_log("[saveguard] ERROR: SetEvent failed pid=%lu error=%lu", GetCurrentProcessId(), GetLastError());
+        CloseHandle(ready);
+    }
 }
 
 std::uint32_t BlockedCount() { return g_blocked.load(); }

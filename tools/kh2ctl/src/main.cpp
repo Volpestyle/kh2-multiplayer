@@ -5,6 +5,7 @@
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/Types.hpp"
+#include "preinject.hpp"
 
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -496,45 +497,7 @@ std::vector<Kh2Process> PruneOwned() {
     return kept;
 }
 
-// LoadLibraryW in the target via a remote thread. Returns an error or empty.
-std::string InjectDll(DWORD pid, const std::filesystem::path& dll) {
-    HANDLE process = OpenProcess(
-        PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE |
-            PROCESS_VM_READ | PROCESS_QUERY_INFORMATION,
-        FALSE, pid);
-    if (!process) return "OpenProcess failed: " + std::to_string(GetLastError());
-
-    const std::wstring path = dll.wstring();
-    const SIZE_T bytes = (path.size() + 1) * sizeof(wchar_t);
-    void* remote = VirtualAllocEx(process, nullptr, bytes,
-                                  MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    std::string error;
-    if (!remote) {
-        error = "VirtualAllocEx failed: " + std::to_string(GetLastError());
-    } else if (!WriteProcessMemory(process, remote, path.c_str(), bytes, nullptr)) {
-        error = "WriteProcessMemory failed: " + std::to_string(GetLastError());
-    } else {
-        auto loadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(
-            GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryW"));
-        HANDLE thread = CreateRemoteThread(process, nullptr, 0, loadLibrary,
-                                           remote, 0, nullptr);
-        if (!thread) {
-            error = "CreateRemoteThread failed: " + std::to_string(GetLastError());
-        } else {
-            if (WaitForSingleObject(thread, 15000) != WAIT_OBJECT_0) {
-                error = "LoadLibraryW did not return within 15 s";
-            } else {
-                DWORD moduleLow = 0;
-                GetExitCodeThread(thread, &moduleLow);
-                if (moduleLow == 0) error = "LoadLibraryW returned NULL in target";
-            }
-            CloseHandle(thread);
-        }
-    }
-    if (remote) VirtualFreeEx(process, remote, 0, MEM_RELEASE);
-    CloseHandle(process);
-    return error;
-}
+using kh2coop::preinject::InjectDll;
 
 // Copies the staged DLL to a unique file so rebuilds never hit a locked DLL.
 std::filesystem::path StageDllCopy(const std::optional<std::string>& dllOverride) {
@@ -633,6 +596,8 @@ LaunchOptions ConsumeLaunchOptions(std::vector<std::string>& args) {
     options.gameDir = ConsumeOption(args, "--game-dir");
     options.dll = ConsumeOption(args, "--dll");
     options.noInject = ConsumeFlag(args, "--no-inject");
+    if (options.noInject)
+        throw std::runtime_error("--no-inject is refused: launch requires the pre-boot save guard");
     options.windowTimeoutMs =
         ParseNumber<int>(ConsumeOption(args, "--window-timeout-ms").value_or("60000"),
                          "--window-timeout-ms");
@@ -658,6 +623,11 @@ CommandResult LaunchInstance(const LaunchOptions& options, const char* command) 
         return MakeError("KH2 executable not found: " + exe.string());
     }
 
+    if (noInject) return MakeError("--no-inject is refused: launch requires the pre-boot save guard");
+    if (initTimeoutMs < 1 || initTimeoutMs > 60000)
+        return MakeError("--init-timeout-ms must be 1..60000");
+    const auto dll = StageDllCopy(dllOverride);
+
     // The DLL reads KH2COOP_LOG_DIR at init; the child inherits it.
     const auto logDir = RigDir() / "logs";
     std::filesystem::create_directories(logDir);
@@ -668,16 +638,38 @@ CommandResult LaunchInstance(const LaunchOptions& options, const char* command) 
     PROCESS_INFORMATION info {};
     std::wstring commandLine = L"\"" + exe.wstring() + L"\"";
     if (!CreateProcessW(exe.wstring().c_str(), commandLine.data(), nullptr,
-                        nullptr, FALSE, 0, nullptr, gameDir.wstring().c_str(),
+                        nullptr, FALSE, CREATE_SUSPENDED, nullptr, gameDir.wstring().c_str(),
                         &startup, &info)) {
         return MakeError("CreateProcessW failed: " + std::to_string(GetLastError()));
     }
 
+    kh2coop::preinject::Child child(info);
     auto owned = PruneOwned();
     owned.push_back({info.dwProcessId, ProcessCreationTime(info.hProcess)});
     WriteOwned(owned);
 
-    // Wait for the game window so the CRT and loader are fully up.
+    const auto launcherLog = logDir / ("kh2ctl_launch_" + std::to_string(info.dwProcessId) +
+                                      "_" + std::to_string(NowMs()) + ".log");
+    std::ofstream launcherOut(launcherLog);
+    if (!launcherOut) return MakeError("Cannot open the launcher evidence log");
+    const auto protectionError = child.ProtectAndResume(
+        [&](DWORD pid) { return InjectDll(pid, dll); }, static_cast<DWORD>(initTimeoutMs));
+    if (!protectionError.empty()) return MakeError(protectionError);
+    const auto& evidence = child.Evidence();
+    std::ostringstream preinjectOut;
+    preinjectOut << "{\"ackWaitMs\":" << evidence.ackWaitMs
+                 << ",\"ackObserved\":" << JsonBool(evidence.ackObserved)
+                 << ",\"resumePrevCount\":" << evidence.resumePrevCount
+                 << ",\"resumedAtTick\":" << evidence.resumedAtTick
+                 << ",\"clock\":\"QPC\"}";
+    const auto preinjectJson = preinjectOut.str();
+    launcherOut << "{\"command\":" << JsonString(command)
+                << ",\"processId\":" << info.dwProcessId
+                << ",\"preinject\":" << preinjectJson << "}\n";
+    launcherOut.flush();
+    if (!launcherOut) return MakeError("Cannot persist the launcher pre-injection evidence");
+
+    // Game boot starts only after all save guard hooks acknowledge success.
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(windowTimeoutMs);
     bool windowFound = false;
@@ -685,8 +677,6 @@ CommandResult LaunchInstance(const LaunchOptions& options, const char* command) 
         if (WaitForSingleObject(info.hProcess, 0) == WAIT_OBJECT_0) {
             DWORD exitCode = 0;
             GetExitCodeProcess(info.hProcess, &exitCode);
-            CloseHandle(info.hThread);
-            CloseHandle(info.hProcess);
             return MakeError("KH2 exited during startup with code " +
                              std::to_string(exitCode));
         }
@@ -696,21 +686,31 @@ CommandResult LaunchInstance(const LaunchOptions& options, const char* command) 
         }
         SleepMs(250);
     }
-    CloseHandle(info.hThread);
-    CloseHandle(info.hProcess);
     if (!windowFound) {
         return MakeError("KH2 window did not appear for PID " +
                          std::to_string(info.dwProcessId));
     }
     SleepMs(settleMs);
 
-    if (noInject) {
-        std::ostringstream out;
-        out << "{\"ok\":true,\"command\":" << JsonString(command)
-            << ",\"processId\":" << info.dwProcessId << ",\"injected\":false}";
-        return {0, out.str()};
-    }
-    return InjectAndReport(info.dwProcessId, dllOverride, initTimeoutMs, command);
+    std::vector<std::string> hooks, errors;
+    bool complete = false;
+    CollectInitLog(info.dwProcessId, initTimeoutMs, hooks, errors, complete);
+    if (!complete || !errors.empty()) return MakeError("Protected KH2 hook initialization failed");
+    std::string title;
+    if (auto hwnd = FindWindowForPid(info.dwProcessId)) title = WindowTitle(*hwnd);
+    std::ostringstream out;
+    out << "{\"ok\":true,\"command\":" << JsonString(command)
+        << ",\"processId\":" << info.dwProcessId
+        << ",\"dll\":" << JsonString(dll.string())
+        << ",\"windowTitle\":" << JsonString(title)
+        << ",\"log\":" << JsonString(LogPathForPid(info.dwProcessId).string())
+        << ",\"launcherLog\":" << JsonString(launcherLog.string())
+        << ",\"preinject\":" << preinjectJson
+        << ",\"saveGuardBeforeResume\":true,\"hooksInstalled\":true,\"hooks\":"
+        << JsonStringArray(hooks) << ",\"errors\":[]}";
+    CommandResult result {0, out.str()};
+    child.Release();
+    return result;
 }
 
 CommandResult CmdLaunch(std::vector<std::string> args) {
