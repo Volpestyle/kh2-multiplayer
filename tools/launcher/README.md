@@ -68,8 +68,8 @@ from another process or from the clipboard.
 Connect builds `--steam-host --steam-allow ID ...` or `--steam-join ID`, with
 explicit owned PID and the existing campaign/compatibility/runtime limits. Steam
 uses Valve relays only and does not launch an ENet server. The existing relay
-fields retain their values and behavior in ENet mode; they are unused by Steam,
-and the local-relay checkbox must be off. There is no automatic fallback.
+fields retain their values and behavior in ENet mode; they are hidden and unused
+by Steam, including the local-relay checkbox. There is no automatic fallback.
 
 The owned broker log is read with write sharing, a bounded 8-KiB prefix and a
 creation-time floor from the launch request. Missing, locked, stale or incomplete

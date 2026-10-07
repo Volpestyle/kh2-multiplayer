@@ -39,7 +39,8 @@ class SteamFields:
         self.host_entry=ttk.Entry(self.body,textvariable=self.host)
         self.allow_label=ttk.Label(self.body,text='Allowed friend IDs')
         self.allow_entry=ttk.Entry(self.body,textvariable=self.allow)
-        ttk.Label(self.body,text='SteamID64 only. Host allows 1-2 friends, separated by commas. Valve relays only.',wraplength=670).grid(row=2,columnspan=3,sticky='w',pady=(5,0))
+        self.hint=tk.StringVar()
+        ttk.Label(self.body,textvariable=self.hint,wraplength=670).grid(row=2,columnspan=3,sticky='w',pady=(5,0))
         ttk.Label(self.body,textvariable=self.note,wraplength=670).grid(row=3,columnspan=3,sticky='w',pady=(3,5))
         for var in (self.mode,self.role,self.identity):var.trace_add('write',lambda *args:self.refresh())
         self.refresh()
@@ -63,6 +64,7 @@ class SteamFields:
             self.body.grid(row=1,columnspan=3,sticky='ew',pady=6)
         else:self.body.grid_remove()
         host=self.role.get() == 'host'
+        self.hint.set('SteamID64 only. Host allows 1-2 friends, separated by commas. Valve relays only.' if host else 'SteamID64 only. Valve relays only.')
         for widget in (self.host_label,self.host_entry,self.allow_label,self.allow_entry):widget.grid_remove()
         label,entry=(self.allow_label,self.allow_entry) if host else (self.host_label,self.host_entry)
         label.grid(row=1,column=0,sticky='w',pady=5);entry.grid(row=1,column=1,columnspan=2,sticky='ew',padx=10)
@@ -80,18 +82,27 @@ def make_view(tk, ttk, browse):
     values={k:tk.StringVar(value=v) for k,v in {'game':'','mode':'join','endpoint':'','port':'27795','name':'Friend','slot':'friend1'}.items()}
     relay=tk.BooleanVar(value=False);loaded=tk.BooleanVar(value=False)
     def field(n,title,widget):
-        ttk.Label(frame,text=title).grid(row=n,column=0,sticky='w',pady=7)
+        label=ttk.Label(frame,text=title)
+        label.grid(row=n,column=0,sticky='w',pady=7)
         widget.grid(row=n,column=1,columnspan=2,sticky='ew',padx=(15,0))
+        return label,widget
     field(2,'Your KH2 game folder',ttk.Entry(frame,textvariable=values['game']))
     ttk.Button(frame,text='Browse…',command=browse).grid(row=3,column=2,sticky='e')
     field(4,'Play as',ttk.Combobox(frame,textvariable=values['mode'],values=('host','join'),state='readonly'))
     steam = SteamFields(frame, tk, ttk, values['mode'])
     steam.frame.grid(row=5,columnspan=3,sticky='ew',pady=4)
-    field(6,'Relay address from your host',ttk.Entry(frame,textvariable=values['endpoint']))
-    field(7,'Port',ttk.Entry(frame,textvariable=values['port']))
+    enet_widgets=(*field(6,'Relay address from your host',ttk.Entry(frame,textvariable=values['endpoint'])),
+                  *field(7,'Port',ttk.Entry(frame,textvariable=values['port'])))
     field(8,'Your name',ttk.Entry(frame,textvariable=values['name']))
     field(9,'Join slot',ttk.Combobox(frame,textvariable=values['slot'],values=('friend1','friend2'),state='readonly'))
-    ttk.Checkbutton(frame,text='Host only: run the relay here (not supported in this preview)',variable=relay).grid(row=10,columnspan=3,sticky='w')
+    relay_check=ttk.Checkbutton(frame,text='Host only: run the relay here (not supported in this preview)',variable=relay)
+    relay_check.grid(row=10,columnspan=3,sticky='w')
+    def connection_fields(*_):
+        for widget in (*enet_widgets,relay_check):
+            if steam.transport() == 'enet':widget.grid()
+            else:widget.grid_remove()
+    steam.mode.trace_add('write',connection_fields)
+    connection_fields()
     ttk.Checkbutton(frame,text='I loaded my save and the host says the room is ready to join',variable=loaded).grid(row=11,columnspan=3,sticky='w',pady=10)
     status=tk.StringVar(value='Nothing starts automatically. ENet uses Tailscale; Steam (beta) uses your game Steam session.')
     ttk.Label(frame,textvariable=status,wraplength=630).grid(row=13,columnspan=3,sticky='w',pady=10)
@@ -172,7 +183,7 @@ def main():
             identity=owner.connection_identity(transport)
             opt=Options(owner.pid,values['mode'].get(),values['endpoint'].get(),
                         int(values['port'].get()) if transport == 'enet' else 27795,
-                        values['name'].get(),values['slot'].get(),relay.get(),1800,
+                        values['name'].get(),values['slot'].get(),relay.get() if transport == 'enet' else False,1800,
                         transport=transport,steam_self=identity,
                         steam_host=steam.host.get(),steam_allow=steam.allow.get())
             plan=make_plan(opt,fresh_dir(),runtime=owner.product('runtime'),server=owner.product('server'))
@@ -243,7 +254,7 @@ def main():
             try:
                 identity=owner.read_steam_identity()
                 steam.identity.set(identity)
-                steam.note.set('Your game Steam session is ready. Hosting requires your friends IDs.' if identity else 'Waiting for the game Steam session (broker cap: 60 seconds).')
+                steam.note.set('Your game Steam session is ready.' if identity else 'Waiting for the game Steam session (broker cap: 60 seconds).')
             except (OSError, ValueError) as error:
                 steam.identity.set('')
                 steam.note.set('Steam ID unavailable: '+str(error))
