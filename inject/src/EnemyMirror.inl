@@ -397,7 +397,7 @@ static Driven* Allocate(uintptr_t actor) {
 // stood at then, and whether it was driven then. Host side logs the same frames.
 static void TraceObserved(uintptr_t actor, const Driven& d) {
     const double c = d.seenCursor;
-    if (c < 0.0 || std::fmod(c, static_cast<double>(kTraceEvery)) != 0.0) return;
+    if (c < 0.0 || (!enemysync::MirrorLatencyTrace() && std::fmod(c, static_cast<double>(kTraceEvery)) != 0.0)) return;
     Vec3 at {};
     std::uint32_t motion = kNoMotion;
     const uintptr_t e = actor + offsets::actor::ENTITY_TRANSFORM;

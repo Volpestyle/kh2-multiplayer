@@ -4,6 +4,15 @@ project(kh2coop LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_executable(kh2coop_latency_config_test tests/LatencyConfigTest.cpp)
+target_include_directories(kh2coop_latency_config_test PRIVATE common/include inject/src)
+if(MSVC)
+    target_compile_options(kh2coop_latency_config_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_latency_config_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------

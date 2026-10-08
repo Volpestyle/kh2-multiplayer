@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include "kh2coop/AvatarInterpolator.hpp"
+#include "kh2coop/LatencyConfig.hpp"
 #include "kh2coop/Protocol.hpp"
 
 #include <array>
@@ -44,7 +45,7 @@ struct PuppetTarget {
 class AvatarSync {
 public:
     struct Config {
-        std::uint32_t renderDelayMs {120};  // behind estimated server time
+        std::uint32_t renderDelayMs {latency::kAvatarDelayMs};  // behind estimated server time
         std::uint32_t staleAfterMs {1000};   // past this, hold the newest pose (AvatarHeld)
         std::uint32_t releaseAfterMs {3000}; // past this, hide; <= staleAfterMs disables the hold
     };

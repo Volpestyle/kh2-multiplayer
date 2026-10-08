@@ -29,6 +29,11 @@ namespace kh2coop::inject::enemymirror {
 
 class Stream {
 public:
+    explicit Stream(std::uint32_t delayFrames = kDelay) noexcept
+        : delayFrames_(delayFrames >= latency::kEnemyDelayMinFrames && delayFrames <= latency::kEnemyDelayMaxFrames
+                           ? delayFrames : kDelay) {}
+    std::uint32_t delayFrames() const noexcept { return delayFrames_; }
+    std::uint32_t newestFrame() const noexcept { return newest_; }
     std::uint32_t epoch() const noexcept { return epoch_; }
     const StreamStats& stats() const noexcept { return stats_; }
     double cursor() const noexcept { return haveCursor_ ? cursor_ : -1.0; }
@@ -90,7 +95,7 @@ public:
         if (haveNewest_) {
             const double newest = static_cast<double>(newest_);
             if (!haveCursor_) {
-                natural_ = newest - kDelay;
+                natural_ = newest - delayFrames_;
                 haveCursor_ = true;
             } else {
                 const double lag = newest - natural_;
@@ -101,12 +106,23 @@ public:
                 // displayed cursor pins at newest-1 (never a trace frame, % 30), and the overflow pushes
                 // the motion time ahead by the stall length for good (fixture 073546: every netId).
                 const bool live = localFrame - newestLocal_ <= kPublishInterval + 1;
-                natural_ += lag > static_cast<double>(kDelay + 3) ? 2.0
-                          : (live && lag < static_cast<double>(kDelay) - 3.0) ? 0.0 : 1.0;
-                if (natural_ < newest - kMaxLag) natural_ = newest - kDelay;
+                if (lag > static_cast<double>(delayFrames_ + 3)) {
+                    natural_ += 2.0;
+                    ++stats_.cursorCatchups;
+                } else if (live && lag < static_cast<double>(delayFrames_) - 3.0) {
+                    ++stats_.cursorHolds;
+                } else {
+                    natural_ += 1.0;
+                }
+                if (natural_ < newest - kMaxLag) {
+                    natural_ = newest - delayFrames_;
+                    ++stats_.cursorSnaps;
+                }
                 if (natural_ > newest + kStaleFrames) natural_ = newest + kStaleFrames;  // bounded overflow
             }
             cursor_ = natural_ > newest - kMinLag ? newest - kMinLag : natural_;
+            // A stream clock clamp, not an inferred packet-loss count.
+            if (natural_ > newest - kMinLag) ++stats_.underrunFrames;
         }
         for (auto& [id, t] : tracks_) {
             (void)id;
@@ -184,6 +200,7 @@ private:
     double cursor_ = 0.0, natural_ = 0.0;  // integral host frames; double: exact for 2^53 frames (N7)
     std::uint32_t newestLocal_ = 0;  // local frame at which newest_ last advanced
     StreamStats stats_ {};
+    std::uint32_t delayFrames_;
 };
 
 }  // namespace kh2coop::inject::enemymirror

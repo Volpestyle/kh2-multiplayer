@@ -296,7 +296,7 @@ void testOwnRoomLoad() {
     sync.onRemote(door);
     bool ghost = false;
     for (std::uint64_t now = 5020; now <= 5016 + 3500; now += 16)
-        ghost = ghost || (sync.sample(now, kWorld, kRoom)[0].active && now > 5016 + 120);
+        ghost = ghost || (sync.sample(now, kWorld, kRoom)[0].active && now > 5016 + latency::kAvatarDelayMs);
     check(!ghost, "receiver shows no door ghost through a 3.5 s own-load gap");
     const auto unflaggedGap = streamed(5000).sample(5000 + 2500, kWorld, kRoom)[0];
     check(held(unflaggedGap), "control: the same gap without the flag would hold (the ghost B1 removes)");

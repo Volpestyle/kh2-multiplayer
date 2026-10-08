@@ -58,3 +58,17 @@ If the relay refuses the connection (build, content, mod, mode or slot
 mismatch), the runtime prints `refused by relay: <reason>`.
 
 Press F8 during runtime to toggle camera override on/off (Windows only).
+
+## Interpolation delay
+
+The qualified defaults are avatar **80 ms** and enemy cursor **6 host frames**.
+Set `KH2COOP_AVATAR_RENDER_DELAY_MS` on each runtime (integer 1..500), and
+`KH2COOP_ENEMY_CURSOR_DELAY_FRAMES` on each game/DLL (integer 4..18), before
+launch. Unset values use the defaults. Zero, out-of-range or malformed values
+fall back to the defaults and log `source=invalid-default`; accepted overrides
+log `source=env`. The enemy lower bound preserves the existing +/-3-frame
+cursor hysteresis. Hold/release thresholds and packet cadence are unchanged.
+
+`KH2COOP_LATENCY_TRACE=1` enables bounded diagnostic counters (18,000 records/
+frames); it does not gate gameplay. The two qualified LOOPBACK comparisons,
+definitions and limits are retained in [the latency results](../docs/research/LATENCY_AB.md).

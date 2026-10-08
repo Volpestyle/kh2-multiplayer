@@ -111,7 +111,9 @@ void testCodec() {
 }
 
 void testStream() {
-    em::Stream s;
+    // Retain the established nine-frame timing vectors as explicit override
+    // coverage; LatencyConfigTest covers the qualified six-frame default.
+    em::Stream s(9);
     // Two samples are needed before a new netId is drivable (hysteresis).
     check(s.Ingest(motion(7, 1, 300, {row(1, 0.0f, 2, 10.0f, 0.0f)}), 1000), "first sample accepted");
     s.Tick(1000);  // natural cursor = 300 - DELAY(9) = 291
@@ -160,13 +162,13 @@ void testStream() {
     s.Ingest(motion(7, 7, 900, {row(1, 3.0f)}), 1059); s.Tick(1059);
     check(s.PoseAt(1, 1059, p) && p.cursor == 891.0, "cursor outside newest-18 snaps to newest-9");
     // A lag a little past DELAY+3 catches up two frames per tick.
-    em::Stream c;
+    em::Stream c(9);
     c.Ingest(motion(3, 1, 100, {row(1, 0.0f)}), 1); c.Tick(1);   // 91
     c.Ingest(motion(3, 2, 103, {row(1, 0.0f)}), 2); c.Tick(2);   // lag 12 -> 92
     c.Ingest(motion(3, 3, 109, {row(1, 0.0f)}), 3); c.Tick(3);   // lag 17 -> 94
     check(c.PoseAt(1, 3, p) && p.cursor == 94.0, "a lag past DELAY+3 catches up two frames per tick");
     // Motion change between brackets: s0's motion continues with its own time, then the new one renders.
-    em::Stream m;
+    em::Stream m(9);
     m.Ingest(motion(3, 1, 10, {row(1, 0.0f, 2, 10.0f)}), 1); m.Tick(1);   // 1
     m.Ingest(motion(3, 2, 13, {row(1, 0.0f, 2, 13.0f)}), 2); m.Tick(2);   // 2
     m.Ingest(motion(3, 3, 16, {row(1, 0.0f, 9, 0.0f)}), 3); m.Tick(3);    // lag 14 -> 4
@@ -180,23 +182,23 @@ void testStream() {
     check(m.PoseAt(1, 20, p) && p.cursor == 16.0 && p.motionId == 9 && std::fabs(p.motionTime) < 1e-3f,
           "after the boundary the new motion is rendered");
     // Held inside the last bracket: position between the two newest, time running.
-    em::Stream h;
+    em::Stream h(9);
     h.Ingest(motion(3, 1, 10, {row(2, 5.0f, 2, 1.0f)}), 1); h.Tick(1);
     h.Ingest(motion(3, 2, 13, {row(2, 8.0f, 2, 4.0f)}), 2); h.Tick(2);
     for (std::uint32_t f = 3; f <= 14; ++f) h.Tick(f);  // natural 14, displayed 12
     check(h.PoseAt(2, 14, p) && p.cursor == 12.0 && std::fabs(p.position.x - 7.0f) < 1e-3f && std::fabs(p.motionTime - 5.0f) < 1e-3f,
           "cursor held at newest-1 stays inside the bracket, time advancing by the overflow");
     // Families: a non-allowlisted object id is never tracked.
-    em::Stream f;
+    em::Stream f(9);
     auto other = row(4, 0.0f); other.objectId = 309;
     f.Ingest(motion(3, 1, 10, {other}), 1); f.Ingest(motion(3, 2, 13, {other}), 2); f.Tick(2);
     check(!f.Drivable(4, 2), "non-allowlisted family is ignored");
-    em::Stream batStream;
+    em::Stream batStream(9);
     auto bat = row(8, 0.0f); bat.objectId = em::kHookBatObjectId;
     batStream.Ingest(motion(3, 1, 10, {bat}), 1); batStream.Ingest(motion(3, 2, 13, {bat}), 2); batStream.Tick(2);
     em::Pose sp;
     check(batStream.Drivable(8, 2) && batStream.PoseAt(8, 2, sp) && sp.objectId == em::kHookBatObjectId, "a Hook Bat (objectId 4) stream is tracked and drivable");
-    em::Stream soldierStream;
+    em::Stream soldierStream(9);
     auto soldier = row(9, 0.0f); soldier.objectId = em::kSoldierObjectId;
     soldierStream.Ingest(motion(3, 1, 10, {soldier, other}), 1); soldierStream.Ingest(motion(3, 2, 13, {soldier, other}), 2); soldierStream.Tick(2);
     check(soldierStream.Drivable(9, 2) && soldierStream.PoseAt(9, 2, sp) && sp.objectId == em::kSoldierObjectId && !soldierStream.Drivable(4, 2),
@@ -205,13 +207,13 @@ void testStream() {
     s.Ingest(motion(8, 1, 5, {row(1, 0.0f)}), 1060);
     check(s.epoch() == 8 && !s.Drivable(1, 1060) && s.stats().resets >= 1, "a new epoch resets the stream and its sequence floor");
     // Out-of-order sample for one netId inside a newer packet is dropped.
-    em::Stream o;
+    em::Stream o(9);
     o.Ingest(motion(3, 1, 20, {row(1, 0.0f)}), 1);
     o.Ingest(motion(3, 2, 15, {row(1, 9.0f)}), 2);
     check(o.stats().staleSamples == 1, "a per-netId sample older than its newest is dropped");
     // S4: a restarted host reuses the epoch with low sequences and frames. Without a reset the
     // stream would refuse it; after Reset(0) (RetireWorldSession / RoomTransition) it is live again.
-    em::Stream r;
+    em::Stream r(9);
     r.Ingest(motion(1, 50, 5000, {row(1, 0.0f)}), 1); r.Ingest(motion(1, 51, 5003, {row(1, 0.0f)}), 2); r.Tick(2);
     check(!r.Ingest(motion(1, 1, 3, {row(1, 0.0f)}), 3), "same epoch, restarted sequence: refused without a reset");
     r.Reset(0);
@@ -224,7 +226,7 @@ void testStream() {
     for (std::uint32_t t = 6; t <= 40; ++t) r.Tick(t);
     check(!r.Drivable(1, 40) && r.stats().releases == releases, "an erased (dead) netId is gone without a release");
     // rev-2 N-c: at most 256 tracks; further new netIds are counted and ignored, known ones keep updating.
-    em::Stream cap;
+    em::Stream cap(9);
     for (std::uint64_t k = 0; k < 9; ++k) {
         std::vector<EnemyMotionEntry> rows;
         for (std::uint16_t i = 0; i < 32; ++i) rows.push_back(row(static_cast<std::uint16_t>(k * 32 + i + 1), 0.0f));
@@ -279,7 +281,7 @@ void testHelpers() {
         check(em::FormatFamilies(nullptr, 8) == 0 && em::FormatFamilies(tiny, 0) == 0, "no buffer: nothing written");
     }
     {  // batch 2: each new family streams beside an ignored family (309)
-        em::Stream b2;
+        em::Stream b2(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 40;
         for (const std::uint32_t oid : {em::kLanceSoldierObjectId, em::kLargeBodyObjectId, em::kGargoyleWarriorObjectId,
@@ -304,7 +306,7 @@ void testHelpers() {
                   !em::FamilyAllowed(314) && !em::FamilyAllowed(315) && !em::FamilyAllowed(316) &&
                   !em::FamilyAllowed(319) && !em::FamilyAllowed(1365),
               "batch5 allows Dusk/Samurai/Dancer; Creeper, Assassin/Sniper/neighbours and RAW stay native");
-        em::Stream b5;
+        em::Stream b5(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 80;
         for (const auto oid : {em::kDuskObjectId, em::kSamuraiObjectId, em::kDancerObjectId}) {
@@ -320,7 +322,7 @@ void testHelpers() {
         check(all, "batch5 streams are tracked and drivable beside ignored Sniper311 and Creeper317");
     }
     {  // each Soldier skin streams like the base family
-        em::Stream skins;
+        em::Stream skins(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 30;
         for (const auto oid : em::kSoldierSkinObjectIds) {
@@ -335,7 +337,7 @@ void testHelpers() {
         check(all, "Soldier skins 1838, 1839 and 1849 are tracked and drivable");
     }
     {  // each Rapid Thruster skin streams like the base family
-        em::Stream skins;
+        em::Stream skins(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 34;
         for (const auto oid : em::kRapidThrusterSkinObjectIds) {
@@ -353,7 +355,7 @@ void testHelpers() {
     // stopped) must not pin the cursor at newest-1 forever: the lag returns to about DELAY-3 and trace frames
     // (cursor % 30 == 0) come back; the motion-time overflow goes back to 0.
     {
-        em::Stream st;
+        em::Stream st(9);
         std::uint32_t local = 1, host = 300;
         std::uint64_t seq = 1;
         auto feed = [&](int frames, bool hostRuns) {

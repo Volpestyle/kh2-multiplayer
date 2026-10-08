@@ -80,6 +80,7 @@ bool MirrorRequested() noexcept;
 // EntityHook's counter, which Panacea's loader also advances).
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept;
 bool MirrorTrace() noexcept;  // KH2COOP_ENEMY_MIRROR_TRACE=1: fixture position trace lines
+bool MirrorLatencyTrace() noexcept; // bounded denser trace for latency A/B only
 double MirrorCursor() noexcept;  // the stream's displayed host-frame cursor; < 0 when none
 // VUH-1788 (KH2COOP_ENEMY_POPULATION=1 with KH2COOP_ENEMY_MIRROR=1; client only).
 bool PopulationRequested() noexcept;

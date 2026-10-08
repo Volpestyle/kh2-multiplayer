@@ -776,7 +776,7 @@ For rooms whose spawner emits enemies over time based on player position
 
 **Client stream state.** `inject/src/EnemyMirrorState.hpp`:
 - An 8-sample ring per netId.
-- A host-frame render cursor 9 frames behind the newest sample (catch-up past 12, snap past 18). The displayed cursor holds at newest-1 while the stream stalls, and the overflow keeps the motion time running.
+- A host-frame render cursor defaults to 6 frames behind the newest sample (previously 9), with `KH2COOP_ENEMY_CURSOR_DELAY_FRAMES=4..18` as a bounded override. It catches up past the configured delay +3 and snaps past 18 back to the configured delay. The displayed cursor holds at newest-1 while the stream stalls, and the overflow keeps the motion time running. The [two latency comparisons](research/LATENCY_AB.md) record the 80 ms avatar / 6-frame enemy default decision.
 - A track is released after 30 frames without a sample, and needs 2 samples to be taken again. It resets on session retire and room transition; a host death erases its track.
 
 **Client driver.** `inject/src/EnemyMirror.inl`. It drives a bound, living, allowlisted Shadow whose stream is fresh, after a 60-frame spawn settle:

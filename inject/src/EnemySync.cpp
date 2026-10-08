@@ -160,6 +160,7 @@ std::uint64_t g_hpSourceSequence = 0;
 // VUH-1515 step 2 (KH2COOP_ENEMY_MIRROR=1 on host and client). Host: own EnemyMotion
 // producer sequence. Client: decoded stream state, sampled at the frame-start frame.
 bool g_mirrorRequested = false;
+unsigned g_latencyTraceBudget = 0; // opt-in bounded diagnostics, never a gameplay gate
 std::uint64_t g_motionSourceSequence = 0;
 std::uint64_t g_motionPublished = 0, g_motionSendFailures = 0;
 enemymirror::Stream g_mirror;
@@ -1847,7 +1848,7 @@ void PublishHostMotion(std::uint32_t frame, const NativeCensus& census) {
         e.objectId = s.objectId;
         e.flags = ENEMY_MOTION_ALIVE;
         m.entries.push_back(e);
-        if (g_mirrorTrace && frame % enemymirror::kTraceEvery == 0 && g_log)
+        if (g_mirrorTrace && (g_latencyTraceBudget || frame % enemymirror::kTraceEvery == 0) && g_log)
             g_log("[enemy-mirror] trace-host netId=%u hostFrame=%u pos=%.1f,%.1f,%.1f motion=%u time=%.1f", e.netId, frame,
                   e.position.x, e.position.y, e.position.z, e.motionId, e.motionTime);
     }
@@ -2047,6 +2048,20 @@ void PopulationTick(std::uint32_t frame, const NativeCensus& census) {
 // Client: advance the render cursor once per frame after this frame's packets.
 void TickMirror(std::uint32_t frame) {
     g_mirrorFrame = frame;
+    if (g_latencyTraceBudget && g_log && g_mirrorRequested && g_role != Role::Off) {
+        --g_latencyTraceBudget;
+        LARGE_INTEGER qpc {};
+        QueryPerformanceCounter(&qpc);
+        const auto& st = g_mirror.stats();
+        g_log("[latency-enemy] role=%s frame=%u qpc=%lld epoch=%u newest=%u cursor=%.0f holds=%llu catchups=%llu "
+              "snaps=%llu underrunFrames=%llu releases=%llu retakes=%llu accepted=%llu resets=%llu",
+              g_role == Role::Host ? "host" : "client", frame, qpc.QuadPart, g_mirror.epoch(),
+              g_mirror.newestFrame(), g_mirror.cursor(), static_cast<unsigned long long>(st.cursorHolds),
+              static_cast<unsigned long long>(st.cursorCatchups), static_cast<unsigned long long>(st.cursorSnaps),
+              static_cast<unsigned long long>(st.underrunFrames), static_cast<unsigned long long>(st.releases),
+              static_cast<unsigned long long>(st.retakes), static_cast<unsigned long long>(st.accepted),
+              static_cast<unsigned long long>(st.resets));
+    }
     if (!g_mirrorRequested || g_role != Role::Client) return;
     if (g_mirror.epoch() != g_host.epoch) g_mirror.Reset(g_host.epoch);
     g_mirror.Tick(frame);
@@ -4212,6 +4227,18 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     progresssync::Install(exeBase, log, SendCapturedWorld);
     char mirror[2] {};
     g_mirrorRequested = GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR", mirror, sizeof(mirror)) == 1 && mirror[0] == '1';
+    char delayText[16] {};
+    const DWORD delayLength = GetEnvironmentVariableA("KH2COOP_ENEMY_CURSOR_DELAY_FRAMES", delayText, sizeof(delayText));
+    const auto delay = delayLength > 0 && delayLength < sizeof(delayText)
+        ? latency::parseEnemyDelayFrames(std::string_view(delayText, delayLength)) : std::nullopt;
+    g_mirror = enemymirror::Stream(delay.value_or(enemymirror::kDelay));
+    char latencyTrace[2] {};
+    g_latencyTraceBudget = g_mirrorRequested &&
+        GetEnvironmentVariableA("KH2COOP_LATENCY_TRACE", latencyTrace, sizeof(latencyTrace)) == 1 && latencyTrace[0] == '1'
+        ? 18000u : 0u;
+    if (g_mirrorRequested && g_log)
+        g_log("[latency] enemyCursorDelayFrames=%u source=%s traceBudget=%u", g_mirror.delayFrames(),
+              !delayLength ? "default" : delay ? "env" : "invalid-default", g_latencyTraceBudget);
     char population[2] {};
     g_populationRequested = g_mirrorRequested &&
         GetEnvironmentVariableA("KH2COOP_ENEMY_POPULATION", population, sizeof(population)) == 1 && population[0] == '1';
@@ -4242,7 +4269,7 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     enemymirror::FormatFamilies(families, sizeof(families));
     if (g_mirrorRequested && g_log)
         g_log("[enemy-mirror] configured=1 families=%s interval=%u delay=%u maxLag=%u stale=%u retake=%u gap=%u settle=%u "
-              "trace=%d control=%d", families, enemymirror::kPublishInterval, enemymirror::kDelay,
+              "trace=%d control=%d", families, enemymirror::kPublishInterval, g_mirror.delayFrames(),
               enemymirror::kMaxLag, enemymirror::kStaleFrames, enemymirror::kRetake, enemymirror::kGapTolerance,
               enemymirror::kSpawnSettleFrames, g_mirrorTrace ? 1 : 0, g_mirrorControlPath[0] ? 1 : 0);
     g_envRole = ReadEnvRole();
@@ -4470,6 +4497,7 @@ void OnFrameStart(std::uint32_t frame) {
 bool MirrorRequested() noexcept { return g_mirrorRequested; }
 
 bool MirrorTrace() noexcept { return g_mirrorTrace; }
+bool MirrorLatencyTrace() noexcept { return g_latencyTraceBudget != 0; }
 bool PopulationRequested() noexcept { return g_populationRequested; }
 // C1: works in every role, so a forced copy left behind by a retired session is still removed.
 bool PopulationForceRemove(uintptr_t actor) noexcept {

@@ -61,6 +61,7 @@ static bool MirrorRequested() noexcept { return g_requested; }
 static bool g_trace = false;
 static double g_cursor = 30.0;
 static bool MirrorTrace() noexcept { return g_trace; }
+static bool MirrorLatencyTrace() noexcept { return false; }
 static double MirrorCursor() noexcept { return g_cursor; }
 static bool g_popRequested = false;
 static uintptr_t g_forceRemoveActor = 0;

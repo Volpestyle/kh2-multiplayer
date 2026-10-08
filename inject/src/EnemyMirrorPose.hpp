@@ -1,4 +1,5 @@
 #pragma once
+#include "kh2coop/LatencyConfig.hpp"
 // ============================================================================
 // EnemyMirrorPose — VUH-1515 step 2 shared constants, the sampled Pose and the
 // pure helpers used by both the stream (EnemyMirrorState.hpp) and the native
@@ -94,10 +95,10 @@ inline std::size_t FormatFamilies(char* out, std::size_t cap) noexcept {
 }
 
 inline constexpr std::uint32_t kPublishInterval = 3;  // host frames between EnemyMotion packets
-// Render cursor behind the newest host frame: two packet intervals plus jitter
-// (review S1). Below kMinLag the cursor holds and the overflow keeps the motion
+// Render cursor behind the newest host frame: qualified six-frame default
+// (runtime-configurable within bounded hysteresis). Below kMinLag the cursor holds and the overflow keeps the motion
 // time running; past kMaxLag it snaps back to kDelay.
-inline constexpr std::uint32_t kDelay = 9;
+inline constexpr std::uint32_t kDelay = latency::kEnemyDelayFrames;
 inline constexpr std::uint32_t kMinLag = 1, kMaxLag = 18;
 inline constexpr std::uint32_t kStaleFrames = 30;     // local frames without a sample -> release
 inline constexpr std::uint32_t kRetake = 2;           // new samples needed after a release
@@ -140,6 +141,7 @@ struct Pose {
 
 struct StreamStats {
     std::uint64_t accepted = 0, rejected = 0, resets = 0, staleSamples = 0, releases = 0, retakes = 0, trackCap = 0;
+    std::uint64_t cursorHolds = 0, cursorCatchups = 0, cursorSnaps = 0, underrunFrames = 0;
 };
 
 // Closed form (review S3): a loop never ends for a finite but huge angle.
