@@ -65,6 +65,9 @@
 #include <cstring>
 #include "DownedSpikeState.hpp"
 #include "RevivePrompt.hpp"
+#include "DownedSpectate.hpp"
+#include "DownedSpectateAdapter.hpp"
+#include "DownedSpectateChannel.hpp"
 #include "PuppetHold.hpp"
 #include "SpawnPickHook.hpp"
 
@@ -573,6 +576,7 @@ static int ApplyStatDeltaBody(void* actor, int delta, int idx, int reactFlag) {
     return result;
 }
 
+static void ReleaseDownedSpectate();
 #include "DownedSpike.inl"
 
 static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
@@ -1118,6 +1122,7 @@ static bool IsPuppetActive(int index) {
 // Owner-thread projection only: already captured avatar values, never extra native reads.
 // warp's transition observer: game thread, inside the requesting entity update.
 static void PublishLocalForTransition() {
+    ReleaseDownedSpectate(); // no spectator selection may survive even a same-room retry
     if (!g_avatarBridge.IsOpen()) return;
     if (const auto flagged = g_localAvatar.OnTransition(g_frameCounter)) g_avatarBridge.PublishLocal(*flagged);
 }
@@ -1217,6 +1222,8 @@ static int PuppetIndexFor(uintptr_t actor) {
     }
     return -1;
 }
+
+#include "DownedSpectate.inl"
 
 #include "CloneNeutralInput.inl"
 #include "EnemyMirror.inl" // VUH-1515 step 2: mirrored enemies on clients (default off)
@@ -2878,6 +2885,7 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
             }
             // VUH-1504 revive prompt: raw slot-0 buttons after the mailbox/event-hold apply.
             downedspike::PromptInput(inputStruct);
+            downedspectate::Input(inputStruct);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             if (control) eventholdnative::AbortInput();
             Log("EXCEPTION in HookedInputCollector post-call");
@@ -3046,6 +3054,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 warp::OnFrameStart(g_frameCounter, addr);
                 BeginCloneFrame();
                 PollPuppetPoses();
+                downedspectate::Tick();
                 enemytarget::OnFrameStart(); // VUH-1515 (default off), after poses
                 ProcessHitRequest();
                 BeginHandleFrame();
@@ -3215,7 +3224,7 @@ static void UninitializeMinHookUnlessRetained() {
         Log("[puppet-command] callback originals retained until process exit");
         return;
     }
-    if (resourcetrace::RetainsMinHookResources() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) {
+    if (downedspectate::RetainsMinHookResources() || resourcetrace::RetainsMinHookResources() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) {
         Log("[native-trace] global MinHook teardown retained until process exit");
         return;
     }
@@ -3225,7 +3234,7 @@ static void UninitializeMinHookUnlessRetained() {
 static bool PuppetCommandsRestricted() { return g_anyPuppetActive; }
 
 bool Initialize(uintptr_t exeBase) {
-    if (resourcetrace::RejectReinitialization() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) return false;
+    if (downedspectate::RetainsMinHookResources() || resourcetrace::RejectReinitialization() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) return false;
     if (g_initialized) return true;
 
     g_exeBase = exeBase;
@@ -3540,6 +3549,7 @@ bool Initialize(uintptr_t exeBase) {
     warp::Install(exeBase, &Log);
     warp::SetTransitionObserver(&PublishLocalForTransition);
     downedspike::Install(exeBase);
+    downedspectate::Install();
     char spawnTraceSetting[2] {};
     const bool spawnTrace = GetEnvironmentVariableA("KH2COOP_SPAWN_TRACE", spawnTraceSetting,
                                                    sizeof(spawnTraceSetting)) == 1 &&
@@ -3611,6 +3621,8 @@ bool Initialize(uintptr_t exeBase) {
 }
 
 void Shutdown() {
+    // Drain spectate before clearing ANY restoration/lifetime authority.
+    if (!downedspectate::Shutdown()) return;
     render::InvalidateCoopHud();
     eventholdnative::Disable();
     AcquireSRWLockExclusive(&g_inputTraceLogLock);

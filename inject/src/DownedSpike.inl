@@ -512,6 +512,7 @@ static Result TryRevive(uint64_t episode) {
         static_cast<unsigned long long>(episode),
         static_cast<unsigned long long>(s.actor), s.hp, s.maxHp, target, g_frameCounter);
     bool fault = false;
+    ReleaseDownedSpectate(); // native revive begins: camera selection is no longer owned
     __try {
         __try {
             g_down.revive(s.actor);

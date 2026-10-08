@@ -179,6 +179,51 @@ round, whose paths it does not exercise.
   three players and Steam cross-account are not.
 - The hooks stay installed as pass-throughs until process exit.
 
+## Downed spectator candidate (VUH-1819; pending live qualification)
+
+`KH2COOP_DOWNED_SPECTATE=1` is default off and depends on the installed
+VUH-1504 held-down mode. In a settled, admitted network room, **R3** cycles
+living teammate puppets and your own downed body. The button must first be
+released after entry, and one press advances once. It is consumed only while
+the local held-down state is eligible. Roster slots and the applied party/kit
+plan resolve teammates; a native AI companion is not a spectator target.
+Cached actor pointers are compared only: slot, pose, plan membership and the
+current native census must pass before any guarded actor/kit metadata read.
+The current metadata must still match the puppet's original bound identity.
+
+The candidate borrows the camera actor pointer only inside native mode-0
+normal follow (`0x165110`), then restores it before returning. Its separately
+byte-checked action-camera predicate hook (`0x3BA300`) suppresses the native aim
+branch only during that borrowed call, preventing mode-1 entry and writes to
+the teammate's actor+0xA10. Other callers and camera modes remain native.
+No fake actor is allocated and no HP/control/party state is changed.
+
+Shutdown closes new spectator access and disables the follow detour, then drains
+active callbacks before any canonical actor, census or lifecycle state retires.
+Aim suppression remains installed until every borrow finishes restoration.
+The DLL is pinned and its trampolines remain process-lifetime even when no other
+feature retains MinHook. Delayed detour entries use those retained originals.
+A reentrant shutdown inside a camera callback defers actor/context retirement
+(rather than waiting for itself); those resources remain until process exit.
+
+A downed, stale (over 30 game frames), held, departed or replaced target is
+skipped for the next valid slot. Room/load/generation changes release the
+selection; native revive releases before calling the revive function. Events,
+menus, an unavailable runtime lease, non-normal cameras and the F5 debug camera
+yield. Episode re-mints alone do not change the selected actor. Native VUH-1504
+refusal on a room retry is unchanged; spectating never repairs or heals it.
+
+`KH2COOP_DOWNED_SPECTATE_FIXTURE=1` additionally publishes the read-only
+`Local\\kh2coop_spectate_<pid>` v1 receipt (104 bytes): the actual pointer during
+normal follow, its before/after values, selected slot, scope and call counters.
+An out-of-call `kh2ctl peek` sees the restored native pointer by design.
+Implementation: `inject/src/DownedSpectate.inl`; pure policy and controls:
+`DownedSpectate.hpp`, `tests/DownedSpectateTest.cpp`. Adapter lifetime/kit ordering
+and deterministic shutdown interleavings use `DownedSpectateAdapter.hpp` and
+`tests/DownedSpectateAdapterTest.cpp`.
+No downed spectator behavior is live-qualified yet. Pending fixture and limits:
+`build/rig/vuh1819-downed-spectate-20261007-01/README.md`.
+
 ## Revive prompt (`KH2COOP_REVIVE_PROMPT=1`)
 
 The player-facing trigger for a ReviveRequest. Default off; it needs
