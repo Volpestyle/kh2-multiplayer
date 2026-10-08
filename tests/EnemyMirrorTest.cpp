@@ -256,7 +256,7 @@ void testHelpers() {
           "take-over blend weight rises monotonically to the stream pose");
     check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && em::FamilyAllowed(301) && em::FamilyAllowed(1838) &&
               em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(311) && !em::FamilyAllowed(0) &&
-              !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(306) &&
+              em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(306) &&
               !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
               !em::FamilyAllowed(1850),
           "allowlist keeps Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849): not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
@@ -272,8 +272,8 @@ void testHelpers() {
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -365,6 +365,22 @@ void testHelpers() {
         em::Pose pose;
         check(!stream.Drivable(91, 2) && !stream.PoseAt(91, 2, pose),
               "failed Fiery Globe76 stays native even if a motion row arrives");
+    }
+    {  // batch8 mirrored families; projectile damage remains UNQUALIFIED
+        for (const auto oid : {em::kBookmasterObjectId, em::kCreeperPlantObjectId}) {
+            em::Stream stream;
+            auto accepted = row(90, 10.0f); accepted.objectId = oid;
+            auto excluded = row(91, 20.0f); excluded.objectId = 76;
+            stream.Ingest(motion(7, 1, 100, {accepted, excluded}), 1);
+            stream.Ingest(motion(7, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
+            em::Pose pose;
+            check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) && stream.PoseAt(90, 2, pose) &&
+                      pose.objectId == oid && !stream.Drivable(91, 2),
+                  "batch8 family streams; failed Fiery Globe76 remains excluded");
+        }
+        check(!em::FamilyAllowed(306) && !em::FamilyAllowed(317) && !em::FamilyAllowed(76) && !em::FamilyAllowed(124) &&
+                  !em::FamilyAllowed(1114) && !em::FamilyAllowed(311) && !em::FamilyAllowed(314),
+              "batch8 keeps failed binders, summoners, other T2 and reaction families native");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins(9);

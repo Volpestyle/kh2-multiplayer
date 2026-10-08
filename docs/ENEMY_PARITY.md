@@ -1,5 +1,38 @@
 # Enemy parity across instances (VUH-1499 spike)
 
+## T2 batch 8 (2026-10-08): Bookmaster 5 and Creeper Plant 125 allowlisted; projectile damage UNQUALIFIED
+
+Lead approved landing Bookmaster `M_EX530` (5; HB04/09 btl2) and Creeper Plant
+`M_EX750` (125; Olympus06/05 btl1) on the non-projectile evidence from b8-07.
+Enemy mirroring remains behind the default-off `KH2COOP_ENEMY_MIRROR` flag.
+This does not qualify either family's projectile damage.
+
+Live run `20261008-183534_vuh1515_b8_fx06_early_world_t2_1` used fixture b8-07
+(the scenario retained its fx06 name): runner PASS, six clips OK, safety PASS,
+protected saves unchanged. Every applicable non-projectile family and global
+gate passed for 5, 125 and the Soldier301 control: living spawn, engagement,
+identity/epoch-scoped coverage, motion, position, brain, attributed hit,
+friend-bound, negative-distance, stale release/retake and placement.
+Bookmaster motion agreement was27/27; Creeper Plant was71/71 for each of three
+bodies; driven position p95 was0u. The Bookmaster coverage population/epoch
+scoping correction is retained in the fixture.
+
+**Projectile damage: UNQUALIFIED for both5 and125.** Finalize is INCONCLUSIVE
+because the required independent projectile-review receipt is absent. No
+family-specific projectile failure or duplicate application was established.
+Emission/owner/attack identity and complete exactly-once native Apply/Take/Stat
+and actual-HP windows still need independent qualification on both copies.
+The landed allowlist is a bounded mirror opt-in, not a complete-combat claim.
+
+**Surveillance Robot `M_EX770` (306): OFF; projectile-unqualified.** It is absent
+from the allowlist, with native tests enforcing exclusion. Prior attempts did
+not witness native projectile impact on both copies; that remains a separate
+open qualification item and does not establish duplicate damage.
+
+Evidence: `build/rig/vuh1515-batch8-variant-20261008-01/live-fixture-b8-07/verdict.json`
+and the canonical scenario report above. No driver, binder, damage, protocol
+or latency changes are included in this landing.
+
 ## T1 batch 7 (2026-10-07): Rabid Dog 3, Hammer Frame 8, Aerial Champ 2410 and Beffudler 2404 allowlisted
 
 Live run 20261007-234704 (fixture b7-01, PC1, two games): PASS. All four families

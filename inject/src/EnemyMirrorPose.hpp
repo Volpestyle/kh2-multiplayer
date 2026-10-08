@@ -73,6 +73,11 @@ inline constexpr std::uint32_t kRabidDogObjectId = 3;
 inline constexpr std::uint32_t kHammerFrameObjectId = 8;
 inline constexpr std::uint32_t kAerialChampObjectId = 2410;
 inline constexpr std::uint32_t kBeffudlerObjectId = 2404;
+// T2 batch8: Bookmaster5 and Creeper Plant125 passed non-projectile gates in b8-07.
+// Projectile damage remains UNQUALIFIED; Robot306 stays OFF. Mirror defaults OFF.
+inline constexpr std::uint32_t kSurveillanceRobotObjectId = 306;
+inline constexpr std::uint32_t kBookmasterObjectId = 5;
+inline constexpr std::uint32_t kCreeperPlantObjectId = 125;
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
@@ -82,7 +87,8 @@ inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId,
                                               kNeoshadowObjectId, kGargoyleKnightObjectId,
                                               kDuskObjectId, kSamuraiObjectId, kDancerObjectId,
                                               kSilverRockObjectId, kIcyCubeObjectId, kAssassinObjectId,
-                                              kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId};
+                                              kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId,
+                                              kBookmasterObjectId, kCreeperPlantObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;
