@@ -37,6 +37,14 @@ public:
     bool Open(DWORD) { open = true; return true; }
     void Close() { open = false; }
     bool IsOpen() const { return open; }
+    std::uint32_t writerPid = 123, writerHeartbeat = 0;
+    mutable unsigned writerReads = 0;
+    unsigned replaceGenerationOnWriterRead = 0;
+    WorldBridge::WriterView RuntimeWriter() const {
+        if (++writerReads == replaceGenerationOnWriterRead) ++generation;
+        // Lease snapshots are separate from the existing nth-context-read fault injection.
+        return {writerPid, writerHeartbeat ? writerHeartbeat : GetTickCount(), generation, true};
+    }
     std::uint64_t DeliverySerial() const { return deliverySerial; }
     std::uint64_t PeerDeliverySerial(std::uint8_t slotIndex) const {
         return slotIndex < peerDeliverySerials.size() ? peerDeliverySerials[slotIndex] : 0;
@@ -71,7 +79,9 @@ public:
         if (!SendToRuntime(packet, context.generation)) return false;
         outgoingContexts.push_back(context); return true;
     }
+    bool restartOnReceive = false;
     bool ReceiveFromRuntime(std::vector<std::uint8_t>& packet) {
+        if (restartOnReceive) { ++generation; writerPid += 1; writerHeartbeat = GetTickCount(); restartOnReceive = false; }
         if (incoming.empty()) return false;
         packet = std::move(incoming.front()); incoming.pop_front(); return true;
     }
@@ -179,7 +189,8 @@ void NoteReapply(const PartyReapply&, std::uint32_t) {}
 void NoteIntent(const PartyIntent&, std::uint8_t, std::uint32_t, const std::array<std::uint64_t, 3>&, bool) {}
 bool HostIntentToPublish(std::uint32_t, const std::array<std::uint64_t, 3>&, PartyIntent&) { return false; }
 void NoteHostIntentSent(const PartyIntent&, std::uint32_t) {}
-void Observe(std::uint32_t, const std::array<std::uint64_t, 3>&, std::uint8_t, bool) {}
+unsigned deadWriterObservations = 0;
+void Observe(std::uint32_t, const std::array<std::uint64_t, 3>&, std::uint8_t, bool open) { if (!open) ++deadWriterObservations; }
 bool HostLayoutToPublish(std::uint32_t, const RoomTransition&, const std::array<std::uint64_t, 3>&, PartyLayout&) { return false; }
 void NoteHostSent(const PartyLayout&, std::uint32_t) {}
 }
@@ -285,6 +296,9 @@ void Reset(bool client = false, bool registerReader = true) {
     g_exeBase = image; g_log = nullptr; g_logBudget = 400;
     g_takeDamage = NativeDamage; g_envRole = Role::Off;
     g_role = client ? Role::Client : Role::Host;
+    // Reset owns a new synthetic bridge incarnation; production leases never reset.
+    g_writerLease.~RuntimeWriterLease(); new (&g_writerLease) RuntimeWriterLease;
+    g_writerRetired = false; g_writerRecoveryPacket.reset();
     g_bridge = HeadlessWorldBridge {}; g_bridge.slot = client ? 1 : 0;
     g_inst = {}; g_inst.live = true;
     g_inst.world = 5; g_inst.room = 2; g_inst.door = 3;
@@ -2187,6 +2201,45 @@ int main() try {
     TestNativeRecordWriteGuards();
     TestConstructionSerialization();
     TestResourceSerialization();
+    ResetWorld(); g_bridge.replaceGenerationOnWriterRead = 2;
+    Check(!PartyLoadAdmitted(1), "load lease rejects generation replacement between its two exact-binding snapshots");
+    // Actual EnemySync expiry/consumer path; transport is an owned-memory adapter.
+    ResetWorld();
+    g_bridge.generation = g_activationGeneration = g_activationOrderedGeneration = 100;
+    g_bridge.writerHeartbeat = GetTickCount() - 5001;
+    const auto clears = kh2coop::inject::partynative::deadWriterObservations;
+    g_bridge.incoming.push_back({1, 0, 0});
+    OnFrameStart(900);
+    Check(g_writerRetired && g_activationOrderedGeneration == 0 && g_orderedDeliverySerial == 0 &&
+          g_bridge.incoming.empty() && kh2coop::inject::partynative::deadWriterObservations == clears + 1,
+          "dead writer retires ordered authority/party intents and discards queued work");
+    Check(!kh2coop::inject::recoverywarp::g_clientAuthority && !WorldSessionGeneration() &&
+          !PartyLoadAdmitted(100) && CapturePuppetAuthority().mode == PuppetAuthorityMode::Unavailable,
+          "dead writer releases native warp, load, world and puppet authority");
+    g_bridge.writerHeartbeat = GetTickCount();
+    g_envRole = Role::Client;
+    Check(CurrentRole() == Role::Off, "resumed writer and environment override cannot bypass expiry");
+    const auto reset = [](std::uint32_t generation) {
+        std::vector<std::uint8_t> packet {static_cast<std::uint8_t>(PacketType::SessionState), 12, 0};
+        for (unsigned b = 0; b < 4; ++b) packet.push_back(static_cast<std::uint8_t>(generation >> (b * 8)));
+        for (unsigned b = 0; b < 8; ++b) packet.push_back(static_cast<std::uint8_t>(std::uint64_t{1} >> (b * 8)));
+        return packet;
+    };
+    g_bridge.incoming.push_back(reset(100)); ReceiveWorldPackets();
+    Check(!g_activationOrderedGeneration && !WorldSessionGeneration(), "queued same-generation reset cannot rearm expired writer");
+    g_bridge.generation = 101;
+    Check(!WorldSessionGeneration() && !PartyLoadAdmitted(100), "new fresh writer still refuses old ordered/cached binding");
+    CheckActivationGeneration(); g_bridge.incoming.push_back(reset(101)); ReceiveWorldPackets();
+    Check(WorldSessionGeneration() == 101 && PartyLoadAdmitted(101), "fresh new-generation ordered reset restores admission");
+    // A fresh reset racing the expired-queue drain must survive that pop.
+    OnFrameStart(901); // establish the recovered101 frame before expiring it
+    g_bridge.writerHeartbeat = GetTickCount() - 5001;
+    g_bridge.restartOnReceive = true; g_bridge.incoming.push_back(reset(102));
+    OnFrameStart(902);
+    Check(g_writerRecoveryPacket.has_value(), "new writer reset raced during discard is retained in FIFO order");
+    OnFrameStart(903);
+    Check(WorldSessionGeneration() == 102 && !g_writerRecoveryPacket.has_value(),
+          "raced new-generation reset rearms through normal ordered admission");
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);
     return errors ? 1 : 0;

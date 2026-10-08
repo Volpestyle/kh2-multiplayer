@@ -131,7 +131,7 @@ That ordering result alone does not prove native convergence; the protocol 8
 transaction adds separate source cuts and per-target delivery fences.
 
 The current source uses protocol **10**, AvatarBridge **3**,
-WorldBridge **11** and CaptureChannel **1**. AvatarBridge v3 appends the bounded
+WorldBridge **12** and CaptureChannel **1**. AvatarBridge v3 appends the bounded
 HUD roster-label slot; mixed v2/v3 mappings are refused. The reviewed name patch
 has a matched private Release DLL/runtime/avatarctl build, but no live names
 acceptance or deployment. Protocol 10 retains the fresh-observation requirement
@@ -142,7 +142,7 @@ older DLL is not current validation. Existing protocol-v3 native receipts stay
 historical. AvatarState telemetry/recording layout and the v3 claim shape are
 unchanged. V5 introduced opaque world-incarnation identity and typed closure
 reasons; v6 adds diagnostic request/chunk/done messages and a third ENet channel.
-WorldBridge 11 retains captured generation/delivery/source context and uses a
+WorldBridge 12 retains captured generation/delivery/source context and uses a
 separate bounded CAS operator mailbox, preserving the DLL ring's single producer.
 Protocol 9 adds full record witnesses (native coverage255); generic synthetic
 coverage127 is rejected by the native consumer. Exact content qualification and
@@ -242,3 +242,31 @@ comment. Wait for the query owner's actual handle to become terminal before
 retrying; do not clear its lock or kill its process. Independent saved-PE byte
 reads/dumpbin need no project lock. Inspect retained output for Ghidra errors:
 a surrounding PowerShell output pipeline can report exit0 after a failed query.
+
+### Runtime writer lease (2026-10-07)
+
+WorldBridge 12 adds runtime PID at byte 116 and GetTickCount heartbeat at byte 52,
+using reserved words; the 128-byte header and ring offsets stay unchanged. Both
+DLL and runtime must use v12; earlier versions are rejected. The runtime's world
+pump renews the lease, including its inner wait loop. No background watchdog
+conceals a stalled pump. A heartbeat age of 5000 ms remains live; greater ages
+expire. Unsigned subtraction handles the 32-bit clock wrap. Timestamp 0 is valid;
+PID 0 means no writer. Missing writer on an armed generation fails closed.
+
+Expiry retires that raw generation permanently in the DLL. Native frame handling
+clears stored party intents/kits and ordered world authority, releases client warp
+authority and drains stale packets without writing runtime-owned headers or ring
+indices. Current actors are not rewritten: the next native load restores the
+party. The loading hook independently checks freshness and its seqlock-published
+plan generation before member writes, so a loading/menu interval cannot apply a
+stale plan before the next frame. Puppet and world authority also require a lease.
+
+Derived generation 0 still holds stored plans during ordering/delivery flicker;
+it is not an expiry signal. A raw generation change prevents an old cached plan
+from applying even while the derived generation is0. Graceful disconnected
+clients may retain stored intents until rebase; this change does not redefine
+that policy. An expired raw generation cannot revive from a resumed heartbeat,
+a new PID alone or queued reset. Recovery requires a fresh heartbeat, a newer
+nonzero raw generation and its matching ordered reset/delivery before new world
+work is admitted. Generation comparisons assume no reader lags by 2^31 session
+boundaries. A runtime stalled over 5 seconds is intentionally treated like a dead writer. A writer PID change within the same observed raw generation also retires that binding; heartbeat publication cannot renew an older writer's plan before the new reset.

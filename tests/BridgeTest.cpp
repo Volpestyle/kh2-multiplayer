@@ -120,10 +120,15 @@ void testVersion11Layout() {
     WorldBridge producer, consumer, absent;
     const DWORD pid = 0x7FF50000u + (GetCurrentProcessId() & 0xFFFFu);
     check(!absent.OpenExisting(pid), "operator OpenExisting does not manufacture absent mapping");
-    check(producer.Open(pid) && consumer.OpenExisting(pid), "version11 owned fixture mapping opens");
-    check(WORLD_BRIDGE_VERSION == 11 && consumer.DeliverySerial() == 0 &&
+    check(producer.Open(pid) && consumer.OpenExisting(pid), "version12 owned fixture mapping opens");
+    check(consumer.RuntimeWriter().pid == 0, "new mapping has no runtime writer");
+    producer.PulseRuntimeWriter();
+    const auto writer = consumer.RuntimeWriter();
+    check(writer.pid == GetCurrentProcessId() && static_cast<DWORD>(GetTickCount() - writer.heartbeat) < 1000,
+          "runtime heartbeat PID and timestamp cross the real shared mapping");
+    check(WORLD_BRIDGE_VERSION == 12 && consumer.DeliverySerial() == 0 &&
           consumer.PeerDeliverySerial(0) == 0 && consumer.PeerDeliverySerial(1) == 0 && consumer.PeerDeliverySerial(2) == 0,
-          "version11 delivery floors initialize unavailable");
+          "version12 delivery floors initialize unavailable");
     constexpr std::uint64_t wide = 0xFEDCBA9876543210ULL;
     producer.SetDeliverySerial(wide);
     producer.SetPeerDeliverySerials({wide, 0x100000001ULL, 0x200000002ULL});

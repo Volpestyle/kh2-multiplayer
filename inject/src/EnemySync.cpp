@@ -33,6 +33,7 @@
 #include "kh2coop/SurvivingPackPreparation.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/WorldBridge.hpp"
+#include "kh2coop/RuntimeWriterLease.hpp"
 
 #include <Windows.h>
 
@@ -76,6 +77,16 @@ StatDeltaFn g_applyStatDelta = nullptr;
 TakeDamageFn g_takeDamage = nullptr;
 Role g_role = Role::Off;
 WorldBridge g_bridge;
+RuntimeWriterLease g_writerLease;
+std::optional<std::vector<std::uint8_t>> g_writerRecoveryPacket; // retains a raced first new-binding packet
+bool g_writerRetired = false; // game-thread retirement/diagnostic only
+bool RuntimeWriterLive(std::uint32_t expectedGeneration = 0) noexcept {
+    if (!g_bridge.IsOpen()) return false;
+    const auto writer = g_bridge.RuntimeWriter();
+    if (!writer.valid || (expectedGeneration && writer.generation != expectedGeneration) || !g_writerLease.Available(writer.generation, writer.pid, writer.heartbeat, GetTickCount())) return false;
+    const auto after = g_bridge.RuntimeWriter();
+    return after.valid && after.generation == writer.generation && after.pid == writer.pid;
+}
 // VUH-1504 revive owner state; game lifetime (never reset with sessions or rooms).
 ReviveApplyFn g_reviveApply = nullptr;         // set once by EntityHook
 ReviveOwnerGate g_reviveGate;
@@ -3274,7 +3285,13 @@ void TickHostPartyLayout() {
 bool ReceiveWorldPackets() {
     bool hostSessionReset = false;
     std::vector<std::uint8_t> packet;
-    while (g_bridge.ReceiveFromRuntime(packet)) {
+    const auto receive = [&]() {
+        if (g_writerRecoveryPacket) {
+            packet = std::move(*g_writerRecoveryPacket); g_writerRecoveryPacket.reset(); return true;
+        }
+        return g_bridge.ReceiveFromRuntime(packet);
+    };
+    while (receive()) {
         CheckActivationGeneration();
         try {
             const std::uint8_t* payload = nullptr;
@@ -3347,7 +3364,7 @@ bool ReceiveWorldPackets() {
                     ByteReader resetReader(payload, size);
                     const auto generation = resetReader.readU32();
                     const auto delivery = resetReader.readU64();
-                    if (generation != 0 && generation == g_bridge.SessionGeneration() &&
+                    if (RuntimeWriterLive() && generation != 0 && generation == g_bridge.SessionGeneration() &&
                         delivery != 0 && delivery == g_bridge.DeliverySerial()) {
                         g_activationOrderedGeneration = generation;
                         g_lastOrderedGeneration = generation;
@@ -4163,6 +4180,7 @@ Role ReadEnvRole() {
 }
 
 Role CurrentRole() {
+    if (!RuntimeWriterLive()) return Role::Off; // includes environment-role override
     if (g_envRole != Role::Off) return g_envRole;
     const std::uint8_t slot = g_bridge.LocalSlot();
     if (slot == 0) return Role::Host;
@@ -4263,6 +4281,29 @@ void OnFrameStart(std::uint32_t frame) {
     nativehittrace::RegisterOwnerThread();
     g_hitTraceFrame = frame;
     if (!g_bridge.IsOpen()) { partynative::Observe(0, {}, 0xFF, false); DrainPendingSpawnTrace(false); return; }
+    if (!RuntimeWriterLive()) {
+        if (!g_writerRetired) {
+            const auto writer = g_bridge.RuntimeWriter();
+            if (g_log) g_log("[worldbridge] writer-expired pid=%lu generation=%u timeoutMs=5000; party retires; next load native",
+                            static_cast<unsigned long>(writer.pid), g_bridge.SessionGeneration());
+            g_activationOrderedGeneration = 0; g_orderedDeliverySerial = 0;
+            g_role = Role::Off;
+            RetireWorldSession();
+            g_writerRetired = true;
+        }
+        partynative::Observe(0, {}, WORLD_SLOT_UNKNOWN, false);
+        // Sole consumer drains, discarding stale work without changing producer headers.
+        std::vector<std::uint8_t> discarded;
+        for (unsigned i = 0; i < 256; ++i) {
+            if (RuntimeWriterLive() || !g_bridge.ReceiveFromRuntime(discarded)) break;
+            // Restart may publish its header/reset during this pop. Preserve
+            // the first raced record, in FIFO order, for normal admission.
+            if (RuntimeWriterLive()) { g_writerRecoveryPacket = std::move(discarded); break; }
+        }
+        DrainPendingSpawnTrace(false);
+        return;
+    }
+    g_writerRetired = false;
     CheckActivationGeneration();
     const Role role = CurrentRole();
     bool becameHost = role == Role::Host && g_role != Role::Host;
@@ -4673,6 +4714,7 @@ PuppetAuthority CapturePuppetAuthority() noexcept {
     PuppetAuthority out {};
     if (!spawncontroller::IsDiagnosticGameThread() || !nativehittrace::IsOwnerThread() ||
         !g_bridge.IsOpen()) return out;
+    if (!RuntimeWriterLive()) return out;
     const auto mode = g_bridge.GetPuppetAuthorityMode();
     const auto generation = g_bridge.SessionGeneration();
     const auto localSlot = g_bridge.LocalSlot();
@@ -4700,6 +4742,7 @@ PuppetAuthority CapturePuppetAuthority() noexcept {
     out.generation = generation;
     out.localSlot = localSlot;
     out.connectionIds = ids;
+    if (!RuntimeWriterLive()) return {};
     return out;
 }
 
@@ -4728,6 +4771,12 @@ bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille) {
 }
 
 bool HasClientAuthority() { return CurrentRole() == Role::Client; }
+
+bool PartyLoadAdmitted(std::uint32_t generation) noexcept {
+    // Loading-thread safe: only immutable view and atomic header/lease reads.
+    // The plan carries the generation under which its ordered packet was admitted.
+    return generation != 0 && RuntimeWriterLive(generation);
+}
 
 std::uint32_t WorldSessionGeneration() noexcept {
     if (!spawncontroller::IsDiagnosticGameThread() || !g_bridge.IsOpen()) return 0;

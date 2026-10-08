@@ -37,6 +37,9 @@
 // world incarnation id, published by the runtime before it advances the session
 // generation. Zero means none (an older runtime, or no session); the DLL then
 // keeps the native random spawn draw. Layout-compatible: no version change.
+// Word [13] (bytes52..56): runtime GetTickCount heartbeat; word [29]
+// (bytes116..120): writer PID, published before each heartbeat. Version12
+// requires these fields for armed sessions; ring offsets remain128.
 // ============================================================================
 
 #include "kh2coop/PacketRing.hpp"
@@ -61,7 +64,7 @@ namespace kh2coop {
 
 static constexpr const char* WORLD_BRIDGE_PREFIX = "Local\\kh2coop_world_";
 static constexpr std::uint32_t WORLD_BRIDGE_MAGIC = 0x42574B32; // "2KWB"
-static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 11; // resync native record-content wire contract
+static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 12; // runtime pump liveness in reserved header words
 static constexpr std::uint32_t WORLD_RING_BYTES = 1u << 20;      // 1 MiB each way
 static constexpr std::uint8_t WORLD_SLOT_UNKNOWN = 0xFF;
 static constexpr std::uint32_t WORLD_NET_UNKNOWN = 0xFFFFFFFFu;
@@ -155,6 +158,26 @@ public:
         return SendToRuntime(packet, SessionGeneration());
     }
     bool ReceiveFromRuntime(std::vector<std::uint8_t>& packet) { return toDll_.pop(packet); }
+
+    // Runtime alone renews this lease, on the same pump that publishes world work.
+    void PulseRuntimeWriter() {
+        if (!view_) return;
+        // Publish replacement identity before freshness: an old binding must
+        // never receive the new writer's heartbeat before seeing its new PID.
+        InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 116), static_cast<LONG>(GetCurrentProcessId()));
+        InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 52), static_cast<LONG>(GetTickCount()));
+    }
+    struct WriterView { std::uint32_t pid = 0, heartbeat = 0, generation = 0; bool valid = false; };
+    [[nodiscard]] WriterView RuntimeWriter() const {
+        if (!view_) return {};
+        const auto generation = SessionGeneration();
+        auto* pid = reinterpret_cast<volatile LONG*>(view_ + 116);
+        const auto before = static_cast<std::uint32_t>(InterlockedCompareExchange(pid, 0, 0));
+        const auto heartbeat = static_cast<std::uint32_t>(InterlockedCompareExchange(
+            reinterpret_cast<volatile LONG*>(view_ + 52), 0, 0));
+        const auto after = static_cast<std::uint32_t>(InterlockedCompareExchange(pid, 0, 0));
+        return before == after && SessionGeneration() == generation ? WriterView {after, heartbeat, generation, true} : WriterView {};
+    }
 
     // Runtime side
     bool ReceiveFromDll(std::vector<std::uint8_t>& packet, ProducerWorldContext& context) {

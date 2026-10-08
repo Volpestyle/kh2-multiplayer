@@ -111,10 +111,11 @@ PlanChoice SelectPlan(const PlanTable& table, std::uint16_t world, std::uint16_t
 // thread). A reader that cannot get a stable copy in maxTries gets an empty table (native load).
 class PlanTableCell {
 public:
-    void Publish(const PlanTable& table); // single writer
-    bool Read(PlanTable& out, unsigned maxTries = 64) const;
+    void Publish(const PlanTable& table, std::uint32_t generation = 0); // single writer
+    bool Read(PlanTable& out, unsigned maxTries = 64, std::uint32_t* generation = nullptr) const;
     std::uint32_t Version() const { return version_.load(std::memory_order_acquire); }
 private:
+    std::atomic<std::uint32_t> generation_ {0};
     std::atomic<std::uint32_t> version_ {0}; // odd while a write is in progress; full 32-bit, wraps
     std::array<std::atomic<std::uint64_t>, 2 * PLAN_TABLE> words_ {};
 };

@@ -312,8 +312,7 @@ The gates are the same as for `two-clones`. Notes:
   - **Run 20261007-175931 (rev5) passed:** host Sora, client Roxas, GoA then Borough 04/0A then GoA again, then the client leaves and the host restores Donald and Goofy natively.
   - **Earlier run 20261007-165859** passed every applied-visit gate on both machines: one-clone shape, puppet to remote kit, Goofy HP/max stable, completed native Goofy AI, and clone-to-ally refusals. Its restore step failed only because the fixture hard-killed the client runtime.
   - **Not yet handled:**
-    - **Client-side restore after an abrupt runtime death is UNQUALIFIED.** A Windows TerminateProcess skips the runtime's shutdown publication, so the client DLL's world bridge stays stale. See `build/rig/party2-20261007-01/rev4/diagnosis.md`.
-    - **Retiring a disconnected client's party explicitly** is still open.
+  - **Abrupt runtime death (fixed):** the runtime now holds a writer lease on the world bridge. When the writer dies, for example by TerminateProcess or a crash, the client DLL retires its party plan within a bounded time and restores native on the next load. Run 20261007-201506 (rev6) hard-killed the client runtime and required the client to restore; it passed.
 
 ## Offline evidence
 

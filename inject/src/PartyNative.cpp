@@ -7,6 +7,7 @@
 #ifndef KH2COOP_PARTYNATIVE_POLICY_ONLY
 #include "NativePrivateStatus.hpp"
 #include "PlayerKit.hpp"
+#include "EnemySync.hpp"
 #include <Windows.h>
 #include <atomic>
 #endif
@@ -308,7 +309,7 @@ PlanChoice SelectPlan(const PlanTable& table, std::uint16_t world, std::uint16_t
     return layout.source == PlanSource::Layout ? layout : PlanChoice {};
 }
 
-void PlanTableCell::Publish(const PlanTable& table) {
+void PlanTableCell::Publish(const PlanTable& table, std::uint32_t generation) {
     const auto v = version_.load(std::memory_order_relaxed);
     version_.store(v + 1, std::memory_order_relaxed); // odd: write in progress
     std::atomic_thread_fence(std::memory_order_release);
@@ -316,10 +317,11 @@ void PlanTableCell::Publish(const PlanTable& table) {
         words_[2 * i].store(table[i].key, std::memory_order_relaxed);
         words_[2 * i + 1].store(table[i].seq, std::memory_order_relaxed);
     }
+    generation_.store(generation, std::memory_order_relaxed);
     version_.store(v + 2, std::memory_order_release);
 }
 
-bool PlanTableCell::Read(PlanTable& out, unsigned maxTries) const {
+bool PlanTableCell::Read(PlanTable& out, unsigned maxTries, std::uint32_t* generation) const {
     for (unsigned k = 0; k < maxTries; ++k) {
         const auto v1 = version_.load(std::memory_order_acquire);
         if (v1 & 1u) continue;
@@ -328,10 +330,11 @@ bool PlanTableCell::Read(PlanTable& out, unsigned maxTries) const {
             t[i].key = words_[2 * i].load(std::memory_order_relaxed);
             t[i].seq = words_[2 * i + 1].load(std::memory_order_relaxed);
         }
+        const auto tag = generation_.load(std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_acquire);
-        if (version_.load(std::memory_order_relaxed) == v1) { out = t; return true; }
+        if (version_.load(std::memory_order_relaxed) == v1) { out = t; if (generation) *generation = tag; return true; }
     }
-    out = {};
+    out = {}; if (generation) *generation = 0;
     return false;
 }
 
@@ -502,6 +505,7 @@ std::uint64_t g_hostVersion = 0;
 PlanTableCell g_planCell {};
 PlanTable g_lastPublished {};
 bool g_publishedOnce = false;
+std::uint32_t g_lastPublishedGeneration = 0;
 // Loading thread -> game thread: the seq of the last story hold a load used (B1 release).
 std::atomic<std::uint64_t> g_holdConsumed {0};
 std::atomic<std::uint32_t> g_tableMisses {0}; // reads that fell back to an empty table (logged: misses=)
@@ -530,10 +534,11 @@ bool g_kitsUnknownLogged = false;
 void PublishIntent() {
     PlanTable table {};
     PackPlanTable(g_intent, table, g_kits.load(std::memory_order_acquire));
-    bool same = g_publishedOnce;
+    bool same = g_publishedOnce && g_lastPublishedGeneration == g_intent.generation;
     for (unsigned i = 0; same && i < PLAN_TABLE; ++i) same = table[i].key == g_lastPublished[i].key && table[i].seq == g_lastPublished[i].seq;
     if (same) return; // only real changes are published (the reader retries only around a write)
-    g_planCell.Publish(table);
+    g_planCell.Publish(table, g_intent.generation);
+    g_lastPublishedGeneration = g_intent.generation;
     g_lastPublished = table; g_publishedOnce = true;
 }
 
@@ -556,7 +561,9 @@ void Observer(std::uint16_t* resolved, const playerkit::LoadContext& c) {
     in.world = c.world; in.room = c.room; in.evtProgram = c.evtProgram;
     in.eventContext = c.eventContext; in.cutsceneState = c.cutsceneState;
     PlanTable table {};
-    if (!g_planCell.Read(table)) g_tableMisses.fetch_add(1, std::memory_order_relaxed); // empty table: native load
+    std::uint32_t generation = 0;
+    if (!g_planCell.Read(table, 64, &generation)) g_tableMisses.fetch_add(1, std::memory_order_relaxed); // empty table: native load
+    if (!enemysync::PartyLoadAdmitted(generation)) table = {}; // expiry/restart refuses old cached plans before any write
     const PlanChoice choice = SelectPlan(table, in.world, in.room, in.evtProgram);
     if (choice.source == PlanSource::Hold) g_holdConsumed.store(choice.seq, std::memory_order_release); // B1: this load was the story's
     in.plan = choice.plan; in.source = choice.source;
@@ -570,6 +577,7 @@ void Observer(std::uint16_t* resolved, const playerkit::LoadContext& c) {
     __try {
         in.resolved[0] = resolved[0]; in.resolved[1] = resolved[1]; in.resolved[2] = resolved[2];
         in.rowRead = ReadRow(in.world, in.row);
+        if (!enemysync::PartyLoadAdmitted(generation)) in.plan = Plan::None; // recheck immediately before writes
         r = ApplyAfterResolve(in, resolved, g_original);
         ok = true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {

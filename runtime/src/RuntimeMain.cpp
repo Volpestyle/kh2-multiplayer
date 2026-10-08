@@ -1849,6 +1849,9 @@ int main(int argc, char* argv[]) {
          g_running && (options.maxTicks == 0 || tick < options.maxTicks);
          ++tick) {
 
+#ifdef _WIN32
+        worldBridge.PulseRuntimeWriter();
+#endif
         // Pump network events every tick, even before KH2 is attached.
         if (netClient) {
             if (steamHost) steamHost->tick(0);
@@ -1993,6 +1996,7 @@ int main(int argc, char* argv[]) {
             }
             if (!worldBridge.IsOpen()) {
                 if (worldBridge.Open(static_cast<DWORD>(game.ProcessId()))) {
+                    worldBridge.PulseRuntimeWriter();
                     const auto priorGeneration = worldSessionGeneration;
                     worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
                     worldBridge.SetSpawnPickSalt(kh2coop::WorldBridge::SpawnPickSaltFromSession(worldSessionId)); // VUH-1515
@@ -2153,6 +2157,7 @@ int main(int argc, char* argv[]) {
         while (g_running && std::chrono::steady_clock::now() < tickEnd) {
             eventHoldTimed("pump-sleep", [&] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
             if (netClient) eventHoldTimed("network-inner", [&] { if (steamHost) steamHost->tick(0); netClient->tick(0); });
+            worldBridge.PulseRuntimeWriter();
             pulseEventHoldControl();
             eventHoldTimed("avatar-inner", [&] { pumpAvatars(pumpWorld, pumpRoom); });
         }

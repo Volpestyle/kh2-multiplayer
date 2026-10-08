@@ -80,7 +80,7 @@ HitClaim transport. ApplyHitDamage now snapshots an ordinary canonical-player
 HP hit before client suppression and submits an immutable typed claim to
 EnemySync. The host checks current roster connection, sequence, epoch, binding
 and native combat metadata before one byte-verified TakeDamage attempt, then
-recaptures the census before HP/death publication. WorldBridge v11 carries atomic
+recaptures the census before HP/death publication. WorldBridge v12 carries atomic
 roster/delivery floors, explicit puppet authority, captured producer context and
 a separate bounded CAS operator mailbox. Protocol v9 retains v3
 claims and v4 connection-tagged avatar relays; AvatarBridge v2 carries pose
@@ -183,6 +183,7 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 | `include/kh2coop/AvatarBridge.hpp` | | Version 2 shared memory DLL/runtime: unchanged local avatar, provenance-tagged puppet poses (seqlock) |
 | `include/kh2coop/PuppetProvenance.hpp` | | Platform-free network/standalone pose eligibility against explicit receiver authority and slot mapping |
 | `include/kh2coop/PacketRing.hpp` | ~125 | Lock-free SPSC ring of variable-length packets in shared memory |
+| `include/kh2coop/RuntimeWriterLease.hpp` | ~32 | Bounded pump heartbeat and expired-generation tombstone |
 | `include/kh2coop/WorldBridge.hpp` | ~190 | Shared world rings, immediate session generation and generation-bound ordered reset |
 | `include/kh2coop/WorldPump.hpp` | ~160 | Reliable world backlog and expendable activation-lease forwarding |
 | `include/kh2coop/ActivationLease.hpp` | ~120 | Bounded challenge state; fixed original-request expiry and replay rejection on a client-local clock |

@@ -116,6 +116,8 @@ bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille);
 // Read the runtime's current session role even between gameplay frames,
 // so disconnecting while a menu/load is active releases native exits.
 bool HasClientAuthority();
+// Loading-thread admission for a cached, generation-tagged party plan.
+bool PartyLoadAdmitted(std::uint32_t generation) noexcept;
 
 // Read-only on the registered game thread: the nonzero header generation whose
 // ordered reset has been consumed, or zero while retired/unavailable. Callers
