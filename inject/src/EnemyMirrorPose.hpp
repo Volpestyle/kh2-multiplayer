@@ -63,6 +63,11 @@ inline constexpr std::uint32_t kDuskObjectId = 318;
 inline constexpr std::uint32_t kCreeperObjectId = 317;  // not allowlisted; see above
 inline constexpr std::uint32_t kSamuraiObjectId = 310;
 inline constexpr std::uint32_t kDancerObjectId = 312;
+// T1 batch 6 test-only candidate: common generic type-4 families. Not live qualified.
+inline constexpr std::uint32_t kSilverRockObjectId = 71;
+// Fiery Globe76 stays native: b6-02 first-point mismatch on all five bodies.
+inline constexpr std::uint32_t kIcyCubeObjectId = 77;
+inline constexpr std::uint32_t kAssassinObjectId = 309;
 // T1 batch7 test-only candidate; direct-ARD smoke qualification pending.
 inline constexpr std::uint32_t kRabidDogObjectId = 3;
 inline constexpr std::uint32_t kHammerFrameObjectId = 8;
@@ -76,6 +81,7 @@ inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId,
                                               kRapidThrusterSkinObjectIds[1], kArmoredKnightObjectId, kDrillerMoleObjectId,
                                               kNeoshadowObjectId, kGargoyleKnightObjectId,
                                               kDuskObjectId, kSamuraiObjectId, kDancerObjectId,
+                                              kSilverRockObjectId, kIcyCubeObjectId, kAssassinObjectId,
                                               kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)

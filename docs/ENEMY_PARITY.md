@@ -33,6 +33,33 @@ Same class/hook compatibility and unchanged driver/binding/gates as
 prior T1 batches. Batch6 remains unlanded on this pinned base; rebase/repin
 before batch7 live if main gains its qualified families. No absence passes.
 
+## T1 batch 6 (2026-10-08): Silver Rock 71, Icy Cube 77 and Assassin 309 allowlisted; Fiery Globe 76 stays off
+
+Live run 20261007-235458 (fixture b6-03, PC1, two games): PASS. All three families
+plus the Soldier 301 control passed every gate; 3 co-located host/friend clips;
+4 protected saves unchanged. Report: `build/scenarios/20261007-235458_vuh1515_b6_fx03_common_t1_1`.
+Landed on main after batch 7.
+
+Candidate notes as staged:
+
+On main4c41090, the test-only variant adds Silver Rock71, Icy Cube77 and
+Assassin309. Fiery Globe76 and Creeper317 stay native. Batch6 b6-02
+(20261007-234257) passed Silver Rock71 and Soldier301 before failing the
+Fiery Globe readiness gate; 77 and309 were not reached. All five76 bodies
+spawned on both copies, but every friend bind reported no-point-match.
+The nearest rounded host first points were43–125u away versus the8u radius;
+rounding cannot explain the gap. Entry orientation versus capture timing
+remains unproven; the tolerance is unchanged. 
+
+b6-03 retains direct ARD legs Agrabah07/00 btl1 Silver Rock+Soldier,
+07/01 btl2 Icy Cube+Soldier, and EH12/0B btl1 Assassin (Sniper311 native).
+Every load explicitly selects unused evt32767 and requires settled receipts.
+Living spawn/engagement, brain/hit, positions/coverage, stale release and
+retake gates stay unchanged. Old packets/scenarios are moved into the lane's
+attempt-archive with original FAIL/safety PASS receipts retained. New
+products, native tests and live qualification require separate adoption.
+Packet: `build/rig/vuh1515-batch6-variant-20261007-01/live-fixture-b6-03/`.
+
 
 ## T1 batch 5 (2026-10-07): Dusk 318, Samurai 310 and Dancer 312 allowlisted; Creeper 317 stays off
 

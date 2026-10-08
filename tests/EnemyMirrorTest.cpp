@@ -190,7 +190,7 @@ void testStream() {
           "cursor held at newest-1 stays inside the bracket, time advancing by the overflow");
     // Families: a non-allowlisted object id is never tracked.
     em::Stream f(9);
-    auto other = row(4, 0.0f); other.objectId = 309;
+    auto other = row(4, 0.0f); other.objectId = 311;
     f.Ingest(motion(3, 1, 10, {other}), 1); f.Ingest(motion(3, 2, 13, {other}), 2); f.Tick(2);
     check(!f.Drivable(4, 2), "non-allowlisted family is ignored");
     em::Stream batStream(9);
@@ -255,7 +255,7 @@ void testHelpers() {
               em::BlendWeight(1) < 1.0f && em::BlendWeight(0) == 1.0f,
           "take-over blend weight rises monotonically to the stream pose");
     check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && em::FamilyAllowed(301) && em::FamilyAllowed(1838) &&
-              em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(309) && !em::FamilyAllowed(0) &&
+              em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(311) && !em::FamilyAllowed(0) &&
               !em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(306) &&
               !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
               !em::FamilyAllowed(1850),
@@ -272,15 +272,15 @@ void testHelpers() {
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,3,8,2410,2404").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,3,8,2410,2404",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
         check(std::string(tiny) == "302,4", "a short buffer drops whole families, never prints a cut id");
         check(em::FormatFamilies(nullptr, 8) == 0 && em::FormatFamilies(tiny, 0) == 0, "no buffer: nothing written");
     }
-    {  // batch 2: each new family streams beside an ignored family (309)
+    {  // batch 2: each new family streams beside an ignored family (311)
         em::Stream b2(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 40;
@@ -292,20 +292,20 @@ void testHelpers() {
             rows.push_back(r);
         }
         auto ignored = row(49, 0.0f);
-        ignored.objectId = 309;
+        ignored.objectId = 311;
         rows.push_back(ignored);
         b2.Ingest(motion(3, 1, 10, rows), 1); b2.Ingest(motion(3, 2, 13, rows), 2); b2.Tick(2);
         em::Pose bp;
         bool all = !b2.Drivable(49, 2);
         for (std::uint16_t n = 40; n < 49; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
-        check(all, "batch 2-4 family streams (17, 303, 368, 10, 304, 305, 18, 120, 367) are tracked and drivable; 309 is not");
+        check(all, "batch 2-4 family streams (17, 303, 368, 10, 304, 305, 18, 120, 367) are tracked and drivable; 311 is not");
     }
-    {  // batch 5: exactly four new type-4 families, not adjacent natives or bosses
+    {  // batch 5: qualified type-4 families; failed Creeper stays native
         check(em::FamilyAllowed(318) && !em::FamilyAllowed(317) && em::FamilyAllowed(310) && em::FamilyAllowed(312) &&
-                  !em::FamilyAllowed(309) && !em::FamilyAllowed(311) && !em::FamilyAllowed(313) &&
+                  !em::FamilyAllowed(311) && !em::FamilyAllowed(313) &&
                   !em::FamilyAllowed(314) && !em::FamilyAllowed(315) && !em::FamilyAllowed(316) &&
                   !em::FamilyAllowed(319) && !em::FamilyAllowed(1365),
-              "batch5 allows Dusk/Samurai/Dancer; Creeper, Assassin/Sniper/neighbours and RAW stay native");
+              "batch5 allows Dusk/Samurai/Dancer; Creeper, Sniper/neighbours and RAW stay native");
         em::Stream b5(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 80;
@@ -336,9 +336,35 @@ void testHelpers() {
         }
         check(!em::FamilyAllowed(2) && !em::FamilyAllowed(7) && !em::FamilyAllowed(9) &&
                   !em::FamilyAllowed(2403) && !em::FamilyAllowed(2405) && !em::FamilyAllowed(2409) &&
-                  !em::FamilyAllowed(2411) && !em::FamilyAllowed(71) && !em::FamilyAllowed(76) &&
-                  !em::FamilyAllowed(77) && !em::FamilyAllowed(309),
-              "batch7 keeps neighbours and unlanded batch6 families native on main");
+                  !em::FamilyAllowed(2411) && !em::FamilyAllowed(76),
+              "batch7 keeps neighbours and failed batch6 Fiery Globe76 native on main");
+    }
+    {  // batch 6 test-only families: one stream per family, excluded native neighbours
+        for (const auto oid : {em::kSilverRockObjectId,
+                               em::kIcyCubeObjectId, em::kAssassinObjectId}) {
+            em::Stream stream;
+            auto accepted = row(90, 10.0f); accepted.objectId = oid;
+            auto excluded = row(91, 20.0f); excluded.objectId = 317;
+            stream.Ingest(motion(6, 1, 100, {accepted, excluded}), 1);
+            stream.Ingest(motion(6, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
+            em::Pose pose;
+            check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) &&
+                      stream.PoseAt(90, 2, pose) && pose.objectId == oid && !stream.Drivable(91, 2),
+                  "batch6 family streams without enabling Creeper317");
+        }
+        check(!em::FamilyAllowed(70) && !em::FamilyAllowed(72) && !em::FamilyAllowed(73) &&
+                  !em::FamilyAllowed(75) && !em::FamilyAllowed(76) && !em::FamilyAllowed(78) && !em::FamilyAllowed(308) &&
+                  !em::FamilyAllowed(311) && !em::FamilyAllowed(317),
+              "batch6 excludes Fiery Globe76, neighbours, T2/T3 and failed Creeper");
+    }
+    {
+        em::Stream stream;
+        auto nativeOnly = row(91, 20.0f); nativeOnly.objectId = 76;
+        stream.Ingest(motion(6, 1, 100, {nativeOnly}), 1);
+        stream.Ingest(motion(6, 2, 103, {nativeOnly}), 2); stream.Tick(2);
+        em::Pose pose;
+        check(!stream.Drivable(91, 2) && !stream.PoseAt(91, 2, pose),
+              "failed Fiery Globe76 stays native even if a motion row arrives");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins(9);
