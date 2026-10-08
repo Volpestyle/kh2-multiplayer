@@ -32,6 +32,12 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 - **Lone Alt** can put a window into menu mode. Check pixels before sending more keys, and don't press Escape blindly (it's also pause).
 - **Reading the inject log while the game runs:** open it with `FileShare.ReadWrite`. A plain `ReadAllText` fails on the logger's lock.
 - **`boot-load-save` is broken.** Load saves through the scenario `boot` step.
+- **Cross-account Steam saves:** copying another account's whole `KHIIFM_WW.png` can block startup on a corrupt-save dialog before any Present receipt. With explicit save-handling approval, import raw entries into the target account's own native container, preserving its header, footer and XOR key (Kingdom Save Editor's `PcSaveArchive` format). Work on copies, retain the rejected container, hash originals and every target file, and verify title/capture without loading or saving. PC2 conversion evidence: `.local/pc2/save-conversion-result.md` (2026-10-07); startup passed, save loading remains untested. Do not dismiss the dialog blindly: it announces deletion and new save creation.
+- **Staging a packet on PC2** (`ssh pc2`, a Windows standard user):
+  - `scp -r <packet> pc2:<lane>/` copies the packet's *contents* into `<lane>` when `<lane>` doesn't exist yet, so `<lane>/<packet>/` is never created. This happened twice on 2026-10-07.
+  - Create the lane first with `powershell New-Item -ItemType Directory -Force`; cmd `mkdir` over SSH failed silently.
+  - After copying, check that `<lane>/<packet>/pins.json` exists and its sha256 matches.
+  - Remote `herdr agent prompt` keeps only the first line, so send instructions as a file in `C:\Users\ccroc\lead-inbox\`. In a shell heredoc, write literal paths instead of `$VARS`.
 - **Relay lifetime** is about 12 minutes (720 s). Don't explore routes on the relay clock; work routes out offline first.
 - **MP4s can't be decoded until finalized** (the `moov` atom). Stop a short sample before checking it.
 - **Clip-helper cleanup:** if a runner-owned `kh2ctl clip` is terminated during encoding, its ffmpeg child can survive. At closure, query children by the retained helper PID, creation time and clip command; stop only verified owned children and confirm their exit. Never kill every ffmpeg process.
