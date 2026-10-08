@@ -270,8 +270,8 @@ void testHelpers() {
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -297,6 +297,27 @@ void testHelpers() {
         bool all = !b2.Drivable(49, 2);
         for (std::uint16_t n = 40; n < 49; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
         check(all, "batch 2-4 family streams (17, 303, 368, 10, 304, 305, 18, 120, 367) are tracked and drivable; 309 is not");
+    }
+    {  // batch 5: exactly four new type-4 families, not adjacent natives or bosses
+        check(em::FamilyAllowed(318) && !em::FamilyAllowed(317) && em::FamilyAllowed(310) && em::FamilyAllowed(312) &&
+                  !em::FamilyAllowed(309) && !em::FamilyAllowed(311) && !em::FamilyAllowed(313) &&
+                  !em::FamilyAllowed(314) && !em::FamilyAllowed(315) && !em::FamilyAllowed(316) &&
+                  !em::FamilyAllowed(319) && !em::FamilyAllowed(1365),
+              "batch5 allows Dusk/Samurai/Dancer; Creeper, Assassin/Sniper/neighbours and RAW stay native");
+        em::Stream b5;
+        std::vector<EnemyMotionEntry> rows;
+        std::uint16_t net = 80;
+        for (const auto oid : {em::kDuskObjectId, em::kSamuraiObjectId, em::kDancerObjectId}) {
+            auto r = row(net++, 12.0f); r.objectId = oid; rows.push_back(r);
+        }
+        auto ignored = row(84, 0.0f); ignored.objectId = 311; rows.push_back(ignored);
+        auto creeper = row(85, 0.0f); creeper.objectId = em::kCreeperObjectId; rows.push_back(creeper);
+        b5.Ingest(motion(5, 1, 100, rows), 1); b5.Ingest(motion(5, 2, 103, rows), 2); b5.Tick(2);
+        em::Pose pose;
+        bool all = !b5.Drivable(84, 2) && !b5.Drivable(85, 2);
+        for (std::uint16_t n = 80; n < 83; ++n)
+            all = all && b5.Drivable(n, 2) && b5.PoseAt(n, 2, pose) && pose.objectId == rows[n - 80].objectId;
+        check(all, "batch5 streams are tracked and drivable beside ignored Sniper311 and Creeper317");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins;

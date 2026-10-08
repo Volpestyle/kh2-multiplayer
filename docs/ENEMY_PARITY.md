@@ -1,5 +1,14 @@
 # Enemy parity across instances (VUH-1499 spike)
 
+## T1 batch 5 (2026-10-07): Dusk 318, Samurai 310 and Dancer 312 allowlisted; Creeper 317 stays off
+
+Live run 20261007-220021 (batch-5 fixture-01, TWTNW, rooms from the no-mirror
+`build/scenarios/combat_rooms.json`):
+- Dusk at 12/0F btl 1, and Samurai and Dancer at 12/0C btl 1, each passed coverage, motion, position and engagement. The Soldier 301 and Driller Mole 18 controls (TT) also passed.
+- Creeper at 12/06 btl 2 failed. Its client copy never bound: epoch 4 `candidate0 reason=no-point-match`, then 29 unmatched statehash rows, all object 317. That alone caused the run's global `positions` and `friend-bound` failures. Driven XYZ p95 was 0.
+- An offline rejudge that omits only that native epoch-4 visit (original judge and thresholds) passes every family and every global. It is retained in `build/rig/vuh1515-batch5-variant-20261007-01/partial-rejudge-20261007-01/`.
+- The exact cause of the Creeper point mismatch is not logged; timing or burrow motion is only a hypothesis. Reaction commands, grabs and special states remain unqualified for all four.
+
 Question (plan D5, hard problem 3, risk R4): with the same save and room, do
 two instances spawn the same enemies, and what key matches a host enemy to
 its client copy?

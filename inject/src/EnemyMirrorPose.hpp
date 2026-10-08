@@ -55,13 +55,21 @@ inline constexpr std::uint32_t kArmoredKnightObjectId = 305;
 inline constexpr std::uint32_t kDrillerMoleObjectId = 18;
 inline constexpr std::uint32_t kNeoshadowObjectId = 120;
 inline constexpr std::uint32_t kGargoyleKnightObjectId = 367;
+// T1 batch 5: Nobody families qualified live in TWTNW (run 20261007-220021):
+// 12/0F btl1 Dusk; 12/0C btl1 Samurai and Dancer. Creeper 317 stays native:
+// its client copy failed initial binding (no-point-match) in that run.
+inline constexpr std::uint32_t kDuskObjectId = 318;
+inline constexpr std::uint32_t kCreeperObjectId = 317;  // not allowlisted; see above
+inline constexpr std::uint32_t kSamuraiObjectId = 310;
+inline constexpr std::uint32_t kDancerObjectId = 312;
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
                                               kLanceSoldierObjectId, kLargeBodyObjectId, kGargoyleWarriorObjectId,
                                               kNightwalkerObjectId, kRapidThrusterObjectId, kRapidThrusterSkinObjectIds[0],
                                               kRapidThrusterSkinObjectIds[1], kArmoredKnightObjectId, kDrillerMoleObjectId,
-                                              kNeoshadowObjectId, kGargoyleKnightObjectId};
+                                              kNeoshadowObjectId, kGargoyleKnightObjectId,
+                                              kDuskObjectId, kSamuraiObjectId, kDancerObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;
