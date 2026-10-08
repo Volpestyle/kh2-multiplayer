@@ -108,11 +108,25 @@ def crt_closure(products, crt, dumpbin, evidence):
     return [available[name] for name in sorted(needed)]
 
 
+def select_products(transport, selection):
+    if transport not in ('steam','enet'):raise ValueError('Unknown package transport.')
+    if transport == 'steam' and not selection:
+        raise ValueError('Steam packaging requires --products with explicit reviewed Steam-capable product pins; release09 inputs are not reused.')
+    selected = json.loads((Path(selection) if selection else ROOT/'tools/packaging/friend-products.json').read_text())
+    if transport == 'steam' and selected.get('transport') != 'steam':
+        raise ValueError('Selected product receipt does not declare Steam transport.')
+    if set(selected['products']) != {'dll','runtime','server','avatarctl'}:
+        raise ValueError('Product selection must contain exactly DLL, runtime, server and avatarctl roles.')
+    return selected
+
+
 def build(args):
+    transport = getattr(args,'transport','steam')
+    selected = select_products(transport,getattr(args,'products',None))
     output, evidence = Path(args.output).resolve(), Path(args.evidence).resolve()
     output.mkdir(parents=True, exist_ok=False); evidence.mkdir(parents=True, exist_ok=False)
     python = Path(args.python_home).resolve(); crt = Path(args.crt).resolve()
-    sources = {}; products = {}; selected = json.loads((ROOT/'tools/packaging/friend-products.json').read_text())
+    sources = {}; products = {}
     def copy(source, dest):
         source = Path(source).resolve(); target = output/dest
         if not source.is_file():raise ValueError(f'Missing installed input: {source}')
@@ -126,7 +140,7 @@ def build(args):
     cli = Path(args.cli).resolve()
     if digest(cli) != args.cli_sha256:raise ValueError('Private portable CLI hash mismatch')
     copy(cli, 'bin/kh2ctl.exe'); products['cli']='bin/kh2ctl.exe'
-    for name in ('friend.py','friend_package.py','launcher.py','plan.py','windows_owned.py'):
+    for name in ('friend.py','friend_package.py','launcher.py','plan.py','windows_owned.py','steam_flow.py'):
         copy(ROOT/'tools/launcher'/name, 'tools/launcher/'+name)
     for name in ('python.exe','pythonw.exe','python3.dll','python311.dll','vcruntime140.dll','vcruntime140_1.dll'):
         copy(python/name, 'python/'+name)
@@ -146,12 +160,12 @@ def build(args):
     copy(Path(args.vs_licenses)/'ThirdPartyNotices.txt','licenses/MSVC-ThirdPartyNotices.txt')
     copy(ROOT/'build/_deps/enet-src/LICENSE','licenses/ENet.txt')
     copy(ROOT/'build/_deps/minhook-src/LICENSE.txt','licenses/MinHook.txt')
-    copy(ROOT/'docs/FRIEND_PLAYTEST.md','READ ME FIRST.txt')
+    copy(ROOT/('docs/FRIEND_PLAYTEST_STEAM.md' if transport == 'steam' else 'docs/FRIEND_PLAYTEST.md'),'READ ME FIRST.txt')
     (output/'python/python311._pth').write_text('.\nLib\nDLLs\n../tools/launcher\n',encoding='ascii')
     (output/'KH2COOP-PACKAGE').write_text('kh2coop-friend-package-v1\n',encoding='ascii')
     (output/'Start KH2 Co-op.cmd').write_text('@echo off\ncd /d "%~dp0"\n"%~dp0python\\pythonw.exe" -I -B "%~dp0tools\\launcher\\friend.py"\n',encoding='ascii')
     files={p.relative_to(output).as_posix():digest(p) for p in sorted(output.rglob('*')) if p.is_file()}
-    manifest={'schema':1,'name':'KH2 Co-op private friend preview','avatarBridgeVersion':3,'protocol':10,
+    manifest={'schema':1,'name':'KH2 Co-op private friend preview','avatarBridgeVersion':3,'protocol':10,'defaultTransport':transport,
               'gameBuild':'1.0.0.10-steam-global','content':'none','mod':'none',
               'supportedGame':{'sha256':SUPPORTED_GAME,'fileVersion':'1.0.0.2','edition':'Steam Global'},
               'products':products,'files':files}
@@ -173,4 +187,6 @@ def build(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('output','evidence','python-home','crt','dumpbin','vs-licenses','cli','cli-sha256'):p.add_argument('--'+name,required=True)
+    p.add_argument('--transport',choices=('steam','enet'),default='steam')
+    p.add_argument('--products',help='Explicit product-pin receipt; mandatory for Steam')
     build(p.parse_args())

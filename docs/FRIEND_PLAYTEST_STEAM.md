@@ -1,69 +1,66 @@
-# KH2 Co-op — private friend preview over Steam (DRAFT, not released)
+# KH2 Co-op — Steam private preview
 
-> Draft for a future Steam-beta package (release10). It is not shipped yet, and it is not accurate for
-> release09, which uses Tailscale. It becomes valid only after the single-account listener probe and the
-> two-account Steam run both pass (`docs/STEAM_TRANSPORT.md`).
+This package flow has offline review approval and passed its PC2 launch/title/exit
+UX check (UX07, 2026-10-08). The underlying two-account Steam Step 2 also passed.
+Host/join via the package UI remains untested live.
 
-## What you need
+You need Steam running, signed in to your account owning KINGDOM HEARTS HD
+1.5+2.5 ReMIX, Windows, and the exact supported Steam Global KH2 build. No
+Tailscale, VPN, port forwarding or firewall changes are needed. Connections must
+use Valve relays; there is no direct-IP fallback. Up to three players can play.
 
-- Your own Windows copy of KINGDOM HEARTS HD 1.5+2.5 ReMIX on Steam (Global), the exact build the launcher
-  accepts. Epic and other builds are refused.
-- Steam running and signed in as you. That's all for networking: no Tailscale, no VPN, no router or firewall
-  changes, no port forwarding. Traffic goes through Valve's relays. The other player never sees your IP
-  address, and you never see theirs.
-- Your host's SteamID64, or your friends' SteamID64s if you are the host. This is a 17-digit number. It
-  is not your profile name, friend code or profile URL.
-- Up to three players: the host and one or two friends.
+1. Unzip into a new folder beside the game folder, not inside it. Keep the files
+   together. Open **Start KH2 Co-op.cmd** from your normal Windows desktop.
+2. Browse to the folder containing **KINGDOM HEARTS II FINAL MIX.exe**. Leave
+   **Steam (beta)** selected. If `steam_appid.txt` is missing, check the permission
+   box to create it beside KH2 with app ID 2552430. Existing correct files are
+   preserved; a different app ID is refused. No administrator access is needed.
+3. Click **Start game**. Wait for save protection and your actual **SteamID**.
+   Check that it is your account, then tick the account confirmation. You can
+   enter an expected SteamID to catch the wrong account. This must be a 17-digit
+   SteamID64, not a profile name, URL or friend code.
+4. Load your existing save manually. **Do not save during this preview.** If KH2
+   shows a corrupt-save or deletion prompt, stop and contact the host. Do not
+   dismiss it or copy someone else's save into your account.
+5. Host: choose **host**, paste one or two friends' actual SteamIDs separated by
+   commas, and confirm that only those accounts may join. When your room is ready,
+   check the ready box and click **Start hosting**. Wait for **Hosting — roster
+   verified**, then **Copy invitation** and share that text with your friends.
+6. Friend: choose **join**, select the slot the host assigned, and paste the host
+   SteamID or invitation (`kh2coop:steam:` followed by the host ID). Confirm your
+   account and readiness, then click **Join**. The host must separately allowlist
+   your actual SteamID. The invitation alone grants no admission.
+7. Wait for **Connected — roster verified**. The HUD can show connection latency.
+   To finish, click **Disconnect**, then **Exit & close game**. Disconnect leaves
+   the game open. Closing stops only the game and helpers started here.
 
-## Start and join
+The allowlist is fixed for a hosting session. To change it, Disconnect, edit and
+confirm it, then Start hosting again. Disconnecting as host ends the friends'
+session. Steam overlay invites, a friends picker and Steam's **Join game** button
+are not supported; use the copied invitation text.
 
-1. Unzip to a new folder beside your game folder, **not inside it**, and keep all files together.
-   Double-click **Start KH2 Co-op.cmd**. Nothing is installed and administrator access isn't needed.
-2. Browse to the folder that contains **KINGDOM HEARTS II FINAL MIX.exe**, choose **Steam (beta)**, then
-   click **Start game**. When save protection is confirmed, the launcher shows **Your SteamID**. Copy it and
-   send it to the other player over chat.
-3. Host:
-   - choose **host**;
-   - paste one or two friend SteamIDs, separated by a comma;
-   - only those accounts can join this session. To add someone later, Disconnect, add them, then Connect
-     again.
-4. Friend:
-   - choose **join** and your slot (**friend1**, or **friend2** if your host assigns it);
-   - paste the host's SteamID.
-5. Load your existing save normally. **Do not save during the preview.** Meet in the agreed room, wait for the
-   host's ready signal, check the ready box, then click **Connect**. Look for the verified roster and RTT.
-6. When you're done, click **Disconnect**, then **Exit & close game**.
+If Steam is unavailable, start it and sign in to the account owning KH2, using
+the same normal desktop session as this launcher. Close this game and start
+again. Broker startup can take up to 60 seconds. If authentication or Valve relay
+is unavailable, check Steam online status and retry a fresh launch. These failures
+cannot always be distinguished; preserve the logs when reporting a problem.
 
-## If it doesn't connect
+If the account is wrong, close this game, switch accounts in Steam, then start
+again. If joining fails, verify the host ID and the host's explicit allowlist.
+A generic timeout does not prove which side failed. Privacy/ICE failures are
+refused; do not change network settings to bypass them.
 
-(Exact launcher wording to be confirmed against the release10 build.)
+Short transport interruptions use bounded reconnection. **Host left** is terminal:
+there is no automatic rejoin; ask the host before joining a new session. Session
+errors remain visible in the launcher. Logs stay in this package. Sessions have a
+30-minute limit.
 
+SaveGuard redirects save writes into a sandbox; never copy those files over your
+saves. The launcher removes only an unchanged app-ID file it created, after
+confirmed owned game closure. Changed or pre-existing app-ID files are preserved.
+After an uncertain launch, leave the file in place until the game is closed and
+check the launch receipt. Never delete your saves as a troubleshooting step.
 
-- No SteamID shown, or the launcher says the Steam broker is not ready: make sure Steam is running and online, wait up to a minute
-  after the title screen, then try again. Starting the game outside the launcher doesn't enable Steam co-op.
-- The host never sees you join: the host must paste your exact SteamID64. Check that no digit is missing.
-- A refusal that mentions relay-only or ICE: your connection was refused on purpose because it would
-  not go through Valve's relays. Don't change Steam settings to work around it; report it with the package
-  logs.
-- It dropped mid-session: click **Connect** again. Each Connect starts a fresh link through Steam; your game
-  stays open. If the host leaves, the session ends for everyone.
-
-## Saves, warnings and removal
-
-Unchanged from the Tailscale preview:
-- SaveGuard redirects save writes into the package sandbox. Never copy sandbox files over your saves.
-- Antivirus may warn about the unsigned DLL. Stop and contact your host; don't add exclusions yourself.
-- To uninstall, delete the folder and the ZIP after closing the game and the launcher.
-
-The Steam option uses your game's own Steam session. It adds no Steam app, no second Steam login, and no
-account or firewall change.
-
-## Preview limits
-
-The gameplay limits of the Tailscale preview still apply: enemies, combat, cutscenes, reconnecting and the
-courtyard workaround all behave the same. Steam adds:
-- its own relay latency, typically tens of milliseconds;
-- the remote player's character may freeze for up to 3 seconds during a short network hiccup before
-  continuing. A longer outage hides it until the connection recovers.
-
-Separate-PC play over Steam is untested until the two-account run passes.
+The existing preview gameplay limits still apply. Stop on antivirus warnings and
+contact the host rather than adding exclusions. To uninstall, close the game and
+launcher, then delete the extracted package and ZIP.

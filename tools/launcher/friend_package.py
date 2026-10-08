@@ -11,6 +11,7 @@ import time
 import re
 
 from plan import steam_id
+from steam_flow import AppIdFile, broker_error
 
 GAME_NAME = 'KINGDOM HEARTS II FINAL MIX.exe'
 SUPPORTED_GAME = '9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed'
@@ -26,6 +27,8 @@ def verify_package(root):
     manifest = json.loads((root / 'package.json').read_text(encoding='utf-8'))
     if manifest.get('schema') != 1 or manifest.get('avatarBridgeVersion') != 3:
         raise ValueError('This package is incomplete or has incompatible components. Unpack a fresh copy.')
+    if manifest.get('defaultTransport','enet') not in ('steam','enet'):
+        raise ValueError('This package has an unknown connection mode. Unpack a fresh copy.')
     for name, expected in manifest['files'].items():
         path = (root / name).resolve()
         if not path.is_relative_to(root) or not path.is_file() or digest(path) != expected:
@@ -118,11 +121,13 @@ class GameOwner:
         self.transport = None
         self.launch_wall_ns = 0
         self.steam_identity = ''
+        self.appid_file = None
+        self.launch_directory = None
 
     def product(self, name):
         return self.root / self.manifest['products'][name]
 
-    def launch(self, game_dir, receipt_dir, *, transport='enet'):
+    def launch(self, game_dir, receipt_dir, *, transport='enet', appid_consent=False):
         if transport not in ('enet', 'steam'):
             raise ValueError('Choose ENet / relay or Steam (beta).')
         if self.unresolved_launch:
@@ -132,13 +137,18 @@ class GameOwner:
         exe = verify_game(game_dir, self.root)  # must precede every launch/injection
         verify_package(self.root)
         receipt_dir = Path(receipt_dir); receipt_dir.mkdir(parents=True, exist_ok=False)
+        self.launch_directory = receipt_dir
+        appid = None
+        if transport == 'steam':
+            self.appid_file = AppIdFile(exe.parent / 'steam_appid.txt')
+            appid = self.appid_file.prepare(appid_consent)
         argv = ['launch', '--game-dir', str(exe.parent), '--dll', str(self.product('dll'))]
         self.launch_wall_ns = time.time_ns()
         self.transport = transport
         self.steam_identity = ''
         (receipt_dir / 'launch-request.json').write_text(json.dumps({'argv':argv,'gameSHA256':SUPPORTED_GAME,
             'startedNs':time.perf_counter_ns(), 'startedWallNs':self.launch_wall_ns,
-            'transport':transport, 'steamBroker':transport == 'steam'}, indent=2), encoding='utf-8')
+            'transport':transport, 'steamBroker':transport == 'steam', 'steamAppIdFile':appid}, indent=2), encoding='utf-8')
         self.unresolved_launch = True
         launch_failure = None
         try:
@@ -146,7 +156,8 @@ class GameOwner:
             receipt = self.command(self.root, self.product('cli'), argv, timeout=105, **opt_in)
         except Exception as error:
             (receipt_dir / 'launch-error.json').write_text(json.dumps({'error':str(error),
-                'ownershipUnresolved':True,'note':'No guessed PID is adopted or killed.'},indent=2),encoding='utf-8')
+                'ownershipUnresolved':True,'steamAppIdFile':appid,
+                'note':'No guessed PID is adopted or killed. Any newly created app-ID file is retained until owned game closure is confirmed.'},indent=2),encoding='utf-8')
             # InjectAndReport returns the exact launched PID even when a hook
             # failed. Preserve that receipt so this owned unsafe game is closed.
             receipt = error.receipt if isinstance(error, CanonicalFailure) else {}
@@ -285,6 +296,10 @@ class GameOwner:
         self.unresolved_launch = False  # only after confirmed WAIT_OBJECT_0
         self.win.close(self.handle)
         self.handle = None
+        if self.appid_file:
+            result['steamAppIdFile'] = self.appid_file.cleanup()
+            if self.launch_directory:
+                (self.launch_directory / 'appid-cleanup.json').write_text(json.dumps(result['steamAppIdFile'], indent=2), encoding='utf-8')
         return result
 
 
@@ -297,13 +312,13 @@ def parse_broker_identity(text):
         if match:
             identities.append(steam_id(match[1]))
         if line.startswith(('[steam-broker] unavailable ', '[steam-broker] refused pipe-create', '[steam-broker] exception ')):
-            raise ValueError('Steam broker is unavailable; see the owned game broker log.')
+            raise ValueError(broker_error(line) or 'Steam broker is unavailable; see the owned game broker log.')
     if len(identities) > 1:
         raise ValueError('Ambiguous Steam broker identity receipt.')
     return identities[0] if identities else ''
 
 
-def read_shared_prefix(path):
+def read_shared_prefix(path, *, offset=0):
     """One bounded read, with write sharing for the live log; never retry/block on a lock."""
     import ctypes as c
     from ctypes import wintypes as w
@@ -315,11 +330,13 @@ def read_shared_prefix(path):
     k.GetFileTime.argtypes = [w.HANDLE,c.POINTER(w.FILETIME),c.c_void_p,c.c_void_p]
     k.GetFileTime.restype = w.BOOL
     k.CloseHandle.argtypes = [w.HANDLE]; k.CloseHandle.restype = w.BOOL
+    k.SetFilePointerEx.argtypes = [w.HANDLE,c.c_longlong,c.POINTER(c.c_longlong),w.DWORD]
     handle = k.CreateFileW(str(path),0x80000000,1|2|4,None,3,0,None)
     if handle == c.c_void_p(-1).value:
         raise c.WinError(c.get_last_error())
     try:
         created = w.FILETIME(); count = w.DWORD(); buf = c.create_string_buffer(8192)
+        if offset and not k.SetFilePointerEx(handle,offset,None,0):raise c.WinError(c.get_last_error())
         if not k.GetFileTime(handle,c.byref(created),None,None) or not k.ReadFile(handle,buf,8192,c.byref(count),None):
             raise c.WinError(c.get_last_error())
         stamp = ((created.dwHighDateTime << 32) | created.dwLowDateTime) * 100 - 11644473600000000000

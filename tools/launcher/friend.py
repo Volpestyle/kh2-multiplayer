@@ -15,6 +15,7 @@ sys.path.insert(0, str(HERE))
 from friend_package import GameOwner, verify_package
 from launcher import Session, require_idle_rig
 from plan import ROOT, LOCAL, Options, make_plan
+from steam_flow import invitation, confirm_account, RuntimeStatus
 
 
 
@@ -22,9 +23,12 @@ class SteamFields:
     """Default-off connection choice, used by the real UI and its offline screenshot."""
     def __init__(self, parent, tk, ttk, role):
         self.role=role;self.locked=False
-        self.mode=tk.StringVar(value='ENet / relay')
+        self.mode=tk.StringVar(value='Steam (beta)')
         self.identity=tk.StringVar();self.host=tk.StringVar();self.allow=tk.StringVar()
-        self.note=tk.StringVar(value='Choose Steam before Start game. Requires a broker-enabled build; release09 is unchanged.')
+        self.expected=tk.StringVar();self.confirmed=tk.BooleanVar(value=False)
+        self.allow_confirmed=tk.BooleanVar(value=False);self.appid_consent=tk.BooleanVar(value=False)
+        self.hosting=False
+        self.note=tk.StringVar(value='Start Steam and sign in to the account owning KH2 before Start game.')
         self.frame=ttk.Frame(parent);self.frame.columnconfigure(1,weight=1)
         ttk.Label(self.frame,text='Connection').grid(row=0,column=0,sticky='w',pady=5)
         self.choice=ttk.Combobox(self.frame,textvariable=self.mode,values=('ENet / relay','Steam (beta)'),state='readonly')
@@ -42,6 +46,19 @@ class SteamFields:
         self.hint=tk.StringVar()
         ttk.Label(self.body,textvariable=self.hint,wraplength=670).grid(row=2,columnspan=3,sticky='w',pady=(5,0))
         ttk.Label(self.body,textvariable=self.note,wraplength=670).grid(row=3,columnspan=3,sticky='w',pady=(3,5))
+        ttk.Label(self.body,text='Expected SteamID (optional)').grid(row=4,column=0,sticky='w')
+        self.expected_entry=ttk.Entry(self.body,textvariable=self.expected)
+        self.expected_entry.grid(row=4,column=1,columnspan=2,sticky='ew',padx=10)
+        self.account_check=ttk.Checkbutton(self.body,text='The displayed SteamID is my account',variable=self.confirmed)
+        self.account_check.grid(row=5,columnspan=3,sticky='w')
+        self.allow_check=ttk.Checkbutton(self.body,text='Only these friend accounts may join this hosting session',variable=self.allow_confirmed)
+        self.allow_check.grid(row=6,columnspan=3,sticky='w')
+        self.appid_check=ttk.Checkbutton(self.body,text='Allow creation of missing steam_appid.txt (2552430) beside KH2; remove it after owned game closure',variable=self.appid_consent)
+        self.appid_check.grid(row=7,columnspan=3,sticky='w')
+        self.invite=ttk.Button(self.body,text='Copy invitation',command=self.copy_invitation,state='disabled')
+        self.invite.grid(row=8,columnspan=3,sticky='e')
+        self.identity.trace_add('write',lambda *args:self.confirmed.set(False))
+        self.allow.trace_add('write',lambda *args:self.allow_confirmed.set(False))
         for var in (self.mode,self.role,self.identity):var.trace_add('write',lambda *args:self.refresh())
         self.refresh()
 
@@ -55,6 +72,10 @@ class SteamFields:
         value=steam_id(self.identity.get())
         self.frame.clipboard_clear();self.frame.clipboard_append(value)
 
+    def copy_invitation(self):
+        if not self.hosting:raise ValueError('Start hosting before sharing an invitation.')
+        self.frame.clipboard_clear();self.frame.clipboard_append(invitation(self.identity.get()))
+
     def set_locked(self, locked):
         self.locked=locked;self.refresh()
 
@@ -64,20 +85,26 @@ class SteamFields:
             self.body.grid(row=1,columnspan=3,sticky='ew',pady=6)
         else:self.body.grid_remove()
         host=self.role.get() == 'host'
-        self.hint.set('SteamID64 only. Host allows 1-2 friends, separated by commas. Valve relays only.' if host else 'SteamID64 only. Valve relays only.')
+        self.hint.set('Allow 1–2 SteamID64s, separated by commas. Disconnect to change this list; this ends the friends\' session.' if host else 'Paste the host SteamID64 or kh2coop:steam: invitation. The host must allow your SteamID. Valve relays only.')
         for widget in (self.host_label,self.host_entry,self.allow_label,self.allow_entry):widget.grid_remove()
         label,entry=(self.allow_label,self.allow_entry) if host else (self.host_label,self.host_entry)
         label.grid(row=1,column=0,sticky='w',pady=5);entry.grid(row=1,column=1,columnspan=2,sticky='ew',padx=10)
         entry.configure(state='disabled' if self.locked else 'normal')
         self.copy.configure(state='normal' if self.identity.get() else 'disabled')
+        self.invite.configure(state='normal' if host and self.hosting and self.identity.get() else 'disabled')
+        self.expected_entry.configure(state='disabled' if self.locked else 'normal')
+        for widget in (self.account_check,self.allow_check,self.appid_check):
+            widget.configure(state='disabled' if self.locked else 'normal')
+        if host:self.allow_check.grid()
+        else:self.allow_check.grid_remove()
 
 
 def make_view(tk, ttk, browse):
     """Construct the real launcher widgets only. No discovery, files, game or network."""
-    app = tk.Tk(); app.title('KH2 Co-op — friend preview'); app.geometry('740x860')
+    app = tk.Tk(); app.title('KH2 Co-op — friend preview'); app.geometry('900x940');app.minsize(900,940)
     frame=ttk.Frame(app,padding=20);frame.pack(fill='both',expand=True);frame.columnconfigure(1,weight=1)
     ttk.Label(frame,text='KH2 Co-op',font=('Segoe UI',20,'bold')).grid(row=0,columnspan=3,sticky='w')
-    ttk.Label(frame,text='Start your game, load your save, then connect. Do not save during this preview.',
+    ttk.Label(frame,text='Steam hosting and joining: no Tailscale needed. Start your game, load your save, then connect. Do not save during this preview.',
               wraplength=630).grid(row=1,columnspan=3,sticky='w',pady=(5,15))
     values={k:tk.StringVar(value=v) for k,v in {'game':'','mode':'join','endpoint':'','port':'27795','name':'Friend','slot':'friend1'}.items()}
     relay=tk.BooleanVar(value=False);loaded=tk.BooleanVar(value=False)
@@ -88,7 +115,8 @@ def make_view(tk, ttk, browse):
         return label,widget
     field(2,'Your KH2 game folder',ttk.Entry(frame,textvariable=values['game']))
     ttk.Button(frame,text='Browse…',command=browse).grid(row=3,column=2,sticky='e')
-    field(4,'Play as',ttk.Combobox(frame,textvariable=values['mode'],values=('host','join'),state='readonly'))
+    play_as=ttk.Combobox(frame,textvariable=values['mode'],values=('host','join'),state='readonly')
+    field(4,'Play as',play_as)
     steam = SteamFields(frame, tk, ttk, values['mode'])
     steam.frame.grid(row=5,columnspan=3,sticky='ew',pady=4)
     enet_widgets=(*field(6,'Relay address from your host',ttk.Entry(frame,textvariable=values['endpoint'])),
@@ -104,7 +132,7 @@ def make_view(tk, ttk, browse):
     steam.mode.trace_add('write',connection_fields)
     connection_fields()
     ttk.Checkbutton(frame,text='I loaded my save and the host says the room is ready to join',variable=loaded).grid(row=11,columnspan=3,sticky='w',pady=10)
-    status=tk.StringVar(value='Nothing starts automatically. ENet uses Tailscale; Steam (beta) uses your game Steam session.')
+    status=tk.StringVar(value='Nothing starts automatically. Steam uses your own KH2 Steam session and Valve relays.')
     ttk.Label(frame,textvariable=status,wraplength=630).grid(row=13,columnspan=3,sticky='w',pady=10)
     ttk.Label(frame,text='Disconnect leaves the game open. Exit & close game closes only the game started here.\n'
               'Session limit: 30 minutes. Logs stay in this package. No save is committed.',wraplength=630).grid(row=14,columnspan=3,sticky='w')
@@ -116,7 +144,7 @@ def make_view(tk, ttk, browse):
     actions['hud'].configure(state='disabled')
     from types import SimpleNamespace
     return SimpleNamespace(app=app,frame=frame,values=values,relay=relay,loaded=loaded,
-                           status=status,actions=actions,steam=steam)
+                           status=status,actions=actions,steam=steam,play_as=play_as)
 
 
 
@@ -136,7 +164,8 @@ def main():
     if args.self_check:
         print(json.dumps({'ok':True,'scope':'offline files/imports/Tcl only; no game or network',
                           'python':sys.version,'tcl':tk.Tcl().eval('info patchlevel'),
-                          'package':str(ROOT),'bridgeVersion':manifest['avatarBridgeVersion']}))
+                          'package':str(ROOT),'bridgeVersion':manifest['avatarBridgeVersion'],
+                          'defaultTransport':manifest.get('defaultTransport','enet')}))
         return 0
     from windows_owned import Windows
     win = Windows()
@@ -148,10 +177,12 @@ def main():
     package_lock = win.mutex('package_'+str(key))
     owner = GameOwner(ROOT, manifest, win)
     view = make_view(tk, ttk, lambda: view.values['game'].set(filedialog.askdirectory() or view.values['game'].get()))
+    view.steam.mode.set('Steam (beta)' if manifest.get('defaultTransport','enet') == 'steam' else 'ENet / relay')
     app,frame,values,relay,loaded,status = view.app,view.frame,view.values,view.relay,view.loaded,view.status
     steam=view.steam
     events=queue.Queue();busy=False;session=None;closing=False
     log_offset=0;log_fragment='';roster=False;last_rtt='';rtt_at=0.;connection_line=''
+    runtime_status=RuntimeStatus();broker_offset=0;broker_fragment=''
     def run_work(fn,label):
         nonlocal busy
         if busy:return
@@ -165,15 +196,16 @@ def main():
     def launch():
         directory=values['game'].get()
         transport=steam.transport()
+        appid_consent=steam.appid_consent.get()
         steam.identity.set('')
         steam.note.set('Waiting for the owned game broker receipt.')
         def action():
             require_idle_rig(win)
-            r=owner.launch(directory,fresh_dir(),transport=transport)
-            return f'Game {r["processId"]} prepared with save protection. Load your save manually, then Connect.'
+            r=owner.launch(directory,fresh_dir(),transport=transport,appid_consent=appid_consent)
+            return f'Game {r["processId"]} prepared with save protection. Load your save, confirm your Steam account, then Start hosting or Join.'
         run_work(action,'Checking the exact game build and starting KH2…')
     def connect():
-        nonlocal session,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line
+        nonlocal session,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line,runtime_status,broker_offset,broker_fragment
         if busy:return
         try:
             if not owner.ready or not win.alive(owner.handle):raise ValueError('Start and prepare your game here first.')
@@ -181,6 +213,10 @@ def main():
             if session and not session.done.is_set():raise ValueError('Already connected or connecting.')
             transport=steam.transport()
             identity=owner.connection_identity(transport)
+            if transport == 'steam':
+                confirm_account(identity,steam.expected.get(),steam.confirmed.get())
+                if values['mode'].get() == 'host' and not steam.allow_confirmed.get():
+                    raise ValueError('Confirm the explicit friend allowlist before Start hosting.')
             opt=Options(owner.pid,values['mode'].get(),values['endpoint'].get(),
                         int(values['port'].get()) if transport == 'enet' else 27795,
                         values['name'].get(),values['slot'].get(),relay.get() if transport == 'enet' else False,1800,
@@ -188,8 +224,11 @@ def main():
                         steam_host=steam.host.get(),steam_allow=steam.allow.get())
             plan=make_plan(opt,fresh_dir(),runtime=owner.product('runtime'),server=owner.product('server'))
             verify_package(ROOT)
-            session=Session(win,plan,owner.product('cli'))
             log_offset=0;log_fragment='';roster=False;last_rtt='';rtt_at=0.;connection_line=''
+            runtime_status=RuntimeStatus(hosting=values['mode'].get() == 'host')
+            broker_path=ROOT/'build/rig/logs'/f'steam-broker_{owner.pid}.log'
+            broker_offset=broker_path.stat().st_size if transport == 'steam' else 0;broker_fragment=''
+            session=Session(win,plan,owner.product('cli'))
             run_work(lambda:(session.start() or session.error or 'Connecting; waiting for verified roster.'),'Starting private session…')
         except Exception as error:messagebox.showerror('Cannot connect',str(error))
     def disconnect():
@@ -215,7 +254,7 @@ def main():
     hud_button=view.actions['hud']
     hud_button.configure(command=lambda:hud(owner.overlay_enabled is not True))
     def tick():
-        nonlocal busy,closing,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line
+        nonlocal busy,closing,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line,broker_offset,broker_fragment
         try:
             kind,text=events.get_nowait();busy=False
             if kind=='error':
@@ -227,6 +266,12 @@ def main():
         if session and not busy:
             if session.started.is_set() and not session.done.is_set():
                 if not win.alive(session.game) or any(p.poll() is not None for p in session.processes.values()):
+                    if owner.transport == 'steam':
+                        try:
+                            with (session.path/'runtime.log').open('rb') as stream:
+                                stream.seek(log_offset);tail=stream.read(65536).decode('utf-8',errors='replace')
+                            for line in (log_fragment+tail).splitlines():runtime_status.feed(line)
+                        except OSError:pass
                     run_work(lambda:session.stop('game/helper exited'),'Session ended…')
                 else:
                     log=session.path/'runtime.log'
@@ -239,21 +284,38 @@ def main():
                     rtt=re.findall(r'\[Runtime\] Net: rtt=(\d+)ms',text)
                     if rtt:last_rtt=rtt[-1];rtt_at=time.monotonic()
                     for line in text.splitlines():
+                        runtime_status.feed(line)
                         if line.startswith('[Runtime] Network: SessionState session='):
                             roster=True;connection_line=line
                         if 'Network: closed ' in line or 'refused by relay:' in line:
                             roster=False;last_rtt='';connection_line=''
-                    status.set(('Connected — roster verified' if roster else 'Waiting for verified roster')+
+                    if owner.transport == 'steam':
+                        from friend_package import read_shared_prefix
+                        try:
+                            broker_text,_=read_shared_prefix(ROOT/'build/rig/logs'/f'steam-broker_{owner.pid}.log',offset=broker_offset)
+                            broker_offset+=len(broker_text.encode('utf-8'))
+                            broker_lines=(broker_fragment+broker_text).split('\n');broker_fragment=broker_lines.pop()
+                            for line in broker_lines:runtime_status.feed(line.rstrip('\r'))
+                        except OSError as error:
+                            runtime_status.text='Cannot read the owned Steam receipt: '+str(error)
+                            runtime_status.roster=False;runtime_status.terminal=True
+                        roster=runtime_status.roster
+                    status.set((runtime_status.text if owner.transport == 'steam' else 'Connected — roster verified' if roster else 'Waiting for verified roster')+
                                (f' · RTT {last_rtt} ms'+(' (stale)' if time.monotonic()-rtt_at>5 else '') if last_rtt else '')+'\n'+str(session.path))
-                    if roster and owner.overlay_enabled is None and owner.overlay_auto_session is not session:
+                    if owner.transport == 'steam' and runtime_status.terminal and not session.stopping.is_set():
+                        run_work(lambda:session.stop('Steam session ended'),runtime_status.text)
+                    elif roster and owner.overlay_enabled is None and owner.overlay_auto_session is not session:
                         hud(True,automatic=True)
-            elif session.done.is_set():status.set(session.error or 'Disconnected. Game remains open; do not save.')
+            elif session.done.is_set():status.set(session.error or (runtime_status.text if runtime_status.terminal else 'Disconnected. Game remains open; do not save.'))
         active = bool(session and not session.done.is_set())
+        steam.hosting=active and roster and runtime_status.hosting and runtime_status.listener and not runtime_status.terminal
         steam.set_locked(busy or closing or active)
+        view.play_as.configure(state='disabled' if busy or closing or active else 'readonly')
+        view.actions['connect'].configure(text='Start hosting' if values['mode'].get() == 'host' else 'Join')
         if not busy and not closing and owner.ready and owner.transport == 'steam':
             try:
                 identity=owner.read_steam_identity()
-                steam.identity.set(identity)
+                if steam.identity.get() != identity:steam.identity.set(identity)
                 steam.note.set('Your game Steam session is ready.' if identity else 'Waiting for the game Steam session (broker cap: 60 seconds).')
             except (OSError, ValueError) as error:
                 steam.identity.set('')

@@ -77,12 +77,14 @@ class Ownership(unittest.TestCase):
     command = fixtures.Safety.command
     def launch_steam(self):
         owner=self.owner()
+        (self.root.parent/'steam_appid.txt').write_text('2552430\n')
         with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME):
             owner.launch('unused',self.root/'steam-run',transport='steam')
         return owner
 
     def test_opt_in_only_in_launch_child_not_parent_or_later_commands(self):
         kwargs=[]
+        (self.root.parent/'steam_appid.txt').write_text('2552430\n')
         def command(*args,**kw):
             kwargs.append((args[2],kw));return self.command(*args,**kw)
         o=self.owner(command)

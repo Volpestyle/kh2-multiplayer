@@ -99,7 +99,8 @@ def steam_arguments(options):
         if not 1 <= len(ids) <= 2 or len(set(ids)) != len(ids) or own in ids:
             raise ValueError('Allow one or two distinct friends, excluding your own SteamID.')
         return ['--steam-host', *[arg for identity in ids for arg in ('--steam-allow', identity)]]
-    target = steam_id(options.steam_host.strip())
+    from steam_flow import host_identity
+    target = host_identity(options.steam_host)
     if target == own:
         raise ValueError('Host SteamID must belong to another account.')
     return ['--steam-join', target]

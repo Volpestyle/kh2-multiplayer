@@ -1,9 +1,66 @@
 # Steam transport work (VUH-1493)
 
-Steam connectivity is not available to friends yet. ENet remains the default
-packet transport. Native delta `fff108b` has lead re-review ADOPT with no blockers;
-cross-account validation waits on James's second account. Protocol10, its channel assignments,
+Step 2 passed on both PCs (rev11: host 20261008-000620, friend 20261008-000619):
+authenticated relayed admission, room follow, combat, attachment reconnect and
+terminal host leave. The friend Steam flow has offline review approval and passed
+its PC2 launch/title/exit UX acceptance (UX07, 20261008T060115Z-5fd7830d).
+Host/join via the package UI remains untested live. Historical probe/checklist
+sections below retain their original scope. ENet remains the development
+runtime's default packet transport. Protocol10, its channel assignments,
 session/cache/resync authority and all existing admission checks are unchanged.
+
+## Friend setup: Steam private preview
+
+**Status:** the Steam transport passed its two-PC Step 2 run, and the friend
+launcher passed its one-launch PC2 UX check (UX07, 2026-10-08). Host/join via the
+package UI remains untested live. Use the
+specific reviewed package supplied by the host, with matching versions on both PCs.
+
+**Install and run.** Each player needs Windows, their own Steam account with the
+supported Steam Global KINGDOM HEARTS HD 1.5+2.5 ReMIX installation, and Steam
+running and signed in on the same normal desktop as the launcher. Extract the
+entire friend ZIP into a new folder outside the game directory. Keep its files
+together; Python and co-op tools are bundled. Open **Start KH2 Co-op.cmd** without
+administrator access, select the folder containing **KINGDOM HEARTS II FINAL
+MIX.exe**, leave **Steam (beta)** selected, and click **Start game**. No Tailscale,
+VPN, port forwarding or firewall changes are required. Connections use Valve
+relays with no direct-IP fallback.
+
+**Account and app ID.** Wait for save protection and the displayed SteamID, then
+confirm that it is your account. An optional expected SteamID catches a mismatch.
+Use the account's 17-digit SteamID64, not a friend code, profile name or URL. If
+`steam_appid.txt` beside KH2 is absent, explicitly consent to creating it with
+`2552430`; an existing correct file stays unchanged and a different ID is refused.
+After verified owned game closure the launcher removes only the unchanged file
+it created. It preserves pre-existing or changed files. Do not edit Steam files
+to bypass an error; preserve the launch receipt if closure is uncertain.
+
+**Host or join.** Load your existing save manually and confirm room readiness in
+the launcher. The host selects **host**, enters one or two friends' SteamID64s,
+confirms the allowlist, and clicks **Start hosting**. After roster verification,
+**Copy invitation** supplies text beginning `kh2coop:steam:`. A friend selects
+**join**, chooses the assigned friend slot, pastes that invitation or the host's
+SteamID64, and clicks **Join**. An invitation grants no admission by itself: the
+host must allowlist that friend's actual account. Changing the allowlist requires
+Disconnect and a new hosting session. A Steam friends picker, overlay invitation
+and Steam's **Join game** action are not supported by this package.
+
+**Saves: do not copy another account's container.** Do not save during this preview.
+A whole `KHIIFM_WW.png` copied from another Steam account can block startup with a
+corrupt-save/deletion prompt before the game renders. Stop at that prompt; do not
+confirm deletion or replace your own saves. An approved migration must preserve
+the target account's native container header, footer and XOR key, importing raw
+entries into a copy and retaining originals with before/after hashes. This is an
+operator-assisted conversion, not a launcher feature. SaveGuard redirects writes
+into a sandbox; never copy sandbox files back over your saves.
+
+**Errors and exit.** For unavailable Steam or the wrong account, close the owned
+game, correct Steam's login, then start again. Authentication/relay failure can
+require checking Steam online status; a generic timeout does not identify which
+side failed. Keep the package logs when asking for help. **Host left** ends the
+session with no automatic rejoin; ordinary transport interruptions have bounded
+reconnection. **Disconnect** leaves the game open; **Exit & close game** closes
+only this launcher's game and helpers. Close both before removing the package.
 
 `NetworkClient` and `SessionHost` accept an optional owned `Transport` as their
 last constructor argument. With none supplied, they create `EnetTransport`.
@@ -54,7 +111,8 @@ Set `KH2COOP_STEAM_BROKER=1` **only in the owned game's launch environment**.
 Use the reviewed broker DLL and wait for its `steam-broker_<pid>.log` readiness
 receipt. Do not enable the capability probe at the same time. The default is off;
 there is no new hook or game-memory/input/save writer. The source launcher offers
-a default-off Steam (beta) mode; sealed release09 remains unchanged.
+a Steam (beta) mode; explicitly selected Steam packages default to it. Sealed
+release09 remains unchanged.
 
 Start the matching runtime with its existing config/build/content/mod arguments:
 
@@ -362,3 +420,37 @@ is emitted first. Admission and live Connected security gates are unchanged.
 Generic transport loss/local disconnect keeps its existing immediate retirement
 and stale-rejoin handling; delaying those would reject an incoming G7 rejoin as
 a duplicate while its old connection was retained.
+
+## Friend package flow (PENDING)
+
+`tools/packaging/build_friend.py --transport steam --products <pins.json>` uses
+explicit Steam-capable products, a separately pinned portable CLI, and
+`docs/FRIEND_PLAYTEST_STEAM.md`. It refuses implicit release09 product selection.
+The verified manifest selects Steam by default; legacy ENet packages retain
+their default. The launcher requires confirmation of the broker-reported actual
+SteamID and the host's immutable allowlist. An optional expected ID detects a
+wrong account. Host invitations are copy/paste `kh2coop:steam:<SteamID64>` text;
+they grant no admission and invoke no shell or URL handler. Hosting is shown only
+after the current listener and local verified roster receipts.
+
+Missing `steam_appid.txt` requires explicit creation consent. Existing correct
+files are preserved; other IDs and links are refused. On confirmed owned game
+closure, only an unchanged file created by this launcher is removed. Launch and
+cleanup receipts record the decision; unresolved ownership leaves the file in
+place. SteamAppId environment variables alone did not prevent the PC2 first-run
+failure, so the file is checked explicitly. Save files remain outside this flow.
+
+The UI distinguishes startup/auth-or-relay failures, wrong-account confirmation,
+session refusal, bounded reconnection and terminal Host left. A generic timeout
+does not prove non-allowlisting or a particular Steam outage. Complete log lines
+from this owned game/session drive persistent errors; no direct-IP fallback.
+
+The current native bridge exposes no Steam friends picker or invite callback
+delivery. Valve's InviteUserToGame can cold-launch the Steam-owned executable or
+deliver GameRichPresenceJoinRequested to a running game. Supporting that route
+requires a guarded launch design and reviewed same-pipe callback routing, so this
+package offers copy/paste invitations. No second Steam initialization is added.
+See [Valve's invite contract](https://partner.steamgames.com/doc/api/ISteamFriends#InviteUserToGame).
+
+Rev7's two-PC Step 2 PASS (20261007-214358) is transport evidence. These package
+and UI changes have offline controls only until their own reviewed acceptance run.
