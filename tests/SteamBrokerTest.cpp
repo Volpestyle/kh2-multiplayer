@@ -24,8 +24,13 @@ void check(bool v,const char* what){std::cout<<(v?"PASS ":"FAIL ")<<what<<'\n';i
 constexpr std::uint64_t Host=76561198000000001ull,Guest=Host+1,Other=Host+2;
 Frame hostFrame(){Frame f{Op::Host};for(unsigned i=0;i<8;++i)f.bytes.push_back(static_cast<std::uint8_t>(Guest>>(8*i)));return f;}
 struct Mock:Api {
-    std::uint64_t id=Host;bool ice=true,auth=true,ok=true,accepted=true,sent=true,busy=false,loggedOn=true;unsigned identityChecks=0;
+    std::uint64_t id=Host;bool ice=true,auth=true,ok=true,accepted=true,sent=true,busy=false,loggedOn=true;bool drained=true;unsigned identityChecks=0;
     std::uint32_t listener=10,next=20;unsigned accepts=0,closes=0,listensClosed=0,sends=0;
+    struct Decision {std::uint32_t handle;std::uint64_t identity;std::string action,why;std::size_t allowed;int flags;};
+    std::vector<Decision> decisions;
+    void decision(std::uint32_t h,std::uint64_t who,const char* action,const char* why,std::size_t allowed,int flags)override {
+        decisions.push_back({h,who,action,why,allowed,flags});
+    }
     std::deque<Status> events;std::deque<Message> messages;std::vector<std::uint8_t> last,delivered;
     std::uint64_t readyIdentity()override{return auth?id:0;}
     std::uint64_t currentIdentity()override{++identityChecks;return loggedOn?id:0;}
@@ -34,7 +39,9 @@ struct Mock:Api {
     std::uint32_t connect(std::uint64_t)override{return next;}
     bool iceOff(std::uint32_t,bool)override{return ice;}
     bool accept(std::uint32_t)override{++accepts;return accepted;}
-    void close(std::uint32_t,bool,std::uint32_t=0)override{++closes;}
+    bool lastLinger=false;std::uint32_t lastReason=0;
+    bool reliableDrained(std::uint32_t)override{return drained;}
+    void close(std::uint32_t,bool linger,std::uint32_t reason=0)override{++closes;lastLinger=linger;lastReason=reason;}
     void closeListener(std::uint32_t)override{++listensClosed;}
     bool nextStatus(Status& s)override{if(events.empty())return false;s=events.front();events.pop_front();return true;}
     bool healthy()const override{return ok;}
@@ -90,6 +97,55 @@ struct QueuedLink:BrokerLink {
 };
 }
 int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reaches the log
+    check(nativeEndReason(5)==1005 && applicationEndReason(1005)==5 && hostLeftReason(applicationEndReason(1004)),"host-left native application reason roundtrips");
+    check(applicationEndReason(0)==0 && applicationEndReason(1000)==0 && applicationEndReason(5003)==0,"generic/transport closes remain recoverable transport loss");
+    {Mock m;Broker b(m);start(b);connect(m,b);m.sent=false;m.busy=true;m.drained=false;
+     b.command({Op::Send,Guest,0,0,true,{42}},103);b.command({Op::Close,Guest,5},104);
+     b.tick(105);check(m.closes==0,"terminal close preserves broker-congested reliable queue");
+     m.sent=true;b.tick(106);check(m.closes==0 && std::find(m.delivered.begin(),m.delivered.end(),42)!=m.delivered.end(),"terminal close drains broker sends but waits for Steam acknowledgement");
+     m.drained=true;b.tick(107);Frame receipt{};b.pop(receipt);
+     check(m.closes==1&&m.lastLinger&&m.lastReason==5&&receipt.op==Op::Disconnected&&receipt.reason==5,"delivered host leave closes with linger and terminal receipt");}
+    {Mock m;Broker b(m);start(b);connect(m,b);m.drained=false;b.command({Op::Close,Guest,4},103);
+     b.tick(103+TerminalDrainMs-1);check(m.closes==0,"terminal drain remains bounded without premature success");
+     b.tick(103+TerminalDrainMs);check(m.closes==1&&m.lastLinger&&m.lastReason==4&&m.decisions.back().why=="host-left-drain-timeout","drain timeout retains explicit host-left reason and logs delivery limit");}
+    {Mock m;m.id=Guest;Broker b(m);b.command({Op::Hello},100);Frame out{};b.pop(out);b.command({Op::Join,Host},101);
+     m.events.push_back({20,0,Host,3,true,true});b.tick(102);b.pop(out);
+     m.messages.push_back({20,Host,true,{0x4b,0x53,1,0,1,1,0,0,5}});b.tick(103);
+     check(b.pop(out)&&out.op==Op::Disconnected&&out.reason==5,"reliable host session-end message terminates friend even without a close callback");
+     m.messages.push_back({20,Host,true,{0x4b,0x53,1,0,1,1,0,0,5}});b.tick(104);
+     check(!b.pop(out),"duplicate session-end never emits a second disconnect");}
+    {Mock m;Broker b(m);start(b);connect(m,b);m.messages.push_back({20,Guest,true,{0x4b,0x53,1,0,1,1,0,0,5}});
+     check(!b.tick(103)&&b.failed(),"friend cannot impersonate a host session-end envelope");}
+    for(const std::uint32_t reason:{4u,5u})for(const bool timeout:{false,true}){
+        Mock m;Broker b(m);start(b);connect(m,b);m.sent=false;m.busy=true;
+        bool filled=true;for(std::size_t n=0;n<MaxQueue;++n)filled=b.command({Op::Send,Guest,0,0,true,{42}},103)&&filled;
+        check(filled&&b.canCommand(),"full MaxQueue retains IPC control command admission");
+        check(b.command({Op::Close,Guest,reason},104)&&!b.failed()&&m.closes==0,"full MaxQueue terminal close preserves reason without allocating a gameplay slot");
+        b.tick(105);check(m.closes==0,"full MaxQueue congested terminal close waits without generic stop");
+        if(timeout)b.tick(104+TerminalDrainMs);
+        else{m.sent=true;for(unsigned n=0;n<8;++n)b.tick(106+n);}
+        Frame receipt{};b.pop(receipt);
+        check(m.closes==1&&m.lastLinger&&m.lastReason==reason&&receipt.op==Op::Disconnected&&receipt.reason==reason&&!b.failed(),"full MaxQueue drain or timeout closes with terminal reason and linger");
+        if(timeout)check(std::any_of(m.decisions.begin(),m.decisions.end(),[](const auto& d){return d.action=="drain-abandoned"&&d.why.find("pendingMessages=128-pendingBytes=1161")!=std::string::npos;}),"full MaxQueue timeout reports undelivered message and byte counts");
+        else check(m.delivered.size()==MaxQueue+1&&m.delivered.back()==reason&&std::all_of(m.delivered.begin(),m.delivered.end()-1,[](auto value){return value==42;}),"full MaxQueue FIFO gameplay precedes the separate session-end envelope");
+    }
+    {Mock m;Broker b(m);start(b);connect(m,b);m.sent=false;m.busy=true;b.command({Op::Close,Guest,5},103);b.stop();
+     check(m.lastReason==5&&m.lastLinger,"attachment stop cannot downgrade an already requested terminal close");}
+    for(const bool withEnd:{false,true}){
+        Mock m;m.id=Guest;Broker b(m);b.command({Op::Hello},100);Frame out{};b.pop(out);b.command({Op::Join,Host},101);
+        m.events.push_back({20,0,Host,3,true,true});b.tick(102);b.pop(out);
+        for(std::uint8_t n=0;n<18;++n)m.messages.push_back({20,Host,true,{0x4b,0x53,1,0,1,0,0,0,n}});
+        if(withEnd)m.messages.push_back({20,Host,true,{0x4b,0x53,1,0,1,1,0,0,5}});
+        m.events.push_back({20,0,Host,4,true,true,5});b.tick(103);
+        check(m.closes==0&&m.messages.size()==(withEnd?3u:2u),"ClosedByPeer retains queued reliable receives across the per-tick budget");
+        std::vector<Frame> receipts;while(b.pop(out))receipts.push_back(out);
+        b.tick(104);while(b.pop(out))receipts.push_back(out);
+        bool ordered=receipts.size()==19;
+        for(std::size_t n=0;n<18&&ordered;++n)ordered=receipts[n].op==Op::Data&&receipts[n].bytes==std::vector<std::uint8_t>{static_cast<std::uint8_t>(n)};
+        ordered=ordered&&receipts.back().op==Op::Disconnected&&receipts.back().reason==5;
+        check(ordered&&m.closes==1&&m.messages.empty(),"all queued gameplay precedes exactly one terminal Disconnected with or without session-end");
+        b.tick(105);check(!b.pop(out),"later receiver tick cannot duplicate terminal disconnect");
+    }
     std::uint64_t id=0;check(parseId(std::to_string(Host),id)&&id==Host,"SteamID64 parsed exactly");
     for(const auto& s:{"480","0","+76561198000000001","76561198000000001x","76561198000000001 ","76561198000000000"}){
         if(std::string(s)=="76561198000000000")continue;check(!parseId(s,id),"invalid Steam ID refused");}
@@ -103,6 +159,28 @@ int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reach
     {Mock m;m.auth=false;Broker b(m);check(!b.command({Op::Hello},1),"no session/auth readiness refused");}
     {Mock m;m.ice=false;Broker b(m);b.command({Op::Hello},1);check(!b.command(hostFrame(),2)&&m.listensClosed==1,"listen ICE failure closes handle");}
     {Mock m;m.ice=false;Broker b(m);b.command({Op::Hello},1);check(!b.command({Op::Join,Guest},2)&&m.closes==1,"connect ICE failure closes handle");}
+    {Mock m;Broker b(m);start(b);m.events.push_back({20,10,Guest,1,true,false,0,2});
+        check(b.tick(101)&&m.accepts==1&&m.closes==0,"allowlisted authenticated Connecting with pending encryption is accepted");
+        const auto& d=m.decisions.back();
+        check(d.action=="accept"&&d.why=="allowlisted-authenticated-connecting"&&d.identity==Guest&&d.allowed==1&&d.flags==2,
+              "accept receipt names reason, exact peer, allowlist size and incoming flags");
+        Frame f;check(!b.pop(f),"accept does not manufacture Connected admission");
+        m.events.push_back({20,10,Guest,3,true,true,0,16});
+        check(b.tick(102)&&b.pop(f)&&f.op==Op::Connected,"encrypted authenticated relay Connected completes admission");}
+    {Mock m;Broker b(m);start(b);m.events.push_back({20,10,Other,1,true,false,0,2});b.tick(101);
+        const auto& d=m.decisions.back();
+        check(m.accepts==0&&m.closes==1&&d.action=="close"&&d.why=="incoming-not-allowlisted"&&d.identity==Other&&d.allowed==1&&d.flags==2,
+              "non-allowlisted Connecting closes with explicit authority receipt");}
+    for(const int flags:{1,3}){Mock m;Broker b(m);start(b);m.events.push_back({20,10,Guest,1,false,false,0,flags});b.tick(101);
+        check(m.accepts==0&&m.closes==1&&m.decisions.back().why=="incoming-unauthenticated",
+              "unauthenticated Connecting remains refused with reason");}
+    {Mock m;Broker b(m);start(b);m.events.push_back({20,10,Guest,1,true,false,0,2});b.tick(101);
+        m.events.push_back({20,10,Guest,3,true,true,0,18});Frame f;
+        check(!b.tick(102)&&m.closes==1&&b.pop(f)&&f.op==Op::Error,
+              "unencrypted Connected still fails the encrypted relay gate");
+        const auto close=std::find_if(m.decisions.begin(),m.decisions.end(),[](const auto& d){return d.action=="close";});
+        check(close!=m.decisions.end()&&close->why=="connection-not-authenticated-relay-only"&&close->identity==Guest&&close->allowed==1,
+              "failed Connected records its close reason before clearing allowlist");}
     {Mock m;Broker b(m);start(b);m.events.push_back({20,10,Other,1,true,false});b.tick(101);check(m.accepts==0&&m.closes==1,"unlisted identity refused before accept");}
     {Mock m;Broker b(m);start(b);m.events.push_back({20,10,Guest,1,false,false});b.tick(101);check(m.accepts==0&&m.closes==1,"unauthenticated identity refused");}
     {Mock m;Broker b(m);start(b);connect(m,b);m.events.push_back({21,10,Guest,1,true,false});b.tick(103);check(m.accepts==1&&m.closes==1,"duplicate identity refused");}
@@ -116,7 +194,7 @@ int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reach
     {Mock m;Broker b(m);start(b);m.ok=false;check(!b.tick(101),"callback loss refuses");}
     {Mock m;Broker b(m);start(b);connect(m,b);check(!b.command({Op::Send,Other,0,0,true,{1}},103),"unknown destination refused");}
     {Mock m;Broker b(m);start(b);connect(m,b);m.sent=false;check(b.command({Op::Send,Guest,0,0,true,{1}},103)&&!b.failed()&&m.closes==1,"closed send retires peer only");}
-    {Mock m;Broker b(m);b.command({Op::Hello},100);b.command({Op::Join,Guest},100);b.command({Op::Ping},15100);check(b.tick(15101)&&!b.failed()&&m.closes==1,"pending connection bounded 15 seconds without ending session");}
+    {Mock m;Broker b(m);b.command({Op::Hello},100);b.command({Op::Join,Guest},100);b.command({Op::Ping},30100);check(b.tick(30101)&&!b.failed()&&m.closes==1,"pending connection bounded 30 seconds without ending session");}
     {Mock m;Broker b(m);b.tick(100);check(!b.tick(5101),"IPC first hello has a five second deadline");}
     {Mock m;Broker b(m);start(b);connect(m,b);b.stop();check(m.closes==1&&m.listensClosed==1,"stop only owned connection/listener");}
     {Mock m;Broker b(m);start(b);connect(m,b);for(unsigned i=0;i<129;++i)m.messages.push_back({20,Guest,false,{0x4b,0x53,1,1,0,0,0,0,1}});
@@ -140,8 +218,17 @@ int main(){std::cout<<std::unitbuf; // crash diagnostics: every check line reach
     {Mock m;Broker b(m);b.command({Op::Hello},100);auto f=hostFrame();for(unsigned i=0;i<8;++i)f.bytes.push_back(static_cast<std::uint8_t>(Other>>(8*i)));
         b.command(f,100);Frame out;while(b.pop(out)){};connect(m,b);
         m.events.push_back({21,10,Other,1,true,false});b.tick(103);b.command({Op::Ping},15104);
-        check(b.tick(15104)&&!b.failed()&&m.closes==1,"one pending timeout preserves established friend");
-        check(b.command({Op::Send,Guest,0,0,true,{7}},15105)&&m.last.back()==7,"established friend remains writable after other timeout");}
+        check(b.tick(15104)&&!b.failed()&&m.closes==0,"pending Steam peer survives old 15-second limit");
+        b.command({Op::Ping},30103);
+        check(b.tick(30103)&&m.closes==0,"pending Steam peer survives through exactly 30 seconds");
+        b.command({Op::Ping},30104);
+        check(b.tick(30104)&&!b.failed()&&m.closes==1,"one pending timeout preserves established friend");
+        check(b.command({Op::Send,Guest,0,0,true,{7}},30105)&&m.last.back()==7,"established friend remains writable after other timeout");}
+    {Mock m;m.id=Guest;Broker b(m);b.command({Op::Hello},100);b.command({Op::Join,Host},100);
+        b.command({Op::Ping},20100);check(b.tick(20100)&&m.closes==0,"outgoing Steam join survives a 20-second FindingRoute");
+        m.events.push_back({20,0,Host,2,true,false});b.tick(20101);Frame f;while(b.pop(f)){}
+        m.events.push_back({20,0,Host,3,true,true});check(b.tick(20102)&&m.closes==0,"delayed outgoing Steam route reaches authenticated relay");
+        check(b.pop(f)&&f.op==Op::Connected&&f.peer==Host,"only actual delayed Connected callback admits route");}
     {Mock m;Broker b(m);start(b);connect(m,b);m.sent=false;m.busy=true;
         for(unsigned n=0;n<40;++n)b.command({Op::Send,Guest,0,0,true,{static_cast<std::uint8_t>(n)}},103);
         check(b.tick(104)&&!b.failed()&&m.closes==0,"SDK send LimitExceeded queues bounded ordered retry without peer loss");

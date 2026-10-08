@@ -1136,7 +1136,8 @@ int main(int argc, char* argv[]) {
         if (observeIdentity) observeIdentity("snapshot-delivered");
     };
 #endif
-    kh2coop::ClientRecovery recovery(options.config.ownedSlot);
+    kh2coop::ClientRecovery recovery(options.config.ownedSlot,
+        steamEnabled ? kh2coop::ClientRecovery::Backend::Steam : kh2coop::ClientRecovery::Backend::Enet);
     std::optional<kh2coop::SessionResumePin> resumePin;
     bool membershipInvalidated = false;
     kh2coop::DesyncCollectorOptions desyncOptions;

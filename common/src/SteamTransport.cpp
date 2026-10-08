@@ -4,6 +4,7 @@
 #include <chrono>
 #include <deque>
 #include <map>
+#include <set>
 #include <thread>
 
 namespace kh2coop {
@@ -12,21 +13,22 @@ std::uint64_t now(){return static_cast<std::uint64_t>(std::chrono::duration_cast
 struct Hub {
     std::unique_ptr<steam::BrokerLink> pipe;
     std::uint64_t identity=0,lastPing=0;
-    bool host=false,dead=false,listening=false,localConnected=false,configured=false;
+    bool host=false,dead=false,listening=false,localConnected=false,configured=false,flushing=false;
     std::vector<std::uint64_t> allowed;
     std::map<std::uint64_t,TransportStats> quality;
     std::deque<steam::Frame> server,client,commands;
+    std::set<std::uint64_t> terminalReceipts;
     void fail(){dead=true;pipe->close();}
     // VUH-1493 host leave: before a terminal close, push queued commands (e.g. SessionHost::stop()'s RelayStopping
     // Close per peer) through the pipe and let in-flight overlapped writes complete. Closing the pipe cancels them,
     // and the broker would then close the peers itself with reason 0, which the friend treats as TransportLost and
     // retries instead of ending the session. Bounded; the owner loop is already shutting down.
-    void flush(std::uint64_t budgetMs=500){
-        const auto end=now()+budgetMs;
-        while(!dead&&(!commands.empty()||pipe->queued())&&now()<end){if(!pump())return;std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+    void flush(std::uint64_t budgetMs=2500){
+        flushing=true;const auto end=now()+budgetMs;
+        while(!dead&&(!commands.empty()||pipe->queued()||!terminalReceipts.empty())&&now()<end){if(!pump())return;std::this_thread::sleep_for(std::chrono::milliseconds(1));}
     }
     bool push(std::deque<steam::Frame>& q,steam::Frame f){if(q.size()>=steam::MaxQueue){fail();return false;}q.push_back(std::move(f));return true;}
-    bool command(const steam::Frame& f){if(dead||commands.size()>=steam::MaxQueue){fail();return false;}commands.push_back(f);return true;}
+    bool command(const steam::Frame& f){if(dead||commands.size()>=steam::MaxQueue){fail();return false;}if(f.op==steam::Op::Close&&steam::hostLeftReason(f.reason))terminalReceipts.insert(f.peer);commands.push_back(f);return true;}
     bool pump(){
         if(dead)return false;
         if(now()-lastPing>=1000){lastPing=now();if(!command({steam::Op::Ping}))return false;}
@@ -37,7 +39,7 @@ struct Hub {
             if(!pipe->send(commands.front())){fail();return false;}commands.pop_front();
         }
         steam::Frame f;
-        for(unsigned i=0;i<64&&(host?server:client).size()<steam::MaxQueue-32&&pipe->receive(f);++i){
+        for(unsigned i=0;i<64&&(flushing||(host?server:client).size()<steam::MaxQueue-32)&&pipe->receive(f);++i){
             if(f.op==steam::Op::Error){fail();return false;}
             if(f.op==steam::Op::Ready){if(f.peer!=identity){fail();return false;}configured=true;continue;}
             if(f.op==steam::Op::Stats){
@@ -46,6 +48,8 @@ struct Hub {
                 if(read(4)>1000){fail();return false;}quality[f.peer]={read(0),0,read(4),3};continue;
             }
             if(f.op!=steam::Op::Connected&&f.op!=steam::Op::Disconnected&&f.op!=steam::Op::Data){fail();return false;}
+            if(f.op==steam::Op::Disconnected)terminalReceipts.erase(f.peer);
+            if(flushing)continue; // teardown consumes receipts without filling gameplay queues
             if(!push(host?server:client,std::move(f)))return false;
         }return true;
     }

@@ -13,6 +13,16 @@ namespace kh2coop::steam {
 constexpr std::uint32_t AppId = 2552430;
 constexpr std::size_t MaxPacket = 65536, MaxQueue = 128, MaxPeers = 2;
 constexpr std::uint16_t VirtualPort = 27795;
+// SDR route finding can outlast the ENet four-second connect budget. Keep the
+// native SDK, broker pending peer, and runtime Steam recovery budget aligned.
+constexpr std::uint32_t ConnectTimeoutMs = 30000;
+// Protocol DisconnectReason 4/5 are terminal host/session ends; zero remains transport loss.
+constexpr bool hostLeftReason(std::uint32_t reason) { return reason==4 || reason==5; }
+constexpr int nativeEndReason(std::uint32_t reason) { return 1000+static_cast<int>(reason); }
+constexpr std::uint32_t applicationEndReason(int reason) {
+    return reason>=1000 && reason<=1009 ? static_cast<std::uint32_t>(reason-1000) : 0;
+}
+constexpr std::uint64_t TerminalDrainMs = 2000;
 enum class Op : std::uint8_t { Hello=1, Host, Join, Send, Close, Stop, Ready, Connected, Disconnected, Data, Error, Ping, Stats };
 struct Frame {
     Op op{};
@@ -31,7 +41,9 @@ bool decode(std::span<const std::uint8_t>, std::uint64_t expectedSequence, Frame
 bool validId(std::uint64_t);
 bool parseId(const std::string&, std::uint64_t&);
 
-struct Status { std::uint32_t handle=0, listener=0; std::uint64_t identity=0; int state=0; bool authenticated=false, relay=false; std::uint32_t reason=0; };
+// authenticated is remote identity only (SDK bit 1 clear); flags preserves the
+// independent encryption-pending bit for Connecting and the strict Connected gate.
+struct Status { std::uint32_t handle=0, listener=0; std::uint64_t identity=0; int state=0; bool authenticated=false, relay=false; std::uint32_t reason=0; int flags=0; };
 struct Message { std::uint32_t handle=0; std::uint64_t identity=0; bool reliable=false; std::vector<std::uint8_t> bytes; };
 // Native adapter owns the game's existing Steam API only. Tests supply mocks.
 // listen/connect MUST pass ICE=0 in creation options. iceOff checks actual handle.
@@ -48,9 +60,17 @@ public:
     virtual void close(std::uint32_t, bool linger, std::uint32_t reason=0)=0;
     virtual void closeListener(std::uint32_t)=0;
     virtual bool nextStatus(Status&)=0;
+    // Worker-owned diagnostic sink; identity/flags come from SDK status, not runtime text.
+    virtual void decision(std::uint32_t handle,std::uint64_t identity,const char* action,
+                          const char* why,std::size_t allowlistSize,int flags) {
+        (void)handle;(void)identity;(void)action;(void)why;(void)allowlistSize;(void)flags;
+    }
     virtual bool healthy() const=0; // callback loss ends this attached session, never silent
     virtual bool receive(std::uint32_t, Message&)=0;
     virtual bool send(std::uint32_t, std::span<const std::uint8_t>, bool)=0;
+    // Only the broker worker calls this. Native returns true after Steam has
+    // acknowledged every reliable send; a failed query never claims delivery.
+    virtual bool reliableDrained(std::uint32_t) { return true; }
     virtual bool congested() const { return false; } // last send: explicit SDK LimitExceeded
     virtual bool quality(std::uint32_t, std::uint32_t& rttMs, std::uint32_t& lossPermille) { (void)rttMs;(void)lossPermille;return false; }
 };
@@ -67,8 +87,10 @@ public:
 private:
     struct Pending { std::vector<std::uint8_t> bytes; bool reliable; };
     struct Peer {
-        std::uint32_t handle; bool connected; std::uint64_t started; std::uint64_t lastStats=0;
+        std::uint32_t handle; bool connected; std::uint64_t started; std::uint64_t lastStats=0; int flags=0;
         std::deque<Pending> pending;
+        bool remoteClosed=false,terminalSent=false; std::uint32_t remoteReason=0; std::uint64_t remoteClosedAt=0;
+        bool terminalReceived=false; bool closing=false; std::uint32_t closeReason=0; std::uint64_t closeStarted=0;
         Peer(std::uint32_t h,bool c,std::uint64_t t):handle(h),connected(c),started(t){}
     };
     Api& api_;
@@ -79,7 +101,10 @@ private:
     std::map<std::uint64_t,Peer> peers_;
     std::deque<Frame> out_;
     bool emit(Frame);
-    bool retire(std::uint64_t identity, std::uint32_t reason=0);
+    bool retire(std::uint64_t identity, std::uint32_t reason=0,const char* why="peer-retired");
+    void closePeer(std::uint32_t handle,std::uint64_t identity,bool linger,
+                   std::uint32_t reason,const char* why,int flags=0);
+    void stopOwned(const char* why);
     bool identityCurrent(std::uint64_t nowMs);
     bool fail(const char*);
 };

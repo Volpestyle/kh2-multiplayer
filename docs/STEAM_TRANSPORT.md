@@ -82,12 +82,87 @@ The broker checks the effective int32 value on the actual listen/connection
 handles, including incoming connections before acceptance. Unsupported/nonzero
 settings refuse and close owned handles. Connected and data-path checks require
 an authenticated, encrypted, relayed connection. A missing callback never creates
-admission; pending connections time out after15seconds. Steam invokes the callback
-through the game's own pump. Its 64-entry ring copies status only, using an O(1) lock-protected section.
+admission; pending connections time out after 30 seconds. The broker explicitly pumps
+the sockets interface on its worker. Its 64-entry ring copies status only, using an O(1) lock-protected section.
 Overflow ends the attached session, closes its owned handles, then clears the
 lost history and serves a fresh runtime attachment. It does not require a game
 restart. Late events cannot adopt unknown handles. Enabled
 mode pins the DLL until process exit to keep queued callback code alive.
+
+### Incoming acceptance and close decisions
+
+The 2026-10-07 rev3 host received the exact allowlisted SteamID on its listener
+with Connecting flags=2. The adapter incorrectly treated Unencrypted (bit 2)
+as unauthenticated identity, closing before AcceptConnection. Authentication
+now reflects only Unauthenticated (bit 1); raw flags travel with the status.
+The incoming gate requires a valid allowlisted authenticated identity, available
+peer capacity, no duplicate and verified ICE=0. It permits encryption pending
+only at Connecting. Accept does not emit Connected or authorize traffic. The
+Connected gate still rejects either low flag bit or a non-relay route, and
+native send/receive continue checking encrypted/authenticated relayed state.
+
+Every broker close decision records action, named reason, SDK peer identity,
+allowlist size and last observed raw flags before closing or clearing authority.
+Host configuration and accepted Connecting decisions are recorded too. The
+wire close reason remains unchanged. The empty-allowlist probe still closes all
+remote peers with incoming-not-allowlisted; it has no bypass flag in the broker.
+Offline core and native-adapter tests cover flags=2 acceptance, explicit foreign
+peer refusal, absent early admission, and unencrypted Connected refusal.
+Valve defines the separate flag bits in
+[steamnetworkingtypes.h](https://github.com/ValveSoftware/GameNetworkingSockets/blob/master/include/steam/steamnetworkingtypes.h)
+and requires accept-or-close at Connecting in
+[ISteamNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets/blob/master/include/steam/isteamnetworkingsockets.h).
+
+### SDR connect budget and callback diagnostics
+
+Steam uses a 30-second route/connect budget in three places: per-handle SDK
+`TimeoutInitial` (config 24), the broker's pending-peer deadline, and the runtime's
+`ClientRecovery`. ENet keeps its four-second connect budget. The separate four-second
+roster deadline and 60-second bounded rejoin episode are unchanged.
+
+Relay warmup already runs at broker initialization, before READY. The initial
+identity gate requires authentication and relay/config/any-relay availability
+Current (100), within the existing 60-second startup limit. `relay-init` and
+`relay-status` receipts show that call and subsequent numeric status changes;
+sampling continues once per second while the broker serves attachments. No extra
+warmup is issued at READY, since initialization already happened before that gate.
+
+The connection callback is a per-listener/per-connection creation config (201),
+using the game's SteamNetworkingSockets interface, current Steam user and pipe.
+The broker calls the flat `SteamAPI_ISteamNetworkingSockets_RunCallbacks` export
+on its sole worker at a minimum interval of 16 ms while serving an attachment.
+It never calls global `SteamAPI_RunCallbacks` or manual dispatch. No ring lock is
+held across the SDK call: callbacks can execute synchronously, take the bounded
+SRW lock to enqueue, and are drained afterward by that same worker. Concurrent
+callback delivery from the game is safe under that ring lock. A foreign thread
+cannot call the broker pump; an ended/replaced Steam pipe stops it. The pipe
+check is not an SDK shutdown lifetime lock, so the existing shutdown race remains.
+The startup receipt records registration, current user/pipe and dispatch mode;
+the first actual pump records its worker thread. Every dequeued callback logs
+Connecting, FindingRoute, Connected, ClosedByPeer and ProblemDetectedLocally,
+with old state and raw SDK end reason. The receipt prefix remains unchanged.
+
+Valve's header says RunCallbacks invokes configured callback functions, and also
+says Steam's default dispatch may make that call unnecessary. Therefore the
+header alone does not prove KH2's missing callbacks were caused by absent pumping.
+The explicit pump removes reliance on an unverified game dispatch path. The
+flat-ABI fake test holds SDK events pending until this production pump runs;
+it checks delivery, cadence, foreign-thread refusal and closed-pipe refusal.
+
+`connection-poll` queries GetConnectionInfo once per second on owned connections
+and records state/flags/end-reason changes with the callback receipt count. It
+also records unavailable results. This is diagnostic only: a polled Connected
+state does not manufacture an event or bypass callback admission, identity,
+relay-only or ICE checks. It distinguishes SDK connection progression from an
+empty callback queue on the next two-PC attempt. Closed handles are removed.
+Probe03 is listener-only with an in-process Player endpoint; it never required
+a remote connection-status callback, so its PASS cannot qualify callback delivery.
+
+Valve documents relay warmup and callback dispatch in
+[ISteamNetworkingUtils](https://github.com/ValveSoftware/GameNetworkingSockets/blob/master/include/steam/isteamnetworkingutils.h)
+and [ISteamNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets/blob/master/include/steam/isteamnetworkingsockets.h).
+The 2026-10-07 join failure therefore established premature four-second closure
+and absent callback receipts; it did not establish SDR cold start as the sole cause.
 
 The host runtime owns `SessionHost` and a local Player transport. Its authenticated
 identity is reserved for Player; remote Hello identity must equal the SteamID
@@ -128,7 +203,7 @@ ordinary game exit does not promise to do so before the game's own Steam teardow
 A future live run must include graceful game exit with a session active and watch
 for hitches/crashes. Synchronous SDK calls and OS cancellation completion cannot
 be externally preempted by logical deadlines. No shared global Steam
-configuration, Init, Shutdown, RunCallbacks or network-facing IP socket is used.
+configuration, Init, Shutdown, global SteamAPI_RunCallbacks or network-facing IP socket is used.
 
 A terminal Steam IPC/transport failure requires a fresh runtime attachment;
 there is no automatic ENet fallback. Existing ENet recovery behavior is untouched.
@@ -199,13 +274,15 @@ the broker. Keep all prior FAILs.
    fallback.
 2. **N6: incoming authentication.** Retain the host's actual Connecting-state
    `callback handle=` record (`state=1`), SteamID, listener and raw flags before
-   acceptance. Check unauthenticated/unencrypted bits are clear (`flags & 3 == 0`)
-   and that acceptance belongs to that allowlisted account. If Steam reports a
+   acceptance. Require the unauthenticated bit clear (`flags & 1 == 0`) and
+   that acceptance belongs to the allowlisted account. Connecting may have bit 2
+   (encryption pending); Connected and data still require `flags & 3 == 0` plus
+   relay. If Steam reports a
    different state/flag sequence, preserve the refusal; do not relax admission.
 3. **N5: callback cadence.** Retain callback state transitions and timestamped
    observation intervals during connection and gameplay. Report observed delivery
    cadence/delays and any pending timeout; untimed line order or auth/SDR readiness
-   alone does not prove the game's callback-pump rate. Do not add RunCallbacks.
+   alone does not prove callback delivery cadence. Retain the explicit sockets-pump receipt.
 4. Check version refusal, verified roster/ownership, avatar exchange and the
    existing world-cache/admission behavior. Record each peer departure and the
    remaining session state; do not claim a three-peer result from two accounts.
@@ -233,3 +310,55 @@ First-party contracts: [Steam sockets](https://partner.steamgames.com/doc/api/IS
 and Valve's [networking type definitions](https://github.com/ValveSoftware/GameNetworkingSockets/blob/master/include/steam/steamnetworkingtypes.h).
 The narrow native flat ABI is pinned against the retained Valve headers and
 shipped exports in `build/rig/vuh1493-steam-p2p-20261006-01/valve-reference/`.
+
+
+### Terminal host leave (rev7)
+
+A graceful host stop queues RelayStopping (5), or HostSessionEnded (4), on the
+runtime-to-broker pipe. The host transport flushes queued/overlapped writes and
+waits up to 2.5 seconds for the broker Disconnected receipt before detaching.
+This includes main's d63c1b0 flush, absent from the previously pinned rev6 products.
+The broker queues a reliable private session-end envelope behind existing sends,
+waits for its bounded pending queue and Steam pendingReliable/unacked bytes to
+reach zero, then closes with native application reason 1005/1004, debug string
+`KH2 host left`, and linger enabled. Drain is bounded at 2 seconds; timeout is
+explicitly logged as `host-left-drain-timeout`, never claimed delivered. Native
+quality queries and connection closes run only on the existing broker worker;
+no game callback lock is held across SDK calls.
+
+The joiner accepts a session-end envelope only from its authenticated target
+connection, never from a friend on a host listener. It translates that message,
+or the native application close reason, into the existing terminal client
+recovery path (no rejoin). Reason 0, native generic 1000, and SDK transport
+problems such as 5003 remain TransportLost and use recovery. This separates G8
+host/session end from the G7 reusable broker attachment.
+
+Valve's CloseConnection contract says application reason/debug reach the peer,
+linger attempts to flush remaining reliable sends, and unread incoming data is
+discarded on close. Consequently the terminal native reason is required even
+when the reliable end message was sent: a status callback may overtake dequeue.
+Reference: https://github.com/ValveSoftware/GameNetworkingSockets/blob/master/include/steam/isteamnetworkingsockets.h
+
+
+Rev7 review corrections: terminal state and its single 9-byte end envelope are
+kept outside the MaxQueue gameplay FIFO. IPC command consumption remains enabled
+at a full send queue so Close/Ping are not starved by congestion; gameplay Send
+still has the existing hard MaxQueue bound. The end envelope is sent after FIFO
+gameplay drains. Timeout diagnostics report undelivered broker messages/bytes,
+and attachment cleanup preserves an already requested terminal reason and linger.
+
+An admitted peer's host-left terminal callback (reason 4/5) is retained while queued SDK messages drain
+(up to 16 per tick, respecting IPC output room), before closing its handle and
+emitting one Disconnected. A 2-second receive drain limit is explicitly logged;
+IPC saturation continues to backpressure delivery. The native adapter permits
+ClosedByPeer/ProblemDetectedLocally receive only on an owned handle whose earlier
+Connected callback established encrypted authenticated relay, and checks each
+retained message's handle and identity. It checks eligibility before dequeuing,
+so an ineligible terminal handle cannot consume and discard a queued message.
+Connection destruction/reset clears that trust. A session-end message and a
+terminal callback coalesces into one disconnect; all earlier reliable gameplay
+is emitted first. Admission and live Connected security gates are unchanged.
+
+Generic transport loss/local disconnect keeps its existing immediate retirement
+and stale-rejoin handling; delaying those would reject an incoming G7 rejoin as
+a duplicate while its old connection was retained.

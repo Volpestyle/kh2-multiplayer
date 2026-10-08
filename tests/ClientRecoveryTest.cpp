@@ -121,6 +121,33 @@ void testScheduler() {
     stable.shutdown(); stable.connected(12102); stable.admitted(12103, 5);
     check(stable.state() == State::Terminal && stable.tick(13000) == Action::None, "callbacks after explicit shutdown cannot rearm recovery");
 }
+void testSteamConnectBudget() {
+    Recovery delayed(SlotType::Friend1, Recovery::Backend::Steam);
+    check(delayed.start(100) == Action::Connect && delayed.tick(4100) == Action::None &&
+          delayed.tick(15100) == Action::None && delayed.tick(30099) == Action::None,
+          "Steam connect survives former four/fifteen-second limits through 29,999 ms");
+    delayed.connected(30099);
+    check(delayed.state() == State::AwaitingRoster && delayed.tick(34098) == Action::None &&
+          delayed.tick(34099) == Action::Disconnect && delayed.state() == State::Terminal,
+          "Steam route at 29,999 ms retains separate exact four-second roster budget");
+    Recovery timeout(SlotType::Friend1, Recovery::Backend::Steam); (void)timeout.start(100);
+    check(timeout.tick(30100) == Action::Disconnect && timeout.state() == State::Terminal &&
+          timeout.tick(60000) == Action::None && timeout.attempts() == 0,
+          "Steam initial timeout is exact 30 seconds and never auto-retries an unpinned client");
+    Recovery late(SlotType::Friend1, Recovery::Backend::Steam); (void)late.start(0); late.connected(30000);
+    check(late.state() == State::Terminal && late.tick(30000) == Action::Disconnect,
+          "Steam late callback cannot evade its 30-second deadline");
+    Recovery rejoin(SlotType::Friend1, Recovery::Backend::Steam); admit(rejoin);
+    rejoin.closed(100, closeInfo(DisconnectReason::TransportLost));
+    check(rejoin.tick(1100) == Action::Connect && rejoin.tick(5100) == Action::None &&
+          rejoin.tick(31099) == Action::None && rejoin.tick(31100) == Action::Disconnect,
+          "Steam pinned rejoin also keeps the bounded 30-second route budget");
+    Recovery episode(SlotType::Friend1, Recovery::Backend::Steam); admit(episode);
+    episode.closed(100, closeInfo(DisconnectReason::TransportLost));
+    (void)episode.tick(59000);
+    check(episode.tick(60100) == Action::Disconnect && episode.state() == State::Terminal,
+          "Steam longer connect budget cannot extend the existing 60-second rejoin episode");
+}
 std::uint64_t nowMs() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -521,6 +548,7 @@ void testCallbackQuarantineAndCloseLatch() {
 } // namespace
 int main() {
     testScheduler();
+    testSteamConnectBudget();
     if (enet_initialize() != 0) return 2;
     testExistingHostRecovery(); testRestartedRelayPin(); testProtocolFourRefused(); testCallbackQuarantineAndCloseLatch();
     enet_deinitialize();

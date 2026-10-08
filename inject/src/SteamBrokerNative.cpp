@@ -47,21 +47,32 @@ SRWLOCK g_lock=SRWLOCK_INIT;
 std::array<Change,64> g_changes{};
 std::size_t g_head=0,g_count=0;
 std::atomic<bool> g_overflow{false};
+std::atomic<std::uint64_t> g_callbacksReceived{0};
 int g_marker=0;
 void __cdecl Changed(Change* c) noexcept {
     if(!c)return;
+    g_callbacksReceived.fetch_add(1,std::memory_order_relaxed);
     AcquireSRWLockExclusive(&g_lock);
     if(g_count==g_changes.size())g_overflow.store(true,std::memory_order_release);
     else {g_changes[(g_head+g_count)%g_changes.size()]=*c;++g_count;}
     ReleaseSRWLockExclusive(&g_lock);
 }
 template<class T> bool load(HMODULE m,T& out,const char* key){auto p=GetProcAddress(m,key);static_assert(sizeof(p)==sizeof(out));std::memcpy(&out,&p,sizeof(out));return p!=nullptr;}
+const char* connectionStateName(int state) noexcept {
+    switch(state){
+        case 0:return "None";case 1:return "Connecting";case 2:return "FindingRoute";
+        case 3:return "Connected";case 4:return "ClosedByPeer";case 5:return "ProblemDetectedLocally";
+        case -1:return "FinWait";case -2:return "Linger";case -3:return "Dead";
+        default:return "Unknown";
+    }
+}
 class Native final:public steam::Api {
     int (__cdecl *userHandle_)()=nullptr; int (__cdecl *pipeHandle_)()=nullptr;
     void* (__cdecl *getUser_)()=nullptr; void* (__cdecl *getUtils_)()=nullptr;
     void* (__cdecl *getSockets_)()=nullptr; void* (__cdecl *getNetworkUtils_)()=nullptr;
     bool (__cdecl *loggedOn_)(void*)=nullptr; std::uint64_t (__cdecl *steamId_)(void*)=nullptr;
     std::uint32_t (__cdecl *appId_)(void*)=nullptr;
+    void (__cdecl *runCallbacks_)(void*)=nullptr;
     int (__cdecl *initAuth_)(void*)=nullptr; int (__cdecl *auth_)(void*,Auth*)=nullptr;
     void (__cdecl *initRelay_)(void*)=nullptr; int (__cdecl *relay_)(void*,Relay*)=nullptr;
     std::uint32_t (__cdecl *listen_)(void*,int,int,const Config*)=nullptr;
@@ -77,13 +88,28 @@ class Native final:public steam::Api {
     void (__cdecl *identitySet_)(Identity*,std::uint64_t)=nullptr;
     std::uint64_t (__cdecl *identityGet_)(const Identity*)=nullptr;
     void *user_=nullptr,*utils_=nullptr,*sockets_=nullptr,*nu_=nullptr;
+    std::size_t allowlistSize_=0;
     FILE* log_; bool healthy_=true,sendBusy_=false,steamEnded_=false;
     HMODULE module_=nullptr;int boundPipe_=0;
+    struct Observed {std::uint64_t peer=0;bool sampled=false,available=false;int state=0,flags=0,reason=0;bool trusted=false;};
+    std::map<std::uint32_t,Observed> observed_;
+    bool relaySampled_=false;Relay lastRelay_{};int lastRelayResult_=0;
+    std::uint64_t lastDiagnosticPoll_=0,lastCallbackPump_=0;
+    DWORD workerThread_=0;bool callbackPumpStarted_=false;
+    int sampleRelay(){
+        Relay r{};const auto result=relay_(nu_,&r);
+        if(!relaySampled_||result!=lastRelayResult_||r.availability!=lastRelay_.availability||
+           r.measuring!=lastRelay_.measuring||r.config!=lastRelay_.config||r.any!=lastRelay_.any){
+            std::fprintf(log_,"[steam-broker] relay-status availability=%d detail=%d measuring=%d config=%d any=%d\n",
+                         result,r.availability,r.measuring,r.config,r.any);
+        }
+        relaySampled_=true;lastRelay_=r;lastRelayResult_=result;return result;
+    }
     std::array<Config,4> options() const {
         std::array<Config,4> o{};o[0]={104,1,{0}}; // no ICE candidates, at creation
         o[1]={201,5,{0}};auto cb=&Changed;std::memcpy(&o[1].value.pointer,&cb,sizeof(cb));
         o[2]={9,1,{512*1024}}; // bounded Steam send queue
-        o[3]={24,1,{15000}};
+        o[3]={24,1,{steam::ConnectTimeoutMs}}; // SDK TimeoutInitial, per handle
         return o;
     }
 public:
@@ -95,6 +121,7 @@ public:
         GET(getUser_,"SteamAPI_SteamUser_v023");GET(getUtils_,"SteamAPI_SteamUtils_v010");
         GET(getSockets_,"SteamAPI_SteamNetworkingSockets_SteamAPI_v012");GET(getNetworkUtils_,"SteamAPI_SteamNetworkingUtils_SteamAPI_v004");
         GET(loggedOn_,"SteamAPI_ISteamUser_BLoggedOn");GET(steamId_,"SteamAPI_ISteamUser_GetSteamID");GET(appId_,"SteamAPI_ISteamUtils_GetAppID");
+        GET(runCallbacks_,"SteamAPI_ISteamNetworkingSockets_RunCallbacks");
         GET(initAuth_,"SteamAPI_ISteamNetworkingSockets_InitAuthentication");GET(auth_,"SteamAPI_ISteamNetworkingSockets_GetAuthenticationStatus");
         GET(initRelay_,"SteamAPI_ISteamNetworkingUtils_InitRelayNetworkAccess");GET(relay_,"SteamAPI_ISteamNetworkingUtils_GetRelayNetworkStatus");
         GET(listen_,"SteamAPI_ISteamNetworkingSockets_CreateListenSocketP2P");GET(connect_,"SteamAPI_ISteamNetworkingSockets_ConnectP2P");
@@ -105,11 +132,14 @@ public:
         GET(quality_,"SteamAPI_ISteamNetworkingSockets_GetConnectionRealTimeStatus");
         GET(identitySet_,"SteamAPI_SteamNetworkingIdentity_SetSteamID64");GET(identityGet_,"SteamAPI_SteamNetworkingIdentity_GetSteamID64");
 #undef GET
-        module_=m;boundPipe_=pipeHandle_();
+        module_=m;boundPipe_=pipeHandle_();workerThread_=GetCurrentThreadId();
         if(!userHandle_()||!boundPipe_)return false;
         user_=getUser_();utils_=getUtils_();sockets_=getSockets_();nu_=getNetworkUtils_();
         if(!user_||!utils_||!sockets_||!nu_||appId_(utils_)!=steam::AppId||!loggedOn_(user_)||!steam::validId(steamId_(user_)))return false;
-        initAuth_(sockets_);initRelay_(nu_);return true;
+        initAuth_(sockets_);initRelay_(nu_);
+        std::fprintf(log_,"[steam-broker] relay-init phase=existing-session user=%d pipe=%d\n",userHandle_(),boundPipe_);
+        std::fprintf(log_,"[steam-broker] callback-delivery registration=socket-config-201 dispatch=broker-ISteamNetworkingSockets-RunCallbacks intervalMs=16 manualDispatch=0 socketsRunCallbacks=1 user=%d pipe=%d\n",userHandle_(),boundPipe_);
+        sampleRelay();return true;
     }
     bool pipeAlive(){
         // Cheap SteamAPI-local handle check before each worker tick/API group.
@@ -124,39 +154,85 @@ public:
     }
     std::uint64_t readyIdentity() override {
         const auto id=currentIdentity();if(!id)return 0;
-        Auth a{};Relay r{};if(!pipeAlive()||auth_(sockets_,&a)!=100||relay_(nu_,&r)!=100||r.config!=100||r.any!=100)return 0;
+        Auth a{};if(!pipeAlive()||auth_(sockets_,&a)!=100||sampleRelay()!=100||lastRelay_.config!=100||lastRelay_.any!=100)return 0;
         return id;
+    }
+    // Only the broker worker invokes this SDK pump. It holds no callback-ring
+    // lock across RunCallbacks: Changed can run synchronously and copies under
+    // g_lock; nextStatus drains afterward. Game-origin dispatch can also enqueue
+    // safely, but the broker never invokes SteamAPI_RunCallbacks/manual dispatch.
+    void pumpCallbacks(std::uint64_t now){
+        if(GetCurrentThreadId()!=workerThread_||!pipeAlive()||!sockets_)return;
+        if(callbackPumpStarted_&&(now<lastCallbackPump_||now-lastCallbackPump_<16))return;
+        lastCallbackPump_=now;
+        if(!callbackPumpStarted_){
+            callbackPumpStarted_=true;
+            std::fprintf(log_,"[steam-broker] callback-pump started thread=%lu pipe=%d intervalMs=16\n",workerThread_,boundPipe_);
+        }
+        runCallbacks_(sockets_);
+    }
+    // Read-only diagnostics, never synthesize admission/Connected events from a
+    // poll. A state change without Changed delivery must remain visible and must
+    // not silently replace the authenticated callback path.
+    void pollDiagnostics(std::uint64_t now){
+        if(!pipeAlive()||!nu_||!sockets_||now<lastDiagnosticPoll_||now-lastDiagnosticPoll_<1000)return;
+        lastDiagnosticPoll_=now;sampleRelay();
+        for(auto& [handle,previous]:observed_){
+            if(!pipeAlive())return;
+            Info current{};const bool available=info_(sockets_,handle,&current);
+            if(!previous.sampled||available!=previous.available||
+               (available&&(current.state!=previous.state||current.flags!=previous.flags||current.reason!=previous.reason))){
+                std::fprintf(log_,"[steam-broker] connection-poll handle=%u peer=%llu available=%u state=%d stateName=%s oldState=%d flags=%d endReason=%d callbacksReceived=%llu\n",
+                    handle,previous.peer,unsigned(available),current.state,connectionStateName(current.state),
+                    previous.state,current.flags,current.reason,g_callbacksReceived.load(std::memory_order_relaxed));
+            }
+            previous.sampled=true;previous.available=available;previous.state=current.state;
+            previous.flags=current.flags;previous.reason=current.reason;
+        }
     }
     void resetSession(){
         // Called only after broker.stop closed its handles and the pipe closed.
         AcquireSRWLockExclusive(&g_lock);g_head=g_count=0;g_overflow.store(false,std::memory_order_release);ReleaseSRWLockExclusive(&g_lock);
-        healthy_=true;sendBusy_=false;
+        healthy_=true;sendBusy_=false;observed_.clear();allowlistSize_=0;
     }
     std::uint32_t listen() override {if(!pipeAlive())return 0;auto o=options();const auto h=listen_(sockets_,steam::VirtualPort,static_cast<int>(o.size()),o.data());std::fprintf(log_,"[steam-broker] listen handle=%u iceCreation=0\n",h);return h;}
-    std::uint32_t connect(std::uint64_t id) override {if(!pipeAlive())return 0;Identity identity{};identitySet_(&identity,id);auto o=options();const auto h=connect_(sockets_,&identity,steam::VirtualPort,static_cast<int>(o.size()),o.data());std::fprintf(log_,"[steam-broker] connect peer=%llu handle=%u iceCreation=0\n",id,h);return h;}
+    std::uint32_t connect(std::uint64_t id) override {if(!pipeAlive())return 0;Identity identity{};identitySet_(&identity,id);auto o=options();const auto h=connect_(sockets_,&identity,steam::VirtualPort,static_cast<int>(o.size()),o.data());std::fprintf(log_,"[steam-broker] connect peer=%llu handle=%u iceCreation=0\n",id,h);if(h){try{observed_.insert_or_assign(h,Observed{id});}catch(...){decision(h,id,"close","native-observation-allocation-failed",allowlistSize_,0);close(h,false);throw;}}return h;}
     bool iceOff(std::uint32_t h,bool listener) override {if(!pipeAlive())return false;int type=0,value=-1;std::size_t n=sizeof(value);const auto r=getConfig_(nu_,104,listener?3:4,h,&type,&value,&n);const bool ok=(r==1||r==2)&&type==1&&n==4&&value==0;
         std::fprintf(log_,"[steam-broker] ice handle=%u listener=%u get=%d type=%d size=%zu value=%d verified=%u\n",h,unsigned(listener),r,type,n,value,unsigned(ok));return ok;}
-    bool accept(std::uint32_t h) override {if(!pipeAlive())return false;const auto r=accept_(sockets_,h);std::fprintf(log_,"[steam-broker] accept handle=%u result=%d\n",h,r);return r==1;}
-    void close(std::uint32_t h,bool linger,std::uint32_t reason=0) override {if(!pipeAlive())return;const auto ok=close_(sockets_,h,1000+static_cast<int>(reason),"KH2 broker closed",linger);std::fprintf(log_,"[steam-broker] close handle=%u linger=%u reason=%u ok=%u\n",h,unsigned(linger),reason,unsigned(ok));}
+    bool accept(std::uint32_t h) override {if(!pipeAlive())return false;const auto r=accept_(sockets_,h);std::fprintf(log_,"[steam-broker] accept handle=%u result=%d\n",h,r);if(r==1){Info i{};if(info_(sockets_,h,&i))observed_.insert_or_assign(h,Observed{identityGet_(&i.identity)});}return r==1;}
+    void close(std::uint32_t h,bool linger,std::uint32_t reason=0) override {observed_.erase(h);if(!pipeAlive())return;const auto ok=close_(sockets_,h,steam::nativeEndReason(reason),steam::hostLeftReason(reason)?"KH2 host left":"KH2 broker closed",linger);std::fprintf(log_,"[steam-broker] close handle=%u linger=%u reason=%u nativeEndReason=%d hostLeft=%u ok=%u\n",h,unsigned(linger),reason,steam::nativeEndReason(reason),unsigned(steam::hostLeftReason(reason)),unsigned(ok));}
     void closeListener(std::uint32_t h) override {if(!pipeAlive())return;std::fprintf(log_,"[steam-broker] close-listener handle=%u ok=%u\n",h,unsigned(closeListener_(sockets_,h)));}
     bool nextStatus(steam::Status& s) override {
         Change c{};AcquireSRWLockExclusive(&g_lock);if(!g_count){ReleaseSRWLockExclusive(&g_lock);return false;}
         c=g_changes[g_head];g_head=(g_head+1)%g_changes.size();--g_count;ReleaseSRWLockExclusive(&g_lock);
         if(!pipeAlive())return false;
         const auto id=identityGet_(&c.info.identity);
-        s={c.handle,c.info.listener,id,c.info.state,(c.info.flags&3)==0,(c.info.flags&16)!=0,
-           c.info.reason>=1000&&c.info.reason<=1009?static_cast<std::uint32_t>(c.info.reason-1000):0};
-        std::fprintf(log_,"[steam-broker] callback handle=%u peer=%llu state=%d flags=%d listener=%u\n",c.handle,id,c.info.state,c.info.flags,c.info.listener);return true;
+        const auto owned=observed_.find(c.handle);
+        if(owned!=observed_.end()&&owned->second.peer==id&&c.info.state==3)
+            owned->second.trusted=(c.info.flags&3)==0&&(c.info.flags&16)!=0;
+        s={c.handle,c.info.listener,id,c.info.state,(c.info.flags&1)==0,(c.info.flags&16)!=0,
+           steam::applicationEndReason(c.info.reason),c.info.flags};
+        std::fprintf(log_,"[steam-broker] callback handle=%u peer=%llu state=%d flags=%d listener=%u stateName=%s oldState=%d endReason=%d\n",c.handle,id,c.info.state,c.info.flags,c.info.listener,connectionStateName(c.info.state),c.oldState,c.info.reason);return true;
+    }
+    void decision(std::uint32_t handle,std::uint64_t identity,const char* action,
+                  const char* why,std::size_t allowlistSize,int flags)override {
+        allowlistSize_=allowlistSize;
+        std::fprintf(log_,"[steam-broker] decision action=%s reason=%s handle=%u peer=%llu allowlistSize=%zu flags=%d\n",
+                     action,why,handle,identity,allowlistSize,flags);
     }
     bool healthy()const override{return healthy_&&!g_overflow.load(std::memory_order_acquire);}
     bool receive(std::uint32_t h,steam::Message& out) override {
         if(!pipeAlive())return false;
+        Info current{};if(!info_(sockets_,h,&current))return false;
+        const auto owned=observed_.find(h);
+        const bool draining=(current.state==4||current.state==5)&&owned!=observed_.end()&&owned->second.trusted;
+        if(!draining&&current.state!=3)return false;
+        if(!draining&&((current.flags&3)||(current.flags&16)==0)){healthy_=false;return false;}
         Message* m=nullptr;const auto n=receive_(sockets_,h,&m,1);if(n<=0)return false; // closed peer is retired by its status, not global failure
         if(!m){healthy_=false;return false;}
         struct Release{Message* p;~Release(){if(p->release)p->release(p);}} release{m};
         if(!m->release||!m->data||m->size<0||static_cast<std::size_t>(m->size)>steam::MaxPacket){healthy_=false;return false;}
-        Info current{};if(!pipeAlive()||!info_(sockets_,h,&current)||current.state!=3)return false;
-        if((current.flags&3)||(current.flags&16)==0){healthy_=false;return false;}
+        if(draining&&(m->handle!=h||identityGet_(&m->identity)!=owned->second.peer)){healthy_=false;return false;}
         out={m->handle,identityGet_(&m->identity),(m->flags&8)!=0,{}};const auto* b=static_cast<const std::uint8_t*>(m->data);out.bytes.assign(b,b+m->size);return true;
     }
     bool send(std::uint32_t h,std::span<const std::uint8_t>b,bool reliable)override {
@@ -165,6 +241,11 @@ public:
         const auto result=send_(sockets_,h,b.data(),static_cast<std::uint32_t>(b.size()),reliable?9:1,nullptr);
         sendBusy_=result==25;return result==1;
 
+    }
+    bool reliableDrained(std::uint32_t h)override {
+        if(!pipeAlive())return false;Quality q{};
+        return quality_(sockets_,h,&q,0,nullptr)==1 && q.state==3 &&
+               q.pendingReliable==0 && q.unacked==0;
     }
     bool congested()const override{return sendBusy_;}
     bool quality(std::uint32_t h,std::uint32_t& rtt,std::uint32_t& loss)override{
@@ -184,6 +265,8 @@ void run(FILE* log,HANDLE stop){
         steam::Pipe pipe;if(!pipe.serve()){std::fprintf(log,"[steam-broker] refused pipe-create\n");return;}
         steam::Broker broker(api);bool attached=false;
         while(!stopped(stop,1)&&api.pipeAlive()&&pipe.pump()){
+            api.pumpCallbacks(GetTickCount64());
+            api.pollDiagnostics(GetTickCount64());
             if(!pipe.connected())continue;
             if(!attached){attached=true;std::fprintf(log,"[steam-broker] runtime-attached\n");}
             steam::Frame f;for(unsigned n=0;n<32&&api.pipeAlive()&&broker.canCommand(pipe.queued())&&pipe.receive(f);++n){if(!broker.command(f,GetTickCount64()))break;}

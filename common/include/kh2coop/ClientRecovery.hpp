@@ -1,5 +1,6 @@
 #pragma once
 #include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/SteamBroker.hpp"
 
 #include <array>
 #include <cstdint>
@@ -15,13 +16,15 @@ class ClientRecovery {
 public:
     enum class State { Idle, Connecting, AwaitingRoster, Admitted, RetryWait, Terminal };
     enum class Action { None, Connect, Disconnect };
+    enum class Backend { Enet, Steam };
     static constexpr std::uint64_t kTransportMs = 4000;
     static constexpr std::uint64_t kRosterMs = 4000;
     static constexpr std::uint64_t kEpisodeMs = 60000;
     static constexpr std::uint64_t kMembershipStableMs = 10000;
     static constexpr std::array<std::uint64_t, 5> kRetryDelays {1000, 2000, 4000, 8000, 8000};
 
-    explicit ClientRecovery(SlotType localSlot) : localSlot_(localSlot) {}
+    explicit ClientRecovery(SlotType localSlot, Backend backend = Backend::Enet)
+        : localSlot_(localSlot), transportMs_(backend == Backend::Steam ? steam::ConnectTimeoutMs : kTransportMs) {}
 
     // One explicit initial attempt. Calling start twice never retries/restarts.
     [[nodiscard]] Action start(std::uint64_t now) {
@@ -34,7 +37,7 @@ public:
     void connected(std::uint64_t now) {
         advance(now);
         if (state_ != State::Connecting) return;
-        if (elapsed(enteredAt_) >= kTransportMs) { failed("initial transport deadline exceeded", true); return; }
+        if (elapsed(enteredAt_) >= transportMs_) { failed("initial transport deadline exceeded", true); return; }
         state_ = State::AwaitingRoster;
         enteredAt_ = now_;
     }
@@ -99,7 +102,7 @@ public:
             terminate("rejoin episode exceeded 60 seconds", false);
             return active ? Action::Disconnect : Action::None;
         }
-        if (state_ == State::Connecting && elapsed(enteredAt_) >= kTransportMs) {
+        if (state_ == State::Connecting && elapsed(enteredAt_) >= transportMs_) {
             failed("initial transport deadline exceeded", false);
             return Action::Disconnect;
         }
@@ -154,6 +157,7 @@ private:
         disconnectPending_ = disconnect;
     }
     SlotType localSlot_;
+    const std::uint64_t transportMs_;
     State state_ {State::Idle};
     std::uint64_t now_ {0}, enteredAt_ {0}, episodeAt_ {0}, selfId_ {0};
     bool everAdmitted_ {false}, episode_ {false}, disconnectPending_ {false};
