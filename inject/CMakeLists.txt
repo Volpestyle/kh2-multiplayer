@@ -53,6 +53,7 @@ add_library(kh2coop_inject SHARED
     src/Warp.cpp
     src/PlayerKit.cpp
     src/PartyNative.cpp
+    src/PuppetCommandGuard.cpp
     src/SaveGuard.cpp
     src/CrashDump.cpp
     src/EnemySync.cpp

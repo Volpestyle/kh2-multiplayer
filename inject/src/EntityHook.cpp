@@ -51,6 +51,7 @@
 #include "kh2coop/AvatarCapture.hpp"
 #include "PlayerKit.hpp"
 #include "PartyNative.hpp"
+#include "PuppetCommandGuard.hpp"
 #include "kh2coop/PlayerKits.hpp"
 #include "kh2coop/HitChannel.hpp"
 
@@ -440,13 +441,7 @@ static constexpr uintptr_t ACTOR_TEAM = 0x4DC;
 // shared by every actor of that model: never touch that one.
 static constexpr uintptr_t ACTOR_COLLISION_FLAGS = 0x18C;
 static constexpr uint8_t ACTOR_NO_COLLIDE = 0x40;
-// Sora's drive gauge (real slot base, Steam Global). Holding it at 0 blocks
-// Drive forms and Summons, which consume or animate party members.
-static constexpr uint64_t SORA_DRIVE_BARS = 0x2A23749;     // u8
-static constexpr uint64_t SORA_DRIVE_PARTIAL = 0x2A23748;  // u8
-static bool g_driveHeld = false;
-static uint8_t g_savedDriveBars = 0;
-static uint8_t g_savedDrivePartial = 0;
+// Puppet Drive/Summon restriction uses read-only native command admission.
 static bool g_anyPuppetActive = false;
 
 // Limits grey out while puppets are active: a limit's cutscene would grab
@@ -1474,7 +1469,7 @@ static void RestorePuppetTeam(PuppetDriver& d, int index) {
 }
 
 // Frame start: take new poses, release slots that stopped being puppets,
-// and hold the drive gauge while any puppet is active.
+// and gate native Drive/Summon admission while any puppet is active.
 // Forgets a driver's cached actor without writing to it (the actor may be
 // mid-teardown or already freed).
 static void ForgetPuppetActor(PuppetDriver& d) {
@@ -1561,24 +1556,7 @@ static void PollPuppetPoses() {
     }
     g_anyPuppetActive = anyActive;
 
-    auto* bars = reinterpret_cast<uint8_t*>(g_exeBase + SORA_DRIVE_BARS);
-    auto* partial = reinterpret_cast<uint8_t*>(g_exeBase + SORA_DRIVE_PARTIAL);
-    if (anyActive) {
-        if (!g_driveHeld) {
-            g_savedDriveBars = *bars;
-            g_savedDrivePartial = *partial;
-            g_driveHeld = true;
-            Log("Puppets active: holding drive gauge at 0 (was %u bars, %u partial)",
-                g_savedDriveBars, g_savedDrivePartial);
-        }
-        *bars = 0;
-        *partial = 0;
-    } else if (g_driveHeld) {
-        *bars = g_savedDriveBars;
-        *partial = g_savedDrivePartial;
-        g_driveHeld = false;
-        Log("No puppets: drive gauge restored");
-    }
+
 }
 static bool     g_mailboxAvailable     = false;
 // Wall-clock timers: the DLL frame counter only advances during entity
@@ -3233,12 +3211,18 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 // ============================================================================
 
 static void UninitializeMinHookUnlessRetained() {
+    if (puppetcommand::RetainsMinHookResources()) {
+        Log("[puppet-command] callback originals retained until process exit");
+        return;
+    }
     if (resourcetrace::RetainsMinHookResources() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) {
         Log("[native-trace] global MinHook teardown retained until process exit");
         return;
     }
     MH_Uninitialize();
 }
+
+static bool PuppetCommandsRestricted() { return g_anyPuppetActive; }
 
 bool Initialize(uintptr_t exeBase) {
     if (resourcetrace::RejectReinitialization() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) return false;
@@ -3280,6 +3264,7 @@ bool Initialize(uintptr_t exeBase) {
 
     // Before anything that can fail: an injected instance never writes saves.
     if (!saveguard::Install(&Log)) return false;
+    if (!puppetcommand::Install(exeBase, &PuppetCommandsRestricted, &Log)) return false;
     eventholdnative::Install(exeBase, &Log);
     crashdump::Install(&Log);
 
@@ -3661,6 +3646,7 @@ void Shutdown() {
     warp::Shutdown();
     enemysync::Shutdown();
     MH_DisableHook(MH_ALL_HOOKS);
+    puppetcommand::Shutdown();
     UninitializeMinHookUnlessRetained();
 
     g_initialized = false;

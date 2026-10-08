@@ -287,3 +287,8 @@ Save hashes remain a backstop, not permission to save. PC1 run `20261007-172006`
 loaded an existing save, passed both ordering checks and preserved every save
 hash; see the [live result](../build/rig/vuh-saveguard-preinject-20261007-01/live-pc1/output/result.json).
 This evidence does not include OS-wide transient-write tracing.
+
+
+## Puppet Drive holds can persist into SAVE
+
+Main PollPuppetPoses used to zero canonical Sora Drive status2A23748/49 whenever any puppet was active, independently of party mode. Native commit3C2120 copies these fields into serialized SAVE3528/29. Caching and later restoring them does not make the mid-session mutation safe. Replace the hold with read-only native command admission before Drive/Summon effects, including the separate Summon callback, and keep both SAVE fields strict. Owned-memory controls execute the original native copyback and reproduce exactly the two-byte legacy corruption. See build/rig/puppet-command-savefix-20261007-01/rev1/design.md.
