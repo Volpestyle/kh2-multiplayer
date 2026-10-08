@@ -26,6 +26,12 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 
 ## Gotchas (each cost real attempts)
 
+- **Desktop-job UTF-8 BOM:** read `.ps1` source explicitly as UTF-8 (`utf-8-sig` accepts one BOM), never with the locale default. Emit at most one real BOM (`EF BB BF`); reject duplicate BOMs and the mojibake prefix `C3 AF C2 BB C2 BF` before sealing. Windows PowerShell5 may parse that mojibake as code instead of treating it as a signature. Check raw bytes as well as parser syntax. Preserve a sealed/live packet; repair only the writer or a new revision.
+
+- **Python text output on the rig:** the bridge console is cp1252. A `write_text`, `open` or `print` without `encoding='utf-8'` crashes the runner on characters like U+FFFD (empty-seat fixture-05, b8-06). Profiles must write UTF-8 or copy bytes. The lead also wraps bridge jobs with `$env:PYTHONUTF8="1"`.
+- **Bridge job output:** the bridge's `.out` keeps only the job's thrown error, so a native child's stderr is lost ("Fixture failed/refused: 1" with no reason). Have wrappers tee stdout and stderr to a file in the packet.
+- **Launcher paths:** a revised packet's `desktop-*.ps1` must point `--packet` and the profile at its own directory. Chosen-AI rev4 was ADOPTed while its launchers still ran rev3. Reviewers check this.
+- **Two-PC GO:** copy the lead's ADOPT `lead-review.json` to PC2's packet, and verify it there, before sending GO. The PC2 worker correctly refuses a PENDING receipt (JOIN07).
 - **Window/desktop recorders:** ffmpeg `gdigrab` records **black** frames from the D3D12 game. Use `kh2ctl clip`. On a package-launched game, the rig recorder can be declared as a rehearsal aid: bind `--pid N` to the launcher's retained owned process and creation time. It writes the mod's capture channel, not gameplay or save memory; it adds no proof of desktop-only gameplay control. Never use auto-selection or capture an unowned game.
 - **Synthetic keys:** KH2 reads scan codes. A VK-only `SendInput` (scan 0) does nothing. Set `wScan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)`, add `KEYEVENTF_EXTENDEDKEY` for arrows, and bring the game to the foreground. `kh2ctl` does this already (`main.cpp` `SendVk`).
 - **Combat by stand-in:** one key per process invocation, with deliberation between keys, is too slow, and Sora dies. Live combat should come from scenarios, not hand-driven rehearsal.
