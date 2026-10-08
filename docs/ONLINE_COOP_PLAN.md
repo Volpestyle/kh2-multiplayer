@@ -1,6 +1,7 @@
 # Online Co-op Plan
 
-> **Status:** proposed plan of record, 2026-10-01. Supersedes the Track A
+> **Status:** plan of record established 2026-10-01; current-state refresh
+> 2026-10-08 against main `23e9c52`. Supersedes the Track A
 > milestones M4–M8 in `IMPLEMENTATION_BACKLOG.md` and the authority and actor
 > model sections of `kh2_three_client_coop_design.md`. Work is tracked in the
 > Linear project **KH2 Multiplayer** (vuhlp workspace); this doc holds the
@@ -14,20 +15,77 @@ with their own camera and full controls. Then widen who you can play as: three
 recolored Soras first, then Roxas and Riku, party and world characters, and
 possibly enemies.
 
-## Where the project stands (updated 2026-10-06)
+## Where the project stands (updated 2026-10-08)
+
+This snapshot describes main `23e9c52` and the bounded live evidence below.
+Pending chosen-AI, record-authority and batch-8 candidates are not included.
+The original decisions and phase gates remain unchanged; these passes do not
+establish a full playthrough or the two-hour friend-session gate.
 
 | Area | State |
 |---|---|
-| Pointer map | Party transforms/HP, full locations, camera, entity list, objentry IDs, enemy stats and the damage/death path are mapped. Spawn control and enemy AI suppression remain open. |
-| In-process hooks | MinHook DLL hooks the per-entity update, friend AI, pre-physics and the motion setter, and reads raw input. |
-| Friend control | Donald moves and animates under player control (F5). He cannot attack, jump, guard or cast. |
-| Animation control | Any motion can be set and held on a friend actor without the game resetting it (Session 5). |
-| Network layer | ENet relay server, codec, version gate; the 3-client fake-simulation test passes. |
-| Live networking | Three live instances on loopback exchange avatars and shared enemy HP/deaths. Private Tailscale transport passed with one real game and a Mac synthetic avatar for two minutes, then two real local games through a Mac relay, normally and with delay/loss. Two separate Windows installations and controller playtests remain open. |
-| Hit claims | A client's hits on enemies are sent as claims; the host applies each once through the game's own damage routine and broadcasts absolute HP (protocol 10). Ordinary Shadow combat, including client kills, works on loopback. Attack-specific effects and boss finishers are open. |
-| Rooms | Host-follow, late join and same-room reload passed 20 loads across five rooms with three instances, matching full locations, ACKs and native puppet targets. Native client exit denial and host walking exits also passed. After checked native snapshots exposed five unmatched client enemies, scoped host activation passed the original strict 20-load route with empty enemy populations and a source-expiry control. Its unchanged native-wave regression then failed with different enemy identities and an alive host refill. Nonempty spawn/lifecycle authority remains open. Evidence is in `SCENARIOS.md` and `ENEMY_PARITY.md`. |
-| Shared progress | Masked native SAVE snapshots/deltas apply before client room initialization and hash actual bytes. Native chest opening passed client mirroring, late join and reload with personal bytes preserved. A naturally acquired visited-room bit also passed late join and reload through the impaired Mac relay (`021630`), with all shared ranges matching before client room initialization. A naturally acquired story flag plus program/visited bytes passed late join and reload (`040303`). Connected story delivery and one empty-room native client hold also passed (`094229`); broader event side effects remain open. |
-| Dev loop | The desktop-session rig launches, injects, loads the fixture, drives inputs, captures each instance and checks save hashes without James. One live lane owns it; other lanes stay offline. |
+| Pointer map and hooks | Party/status, camera, entity, damage/death and native spawn/removal boundaries are mapped. Scoped activation and enemy AI suppression work for qualified populations; general native wave/lifecycle authority remains open. |
+| Player avatars and parties | Native player-kit puppets with private status and clone-only routing are on main. Two-player mixed-party support and opt-in two-player/zero-AI empty seats have bounded live qualifications. Legacy F5 Donald control remains a development tool. Chosen Donald/Goofy and solo companion variants are pending. |
+| Network layer | ENet relay remains available. Steam relay-only transport passed on two separate Windows PCs in rev11, including authenticated/encrypted admission, reconnect, room follow, combat and host-leave closure. This supersedes the earlier second-installation gap; physical-controller friend-session acceptance remains open. |
+| Package | The Steam friend GUI is on main: confirmed host account/allowlist, consent, copy/paste invitation, guarded owned launch and persistent errors. UX07 covers the friend flow. JOIN05 reached technical two-PC package-GUI host/join acceptance; effective movement and a clearly visible responding puppet on both screens still need qualification. No release or publication is implied. |
+| Enemy combat | Shared HP/deaths and exactly-once client claims remain qualified within their fixtures. Mirroring batches 1-5, 7 and the final batch-6 subset are on main with family/room-specific live evidence. Creeper 317 and Fiery Globe 76 remain off. General projectile, boss and separated-player wave acceptance remain open. |
+| Rooms and progress | Host-follow, late join/reload and masked native progress have bounded live passes, including the earlier three-instance routes and BB04 two-wave gate. Populated reconnect and proximity/wave/cull consistency remain incomplete. Connected cutscene hold stays default-off and empty-room-only. |
+| Downed and camera | Downed/revive has pair/trio evidence. Default-off held-down spectate is on main and live-qualified for target cycling and release on revive; this does not qualify every camera mode or whole-party-down recovery. |
+| Command and SAVE safety | The puppet gauge hold that copied back into persistent Drive bytes is removed on main. Mandatory native command gates replace it. Smoke-07 qualifies Drive refusal and protected bytes; Summon was UNQUALIFIED without a charm, and active-puppet Revert timed out. Disk-save preservation remains mandatory and grants no permission to save. |
+| Latency | Defaults are avatar 80 ms and enemy cursor 6 host frames, with bounded overrides and logged invalid fallbacks. The selected 80/6 setting has short loopback A/B evidence, not Steam/internet latency acceptance or input-to-photon measurements. |
+| Dev loop | Canonical guarded desktop-session launch, save hashes, captures and owned cleanup remain the rig path. Runner children suppress visible consoles and owned helpers are reaped. One live lane owns each rig. |
+
+**Current evidence and limits.** Steam [two-PC rev11](../build/rig/steam-confirm-20261007-01/live-step2-rev11/)
+requires allowlisted authenticated admission and encrypted relay-only Connected
+traffic (flags 16, ICE 0). Its idle friend was HP-protected: combat/transport PASS
+is not incoming-damage or human combat-feel acceptance. The
+[friend UX07 lane](../build/rig/steam-friend-20261007-01/live-pc2-ux07/) and
+[package JOIN05 lane](../build/rig/steam-package-join-20261008-01/live-package-join05/)
+cover separate GUI milestones. JOIN05's technical result must not stand in for
+measured movement, clear puppet visibility, a controller session or a full route.
+Some preparation summaries in these lanes retain their pre-attempt PENDING text;
+use the retained run evidence and accepted result scope when assessing a gate.
+
+The [Drive SAVE fix lane](../build/rig/puppet-command-savefix-20261007-01/rev2/)
+includes [smoke-07](../build/rig/puppet-command-savefix-20261007-01/rev2/live-smoke-07/).
+Main `5a427ba` replaces gauge writes with puppet-only command admission, without
+adding a protected-SAVE exception. Native Drive availability and refusal are
+bounded evidence; charm-backed Summon and active-puppet Revert remain incomplete.
+The [spectate run 232744](../build/rig/vuh1819-downed-spectate-20261007-01/output/scenarios/20261007-232744_vuh1819_downed_spectate_1/report.md)
+qualifies held-down cycling and release with the feature enabled. It is off by
+default and does not replace the downed/revive gate.
+
+[Enemy parity](ENEMY_PARITY.md) retains batch 1-5 evidence and the family-specific
+limits. [Batch7](../build/rig/vuh1515-batch7-variant-20261007-01/live-fixture-b7-01/)
+passed run 234704 (Rabid Dog 3, Hammer Frame 8, Aerial Champ 2410, Beffudler 2404).
+[Batch6 b6-03](../build/rig/vuh1515-batch6-variant-20261007-01/live-fixture-b6-03/)
+passed run 235458 (Silver Rock 71, Icy Cube 77, Assassin 309), and landed after batch 7.
+Both include Soldier 301 controls. These qualify existing living bodies and their
+standard mirror/authority/release gates in the declared rooms, not missing native
+spawns, arbitrary later waves, record-only populations, projectiles or bosses.
+
+[Empty-seat fixture 10](../build/rig/party-empty2-20261007-01/rev6/live-fixture-10/)
+passed run 20261008-024646: matched native OFF inventory, two players/zero AI,
+private clone status/damage, ally refusal, GoA/Borough/GoA, pause/first Items and
+writer retirement followed by native-load restoration. Typed native history and
+playtime checks retain Drive 3528/3529/24F0 protection. Deeper menus, equipment,
+shutdown restoration and host-chosen or solo companions remain unqualified;
+[party setup](PARTY_SETUP.md) records the exact scope. Chosen-AI rev3 is CHANGES
+and rev4 is pending; neither is a main/live-proven feature.
+
+The [80/6 default decision](research/LATENCY_AB.md) preserves both A/B receipts:
+[50/4 comparison](../build/rig/latency-ab-20261007-01/output/comparison.md) and
+[80/6 comparison](../build/rig/latency-ab-middle-20261007-01/output/comparison.md).
+The middle setting reduced measured fitted lag with fewer underruns than 50/4
+in those loopback windows. Internet jitter, longer sessions and perceived combat
+responsiveness still require separate evidence.
+
+### Earlier qualification history (through 2026-10-06)
+
+The following attempt chronology and original outcomes are retained. Statements
+about pending packages or a second Windows installation describe that earlier
+snapshot; the current status above supersedes those gaps only within its stated
+scope. Earlier failures are not reclassified by later passes.
 
 **First friend preview (VUH-1494).** Release09 is sealed for the adopted bounded
 preview, pending package handoff and private relay-access approval. It includes
@@ -532,7 +590,8 @@ hold run occurred; `094229` remains empty-room evidence. See the [prep and prere
 and [offline adoption](../build/rig/vuh1498-populated-hold-review-20261006-01/result.json).
 
 See [private joining and simulation](JOIN_GUIDE.md). General cutscene support,
-waves and bosses, and the package also remain open.
+separated-player waves, bosses and a complete package-installed friend session
+remain open; current Steam/package milestones are summarized above.
 
 ## Prior art (researched 2026-10-01)
 
