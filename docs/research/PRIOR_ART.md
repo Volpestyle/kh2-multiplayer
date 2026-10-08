@@ -46,6 +46,62 @@ project's design, and very new.
   position, rotation, animation, or controller updates"
   ([KH1 repo](https://github.com/Expert595/kh1-multiplayer)).
 
+### KH2FM online co-op (TCM-Murray, Oct 2026)
+
+[Repo](https://github.com/TCM-Murray/Kingdom-Hearts-II-Coop-Multiplayer), read at
+`ed028f8` (2026-10-07). GPL-3.0. A hobby project started 2026-10-04 and made
+public on 2026-10-07. Its author emailed James: they had used this repo's docs
+as a reference, copied no code, and offered their notes in return. Their
+MODLOG credits this repo's findings as leads.
+
+- **Architecture.** OpenKH Panacea loads a C++ DLL (MinHook) from an OpenKH mod
+  ([README](https://github.com/TCM-Murray/Kingdom-Hearts-II-Coop-Multiplayer/blob/main/README.md)).
+  - The two players run on two PCs over Radmin VPN, with a link handshake.
+  - The host owns rooms, enemies and world state. The friend follows room
+    changes and gets mirrored enemy position, motion, HP and deaths.
+  - Each player is Sora in their own game. The other player appears as a "Sora
+    copy" replacing Donald or Goofy, and mirrors movement, attacks, magic,
+    items and Limits (TODO.md "Where we are").
+- **Working, by their own report:**
+  - cutscenes on both screens, with the host starting them (Hades and Cerberus checked);
+  - shared combat pause;
+  - a 20 s downed state that reuses the Mickey-rescue animations, revived with
+    Cure or items; both players down means Game Over;
+  - a shared Game Over choice that follows the host;
+  - host-led rooms through Hollow Bastion and Olympus.
+  - Not started: story-progress sync, Drive Forms and Summons in co-op.
+- **Offsets as leads [unverified here].** Their VERIFIED_OFFSETS.md lists
+  about 110 addresses that appear nowhere in this repo. They are their findings
+  in their build. Re-verify any of them before relying on it. The most relevant:
+  - `exe+0x3D5C50` GetPartyMember(n): n=0 is the player at `exe+0x2A105D0`,
+    otherwise GetFriend(n-1). Friend slots are at `exe+0x2A239B0`.
+  - `exe+0x3BE2B0` SetTarget(slot = enemy+0xBF8, mode, actor), with modes
+    documented. `exe+0x411300` RecordAttacker.
+  - `exe+0x3DBEA0` prize pickup check, which loops GetPartyMember(0..2).
+    `exe+0x3DC170` enemy drops, multiplied through `exe+0x3ECEF0` and
+    `exe+0x3ABA40`.
+  - `*(exe+0x2A25370)` item table: 0x18-byte rows, with id and heal %.
+  - `exe+0x3E60C0` character id to companion index for menus. Their menu
+    crash was traced through `exe+0x36A440`.
+  - Pause and battle state: menu byte `exe+0x7435D0` (0x0A full menu, 0x08
+    combat pause), and battle flag `exe+0x2A11404`.
+  - Game Over constructor `exe+0x3FC7A0` (instance `exe+0x2AE8050`, +0x14 =
+    Mickey chosen). MickeyAllowed is `exe+0x3A3BD0`.
+  - `exe+0x3EFA60` Keyblade weapon update, needed to keep the copy's weapon visible.
+- **Hazards they hit:**
+  - With Steam Input, one Xbox pad shows up on two XInput slots, and each
+    game acts on input only while focused.
+  - Summon commands grey out with a copy in the party; cause unknown.
+  - The end of a Mickey rescue rebuilds the party from the party list, and
+    crashed their host with a copy in Donald's slot.
+  - A downed get-up exhausted the effect pool (`exe+0x2B0EC08`).
+  - Drops are "not shared between games, but doubled inside each game". The
+    prize multiplier adds a term per party member, and the copy is in the
+    party **[I]**.
+- **License.** Both repos are GPL-3.0(-or-later), so reuse in either
+  direction is permitted with credit. No code from it is in this repo; credit
+  any future port explicitly.
+
 ### KH2 Co-op Mix (Snackya, 2021)
 
 [Repo](https://github.com/Snackya/KH2-co-op-mix). Shared-hub co-op for the
