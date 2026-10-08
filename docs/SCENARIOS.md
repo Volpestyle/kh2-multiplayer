@@ -3027,3 +3027,28 @@ and [prior source review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-
   passing menu scenario remains open. The menu runs as a scheduled task
   (`0x1512B0`); no direct native writer/task invocation was used. Standing save
   restrictions remain, and this single save authorization is consumed.
+
+
+## Poll subprocesses and console cleanup
+
+The canonical `kh2ctl` wrapper and `bridge()` avatar poll use
+`CREATE_NO_WINDOW`, including when the runner has detached from a console during
+G7 runtime shutdown. Capturing stdout/stderr alone does not suppress allocation
+of a new console. On PC2, rev6/rev7 polling began creating orphan console hosts
+immediately after that detach; those hosts were outside Windows jobs after their
+poll processes had exited. Never clean them by name or timestamp alone.
+
+`subprocess.run` reaps normal and timed-out poll children. `Context.close()` joins
+the protector before exiting (its existing command timeouts bound an in-flight
+poll), and waits after force-killing each retained owned helper. The offline
+Windows control uses disposable Python helpers, checks both polling wrappers,
+normal exit, timeout and in-flight protection cleanup, and counts retained owned
+child/console processes:
+
+```powershell
+python -B tools/scenario/console_process_control.py --out .local/console-control.json
+```
+
+It makes no game calls. Total process/console counts are recorded as observations;
+any retained owned poll child or console process fails the control. A new sealed
+fixture must repin the canonical runner hash after adopting this change.

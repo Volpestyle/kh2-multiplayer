@@ -73,7 +73,8 @@ def kh2ctl(*args: str, pid: int | None = None, check: bool = True, timeout: floa
     if pid is not None:
         cmd += ["--pid", str(pid)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                          env=dict(os.environ, **env) if env else None)
+                          env=dict(os.environ, **env) if env else None,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     text = proc.stdout.strip()
     try:
         data = json.loads(text.splitlines()[-1]) if text else {}
@@ -281,7 +282,8 @@ class Context:
         def bridge(index: int = 0, seconds: float = 0.5) -> dict:
             """The instance's AvatarBridge: local frames/s and both puppet slots."""
             out = subprocess.run([str(AVATARCTL), "peek", "--pid", str(self.inst(index).pid),
-                                  "--seconds", str(seconds)], capture_output=True, text=True, timeout=30)
+                                  "--seconds", str(seconds)], capture_output=True, text=True, timeout=30,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             return json.loads(out.stdout.strip().splitlines()[-1])
 
         return {"peek": peek, "pos": pos, "room": room, "enemies": enemies, "enemy_hps": enemy_hps, "actor": self.actor,
@@ -311,6 +313,9 @@ class Context:
 
     def close(self) -> None:
         self._stop.set()
+        # A protection poll can already be inside subprocess.run. Join it before
+        # the runner exits: run() reaps its bounded child, including on timeout.
+        self._protector.join()
         for value in self.saved.values():
             if isinstance(value, Recorder):
                 value.stop()
@@ -321,6 +326,9 @@ class Context:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                    proc.wait()  # reap the exact owned child after forced cleanup
+            else:
+                proc.wait()  # retain the same cleanup contract for exited helpers
             log.close()
 
 
@@ -923,7 +931,8 @@ def collect_reconnect_sample(ctx: Context, deadline: float) -> dict:
                 raise StepFailed("reconnect observation deadline exceeded")
             observed = subprocess.run(
                 [str(AVATARCTL), "observe", "--pid", str(inst.pid), "--samples", "2", "--interval-ms", "100"],
-                capture_output=True, text=True, timeout=min(5.0, remaining))
+                capture_output=True, text=True, timeout=min(5.0, remaining),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             row["avatarObservation"] = json.loads(observed.stdout)
             row["avatarExitCode"] = observed.returncode
             row["avatarStderr"] = observed.stderr
