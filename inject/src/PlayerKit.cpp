@@ -318,10 +318,15 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
     return true;
 }
 
-void Shutdown() {
+void StopResolver() {
     if (!g_stats.installed) return;
     g_active.store(false, std::memory_order_release);
     MH_DisableHook(reinterpret_cast<void*>(g_base + RVA_RESOLVE_MEMBERS));
+}
+
+void Shutdown() {
+    if (!g_stats.installed) return;
+    StopResolver();
     __try {
         auto* resolved = reinterpret_cast<std::uint16_t*>(g_base + RVA_RESOLVED_MEMBERS);
         const std::uint16_t before = resolved[0];

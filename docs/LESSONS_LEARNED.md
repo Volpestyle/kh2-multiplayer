@@ -292,3 +292,10 @@ This evidence does not include OS-wide transient-write tracing.
 ## Puppet Drive holds can persist into SAVE
 
 Main PollPuppetPoses used to zero canonical Sora Drive status2A23748/49 whenever any puppet was active, independently of party mode. Native commit3C2120 copies these fields into serialized SAVE3528/29. Caching and later restoring them does not make the mid-session mutation safe. Replace the hold with read-only native command admission before Drive/Summon effects, including the separate Summon callback, and keep both SAVE fields strict. Owned-memory controls execute the original native copyback and reproduce exactly the two-byte legacy corruption. See build/rig/puppet-command-savefix-20261007-01/rev1/design.md.
+
+
+## Sparse party menus: distinguish compact indices from row seats (2026-10-08)
+
+Empty-seat run20261008-011955 failed capture because the host crashed entering pause, not because its capture timeout was too short. A zero-byte rig dump concealed the original exception behind CLR recursion during in-process MiniDumpWriteDump; the retained WER dump recovered the native null descriptor read. Inspect the original exception below crash-handler frames before assigning the final WER module as the cause.
+
+Native menu entries compact away zero members but retain their original row seat. Callers of a row-seat API must translate through that saved field; auditing the callee alone misses dense-index assumptions in callers. Native companion-history loops also assume every compact entry after the first is an AI companion: Sora/Roxas can derive negative companion bitset indices even with a trailing empty seat. Keep player history separate, preserve the native zero-key skip, and scope any translation to proven callers and physically owned layouts. A passing native OFF menu does not prove sparse-party menu safety. The bounded pause/first-Items fix does not qualify Party/change or deeper Items navigation.

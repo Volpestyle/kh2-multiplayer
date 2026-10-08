@@ -289,3 +289,7 @@ Avatar and world paths (plan D2/D9; the DLL sides of both bridges are live-lane 
  (transition, enemies, claims)                                  cache, forward
  act on them  <-WorldBridge---- onWorldEnvelope <--------------- (claims -> host)
 ```
+
+The opt-in two-player empty-AI layout adds `inject/src/PartyEmptySeat.{hpp,cpp}` for scoped native row/status and pause/history projections, and `PartyEmptyPackage.{hpp,cpp}` with pinned payload data for read-only selected-ARD qualification. GoA/Borough, pause, first Items selection and next-load restore passed live in run20261008-024646, fixture `build/rig/party-empty2-20261007-01/rev6/live-fixture-10`. See `docs/PARTY_SETUP.md` for flags and qualification limits.
+
+- `inject/src/PuppetCommandGuard.{hpp,cpp}`: mandatory puppet-only Drive/Summon command admission, native exact-byte guards and retained callback/trampoline lifetime; no status or SAVE writes.

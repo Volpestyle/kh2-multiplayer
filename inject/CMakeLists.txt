@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# kh2coop_inject — In-process DLL for friend AI replacement (Strategy B)
+# kh2coop_inject â€” In-process DLL for friend AI replacement (Strategy B)
 #
 # This DLL loads into the KH2 process and hooks PerEntityUpdate to replace
 # friend AI with player input. It can be loaded either:
@@ -24,7 +24,7 @@ if(NOT minhook_POPULATED)
     FetchContent_Populate(minhook)
 endif()
 
-# MinHook v1.3.3 has no CMakeLists.txt — build from source directly.
+# MinHook v1.3.3 has no CMakeLists.txt â€” build from source directly.
 # Only 4 C files needed for x64.
 add_library(minhook_lib STATIC
     ${minhook_SOURCE_DIR}/src/buffer.c
@@ -49,11 +49,13 @@ add_library(kh2coop_inject SHARED
     src/SteamCapabilityProbe.cpp
     src/SteamBrokerNative.cpp
     src/EntityHook.cpp
+    src/PuppetCommandGuard.cpp
     src/RenderHook.cpp
     src/Warp.cpp
     src/PlayerKit.cpp
     src/PartyNative.cpp
-    src/PuppetCommandGuard.cpp
+    src/PartyEmptySeat.cpp
+    src/PartyEmptyPackage.cpp
     src/SaveGuard.cpp
     src/CrashDump.cpp
     src/EnemySync.cpp

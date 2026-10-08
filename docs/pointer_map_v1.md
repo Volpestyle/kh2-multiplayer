@@ -989,3 +989,25 @@ and caller-site checks gate the observers; partial masks, foreign calls,
 unwinds, repeated children and loss cannot establish a branch conclusion.
 The [static capture contract](../build/rig/wave_predicate_capture_plan_20261003.md)
 records exact bytes against PE SHA256 `9002B2DE6A1F91A790BD0673DE125D1CF833F7942BFEC827CDCF6BA64D5849ED`.
+
+
+### Empty-seat package qualification correction (9002b2de, 2026-10-07)
+
+`2A0F7A8`, historically labelled ARD pointer, is a script visibility mask in
+this executable. Native `3A2030` reads the loaded ARD BAR root at `2A0F828`;
+`3A2060` prepares it before `3E2EB0`. Entry offsets are encoded handles after
+`3A6840`, decoded with table `2B0D720`. See party-empty2/rev1 research/package-gate.md
+for primary bytes, ordering, package hashes and restricted read-only gate.
+
+
+### Sparse party menu consumers (9002b2de, 2026-10-08)
+
+Native `2FC360` compacts nonzero member entries (stride0x20) and preserves
+the original row seat at entry+8. Pause caller3065C8 must project its compact
+index through that saved seat before2FC5B0 (return3065CD). Only the two
+companion-history callers returning36A46A/36A727 project Sora/Roxas to the
+existing zero-skip through2FC6D0; player history stays native. Five hook
+entries and three caller CALL signatures are guarded. No SAVE write is added.
+Primary evidence and other-consumer limits: party-empty2/rev6/research/consumer-audit.md.
+Fixture10 run20261008-024646 qualified pause and first Items selection with
+remote/0/local members, not Party/change or deeper Items consumers.

@@ -1,15 +1,14 @@
 # Host party setup contract (VUH-1519)
 
 Protocol **12** added `PartyLayout` (type42, 68 payload bytes) and
-`PartyReapply` (type43, 25 bytes). AvatarBridge remains4. All session peers
-must use the same protocol, now **13** (VUH-1515 `EnemyMotion`; contract and
-history in `ENEMY_PARITY.md`); older binaries refuse admission. Sealed packages and
-native products have not been rebuilt or changed for this task.
+`PartyReapply` (type43, 25 bytes). Later protocol changes are recorded in
+`ENEMY_PARITY.md` and the PartyIntent section below. All session peers must
+use matching products; older binaries refuse admission.
 
-This is a host-authoritative session policy and bridge contract, **not native
-party application or spectating**. It does not bench an actor, alter puppet
-mapping, disable controls, write MEMT/save data, or prove a scripted fight.
-There are no inject/launcher changes.
+The initial implementation established host-authoritative session policy and
+the bridge contract. Native application was added later, behind explicit
+opt-in flags. The sections below distinguish the original contract from the
+layouts qualified live; whole-game party replacement and spectating remain open.
 
 ## Source and default policy
 
@@ -106,7 +105,7 @@ no guest) and the kit each remote puppet must show, carried in
 
 `inject/src/PartyNative.*` applies the host layout natively. It is **default off**: `KH2COOP_PARTY_NATIVE=1`, which also requires `KH2COOP_NATIVE_SORA_PRIVATE_STATUS=1` and `KH2COOP_CLONE_NEUTRAL_INPUT=1`, and the module's live private-status and neutral-input state.
 
-It qualifies one case only: "3 players, no NPCs" in GoA `04/1A`, evt 0, with the native DEFAULT row `00/01/02/12`. On such a load, an observer on PlayerKit's per-load `3E2EB0` resolver post-hook does the following:
+The initial native qualification covered: "3 players, no NPCs" in GoA `04/1A`, evt 0, with the native DEFAULT row `00/01/02/12`. On such a load, an observer on PlayerKit's per-load `3E2EB0` resolver post-hook does the following:
 - sets resolved members 1/2 (Donald/Goofy) to Sora `0x54`, so both friend seats spawn as player-class Sora clones;
 - leaves the save-backed party row and MEMT unwritten.
 
@@ -114,7 +113,7 @@ It qualifies one case only: "3 players, no NPCs" in GoA `04/1A`, evt 0, with the
 
 Every other room, rule or layout resolves natively, and so does any later load: the native party returns by itself.
 
-**Flags.** `KH2COOP_PARTY_NATIVE`, `KH2COOP_REMOTE_KIT_SLOT` and `KH2COOP_PLAYER_KIT` are mutually exclusive. Each conflicting side refuses and logs it.
+**Flags for the original path.** `KH2COOP_PARTY_NATIVE`, `KH2COOP_REMOTE_KIT_SLOT` and `KH2COOP_PLAYER_KIT` are mutually exclusive. Party kits use the later `KH2COOP_PARTY_KITS` path instead. Each conflicting side refuses and logs it.
 
 **Timing (scoped lead decision).** The resolver runs during an area load, before the host can publish that room's layout. So each machine applies the **newest accepted layout** of the same generation, roster and local slot, **pinned to that layout's own world/room/evt**. Epoch and door are ignored, so a same-room reload matches. The layout is re-checked against the native row and members read at that load.
 - StoryForced and RosterChanged `PartyReapply` clear it.
@@ -122,7 +121,7 @@ Every other room, rule or layout resolves natively, and so does any later load: 
 
 VUH-1519 itself added no packet type: it uses `PartyLayout` 42 and `PartyReapply` 43 at protocol 13. Crossing into a second qualified room without an extra reload needs the room-independent `PartyIntent` (VUH-1786, below).
 
-**Live result, 2026-10-07: PASS.** Run `build/scenarios/20261007-044847_vuh1519_party_native_goa_three_1`, fixture `build/rig/vuh1519-party-native-20261007-01/live-fixture-05`, DLL `d0d28019…` (lane pins `a1466dd3…`). Three games in GoA:
+**Live result, 2026-10-07: PASS.** Run `build/scenarios/20261007-044847_vuh1519_party_native_goa_three_1`, fixture `build/rig/vuh1519-party-native-20261007-01/live-fixture-05`, DLL `d0d28019â€¦` (lane pins `a1466dd3â€¦`). Three games in GoA:
 - **controls:** flag off, no private status, and party + remote kit;
 - **apply:** host layout echo, one host same-room reload, then on every machine:
   - the build order clone, clone, local;
@@ -133,12 +132,12 @@ VUH-1519 itself added no packet type: it uses `PartyLayout` 42 and `PartyReapply
 - **interval:**
   - one damage1 per clone, on two machines, with the clone's personal SAVE commit bytes unchanged;
   - an unchanged in-memory SAVE hash, outside the enumerated exclusions;
-  - follow p95 4–7.5;
+  - follow p95 4â€“7.5;
   - no rebinds;
 - **restore leg:** after one runtime left and the host reloaded, the remaining machines resolved members 1/2 natively to `0x5C/0x5D`, and Donald/Goofy were back;
 - **closure:** clips on all three sides, saves unchanged, SaveGuard on, and no save attempts.
 
-Earlier attempts 01–04 failed on fixture expectations, which were fixed one at a time:
+Earlier attempts 01â€“04 failed on fixture expectations, which were fixed one at a time:
 - 01: kill ordering;
 - 02: client post-load match ordering;
 - 03: a single hit never commits through `3C2120`;
@@ -196,7 +195,7 @@ It is a 63-byte payload.
 - Whichever lands second merges the `PacketType` enum, the `Protocol.hpp` version comment, the `RS_INNER` line and the `HudNamesTest` message, then rebuilds and re-runs the full CTest and the offline controls on the merged products.
 - Each lane's pinned DLL predates the merge.
 
-PartyIntent leaves VUH-1519's own open items open: mixed layouts, empty seats and per-seat kits.
+PartyIntent originally left mixed layouts, empty seats and per-seat kits open. The bounded mixed-party and empty-seat qualifications below supersede that initial status.
 
 **Static audit: `resolved[]` does not reach SAVE (2026-10-07).** This was owed since the VUH-1513 review. Evidence is in `build/rig/vuh1519-resolved-save-audit-20261007-01/`, run against Steam exe `9002b2de`.
 
@@ -265,11 +264,11 @@ that overlaps the local player creates a native hit. `DamagePolicy` zeroes its H
 reaction still plays (star burst, red portrait flash). Run `20261007-115923` logged 15 on one machine: the
 Mickey clone's attack motion 186 lands twice (6, then 2) and reached the host on 8 of 9 swings; Sora's 151
 lands once and rarely reached anyone. The local's attacks never hit a clone (bit 0 is never in a mask).
-- `=1` refuses every native-allowed hit between two distinct player-class actors (clone → local, local →
-  clone, clone → clone) at `3D2060`, after the original ran, so no hit record, `[hit]` line or reaction exists.
+- `=1` refuses every native-allowed hit between two distinct player-class actors (clone â†’ local, local â†’
+  clone, clone â†’ clone) at `3D2060`, after the original ran, so no hit record, `[hit]` line or reaction exists.
   Atkp kinds 5/6 (they bypass the mask natively) stay native. Enemies are untouched either way.
-- `=trace` changes nothing and logs the same pairs. Both log one `[allyhit] f=… attacker=…(side team=…) ->
-  victim=…(side team=…) atkTeam=… mask=0x.. kind=… atkp=… native=… verdict=… via=owner|source` line per
+- `=trace` changes nothing and logs the same pairs. Both log one `[allyhit] f=â€¦ attacker=â€¦(side team=â€¦) ->
+  victim=â€¦(side team=â€¦) atkTeam=â€¦ mask=0x.. kind=â€¦ atkp=â€¦ native=â€¦ verdict=â€¦ via=owner|source` line per
   (attack, victim) pair (160 lines), and a stats line every 600 frames while counts change.
 - The attacker is the attack's owner (`+0x10`), or its source (`+0x14`) when the owner is not a player, the way
   the native check also excludes both. A player's projectile or magic owned by another object counts (`via=source`).
@@ -278,7 +277,7 @@ lands once and rarely reached anyone. The local's attacks never hit a clone (bit
   otherwise crowd out the refusals.
 - A clone never hits a team-1 non-player either (Donald, Goofy, world allies): its team-0 mask includes team 1,
   which its native party mask `~((1 << 1) | 1)` excludes. Reachable since the two-player party keeps Goofy beside a
-  clone. The row shows `victim=…(other team=1)`.
+  clone. The row shows `victim=â€¦(other team=1)`.
 - Not covered:
   - Atkp kinds 5/6 (Cure/CCure) between players stay native, as on main. Check for a double heal before
     networked ally heals ship.
@@ -304,14 +303,12 @@ The gates are the same as for `two-clones`. Notes:
   Goofy keeps his native AI.
 - **Restore:** when the remote leaves, the roster-pinned intents retire. The next load is native (Donald + Goofy),
   and shutdown restores members 0..2 while still ours.
-- **Not supported:** any other two-player layout stays `unsupported` until it has its own run: Donald kept, or an
-  empty seat.
-- **Unknowns:** a Roxas canonical local in a party stamp, a Roxas clone among three players, the key-14 clone's SAVE veto, and 04/0A with Roxas.
+- **Other layouts:** retaining Donald is pending chosen-AI qualification. Two players with an empty AI seat have the separate qualified opt-in below.
+- **Scope:** run175931 qualified canonical Roxas and the remote-kit private SAVE veto in the two-player GoA/Borough route. Roxas among three players remains unqualified.
 - **Command menu:** it is still unguarded with a kit (VUH-1509).
 - **Live evidence:**
   - **Run 20261007-175931 (rev5) passed:** host Sora, client Roxas, GoA then Borough 04/0A then GoA again, then the client leaves and the host restores Donald and Goofy natively.
   - **Earlier run 20261007-165859** passed every applied-visit gate on both machines: one-clone shape, puppet to remote kit, Goofy HP/max stable, completed native Goofy AI, and clone-to-ally refusals. Its restore step failed only because the fixture hard-killed the client runtime.
-  - **Not yet handled:**
   - **Abrupt runtime death (fixed):** the runtime now holds a writer lease on the world bridge. When the writer dies, for example by TerminateProcess or a crash, the client DLL retires its party plan within a bounded time and restores native on the next load. Run 20261007-201506 (rev6) hard-killed the client runtime and required the client to restore; it passed.
 
 ## Offline evidence
@@ -324,3 +321,63 @@ with mocked Valve/IPC boundaries in `kh2coop_steam_broker_test`.
 
 The policy does not establish that engine companions/puppets can be remapped in
 these rooms. Native integration and whole-game live qualification remain open.
+
+
+## Two players without AI companions (live qualified, 2026-10-08)
+
+Set `KH2COOP_PARTY_AI=none` on both DLLs, alongside
+`KH2COOP_PARTY_NATIVE=1`, `KH2COOP_NATIVE_SORA_PRIVATE_STATUS=1` and
+`KH2COOP_CLONE_NEUTRAL_INPUT=1`. The qualified fixture also sets `KH2COOP_PARTY_KITS=1` and uses the
+Sora/Roxas party-kit path. The default mixed party and three-player paths are unchanged.
+This opt-in is limited to GoA `04/1A` and Borough `04/0A`, event0, the checked
+DEFAULT row and the pinned selected spawn packages. Other rooms, rules,
+packages and layouts resolve natively.
+
+Logical seats are Local/Remote/Empty. Physical resolved members are
+remote/0/local: the remote clone is built first and the canonical local last.
+The save-backed row remains `00/01/02/12`, unwritten. Native selector `0x12`
+means absent; the corresponding resolved member ID is zero. Roxas prologue
+and native solo programs supply precedents for absent friend seats, but do
+not establish that arbitrary sparse rows are safe. Scoped native row/status
+projections and read-only ARD qualification are required before admission.
+
+Five byte-guarded hooks and three caller signatures protect the qualified
+menu path. Pause caller `3065C8` passes a compact entry index to `2FC5B0`,
+which expects an original row seat; this caller alone translates through the
+native entry's saved seat at +8. Two companion-only NEW/history readers use
+key0 for Sora/Roxas through `2FC6D0`, retaining their native empty-skip and
+separate player-history logic. No SAVE or menu table is written. Original
+trampolines and the callback module remain retained until process exit.
+See `build/rig/party-empty2-20261007-01/rev6/research/consumer-audit.md`.
+
+**LIVE PASS:** run
+`20261008-024646_party_empty2_matched_off_on_inventory_1`, fixture
+`build/rig/party-empty2-20261007-01/rev6/live-fixture-10`, completed in367s.
+Three fresh install controls and the matched feature-OFF native sequence
+passed before feature ON. Both machines passed the two-player/zero-AI census,
+one private remote puppet, clone damage/private SAVE veto and ally-refusal
+gates across GoA, Borough and GoA again. Both passed pause and first Items
+character selection; that pinned save exposes two characters plus Stock,
+versus three characters plus Stock in the native OFF control. Stock is not
+an AI member, and this count is not a general rule for other saves or worlds.
+After abrupt client-runtime death, intents retired and both next loads
+restored their native party. All seven launched games were cleaned up;
+disk saves were unchanged. The report, captures and closure are retained
+under the run and fixture paths above.
+
+**SAVE semantics:** native acquired-ability history at428A/B is persistent
+and protected. The fixture prepares native menus before the feature baseline
+and validates that initialization with typed native semantics, then requires
+applied and restore comparisons to remain protected. Matched OFF inventory
+also accounts for native playtime timers2444/245C by their typed clock rules;
+it does not learn arbitrary byte exclusions. Serialized Drive3528/3529 and
+24F0 remain protected throughout the puppet interval. The previously removed
+puppet gauge hold is replaced by native command admission gates; it is not
+part of this empty-seat patch and grants no SAVE exception.
+
+**Qualification limits:** pause and first Items character selection only.
+Party/change, Status, deeper Items and equipment edits remain unqualified;
+additional native consumers assume dense companion rows. Shutdown restoration
+was not exercised: the fixture uses owned process kills. The qualified restore
+is roster/bridge retirement followed by a native load. Host-chosen Donald or
+Goofy, solo with one companion, and world allies remain separate pending work.

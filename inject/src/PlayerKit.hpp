@@ -74,6 +74,7 @@ struct Stats {
 bool Install(std::uintptr_t exeBase, LogFn log);
 // Disables the hook, then restores member 0 if it still holds our kit.
 void Shutdown();
+void StopResolver(); // disable shared load hook before party member restoration
 Stats GetStats();
 // Roster byte for the actor's actual descriptor (actor+0x918 -> objentry id).
 std::uint8_t RosterForActor(std::uintptr_t actor);
