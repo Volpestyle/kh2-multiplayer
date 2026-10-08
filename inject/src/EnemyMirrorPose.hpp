@@ -63,6 +63,11 @@ inline constexpr std::uint32_t kDuskObjectId = 318;
 inline constexpr std::uint32_t kCreeperObjectId = 317;  // not allowlisted; see above
 inline constexpr std::uint32_t kSamuraiObjectId = 310;
 inline constexpr std::uint32_t kDancerObjectId = 312;
+// T1 batch7 test-only candidate; direct-ARD smoke qualification pending.
+inline constexpr std::uint32_t kRabidDogObjectId = 3;
+inline constexpr std::uint32_t kHammerFrameObjectId = 8;
+inline constexpr std::uint32_t kAerialChampObjectId = 2410;
+inline constexpr std::uint32_t kBeffudlerObjectId = 2404;
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
@@ -70,7 +75,8 @@ inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId,
                                               kNightwalkerObjectId, kRapidThrusterObjectId, kRapidThrusterSkinObjectIds[0],
                                               kRapidThrusterSkinObjectIds[1], kArmoredKnightObjectId, kDrillerMoleObjectId,
                                               kNeoshadowObjectId, kGargoyleKnightObjectId,
-                                              kDuskObjectId, kSamuraiObjectId, kDancerObjectId};
+                                              kDuskObjectId, kSamuraiObjectId, kDancerObjectId,
+                                              kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;

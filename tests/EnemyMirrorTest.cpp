@@ -272,8 +272,8 @@ void testHelpers() {
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,3,8,2410,2404").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,3,8,2410,2404",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -320,6 +320,25 @@ void testHelpers() {
         for (std::uint16_t n = 80; n < 83; ++n)
             all = all && b5.Drivable(n, 2) && b5.PoseAt(n, 2, pose) && pose.objectId == rows[n - 80].objectId;
         check(all, "batch5 streams are tracked and drivable beside ignored Sniper311 and Creeper317");
+    }
+    {  // batch7 test-only streams; unchanged native binding/driver
+        for (const auto oid : {em::kRabidDogObjectId, em::kHammerFrameObjectId,
+                               em::kAerialChampObjectId, em::kBeffudlerObjectId}) {
+            em::Stream stream;
+            auto accepted = row(90, 10.0f); accepted.objectId = oid;
+            auto excluded = row(91, 20.0f); excluded.objectId = 317;
+            stream.Ingest(motion(7, 1, 100, {accepted, excluded}), 1);
+            stream.Ingest(motion(7, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
+            em::Pose pose;
+            check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) &&
+                      stream.PoseAt(90, 2, pose) && pose.objectId == oid && !stream.Drivable(91, 2),
+                  "batch7 family streams without enabling failed Creeper317");
+        }
+        check(!em::FamilyAllowed(2) && !em::FamilyAllowed(7) && !em::FamilyAllowed(9) &&
+                  !em::FamilyAllowed(2403) && !em::FamilyAllowed(2405) && !em::FamilyAllowed(2409) &&
+                  !em::FamilyAllowed(2411) && !em::FamilyAllowed(71) && !em::FamilyAllowed(76) &&
+                  !em::FamilyAllowed(77) && !em::FamilyAllowed(309),
+              "batch7 keeps neighbours and unlanded batch6 families native on main");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins(9);

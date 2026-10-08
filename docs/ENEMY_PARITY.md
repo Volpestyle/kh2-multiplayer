@@ -1,5 +1,39 @@
 # Enemy parity across instances (VUH-1499 spike)
 
+## T1 batch 7 (2026-10-07): Rabid Dog 3, Hammer Frame 8, Aerial Champ 2410 and Beffudler 2404 allowlisted
+
+Live run 20261007-234704 (fixture b7-01, PC1, two games): PASS. All four families
+plus the Soldier 301 control passed spawn, engagement, coverage, motion, position,
+brain, hit and release/retake gates; 5 co-located host/friend clips; 4 protected
+saves unchanged. Report: `build/scenarios/20261007-234704_vuh1515_b7_fx01_early_world_t1_1`.
+
+Candidate notes as staged:
+
+On main4c41090 (including live-qualified spectate), enemy-mirror-b7 adds Rabid Dog3 (76 placements/8 areas),
+Hammer Frame8 (46/6), Aerial Champ2410 (28/1) and Beffudler2404 (26/2).
+Within the requested five worlds their placement counts are50,37,28,26;
+these rank ahead of Iron Hammer19 and Lance Warrior13 after excluding
+already-qualified families, batch6's in-flight candidates and Creeper.
+They are the next common unqualified T1 families with direct ARD programs in
+the requested TT/HB/LoD/BB/Olympus worlds. Aerial Knocker20 is more common
+globally but only has Olympus cup placements in this world set; its ordinary
+rooms are in Pride Lands. Iron Hammer2405 and Lance Warrior2409 follow these
+four by census count. Other TT/LoD common T1 families are already qualified;
+Creeper317 remains excluded pending its separate read-only investigation.
+
+Fixture: Olympus06/07 btl1 (he07 b_00 group53), BB05/0C btl10 (bb12 b_20
+group49, a Hammer retry away from batch4's unsuccessful BB09 setup), HB04/17
+btl26 (hb23 b_81 group265), HB04/15 btl25 (hb21 b_80 group713), then TT02/0D
+btl4 Soldier301 control (tt13 b_10 group107). HB candidates are Cavern content,
+not first-visit encounters. These are static ARD candidates, not confirmed
+live spawns; mandatory living spawn confirmation and engagement must pass.
+
+Packet: `build/rig/vuh1515-batch7-variant-20261007-01/`. Landed on main after the live pass;
+Same class/hook compatibility and unchanged driver/binding/gates as
+prior T1 batches. Batch6 remains unlanded on this pinned base; rebase/repin
+before batch7 live if main gains its qualified families. No absence passes.
+
+
 ## T1 batch 5 (2026-10-07): Dusk 318, Samurai 310 and Dancer 312 allowlisted; Creeper 317 stays off
 
 Live run 20261007-220021 (batch-5 fixture-01, TWTNW, rooms from the no-mirror
