@@ -17,13 +17,22 @@ buildid `15194255`. This qualifies the lane, not other fixtures or networking.
    assertions and save/memory authorization boundaries.
 2. Carry the friend ZIP's `bin/` products and bundled Python. Copy the full
    diagnostic kh2ctl separately when the scenario needs commands unavailable
-   in the portable CLI. Copy any fixture-specific DLL into the packet and pin
+   in the portable CLI, after qualifying its native ownership registry as below.
+   Copy any fixture-specific DLL into the packet and pin
    it; never pin mutable `build/` outputs as runtime dependencies.
 3. Use portable kh2ctl for launch, instances and owned kill, with its unpacked
    package as cwd and an explicit pinned DLL. Launch from the default real
    Steam game directory; check game hash/build separately. The copied full
    CLI may have an embedded PC1 source root: use it only for reviewed commands
    with explicit PID/output paths, never its launch, restart or ownership state.
+   Explicit PID is insufficient for `poke`: it also checks PID and creation time
+   against its own `RepoRoot()/build/rig/owned.txt`. Worldmap01 failed at its
+   first poke on 2026-10-09 UTC because portable launch and full diagnostic CLI
+   resolved different registries; no setup bytes were applied. Memory fixtures
+   need a reviewed internal diagnostic product with package-root semantics and
+   a limited command allowlist, sharing the launcher's native ownership registry.
+   Preserve native ownership checks and ordinary friend-package restrictions;
+   never copy registry entries into a checkout or substitute ad-hoc writes.
 4. Derive home from `USERPROFILE`, packet from `__file__`/`PSScriptRoot`, and
    evidence/unpack from run context. Resolve Documents through the Known Folder
    API, using the target account's native save container. Never import saves or
