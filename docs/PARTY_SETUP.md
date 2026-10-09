@@ -457,3 +457,33 @@ proof. An invalid original snapshot or a restoration exception cannot authorize
 guard retirement. Empty-seat row and portrait guards retain their separate
 existing rules; a successful native resolver remains an independent retirement
 authority. No SAVE bytes are written by this shutdown proof.
+
+
+### Secondary-player Items entry refusal (qualified 2026-10-08)
+
+The first Items character page remains native state1. Under a physically owned
+empty-seat layout, the secondary player row is not a native companion: a
+byte-guarded native admission callback refuses its deeper menu when the compact
+entry identifies original seat2, player key1/14 and a nonnull native status.
+The first character, Stock, native-AI rows, Cancel, other pages and restored
+native parties retain native delegation. Installation checks the selected-index
+setup, input and result-classification calls, refusal branch and native ALfalse
+feedback4 contract before hook creation. There is no menu or SAVE write.
+
+Optional `KH2COOP_ITEMS_ADMISSION_TRACE=1` emits at most16 process-lifetime
+consumed-refusal receipts with caller, state, selection, menu/status and owner.
+The qualifying live run20261008-200037_party_items_secondary_consumed_refusal_1
+passed all steps with disk saves unchanged. It verified fresh identified
+secondary-player refusal on both machines, positive Cancel, retained sparse
+members and native first-character-page/count restoration after writer expiry
+and the next load, using the matched native-OFF typed SAVE inventory.
+
+This qualifies the bounded refusal and first-page restoration, not deeper
+first-row/Stock/native-companion activation, item use, equipment, abilities,
+Party/change, save screens or full DLL-shutdown quiescence. Native menu status
+is bracketed independently; actor/private-status equality is not assumed.
+Independent review: party-menus-20261008/codex-review-rev5-fixture02.md (ADOPT).
+Reusable offline evidence: rev5's36 native modes/664 assertions and98 audited
+socketless fixture checks. The landed production file is byte-identical to
+that compiled/adopted rev5; current-main chosen-AI A2 restoration ownership is
+preserved. The separate ordinary-root Party guard is not part of this landing.

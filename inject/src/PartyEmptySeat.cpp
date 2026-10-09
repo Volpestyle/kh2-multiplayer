@@ -8,7 +8,7 @@
 
 namespace kh2coop::inject::partyempty {
 namespace {
-constexpr std::uintptr_t SITES[] {0x3E3670, 0x3E3680, 0x3E3830, 0x2FC5B0, 0x2FC6D0};
+constexpr std::uintptr_t SITES[] {0x3E3670, 0x3E3680, 0x3E3830, 0x2FC5B0, 0x2FC6D0, 0x34EE00};
 // Original byte sequences from the pinned 9002b2de executable. The tiny leaf
 // includes its padding because MinHook needs a relay/patch span beyond RET.
 constexpr std::uint8_t SELECTOR_BYTES[] {0x48,0x63,0xC2,0x0F,0xB6,0x04,0x08,0x83,0xE0,0x1F,0xC3,0xCC,0xCC,0xCC,0xCC,0xCC};
@@ -18,12 +18,17 @@ constexpr std::uint8_t ALIAS_BYTES[] {0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x
 constexpr std::uint8_t MENU_KEY_BYTES[] {0x85,0xD2,0x78,0x11,0x3B,0x11,0x7D,0x0D,0x48,0x63,0xC2,0x48,0xC1,0xE0,0x05,0x0F,0xBF,0x44,0x08,0x0A,0xC3};
 constexpr std::uintptr_t CALL_SITES[] {0x3065C8, 0x36A465, 0x36A722};
 constexpr std::uint8_t CALL_BYTES[][5] {{0xE8,0xE3,0x5F,0xFF,0xFF}, {0xE8,0x66,0x22,0xF9,0xFF}, {0xE8,0xA9,0x1F,0xF9,0xFF}};
-constexpr unsigned HOOK_COUNT = 5;
+constexpr std::uint8_t ADMISSION_BYTES[] {0x40,0x53,0x48,0x83,0xEC,0x20,0x8B,0xD9};
+constexpr unsigned HOOK_COUNT = 6;
+using AdmissionFn = std::uint8_t (__fastcall *)(std::int32_t);
 using RowFn = std::int32_t (__fastcall *)(const std::uint8_t*, std::int32_t);
 RowFn g_original[HOOK_COUNT] {};
 std::uintptr_t g_base = 0;
 std::atomic<bool> g_ready {false};
 std::atomic<bool> g_retained {false};
+LogFn g_traceLog = nullptr;
+std::atomic<unsigned> g_traceReceipts {0}; // process lifetime; never renewed by loads
+
 // Independent of bridge/intent liveness: a mapped zero member still needs the
 // native empty-selector branches until the next resolver or member restore.
 std::atomic<std::uint64_t> g_owned {0};
@@ -95,6 +100,50 @@ std::int32_t __fastcall MenuKey(const std::uint8_t* menu, std::int32_t index) {
     SetLastError(savedError);
     return skip ? 0 : key;
 }
+std::uint8_t __fastcall ItemsAdmission(std::int32_t selection) {
+    const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
+    const DWORD savedError = GetLastError();
+    std::uint32_t page = 0;
+    std::uintptr_t menu = 0, status = 0;
+    std::int32_t count = 0;
+    std::int16_t seat = -1, key = 0;
+    bool refuse = false;
+    if (caller == g_base + 0x2F62EC && selection > 0 && OwnedEmpty() &&
+        Read(g_base + 0xBEE64C, &page, sizeof(page)) && page == 1 &&
+        Read(g_base + 0xBEEC28, &menu, sizeof(menu)) && menu &&
+        Read(menu, &count, sizeof(count)) && count > 0 && count <= 4) {
+        const auto compact = selection; // state1 has compact characters followed by Stock
+        if (compact < count) {
+            const auto entry = menu + static_cast<unsigned>(compact) * 0x20;
+            refuse = Read(entry + 8, &seat, sizeof(seat)) && seat == 2 &&
+                Read(entry + 10, &key, sizeof(key)) && (key == 1 || key == 14) &&
+                Read(entry + 0x20, &status, sizeof(status)) && status != 0;
+        }
+    }
+    SetLastError(savedError);
+    if (refuse) {
+        // Opt-in observation of the existing consumed callback. No hook, menu or
+        // SAVE mutation; admission and the native feedback4 return stay identical.
+        if (g_traceLog) {
+            auto sequence = g_traceReceipts.load(std::memory_order_relaxed);
+            while (sequence < 16 && !g_traceReceipts.compare_exchange_weak(sequence, sequence + 1,
+                        std::memory_order_relaxed, std::memory_order_relaxed)) {}
+            if (sequence < 16) {
+                const auto owner = g_owned.load(std::memory_order_acquire);
+                g_traceLog("[partyempty-items] refused seq=%u tick=%llu caller=%llX state=%u selection=%d menu=%llX count=%d seat=%d key=%d status=%llX owner=%X/0/%X",
+                    sequence + 1, static_cast<unsigned long long>(GetTickCount64()),
+                    static_cast<unsigned long long>(caller - g_base), page, selection,
+                    static_cast<unsigned long long>(menu), count, static_cast<int>(seat), static_cast<int>(key),
+                    static_cast<unsigned long long>(status), static_cast<unsigned>(static_cast<std::uint16_t>(owner)),
+                    static_cast<unsigned>(static_cast<std::uint16_t>(owner >> 32)));
+            }
+        }
+        SetLastError(savedError);
+        return 0; // native feedback4 declines before any deeper builder
+    }
+    return reinterpret_cast<AdmissionFn>(g_original[5])(selection);
+}
+
 }
 bool ProjectRow(const std::array<std::uint8_t, 4>& row, std::array<std::uint8_t, 4>& projected, unsigned missingIndex) {
     projected = row;
@@ -108,9 +157,9 @@ bool ProjectRow(const std::array<std::uint8_t, 4>& row, std::array<std::uint8_t,
 bool Install(std::uintptr_t base, LogFn log) {
     if (Ready()) return true;
     if (RetainsMinHookResources()) return false;
-    const std::uint8_t* bytes[] {SELECTOR_BYTES, KEY_BYTES, FIND_BYTES, ALIAS_BYTES, MENU_KEY_BYTES};
-    const std::size_t lengths[] {sizeof(SELECTOR_BYTES), sizeof(KEY_BYTES), sizeof(FIND_BYTES), sizeof(ALIAS_BYTES), sizeof(MENU_KEY_BYTES)};
-    const RowFn hooks[] {Selector, Key, Find, MenuAlias, MenuKey};
+    const std::uint8_t* bytes[] {SELECTOR_BYTES, KEY_BYTES, FIND_BYTES, ALIAS_BYTES, MENU_KEY_BYTES, ADMISSION_BYTES};
+    const std::size_t lengths[] {sizeof(SELECTOR_BYTES), sizeof(KEY_BYTES), sizeof(FIND_BYTES), sizeof(ALIAS_BYTES), sizeof(MENU_KEY_BYTES), sizeof(ADMISSION_BYTES)};
+    const RowFn hooks[] {Selector, Key, Find, MenuAlias, MenuKey, reinterpret_cast<RowFn>(ItemsAdmission)};
     for (unsigned i = 0; i < HOOK_COUNT; ++i) {
         std::uint8_t actual[32] {};
         if (!Read(base + SITES[i], actual, lengths[i]) || std::memcmp(actual, bytes[i], lengths[i])) {
@@ -127,6 +176,27 @@ bool Install(std::uintptr_t base, LogFn log) {
     }
     // Explicit DLL unload cannot strand a retained row detour if member restore
     // faults. Empty-seat support deliberately keeps its code mapped until exit.
+    struct Guard { std::uintptr_t site; std::uint8_t bytes[17]; std::size_t size; };
+    const Guard admissionGuards[] {
+        {0x34E197, {0x4C,0x8D,0x0D,0x62,0x0C,0,0}, 7},
+        {0x2F62E9, {0x41,0xFF,0xD1}, 3},
+        {0x2F5F30, {0x8B,0x05,0x16,0x87,0x8F,0,0xC3}, 7},
+        // The selected compact index and ALfalse refusal must dominate state2.
+        {0x34E1A1, {0x8B,0xCF}, 2},
+        {0x34E1A3, {0xE8,0xC8,0x80,0xFA,0xFF}, 5},
+        {0x34E1A8, {0x8B,0xC8,0xE8,0x01,0xD7,0xF9,0xFF}, 7},
+        {0x34E1AF, {0x84,0xC0}, 2},
+        {0x34E1B1, {0x0F,0x85,0x54,0x01,0,0}, 6},
+        // Native input chooses feedback4 for ALfalse, feedback2 for ALtrue.
+        {0x2F62EC, {0xB9,0x02,0,0,0,0x84,0xC0,0xBA,0x04,0,0,0,0x0F,0x45,0xD1,0x8B,0xCA}, 17}
+    };
+    for (const auto& guard : admissionGuards) {
+        std::uint8_t actual[17] {};
+        if (!Read(base + guard.site, actual, guard.size) || std::memcmp(actual, guard.bytes, guard.size)) {
+            if (log) log("[partyempty] REFUSED: Items admission boundary %llX bytes differ", static_cast<unsigned long long>(guard.site));
+            return false;
+        }
+    }
     HMODULE module = nullptr;
     if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
                            reinterpret_cast<LPCSTR>(&Install), &module)) {
@@ -152,8 +222,11 @@ bool Install(std::uintptr_t base, LogFn log) {
         if (log) log("[partyempty] REFUSED: row/menu hooks unavailable; originals retained; empty member not admitted");
         return false;
     }
+    char traceSetting[2] {};
+    const bool trace = GetEnvironmentVariableA("KH2COOP_ITEMS_ADMISSION_TRACE", traceSetting, sizeof(traceSetting)) == 1 && traceSetting[0] == '1';
+    g_traceLog = trace ? log : nullptr;
     g_ready.store(true, std::memory_order_release);
-    if (log) log("[partyempty] five native row/menu guards installed; compact-seat portrait and companion-history readers scoped; selected-package qualification still required");
+    if (log) log("[partyempty] six native row/menu guards installed; compact-seat portrait, companion-history and deeper-player-Items admission scoped; selected-package qualification still required");
     return true;
 }
 bool Ready() { return g_ready.load(std::memory_order_acquire); }
