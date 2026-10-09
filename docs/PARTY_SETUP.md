@@ -379,5 +379,81 @@ part of this empty-seat patch and grants no SAVE exception.
 Party/change, Status, deeper Items and equipment edits remain unqualified;
 additional native consumers assume dense companion rows. Shutdown restoration
 was not exercised: the fixture uses owned process kills. The qualified restore
-is roster/bridge retirement followed by a native load. Host-chosen Donald or
-Goofy, solo with one companion, and world allies remain separate pending work.
+is roster/bridge retirement followed by a native load. Solo with one companion and world allies remain separate pending work.
+Host-chosen two-player Donald/Goofy qualification is recorded below.
+
+
+## Host-chosen companion layouts (2026-10-08)
+
+The product from revision5 of `build/rig/party-choice-20261007-01`, code
+`3e3dcc6`, qualifies two players with host-chosen Donald or Goofy. It includes
+the landed empty-seat/pause guards and read-only puppet Drive/Summon command
+admission; it does not reintroduce the former Drive gauge hold or any SAVE write.
+The landing on main89579a4 preserves that reviewed party product exactly.
+
+**Two-player live PASS:** Donald run
+`build/scenarios/20261008-184452_party_choice_2p_donald_1` (358.1 s), and Goofy run
+`build/scenarios/20261008-185124_party_choice_2p_goofy_1` (342.1 s). Both complete
+the matched native-OFF inventory, GoA/Borough/GoA applied visits, companion
+HP/AI, puppet and ally-hit gates, pause/first-Items menus and next-load restore.
+Disk saves remained unchanged; protected in-memory checks had zero changes
+outside the typed native model. The shipped DLL is `0aa42342`; full source/product
+pins and the 69 passing own-process native executions are in revision5.
+
+**Solo remains UNQUALIFIED.** The shared product includes explicit solo choice,
+but the solo Donald/Goofy attempts stopped at a fixture type gate (runs
+`20261008-185756_party_choice_solo_donald_1` and
+`20261008-190128_party_choice_solo_goofy_1`). Those failures establish no solo
+live acceptance. Corrected solo fixtures are separate work.
+
+With the existing native-party/private-status/neutral-input opt-ins, the host
+may set `KH2COOP_PARTY_AI=donald` or `goofy` before launch. For two players the
+host authors `[Local, Remote, chosen AI]`; on each machine the physical tuple
+is `[remote kit, native companion, own kit]`. The host's published layout wins
+over a different local client preference. With one host present at session
+start, an explicit choice authors `[Local, chosen AI, Empty]` and applies
+`[own kit, native companion, 0]`, without clones or puppet ownership. Unset
+choice preserves existing defaults; `none` preserves the two-player empty-seat
+option and does not opt a solo session into this candidate.
+
+The missing solo member2 uses the same byte-guarded row projection, compact
+pause portrait translation, scoped companion-history readers, selected-package
+qualification and retained trampoline lifetime as the landed empty-seat code.
+The row projection selects only the owned missing member, and preserves the
+native companion's original row seat and history key. All admitted loads remain
+limited to default-party GoA04/1A and Borough04/0A, event program0 and no active
+event/cutscene. SAVE party selectors and MEMT are not written.
+
+The same two proven companion-history callers also skip player keys under an
+exact owned paired tuple, since a local Sora/Roxas after the native companion
+has no companion history row. Dense paired tuples do not receive empty row or
+portrait projection. Both peers install these guards before applying any
+one-companion plan; a failed guard refuses the load without writes.
+
+The native companion is excluded from puppet targeting. Positive original-AI
+completion receipts identify Donald or Goofy and the current load. Writer
+expiry and roster changes retire the standing plan for restoration on the next
+qualified load. Solo authoring is a session-start opt-in: once a peer joins,
+its later departure cannot automatically repopulate a solo chosen layout;
+only a genuinely new host connection can opt in again. Generation-zero hold
+semantics remain those of the landed runtime-liveness implementation.
+
+Two-player Donald and Goofy have passed; solo Donald and solo Goofy remain
+queued for corrected-fixture qualification. The Donald case owns the fresh
+install-control receipt needed by the remaining fixtures. Each fixture first completes a
+matched feature-OFF inventory using typed native SAVE semantics; it may not
+learn arbitrary byte exclusions. Menus cover pause and the first Items character
+page only. World allies, interactive choice during a session, full Party/Status
+or deeper Items navigation, and live solo peer-join retirement remain open.
+
+### Chosen companion shutdown proof
+
+Dense paired chosen-companion history guards remain owned if shutdown cannot
+positively restore the captured native party. PartyNative snapshots all three
+original members before restoration and supplies that tuple only after a normal
+restore and matching post-read. The menu guard independently rereads all three,
+rejects unreadable or still-owned tuples, and retains its readiness without that
+proof. An invalid original snapshot or a restoration exception cannot authorize
+guard retirement. Empty-seat row and portrait guards retain their separate
+existing rules; a successful native resolver remains an independent retirement
+authority. No SAVE bytes are written by this shutdown proof.

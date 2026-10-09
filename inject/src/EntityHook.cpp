@@ -1193,6 +1193,8 @@ static uintptr_t PuppetTarget(int index) {
     // A party plan applied: puppets drive clones only, never a native friend. Two players (one clone): the one
     // present remote's puppet drives the clone and native Goofy keeps his own AI.
     const unsigned planned = partynative::AppliedClones();
+    // A chosen solo companion must never enter legacy puppet fallback.
+    if (planned == 0 && partynative::AppliedCompanionMember() != 0) return 0;
     if (planned == 1) {
         const uintptr_t one = index == partynative::PresentPuppetIndex() ? g_clones[0] : 0;
         return one != 0 && playerkit::BlocksNativeSoraPuppets() ? 0 : one;
@@ -2716,12 +2718,13 @@ static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
         __finally { EndNativeAiStamp(stamp, normal && !AbnormalTermination()); }
         // Positive observation of completed original AI, never a suppression receipt.
         // Bounded cadence keeps the diagnostic available on each applied visit.
-        if (normal && partynative::AppliedClones() == 1 && g_frameCounter % 120 == 0) {
+        const auto companion = partynative::AppliedCompanionMember();
+        if (normal && companion != 0 && g_frameCounter % 120 == 0) {
             const auto actor = CaptureHitActor(reinterpret_cast<uintptr_t>(actorObj));
             if ((actor.readMask & (nativehittrace::ActorId | nativehittrace::ActorType)) ==
-                    (nativehittrace::ActorId | nativehittrace::ActorType) && actor.objectId == 93 && actor.type == 1)
-                Log("[friendai] original-complete frame=%u actor=%llX objectId=93 load=%u",
-                    g_frameCounter, static_cast<unsigned long long>(actor.actor), warp::LoadSerial());
+                    (nativehittrace::ActorId | nativehittrace::ActorType) && actor.objectId == companion && actor.type == 1)
+                Log("[friendai] original-complete frame=%u actor=%llX objectId=%u load=%u",
+                    g_frameCounter, static_cast<unsigned long long>(actor.actor), static_cast<unsigned>(companion), warp::LoadSerial());
         }
     }
 }

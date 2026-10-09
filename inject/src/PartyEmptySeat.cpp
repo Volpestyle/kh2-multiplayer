@@ -32,20 +32,31 @@ bool Read(std::uintptr_t p, void* out, std::size_t n) {
     __try { std::memcpy(out, reinterpret_cast<const void*>(p), n); return true; }
     __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
-bool OwnedEmpty() {
+bool OwnedTuple(unsigned* missingOut = nullptr) {
     const auto owner = g_owned.load(std::memory_order_acquire);
     if (!owner || !g_ready.load(std::memory_order_acquire)) return false;
+    const auto tag = static_cast<unsigned>(owner >> 48);
+    if (tag < 1 || tag > 3) return false;
+    if (missingOut) *missingOut = tag == 1 ? 3u : tag - 1;
     std::uint16_t members[3] {};
     return Read(g_base + playerkit::RVA_RESOLVED_MEMBERS, members, sizeof(members)) &&
-        members[0] == static_cast<std::uint16_t>(owner) && members[1] == 0 &&
+        members[0] == static_cast<std::uint16_t>(owner) &&
+        members[1] == static_cast<std::uint16_t>(owner >> 16) &&
         members[2] == static_cast<std::uint16_t>(owner >> 32) &&
         owner == g_owned.load(std::memory_order_acquire);
 }
+bool OwnedEmpty(unsigned* missingOut = nullptr) {
+    unsigned missing = 3;
+    if (!OwnedTuple(&missing) || missing == 3) return false;
+    if (missingOut) *missingOut = missing;
+    return true;
+}
 std::int32_t Dispatch(unsigned site, const std::uint8_t* row, std::int32_t arg) {
     const DWORD savedError = GetLastError();
+    unsigned missingIndex = 0;
     std::array<std::uint8_t, 4> copy {}, projected {};
-    const bool use = (site == 2 || (arg >= 0 && arg < 4)) && OwnedEmpty() &&
-        Read(reinterpret_cast<std::uintptr_t>(row), copy.data(), copy.size()) && ProjectRow(copy, projected);
+    const bool use = (site == 2 || (arg >= 0 && arg < 4)) && OwnedEmpty(&missingIndex) &&
+        Read(reinterpret_cast<std::uintptr_t>(row), copy.data(), copy.size()) && ProjectRow(copy, projected, missingIndex);
     SetLastError(savedError);
     // Native wrappers inspect the row synchronously and do not retain it.
     // In particular FIND preserves the first match for key zero (empty seat).
@@ -62,10 +73,11 @@ std::int32_t __fastcall MenuAlias(const std::uint8_t* menu, std::int32_t index) 
     std::int32_t count = 0;
     std::int16_t seat = -1;
     std::uintptr_t status = 0;
-    const bool use = caller == g_base + 0x3065CD && OwnedEmpty() && index >= 0 && index < 4 &&
+    unsigned missingIndex = 0;
+    const bool use = caller == g_base + 0x3065CD && OwnedEmpty(&missingIndex) && index >= 0 && index < 4 &&
         Read(reinterpret_cast<std::uintptr_t>(menu), &count, sizeof(count)) && count > 0 && count <= 4 && index < count &&
         Read(reinterpret_cast<std::uintptr_t>(menu) + 8 + static_cast<unsigned>(index) * 0x20, &seat, sizeof(seat)) &&
-        (seat == 0 || seat == 2) &&
+        seat >= 0 && seat < 3 && static_cast<unsigned>(seat) != missingIndex &&
         Read(reinterpret_cast<std::uintptr_t>(menu) + 0x20 + static_cast<unsigned>(index) * 0x20, &status, sizeof(status)) && status != 0;
     SetLastError(savedError);
     return g_original[3](menu, use ? seat : index);
@@ -79,16 +91,17 @@ std::int32_t __fastcall MenuKey(const std::uint8_t* menu, std::int32_t index) {
     // native code computes (1-2)*0x30, then a huge unsigned bitset index.
     // The loops' separate player-history block and every other reader delegate.
     const bool skip = (caller == g_base + 0x36A46A || caller == g_base + 0x36A727) &&
-        (key == 1 || key == 14) && OwnedEmpty();
+        (key == 1 || key == 14) && OwnedTuple();
     SetLastError(savedError);
     return skip ? 0 : key;
 }
 }
-bool ProjectRow(const std::array<std::uint8_t, 4>& row, std::array<std::uint8_t, 4>& projected) {
+bool ProjectRow(const std::array<std::uint8_t, 4>& row, std::array<std::uint8_t, 4>& projected, unsigned missingIndex) {
     projected = row;
+    if (missingIndex != 1 && missingIndex != 2) return false;
     bool changed = false;
     for (auto& selector : projected) {
-        if ((selector & 0x1F) == 1) { selector = static_cast<std::uint8_t>((selector & 0xE0) | 0x12); changed = true; }
+        if (static_cast<unsigned>(selector & 0x1F) == missingIndex) { selector = static_cast<std::uint8_t>((selector & 0xE0) | 0x12); changed = true; }
     }
     return changed;
 }
@@ -147,15 +160,48 @@ bool Ready() { return g_ready.load(std::memory_order_acquire); }
 bool RetainsMinHookResources() { return g_retained.load(std::memory_order_acquire); }
 void NativeResolved() { g_owned.store(0, std::memory_order_release); }
 void Arm(std::uint16_t remote, std::uint16_t local) {
-    g_owned.store(remote && local ? static_cast<std::uint64_t>(remote) | (static_cast<std::uint64_t>(local) << 32) : 0,
-                  std::memory_order_release);
+    ArmTuple({remote, 0, local}, 1);
 }
-bool Shutdown() {
+void ArmCompanionTuple(const std::array<std::uint16_t, 3>& members) {
+    if (!members[0] || (members[1] != 0x5C && members[1] != 0x5D) || !members[2]) return;
+    g_owned.store(static_cast<std::uint64_t>(members[0]) |
+        (static_cast<std::uint64_t>(members[1]) << 16) |
+        (static_cast<std::uint64_t>(members[2]) << 32) |
+        (std::uint64_t{1} << 48), std::memory_order_release);
+}
+void ArmTuple(const std::array<std::uint16_t, 3>& members, unsigned missingIndex) {
+    bool valid = missingIndex == 1 || missingIndex == 2;
+    for (unsigned i = 0; i < 3; ++i)
+        valid = valid && (i == missingIndex ? members[i] == 0 : members[i] != 0);
+    if (!valid) return; // invalid replacement cannot retire an owned zero
+    g_owned.store(static_cast<std::uint64_t>(members[0]) |
+        (static_cast<std::uint64_t>(members[1]) << 16) |
+        (static_cast<std::uint64_t>(members[2]) << 32) |
+        (static_cast<std::uint64_t>(missingIndex + 1) << 48), std::memory_order_release);
+}
+bool Shutdown(const std::array<std::uint16_t, 3>* restoredNative) {
     // Caller must restore physical members first. Do not retire these hooks as
     // a side effect of a runtime death while the installed member is still zero.
-    if (g_owned.load(std::memory_order_acquire)) {
-        std::uint16_t member = 0;
-        if (!Read(g_base + playerkit::RVA_RESOLVED_MEMBERS + 2, &member, sizeof(member)) || member == 0) return false;
+    const auto owner = g_owned.load(std::memory_order_acquire);
+    if (owner) {
+        const auto tag = static_cast<unsigned>(owner >> 48);
+        if (tag < 1 || tag > 3) return false;
+        if (tag == 1) {
+            // A changed or unreadable tuple is not evidence of native restoration.
+            // PartyNative supplies its original tuple only after restoration and
+            // the post-read complete normally; verify all three again here.
+            std::array<std::uint16_t, 3> current {};
+            if (!restoredNative ||
+                !Read(g_base + playerkit::RVA_RESOLVED_MEMBERS, current.data(), sizeof(current)) ||
+                current != *restoredNative) return false;
+            const std::array<std::uint16_t, 3> owned {
+                static_cast<std::uint16_t>(owner), static_cast<std::uint16_t>(owner >> 16),
+                static_cast<std::uint16_t>(owner >> 32)};
+            if (current == owned) return false;
+        } else {
+            std::uint16_t member = 0;
+            if (!Read(g_base + playerkit::RVA_RESOLVED_MEMBERS + 2u * (tag - 1), &member, sizeof(member)) || member == 0) return false;
+        }
     }
     g_owned.store(0, std::memory_order_release);
     if (!g_ready.exchange(false, std::memory_order_acq_rel)) return true;

@@ -14,27 +14,43 @@ enum class Plan : std::uint8_t {
     Unsupported,  // accepted, but not the qualified case: native party
     TwoClones,    // both native friend seats are remote-player clones (three players)
     OneClone,     // two players: member 0 = the other player's clone, member 1 = native Goofy, member 2 = own kit
-    OneCloneEmpty // two players: member 0 = remote clone, member 1 = absent (0), member 2 = own kit
+    OneCloneEmpty, // two players: member 0 = remote clone, member 1 = absent (0), member 2 = own kit
+    OneCloneDonald, // two players: remote clone, native Donald, canonical own kit
+    SoloDonald,    // one player: canonical own kit, native Donald, absent
+    SoloGoofy      // one player: canonical own kit, native Goofy, absent
 };
 // A plan that spawns clones, and how many.
-constexpr bool IsOneClone(Plan p) { return p == Plan::OneClone || p == Plan::OneCloneEmpty; }
+constexpr bool IsOneClone(Plan p) { return p == Plan::OneClone || p == Plan::OneCloneEmpty || p == Plan::OneCloneDonald; }
 constexpr bool ClonePlan(Plan p) { return p == Plan::TwoClones || IsOneClone(p); }
 constexpr unsigned PlanClones(Plan p) { return p == Plan::TwoClones ? 2u : IsOneClone(p) ? 1u : 0u; }
+constexpr bool SoloPlan(Plan p) { return p == Plan::SoloDonald || p == Plan::SoloGoofy; }
+constexpr bool SupportedPlan(Plan p) { return ClonePlan(p) || SoloPlan(p); }
+constexpr bool EmptyPlan(Plan p) { return p == Plan::OneCloneEmpty || SoloPlan(p); }
+constexpr std::uint16_t CompanionMember(Plan p) {
+    return p == Plan::OneCloneDonald || p == Plan::SoloDonald ? DONALD : p == Plan::OneClone || p == Plan::SoloGoofy ? GOOFY : 0;
+}
+enum class HostAIChoice : std::uint8_t { Default, None, Donald, Goofy };
 const char* PlanName(Plan p);
 
 // Machine-local projection. Host-view seats are translated so this machine's
-// own player stays the canonical (last-built) player; the two friend seats
+// own player stays canonical (last-built with clones, native member0 in solo); the two friend seats
 // then hold the other two network slots. Only rule DEFAULT with every seat a
 // player is TwoClones.
 // Two players: remote in seat 1, Goofy in seat 2 is OneClone; replacing Goofy
 // with Empty is OneCloneEmpty.
-// Donald kept and permutations remain Unsupported.
+// Donald in seat 2 is OneCloneDonald. Remote/AI seat permutations remain Unsupported.
+// One host with an explicit chosen AI in seat 1 and Empty seat 2 is SoloDonald/SoloGoofy.
 Plan Project(const PartyLayout& layout, std::uint8_t localSlot);
 // Host opt-in: preserve the default authoring contract; only Default with two players
 // changes Goofy seat 2 to Empty. Other rules and three-player layouts are unchanged.
 std::optional<PartyLayout> AuthorLayout(RoomTransition room, std::uint64_t version,
         PartyApplyReason reason, PartyRule rule, std::uint32_t forcedAllyObject,
         const std::array<std::uint64_t,3>& roster, std::array<std::uint8_t,2> priority={1,2}, bool noAI=false);
+// Chosen Donald/Goofy changes two-player AI seat 2 and admits explicit host-only
+// [Local, chosen AI, Empty]. Native application still needs the missing-seat gates.
+std::optional<PartyLayout> AuthorLayout(RoomTransition room, std::uint64_t version,
+        PartyApplyReason reason, PartyRule rule, std::uint32_t forcedAllyObject,
+        const std::array<std::uint64_t,3>& roster, std::array<std::uint8_t,2> priority, HostAIChoice choice);
 
 // Standing intent (lead decision, scoped to this GoA-only candidate): the newest
 // accepted layout of this session generation, roster and host connection,
@@ -232,10 +248,10 @@ int PresentIndex(const std::array<std::uint64_t, 3>& roster, std::uint8_t localS
 // VUH-1786 host: is the intent for a target due (first send, new generation/roster, or an unechoed retry)?
 // Party kits: also due when `kits` differs from the vector last published for that target.
 bool HostIntentDue(const HostPublished& last, std::uint32_t generation, const std::array<std::uint64_t, 3>& roster,
-                   std::uint64_t nowMs, const std::array<std::uint16_t, 3>& kits = {});
+                   std::uint64_t nowMs, const std::array<std::uint16_t, 3>& kits = {}, bool soloAllowed = false);
 bool HostShouldPublish(const HostPublished& last, std::uint32_t generation, const RoomTransition& location,
                        const std::array<std::uint64_t, 3>& roster, bool rowRead,
-                       const std::array<std::uint8_t, 4>& row, std::uint64_t nowMs, PartyApplyReason& reason);
+                       const std::array<std::uint8_t, 4>& row, std::uint64_t nowMs, PartyApplyReason& reason, bool soloAllowed = false);
 // True when the same tuple was sent, never echoed, and the re-send cap is spent.
 bool HostEchoGivenUp(const HostPublished& last, std::uint32_t generation, const RoomTransition& location,
                      const std::array<std::uint64_t, 3>& roster);

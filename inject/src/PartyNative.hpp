@@ -3,15 +3,14 @@
 // PartyNative — native application of the host party layout (VUH-1519).
 // Default OFF: nothing is hooked, read or written unless KH2COOP_PARTY_NATIVE=1.
 //
-// Minimal qualified case only: GoA (04/1A, NOW evt program 0, no event or
-// cutscene), native DEFAULT party (save row 00/01/02/12, resolved members
-// 1/2 = Donald 0x5C / Goofy 0x5D), three players present and the host layout
-// putting a remote player in both friend seats. On such an area load the
-// shared 3E2EB0 post-hook (PlayerKit.cpp) replaces resolved members 1 and 2
-// with Sora (0x54), so Friend1/Friend2 spawn as player-class Sora clones and
-// NativePrivateStatus gives both clones private status records. The selectors
-// in the save-backed party row are never written; MEMT is never written.
-// Every other layout, room or rule leaves the native resolution untouched.
+// Pinned native DEFAULT loads in 04/1A and 04/0A (evt 0, no active event):
+// three players use two clones; two players use one clone plus Goofy by default,
+// or host-chosen Donald/Goofy/Empty. An explicit solo choice uses native member0
+// plus one native companion and an empty member2, with no clones. Empty members
+// require scoped native row projections and a matching pinned spawn package.
+// NativePrivateStatus owns clone status records. SAVE selectors and MEMT remain
+// untouched. Other rooms, native forced parties and unsupported layouts resolve
+// natively; live acceptance belongs to each staged fixture, not this header.
 //
 // Timing: the resolver runs during the load, before the room-pinned
 // PartyLayout for that room can exist. Application therefore uses the standing
@@ -54,8 +53,10 @@ bool Requested();
 using ReadyProbe = bool (*)();
 void ConfirmLocalReadiness(bool resolverHookInstalled, ReadyProbe neutralInputConfigured);
 // The clones the last applied load spawned while the members still hold what it wrote: 2 (TwoClones),
-// 1 (OneClone: [clone kit, Goofy, own kit]), otherwise 0. Read by NativePrivateStatus and EntityHook (game thread).
+// 1 (one-clone plans: [clone kit, chosen AI/empty, own kit]), otherwise 0. Read by NativePrivateStatus and EntityHook (game thread).
 unsigned AppliedClones();
+// Exact currently applied physical tuple contains one native AI companion (Donald/Goofy).
+std::uint16_t AppliedCompanionMember();
 // Two players: the puppet index of the one connected other player (the clone's owner), or -1.
 int PresentPuppetIndex();
 // Party kits (KH2COOP_PARTY_KITS=1 accepted at Install): per-seat kits are on for this machine.
@@ -63,7 +64,7 @@ bool KitsActive();
 // Party kits: the clone kits the last applied load wrote (rev3: members 0/1; member 2 = AppliedLocal()).
 // OneClone: member2 = 0 (member 1 is native Goofy). False when not applied.
 bool AppliedMembers(std::uint16_t& member1, std::uint16_t& member2);
-// Rev2 S3: the local member 0 the applied load expected (this machine's own kit); 0 when not applied.
+// Canonical local kit of the applied plan (member2 with clones, member0 solo); 0 when not applied.
 std::uint16_t AppliedLocal();
 // Party kits: the kit of puppet `index`'s player in the applied load (puppet 0 = the lower other
 // network slot = clone kit 1 (member 0), puppet 1 = clone kit 2 (member 1)); 0 when nothing is applied.
@@ -71,7 +72,7 @@ std::uint16_t PuppetKit(int index);
 // Party kits, owner thread: the latest VALIDATED pose roster byte of puppet `index` (0 Sora,
 // 1 Roxas; anything else = unsupported). The host builds its intent kits from these.
 void NoteRemoteKit(int index, std::uint8_t roster);
-// After playerkit::Shutdown disabled the shared hook.
+// After playerkit::StopResolver disabled the shared hook, before PlayerKit restoration.
 void Shutdown();
 #endif
 
