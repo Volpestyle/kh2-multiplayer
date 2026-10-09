@@ -400,11 +400,17 @@ Disk saves remained unchanged; protected in-memory checks had zero changes
 outside the typed native model. The shipped DLL is `0aa42342`; full source/product
 pins and the 69 passing own-process native executions are in revision5.
 
-**Solo remains UNQUALIFIED.** The shared product includes explicit solo choice,
-but the solo Donald/Goofy attempts stopped at a fixture type gate (runs
-`20261008-185756_party_choice_solo_donald_1` and
-`20261008-190128_party_choice_solo_goofy_1`). Those failures establish no solo
-live acceptance. Corrected solo fixtures are separate work.
+**Solo Donald and Goofy are now qualified** by corrected rev7 fixtures:
+`build/scenarios/20261008-201415_party_choice_solo_donald_1` and
+`build/scenarios/20261008-201829_party_choice_solo_goofy_1`. Both passed all
+steps; each closure proves all four disk saves unchanged. The product source
+was unchanged: earlier rev5/rev6 failures were fixture identity/source gates.
+Rev7 selects layout versus target intent using the accepted pre-load publication
+order, rather than requiring target-intent provenance when a newer matching
+layout legitimately supplies the first load. Matched OFF inventory, native
+companion HP/original-AI receipts, no puppet ownership, sparse census, pause and
+first-Items character page and next-load native restore passed. This qualifies
+solo session-start choice; live peer-join retirement and full menus remain open.
 
 With the existing native-party/private-status/neutral-input opt-ins, the host
 may set `KH2COOP_PARTY_AI=donald` or `goofy` before launch. For two players the
@@ -438,9 +444,12 @@ its later departure cannot automatically repopulate a solo chosen layout;
 only a genuinely new host connection can opt in again. Generation-zero hold
 semantics remain those of the landed runtime-liveness implementation.
 
-Two-player Donald and Goofy have passed; solo Donald and solo Goofy remain
-queued for corrected-fixture qualification. The Donald case owns the fresh
-install-control receipt needed by the remaining fixtures. Each fixture first completes a
+Two-player Donald/Goofy and solo Donald/Goofy have passed. The two-player
+Donald case owns the fresh install-control receipt reused by the remaining
+unchanged-product fixtures. Rev7 solo Donald and Goofy were independently
+ADOPTed in codex-review-rev7-solo-donald.md and codex-review-rev7-solo-goofy.md
+under build/rig/party-choice-20261007-01. Reused verification comprises69 native
+executions plus208 audited socketless checks per solo fixture. Each fixture first completes a
 matched feature-OFF inventory using typed native SAVE semantics; it may not
 learn arbitrary byte exclusions. Menus cover pause and the first Items character
 page only. World allies, interactive choice during a session, full Party/Status
