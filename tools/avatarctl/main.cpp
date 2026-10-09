@@ -7,7 +7,7 @@
 //       Play a recording into a puppet slot at its recorded pace (times are
 //       re-based on now), optionally offset so it doesn't overlap the player.
 //   avatarctl synth --pid N [--puppet 0|1] [--seconds S] [--center X,Y,Z]
-//                   [--radius R] [--motion ID]
+//                   [--radius R] [--motion ID] [--world 0..255 --room 0..255]
 //       Drive a puppet around a circle (run speed) — tests the puppet driver
 //       before avatar capture exists.
 //   avatarctl fake-local --pid N [--seconds S] [--center X,Y,Z]
@@ -24,6 +24,8 @@
 #include "kh2coop/AvatarBridge.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/WorldBridge.hpp"
+#include "kh2coop/AvatarPositionFaultChannel.hpp"
+#include "kh2coop/AvatarSynth.hpp"
 
 #include <timeapi.h>
 
@@ -118,16 +120,7 @@ int puppetIndex(std::vector<std::string>& args) {
 
 // Circle path at run speed, as a pose at time t (seconds).
 AvatarState circlePose(float t, const Vec3& center, float radius, std::uint32_t motion) {
-    constexpr float kOmega = 2.0f; // rad/s -> ~600 units/s at r=300
-    const float ang = kOmega * t;
-    AvatarState a;
-    a.position = {center.x + radius * std::cos(ang), center.y, center.z + radius * std::sin(ang)};
-    a.velocity = {-radius * kOmega * std::sin(ang), 0.0f, radius * kOmega * std::cos(ang)};
-    a.rotationY = std::atan2(a.velocity.x, a.velocity.z);
-    a.motionId = motion;
-    a.motionTime = t * 60.0f; // frames at 60 fps
-    a.motionSpeed = 1.0f;
-    return a;
+    return avatarsynth::Circle(t,center,radius,motion);
 }
 
 std::string avatarJson(const AvatarState& a) {
@@ -225,6 +218,37 @@ int cmdReplay(std::vector<std::string> args) {
     return 0;
 }
 
+int cmdFaultArm(std::vector<std::string> args) {
+    const auto pid=static_cast<DWORD>(std::stoul(option(args,"--pid").value_or("0")));
+    const auto activation=parseVec(option(args,"--activation-target").value_or("nan,nan,nan"));
+    requireEmpty(args);
+    if (!pid || !avatarfault::FiniteTarget(activation)) throw std::runtime_error("fault-arm requires pid and finite bounded activation-target");
+    wchar_t name[96] {}; avatarfault::MappingName(name,96,pid);
+    const auto mapping=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,name);
+    if (!mapping) throw std::runtime_error("diagnostic mapping absent (default off)");
+    auto* shared=static_cast<avatarfault::Shared*>(MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(avatarfault::Shared)));
+    if (!shared) { CloseHandle(mapping); throw std::runtime_error("diagnostic mapping unreadable"); }
+    avatarfault::Offer offer {}; const auto now=GetTickCount64();
+    if (!avatarfault::Snapshot(shared->offerSequence,shared->offer,offer) || offer.magic!=avatarfault::Magic ||
+        offer.version!=1 || offer.size!=sizeof(offer) || offer.pid!=pid || !offer.creation || !offer.eligible ||
+        now<offer.tick || now-offer.tick>500) {
+        UnmapViewOfFile(shared);CloseHandle(mapping);throw std::runtime_error("fresh eligible native Donald offer required");
+    }
+    avatarfault::Request request {offer,(now<<16)^GetCurrentProcessId(),now,now+avatarfault::DormantMs,
+        activation,avatarfault::Frames,avatarfault::ActiveMs};
+    if (!request.nonce) request.nonce=1;
+    if (InterlockedCompareExchange(&shared->requestSequence,1,0)!=0) {
+        UnmapViewOfFile(shared);CloseHandle(mapping);throw std::runtime_error("fault request already consumed; renewal refused");
+    }
+    std::memcpy(&shared->request,&request,sizeof(request)); MemoryBarrier();InterlockedExchange(&shared->requestSequence,2);
+    UnmapViewOfFile(shared);CloseHandle(mapping);
+    std::cout << std::setprecision(std::numeric_limits<float>::max_digits10) << "{\"ok\":true,\"command\":\"fault-arm\",\"pid\":" << pid << ",\"nonce\":" << request.nonce
+        << ",\"tick\":" << now << ",\"deadline\":" << request.deadline << ",\"actor\":" << offer.binding.actor
+        << ",\"handle\":" << offer.binding.handle << ",\"transition\":" << offer.binding.transition
+        << ",\"load\":" << offer.binding.load << ",\"puppetIndex\":" << unsigned(offer.binding.puppetIndex)
+        << ",\"activation\":[" << activation.x << ',' << activation.y << ',' << activation.z << "]}\n";
+    return 0;
+}
 int cmdSynth(std::vector<std::string> args) {
     AvatarBridge bridge;
     openBridge(args, bridge);
@@ -233,6 +257,23 @@ int cmdSynth(std::vector<std::string> args) {
     const Vec3 center = parseVec(option(args, "--center").value_or("0,0,0"));
     const float radius = std::stof(option(args, "--radius").value_or("300"));
     const auto motion = static_cast<std::uint32_t>(std::stoul(option(args, "--motion").value_or("2")));
+    const auto worldOption=option(args,"--world"),roomOption=option(args,"--room");
+    const auto roomNumber=[](const std::optional<std::string>& value)->unsigned {
+        if (!value) return 0;
+        std::size_t consumed=0;const auto parsed=std::stoul(*value,&consumed,0);
+        if (consumed!=value->size() || parsed>255) throw std::runtime_error("synth room IDs must be integers 0..255");
+        return static_cast<unsigned>(parsed);
+    };
+    const auto world=roomNumber(worldOption),room=roomNumber(roomOption);
+    if (!avatarsynth::ValidRoomOptions(bool(worldOption),bool(roomOption),world,room))
+        throw std::runtime_error("synth --world and --room must be supplied together");
+    const auto teleportAfter=option(args,"--teleport-after-ms"), teleportDelta=option(args,"--teleport-delta");
+    const auto teleportMs=teleportAfter?std::stoull(*teleportAfter):0;
+    const Vec3 delta=teleportDelta?parseVec(*teleportDelta):Vec3{};
+    if (bool(teleportAfter)!=bool(teleportDelta) || (teleportAfter &&
+        (!teleportMs || teleportMs>60000 || !avatarfault::FiniteTarget(delta) ||
+         std::abs(delta.x)>100 || std::abs(delta.y)>100 || std::abs(delta.z)>100)))
+        throw std::runtime_error("teleport requires paired options: delay 1..60000 ms, finite delta <=100 per axis");
     requireEmpty(args);
 
     const auto start = nowMs();
@@ -240,11 +281,13 @@ int cmdSynth(std::vector<std::string> args) {
     std::uint64_t frames = 0;
     for (std::uint64_t due = start; due < end; due += kFrameMs) {
         sleepUntil(due);
-        PuppetPose p;
-        p.active = 1;
-        p.provenance.producer = PuppetProducer::Standalone;
-        p.pose = circlePose(static_cast<float>(nowMs() - start) / 1000.0f, center, radius, motion);
+        const auto sample=avatarsynth::Puppet(static_cast<float>(nowMs()-start)/1000.0f,center,radius,motion,
+            static_cast<std::uint16_t>(world),static_cast<std::uint16_t>(room));
+        PuppetPose p; p.active=sample.active;p.pose=sample.pose;p.provenance=sample.provenance;
         p.pose.serverTimeMs = nowMs();
+        if (teleportMs && p.pose.serverTimeMs-start>=teleportMs) {
+            p.pose.position.x+=delta.x;p.pose.position.y+=delta.y;p.pose.position.z+=delta.z;
+        }
         bridge.PublishPuppet(idx, p);
         ++frames;
     }
@@ -508,6 +551,7 @@ int main(int argc, char* argv[]) {
         if (cmd == "record") return cmdRecord(std::move(args));
         if (cmd == "replay") return cmdReplay(std::move(args));
         if (cmd == "synth") return cmdSynth(std::move(args));
+        if (cmd == "fault-arm") return cmdFaultArm(std::move(args));
         if (cmd == "fake-local") return cmdFakeLocal(std::move(args));
         if (cmd == "peek") return cmdPeek(std::move(args));
         if (cmd == "observe") return cmdObserve(std::move(args));

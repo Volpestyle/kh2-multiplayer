@@ -70,6 +70,10 @@
 #include "DownedSpectateAdapter.hpp"
 #include "DownedSpectateChannel.hpp"
 #include "PuppetHold.hpp"
+#include "AvatarPositionDiagnostic.hpp"
+#include "AvatarPositionFaultBinding.hpp"
+#include "kh2coop/AvatarPositionFaultChannel.hpp"
+#include <limits>
 #include "SpawnPickHook.hpp"
 
 namespace kh2coop {
@@ -426,6 +430,7 @@ struct PuppetDriver {
     bool noCollideSaved = false;
     bool applied = false;       // prior native drive, independent of current pose permission
     nativehittrace::ActorSnapshot boundActor {}; // checked metadata for bounded release
+    avatarposition::Monitor positionDiagnostic {};
     puppethold::HeldClock heldClock {}; // VUH-1787: frames the pose has been AvatarHeld
 };
 static PuppetDriver g_puppets[2];
@@ -1489,6 +1494,7 @@ static void ForgetPuppetActor(PuppetDriver& d) {
     d.lastAnim = -1;
     d.applied = false;
     d.boundActor = {};
+    d.positionDiagnostic.Reset();
 }
 
 // Frame start: suspend puppets when a transition is requested and resume
@@ -1524,7 +1530,9 @@ static bool UpdatePuppetSuspension() {
     return g_puppetsSuspended;
 }
 
+static void PollPositionFaultIdle();
 static void PollPuppetPoses() {
+    PollPositionFaultIdle();
     const bool suspended = UpdatePuppetSuspension();
     if (suspended || !hud::ValidAuthority(enemysync::CapturePuppetAuthority()))
         render::InvalidateCoopHud();
@@ -1536,6 +1544,7 @@ static void PollPuppetPoses() {
         // separate fact: asking the current predicate cannot detect its edge.
         const bool wasApplied = driver.applied;
         if (!IsPuppetActive(i)) {
+            driver.positionDiagnostic.Reset();
             driver.pose = {};
             driver.have = false;
         }
@@ -1555,6 +1564,7 @@ static void PollPuppetPoses() {
         }
         driver.heldClock.Note(driver.have && (driver.pose.pose.flags & kh2coop::AvatarHeld), g_frameCounter);
         const bool active = IsPuppetActive(i);
+        if (!active) driver.positionDiagnostic.Reset();
         if (wasApplied && !active) {
             RestorePuppetTeam(driver, i);
             driver.lastAnim = -1;
@@ -2566,6 +2576,124 @@ static int PuppetTraceBudget() {
     return budget > 0 ? budget-- : 0;
 }
 
+static avatarposition::Scope PositionScope(int index, uintptr_t actor) {
+    const auto& d = g_puppets[index];
+    const auto& p = d.pose.pose;
+    std::uint32_t handle=0;
+    __try { handle = *reinterpret_cast<volatile const uint32_t*>(actor); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return {}; }
+    return avatarposition::PoseScope(p,d.pose.provenance,actor,handle,warp::TransitionSerial(),warp::LoadSerial(),static_cast<std::uint8_t>(index));
+}
+static Vec3 ReadPuppetPosition(uintptr_t actor) {
+    // Observational failures cannot skip the existing native transform stores.
+    __try {
+        const auto entity = actor + offsets::actor::ENTITY_TRANSFORM;
+        return {*reinterpret_cast<volatile const float*>(entity + offsets::entity::POS_X),
+            *reinterpret_cast<volatile const float*>(entity + offsets::entity::POS_Y),
+            *reinterpret_cast<volatile const float*>(entity + offsets::entity::POS_Z)};
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        const auto invalid = std::numeric_limits<float>::quiet_NaN();
+        return {invalid, invalid, invalid};
+    }
+}
+static void LogPositionReceipt(const avatarposition::Receipt& r) {
+    __try {
+    Log("[avatar-position] t=%llu phase=%s state=%s frame=%u seq=%u puppetIndex=%u actor=%p handle=%08X transition=%u load=%u producer=%u generation=%u localSlot=%u owner=%u character=%u ownerConnection=%llu localConnection=%llu hostConnection=%llu world=%u room=%u streak=%u finite=%u budgetExhausted=%u error=%.17g target=(%.9g,%.9g,%.9g) observed=(%.9g,%.9g,%.9g)",
+        static_cast<unsigned long long>(GetTickCount64()), avatarposition::Name(r.phase), r.recovered ? "recovered" : "deviation", r.frame, r.seq, r.scope.puppetIndex,
+        reinterpret_cast<void*>(r.scope.actor), r.scope.handle, r.scope.transition, r.scope.load,
+        static_cast<unsigned>(r.scope.provenance.producer), r.scope.provenance.generation, unsigned(r.scope.provenance.localSlot), r.scope.owner, r.scope.character,
+        static_cast<unsigned long long>(r.scope.provenance.ownerConnectionId),
+        static_cast<unsigned long long>(r.scope.provenance.localConnectionId),
+        static_cast<unsigned long long>(r.scope.provenance.hostConnectionId),
+        r.scope.world, r.scope.room, r.streak, unsigned(r.finite), unsigned(r.budgetExhausted), r.error,
+        r.target.x, r.target.y, r.target.z, r.observed.x, r.observed.y, r.observed.z);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { /* Log failure grants no gameplay authority. */ }
+}
+static void ObservePuppetBeforeUpdate(uintptr_t actor) {
+    const int index = PuppetIndexFor(actor);
+    if (index < 0) return;
+    auto& d = g_puppets[index];
+    const auto scope = PositionScope(index, actor);
+    d.positionDiagnostic.Bind(scope, !scope.actor || (d.pose.pose.flags & AvatarHeld) != 0);
+    d.positionDiagnostic.BeforeUpdate(g_frameCounter, [actor] { return ReadPuppetPosition(actor); }, &LogPositionReceipt);
+}
+// Explicit diagnostic fixture fault: DLL-owned mapping, never an actor writer.
+static avatarfault::Gate g_positionFault;
+static avatarfault::Shared* g_positionFaultShared = nullptr;
+static HANDLE g_positionFaultMapping = nullptr;
+static std::uint64_t g_positionFaultCreation = 0;
+static bool PositionFaultEnabled() {
+    static const bool enabled = [] {
+        char value[4] {};
+        if (GetEnvironmentVariableA("KH2COOP_AVATAR_POSITION_FAULT",value,sizeof(value)) != 1 || value[0] != '1') return false;
+        g_positionFaultCreation = avatarfault::ProcessCreation();
+        if (!g_positionFaultCreation) return false;
+        wchar_t name[96] {}; avatarfault::MappingName(name,96,GetCurrentProcessId());
+        g_positionFaultMapping = CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(avatarfault::Shared),name);
+        if (!g_positionFaultMapping) return false;
+        if (GetLastError() == ERROR_ALREADY_EXISTS) { CloseHandle(g_positionFaultMapping); g_positionFaultMapping=nullptr; return false; }
+        g_positionFaultShared = static_cast<avatarfault::Shared*>(MapViewOfFile(g_positionFaultMapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(avatarfault::Shared)));
+        if (!g_positionFaultShared) { CloseHandle(g_positionFaultMapping); g_positionFaultMapping=nullptr; return false; }
+        return true;
+    }();
+    return enabled;
+}
+static void LogPositionFault(const avatarfault::Event& e) {
+    const auto& b=e.request.offer.binding;
+    const auto observed=ReadPuppetPosition(static_cast<uintptr_t>(b.actor));
+    Log("[avatar-position-fault] state=%s reason=%s nonce=%llu tick=%llu frame=%u skipped=%u actor=%p handle=%08X transition=%u load=%u puppetIndex=%u producer=%u generation=%u localSlot=%u owner=%u character=%u ownerConnection=%llu localConnection=%llu hostConnection=%llu world=%u room=%u activation=(%.9g,%.9g,%.9g) observed=(%.9g,%.9g,%.9g)",
+        e.state,e.reason,static_cast<unsigned long long>(e.request.nonce),static_cast<unsigned long long>(e.tick),e.frame,e.skipped,
+        reinterpret_cast<void*>(b.actor),b.handle,b.transition,b.load,b.puppetIndex,b.producer,b.generation,b.localSlot,b.owner,b.character,
+        static_cast<unsigned long long>(b.ownerConnection),static_cast<unsigned long long>(b.localConnection),static_cast<unsigned long long>(b.hostConnection),
+        b.world,b.room,e.request.activation.x,e.request.activation.y,e.request.activation.z,observed.x,observed.y,observed.z);
+}
+static bool SkipPositionFaultImpl(int index, uintptr_t actor, const avatarposition::Scope& scope, Vec3 target) {
+    if (!PositionFaultEnabled()) return false;
+    const auto now=GetTickCount64();
+    const auto native=CaptureHitActor(actor);
+    using namespace nativehittrace;
+    avatarfault::Admission admission {};
+    admission.active=IsPuppetActive(index) && PuppetTarget(index)==actor;
+    admission.unheld=!(g_puppets[index].pose.pose.flags & AvatarHeld);
+    admission.friend1=index==0;
+    admission.repeated=(native.readMask & (ActorRepeated|ActorId|ActorType))==(ActorRepeated|ActorId|ActorType);
+    admission.objectId=native.objectId;admission.type=native.type;
+    admission.readable=ReadHitTrace(actor,admission.handle) &&
+        ReadHitTrace(g_exeBase+offsets::WORLD_ID,admission.world) && ReadHitTrace(g_exeBase+offsets::ROOM_ID,admission.room) &&
+        ReadHitTrace(g_exeBase+offsets::OPEN_MENU,admission.menu) && ReadHitTrace(g_exeBase+offsets::CUTSCENE_STATE,admission.cutscene) &&
+        ReadHitTrace(g_exeBase+offsets::EVENT_CONTEXT,admission.event) && avatarfault::FiniteTarget(ReadPuppetPosition(actor));
+    const auto binding=avatarposition::FaultBinding(scope);
+    const bool eligible=avatarfault::Admitted(admission,binding);
+    const avatarfault::Offer offer {avatarfault::Magic,g_positionFaultCreation,now,1,sizeof(avatarfault::Offer),GetCurrentProcessId(),eligible?1u:0u,binding};
+    auto* shared=g_positionFaultShared;
+    InterlockedIncrement(&shared->offerSequence); std::memcpy(&shared->offer,&offer,sizeof(offer));
+    MemoryBarrier(); InterlockedIncrement(&shared->offerSequence);
+    avatarfault::Request request {};
+    const LONG sequence=InterlockedCompareExchange(&shared->requestSequence,0,0);
+    const bool readable=!sequence || avatarfault::Snapshot(shared->requestSequence,shared->request,request);
+    return g_positionFault.Skip(true,readable,sequence?&request:nullptr,offer,target,now,g_frameCounter,&LogPositionFault);
+}
+static bool SkipPositionFaultCpp(int index, uintptr_t actor, const avatarposition::Scope& scope, Vec3 target) {
+    try { return SkipPositionFaultImpl(index,actor,scope,target); }
+    catch (...) { g_positionFault.Cancel(); return false; }
+}
+static bool SkipPositionFault(int index, uintptr_t actor, const avatarposition::Scope& scope, Vec3 target) {
+    __try { return SkipPositionFaultCpp(index,actor,scope,target); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { g_positionFault.Cancel(); return false; } // Ordinary stores remain authoritative.
+}
+static void PollPositionFaultIdleCpp() {
+    if (!g_positionFaultShared) return; // Default-off has no mapping or fault state.
+    try {
+        const auto now=GetTickCount64();
+        g_positionFault.Tick(now,g_frameCounter,&LogPositionFault);
+        if (g_positionFault.Consumed() && (!IsPuppetActive(0) || (g_puppets[0].pose.pose.flags & AvatarHeld)))
+            g_positionFault.Stop("inactive",now,g_frameCounter,&LogPositionFault);
+    } catch (...) { g_positionFault.Cancel(); }
+}
+static void PollPositionFaultIdle() {
+    __try { PollPositionFaultIdleCpp(); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { g_positionFault.Cancel(); }
+}
 static void ApplyPuppetTransform(void* actorObj, int index) {
     if (!IsPuppetActive(index) || PuppetTarget(index) != reinterpret_cast<uintptr_t>(actorObj)) return;
     BindPuppetDrive(index, reinterpret_cast<uintptr_t>(actorObj));
@@ -2582,9 +2710,16 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
             pose.position.x, pose.position.y, pose.position.z, pose.motionId,
             static_cast<unsigned>(pose.flags));
     }
-    *reinterpret_cast<float*>(entity + offsets::entity::POS_X) = pose.position.x;
-    *reinterpret_cast<float*>(entity + offsets::entity::POS_Y) = pose.position.y;
-    *reinterpret_cast<float*>(entity + offsets::entity::POS_Z) = pose.position.z;
+    auto& diagnostic = g_puppets[index].positionDiagnostic;
+    const auto scope = PositionScope(index, actor);
+    diagnostic.Bind(scope, !scope.actor || (pose.flags & AvatarHeld) != 0);
+    diagnostic.Apply(g_frameCounter, pose.seq, pose.position,
+        [actor] { return ReadPuppetPosition(actor); }, [entity,index,actor,scope](Vec3 position) {
+            if (SkipPositionFault(index,actor,scope,position)) return;
+            *reinterpret_cast<float*>(entity + offsets::entity::POS_X) = position.x;
+            *reinterpret_cast<float*>(entity + offsets::entity::POS_Y) = position.y;
+            *reinterpret_cast<float*>(entity + offsets::entity::POS_Z) = position.z;
+        }, &LogPositionReceipt);
     *reinterpret_cast<float*>(entity + offsets::entity::ROT_Y) = pose.rotationY;
     std::memset(reinterpret_cast<void*>(actor + ACTOR_VELOCITY), 0, 3 * sizeof(float));
     // Other terms EntityPositionPhysics (0x3B89A0) adds each frame (repos-60):
@@ -3149,6 +3284,8 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 
     // Always call original â€” even if our logic crashed, the game must continue.
     int savedFriendSlot = g_currentFriendSlot;
+    __try { ObservePuppetBeforeUpdate(reinterpret_cast<uintptr_t>(actorObj)); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { /* Diagnostic cannot suppress the original. */ }
     g_origPerEntityUpdate(actorObj);
 
     // POST-UPDATE overrides â€” run after g_origPerEntityUpdate has finished.
