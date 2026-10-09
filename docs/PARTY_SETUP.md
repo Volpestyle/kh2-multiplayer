@@ -609,9 +609,51 @@ save hashes unchanged and safetyPASS. The canonical report and closure receipt
 are the retained evidence; no separate verdict.json was produced.
 
 This qualifies only the bounded ordinary-root refusal. Direct or cached Status
-constructors, already-open Status pages, positive character/form viewing and
-Equipment ingress remain excluded. Graceful DLL Shutdown remains unqualified
-live; the fixture used owned process termination. Reused rev8 offline evidence
+constructors, already-open Status pages and positive character/form viewing
+remain excluded. Equipment ingress has its own bounded qualification below.
+Graceful DLL Shutdown remains unqualified live; the fixture used owned process termination. Reused rev8 offline evidence
 is138/138 serial CTest,74 native guard modes/1614 assertions,249 frozen socketless
 fixture checks and7 intercepted actual-product launch setup plans. The landing
 also requires a fresh isolated current-main build and serial integration suite.
+
+### Precautionary first Items player-row Equipment refusal (qualified 2026-10-09)
+
+The guard extends the installed Items admission callback34EE00 to refuse
+ordinary Cross on compact player row0 before native Equipment construction.
+It is precautionary: native Equipment cleanup can compact canonical personal
+equipment arrays, but the static audit does not prove an actual live value
+change, crash or save corruption. Positive Equipment construction and cleanup
+idempotence remain unqualified; no SAVE exclusion is added.
+
+The new refusal requires exact owned sparse-middle members `[remote,0,local]`,
+actual caller2F62EC and selection0, current state1, pending target-1 and stable
+callback phase0 or1. Both read brackets must identify the same compact table,
+count2, stored original seat0, raw key1 or14 and nonzero status pointer. Raw menu
+keys are not ObjEntry IDs and status pointers need not be actor-private or unique.
+The guard reads identification fields only. Unavailable or changed authority
+adds no new refusal and continues the existing policies/native callback.
+
+`KH2COOP_EQUIPMENT_ADMISSION_TRACE=1` enables a separate process-lifetime cap16
+of `[partyempty-equipment-items]` consumed-refusal receipts, including the actual
+pending, phase and row identity. Existing Party, Abilities and secondary Items
+streams/caps stay separate; no detour is added and all seven hook lifetimes stay
+unchanged. Native Cancel, Stock and existing shortcuts retain their prior policy.
+
+The qualified fixture positively identifies the first Items player row and
+independent UI count3/Stock tail2, issues actual Cross and requires a fresh consumed
+receipt plus unchanged Items state/model and protected SAVE. Observation phase
+pairs00,01 or11 are allowed; the native refusal tail does not reset phase and no
+phase0-settle requirement is invented. Direct/cached ingress, already-open
+Equipment, edits, Stock Cross and Equipment state2/-5 are outside this slice.
+Writer-expiry/leave plus next-load restoration reuse the qualified lifecycle;
+graceful DLL shutdown remains unqualified live.
+
+Live qualification: `20261009-004702_equipment_first_player_consumed_refusal_1`
+passed, with safety PASS and owned closure confirmed. Both machines positively
+refused first-player Equipment entry before construction while the protected SAVE
+model and inherited menu/restore gates passed. Retained rev9 evidence is146/146
+serial CTest,82 native admission modes/1692 assertions and307 socketless fixture
+checks; independent review3 ADOPT is recorded in
+`build/rig/party-menus-20261008/codex-review-rev9-fixture06-review3.md`.
+The landing additionally validates integration with the landed Status guard
+using a fresh isolated current-main build and serial CTest suite.

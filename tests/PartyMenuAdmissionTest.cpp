@@ -28,7 +28,7 @@ std::int32_t __fastcall Find(const std::uint8_t* row,int key){for(int i=0;i<4;++
 std::int32_t __fastcall Alias(const std::uint8_t*,int seat){++aliasCalls;lastAlias=seat;return seat==0?0x20000236:(seat==1?0x319:(seat==2?0x31A:(seat==3?0x3EE:0)));}
 std::int32_t __fastcall RawKey(const std::uint8_t* menu,int index){++keyCalls;int count=0;std::memcpy(&count,menu,4);if(index<0||index>=count)return 0;std::int16_t key=0;std::memcpy(&key,menu+10+index*32,2);return key;}
 std::vector<std::string> receipts;
-void Log(const char* format,...){char text[2048]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);if(std::strncmp(text,"[partyempty-items]",18)==0||std::strncmp(text,"[partyempty-party]",18)==0||std::strncmp(text,"[partyempty-abilities-",22)==0||std::strncmp(text,"[partyempty-status-root]",24)==0)receipts.emplace_back(text);SetLastError(0xBADF00D);}
+void Log(const char* format,...){char text[2048]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);if(std::strncmp(text,"[partyempty-equipment-items]",28)==0||std::strncmp(text,"[partyempty-items]",18)==0||std::strncmp(text,"[partyempty-party]",18)==0||std::strncmp(text,"[partyempty-abilities-",22)==0||std::strncmp(text,"[partyempty-status-root]",24)==0)receipts.emplace_back(text);SetLastError(0xBADF00D);}
 unsigned admissionCalls=0;
 std::uint8_t __fastcall Admission(int){++admissionCalls;return 1;}
 std::uint64_t __fastcall Feedback(int code,std::uint8_t){return static_cast<std::uint64_t>(code);}
@@ -63,7 +63,7 @@ constexpr std::uint8_t find[]{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,
 constexpr std::uint8_t alias[]{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,0x48,0x83,0xEC,0x20};
 constexpr std::uint8_t rawkey[]{0x85,0xD2,0x78,0x11,0x3B,0x11,0x7D,0x0D,0x48,0x63,0xC2,0x48,0xC1,0xE0,0x05,0x0F,0xBF,0x44,0x08,0x0A,0xC3};
 constexpr std::uint8_t admission[]{0x40,0x53,0x48,0x83,0xEC,0x20,0x8B,0xD9};
-void Seed(std::uint8_t* image){SeedParty(image);SeedAbilities(image);SeedStatus(image);const std::uint8_t* bytes[]{selector,key,find,alias,rawkey,admission};const std::size_t sizes[]{sizeof(selector),sizeof(key),sizeof(find),sizeof(alias),sizeof(rawkey),sizeof(admission)};for(unsigned i=0;i<6;++i)std::memcpy(image+sites[i],bytes[i],sizes[i]);const std::uint8_t c0[]{0xE8,0xE3,0x5F,0xFF,0xFF},c1[]{0xE8,0x66,0x22,0xF9,0xFF},c2[]{0xE8,0xA9,0x1F,0xF9,0xFF};std::memcpy(image+0x3065C8,c0,5);std::memcpy(image+0x36A465,c1,5);std::memcpy(image+0x36A722,c2,5);const std::uint8_t a0[]{0x4C,0x8D,0x0D,0x62,0x0C,0,0},a2[]{0x41,0xFF,0xD1},a3[]{0x8B,0x05,0x16,0x87,0x8F,0,0xC3};std::memcpy(image+0x34E197,a0,7);std::memcpy(image+0x2F62E9,a2,3);std::memcpy(image+0x2F5F30,a3,7);
+void Seed(std::uint8_t* image){SeedParty(image);SeedAbilities(image);SeedStatus(image);SeedEquipment(image);const std::uint8_t* bytes[]{selector,key,find,alias,rawkey,admission};const std::size_t sizes[]{sizeof(selector),sizeof(key),sizeof(find),sizeof(alias),sizeof(rawkey),sizeof(admission)};for(unsigned i=0;i<6;++i)std::memcpy(image+sites[i],bytes[i],sizes[i]);const std::uint8_t c0[]{0xE8,0xE3,0x5F,0xFF,0xFF},c1[]{0xE8,0x66,0x22,0xF9,0xFF},c2[]{0xE8,0xA9,0x1F,0xF9,0xFF};std::memcpy(image+0x3065C8,c0,5);std::memcpy(image+0x36A465,c1,5);std::memcpy(image+0x36A722,c2,5);const std::uint8_t a0[]{0x4C,0x8D,0x0D,0x62,0x0C,0,0},a2[]{0x41,0xFF,0xD1},a3[]{0x8B,0x05,0x16,0x87,0x8F,0,0xC3};std::memcpy(image+0x34E197,a0,7);std::memcpy(image+0x2F62E9,a2,3);std::memcpy(image+0x2F5F30,a3,7);
 const std::uint8_t argument[]{0x8B,0xCF},inputCall[]{0xE8,0xC8,0x80,0xFA,0xFF},resultCall[]{0x8B,0xC8,0xE8,0x01,0xD7,0xF9,0xFF},resultTest[]{0x84,0xC0},refusalBranch[]{0x0F,0x85,0x54,0x01,0,0},feedbackChoice[]{0xB9,0x02,0,0,0,0x84,0xC0,0xBA,0x04,0,0,0,0x0F,0x45,0xD1,0x8B,0xCA};
 std::memcpy(image+0x34E1A1,argument,sizeof(argument));std::memcpy(image+0x34E1A3,inputCall,sizeof(inputCall));std::memcpy(image+0x34E1A8,resultCall,sizeof(resultCall));std::memcpy(image+0x34E1AF,resultTest,sizeof(resultTest));std::memcpy(image+0x34E1B1,refusalBranch,sizeof(refusalBranch));std::memcpy(image+0x2F62EC,feedbackChoice,sizeof(feedbackChoice));}
 void Entry(std::uint8_t* menu,int i,std::int16_t seat,std::int16_t status){std::memcpy(menu+8+i*32,&seat,2);std::memcpy(menu+10+i*32,&status,2);const std::uintptr_t ptr=0x12345678;std::memcpy(menu+0x20+i*32,&ptr,8);}
@@ -81,11 +81,13 @@ int main(int argc,char** argv){
  if(std::strncmp(mode,"party-signature-",16)==0){const int i=std::atoi(mode+16);if(i<0||i>=static_cast<int>(std::size(partyGuardAddresses)))return 2;image[partyGuardAddresses[i]]^=1;}
  if(std::strncmp(mode,"abilities-signature-",20)==0){const int i=std::atoi(mode+20);if(i<0||i>=static_cast<int>(std::size(abilitiesGuardAddresses)))return 2;image[abilitiesGuardAddresses[i]]^=1;}
  if(std::strncmp(mode,"status-signature-",17)==0){const int i=std::atoi(mode+17);if(i<0||i>=static_cast<int>(std::size(statusGuardAddresses)))return 2;image[statusGuardAddresses[i]]^=1;}
+ if(std::strncmp(mode,"equipment-signature-",20)==0){const int i=std::atoi(mode+20);if(i<0||i>=static_cast<int>(std::size(equipmentGuardAddresses)))return 2;image[equipmentGuardAddresses[i]]^=1;}
  const bool trace=std::strcmp(mode,"trace")==0;
  SetEnvironmentVariableA("KH2COOP_ITEMS_ADMISSION_TRACE",trace?"1":(std::strcmp(mode,"trace-nonexact")==0?"10":nullptr));
  SetEnvironmentVariableA("KH2COOP_PARTY_ADMISSION_TRACE",trace?"1":nullptr);
  SetEnvironmentVariableA("KH2COOP_ABILITIES_ADMISSION_TRACE",trace?"1":(std::strcmp(mode,"trace-nonexact")==0?"10":nullptr));
  SetEnvironmentVariableA("KH2COOP_STATUS_ADMISSION_TRACE",trace?"1":(std::strcmp(mode,"trace-nonexact")==0?"10":nullptr));
+ SetEnvironmentVariableA("KH2COOP_EQUIPMENT_ADMISSION_TRACE",trace?"1":(std::strcmp(mode,"trace-nonexact")==0?"10":nullptr));
  const bool installed=empty::Install(base,harness::Log);
  const bool paired=std::strncmp(mode,"paired-",7)==0;
  const bool positive=std::strcmp(mode,"positive")==0||trace||std::strcmp(mode,"trace-nonexact")==0||paired;
@@ -123,7 +125,7 @@ int main(int argc,char** argv){
   Check(std::memcmp(save,before.data(),saveSize)==0,"paired complete synthetic SAVE remains unchanged");
   std::printf("checks=%u failures=%u mode=%s\n",checks,failures,mode);return failures?1:0;
  }
- if(!positive){if((std::strncmp(mode,"signature-",10)==0||std::strncmp(mode,"party-signature-",16)==0||std::strncmp(mode,"abilities-signature-",20)==0||std::strncmp(mode,"status-signature-",17)==0))Check(harness::created==0&&!empty::Ready(),"signature mismatch refuses before hook creation and readiness");Check(harness::removed==0,"failure retains all created trampolines");Check(empty::RetainsMinHookResources()==(harness::created!=0),"retained resource receipt follows actual created callbacks");for(unsigned i=0;i<harness::created;++i)Check(!harness::hooks[i].enabled,"rollback disables every created hook");
+ if(!positive){if((std::strncmp(mode,"signature-",10)==0||std::strncmp(mode,"party-signature-",16)==0||std::strncmp(mode,"abilities-signature-",20)==0||std::strncmp(mode,"status-signature-",17)==0||std::strncmp(mode,"equipment-signature-",20)==0))Check(harness::created==0&&!empty::Ready(),"signature mismatch refuses before hook creation and readiness");Check(harness::removed==0,"failure retains all created trampolines");Check(empty::RetainsMinHookResources()==(harness::created!=0),"retained resource receipt follows actual created callbacks");for(unsigned i=0;i<harness::created;++i)Check(!harness::hooks[i].enabled,"rollback disables every created hook");
   std::array<std::uint8_t,0x100> menu{};const int count=2;std::memcpy(menu.data(),&count,4);Entry(menu.data(),1,2,1);empty::Arm(0x5A,0x54);
   if(harness::created>3){harness::caller=base+0x3065CD;const auto fn=reinterpret_cast<harness::Fn>(harness::hooks[3].detour);Check(fn(menu.data(),1)==0x319,"retained alias callback delegates after failed install");}
   if(harness::created>4){harness::caller=base+0x36A46A;const auto fn=reinterpret_cast<harness::Fn>(harness::hooks[4].detour);Check(fn(menu.data(),1)==1,"retained history callback delegates after failed install");}
@@ -262,6 +264,45 @@ int main(int argc,char** argv){
   empty::NativeResolved();empty::Arm(0x5A,0x54);partyHook(4);unsigned statusAfter=0;for(const auto& receipt:harness::receipts)if(receipt.find("[partyempty-status-root]")==0)++statusAfter;Check(statusAfter==statusReceipts,"Status ownership renewal cannot reset diagnostic budget");
   harness::receipts.resize(oldReceiptCount); // isolate existing Items-only trace assertions
   page=1;std::memcpy(image+0xBEE64C,&page,4);
+  // First-player Equipment ingress: actual production detour plus retained
+  // native feedback/refusal and first-character/Stock decision boundaries.
+  const auto equipmentReceiptStart=harness::receipts.size();
+  std::int32_t pending=-1;std::uint32_t phase=0;
+  std::memcpy(image+0x7435D8,&pending,4);std::memcpy(image+0xBEE650,&phase,4);
+  harness::caller=base+0x2F62EC;Entry(menu.data(),0,0,14);
+  for(const std::uint32_t nativePhase:{0u,1u}){phase=nativePhase;std::memcpy(image+0xBEE650,&phase,4);
+   for(const std::int16_t nativeKey:{std::int16_t{1},std::int16_t{14}}){Entry(menu.data(),0,0,nativeKey);Check(admissionHook(0)==0,"Equipment first row both raw player keys refused in native callback phase0/1");}}
+  members[0]=0x54;members[2]=0x5A;empty::Arm(0x54,0x5A);Check(admissionHook(0)==0,"Equipment mirrored owner keeps independent raw player key authority");members[2]=0x54;empty::Arm(0x54,0x54);Check(admissionHook(0)==0,"Equipment same-kit owner and status aliases add no uniqueness requirement");members[0]=0x5A;empty::Arm(0x5A,0x54);
+  Entry(menu.data(),0,0,14);phase=0;std::memcpy(image+0xBEE650,&phase,4);
+  SetLastError(0x33445566);Check(admissionHook(0)==0&&GetLastError()==0x33445566,"Equipment refusal logger preserves LastError");
+  for(const int target:{0,2,15}){pending=target;std::memcpy(image+0x7435D8,&pending,4);Check(admissionHook(0)==1,"Equipment pending target rather than sentinel delegates");}pending=-1;std::memcpy(image+0x7435D8,&pending,4);
+  for(const unsigned wrongPhase:{2u,3u,~0u}){phase=wrongPhase;std::memcpy(image+0xBEE650,&phase,4);Check(admissionHook(0)==1,"Equipment transition or invalid phase delegates");}phase=0;std::memcpy(image+0xBEE650,&phase,4);
+  for(const unsigned wrongPage:{0u,2u,15u,17u}){page=wrongPage;std::memcpy(image+0xBEE64C,&page,4);Check(admissionHook(0)==1,"Equipment current-page mismatch delegates");}page=1;std::memcpy(image+0xBEE64C,&page,4);
+  for(const int badCount:{0,1,3,4,-1}){std::memcpy(menu.data(),&badCount,4);Check(admissionHook(0)==1,"Equipment exact compact count excludes Stock-only and other shapes");}std::memcpy(menu.data(),&count,4);
+  for(const std::int16_t badSeat:{std::int16_t{-1},std::int16_t{1},std::int16_t{2}}){Entry(menu.data(),0,badSeat,14);Check(admissionHook(0)==1,"Equipment first stored original seat must0");}
+  for(const std::int16_t badKey:{std::int16_t{0},std::int16_t{2},std::int16_t{3},std::int16_t{0x54},std::int16_t{-1}}){Entry(menu.data(),0,0,badKey);Check(admissionHook(0)==1,"Equipment raw key is native player key and not ObjEntry ID");}Entry(menu.data(),0,0,14);
+  const std::uintptr_t absentStatus=0;std::memcpy(menu.data()+0x20,&absentStatus,8);Check(admissionHook(0)==1,"Equipment null status delegates");Entry(menu.data(),0,0,14);
+  for(const std::uintptr_t badMenu:{std::uintptr_t{0},std::uintptr_t{1}}){std::memcpy(image+0xBEEC28,&badMenu,8);Check(admissionHook(0)==1,"Equipment null or unreadable table delegates");}std::memcpy(image+0xBEEC28,&menuPtr,8);
+  harness::caller=base+0x111;Check(admissionHook(0)==1,"Equipment wrong native caller delegates");harness::caller=base+0x2F62EC;
+  members[0]=0x54;Check(admissionHook(0)==1,"Equipment changed physical owner tuple delegates");members[0]=0x5A;
+  empty::ArmTuple({0x5A,0x54,0},2);members[1]=0x54;members[2]=0;Check(admissionHook(0)==1,"Equipment trailing-empty shape delegates");members[1]=0;members[2]=0x54;empty::Arm(0x5A,0x54);
+  empty::NativeResolved();Check(admissionHook(0)==1,"Equipment restored authority delegates");empty::Arm(0x5A,0x54);
+  Check(VirtualProtect(image+0xBEE650,4,PAGE_NOACCESS,&protectedOld)!=0,"Equipment unreadable phase/page setup");Check(admissionHook(0)==1,"Equipment unreadable phase/page delegates safely");Check(VirtualProtect(image+0xBEE650,4,protectedOld,&protectedIgnored)!=0,"Equipment phase/page readability restored");
+  SeedParty(image);SeedAbilities(image);SeedEquipmentFlow(image);
+  using EquipmentDecision=unsigned(__fastcall*)(int,int,int);
+  const auto equipmentDecision=reinterpret_cast<EquipmentDecision>(image+0x34E100);
+  const auto ignoredEquipment=harness::receipts.size();Check(equipmentDecision(static_cast<int>(nativeParty(-1,0,1,admissionHook,0)),-1,3)==0xEE&&harness::receipts.size()==ignoredEquipment,"Equipment ignored Cross has no consumed witness");
+  Check(equipmentDecision(static_cast<int>(nativeParty(0,0,1,admissionHook,0)),0,3)==0xEE,"Equipment actual ALfalse feedback/common branch dominates descriptor and cleanup");
+  empty::NativeResolved();Check(equipmentDecision(static_cast<int>(nativeParty(0,0,1,admissionHook,0)),0,3)==2,"Equipment unowned ALtrue first character selects original target2 before constructor");empty::Arm(0x5A,0x54);
+  Check(equipmentDecision(static_cast<int>(nativeParty(2,0,1,admissionHook,0)),2,3)==0x0A,"Equipment native Stock tail selects target0A outside new refusal");
+  for(const int cancel:{-2,-4}){const auto prior=harness::receipts.size();Check(equipmentDecision(static_cast<int>(nativeParty(cancel,0,1,admissionHook,0)),cancel,3)==0xCC&&harness::receipts.size()==prior,"Equipment native Cancel bypass remains unchanged");}
+  Check(admissionHook(-5)==0&&admissionHook(2)==1,"Equipment branch preserves existing Abilities shortcut and Stock policies; secondary Items covered above");
+  for(int repeat=0;repeat<30;++repeat)Check(admissionHook(0)==0,"Equipment capped diagnostic never changes refusal");
+  unsigned equipmentReceipts=0;for(const auto& receipt:harness::receipts)if(receipt.find("[partyempty-equipment-items]")==0)++equipmentReceipts;
+  Check(equipmentReceipts==(trace?16u:0u),"Equipment separate lifetime16 cap and exact opt-in");
+  if(trace){const auto& receipt=harness::receipts[equipmentReceiptStart];Check(receipt.find("[partyempty-equipment-items] refused seq=1 tick=")==0&&receipt.find("caller=2F62EC state=1 pending=-1 phase=0 selection=0")!=std::string::npos&&receipt.find("count=2 seat=0 key=1 status=12345678 owner=5A/0/54")!=std::string::npos,"Equipment fresh consumed receipt includes exact row and pending/phase guard facts");}
+  empty::NativeResolved();empty::Arm(0x5A,0x54);admissionHook(0);unsigned afterRearm=0;for(const auto& receipt:harness::receipts)if(receipt.find("[partyempty-equipment-items]")==0)++afterRearm;Check(afterRearm==equipmentReceipts,"Equipment retirement/rearm does not reset receipt cap");
+  harness::receipts.resize(equipmentReceiptStart);pending=0;std::memcpy(image+0x7435D8,&pending,4);Entry(menu.data(),0,0,14);
   // Execute the original pinned 2F6270 input handler with a feedback-only boundary double.
   std::memcpy(image+0x2F6270,nativeInput,sizeof(nativeInput));const auto feedback=reinterpret_cast<std::uintptr_t>(harness::Feedback);std::uint8_t jump[]{0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};std::memcpy(jump+2,&feedback,8);std::memcpy(image+0x2EB740,jump,sizeof(jump));FlushInstructionCache(GetCurrentProcess(),image,0x400000);
   using NativeInput=std::uint64_t(__fastcall*)(int,char,std::uint8_t,AdmissionFn,std::uint8_t);const auto input=reinterpret_cast<NativeInput>(image+0x2F6270);
