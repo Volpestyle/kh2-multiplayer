@@ -4,10 +4,25 @@ The binding-only baseline passed ri-01 (20261008-024015). Lead approved the
 default-off scoped authority code after ra-06e2
 (`20261008-211146_vuh1515_scoped_record_authority_ra06_1`). Both original
 populations passed engagement, coverage, motion, colocated position, brain/hit,
-paired HP/death authority and terminal lifecycle gates; safety passed. Final
-acceptance remains INCONCLUSIVE for full-window records, walkaway/negative,
-mute release/retake, scoped friend-bound and complete group81 live exclusion.
-See [the current qualification table](ENEMY_PARITY.md) for exact limits.
+paired HP/death authority and terminal lifecycle gates; safety passed.
+
+The later ra-06j run
+(`20261009-000418_vuh1515_scoped_record_authority_ra06j_1`) passed the scoped
+record, authority/lifecycle, position, negative, brain, hit, stale/release-retake
+and group81 exclusion judges; canonical execution, clips and safety passed.
+FG76's post-retake native hit is observed on the friend at frame8960, netId3,
+damage18/stat0. This is a native hit receipt, not proof of the adjusted HP delta
+or exactly-once damage application.
+
+Full qualification is parked at placement: the final approach blocked the
+background distance sampler and drove the players apart. Its own samples show
+median separation619u against the150u colocation limit, so restoring the missing
+receipt alone would not qualify it. Placement remains UNQUALIFIED; ra-06j's
+final verdict is INCONCLUSIVE. No ra-06k retry is proposed. The feature remains
+default-off, with the scoped passing evidence retained as partial qualification.
+Evidence: `build/rig/vuh1515-record-authority-20261008-01/live-fixture-ra-06j/`
+(`verdict.json`, `closure.json`) and
+`analysis-ra06j-20261009-000418/findings.md` in the same lane.
 
 All flags default off. `KH2COOP_ENEMY_RECORD_BINDING=1` on both peers grants
 correspondence only. Adding `KH2COOP_ENEMY_RECORD_AUTHORITY=1` and
