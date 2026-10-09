@@ -2,6 +2,8 @@
 // No KH2, hook installation, named mapping, transport or native memory access.
 #include "CombatCausalTrace.hpp"
 #include <cstdio>
+#include <Windows.h>
+#include <type_traits>
 #include <new>
 #include <cstdlib>
 #include <vector>
@@ -11,6 +13,13 @@ namespace ht=kh2coop::inject::nativehittrace;
 namespace { unsigned checks=0,failed=0; std::uint64_t clockNs=1;
 void Check(bool ok,const char* name){++checks;if(!ok){++failed;std::printf("FAIL %s\n",name);}}
 std::uint64_t Clock() noexcept{return ++clockNs;}
+std::uint64_t PublishedClock() noexcept{return 0xABC123;}
+DWORD WINAPI PublicationReader(void* value){
+    const auto end=GetTickCount64()+2000;
+    while(!cc::Requested()&&GetTickCount64()<end)SwitchToThread();
+    *static_cast<bool*>(value)=cc::Requested()&&cc::Now()==0xABC123;return 0;
+}
+static_assert(std::is_same_v<decltype(cc::clockFn),std::atomic<cc::Clock>>, "clock pointer publication must remain atomic");
 void ThrowLogger(const char*,...){throw 7;}
 cc::Engine local;
 cc::Scope Scope(bool client=false){cc::Scope s{};auto& n=s.native;n.available=true;n.readMask=ht::ContextComplete;
@@ -36,7 +45,13 @@ ht::Event Emit(const cc::Scope& s,bool client=false){auto before=Facts(s),after=
  ht::EndApply(apply,true,0xABC,&after);ht::Event e{};Check(ht::PopEvent(e),"actual NativeHitTrace event emitted");return e;}
 bool Has(cc::Engine& e,cc::Kind k,bool qualified){cc::Receipt r;bool found=false;while(e.Pop(r))if(r.kind==k&&r.locallyQualified==qualified)found=true;return found;}
 }
-int main(){ht::RegisterOwnerThread();ht::Configure(true,ht::AllHooks,ht::AllHooks);
+int main(){
+ bool published=false;HANDLE reader=CreateThread(nullptr,0,PublicationReader,&published,0,nullptr);
+ Check(reader!=nullptr,"independent clock publication reader created");cc::Configure(true,PublishedClock);
+ if(reader){Check(WaitForSingleObject(reader,3000)==WAIT_OBJECT_0,"clock reader bounded exit");CloseHandle(reader);}
+ Check(published,"release/acquire enabled publication exposes original nonnull clock to reader");
+ cc::enabled.store(false);cc::clockFn.store(nullptr);
+ ht::RegisterOwnerThread();ht::Configure(true,ht::AllHooks,ht::AllHooks);
  auto s=Scope();Admit(local,s);auto hit=Emit(s);Check(cc::PlayerEnemyHit(hit,false),"actual Take/Stat event qualifies player-to-Shadow");
  Check(!hit.witness,"old enemy-to-player Witness remains false");
  for(unsigned mutant=0;mutant<15;++mutant){auto e=hit;switch(mutant){case 0:e.callerRva=0;break;case 1:e.before.source.actor=0;break;
@@ -58,6 +73,11 @@ int main(){ht::RegisterOwnerThread();ht::Configure(true,ht::AllHooks,ht::AllHook
  s=Scope();Admit(local,s);cc::Key key{101,1,9,1,302,65,7};auto t=Target();local.HostApply(s,key,t,100,93,true,true,true,7);
  Check(Has(local,cc::Kind::HostApply,true),"actual host apply facts associate connection/seq/target/delta");
  local.HostApply(s,key,t,93,86,true,true,true,8);Check(local.Retired(),"duplicate host claim refuses even with native delta");
+ for(unsigned m=0;m<7;++m){s=Scope();Admit(local,s);auto raw=kh2coop::encode(kh2coop::EnemyHp{9,{{1,100,100}},1});
+ switch(m){case 0:raw[0]=24;break;case 1:raw[1]++;break;case 2:raw[3]++;break;case 3:raw[7]++;break;
+ case 4:raw[17]++;break;case 5:raw[19]--;break;case 6:raw[23]--;break;}
+ local.Packet(s,cc::Kind::HpPublish,1,1,100,100,raw.data(),static_cast<unsigned>(raw.size()),true,false,8);
+ Check(Has(local,cc::Kind::HpPublish,false),"raw opcode/framing/epoch/sequence/target/HP/maxHP mutant refuses");}
  s=Scope();Admit(local,s);local.Packet(s,cc::Kind::DeathPublish,1,0,0,100,hp.data(),static_cast<unsigned>(hp.size()),true,true,8);
  Check(local.Retired(),"grace/despawn never natural kill");
  s=Scope();Admit(local,s);local.Packet(s,cc::Kind::HpPublish,1,1,99,100,hp.data(),static_cast<unsigned>(hp.size()),true,false,8);
@@ -68,7 +88,9 @@ int main(){ht::RegisterOwnerThread();ht::Configure(true,ht::AllHooks,ht::AllHook
  local.Applied(s,cc::Kind::HpApply,t,1,100,93,93,true,true,true,10);Check(Has(local,cc::Kind::HpApply,true),"client actual checked native store associates source sequence");
  Check(!local.NeedsHpReadback(1,1),"source applied once");
  local.Applied(s,cc::Kind::HpApply,t,1,93,93,92,true,true,true,11);Check(local.Retired(),"failed poststore readback refuses");
- s=Scope();Admit(local,s);for(unsigned i=0;i<cc::QueueCount+1;++i)local.Packet(s,cc::Kind::HpPublish,1,i+1,100,100,hp.data(),static_cast<unsigned>(hp.size()),true,false,12+i);
+ s=Scope();Admit(local,s);for(unsigned i=0;i<cc::QueueCount+1;++i){
+ auto frame=kh2coop::encode(kh2coop::EnemyHp{9,{{1,100,100}},i+1});
+ local.Packet(s,cc::Kind::HpPublish,1,i+1,100,100,frame.data(),static_cast<unsigned>(frame.size()),true,false,12+i);}
  Check(local.Retired()&&local.Loss()==1&&local.Dropped()==1,"fixed ring overflow records loss and permanently retires");
  // Actual production EndApply default-off guard and enabled path, no original callback modified.
  auto started=cc::engine.Started();cc::Configure(false,Clock);s=Scope();auto off=Emit(s);(void)off;

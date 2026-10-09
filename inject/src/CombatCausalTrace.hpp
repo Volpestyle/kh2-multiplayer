@@ -1,6 +1,7 @@
 #pragma once
 // Passive, fixed-capacity owner-thread diagnostic. No native memory or I/O here.
 #include "NativeHitTrace.hpp"
+#include "kh2coop/Codec.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -153,6 +154,35 @@ class Engine {
         if(!p || !n || n>PayloadMax) {r.reason=Reason::Payload;return false;}
         r.payloadBytes=n;std::memcpy(r.payload,p,n);r.payloadDigest=Digest(p,n);return true;
     }
+    static std::uint64_t Le(const std::uint8_t* p,unsigned count) noexcept {
+        std::uint64_t value=0;for(unsigned i=0;i<count;++i)value|=static_cast<std::uint64_t>(p[i])<<(i*8);return value;
+    }
+    static bool Framed(const std::uint8_t* p,unsigned n,PacketType type) noexcept {
+        return p&&n>=3&&p[0]==static_cast<std::uint8_t>(type)&&Le(p+1,2)==n-3;
+    }
+    bool ClaimWire(const Scope& s,const Key& key,const std::uint8_t* p,unsigned n) noexcept {
+        return n==46&&Framed(p,n,PacketType::HitClaim)&&Le(p+3,4)==key.epoch&&Le(p+7,4)==key.sequence&&
+            Le(p+11,2)==key.netId&&Le(p+13,4)==key.objectId&&Le(p+17,8)==key.connection&&
+            Le(p+25,4)==key.attackId&&Le(p+29,4)==static_cast<std::uint32_t>(key.damage)&&p[45]==s.native.slot;
+    }
+    bool PacketWire(const Scope& s,Kind kind,unsigned id,std::uint64_t sequence,int hp,int maxHp,
+                    const std::uint8_t* p,unsigned n) noexcept {
+        if(kind==Kind::DeathPublish||kind==Kind::DeathReceive)
+            return n==9&&Framed(p,n,PacketType::EnemyDeath)&&Le(p+3,4)==s.native.epoch&&Le(p+7,2)==id;
+        if(n<17||!Framed(p,n,PacketType::EnemyHp)||Le(p+3,4)!=s.native.epoch||Le(p+7,8)!=sequence)return false;
+        const auto count=Le(p+15,2);
+        if(!count||count>TargetCount||n!=17+count*10)return false;
+        bool found=false;
+        for(unsigned i=0;i<count;++i) {
+            const auto* row=p+17+i*10;const auto net=static_cast<unsigned>(Le(row,2));
+            for(unsigned j=0;j<i;++j)if(Le(p+17+j*10,2)==net)return false;
+            const auto* mapped=Find(net);const auto value=Le(row+2,4),maximum=Le(row+6,4);
+            if(!mapped||!value||value>static_cast<unsigned>(INT32_MAX)||maximum!=static_cast<unsigned>(mapped->identity.maxHp))return false;
+            if(kind==Kind::HpPublish&&value!=static_cast<unsigned>(mapped->expected))return false;
+            if(net==id){if(value!=static_cast<unsigned>(hp)||maximum!=static_cast<unsigned>(maxHp))return false;found=true;}
+        }
+        return found;
+    }
     bool Cause(Ledger& l,std::uint64_t id,int before,int after) noexcept {
         if(!id || before!=l.expected || after<0 || after>=before || l.count==CauseCount) return false;
         if(id==l.lastEvent) return false;
@@ -234,7 +264,7 @@ public:
         auto* l=Find(key.netId);if(l)r.target=l->identity;
         r.locallyQualified=Current(s)&&l&&event&&key.connection==s.native.connectionId&&
             key.epoch==s.native.epoch&&key.objectId==302&&key.sequence>lastLocalClaimSequence_&&key.damage>0&&
-            queued&&Payload(r,bytes,size);
+            queued&&Payload(r,bytes,size)&&ClaimWire(s,key,bytes,size);
         if(!r.payloadBytes)Payload(r,bytes,size);
         if(r.locallyQualified)lastLocalClaimSequence_=key.sequence;
         r.reason=r.locallyQualified?Reason::Pending:Reason::Unavailable;Push(r);
@@ -260,7 +290,7 @@ public:
         if(!admitted_||retired_)return;
         auto r=Row(kind,s,now);r.hpSequence=hpSequence;r.enqueued=outcome;r.requestedHp=hp;
         auto* l=Find(id);if(l){r.target=l->identity;Causes(r,*l);r.beforeHp=l->published;r.afterHp=hp;}
-        bool ok=Current(s)&&l&&Payload(r,bytes,size)&&outcome&&!despawn;
+        bool ok=Current(s)&&l&&Payload(r,bytes,size)&&PacketWire(s,kind,id,hpSequence,hp,maxHp,bytes,size)&&outcome&&!despawn;
         if(l && kind==Kind::HpPublish) {
             ok=ok&&hpSequence&&hp==l->expected&&maxHp==l->identity.maxHp&&
                (hp==l->published||l->count>0);
@@ -303,13 +333,13 @@ public:
 using Clock=std::uint64_t(*)() noexcept;
 inline std::atomic<bool> enabled{false};
 inline Engine engine{};
-inline Clock clockFn{};
+inline std::atomic<Clock> clockFn{nullptr};
 inline Scope currentScope{};
-inline bool Requested() noexcept{return enabled.load(std::memory_order_relaxed);}
+inline bool Requested() noexcept{return enabled.load(std::memory_order_acquire);}
 inline void Configure(bool requested,Clock clock) noexcept {
-    if(!requested)return;clockFn=clock;enabled.store(true,std::memory_order_relaxed);
+    if(!requested)return;clockFn.store(clock,std::memory_order_relaxed);enabled.store(true,std::memory_order_release);
 }
-inline std::uint64_t Now() noexcept{return clockFn?clockFn():0;}
+inline std::uint64_t Now() noexcept{const auto clock=clockFn.load(std::memory_order_acquire);return clock?clock():0;}
 inline void OnHit(const nativehittrace::Event& event) noexcept {
     if(Requested()){auto scope=currentScope;scope.native=event.before.context;engine.Hit(scope,event,Now());}
 }
