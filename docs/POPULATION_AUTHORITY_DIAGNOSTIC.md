@@ -57,7 +57,45 @@ permission to create actors.
 Source controls include the fixed recorder, actual update/wrapper call-through
 and SEH adapters, and actual MinHook relocation/Windows virtual-unwind controls
 over owned scratch code. No saved game body is executed by those controls.
-Native build/CTest results are pending an explicit kh2-steam reservation. The
-later single-PC fixture needs reviewed frozen products, actual pinned setup,
-natural route/combat, independently fresh census and owned safety closure; none
-of these is supplied by the log joiner or this source preparation alone.
+Native-validated source fb8e21d passed its isolated all-target build and full
+161/161 serial CTest. Native authority and forced enrollment remain unqualified.
+
+## Parked: authority diagnostic and reconnect-04 (2026-10-09)
+
+The late-join population repair landed on main (2d45f39). Its live run
+`20261009-000023_vuh1788_late_join_population_repair_1` passed the fixture oracle
+and safety closure: stale terminal copies became physically absent, both complete
+samples matched the host living IDs/HP/bindings, and no admission/budget waits
+remained. See [population repair](POPULATION_REPAIR.md).
+
+Reconnect works semantically in retained run
+`20261009-012620_vuh1788_reconnect_population_1`: the friend rejoined with a new
+connection/generation, installed fresh PopulationCuts, and samples 2-7 matched
+all peers' living IDs and HP. The original anchors retained their identities.
+The canonical result remains FAIL: new host birth ID11 was forced on the friend
+with controller=0 and spawnRecord=0. That observation does not prove native
+wave-clear counting, lifecycle membership or safe forced enrollment. Receipts:
+`build/rig/vuh1788-waves-20261008/population-reconnect-03/live-findings.md`.
+
+Native enrollment authority remains UNKNOWN. The observational diagnostic has
+no qualified unwarped courtyard (05/06) start. In
+`20261009-092736_vuh1788_native_authority_discovery_1`, ordinary boot loaded
+05/01 and the required 05/06 gate refused before route/combat. The sandbox copy
+matched its derived hash, but its consumption by Load was unproven. Sandbox
+seeding is abandoned; no caching investigation or guessed route is planned.
+The diagnostic observed constructor/init calls only; native lifecycle and
+creation authority remain UNKNOWN. Safety passed with all four saves unchanged
+and owned game/children/encoders closed.
+
+Both the authority diagnostic and reconnect-04 are PARKED. Reconnect-04 is an
+unsealed draft, not an acceptance result or a runnable successor. No enrollment
+product integration or additional native/live work is queued by this note.
+
+The cheapest future unblock is either a recorded native walking recipe from the
+ordinary 05/01 load to 05/06, or a reviewed design change permitting warp before
+the diagnostic baseline. Docs and kh2-story have no retained 05/01-to-05/00
+walking recipe; the documented courtyard/hall door pulses do not fill that gap.
+If the walking path resumes, Lead permits only one further setup attempt; a
+route failure parks the diagnostic again. Any live run still needs separate
+operator GO. Authority discovery must precede the forced-membership product,
+which must precede reconnect-04 acceptance.
