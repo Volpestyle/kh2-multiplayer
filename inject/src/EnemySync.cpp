@@ -4386,8 +4386,7 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 std::int32_t readback=-1;const bool read=ReadNative(native.status,readback);
                 g_log("[record-authority] hp epoch=%u frame=%u netId=%d objectId=%u actor=%llX before=%d requested=%d readback=%d read=%u",
                     g_host.epoch,g_hitTraceFrame,s.netId,s.objectId,static_cast<unsigned long long>(s.actor),native.hp,h.hp,readback,static_cast<unsigned>(read));
-}
-
+            }
             if (combatcausal::Requested()) {
                 NativeEnemy after{}; bool enemy = false;
                 const bool read = ReadNativeEnemy(native.actor, after, enemy) && enemy && SameNativeIdentity(native, after);
