@@ -1950,10 +1950,17 @@ void TestCombatCausalBoundaries() {
         Put(image+offsets::ROOM_ID,std::uint8_t{6});Put(image+offsets::NOW+2,std::uint8_t{0});
         Put(image+offsets::MAP_PROGRAM,std::uint16_t{1});Put(image+offsets::BATTLE_PROGRAM,std::uint16_t{1});Put(image+offsets::EVENT_PROGRAM,std::uint16_t{0});
         g_inst.spawns[0].objectId=302;g_host.enemies[1].objectId=302;Put(object+offsets::objentry::OBJECT_ID,std::uint32_t{302});
+        if(client) {
+            // Original native-arrival adapter leaves, not a live arrival proof.
+            arrivalTarget={};arrivalTarget.epoch=9;arrivalTarget.worldId=5;arrivalTarget.roomId=6;
+            arrivalTarget.mapProgram=1;arrivalTarget.battleProgram=1;
+            g_host.world=5;g_host.room=6;g_host.btl=1;g_host.ackSent=true;
+        }
         cc::enabled.store(enabled);cc::engine.~Engine();new(&cc::engine)cc::Engine;
         cc::clockFn=+[]() noexcept -> std::uint64_t {return 1;};
         if(enabled) {
             auto scope=CausalScope();Check(cc::ScopeEligible(scope),"actual diagnostic safe BC full scope qualifies");
+            cc::currentScope=scope;
             NativeEnemy n{};bool enemyType=false;Check(ReadNativeEnemy(enemy,n,enemyType)&&enemyType,"diagnostic original typed target readable");
             cc::Target rows[5];rows[0]=CausalTarget(g_inst.spawns[0],n,1);
             for(unsigned i=1;i<5;++i)rows[i]={0x1000+i,0x2000+i,0x3000+i,0x4000+i,0x5000+i,i+1,302,4,1000,1000};
@@ -1980,6 +1987,48 @@ void TestCombatCausalBoundaries() {
     Put(status,std::int32_t{980});census=CaptureNativeCensus();HostFrame(12,{},census);
     bool unqualified=false;while(cc::engine.Pop(r))if(r.kind==cc::Kind::HpPublish&&!r.locallyQualified)unqualified=true;
     Check(unqualified,"actual normal HP publication refuses unexplained companion damage");
+    // Production claim encoder/send while a real NativeHitTrace Apply token is active.
+    const auto claimPositive=[&](bool enabled) {
+        prepare(enabled,true);
+        EnemyManifest manifest;manifest.epoch=9;manifest.replace=true;
+        EnemyManifestEntry entry;entry.netId=1;entry.objectId=302;entry.battleProgram=1;manifest.entries.push_back(entry);
+        QueueHostWorld(encode(manifest));QueueHostWorld(encode(EnemyHp{9,{{1,1000,1000}},1}));ReceiveWorldPackets();
+        Check(ReleaseClientClaims(30),"claim positive earns original complete manifest/HP/native-readback release");
+        namespace ht=kh2coop::inject::nativehittrace;
+        ht::ApplyFacts facts{};facts.context=CaptureNativeHitContext();ht::ApplyToken token{};
+        ht::BeginApply(token,0x3D613C,true,facts);
+        const auto event=ht::CurrentApplySequence();
+        Check(event!=0&&RecordLocalPlayerEnemyHit(LocalHit()),"actual opted-in claim production runs inside original Apply sequence");
+        ht::EndApply(token,true,0xABC,&facts);
+        const auto expected=encode(HitClaim{9,1,1,302,101,65,7,{1,2,3},SlotType::Friend1});
+        bool exactSend=false;for(const auto& bytes:g_bridge.outgoing)if(bytes==expected)exactSend=true;
+        Check(exactSend,"actual production claim payload equals canonical encoder epoch/key/position/slot bytes");
+        bool claimReceipt=false;cc::Receipt receipt;
+        while(cc::engine.Pop(receipt))if(receipt.kind==cc::Kind::Claim)claimReceipt=receipt.locallyQualified&&
+            receipt.event==event&&receipt.payloadBytes==expected.size()&&std::memcmp(receipt.payload,expected.data(),expected.size())==0;
+        Check(enabled?claimReceipt:!claimReceipt,"opted-in claim encoder positive retains real event and exact bytes only when enabled");
+        return std::make_tuple(g_bridge.outgoing,g_localClaimSequence,g_clientClaimHold.submitted,nativeCalls,Read<int>(status));
+    };
+    const auto claimOff=claimPositive(false);const auto claimOn=claimPositive(true);
+    Check(claimOff==claimOn,"production claim positive OFF/ON calls/HP/sequence/submission/encoded sends identical");
+    const auto deathPositive=[&](bool enabled) {
+        prepare(enabled);auto lethal=Claim();lethal.objectId=302;lethal.damage=1000;
+        QueueTestClaim(lethal);Check(Process(),"native-zero death positive consumes one actual original claim/native call");
+        auto census=CaptureNativeCensus();Check(HostFrame(6,{},census),"actual normal host death publication runs after native zero");
+        const auto expected=encode(EnemyDeath{9,1});bool exactSend=false;
+        for(const auto& bytes:g_bridge.outgoing)if(bytes==expected)exactSend=true;
+        Check(exactSend&&Read<int>(status)==0&&nativeCalls==1,"production death encoder/send positive is actual native-zero branch, not despawn");
+        bool deathReceipt=false;std::uint64_t cause=0;cc::Receipt receipt;
+        while(cc::engine.Pop(receipt)) {
+            if(receipt.kind==cc::Kind::HostApply&&receipt.locallyQualified)cause=receipt.event;
+            if(receipt.kind==cc::Kind::DeathPublish)deathReceipt=receipt.locallyQualified&&receipt.causeCount==1&&
+                receipt.causes[0]==cause&&cause&&receipt.payloadBytes==expected.size()&&std::memcmp(receipt.payload,expected.data(),expected.size())==0;
+        }
+        Check(enabled?deathReceipt:!deathReceipt,"opted-in native-zero death positive retains exact cause and canonical bytes");
+        return std::make_tuple(g_bridge.outgoing,g_claimSequences[1].consumed,nativeCalls,Read<int>(status),g_inst.spawns[0].deathSent);
+    };
+    const auto deathOff=deathPositive(false);const auto deathOn=deathPositive(true);
+    Check(deathOff==deathOn,"production death positive OFF/ON native calls/HP/sequence/send/death state identical");
     // Real DLL decoder/admission paths; only the native actor/census leaves are owned test data.
     const auto consumerCase=[&](unsigned mode,bool enabled) {
         prepare(enabled,true);g_hostHpSequence=10;
