@@ -414,7 +414,8 @@ if(WIN32)
 
     # Generic generation claim hold and complete native readback release.
     add_executable(kh2coop_claim_hold_test tests/ClientClaimHoldTest.cpp inject/src/NativeHitTrace.cpp
-        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp
+        inject/src/NativePopulationAuthority.cpp)
     target_include_directories(kh2coop_claim_hold_test PRIVATE runtime/include common/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(kh2coop_claim_hold_test PRIVATE kh2coop_common)
@@ -425,7 +426,8 @@ if(WIN32)
 
     # Native load attribution and interval seals over owned memory.
     add_executable(kh2coop_load_cause_test tests/NativeLoadCauseTest.cpp inject/src/NativeHitTrace.cpp
-        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp
+        inject/src/NativePopulationAuthority.cpp)
     target_include_directories(kh2coop_load_cause_test PRIVATE runtime/include common/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(kh2coop_load_cause_test PRIVATE kh2coop_common)
@@ -499,7 +501,8 @@ foreach(target kh2coop_causal_diagnostic_test kh2coop_causal_exception_test kh2c
 endforeach()
 if(WIN32)
     add_executable(kh2coop_native_hash_receipt_test tests/NativeHashReceiptTest.cpp
-        inject/src/NativeHitTrace.cpp inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
+        inject/src/NativeHitTrace.cpp inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp
+        inject/src/NativePopulationAuthority.cpp)
     target_include_directories(kh2coop_native_hash_receipt_test PRIVATE inject/src runtime/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_compile_definitions(kh2coop_native_hash_receipt_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
