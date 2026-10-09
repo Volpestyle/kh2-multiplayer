@@ -957,7 +957,8 @@ int main(int argc, char* argv[]) {
     const bool combatCausalTrace = exactEnvironmentOne("KH2COOP_COMBAT_CAUSAL_TRACE");
     std::uint64_t combatCausalSequence=0;
     const auto combatCausalPacket = [&](const char* direction,const std::vector<std::uint8_t>& packet,
-                                       const kh2coop::ProducerWorldContext& producer,bool accepted) {
+                                       const kh2coop::ProducerWorldContext& producer,bool accepted) noexcept {
+        try {
         if(!combatCausalTrace)return;
         auto type=packet.empty()?kh2coop::PacketType{}:static_cast<kh2coop::PacketType>(packet[0]);
         if(type==kh2coop::PacketType::WorldEnvelope) {
@@ -988,11 +989,15 @@ int main(int argc, char* argv[]) {
             << " host=" << worldHostConnectionId << " self=" << worldSelfConnectionId
             << " slot=" << unsigned(worldSessionSlot) << " accepted=" << accepted
             << " bytes=" << packet.size() << " payload=" << raw << " acceptance=0\n";
+        } catch(...) {
+            // Diagnostic failures cannot enter WorldPump's gameplay rejection path.
+            std::fputs("[combat-causal-runtime] schema=1 loss=1 observerException=1 acceptance=0\n",stderr);
+        }
     };
     const auto combatCausalOutgoing = [&](const std::vector<std::uint8_t>& packet,const kh2coop::ProducerWorldContext& context,bool accepted) {
         combatCausalPacket("dll-to-net",packet,context,accepted);
     };
-    const auto combatCausalThunk=+[](void* opaque,const std::vector<std::uint8_t>& packet,const kh2coop::ProducerWorldContext& context,bool accepted) {
+    const auto combatCausalThunk=+[](void* opaque,const std::vector<std::uint8_t>& packet,const kh2coop::ProducerWorldContext& context,bool accepted) noexcept {
         (*static_cast<const decltype(combatCausalOutgoing)*>(opaque))(packet,context,accepted);
     };
 

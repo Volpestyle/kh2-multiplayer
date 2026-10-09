@@ -34,7 +34,7 @@ struct WorldPumpStats {
     std::uint64_t retiredOutgoing {0}; // unavailable or retired DLL producer
 };
 
-using WorldPumpObserver = void(*)(void*, const std::vector<std::uint8_t>&, const ProducerWorldContext&, bool);
+using WorldPumpObserver = void(*)(void*, const std::vector<std::uint8_t>&, const ProducerWorldContext&, bool) noexcept;
 
 // Drains the DLL's outgoing ring into the network client (call every tick).
 inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats& stats,

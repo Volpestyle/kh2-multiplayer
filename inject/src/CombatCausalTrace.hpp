@@ -315,6 +315,7 @@ inline void OnHit(const nativehittrace::Event& event) noexcept {
 }
 inline void Drain(nativehittrace::LogFn log) noexcept {
     if(!Requested()||!log)return;
+    try {
     Receipt r{};
     for(unsigned n=0;n<16&&engine.Pop(r);++n) {
         char payload[PayloadMax*2+1]{};constexpr char hex[]="0123456789abcdef";
@@ -334,5 +335,8 @@ inline void Drain(nativehittrace::LogFn log) noexcept {
     log("[combat-causal] summary schema=1 admitted=%u retired=%u started=%llu drained=%llu dropped=%llu loss=%llu nativeCoverageQualified=0 acceptance=0",
         unsigned(engine.Admitted()),unsigned(engine.Retired()),static_cast<unsigned long long>(engine.Started()),static_cast<unsigned long long>(engine.Drained()),
         static_cast<unsigned long long>(engine.Dropped()),static_cast<unsigned long long>(engine.Loss()));
+    } catch(...) {
+        engine.Retire(currentScope,Now(),Reason::Loss);
+    }
 }
 } // namespace kh2coop::inject::combatcausal

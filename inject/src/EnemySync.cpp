@@ -59,7 +59,7 @@ namespace {
 enum class Role { Off, Host, Client };
 Role CurrentRole();
 combatcausal::Scope CausalScope() noexcept;
-void ObserveCausalPopulation(bool complete);
+void ObserveCausalPopulation(bool complete) noexcept;
 struct Spawn;
 struct NativeEnemy;
 combatcausal::Target CausalTarget(const Spawn& s, const NativeEnemy& n, unsigned id);
@@ -4075,7 +4075,8 @@ combatcausal::Target CausalTarget(const Spawn& s,const NativeEnemy& n,unsigned i
         s.objentry!=n.objentry || s.status!=n.status) return {};
     return {n.actor,n.objentry,n.status,roots.controller,roots.record,id,n.objectId,n.objectType,n.hp,n.maxHp};
 }
-void ObserveCausalPopulation(bool complete) {
+void ObserveCausalPopulation(bool complete) noexcept {
+    try {
     auto before=CausalScope();
     const auto coverage=nativehittrace::GetStats();
     if(!coverage.requested || coverage.verifiedMask!=nativehittrace::AllHooks || coverage.installedMask!=nativehittrace::AllHooks)
@@ -4104,6 +4105,9 @@ void ObserveCausalPopulation(bool complete) {
     }
     combatcausal::currentScope=after;
     combatcausal::engine.Population(after,rows,count,combatcausal::Now());
+    } catch(...) {
+        combatcausal::engine.Retire(combatcausal::currentScope,combatcausal::Now(),combatcausal::Reason::Unavailable);
+    }
 }
 
 bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generation) {

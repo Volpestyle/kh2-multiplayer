@@ -74,4 +74,5 @@ int main(){ht::RegisterOwnerThread();ht::Configure(true,ht::AllHooks,ht::AllHook
  Check(cc::engine.Started()==started&&!cc::Requested(),"absent/false flag leaves observer state untouched");
  Admit(cc::engine,s);cc::currentScope=s;cc::Configure(true,Clock);auto enabled=Emit(s);(void)enabled;
  Check(Has(cc::engine,cc::Kind::Hit,true),"production EndApply invokes default-off observer only when opted in");
+ cc::Drain(+[](const char*,...){throw 7;});Check(cc::engine.Retired(),"diagnostic logger exception contained and retires coverage");
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}
