@@ -1,0 +1,2 @@
+# Internal media packaging helper is independently pinned.
+add_rig_clip.py -text

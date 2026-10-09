@@ -33,6 +33,10 @@
 #include <string>
 #include <thread>
 #include <vector>
+#if defined(KH2COOP_INTERNAL_CLIP)
+#include <bcrypt.h>
+#include <iomanip>
+#endif
 
 #ifndef KH2COOP_SOURCE_DIR
 #define KH2COOP_SOURCE_DIR "."
@@ -3012,10 +3016,20 @@ void PrintUsage() {
 #endif
 }
 
+#if defined(KH2COOP_INTERNAL_CLIP)
+#include "owned_clip.hpp"
+#if defined(KH2COOP_CLIP_OFFLINE_TEST)
+#include "owned_clip_test.hpp"
+#endif
+#endif
 } // namespace
 
 int main(int argc, char* argv[]) {
     try {
+#if defined(KH2COOP_CLIP_OFFLINE_TEST)
+        if (argc > 1 && std::string(argv[1]).rfind("--test-child-", 0) == 0) return OwnedClipTestChild(argv[1]);
+        if (argc > 1 && std::string(argv[1]) == "--offline-control") return OwnedClipOfflineTest(argc, argv);
+#endif
 #ifdef KH2COOP_PORTABLE_PACKAGE
         RequirePortablePackageRoot();  // before help, discovery, or any state write
 #endif
@@ -3032,9 +3046,13 @@ int main(int argc, char* argv[]) {
         const std::unique_ptr<void, decltype(&CloseHandle)> diagnosticTarget(
             [&]() -> HANDLE {
                 if (command == "help" || command == "--help" || command == "-h") return nullptr;
+#if defined(KH2COOP_INTERNAL_CLIP)
+                if (command != "clip") {
+#else
                 if (command != "mute" && command != "capture" && command != "player-press" &&
                     command != "player-input" && command != "peek" && command != "poke" &&
                     command != "state" && command != "entities" && command != "warp" && command != "dump") {
+#endif
                     throw std::runtime_error("Command unavailable in the internal diagnostic package.");
                 }
                 auto targetArgs = args;
@@ -3121,7 +3139,11 @@ int main(int argc, char* argv[]) {
         } else if (command == "capture") {
             result = CmdCapture(std::move(args));
         } else if (command == "clip") {
+#if defined(KH2COOP_INTERNAL_CLIP)
+            result = CmdOwnedClip(std::move(args));
+#else
             result = CmdClip(std::move(args));
+#endif
         } else if (command == "overlay") {
             result = CmdOverlay(std::move(args));
         } else if (command == "fps") {

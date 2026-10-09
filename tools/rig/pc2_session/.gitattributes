@@ -1,0 +1,2 @@
+# Preserve the reviewed native census and session helper bytes.
+*.py -text whitespace=cr-at-eol

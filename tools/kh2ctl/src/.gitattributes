@@ -1,0 +1,3 @@
+# Internal clip snapshots are independently pinned.
+owned_clip.hpp -text
+owned_clip_test.hpp -text

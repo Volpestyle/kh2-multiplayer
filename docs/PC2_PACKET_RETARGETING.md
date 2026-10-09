@@ -68,6 +68,21 @@ sealed packets retain their original checks and require a new reviewed revision
 when their session no longer matches. Smoke06 refused after the 2026-10-09 reboot
 changed PC2's active console to Session 1; smoke07 introduces this runtime binding.
 
+The tracked implementation is `tools/rig/pc2_session/`: `binding.py` preserves
+Smoke07's exact consent/console/driver predicates and `system_sessions.py`
+preserves the native census used by acceptance04. Packet adapters call
+`require_current_session(consent['session'])` at admission and immediately before
+each launch. It takes a fresh census and console reading every time. Package
+these files together; do not replace this with a cached admission result.
+Offline checks: `python -m tools.rig.pc2_session.controls`.
+
+For owned renderer clips, use the separate `kh2ctl_clip` product and
+`tools/rig/pc2_clip` adapter; see its README for build, pinned encoder and receipt
+contracts. `tools/packaging/add_rig_clip.py` adds the explicit internal capability
+to a fresh verified package without changing existing profiles. Arrival acceptance
+still requires source-owned causal proof, full media replay and independent
+closure of every canonical helper, encoder and verifier identity.
+
 PC2's shared lock is `%USERPROFILE%/lead-outbox/kh2-rig/rig.lock`. Acquire by
 exclusive create before setup/launch; any existing lock refuses, with no stale
 takeover. Bind the JSON to driver PID/native creation FILETIME, run ID, packet
