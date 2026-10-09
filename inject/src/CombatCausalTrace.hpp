@@ -1,7 +1,6 @@
 #pragma once
 // Passive, fixed-capacity owner-thread diagnostic. No native memory or I/O here.
 #include "NativeHitTrace.hpp"
-#include "kh2coop/Codec.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -10,6 +9,9 @@
 
 namespace kh2coop::inject::combatcausal {
 constexpr unsigned TargetCount = 5, QueueCount = 128, CauseCount = 16, PayloadMax = 4096;
+// Keep this copied-facts header usable beside HitChannel.hpp: Codec.hpp also
+// declares an unrelated HitClaim. Production-codec static_asserts live in controls.
+enum class WireType : std::uint8_t { HitClaim=8, EnemyHp=23, EnemyDeath=24 };
 enum class Kind : unsigned { Admission, Hit, Claim, HostApply, HpPublish, HpReceive,
     HpApply, DeathPublish, DeathReceive, DeathApply, Packet, Retired };
 enum class Reason : unsigned { Ok, Unavailable, Scope, Mapping, Source, Native,
@@ -157,19 +159,19 @@ class Engine {
     static std::uint64_t Le(const std::uint8_t* p,unsigned count) noexcept {
         std::uint64_t value=0;for(unsigned i=0;i<count;++i)value|=static_cast<std::uint64_t>(p[i])<<(i*8);return value;
     }
-    static bool Framed(const std::uint8_t* p,unsigned n,PacketType type) noexcept {
+    static bool Framed(const std::uint8_t* p,unsigned n,WireType type) noexcept {
         return p&&n>=3&&p[0]==static_cast<std::uint8_t>(type)&&Le(p+1,2)==n-3;
     }
     bool ClaimWire(const Scope& s,const Key& key,const std::uint8_t* p,unsigned n) noexcept {
-        return n==46&&Framed(p,n,PacketType::HitClaim)&&Le(p+3,4)==key.epoch&&Le(p+7,4)==key.sequence&&
+        return n==46&&Framed(p,n,WireType::HitClaim)&&Le(p+3,4)==key.epoch&&Le(p+7,4)==key.sequence&&
             Le(p+11,2)==key.netId&&Le(p+13,4)==key.objectId&&Le(p+17,8)==key.connection&&
             Le(p+25,4)==key.attackId&&Le(p+29,4)==static_cast<std::uint32_t>(key.damage)&&p[45]==s.native.slot;
     }
     bool PacketWire(const Scope& s,Kind kind,unsigned id,std::uint64_t sequence,int hp,int maxHp,
                     const std::uint8_t* p,unsigned n) noexcept {
         if(kind==Kind::DeathPublish||kind==Kind::DeathReceive)
-            return n==9&&Framed(p,n,PacketType::EnemyDeath)&&Le(p+3,4)==s.native.epoch&&Le(p+7,2)==id;
-        if(n<17||!Framed(p,n,PacketType::EnemyHp)||Le(p+3,4)!=s.native.epoch||Le(p+7,8)!=sequence)return false;
+            return n==9&&Framed(p,n,WireType::EnemyDeath)&&Le(p+3,4)==s.native.epoch&&Le(p+7,2)==id;
+        if(n<17||!Framed(p,n,WireType::EnemyHp)||Le(p+3,4)!=s.native.epoch||Le(p+7,8)!=sequence)return false;
         const auto count=Le(p+15,2);
         if(!count||count>TargetCount||n!=17+count*10)return false;
         bool found=false;

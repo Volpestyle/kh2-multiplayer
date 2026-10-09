@@ -10,6 +10,9 @@
 #include "kh2coop/Codec.hpp"
 namespace cc=kh2coop::inject::combatcausal;
 namespace ht=kh2coop::inject::nativehittrace;
+static_assert(static_cast<unsigned>(cc::WireType::HitClaim)==static_cast<unsigned>(kh2coop::PacketType::HitClaim));
+static_assert(static_cast<unsigned>(cc::WireType::EnemyHp)==static_cast<unsigned>(kh2coop::PacketType::EnemyHp));
+static_assert(static_cast<unsigned>(cc::WireType::EnemyDeath)==static_cast<unsigned>(kh2coop::PacketType::EnemyDeath));
 namespace { unsigned checks=0,failed=0; std::uint64_t clockNs=1;
 void Check(bool ok,const char* name){++checks;if(!ok){++failed;std::printf("FAIL %s\n",name);}}
 std::uint64_t Clock() noexcept{return ++clockNs;}
