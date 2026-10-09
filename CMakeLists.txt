@@ -606,6 +606,18 @@ if(WIN32 AND TARGET minhook_lib)
         target_compile_options(kh2coop_preinject_guard PRIVATE /W4 /WX)
     endif()
 endif()
+# Actual party-menu detours against owned synthetic native memory. Each retained
+# install/signature failure requires a fresh process; CTest must remain serial.
+if(WIN32 AND TARGET minhook_lib)
+    add_executable(kh2coop_party_menu_admission_test tests/PartyMenuAdmissionTest.cpp)
+    target_include_directories(kh2coop_party_menu_admission_test PRIVATE inject/src common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(kh2coop_party_menu_admission_test PRIVATE _CRT_SECURE_NO_WARNINGS)
+    if(MSVC)
+        target_compile_options(kh2coop_party_menu_admission_test PRIVATE /W4 /WX)
+    endif()
+endif()
+
 enable_testing()
 add_executable(kh2coop_downed_spectate_test tests/DownedSpectateTest.cpp)
 target_include_directories(kh2coop_downed_spectate_test PRIVATE inject/src)
@@ -625,5 +637,26 @@ if(TARGET kh2coop_resourcetrace_test)
     foreach(_kh2coop_mode identity allocate register pin enable)
         add_test(NAME kh2coop_resourcetrace_test_${_kh2coop_mode}
                  COMMAND kh2coop_resourcetrace_test ${_kh2coop_mode})
+    endforeach()
+endif()
+
+if(TARGET kh2coop_party_menu_admission_test)
+    foreach(_party_mode trace trace-nonexact paired-donald paired-goofy apply)
+        add_test(NAME kh2coop_party_menu_admission_test_${_party_mode}
+                 COMMAND kh2coop_party_menu_admission_test ${_party_mode})
+    endforeach()
+    foreach(_party_index RANGE 0 17)
+        add_test(NAME kh2coop_party_menu_admission_test_signature-${_party_index}
+                 COMMAND kh2coop_party_menu_admission_test signature-${_party_index})
+    endforeach()
+    foreach(_party_kind create enable)
+        foreach(_party_index RANGE 0 6)
+            add_test(NAME kh2coop_party_menu_admission_test_${_party_kind}-${_party_index}
+                     COMMAND kh2coop_party_menu_admission_test ${_party_kind}-${_party_index})
+        endforeach()
+    endforeach()
+    foreach(_party_index RANGE 0 15)
+        add_test(NAME kh2coop_party_menu_admission_test_party-signature-${_party_index}
+                 COMMAND kh2coop_party_menu_admission_test party-signature-${_party_index})
     endforeach()
 endif()

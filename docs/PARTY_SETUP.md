@@ -495,4 +495,42 @@ Independent review: party-menus-20261008/codex-review-rev5-fixture02.md (ADOPT).
 Reusable offline evidence: rev5's36 native modes/664 assertions and98 audited
 socketless fixture checks. The landed production file is byte-identical to
 that compiled/adopted rev5; current-main chosen-AI A2 restoration ownership is
-preserved. The separate ordinary-root Party guard is not part of this landing.
+preserved. The separately qualified ordinary-root Party refusal is described below.
+
+
+### Ordinary pause-root Party refusal (qualified 2026-10-08)
+
+While the physically owned sparse-middle `[remote, 0, local]` tuple remains
+installed, a seventh byte-guarded callback refuses Party/change from the
+ordinary pause root (state0). Native Party/change mixes unchecked compact
+indices with original row seats; the existing portrait translation cannot make
+its builder safe. The callback maps the actual compact input through feature
+maskBEEC20 and refuses feature3 before descriptor access or state transition.
+State, mask and ownership are bracketed; unowned layouts, trailing empties,
+other pages/features and unreadable observations retain native delegation.
+The game's input/feedback/common-refusal and Cancel paths remain intact. The
+installer pins their complete contract plus native feature mapping and feedback
+tables before accepting any empty member. This adds no menu or SAVE write.
+
+`KH2COOP_PARTY_ADMISSION_TRACE=1` observes at most16 process-lifetime consumed
+refusals with caller/state/selection/mask/feature/owner, preserving LastError.
+Live run20261008-204313_party_root_consumed_refusal_1 passed with all four disk
+saves unchanged. Both machines supplied fresh exact consumed-refusal receipts,
+retained positive root state/selection/member census and passed typed SAVE gates,
+native Cancel and writer-expiry next-load restoration. Before Circle the fixture
+returns the root cursor to Items at top0/relative0, then positively verifies
+remembered feature0: native Cancel derives that metadata from cursor top, whereas
+Cross uses `(top + relative) % rowCount`. Reopening a remembered Party feature
+without this preparation is outside the fixture's qualified route.
+
+The live native OFF/restored paths selected Party then Cancelled without Cross;
+native Party builder entry is not qualified. Alternate constructors/direct or
+save-point ingress, already-open Party pages, companion change, deeper Items,
+equipment/abilities/Status and shop/save/command surfaces remain unqualified.
+This guard protects the ordinary state0 entry only, not all Party ingress.
+The stabilized actual-detour controls now live in PartyMenuAdmissionTest.cpp:
+54 process-isolated modes cover native feedback/comparison/root destinations,
+mask mapping, Cancel, tracing limits, ownership/read faults, A2 restoration and
+seven-hook install/rollback/signatures with the entire synthetic SAVE unchanged.
+Boundary doubles stop at native destination PCs; later builder/cleanup side
+effects are covered only to the extent of the bounded live route above.
