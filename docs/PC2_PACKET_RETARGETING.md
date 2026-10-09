@@ -55,6 +55,19 @@ buildid `15194255`. This qualifies the lane, not other fixtures or networking.
 
 ## Serialize, seal and stage
 
+Desktop session numbers change across reboots. For every future PC2 packet,
+including JOIN friend roles and HB native-sync adapters, bind the expected
+active-console session in fresh consent instead of hardcoding Session 2.
+Read `WTSGetActiveConsoleSessionId` at admission and immediately before each
+game launch. Require a nonzero integer session, reject `0xffffffff` (no active
+console), and require the actual driver process session from the native snapshot
+to equal both consent and active console. A mismatch refuses before launch;
+never launch from SSH Session 0 or silently select another session. Verify a
+logged-in user, Steam signed in, and no KH2/official launcher separately. Existing
+sealed packets retain their original checks and require a new reviewed revision
+when their session no longer matches. Smoke06 refused after the 2026-10-09 reboot
+changed PC2's active console to Session 1; smoke07 introduces this runtime binding.
+
 PC2's shared lock is `%USERPROFILE%/lead-outbox/kh2-rig/rig.lock`. Acquire by
 exclusive create before setup/launch; any existing lock refuses, with no stale
 takeover. Bind the JSON to driver PID/native creation FILETIME, run ID, packet
@@ -86,6 +99,11 @@ prompts can lose multiline text. Supply every mandatory script parameter and
 use `powershell -NonInteractive`. Write UTF-8 and keep operator logs outside
 the sealed packet.
 
+Preserve the scenario's primary error before asserting that two launches were
+recorded. A first-launch startup failure can leave no returned owned instance;
+report its boot error, then recover native ownership from the portable registry
+for closure. The launch-count check still applies to the exact intended terminal.
+
 ## Finish and release
 
 Retain launch ownership even when the helper times out before returning JSON:
@@ -99,5 +117,9 @@ before releasing the window to the JOIN owner. PC2's standard account can deny
 Preserve packet, unpack and evidence on failure; archive by moving and never
 retry the seal. SSH commands can linger after remote completion. Fetch the
 receipt separately; SFTP batch `ls/get` works without rerunning the remote job.
+Poll the known `result.json` directly with scp/SFTP. A status SSH command that
+prints only the started receipt can stall before reading later files, even when
+the result already exists; its partial output does not establish that a run is
+still active.
 Keep raw account/path inventories and logs local; publish sanitized reports and
 game-only renderer captures.
