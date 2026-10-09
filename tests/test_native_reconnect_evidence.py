@@ -49,7 +49,7 @@ def observation(slot, roster, generation, seq):
                             localReadAvailable=True, worldBefore=copy.deepcopy(world), worldAfter=world,
                             local=pose(0, seq + index), puppets=puppets))
     return dict(schema=1, command="observe", processId=100 + slot, ok=True, readOnly=True,
-                atomicAcrossBridges=False, avatarBridgeVersion=2, worldBridgeVersion=11, samples=samples)
+                atomicAcrossBridges=False, avatarBridgeVersion=4, worldBridgeVersion=12, samples=samples)
 
 
 def initial():
@@ -115,20 +115,21 @@ class ReconnectEvidenceTests(unittest.TestCase):
         json.dumps(self.baseline)
         json.dumps(result)
 
-    def test_world_bridge_version_matches_production_and_rejects_other_layouts(self):
-        header = (ROOT / "common/include/kh2coop/WorldBridge.hpp").read_text()
-        declaration = next(line for line in header.splitlines()
-                           if "WORLD_BRIDGE_VERSION =" in line)
-        current = int(declaration.split("=", 1)[1].split(";", 1)[0].strip())
-        self.assertEqual(self.before["peers"][0]["avatarObservation"]["worldBridgeVersion"], current)
-        self.assertTrue(self.baseline["ready"], self.baseline)
-        for incompatible in (0, current - 1, current + 1):
-            with self.subTest(version=incompatible):
-                sample = copy.deepcopy(self.before)
-                sample["peers"][0]["avatarObservation"]["worldBridgeVersion"] = incompatible
-                result = EVIDENCE.capture_baseline(sample)
-                self.assertFalse(result["ready"])
-                self.assertIn("invalid worldBridgeVersion", " ".join(result["problems"]))
+    def test_bridge_versions_match_production_and_reject_other_layouts(self):
+        for name, key, constant in (("AvatarBridge.hpp", "avatarBridgeVersion", "AVATAR_BRIDGE_VERSION"),
+                                    ("WorldBridge.hpp", "worldBridgeVersion", "WORLD_BRIDGE_VERSION")):
+            header = (ROOT / "common/include/kh2coop" / name).read_text()
+            declaration = next(line for line in header.splitlines() if constant + " =" in line)
+            current = int(declaration.split("=", 1)[1].split(";", 1)[0].strip())
+            self.assertEqual(self.before["peers"][0]["avatarObservation"][key], current)
+            self.assertTrue(self.baseline["ready"], self.baseline)
+            for incompatible in (0, current - 1, current + 1):
+                with self.subTest(key=key, version=incompatible):
+                    sample = copy.deepcopy(self.before)
+                    sample["peers"][0]["avatarObservation"][key] = incompatible
+                    result = EVIDENCE.capture_baseline(sample)
+                    self.assertFalse(result["ready"])
+                    self.assertIn("invalid " + key, " ".join(result["problems"]))
 
     def test_incomplete_and_unavailable_inputs_never_throw(self):
         for sample in ({}, None, {"peers": []}, {"peers": [None]}, {"relayLog": "text"}):

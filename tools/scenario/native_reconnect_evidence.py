@@ -120,7 +120,7 @@ def _observation(row, identity, roster, problems):
     raw = row.get("avatarObservation", {})
     for key, expected in {"schema": 1, "command": "observe", "processId": pid,
                           "ok": True, "readOnly": True, "atomicAcrossBridges": False,
-                          "avatarBridgeVersion": 2, "worldBridgeVersion": 11}.items():
+                          "avatarBridgeVersion": 4, "worldBridgeVersion": 12}.items():
         _require(raw.get(key) == expected, f"peer {slot} observe: invalid {key}", problems)
     samples = raw.get("samples", [])
     _require(len(samples) >= 2, f"peer {slot}: two pose samples required", problems)

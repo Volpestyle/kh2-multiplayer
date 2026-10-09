@@ -1055,12 +1055,12 @@ def step_reconnect_mark(ctx: Context, step: dict) -> dict:
     try:
         while True:
             if time.monotonic() >= deadline:
-                raise StepFailed("reconnect baseline deadline exceeded")
+                raise StepFailed("reconnect baseline deadline exceeded: " + "; ".join(latest.get("problems", [])[:6]))
             ctx._reconnect_partial_sample = None
             sample = collect_reconnect_sample(ctx, deadline)
             latest = _native_reconnect.capture_baseline(sample)
             if time.monotonic() >= deadline:
-                raise StepFailed("reconnect baseline deadline exceeded")
+                raise StepFailed("reconnect baseline deadline exceeded: " + "; ".join(latest.get("problems", [])[:6]))
             if latest.get("ready"):
                 break
             ctx.sleep(min(0.25, max(0, deadline - time.monotonic())))
@@ -1078,7 +1078,7 @@ def step_reconnect_mark(ctx: Context, step: dict) -> dict:
                                       "runtimes": [reconnect_runtime(ctx, i) for i in range(3)]}
         check_reconnect_bindings(ctx, latest)
         if time.monotonic() >= deadline:
-            raise StepFailed("reconnect baseline deadline exceeded")
+            raise StepFailed("reconnect baseline deadline exceeded: " + "; ".join(latest.get("problems", [])[:6]))
         save_reconnect_sample(ctx, name, sample, latest)
         ctx.saved[name] = latest
         return latest
