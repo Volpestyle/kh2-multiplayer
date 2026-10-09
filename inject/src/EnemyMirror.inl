@@ -323,6 +323,7 @@ static bool CullBody(void* handler, void* actor, Predicate original) {
             if (g_mstats.forceWaits++ % 300 == 0) CullLog("force-remove-wait", a, netId, since);
             return native;
         }
+        if (!enemysync::PopulationForceRemove(a)) return native; // final identity/scope guard after child reads
         ++g_mstats.forceRemoves;
         CullLog("force-remove", a, netId, since);
         enemysync::PopulationForget(a);  // rev3 C1: the +0x48 dispose always follows a true return
@@ -425,6 +426,7 @@ void PreUpdate(uintptr_t actor) {
     if (!enemysync::MirrorRequested()) return;
     if (g_ownerThread == 0) g_ownerThread = GetCurrentThreadId();
     if (!OwnerThread()) return;
+    // Certified unbound stale copies are consumed at the owner-frame boundary, independently of native bit28.
     Pose pose {};
     const Gate gate = enemysync::MirrorPose(actor, pose);
     Driven* d = Find(actor);

@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// EnemyPopulation — VUH-1788: the client's enemy population follows the host's
+// EnemyPopulation â€” VUH-1788: the client's enemy population follows the host's
 // (KH2COOP_ENEMY_POPULATION=1, requires KH2COOP_ENEMY_MIRROR=1; default off).
 //
 // Pure planning state, no game memory (EnemySync.cpp owns the native calls):
@@ -27,6 +27,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 
 namespace kh2coop::inject::enemypop {
 
@@ -50,6 +51,7 @@ struct HostView {
     bool dead = false;
     bool boundLocally = false;  // a present local spawn carries this netId
     bool streamFresh = false;   // EnemyMotion drivable for this netId
+    bool admissionAvailable = true; // preflighted native admission; false never consumes an attempt
     bool forcedPresent = false; // our earlier forced actor for it is still in the census
 };
 
@@ -100,7 +102,7 @@ public:
                                  !h.forcedPresent;
             if (!missing) { t->missingSince = 0; continue; }
             if (!t->missingSince) t->missingSince = frame ? frame : 1;
-            if (pick || !safe) continue;
+            if (pick || !safe || !h.admissionAvailable) continue;
             if (frame - t->missingSince < kMissingFrames) continue;
             if (t->attempts >= kMaxAttempts || forcedCount_ >= kMaxForced) continue;
             if (t->attempts && frame - t->lastAttempt < kRetryFrames) continue;
@@ -172,7 +174,8 @@ private:
 // The factory's own admission 0x3A1F00: weight (objentry +0x54, u8) <= limit (0x2A0F7DC) - used (0x2A0F830),
 // float32. A refused admission makes 0x3DF930 return null; never call it while this is false.
 inline bool BudgetAllows(float limit, float used, std::uint8_t weight) noexcept {
-    return static_cast<float>(weight) <= limit - used;
+    return std::isfinite(limit) && std::isfinite(used) && used >= 0.0f && limit >= used &&
+           static_cast<float>(weight) <= limit - used;
 }
 
 // A forced copy goes as soon as its host enemy is dead or unknown, the epoch

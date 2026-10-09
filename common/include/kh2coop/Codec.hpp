@@ -5,6 +5,7 @@
 #include "kh2coop/DesyncProtocol.hpp"
 #include "kh2coop/ResyncProtocol.hpp"
 #include "kh2coop/Types.hpp"
+#include "kh2coop/PopulationCut.hpp"
 
 #include <cstdint>
 #include <string>
@@ -60,6 +61,7 @@ enum class PacketType : std::uint8_t {
     RemoteHit = 45, // host -> relay validation -> target owner only
     TargetAuthority = 46, // host -> relay validation -> clients (reliable, periodic)
     PartyIntent = 47, // host -> relay (cached per target; no joiner replay, the host republishes) -> all incl. host (VUH-1786)
+    PopulationCut = 48, // complete certified native occurrence state, host only
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
 inline bool isDesyncDiagnosticPacket(PacketType type) {
@@ -71,6 +73,7 @@ inline bool isDesyncDiagnosticPacket(PacketType type) {
 // ---------------------------------------------------------------------------
 
 // Types.hpp structs
+std::vector<std::uint8_t> encode(const PopulationCut& cut);
 void write(ByteWriter& w, const Vec3& v);
 void write(ByteWriter& w, const InputButtons& b);
 void write(ByteWriter& w, const InputFrame& f);
@@ -250,6 +253,7 @@ inline bool isWorldPacket(PacketType t) {
     switch (t) {
         case PacketType::RoomTransition:
         case PacketType::EventHold:
+        case PacketType::PopulationCut:
         case PacketType::EnemyManifest:
         case PacketType::EnemyHp:
         case PacketType::EnemyDeath:

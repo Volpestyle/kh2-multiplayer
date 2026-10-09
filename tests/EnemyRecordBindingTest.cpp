@@ -189,7 +189,7 @@ int main(int argc,char** argv) {
     check("unsupported schema refused",refused);
     m.entries[0].recordKey.reset();const auto ordinary=encode(m);decodePacketHeader(ordinary.data(),ordinary.size(),payload,size);
     ByteReader normal(payload,size);read(normal,decoded);check("default manifest has no experimental key",normal.atEnd()&&!decoded.entries[0].recordKey);
-    check("v14 peer is explicitly incompatible",PROTOCOL_VERSION==15);
+    check("v14/v15 peers require the newer population protocol",PROTOCOL_VERSION==16);
     if (argc>=2) {
         std::ifstream input(argv[1],std::ios::binary);
         for (const auto oid:{317u,76u}) {

@@ -804,6 +804,15 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             enemyMotionSequence_ = motion.sequence;
         }
 
+        if(type==PacketType::PopulationCut) {
+            PopulationCut cut;read(reader,cut);
+            if(!admittedScope || admittedScope->kind!=WorldSourceKind::Native ||
+               admittedScope->sourceConnectionId!=avatarConnections_[0] || !hostRoom_ ||
+               cut.epoch!=hostRoom_->epoch || cut.location!=NativeRecordLocation{hostRoom_->worldId,hostRoom_->roomId,
+                   hostRoom_->door,hostRoom_->mapProgram,hostRoom_->battleProgram,hostRoom_->eventProgram})return;
+            reader=ByteReader(payload,payloadSize);
+        }
+
         if(type==PacketType::PartyLayout) {
             PartyLayout m;read(reader,m);
             std::array<std::uint64_t,3> roster{avatarConnections_[0],avatarConnections_[1],avatarConnections_[2]};

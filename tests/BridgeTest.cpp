@@ -496,8 +496,11 @@ int main() {
         if (e.scope.kind != WorldSourceKind::Native) return;
         hostInbox.Receive(hostRuntimeSide, encode(e), hostStats);
     };
+    std::vector<WorldScope> populationDeliveries;
     clientCb.onWorldEnvelope = [&](const WorldEnvelope& e) {
         if (e.scope.kind != WorldSourceKind::Native) return;
+        if(!e.packet.empty() && e.packet.front()==static_cast<std::uint8_t>(PacketType::PopulationCut))
+            populationDeliveries.push_back(e.scope);
         clientInbox.Receive(clientRuntimeSide, encode(e), clientStats);
     };
     NetworkClient host("127.0.0.1", cfg.port, cfg.gameBuild, cfg.modHash, "host",
@@ -588,6 +591,30 @@ int main() {
     hostDll.SendToRuntime(encode(EnemyManifest {7, true, {target}}), captured(hostDll, host));
     check(waitFor([&] { return relay.manifestSize() == 1 && clientDll.ConnectionId(2) != 0; }),
           "typed manifest and requester connection identity are available before claiming");
+    PopulationCut population;population.epoch=7;population.hostLoad=2;population.hostTransition=1;
+    population.sequence=100;population.location={4,26,3,1,2,0};
+    NativeRecordContentDefinition populationDefinition;populationDefinition.location=population.location;
+    populationDefinition.layoutSha256.fill(1);populationDefinition.groupKey=808476514;
+    populationDefinition.header[4]=1;populationDefinition.records.resize(1);
+    populationDefinition.records[0][0]=0x35;populationDefinition.records[0][1]=1;
+    population.definitions.push_back(populationDefinition);
+    population.entries.push_back({5,0,0,309,80,80,0,false,{10,0,20,1}});
+    check(hostDll.SendToRuntime(encode(population),captured(hostDll,host)),"host complete cut enters real native bridge");
+    check(waitFor([&]{return populationDeliveries.size()==1;}),"authenticated PopulationCut crosses real pump relay and client decode");
+    const auto initialPopulationDelivery=populationDeliveries.back();
+    check(initialPopulationDelivery.sourceConnectionId==hostDll.ConnectionId(0) &&
+          initialPopulationDelivery.targetDeliverySerial==clientDll.DeliverySerial(),"cut preserves admitted host and client delivery scope");
+    auto rejectedCut=relay.rejectedWorldMessages();
+    population.sequence=101;
+    clientDll.SendToRuntime(encode(population),captured(clientDll,client));pump(100);
+    check(relay.rejectedWorldMessages()==rejectedCut+1 && populationDeliveries.size()==1,"friend cannot author population authority");
+    rejectedCut=relay.rejectedWorldMessages();population.sequence=100;
+    hostDll.SendToRuntime(encode(population),captured(hostDll,host));pump(100);
+    check(relay.rejectedWorldMessages()==rejectedCut+1 && populationDeliveries.size()==1,"same source cut sequence is not reinstalled");
+    rejectedCut=relay.rejectedWorldMessages();population.sequence=101;population.location.eventProgram=1;
+    population.definitions[0].location=population.location;
+    hostDll.SendToRuntime(encode(population),captured(hostDll,host));pump(100);
+    check(relay.rejectedWorldMessages()==rejectedCut+1 && populationDeliveries.size()==1,"same-room changed event cut refuses without poisoning current cut");
 
     // Client DLL claims a hit; host DLL receives it with the real slot.
     HitClaim claim;
@@ -651,6 +678,8 @@ int main() {
     check(networkOnlyWait([&] { return relay.verifiedPeerCount() == 2 && client.worldReady() &&
                                       clientDll.ConnectionId(2) != claim.requesterConnectionId; }),
           "reconnected bridge requester receives a different connection identity");
+    check(networkOnlyWait([&]{return populationDeliveries.size()==2;}) && populationDeliveries.back().targetConnectionId!=initialPopulationDelivery.targetConnectionId &&
+          populationDeliveries.back().targetDeliverySerial==clientDll.DeliverySerial(),"reconnect replays cached complete cut under fresh client delivery scope");
     const auto rejectedBefore = relay.rejectedWorldMessages();
     pumpDllToNet(clientRuntimeSide, client, clientStats);
     check(clientStats.retiredOutgoing == retiredBefore + 3 && relay.rejectedWorldMessages() == rejectedBefore,

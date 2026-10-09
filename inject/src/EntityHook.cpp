@@ -3665,7 +3665,8 @@ bool Initialize(uintptr_t exeBase) {
             Log("  WARNING: ApplyHitDamage bytes don't match this build; hits can't be dropped");
         }
         OpenHitChannel();
-        enemysync::Install(exeBase, &Log, g_origApplyStatDelta, verifiedTakeDamage);
+        enemysync::Install(exeBase, &Log, g_origApplyStatDelta, verifiedTakeDamage,
+                           (hitTraceVerified & hitTraceInstalled & 4U)!=0);
         enemytarget::Install(); // VUH-1515: default off (KH2COOP_ENEMY_TARGET_REMOTE)
         enemysync::SetHashDiagnosticSink([](const std::string& row) {
             if (!g_logFile) return false;

@@ -215,14 +215,14 @@ void rsSnapshotValid(const ResyncSnapshot& m) {
 }
 bool sameResyncRoom(const RoomTransition& a,const RoomTransition& b) {return a.epoch==b.epoch&&a.worldId==b.worldId&&a.roomId==b.roomId&&a.door==b.door&&a.mapProgram==b.mapProgram&&a.battleProgram==b.battleProgram&&a.eventProgram==b.eventProgram;}
 bool isScopedWorldPacket(PacketType t) {return (isWorldPacket(t)&&t!=PacketType::ResyncRequest)||t==PacketType::ActorSnapshot||t==PacketType::EnemySnapshot||t==PacketType::EventMessage;}
-bool isMaterialWorldPacket(PacketType t) {return t==PacketType::RoomTransition||t==PacketType::EventHold||t==PacketType::EnemyManifest||t==PacketType::EnemyHp||t==PacketType::EnemyDeath||t==PacketType::ProgressUpdate;}
+bool isMaterialWorldPacket(PacketType t) {return t==PacketType::RoomTransition||t==PacketType::EventHold||t==PacketType::EnemyManifest||t==PacketType::EnemyHp||t==PacketType::EnemyDeath||t==PacketType::PopulationCut||t==PacketType::ProgressUpdate;}
 PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
     const std::uint8_t* p;std::size_t n;const auto type=decodePacketHeader(bytes.data(),bytes.size(),p,n);
     rsRequire(bytes.size()==n+3&&isScopedWorldPacket(type));ByteReader r(p,n);
     switch(type) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
-        RS_INNER(EventHold) RS_INNER(EnemyManifest)
+        RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
         RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
@@ -1416,6 +1416,10 @@ std::vector<std::uint8_t> encode(const EventHold& m) {
     ByteWriter w;
     write(w, m);
     return encodePacket(PacketType::EventHold, w.data());
+}
+
+std::vector<std::uint8_t> encode(const PopulationCut& m) {
+    ByteWriter w;write(w,m);return encodePacket(PacketType::PopulationCut,w.data());
 }
 
 std::vector<std::uint8_t> encode(const EnemyManifest& m) {

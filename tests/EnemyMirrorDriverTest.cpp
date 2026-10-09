@@ -69,6 +69,8 @@ static double MirrorCursor() noexcept { return g_cursor; }
 static bool g_popRequested = false;
 static uintptr_t g_forceRemoveActor = 0;
 static bool PopulationRequested() noexcept { return g_popRequested; }
+static uintptr_t g_staleActor = 0;
+static bool PopulationStaleRequested(uintptr_t actor) noexcept { return g_popRequested && actor && actor == g_staleActor; }
 static bool PopulationForceRemove(uintptr_t actor) noexcept { return actor && actor == g_forceRemoveActor; }
 static uintptr_t g_forcedHoldActor = 0;
 static bool PopulationForcedHold(uintptr_t actor) noexcept { return actor && actor == g_forcedHoldActor; }
@@ -328,9 +330,17 @@ int main() {
     enemymirror::PreUpdate(pop);  // population off: no cull hook
     CHECK(g_mhCreate == createsBefore && enemymirror::g_cullCount == 0);
     enemysync::g_popRequested = true;
+    // A certified unbound native copy uses the owner-frame consumer, with no removal-predicate hook.
+    enemysync::g_gate = enemymirror::Gate::None;
+    enemysync::g_staleActor = pop;
     ++g_frameCounter;
     enemymirror::PreUpdate(pop);
-    CHECK(g_mhCreate == createsBefore + 1 && enemymirror::g_cullCount == 1);
+    CHECK(g_mhCreate == createsBefore && enemymirror::g_cullCount == 0);
+    CHECK(!enemymirror::Find(pop));
+    enemysync::g_staleActor = 0;
+    enemysync::g_gate = enemymirror::Gate::Drive;
+    ++g_frameCounter;
+    enemymirror::PreUpdate(pop);
     static bool s_native = false;
     struct FakePred { static bool __fastcall Call(void*, void*) { return s_native; } };
     *g_mhOriginal = reinterpret_cast<void*>(&FakePred::Call);

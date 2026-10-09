@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/PopulationCutJson.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/WorldBridge.hpp"
 
@@ -120,6 +121,11 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
                                       type == PacketType::StateHash ||
                                       isEphemeralWorldPacket(type);
                 submitted = net.sendNativeWorld(packet, context, !periodic);
+                if(submitted && type==PacketType::PopulationCut && net.worldBinding()) {
+                    ByteReader cutReader(payload,size);PopulationCut cut;read(cutReader,cut);
+                    const auto receipt=PopulationCutJson(cut,net.worldBinding()->sessionId);
+                    std::printf("[enemy-pop] occurrence-cut-json %s\n",receipt.c_str());
+                }
                 reviveHop(packet, submitted ? "submitted" : "rejected:sendNativeWorld");
             }
             if (submitted) ++stats.toNet;

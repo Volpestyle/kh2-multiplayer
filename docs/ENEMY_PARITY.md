@@ -1456,3 +1456,39 @@ walkaway, standard mirror gates and paired native authority probes. It requires
 a fresh group81 body and opposite peer catalog-key receipt. PASS is scoped to
 the original populations; whole-room friend-bound and group81 mirroring remain
 UNQUALIFIED. Code and fixture are PENDING, without a live qualification claim.
+
+
+### Population repair-06 owner-frame disposal
+
+Repair-05's retained late-join run `20261008-230919` installed cut12 and
+produced terminal tickets, but both unbound Shadows had actor+120 bit28 clear
+in all five complete samples. Native removal-predicate dispatch was therefore
+insufficient. See `.local/repair05-live-230919-diagnosis.json` and the earlier
+`.local/pj08-live-203406-diagnosis.json` for the persistent mismatched sets.
+
+The repair-06 candidate consumes certified terminal tickets on the owner frame
+using the verified native ApplyStatDelta one-shot. It checks full scope, terminal
+incarnation, current unbound ownership, catalog membership and five roots again
+at dispatch. Ordinary bound death authority stays unchanged. A process-lifetime,
+bounded five-root/load/transition journal prevents repeat native calls after a
+fault, readback failure, ticket cancellation, or cut reauthorization. Journal
+exhaustion refuses further calls; it never evicts attempted incarnations.
+
+Every native call or fault stops the frame after a fresh census; tracking resumes
+only from a complete current census. HP zero is pending native removal, and only
+fresh physical absence after an attempted call produces a disposed receipt.
+Per-ticket outcome JSON records refusal checks, call outcomes, pending removal,
+cancellation and confirmed absence; repeated identical outcomes are summarized
+on the next transition, and receipt loss is explicit. Native admission weights,
+used budget, controller counts and constructor records are not changed.
+
+Live run `20261009-000023_vuh1788_late_join_population_repair_1` PASSed the
+fixture oracle and safety closure: terminal ID1 consumed at frame159, physically
+absent at219; both complete three-peer samples match IDs2/6/7 at20/20 HP and
+8/9/10 at28/28 HP with stable unique bindings. No admission/budget waits remain
+in the late-client log. Controller count falls5 ->4 while used budget stays48.
+Reconnect, forced-host-id and used-budget reclamation are not claimed. Build and
+120/120 serial CTest PASS; codec ASan/UBSan PASS. Helper sanitizer is INCOMPLETE
+because of a GCC13 compiler ICE, waived by Lead as a live gate. See
+[population repair and evidence limits](POPULATION_REPAIR.md). The landing tree
+rebased onto079f9a3 awaits its own scheduled build and full serial CTest.

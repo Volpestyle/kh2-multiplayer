@@ -45,6 +45,22 @@ int main() {
     flap[0].boundLocally = false;
     (void)r.Plan(flap, 160, true);
     CHECK(r.Plan(flap, 100 + kMissingFrames, true) == 0 && r.Plan(flap, 160 + kMissingFrames, true) == 8);
+    // A blocked Shadow must not starve a cheaper already-loaded family.
+    Planner budget; budget.Rebase(1);
+    std::vector<HostView> admission {Missing(7), Missing(8)};
+    admission[0].admissionAvailable = false;
+    admission[1].objectId = 4;
+    (void)budget.Plan(admission, 10, true);
+    CHECK(budget.Plan(admission, 10 + kMissingFrames, true) == 8);
+    CHECK(budget.forcedCount() == 0); // budget waits are not constructor attempts
+    admission[0].admissionAvailable = true;
+    admission[1].boundLocally = true;
+    CHECK(budget.Plan(admission, 11 + kMissingFrames, true) == 7); // missing clock retained
+    admission[0].admissionAvailable = false;
+    CHECK(budget.Plan(admission, 12 + kMissingFrames, true) == 0);
+    admission[0].admissionAvailable = true;
+    admission[0].loadedObject = false;
+    CHECK(budget.Plan(admission, 13 + kMissingFrames, true) == 0); // never bypass C5
     // Attempts: identity-matched (C1), not by address alone.
     p.Attempted(6, Id(0xABC000), 1200);
     CHECK(p.forcedCount() == 1 && p.ForcedFor(Id(0xABC000)) && p.ForcedFor(Id(0xABC000))->netId == 6);

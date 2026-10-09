@@ -45,7 +45,7 @@ using LogFn = void (*)(const char* fmt, ...);
 using StatDeltaFn = int(__fastcall*)(void* actor, int delta, int idx, int reactFlag);
 using TakeDamageFn = void(__fastcall*)(void* actor, int delta, int idx, std::uint8_t reactFlag);
 
-void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamageFn takeDamage);
+void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamageFn takeDamage, bool populationDeathHelperVerified);
 // Install-time opt-in, checked flush result; no authority or protocol role.
 void SetHashDiagnosticSink(std::function<bool(const std::string&)> sink);
 
@@ -88,6 +88,7 @@ bool PopulationRequested() noexcept;
 // Owner thread: `actor` (matched by actor + objentry + status) is a copy this
 // client force-spawned whose host enemy is now dead or unknown, the epoch moved,
 // or a native duplicate claims it: the removal predicate forces true.
+bool PopulationStaleRequested(uintptr_t actor) noexcept;
 bool PopulationForceRemove(uintptr_t actor) noexcept;
 // Owner thread: `actor` is a live forced copy whose host enemy lives (held from creation).
 bool PopulationForcedHold(uintptr_t actor) noexcept;

@@ -10,10 +10,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 15;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 16;
 
 // ===========================================================================
-// Protocol v15 adds optional scoped record identity to EnemyManifest entries.
+// Protocol v16 adds bounded host PopulationCut (48) and occurrence bootstrap.
+// v15 adds optional scoped record identity to EnemyManifest entries.
 // v14 adds RemoteHit (45) and TargetAuthority (46) (VUH-1515, enemy targeting of remote players)
 // and PartyIntent = 47 (VUH-1786, host intended party for a target room).
 // v13 added EnemyMotion (VUH-1515 step 2, periodic host enemy pose/motion).

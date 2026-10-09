@@ -29,6 +29,7 @@
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/PopulationCutJson.hpp"
 #include "kh2coop/Revive.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
 #include "kh2coop/SurvivingPackPreparation.hpp"
@@ -75,6 +76,7 @@ CausalSink g_hashDiagnosticSink;
 CausalStream g_hashDiagnosticStream;
 uintptr_t g_exeBase = 0;
 StatDeltaFn g_applyStatDelta = nullptr;
+bool g_populationDeathHelperVerified=false;
 TakeDamageFn g_takeDamage = nullptr;
 Role g_role = Role::Off;
 WorldBridge g_bridge;
@@ -125,6 +127,8 @@ struct Spawn {
     uintptr_t objentry = 0, status = 0; // metadata at this binding's creation
     uintptr_t controller = 0, record = 0; // native spawn controller (+0x9E8) / record (+0x9F0) at creation
     bool identityRead = false;            // both were readable at creation (else the old reuse rule decides)
+    std::array<float,4> populationBirthPoint {};
+    bool populationPointCaptured = false;
     Vec3 spawnPos {};         // where it first appeared (identical across instances)
     bool present = false;     // in the latest complete native census
     std::int32_t lastHp = 1;  // HP when last seen (<= 0: dead, the slot may be reused)
@@ -411,6 +415,7 @@ void LogClaim(const char* action, const HitClaim& claim, const char* reason) {
     if (!g_claimDiagnosticBudget) g_log("[hitclaim] rejection/receipt log budget exhausted; application logs continue");
 }
 
+void ResetPopulationRepair();
 void ClearActivation() {
     g_activationLease.Clear();
     g_activationChallenges = {};
@@ -449,6 +454,7 @@ bool EnsureClientClaimScope();
 bool ReleaseClientClaims(std::uint32_t frame);
 
 void RetireWorldSession() {
+    ResetPopulationRepair();
     g_recordLease.Interrupt(); g_recordKeys.clear(); g_recordAuthority.clear(); g_recordContext={};
     eventholdnative::RetireOwner();
     g_eventControlScope = {}; g_eventControlRoom = {};
@@ -1799,6 +1805,12 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             }
         }
         if (refilled) {
+            // Population terminal history includes superseded IDs as well as native deaths.
+            if (g_populationRequested) {
+                EnemyDeath terminal;terminal.epoch=g_epoch;
+                terminal.netId=static_cast<std::uint16_t>(s.spawnIndex+1);
+                if(!Send(encode(terminal)))continue;
+            }
             s.deathSent = true;
             SYNC_LOG("[enemysync] host: spawn %u despawned, refilled at its point", s.spawnIndex);
         } else if (s.lastHp <= 0 || now - s.goneSinceMs > DESPAWN_GRACE_MS) {
@@ -2034,6 +2046,10 @@ void PopulationTick(std::uint32_t frame, const NativeCensus& census) {
                          f.netId, static_cast<unsigned long long>(f.id.actor), frame - f.frame, ticks);
         g_population.MarkYield(f.id.actor);
     }
+    // Admission is per candidate. One blocked heavy family cannot monopolize Plan.
+    float admissionLimit = 0.0f, admissionUsed = 0.0f;
+    const bool admissionRead = ReadNative(g_exeBase + RVA_ADMISSION_LIMIT, admissionLimit) &&
+                               ReadNative(g_exeBase + RVA_ADMISSION_USED, admissionUsed);
     std::vector<enemypop::HostView> views;
     for (const auto& [id, h] : g_host.enemies) {
         if (h.battleProgram != g_inst.btl) continue;
@@ -2046,8 +2062,20 @@ void PopulationTick(std::uint32_t frame, const NativeCensus& census) {
         // C5: only an object id this instance's own game already spawned (its resources are loaded).
         for (const Spawn& s : g_inst.spawns) if (s.objectId == h.objectId && !isForced(s)) { v.loadedObject = true; break; }
         v.streamFresh = g_mirror.Drivable(id, g_mirrorFrame);
+        uintptr_t admissionObjentry = 0;
+        for (const Spawn& s : g_inst.spawns)
+            if (s.objectId == h.objectId && s.objentry && !isForced(s)) {
+                admissionObjentry = s.objentry; break;
+            }
+        std::uint8_t admissionWeight = 0;
+        v.admissionAvailable = admissionRead && admissionObjentry &&
+            ReadNative(admissionObjentry + 0x54, admissionWeight) &&
+            enemypop::BudgetAllows(admissionLimit, admissionUsed, admissionWeight);
         for (const auto& f : g_population.forced())
             if (f.id.actor && f.netId == id && CensusHasActor(census, f.id.actor)) { v.forcedPresent = true; break; }
+        if(!v.dead && !v.boundLocally && v.loadedObject && !v.admissionAvailable && frame%300==0 && g_log)
+            g_log("[enemy-pop] admission-wait frame=%u netId=%u limit=%.2f used=%.2f weight=%u read=%u",
+                frame,id,admissionLimit,admissionUsed,admissionWeight,admissionRead?1u:0u);
         views.push_back(v);
     }
     const bool safe = g_enemyFactory && g_inst.live && g_host.arrived && SafeNativeGameplay() &&
@@ -2083,6 +2111,12 @@ void PopulationTick(std::uint32_t frame, const NativeCensus& census) {
         std::uint8_t weight = 0;
         (void)(objentry && ReadNative(objentry + 0x54, weight));
         g_popBudgetWaitNetId = 0;
+        // Last owner-thread admission read: no attempt or missing-clock reset on refusal.
+        float finalLimit=0.0f,finalUsed=0.0f;std::uint8_t finalWeight=0;
+        if(!objentry || !ReadNative(g_exeBase+RVA_ADMISSION_LIMIT,finalLimit) ||
+            !ReadNative(g_exeBase+RVA_ADMISSION_USED,finalUsed) || !ReadNative(objentry+0x54,finalWeight) ||
+            !enemypop::BudgetAllows(finalLimit,finalUsed,finalWeight) || !SafeNativeGameplay() ||
+            !spawncontroller::IsDiagnosticGameThread() || g_resyncWriteFence!=ResyncWriteFence::None)return;
         bool fault = false;
         void* actor = CallEnemyFactory(h.objectId, point, yaw, fault);
         if (!actor && !fault && g_log) {  // rev3: say why a null came back
@@ -2433,6 +2467,14 @@ std::vector<NativeRecordContentCandidate> RecordCandidates(const std::vector<Nat
         candidates.push_back({&definition, NativeRecordContentStatus::Complete, true});
     return candidates; // completeness/unique association supplied by the native capture or checked wire
 }
+#include "EnemyPopulationRepair.inl"
+
+bool PopulationDeathHelperReady() {return g_populationDeathHelperVerified && g_applyStatDelta!=nullptr;}
+bool InvokePopulationNativeDeath(uintptr_t actor,int hp) {
+    __try {g_applyStatDelta(reinterpret_cast<void*>(actor),-hp,0,0);return true;}
+    __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
+
 struct NativeRecordWriteCheck {
     ProducerWorldContext context;
     RoomTransition room;
@@ -3470,6 +3512,10 @@ bool ReceiveWorldPackets() {
                 ReceiveResyncSnapshot(packet); continue;
             }
             if (!scope) continue; // native world facts must preserve authenticated transport scope
+            if (type == PacketType::PopulationCut) {
+                ByteReader r(payload,size);PopulationCut cut;read(r,cut);
+                ReceivePopulationCut(cut,*scope);continue;
+            }
             if (type == PacketType::ActivationRequest) {
                 ByteReader r(payload, size);
                 ActivationRequest request;
@@ -4361,6 +4407,12 @@ std::vector<std::size_t> TrackSpawns(const NativeCensus& census) {
             s.objectId = native.objectId;
             s.objectType = native.objectType;
             s.spawnPos = native.position;
+            if(g_role==Role::Host && g_populationRequested && g_populationPointAvailable &&
+                g_populationPointLoad==census.load && g_populationPointTransition==census.transition &&
+                g_populationPointLocation==PopulationLocation(census.location) &&
+                g_mirrorFrame-g_populationPointFrame<=1) {
+                s.populationBirthPoint=g_populationObservedPoint;s.populationPointCaptured=true;
+            }
             g_inst.spawns.push_back(s);
             index = g_inst.spawns.size() - 1;
             fresh.push_back(index);
@@ -4498,10 +4550,11 @@ void SetHashDiagnosticSink(CausalSink sink) {
     else g_hashDiagnosticSink={};
 }
 
-void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamageFn takeDamage) {
+void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamageFn takeDamage,bool populationDeathHelperVerified) {
     g_exeBase = exeBase;
     g_log = log;
     g_applyStatDelta = applyStatDelta;
+    g_populationDeathHelperVerified=populationDeathHelperVerified && applyStatDelta!=nullptr;
     g_takeDamage = takeDamage;
     char eventHold[2] {};
     g_eventHoldProducerEnabled = GetEnvironmentVariableA("KH2COOP_EVENT_HOLD_PRODUCER", eventHold, sizeof(eventHold)) == 1 && eventHold[0] == '1';
@@ -4594,7 +4647,7 @@ void NoteActor(uintptr_t) {
 void OnFrameStart(std::uint32_t frame) {
     // Native damage can synchronously reenter actor work. The outer claim
     // transaction owns queue/sequence/binding state until its post-call census.
-    if (g_hostClaimProcessing) return;
+    if (g_hostClaimProcessing || g_populationConsumerActive) return;
     // This known native actor-update entry establishes diagnostic affinity;
     // broader creator/removal probes may execute before it or on other threads.
     spawncontroller::RegisterDiagnosticGameThread();
@@ -4766,6 +4819,8 @@ void OnFrameStart(std::uint32_t frame) {
         // their bindings reach the peer would report a transport backlog as a
         // native population mismatch.
         if (!HostFrame(frame, fresh, census)) { DrainPendingSpawnTrace(false); return; }
+        CapturePopulationBirths(census); // only the successfully announced, current incarnation
+        PublishPopulationCut(census);
         PublishHostMotion(frame, census);
         FlushActivationResponses();
         TickHostPartyLayout();
@@ -4777,6 +4832,10 @@ void OnFrameStart(std::uint32_t frame) {
                      g_inst.spawns[i].spawnPos.x, g_inst.spawns[i].spawnPos.y, g_inst.spawns[i].spawnPos.z);
         }
         if (!ClientFrame(census)) { DrainPendingSpawnTrace(false); return; }
+        TickPopulationRepair(frame, census);
+        if(!ConsumePopulationDisposals(frame,census)) {
+            DrainPendingSpawnTrace(false);return; // mutation/fault never reuses the pre-call population
+        }
         PopulationTick(frame, census);  // VUH-1788 (default off)
     }
     PublishAppliedHash(frame, census);
@@ -4795,8 +4854,12 @@ bool MirrorTrace() noexcept { return g_mirrorTrace; }
 bool MirrorLatencyTrace() noexcept { return g_latencyTraceBudget != 0; }
 bool PopulationRequested() noexcept { return g_populationRequested; }
 // C1: works in every role, so a forced copy left behind by a retired session is still removed.
+bool PopulationStaleRequested(uintptr_t actor) noexcept {
+    try {return PopulationStaleAuthorized(actor);}catch(...) {return false;}
+}
 bool PopulationForceRemove(uintptr_t actor) noexcept {
     if (!g_populationRequested) return false;
+    // Certified stale natives use the explicit owner-frame consumer, never this bit-gated predicate.
     const auto* f = g_population.ForcedFor(ReadPopulationIdentity(actor));
     if (!f) return false;
     const bool client = g_role == Role::Client;
@@ -4806,6 +4869,7 @@ bool PopulationForceRemove(uintptr_t actor) noexcept {
 }
 void PopulationForget(uintptr_t actor) noexcept {
     if (!g_populationRequested) return;
+    // Ordinary native cull/forced-copy cleanup grants no stale-ticket dispatch authority.
     if (const auto* f = g_population.ForcedFor(ReadPopulationIdentity(actor))) g_population.Forget(f->id.actor);
 }
 std::uint32_t PopulationGeneration() noexcept { return g_population.generation(); }
@@ -5259,11 +5323,15 @@ void CaptureHostActivation(const float* position4) {
     // The hook provides a checked, aligned local copy of its actual native
     // argument. Never read an avatar bridge or answer from a cached old point.
     RoomTransition location;
-    if (!position4 || !ActivationContext(Role::Host, location) ||
-        g_activationSourceSeq == std::numeric_limits<std::uint64_t>::max()) return;
+    if (!position4) return;
     std::array<float, 4> point;
     std::copy_n(position4, point.size(), point.begin());
     if (!std::all_of(point.begin(), point.end(), [](float value) { return std::isfinite(value); })) return;
+    // Retain native birth provenance while the room announcement is waiting for
+    // progress/ring capacity. This does not publish a lease or disposal authority.
+    if(CurrentRole()==Role::Host && WorldSessionGeneration()!=0 && SafeNativeGameplay() && ReadLocationChecked(location))
+        ObservePopulationActivation(point);
+    if(!ActivationContext(Role::Host,location) || g_activationSourceSeq==std::numeric_limits<std::uint64_t>::max())return;
     const auto sequence = ++g_activationSourceSeq;
     const auto now = GetTickCount64();
     for (auto& pending : g_activationChallenges) {
@@ -5285,6 +5353,7 @@ bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t up
     if (!position4 || !ActivationContext(Role::Client, location) ||
         !g_activationLease.Copy(GetTickCount64(), position4) ||
         g_bridge.SessionGeneration() != g_activationGeneration) return false;
+    if (CopyPopulationActivation(position4,controller))return true;
     if (!g_activationRecovery || g_activationRecovery->controller != controller ||
         !g_nativeResync || g_nativeResync->finished) return true;
     auto& recovery = *g_activationRecovery;
@@ -5328,7 +5397,9 @@ void Shutdown() {
     if (g_survivingPack.Intent()) g_survivingPack.Cancel();
     ClearActivation();
     ClearPendingHits();
+    SealPopulationDisposals("shutdown",g_mirrorFrame);
     g_takeDamage = nullptr;
+    g_populationDeathHelperVerified=false;
     g_resyncPlan.reset(); g_nativeResync.reset(); g_resyncOutput.clear();
     g_resyncWriteFence = ResyncWriteFence::None; g_resyncRecordAuthority.reset();
     g_activationOrderedGeneration = 0;

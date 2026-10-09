@@ -46,6 +46,7 @@ void SessionHost::pumpResync(std::uint64_t nowMs) {
     if(resyncPlan_&&nowMs>=resyncDeadline_)finishResync(ResyncResultReason::Deadline,"fixed transaction deadline");
 }
 void SessionHost::refreshResyncCache(const ResyncSnapshot& s,const std::vector<WorldEnvelope>& continuation,std::uint64_t cut) {
+    populationCut_.reset(); // a snapshot cannot manufacture terminal occurrence certificates
     room_=s.room;hold_=s.hold;manifest_={s.room.epoch,true,{}};enemyHp_.clear();deadEnemies_.clear();
     for(const auto& e:s.enemies){manifest_.entries.push_back(e.identity);enemyHp_[e.identity.netId]={e.identity.netId,e.hp,e.maxHp};if(e.life==ResyncLife::ObservedDeadHistory)deadEnemies_.insert(e.identity.netId);}
     lastEnemyHpSequence_=(std::max)(lastEnemyHpSequence_,s.hpSequence);
@@ -365,6 +366,7 @@ void SessionHost::stop() {
     session_.actors.clear();
     session_.sessionId.clear();
     lastEnemyHpSequence_ = 0;
+    populationCutFloor_ = 0;
     lastEnemyMotionSequence_ = 0;
     room_.reset();
     clearWorldState();
@@ -710,6 +712,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                         ++rejectedWorld_;
                         return;
                     }
+                    populationCut_.reset();
                     if (m.replace || m.epoch != manifest_.epoch) {
                         manifest_ = m;
                         enemyHp_.clear();
@@ -756,6 +759,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                         return;
                     }
                     deadEnemies_.insert(m.netId);
+                    populationCut_.reset();
                 }
                 if(admittedScope)lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
                 if(resyncSnapshot_&&admittedScope&&admittedScope->hostSourceSerial>resyncBegin_->snapshotCut&&resyncMaterialDifference(type,packet)) {
@@ -764,6 +768,31 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 }
                 forwardToOthers(peer, packet, reliable);
                 if(type==PacketType::RoomTransition)invalidateParty(PartyApplyReason::RoomChanged);
+                break;
+            }
+
+            case PacketType::PopulationCut: {
+                if(size!=payloadSize+3 || ps->status!=PeerStatus::Verified || !fromHost(*ps) || !admittedScope ||
+                    admittedScope->kind!=WorldSourceKind::Native){++rejectedWorld_;return;}
+                PopulationCut cut;read(reader,cut);
+                NativeRecordLocation room;
+                if(room_)room={room_->worldId,room_->roomId,room_->door,room_->mapProgram,room_->battleProgram,room_->eventProgram};
+                if(!room_ || cut.epoch!=room_->epoch || cut.location!=room || cut.epoch!=manifest_.epoch ||
+                   cut.sequence<=populationCutFloor_){++rejectedWorld_;return;}
+                std::set<std::uint16_t> covered;
+                for(const auto& row:cut.entries){
+                    const auto found=std::find_if(manifest_.entries.begin(),manifest_.entries.end(),[&](const auto& e){return e.netId==row.netId;});
+                    if(found==manifest_.entries.end()||found->objectId!=row.objectId||row.terminal!=(deadEnemies_.count(row.netId)!=0)){
+                        ++rejectedWorld_;return;
+                    }
+                    covered.insert(row.netId);
+                }
+                if(covered.size()!=manifest_.entries.size()){++rejectedWorld_;return;}
+                populationCutFloor_=cut.sequence;
+                populationCut_=std::move(cut);
+                lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
+                if(resyncPlan_)finishResync(ResyncResultReason::NativeFailed,"population cut changed");
+                forwardToOthers(peer,std::vector<std::uint8_t>(data,data+size),true);
                 break;
             }
 
@@ -1304,6 +1333,7 @@ void SessionHost::sendWorldStateTo(TransportPeer* peer) try {
     for (auto id : deadEnemies_) {
         sendTo(peer, encode(EnemyDeath {manifest_.epoch, id}), true, true);
     }
+    if(populationCut_ && populationCut_->epoch==manifest_.epoch)sendTo(peer,encode(*populationCut_),true,true);
 } catch (...) {
     // Covers cached body construction/encoding and the nested scope/envelope send.
     // Preserve the original exception path, but never attest complete coverage.
@@ -1459,6 +1489,7 @@ void SessionHost::clearWorldState() {
     for (auto& p:peers_) p.reviveAvatarMs=0;
     hold_.reset();
     manifest_ = {};
+    populationCut_.reset();
     enemyHp_.clear();
     deadEnemies_.clear();
 }
@@ -1585,6 +1616,7 @@ void SessionHost::removePeer(TransportPeer* peer) {
         session_.sessionId.clear();
         partyIntents_.clear(); partyIntentVersion_ = 0; partyIntentHost_ = 0; // VUH-1786: host gone
         lastEnemyHpSequence_ = 0;
+        populationCutFloor_ = 0;
         lastEnemyMotionSequence_ = 0;
         room_.reset();
         clearWorldState();

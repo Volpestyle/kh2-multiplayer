@@ -36,7 +36,7 @@ void rules() {
     const std::array<std::uint64_t, 3> ids{11, 12, 13};
     const auto goa = makeIntent(1, ids, {4, 0x1A, 0});
     check(validPartyIntent(goa, ids), "three-player default intent is valid");
-    check(static_cast<unsigned>(PacketType::PartyIntent) == 47 && PROTOCOL_VERSION == 15, "PartyIntent is type 47 at protocol 15");
+    check(static_cast<unsigned>(PacketType::PartyIntent) == 47 && PROTOCOL_VERSION == 16, "PartyIntent is type 47 at protocol 16");
     PartyIntent back{}; std::size_t n = 0;
     check(roundtrip(goa, back, n) && n == PARTY_INTENT_PAYLOAD && n == 63 && sameIntent(back, goa), "exact 63-byte codec roundtrip");
     auto two = makeIntent(2, {11, 12, 0}, {4, 0x0A, 0});
