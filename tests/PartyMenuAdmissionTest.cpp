@@ -44,6 +44,7 @@ MH_STATUS WINAPI Remove(void*){++removed;return MH_OK;}
 #define MH_QueueDisableHook harness::Disable
 #define MH_ApplyQueued harness::Apply
 #define MH_RemoveHook harness::Remove
+namespace kh2coop::inject::limitadmission { bool QueuePreserveHeld() { return true; } }
 #include "PartyEmptySeat.cpp"
 #undef _ReturnAddress
 #undef MH_CreateHook

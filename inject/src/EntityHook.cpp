@@ -53,6 +53,7 @@
 #include "PartyEmptySeat.hpp"
 #include "PartyNative.hpp"
 #include "PuppetCommandGuard.hpp"
+#include "LimitAdmission.hpp"
 #include "kh2coop/PlayerKits.hpp"
 #include "kh2coop/HitChannel.hpp"
 
@@ -452,29 +453,6 @@ static constexpr uintptr_t ACTOR_COLLISION_FLAGS = 0x18C;
 static constexpr uint8_t ACTOR_NO_COLLIDE = 0x40;
 // Puppet Drive/Summon restriction uses read-only native command admission.
 static bool g_anyPuppetActive = false;
-
-// Limits grey out while puppets are active: a limit's cutscene would grab
-// the partner actor, which is now a puppet (repos-60's static trace).
-//   0x3D88E0(actor, cmd*, state) -> menu state for a command (5 = greyed,
-//            what the game returns while a limit runs or MP recharges)
-//   0x3E7800(cmdId) -> limt entry if the limit is usable now, else 0; the
-//            execute path 0x3D8B40 re-checks it
-//   0x3E7C30(cmdId) -> limt entry for a command id, or 0 (plain lookup)
-using PFN_LimitMenuState = int(__fastcall*)(void* actor, uint16_t* cmd, int state);
-using PFN_LimitLookup = uintptr_t(__fastcall*)(uint32_t cmdId);
-static constexpr uint64_t RVA_LIMIT_MENU_STATE = 0x3D88E0;
-static constexpr uint64_t RVA_LIMIT_USABLE = 0x3E7800;
-static constexpr uint64_t RVA_LIMIT_BY_CMD = 0x3E7C30;
-static constexpr uint8_t kLimitMenuStateBytes[] = {
-    0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
-static constexpr uint8_t kLimitUsableBytes[] = {
-    0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
-static constexpr uint8_t kLimitByCmdBytes[] = {
-    0x4c, 0x8b, 0x1d, 0x59, 0xda, 0x6f, 0x02, 0x45, 0x33, 0xc9, 0x4d, 0x63, 0x53, 0x04, 0x4d, 0x85};
-static constexpr int LIMIT_STATE_GREYED = 5;
-static PFN_LimitMenuState g_origLimitMenuState = nullptr;
-static PFN_LimitLookup g_origLimitUsable = nullptr;
-static PFN_LimitLookup g_limitByCmd = nullptr;
 
 // ApplyStatDelta 0x3D2EB0(actor, delta, idx, reactFlag) -> new value: the
 // single funnel for HP changes (repos-60's decompile, VUH-1501). idx 0 =
@@ -1075,19 +1053,6 @@ static void OpenHitChannel() {
     g_hitChannel->magic = HIT_MAGIC;
     g_hitChannel->version = HIT_VERSION;
     Log("  Hit channel open (Local\\kh2coop_hit_%lu)", GetCurrentProcessId());
-}
-
-static int __fastcall HookedLimitMenuState(void* actor, uint16_t* cmd, int state) {
-    const int result = g_origLimitMenuState(actor, cmd, state);
-    if (g_anyPuppetActive && cmd != nullptr && g_limitByCmd(*cmd) != 0) {
-        return LIMIT_STATE_GREYED;
-    }
-    return result;
-}
-
-static uintptr_t __fastcall HookedLimitUsable(uint32_t cmdId) {
-    if (g_anyPuppetActive && g_limitByCmd(cmdId & 0xFFFF) != 0) return 0;
-    return g_origLimitUsable(cmdId);
 }
 
 // Release a puppet back to its AI when poses stop arriving (the runtime
@@ -3361,6 +3326,10 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 // ============================================================================
 
 static void UninitializeMinHookUnlessRetained() {
+    if (limitadmission::RetainsMinHookResources()) {
+        Log("[limit-admission] callback originals retained until process exit");
+        return;
+    }
     if (partyempty::RetainsMinHookResources()) {
         Log("[partyempty] callback originals retained until process exit");
         return;
@@ -3379,9 +3348,11 @@ static void UninitializeMinHookUnlessRetained() {
 static bool PuppetCommandsRestricted() { return g_anyPuppetActive; }
 
 bool Initialize(uintptr_t exeBase) {
+    // Terminal installation/retirement refusal precedes log, MinHook and every other mutation.
+    if (limitadmission::RejectReinitialization()) return false;
     if (partyempty::RetainsMinHookResources()) return false; // callbacks retain original trampolines
     if (downedspectate::RetainsMinHookResources() || resourcetrace::RejectReinitialization() || (lifetimetrace::RetainsMinHookResources() || privatestatus::RetainsMinHookResources())) return false;
-    if (g_initialized) return true;
+    if (g_initialized) return limitadmission::Install(exeBase, &PuppetCommandsRestricted, &Log);
 
     g_exeBase = exeBase;
     PFN_MovementDispatch verifiedTakeDamage = nullptr;
@@ -3419,6 +3390,7 @@ bool Initialize(uintptr_t exeBase) {
 
     // Before anything that can fail: an injected instance never writes saves.
     if (!saveguard::Install(&Log)) return false;
+    if (!limitadmission::Install(exeBase, &PuppetCommandsRestricted, &Log)) return false;
     if (!puppetcommand::Install(exeBase, &PuppetCommandsRestricted, &Log)) return false;
     eventholdnative::Install(exeBase, &Log);
     crashdump::Install(&Log);
@@ -3589,35 +3561,10 @@ bool Initialize(uintptr_t exeBase) {
 
     // Screenshots, clips and the debug overlay (VUH-1485). Optional: the DLL
     // keeps working if the renderer can't be hooked.
-    // Limit gate for puppets (VUH-1491): hook only when all three functions
-    // match this build.
     {
         auto matches = [&](uint64_t rva, const uint8_t* bytes, size_t n) {
             return std::memcmp(reinterpret_cast<const void*>(exeBase + rva), bytes, n) == 0;
         };
-        if (matches(RVA_LIMIT_MENU_STATE, kLimitMenuStateBytes, sizeof(kLimitMenuStateBytes)) &&
-            matches(RVA_LIMIT_USABLE, kLimitUsableBytes, sizeof(kLimitUsableBytes)) &&
-            matches(RVA_LIMIT_BY_CMD, kLimitByCmdBytes, sizeof(kLimitByCmdBytes))) {
-            g_limitByCmd = reinterpret_cast<PFN_LimitLookup>(exeBase + RVA_LIMIT_BY_CMD);
-            void* menuState = reinterpret_cast<void*>(exeBase + RVA_LIMIT_MENU_STATE);
-            void* usable = reinterpret_cast<void*>(exeBase + RVA_LIMIT_USABLE);
-            MH_STATUS st = MH_CreateHook(menuState, reinterpret_cast<void*>(&HookedLimitMenuState),
-                                         reinterpret_cast<void**>(&g_origLimitMenuState));
-            if (st == MH_OK) st = MH_EnableHook(menuState);
-            if (st == MH_OK) {
-                st = MH_CreateHook(usable, reinterpret_cast<void*>(&HookedLimitUsable),
-                                   reinterpret_cast<void**>(&g_origLimitUsable));
-            }
-            if (st == MH_OK) st = MH_EnableHook(usable);
-            if (st == MH_OK) {
-                Log("  Limit gate hooks installed (0x3D88E0, 0x3E7800)");
-            } else {
-                Log("  WARNING: limit gate hooks failed: %d (%s)", st, MH_StatusToString(st));
-            }
-        } else {
-            Log("  WARNING: limit gate functions don't match this build; limits not gated");
-        }
-
         // HP funnel logging (VUH-1501).
         if (matches(RVA_APPLY_STAT_DELTA, kApplyStatDeltaBytes, sizeof(kApplyStatDeltaBytes))) {
             hitTraceVerified |= 4U;
@@ -3762,6 +3709,7 @@ bool Initialize(uintptr_t exeBase) {
         Log("  Network mailbox not available â€” will retry periodically");
     }
 
+    if (!limitadmission::Ready()) return false;
     g_initialized = true;
     saveguard::AcknowledgeLaunch();
     return true;
@@ -3805,12 +3753,14 @@ void Shutdown() {
     warp::SetTransitionObserver(nullptr);
     warp::Shutdown();
     enemysync::Shutdown();
-    if (partyempty::Ready()) {
-        if (!partyempty::DisableOtherHooks()) {
-            Log("[partyempty] queued teardown failed; guard code and native hook originals retained");
-            return; // an incompletely disabled callback must keep its original pointers
-        }
-    } else MH_DisableHook(MH_ALL_HOOKS);
+    // Retained physical party ownership must keep the published restriction.
+    // Global queued disable preserves Held targets; it cannot bypass this owner.
+    limitadmission::HoldForShutdown();
+    if (!partyempty::Ready()) limitadmission::Shutdown();
+    if (!partyempty::DisableOtherHooks()) {
+        Log("[native-hooks] queued teardown failed; guards and original callbacks retained");
+        return;
+    }
     puppetcommand::Shutdown();
     UninitializeMinHookUnlessRetained();
 

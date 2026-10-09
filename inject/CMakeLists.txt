@@ -49,6 +49,7 @@ add_library(kh2coop_inject SHARED
     src/SteamCapabilityProbe.cpp
     src/SteamBrokerNative.cpp
     src/EntityHook.cpp
+    src/LimitAdmission.cpp
     src/PuppetCommandGuard.cpp
     src/RenderHook.cpp
     src/Warp.cpp

@@ -1,4 +1,5 @@
 #include "PartyEmptySeat.hpp"
+#include "LimitAdmission.hpp"
 #include "PlayerKit.hpp"
 #include <Windows.h>
 #include "MinHook.h"
@@ -484,6 +485,7 @@ bool DisableOtherHooks() {
         for (const auto site : SITES)
             if (MH_QueueEnableHook(reinterpret_cast<void*>(g_base + site)) != MH_OK) return false;
     }
+    if (!limitadmission::QueuePreserveHeld()) return false;
     return MH_ApplyQueued() == MH_OK;
 }
 }

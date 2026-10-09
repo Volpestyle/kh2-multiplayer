@@ -700,3 +700,16 @@ if(TARGET kh2coop_party_menu_admission_test)
                  COMMAND kh2coop_party_menu_admission_test equipment-signature-${_equipment_index})
     endforeach()
 endif()
+
+
+if(WIN32)
+    add_executable(kh2coop_limit_admission_test tests/LimitAdmissionTest.cpp)
+    target_include_directories(kh2coop_limit_admission_test PRIVATE inject/src)
+    target_link_libraries(kh2coop_limit_admission_test PRIVATE minhook_lib)
+    target_compile_definitions(kh2coop_limit_admission_test PRIVATE _CRT_SECURE_NO_WARNINGS)
+    foreach(_limit_mode success reentrant create0 create1 queue0 queue1 apply0 apply1 apply2 apply3
+            pin foreign identity cleanup-fail cleanup-fallback lost-patch shutdown held owner-hold
+            signature-0 signature-1 signature-2 signature-3 signature-4 signature-5 signature-6 signature-7 signature-8)
+        add_test(NAME kh2coop_limit_admission_test_${_limit_mode} COMMAND kh2coop_limit_admission_test ${_limit_mode})
+    endforeach()
+endif()

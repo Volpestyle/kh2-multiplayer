@@ -657,3 +657,8 @@ checks; independent review3 ADOPT is recorded in
 `build/rig/party-menus-20261008/codex-review-rev9-fixture06-review3.md`.
 The landing additionally validates integration with the landed Status guard
 using a fresh isolated current-main build and serial CTest suite.
+
+
+**Mandatory Limit admission (offline implementation, pending product review).** Co-op initialization requires both native Limit restriction hooks and the verified command lookup before input/entity hooks or the bridge are opened. Failed or partial installation permanently refuses admission in that process; callbacks and originals remain mapped if rollback cannot remove a native patch. This closes the installation gap only: cached Limit execution, active-Limit completion and retained-party lifetime semantics remain unqualified. Existing successful-install restrictions are unchanged.
+
+**Save-point menus remain unqualified.** Entry/Cancel can invoke native object/script callbacks before the runtime-event decision. A concrete room/action issuer and a safe refusal/Cancel contract have not been established; shop refusal does not cover this path. No save-point opening, in-game save or SAVE exclusion is qualified by the menu work. See the retained audit-savepoint-ingress-3a6ce68.md packet receipt.
