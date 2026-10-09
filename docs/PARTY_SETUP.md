@@ -574,3 +574,44 @@ The compiled rev7 production source is retained byte-for-byte; reusable offline
 evidence is127/127 serial CTest,64 native guard modes/1328 assertions and205
 audited socketless fixture checks. The landing additionally checks current-main
 integration with a fresh coordinated build and serial CTest suite.
+
+
+### Precautionary ordinary-root Status refusal (qualified 2026-10-08)
+
+The Status guard reuses the existing seventh callback to refuse feature4
+from ordinary pause-root state0 while the exact physically owned sparse-middle
+`[remote,0,local]` tuple remains installed. Selection is projected through the
+low eight bits of BEEC20; caller, page, mask and ownership are bracketed before
+refusal. Native Cancel, unowned or dense parties, trailing empties, other pages
+and failed observations retain native delegation. Existing Party, Abilities and
+Items guards keep their trace schemas and budgets. No game or SAVE data is written.
+
+This is precautionary: native Status construction can mark selected-form
+history, and native cleanup copies temporary personal and Drive fields back to
+canonical SAVE records. Writer activity does not establish changed values or
+corruption, and the same native writers exist without co-op. Character-only
+entry has not established idempotence across all six temporary Status aliases,
+clamps and cleanup lifetimes. No SAVE exclusion is introduced.
+
+Exact `KH2COOP_STATUS_ADMISSION_TRACE=1` emits at most16 process-lifetime
+`[partyempty-status-root]` consumed-refusal receipts, identifying sequence,
+tick, caller, state, selection, mask, feature4 and owner. Installation additionally
+pins native feature projection, Status routing and the state17 request call.
+Controls exercise actual input, feedback and refusal bodies; accepted routing
+stops at a state-request boundary double before constructor execution.
+
+Live qualification: `20261008-232911_status_root_consumed_refusal_1` passed
+in489.9s. Both machines supplied fresh consumed Status-root refusal receipts
+and unchanged protected SAVE intervals. The matched native OFF inventory,
+inherited menu guards and writer-expiry/leave plus next-load restore gates
+passed. Closure reports canonicalExit0, all7 planned launches absent,4/4 disk
+save hashes unchanged and safetyPASS. The canonical report and closure receipt
+are the retained evidence; no separate verdict.json was produced.
+
+This qualifies only the bounded ordinary-root refusal. Direct or cached Status
+constructors, already-open Status pages, positive character/form viewing and
+Equipment ingress remain excluded. Graceful DLL Shutdown remains unqualified
+live; the fixture used owned process termination. Reused rev8 offline evidence
+is138/138 serial CTest,74 native guard modes/1614 assertions,249 frozen socketless
+fixture checks and7 intercepted actual-product launch setup plans. The landing
+also requires a fresh isolated current-main build and serial integration suite.

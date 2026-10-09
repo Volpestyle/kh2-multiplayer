@@ -669,6 +669,10 @@ if(TARGET kh2coop_party_menu_admission_test)
         add_test(NAME kh2coop_party_menu_admission_test_party-signature-${_party_index}
                  COMMAND kh2coop_party_menu_admission_test party-signature-${_party_index})
     endforeach()
+    foreach(_status_index RANGE 0 9)
+        add_test(NAME kh2coop_party_menu_admission_test_status-signature-${_status_index}
+                 COMMAND kh2coop_party_menu_admission_test status-signature-${_status_index})
+    endforeach()
 endif()
 
 if(TARGET kh2coop_party_menu_admission_test)

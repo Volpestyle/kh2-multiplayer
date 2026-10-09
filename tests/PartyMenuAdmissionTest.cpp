@@ -28,7 +28,7 @@ std::int32_t __fastcall Find(const std::uint8_t* row,int key){for(int i=0;i<4;++
 std::int32_t __fastcall Alias(const std::uint8_t*,int seat){++aliasCalls;lastAlias=seat;return seat==0?0x20000236:(seat==1?0x319:(seat==2?0x31A:(seat==3?0x3EE:0)));}
 std::int32_t __fastcall RawKey(const std::uint8_t* menu,int index){++keyCalls;int count=0;std::memcpy(&count,menu,4);if(index<0||index>=count)return 0;std::int16_t key=0;std::memcpy(&key,menu+10+index*32,2);return key;}
 std::vector<std::string> receipts;
-void Log(const char* format,...){char text[2048]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);if(std::strncmp(text,"[partyempty-items]",18)==0||std::strncmp(text,"[partyempty-party]",18)==0||std::strncmp(text,"[partyempty-abilities-",22)==0)receipts.emplace_back(text);SetLastError(0xBADF00D);}
+void Log(const char* format,...){char text[2048]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);if(std::strncmp(text,"[partyempty-items]",18)==0||std::strncmp(text,"[partyempty-party]",18)==0||std::strncmp(text,"[partyempty-abilities-",22)==0||std::strncmp(text,"[partyempty-status-root]",24)==0)receipts.emplace_back(text);SetLastError(0xBADF00D);}
 unsigned admissionCalls=0;
 std::uint8_t __fastcall Admission(int){++admissionCalls;return 1;}
 std::uint64_t __fastcall Feedback(int code,std::uint8_t){return static_cast<std::uint64_t>(code);}
@@ -63,7 +63,7 @@ constexpr std::uint8_t find[]{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,
 constexpr std::uint8_t alias[]{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,0x48,0x83,0xEC,0x20};
 constexpr std::uint8_t rawkey[]{0x85,0xD2,0x78,0x11,0x3B,0x11,0x7D,0x0D,0x48,0x63,0xC2,0x48,0xC1,0xE0,0x05,0x0F,0xBF,0x44,0x08,0x0A,0xC3};
 constexpr std::uint8_t admission[]{0x40,0x53,0x48,0x83,0xEC,0x20,0x8B,0xD9};
-void Seed(std::uint8_t* image){SeedParty(image);SeedAbilities(image);const std::uint8_t* bytes[]{selector,key,find,alias,rawkey,admission};const std::size_t sizes[]{sizeof(selector),sizeof(key),sizeof(find),sizeof(alias),sizeof(rawkey),sizeof(admission)};for(unsigned i=0;i<6;++i)std::memcpy(image+sites[i],bytes[i],sizes[i]);const std::uint8_t c0[]{0xE8,0xE3,0x5F,0xFF,0xFF},c1[]{0xE8,0x66,0x22,0xF9,0xFF},c2[]{0xE8,0xA9,0x1F,0xF9,0xFF};std::memcpy(image+0x3065C8,c0,5);std::memcpy(image+0x36A465,c1,5);std::memcpy(image+0x36A722,c2,5);const std::uint8_t a0[]{0x4C,0x8D,0x0D,0x62,0x0C,0,0},a2[]{0x41,0xFF,0xD1},a3[]{0x8B,0x05,0x16,0x87,0x8F,0,0xC3};std::memcpy(image+0x34E197,a0,7);std::memcpy(image+0x2F62E9,a2,3);std::memcpy(image+0x2F5F30,a3,7);
+void Seed(std::uint8_t* image){SeedParty(image);SeedAbilities(image);SeedStatus(image);const std::uint8_t* bytes[]{selector,key,find,alias,rawkey,admission};const std::size_t sizes[]{sizeof(selector),sizeof(key),sizeof(find),sizeof(alias),sizeof(rawkey),sizeof(admission)};for(unsigned i=0;i<6;++i)std::memcpy(image+sites[i],bytes[i],sizes[i]);const std::uint8_t c0[]{0xE8,0xE3,0x5F,0xFF,0xFF},c1[]{0xE8,0x66,0x22,0xF9,0xFF},c2[]{0xE8,0xA9,0x1F,0xF9,0xFF};std::memcpy(image+0x3065C8,c0,5);std::memcpy(image+0x36A465,c1,5);std::memcpy(image+0x36A722,c2,5);const std::uint8_t a0[]{0x4C,0x8D,0x0D,0x62,0x0C,0,0},a2[]{0x41,0xFF,0xD1},a3[]{0x8B,0x05,0x16,0x87,0x8F,0,0xC3};std::memcpy(image+0x34E197,a0,7);std::memcpy(image+0x2F62E9,a2,3);std::memcpy(image+0x2F5F30,a3,7);
 const std::uint8_t argument[]{0x8B,0xCF},inputCall[]{0xE8,0xC8,0x80,0xFA,0xFF},resultCall[]{0x8B,0xC8,0xE8,0x01,0xD7,0xF9,0xFF},resultTest[]{0x84,0xC0},refusalBranch[]{0x0F,0x85,0x54,0x01,0,0},feedbackChoice[]{0xB9,0x02,0,0,0,0x84,0xC0,0xBA,0x04,0,0,0,0x0F,0x45,0xD1,0x8B,0xCA};
 std::memcpy(image+0x34E1A1,argument,sizeof(argument));std::memcpy(image+0x34E1A3,inputCall,sizeof(inputCall));std::memcpy(image+0x34E1A8,resultCall,sizeof(resultCall));std::memcpy(image+0x34E1AF,resultTest,sizeof(resultTest));std::memcpy(image+0x34E1B1,refusalBranch,sizeof(refusalBranch));std::memcpy(image+0x2F62EC,feedbackChoice,sizeof(feedbackChoice));}
 void Entry(std::uint8_t* menu,int i,std::int16_t seat,std::int16_t status){std::memcpy(menu+8+i*32,&seat,2);std::memcpy(menu+10+i*32,&status,2);const std::uintptr_t ptr=0x12345678;std::memcpy(menu+0x20+i*32,&ptr,8);}
@@ -80,10 +80,12 @@ int main(int argc,char** argv){
  if(std::strcmp(mode,"apply")==0)harness::failApply=true;
  if(std::strncmp(mode,"party-signature-",16)==0){const int i=std::atoi(mode+16);if(i<0||i>=static_cast<int>(std::size(partyGuardAddresses)))return 2;image[partyGuardAddresses[i]]^=1;}
  if(std::strncmp(mode,"abilities-signature-",20)==0){const int i=std::atoi(mode+20);if(i<0||i>=static_cast<int>(std::size(abilitiesGuardAddresses)))return 2;image[abilitiesGuardAddresses[i]]^=1;}
+ if(std::strncmp(mode,"status-signature-",17)==0){const int i=std::atoi(mode+17);if(i<0||i>=static_cast<int>(std::size(statusGuardAddresses)))return 2;image[statusGuardAddresses[i]]^=1;}
  const bool trace=std::strcmp(mode,"trace")==0;
  SetEnvironmentVariableA("KH2COOP_ITEMS_ADMISSION_TRACE",trace?"1":(std::strcmp(mode,"trace-nonexact")==0?"10":nullptr));
  SetEnvironmentVariableA("KH2COOP_PARTY_ADMISSION_TRACE",trace?"1":nullptr);
  SetEnvironmentVariableA("KH2COOP_ABILITIES_ADMISSION_TRACE",trace?"1":(std::strcmp(mode,"trace-nonexact")==0?"10":nullptr));
+ SetEnvironmentVariableA("KH2COOP_STATUS_ADMISSION_TRACE",trace?"1":(std::strcmp(mode,"trace-nonexact")==0?"10":nullptr));
  const bool installed=empty::Install(base,harness::Log);
  const bool paired=std::strncmp(mode,"paired-",7)==0;
  const bool positive=std::strcmp(mode,"positive")==0||trace||std::strcmp(mode,"trace-nonexact")==0||paired;
@@ -98,6 +100,11 @@ int main(int argc,char** argv){
   using AdmissionFn=std::uint8_t(__fastcall*)(std::int32_t);
   const auto admissionHook=reinterpret_cast<AdmissionFn>(harness::hooks[5].detour);
   harness::caller=base+0x2F62EC;Check(admissionHook(2)==1&&admissionHook(1)==1&&admissionHook(-5)==1,"dense chosen player native AI and -5 shortcut keep native Items delegation");
+  const auto rootHook=reinterpret_cast<AdmissionFn>(harness::hooks[6].detour);
+  const std::uint32_t rootPage=0;const std::uint16_t statusMask=0x10;
+  std::memcpy(image+0xBEE64C,&rootPage,4);std::memcpy(image+0xBEEC20,&statusMask,2);
+  Check(rootHook(0)==1,"dense chosen party retains native root Status admission");
+  std::memcpy(image+0xBEE64C,&page,4);
   const auto history=reinterpret_cast<harness::Fn>(harness::hooks[4].detour);
   for(const auto caller:{0x36A46Au,0x36A727u}){harness::caller=base+caller;Check(history(menu.data(),0)==0&&history(menu.data(),2)==0&&history(menu.data(),1)==(companion==0x5C?2:3),"both chosen companion-history callers skip players and preserve AI");}
   const auto selectorHook=reinterpret_cast<harness::Fn>(harness::hooks[0].detour);const std::array<std::uint8_t,4> row{0,1,2,18};
@@ -116,7 +123,7 @@ int main(int argc,char** argv){
   Check(std::memcmp(save,before.data(),saveSize)==0,"paired complete synthetic SAVE remains unchanged");
   std::printf("checks=%u failures=%u mode=%s\n",checks,failures,mode);return failures?1:0;
  }
- if(!positive){if((std::strncmp(mode,"signature-",10)==0||std::strncmp(mode,"party-signature-",16)==0||std::strncmp(mode,"abilities-signature-",20)==0))Check(harness::created==0&&!empty::Ready(),"signature mismatch refuses before hook creation and readiness");Check(harness::removed==0,"failure retains all created trampolines");Check(empty::RetainsMinHookResources()==(harness::created!=0),"retained resource receipt follows actual created callbacks");for(unsigned i=0;i<harness::created;++i)Check(!harness::hooks[i].enabled,"rollback disables every created hook");
+ if(!positive){if((std::strncmp(mode,"signature-",10)==0||std::strncmp(mode,"party-signature-",16)==0||std::strncmp(mode,"abilities-signature-",20)==0||std::strncmp(mode,"status-signature-",17)==0))Check(harness::created==0&&!empty::Ready(),"signature mismatch refuses before hook creation and readiness");Check(harness::removed==0,"failure retains all created trampolines");Check(empty::RetainsMinHookResources()==(harness::created!=0),"retained resource receipt follows actual created callbacks");for(unsigned i=0;i<harness::created;++i)Check(!harness::hooks[i].enabled,"rollback disables every created hook");
   std::array<std::uint8_t,0x100> menu{};const int count=2;std::memcpy(menu.data(),&count,4);Entry(menu.data(),1,2,1);empty::Arm(0x5A,0x54);
   if(harness::created>3){harness::caller=base+0x3065CD;const auto fn=reinterpret_cast<harness::Fn>(harness::hooks[3].detour);Check(fn(menu.data(),1)==0x319,"retained alias callback delegates after failed install");}
   if(harness::created>4){harness::caller=base+0x36A46A;const auto fn=reinterpret_cast<harness::Fn>(harness::hooks[4].detour);Check(fn(menu.data(),1)==1,"retained history callback delegates after failed install");}
@@ -226,6 +233,33 @@ int main(int argc,char** argv){
   for(const auto& receipt:harness::receipts){if(receipt.find("[partyempty-abilities-root]")==0)++rootAbilities;if(receipt.find("[partyempty-abilities-items]")==0)++itemsAbilities;}
   Check(rootAbilities==(trace?16u:0u)&&itemsAbilities==(trace?16u:0u),"Abilities root and shortcut have separate capped counters and exact opt-in");
   if(trace){Check(harness::receipts[beforeAbilities].find("[partyempty-abilities-root] refused seq=1")!=std::string::npos&&harness::receipts[beforeAbilities].find("state=0 selection=1 mask=F feature=1 owner=5A/0/54")!=std::string::npos,"Abilities root positive consumed receipt identifies exact admitted domain");bool shortcutReceipt=false;for(const auto& receipt:harness::receipts)shortcutReceipt=shortcutReceipt||(receipt.find("[partyempty-abilities-items] refused seq=1")!=std::string::npos&&receipt.find("state=1 selection=-5 mask=F feature=1 owner=5A/0/54")!=std::string::npos);Check(shortcutReceipt,"Abilities Items positive consumed receipt identifies shortcut domain");}
+  // Precautionary Status ingress: execute actual input/feedback/refusal bodies,
+  // and independently pin/execute the native accepted feature4 -> state17 route.
+  page=0;std::memcpy(image+0xBEE64C,&page,4);
+  mask=0x1F;std::memcpy(image+0xBEEC20,&mask,2);
+  const auto beforeStatus=harness::receipts.size();
+  Check(partyHook(4)==0,"Status root feature4 refused before constructor under sparse-middle ownership");
+  if(trace)Check(harness::receipts.back().find("[partyempty-status-root] refused seq=1")!=std::string::npos&&harness::receipts.back().find("state=0 selection=4 mask=1F feature=4 owner=5A/0/54")!=std::string::npos,"Status fresh receipt binds feature4 without changing other trace schemas");
+  SeedStatusRoute(image);
+  using StatusRoute=unsigned(__fastcall*)(int);
+  const auto statusRoute=reinterpret_cast<StatusRoute>(image+0x303800);
+  for(const std::uint16_t m:{std::uint16_t{0x10},std::uint16_t{0x11},std::uint16_t{0x15},std::uint16_t{0x1F},std::uint16_t{0xFF},std::uint16_t{0xFF10}}){mask=m;std::memcpy(image+0xBEEC20,&mask,2);int selected=0;for(unsigned bit=0;bit<4;++bit)if(mask&(1<<bit))++selected;Check(partyHook(selected)==0,"Status low8 mask projection refuses actual compact index with reserved bits retained");Check(statusRoute(selected)==0x17,"actual native mapping jump table and feature4 call request state17 at terminal boundary");Check(rootDecision(static_cast<int>(nativeParty(selected,0,1,partyHook,0)),selected)==2,"actual native Status refusal reaches common tail before accepted feature or state stores");}
+  mask=0x1F;std::memcpy(image+0xBEEC20,&mask,2);
+  const auto ignoredStatus=harness::receipts.size();Check(rootDecision(static_cast<int>(nativeParty(-1,0,1,partyHook,0)),-1)==2&&harness::receipts.size()==ignoredStatus,"ignored Status challenge cannot manufacture consumed refusal");
+  for(const int cancel:{-2,-4}){const auto receiptCount=harness::receipts.size();Check(rootDecision(static_cast<int>(nativeParty(cancel,0,1,partyHook,0)),cancel)==3&&harness::receipts.size()==receiptCount,"native Status challenge Cancel bypass preserves root destination without receipt");}
+  for(const std::uint16_t absent:{std::uint16_t{0},std::uint16_t{1},std::uint16_t{4},std::uint16_t{0xE0}}){std::memcpy(image+0xBEEC20,&absent,2);Check(partyHook(0)==1,"mask without Status or another guarded feature delegates");}std::memcpy(image+0xBEEC20,&mask,2);
+  for(const unsigned wrongPage:{1u,2u,0x17u,0x18u}){page=wrongPage;std::memcpy(image+0xBEE64C,&page,4);Check(partyHook(4)==1,"already-open Status and other states delegate outside root ingress");}page=0;std::memcpy(image+0xBEE64C,&page,4);
+  harness::caller=base+0x111;Check(partyHook(4)==1,"Status wrong callback caller delegates");harness::caller=base+0x2F62EC;
+  members[0]=0x54;Check(partyHook(4)==1,"Status physical ownership mismatch delegates");members[0]=0x5A;
+  empty::ArmTuple({0x5A,0x54,0},2);members[1]=0x54;members[2]=0;Check(partyHook(4)==1,"Status trailing-empty tuple retains native delegation");members[1]=0;members[2]=0x54;empty::Arm(0x5A,0x54);
+  Check(VirtualProtect(image+0xBEEC20,2,PAGE_NOACCESS,&protectedOld)!=0,"Status unreadable mask setup");Check(partyHook(4)==1,"Status unreadable bracket delegates without fault");Check(VirtualProtect(image+0xBEEC20,2,protectedOld,&protectedIgnored)!=0,"Status mask readability restored");
+  SetLastError(0x456789AB);Check(partyHook(4)==0&&GetLastError()==0x456789AB,"Status refusal preserves LastError including diagnostic effects");
+  members[0]=0x54;members[2]=0x5A;empty::Arm(0x54,0x5A);Check(partyHook(4)==0,"Status refusal supports reversed local and remote player projection");members[0]=0x5A;members[2]=0x54;empty::Arm(0x5A,0x54);
+  empty::NativeResolved();Check(rootDecision(static_cast<int>(nativeParty(4,0,1,partyHook,0)),4)==1&&statusRoute(4)==0x17,"restored native Status admission and accepted state17 boundary delegate");empty::Arm(0x5A,0x54);
+  for(int repeat=0;repeat<30;++repeat)Check(partyHook(4)==0,"Status lifetime receipt cap never changes precautionary refusal");
+  unsigned statusReceipts=0;for(std::size_t i=beforeStatus;i<harness::receipts.size();++i)if(harness::receipts[i].find("[partyempty-status-root]")==0)++statusReceipts;
+  Check(statusReceipts==(trace?16u:0u),"Status stream has its own exact opt-in and16 lifetime cap");
+  empty::NativeResolved();empty::Arm(0x5A,0x54);partyHook(4);unsigned statusAfter=0;for(const auto& receipt:harness::receipts)if(receipt.find("[partyempty-status-root]")==0)++statusAfter;Check(statusAfter==statusReceipts,"Status ownership renewal cannot reset diagnostic budget");
   harness::receipts.resize(oldReceiptCount); // isolate existing Items-only trace assertions
   page=1;std::memcpy(image+0xBEE64C,&page,4);
   // Execute the original pinned 2F6270 input handler with a feedback-only boundary double.
