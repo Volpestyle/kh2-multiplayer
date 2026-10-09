@@ -1392,9 +1392,14 @@ void DrainPendingSpawnTrace(bool correlate) {
         ObserveCausalPopulation(correlate);
         const auto loss = nativehittrace::GetStats();
         if(!admitted&&combatcausal::engine.Admitted())originalLoss=loss;
+        // `unmatched` means a child callback OUTSIDE ApplyHitDamage, not a
+        // dropped hit event. Ordinary claim TakeDamage uses its trampoline and
+        // reaches StatHP outside Apply; that actual operation has HostApply's
+        // independent before/after receipt. Never reinterpret it as a hit.
+        // Any HP delta without an admitted hit/apply cause still retires below.
         if (combatcausal::engine.Admitted() && (loss.dropped!=originalLoss.dropped || loss.foreign!=originalLoss.foreign ||
             loss.unwound!=originalLoss.unwound || loss.nested!=originalLoss.nested || loss.overflow!=originalLoss.overflow ||
-            loss.unmatched!=originalLoss.unmatched || loss.coverageSerial!=originalLoss.coverageSerial))
+            loss.coverageSerial!=originalLoss.coverageSerial))
             combatcausal::engine.Retire(CausalScope(), combatcausal::Now(), combatcausal::Reason::Loss);
         combatcausal::Drain(g_log);
     }

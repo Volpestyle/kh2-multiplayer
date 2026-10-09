@@ -17,3 +17,5 @@ Offline controls exercise production NativeHitTrace callbacks and the actual Ene
 The existing 3-second clip04 contract is unchanged. A 12-second wall-clock capture is unselected. SSH setup failures and unknown old worker closure do not provide a latency or recording-coverage measurement. No SSH, PC2 contact, game launch/input or public exposure is authorized by this diagnostic.
 
 Diagnostic logging and census-allocation exceptions are contained: they retire coverage or emit explicit loss, and cannot enter the gameplay transport failure path. The optional WorldPump observer has a noexcept callback boundary.
+
+NativeHitTrace `unmatched` counts child callbacks outside ApplyHitDamage, including StatHP reached by the existing claim TakeDamage trampoline. It is retained as a counter, not reinterpreted as a dropped hit or canonical event. That known claim operation has its independent checked HostApply receipt; an HP delta with no admitted native-hit or HostApply cause still cannot qualify. Dropped, foreign, unwound, nested and overflow observations remain coverage failures.
