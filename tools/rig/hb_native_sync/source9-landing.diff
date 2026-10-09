@@ -1,0 +1,310 @@
+--- source9/fixture.py
++++ landing/fixture.py
+@@ -1,13 +1,13 @@
+-"""PC2 two owned games: approved setup and one host-led native HB transition.
++"""Accepted PC2 host-native-warp/product-follower fixture (source9 projection).
+ 
+---validate is offline. --execute requires exact lead ADOPT and one spent attempt.
+-Always retains PENDING; no map UI or natural travel acceptance, no game save.
++Only the acceptance04 dispatcher is installed. Execution requires the reviewed
++PC2 adapter, sealed products, original consent/session binding and owned closure.
++This module supplies offline --validate only; it never launches a game directly.
+ """
+-import argparse,hashlib,importlib.util,json,math,sys,time
++import argparse,hashlib,importlib.util,json,sys,time
+ from pathlib import Path
+-from concurrent.futures import ThreadPoolExecutor
+-import pause_guard,departure_only,selection_only,map_diagnostic,cursor_select,native_sync,native_sync_acceptance,native_sync_media
+-import archive_format,evidence,memory_start,native_read,observer,servicing,packet_products
++import native_sync_acceptance,native_sync_media
++import archive_format,memory_start,observer,packet_products
+ 
+ START=[2,2,0,4,0,0]
+ 
+@@ -33,27 +33,6 @@
+ def load_runner(root):
+     spec=importlib.util.spec_from_file_location('worldmap_fixture_runner',root/'tools/scenario/run.py')
+     runner=importlib.util.module_from_spec(spec);sys.modules[spec.name]=runner;spec.loader.exec_module(runner);return runner
+-
+-
+-def map_ui(reader,receipt=None):
+-    if receipt is None:receipt={}
+-    pointers=[reader.value(r,'Q') for r in (0xBF2BB8,0xBF2E00)]
+-    out=dict(landing=pointers[0],info=pointers[1]);receipt['pointersBefore']=list(pointers);receipt['values']=out
+-    if pointers[0]:
+-        out.update(world=reader.value(pointers[0]-reader.base+0x2830,'I'),mode=reader.value(pointers[0]-reader.base+0x2838,'I'))
+-    if pointers[1]:out['infoWorld']=reader.value(pointers[1]-reader.base+0x128,'I')
+-    after=[reader.value(r,'Q') for r in (0xBF2BB8,0xBF2E00)];receipt['pointersAfter']=after
+-    if pointers!=after:raise ValueError('native map UI replaced during read')
+-    return out
+-
+-
+-def map_input_allowed(native,ui,button=None):
+-    f=native['flags']
+-    if native['location'][:2]!=[15,0] or f['eventState'] or f['eventContext']:return False
+-    if button=='cross':return ui.get('landing',0)!=0 and ui.get('world')==4 and ui.get('mode') in (0,1,2) and f['openMenu']==255
+-    if ui.get('landing'):return False
+-    if f['frozen'] or f['openMenu']!=255:return False
+-    return button is None or (button=='triangle' and ui.get('infoWorld')==4)
+ 
+ 
+ def install(runner,packet,*,platform=None):
+@@ -86,180 +65,7 @@
+         retain(ctx,'worldmap_bootstrap',last);raise runner.StepFailed('two-peer native bootstrap not ready; no map input')
+     def route(ctx,step):
+         if step.get('scope')=='native-arrival-acceptance':return native_sync_acceptance.observe(runner,ctx)
+-        if step.get('scope')=='native-arrival-sync':return native_sync.observe(runner,ctx)
+-        if json.loads((packet/'execution.json').read_text(encoding='utf-8')).get('nativeSyncSchema'):
+-            raise runner.StepFailed('native sync source refuses selector/hold scope')
+-        clearance=step.get('scope')=='cursor-clearance-diagnostic'
+-        cursor=step.get('scope') in ('cursor-selection','cursor-clearance-diagnostic')
+-        diagnostic=step.get('scope')=='map-mode-diagnostic'
+-        selection=step.get('scope') in ('selection-only','map-mode-diagnostic','cursor-selection','cursor-clearance-diagnostic')
+-        if selection and not callable(getattr(runner,'pc2_require_disk_inventory',None)):raise runner.StepFailed('selection profile requires PC2 inventory adapter')
+-        trace=ctx.saved['worldmap_trace'];actions=[];watch=None;guard=None;host_capture=None;readers=[];held=False;released=False
+-        result={'status':'PENDING','acceptance':False,'holdPolicy':'fixture-owned native pause10; not authenticated network mode hold',
+-                'servicingScope':'50ms read-only runtime writer leases; <=250ms observation gap; native5000ms lease age; not every native packet pump',
+-                'selection':'native HB world4 gates; bounded closed-loop calibration; no wrong-world confirmation'}
+-        if diagnostic:result.update(selection='passive map-mode diagnostic; no host input',mapModeDiagnosticObserved=False,selectorInputQualified=False,hbSelectionObserved=False,noHostInput=True,shipControlIdentity='UNQUALIFIED',nativeSlot0PoseMeaning='UNQUALIFIED',direction='UNQUALIFIED',reachability='UNQUALIFIED')
+-        def collect():
+-            def peer(i):
+-                inst=ctx.inst(i);before=runner.kh2ctl('peek','--rva',observer.FIELDS,pid=inst.pid,timeout=5)
+-                row=dict(instance=i,pid=inst.pid,startedNs=time.monotonic_ns(),peekBefore=before,
+-                    runtimeLogHex=(ctx.run_dir/f'runtime_{i}.log').read_bytes().hex(),injectLogHex=inst.inject_log.read_bytes().hex())
+-                row.update(peek=runner.kh2ctl('peek','--rva',observer.FIELDS,pid=inst.pid,timeout=5),finishedNs=time.monotonic_ns())
+-                return row
+-            with ThreadPoolExecutor(max_workers=2) as pool:pair=list(pool.map(peer,(0,1)))
+-            trace['samples'].append(pair)
+-            return [evidence.native(r) for r in pair]
+-        def capture(label):
+-            for i in (0,1):
+-                if diagnostic or cursor:
+-                    watch.require();out=ctx.run_dir/f'{label}_{i}.png'
+-                    receipt=runner.kh2ctl('capture','--out',str(out),pid=ctx.inst(i).pid,timeout=5)
+-                    if receipt.get('ok') is not True or receipt.get('processId')!=ctx.inst(i).pid:raise runner.StepFailed('owned diagnostic capture receipt mismatch')
+-                    actions.append(dict(capture=out.name,receipt=receipt,pid=ctx.inst(i).pid,timeoutSeconds=5))
+-                    ctx.artifacts.append(out.name);watch.require()
+-                else:runner.step_capture(ctx,dict(instance=i,name=label+'_'+str(i)))
+-        def press(i,button):
+-            if watch:watch.require()
+-            actions.append(dict(instance=i,button=button,at=time.monotonic()))
+-            runner.step_press(ctx,dict(instance=i,button=button,ms=80))
+-        def gate_map(button=None):
+-            check=dict(button=button,accepted=False)
+-            result.setdefault('mapGateChecks',[]).append(check)
+-            try:
+-                watch.require();pair=collect();check['before']=pair[0]
+-                ui=map_ui(readers[0],check.setdefault('uiBeforeRead',{}));check['uiBefore']=ui
+-                if selection:
+-                    after=collect();check['after']=after[0]
+-                    after_ui=map_ui(readers[0],check.setdefault('uiAfterRead',{}));check['uiAfter']=after_ui
+-                    check['bracketReasons']=selection_only.reasons(pair[0],after[0],ui,after_ui)
+-                    if not selection_only.bracket(pair[0],after[0],ui,after_ui):raise runner.StepFailed('current full map scope/UI bracket refuses input')
+-                    pair=after;ui=after_ui
+-                check['observationOnly']=cursor and button=='cursor-observe'
+-                check['inputPredicateAllowed']=True if check['observationOnly'] else map_input_allowed(pair[0],ui,button)
+-                if not check['inputPredicateAllowed']:raise runner.StepFailed('current native map/selection state refuses input')
+-                actions.append(dict(nativeBeforeInput=pair[0],ui=ui,button=button));check['accepted']=True
+-                return pair,ui
+-            except Exception as error:
+-                check['error']=str(error);raise
+-        def position():
+-            s=runner.kh2ctl('state',pid=ctx.inst(0).pid)
+-            if s.get('processId')!=ctx.inst(0).pid or s.get('room',{}).get('worldId')!=15:raise runner.StepFailed('map actor state/PID unavailable')
+-            p=s['actors']['player']['position'];v=[p['x'],p['z']]
+-            if not all(math.isfinite(x) for x in v):raise runner.StepFailed('map pose unavailable')
+-            return v
+-        def move(x,y):
+-            gate_map();runner.step_input(ctx,dict(instance=0,lx=x,ly=y,ms=200));ctx.sleep(.1)
+-            actions.append(dict(instance=0,lx=x,ly=y,ms=200,at=time.monotonic()))
+-        try:
+-            gates=[memory_start.safe(runner,ctx,i) for i in (0,1)]
+-            if not all(g['safe'] and g['location']==START for g in gates):raise runner.StepFailed('current safe start required on both peers')
+-            # Start opens pause10 only in safe TT. No client menu navigation.
+-            press(1,'start');ctx.sleep(.3);pair=collect()
+-            if pair[1]['location']!=START or pair[1]['flags']['openMenu']!=10:raise runner.StepFailed('client pause10 did not open')
+-            held=True
+-            bases=[int(g['raw']['moduleBase'],0) for g in gates]
+-            watch=servicing.Watchdog(ctx,bases);watch.start()
+-            guard=pause_guard.Guard(runner,ctx.inst(1),watch)
+-            readers=[native_read.Reader(ctx.inst(i).pid,bases[i]) for i in (0,1)]
+-            capture('client_pause_before_departure');watch.require()
+-            if selection:
+-                result['setupBoundary']='isolated native-map-request warp; authored809/810 departure remains unqualified'
+-                runner.step_warp(ctx,dict(instance=0,**selection_only.WARP))
+-            else:runner.step_warp(ctx,dict(instance=0,world=2,room=27,door=0,map=3,btl=0,evt=4))
+-            if step.get('scope')=='departure-only':
+-                host_capture=native_read.Mapping(ctx.inst(0).pid,'capture',56)
+-                departure_only.observe(runner,ctx,collect,watch,host_capture,result)
+-                raise runner.StepFailed('departure-only calibration retained PENDING; no HB selection/release')
+-            deadline=time.monotonic()+(20 if selection else 150)
+-            while True:
+-                watch.require();pair=collect()
+-                if pair[0]['mode']=='world-map':break
+-                if pair[0]['location'][0] not in ((2,15,255) if selection else (2,255)):raise runner.StepFailed('native departure redirected; no map input')
+-                if time.monotonic()>deadline:raise runner.StepFailed('native809/810 map entry timeout')
+-                ctx.sleep(.25)
+-            if selection:gate_map()
+-            capture('native_map_entry')
+-            if cursor:
+-                cursor_select.observe(runner,ctx,readers[0],gate_map,capture,result,watch,diagnostic=True) if clearance else cursor_select.observe(runner,ctx,readers[0],gate_map,capture,result,watch)
+-            if diagnostic:
+-                map_diagnostic.observe(runner,ctx,readers[0],gate_map,capture,result)
+-            # Installed m_50 object931 is a candidate only until its own userdata
+-            # world is positively read as4 on this current native map load.
+-            entities=runner.kh2ctl('entities',pid=ctx.inst(0).pid)
+-            icons=[a for a in entities.get('actors',[]) if a.get('objectId')==931]
+-            if entities.get('world')!=15 or len(icons)!=1:raise runner.StepFailed('unique HB icon candidate unavailable')
+-            icon=icons[0];address=int(icon['address'],0)
+-            userdata=int.from_bytes(readers[0].read(address+0xD50,8),'little')
+-            if readers[0].read(userdata+4,1)!=bytes([4]):raise runner.StepFailed('HB icon candidate has no native world4 identity')
+-            target=[icon['position']['x'],icon['position']['z']]
+-            actions.append(dict(hbIcon=icon,userdata=hex(userdata),world=4))
+-            if map_ui(readers[0]).get('infoWorld')!=4:
+-                # Measure the two stick axes, then solve a bounded local direction.
+-                p0=position();move(.6,0);p1=position();move(0,.6);p2=position()
+-                a,b=p1[0]-p0[0],p2[0]-p1[0];c,d=p1[1]-p0[1],p2[1]-p1[1];det=a*d-b*c
+-                if abs(det)<1:raise runner.StepFailed('map stick calibration degenerate; no guessed direction')
+-                last=math.inf
+-                for _ in range(40):
+-                    _,ui=gate_map()
+-                    if ui.get('infoWorld')==4:break
+-                    if readers[0].read(address+0xD50,8)!=userdata.to_bytes(8,'little') or readers[0].read(userdata+4,1)!=bytes([4]):
+-                        raise runner.StepFailed('HB icon identity changed')
+-                    p=position();dx,dz=target[0]-p[0],target[1]-p[1];distance=math.hypot(dx,dz)
+-                    if distance>last+100:raise runner.StepFailed('map movement diverged; stop')
+-                    last=distance;x=(d*dx-b*dz)/det;y=(-c*dx+a*dz)/det;scale=max(abs(x),abs(y),1)
+-                    move(.6*x/scale,.6*y/scale)
+-                else:raise runner.StepFailed('HB hover not reached within40 pulses')
+-            gate_map('triangle');capture('native_hb_hover');gate_map('triangle');press(0,'triangle');ctx.sleep(.5)
+-            if selection:
+-                deadline=time.monotonic()+5
+-                while True:
+-                    watch.require();pair=collect();ui=map_ui(readers[0])
+-                    if ui.get('landing'):
+-                        gate_map('cross')
+-                        capture('native_hb_selection_only')
+-                        gate_map('cross')
+-                        result['hbSelectionObserved']=True
+-                        raise runner.StepFailed('selection-only boundary retained PENDING; no Cross/travel/release')
+-                    if not selection_only.admitted(pair[0]) or time.monotonic()>deadline:
+-                        raise runner.StepFailed('HB selection panel unavailable; no retry/travel/release')
+-                    ctx.sleep(.1)
+-            for _ in range(3):
+-                pair=collect()
+-                if pair[0]['location'][0]!=15:break
+-                gate_map('cross');capture('native_hb_selection');gate_map('cross');press(0,'cross');ctx.sleep(.75)
+-            # The client remains paused until the HOST reaches safe authored HB10.
+-            deadline=time.monotonic()+100
+-            while True:
+-                watch.require();pair=collect()
+-                if pair[0]['location'][:2]==[4,10] and pair[0]['safeField']:break
+-                if pair[0]['location'][0] not in (15,4,255):raise runner.StepFailed('wrong native landing world')
+-                if time.monotonic()>deadline:raise runner.StepFailed('host HB10 timeout; client remains held')
+-                ctx.sleep(.25)
+-            capture('host_hb_before_client_release');watch.require();pair=collect()
+-            if not (pair[0]['location'][:2]==[4,10] and pair[0]['safeField'] and pair[1]['location']==START and pair[1]['flags']['openMenu']==10 and not pair[1]['flags']['eventState'] and not pair[1]['flags']['eventContext']):
+-                raise runner.StepFailed('current release state unsafe; no Start sent')
+-            watch.release();guard.close();guard=None;press(1,'start');released=True;deadline=time.monotonic()+40
+-            while True:
+-                watch.require();pair=collect()
+-                if all(p['location'][:2]==[4,10] and p['safeField'] for p in pair):break
+-                if time.monotonic()>deadline:raise runner.StepFailed('client HB arrival timeout; no successor input')
+-                ctx.sleep(.25)
+-            runner.step_progress_snapshot(ctx,{'instances':[0,1],'as':'wm_progress_after','compare':'wm_progress_before'})
+-            result['transitionEvidence']=runner.transition_evidence(ctx,[0,1],0)
+-            capture('both_native_hb10');result['bothSafeHB10Observed']=True
+-        except Exception as error:
+-            result['stopped']=str(error)
+-            raise
+-        finally:
+-            if host_capture:host_capture.close()
+-            if guard:guard.close()
+-            if watch:
+-                watch.stop();result['watchdogFailure']=watch.failure
+-                if 'worldmap_watchdog.jsonl' not in ctx.artifacts:ctx.artifacts.append('worldmap_watchdog.jsonl')
+-            for reader in readers:reader.close()
+-            result.update(held=held,released=released,actions=actions,boundaryDiagnostics=evidence.evaluate(trace))
+-            retain(ctx,'worldmap_trace',trace);retain(ctx,'worldmap_result',result)
+-        raise runner.StepFailed('TT-to-HB calibration PENDING independent review; no successor input')
++        raise runner.StepFailed('only accepted native-arrival-acceptance scope is supported')
+     def finish(ctx,step):
+         import native_sync_proof
+         from media_clock import clock as acceptance_clock
+@@ -287,8 +93,6 @@
+         finally:
+             if hasattr(ctx,'pc2_media_cancel'):ctx.pc2_media_cancel.set()
+     runner.STEPS.update(wm_preflight=preflight,wm_memory_start=setup,wm_ready=ready,wm_route=route,wm_acceptance_finish=finish)
+-
+-
+ def validate(root,packet,scenario):
+     runner=load_runner(root);install(runner,packet);data=json.loads(scenario.read_text(encoding='utf-8'));runner.validate_scenario(data)
+     acceptance=json.loads((packet/'execution.json').read_text(encoding='utf-8')).get('hostWarpAcceptanceSchema')
+@@ -301,21 +105,8 @@
+ 
+ 
+ if __name__=='__main__':
+-    p=argparse.ArgumentParser(description=__doc__)
+-    for k in ('root','packet','scenario'):p.add_argument('--'+k,type=Path,required=True)
+-    g=p.add_mutually_exclusive_group(required=True);g.add_argument('--validate',action='store_true');g.add_argument('--execute',action='store_true');a=p.parse_args()
+-    root,packet,scenario=a.root.resolve(),a.packet.resolve(),a.scenario.resolve();print(json.dumps(validate(root,packet,scenario)))
+-    if a.execute:
+-        if any(s.get('scope')=='native-arrival-acceptance' for s in json.loads(scenario.read_text())['steps']) or json.loads(scenario.read_text(encoding='utf-8'))['steps'][-1].get('scope') in ('selection-only','map-mode-diagnostic','cursor-selection','cursor-clearance-diagnostic','native-arrival-sync'):raise ValueError('PC2 profile requires reviewed pc2_lane.execute adapter; no PC1 standalone entry')
+-        verify(packet);review=json.loads((packet/'lead-review.json').read_text(encoding='utf-8'))
+-        if review.get('status')!='ADOPT' or review.get('pinsSha256')!=sha(packet/'pins.json'):raise ValueError('exact lead ADOPT required')
+-        runner=load_runner(root);install(runner,packet)
+-        before=runner.hash_saves()
+-        require_disk_inventory(runner,before)
+-        sys.argv=[str(root/'tools/scenario/run.py'),str(scenario)]
+-        try:code=runner.main()
+-        finally:
+-            after=runner.hash_saves();out=packet/'live-out';out.mkdir(exist_ok=True)
+-            (out/'disk-save-closure.json').write_text(json.dumps(dict(before=before,after=after,unchanged=before==after),indent=2),encoding='utf-8')
+-            if before!=after:raise ValueError('canonical disk saves changed')
+-        raise SystemExit(code)
++    parser=argparse.ArgumentParser(description=__doc__)
++    for key in ('root','packet','scenario'):parser.add_argument('--'+key,type=Path,required=True)
++    parser.add_argument('--validate',action='store_true',required=True)
++    args=parser.parse_args()
++    print(json.dumps(validate(args.root.resolve(),args.packet.resolve(),args.scenario.resolve())))
+--- source9/observer.py
++++ landing/observer.py
+@@ -56,37 +56,4 @@
+                 raise runner.StepFailed('world-map baseline must be fresh safe TT on both games')
+         return {'status':'PENDING','baseline':'retained; route/save provenance still required'}
+ 
+-    def observe(ctx,step):
+-        seconds=step.get('seconds',180)
+-        if type(seconds) is not int or not 1<=seconds<=300:
+-            raise runner.StepFailed('world-map observation budget outside1..300 seconds')
+-        trace=ctx.saved['worldmap_trace']
+-        start=time.monotonic(); reached=False
+-        try:
+-            while time.monotonic()-start<seconds:
+-                pair=collect_pair(ctx)
+-                trace['samples'].append(pair)
+-                for i in (0,1):
+-                    runner.step_capture(ctx,{'instance':i,'name':f'worldmap_{len(trace["samples"]):04d}'})
+-                result=retain(ctx,trace)
+-                # Pending diagnostics never grant further movement. We collect
+-                # through both safe HB arrivals, then leave all checks to review.
+-                if result['sawHostWorldMap'] and result['sawBothSafeHB']:
+-                    runner.step_progress_snapshot(ctx,{'instances':[0,1],'as':'wm_progress_after','compare':'wm_progress_before'})
+-                    try:
+-                        initial=trace['samples'][0][0]
+-                        arrival=list(evidence.ARRIVAL.finditer(bytes.fromhex(initial['injectLogHex']).decode('utf-8',errors='replace')))[-1]
+-                        trace['landingTransitionEvidence']=runner.transition_evidence(ctx,[0,1],int(arrival['epoch']))
+-                    except Exception as error:
+-                        trace['landingTransitionEvidence']={'ready':False,'error':str(error)}
+-                    reached=True
+-                    break
+-                ctx.sleep(1.5)
+-        finally:
+-            trace['elapsedSeconds']=time.monotonic()-start
+-            retain(ctx,trace)
+-        if not reached:
+-            raise runner.StepFailed('world-map/HB boundary timed out; trace retained; no follow-on input')
+-        raise runner.StepFailed('world-map calibration PENDING; inspect worldmap_result.json; no input/release authorized')
+-
+-    runner.STEPS.update(wm_baseline=baseline,wm_observe=observe)
++    runner.STEPS.update(wm_baseline=baseline)

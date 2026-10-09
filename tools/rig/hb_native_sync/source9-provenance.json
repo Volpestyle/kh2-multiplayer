@@ -1,0 +1,370 @@
+{
+  "source9PinsSha256": "7be478f98d77c2066af832ce3db1ec1aa61892fe668da79c8e86a31b108f6aa1",
+  "source9Scope": "accepted source9 implementation; runtime bodies unchanged except removal of dormant dispatch/observer branches and standalone CLI",
+  "files": [
+    {
+      "path": "acceptance_offline.py",
+      "source9Sha256": "1054b361f2ef6a9765cc0d163032479bf6ccb6f32094b798f48c2e556425236c",
+      "landingSha256": "1054b361f2ef6a9765cc0d163032479bf6ccb6f32094b798f48c2e556425236c",
+      "byteIdentical": true
+    },
+    {
+      "path": "archive_format.py",
+      "source9Sha256": "1b76f35e028bb072e1c1199928d7cb777a02b841d146cf6b144c58fa75f40f8c",
+      "landingSha256": "1b76f35e028bb072e1c1199928d7cb777a02b841d146cf6b144c58fa75f40f8c",
+      "byteIdentical": true
+    },
+    {
+      "path": "evidence.py",
+      "source9Sha256": "f072c4cff22d6e68f7c4fab2647ba54b0c187e55cabe4d7d348170840ce6d53c",
+      "landingSha256": "f072c4cff22d6e68f7c4fab2647ba54b0c187e55cabe4d7d348170840ce6d53c",
+      "byteIdentical": true
+    },
+    {
+      "path": "fixture.py",
+      "source9Sha256": "d519d810661bd0f1d10d35163aea3ad731c547a665cab659701a57ccb6ad4d5a",
+      "landingSha256": "e8fe470543c87d2c192d258d1fd9db29d2751f6555d552af3b1a37fb3bff57ce",
+      "byteIdentical": false
+    },
+    {
+      "path": "media_clock.py",
+      "source9Sha256": "ba6849e88cef1611e015e9b53dd995785ae82016e267b8131519bf957af1de4c",
+      "landingSha256": "ba6849e88cef1611e015e9b53dd995785ae82016e267b8131519bf957af1de4c",
+      "byteIdentical": true
+    },
+    {
+      "path": "media_contract/agreement.json",
+      "source9Sha256": "99942d9f0e2a7be71e9f84187ef63e073d1466d2b683d3c7be9f624117ff5b3b",
+      "landingSha256": "99942d9f0e2a7be71e9f84187ef63e073d1466d2b683d3c7be9f624117ff5b3b",
+      "byteIdentical": true
+    },
+    {
+      "path": "media_contract/pc2-decoded-frames-v1.schema.proposed.json",
+      "source9Sha256": "b06a43ab43bccccfdd6a58eb061df6cf68a1426a9aaeea4af71a3ee6665f6adc",
+      "landingSha256": "b06a43ab43bccccfdd6a58eb061df6cf68a1426a9aaeea4af71a3ee6665f6adc",
+      "byteIdentical": true
+    },
+    {
+      "path": "media_contract/pc2-owned-clip-api-proposal.md",
+      "source9Sha256": "83b35d12ca6e612a858e032e78b2b36ecebee098366c64da706bfc2311631e39",
+      "landingSha256": "83b35d12ca6e612a858e032e78b2b36ecebee098366c64da706bfc2311631e39",
+      "byteIdentical": true
+    },
+    {
+      "path": "media_contract/pc2-owned-clip-failure-v1.schema.proposed.json",
+      "source9Sha256": "27df82c90169fa103f3f4005b3861ea8b18cb53b1ac89acf474a72d11a98bff1",
+      "landingSha256": "27df82c90169fa103f3f4005b3861ea8b18cb53b1ac89acf474a72d11a98bff1",
+      "byteIdentical": true
+    },
+    {
+      "path": "media_contract/pc2-owned-clip-v1.schema.proposed.json",
+      "source9Sha256": "e3d8c4d7ee949aae43d0447755e2e44db1b834e06692c27b1bd36c6cbaf002fc",
+      "landingSha256": "e3d8c4d7ee949aae43d0447755e2e44db1b834e06692c27b1bd36c6cbaf002fc",
+      "byteIdentical": true
+    },
+    {
+      "path": "memory_start.py",
+      "source9Sha256": "04dbf750feed45a4fef9b413693a60bf9f1cb1b20d816b7c8af523ad0b880ff0",
+      "landingSha256": "04dbf750feed45a4fef9b413693a60bf9f1cb1b20d816b7c8af523ad0b880ff0",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_log_format.py",
+      "source9Sha256": "5482e220aecb2e50f1bf072868998a25e8552082c14133cb28ae391608111959",
+      "landingSha256": "5482e220aecb2e50f1bf072868998a25e8552082c14133cb28ae391608111959",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_read.py",
+      "source9Sha256": "8b39480a4f27944528b30a21548cf9f5d66bb6b73c598217df058d9e9fbfc01b",
+      "landingSha256": "8b39480a4f27944528b30a21548cf9f5d66bb6b73c598217df058d9e9fbfc01b",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync.py",
+      "source9Sha256": "40397af899ed1ab3ebec63201111c0bc4eb97bb030e22a2273c17320af666b08",
+      "landingSha256": "40397af899ed1ab3ebec63201111c0bc4eb97bb030e22a2273c17320af666b08",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_acceptance.py",
+      "source9Sha256": "dc9c4c603b590bdf4dfe5e40f342ed490bbb23781e63025b8774dfa08fc3e381",
+      "landingSha256": "dc9c4c603b590bdf4dfe5e40f342ed490bbb23781e63025b8774dfa08fc3e381",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_budget_controls.py",
+      "source9Sha256": "8e702fd9c69b6a05990cd3a6dcc495a92285b796fbb770c161433c05e310228d",
+      "landingSha256": "8e702fd9c69b6a05990cd3a6dcc495a92285b796fbb770c161433c05e310228d",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_controls.py",
+      "source9Sha256": "fc46acd274378f2a745f98715e980b199676b0c3866161ec49ee84969167273b",
+      "landingSha256": "fc46acd274378f2a745f98715e980b199676b0c3866161ec49ee84969167273b",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_media.py",
+      "source9Sha256": "c947c7e0052aa0bf873384a0e179ec4efe3c6eabbc473f5560502206618bd1a7",
+      "landingSha256": "c947c7e0052aa0bf873384a0e179ec4efe3c6eabbc473f5560502206618bd1a7",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_media_controls.py",
+      "source9Sha256": "e547d4190f9b21058de11b34f96fa0597015df56c1997ae6ba108dbd275009f3",
+      "landingSha256": "e547d4190f9b21058de11b34f96fa0597015df56c1997ae6ba108dbd275009f3",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_proof.py",
+      "source9Sha256": "147db1a6d0d0ef29786f56661eaad07dce32705a9573b0bbf214d4820c105cbe",
+      "landingSha256": "147db1a6d0d0ef29786f56661eaad07dce32705a9573b0bbf214d4820c105cbe",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_retained_controls.py",
+      "source9Sha256": "0b12280a909c280db74c4e265413437a3567e5b63de2f977a221c3f5af25423b",
+      "landingSha256": "0b12280a909c280db74c4e265413437a3567e5b63de2f977a221c3f5af25423b",
+      "byteIdentical": true
+    },
+    {
+      "path": "native_sync_scope_controls.py",
+      "source9Sha256": "04b9a65a658cdc5c4153923410381cfa0c2e376774bc1355b3382f56cd918262",
+      "landingSha256": "04b9a65a658cdc5c4153923410381cfa0c2e376774bc1355b3382f56cd918262",
+      "byteIdentical": true
+    },
+    {
+      "path": "observer.py",
+      "source9Sha256": "7ab597d7135821fdf4cce648dee7c2e1ab5cb4451e59790deecb7bc279c28b0c",
+      "landingSha256": "8b66a47151d6f2b795b42c85f85b791eb2670ea1e5bf88f62d876cee712fd37e",
+      "byteIdentical": false
+    },
+    {
+      "path": "packet_products.py",
+      "source9Sha256": "f34c8a69f83f6b3c0b513c9e4d7400239232aa6ad523cd9f9c9d0a79bb81ac29",
+      "landingSha256": "f34c8a69f83f6b3c0b513c9e4d7400239232aa6ad523cd9f9c9d0a79bb81ac29",
+      "byteIdentical": true
+    },
+    {
+      "path": "pause_scope.py",
+      "source9Sha256": "f738bcd7cc8dd5d1797e16b8cfc7d5798c6436db9162162a75a0b3fc235f8c41",
+      "landingSha256": "f738bcd7cc8dd5d1797e16b8cfc7d5798c6436db9162162a75a0b3fc235f8c41",
+      "byteIdentical": true
+    },
+    {
+      "path": "product_controls.py",
+      "source9Sha256": "10f316331719e375eb081551060d99ac5a207f68e394f53f9e003ed719046584",
+      "landingSha256": "10f316331719e375eb081551060d99ac5a207f68e394f53f9e003ed719046584",
+      "byteIdentical": true
+    },
+    {
+      "path": "scenario.json",
+      "source9Sha256": "4843c13da7cb6a2614fb195ecd192eefc3b12317e132d9539e39a2bfc01c7a62",
+      "landingSha256": "4843c13da7cb6a2614fb195ecd192eefc3b12317e132d9539e39a2bfc01c7a62",
+      "byteIdentical": true
+    },
+    {
+      "path": "servicing.py",
+      "source9Sha256": "3e4abe2e32d29ea6bef2813ddb3be676fd1c86a112e9249bc9ee6ca0ac47a254",
+      "landingSha256": "3e4abe2e32d29ea6bef2813ddb3be676fd1c86a112e9249bc9ee6ca0ac47a254",
+      "byteIdentical": true
+    },
+    {
+      "path": "setup_controls.py",
+      "source9Sha256": "b315b7f1cb71cbc241ec1608b2134d61e3874427b2c7c894645167712abee4ca",
+      "landingSha256": "b315b7f1cb71cbc241ec1608b2134d61e3874427b2c7c894645167712abee4ca",
+      "byteIdentical": true
+    },
+    {
+      "path": "test_native_sync_proof.py",
+      "source9Sha256": "efb5cda22c9a77406c82ec62dcd1504ee8233731e977d569f0b4c400a87039ab",
+      "landingSha256": "efb5cda22c9a77406c82ec62dcd1504ee8233731e977d569f0b4c400a87039ab",
+      "byteIdentical": true
+    }
+  ],
+  "projections": {
+    "fixture.py": {
+      "byteIdenticalFunctions": {
+        "require_disk_inventory": {
+          "sourceLines": [
+            14,
+            17
+          ],
+          "landingLines": [
+            14,
+            17
+          ],
+          "sha256": "a8308c8f617f920f45c680aadcca043a20bf294c9a9ca2832c5e1bea508d5d9e"
+        },
+        "sha": {
+          "sourceLines": [
+            20,
+            20
+          ],
+          "landingLines": [
+            20,
+            20
+          ],
+          "sha256": "452dca73f0c03024f1b37c1334a1d3066a7fe36748642a70b164d5c2c9bfcc47"
+        },
+        "verify": {
+          "sourceLines": [
+            23,
+            30
+          ],
+          "landingLines": [
+            23,
+            30
+          ],
+          "sha256": "008112bd96536f5cdae87beaa47c2f8e934f024ff3fdfb5d23ba8bc786ceaaae"
+        },
+        "load_runner": {
+          "sourceLines": [
+            33,
+            35
+          ],
+          "landingLines": [
+            33,
+            35
+          ],
+          "sha256": "a344f899e1cb9f7f12d9ad58b22b9fce414cd515b966ea61999eee1669f6854b"
+        },
+        "install.retain": {
+          "sourceLines": [
+            67,
+            70
+          ],
+          "landingLines": [
+            46,
+            49
+          ],
+          "sha256": "5fce5e3b1cba0d97d6e8fe2bd52a4f61994f8d386bd35f543e51a67b387c05c3"
+        },
+        "install.preflight": {
+          "sourceLines": [
+            71,
+            77
+          ],
+          "landingLines": [
+            50,
+            56
+          ],
+          "sha256": "5591cf2eb79cc7b4293d3dfd4e1bf741e72db58a995e0b480cee532fe601f067"
+        },
+        "install.setup": {
+          "sourceLines": [
+            78,
+            78
+          ],
+          "landingLines": [
+            57,
+            57
+          ],
+          "sha256": "50e9cbbe0304282545278dcce40090f932adfaa5af84f73bcafff0884a8231cb"
+        },
+        "install.ready": {
+          "sourceLines": [
+            79,
+            86
+          ],
+          "landingLines": [
+            58,
+            65
+          ],
+          "sha256": "fb4183034d59f60eb3d842bd21222c0d9aeb9eb6437e518520d337ee3cd5570a"
+        },
+        "install.finish": {
+          "sourceLines": [
+            263,
+            288
+          ],
+          "landingLines": [
+            69,
+            94
+          ],
+          "sha256": "c74d213e72b77657f1c002a01323ad1075f66d3c510c09ae1ad102d679dbfe61"
+        },
+        "validate": {
+          "sourceLines": [
+            292,
+            300
+          ],
+          "landingLines": [
+            96,
+            104
+          ],
+          "sha256": "16631763661479ab1d885e3f0ef008ba98de482cda1eb77600f27a51a0b8717f"
+        }
+      },
+      "changedOrRemovedFunctions": [
+        "map_ui",
+        "map_input_allowed",
+        "install",
+        "install.route",
+        "install.route.collect",
+        "install.route.collect.peer",
+        "install.route.capture",
+        "install.route.press",
+        "install.route.gate_map",
+        "install.route.position",
+        "install.route.move"
+      ]
+    },
+    "observer.py": {
+      "byteIdenticalFunctions": {
+        "install.sample": {
+          "sourceLines": [
+            16,
+            30
+          ],
+          "landingLines": [
+            16,
+            30
+          ],
+          "sha256": "e451b6373ef22d96ba4995b7f8b2b4a63e9803e5a21474789a66b144a3de38c1"
+        },
+        "install.collect_pair": {
+          "sourceLines": [
+            32,
+            36
+          ],
+          "landingLines": [
+            32,
+            36
+          ],
+          "sha256": "ae0adec180ce89d09854a861cc5811f92552061c54025bf523f13552a165c8b6"
+        },
+        "install.retain": {
+          "sourceLines": [
+            38,
+            48
+          ],
+          "landingLines": [
+            38,
+            48
+          ],
+          "sha256": "5e3fa0cbf72127e7f917d9e79d7cf423af8d118c4e2feb6a8bbf44ef9223c1ea"
+        },
+        "install.baseline": {
+          "sourceLines": [
+            50,
+            57
+          ],
+          "landingLines": [
+            50,
+            57
+          ],
+          "sha256": "1ad20b6d4691384b8a2c044b2b9eea7169a0a743656b6f25c5bb666f5bc2fade"
+        }
+      },
+      "changedOrRemovedFunctions": [
+        "install",
+        "install.observe"
+      ]
+    }
+  },
+  "installPrefixByteIdentical": true,
+  "acceptedRouteClauseByteIdentical": "        if step.get('scope')=='native-arrival-acceptance':return native_sync_acceptance.observe(runner,ctx)",
+  "liveCodeChanged": false
+}

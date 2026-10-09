@@ -1,0 +1,54 @@
+{
+  "name": "pc2_tt_hb_host_warp_follow_acceptance_01",
+  "description": "One host native HB00 request; ordinary product follower; paired safe HB arrival media ready for independent closure. Natural travel/map UI unqualified.",
+  "steps": [
+    {
+      "do": "wm_preflight"
+    },
+    {
+      "do": "boot",
+      "instance": 0
+    },
+    {
+      "do": "boot",
+      "instance": 1
+    },
+    {
+      "do": "wm_memory_start"
+    },
+    {
+      "do": "relay"
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wm_ready"
+    },
+    {
+      "do": "wm_baseline"
+    },
+    {
+      "do": "progress_snapshot",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "wm_progress_before"
+    },
+    {
+      "do": "wm_route",
+      "scope": "native-arrival-acceptance"
+    },
+    {
+      "do": "wm_acceptance_finish"
+    }
+  ]
+}

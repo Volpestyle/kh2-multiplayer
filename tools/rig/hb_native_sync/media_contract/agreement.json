@@ -1,0 +1,50 @@
+{
+  "schema": "kh2-story-pc2-owned-clip-agreement-v1",
+  "status": "AGREED",
+  "scope": "offline source6/product interface only; no live authority",
+  "files": {
+    "pc2-owned-clip-v1.schema.proposed.json": "e3d8c4d7ee949aae43d0447755e2e44db1b834e06692c27b1bd36c6cbaf002fc",
+    "pc2-owned-clip-failure-v1.schema.proposed.json": "27df82c90169fa103f3f4005b3861ea8b18cb53b1ac89acf474a72d11a98bff1",
+    "pc2-decoded-frames-v1.schema.proposed.json": "b06a43ab43bccccfdd6a58eb061df6cf68a1426a9aaeea4af71a3ee6665f6adc",
+    "pc2-owned-clip-api-proposal.md": "83b35d12ca6e612a858e032e78b2b36ecebee098366c64da706bfc2311631e39"
+  },
+  "sourceOwner": "kh2-story",
+  "productOwner": "kh2-pc2lane",
+  "interface": {
+    "clip": "runner.pc2_owned_clip(ctx, instance, output, deadline)",
+    "products": "ctx.pc2_media_products verified immutable before sole warp",
+    "targets": "ctx.pc2_media_targets from initial source5 PID/creationTicks/moduleBase",
+    "cancel": "ctx.pc2_media_cancel original source-owned Event",
+    "bindingHook": false,
+    "bindingSha256": false
+  },
+  "sourceGuarantees": [
+    "unchanged source5 causal oracle",
+    "fresh original native/causal media bookends",
+    "180s total; unchanged45s acquisition/native hook deadline; separate<=30s source validation deadline including processing/join/final step",
+    "independent lossless frame and auxiliary artifact verification",
+    "READY_FOR_CLOSURE acceptance=false only"
+  ],
+  "superseded": [
+    "pc2-media-binding-v1.schema.proposed.json"
+  ],
+  "clockAmendment": {
+    "status": "AGREED",
+    "deadline": "time.perf_counter() absolute float",
+    "timestamps": "time.perf_counter_ns()",
+    "native": "QueryPerformanceCounter",
+    "schemaChanges": false,
+    "globalMonkeypatch": false,
+    "source5Changed": false
+  },
+  "timingAmendment": {
+    "status": "AGREED_DESIGN_REV3",
+    "designPinsSha256": "3474711419d0c9cbd788b48630e6b18298ec941f0d09d0aa030c69dda0891d7e",
+    "sourceRevision": 8,
+    "nativeSchemasChanged": false,
+    "nativeHookChanged": false,
+    "originalDeadlineAlias": "media.deadlineMonotonicNs == acquisitionDeadlineNs; never validationDeadlineNs",
+    "mandatoryHistoryReplay": "hb-arrival-media-v2 original A45/V30/H180 chronology before fresh replay",
+    "remainingLiveAttemptLimit": 1
+  }
+}

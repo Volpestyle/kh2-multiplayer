@@ -1,0 +1,1026 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kh2:failure:v1:proposal",
+  "$ref": "#/$defs/failure",
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_.-]+$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ]
+    },
+    "processIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "creationTicks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parentPid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imagePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "imageSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "pid",
+        "creationTicks",
+        "parentPid",
+        "imagePath",
+        "imageSha256",
+        "argv"
+      ]
+    },
+    "closedProcess": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/processIdentity"
+        },
+        "startedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "finishedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exitCode": {
+          "const": 0,
+          "type": "integer"
+        },
+        "exited": {
+          "const": true,
+          "type": "boolean"
+        },
+        "identityAbsent": {
+          "const": true,
+          "type": "boolean"
+        },
+        "absenceCheckedNs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "identity",
+        "startedNs",
+        "finishedNs",
+        "exitCode",
+        "exited",
+        "identityAbsent",
+        "absenceCheckedNs"
+      ]
+    },
+    "closedProcesses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "helper": {
+          "$ref": "#/$defs/closedProcess"
+        },
+        "encoder": {
+          "$ref": "#/$defs/closedProcess"
+        },
+        "verifier": {
+          "$ref": "#/$defs/closedProcess"
+        }
+      },
+      "required": [
+        "helper",
+        "encoder",
+        "verifier"
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "output": {
+          "type": "string",
+          "pattern": "^hb_arrival_peer[01]\\.mp4$"
+        },
+        "seconds": {
+          "const": 3,
+          "type": "integer"
+        },
+        "requestedFps": {
+          "const": 30,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "instance",
+        "output",
+        "seconds",
+        "requestedFps"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "creationTicks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imagePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "imageName": {
+          "const": "KINGDOM HEARTS II FINAL MIX.exe",
+          "type": "string"
+        },
+        "ownedRecordSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "handleHeldThroughFinalization": {
+          "const": true,
+          "type": "boolean"
+        },
+        "moduleBase": {
+          "type": "integer",
+          "minimum": 65536
+        },
+        "imageSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "pid",
+        "creationTicks",
+        "imagePath",
+        "imageName",
+        "ownedRecordSha256",
+        "handleHeldThroughFinalization",
+        "moduleBase",
+        "imageSha256"
+      ]
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expectedRequestSeq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "doneSeq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "nativeStatus": {
+          "const": 0,
+          "type": "integer"
+        },
+        "framesWritten": {
+          "const": 90,
+          "type": "integer"
+        },
+        "requestedInterval": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "renderer": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backbufferFormat": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "gameFpsBefore": {
+          "type": "number",
+          "minimum": 1
+        },
+        "gameFpsDuringCapture": {
+          "type": "number",
+          "minimum": 1
+        },
+        "encodedFps": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "startedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "finishedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "captureLeaseReleased": {
+          "const": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "expectedRequestSeq",
+        "doneSeq",
+        "nativeStatus",
+        "framesWritten",
+        "requestedInterval",
+        "width",
+        "height",
+        "renderer",
+        "backbufferFormat",
+        "gameFpsBefore",
+        "gameFpsDuringCapture",
+        "encodedFps",
+        "startedNs",
+        "finishedNs",
+        "captureLeaseReleased"
+      ]
+    },
+    "decode": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifactSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "decodedAllFrames": {
+          "const": true,
+          "type": "boolean"
+        },
+        "decodeErrors": {
+          "const": 0,
+          "type": "integer"
+        },
+        "decodedFrames": {
+          "const": 90,
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "durationSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "frameDigestManifest": {
+          "$ref": "#/$defs/artifact"
+        },
+        "contactSheet": {
+          "$ref": "#/$defs/artifact"
+        },
+        "metricsAlgorithmSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "blackFrames": {
+          "const": 0,
+          "type": "integer"
+        },
+        "nonblackDistinctFrames": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "motionQualified": {
+          "const": true,
+          "type": "boolean"
+        },
+        "maximumChangedPixels": {
+          "type": "integer",
+          "minimum": 64
+        },
+        "motionChannelDelta": {
+          "const": 16,
+          "type": "integer"
+        },
+        "motionMinimumChangedPixels": {
+          "const": 64,
+          "type": "integer"
+        },
+        "blackLumaThreshold": {
+          "const": 16,
+          "type": "integer"
+        },
+        "blackPixelFractionThreshold": {
+          "const": 0.99,
+          "type": "number"
+        }
+      },
+      "required": [
+        "artifactSha256",
+        "decodedAllFrames",
+        "decodeErrors",
+        "decodedFrames",
+        "width",
+        "height",
+        "durationSeconds",
+        "frameDigestManifest",
+        "contactSheet",
+        "metricsAlgorithmSha256",
+        "blackFrames",
+        "nonblackDistinctFrames",
+        "motionQualified",
+        "maximumChangedPixels",
+        "motionChannelDelta",
+        "motionMinimumChangedPixels",
+        "blackLumaThreshold",
+        "blackPixelFractionThreshold"
+      ]
+    },
+    "products": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clipCli": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "packagePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "packagePath",
+            "sha256"
+          ]
+        },
+        "encoder": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "packagePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "packagePath",
+            "sha256"
+          ]
+        },
+        "verifier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "packagePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "packagePath",
+            "sha256"
+          ]
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "packagePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "packagePath",
+            "sha256"
+          ]
+        }
+      },
+      "required": [
+        "clipCli",
+        "encoder",
+        "verifier",
+        "metrics"
+      ]
+    },
+    "closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allStartedIdentitiesRetained": {
+          "const": true,
+          "type": "boolean"
+        },
+        "helpersClosed": {
+          "const": true,
+          "type": "boolean"
+        },
+        "ownedDescendantsAbsent": {
+          "const": true,
+          "type": "boolean"
+        },
+        "checkedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "remainingOwnedIdentities": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "$ref": "#/$defs/processIdentity"
+          }
+        }
+      },
+      "required": [
+        "allStartedIdentitiesRetained",
+        "helpersClosed",
+        "ownedDescendantsAbsent",
+        "checkedNs",
+        "remainingOwnedIdentities"
+      ]
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "pc2-owned-clip-v1",
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "request": {
+          "$ref": "#/$defs/request"
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "products": {
+          "$ref": "#/$defs/products"
+        },
+        "startedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "finishedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "deadlineMonotonicNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capture": {
+          "$ref": "#/$defs/capture"
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "decode": {
+          "$ref": "#/$defs/decode"
+        },
+        "processes": {
+          "$ref": "#/$defs/closedProcesses"
+        },
+        "closure": {
+          "$ref": "#/$defs/closure"
+        },
+        "acceptance": {
+          "const": false,
+          "type": "boolean"
+        },
+        "rawCliReceipt": {
+          "$ref": "#/$defs/artifact"
+        },
+        "rawLogs": {
+          "$ref": "#/$defs/rawLogs"
+        },
+        "driver": {
+          "$ref": "#/$defs/processIdentity"
+        }
+      },
+      "required": [
+        "schema",
+        "ok",
+        "request",
+        "target",
+        "products",
+        "startedNs",
+        "finishedNs",
+        "deadlineMonotonicNs",
+        "capture",
+        "artifact",
+        "decode",
+        "processes",
+        "closure",
+        "acceptance",
+        "rawCliReceipt",
+        "rawLogs",
+        "driver"
+      ]
+    },
+    "partialProcess": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "helper",
+            "encoder",
+            "verifier"
+          ]
+        },
+        "identity": {
+          "$ref": "#/$defs/processIdentity"
+        },
+        "startedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exitCode": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finishedNs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exited": {
+          "type": "boolean"
+        },
+        "identityAbsent": {
+          "type": "boolean"
+        },
+        "absenceCheckedNs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "role",
+        "identity",
+        "startedNs",
+        "exitCode",
+        "finishedNs",
+        "exited",
+        "identityAbsent",
+        "absenceCheckedNs"
+      ]
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "pc2-owned-clip-failure-v1"
+        },
+        "ok": {
+          "const": false
+        },
+        "acceptance": {
+          "const": false
+        },
+        "instance": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "pid": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "creationTicks": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "imagePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "imageName": {
+                  "const": "KINGDOM HEARTS II FINAL MIX.exe",
+                  "type": "string"
+                },
+                "ownedRecordSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "moduleBase": {
+                  "type": "integer",
+                  "minimum": 65536
+                }
+              },
+              "required": [
+                "pid",
+                "creationTicks",
+                "imagePath",
+                "imageName",
+                "ownedRecordSha256",
+                "moduleBase"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "admission",
+            "capture",
+            "encode",
+            "decode",
+            "hash",
+            "cleanup",
+            "deadline",
+            "cancelled"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "finishedNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "deadlineMonotonicNs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "spawnedIdentities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/processIdentity"
+          }
+        },
+        "processes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/partialProcess"
+          }
+        },
+        "closure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "checkedNs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ownedDescendantsAbsent": {
+              "type": "boolean"
+            },
+            "remainingOwnedIdentities": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/processIdentity"
+              }
+            }
+          },
+          "required": [
+            "checkedNs",
+            "ownedDescendantsAbsent",
+            "remainingOwnedIdentities"
+          ]
+        },
+        "artifact": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^hb_arrival_peer[01]\\.mp4$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawCliReceipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/artifact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawLogs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rawLogs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "ok",
+        "acceptance",
+        "instance",
+        "target",
+        "stage",
+        "error",
+        "startedNs",
+        "finishedNs",
+        "deadlineMonotonicNs",
+        "spawnedIdentities",
+        "processes",
+        "closure",
+        "artifact",
+        "rawCliReceipt",
+        "rawLogs"
+      ]
+    },
+    "rawArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_.-]+$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ]
+    },
+    "frameRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 89
+        },
+        "pts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "png": {
+          "$ref": "#/$defs/artifact"
+        },
+        "rgbSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "blackFraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "changedPixels": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "index",
+        "pts",
+        "png",
+        "rgbSha256",
+        "blackFraction",
+        "changedPixels"
+      ]
+    },
+    "frameManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "pc2-decoded-frames-v1"
+        },
+        "instance": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "videoSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeBase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "numerator": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "denominator": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "numerator",
+            "denominator"
+          ]
+        },
+        "metricsAlgorithmSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 90,
+          "maxItems": 90,
+          "items": {
+            "$ref": "#/$defs/frameRow"
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "instance",
+        "videoSha256",
+        "width",
+        "height",
+        "timeBase",
+        "metricsAlgorithmSha256",
+        "rows"
+      ]
+    },
+    "rawLogs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "helper": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stdout": {
+              "$ref": "#/$defs/rawArtifact"
+            },
+            "stderr": {
+              "$ref": "#/$defs/rawArtifact"
+            }
+          },
+          "required": [
+            "stdout",
+            "stderr"
+          ]
+        },
+        "encoder": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stdout": {
+              "$ref": "#/$defs/rawArtifact"
+            },
+            "stderr": {
+              "$ref": "#/$defs/rawArtifact"
+            }
+          },
+          "required": [
+            "stdout",
+            "stderr"
+          ]
+        },
+        "verifier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stdout": {
+              "$ref": "#/$defs/rawArtifact"
+            },
+            "stderr": {
+              "$ref": "#/$defs/rawArtifact"
+            }
+          },
+          "required": [
+            "stdout",
+            "stderr"
+          ]
+        }
+      },
+      "required": [
+        "helper",
+        "encoder",
+        "verifier"
+      ]
+    }
+  }
+}

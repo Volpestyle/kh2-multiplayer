@@ -1,0 +1,4 @@
+# Preserve accepted source9 bytes and their provenance hashes across checkouts.
+* -text whitespace=cr-at-eol
+# A unified diff uses a literal space on blank context lines.
+source9-landing.diff whitespace=cr-at-eol,-blank-at-eol
