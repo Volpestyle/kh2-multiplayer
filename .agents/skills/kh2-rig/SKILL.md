@@ -23,6 +23,7 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 | Local safety inventory | `tools/rig/check-safety.ps1` | Explicit complete pre-run save/foreign/game-root/assets baselines and fresh output path. Process inventory alone does not assert closure. |
 | Final private relay receipt | `python -B tools/rig/verify-relay-closed.py ...` | After exact owned stop/fetch: explicit run/ready/fetched/output/SSH paths; hashes, exits, PID/supervisor absence and UDP27795. Never stops anything. |
 | Friend package | `tools/packaging/build_friend.py`, `tools/launcher/friend.py` | The portable kh2ctl only allows `launch / instances / kill / overlay`. |
+| PC2 single-PC lane | `docs/PC2_PACKET_RETARGETING.md` | Self-contained packets, bundled-Python dependency check, shared PC2 lock plus transitional checkout lock, JOIN-owner window, ADOPT/UTC consent and owned closure. Two-instance smoke passed 2026-10-09 UTC. |
 
 ## Gotchas (each cost real attempts)
 
