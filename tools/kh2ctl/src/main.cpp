@@ -2945,7 +2945,10 @@ CommandResult CmdWorldResync(std::vector<std::string> args) {
 }
 
 void PrintUsage() {
-#ifdef KH2COOP_PORTABLE_PACKAGE
+#if defined(KH2COOP_INTERNAL_DIAGNOSTIC)
+    std::cout << "KH2 internal package diagnostics (explicit owned --pid N required).\n"
+                 "Commands: mute, capture, player-press, player-input, peek, poke, state, entities, warp, dump, help.\n";
+#elif defined(KH2COOP_PORTABLE_PACKAGE)
     std::cout << "KH2 Co-op package helper. Open Start KH2 Co-op.cmd.\n"
                  "Internal commands: launch, instances, kill, overlay on|off --pid N, help.\n";
 #else
@@ -3023,7 +3026,42 @@ int main(int argc, char* argv[]) {
 
         const std::string command = ToLower(argv[1]);
         std::vector<std::string> args(argv + 2, argv + argc);
-#ifdef KH2COOP_PORTABLE_PACKAGE
+#if defined(KH2COOP_INTERNAL_DIAGNOSTIC)
+        // Keep this process handle alive through command execution: a recycled
+        // PID must never qualify using the portable launcher's retained record.
+        const std::unique_ptr<void, decltype(&CloseHandle)> diagnosticTarget(
+            [&]() -> HANDLE {
+                if (command == "help" || command == "--help" || command == "-h") return nullptr;
+                if (command != "mute" && command != "capture" && command != "player-press" &&
+                    command != "player-input" && command != "peek" && command != "poke" &&
+                    command != "state" && command != "entities" && command != "warp" && command != "dump") {
+                    throw std::runtime_error("Command unavailable in the internal diagnostic package.");
+                }
+                auto targetArgs = args;
+                const auto raw = ConsumeOption(targetArgs, "--pid");
+                std::uint32_t pid = 0;
+                if (!raw || raw->empty() || std::find(targetArgs.begin(), targetArgs.end(), "--pid") != targetArgs.end())
+                    throw std::runtime_error("Diagnostics require one explicit positive decimal --pid.");
+                const auto parsed = std::from_chars(raw->data(), raw->data() + raw->size(), pid);
+                if (parsed.ec != std::errc{} || parsed.ptr != raw->data() + raw->size() || pid == 0)
+                    throw std::runtime_error("Diagnostics require one explicit positive decimal --pid.");
+                const auto owned = ReadOwned();
+                const auto owner = std::find_if(owned.begin(), owned.end(), [pid](const auto& row) {
+                    return row.pid == pid && row.creationTime != 0;
+                });
+                if (owner == owned.end()) throw std::runtime_error("Diagnostics require this package's owned game.");
+                std::unique_ptr<void, decltype(&CloseHandle)> process(
+                    OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid), &CloseHandle);
+                std::array<wchar_t, 32768> image {};
+                DWORD length = static_cast<DWORD>(image.size());
+                if (!process || ProcessCreationTime(process.get()) != owner->creationTime ||
+                    WaitForSingleObject(process.get(), 0) != WAIT_TIMEOUT ||
+                    !QueryFullProcessImageNameW(process.get(), 0, image.data(), &length) ||
+                    _wcsicmp(std::filesystem::path(image.data()).filename().c_str(), kKh2ExeName) != 0)
+                    throw std::runtime_error("Diagnostic game identity changed or is unavailable.");
+                return process.release();
+            }(), &CloseHandle);
+#elif defined(KH2COOP_PORTABLE_PACKAGE)
         if (command != "launch" && command != "instances" && command != "kill" &&
             command != "overlay" && command != "help" && command != "--help" && command != "-h") {
             const auto error = MakeError("Command unavailable in the friend package. "

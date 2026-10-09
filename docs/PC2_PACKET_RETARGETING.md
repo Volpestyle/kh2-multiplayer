@@ -33,6 +33,14 @@ buildid `15194255`. This qualifies the lane, not other fixtures or networking.
    a limited command allowlist, sharing the launcher's native ownership registry.
    Preserve native ownership checks and ordinary friend-package restrictions;
    never copy registry entries into a checkout or substitute ad-hoc writes.
+   Build `kh2ctl_diagnostic` from the reviewed source worktree and use
+   `tools/packaging/add_rig_diagnostic.py` to add it to a new rig ZIP. Run
+   `bin/kh2ctl_diagnostic.exe` with unpacked-package cwd and explicit owned PID;
+   verify its bytes against the packet product pin and package manifest before
+   dispatch. It retains a native PID/creation/image handle for each command and
+   keeps the existing `poke` ownership check. The ordinary friend CLI and full
+   checkout CLI retain their existing command boundaries. Source products remain
+   copied unchanged; the adapter selects this additional diagnostic product.
 4. Derive home from `USERPROFILE`, packet from `__file__`/`PSScriptRoot`, and
    evidence/unpack from run context. Resolve Documents through the Known Folder
    API, using the target account's native save container. Never import saves or
@@ -63,6 +71,12 @@ Validate hashes, scenario structure, script syntax/BOM bytes and bundled Python
 imports offline. Seal `pins.json` PENDING, obtain independent review, then have
 the lead write the actual ADOPT receipt and fresh same-UTC-day consent. Use a
 seal-specific exclusive-create spent marker: one attempt per sealed packet.
+
+Copied offline controls must accept explicit packet/scratch paths or resolve
+their new location correctly. A fixed `parents[2]` root that worked under
+`.local/pc2/` resolves to `build/` when copied into a packet, breaking direct
+replay. Verify the retained control entry from its final location before sealing;
+the production adapter's separate `--verify` is not a replayability check.
 
 Create the PC2 destination lane before `scp -r`; otherwise scp can copy contents
 without the expected nested packet directory. Copy the actual ADOPT receipt,

@@ -21,6 +21,16 @@ Expected output path on Windows is usually one of:
 - `build/Release/kh2ctl.exe`
 - `build/kh2ctl.exe`
 
+Internal PC2 rig packets can build `kh2ctl_diagnostic` (excluded from the default
+build). This separate product requires the same package-root cwd and `bin/`
+location as portable launch. Every diagnostic requires one explicit positive
+decimal PID, a nonzero creation-time match in that package's `build/rig/owned.txt`,
+and a live native KH2 image handle retained through execution. Its commands are
+limited to mute, capture, player-press, player-input, peek, poke, state, entities,
+warp and dump; launch/kill/instances remain the ordinary portable helper's job.
+The full checkout CLI and distributed friend helper keep their existing behavior.
+See `PC2_PACKET_RETARGETING.md` for packaging and review requirements.
+
 ## What It Can Do
 
 ### Process and state control
