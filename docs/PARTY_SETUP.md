@@ -303,7 +303,7 @@ The gates are the same as for `two-clones`. Notes:
   Goofy keeps his native AI.
 - **Restore:** when the remote leaves, the roster-pinned intents retire. The next load is native (Donald + Goofy),
   and shutdown restores members 0..2 while still ours.
-- **Other layouts:** retaining Donald is pending chosen-AI qualification. Two players with an empty AI seat have the separate qualified opt-in below.
+- **Other layouts:** retaining Donald is qualified by the host-chosen companion runs below. Two players with an empty AI seat have the separate qualified opt-in below.
 - **Scope:** run175931 qualified canonical Roxas and the remote-kit private SAVE veto in the two-player GoA/Borough route. Roxas among three players remains unqualified.
 - **Command menu:** it is still unguarded with a kit (VUH-1509).
 - **Live evidence:**
@@ -379,14 +379,14 @@ part of this empty-seat patch and grants no SAVE exception.
 Party/change, Status, deeper Items and equipment edits remain unqualified;
 additional native consumers assume dense companion rows. Shutdown restoration
 was not exercised: the fixture uses owned process kills. The qualified restore
-is roster/bridge retirement followed by a native load. Solo with one companion and world allies remain separate pending work.
+is roster/bridge retirement followed by a native load. Solo with Donald or Goofy is separately qualified below; world allies remain pending.
 Host-chosen two-player Donald/Goofy qualification is recorded below.
 
 
 ## Host-chosen companion layouts (2026-10-08)
 
 The product from revision5 of `build/rig/party-choice-20261007-01`, code
-`3e3dcc6`, qualifies two players with host-chosen Donald or Goofy. It includes
+`3e3dcc6`, qualifies two players or a solo host with chosen Donald or Goofy. It includes
 the landed empty-seat/pause guards and read-only puppet Drive/Summon command
 admission; it does not reintroduce the former Drive gauge hold or any SAVE write.
 The landing on main89579a4 preserves that reviewed party product exactly.
