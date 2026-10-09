@@ -13,6 +13,7 @@
 // ============================================================================
 
 #include "EnemySync.hpp"
+#include "CombatCausalTrace.hpp"
 #include "OrdinaryEnemyBinding.hpp"
 #include "SpawnRowIdentity.hpp"
 #include "SpawnPick.hpp"
@@ -57,6 +58,11 @@ namespace {
 
 enum class Role { Off, Host, Client };
 Role CurrentRole();
+combatcausal::Scope CausalScope() noexcept;
+void ObserveCausalPopulation(bool complete);
+struct Spawn;
+struct NativeEnemy;
+combatcausal::Target CausalTarget(const Spawn& s, const NativeEnemy& n, unsigned id);
 
 constexpr std::uint32_t HP_INTERVAL_FRAMES = 6;  // ~10 Hz
 constexpr std::uint64_t HASH_INTERVAL_MS = 1000;
@@ -1380,6 +1386,18 @@ void DrainResourceTrace() {
 }
 
 void DrainPendingSpawnTrace(bool correlate) {
+    if (combatcausal::Requested() && nativehittrace::IsOwnerThread()) {
+        static nativehittrace::Stats originalLoss{};
+        const bool admitted= combatcausal::engine.Admitted();
+        ObserveCausalPopulation(correlate);
+        const auto loss = nativehittrace::GetStats();
+        if(!admitted&&combatcausal::engine.Admitted())originalLoss=loss;
+        if (combatcausal::engine.Admitted() && (loss.dropped!=originalLoss.dropped || loss.foreign!=originalLoss.foreign ||
+            loss.unwound!=originalLoss.unwound || loss.nested!=originalLoss.nested || loss.overflow!=originalLoss.overflow ||
+            loss.unmatched!=originalLoss.unmatched || loss.coverageSerial!=originalLoss.coverageSerial))
+            combatcausal::engine.Retire(CausalScope(), combatcausal::Now(), combatcausal::Reason::Loss);
+        combatcausal::Drain(g_log);
+    }
     nativehittrace::Drain(g_log, g_hitTraceFrame);
     DrainResourceTrace();
     const auto stats = spawncontroller::GetTraceStats();
@@ -1817,7 +1835,15 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             EnemyDeath d;
             d.epoch = g_epoch;
             d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
-            if (Send(encode(d))) {
+            bool sent;
+            if (!combatcausal::Requested()) sent = Send(encode(d));
+            else {
+                const auto bytes = encode(d); sent = Send(bytes);
+                combatcausal::engine.Packet(CausalScope(), combatcausal::Kind::DeathPublish,
+                    d.netId, 0, 0, s.lastMaxHp, bytes.data(), static_cast<unsigned>(bytes.size()),
+                    sent, true, combatcausal::Now());
+            }
+            if (sent) {
                 s.deathSent = true;
                 SYNC_LOG("[enemysync] host death epoch %u netId %u (despawned, not refilled)", g_epoch, d.netId);
             }
@@ -1835,7 +1861,15 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             EnemyDeath d;
             d.epoch = g_epoch;
             d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
-            if (Send(encode(d))) {
+            bool sent;
+            if (!combatcausal::Requested()) sent = Send(encode(d));
+            else {
+                const auto bytes = encode(d); sent = Send(bytes);
+                combatcausal::engine.Packet(CausalScope(), combatcausal::Kind::DeathPublish,
+                    d.netId, 0, 0, native->maxHp, bytes.data(), static_cast<unsigned>(bytes.size()),
+                    sent, false, combatcausal::Now());
+            }
+            if (sent) {
                 s.deathSent = true;
                 SYNC_LOG("[enemysync] host death epoch %u netId %u", g_epoch, d.netId);
             }
@@ -1851,7 +1885,14 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             }
         } else {
             hp.sequence = ++g_hpSourceSequence;
-            Send(encode(hp));
+            if (!combatcausal::Requested()) Send(encode(hp));
+            else {
+                const auto bytes = encode(hp); const bool sent = Send(bytes);
+                for (const auto& entry : hp.entries)
+                    combatcausal::engine.Packet(CausalScope(), combatcausal::Kind::HpPublish,
+                        entry.netId, hp.sequence, entry.hp, entry.maxHp, bytes.data(),
+                        static_cast<unsigned>(bytes.size()), sent, false, combatcausal::Now());
+            }
         }
     }
     return true;
@@ -3659,6 +3700,9 @@ bool ReceiveWorldPackets() {
                         auto& host = it->second;
                         if (!host.hpKnown || host.hp != e.hp || host.maxHp != e.maxHp) AdvanceClientManifestRevision();
                         host.hp = e.hp; host.maxHp = e.maxHp; host.hpKnown = true; host.hpSourceSequence = m.sequence;
+                        if (combatcausal::Requested()) combatcausal::engine.Packet(CausalScope(),
+                            combatcausal::Kind::HpReceive, e.netId, m.sequence, e.hp, e.maxHp,
+                            packet.data(), static_cast<unsigned>(packet.size()), true, false, combatcausal::Now());
                     }
                 }
                 ContinuePackPreparation(scope->hostSourceSerial, packChanged);
@@ -3668,6 +3712,10 @@ bool ReceiveWorldPackets() {
                 if (m.epoch != g_host.epoch) continue;
                 auto it = g_host.enemies.find(m.netId);
                 if (it != g_host.enemies.end()) { it->second.dead = true; AdvanceClientManifestRevision(); }
+                if (combatcausal::Requested()) combatcausal::engine.Packet(CausalScope(),
+                    combatcausal::Kind::DeathReceive, m.netId, 0, 0, 0, packet.data(),
+                    static_cast<unsigned>(packet.size()), packet.size() == size + 3 && r.remaining() == 0,
+                    false, combatcausal::Now());
                 g_mirror.Erase(m.netId);  // VUH-1515 N6: a death is not a stream release
                 SYNC_LOG("[enemysync] client: host death epoch %u netId %u", m.epoch, m.netId);
                 ContinuePackPreparation(scope->hostSourceSerial, true);
@@ -4004,6 +4052,60 @@ bool ResolveRecordPopulation(const NativeCensus& census, bool host) {
     return true;
 }
 
+combatcausal::Scope CausalScope() noexcept {
+    combatcausal::Scope s{};
+    if (!combatcausal::Requested() || !nativehittrace::IsOwnerThread()) return s;
+    s.native = CaptureNativeHitContext();
+    s.delivery = g_bridge.DeliverySerial(); s.sessionSalt = g_bridge.SpawnPickSalt();
+    for (unsigned i=0;i<3;++i) {
+        s.roster[i]=g_bridge.ConnectionId(static_cast<std::uint8_t>(i));
+        s.peerDelivery[i]=g_bridge.PeerDeliverySerial(static_cast<std::uint8_t>(i));
+    }
+    const auto after=CaptureNativeHitContext();
+    auto repeated=s; repeated.native=after;
+    if (!combatcausal::SameScope(s,repeated) || s.delivery!=g_bridge.DeliverySerial() ||
+        s.sessionSalt!=g_bridge.SpawnPickSalt()) s.native.available=false;
+    for (unsigned i=0;i<3;++i) if(s.roster[i]!=g_bridge.ConnectionId(static_cast<std::uint8_t>(i)) ||
+        s.peerDelivery[i]!=g_bridge.PeerDeliverySerial(static_cast<std::uint8_t>(i)))s.native.available=false;
+    return s;
+}
+combatcausal::Target CausalTarget(const Spawn& s,const NativeEnemy& n,unsigned id) {
+    ordinarybinding::Identity roots{};
+    if (!ReadOrdinaryIdentity(n,roots) || !s.present || s.actor!=n.actor ||
+        s.objentry!=n.objentry || s.status!=n.status) return {};
+    return {n.actor,n.objentry,n.status,roots.controller,roots.record,id,n.objectId,n.objectType,n.hp,n.maxHp};
+}
+void ObserveCausalPopulation(bool complete) {
+    auto before=CausalScope();
+    const auto coverage=nativehittrace::GetStats();
+    if(!coverage.requested || coverage.verifiedMask!=nativehittrace::AllHooks || coverage.installedMask!=nativehittrace::AllHooks)
+        before.native.available=false;
+    combatcausal::currentScope=before;
+    if(!complete) {
+        if(combatcausal::engine.Admitted())combatcausal::engine.Retire(before,combatcausal::Now(),combatcausal::Reason::Unavailable);
+        return;
+    }
+    const auto census=CaptureNativeCensus();
+    combatcausal::Target rows[combatcausal::TargetCount]{}; unsigned count=0;
+    bool valid=CensusMatchesInstance(census);
+    for(const auto& n:census.enemies) {
+        if(count==combatcausal::TargetCount){valid=false;break;}
+        const auto it=g_inst.byActor.find(n.actor);
+        if(it==g_inst.byActor.end() || it->second>=g_inst.spawns.size()){valid=false;break;}
+        const auto& spawn=g_inst.spawns[it->second];
+        const auto id=g_role==Role::Host ? static_cast<unsigned>(spawn.spawnIndex)+1 : static_cast<unsigned>(spawn.netId);
+        if((g_role==Role::Host&&!spawn.announced) || (g_role==Role::Client&&spawn.netId<=0)){valid=false;break;}
+        rows[count++]=CausalTarget(spawn,n,id);
+    }
+    const auto after=CausalScope();
+    if(!valid || !combatcausal::SameScope(before,after)) {
+        if(combatcausal::engine.Admitted())combatcausal::engine.Retire(after,combatcausal::Now(),combatcausal::Reason::Mapping);
+        return;
+    }
+    combatcausal::currentScope=after;
+    combatcausal::engine.Population(after,rows,count,combatcausal::Now());
+}
+
 bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generation) {
     namespace ob = ordinarybinding;
     std::vector<ob::Local> locals;
@@ -4144,12 +4246,20 @@ bool ClientFrame(const NativeCensus& initialCensus) {
             // No ordinary resurrection or write based on an unavailable incarnation.
             if (native.hp <= 0) continue;
         }
+        if (combatcausal::Requested() && !h.dead && native.hp==h.hp &&
+            combatcausal::engine.NeedsHpReadback(static_cast<unsigned>(s.netId),h.hpSourceSequence)) {
+            const auto target=CausalTarget(s,native,static_cast<unsigned>(s.netId));
+            combatcausal::engine.Applied(CausalScope(),combatcausal::Kind::HpApply,target,
+                h.hpSourceSequence,native.hp,h.hp,native.hp,false,true,true,combatcausal::Now());
+        }
         bool ordinaryLethal = false;
         if (h.dead) {
             if (native.hp > 0 && g_applyStatDelta && !s.deathAttempted) {
                 s.deathAttempted = true;
                 ordinaryLethal = !contentRequired;
                 const int before = native.hp;
+                combatcausal::Target causalTarget{};
+                if (combatcausal::Requested()) causalTarget = CausalTarget(s, native, static_cast<unsigned>(s.netId));
                 if (!ApplyNativeDeath(native, before, generation, recordCheck)) {
                     if (contentRequired) {
                         clearBindings(); g_resyncWriteFence = ResyncWriteFence::Failed;
@@ -4165,6 +4275,9 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                     InterruptCensus("native lethal outcome unavailable", s.actor);
                     return false;
                 }
+                if (combatcausal::Requested()) combatcausal::engine.Applied(CausalScope(),
+                    combatcausal::Kind::DeathApply, causalTarget, 0, before, 0, after.hp,
+                    true, true, combatcausal::SameTarget(causalTarget,CausalTarget(s,after,static_cast<unsigned>(s.netId))), combatcausal::Now());
                 native = after;
                 if (native.hp <= 0) {
                     if (g_log) g_log("[enemysync] client: host death netId %d applied (hp %d -> %d)",
@@ -4211,6 +4324,8 @@ bool ClientFrame(const NativeCensus& initialCensus) {
             // the whole fresh census again. Existing per-spawn once fence stays.
             if (ordinaryLethal) return WorldSessionGeneration() == generation;
         } else if (h.hp > 0 && native.hp != h.hp) {
+            combatcausal::Target causalTarget{};
+            if (combatcausal::Requested()) causalTarget=CausalTarget(s,native,static_cast<unsigned>(s.netId));
             if (!WriteNativeHp(native, h.hp, generation, recordCheck)) { // never 0: deaths are explicit
                 if (contentRequired) {
                     clearBindings(); g_resyncWriteFence = ResyncWriteFence::Failed;
@@ -4224,6 +4339,16 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 std::int32_t readback=-1;const bool read=ReadNative(native.status,readback);
                 g_log("[record-authority] hp epoch=%u frame=%u netId=%d objectId=%u actor=%llX before=%d requested=%d readback=%d read=%u",
                     g_host.epoch,g_hitTraceFrame,s.netId,s.objectId,static_cast<unsigned long long>(s.actor),native.hp,h.hp,readback,static_cast<unsigned>(read));
+}
+
+            if (combatcausal::Requested()) {
+                NativeEnemy after{}; bool enemy = false;
+                const bool read = ReadNativeEnemy(native.actor, after, enemy) && enemy && SameNativeIdentity(native, after);
+                const auto repeated=read ? CausalTarget(s,after,static_cast<unsigned>(s.netId)) : combatcausal::Target{};
+                const bool available=read&&combatcausal::SameTarget(causalTarget,repeated);
+                combatcausal::engine.Applied(CausalScope(), combatcausal::Kind::HpApply, causalTarget,
+                    h.hpSourceSequence, native.hp, h.hp, available ? after.hp : -1,
+                    true, true, available, combatcausal::Now());
             }
             // Outside the checked leaf/final-check-to-store interval. The leaf
             // returned after storing; later observation supplies actual HP.
@@ -4489,6 +4614,9 @@ bool ProcessHostHitClaims(NativeCensus& census) {
         // Reliable claims are ordered by connection. Keep this high-water mark
         // across rooms, queue pressure, native no-ops and native faults.
         sequence.consumed = claim.seq;
+        combatcausal::Target causalTarget{};
+        Spawn causalSpawn{};
+        if (combatcausal::Requested()) {causalSpawn=*target;causalTarget=CausalTarget(causalSpawn,native,claim.netId);}
         bool attempted = false;
         const bool nativeOk = ApplyNativeClaim(native, pending, attempted);
         if (!attempted) {
@@ -4509,6 +4637,13 @@ bool ProcessHostHitClaims(NativeCensus& census) {
                          static_cast<unsigned long long>(claim.requesterConnectionId), claim.seq, claim.epoch,
                          claim.netId, claim.objectId, claim.attackId, claim.damage, native.hp,
                          afterAvailable ? after->hp : -1, nativeOk ? 1u : 0u, afterAvailable ? 1u : 0u);
+        if (combatcausal::Requested()) {
+            const auto repeated=afterAvailable ? CausalTarget(causalSpawn,*after,claim.netId) : combatcausal::Target{};
+            combatcausal::engine.HostApply(CausalScope(),
+                {claim.requesterConnectionId, claim.seq, claim.epoch, claim.netId, claim.objectId, claim.attackId, claim.damage},
+                causalTarget, native.hp, afterAvailable ? after->hp : -1, attempted, nativeOk,
+                afterAvailable&&combatcausal::SameTarget(causalTarget,repeated), combatcausal::Now());
+        }
         if (postAvailable) TrackSpawns(census);
         if (!postAvailable || !nativeOk) {
             InterruptCensus(!nativeOk ? "native claim fault; outcome unknown" : "claim post-census unavailable",
@@ -5052,7 +5187,16 @@ bool RecordLocalPlayerEnemyHit(const LocalPlayerEnemyHit& hit) noexcept {
         claim.seq = ++g_localClaimSequence;
         // Encode/send this detection's immutable identity immediately. A full
         // ring drops the claim; it can never be relabeled after a room change.
-        if (!Send(encode(claim))) { LogClientClaim("enqueue-failed", "world-ring-or-context", 0, &claim); return reject("world ring full"); }
+        bool sent;
+        if (!combatcausal::Requested()) sent = Send(encode(claim));
+        else {
+            const auto bytes = encode(claim); sent = Send(bytes);
+            combatcausal::engine.Claim(CausalScope(),
+                {claim.requesterConnectionId, claim.seq, claim.epoch, claim.netId, claim.objectId, claim.attackId, claim.damage},
+                nativehittrace::CurrentApplySequence(), bytes.data(), static_cast<unsigned>(bytes.size()),
+                sent, combatcausal::Now());
+        }
+        if (!sent) { LogClientClaim("enqueue-failed", "world-ring-or-context", 0, &claim); return reject("world ring full"); }
         if (g_clientClaimHold.submitted == UINT64_MAX) g_clientClaimHold.poisoned = true;
         else ++g_clientClaimHold.submitted;
         LogClientClaim("submitted", "world-ring-enqueued", 0, &claim);

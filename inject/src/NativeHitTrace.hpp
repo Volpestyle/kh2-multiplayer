@@ -97,6 +97,7 @@ void Shutdown() noexcept;
 void RegisterOwnerThread() noexcept;
 bool IsOwnerThread() noexcept;
 bool Requested() noexcept;
+std::uint64_t CurrentApplySequence() noexcept;
 bool CanCaptureApply() noexcept;
 bool CanCaptureChild() noexcept;
 void BeginApply(ApplyToken& token, uintptr_t callerRva, bool callerAvailable, const ApplyFacts& before) noexcept;

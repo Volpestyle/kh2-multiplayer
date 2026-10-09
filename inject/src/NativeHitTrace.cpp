@@ -1,4 +1,5 @@
 #include "NativeHitTrace.hpp"
+#include "CombatCausalTrace.hpp"
 #include <Windows.h>
 #include <atomic>
 #include <cstring>
@@ -128,10 +129,11 @@ void Configure(bool requested, std::uint32_t verified, std::uint32_t installed) 
         (static_cast<std::uint64_t>(verified & AllHooks) << 1) | (static_cast<std::uint64_t>(installed & AllHooks) << 4);
     } while (!g_config.compare_exchange_weak(previous, next));
 }
-void Shutdown() noexcept { const auto s = GetStats(); Configure(false, s.verifiedMask, s.installedMask); }
+void Shutdown() noexcept { if (combatcausal::Requested()) combatcausal::enabled.store(false); const auto s = GetStats(); Configure(false, s.verifiedMask, s.installedMask); }
 void RegisterOwnerThread() noexcept { DWORD expected = 0; g_owner.compare_exchange_strong(expected, GetCurrentThreadId()); }
 bool IsOwnerThread() noexcept { return g_owner.load() == GetCurrentThreadId(); }
 bool Requested() noexcept { return (g_config.load() & 1) != 0; }
+std::uint64_t CurrentApplySequence() noexcept { return g_apply && g_apply->active ? g_apply->event.sequence : 0; }
 bool CanCaptureApply() noexcept {
     if (!Requested()) return false;
     if (!IsOwnerThread()) { ++g_foreign; return false; }
@@ -173,7 +175,9 @@ void EndApply(ApplyToken& token, bool normal, uintptr_t rawResult, const ApplyFa
     e.contextStable = normal && SameContext(e.before.context, e.after.context);
     e.metadataStable = normal && SameActor(e.before.victim, e.after.victim);
     if (e.unwound) ++g_unwound;
-    e.witness = Witness(e); Publish(e);
+    e.witness = Witness(e);
+    if (combatcausal::Requested()) combatcausal::OnHit(e);
+    Publish(e);
 }
 void BeginTake(ChildToken& t, uintptr_t a, std::int32_t d, std::int32_t s, std::int32_t r, uintptr_t c, bool ca, const ActorSnapshot& b) noexcept { BeginChild(t,ChildKind::Take,a,d,s,r,c,ca,b); }
 void EndTake(ChildToken& t, bool normal, const ActorSnapshot* a) noexcept { EndChild(t,normal,0,a); }

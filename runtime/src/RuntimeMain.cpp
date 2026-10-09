@@ -954,6 +954,48 @@ int main(int argc, char* argv[]) {
     std::uint64_t worldHostConnectionId = 0, worldSelfConnectionId = 0;
     std::uint32_t worldSessionGeneration = 0;
     std::uint64_t worldCauseSequence = 0;
+    const bool combatCausalTrace = exactEnvironmentOne("KH2COOP_COMBAT_CAUSAL_TRACE");
+    std::uint64_t combatCausalSequence=0;
+    const auto combatCausalPacket = [&](const char* direction,const std::vector<std::uint8_t>& packet,
+                                       const kh2coop::ProducerWorldContext& producer,bool accepted) {
+        if(!combatCausalTrace)return;
+        auto type=packet.empty()?kh2coop::PacketType{}:static_cast<kh2coop::PacketType>(packet[0]);
+        if(type==kh2coop::PacketType::WorldEnvelope) {
+            try {
+                const std::uint8_t* data=nullptr;std::size_t size=0;
+                kh2coop::decodePacketHeader(packet.data(),packet.size(),data,size);
+                kh2coop::ByteReader reader(data,size);kh2coop::WorldEnvelope e;kh2coop::read(reader,e);
+                type=e.packet.empty()?kh2coop::PacketType{}:static_cast<kh2coop::PacketType>(e.packet[0]);
+            } catch(const std::exception&) {std::cout<<"[combat-causal-runtime] schema=1 loss=1 malformed=1 acceptance=0\n";return;}
+        }
+        if(type!=kh2coop::PacketType::EnemyHp && type!=kh2coop::PacketType::EnemyDeath &&
+           type!=kh2coop::PacketType::HitClaim && type!=kh2coop::PacketType::SessionState)return;
+        if(++combatCausalSequence>4096 || packet.size()>4096 || worldSessionId.size()>64) {
+            if(combatCausalSequence==4097 || combatCausalSequence<=4096)
+                std::cout << "[combat-causal-runtime] schema=1 loss=1 acceptance=0\n";
+            return;
+        }
+        LARGE_INTEGER q{},f{};QueryPerformanceCounter(&q);QueryPerformanceFrequency(&f);
+        const auto ticks=static_cast<std::uint64_t>(q.QuadPart),hz=static_cast<std::uint64_t>(f.QuadPart);
+        const auto ns=hz ? ticks/hz*1000000000ULL+ticks%hz*1000000000ULL/hz : 0;
+        constexpr char hex[]="0123456789abcdef";char raw[8193]{},session[129]{};
+        for(std::size_t i=0;i<packet.size();++i){raw[2*i]=hex[packet[i]>>4];raw[2*i+1]=hex[packet[i]&15];}
+        for(std::size_t i=0;i<worldSessionId.size();++i){const auto c=static_cast<unsigned char>(worldSessionId[i]);session[2*i]=hex[c>>4];session[2*i+1]=hex[c&15];}
+        std::cout << "[combat-causal-runtime] schema=1 serial=" << combatCausalSequence
+            << " qpc=" << ns << " direction=" << direction << " sessionHex=" << session
+            << " generation=" << worldSessionGeneration << " delivery=" << worldDeliverySerial
+            << " producerGeneration=" << producer.generation << " producerDelivery=" << producer.deliverySerial
+            << " host=" << worldHostConnectionId << " self=" << worldSelfConnectionId
+            << " slot=" << unsigned(worldSessionSlot) << " accepted=" << accepted
+            << " bytes=" << packet.size() << " payload=" << raw << " acceptance=0\n";
+    };
+    const auto combatCausalOutgoing = [&](const std::vector<std::uint8_t>& packet,const kh2coop::ProducerWorldContext& context,bool accepted) {
+        combatCausalPacket("dll-to-net",packet,context,accepted);
+    };
+    const auto combatCausalThunk=+[](void* opaque,const std::vector<std::uint8_t>& packet,const kh2coop::ProducerWorldContext& context,bool accepted) {
+        (*static_cast<const decltype(combatCausalOutgoing)*>(opaque))(packet,context,accepted);
+    };
+
     const auto worldCauseReceipt = [&](const char* origin, std::uint32_t priorGeneration,
                                        bool markerQueued, const kh2coop::ResyncBegin* begin = nullptr,
                                        const kh2coop::ResyncKey* terminal = nullptr) {
@@ -1096,7 +1138,9 @@ int main(int argc, char* argv[]) {
         }
     };
     const auto enqueueWorld = [&](const std::vector<std::uint8_t>& packet) {
-        if (worldInbox.Receive(worldBridge, packet, worldStats)) return true;
+        const bool queued=worldInbox.Receive(worldBridge, packet, worldStats);
+        if(combatCausalTrace)combatCausalPacket("net-to-inbox",packet,{},queued);
+        if (queued) return true;
         if (eventHoldControlEnabled) eventHoldProjection.Retire(kh2coop::eventhold::Abort::Overflow);
         if (netClient) netClient->failWorldResync(kh2coop::ResyncResultReason::Overflow,
                                                  "runtime world inbox overflow");
@@ -1937,7 +1981,9 @@ int main(int argc, char* argv[]) {
             }
 #ifdef _WIN32
             if (worldBridge.IsOpen() && !netReady)
-                kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
+                if(!combatCausalTrace) kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
+                else kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats,combatCausalThunk,
+                    const_cast<void*>(static_cast<const void*>(&combatCausalOutgoing)));
 #endif
             if (recovery.state() != lastRecoveryState) {
                 lastRecoveryState = recovery.state();
@@ -2082,7 +2128,9 @@ int main(int argc, char* argv[]) {
                     worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN,
                                             kh2coop::WORLD_NET_UNKNOWN);
                 }
-                kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
+                if(!combatCausalTrace) kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
+                else kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats,combatCausalThunk,
+                    const_cast<void*>(static_cast<const void*>(&combatCausalOutgoing)));
             }
             pumpAvatars(room.worldId, room.roomId);
         }

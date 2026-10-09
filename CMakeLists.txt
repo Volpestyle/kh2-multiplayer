@@ -433,6 +433,14 @@ if(WIN32)
         target_compile_options(kh2coop_hittrace_test PRIVATE /W4 /WX)
     endif()
 
+    add_executable(kh2coop_combat_causal_test tests/CombatCausalTraceTest.cpp inject/src/NativeHitTrace.cpp)
+    target_include_directories(kh2coop_combat_causal_test PRIVATE inject/src common/include)
+    target_compile_definitions(kh2coop_combat_causal_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(kh2coop_combat_causal_test PRIVATE kh2coop_common)
+    if(MSVC)
+        target_compile_options(kh2coop_combat_causal_test PRIVATE /W4 /WX)
+    endif()
+
     # Production HP permission policy and checked zero-write leaf; only owned
     # record pages and synthetic native callbacks, never a game process.
     add_executable(kh2coop_damagepolicy_test tests/DamagePolicyTest.cpp inject/src/DamagePolicy.cpp)

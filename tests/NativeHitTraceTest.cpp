@@ -1,5 +1,6 @@
 // Windows-only, production core linked separately. No game process or memory.
 #include "NativeHitTrace.hpp"
+#include "CombatCausalTrace.hpp"
 #include "DamagePolicy.hpp"
 #include <Windows.h>
 #include <cstdarg>
@@ -444,6 +445,21 @@ int main(int argc,char** argv) {
     g_lines.clear();ht::CanCaptureChild();ht::Drain(Logger);Check(HasLine("[hittrace] summary schema=1"),"unmatched-only counter change emits summary");
     ht::Shutdown();const auto disabledCalls=g_applyCalls;ApplyAdapter(reinterpret_cast<void*>(g_before.victim.actor),reinterpret_cast<void*>(g_before.hit.hit));
     Check(g_applyCalls==disabledCalls+1 && !ht::PopEvent(event),"opt-out original pass-through");
+    // Original adapter calls/arguments/reads/opaque return stay identical with the
+    // passive observer enabled. No admission exists in this control.
+    namespace cc=kh2coop::inject::combatcausal;
+    ht::Configure(true,7,7);g_raise=false;g_before=Facts();g_after=After(g_before);
+    const auto a0=g_applyCalls,t0=g_takeCalls,s0=g_statCalls,r0=g_reads;
+    const auto offResult=ApplyAdapter(reinterpret_cast<void*>(g_before.victim.actor),reinterpret_cast<void*>(g_before.hit.hit));
+    const auto da=g_applyCalls-a0,dt=g_takeCalls-t0,ds=g_statCalls-s0,dr=g_reads-r0;
+    const auto causalStarted=cc::engine.Started();
+    cc::Configure(true,+[]() noexcept -> std::uint64_t{return 1;});
+    const auto onResult=ApplyAdapter(reinterpret_cast<void*>(g_before.victim.actor),reinterpret_cast<void*>(g_before.hit.hit));
+    Check(onResult==offResult&&g_applyCalls-a0==2*da&&g_takeCalls-t0==2*dt&&g_statCalls-s0==2*ds&&g_reads-r0==2*dr&&
+          g_argVictim==g_before.victim.actor&&g_argHit==g_before.hit.hit&&g_argDelta==-7&&g_argStat==0&&g_argReact==1,
+          "causal opt-in preserves real adapter original calls, arguments, reads and opaque return");
+    Check(cc::engine.Started()==causalStarted,"unadmitted observer creates no synthetic receipts");
+    ht::Shutdown();EmptyQueue();
     PolicyControls();
     std::printf("NativeHitTraceTest: %u checks, %u failed\n",g_checks,g_failed);return g_failed ? 1 : 0;
 }

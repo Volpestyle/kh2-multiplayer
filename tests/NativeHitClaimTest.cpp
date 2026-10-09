@@ -4,6 +4,7 @@
 #error NativeHitClaimTest requires Windows and MSVC-compatible SEH.
 #endif
 #include "kh2coop/WorldBridge.hpp"
+#include "../inject/src/CombatCausalTrace.hpp"
 #include <deque>
 #include <exception>
 #include <cstdarg>
@@ -1938,6 +1939,49 @@ void TestResourceSerialization() {
 }
 }
 
+
+void TestCombatCausalBoundaries() {
+    namespace cc=kh2coop::inject::combatcausal;
+    const auto prepare=[](bool enabled) {
+        Reset();
+        g_bridge.connections[2]=0;g_bridge.spawnPickSalt=55;
+        g_inst.room=6;g_inst.door=0;g_inst.map=1;g_inst.btl=1;g_inst.evt=0;
+        Put(image+offsets::ROOM_ID,std::uint8_t{6});Put(image+offsets::NOW+2,std::uint8_t{0});
+        Put(image+offsets::MAP_PROGRAM,std::uint16_t{1});Put(image+offsets::BATTLE_PROGRAM,std::uint16_t{1});Put(image+offsets::EVENT_PROGRAM,std::uint16_t{0});
+        g_inst.spawns[0].objectId=302;g_host.enemies[1].objectId=302;Put(object+offsets::objentry::OBJECT_ID,std::uint32_t{302});
+        cc::enabled.store(enabled);cc::engine.~Engine();new(&cc::engine)cc::Engine;
+        cc::clockFn=+[]() noexcept -> std::uint64_t {return 1;};
+        if(enabled) {
+            auto scope=CausalScope();Check(cc::ScopeEligible(scope),"actual diagnostic safe BC full scope qualifies");
+            NativeEnemy n{};bool enemyType=false;Check(ReadNativeEnemy(enemy,n,enemyType)&&enemyType,"diagnostic original typed target readable");
+            cc::Target rows[5];rows[0]=CausalTarget(g_inst.spawns[0],n,1);
+            for(unsigned i=1;i<5;++i)rows[i]={0x1000+i,0x2000+i,0x3000+i,0x4000+i,0x5000+i,i+1,302,4,1000,1000};
+            cc::engine.Population(scope,rows,5,1);++scope.native.frame;cc::engine.Population(scope,rows,5,2);
+            Check(cc::engine.Admitted(),"actual target roots admitted with copied four census leaves (not native coverage)");
+            cc::Receipt r;while(cc::engine.Pop(r)){}
+        }
+    };
+    prepare(false);auto c=Claim();c.objectId=302;QueueTestClaim(c);Check(Process(),"off actual host claim handler succeeds");
+    auto census=CaptureNativeCensus();Check(HostFrame(6,{},census),"off actual normal HP publisher succeeds");
+    const auto offBytes=g_bridge.outgoing;const auto offCalls=nativeCalls;const auto offHp=*reinterpret_cast<int*>(status);
+    const auto offClaimConsumed=g_claimSequences[1].consumed;
+    prepare(true);c=Claim();c.objectId=302;QueueTestClaim(c);Check(Process(),"on actual host claim handler succeeds");
+    census=CaptureNativeCensus();Check(HostFrame(6,{},census),"on actual normal HP publisher succeeds");
+    Check(offBytes==g_bridge.outgoing&&offCalls==nativeCalls&&offHp==*reinterpret_cast<int*>(status)&&offClaimConsumed==g_claimSequences[1].consumed,
+        "default-off/on actual native calls, result HP, sequence and encoded sends identical");
+    cc::Receipt r;bool apply=false,publish=false;std::uint64_t event=0;
+    while(cc::engine.Pop(r)) {
+        if(r.kind==cc::Kind::HostApply){apply=r.locallyQualified&&r.key.connection==101&&r.key.sequence==1&&r.beforeHp==1000&&r.afterHp==993;event=r.event;}
+        if(r.kind==cc::Kind::HpPublish)publish=r.locallyQualified&&r.causeCount==1&&r.causes[0]==event&&r.requestedHp==993&&r.payloadBytes>0;
+    }
+    Check(apply&&publish,"actual host consumer -> NORMAL HP source sequence/raw payload causal association");
+    QueueTestClaim(c);Process();Check(nativeCalls==1,"observer adds no native retry on duplicate claim");
+    Put(status,std::int32_t{980});census=CaptureNativeCensus();HostFrame(12,{},census);
+    bool unqualified=false;while(cc::engine.Pop(r))if(r.kind==cc::Kind::HpPublish&&!r.locallyQualified)unqualified=true;
+    Check(unqualified,"actual normal HP publication refuses unexplained companion damage");
+    cc::enabled.store(false);Reset();
+}
+
 int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
@@ -2193,6 +2237,7 @@ int main() try {
           "pending native teardown prevents puppet release");
     TestWorldRetirement();
     TestEnemyHpOrdering();
+    TestCombatCausalBoundaries();
     TestFreshProgressCapture();
     TestNativeResync();
     TestNativeRecordResync();

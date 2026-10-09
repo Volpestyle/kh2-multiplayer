@@ -42,6 +42,7 @@
 #include "NativeLifetimeTrace.hpp"
 #include "NativePrivateStatus.hpp"
 #include "NativeHitTrace.hpp"
+#include "CombatCausalTrace.hpp"
 #include "DamagePolicy.hpp"
 #include "EnemyTargetRemote.hpp" // VUH-1515 (default off)
 #include "AllyHit.hpp" // ally player-to-player hits (default off)
@@ -3626,8 +3627,18 @@ bool Initialize(uintptr_t exeBase) {
     char hitTraceSetting[2] {};
     const bool hitTrace = GetEnvironmentVariableA("KH2COOP_TRACE_HITS", hitTraceSetting,
                                                   sizeof(hitTraceSetting)) == 1 && hitTraceSetting[0] == '1';
+    char causalSetting[2] {};
+    const bool causalTrace = GetEnvironmentVariableA("KH2COOP_COMBAT_CAUSAL_TRACE", causalSetting,
+        sizeof(causalSetting)) == 1 && causalSetting[0] == '1';
+    if (causalTrace) combatcausal::Configure(true, +[]() noexcept -> std::uint64_t {
+        LARGE_INTEGER q {}, frequency {};
+        if (!QueryPerformanceCounter(&q) || !QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) return 0;
+        const auto ticks = static_cast<std::uint64_t>(q.QuadPart);
+        const auto hz = static_cast<std::uint64_t>(frequency.QuadPart);
+        return (ticks / hz) * 1000000000ULL + (ticks % hz) * 1000000000ULL / hz;
+    });
     g_hitTraceImageSize = 0;
-    if (hitTrace) {
+    if (hitTrace || causalTrace) {
         IMAGE_DOS_HEADER dos {};
         IMAGE_NT_HEADERS64 nt {};
         if (ReadHitTrace(exeBase, dos) && dos.e_magic == IMAGE_DOS_SIGNATURE &&
@@ -3637,7 +3648,7 @@ bool Initialize(uintptr_t exeBase) {
             nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
             g_hitTraceImageSize = nt.OptionalHeader.SizeOfImage;
     }
-    nativehittrace::Configure(hitTrace, hitTraceVerified, hitTraceInstalled);
+    nativehittrace::Configure(hitTrace || causalTrace, hitTraceVerified, hitTraceInstalled);
 
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);

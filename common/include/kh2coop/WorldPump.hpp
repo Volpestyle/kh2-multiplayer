@@ -34,8 +34,11 @@ struct WorldPumpStats {
     std::uint64_t retiredOutgoing {0}; // unavailable or retired DLL producer
 };
 
+using WorldPumpObserver = void(*)(void*, const std::vector<std::uint8_t>&, const ProducerWorldContext&, bool);
+
 // Drains the DLL's outgoing ring into the network client (call every tick).
-inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats& stats) {
+inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats& stats,
+                         WorldPumpObserver observer = nullptr, void* observerContext = nullptr) {
     std::uint8_t operatorMask = 0;
     std::uint64_t operatorHost = 0;
     ProducerWorldContext operatorContext;
@@ -128,6 +131,7 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
                 }
                 reviveHop(packet, submitted ? "submitted" : "rejected:sendNativeWorld");
             }
+            if (observer) observer(observerContext, packet, context, submitted);
             if (submitted) ++stats.toNet;
             else {
                 ++stats.rejected;
