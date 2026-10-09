@@ -3578,7 +3578,9 @@ bool ReceiveWorldPackets() {
             if (type == PacketType::NativeResyncSnapshot) {
                 ReceiveResyncSnapshot(packet); continue;
             }
-            if (!scope) continue; // native world facts must preserve authenticated transport scope
+            if (!scope) { // native world facts must preserve authenticated transport scope
+                ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectScope);continue;
+            }
             if (type == PacketType::PopulationCut) {
                 ByteReader r(payload,size);PopulationCut cut;read(r,cut);
                 ReceivePopulationCut(cut,*scope);continue;

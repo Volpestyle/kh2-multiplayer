@@ -2035,15 +2035,15 @@ void TestCombatCausalBoundaries() {
         auto raw=encode(EnemyHp{9,{{1,900,1000}},11});
         auto reason=cc::Reason::Ok;bool rejected=true;
         switch(mode) {
-        case 0:raw.push_back(0);reason=cc::Reason::RejectFraming;break;
+        case 0:raw.push_back(0);reason=cc::Reason::RejectDecode;break; // HP header decoder rejects extra frame bytes
         case 1:raw=encode(EnemyHp{8,{{1,900,1000}},11});reason=cc::Reason::RejectEpoch;break;
-        case 2:std::fill_n(raw.begin()+7,8,std::uint8_t{0});reason=cc::Reason::RejectZeroSequence;break;
+        case 2:std::fill_n(raw.begin()+7,8,std::uint8_t{0});reason=cc::Reason::RejectScope;break; // no authenticated scope: payload decoder is not reached
         case 3:raw=encode(EnemyHp{9,{{1,900,1000}},9});reason=cc::Reason::RejectStaleSequence;break;
         case 4:raw=encode(EnemyHp{9,{{99,900,1000}},11});reason=cc::Reason::RejectUnknownTarget;break;
         case 5:raw=encode(EnemyDeath{8,1});reason=cc::Reason::RejectEpoch;break;
         case 6:raw=encode(EnemyDeath{9,99});reason=cc::Reason::RejectUnknownTarget;break;
-        case 7:raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);reason=cc::Reason::RejectDecode;break;
-        case 8:raw=encode(EnemyDeath{9,1});raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);reason=cc::Reason::RejectDecode;break;
+        case 7:raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);reason=cc::Reason::RejectScope;break; // bare frame reaches scope gate first
+        case 8:raw=encode(EnemyDeath{9,1});raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);reason=cc::Reason::RejectScope;break;
         case 9:{auto outer=HostEnvelope(raw);const std::uint8_t* p=nullptr;std::size_t n=0;decodePacketHeader(outer.data(),outer.size(),p,n);
             ByteReader reader(p,n);WorldEnvelope e;read(reader,e);e.scope.sourceConnectionId=555;
             outer=encode(e);g_bridge.incoming.push_back(outer);reason=cc::Reason::RejectScope;break;}
@@ -2055,12 +2055,13 @@ void TestCombatCausalBoundaries() {
         case 13:raw=encode(EnemyHp{9,{},11});rejected=false;break; // accepted empty packet still has a consumer outcome
         case 14:raw=encode(EnemyDeath{9,1});rejected=false;break;
         case 15:raw=encode(EnemyDeath{9,1});raw.push_back(0);++raw[1];raw=HostEnvelope(raw);reason=cc::Reason::RejectDecode;break; // actual envelope validator rejects trailing death body
-        case 16:raw=HostEnvelope(raw);raw.push_back(0);reason=cc::Reason::RejectFraming;break;
+        case 16:raw=HostEnvelope(raw);raw.push_back(0);reason=cc::Reason::RejectDecode;break; // outer header decoder rejects resync frame-length mismatch
         case 17:std::fill_n(raw.begin()+7,8,std::uint8_t{0});raw=HostEnvelope(raw);reason=cc::Reason::RejectDecode;break;
         case 18:raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);raw=HostEnvelope(raw);reason=cc::Reason::RejectDecode;break;
         }
-        if(mode==0||mode==1||mode==2||mode==3||mode==7||mode==8)g_bridge.incoming.push_back(raw);
+        if(mode==0||mode==2||mode==7||mode==8)g_bridge.incoming.push_back(raw);
         else if(mode!=9)Check(QueueHostWorld(raw),"actual consumer test enqueue succeeds");
+        std::cout<<"consumer-case mode="<<mode<<" enabled="<<enabled<<" expectedReason="<<static_cast<unsigned>(reason)<<std::endl;
         const auto beforeScope=CausalScope();ReceiveWorldPackets();
         bool found=false;cc::Receipt receipt;
         while(cc::engine.Pop(receipt)) {
