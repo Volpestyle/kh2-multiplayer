@@ -1,5 +1,7 @@
 #pragma once
 #include "kh2coop/Types.hpp"
+#include "kh2coop/EnemyRecordKey.hpp"
+#include <optional>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -8,10 +10,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 14;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 15;
 
 // ===========================================================================
-// Protocol v14 adds RemoteHit (45) and TargetAuthority (46) (VUH-1515, enemy targeting of remote players)
+// Protocol v15 adds optional scoped record identity to EnemyManifest entries.
+// v14 adds RemoteHit (45) and TargetAuthority (46) (VUH-1515, enemy targeting of remote players)
 // and PartyIntent = 47 (VUH-1786, host intended party for a target room).
 // v13 added EnemyMotion (VUH-1515 step 2, periodic host enemy pose/motion).
 // v12 added versioned host party layout and reapplication events.
@@ -166,6 +169,7 @@ struct EnemyManifestEntry {
     std::uint16_t spawnIndex {0};
     std::uint32_t objectId {0};
     Vec3 spawnPosition {};
+    std::optional<EnemyRecordKey> recordKey {};
 };
 
 struct EnemyManifest {

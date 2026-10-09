@@ -867,19 +867,21 @@ void testVersionReject() {
           "client received the reject reason: " + reason);
     check(host.verifiedPeerCount() == 0, "mismatched client never verified");
     client.disconnect();
+    for (const std::uint16_t legacyVersion : {std::uint16_t{3},std::uint16_t{14}}) {
     reason.clear(); disconnected = false;
     ClientCallbacks legacyCallbacks;
     legacyCallbacks.onRejected = [&](const HelloReject& r) { reason = r.reason; };
     legacyCallbacks.onDisconnected = [&] { disconnected = true; };
-    NetworkClient legacy("127.0.0.1", cfg.port, cfg.gameBuild, cfg.modHash, "legacy-v3",
-                         SlotType::Friend1, std::move(legacyCallbacks), RuntimeMode::CampaignCoop, cfg.contentHash, 3);
+    NetworkClient legacy("127.0.0.1", cfg.port, cfg.gameBuild, cfg.modHash, "legacy-v"+std::to_string(legacyVersion),
+                         SlotType::Friend1, std::move(legacyCallbacks), RuntimeMode::CampaignCoop, cfg.contentHash, legacyVersion);
     legacy.connect();
     const auto legacyDeadline = steadyMs() + 3000;
     while (steadyMs() < legacyDeadline && !disconnected) {
         host.tick(0); legacy.tick(0); std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    check(PROTOCOL_VERSION == 14 && disconnected && reason == "Protocol mismatch: client=3 server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
-          "otherwise matching legacy v3 peer is rejected for exact protocol mismatch with free capacity");
+    check(PROTOCOL_VERSION == 15 && disconnected && reason == "Protocol mismatch: client="+std::to_string(legacyVersion)+" server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
+          "otherwise matching legacy peer is rejected for exact protocol mismatch with free capacity");
+    }
 }
 
 } // namespace

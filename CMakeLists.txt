@@ -229,6 +229,16 @@ else()
     target_compile_options(kh2coop_hp_order_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# Default-off scoped record correspondence; no live native process.
+add_executable(kh2coop_enemy_record_binding_test tests/EnemyRecordBindingTest.cpp)
+target_link_libraries(kh2coop_enemy_record_binding_test PRIVATE kh2coop_common)
+target_include_directories(kh2coop_enemy_record_binding_test PRIVATE inject/src)
+if(MSVC)
+    target_compile_options(kh2coop_enemy_record_binding_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_enemy_record_binding_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 # VUH-1515 step 2: EnemyMotion codec, relay forwarding rules and the pure
 # client stream state (inject/src/EnemyMirrorState.hpp). Loopback ENet, no KH2.
 add_executable(kh2coop_enemy_mirror_test tests/EnemyMirrorTest.cpp)

@@ -46,8 +46,10 @@ static uintptr_t __fastcall FakeResolve(std::uint32_t) { return g_handler; }
 static PFN_ResolveHandle g_resolveHandle = &FakeResolve;
 using PFN_SetAnimationDirect = void(__fastcall*)(void*, int, float, float);
 static int g_sets = 0, g_lastSet = -1;
+static bool g_recordCurrent = true, g_withdrawDuringSet = false;
 static void __fastcall FakeSetAnim(void* motCtrl, int id, float, float) {
     ++g_sets; g_lastSet = id;
+    if (g_withdrawDuringSet) g_recordCurrent=false;
     *reinterpret_cast<std::uint32_t*>(reinterpret_cast<uintptr_t>(motCtrl) + 0x28) = static_cast<std::uint32_t>(id);
     *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(motCtrl) + 0x44) = 0.0f;
 }
@@ -58,6 +60,7 @@ static enemymirror::Gate g_gate = enemymirror::Gate::None;
 static uintptr_t g_for = 0;
 static enemymirror::Pose g_pose {};
 static bool MirrorRequested() noexcept { return g_requested; }
+static bool RecordMirrorAuthorityCurrent(uintptr_t) noexcept { return g_recordCurrent; }
 static bool g_trace = false;
 static double g_cursor = 30.0;
 static bool MirrorTrace() noexcept { return g_trace; }
@@ -411,6 +414,35 @@ int main() {
     ++g_frameCounter;
     enemymirror::PreUpdate(pop);
     CHECK(enemymirror::g_mstats.cullRefused == 1);
+    // Isolated record-withdrawal controls after the inherited driver sequence.
+    Q(g_handler)=vtable;enemysync::g_for=actor;enemysync::g_gate=enemymirror::Gate::Drive;
+    enemysync::g_pose.netId=7;g_recordCurrent=true;
+    ++g_frameCounter;enemymirror::PreUpdate(actor);
+    g_frameCounter+=enemymirror::kSpawnSettleFrames;enemymirror::PreUpdate(actor);
+    d=enemymirror::Find(actor);
+    // Withdrawal between PreUpdate and brain/motion/pose consumers releases
+    // the actual driver table in this frame. Retained actor memory is untouched.
+    const auto oldBrain=g_brainCalls,oldSets=g_sets;
+    const float oldX=F(e+0x30),oldTime=F(motCtrl+0x44);
+    g_recordCurrent=false;
+    s_native=true;
+    CHECK(enemymirror::CullBody(reinterpret_cast<void*>(g_handler),reinterpret_cast<void*>(actor),&FakePred::Call) && !enemymirror::Find(actor));
+    enemymirror::BrainBody(reinterpret_cast<void*>(g_handler),reinterpret_cast<void*>(actor),&FakeBrain);
+    enemymirror::PostUpdate(actor);
+    CHECK(g_brainCalls==oldBrain+1 && g_sets==oldSets && !enemymirror::Find(actor));
+    CHECK(!enemymirror::BlockMotion(actor) && F(e+0x30)==oldX && F(motCtrl+0x44)==oldTime);
+    g_recordCurrent=true;
+    // Reentrant withdrawal inside SetAnimation: no time/pose/velocity writes
+    // are allowed after it returns, even though the setter already ran.
+    ++g_frameCounter;enemymirror::PreUpdate(actor);
+    g_frameCounter+=enemymirror::kSpawnSettleFrames;enemymirror::PreUpdate(actor);
+    F(e+0x30)=11;F(actor+0xB98)=7;g_withdrawDuringSet=true;
+    enemymirror::PostUpdate(actor);
+    CHECK(!enemymirror::Find(actor) && F(e+0x30)==11 && F(actor+0xB98)==7 && F(motCtrl+0x44)==0);
+    g_withdrawDuringSet=false;g_recordCurrent=true;
+    ++g_frameCounter;enemymirror::PreUpdate(actor);
+    g_frameCounter+=enemymirror::kSpawnSettleFrames;enemymirror::PreUpdate(actor);
+    d=enemymirror::Find(actor);
     std::printf("EnemyMirrorDriverTest: %s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }

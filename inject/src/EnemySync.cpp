@@ -1,3 +1,4 @@
+#include "EnemyRecordBinding.hpp"
 // ============================================================================
 // EnemySync — see EnemySync.hpp.
 //
@@ -116,6 +117,7 @@ bool ReviveLogAllowed() {
 
 // One enemy as this machine saw it spawn in the current room instance.
 struct Spawn {
+    std::optional<EnemyRecordKey> observedRecordKey;
     std::uint16_t spawnIndex = 0;
     std::uint32_t objectId = 0;
     std::uint32_t objectType = 0;
@@ -160,6 +162,29 @@ std::uint64_t g_hpSourceSequence = 0;
 // VUH-1515 step 2 (KH2COOP_ENEMY_MIRROR=1 on host and client). Host: own EnemyMotion
 // producer sequence. Client: decoded stream state, sampled at the frame-start frame.
 bool g_mirrorRequested = false;
+bool g_recordBindingRequested = false;
+bool g_recordAuthorityRequested = false;
+struct RecordAuthorityProof {
+    ordinarybinding::Identity roots;
+    std::array<std::uint8_t,64> bytes{};
+    std::uint32_t frame{},generation{},epoch{},load{},transition{};
+    NativeRecordLocation location{};
+    std::uint64_t hostConnection{};
+    bool terminal{};
+};
+std::map<uintptr_t,RecordAuthorityProof> g_recordAuthority;
+// Logging-only metadata; never read by an authority or native-pointer path.
+std::map<uintptr_t,RecordAuthorityProof> g_recordLastAuthority;
+recordbinding::Lease g_recordLease;
+std::map<uintptr_t, EnemyRecordKey> g_recordKeys;
+ProducerWorldContext g_recordContext;
+unsigned g_recordLogs = 0;
+std::uint32_t g_recordMatchLogFrame=0;
+bool g_recordWasAdmitted=false;
+std::uint32_t g_recordLastHoldEpoch=0, g_recordLastHoldLoad=0;
+const char* g_recordLastHoldReason=nullptr;
+void WithdrawRecordBindings(const char* reason);
+
 unsigned g_latencyTraceBudget = 0; // opt-in bounded diagnostics, never a gameplay gate
 std::uint64_t g_motionSourceSequence = 0;
 std::uint64_t g_motionPublished = 0, g_motionSendFailures = 0;
@@ -223,6 +248,7 @@ std::uint32_t g_hitTraceFrame = 0;
 
 // Client view of the host.
 struct HostEnemy {
+    std::optional<EnemyRecordKey> recordKey;
     std::uint16_t spawnIndex = 0;
     std::uint32_t objectId = 0;
     Vec3 spawnPos {};
@@ -423,6 +449,7 @@ bool EnsureClientClaimScope();
 bool ReleaseClientClaims(std::uint32_t frame);
 
 void RetireWorldSession() {
+    g_recordLease.Interrupt(); g_recordKeys.clear(); g_recordAuthority.clear(); g_recordContext={};
     eventholdnative::RetireOwner();
     g_eventControlScope = {}; g_eventControlRoom = {};
     g_hostEventPublication = {};
@@ -660,7 +687,37 @@ NativeCensus CaptureNativeCensus(uintptr_t watchedActor = 0) {
     return result;
 }
 
+
+void WithdrawRecordBindings(const char* reason) {
+    const auto epoch=g_role==Role::Host?g_epoch:g_host.epoch;
+    const bool changed=g_recordWasAdmitted || epoch!=g_recordLastHoldEpoch ||
+        g_seenLoad!=g_recordLastHoldLoad || !g_recordLastHoldReason || std::strcmp(reason,g_recordLastHoldReason)!=0;
+    if (changed && g_log) {
+        g_log("[record-binding] withdrawal epoch=%u frame=%u generation=%u connection=%llu load=%u transition=%u reason=%s expected=%zu rights=%zu terminal=%u",
+            epoch,g_hitTraceFrame,WorldSessionGeneration(),static_cast<unsigned long long>(g_bridge.ConnectionId(0)),
+            g_seenLoad,g_seenTransition,reason,recordbinding::Population({g_inst.world,g_inst.room,g_inst.door,g_inst.map,g_inst.btl,g_inst.evt}),g_recordAuthority.size(),static_cast<unsigned>(g_recordWasAdmitted));
+        const auto& retired=g_recordAuthority.empty()?g_recordLastAuthority:g_recordAuthority;
+        for (const auto& [actor,proof]:retired)
+            g_log("[record-binding] withdrawn-body epoch=%u frame=%u actor=%llX status=%llX controller=%llX record=%llX",
+                epoch,g_hitTraceFrame,static_cast<unsigned long long>(actor),static_cast<unsigned long long>(proof.roots.status),
+                static_cast<unsigned long long>(proof.roots.controller),static_cast<unsigned long long>(proof.roots.record));
+    }
+    g_recordWasAdmitted=false;g_recordLastHoldEpoch=epoch;g_recordLastHoldLoad=g_seenLoad;g_recordLastHoldReason=reason;
+    g_recordLease.Interrupt();g_recordKeys.clear();g_recordAuthority.clear();g_recordContext={};
+    g_recordLastAuthority.clear();
+    for (auto& spawn:g_inst.spawns) if (RecordFamily(spawn.objectId)) {spawn.netId=-1;spawn.ordinaryBinding.bound=0;}
+    // Preserve unrelated queued claims. Already-delivered HP/death remains
+    // cached input only: its actual write boundary requires a new current proof.
+    std::size_t kept=0;
+    for (std::size_t i=0;i<g_hitCount;++i) {
+        const auto pending=g_pendingHits[(g_hitHead+i)%HIT_PENDING_CAP];
+        if (!RecordFamily(pending.claim.objectId)) g_pendingHits[(g_hitHead+kept++)%HIT_PENDING_CAP]=pending;
+    }
+    g_hitCount=static_cast<decltype(g_hitCount)>(kept);
+}
+
 void InterruptCensus(const char* reason, uintptr_t address, std::size_t nodes = 0) {
+    if (g_recordBindingRequested) WithdrawRecordBindings("native-census-interrupted");
     g_censusInterrupted = true;
     // Wall time spent without a complete observation never counts as absence.
     for (Spawn& spawn : g_inst.spawns) spawn.goneSinceMs = 0;
@@ -1674,6 +1731,9 @@ bool HostBeginInstance() {
     return true;
 }
 
+bool CaptureRecordPopulation(const NativeCensus&, std::vector<recordbinding::Local>&, spawncontroller::NativeRecordCatalog&);
+bool ResolveRecordPopulation(const NativeCensus&, bool host);
+
 bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                const NativeCensus& census) {
     // The bounded event-control lane needs an authenticated empty host roster
@@ -1688,6 +1748,10 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
         g_manifestSent = true;
         SYNC_LOG("[enemysync] host manifest epoch %u frame %u: complete empty census", g_epoch, frame);
     }
+    // Claims can invoke native callbacks. Re-prove the complete population
+    // before publishing, as well as before consuming the queued claims.
+    if (g_recordBindingRequested && recordbinding::Population({g_inst.world,g_inst.room,g_inst.door,g_inst.map,g_inst.btl,g_inst.evt}))
+        ResolveRecordPopulation(census, true);
     if (!newSpawns.empty()) {
         EnemyManifest m;
         m.epoch = g_epoch;
@@ -1702,9 +1766,15 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             // A deferred room announcement can outlive an actor. The original
             // spawn point remains valid even after its native pointer expires.
             e.spawnPosition = s.spawnPos;
+            if (g_recordBindingRequested && RecordFamily(s.objectId)) {
+                const auto key=g_recordKeys.find(s.actor);
+                if (key!=g_recordKeys.end()) e.recordKey=key->second;
+                else return false; // retry the first complete population; no unkeyed experimental row
+            }
             m.entries.push_back(e);
         }
-        if (!Send(encode(m))) return false;
+        const bool keyed=std::any_of(m.entries.begin(),m.entries.end(),[](const auto& e){return e.recordKey.has_value();});
+        if (!(keyed ? SendCapturedWorld(encode(m),g_recordContext) : Send(encode(m)))) return false;
         for (const auto i : newSpawns) g_inst.spawns[i].announced = true;
         g_manifestSent = true;
         SYNC_LOG("[enemysync] host manifest epoch %u frame %u: %zu new (%s), %zu total; last objectId=%u@%llX at (%.0f,%.0f,%.0f)",
@@ -3503,15 +3573,21 @@ bool ReceiveWorldPackets() {
                     for (std::size_t j = 0; j < i; ++j)
                         if (m.entries[i].netId == m.entries[j].netId) uniqueManifest = false;
                 if (!uniqueManifest) { g_host.manifestComplete = false; InvalidateClientClaims("duplicate-manifest-id"); continue; }
+                if (!g_recordBindingRequested && std::any_of(m.entries.begin(),m.entries.end(),[](const auto& e){return e.recordKey.has_value();})) {
+                    g_host.manifestComplete=false; InvalidateClientClaims("record-binding flag mismatch");
+                    if (g_log) g_log("[record-binding] refused incompatible peer flag=0");
+                    continue;
+                }
                 AdvanceClientManifestRevision();
                 const bool packChanged = PackManifestChanged(m);
                 if (m.replace) { g_host.enemies.clear(); g_host.manifestComplete = true; }
                 for (const auto& e : m.entries) {
                     HostEnemy& h = g_host.enemies[e.netId];
                     if (h.objectId != e.objectId || h.spawnIndex != e.spawnIndex ||
-                        h.battleProgram != e.battleProgram || !SamePoint(h.spawnPos, e.spawnPosition)) {
+                        h.battleProgram != e.battleProgram || h.recordKey != e.recordKey || !SamePoint(h.spawnPos, e.spawnPosition)) {
                         h.hpKnown = false; h.hp = h.maxHp = -1; h.hpSourceSequence = 0;
                     }
+                    h.recordKey = e.recordKey;
                     h.spawnIndex = e.spawnIndex;
                     h.objectId = e.objectId;
                     h.spawnPos = e.spawnPosition;
@@ -3606,10 +3682,39 @@ bool ResyncNativeSampleCurrent(const NativeEnemy& expected) {
         Read<std::int32_t>(expected.status) == expected.hp && Read<std::int32_t>(expected.status + 4) == expected.maxHp;
 }
 
+// Sampled scope/identity/content proof; called again inside each SEH write leaf.
+// Authority exists only for this complete owner-frame population. No historical
+// native pointer is dereferenced before finding its checked proof.
+bool RecordAuthorityCurrent(uintptr_t actor,std::uint32_t id,bool death=false) noexcept {
+    if (!RecordFamily(id)) return true;
+    const auto found=g_recordAuthority.find(actor);
+    if (!recordbinding::ScopedAuthorityAllowed(g_recordBindingRequested,g_recordAuthorityRequested,id,
+                                               found!=g_recordAuthority.end())) return false;
+    const auto& p=found->second;
+    if (p.terminal!=death || p.roots.objectId!=id) return false;
+    RoomTransition room;
+    if (!ReadLocationChecked(room)) return false;
+    const recordbinding::Scope proof{p.generation,p.epoch,p.load,p.transition,p.frame,p.hostConnection,p.location};
+    const recordbinding::Scope now{WorldSessionGeneration(),CurrentRole()==Role::Client?g_host.epoch:g_epoch,
+        warp::LoadSerial(),warp::TransitionSerial(),g_hitTraceFrame,g_bridge.ConnectionId(0),
+        {room.worldId,room.roomId,room.door,room.mapProgram,room.battleProgram,room.eventProgram}};
+    if (!recordbinding::AuthorityScopeCurrent(proof,now,WorldContextCurrent(g_recordContext),SafeNativeGameplay())) return false;
+    uintptr_t obj=0,status=0,controller=0,record=0;
+    std::uint32_t objectId=0;
+    std::array<std::uint8_t,64> bytes{};
+    return ReadNative(actor+offsets::actor::OBJENTRY_PTR,obj) && obj==p.roots.objentry &&
+        ReadNative(obj+offsets::objentry::OBJECT_ID,objectId) && objectId==id &&
+        ReadNative(actor+ACTOR_STATUS,status) && status==p.roots.status &&
+        ReadNative(actor+0x9E8,controller) && controller==p.roots.controller &&
+        ReadNative(actor+0x9F0,record) && record==p.roots.record &&
+        ReadNative(record,bytes) && bytes==p.bytes;
+}
+
 // No C++ objects requiring unwinding in the SEH leaves that call/write native memory.
 bool WriteNativeHp(const NativeEnemy& expected, std::int32_t hp, std::uint32_t generation,
                    const NativeRecordWriteCheck* record = nullptr) {
     __try {
+        if (!RecordAuthorityCurrent(expected.actor,expected.objectId)) return false;
         if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
             Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
             Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId) return false;
@@ -3620,6 +3725,7 @@ bool WriteNativeHp(const NativeEnemy& expected, std::int32_t hp, std::uint32_t g
             Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId) return false;
         if (record && (hp <= 0 || hp > expected.maxHp || !ResyncNativeSampleCurrent(expected) ||
                        !ResyncFinalWriteContext(*record))) return false;
+        if (!RecordAuthorityCurrent(expected.actor,expected.objectId)) return false;
         *reinterpret_cast<std::int32_t*>(expected.status) = hp;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -3630,6 +3736,7 @@ bool WriteNativeHp(const NativeEnemy& expected, std::int32_t hp, std::uint32_t g
 bool ApplyNativeDeath(const NativeEnemy& expected, int hp, std::uint32_t generation,
                       const NativeRecordWriteCheck* record = nullptr) {
     __try {
+        if (!RecordAuthorityCurrent(expected.actor,expected.objectId,true)) return false;
         if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
             Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
             Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId) return false;
@@ -3640,6 +3747,7 @@ bool ApplyNativeDeath(const NativeEnemy& expected, int hp, std::uint32_t generat
             Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId) return false;
         if (record && (hp <= 0 || hp != expected.hp || !ResyncNativeSampleCurrent(expected) ||
                        !ResyncFinalWriteContext(*record))) return false;
+        if (!RecordAuthorityCurrent(expected.actor,expected.objectId,true)) return false;
         g_applyStatDelta(reinterpret_cast<void*>(expected.actor), -hp, 0, 0);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -3652,7 +3760,7 @@ bool ApplyNativeDeath(const NativeEnemy& expected, int hp, std::uint32_t generat
 bool ApplyNativeClaim(const NativeEnemy& expected, const PendingHitClaim& pending, bool& attempted) {
     attempted = false;
     __try {
-        if (!g_takeDamage ||
+        if (!RecordAuthorityCurrent(expected.actor,expected.objectId) || !g_takeDamage ||
             Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
             Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
             Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId ||
@@ -3666,6 +3774,7 @@ bool ApplyNativeClaim(const NativeEnemy& expected, const PendingHitClaim& pendin
                               pending.claim.requesterConnectionId, pending.requesterDeliverySerial) ||
             g_bridge.ConnectionId(static_cast<std::uint8_t>(pending.claim.attackerSlot)) !=
                 pending.claim.requesterConnectionId) return false;
+        if (!RecordAuthorityCurrent(expected.actor,expected.objectId)) return false;
         attempted = true;
         g_takeDamage(reinterpret_cast<void*>(expected.actor), -pending.claim.damage, 0, 1);
         return true;
@@ -3685,6 +3794,170 @@ bool ReadOrdinaryIdentity(const NativeEnemy& sampled, ordinarybinding::Identity&
            SameNativeIdentity(sampled, after) && sampled.hp == after.hp && sampled.maxHp == after.maxHp;
 }
 
+// Complete frame-local content + census membership, sampled again every frame.
+bool CaptureRecordPopulation(const NativeCensus& census, std::vector<recordbinding::Local>& local, RecordCatalog& verified) {
+    local.clear();
+    if (!CensusMatchesInstance(census) || !SafeNativeGameplay()) return false;
+    const auto expected=recordbinding::Population({g_inst.world,g_inst.room,g_inst.door,g_inst.map,g_inst.btl,g_inst.evt});
+    if (!expected) return false;
+    RecordCatalog before, after;
+    if (!FreshRecordCatalog(census,before)) return false;
+    for (const auto& native : census.enemies) {
+        if (!RecordFamily(native.objectId)) continue;
+        const auto tracked=g_inst.byActor.find(native.actor);
+        if (tracked==g_inst.byActor.end() || tracked->second>=g_inst.spawns.size()) return false;
+        auto& spawn=g_inst.spawns[tracked->second];
+        if (!spawn.present || FindNativeEnemy(census,spawn)!=&native) return false;
+        recordbinding::Local l;
+        if (!ReadOrdinaryIdentity(native,l.roots) || !spawn.identityRead ||
+            l.roots.controller!=spawn.controller || l.roots.record!=spawn.record) return false;
+        spawncontroller::NativeRecordMembership member;
+        if (!RecordMember(before,census,native.actor,member) || member.issues ||
+            member.controller[0]!=l.roots.controller || member.controller[1]!=l.roots.controller ||
+            member.record[0]!=l.roots.record || member.record[1]!=l.roots.record) return false;
+        const auto& definition=before.entries[member.tableIndex].content;
+        const auto content=BuildNativeRecordContent(definition);
+        if (content.status!=NativeRecordContentStatus::Complete || member.recordIndex>=content.records.size()) return false;
+        const auto& record=content.records[member.recordIndex];
+        l.key.location=definition.location; l.key.controllerKey=definition.groupKey;
+        l.key.group=native_record_detail::u16(definition.header.data()+2);
+        l.key.ordinal=member.recordIndex; l.key.nativeId=record.rawId;
+        l.key.definition=content.comparisonSha256; l.key.header=desyncSha256(content.headerProjection);
+        l.key.record=record.recordSha256;
+        if (RecordObjectId(member.recordBytes[0])!=native.objectId || member.recordBytes[0]!=member.recordBytes[1] ||
+            member.recordBytes[0]!=definition.records[member.recordIndex] || (!recordbinding::Admitted(native.objectId,l.key) && !recordbinding::ExclusionKnown(native.objectId,l.key))) return false;
+        if (spawn.observedRecordKey && *spawn.observedRecordKey!=l.key) return false;
+        spawn.observedRecordKey=l.key;
+        // The entire tracked history must contain exactly this first body for
+        // the record. A recycled body, including same address, consumes the load.
+        unsigned recordHistory=0;
+        for (const auto& old:g_inst.spawns)
+            if (RecordFamily(old.objectId) &&
+                ((old.controller==l.roots.controller && old.record==l.roots.record) ||
+                 (old.observedRecordKey && *old.observedRecordKey==l.key))) ++recordHistory;
+        if (recordHistory!=1) return false;
+        l.id=static_cast<int>(spawn.spawnIndex)+1; l.living=native.hp>0;
+        local.push_back(l);
+    }
+    std::size_t admittedHistory=0;
+    for (const auto& old:g_inst.spawns) if (RecordFamily(old.objectId)) {
+        if (!old.observedRecordKey || (!recordbinding::Admitted(old.objectId,*old.observedRecordKey) &&
+            !recordbinding::ExclusionKnown(old.objectId,*old.observedRecordKey))) return false;
+        if (recordbinding::Admitted(old.objectId,*old.observedRecordKey)) ++admittedHistory;
+    }
+    if (admittedHistory!=expected) return false;
+    ordinarybinding::Identity checked;
+    for (const auto& l:local) {
+        const auto tracked=g_inst.byActor.find(l.roots.actor);
+        if (tracked==g_inst.byActor.end()) return false;
+        const auto* native=FindNativeEnemy(census,g_inst.spawns[tracked->second]);
+        if (!native || !ReadOrdinaryIdentity(*native,checked) || checked!=l.roots) return false;
+    }
+    if (!FreshRecordCatalog(census,after) || !SameRecordCatalogSample(before,after) || !CensusMatchesInstance(census) || !SafeNativeGameplay()) return false;
+    verified=std::move(after);return true;
+}
+bool CatalogContainsRecordKey(const RecordCatalog& catalog,std::uint32_t objectId,const EnemyRecordKey& key) {
+    unsigned matches=0;
+    for (std::uint32_t i=0;i<catalog.entryCount;++i) {
+        const auto& def=catalog.entries[i].content;
+        if (def.location!=key.location || def.groupKey!=key.controllerKey || native_record_detail::u16(def.header.data()+2)!=key.group) continue;
+        const auto content=BuildNativeRecordContent(def);
+        if (content.status!=NativeRecordContentStatus::Complete || key.ordinal>=content.records.size()) return false;
+        const auto& rec=content.records[key.ordinal];
+        if (RecordObjectId(def.records[key.ordinal])==objectId && rec.rawId==key.nativeId &&
+            rec.recordSha256==key.record && content.comparisonSha256==key.definition && desyncSha256(content.headerProjection)==key.header) ++matches;
+    }
+    return matches==1;
+}
+
+bool ResolveRecordPopulation(const NativeCensus& census, bool host) {
+    if (!g_recordAuthority.empty()) g_recordLastAuthority=g_recordAuthority;
+    g_recordKeys.clear(); g_recordAuthority.clear();
+    if (!g_recordBindingRequested) return false;
+    for (auto& s:g_inst.spawns) if (RecordFamily(s.objectId)) s.netId=-1;
+    ProducerWorldContext captured;
+    if (!CaptureWorldContext(captured) || captured.generation!=WorldSessionGeneration()) { WithdrawRecordBindings("record-world-context-changed");return false; }
+    std::vector<recordbinding::Local> allLocal;
+    RecordCatalog verified;
+    const bool complete=CaptureRecordPopulation(census,allLocal,verified);
+    std::vector<recordbinding::Host> remote;
+    if (host) {
+        for (const auto& l:allLocal) remote.push_back({l.key,l.id,l.roots.objectId,false});
+    } else {
+        for (const auto& [id,h]:g_host.enemies) if (RecordFamily(h.objectId)) {
+            if (!h.recordKey) {
+                WithdrawRecordBindings("peer-missing-record-identity");
+                if (g_log && g_recordLogs++<128) g_log("[record-binding] hold reason=incompatible-peer-missing-identity authority=0");
+                return false;
+            }
+            if (!complete || !CatalogContainsRecordKey(verified,h.objectId,*h.recordKey)) {
+                WithdrawRecordBindings("peer-key-not-in-fresh-native-catalog");return false;
+            }
+            remote.push_back({*h.recordKey,id,h.objectId,h.dead});
+        }
+    }
+    const recordbinding::Scope scope{WorldSessionGeneration(),host?g_epoch:g_host.epoch,g_seenLoad,g_seenTransition,
+        g_hitTraceFrame,g_bridge.ConnectionId(0),{g_inst.world,g_inst.room,g_inst.door,g_inst.map,g_inst.btl,g_inst.evt}};
+    const auto selected=recordbinding::SelectPopulation(scope,allLocal,remote);
+    const auto& local=selected.local;
+    const auto result=g_recordLease.Resolve(scope,local,selected.host,complete && selected.complete && (host || g_host.manifestComplete),g_recordAuthorityRequested && !host);
+    if (!result.admitted) {
+        WithdrawRecordBindings(!complete?"native-membership-content-or-history":!selected.complete?selected.reason:result.reason);
+        if (g_log && g_recordLogs++<128) g_log("[record-binding] hold epoch=%u frame=%u reason=%s local=%zu host=%zu authority=0",scope.epoch,scope.frame,result.reason,local.size(),remote.size());
+        return false;
+    }
+    if (!WorldContextCurrent(captured) || captured.generation!=WorldSessionGeneration() ||
+        CurrentRole()!=(host?Role::Host:Role::Client) || !CensusMatchesInstance(census)) { WithdrawRecordBindings("record-world-context-changed");return false; }
+    g_recordContext=captured;
+    if (!g_recordWasAdmitted && g_log) g_log("[record-binding] admission epoch=%u frame=%u load=%u transition=%u expected=%zu localExcluded=%zu hostExcluded=%zu rights=%u",
+        scope.epoch,scope.frame,scope.load,scope.transition,local.size(),selected.localExcluded,selected.hostExcluded,static_cast<unsigned>(g_recordAuthorityRequested));
+    const bool firstAdmission=!g_recordWasAdmitted;
+    const bool emitMatches=g_recordMatchLogFrame!=scope.frame;
+    g_recordWasAdmitted=true;
+    // Publication includes positively validated negative keys. Those keys do
+    // not enter the binding/authority map and never yield a client netId.
+    for (const auto& l:allLocal) g_recordKeys[l.roots.actor]=l.key;
+    if ((selected.localExcluded || selected.hostExcluded) && g_log && scope.frame%30==0)
+        g_log("[record-binding] exclusion epoch=%u frame=%u load=%u transition=%u local=%zu peer=%zu authority=0 population=81",
+            scope.epoch,scope.frame,scope.load,scope.transition,selected.localExcluded,selected.hostExcluded);
+    if (g_log && (firstAdmission || scope.frame%30==0)) {
+        for (const auto& l:allLocal) if (recordbinding::ExclusionKnown(l.roots.objectId,l.key))
+            g_log("[record-binding] excluded-body role=%u epoch=%u frame=%u load=%u transition=%u objectId=%u netId=0 group=%u ordinal=%u nativeId=%u actor=%llX objentry=%llX status=%llX controller=%llX record=%llX definition=%s header=%s digest=%s membership=1 catalog=1 authority=0",
+                static_cast<unsigned>(g_role),scope.epoch,scope.frame,scope.load,scope.transition,l.roots.objectId,l.key.group,l.key.ordinal,l.key.nativeId,
+                static_cast<unsigned long long>(l.roots.actor),static_cast<unsigned long long>(l.roots.objentry),static_cast<unsigned long long>(l.roots.status),static_cast<unsigned long long>(l.roots.controller),static_cast<unsigned long long>(l.roots.record),
+                desyncDigestHex(l.key.definition).c_str(),desyncDigestHex(l.key.header).c_str(),desyncDigestHex(l.key.record).c_str());
+        for (const auto& h:remote) if (recordbinding::ExclusionKnown(h.objectId,h.key))
+            g_log("[record-binding] excluded-peer role=%u epoch=%u frame=%u load=%u transition=%u objectId=%u peerNetId=%d group=%u ordinal=%u nativeId=%u definition=%s header=%s digest=%s catalog=1 authority=0",
+                static_cast<unsigned>(g_role),scope.epoch,scope.frame,scope.load,scope.transition,h.objectId,h.id,h.key.group,h.key.ordinal,h.key.nativeId,
+                desyncDigestHex(h.key.definition).c_str(),desyncDigestHex(h.key.header).c_str(),desyncDigestHex(h.key.record).c_str());
+    }
+    for (std::size_t i=0;i<local.size();++i) {
+        const auto& l=local[i]; g_recordKeys[l.roots.actor]=l.key;
+        const auto tracked=g_inst.byActor.find(l.roots.actor);
+        if (tracked==g_inst.byActor.end()) { WithdrawRecordBindings("tracked-root-lost");return false; }
+        if (!host) g_inst.spawns[tracked->second].netId=result.ids[i];
+        if (g_recordAuthorityRequested) {
+            RecordAuthorityProof proof; proof.roots=l.roots; proof.frame=scope.frame;
+            proof.generation=scope.generation;proof.epoch=scope.epoch;proof.load=scope.load;
+            proof.transition=scope.transition;proof.location=scope.location;proof.hostConnection=scope.hostConnection;
+            const auto peer=std::find_if(selected.host.begin(),selected.host.end(),[&](const auto& h){return h.key==l.key;});
+            proof.terminal=peer!=selected.host.end() && peer->dead;
+            if (!ReadNative(l.roots.record,proof.bytes) || desyncSha256(proof.bytes)!=l.key.record) { WithdrawRecordBindings("record-bytes-changed");return false; }
+            g_recordAuthority[l.roots.actor]=proof;
+        }
+        if (emitMatches && g_recordAuthorityRequested && g_log && (firstAdmission || g_hitTraceFrame%30==0))
+            g_log("[record-authority] admitted epoch=%u frame=%u objectId=%u netId=%d actor=%llX terminal=%u authority=1",
+                  scope.epoch,scope.frame,l.roots.objectId,result.ids[i],static_cast<unsigned long long>(l.roots.actor),
+                  static_cast<unsigned>(g_recordAuthority[l.roots.actor].terminal));
+        if (emitMatches && g_log && (firstAdmission || g_hitTraceFrame%30==0)) g_log("[record-binding] match role=%u epoch=%u frame=%u load=%u transition=%u objectId=%u netId=%d group=%u ordinal=%u nativeId=%u actor=%llX objentry=%llX status=%llX controller=%llX record=%llX definition=%s header=%s digest=%s authority=0",
+            static_cast<unsigned>(g_role),scope.epoch,scope.frame,scope.load,scope.transition,l.roots.objectId,result.ids[i],l.key.group,l.key.ordinal,l.key.nativeId,
+            static_cast<unsigned long long>(l.roots.actor),static_cast<unsigned long long>(l.roots.objentry),static_cast<unsigned long long>(l.roots.status),static_cast<unsigned long long>(l.roots.controller),static_cast<unsigned long long>(l.roots.record),
+            desyncDigestHex(l.key.definition).c_str(),desyncDigestHex(l.key.header).c_str(),desyncDigestHex(l.key.record).c_str());
+    }
+    g_recordMatchLogFrame=scope.frame;
+    return true;
+}
+
 bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generation) {
     namespace ob = ordinarybinding;
     std::vector<ob::Local> locals;
@@ -3700,6 +3973,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return holdAll();
         const auto& s = g_inst.spawns[found->second];
         if (!s.present || FindNativeEnemy(census, s) != &native) return holdAll();
+        if (RecordFamily(s.objectId)) continue;
         ob::Local local;
         if (!ReadOrdinaryIdentity(native, local.identity)) return holdAll();
         local.point = {s.spawnPos.x, s.spawnPos.y, s.spawnPos.z};
@@ -3710,7 +3984,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         indices.push_back(found->second);
     }
     for (const auto& [id, h] : g_host.enemies) {
-        if (h.battleProgram == g_inst.btl)
+        if (h.battleProgram == g_inst.btl && !RecordFamily(h.objectId))
             hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead});
     }
     const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame});
@@ -3740,6 +4014,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         s.netId = d.id > 0 ? d.id : -1;
     }
     for (auto& s : g_inst.spawns) if (s.netId < 0) s.ordinaryBinding.bound = 0;
+    if (g_recordBindingRequested) ResolveRecordPopulation(census, false);
     return true;
 }
 
@@ -3788,7 +4063,7 @@ bool ClientFrame(const NativeCensus& initialCensus) {
     }
     if (!contentRequired && !ResolveOrdinaryBindings(current, generation)) return false;
     for (Spawn& s : g_inst.spawns) {
-        if (!s.present || s.killed) continue;
+        if (!s.present || s.killed || !RecordAuthorityCurrent(s.actor,s.objectId,g_host.enemies.contains(static_cast<std::uint16_t>(s.netId)) && g_host.enemies.at(static_cast<std::uint16_t>(s.netId)).dead)) continue;
         const NativeRecordWriteCheck* recordCheck = nullptr;
         ResyncRecordReference localRecord;
         if (contentRequired) {
@@ -3814,7 +4089,8 @@ bool ClientFrame(const NativeCensus& initialCensus) {
         }
         if (!contentRequired) {
             ordinarybinding::Identity identity;
-            if (!ReadOrdinaryIdentity(native, identity) || identity != s.ordinaryBinding.identity) {
+            if (RecordFamily(s.objectId) ? !RecordAuthorityCurrent(s.actor,s.objectId,h.dead) :
+                (!ReadOrdinaryIdentity(native, identity) || identity != s.ordinaryBinding.identity)) {
                 for (auto& held : g_inst.spawns) { held.netId = -1; held.ordinaryBinding.bound = 0; }
                 InterruptCensus("ordinary binding roots changed before write", s.actor);
                 return false;
@@ -3879,6 +4155,11 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 }
             }
             s.killed = native.hp <= 0;
+            if (RecordFamily(s.objectId)) {
+                if (g_log) g_log("[record-authority] death epoch=%u frame=%u netId=%d objectId=%u actor=%llX hp=%d attempted=%u",
+                    g_host.epoch,g_hitTraceFrame,s.netId,s.objectId,static_cast<unsigned long long>(s.actor),native.hp,static_cast<unsigned>(s.deathAttempted));
+                WithdrawRecordBindings("terminal-population-retired");
+            }
             // A lethal can create/remove actors. Do not carry the pre-call
             // ordinary batch into another write: next owner frame resolves
             // the whole fresh census again. Existing per-spawn once fence stays.
@@ -3892,6 +4173,11 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 }
                 InterruptCensus("client HP write unavailable", s.actor);
                 return false;
+            }
+            if (RecordFamily(s.objectId) && g_log) {
+                std::int32_t readback=-1;const bool read=ReadNative(native.status,readback);
+                g_log("[record-authority] hp epoch=%u frame=%u netId=%d objectId=%u actor=%llX before=%d requested=%d readback=%d read=%u",
+                    g_host.epoch,g_hitTraceFrame,s.netId,s.objectId,static_cast<unsigned long long>(s.actor),native.hp,h.hp,readback,static_cast<unsigned>(read));
             }
             // Outside the checked leaf/final-check-to-store interval. The leaf
             // returned after storing; later observation supplies actual HP.
@@ -4226,7 +4512,14 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
         prepare[0] == '1';
     progresssync::Install(exeBase, log, SendCapturedWorld);
     char mirror[2] {};
+    char recordFlag[4] {};
+    g_recordBindingRequested = GetEnvironmentVariableA("KH2COOP_ENEMY_RECORD_BINDING",recordFlag,sizeof(recordFlag))==1 && recordFlag[0]=='1';
+    if (g_recordBindingRequested && g_log) g_log("[record-binding] enabled schema=1 protocol=15 authority=0 families=317,76");
     g_mirrorRequested = GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR", mirror, sizeof(mirror)) == 1 && mirror[0] == '1';
+    char authorityFlag[4]{};
+    g_recordAuthorityRequested = g_recordBindingRequested && g_mirrorRequested &&
+        GetEnvironmentVariableA("KH2COOP_ENEMY_RECORD_AUTHORITY",authorityFlag,sizeof(authorityFlag))==1 && authorityFlag[0]=='1';
+    if (g_log) g_log("[record-authority] configured=%u scope=first-living-population terminal=one-death families=317,76",static_cast<unsigned>(g_recordAuthorityRequested));
     char delayText[16] {};
     const DWORD delayLength = GetEnvironmentVariableA("KH2COOP_ENEMY_CURSOR_DELAY_FRAMES", delayText, sizeof(delayText));
     const auto delay = delayLength > 0 && delayLength < sizeof(delayText)
@@ -4457,6 +4750,8 @@ void OnFrameStart(std::uint32_t frame) {
         // manifest/HP/hash may escape under the previous room's epoch.
         if (!HostBeginInstance()) { DrainPendingSpawnTrace(false); return; }
         if (!TickHostEventHold(frame, true)) { DrainPendingSpawnTrace(false); return; }
+        // Refresh the frame-local proof before consuming queued native claims.
+        if (g_recordBindingRequested) ResolveRecordPopulation(census,true);
         if (!ProcessHostHitClaims(census)) { DrainPendingSpawnTrace(false); return; }
         // Native claim application may have emitted/removed actors. Rebuild
         // from the latest census tracking, never reuse pre-call fresh indices.
@@ -4524,6 +4819,56 @@ bool PopulationForcedHold(uintptr_t actor) noexcept {
 }
 double MirrorCursor() noexcept { return g_mirror.cursor(); }
 
+// A negative publication key is not authority and is not sufficient here.
+// Shared native handler hooks can receive un-driven actors: rebuild the entire
+// native membership/catalog proof before letting a known outside body cull.
+bool RecordExclusionCurrent(uintptr_t actor,std::uint32_t id) {
+    if (!g_recordWasAdmitted || !g_recordAuthorityRequested || g_recordAuthority.contains(actor) ||
+        !WorldContextCurrent(g_recordContext) || !SafeNativeGameplay()) return false;
+    const auto published=g_recordKeys.find(actor);
+    if (published==g_recordKeys.end() || !recordbinding::ExclusionKnown(id,published->second)) return false;
+    const auto key=published->second;
+    const auto census=CaptureNativeCensus();
+    std::vector<recordbinding::Local> local;
+    RecordCatalog catalog;
+    if (!CaptureRecordPopulation(census,local,catalog)) return false;
+    const auto extra=std::find_if(local.begin(),local.end(),[&](const auto& l) {
+        return l.roots.actor==actor && l.roots.objectId==id && l.key==key;
+    });
+    if (extra==local.end() || !recordbinding::ExclusionKnown(id,extra->key)) return false;
+    std::vector<recordbinding::Host> host;
+    for (const auto& l:local) {
+        if (recordbinding::Admitted(l.roots.objectId,l.key)) {
+            const auto proof=g_recordAuthority.find(l.roots.actor);
+            if (proof==g_recordAuthority.end() || proof->second.roots!=l.roots ||
+                !RecordAuthorityCurrent(l.roots.actor,l.roots.objectId,proof->second.terminal)) return false;
+        }
+        host.push_back({l.key,l.id,l.roots.objectId,false});
+    }
+    RoomTransition room;
+    if (!ReadLocationChecked(room)) return false;
+    const recordbinding::Scope now{WorldSessionGeneration(),CurrentRole()==Role::Client?g_host.epoch:g_epoch,
+        warp::LoadSerial(),warp::TransitionSerial(),g_hitTraceFrame,g_bridge.ConnectionId(0),
+        {room.worldId,room.roomId,room.door,room.mapProgram,room.battleProgram,room.eventProgram}};
+    // The selector also rejects aliases between outside and original roots.
+    const auto selected=recordbinding::SelectPopulation(now,local,host);
+    return selected.complete && WorldContextCurrent(g_recordContext) && CensusMatchesInstance(census) && SafeNativeGameplay();
+}
+
+bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept {
+    if (!g_recordBindingRequested) return true;
+    if (!spawncontroller::IsDiagnosticGameThread()) return false;
+    const auto found=g_inst.byActor.find(actor);
+    if (found==g_inst.byActor.end() || found->second>=g_inst.spawns.size()) return false;
+    const auto id=g_inst.spawns[found->second].objectId;
+    if (!RecordFamily(id)) return true;
+    if (RecordAuthorityCurrent(actor,id)) return true;
+    // False releases this callback to native behavior. A freshly proven outside
+    // actor has no rights to retire; it must not revoke the original population.
+    if (RecordExclusionCurrent(actor,id)) return false;
+    WithdrawRecordBindings("native-mirror-boundary-held");return false;
+}
+
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     using enemymirror::Gate;
     if (!g_mirrorRequested || g_role != Role::Client || !g_inst.live || !g_host.arrived || actor == 0) return Gate::None;
@@ -4532,7 +4877,7 @@ enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return Gate::None;
     const Spawn& s = g_inst.spawns[found->second];
     if (s.actor != actor || !s.present || s.killed || s.netId <= 0 || s.netId > 0xFFFF ||
-        !enemymirror::FamilyAllowed(s.objectId)) return Gate::None;
+        !RecordAuthorityCurrent(s.actor,s.objectId) || !enemymirror::FamilyAllowed(s.objectId)) return Gate::None;
     const auto host = g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
     if (host == g_host.enemies.end() || host->second.dead || host->second.objectId != s.objectId) return Gate::None;
     // N5: the live status pointer must still be this binding's (closes a mid-frame reuse window).
@@ -4612,6 +4957,7 @@ bool RecordLocalPlayerEnemyHit(const LocalPlayerEnemyHit& hit) noexcept {
         if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size())
             return reject("local binding unavailable");
         const Spawn& spawn = g_inst.spawns[found->second];
+        if (!RecordAuthorityCurrent(spawn.actor,spawn.objectId)) return reject("record binding qualification has no claim authority");
         if (!spawn.present || spawn.killed || spawn.netId <= 0 || spawn.netId > UINT16_MAX)
             return reject("local binding not live/matched");
         claim.netId = static_cast<std::uint16_t>(spawn.netId);

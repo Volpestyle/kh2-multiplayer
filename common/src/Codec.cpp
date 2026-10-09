@@ -742,6 +742,15 @@ void write(ByteWriter& w, const EnemyManifest& m) {
         w.writeU16(e.spawnIndex);
         w.writeU32(e.objectId);
         write(w, e.spawnPosition);
+        w.writeBool(e.recordKey.has_value());
+        if (e.recordKey) {
+            const auto& k = *e.recordKey;
+            if (k.schema != 1 || !RecordFamily(e.objectId)) throw std::runtime_error("EnemyManifest: invalid record identity");
+            w.writeU16(k.schema);
+            for (auto v : {k.location.world,k.location.room,k.location.door,k.location.mapProgram,k.location.battleProgram,k.location.eventProgram}) w.writeU16(v);
+            w.writeU32(k.controllerKey); w.writeU16(k.group); w.writeU16(k.ordinal); w.writeU16(k.nativeId);
+            for (const auto* digest : {&k.definition,&k.header,&k.record}) for (auto v : *digest) w.writeU8(v);
+        }
     }
 }
 
@@ -1167,6 +1176,17 @@ void read(ByteReader& r, EnemyManifest& m) {
         e.spawnIndex = r.readU16();
         e.objectId = r.readU32();
         read(r, e.spawnPosition);
+        e.recordKey.reset();
+        const auto recordPresent=r.readU8();
+        if (recordPresent>1) throw std::runtime_error("EnemyManifest: invalid identity presence");
+        if (recordPresent) {
+            EnemyRecordKey k; k.schema=r.readU16();
+            if (k.schema != 1 || !RecordFamily(e.objectId)) throw std::runtime_error("EnemyManifest: incompatible record identity");
+            k.location={r.readU16(),r.readU16(),r.readU16(),r.readU16(),r.readU16(),r.readU16()};
+            k.controllerKey=r.readU32(); k.group=r.readU16(); k.ordinal=r.readU16(); k.nativeId=r.readU16();
+            for (auto* digest : {&k.definition,&k.header,&k.record}) for (auto& v : *digest) v=r.readU8();
+            e.recordKey=k;
+        }
     }
 }
 

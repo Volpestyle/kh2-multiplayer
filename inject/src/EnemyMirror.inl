@@ -109,16 +109,19 @@ static Driven* Find(uintptr_t actor) noexcept {
 }
 static bool OwnerThread() noexcept { return GetCurrentThreadId() == g_ownerThread; }
 // The thread check comes first: off the game thread the table is never read (rev-2 N-a).
+static void Retire(Driven& d, const char* why);
 static bool DrivenNow(uintptr_t actor) noexcept {
     if (!OwnerThread()) return false;
-    const Driven* d = Find(actor);
-    return d && d->running && d->frame == g_frameCounter;
+    Driven* d = Find(actor);
+    if (!d || !d->running || d->frame!=g_frameCounter) return false;
+    if (!enemysync::RecordMirrorAuthorityCurrent(actor)) { Retire(*d,"record-withdraw");return false; }
+    return true;
 }
 
 static void BrainBody(void* handler, void* actor, Brain original) {
     Driven* d = OwnerThread() ? Find(reinterpret_cast<uintptr_t>(actor)) : nullptr;
     if (d) {
-        if (d->running && d->frame == g_frameCounter) {
+        if (DrivenNow(reinterpret_cast<uintptr_t>(actor))) {
             ++d->skips;
             ++g_mstats.skips;
             d->lastSkipFrame = g_frameCounter;
@@ -301,6 +304,10 @@ static bool CullBody(void* handler, void* actor, Predicate original) {
     const bool native = original(handler, actor);
     if (!OwnerThread()) return native;
     const auto a = reinterpret_cast<uintptr_t>(actor);
+    if (!enemysync::RecordMirrorAuthorityCurrent(a)) {
+        if (auto* stale=Find(a)) Retire(*stale,"record-withdraw");
+        return native;
+    }
     SyncHistory();
     const Driven* d = Find(a);
     const RecentBind* r = FindRecent(a);
@@ -482,7 +489,7 @@ bool BlockMotion(uintptr_t actor) noexcept {
 }
 
 static bool SetMotion(uintptr_t actor, std::uint32_t motion) noexcept {
-    if (!g_setAnimationUnderlying) return false;
+    if (!g_setAnimationUnderlying || !DrivenNow(actor)) return false;
     bool ok = false;
     g_guard = true;
     __try {
@@ -496,6 +503,7 @@ static bool SetMotion(uintptr_t actor, std::uint32_t motion) noexcept {
 }
 
 static bool WritePose(uintptr_t actor, Driven& d) noexcept {
+    if (!DrivenNow(actor)) return false;
     __try {
         const uintptr_t e = actor + offsets::actor::ENTITY_TRANSFORM;
         auto* pos = reinterpret_cast<float*>(e + offsets::entity::POS_X);
@@ -536,7 +544,7 @@ void PostUpdate(uintptr_t actor) {
     float time = 0.0f, end = 0.0f;
     const uintptr_t motCtrl = actor + ACTOR_MOTION_CTRL;
     if (d->forceSet || (haveCurrent && current != d->pose.motionId)) {
-        if (!SetMotion(actor, d->pose.motionId)) return;
+        if (!SetMotion(actor, d->pose.motionId) || !DrivenNow(actor)) return; // native motion setter can reenter lifecycle hooks
         d->forceSet = false;
         d->setMotion = d->pose.motionId;
         d->setFrame = g_frameCounter;
@@ -545,6 +553,7 @@ void PostUpdate(uintptr_t actor) {
     if (ReadHitTrace(motCtrl + MOTION_TIME, time) && ReadHitTrace(motCtrl + MOTION_END, end)) {
         const float target = ClampMotionTime(d->pose.motionTime, end);
         if (std::fabs(time - target) > PUPPET_TIME_DRIFT_FRAMES) {
+            if (!DrivenNow(actor)) return;
             __try { *reinterpret_cast<float*>(motCtrl + MOTION_TIME) = target; } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
     }

@@ -1,3 +1,40 @@
+## Scoped 317/76 authority: partial live qualification (2026-10-08)
+
+Lead approved the default-off scoped record binder/authority implementation
+after `20261008-211146_vuh1515_scoped_record_authority_ra06_1` (ra-06e2).
+Both peers need `KH2COOP_ENEMY_MIRROR=1`,
+`KH2COOP_ENEMY_RECORD_BINDING=1` and `KH2COOP_ENEMY_RECORD_AUTHORITY=1` for
+317/76 pose, brain, hit-claim or HP/death authority. All remain default off.
+Binding alone grants correspondence only. Neither family can fall back to
+ordinary point matching or obtain rights outside the reviewed first population.
+
+| Scope | Qualified | Pending / unqualified |
+|---|---|---|
+| Creeper 317, EH12/06 map0 btl2 evt32767, group286 (three bodies) | Both-side spawn, engagement, coverage, motion and colocated position; native brain/hit; paired nonlethal HP and one-death authority; terminal lifecycle denial | Full observation-window record coverage, walkaway position/negative, mute release/retake and scoped friend-bound acceptance |
+| Fiery Globe 76, AL07/00 map0 btl2 evt32767, group78 (five bodies) | Same gates as Creeper, including native HP/death authority and terminal lifecycle | Same observation-window gates; complete live group81 positive-exclusion acceptance |
+| Safety | Canonical launch/closure, clips and unchanged saves PASS | No broader room, population, incarnation, boss, projectile or reaction-command qualification |
+
+The runner passed, but the final acceptance verdict remains INCONCLUSIVE.
+The 30-second hold plus endpoint reads exceeded the record judge's 1800-frame
+cap on three peer windows. Scope selection also omitted walkaway/mute/retake
+and excluded-population evidence. Offline diagnostics recover position/negative
+and epoch-scoped stale agreement; they do not replace the sealed verdict.
+ra-06f will use bounded phase windows and incarnation-aware predecessor state
+without relaxing coverage, position, release, retake or authority thresholds.
+See `build/rig/vuh1515-record-authority-20261008-01/analysis-ra06e2-window/`.
+
+ri-01 previously qualified binding-only correspondence. The population-opt-in
+cull combination has real-guard native controls, including positive exclusion
+and stale/ambiguous refusal, but ra-06e2 did not enable that combination live.
+Exact group81 native/catalog exclusions grant zero mirror or damage rights;
+unknown extras, missing originals and ambiguous/stale roots revoke the whole
+lease. Same-load recovery is refused; a single native death retires the scoped
+population. Whole-room statehash agreement and group81 mirroring are UNQUALIFIED.
+
+The earlier batch and candidate sections below retain their historical status;
+this section is the current qualification record for 317/76. Other families'
+qualification is unchanged. See [scope and guards](ENEMY_RECORD_BINDING.md).
+
 # Enemy parity across instances (VUH-1499 spike)
 
 ## T2 batch 8 (2026-10-08): Bookmaster 5 and Creeper Plant 125 allowlisted; projectile damage UNQUALIFIED
@@ -1375,3 +1412,47 @@ Not covered yet:
   plus successful recovery after the enemy mismatch control. The nonempty
   proof covers one fixed-wave room; it does not establish spawn convergence
   or native remote actors after its battle-room reload.
+
+## Historical scoped record binder proposal (2026-10-08)
+
+317/76 remain outside the production pose allowlist. A default-off binding-only
+candidate addresses the reviewed point mismatch using exact content/controller
+keys in EH12/06 btl2 group286 and AL07/00 btl2 group78 only. Any population,
+content, root or incarnation ambiguity holds binding; HP/death/claims/pose remain
+fenced. Protocol v15 rejects old peers. See [design and limits](ENEMY_RECORD_BINDING.md)
+and `build/rig/vuh1515-record-binder-20261008-01/`; no live qualification yet.
+
+
+### Historical scoped Creeper/Fiery Globe authority proposal
+
+Binding-only ri-01 passed20261008-024015. A separate default-off candidate adds317/76 to stream eligibility, but native pose/brain/claim/HP rights require both `KH2COOP_ENEMY_RECORD_BINDING=1` and `KH2COOP_ENEMY_RECORD_AUTHORITY=1` plus mirror opt-in and a complete current-frame scoped record proof. Only reviewed12/06 btl2 Creeper and07/00 btl2 Fiery Globe populations qualify. No ordinary point fallback is used for either family.
+
+The first population must be complete/living with continuous checked roots and exact record content. A single host death can hand off one native lethal on that frame from an installed lease; then the whole selected population retires until a fresh local load and shared epoch. Multiple simultaneous deaths, missing bodies and same-record reuse hold authority. This is deliberately conservative first-population support, not global or incarnation-safe identity. Full qualification packet includes standard batch mirror gates plus explicit host-only native damage/kill and friend HP/death receipts; code and fixture remain PENDING.
+
+### Historical ra-05 positive outside-population proposal
+
+ra-03 withdrew the original five Fiery Globe group78 bindings when group81
+appeared during the walkaway. This was a real binder withdrawal; Creeper's
+authority probe passed. Retained run:20261008-181351.
+
+ra-05 keeps the original eight immutable record pins in EH12/06 btl2 (three
+Creepers, group286) and Agrabah07/00 btl2 (five Fiery Globes, group78). Only the
+six exact group81 records in the same Agrabah program may be excluded. Every
+local extra requires fresh complete native census/catalog membership, repeated
+roots/content and disjoint original roots. Every peer317/76 row requires a full
+record key checked against the fresh local catalog. Protocol15 publishes positive
+outside keys with zero binding, mirror, claim, HP or death rights. Unknown or
+missing keys, aliases, missing originals and reincarnations withdraw the lease.
+
+Withdrawal clears current keys/rights, bindings and pending317/76 claims. Retained
+HP/death work is denied at the actual native boundary. Brain, motion and pose
+callbacks recheck authority, including after a reentrant motion setter. A fresh
+load AND transition plus advanced epoch (or changed generation AND connection)
+is still required to reset a consumed population. No same-load recovery or point
+fallback is added; the one-death handoff remains terminal.
+
+`build/rig/vuh1515-record-authority-20261008-01/live-fixture-ra-05` retains the
+walkaway, standard mirror gates and paired native authority probes. It requires
+a fresh group81 body and opposite peer catalog-key receipt. PASS is scoped to
+the original populations; whole-room friend-bound and group81 mirroring remain
+UNQUALIFIED. Code and fixture are PENDING, without a live qualification claim.

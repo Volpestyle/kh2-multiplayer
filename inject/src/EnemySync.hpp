@@ -78,6 +78,7 @@ bool MirrorRequested() noexcept;
 // for Bound and Drive, the full pose for Drive only.
 // Freshness uses EnemySync's own frame clock, the one that stamps arrivals (not
 // EntityHook's counter, which Panacea's loader also advances).
+bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept;
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept;
 bool MirrorTrace() noexcept;  // KH2COOP_ENEMY_MIRROR_TRACE=1: fixture position trace lines
 bool MirrorLatencyTrace() noexcept; // bounded denser trace for latency A/B only

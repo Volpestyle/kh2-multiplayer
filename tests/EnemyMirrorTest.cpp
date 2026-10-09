@@ -272,8 +272,8 @@ void testHelpers() {
     {
         char line[128] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125,317,76").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125,317,76",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -300,12 +300,12 @@ void testHelpers() {
         for (std::uint16_t n = 40; n < 49; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
         check(all, "batch 2-4 family streams (17, 303, 368, 10, 304, 305, 18, 120, 367) are tracked and drivable; 311 is not");
     }
-    {  // batch 5: qualified type-4 families; failed Creeper stays native
-        check(em::FamilyAllowed(318) && !em::FamilyAllowed(317) && em::FamilyAllowed(310) && em::FamilyAllowed(312) &&
+    {  // batch5 and scoped-record stream candidates; native authority is separately gated
+        check(em::FamilyAllowed(318) && em::FamilyAllowed(317) && em::FamilyAllowed(310) && em::FamilyAllowed(312) &&
                   !em::FamilyAllowed(311) && !em::FamilyAllowed(313) &&
                   !em::FamilyAllowed(314) && !em::FamilyAllowed(315) && !em::FamilyAllowed(316) &&
                   !em::FamilyAllowed(319) && !em::FamilyAllowed(1365),
-              "batch5 allows Dusk/Samurai/Dancer; Creeper, Sniper/neighbours and RAW stay native");
+              "batch5 allows Dusk/Samurai/Dancer; Creeper stream candidate; Sniper/neighbours and RAW stay native");
         em::Stream b5(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 80;
@@ -316,71 +316,77 @@ void testHelpers() {
         auto creeper = row(85, 0.0f); creeper.objectId = em::kCreeperObjectId; rows.push_back(creeper);
         b5.Ingest(motion(5, 1, 100, rows), 1); b5.Ingest(motion(5, 2, 103, rows), 2); b5.Tick(2);
         em::Pose pose;
-        bool all = !b5.Drivable(84, 2) && !b5.Drivable(85, 2);
+        bool all = !b5.Drivable(84, 2) && b5.Drivable(85, 2);
         for (std::uint16_t n = 80; n < 83; ++n)
             all = all && b5.Drivable(n, 2) && b5.PoseAt(n, 2, pose) && pose.objectId == rows[n - 80].objectId;
-        check(all, "batch5 streams are tracked and drivable beside ignored Sniper311 and Creeper317");
+        check(all, "batch5 streams are tracked and drivable beside ignored Sniper311; Creeper317 stream enabled with scoped native gate");
     }
     {  // batch7 test-only streams; unchanged native binding/driver
         for (const auto oid : {em::kRabidDogObjectId, em::kHammerFrameObjectId,
                                em::kAerialChampObjectId, em::kBeffudlerObjectId}) {
             em::Stream stream;
             auto accepted = row(90, 10.0f); accepted.objectId = oid;
-            auto excluded = row(91, 20.0f); excluded.objectId = 317;
+            auto excluded = row(91, 20.0f); excluded.objectId = 311;
             stream.Ingest(motion(7, 1, 100, {accepted, excluded}), 1);
             stream.Ingest(motion(7, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
             em::Pose pose;
             check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) &&
                       stream.PoseAt(90, 2, pose) && pose.objectId == oid && !stream.Drivable(91, 2),
-                  "batch7 family streams without enabling failed Creeper317");
+                  "batch7 family streams beside excluded Sniper311");
         }
         check(!em::FamilyAllowed(2) && !em::FamilyAllowed(7) && !em::FamilyAllowed(9) &&
                   !em::FamilyAllowed(2403) && !em::FamilyAllowed(2405) && !em::FamilyAllowed(2409) &&
-                  !em::FamilyAllowed(2411) && !em::FamilyAllowed(76),
-              "batch7 keeps neighbours and failed batch6 Fiery Globe76 native on main");
+                  !em::FamilyAllowed(2411) && em::FamilyAllowed(76),
+              "batch7 neighbours stay native; Fiery Globe76 is a scoped-record stream candidate");
     }
     {  // batch 6 test-only families: one stream per family, excluded native neighbours
         for (const auto oid : {em::kSilverRockObjectId,
                                em::kIcyCubeObjectId, em::kAssassinObjectId}) {
             em::Stream stream;
             auto accepted = row(90, 10.0f); accepted.objectId = oid;
-            auto excluded = row(91, 20.0f); excluded.objectId = 317;
+            auto excluded = row(91, 20.0f); excluded.objectId = 311;
             stream.Ingest(motion(6, 1, 100, {accepted, excluded}), 1);
             stream.Ingest(motion(6, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
             em::Pose pose;
             check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) &&
                       stream.PoseAt(90, 2, pose) && pose.objectId == oid && !stream.Drivable(91, 2),
-                  "batch6 family streams without enabling Creeper317");
+                  "batch6 family streams beside excluded Sniper311");
         }
         check(!em::FamilyAllowed(70) && !em::FamilyAllowed(72) && !em::FamilyAllowed(73) &&
-                  !em::FamilyAllowed(75) && !em::FamilyAllowed(76) && !em::FamilyAllowed(78) && !em::FamilyAllowed(308) &&
-                  !em::FamilyAllowed(311) && !em::FamilyAllowed(317),
-              "batch6 excludes Fiery Globe76, neighbours, T2/T3 and failed Creeper");
+                  !em::FamilyAllowed(75) && em::FamilyAllowed(76) && !em::FamilyAllowed(78) && !em::FamilyAllowed(308) &&
+                  !em::FamilyAllowed(311) && em::FamilyAllowed(317),
+              "batch6 neighbours excluded; 76/317 stream eligibility has separate scoped native authority");
     }
     {
         em::Stream stream;
-        auto nativeOnly = row(91, 20.0f); nativeOnly.objectId = 76;
+        auto nativeOnly = row(91, 20.0f); nativeOnly.objectId = 75;
         stream.Ingest(motion(6, 1, 100, {nativeOnly}), 1);
         stream.Ingest(motion(6, 2, 103, {nativeOnly}), 2); stream.Tick(2);
         em::Pose pose;
         check(!stream.Drivable(91, 2) && !stream.PoseAt(91, 2, pose),
-              "failed Fiery Globe76 stays native even if a motion row arrives");
+              "neighbour75 stays native even if a motion row arrives");
+    }
+    for (const auto oid:{317u,76u}) {
+        em::Stream candidate;auto entry=row(95,20.0f);entry.objectId=oid;
+        candidate.Ingest(motion(8,1,100,{entry}),1);candidate.Ingest(motion(8,2,103,{entry}),2);candidate.Tick(2);
+        em::Pose pose;check(candidate.Drivable(95,2) && candidate.PoseAt(95,2,pose) && pose.objectId==oid,
+            "scoped record family stream candidate is decodable; native authority separately guarded");
     }
     {  // batch8 mirrored families; projectile damage remains UNQUALIFIED
         for (const auto oid : {em::kBookmasterObjectId, em::kCreeperPlantObjectId}) {
             em::Stream stream;
             auto accepted = row(90, 10.0f); accepted.objectId = oid;
-            auto excluded = row(91, 20.0f); excluded.objectId = 76;
+            auto excluded = row(91, 20.0f); excluded.objectId = 306;
             stream.Ingest(motion(7, 1, 100, {accepted, excluded}), 1);
             stream.Ingest(motion(7, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
             em::Pose pose;
             check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) && stream.PoseAt(90, 2, pose) &&
                       pose.objectId == oid && !stream.Drivable(91, 2),
-                  "batch8 family streams; failed Fiery Globe76 remains excluded");
+                  "batch8 family streams; Robot306 remains excluded");
         }
-        check(!em::FamilyAllowed(306) && !em::FamilyAllowed(317) && !em::FamilyAllowed(76) && !em::FamilyAllowed(124) &&
+        check(!em::FamilyAllowed(306) && em::FamilyAllowed(317) && em::FamilyAllowed(76) && !em::FamilyAllowed(124) &&
                   !em::FamilyAllowed(1114) && !em::FamilyAllowed(311) && !em::FamilyAllowed(314),
-              "batch8 keeps failed binders, summoners, other T2 and reaction families native");
+              "batch8 keeps Robot/summoners/reaction families native; 317/76 require scoped gates");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins(9);

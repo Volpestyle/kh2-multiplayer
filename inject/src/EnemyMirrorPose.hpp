@@ -60,7 +60,7 @@ inline constexpr std::uint32_t kGargoyleKnightObjectId = 367;
 // 12/0F btl1 Dusk; 12/0C btl1 Samurai and Dancer. Creeper 317 stays native:
 // its client copy failed initial binding (no-point-match) in that run.
 inline constexpr std::uint32_t kDuskObjectId = 318;
-inline constexpr std::uint32_t kCreeperObjectId = 317;  // not allowlisted; see above
+inline constexpr std::uint32_t kCreeperObjectId = 317;  // candidate: native authority requires scoped record lease
 inline constexpr std::uint32_t kSamuraiObjectId = 310;
 inline constexpr std::uint32_t kDancerObjectId = 312;
 // T1 batch 6 test-only candidate: common generic type-4 families. Not live qualified.
@@ -88,7 +88,7 @@ inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId,
                                               kDuskObjectId, kSamuraiObjectId, kDancerObjectId,
                                               kSilverRockObjectId, kIcyCubeObjectId, kAssassinObjectId,
                                               kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId,
-                                              kBookmasterObjectId, kCreeperPlantObjectId};
+                                              kBookmasterObjectId, kCreeperPlantObjectId, kCreeperObjectId, 76};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;
