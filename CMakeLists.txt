@@ -670,3 +670,10 @@ if(TARGET kh2coop_party_menu_admission_test)
                  COMMAND kh2coop_party_menu_admission_test party-signature-${_party_index})
     endforeach()
 endif()
+
+if(TARGET kh2coop_party_menu_admission_test)
+    foreach(_abilities_index RANGE 0 9)
+        add_test(NAME kh2coop_party_menu_admission_test_abilities-signature-${_abilities_index}
+                 COMMAND kh2coop_party_menu_admission_test abilities-signature-${_abilities_index})
+    endforeach()
+endif()

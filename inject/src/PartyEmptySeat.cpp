@@ -27,6 +27,8 @@ RowFn g_original[HOOK_COUNT] {};
 std::uintptr_t g_base = 0;
 std::atomic<bool> g_ready {false};
 std::atomic<bool> g_retained {false};
+LogFn g_abilitiesTraceLog = nullptr;
+std::atomic<unsigned> g_abilitiesRootReceipts {0}, g_abilitiesItemsReceipts {0};
 LogFn g_partyTraceLog = nullptr;
 std::atomic<unsigned> g_partyTraceReceipts {0};
 LogFn g_traceLog = nullptr;
@@ -103,9 +105,42 @@ std::int32_t __fastcall MenuKey(const std::uint8_t* menu, std::int32_t index) {
     SetLastError(savedError);
     return skip ? 0 : key;
 }
+void AbilitiesReceipt(bool root, std::uintptr_t caller, std::uint32_t page,
+                      std::int32_t selection, std::uint16_t mask, std::uint64_t owner) {
+    if (!g_abilitiesTraceLog) return;
+    auto& receipts = root ? g_abilitiesRootReceipts : g_abilitiesItemsReceipts;
+    auto sequence = receipts.load(std::memory_order_relaxed);
+    while (sequence < 16 && !receipts.compare_exchange_weak(sequence, sequence + 1,
+                std::memory_order_relaxed, std::memory_order_relaxed)) {}
+    if (sequence < 16)
+        g_abilitiesTraceLog("[partyempty-abilities-%s] refused seq=%u tick=%llu caller=%llX state=%u selection=%d mask=%X feature=1 owner=%X/0/%X",
+            root ? "root" : "items", sequence + 1, static_cast<unsigned long long>(GetTickCount64()),
+            static_cast<unsigned long long>(caller - g_base), page, selection,
+            static_cast<unsigned>(mask), static_cast<unsigned>(static_cast<std::uint16_t>(owner)),
+            static_cast<unsigned>(static_cast<std::uint16_t>(owner >> 32)));
+}
+bool RefuseItemsAbilities(std::uintptr_t caller, std::int32_t selection) {
+    if (caller != g_base + 0x2F62EC || selection != -5) return false;
+    const auto owner = g_owned.load(std::memory_order_acquire);
+    unsigned missing = 3;
+    std::uint32_t page = ~0u, finalPage = ~0u;
+    std::uint16_t mask = 0, finalMask = 0;
+    const bool refuse = OwnedEmpty(&missing) && missing == 1 &&
+        Read(g_base + 0xBEE64C, &page, sizeof(page)) && page == 1 &&
+        Read(g_base + 0xBEEC20, &mask, sizeof(mask)) &&
+        Read(g_base + 0xBEE64C, &finalPage, sizeof(finalPage)) && finalPage == page &&
+        Read(g_base + 0xBEEC20, &finalMask, sizeof(finalMask)) && finalMask == mask &&
+        OwnedEmpty(&missing) && missing == 1 && owner == g_owned.load(std::memory_order_acquire);
+    if (refuse) AbilitiesReceipt(false, caller, page, selection, mask, owner);
+    return refuse;
+}
 std::uint8_t __fastcall ItemsAdmission(std::int32_t selection) {
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     const DWORD savedError = GetLastError();
+    if (RefuseItemsAbilities(caller, selection)) {
+        SetLastError(savedError);
+        return 0; // native feedback4 before state1/-5 cleanup or state0F request
+    }
     std::uint32_t page = 0;
     std::uintptr_t menu = 0, status = 0;
     std::int32_t count = 0;
@@ -166,11 +201,12 @@ std::uint8_t __fastcall PartyAdmission(std::int32_t selection) {
             if ((mask & (1u << bit)) && compact++ == selection) { feature = static_cast<int>(bit); break; }
         }
     }
-    const bool refuse = feature == 3 &&
+    const bool refuse = (feature == 3 || feature == 1) &&
         Read(g_base + 0xBEE64C, &finalPage, sizeof(finalPage)) && finalPage == page &&
         Read(g_base + 0xBEEC20, &finalMask, sizeof(finalMask)) && finalMask == mask &&
         OwnedEmpty(&missing) && missing == 1 && owner == g_owned.load(std::memory_order_acquire);
-    if (refuse && g_partyTraceLog) {
+    if (refuse && feature == 1) AbilitiesReceipt(true, caller, page, selection, mask, owner);
+    if (refuse && feature == 3 && g_partyTraceLog) {
         auto sequence = g_partyTraceReceipts.load(std::memory_order_relaxed);
         while (sequence < 16 && !g_partyTraceReceipts.compare_exchange_weak(sequence, sequence + 1,
                     std::memory_order_relaxed, std::memory_order_relaxed)) {}
@@ -219,6 +255,12 @@ bool Install(std::uintptr_t base, LogFn log) {
     // faults. Empty-seat support deliberately keeps its code mapped until exit.
     struct Guard { std::uintptr_t site; std::uint8_t bytes[64]; std::size_t size; };
     const Guard admissionGuards[] {
+        // Accepted Items -5 and root feature1 state0F routing are admission dependencies.
+        {0x34E1B7, {0x83,0xFF,0xFB,0x0F,0x84,0xDE,0x00,0x00,0x00,0x83,0xFF,0xFC,0x0F,0x84,0x8B,0x00,0x00,0x00,0x83,0xFF,0xFE,0x74,0x62,0x85,0xFF,0x0F,0x88,0x35,0x01,0x00,0x00,0x3B,0xFB,0x0F,0x8D,0x2D,0x01,0x00,0x00}, 39},
+        {0x34E29E, {0xE8,0xDD,0x67,0xFB,0xFF,0xE8,0x68,0xC2,0xFA,0xFF,0x33,0xC9,0xE8,0x61,0x5C,0xFD,0xFF,0xE8,0x8C,0x03,0x00,0x00,0xB9,0x01,0x00,0x00,0x00,0xE8,0xF2,0x7C,0xFA,0xFF,0xB9,0x0F,0x00,0x00,0x00,0xE8,0x98,0x82,0xFA,0xFF}, 42},
+        {0x303A64, {0xB9,0x01,0x00,0x00,0x00,0xEB,0x21,0xB9,0x0F,0x00,0x00,0x00,0xEB,0x1A,0xB9,0x14,0x00,0x00,0x00,0xEB,0x13}, 21},
+        {0x303B94, {0x64,0x3A,0x30,0x00,0x6B,0x3A,0x30,0x00,0x80,0x3A,0x30,0x00,0x72,0x3A,0x30,0x00,0x79,0x3A,0x30,0x00,0xE0,0x3A,0x30,0x00,0xE0,0x3A,0x30,0x00,0x87,0x3A,0x30,0x00}, 32},
+
         {0x2F6270, {0x48,0x83,0xEC,0x28,0x84,0xD2,0x0F,0x85,0x96,0x00,0x00,0x00,0x83,0xF9,0xFE,0x75,0x13,0x0F,0xB6,0x54,0x24,0x50,0xB9,0x03,0x00,0x00,0x00,0x48,0x83,0xC4,0x28,0xE9,0xAC,0x54,0xFF,0xFF,0x8D,0x41,0x0D,0x83,0xF8,0x01,0x76,0x76,0x83,0xF9,0xFC,0x75,0x15,0x0F,0xB6,0x54,0x24,0x50,0x41,0x0F,0xB6,0xC8,0x83,0xC1,0x04,0x48,0x83,0xC4}, 64},
         {0x2F62B0, {0x28,0xE9,0x8A,0x54,0xFF,0xFF,0x8D,0x41,0x07,0x83,0xF8,0x02,0x76,0x14,0x8D,0x41,0x09,0x83,0xF8,0x01,0x76,0x0C,0x8D,0x41,0x0B,0x83,0xF8,0x01,0x76,0x04,0x85,0xC9,0x78,0x39,0x4D,0x85,0xC9,0x75,0x12,0x0F,0xB6,0x54,0x24,0x50,0x41,0x8D,0x49,0x02,0x48,0x83,0xC4,0x28,0xE9,0x57,0x54,0xFF,0xFF,0x41,0xFF,0xD1,0xB9,0x02,0x00,0x00}, 64},
         {0x2F62F0, {0x00,0x84,0xC0,0xBA,0x04,0x00,0x00,0x00,0x0F,0x45,0xD1,0x8B,0xCA,0x0F,0xB6,0x54,0x24,0x50,0x48,0x83,0xC4,0x28,0xE9,0x35,0x54,0xFF,0xFF,0x33,0xC0,0x48,0x83,0xC4,0x28,0xC3,0x0F,0xB6,0x54,0x24,0x50,0xB9,0x01,0x00,0x00,0x00,0x48,0x83,0xC4,0x28,0xE9,0x1B,0x54,0xFF,0xFF}, 53},
@@ -283,8 +325,10 @@ bool Install(std::uintptr_t base, LogFn log) {
     g_traceLog = trace ? log : nullptr;
     const bool partyTrace = GetEnvironmentVariableA("KH2COOP_PARTY_ADMISSION_TRACE", traceSetting, sizeof(traceSetting)) == 1 && traceSetting[0] == '1';
     g_partyTraceLog = partyTrace ? log : nullptr;
+    const bool abilitiesTrace = GetEnvironmentVariableA("KH2COOP_ABILITIES_ADMISSION_TRACE", traceSetting, sizeof(traceSetting)) == 1 && traceSetting[0] == '1';
+    g_abilitiesTraceLog = abilitiesTrace ? log : nullptr;
     g_ready.store(true, std::memory_order_release);
-    if (log) log("[partyempty] seven native row/menu guards installed; compact-seat portrait, companion-history and deeper-player-Items and ordinary-root-Party admission scoped; selected-package qualification still required");
+    if (log) log("[partyempty] seven native row/menu guards installed; compact-seat portrait, companion-history and deeper-player-Items and ordinary-root-Party/Abilities plus Items-5 admission scoped; selected-package qualification still required");
     return true;
 }
 bool Ready() { return g_ready.load(std::memory_order_acquire); }

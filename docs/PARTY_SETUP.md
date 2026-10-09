@@ -534,3 +534,43 @@ mask mapping, Cancel, tracing limits, ownership/read faults, A2 restoration and
 seven-hook install/rollback/signatures with the entire synthetic SAVE unchanged.
 Boundary doubles stop at native destination PCs; later builder/cleanup side
 effects are covered only to the extent of the bounded live route above.
+
+
+### Bounded Abilities ingress refusal (qualified 2026-10-08)
+
+This slice reuses the seven existing hooks to refuse ordinary pause-root
+Abilities feature1 and the Items character page state1 input-5 shortcut while
+an exact physically owned sparse-middle `[remote,0,local]` tuple remains installed.
+Root input maps through BEEC20 rather than assuming a compact index. The Items
+shortcut refuses before native cleanup and its state0F transition; it does not
+inspect a deeper character/ability builder. Both new predicates bracket physical
+ownership, page and the read-only feature-mask snapshot. Existing root Party
+feature3 and secondary-player Items refusal retain their own trace schemas and
+budgets. Native Cancel-2/-4 bypass the callbacks; other choices, pages, unowned
+or trailing-empty layouts and unavailable reads delegate unchanged. No game,
+menu or SAVE data is written, and no SAVE exclusion is added.
+
+Exact opt-in `KH2COOP_ABILITIES_ADMISSION_TRACE=1` produces separately capped
+16-per-process `[partyempty-abilities-root]` and `[partyempty-abilities-items]`
+consumed-refusal receipts. Each identifies sequence/tick, callback caller,
+state, actual compact/input selection, mask, feature1 and owned members. The
+installer additionally pins the native accepted-5 decision, cleanup and state0F
+request, plus the root feature1 routing. Actual native controls exercise the
+original helper, feedback/comparison and action/refusal destinations. Terminal
+boundary doubles do not claim later cleanup or builder safety.
+
+Live run20261008-213653_abilities_root_items_shortcut_consumed_refusal_1
+passed in458 seconds:7/7 launch-absence checks,4/4 disk saves unchanged and
+closure safety PASS. Both machines supplied fresh ordinary-root Abilities Cross
+and Items Square/-5 consumed-refusal receipts, positive Cancel and restored
+native next-load behavior with the matched native-OFF typed SAVE inventory.
+This qualifies only the bounded refusal routes. Equipment state2/-5, direct or
+cached initial constructors, already-open Abilities pages and ability toggles
+remain excluded. Native companion-history lookups and serialized ownership
+need a separate design before allowing ability/equipment changes. Current
+live qualification also includes the separately recorded Items and Party slices.
+Independent review: party-menus-20261008/codex-review-rev7-fixture04-review3.md.
+The compiled rev7 production source is retained byte-for-byte; reusable offline
+evidence is127/127 serial CTest,64 native guard modes/1328 assertions and205
+audited socketless fixture checks. The landing additionally checks current-main
+integration with a fresh coordinated build and serial CTest suite.
