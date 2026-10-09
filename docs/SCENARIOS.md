@@ -3031,6 +3031,17 @@ and [prior source review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-
 
 ## Poll subprocesses and console cleanup
 
+Reconnect evidence expects AvatarBridge 4 and WorldBridge 12. Its regression
+checks derive these versions from the production headers and refuse other
+layouts. `reconnect_mark` keeps its 15-second maximum and includes the latest
+validator problems in its deadline error; repeated schema refusals must remain
+visible. Population reconnect qualification additionally requires the original
+Friend1 process to depart and automatically rejoin, native re-entry evidence,
+and two fresh exact living-set/HP/binding endpoints, preserving the pre-drop
+host and unaffected friend's bodies and lifecycle. The offline PENDING fixture
+is `build/rig/vuh1788-waves-20261008/population-reconnect-01`; its real setup
+control stops before desktop access and launches no native process.
+
 The canonical `kh2ctl` wrapper and `bridge()` avatar poll use
 `CREATE_NO_WINDOW`, including when the runner has detached from a console during
 G7 runtime shutdown. Capturing stdout/stderr alone does not suppress allocation
