@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <deque>
 #include <fstream>
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <limits>

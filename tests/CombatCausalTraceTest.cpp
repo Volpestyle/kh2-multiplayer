@@ -11,6 +11,7 @@ namespace ht=kh2coop::inject::nativehittrace;
 namespace { unsigned checks=0,failed=0; std::uint64_t clockNs=1;
 void Check(bool ok,const char* name){++checks;if(!ok){++failed;std::printf("FAIL %s\n",name);}}
 std::uint64_t Clock() noexcept{return ++clockNs;}
+void ThrowLogger(const char*,...){throw 7;}
 cc::Engine local;
 cc::Scope Scope(bool client=false){cc::Scope s{};auto& n=s.native;n.available=true;n.readMask=ht::ContextComplete;
  n.frame=1;n.generation=1;n.epoch=9;n.loadSerial=3;n.transitionSerial=2;n.role=client?2:1;n.slot=client?1:0;
@@ -74,5 +75,7 @@ int main(){ht::RegisterOwnerThread();ht::Configure(true,ht::AllHooks,ht::AllHook
  Check(cc::engine.Started()==started&&!cc::Requested(),"absent/false flag leaves observer state untouched");
  Admit(cc::engine,s);cc::currentScope=s;cc::Configure(true,Clock);auto enabled=Emit(s);(void)enabled;
  Check(Has(cc::engine,cc::Kind::Hit,true),"production EndApply invokes default-off observer only when opted in");
- cc::Drain(+[](const char*,...){throw 7;});Check(cc::engine.Retired(),"diagnostic logger exception contained and retires coverage");
+ Admit(cc::engine,s);cc::currentScope=s;auto queued=Emit(s);(void)queued;
+ Check(!cc::engine.Retired(),"logger-fault control begins with live admitted queued receipt");
+ cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"diagnostic logger exception contained and retires coverage");
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}
