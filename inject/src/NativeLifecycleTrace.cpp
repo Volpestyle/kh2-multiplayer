@@ -1,4 +1,5 @@
 #include "NativeLifecycleTrace.hpp"
+#include "NativePopulationAuthority.hpp"
 #include "NativeTraceFiber.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 
@@ -280,6 +281,20 @@ void FinishEvent(Event& event, bool completed) {
 // and validated retained-frame restoration on normal return or unwind. Events publish child-first;
 // sequence/parent/depth express entry order rather than queue order.
 void Run(Kind kind,void* controller,void* actor,uintptr_t caller) {
+    if (populationauthority::Requested()) {
+        constexpr populationauthority::Kind kinds[]{populationauthority::Kind::Removal,
+            populationauthority::Kind::Disposal,populationauthority::Kind::Death,
+            populationauthority::Kind::DeathBookkeeping,populationauthority::Kind::Count};
+        const auto index=static_cast<unsigned>(kind);
+        if (index>=5) {InvokeOriginal(kind,controller,actor);return;}
+        const auto error=GetLastError();bool returned=false;
+        const auto token=populationauthority::Enter(kinds[index],reinterpret_cast<uintptr_t>(controller),0,
+            reinterpret_cast<uintptr_t>(actor),caller);
+        __try {SetLastError(error);InvokeOriginal(kind,controller,actor);returned=true;}
+        __finally {const auto nativeError=GetLastError();populationauthority::Exit(token,kinds[index],
+            reinterpret_cast<uintptr_t>(controller),0,0,0,returned);SetLastError(nativeError);}
+        return;
+    }
     const auto error=GetLastError();Local* local=nullptr;(void)Parent(local);
     if(!g_recording || !local || local->depth>=kDepthCap) {
         if(local && local->depth>=kDepthCap)g_storage.Reject(local);
@@ -473,7 +488,8 @@ bool InstallOne(unsigned index, const std::uint8_t* bytes, std::size_t length, v
     const bool created = status == MH_OK;
     if (created) {
         g_enableAttempted.fetch_or(bit);
-        status = MH_EnableHook(target);
+        status = populationauthority::Requested() && !populationauthority::PrepareTrampoline(kRvas[index],*original)
+            ? MH_ERROR_UNSUPPORTED_FUNCTION : MH_EnableHook(target);
         if (status != MH_OK) MH_DisableHook(target); // retain potentially exposed original
     }
     if (status == MH_OK) g_installed.fetch_or(bit);
@@ -493,11 +509,12 @@ bool InstallOne(Kind kind, const std::uint8_t* bytes, std::size_t length, void* 
 bool Install(uintptr_t exeBase, spawncontroller::LogFn log, spawncontroller::RoleFn role, bool trace) {
     if (g_installed.load()) return true;
     if (g_enableAttempted.load()) {if(log)log("[lifecycletrace] unavailable reason=retained-partial-install");return false;}
-    g_requested.store(trace);
-    if (!trace) return false;
+    const bool authority=populationauthority::Requested();
+    g_requested.store(trace || authority);
+    if (!trace && !authority) return false;
     if(tracefiber::PrepareRequested()){if(log)log("[lifecycletrace] unavailable reason=PREPARE-enabled diagnostic-profile");return false;}
-    if(!g_storage.Init(reinterpret_cast<const void*>(&Install))){if(log)log("[lifecycletrace] unavailable reason=FLS-storage");return false;}
-    g_recording=true;
+    if(!authority && !g_storage.Init(reinterpret_cast<const void*>(&Install))){if(log)log("[lifecycletrace] unavailable reason=FLS-storage");return false;}
+    g_recording=!authority;
     g_exeBase = exeBase;
     g_imageSize = ReadImageSize(exeBase);
     g_log = log;
@@ -509,6 +526,7 @@ bool Install(uintptr_t exeBase, spawncontroller::LogFn log, spawncontroller::Rol
     InstallOne(Kind::DeathMark, kDeathMarkBytes, sizeof(kDeathMarkBytes), reinterpret_cast<void*>(&DeathMark), reinterpret_cast<void**>(&g_deathMark));
     InstallOne(Kind::DeathBookkeeping, kDeathBookBytes, sizeof(kDeathBookBytes), reinterpret_cast<void*>(&DeathBook), reinterpret_cast<void**>(&g_deathBook));
     InstallOne(Kind::CountDecrement, kCountBytes, sizeof(kCountBytes), reinterpret_cast<void*>(&Count), reinterpret_cast<void**>(&g_count));
+    if (authority) {populationauthority::Coverage((g_installed.load()&31u)<<6);return g_installed.load()==31u;}
     // Children become callable before the parent can claim complete coverage.
     InstallOne(6, kScriptBytes, sizeof(kScriptBytes), reinterpret_cast<void*>(&ScriptPredicate), reinterpret_cast<void**>(&g_script));
     InstallOne(7, kAuxiliaryBytes, sizeof(kAuxiliaryBytes), reinterpret_cast<void*>(&AuxiliaryPredicate), reinterpret_cast<void**>(&g_auxiliary));
@@ -543,6 +561,11 @@ bool PopEvent(Event& event) {
 
 void Shutdown() {
     g_recording=false;
+    if (populationauthority::Retained()) {
+        for (unsigned i=0;i<kRvas.size();++i) if (g_enableAttempted.load()&(1u<<i))
+            MH_DisableHook(reinterpret_cast<void*>(g_exeBase+kRvas[i]));
+        return;
+    }
     if(g_storage.Ready()) {++g_coverageGeneration;
         for(unsigned i=0;i<kRvas.size();++i)if(g_enableAttempted.load()&(1u<<i))MH_DisableHook(reinterpret_cast<void*>(g_exeBase+kRvas[i]));
         return; // originals/trampolines/FLS retained for suspended fibers

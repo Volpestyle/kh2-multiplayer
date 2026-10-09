@@ -1,4 +1,5 @@
 #include "NativeSpawnController.hpp"
+#include "NativePopulationAuthority.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeTraceFiber.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
@@ -102,6 +103,7 @@ using UpdateFn = void (__fastcall*)(void*, const float*);
 using LookupFn = const void* (__fastcall*)(std::int32_t);
 using WrapperFn = void* (__fastcall*)(const void*, void*);
 using GeneratedFn = void* (__fastcall*)(const void*, void*, const float*);
+using NaturalFactoryFn = void* (__fastcall*)(std::uint32_t,const float*,float);
 using DispatcherFn = std::uint64_t (__fastcall*)(void*, void*);
 // No XMM inputs/return in either verified path. Capturing RAX preserves even
 // the unspecified scalar result of the script's early return as well as its tail call.
@@ -133,25 +135,42 @@ void HostEmissionMutation(uintptr_t controller);
 void HostEmissionInitialized(uintptr_t controller);
 
 void* __fastcall HookedControllerCtor(void* controller, std::uint32_t key, const void* header) {
+    const auto savedError=GetLastError();
+    const auto observation=populationauthority::Enter(populationauthority::Kind::Constructor,
+        reinterpret_cast<uintptr_t>(controller),0,0,reinterpret_cast<uintptr_t>(_ReturnAddress()));
     const bool counted = g_knownMutation.Begin();
     HostEmissionMutation(reinterpret_cast<uintptr_t>(controller));
     void* result = nullptr;
-    __try { result = g_originalControllerCtor(controller, key, header); }
-    __finally { g_knownMutation.End(counted, AbnormalTermination() != FALSE); }
+    bool returned=false;
+    __try { SetLastError(savedError);result = g_originalControllerCtor(controller, key, header);returned=true; }
+    __finally { const auto error=GetLastError();g_knownMutation.End(counted, AbnormalTermination() != FALSE);
+        populationauthority::Exit(observation,populationauthority::Kind::Constructor,
+            reinterpret_cast<uintptr_t>(controller),0,0,reinterpret_cast<uintptr_t>(result),returned);SetLastError(error); }
     return result;
 }
 void __fastcall HookedControllerInit(void* controller) {
+    const auto savedError=GetLastError();
+    const auto observation=populationauthority::Enter(populationauthority::Kind::Initialize,
+        reinterpret_cast<uintptr_t>(controller),0,0,reinterpret_cast<uintptr_t>(_ReturnAddress()));
     const bool counted = g_knownMutation.Begin();
     HostEmissionMutation(reinterpret_cast<uintptr_t>(controller));
-    __try { g_originalControllerInit(controller); }
-    __finally { g_knownMutation.End(counted, AbnormalTermination() != FALSE); }
+    bool returned=false;
+    __try { SetLastError(savedError);g_originalControllerInit(controller);returned=true; }
+    __finally { const auto error=GetLastError();g_knownMutation.End(counted, AbnormalTermination() != FALSE);
+        populationauthority::Exit(observation,populationauthority::Kind::Initialize,
+            reinterpret_cast<uintptr_t>(controller),0,0,0,returned);SetLastError(error); }
     HostEmissionInitialized(reinterpret_cast<uintptr_t>(controller));
 }
 void __fastcall HookedControllerTeardown(void* controller) {
+    const auto savedError=GetLastError();
+    const auto observation=populationauthority::Enter(populationauthority::Kind::Teardown,
+        reinterpret_cast<uintptr_t>(controller),0,0,reinterpret_cast<uintptr_t>(_ReturnAddress()));
     const bool counted = g_knownMutation.Begin();
     HostEmissionMutation(reinterpret_cast<uintptr_t>(controller));
-    __try { g_originalControllerTeardown(controller); }
-    __finally { g_knownMutation.End(counted, AbnormalTermination() != FALSE); }
+    bool returned=false;
+    __try { SetLastError(savedError);g_originalControllerTeardown(controller);returned=true; }
+    __finally { const auto error=GetLastError();g_knownMutation.End(counted, AbnormalTermination() != FALSE);
+        populationauthority::Exit(observation,populationauthority::Kind::Teardown,0,0,0,0,returned);SetLastError(error); }
 }
 uintptr_t g_exeBase = 0;
 std::uint32_t g_imageSize = 0;
@@ -168,6 +187,7 @@ std::atomic<bool> g_dispatcherInstalled {false}, g_scriptInstalled {false};
 std::atomic<DWORD> g_diagnosticGameThread {0};
 WrapperFn g_originalWrapper = nullptr;
 GeneratedFn g_originalGenerated = nullptr;
+NaturalFactoryFn g_originalNaturalFactory = nullptr;
 DispatcherFn g_originalDispatcher = nullptr;
 ScriptFn g_originalScript = nullptr;
 AdmissionFn g_originalAdmission = nullptr;
@@ -1614,13 +1634,40 @@ void* ObserveWrapper(const void* record, void* controller, const float* point,
 }
 
 void* __fastcall HookedWrapper(const void* record, void* controller) {
+    if (populationauthority::Requested()) {
+        const auto error=GetLastError();void* actor=nullptr;bool returned=false;
+        const auto token=populationauthority::Enter(populationauthority::Kind::Fixed,
+            reinterpret_cast<uintptr_t>(controller),reinterpret_cast<uintptr_t>(record),0,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        __try {SetLastError(error);actor=g_originalWrapper(record,controller);returned=true;}
+        __finally {const auto nativeError=GetLastError();populationauthority::Exit(token,populationauthority::Kind::Fixed,
+            reinterpret_cast<uintptr_t>(controller),reinterpret_cast<uintptr_t>(record),0,reinterpret_cast<uintptr_t>(actor),returned);SetLastError(nativeError);}
+        return actor;
+    }
     return ObserveWrapper(record, controller, nullptr, TraceWrapper::Fixed,
                           reinterpret_cast<uintptr_t>(_ReturnAddress()));
 }
 
 void* __fastcall HookedGenerated(const void* record, void* controller, const float* point) {
+    if (populationauthority::Requested()) {
+        const auto error=GetLastError();void* actor=nullptr;bool returned=false;
+        const auto token=populationauthority::Enter(populationauthority::Kind::Generated,
+            reinterpret_cast<uintptr_t>(controller),reinterpret_cast<uintptr_t>(record),0,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        __try {SetLastError(error);actor=g_originalGenerated(record,controller,point);returned=true;}
+        __finally {const auto nativeError=GetLastError();populationauthority::Exit(token,populationauthority::Kind::Generated,
+            reinterpret_cast<uintptr_t>(controller),reinterpret_cast<uintptr_t>(record),0,reinterpret_cast<uintptr_t>(actor),returned);SetLastError(nativeError);}
+        return actor;
+    }
     return ObserveWrapper(record, controller, point, TraceWrapper::Generated,
                           reinterpret_cast<uintptr_t>(_ReturnAddress()));
+}
+
+void* __fastcall HookedNaturalFactory(std::uint32_t rawId,const float* point,float yaw) {
+    const auto error=GetLastError();void* result=nullptr;bool returned=false;
+    const auto token=populationauthority::EnterFactory(rawId,point,yaw,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    __try {SetLastError(error);result=g_originalNaturalFactory(rawId,point,yaw);returned=true;}
+    __finally {const auto nativeError=GetLastError();populationauthority::Exit(token,populationauthority::Kind::Factory,
+        0,0,0,reinterpret_cast<uintptr_t>(result),returned);SetLastError(nativeError);}
+    return result;
 }
 
 std::uint64_t RunDispatcherScope(void* controller, void* region, uintptr_t caller) {
@@ -2000,6 +2047,15 @@ void RunObservedUpdateEntry(void* controller, const float* nativePoint, uintptr_
 }
 
 void __fastcall HookedUpdate(void* controller, const float* nativePoint) {
+    if (populationauthority::Requested()) {
+        const auto error=GetLastError();bool returned=false;
+        const auto token=populationauthority::Enter(populationauthority::Kind::Update,
+            reinterpret_cast<uintptr_t>(controller),0,0,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        __try {SetLastError(error);g_original(controller,nativePoint);returned=true;}
+        __finally {const auto nativeError=GetLastError();populationauthority::Exit(token,populationauthority::Kind::Update,
+            reinterpret_cast<uintptr_t>(controller),0,0,0,returned);SetLastError(nativeError);}
+        return;
+    }
     const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
     if (g_originalPhaseConfigured.load()) {
         RunObservedUpdateEntry(controller, nativePoint, caller);
@@ -2024,7 +2080,8 @@ bool InstallDiagnosticHook(uintptr_t rva, const std::uint8_t (&bytes)[N], void* 
     auto status = MH_CreateHook(target, detour, reinterpret_cast<void**>(&original));
     const bool created = status == MH_OK;
     if (created) {
-        status = MH_EnableHook(target);
+        status = populationauthority::Requested() && !populationauthority::PrepareTrampoline(rva,reinterpret_cast<void*>(original))
+            ? MH_ERROR_UNSUPPORTED_FUNCTION : MH_EnableHook(target);
         if (status != MH_OK) {
             if (retainOnExposure) MH_DisableHook(target);
             else MH_RemoveHook(target);
@@ -2051,16 +2108,24 @@ bool InstallKnownMutationHook(uintptr_t rva, const std::uint8_t (&bytes)[N], voi
     if (!Matches(g_exeBase + rva, bytes)) return false;
     auto* target = reinterpret_cast<void*>(g_exeBase + rva);
     auto status = MH_CreateHook(target, detour, reinterpret_cast<void**>(&original));
-    if (status == MH_OK) {
-        status = MH_EnableHook(target);
-        if (status != MH_OK) MH_RemoveHook(target);
+    const bool created=status==MH_OK;
+    if (created) {
+        status = populationauthority::Requested() && !populationauthority::PrepareTrampoline(rva,reinterpret_cast<void*>(original))
+            ? MH_ERROR_UNSUPPORTED_FUNCTION : MH_EnableHook(target);
+        if (status != MH_OK) {
+            if (populationauthority::Requested()) MH_DisableHook(target);
+            else MH_RemoveHook(target);
+        }
     }
-    if (status != MH_OK) { original = nullptr; return false; }
+    if (status != MH_OK) {
+        if (!created || !populationauthority::Requested()) original = nullptr;
+        return false;
+    }
     return true;
 }
 
 void InstallKnownMutationHooks() {
-    if (!g_knownMutationRequested) return;
+    if (!g_knownMutationRequested && !populationauthority::Requested()) return;
     if (InstallKnownMutationHook(CONTROLLER_CTOR_RVA, kControllerCtorBytes,
             reinterpret_cast<void*>(&HookedControllerCtor), g_originalControllerCtor))
         g_knownMutationInstalled |= 1;
@@ -2074,6 +2139,7 @@ void InstallKnownMutationHooks() {
     else g_knownMutation.Poison();
     if (g_log) g_log("[knownmutation] requested=1 installedMask=%u poisoned=%u negative-fence-only=1 creationAuthority=0",
         g_knownMutationInstalled, g_knownMutation.Snapshot().poisoned ? 1U : 0U);
+    populationauthority::Coverage(g_knownMutationInstalled);
 }
 
 template <typename Fn>
@@ -2824,17 +2890,30 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
     auto status = MH_CreateHook(address, reinterpret_cast<void*>(&HookedUpdate),
                                 reinterpret_cast<void**>(&g_original));
     if (status == MH_OK) {
-        status = MH_EnableHook(address);
-        if (status != MH_OK) MH_RemoveHook(address);
+        status = populationauthority::Requested() && !populationauthority::PrepareTrampoline(UPDATE_RVA,reinterpret_cast<void*>(g_original))
+            ? MH_ERROR_UNSUPPORTED_FUNCTION : MH_EnableHook(address);
+        if (status != MH_OK) {
+            if (populationauthority::Requested()) MH_DisableHook(address);
+            else MH_RemoveHook(address);
+        }
     }
     if (status != MH_OK) {
         if (g_log) g_log("[spawnctl] unavailable: hook installation failed status=%d", status);
-        g_original = nullptr;
+        if (!populationauthority::Requested()) g_original = nullptr;
         if (g_knownMutationRequested) g_knownMutation.Poison();
         return false;
     }
     g_installed = true;
+    populationauthority::Coverage(8);
     InstallKnownMutationHooks(); // Independent of every diagnostic trace flag.
+    if (populationauthority::Requested()) {
+        g_fixedInstalled=InstallDiagnosticHook(WRAPPER_RVA,kWrapperBytes,reinterpret_cast<void*>(&HookedWrapper),g_originalWrapper,true);
+        g_generatedInstalled=InstallDiagnosticHook(GENERATED_RVA,kGeneratedBytes,reinterpret_cast<void*>(&HookedGenerated),g_originalGenerated,true);
+        populationauthority::Coverage((g_fixedInstalled?16u:0u)|(g_generatedInstalled?32u:0u));
+        constexpr std::uint8_t factoryBytes[]{0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83,0xEC,0x40,0x0F,0x29,0x74,0x24,0x30};
+        if (InstallDiagnosticHook(0x3DF930,factoryBytes,reinterpret_cast<void*>(&HookedNaturalFactory),g_originalNaturalFactory,true))
+            populationauthority::Coverage(2048);
+    }
     if (trace) {
         std::uint32_t peOffset = 0, signature = 0, imageSize = 0;
         std::uint16_t magic = 0;
@@ -2997,6 +3076,12 @@ TraceStats GetTraceStats() {
 }
 
 void Shutdown() {
+    if (populationauthority::Retained()) {
+        populationauthority::Stop();
+        const uintptr_t targets[]{UPDATE_RVA,WRAPPER_RVA,GENERATED_RVA,CONTROLLER_CTOR_RVA,CONTROLLER_INIT_RVA,CONTROLLER_TEARDOWN_RVA,0x3DF930};
+        for (const auto rva:targets) MH_DisableHook(reinterpret_cast<void*>(g_exeBase+rva));
+        return; // originals/code/storage stay valid for in-flight native calls
+    }
     if(g_factoryStorage.Ready()) {
         g_rawDiagnosticEnabled=false;g_constructionConfigured=false;++g_constructionCoverage;
         ++g_factoryCoverageSerial;

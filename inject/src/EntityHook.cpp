@@ -37,6 +37,7 @@
 #include "EnemySync.hpp"
 #include "EventHoldNativeInput.hpp"
 #include "NativeSpawnController.hpp"
+#include "NativePopulationAuthority.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
 #include "NativeLifetimeTrace.hpp"
@@ -3697,6 +3698,7 @@ bool Initialize(uintptr_t exeBase) {
     warp::SetTransitionObserver(&PublishLocalForTransition);
     downedspike::Install(exeBase);
     downedspectate::Install();
+    populationauthority::Configure(exeBase, &Log);
     char spawnTraceSetting[2] {};
     const bool spawnTrace = GetEnvironmentVariableA("KH2COOP_SPAWN_TRACE", spawnTraceSetting,
                                                    sizeof(spawnTraceSetting)) == 1 &&

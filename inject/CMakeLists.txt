@@ -63,6 +63,7 @@ add_library(kh2coop_inject SHARED
     src/ProgressSync.cpp
     src/EventHoldNative.cpp
     src/NativeSpawnController.cpp
+    src/NativePopulationAuthority.cpp
     src/NativeResourceTrace.cpp
     src/NativeOwnedEmitterCode.cpp
     src/NativeOwnedEmitterGateway.cpp
@@ -80,6 +81,7 @@ if(MSVC)
     set_source_files_properties(
         src/SteamBrokerNative.cpp
         src/NativeLifetimeTrace.cpp
+        src/NativePopulationAuthority.cpp
         src/NativeOwnedEmitterGateway.cpp
         src/NativeOwnedEmitterInstall.cpp
         PROPERTIES COMPILE_OPTIONS "/W4;/WX"

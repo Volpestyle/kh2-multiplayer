@@ -29,6 +29,7 @@ void RegisterDiagnosticGameThread() {
     DWORD none = 0;
     diagnosticThread.compare_exchange_strong(none, GetCurrentThreadId());
 }
+
 bool IsDiagnosticGameThread() {
     const auto registered = diagnosticThread.load();
     return registered != 0 && registered == GetCurrentThreadId();
@@ -48,6 +49,11 @@ TraceState CaptureDiagnosticState(uintptr_t, uintptr_t controller) {
     result.cacheAvailable = stateAvailable;
     return result;
 }
+}
+
+namespace kh2coop::inject::warp {
+std::uint32_t TransitionSerial() {return transition;}
+std::uint32_t LoadSerial() {return load;}
 }
 
 MH_STATUS WINAPI MH_CreateHook(LPVOID, LPVOID, LPVOID*) { ++hookCalls; return MH_ERROR_NOT_INITIALIZED; }

@@ -6,6 +6,7 @@
 #endif
 
 #include "../inject/src/NativeSpawnController.cpp"
+#include "../inject/src/NativePopulationAuthority.cpp"
 
 #include <iostream>
 #include <cstdlib>
@@ -1928,6 +1929,72 @@ DWORD WINAPI FactoryDepthCapObservation(void* argument) {
     return 0;
 }
 
+namespace {
+unsigned authorityCalls{};
+void* authorityController{};
+const float* authorityPoint{};
+bool authorityFault{}, authorityArgs=true;
+void __fastcall AuthorityOriginal(void* controller,const float* point) {
+    ++authorityCalls;authorityArgs=authorityArgs && controller==authorityController && point==authorityPoint;
+    Check(GetLastError()==0x12345,"observer preserves entry LastError");
+    SetLastError(0x23456);
+    if (authorityFault) RaiseException(kDeliberateException,0,0,nullptr);
+}
+void* __fastcall AuthorityWrapper(const void*,void* controller) {
+    ++authorityCalls;authorityArgs=authorityArgs && controller==authorityController;
+    SetLastError(0x23456);
+    if (authorityFault) RaiseException(kDeliberateException,0,0,nullptr);
+    return reinterpret_cast<void*>(0x123456789ABCULL);
+}
+void* __fastcall AuthorityFactory(std::uint32_t rawId,const float* point,float yaw) {
+    ++authorityCalls;authorityArgs=authorityArgs && rawId==0x4000012Eu && point==authorityPoint && yaw==1.25f;
+    SetLastError(0x23456);return nullptr;
+}
+bool CatchAuthority(void* controller,const float* point) {
+    __try {HookedUpdate(controller,point);}
+    __except(GetExceptionCode()==kDeliberateException?EXCEPTION_EXECUTE_HANDLER:EXCEPTION_CONTINUE_SEARCH) {return true;}
+    return false;
+}
+void AuthorityControls(std::uint8_t* image) {
+    using namespace kh2coop::inject;
+    SetEnvironmentVariableA("KH2COOP_POPULATION_AUTHORITY_TRACE",nullptr);
+    const auto hooksBefore=hookCalls;
+    Check(!populationauthority::Configure(reinterpret_cast<uintptr_t>(image),nullptr) && !populationauthority::Requested(),
+        "actual authority setup default off performs no installation");
+    SetEnvironmentVariableA("KH2COOP_POPULATION_AUTHORITY_TRACE","1");
+    SetEnvironmentVariableA("KH2COOP_SPAWN_TRACE","1");
+    Check(!populationauthority::Configure(reinterpret_cast<uintptr_t>(image),nullptr) && !populationauthority::Requested(),
+        "actual authority setup refuses incompatible profile before activation");
+    SetEnvironmentVariableA("KH2COOP_SPAWN_TRACE",nullptr);
+    SetEnvironmentVariableA("KH2COOP_SURVIVING_PACK_PREPARE",nullptr);
+    Check(!populationauthority::Configure(reinterpret_cast<uintptr_t>(image),nullptr),"actual setup refuses unverified synthetic native image");
+    // Exercise the actual adapters on owned memory independently of hook/image
+    // installation. This does not fake or qualify the production image gate.
+    populationauthority::image=reinterpret_cast<uintptr_t>(image);
+    populationauthority::requested=true;
+    populationauthority::recorder.Start(GetTickCount64());
+    Controller controller{};float point[4]{1,2,3,1};
+    authorityController=&controller;authorityPoint=point;
+    g_original=&AuthorityOriginal;g_originalWrapper=&AuthorityWrapper;
+    const auto roles=roleReads.load();
+    SetLastError(0x12345);HookedUpdate(&controller,point);
+    Check(authorityCalls==1 && authorityArgs && GetLastError()==0x23456,"real update adapter calls original once preserving arguments and LastError");
+    SetLastError(0x12345);
+    Check(HookedWrapper(nullptr,&controller)==reinterpret_cast<void*>(0x123456789ABCULL) &&
+        authorityCalls==2 && GetLastError()==0x23456,"real wrapper adapter preserves raw native RAX without actor dereference");
+    authorityFault=true;SetLastError(0x12345);
+    Check(CatchAuthority(&controller,point) && authorityCalls==3,"real update adapter propagates native SEH through observer finally");
+    Check(roleReads.load()==roles && hookCalls==hooksBefore,"role0 observer adapters perform no policy callback or hook installation");
+    g_originalNaturalFactory=&AuthorityFactory;SetLastError(0x12345);
+    Check(HookedNaturalFactory(0x4000012Eu,point,1.25f)==nullptr && authorityCalls==4 && authorityArgs && GetLastError()==0x23456,
+        "actual primary-factory adapter preserves flagged raw ID, XMM yaw, point, null and LastError");
+    populationauthority::Frame();populationauthority::Stop();
+    authorityFault=false;SetLastError(0x12345);HookedUpdate(&controller,point);
+    Check(authorityCalls==5 && authorityArgs,"stopped observation still passes original exactly once");
+    SetEnvironmentVariableA("KH2COOP_POPULATION_AUTHORITY_TRACE",nullptr);
+}
+}
+
 int main() {
     // No game executable or process is opened. The implementation's native
     // offset reads resolve entirely inside this zeroed, test-owned allocation.
@@ -2354,6 +2421,7 @@ int main() {
     KnownMutationControls(image);
     SelectedOccupancyControls(image);
     ConstructionLineageControls(image);
+    AuthorityControls(image);
 
     g_original = nullptr;
     g_originalWrapper = nullptr;

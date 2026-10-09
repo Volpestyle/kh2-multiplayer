@@ -380,6 +380,7 @@ if(WIN32)
     endif()
 
     add_executable(kh2coop_lifecycletrace_test tests/NativeLifecycleTraceTest.cpp)
+    target_sources(kh2coop_lifecycletrace_test PRIVATE inject/src/NativePopulationAuthority.cpp)
     target_include_directories(kh2coop_lifecycletrace_test PRIVATE
         runtime/include
         common/include
@@ -389,11 +390,20 @@ if(WIN32)
     if(MSVC)
         target_compile_options(kh2coop_lifecycletrace_test PRIVATE /W4 /WX)
     endif()
+    add_executable(kh2coop_population_authority_trampoline_test tests/PopulationAuthorityTrampolineTest.cpp)
+    target_include_directories(kh2coop_population_authority_trampoline_test PRIVATE runtime/include common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(kh2coop_population_authority_trampoline_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(kh2coop_population_authority_trampoline_test PRIVATE minhook_lib)
+    if(MSVC)
+        target_compile_options(kh2coop_population_authority_trampoline_test PRIVATE /W4 /WX)
+    endif()
 
     # Real hit consumer/publisher and census over owned synthetic native memory;
     # only transport, lifecycle and unrelated diagnostic services are stubbed.
     add_executable(kh2coop_nativehit_test tests/NativeHitClaimTest.cpp inject/src/NativeHitTrace.cpp
-        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp)
+        inject/src/NativeSpawnController.cpp inject/src/NativeResourceTrace.cpp inject/src/EventHoldNative.cpp
+        inject/src/NativePopulationAuthority.cpp)
     target_include_directories(kh2coop_nativehit_test PRIVATE runtime/include common/include
         $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(kh2coop_nativehit_test PRIVATE kh2coop_common)
@@ -636,14 +646,18 @@ target_include_directories(kh2coop_population_repair_native_test PRIVATE inject/
 target_link_libraries(kh2coop_population_repair_native_test PRIVATE kh2coop_common)
 add_executable(kh2coop_population_registration_test tests/PopulationRegistrationTest.cpp)
 target_include_directories(kh2coop_population_registration_test PRIVATE inject/src)
+add_executable(kh2coop_population_authority_trace_test tests/PopulationAuthorityTraceTest.cpp)
+target_include_directories(kh2coop_population_authority_trace_test PRIVATE inject/src)
 if(MSVC)
     target_compile_options(kh2coop_population_cut_test PRIVATE /W4 /WX)
     target_compile_options(kh2coop_population_repair_native_test PRIVATE /W4 /WX)
     target_compile_options(kh2coop_population_registration_test PRIVATE /W4 /WX)
+    target_compile_options(kh2coop_population_authority_trace_test PRIVATE /W4 /WX)
 else()
     target_compile_options(kh2coop_population_cut_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(kh2coop_population_repair_native_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(kh2coop_population_registration_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(kh2coop_population_authority_trace_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 add_executable(kh2coop_downed_spectate_test tests/DownedSpectateTest.cpp)
 target_include_directories(kh2coop_downed_spectate_test PRIVATE inject/src)

@@ -18,6 +18,7 @@
 #include "SpawnPick.hpp"
 #include "EnemyMirrorState.hpp"
 #include "NativeSpawnController.hpp"
+#include "NativePopulationAuthority.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
 #include "ProgressSync.hpp"
@@ -4651,6 +4652,7 @@ void OnFrameStart(std::uint32_t frame) {
     // This known native actor-update entry establishes diagnostic affinity;
     // broader creator/removal probes may execute before it or on other threads.
     spawncontroller::RegisterDiagnosticGameThread();
+    populationauthority::Frame(); // role-independent drain, including no runtime/census
     nativehittrace::RegisterOwnerThread();
     g_hitTraceFrame = frame;
     if (!g_bridge.IsOpen()) { partynative::Observe(0, {}, 0xFF, false); DrainPendingSpawnTrace(false); return; }
