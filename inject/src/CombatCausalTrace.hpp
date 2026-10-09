@@ -13,9 +13,10 @@ constexpr unsigned TargetCount = 5, QueueCount = 128, CauseCount = 16, PayloadMa
 // declares an unrelated HitClaim. Production-codec static_asserts live in controls.
 enum class WireType : std::uint8_t { HitClaim=8, EnemyHp=23, EnemyDeath=24 };
 enum class Kind : unsigned { Admission, Hit, Claim, HostApply, HpPublish, HpReceive,
-    HpApply, DeathPublish, DeathReceive, DeathApply, Packet, Retired };
+    HpApply, DeathPublish, DeathReceive, DeathApply, Packet, Retired, ConsumerRejected, ConsumerAccepted };
 enum class Reason : unsigned { Ok, Unavailable, Scope, Mapping, Source, Native,
-    UnknownDelta, Payload, Capacity, Duplicate, Despawn, Loss, Pending };
+    UnknownDelta, Payload, Capacity, Duplicate, Despawn, Loss, Pending, RejectFraming, RejectEpoch, RejectZeroSequence,
+    RejectStaleSequence, RejectUnknownTarget, RejectDecode, RejectScope, RejectRole };
 struct Scope {
     nativehittrace::Context native{};
     std::uint64_t delivery{}, sessionSalt{}, roster[3]{}, peerDelivery[3]{};
@@ -33,10 +34,11 @@ struct Key {
 struct Receipt {
     Kind kind{}; Reason reason{Reason::Unavailable};
     std::uint64_t serial{}, qpc{}, loss{}, event{}, hpSequence{}, payloadDigest{};
-    Scope scope{}; Target target{}; Key key{};
+    Scope scope{}, admittedScope{}; Target target{}; Key key{};
     std::int32_t beforeHp{}, afterHp{}, requestedHp{};
     bool attempted{}, returned{}, readback{}, enqueued{}, locallyQualified{};
-    unsigned causeCount{}, payloadBytes{};
+    unsigned causeCount{}, payloadBytes{}, payloadOriginalBytes{}, consumerOutcome{}, wireType{};
+    std::uint64_t consumerSequenceFloor{}; std::uint32_t consumerEpoch{}; bool payloadTruncated{};
     std::uint64_t causes[CauseCount]{};
     std::uint8_t payload[PayloadMax]{};
 };
@@ -141,7 +143,7 @@ class Engine {
         for(auto& t:targets_) if(t.identity.netId==id) return &t; return nullptr;
     }
     Receipt Row(Kind kind,const Scope& scope,std::uint64_t now) noexcept {
-        Receipt r{};r.kind=kind;r.scope=scope;r.qpc=now;r.loss=loss_;return r;
+        Receipt r{};r.kind=kind;r.scope=scope;r.admittedScope=original_;r.qpc=now;r.loss=loss_;return r;
     }
     void Push(Receipt& r) noexcept {
         ++started_;
@@ -287,10 +289,24 @@ public:
         r.reason=r.locallyQualified?Reason::Ok:Reason::Native;Push(r);
         if(!r.locallyQualified)Retire(s,now,Reason::Native);
     }
+    void Consumer(const Scope& s,unsigned wireType,Reason reason,unsigned id,std::uint64_t sequence,
+                  std::uint32_t consumerEpoch,std::uint64_t floor,const std::uint8_t* bytes,unsigned size,
+                  std::uint64_t now,bool accepted=false) noexcept {
+        if(!admitted_||retired_)return;
+        auto r=Row(accepted?Kind::ConsumerAccepted:Kind::ConsumerRejected,s,now);r.consumerOutcome=accepted?1:2;r.wireType=wireType;
+        r.hpSequence=sequence;r.consumerEpoch=consumerEpoch;r.consumerSequenceFloor=floor;
+        auto* l=Find(id);if(l)r.target=l->identity;else r.target.netId=id;
+        r.payloadOriginalBytes=size;r.payloadTruncated=size>PayloadMax;
+        Payload(r,bytes,size>PayloadMax?PayloadMax:size);r.reason=reason;Push(r);
+        // A bounded prefix is explicit loss, never complete raw rejection evidence.
+        if(r.payloadTruncated||!r.payloadBytes)Retire(s,now,Reason::Loss);
+        else if(!SameScope(original_,s))Retire(s,now,Reason::Scope);
+    }
     void Packet(const Scope& s,Kind kind,unsigned id,std::uint64_t hpSequence,int hp,int maxHp,
                 const std::uint8_t* bytes,unsigned size,bool outcome,bool despawn,std::uint64_t now) noexcept {
         if(!admitted_||retired_)return;
         auto r=Row(kind,s,now);r.hpSequence=hpSequence;r.enqueued=outcome;r.requestedHp=hp;
+        if(kind==Kind::HpReceive||kind==Kind::DeathReceive){r.consumerOutcome=1;r.wireType=bytes&&size?bytes[0]:0;r.payloadOriginalBytes=size;}
         auto* l=Find(id);if(l){r.target=l->identity;Causes(r,*l);r.beforeHp=l->published;r.afterHp=hp;}
         bool ok=Current(s)&&l&&Payload(r,bytes,size)&&PacketWire(s,kind,id,hpSequence,hp,maxHp,bytes,size)&&outcome&&!despawn;
         if(l && kind==Kind::HpPublish) {
@@ -360,6 +376,14 @@ inline void Drain(nativehittrace::LogFn log) noexcept {
             r.scope.native.location[0],r.scope.native.location[1],r.scope.native.location[2],r.scope.native.location[3],r.scope.native.location[4],r.scope.native.location[5],
             r.target.netId,r.target.objectId,r.target.type,U(r.target.actor),U(r.target.objentry),U(r.target.status),U(r.target.controller),U(r.target.record),r.target.hp,r.target.maxHp,
             U(r.key.connection),r.key.sequence,r.key.attackId,r.key.damage,r.beforeHp,r.afterHp,r.requestedHp,unsigned(r.attempted),unsigned(r.returned),unsigned(r.readback),unsigned(r.enqueued),r.causeCount,r.payloadBytes,U(r.payloadDigest),payload);
+        if(r.consumerOutcome) {
+            const auto& a=r.admittedScope;
+            log("[combat-causal] consumer schema=1 serial=%llu outcome=%u wireType=%u reason=%u expectedEpoch=%u sequenceFloor=%llu originalBytes=%u retainedBytes=%u truncated=%u admittedGeneration=%llu admittedDelivery=%llu admittedSessionSalt=%llu admittedConnection=%llu admittedHost=%llu admittedPeer=%llu admittedHostDelivery=%llu admittedPeerDelivery=%llu admittedEpoch=%llu admittedLoad=%llu admittedTransition=%llu admittedRole=%u admittedSlot=%u admittedLocation=%u,%u,%u,%u,%u,%u",
+                U(r.serial),r.consumerOutcome,r.wireType,unsigned(r.reason),r.consumerEpoch,U(r.consumerSequenceFloor),r.payloadOriginalBytes,r.payloadBytes,unsigned(r.payloadTruncated),
+                U(a.native.generation),U(a.delivery),U(a.sessionSalt),U(a.native.connectionId),U(a.native.hostConnectionId),U(a.roster[1]),U(a.peerDelivery[0]),U(a.peerDelivery[1]),
+                U(a.native.epoch),U(a.native.loadSerial),U(a.native.transitionSerial),unsigned(a.native.role),unsigned(a.native.slot),
+                a.native.location[0],a.native.location[1],a.native.location[2],a.native.location[3],a.native.location[4],a.native.location[5]);
+        }
         for(unsigned i=0;i<r.causeCount;++i)log("[combat-causal] association schema=1 serial=%llu index=%u event=%llu",U(r.serial),i,U(r.causes[i]));
     }
     static std::uint64_t lastSummary=0;

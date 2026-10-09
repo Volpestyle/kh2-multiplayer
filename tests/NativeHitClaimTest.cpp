@@ -6,6 +6,7 @@
 #include "kh2coop/WorldBridge.hpp"
 #include "../inject/src/CombatCausalTrace.hpp"
 #include <deque>
+#include <tuple>
 #include <exception>
 #include <cstdarg>
 #include <cstdio>
@@ -1942,8 +1943,8 @@ void TestResourceSerialization() {
 
 void TestCombatCausalBoundaries() {
     namespace cc=kh2coop::inject::combatcausal;
-    const auto prepare=[](bool enabled) {
-        Reset();
+    const auto prepare=[](bool enabled,bool client=false) {
+        Reset(client);
         g_bridge.connections[2]=0;g_bridge.spawnPickSalt=55;
         g_inst.room=6;g_inst.door=0;g_inst.map=1;g_inst.btl=1;g_inst.evt=0;
         Put(image+offsets::ROOM_ID,std::uint8_t{6});Put(image+offsets::NOW+2,std::uint8_t{0});
@@ -1979,6 +1980,66 @@ void TestCombatCausalBoundaries() {
     Put(status,std::int32_t{980});census=CaptureNativeCensus();HostFrame(12,{},census);
     bool unqualified=false;while(cc::engine.Pop(r))if(r.kind==cc::Kind::HpPublish&&!r.locallyQualified)unqualified=true;
     Check(unqualified,"actual normal HP publication refuses unexplained companion damage");
+    // Real DLL decoder/admission paths; only the native actor/census leaves are owned test data.
+    const auto consumerCase=[&](unsigned mode,bool enabled) {
+        prepare(enabled,true);g_hostHpSequence=10;
+        auto raw=encode(EnemyHp{9,{{1,900,1000}},11});
+        auto reason=cc::Reason::Ok;bool rejected=true;
+        switch(mode) {
+        case 0:raw.push_back(0);reason=cc::Reason::RejectFraming;break;
+        case 1:raw=encode(EnemyHp{8,{{1,900,1000}},11});reason=cc::Reason::RejectEpoch;break;
+        case 2:std::fill_n(raw.begin()+7,8,std::uint8_t{0});reason=cc::Reason::RejectZeroSequence;break;
+        case 3:raw=encode(EnemyHp{9,{{1,900,1000}},9});reason=cc::Reason::RejectStaleSequence;break;
+        case 4:raw=encode(EnemyHp{9,{{99,900,1000}},11});reason=cc::Reason::RejectUnknownTarget;break;
+        case 5:raw=encode(EnemyDeath{8,1});reason=cc::Reason::RejectEpoch;break;
+        case 6:raw=encode(EnemyDeath{9,99});reason=cc::Reason::RejectUnknownTarget;break;
+        case 7:raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);reason=cc::Reason::RejectDecode;break;
+        case 8:raw=encode(EnemyDeath{9,1});raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);reason=cc::Reason::RejectDecode;break;
+        case 9:{auto outer=HostEnvelope(raw);const std::uint8_t* p=nullptr;std::size_t n=0;decodePacketHeader(outer.data(),outer.size(),p,n);
+            ByteReader reader(p,n);WorldEnvelope e;read(reader,e);e.scope.sourceConnectionId=555;
+            outer=encode(e);g_bridge.incoming.push_back(outer);reason=cc::Reason::RejectScope;break;}
+        case 10:{auto outer=HostEnvelope(raw);const std::uint8_t* p=nullptr;std::size_t n=0;decodePacketHeader(outer.data(),outer.size(),p,n);
+            ByteReader reader(p,n);WorldEnvelope e;read(reader,e);e.scope.targetConnectionId=555;
+            raw=encode(e);reason=cc::Reason::RejectScope;break;}
+        case 11:rejected=false;break; // new accepted HP
+        case 12:raw=encode(EnemyHp{9,{{1,900,1000}},10});rejected=false;break; // native equal replay is accepted
+        case 13:raw=encode(EnemyHp{9,{},11});rejected=false;break; // accepted empty packet still has a consumer outcome
+        case 14:raw=encode(EnemyDeath{9,1});rejected=false;break;
+        case 15:raw=encode(EnemyDeath{9,1});raw.push_back(0);++raw[1];raw=HostEnvelope(raw);reason=cc::Reason::RejectDecode;break; // actual envelope validator rejects trailing death body
+        case 16:raw=HostEnvelope(raw);raw.push_back(0);reason=cc::Reason::RejectFraming;break;
+        case 17:std::fill_n(raw.begin()+7,8,std::uint8_t{0});raw=HostEnvelope(raw);reason=cc::Reason::RejectDecode;break;
+        case 18:raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);raw=HostEnvelope(raw);reason=cc::Reason::RejectDecode;break;
+        }
+        if(mode==0||mode==1||mode==2||mode==3||mode==7||mode==8)g_bridge.incoming.push_back(raw);
+        else if(mode!=9)Check(QueueHostWorld(raw),"actual consumer test enqueue succeeds");
+        const auto beforeScope=CausalScope();ReceiveWorldPackets();
+        bool found=false;cc::Receipt receipt;
+        while(cc::engine.Pop(receipt)) {
+            if(receipt.kind==(rejected?cc::Kind::ConsumerRejected:cc::Kind::ConsumerAccepted)&&receipt.reason==reason) {
+                found=receipt.consumerOutcome==(rejected?2u:1u)&&!receipt.locallyQualified&&
+                    receipt.payloadOriginalBytes==raw.size()&&receipt.payloadBytes==raw.size()&&!receipt.payloadTruncated&&
+                    std::memcmp(receipt.payload,raw.data(),raw.size())==0&&
+                    cc::SameScope(receipt.scope,beforeScope)&&cc::SameScope(receipt.admittedScope,beforeScope)&&
+                    receipt.consumerEpoch==9;
+                if(mode==3)found=found&&receipt.hpSequence==9&&receipt.consumerSequenceFloor==10;
+                if(mode==4||mode==6)found=found&&receipt.target.netId==99&&receipt.target.actor==0;
+            }
+        }
+        Check(enabled?found:(!found&&cc::engine.Started()==0),"actual accepted/rejected consumer emits exact raw reason/current-original scope only when opted in");
+        // Snapshot decisions and all directly affected state for OFF/ON equality.
+        const auto& h=g_host.enemies.at(1);
+        return std::make_tuple(g_hostHpSequence,h.hp,h.maxHp,h.hpKnown,h.dead,g_host.enemies.size(),
+            g_clientManifestRevision,nativeCalls,Read<int>(status),g_bridge.outgoing,g_bridge.incoming.size());
+    };
+    for(unsigned mode=0;mode<19;++mode) {
+        const auto off=consumerCase(mode,false);const auto on=consumerCase(mode,true);
+        Check(off==on,"actual rejected/accepted consumer OFF/ON cache/native/calls/sequence/revision/sends decisions identical");
+    }
+    prepare(true,true);auto raw=encode(EnemyHp{9,{{1,900,1000}},1});
+    for(unsigned i=0;i<cc::QueueCount+1;++i)ObserveCombatConsumerOutcome(raw,cc::Reason::RejectScope);
+    Check(cc::engine.Retired()&&cc::engine.Loss()>0,"actual consumer observer ring failure is explicit loss");
+    QueueHostWorld(raw);ReceiveWorldPackets();
+    Check(g_hostHpSequence==1&&g_host.enemies.at(1).hp==900,"observer overflow cannot change subsequent native consumer acceptance");
     cc::enabled.store(false);Reset();
 }
 

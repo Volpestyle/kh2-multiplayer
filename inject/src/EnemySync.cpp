@@ -3455,6 +3455,16 @@ void TickHostPartyLayout() {
     if (SendCapturedWorld(encode(layout), context)) partynative::NoteHostSent(layout, generation);
 }
 
+void ObserveCombatConsumerOutcome(const std::vector<std::uint8_t>& packet,
+                                     combatcausal::Reason reason,unsigned netId=0,std::uint64_t sequence=0,bool accepted=false) noexcept {
+    if(!combatcausal::Requested()||packet.empty())return;
+    const auto type=packet.front();
+    if(type!=static_cast<unsigned>(PacketType::EnemyHp)&&type!=static_cast<unsigned>(PacketType::EnemyDeath)&&
+       type!=static_cast<unsigned>(PacketType::WorldEnvelope))return;
+    combatcausal::engine.Consumer(CausalScope(),type,reason,netId,sequence,g_host.epoch,g_hostHpSequence,
+        packet.data(),static_cast<unsigned>(packet.size()),combatcausal::Now(),accepted);
+}
+
 bool ReceiveWorldPackets() {
     bool hostSessionReset = false;
     std::vector<std::uint8_t> packet;
@@ -3466,6 +3476,7 @@ bool ReceiveWorldPackets() {
     };
     while (receive()) {
         CheckActivationGeneration();
+        auto causalDecodeFailure=combatcausal::Reason::RejectDecode;
         try {
             const std::uint8_t* payload = nullptr;
             std::size_t size = 0;
@@ -3473,7 +3484,10 @@ bool ReceiveWorldPackets() {
             std::optional<WorldScope> scope;
             if (type == PacketType::WorldEnvelope) {
                 ByteReader envelopeReader(payload, size); WorldEnvelope envelope; read(envelopeReader, envelope);
-                if (!envelopeReader.atEnd() || packet.size() != size + 3 || !WorldSessionGeneration()) continue;
+                if (!envelopeReader.atEnd() || packet.size() != size + 3 || !WorldSessionGeneration()) {
+                    ObserveCombatConsumerOutcome(packet,(!envelopeReader.atEnd()||packet.size()!=size+3)?
+                        combatcausal::Reason::RejectFraming:combatcausal::Reason::RejectScope);continue;
+                }
                 scope = envelope.scope;
                 const bool partyRelay = partynative::Requested() && scope->kind == WorldSourceKind::Relay &&
                     !envelope.packet.empty() && envelope.packet.front() == static_cast<std::uint8_t>(PacketType::PartyReapply);
@@ -3489,11 +3503,14 @@ bool ReceiveWorldPackets() {
                               static_cast<unsigned long long>(g_bridge.ConnectionId(g_bridge.LocalSlot())),
                               static_cast<unsigned long long>(scope->targetDeliverySerial),
                               static_cast<unsigned long long>(g_bridge.DeliverySerial()));
+                    ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectScope);
                     continue;
                 }
                 packet = std::move(envelope.packet);
                 type = decodePacketHeader(packet.data(), packet.size(), payload, size);
-                if (packet.size() != size + 3 || !isScopedWorldPacket(type)) continue;
+                if (packet.size() != size + 3 || !isScopedWorldPacket(type)) {
+                    ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectFraming);continue;
+                }
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
                 if (partynative::Requested() && (type == PacketType::PartyLayout || type == PacketType::PartyReapply ||
                                                   type == PacketType::PartyIntent)) {
@@ -3503,14 +3520,18 @@ bool ReceiveWorldPackets() {
                 if (CurrentRole() == Role::Client) {
                     if (scope->sourceConnectionId != g_bridge.ConnectionId(0) || !scope->hostSourceSerial ||
                         scope->sourceDeliverySerial != g_bridge.PeerDeliverySerial(0) ||
-                        scope->hostSourceSerial <= g_resyncAppliedCut) continue;
+                        scope->hostSourceSerial <= g_resyncAppliedCut) {
+                        ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectScope);continue;
+                    }
                 } else if (CurrentRole() == Role::Host) {
                     std::uint8_t sourceSlot = 0;
                     for (std::uint8_t slot = 1; slot < 3; ++slot)
                         if (g_bridge.ConnectionId(slot) == scope->sourceConnectionId) sourceSlot = slot;
                     if (scope->hostSourceSerial ||
-                        !RequesterCurrent(sourceSlot, scope->sourceConnectionId, scope->sourceDeliverySerial)) continue;
-                } else continue;
+                        !RequesterCurrent(sourceSlot, scope->sourceConnectionId, scope->sourceDeliverySerial)) {
+                        ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectScope);continue;
+                    }
+                } else {ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectRole);continue;}
             }
             if (type == PacketType::ResyncPlan) {
                 ByteReader r(payload, size); ResyncPlan plan; read(r, plan);
@@ -3553,7 +3574,7 @@ bool ReceiveWorldPackets() {
             }
             // Old ring contents cannot reconstruct authority before the reset
             // marker for the currently published header generation arrives.
-            if (!WorldSessionGeneration()) continue;
+            if (!WorldSessionGeneration()) {ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectScope);continue;}
             if (type == PacketType::NativeResyncSnapshot) {
                 ReceiveResyncSnapshot(packet); continue;
             }
@@ -3599,7 +3620,7 @@ bool ReceiveWorldPackets() {
             }
             if (type == PacketType::RemoteHit) { AdmitRemoteHit(*scope, payload, size); continue; } // VUH-1515
             if (type == PacketType::TargetAuthority) { AdmitTargetAuthority(*scope, payload, size); continue; } // VUH-1515
-            if (CurrentRole() != Role::Client) continue;
+            if (CurrentRole() != Role::Client) {ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectRole);continue;}
             ByteReader r(payload, size);
             if (progresssync::HandlePacket(type, r)) {
                 if (scope && PackPreparationActive() &&
@@ -3690,13 +3711,23 @@ bool ReceiveWorldPackets() {
                 ContinuePackPreparation(scope->hostSourceSerial, packChanged);
             } else if (type == PacketType::EnemyHp) {
                 EnemyHp m;
+                if(combatcausal::Requested()&&size>=12) {
+                    const std::uint64_t zero=0;
+                    if(std::memcmp(payload+4,&zero,8)==0)causalDecodeFailure=combatcausal::Reason::RejectZeroSequence;
+                }
                 read(r, m);
                 // Complete framing and current epoch must be established before
                 // a hostile/malformed high sequence can poison the high-water.
                 if (packet.size() != size + 3 || r.remaining() != 0 || !m.epoch ||
-                    m.epoch != g_host.epoch || !m.sequence || m.sequence < g_hostHpSequence) continue;
+                    m.epoch != g_host.epoch || !m.sequence || m.sequence < g_hostHpSequence) {
+                    const auto reason=(packet.size()!=size+3||r.remaining()!=0)?combatcausal::Reason::RejectFraming:
+                        (!m.epoch||m.epoch!=g_host.epoch)?combatcausal::Reason::RejectEpoch:
+                        !m.sequence?combatcausal::Reason::RejectZeroSequence:combatcausal::Reason::RejectStaleSequence;
+                    ObserveCombatConsumerOutcome(packet,reason,0,m.sequence);continue;
+                }
                 // Equal trusted relay cache replay can restore a replaced
                 // manifest. NetworkClient admits equality only when reliable.
+                ObserveCombatConsumerOutcome(packet,combatcausal::Reason::Ok,0,m.sequence,true);
                 g_hostHpSequence = m.sequence;
                 const bool packChanged = PackHpChanged(m);
                 for (const auto& e : m.entries) {
@@ -3708,16 +3739,20 @@ bool ReceiveWorldPackets() {
                         if (combatcausal::Requested()) combatcausal::engine.Packet(CausalScope(),
                             combatcausal::Kind::HpReceive, e.netId, m.sequence, e.hp, e.maxHp,
                             packet.data(), static_cast<unsigned>(packet.size()), true, false, combatcausal::Now());
-                    }
+                    } else ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectUnknownTarget,e.netId,m.sequence);
                 }
                 ContinuePackPreparation(scope->hostSourceSerial, packChanged);
             } else if (type == PacketType::EnemyDeath) {
                 EnemyDeath m;
                 read(r, m);
-                if (m.epoch != g_host.epoch) continue;
+                if (m.epoch != g_host.epoch) {
+                    ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectEpoch,m.netId);continue;
+                }
+                ObserveCombatConsumerOutcome(packet,combatcausal::Reason::Ok,m.netId,0,true);
                 auto it = g_host.enemies.find(m.netId);
                 if (it != g_host.enemies.end()) { it->second.dead = true; AdvanceClientManifestRevision(); }
-                if (combatcausal::Requested()) combatcausal::engine.Packet(CausalScope(),
+                if (it==g_host.enemies.end()) ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectUnknownTarget,m.netId);
+                else if (combatcausal::Requested()) combatcausal::engine.Packet(CausalScope(),
                     combatcausal::Kind::DeathReceive, m.netId, 0, 0, 0, packet.data(),
                     static_cast<unsigned>(packet.size()), packet.size() == size + 3 && r.remaining() == 0,
                     false, combatcausal::Now());
@@ -3742,6 +3777,7 @@ bool ReceiveWorldPackets() {
                 }
             }
         } catch (const std::exception&) {
+            ObserveCombatConsumerOutcome(packet,causalDecodeFailure);
             SYNC_LOG("[enemysync] client: malformed world packet");
         }
     }

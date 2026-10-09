@@ -103,4 +103,14 @@ int main(){
  Admit(cc::engine,s);cc::currentScope=s;auto queued=Emit(s);(void)queued;
  Check(!cc::engine.Retired(),"logger-fault control begins with live admitted queued receipt");
  cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"diagnostic logger exception contained and retires coverage");
+ // Consumer observation failures cannot become complete rejection evidence.
+ Admit(cc::engine,s);std::vector<std::uint8_t> oversized(cc::PayloadMax+1,1);
+ cc::engine.Consumer(s,23,cc::Reason::RejectDecode,0,0,9,0,oversized.data(),static_cast<unsigned>(oversized.size()),20);
+ bool prefix=false;cc::Receipt rejected;
+ while(cc::engine.Pop(rejected))if(rejected.kind==cc::Kind::ConsumerRejected)prefix=rejected.payloadTruncated&&
+     rejected.payloadOriginalBytes==cc::PayloadMax+1&&rejected.payloadBytes==cc::PayloadMax&&!rejected.locallyQualified;
+ Check(prefix&&cc::engine.Retired(),"oversized consumer raw receipt retains explicit prefix and permanently refuses completeness");
+ Admit(cc::engine,s);cc::currentScope=s;
+ cc::engine.Consumer(s,23,cc::Reason::RejectDecode,0,0,9,0,hp.data(),static_cast<unsigned>(hp.size()),21);
+ cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"actual queued consumer-rejection logger failure is contained");
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}
