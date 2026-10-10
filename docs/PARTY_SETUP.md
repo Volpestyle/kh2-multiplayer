@@ -266,12 +266,28 @@ Mickey clone's attack motion 186 lands twice (6, then 2) and reached the host on
 lands once and rarely reached anyone. The local's attacks never hit a clone (bit 0 is never in a mask).
 - Unset (the default; the friend package strips every `KH2COOP_*` variable, so this is what players get):
   puppet mode. At `3D2060` it refuses a native-allowed hit only when the attacker (owner `+0x10`, or source
-  `+0x14`) is an actor the puppet driver is driving right now (`BindPuppetDrive` until release clears
-  `applied`): a party-native clone or a friend-slot companion puppet. Victims refused: player-class actors and
+  `+0x14`) is an actor the puppet driver is driving right now: from `BindPuppetDrive` until release clears
+  `applied`, and only while the actor is still a cached puppet target (`g_clones[]`, `g_friend1/2Actor`).
+  That covers a party-native clone and a friend-slot companion puppet. Victims refused: player-class actors and
   team-1 non-players. Atkp kinds 5/6 stay native. With no driven puppet the hook returns the native answer
-  without reading anything. The local player's own attacks, enemy attacks and the client claim path are
-  unchanged. Log: `[allyhit] installed mode=puppet`, `f=… puppet attacker=…` rows, `puppetRefused=` in stats.
-  `DamagePolicy`'s `RemoteSource` zero stays as the backstop. Offline only so far; live acceptance is open.
+  without reading anything. Otherwise the victim is read first, and an ineligible victim (an enemy, a prop)
+  returns native before the attack or handle lookup is touched. The local player's own attacks, enemy attacks
+  and the client claim path are unchanged. Log: `[allyhit] installed mode=puppet`, one
+  `f=… puppet attacker=… verdict=refuse` row per refused (attack, victim) pair. Kept checks are never traced, so
+  they can't use up the 160-line budget. Stats (`calls`, `playerPairs`, `nativeAllowed`) count only
+  driven-puppet attacks on eligible victims, and `puppetRefused=` is shown. `DamagePolicy`'s `RemoteSource`
+  zero stays as the backstop. Offline only so far (`kh2coop_allyhit_test`). Live checks still open:
+  - A two-player run where a remote's swings overlap the local player. Expect `[allyhit] ... puppet ...
+    verdict=refuse` rows, no `[hit]` line with a puppet as attacker, and no flinch, star burst or portrait flash.
+  - Solo cost. The `3D2060` hook now installs on every default launch. It is inert without a driven puppet,
+    but its cost and safety outside co-op are unmeasured.
+  - Attacks still in flight after release. An attack spawned while driven keeps its team-0 mask after the
+    driver releases, and it is no longer refused.
+  - Companion puppets. Whether friend-slot companion puppets replay attacks that hit at all has not been
+    observed live; that case is covered offline only.
+  - Skipped team restore. Release restores the saved team only when membership, metadata, canonical and
+    lifecycle checks pass. Otherwise it clears `applied` and leaves the actor on team 0. That actor is no longer
+    "driven", so its swings reach the local player natively again.
 - `=0` is the explicit opt-out: no hook.
 - `=1` refuses every native-allowed hit between two distinct player-class actors (clone â†’ local, local â†’
   clone, clone â†’ clone) at `3D2060`, after the original ran, so no hit record, `[hit]` line or reaction exists.

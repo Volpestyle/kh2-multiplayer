@@ -22,6 +22,8 @@ static std::uintptr_t g_image = 0, g_heap = 0;
 static std::uintptr_t g_local = 0, g_clone = 0, g_clone2 = 0, g_enemy = 0, g_bullet = 0, g_companion = 0;
 static std::uint64_t g_nativeAnswer = 1;
 static std::uintptr_t __fastcall Resolve(std::uint32_t h) { return h == 1 ? g_local : h == 2 ? g_clone : h == 3 ? g_clone2 : h == 4 ? g_enemy : h == 5 ? g_bullet : h == 6 ? g_companion : 0; }
+static unsigned g_resolveCalls = 0;
+static std::uintptr_t __fastcall CountingResolve(std::uint32_t h) { ++g_resolveCalls; return Resolve(h); }
 static std::uint32_t Frame() { return 77; }
 static std::uint64_t __fastcall Native(std::uintptr_t, std::uintptr_t) { return g_nativeAnswer; }
 static std::uintptr_t g_drivenActors[2] {};
@@ -186,7 +188,7 @@ int main() {
 
     // ---- puppet mode (VUH-1808 default: KH2COOP_ALLY_HIT unset)
     SetEnvironmentVariableA("KH2COOP_ALLY_HIT", nullptr);
-    CHECK("unset: puppet mode installs", Install(g_image, &Log, &Resolve, &Frame, &Driven) && CurrentMode() == Mode::Puppet &&
+    CHECK("unset: puppet mode installs", Install(g_image, &Log, &CountingResolve, &Frame, &Driven) && CurrentMode() == Mode::Puppet &&
           Has("[allyhit] installed mode=puppet"));
     g_nativeAnswer = 0x1234501;
     const Stats p0 = GetStats();
@@ -199,8 +201,24 @@ int main() {
     CHECK("puppet: enemy -> local native", HookedCanHit(Attack(81, 4, 0, 1701, 2), g_local) == 0x1234501);
     CHECK("puppet: local -> enemy native (client claim path untouched)", HookedCanHit(Attack(82, 1, 0, 1702, 1), g_enemy) == 0x1234501);
     CHECK("puppet: local -> clone native (its own mask decides)", HookedCanHit(Attack(83, 1, 0, 1703, 1), g_clone) == 0x1234501);
-    CHECK("puppet: driven clone -> enemy native", HookedCanHit(Attack(84, 2, 0, 1704, 0), g_enemy) == 0x1234501);
+    {
+        // L2: victim first. A driven puppet's swing on an enemy reads no attack, resolves no handle and
+        // moves no counter, so ordinary checks cost nothing extra and the stats stay honest.
+        const Stats s0 = GetStats(); const unsigned r0 = g_resolveCalls;
+        CHECK("puppet: driven clone -> enemy native", HookedCanHit(Attack(84, 2, 0, 1704, 0), g_enemy) == 0x1234501);
+        CHECK("puppet: an ineligible victim is checked before the attack (no handle lookup)", g_resolveCalls == r0);
+        const Stats s1 = GetStats();
+        CHECK("puppet: puppet-on-enemy moves no counter", s1.calls == s0.calls && s1.playerPairs == s0.playerPairs &&
+              s1.nativeAllowed == s0.nativeAllowed && s1.refused == s0.refused);
+        HookedCanHit(Attack(97, 4, 0, 1717, 2), g_enemy);
+        CHECK("puppet: enemy -> enemy reads no attack either", g_resolveCalls == r0);
+        const unsigned r1 = g_resolveCalls;
+        HookedCanHit(Attack(98, 4, 0, 1718, 2), g_local);
+        CHECK("puppet: an eligible victim does read the attack", g_resolveCalls > r1);
+    }
     CHECK("puppet: driven clone heal (kind 5) -> local native", HookedCanHit(Attack(85, 2, 5, 1705, 0), g_local) == 0x1234501);
+    CHECK("puppet: only refusals are traced (no rows for kept checks)", !Has("atkp=1704 ") && !Has("atkp=1705 ") &&
+          !Has("atkp=1717 ") && !Has("atkp=1718 "));
     CHECK("puppet: an undriven player-class actor -> local native", HookedCanHit(Attack(86, 3, 0, 1706, 0), g_local) == 0x1234501);
     CHECK("puppet: driven-clone-sourced projectile -> local refused", HookedCanHit(Attack(87, 5, 0, 1707, 0, 2), g_local) == 0x1234500 &&
           Has("atkp=1707 native=1 verdict=refuse via=source"));

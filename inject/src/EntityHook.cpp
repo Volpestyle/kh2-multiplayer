@@ -3683,11 +3683,17 @@ bool Initialize(uintptr_t exeBase) {
     cloneneutral::Install(exeBase); // VUH-1489: default off (KH2COOP_CLONE_NEUTRAL_INPUT)
     // Ally hits (KH2COOP_ALLY_HIT): after the handle resolver is verified. Default (unset) is puppet mode
     // (VUH-1808): only a driven puppet's attacks on players / the team-1 party are refused; "0" opts out.
-    // A driver is "driven" from BindPuppetDrive until its release restores the team (applied cleared).
+    // A driver is "driven" from BindPuppetDrive until its release restores the team (applied cleared),
+    // and only while its actor is still a current puppet target: a cached clone or friend pointer
+    // (already captured values; no game-memory reads).
     allyhit::Install(exeBase, &Log, g_resolveHandle, []() -> uint32_t { return g_frameCounter; },
                      [](std::uintptr_t (&out)[2]) -> unsigned {
                          unsigned n = 0;
-                         for (const auto& d : g_puppets) if (d.actor && d.applied) out[n++] = d.actor;
+                         for (const auto& d : g_puppets) {
+                             const bool current = d.actor == g_clones[0] || d.actor == g_clones[1] ||
+                                                  d.actor == g_friend1Actor || d.actor == g_friend2Actor;
+                             if (d.actor && d.applied && current) out[n++] = d.actor;
+                         }
                          return n;
                      });
     // VUH-1519 R1/R2: party-native stays requested only if its hook, private status and the

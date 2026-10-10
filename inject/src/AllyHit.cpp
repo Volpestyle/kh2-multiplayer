@@ -91,17 +91,23 @@ std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::ui
         for (unsigned i = 0; i < n && i < 2; ++i) if (actor && driven[i] == actor) return true;
         return false;
     };
-    g_calls.fetch_add(1, std::memory_order_relaxed);
+    // Victim first: only a player-class or team-1 victim can be refused, so every other check (puppet on
+    // enemy, enemy on anything) costs one victim read and never touches the attack or the handle lookup.
+    const std::uintptr_t player = Player();
+    ActorFacts v {};
+    if (!ReadActor(victim, player, v)) { g_faults.fetch_add(1); return native; }
+    if (!PlayerSide(v.side) && v.team != 1) return native;
+    g_calls.fetch_add(1, std::memory_order_relaxed); // puppet mode: checks on an eligible victim
     AttackFacts a {};
     if (!ReadAttack(attack, a)) { g_faults.fetch_add(1); return native; }
     std::uintptr_t attacker = 0; bool viaSource = false;
     if (isDriven(a.owner)) attacker = a.owner;
     else if (a.source && a.source != a.owner && isDriven(a.source)) { attacker = a.source; viaSource = true; }
-    const std::uintptr_t player = Player();
     // The local player's own attacks are never a puppet's, even if a driver ever named it.
     if (!attacker || attacker == victim || attacker == player) return native;
-    ActorFacts v {}, o {};
-    if (!ReadActor(victim, player, v) || !ReadActor(attacker, player, o)) { g_faults.fetch_add(1); return native; }
+    ActorFacts o {};
+    if (!ReadActor(attacker, player, o)) { g_faults.fetch_add(1); return native; }
+    // Puppet mode counts only driven-puppet attacks on eligible victims (never puppet-on-enemy rows).
     g_pairs.fetch_add(1, std::memory_order_relaxed);
     g_allowed.fetch_add(1, std::memory_order_relaxed);
     Pair pair {Mode::Puppet, o.side, v.side, true, a.kind, v.team};
@@ -110,7 +116,8 @@ std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::ui
     if (BypassKind(a.kind)) g_kindKept.fetch_add(1, std::memory_order_relaxed);
     if (verdict == Verdict::Refuse) { g_refused.fetch_add(1, std::memory_order_relaxed); g_puppetRefused.fetch_add(1, std::memory_order_relaxed); }
     if (viaSource) g_viaSource.fetch_add(1, std::memory_order_relaxed);
-    if (g_log && g_traced.load() < TRACE_BUDGET && FirstSight(attack, victim)) {
+    // Refusals only, so kept rows can't spend TRACE_BUDGET before a real overlap happens.
+    if (verdict == Verdict::Refuse && g_log && g_traced.load() < TRACE_BUDGET && FirstSight(attack, victim)) {
         g_traced.fetch_add(1);
         TraceRow("puppet", o, attacker, v, victim, a, true, verdict, viaSource);
     }
