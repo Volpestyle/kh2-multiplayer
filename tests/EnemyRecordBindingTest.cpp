@@ -1,4 +1,5 @@
 #include "EnemyRecordBinding.hpp"
+#include "OrdinaryEnemyBinding.hpp"
 #ifndef RECORD_PURE_ONLY
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
@@ -26,7 +27,67 @@ struct Fixture {
     }
     rb::Result run(bool complete=true) { return lease.Resolve(scope,local,host,complete); }
 };
+
+// Copied-fact production resolver controls; no native memory, writes or hooks.
+void OrdinaryTerminalControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const ob::Identity roots{0x7FF656D27550ULL,0x7FF6571C9F18ULL,
+        0x7FF6571C2E30ULL,0x7FF657288340ULL,0x7FF657186394ULL,302};
+    const std::array<float,3> point{1,2,3};
+    auto resolve=[&](ob::Local l,ob::Host h,ob::Scope scope) {
+        const std::array locals{l}; const std::array hosts{h};
+        return ob::Resolve(locals,hosts,scope).front();
+    };
+    ob::Local local{roots,point,{},true,true};
+    ob::Host host{1,302,point,false};
+    auto live=resolve(local,host,{2,2,983});
+    check("ordinary prior living binding",live.id==1);
+    local.prior=live.next; host.dead=true;
+    auto death=resolve(local,host,{2,2,984});
+    check("856 retained frame984 established death while native living",death.id==1);
+    // Native DeathApply at 984 reads HP 2->0. Frame985 is not logged: this
+    // constructs the required continuous intermediate, NOT a recovered sample.
+    local.prior=death.next; local.living=false;
+    auto dead=resolve(local,host,{2,2,985});
+    check("ordinary living to native dead authenticated",dead.id==1);
+    local.prior=dead.next;
+    auto dead986=resolve(local,host,{2,2,986});
+    check("856 retained frame986 roots survive continuous dead observation",dead986.id==1);
+    local.prior=dead986.next;
+    auto dead987=resolve(local,host,{2,2,987});
+    check("ordinary repeated dead remains authenticated",dead987.id==1);
+    auto terminal=local; terminal.prior=dead987.next;
+    for (int mode=0;mode<12;++mode) {
+        auto l=terminal; auto h=host; ob::Scope now{2,2,988};
+        switch(mode) {
+        case 0:l.prior={};break; // no living authentication
+        case 1:++now.frame;break; // actual missing-frame variant still refuses
+        case 2:++l.identity.actor;break;
+        case 3:++l.identity.objentry;break;
+        case 4:++l.identity.status;break;
+        case 5:++l.identity.controller;break;
+        case 6:++l.identity.record;break;
+        case 7:++h.id;break; // netId reuse/replacement
+        case 8:++now.epoch;break;
+        case 9:++now.generation;break;
+        case 10:l.living=true;break; // native resurrection despite dead host
+        case 11:l.living=true;h.dead=false;break; // both advertise resurrection
+        }
+        auto refused=resolve(l,h,now);
+        check("ordinary terminal ambiguity refuses "+std::to_string(mode),refused.id==0);
+        l.prior=refused.next; ++now.frame;
+        check("ordinary refused terminal cannot recover "+std::to_string(mode),
+              resolve(l,h,now).id==0);
+    }
+    auto l=terminal; l.living=true; l.prior={};
+    check("ordinary fresh living remains allowed",resolve(l,{2,302,point,false},{2,2,988}).id==2);
+    l=terminal;
+    check("ordinary dead cannot turn into host live binding",
+          resolve(l,{1,302,point,false},{2,2,988}).id==0);
+}
+
 int main(int argc,char** argv) {
+    OrdinaryTerminalControls();
     (void)argc; (void)argv;
     for (auto oid:{317u,76u}) {
         Fixture f(oid);check("first exact complete population",f.run().admitted);

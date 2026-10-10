@@ -37,3 +37,24 @@ A fixed16-entry diagnostic-only association table counts actual Engine::Claim ca
 ## Main-based practice successor (Lead17)
 
 The practice-only three-commit stack is rebased onto exact main3c0f8e422ec6ac1b819e1a6bc2b95222b5a9f7a8, which already contains the causal diagnostic. Git range-diff reports all three patches identical; the prior19aae-based branch and856f09d remain intact. This retains main's networking/protocol15/16 behavior rather than carrying the older branch integration. Preservation controls now compare against the corresponding main-based commits. The avatar/world regression is not diagnosed or waived by this rebase: kh2-steam must run kh2coop_avatar_test and kh2coop_world_test and require both PASS, alongside kh2coop_combat_causal_test, before using this combined candidate. No native build, live run, PC2 action or landing is implied by the offline handoff.
+
+
+### Continuous ordinary death binding (practice successor to ca007d4)
+
+OrdinaryEnemyBinding now retains an authenticated terminal binding through
+consecutive dead observations. Only the original netId, sampled roots,
+generation and epoch may continue, with exactly one frame between observations.
+A missing frame, changed/reused identity, unknown dead body or resurrection still
+refuses. A refusal clears the current binding; terminal history remains so the
+same tracked body cannot recover as a new living candidate. The Mapping hard
+guard, native death application, player witnesses and UnknownDelta are unchanged.
+
+The 856 A friend log records established death at frame 984, qualified native
+DeathApply HP 2?0, then identical roots rejected at frame 986. The copied-fact
+regression uses those retained roots and frames, with an explicitly constructed
+continuous dead frame 985 (not retained in the log). It passes frame 986 under
+that continuous precondition; a missing-frame variant refuses. This does not
+retroactively qualify the spent run. Controls in EnemyRecordBindingTest cover
+living?dead?dead?dead, every root, netId, epoch/generation, gap and resurrection,
+including refusal on subsequent attempts. Native execution is pending the next
+kh2-steam build; no live authority follows from this source handoff.

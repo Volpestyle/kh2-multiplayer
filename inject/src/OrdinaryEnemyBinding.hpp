@@ -24,6 +24,9 @@ struct State {
     Identity identity{};
     Scope scope{};
     bool living{};
+    // Set only after a continuous authenticated host death is observed locally
+    // dead. Retained on refusal so the same tracked body cannot resurrect.
+    bool terminal{};
 };
 struct Local {
     Identity identity{};
@@ -69,7 +72,8 @@ inline bool Continuous(const Local& l, Scope now) noexcept {
     const auto& p = l.prior;
     // Missing frames, changed sampled roots, and absent controller/record cannot
     // authorize a tombstone. Same-address reuse between samples is unresolved.
-    return p.bound > 0 && p.living && p.identity == l.identity &&
+    return p.bound > 0 && (p.living || (p.terminal && !l.living)) &&
+           p.identity == l.identity &&
            l.identity.controller && l.identity.record &&
            p.scope.generation == now.generation && p.scope.epoch == now.epoch &&
            now.frame > p.scope.frame && now.frame-p.scope.frame == 1;
@@ -99,6 +103,12 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         d.candidate = best->id;
         if (!l.available) continue; // retain the candidate for whole-census conflict detection
         if (best->id < l.prior.highWater) { d.reason = Reason::Older; continue; }
+        // A terminal body never becomes a new live candidate. Dead continuation
+        // still requires the original ID, every sampled root and every frame.
+        if (l.prior.terminal && (l.living || !best->dead)) {
+            d.reason = Reason::UnestablishedDeath;
+            continue;
+        }
         if (best->dead && (l.prior.bound != best->id || !Continuous(l,now))) {
             d.reason = Reason::UnestablishedDeath;
             continue;
@@ -119,6 +129,8 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         }
     }
     for (auto& d : out) {
+        if (d.id > 0 && d.reason == Reason::BoundDeath && !d.next.living)
+            d.next.terminal = true;
         d.next.bound = d.id;
         d.next.highWater = std::max(d.next.highWater,d.id);
     }
