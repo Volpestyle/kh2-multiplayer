@@ -4277,11 +4277,16 @@ void ObserveCausalPopulation(bool complete) noexcept {
     ProbeCausalDisappearance(census,before);
     combatcausal::Target rows[combatcausal::TargetCount]{}; unsigned count=0;
     bool valid=CensusMatchesInstance(census);
+    for(const auto& presence:g_ordinaryPresence)if(presence.pending && !presence.finished) {
+        if(!OrdinaryPresenceCurrent(presence) || CensusHasActor(census,presence.target.actor) ||
+           !combatcausal::engine.PendingNativeLeave(before,presence.target,combatcausal::Now()))valid=false;
+    }
     for(const auto& n:census.enemies) {
         const auto it=g_inst.byActor.find(n.actor);
         if(it==g_inst.byActor.end() || it->second>=g_inst.spawns.size()){valid=false;break;}
         const auto& spawn=g_inst.spawns[it->second];
         const auto id=g_role==Role::Host ? static_cast<unsigned>(spawn.spawnIndex)+1 : static_cast<unsigned>(spawn.netId);
+        if(g_role==Role::Client && spawn.netId<=0 && !spawn.lifecycleRetired && OrdinaryPendingReplacement(census,n))continue;
         if((g_role==Role::Host&&!spawn.announced) || (g_role==Role::Client&&spawn.netId<=0&&!spawn.lifecycleRetired)){valid=false;break;}
         const auto target=CausalTarget(spawn,n,id);
         if(spawn.lifecycleRetired) {
@@ -5179,8 +5184,12 @@ void OnFrameStart(std::uint32_t frame) {
                      static_cast<unsigned long long>(g_inst.spawns[i].actor),
                      g_inst.spawns[i].spawnPos.x, g_inst.spawns[i].spawnPos.y, g_inst.spawns[i].spawnPos.z);
         }
+        if(!RefreshOrdinaryPresence(census)) {DrainPendingSpawnTrace(false);return;}
         if(!ConsumeOrdinaryRetirements(frame,census)) {DrainPendingSpawnTrace(false);return;}
         if (!ClientFrame(census)) { DrainPendingSpawnTrace(false); return; }
+        // Cache the independently read post-store binding for the NEXT frame;
+        // never carry a pre-native-call census into an absence certificate.
+        if(!RefreshOrdinaryPresence(CaptureNativeCensus())) {DrainPendingSpawnTrace(false);return;}
         TickPopulationRepair(frame, census);
         if(!ConsumePopulationDisposals(frame,census)) {
             DrainPendingSpawnTrace(false);return; // mutation/fault never reuses the pre-call population

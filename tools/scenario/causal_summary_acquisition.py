@@ -31,7 +31,8 @@ def acquire(read_sample, validate, cancel, deadline_ns, *, _clock_ns=time.perf_c
     """Return (original_sample, evidence) or fail with retained attempt evidence.
 
     Retries are reads only. Every safety/prefix/retirement failure is terminal;
-    only no new summary, or a fresh not-yet-admitted summary, may wait. At most
+    only no new summary, a fresh not-yet-admitted summary, or an explicitly
+    pending native leave awaiting its original host cut may wait. At most
     three seconds and 64 attempts, clamped to the original caller deadline.
     """
     attempts = []
@@ -83,6 +84,9 @@ def acquire(read_sample, validate, cancel, deadline_ns, *, _clock_ns=time.perf_c
                 elif _integer(row, 'admitted') != 1:
                     raise ValueError('invalid admitted summary value')
                 else:
+                    pending = int(row.get('pendingNativeLeave', '0'))
+                    if not 0 <= pending <= 5:
+                        raise ValueError('invalid pending native leave count')
                     admitted = [r for r in receipts if _integer(r, 'kind') == 0]
                     if len(admitted) != 5 or any(_integer(r, 'qualified') != 1 or _integer(r, 'reason') != 0 for r in admitted):
                         raise ValueError('fresh summary missing five original admissions')
@@ -94,12 +98,15 @@ def acquire(read_sample, validate, cancel, deadline_ns, *, _clock_ns=time.perf_c
                     earlier = _rows(before, SUMMARY)
                     if earlier and 'ownerFrame' in earlier[-1] and _integer(row, 'ownerFrame') <= _integer(earlier[-1], 'ownerFrame'):
                         raise ValueError('fresh summary owner frame did not advance')
-                    attempt['status'] = 'FRESH_ADMITTED'
-                    evidence = dict(schema='causal-summary-acquisition-v1', clock='perf_counter_ns',
-                                    startedNs=start, deadlineNs=end, finishedNs=_clock_ns(),
-                                    attempts=attempts, summary=dict(row), dispatched=False)
-                    check()
-                    return sample, evidence
+                    if pending:
+                        attempt['status'] = 'WAIT_PENDING_NATIVE_LEAVE'
+                    else:
+                        attempt['status'] = 'FRESH_ADMITTED'
+                        evidence = dict(schema='causal-summary-acquisition-v1', clock='perf_counter_ns',
+                                        startedNs=start, deadlineNs=end, finishedNs=_clock_ns(),
+                                        attempts=attempts, summary=dict(row), dispatched=False)
+                        check()
+                        return sample, evidence
         except AcquisitionFailed:
             raise
         except Exception as exc:

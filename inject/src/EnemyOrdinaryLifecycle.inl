@@ -22,11 +22,20 @@ struct OrdinaryRetirement {
     const char* outcome="queued";
 };
 std::vector<OrdinaryRetirement> g_ordinaryRetirements;
+// Client-first native removal is not an authoritative retirement. Keep the last
+// adjacent, fully checked living binding until its original host cut arrives.
+struct OrdinaryPresence {
+    OrdinaryRetirement anchor;
+    combatcausal::Target target;
+    std::uint32_t seen{},absent{},checked{};
+    bool pending{},failed{},finished{};
+};
+std::vector<OrdinaryPresence> g_ordinaryPresence;
 bool RequestOrdinaryNativeLeave(const Spawn& original,int hp);
 using OrdinaryLeaveFn=bool(*)(const Spawn&,int);
 OrdinaryLeaveFn g_ordinaryLeave=RequestOrdinaryNativeLeave;
 void ResetOrdinaryLifecycle() {
-    g_ordinaryBirths.clear();g_ordinaryRetirements.clear();g_ordinaryHostHistory.Reset();g_ordinaryClientHistory.Reset();
+    g_ordinaryBirths.clear();g_ordinaryRetirements.clear();g_ordinaryPresence.clear();g_ordinaryHostHistory.Reset();g_ordinaryClientHistory.Reset();
     g_ordinarySequence=0;g_ordinaryGeneration=g_ordinaryLoad=g_ordinaryTransition=0;g_ordinarySource.reset();
 }
 bool OrdinaryLifecycleRoom() {
@@ -59,6 +68,150 @@ combatcausal::Target OrdinaryHistoricalTarget(const Spawn& spawn,const NativeEne
     if(!ReadOrdinaryIdentity(native,identity) || identity.actor!=spawn.actor || identity.objentry!=spawn.objentry ||
        identity.status!=spawn.status || identity.controller!=spawn.controller || identity.record!=spawn.record)return {};
     return {identity.actor,identity.objentry,identity.status,identity.controller,identity.record,id,native.objectId,native.objectType,native.hp,native.maxHp};
+}
+bool OrdinaryPresenceCurrent(const OrdinaryPresence& presence) {
+    const auto& anchor=presence.anchor;
+    if(presence.failed || presence.finished || !OrdinaryCutCurrent() || g_role!=Role::Client ||
+       !g_ordinarySource || anchor.generation!=WorldSessionGeneration() || anchor.load!=warp::LoadSerial() ||
+       anchor.transition!=warp::TransitionSerial() || anchor.source.sessionId!=g_ordinarySource->sessionId ||
+       anchor.source.sourceConnectionId!=g_ordinarySource->sourceConnectionId ||
+       anchor.source.sourceDeliverySerial!=g_ordinarySource->sourceDeliverySerial ||
+       anchor.source.targetConnectionId!=g_ordinarySource->targetConnectionId ||
+       anchor.source.targetDeliverySerial!=g_ordinarySource->targetDeliverySerial ||
+       anchor.source.hostSourceSerial>g_ordinarySource->hostSourceSerial || g_resyncWriteFence!=ResyncWriteFence::None)return false;
+    if(presence.target.netId!=anchor.occurrence.netId ||
+       PopulationSpawnRoots(anchor.original)!=std::array<uintptr_t,5>{presence.target.actor,presence.target.objentry,
+           presence.target.status,presence.target.controller,presence.target.record})return false;
+    unsigned originals=0;
+    for(const auto& tracked:g_inst.spawns)if(tracked.actor==presence.target.actor &&
+       tracked.ordinaryBinding.highWater==static_cast<int>(presence.target.netId) &&
+       PopulationSpawnRoots(tracked)==PopulationSpawnRoots(anchor.original))++originals;
+    if(originals!=1)return false;
+    const auto* row=ordinarylifecycle::Find(*OrdinaryCut(),anchor.occurrence.netId);
+    return row && !row->terminal && row->birthSequence==anchor.occurrence.birthSequence &&
+        row->record==anchor.occurrence.record &&
+        population_cut_detail::sameDefinition(OrdinaryCut()->definitions[row->definition],anchor.definition);
+}
+bool OrdinaryPresenceRecord(const OrdinaryPresence& presence,const RecordCatalog& catalog) {
+    unsigned matches=0;
+    for(std::uint32_t index=0;index<catalog.entryCount;++index) {
+        const auto& entry=catalog.entries[index];
+        if(population_cut_detail::sameDefinition(entry.content,presence.anchor.definition)) {
+            if(entry.controller!=presence.target.controller ||
+               entry.spawnArray+64*presence.anchor.occurrence.record!=presence.target.record)return false;
+            ++matches;
+        }
+    }
+    return matches==1;
+}
+void OrdinaryPresenceFailure(OrdinaryPresence& presence,const char* reason) {
+    if(presence.failed)return;
+    presence.failed=true;InvalidateClientClaims("ordinary-native-leave-unproved");
+    if(g_log)g_log("[ordinary-lifecycle] native-pending netId=%u actor=%llX frame=%u outcome=%s killCredit=0 nativeWrite=0",
+        presence.target.netId,(unsigned long long)presence.target.actor,g_hitTraceFrame,reason);
+}
+// Runs with the observer OFF too. No cached address is dereferenced after absence.
+bool RefreshOrdinaryPresence(const NativeCensus& census) {
+    if(g_role!=Role::Client || !OrdinaryLifecycleRoom() || !OrdinaryCut())return true;
+    RecordCatalog first,last;
+    if(!OrdinaryCutCurrent() || !CensusMatchesInstance(census) || !FreshRecordCatalog(census,first))return false;
+    bool valid=true;
+    for(auto& presence:g_ordinaryPresence) {
+        if(presence.finished)continue;
+        const auto death=g_host.enemies.find(static_cast<std::uint16_t>(presence.target.netId));
+        if(!presence.pending && !presence.failed && death!=g_host.enemies.end() && death->second.dead) {
+            // The existing authenticated death/native-zero path owns this body;
+            // do not reinterpret it as a living membership leave.
+            presence.finished=true;continue;
+        }
+        if(!OrdinaryPresenceCurrent(presence) || !OrdinaryPresenceRecord(presence,first)) {
+            OrdinaryPresenceFailure(presence,"refuse-original-scope-or-record");valid=false;continue;
+        }
+        const auto found=std::find_if(census.enemies.begin(),census.enemies.end(),[&](const auto& native){return native.actor==presence.target.actor;});
+        if(found==census.enemies.end()) {
+            if(presence.pending && presence.checked!=g_hitTraceFrame &&
+               (presence.checked==UINT32_MAX || presence.checked+1!=g_hitTraceFrame)) {
+                OrdinaryPresenceFailure(presence,"refuse-pending-census-gap");valid=false;continue;
+            }
+            if(!presence.pending) {
+                if(presence.seen==UINT32_MAX || presence.seen+1!=g_hitTraceFrame || presence.target.hp<=0) {
+                    OrdinaryPresenceFailure(presence,"refuse-nonadjacent-native-leave");valid=false;continue;
+                }
+                presence.pending=true;presence.absent=g_hitTraceFrame;
+                InvalidateClientClaims("ordinary-native-leave-awaiting-cut");
+                if(g_log)g_log("[ordinary-lifecycle] native-pending netId=%u actor=%llX frame=%u lastSeen=%u hp=%d outcome=awaiting-authoritative-cut killCredit=0 nativeWrite=0",
+                    presence.target.netId,(unsigned long long)presence.target.actor,g_hitTraceFrame,presence.seen,presence.target.hp);
+            }
+            presence.checked=g_hitTraceFrame;
+            const auto repeated=CaptureNativeCensus(presence.target.actor);
+            if(g_hitTraceFrame<presence.absent || g_hitTraceFrame-presence.absent>120 ||
+               !CensusMatchesInstance(repeated) || repeated.watchedActorPresent || !OrdinaryPresenceCurrent(presence)) {
+                OrdinaryPresenceFailure(presence,"refuse-pending-absence-or-timeout");valid=false;
+            }
+        } else {
+            if(presence.pending) {OrdinaryPresenceFailure(presence,"refuse-reappeared-or-reused-actor");valid=false;continue;}
+            const auto target=OrdinaryHistoricalTarget(presence.anchor.original,*found,presence.target.netId);
+            if(!combatcausal::SameTarget(target,presence.target) || target.hp<=0) {
+                OrdinaryPresenceFailure(presence,"refuse-changed-living-roots");valid=false;continue;
+            }
+            presence.target=target;presence.seen=g_hitTraceFrame;
+        }
+    }
+    // Establish presence only from an already earned, live native binding.
+    for(const auto& spawn:g_inst.spawns)if(spawn.netId>0 && spawn.present && !spawn.lifecycleRetired) {
+        const auto* row=ordinarylifecycle::Find(*OrdinaryCut(),static_cast<unsigned>(spawn.netId));
+        const auto exists=std::find_if(g_ordinaryPresence.begin(),g_ordinaryPresence.end(),[&](const auto& presence){return presence.target.netId==static_cast<unsigned>(spawn.netId);});
+        const auto death=g_host.enemies.find(static_cast<std::uint16_t>(spawn.netId));
+        if(exists!=g_ordinaryPresence.end() || !row || row->terminal || spawn.ordinaryBinding.highWater!=spawn.netId ||
+           (death!=g_host.enemies.end() && death->second.dead))continue;
+        const auto* native=FindNativeEnemy(census,spawn);if(!native || native->hp<=0)continue;
+        OrdinaryPresence presence;
+        presence.anchor={spawn,*row,OrdinaryCut()->definitions[row->definition],*g_ordinarySource,
+            WorldSessionGeneration(),census.load,census.transition,g_hitTraceFrame};
+        presence.target=OrdinaryHistoricalTarget(spawn,*native,row->netId);presence.seen=g_hitTraceFrame;
+        if(!combatcausal::SameTarget(presence.target,presence.target) || !OrdinaryPresenceRecord(presence,first) ||
+           g_ordinaryPresence.size()==POPULATION_MAX_ENTRIES) {
+            for(auto& original:g_ordinaryPresence)if(!original.finished)OrdinaryPresenceFailure(original,"refuse-presence-establishment");
+            return false;
+        }
+        g_ordinaryPresence.push_back(std::move(presence));
+    }
+    const auto repeated=CaptureNativeCensus();
+    bool bookend=FreshRecordCatalog(census,last) && SameRecordCatalogSample(first,last) &&
+        CensusMatchesInstance(census) && CensusMatchesInstance(repeated) && OrdinaryCutCurrent();
+    for(const auto& presence:g_ordinaryPresence)if(!presence.finished && !presence.failed) {
+        const auto found=std::find_if(repeated.enemies.begin(),repeated.enemies.end(),[&](const auto& native){return native.actor==presence.target.actor;});
+        if(presence.pending)bookend=bookend && found==repeated.enemies.end();
+        else if(found==repeated.enemies.end())bookend=false;
+        else {
+            const auto target=OrdinaryHistoricalTarget(presence.anchor.original,*found,presence.target.netId);
+            bookend=bookend && combatcausal::SameTarget(target,presence.target) && target.hp==presence.target.hp;
+        }
+    }
+    if(!bookend)for(auto& presence:g_ordinaryPresence)if(!presence.finished)
+        OrdinaryPresenceFailure(presence,"refuse-presence-bookend");
+    return valid && bookend;
+}
+// Only an unbound, independently typed replacement of the pending record may
+// be omitted from the diagnostic population. It receives no ID or HP authority.
+bool OrdinaryPendingReplacement(const NativeCensus& census,const NativeEnemy& native) {
+    if(native.objectId!=302 || native.objectType!=4 || native.hp<=0 || census.enemies.size()>5 || !OrdinaryCutCurrent())return false;
+    ordinarybinding::Identity identity;RecordCatalog first,last;spawncontroller::NativeRecordMembership member;
+    if(!ReadOrdinaryIdentity(native,identity) || !FreshRecordCatalog(census,first) ||
+       !RecordMember(first,census,native.actor,member) || member.issues)return false;
+    unsigned localAliases=0;
+    for(const auto& candidate:census.enemies) {
+        ordinarybinding::Identity checked;
+        if(!ReadOrdinaryIdentity(candidate,checked))return false;
+        if(checked.controller==identity.controller && checked.record==identity.record)++localAliases;
+    }
+    if(localAliases!=1)return false;
+    unsigned matches=0;
+    for(const auto& presence:g_ordinaryPresence)if(presence.pending && OrdinaryPresenceCurrent(presence) &&
+       native.actor!=presence.target.actor && !CensusHasActor(census,presence.target.actor) &&
+       identity.controller==presence.target.controller && identity.record==presence.target.record &&
+       member.recordIndex==presence.anchor.occurrence.record && OrdinaryPresenceRecord(presence,first))++matches;
+    return matches==1 && FreshRecordCatalog(census,last) && SameRecordCatalogSample(first,last) && CensusMatchesInstance(census);
 }
 bool PublishOrdinaryLifecycle(const NativeCensus& census) {
     if(!OrdinaryLifecycleRoom())return true;
@@ -195,17 +348,32 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
     for(unsigned i=0;i<3;++i)deliveries[i]=g_bridge.PeerDeliverySerial(static_cast<std::uint8_t>(i));
     const auto before=CausalScope();const auto census=CaptureNativeCensus();
     if(!CensusMatchesInstance(census) || !SafeNativeGameplay())return;
+    if(!RefreshOrdinaryPresence(census)){OrdinaryCutReceipt(cut,"client-refused-native-history");return;}
     RecordCatalog catalogBefore,catalogAfter;
     if(!FreshRecordCatalog(census,catalogBefore))return;
-    struct Retiring {std::size_t index;const PopulationOccurrence* row;combatcausal::Target target;};
+    struct Retiring {std::size_t index;const PopulationOccurrence* row;combatcausal::Target target;bool absent;};
     std::vector<Retiring> retiring;
     for(const auto& row:cut.entries)if(row.removed) {
         const auto* prior=g_ordinaryClientHistory.Current()?ordinarylifecycle::Find(*g_ordinaryClientHistory.Current(),row.netId):nullptr;
         if(prior && !prior->terminal)for(auto& spawn:g_inst.spawns)if(spawn.ordinaryBinding.highWater==row.netId) {
-            NativeEnemy native;bool enemy=false;
-            if(!ReadNativeEnemy(spawn.actor,native,enemy) || !enemy)return;
-            const auto target=OrdinaryHistoricalTarget(spawn,native,row.netId);
-            if(!combatcausal::SameTarget(target,target))return;
+            const bool absent=!CensusHasActor(census,spawn.actor);
+            combatcausal::Target target;
+            if(absent) {
+                const auto original=std::find_if(g_ordinaryPresence.begin(),g_ordinaryPresence.end(),[&](const auto& presence) {
+                    return presence.target.netId==row.netId && presence.pending && OrdinaryPresenceCurrent(presence) &&
+                        PopulationSpawnRoots(presence.anchor.original)==PopulationSpawnRoots(spawn) &&
+                        presence.anchor.occurrence.birthSequence==row.birthSequence &&
+                        presence.anchor.occurrence.record==row.record &&
+                        population_cut_detail::sameDefinition(presence.anchor.definition,cut.definitions[row.definition]);
+                });
+                if(original==g_ordinaryPresence.end()){OrdinaryCutReceipt(cut,"client-refused-absence-without-binding");return;}
+                target=original->target; // last checked positive HP, not a read of a disposed actor
+            } else {
+                const auto* native=FindNativeEnemy(census,spawn);
+                if(!native){OrdinaryCutReceipt(cut,"client-refused-old-body");return;}
+                target=OrdinaryHistoricalTarget(spawn,*native,row.netId);
+            }
+            if(!combatcausal::SameTarget(target,target) || target.hp<=0){OrdinaryCutReceipt(cut,"client-refused-old-identity");return;}
             unsigned matches=0;
             for(std::uint32_t i=0;i<catalogBefore.entryCount;++i) {
                 const auto& entry=catalogBefore.entries[i];
@@ -215,13 +383,19 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
                 }
             }
             if(matches!=1)return;
-            retiring.push_back({static_cast<std::size_t>(&spawn-g_inst.spawns.data()),&row,target});
+            retiring.push_back({static_cast<std::size_t>(&spawn-g_inst.spawns.data()),&row,target,absent});
         }
     }
     if(!FreshRecordCatalog(census,catalogAfter) || !SameRecordCatalogSample(catalogBefore,catalogAfter) ||
        !ReadClientClaimScope(productAfter) || !SameClientClaimScope(productBefore,productAfter) ||
        !g_host.ackSent || !salt || salt!=g_bridge.SpawnPickSalt() || !CensusMatchesInstance(census))return;
     for(unsigned i=0;i<3;++i)if(deliveries[i]!=g_bridge.PeerDeliverySerial(static_cast<std::uint8_t>(i)))return;
+    for(const auto& pending:retiring)if(pending.absent) {
+        const auto bookend=CaptureNativeCensus(pending.target.actor);
+        if(!CensusMatchesInstance(bookend) || bookend.watchedActorPresent || !OrdinaryCutCurrent()) {
+            OrdinaryCutReceipt(cut,"client-refused-absence-bookend");return;
+        }
+    }
     if(g_ordinaryRetirements.size()+retiring.size()>POPULATION_MAX_ENTRIES)return;
     for(const auto& pending:retiring) {
         const auto& row=*pending.row;
@@ -235,6 +409,12 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
         const auto& row=*pending.row;
         g_ordinaryRetirements.push_back({g_inst.spawns[pending.index],row,cut.definitions[row.definition],source,
             WorldSessionGeneration(),census.load,census.transition,g_hitTraceFrame});
+        if(pending.absent) {
+            auto& ticket=g_ordinaryRetirements.back();ticket.completed=true;ticket.outcome="complete-native-absence-before-cut";
+            if(g_log)g_log("[ordinary-lifecycle] native-retire netId=%u actor=%llX frame=%u outcome=%s killCredit=0 nativeWrite=0",
+                row.netId,(unsigned long long)ticket.original.actor,g_hitTraceFrame,ticket.outcome);
+        }
+        for(auto& presence:g_ordinaryPresence)if(presence.target.netId==row.netId)presence.finished=true;
     }
     for(const auto& pending:retiring) {
         auto& spawn=g_inst.spawns[pending.index];spawn.ordinaryBinding.removed=true;

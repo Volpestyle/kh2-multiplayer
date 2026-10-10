@@ -2183,7 +2183,7 @@ void TestCombatCausalBoundaries() {
     // Actual B: frame691 released five bodies; cut6 retires living net4 at20.
     // Native leave leaf is the ONLY replacement below; all authenticated source,
     // census/record/scope and release decisions are the production functions.
-    const auto retirementSetup=[&]() {
+    const auto retirementSetup=[&](bool publishRetirement=true) {
         prepare(false,true);SeedPreparationShadows(20);
         // SeedPreparationShadows refreshes tracking; re-earn native certificate.
         for(auto& tracked:g_inst.spawns) {
@@ -2194,6 +2194,9 @@ void TestCombatCausalBoundaries() {
         for(unsigned id=1;id<=5;++id)baseline.entries.push_back({static_cast<std::uint16_t>(id),20,20});
         g_bridge.incoming.push_back(HostEnvelope(encode(baseline),2));ReceiveWorldPackets();
         Check(ReleaseClientClaims(691),"B frame691 complete original manifest release");
+        g_hitTraceFrame=795;
+        Check(RefreshOrdinaryPresence(CaptureNativeCensus()),"cache original five living native identities before any leave");
+        if(!publishRetirement)return;
         auto cut=*OrdinaryCut();cut.sequence=6;cut.entries[3].terminal=cut.entries[3].removed=true;cut.entries[3].terminalSequence=6;
         g_hitTraceFrame=796;g_bridge.incoming.push_back(HostEnvelope(encode(cut),3));ReceiveWorldPackets();
         Check(g_ordinaryRetirements.size()==1&&g_ordinaryRetirements[0].occurrence.netId==4&&
@@ -2298,6 +2301,73 @@ void TestCombatCausalBoundaries() {
     g_bridge.incoming.push_back(HostEnvelope(encode(replacementHp),6));ReceiveWorldPackets();
     Check(ReleaseClientClaims(798)&&leaveCalls==1&&deathCalls==0,
           "replacement complete current native readback releases without relabel/kill credit");
+    // New B: native leave frame801 precedes cut6 delivery. The old allocation
+    // is intentionally unreadable: cached adjacent binding + independent list
+    // absence, not disposed-memory readback, must authorize the matching cut.
+    for(unsigned absentMutation=0;absentMutation<12;++absentMutation) {
+        retirementSetup(false);leaveCalls=0;g_hitTraceFrame=800;
+        Check(RefreshOrdinaryPresence(CaptureNativeCensus()),"B frame800 refresh original net4 positive native presence");
+        auto delayedCut=*OrdinaryCut();delayedCut.sequence=6;
+        delayedCut.entries[3].terminal=delayedCut.entries[3].removed=true;delayedCut.entries[3].terminalSequence=6;
+        switch(absentMutation) {
+        case 1:g_ordinaryPresence.clear();break;
+        case 2:g_ordinaryPresence[3].seen=798;break;
+        case 3:++g_ordinaryPresence[3].anchor.source.sourceDeliverySerial;break;
+        case 4:++g_ordinaryPresence[3].anchor.original.record;break;
+        case 5:++g_ordinaryPresence[3].anchor.occurrence.birthSequence;break;
+        case 6:++g_ordinaryPresence[3].anchor.generation;break;
+        case 7:++g_ordinaryPresence[3].anchor.definition.header[0];break;
+        case 9:g_ordinaryPresence[3].anchor.source.sessionId[0]^=1;break;
+        case 10:g_inst.spawns[3].ordinaryBinding.highWater=6;break;
+        }
+        Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+            static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+        g_hitTraceFrame=801;
+        const bool pendingRead=RefreshOrdinaryPresence(CaptureNativeCensus());
+        Put(enemy+0x6000+ACTOR_STATUS,std::uintptr_t{0}); // disposed old allocation
+        if(absentMutation==8)g_hitTraceFrame=922;
+        if(absentMutation==11) {
+            Put(enemy+0x6000+ACTOR_STATUS,status+0x300);
+            Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+                static_cast<std::uint32_t>((enemy+0x6000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+            g_hitTraceFrame=802; // original pointer reappears; pending may not be re-anchored
+        }
+        g_bridge.incoming.push_back(HostEnvelope(encode(delayedCut),3));ReceiveWorldPackets();
+        if(absentMutation==0) {
+            Check(pendingRead&&OrdinaryCut()->sequence==6&&g_ordinaryRetirements.size()==1&&
+                g_ordinaryRetirements[0].completed&&leaveCalls==0&&nativeCalls==0&&deathCalls==0,
+                "B frame801 native-first leave accepts authenticated cut6 already complete with no disposed read/kill/native call");
+            Check(!ReleaseClientClaims(801),"absent-before-cut retirement cannot weaken full manifest release");
+            EnemyManifest delayedManifest;delayedManifest.epoch=9;delayedManifest.replace=false;
+            EnemyManifestEntry delayedEntry;delayedEntry.netId=6;delayedEntry.objectId=302;
+            delayedEntry.spawnIndex=5;delayedEntry.battleProgram=1;delayedManifest.entries.push_back(delayedEntry);
+            g_bridge.incoming.push_back(HostEnvelope(encode(delayedManifest),4));ReceiveWorldPackets();
+            auto delayedBirth=delayedCut;delayedBirth.sequence=7;
+            auto replacementOccurrence=delayedCut.entries[3];replacementOccurrence.netId=6;
+            replacementOccurrence.terminal=replacementOccurrence.removed=false;replacementOccurrence.terminalSequence=0;
+            replacementOccurrence.birthSequence=replacementOccurrence.occurrence=7;delayedBirth.entries.push_back(replacementOccurrence);
+            g_bridge.incoming.push_back(HostEnvelope(encode(delayedBirth),5));ReceiveWorldPackets();
+            Check(OrdinaryCut()->sequence==7,"native-first cut6 commits before ordered cut7 birth");
+            std::memcpy(reinterpret_cast<void*>(newActor),reinterpret_cast<void*>(enemy),0x1000);
+            Put(newActor+offsets::actor::OBJENTRY_PTR,object);Put(newActor+ACTOR_STATUS,newStatus);
+            Put(newStatus,std::int32_t{20});Put(newStatus+4,std::int32_t{20});
+            Put(newActor+0x9E8,RecordController());Put(newActor+0x9F0,RecordData(0,3));
+            Put(newActor+offsets::actor::LINKED_NEXT_HANDLE,std::uint32_t{0});
+            Put(enemy+0x8000+offsets::actor::LINKED_NEXT_HANDLE,
+                static_cast<std::uint32_t>(newActor&offsets::active_entity_list::HANDLE_LOW_MASK));
+            Put(image+offsets::active_entity_list::TAIL,newActor);
+            currentCensus=CaptureNativeCensus();TrackSpawns(currentCensus);
+            Check(ResolveOrdinaryBindings(currentCensus,WorldSessionGeneration())&&
+                  g_inst.spawns[g_inst.byActor.at(newActor)].netId==6,
+                  "native-first removal binds new body only after exact old retire and new birth, never relabels");
+            EnemyHp delayedHp;delayedHp.epoch=9;delayedHp.sequence=7;
+            for(unsigned id: {1u,2u,3u,5u,6u})delayedHp.entries.push_back({static_cast<std::uint16_t>(id),20,20});
+            g_bridge.incoming.push_back(HostEnvelope(encode(delayedHp),6));ReceiveWorldPackets();
+            Check(ReleaseClientClaims(802)&&leaveCalls==0&&nativeCalls==0&&deathCalls==0,
+                  "native-first replacement full original release gates succeed with zero native leave/kill calls");
+        } else Check(OrdinaryCut()->sequence==5&&g_ordinaryRetirements.empty()&&leaveCalls==0,
+            "missing/gapped/foreign/reused/stale native-first binding refuses cut without leaf or reanchor");
+    }
     g_ordinaryLeave=originalLeave;
     cc::enabled.store(false);Reset();
 }

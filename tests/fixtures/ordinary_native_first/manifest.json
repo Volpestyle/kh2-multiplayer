@@ -1,0 +1,29 @@
+{
+  "schema": "ordinary-native-first-retained-v1",
+  "source": "03329070db92a3b9dd73386492b5be0890728ec9",
+  "acceptance": false,
+  "nativeConsumerFailureReasonRetained": false,
+  "files": [
+    {
+      "name": "inject-0.log",
+      "sourcePath": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\practice-client-retirement-B-20261010-01\\inject-0.log",
+      "bytes": 188632,
+      "sha256": "68f166ad779f32b776a984905b811fb25465cc8b99b6bef2766352cedf761ccd",
+      "compressedSha256": "f53ffe4c847ea5254200ac469594e612b993b937a92840a8db036db5398fa4c6"
+    },
+    {
+      "name": "inject-1.log",
+      "sourcePath": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\practice-client-retirement-B-20261010-01\\inject-1.log",
+      "bytes": 270690,
+      "sha256": "854142870adeb8f5b66e525e7624912e19394bdef452067a5599838c0accc57c",
+      "compressedSha256": "fc1a3cf3b64d9bb2e2f63cd6b9447fc3ae869bbc3db455a5529cd278ee1d1f7a"
+    },
+    {
+      "name": "runtime-1.log",
+      "sourcePath": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\practice-client-retirement-B-20261010-01\\runtime-1.log",
+      "bytes": 26332,
+      "sha256": "2bcf0548bd2bf976b373bb17796678d671a5bd39c0d77cbb63cb1b30f0e129e3",
+      "compressedSha256": "a1b7dc5fbc17761bf2a78d27f380ffae149f6b3c42342e6abd7e7e74e78cb4e7"
+    }
+  ]
+}

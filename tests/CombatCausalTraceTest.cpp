@@ -197,6 +197,51 @@ void LifecycleControls() {
         if(withProof)Check(local.Removed(actual[3])&&!local.Member(4),"retained live HP20 never converted to native death");
     }
 }
+// Native-first removal is record-only pending, not death or new membership.
+void NativePendingControls() {
+    const auto originalCut=LifecycleFixture();const auto originalBytes=kh2coop::encode(originalCut);
+    auto removedCut=originalCut;removedCut.sequence=6;
+    removedCut.entries[0].terminal=removedCut.entries[0].removed=true;removedCut.entries[0].terminalSequence=6;
+    const auto removedBytes=kh2coop::encode(removedCut);
+    for(unsigned pendingMutation=0;pendingMutation<10;++pendingMutation) {
+        auto pendingScope=Scope(true);Admit(local,pendingScope);
+        for(unsigned id=1;id<=5;++id)local.BindBirth(pendingScope,Target(id),id,originalBytes.data(),static_cast<unsigned>(originalBytes.size()),3);
+        auto originalTarget=Target();
+        switch(pendingMutation) {
+        case 1:++originalTarget.actor;break;
+        case 2:--originalTarget.hp;break;
+        case 3:++pendingScope.native.epoch;break;
+        case 4:pendingScope.native.role=1;break;
+        }
+        const bool pendingAccepted=local.PendingNativeLeave(pendingScope,originalTarget,4);
+        if(pendingMutation>0 && pendingMutation<5) {
+            Check(!pendingAccepted&&local.Retired(),"foreign/HP-changed/scope/host pending leave hard refuses");continue;
+        }
+        Check(pendingAccepted&&local.PendingNativeCount()==1&&!local.Removed(originalTarget),"original client absence pending retains old ID/HP without death or retirement");
+        cc::Target remaining[4];for(unsigned id=2;id<=5;++id)remaining[id-2]=Target(id);
+        pendingScope.native.frame++;
+        if(pendingMutation==5)remaining[0].hp--;
+        if(pendingMutation==6)remaining[0].status++;
+        if(pendingMutation==7)pendingScope.native.frame+=121;
+        if(pendingMutation==8)pendingScope.delivery++;
+        if(pendingMutation==9) {
+            cc::Target reappeared[5];for(unsigned id=1;id<=5;++id)reappeared[id-1]=Target(id);
+            local.Population(pendingScope,reappeared,5,5);
+        } else local.Population(pendingScope,remaining,4,5);
+        if(pendingMutation>=5) {
+            Check(local.Retired(),"pending absence never hides other HP/roots/scope/time/reappearance failures");continue;
+        }
+        Check(!local.Retired()&&local.Member(1),"bounded pending missing original is record-only, never member retirement");
+        bool pendingReceipt=false;cc::Receipt pendingRow;
+        while(local.Pop(pendingRow))if(pendingRow.kind==cc::Kind::MembershipPending)
+            pendingReceipt=pendingRow.reason==cc::Reason::Pending&&!pendingRow.locallyQualified&&pendingRow.beforeHp==100&&pendingRow.afterHp==100;
+        Check(pendingReceipt,"pending receipt explicitly unqualified with unchanged positive HP");
+        Check(local.RetireMember(pendingScope,1,1,6,originalTarget,removedBytes.data(),static_cast<unsigned>(removedBytes.size()),6)&&
+              !local.PendingNativeCount()&&local.Removed(originalTarget),"only authenticated matching host cut completes pending retirement");
+    }
+    auto noBirthScope=Scope(true);Admit(local,noBirthScope);
+    Check(!local.PendingNativeLeave(noBirthScope,Target(),7)&&local.Retired(),"uncertified native absence cannot become pending");
+}
 int main(){
  bool published=false;HANDLE reader=CreateThread(nullptr,0,PublicationReader,&published,0,nullptr);
  Check(reader!=nullptr,"independent clock publication reader created");cc::Configure(true,PublishedClock);
@@ -262,5 +307,5 @@ int main(){
  Admit(cc::engine,s);cc::currentScope=s;
  cc::engine.Consumer(s,23,cc::Reason::RejectDecode,0,0,9,0,hp.data(),static_cast<unsigned>(hp.size()),21);
  cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"actual queued consumer-rejection logger failure is contained");
- cc::Configure(false,Clock);LifecycleControls();CompanionControls();PracticePlayerControls();PracticeClientControls();DisappearanceControls();
+ cc::Configure(false,Clock);LifecycleControls();NativePendingControls();CompanionControls();PracticePlayerControls();PracticeClientControls();DisappearanceControls();
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}

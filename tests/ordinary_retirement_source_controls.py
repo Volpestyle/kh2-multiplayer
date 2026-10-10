@@ -35,8 +35,12 @@ impl = source("inject/src/EnemyOrdinaryLifecycle.inl")
 check(body(sync, "bool ReleaseClientClaims(") == body(old, "bool ReleaseClientClaims("), "full claim release gate byte-exact")
 begin, end = "bool lifecycleUnknown=false;", "g_hostHpSequence = m.sequence;"
 check(sync[sync.index(begin):sync.index(end)] == old[old.index(begin):old.index(end)], "reason21 in-flight-birth refusal byte-exact")
-for path in ("inject/src/OrdinaryEnemyBinding.hpp", "inject/src/CombatCausalTrace.hpp", "inject/src/EnemyMirror.inl", "CMakeLists.txt"):
+for path in ("inject/src/OrdinaryEnemyBinding.hpp", "inject/src/EnemyMirror.inl", "CMakeLists.txt"):
     check(source(path) == original(path), path + " unchanged")
+trace=source("inject/src/CombatCausalTrace.hpp")
+oldtrace=original("inject/src/CombatCausalTrace.hpp")
+for method in ("void Hit(","void Claim(","void HostApply(","void Consumer(","void Packet(","void Applied(","bool PacketWire(","bool ClaimWire(","bool LifecycleProof(","bool BindBirth("):
+    check(body(trace,method)==body(oldtrace,method),method+" exact; no causal or HP guard relaxation")
 leaf = body(sync, "bool RequestOrdinaryNativeLeave(")
 check("g_applyStatDelta" not in leaf and "g_takeDamage" not in leaf and "*flags|=0x10" in leaf, "native leave has no damage/death call")
 check("memcmp" in leaf and "wrapperBytes" in leaf and "fadeBytes" in leaf and "hp<=0" in leaf, "native ABI/version and positive HP gated")

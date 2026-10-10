@@ -65,7 +65,7 @@ def emit(name, **context):
     for expression in expressions:
         expression = expression.replace("static_cast<unsigned long long>", "int")
         # No arbitrary source execution: only member/index reads, wrapper calls,
-        # and the eight named zero-argument Engine accessors used by Drain.
+        # and the named zero-argument Engine accessors used by Drain.
         if not re.fullmatch(r"[A-Za-z0-9_.\[\]()]+", expression):
             raise ValueError("unsupported serializer expression " + expression)
         values.append(eval(expression, {"__builtins__": {}, "U": int, "unsigned": int,
@@ -82,7 +82,7 @@ def render(rows, summary_changes=None):
             text += emit("consumer", r=r, a=r.admittedScope)
         for i in range(row["causeCount"]):
             text += emit("association", r=r, i=i)
-    fields = dict(Admitted=1, Retired=0, Started=len(rows), Drained=len(rows), Dropped=0, Loss=0)
+    fields = dict(Admitted=1, Retired=0, Started=len(rows), Drained=len(rows), Dropped=0, Loss=0, PendingNativeCount=0)
     fields.update(summary_changes or {})
     engine = NS(**{k: (lambda value=v: value) for k, v in fields.items()})
     current = namespace(rows[-1]).scope if rows else NS(delivery=0,native=NS(frame=0,available=False,generation=0,connectionId=0,epoch=0,loadSerial=0,transitionSerial=0,role=0,slot=0,location=(0,)*6))

@@ -20,7 +20,7 @@ from ordinary_lifecycle_audit import History as LifecycleHistory, decode as deco
 
 KINDS = ("Admission", "Hit", "Claim", "HostApply", "HpPublish", "HpReceive",
          "HpApply", "DeathPublish", "DeathReceive", "DeathApply", "Packet",
-         "Retired", "ConsumerRejected", "ConsumerAccepted", "MembershipRetire", "MembershipBirth")
+         "Retired", "ConsumerRejected", "ConsumerAccepted", "MembershipRetire", "MembershipBirth", "MembershipPending")
 SCOPE = "generation delivery sessionSalt connection host peer hostDelivery peerDelivery epoch load transition role slot location".split()
 ROOTS = "actor objentry status controller record objectId type maxHp".split()
 HEX = set("actor objentry status controller record".split())
@@ -28,6 +28,7 @@ BITS = set("qualified attempted returned readback enqueued".split())
 RECEIPT = set(("schema serial qpc kind reason qualified event hpSequence loss generation delivery sessionSalt connection host peer hostDelivery peerDelivery epoch load transition frame role slot location netId objectId type actor objentry status controller record targetHp maxHp claimConnection claimSeq attackId damage beforeHp afterHp requestedHp attempted returned readback enqueued causeCount payloadBytes payloadFnv64 payload incarnationAuthority").split())
 SUMMARY = set("schema admitted retired started drained dropped loss nativeCoverageQualified acceptance".split())
 SUMMARY_OWNER = SUMMARY | set("ownerFrame ownerAvailable generation delivery connection epoch load transition role slot location".split())
+SUMMARY_PENDING = SUMMARY_OWNER | {'pendingNativeLeave'}
 CONSUMER = set(("schema serial outcome wireType reason expectedEpoch sequenceFloor originalBytes retainedBytes truncated admittedGeneration admittedDelivery admittedSessionSalt admittedConnection admittedHost admittedPeer admittedHostDelivery admittedPeerDelivery admittedEpoch admittedLoad admittedTransition admittedRole admittedSlot admittedLocation").split())
 ASSOCIATION = set("schema serial index event".split())
 LIMITS = [
@@ -89,6 +90,8 @@ def parse(text, peer, audit):
                 fields[key] = value
             if name=="summary" and fields.keys()==SUMMARY_OWNER:
                 expected=SUMMARY_OWNER
+            if name=="summary" and fields.keys()==SUMMARY_PENDING:
+                expected=SUMMARY_PENDING
             if expected is None or fields.keys() != expected:
                 raise ValueError("unknown/missing schema fields")
             converted = {"line": number}
@@ -128,6 +131,10 @@ def parse(text, peer, audit):
                     raise ValueError("unsupported incarnation assertion")
                 rows.append(row)
             elif name == "summary":
+                if not 0 <= row.get('pendingNativeLeave', 0) <= 5:
+                    raise ValueError('pending native leave count')
+                if row.get('pendingNativeLeave', 0):
+                    audit.issue('native_leave_pending_summary', peer, row, category='coverage')
                 summaries.append(row)
             elif name == "consumer":
                 if row["serial"] in supplements:
@@ -259,6 +266,15 @@ def prepare(rows, peer, audit):
                 audit.issue("consumer_promoted_to_cause", peer, row)
             continue
         net=row["netId"]
+        if row['kind']==16:
+            original=mapping.get(net)
+            if (peer!='client' or net in retired or not original or target(original)!=target(row) or
+                row['event']!=births.get(net) or row['qualified'] or row['reason']!=12 or
+                row['payload'] or row['attempted'] or row['returned'] or row['enqueued'] or row['damage'] or
+                row['beforeHp']!=row['afterHp'] or not 0 < row['afterHp'] <= row['maxHp']):
+                audit.issue('invalid_native_leave_pending',peer,row)
+            audit.issue('native_leave_pending_record_only',peer,row,category='coverage')
+            continue
         if row["kind"] in (14,15):
             try:
                 if row["payload"] != lifecycle_raw:
@@ -529,7 +545,7 @@ def audit_texts(host_text, client_text):
             if not any(r.get("publication") is pub for r in peers["client"]):
                 audit.issue("publication_without_receive", "host", pub, category="coverage")
     for peer, rows in peers.items():
-        allowed = {0, 1, 3, 4, 7, 11, 12, 13, 14, 15} if peer == "host" else {0, 1, 2, 5, 6, 8, 9, 11, 12, 13, 14, 15}
+        allowed = {0, 1, 3, 4, 7, 11, 12, 13, 14, 15} if peer == "host" else {0, 1, 2, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16}
         last_hit, last_frame = 0, 0
         for row in rows:
             if row["kind"] not in allowed:

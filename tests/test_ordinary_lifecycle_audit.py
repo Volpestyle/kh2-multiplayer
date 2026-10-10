@@ -46,6 +46,21 @@ def timeline(peer):
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_pending_native_leave_is_never_a_cause(self):
+        h,c=timeline('host'),timeline('client')
+        pending=copy.deepcopy(c[3]);pending.update(kind=16,event=4,qualified=0,reason=12,beforeHp=100,afterHp=100,payload=b'')
+        c.insert(10,pending)
+        result=A.audit_texts(render(h),render(legacy.finalize(c)))
+        codes={r['code'] for r in result['issues']}
+        self.assertIn('native_leave_pending_record_only',codes)
+        self.assertNotIn('invalid_native_leave_pending',codes)
+        self.assertNotIn('invalid_record',codes)
+        self.assertFalse(result['coverageQualified'])
+        for key,value in [('qualified',1),('event',99),('actor',123),('beforeHp',99),('attempted',1),('payload',b'fake')]:
+            bad=copy.deepcopy(c);bad[10][key]=value
+            mutated=A.audit_texts(render(h),render(legacy.finalize(bad)))
+            self.assertIn('invalid_native_leave_pending',{r['code'] for r in mutated['issues']})
+
     def test_retained_ca007_removal_relabel_and_hp198(self):
         saved=json.loads((ROOT/"tests/fixtures/ordinary_lifecycle_ca007.json").read_text())
         self.assertEqual(saved["status"],"ORIGINAL_FAIL_PRESERVED")

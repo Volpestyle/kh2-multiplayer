@@ -15,7 +15,7 @@ constexpr unsigned TargetCount = 5, QueueCount = 128, CauseCount = 16, PayloadMa
 // declares an unrelated HitClaim. Production-codec static_asserts live in controls.
 enum class WireType : std::uint8_t { HitClaim=8, EnemyHp=23, EnemyDeath=24 };
 enum class Kind : unsigned { Admission, Hit, Claim, HostApply, HpPublish, HpReceive,
-    HpApply, DeathPublish, DeathReceive, DeathApply, Packet, Retired, ConsumerRejected, ConsumerAccepted, MembershipRetire, MembershipBirth };
+    HpApply, DeathPublish, DeathReceive, DeathApply, Packet, Retired, ConsumerRejected, ConsumerAccepted, MembershipRetire, MembershipBirth, MembershipPending };
 enum class Reason : unsigned { Ok, Unavailable, Scope, Mapping, Source, Native,
     UnknownDelta, Payload, Capacity, Duplicate, Despawn, Loss, Pending, RejectFraming, RejectEpoch, RejectZeroSequence,
     RejectStaleSequence, RejectUnknownTarget, RejectDecode, RejectScope, RejectRole, RejectUnadmittedLifecycle };
@@ -293,6 +293,7 @@ class Engine {
         std::int32_t causeBefore{}, causeAfter{}; unsigned count{};
         std::uint64_t causes[CauseCount]{}; bool deathSent{}, deathReceived{}, dead{}, removed{};
         std::uint64_t birth{}, retirement{};
+        bool nativePending{};std::uint64_t absentFrame{};
         std::uint64_t appliedHpSequence{}, receivedHpSequence{}; std::int32_t receivedHp{}; };
     ordinarylifecycle::History lifecycleProof_;
     std::array<std::uint8_t,PayloadMax> lifecycleBytes_{};unsigned lifecycleSize_{};
@@ -395,6 +396,24 @@ class Engine {
         r.event=l.lastEvent;
     }
 public:
+    unsigned PendingNativeCount() const noexcept {
+        unsigned count=0;for(const auto& ledger:targets_)if(ledger.nativePending && !ledger.removed)++count;return count;
+    }
+    // Record-only absence of an original client binding. Caller supplies the
+    // adjacent native presence/complete absence proof; a host cut still owns
+    // retirement. This never changes expected HP, original scope or membership.
+    bool PendingNativeLeave(const Scope& s,const Target& target,std::uint64_t now) noexcept {
+        if(!admitted_ || retired_)return !retired_;
+        auto* ledger=Find(target.netId);
+        const bool ok=Current(s) && s.native.role==2 && ledger && ledger->birth && !ledger->dead &&
+            SameTarget(ledger->identity,target) && target.hp==ledger->expected && target.hp>0;
+        if(!ok){Retire(s,now,Reason::Mapping);return false;}
+        if(ledger->nativePending)return true;
+        ledger->nativePending=true;ledger->absentFrame=s.native.frame;
+        auto receipt=Row(Kind::MembershipPending,s,now);receipt.target=target;
+        receipt.event=ledger->birth;receipt.beforeHp=receipt.afterHp=ledger->expected;
+        receipt.reason=Reason::Pending;Push(receipt);return !retired_;
+    }
     bool BirthBound(const Scope& s,const Target& target,std::uint64_t birth) noexcept {
         const auto* l=Find(target.netId);return l && l->birth==birth && SameTarget(l->identity,target) && Current(s);
     }
@@ -452,7 +471,7 @@ public:
         bool ok=Current(s)&&l&&l->birth==birth&&retirement>birth&&!l->dead&&
             SameTarget(l->identity,current)&&current.hp==l->expected&&current.hp>0&&Payload(r,bytes,size)&&
             LifecycleProof(s,id,retirement,true,bytes,size,proof);
-        if(ok){l->removed=true;l->retirement=retirement;r.beforeHp=r.afterHp=l->expected;CommitLifecycle(std::move(proof),bytes,size);}
+        if(ok){l->removed=true;l->nativePending=false;l->retirement=retirement;r.beforeHp=r.afterHp=l->expected;CommitLifecycle(std::move(proof),bytes,size);}
         r.locallyQualified=ok;r.reason=ok?Reason::Ok:Reason::Mapping;Push(r);
         if(!ok)Retire(s,now,Reason::Mapping);return ok;
     }
@@ -493,6 +512,7 @@ public:
                 Retire(s,now,Reason::Mapping);return;
             }
             auto* l=Find(rows[i].netId);
+            if(l && l->nativePending){Retire(s,now,Reason::Mapping);return;} // no reappearance/reuse
             if(!l || !SameTarget(l->identity,rows[i]) || rows[i].hp!=l->expected) {
                 Retire(s,now,Reason::UnknownDelta);return;
             }
@@ -500,6 +520,8 @@ public:
         for(auto& l:targets_) {
             bool found=false;for(unsigned i=0;i<count;++i)if(rows[i].netId==l.identity.netId)found=true;
             if(l.removed || !l.identity.netId)continue;
+            if(l.nativePending && !found && s.native.role==2 && s.native.frame>=l.absentFrame &&
+               s.native.frame-l.absentFrame<=120)continue;
             if(!found && !(l.dead && l.expected==0)) {Retire(s,now,Reason::Mapping);return;}
         }
     }
@@ -660,7 +682,7 @@ inline void Drain(nativehittrace::LogFn log) noexcept {
     }
     static std::uint64_t lastSummary=0;
     if(Now()-lastSummary<1000000000ULL)return;lastSummary=Now();
-    log("[combat-causal] summary schema=1 admitted=%u retired=%u started=%llu drained=%llu dropped=%llu loss=%llu ownerFrame=%llu ownerAvailable=%u generation=%llu delivery=%llu connection=%llu epoch=%llu load=%llu transition=%llu role=%u slot=%u location=%u,%u,%u,%u,%u,%u nativeCoverageQualified=0 acceptance=0",
+    log("[combat-causal] summary schema=1 admitted=%u retired=%u started=%llu drained=%llu dropped=%llu loss=%llu ownerFrame=%llu ownerAvailable=%u generation=%llu delivery=%llu connection=%llu epoch=%llu load=%llu transition=%llu role=%u slot=%u location=%u,%u,%u,%u,%u,%u pendingNativeLeave=%u nativeCoverageQualified=0 acceptance=0",
         unsigned(engine.Admitted()),unsigned(engine.Retired()),static_cast<unsigned long long>(engine.Started()),static_cast<unsigned long long>(engine.Drained()),
         static_cast<unsigned long long>(engine.Dropped()),static_cast<unsigned long long>(engine.Loss()),
         static_cast<unsigned long long>(currentScope.native.frame),unsigned(currentScope.native.available),
@@ -668,7 +690,7 @@ inline void Drain(nativehittrace::LogFn log) noexcept {
         static_cast<unsigned long long>(currentScope.native.connectionId),static_cast<unsigned long long>(currentScope.native.epoch),
         static_cast<unsigned long long>(currentScope.native.loadSerial),static_cast<unsigned long long>(currentScope.native.transitionSerial),
         unsigned(currentScope.native.role),unsigned(currentScope.native.slot),
-        currentScope.native.location[0],currentScope.native.location[1],currentScope.native.location[2],currentScope.native.location[3],currentScope.native.location[4],currentScope.native.location[5]);
+        currentScope.native.location[0],currentScope.native.location[1],currentScope.native.location[2],currentScope.native.location[3],currentScope.native.location[4],currentScope.native.location[5],engine.PendingNativeCount());
     } catch(...) {
         engine.Retire(currentScope,Now(),Reason::Loss);
     }

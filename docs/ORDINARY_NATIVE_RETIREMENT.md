@@ -42,5 +42,37 @@ The ABI evidence is `native-42C810.asm.txt` in
 `build/rig/native-shadow-bdx-semantics-20261004-01`; the fade leaf bytes come from
 the same saved PE. Native eventual removal is still a practice qualification.
 
-Separate pending work: A's Mapping retirement before cut admission (#3), and
-causal queue/drain coverage (#4). Neither is changed by this fix.
+The subsequent 03329070 practice B exposed the opposite ordering: the client
+body left at frame801/HP20 before the runtime processed cut6/7. The receiver
+required fresh reads of the disposed old allocation, so it could not complete
+that boundary. Only cut5 committed. The native leave leaf was not reached;
+its request/completion remains unqualified live. The exact old-read return
+reason was not retained, so the logs establish ordering and a receiver gap,
+not which disposed field failed. See `tests/fixtures/ordinary_native_first/`.
+
+Client-first removal now keeps the immediately previous independently checked
+living binding (original session, deliveries, generation/load/transition,
+net-ID/birth, record content/ordinal and five roots). A repeated complete native
+census must prove absence on every adjacent owner frame. The wait is limited
+to120 frames. Reappearance, reuse, gaps, changed record/scope, or timeout refuse;
+there is no re-anchor. Claims stay held. No disposed actor is dereferenced.
+The matching authenticated host retirement cut can complete that exact pending
+absence with zero native calls. A fresh replacement can bind only after the
+ordered retirement and birth. The host-first living-body path is unchanged.
+
+The passive observer emits `MembershipPending` (kind16, reason12, unqualified)
+while retaining the original ledger and expected HP. Every remaining observed
+body still gets the original identity/HP checks. Only one independently checked
+unbound replacement at the exact pending record can be record-only; it gets no
+ID, store or claim authority. Any other unknown body still refuses. A matching
+raw host cut owns the later membership retirement, never the pending receipt.
+`pendingNativeLeave` in owner summaries makes the sampler wait read-only under
+its original cancellation/deadline cap before irreversible Admission; it cannot
+dispatch while a native leave is pending. Existing source/HP guards, the full
+release function, reason21 and the native leave leaf remain unchanged.
+
+Actual-handler and observer C++ controls cover both orderings, disposed-memory
+refusal of fresh reads, authenticated completion, binding/release, unchanged
+remaining HP, gaps, reuse and timeout. Compilation is kh2-steam's next step;
+Python controls prove sampler/projection/evidence behavior only. The original
+runs remain unqualified. Causal queue/drain coverage (#4) is still separate.
