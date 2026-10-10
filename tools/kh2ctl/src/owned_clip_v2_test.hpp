@@ -1,4 +1,33 @@
 // Offline-only executable: generated pixels and owned self-test child processes.
+namespace {
+HANDLE clockFailureOriginal = nullptr;
+DWORD clockFailurePid = 0;
+std::uint64_t clockFailureCreation = 0;
+std::uint64_t FailChildStartClock(HANDLE original, DWORD pid) {
+    if (!DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &clockFailureOriginal,
+                         0, FALSE, DUPLICATE_SAME_ACCESS))
+        throw std::runtime_error("Clock control cannot retain original handle");
+    clockFailurePid = pid;
+    clockFailureCreation = ProcessCreationTime(original);
+    throw std::runtime_error("Injected post-create clock failure");
+}
+// Even a failing regression control must not leak its own fixture processes.
+struct ClockFailureFixtures {
+    HANDLE unrelated = nullptr;
+    ~ClockFailureFixtures() {
+        owned_clip::childStartClockForTest = nullptr;
+        for (HANDLE original : {clockFailureOriginal, unrelated}) {
+            if (!original) continue;
+            if (WaitForSingleObject(original, 0) != WAIT_OBJECT_0) {
+                TerminateProcess(original, 126);
+                WaitForSingleObject(original, 2000);
+            }
+            CloseHandle(original);
+        }
+        clockFailureOriginal = nullptr;
+    }
+};
+}
 int OwnedClipTestChild(const std::string& mode) {
     if (mode == "--test-child-sleep") { Sleep(30000); return 0; }
     if (mode == "--test-child-descendant") {
@@ -155,6 +184,37 @@ int OwnedClipOfflineTest(int argc, char** argv) {
                 if (entry.is_regular_file() && entry.path().extension() == ".png") ++decodedCount;
             }
             if (decodedCount != frames) throw std::runtime_error("Full generated decode count differs from requested mode");
+        } else if (name == "clock_after_spawn") {
+            ClockFailureFixtures fixtures;
+            // Owned by this control, but foreign to Child's private job.
+            std::wstring command = Quote(self.wstring()) + L" --test-child-sleep";
+            STARTUPINFOW startup{}; startup.cb = sizeof(startup);
+            PROCESS_INFORMATION unrelated{};
+            if (!CreateProcessW(self.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                                nullptr, nullptr, &startup, &unrelated))
+                throw std::runtime_error("Clock control unrelated fixture creation failed");
+            fixtures.unrelated = unrelated.hProcess;
+            CloseHandle(unrelated.hThread);
+            const auto digest = HashFile(self, bound);
+            childStartClockForTest = FailChildStartClock;
+            std::string refusal;
+            try { Child({self.string(),"--test-child-sleep"},digest,root,name,"child",job.value,bound); }
+            catch (const std::exception& error) { refusal = error.what(); }
+            childStartClockForTest = nullptr;
+            const bool originalAbsent = clockFailureOriginal && clockFailurePid != 0 && clockFailureCreation != 0 &&
+                WaitForSingleObject(clockFailureOriginal,0) == WAIT_OBJECT_0;
+            const bool unrelatedSurvived = WaitForSingleObject(fixtures.unrelated,0) == WAIT_TIMEOUT;
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+            const bool neverAssigned = QueryInformationJobObject(job.value,JobObjectBasicAccountingInformation,
+                &accounting,sizeof(accounting),nullptr) && accounting.TotalProcesses == 0;
+            Write(root/"clock-boundary.json", "{\"originalPid\":"+std::to_string(clockFailurePid)+
+                ",\"creationTicks\":"+std::to_string(clockFailureCreation)+
+                ",\"originalAbsent\":"+(originalAbsent?"true":"false")+
+                ",\"unrelatedSurvived\":"+(unrelatedSurvived?"true":"false")+
+                ",\"neverAssigned\":"+(neverAssigned?"true":"false")+
+                ",\"refusal\":"+JsonString(refusal)+"}");
+            if (refusal != "Injected post-create clock failure" || !originalAbsent || !unrelatedSurvived || !neverAssigned)
+                throw std::runtime_error("Post-create clock cleanup boundary failed");
         } else {
             const std::string mode = name == "exited" ? "--test-child-exit" : name == "descendant" ? "--test-child-descendant" : "--test-child-sleep";
             const auto digest = HashFile(self,bound); std::thread signal;

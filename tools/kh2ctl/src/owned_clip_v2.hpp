@@ -2,7 +2,7 @@
 namespace owned_clip {
 struct Handle {
     HANDLE value = nullptr;
-    explicit Handle(HANDLE h = nullptr) : value(h) {}
+    explicit Handle(HANDLE h = nullptr) noexcept : value(h) {}
     ~Handle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
@@ -97,6 +97,10 @@ void Write(const std::filesystem::path& path, const std::string& data) {
 }
 
 struct ChildResult { std::string json; };
+#if defined(KH2COOP_CLIP_OFFLINE_TEST)
+// Only the offline executable can inject the first post-creation clock failure.
+std::uint64_t (*childStartClockForTest)(HANDLE, DWORD) = nullptr;
+#endif
 
 ChildResult Child(const std::vector<std::string>& argv, const std::string& imageHash,
                   const std::filesystem::path& evidence, const std::string& stem,
@@ -119,9 +123,13 @@ ChildResult Child(const std::vector<std::string>& argv, const std::string& image
                         CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, RepoRoot().c_str(), &startup, &info))
         throw std::runtime_error("Media child CreateProcess failed " + std::to_string(GetLastError()));
     Handle process(info.hProcess), thread(info.hThread);
-    const auto started = NowNs();
     bool assigned = false;
     try {
+        const auto started =
+#if defined(KH2COOP_CLIP_OFFLINE_TEST)
+            childStartClockForTest ? childStartClockForTest(process.value, info.dwProcessId) :
+#endif
+            NowNs();
         assigned = AssignProcessToJobObject(job, process.value) != 0;
         if (!assigned) throw std::runtime_error("Cannot contain media child before resume");
         const auto creation = ProcessCreationTime(process.value);
@@ -163,9 +171,12 @@ ChildResult Child(const std::vector<std::string>& argv, const std::string& image
         return {receipt.str()};
     } catch (...) {
         // No broad process discovery/kill: job contains only this helper's suspended-admitted children.
-        if (assigned) TerminateJobObject(job, 125); else TerminateProcess(process.value, 125);
-        const auto now = NowNs(); const auto ms = now < bound.end ? (bound.end - now) / 1000000ULL : 0;
-        WaitForSingleObject(process.value, static_cast<DWORD>((std::min)(ms, 2000ULL)));
+        const BOOL terminated = assigned ? TerminateJobObject(job, 125) : TerminateProcess(process.value, 125);
+        // The clock itself may have failed. Cleanup must not call it again.
+        // Use the existing two-second cleanup reserve and original process handle.
+        const DWORD stopped = WaitForSingleObject(process.value, 2000);
+        if (!terminated || stopped != WAIT_OBJECT_0)
+            throw std::runtime_error("Media child cleanup UNKNOWN: termination or original-handle wait failed");
         throw;
     }
 }
