@@ -3017,9 +3017,17 @@ void PrintUsage() {
 }
 
 #if defined(KH2COOP_INTERNAL_CLIP)
+#if defined(KH2COOP_CLIP_V2)
+#include "owned_clip_v2.hpp"
+#else
 #include "owned_clip.hpp"
+#endif
 #if defined(KH2COOP_CLIP_OFFLINE_TEST)
+#if defined(KH2COOP_CLIP_V2)
+#include "owned_clip_v2_test.hpp"
+#else
 #include "owned_clip_test.hpp"
+#endif
 #endif
 #endif
 } // namespace
