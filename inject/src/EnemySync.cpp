@@ -64,6 +64,7 @@ combatcausal::Scope CausalScope() noexcept;
 void ObserveCausalPopulation(bool complete) noexcept;
 struct Spawn;
 struct NativeEnemy;
+std::array<uintptr_t,5> PopulationSpawnRoots(const Spawn& spawn);
 combatcausal::Target CausalTarget(const Spawn& s, const NativeEnemy& n, unsigned id);
 bool ReadOrdinaryIdentity(const NativeEnemy&,ordinarybinding::Identity&);
 
