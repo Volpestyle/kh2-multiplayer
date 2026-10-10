@@ -97,8 +97,14 @@ lock in new packets; existing sealed packets remain intact.
 
 Validate hashes, scenario structure, script syntax/BOM bytes and bundled Python
 imports offline. Seal `pins.json` PENDING, obtain independent review, then have
-the lead write the actual ADOPT receipt and fresh same-UTC-day consent. Use a
+the lead write the actual ADOPT receipt and a same-UTC-day consent record. Use a
 seal-specific exclusive-create spent marker: one attempt per sealed packet.
+
+Consent records James's standing availability; it is not a per-run question.
+James says when PC2 is free and when he reclaims it. While it is free, the lead
+writes consent for each reviewed packet from that standing statement and the
+run proceeds on review approval, without asking him first. A reclaim stops the
+run immediately and ends the availability until he frees PC2 again.
 
 Copied offline controls must accept explicit packet/scratch paths or resolve
 their new location correctly. A fixed `parents[2]` root that worked under
