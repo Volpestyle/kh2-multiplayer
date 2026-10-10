@@ -15,7 +15,7 @@ from practice_player_retained_fixture import practice_fixture
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools/scenario'))
 import causal_summary_acquisition as acquisition
-BASE = '2f6e53160ea886533385221067423d57f2824a99'
+BASE = 'e695a0ce8d37f1de0ef4304f8822bc9c5457fbb4'
 
 def load(path):
     spec = importlib.util.spec_from_file_location('retained_source05_oracle', path)

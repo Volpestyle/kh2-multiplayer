@@ -2,7 +2,7 @@
 import argparse,hashlib,json,subprocess,tempfile
 from pathlib import Path
 from companion_retained_fixture import generate
-BASE='19aae6cd00e4b36207772f5ca7ca47db3f3d4bc6'
+BASE='3c0f8e422ec6ac1b819e1a6bc2b95222b5a9f7a8'
 ROOT=Path(__file__).resolve().parents[1]
 def original(path):return subprocess.check_output(['git','show',BASE+':'+path],cwd=ROOT).decode('utf-8').replace('\r\n','\n')
 def current(path):return (ROOT/path).read_text(encoding='utf-8')
