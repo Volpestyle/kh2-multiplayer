@@ -2180,6 +2180,125 @@ void TestCombatCausalBoundaries() {
     const auto noObserver=birthBeforeLocalBinding(0);
     for(unsigned mode=1;mode<=3;++mode)Check(noObserver==birthBeforeLocalBinding(mode),
         "actual lifecycle retirement/birth/HP gameplay identical with observer ON/retired/overflow");
+    // Actual B: frame691 released five bodies; cut6 retires living net4 at20.
+    // Native leave leaf is the ONLY replacement below; all authenticated source,
+    // census/record/scope and release decisions are the production functions.
+    const auto retirementSetup=[&]() {
+        prepare(false,true);SeedPreparationShadows(20);
+        // SeedPreparationShadows refreshes tracking; re-earn native certificate.
+        for(auto& tracked:g_inst.spawns) {
+            tracked.controller=RecordController();tracked.record=RecordData(0,tracked.spawnIndex);tracked.identityRead=true;
+        }
+        Check(ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration()),"B control earns original five native bindings");
+        EnemyHp baseline;baseline.epoch=9;baseline.sequence=6;
+        for(unsigned id=1;id<=5;++id)baseline.entries.push_back({static_cast<std::uint16_t>(id),20,20});
+        g_bridge.incoming.push_back(HostEnvelope(encode(baseline),2));ReceiveWorldPackets();
+        Check(ReleaseClientClaims(691),"B frame691 complete original manifest release");
+        auto cut=*OrdinaryCut();cut.sequence=6;cut.entries[3].terminal=cut.entries[3].removed=true;cut.entries[3].terminalSequence=6;
+        g_hitTraceFrame=796;g_bridge.incoming.push_back(HostEnvelope(encode(cut),3));ReceiveWorldPackets();
+        Check(g_ordinaryRetirements.size()==1&&g_ordinaryRetirements[0].occurrence.netId==4&&
+              g_ordinaryRetirements[0].original.lastHp==20,"B cut6 captures exact old living net4 binding");
+    };
+    const auto originalLeave=g_ordinaryLeave;
+    static unsigned leaveCalls=0;
+    g_ordinaryLeave=+[](const Spawn&,int hp)->bool {++leaveCalls;return hp==20;};
+    retirementSetup();leaveCalls=0;
+    auto currentCensus=CaptureNativeCensus();
+    Check(!ConsumeOrdinaryRetirements(796,currentCensus)&&leaveCalls==1&&Read<int>(status+0x300)==20,
+          "authenticated living retirement requests native leave once without damage");
+    currentCensus=CaptureNativeCensus();
+    Check(ConsumeOrdinaryRetirements(797,currentCensus)&&leaveCalls==1&&!g_ordinaryRetirements[0].completed&&
+          !ReleaseClientClaims(797),"returned leave is not completion and cannot release old living body");
+    auto historyCut=*OrdinaryCut();std::uint64_t envelopeSerial=4;
+    for(unsigned replacementId=6;replacementId<=10;++replacementId) {
+        if(replacementId>6) {
+            auto& previous=historyCut.entries.back();previous.terminal=previous.removed=true;
+            previous.terminalSequence=++historyCut.sequence;
+            g_bridge.incoming.push_back(HostEnvelope(encode(historyCut),envelopeSerial++));ReceiveWorldPackets();
+        }
+        EnemyManifest append;append.epoch=9;append.replace=false;
+        EnemyManifestEntry entry;entry.netId=static_cast<std::uint16_t>(replacementId);entry.objectId=302;
+        entry.spawnIndex=static_cast<std::uint16_t>(replacementId-1);entry.battleProgram=1;append.entries.push_back(entry);
+        g_bridge.incoming.push_back(HostEnvelope(encode(append),envelopeSerial++));ReceiveWorldPackets();
+        auto born=historyCut.entries[3];born.netId=entry.netId;born.terminal=born.removed=false;born.terminalSequence=0;
+        born.birthSequence=born.occurrence=++historyCut.sequence;historyCut.entries.push_back(born);
+        g_bridge.incoming.push_back(HostEnvelope(encode(historyCut),envelopeSerial++));ReceiveWorldPackets();
+        currentCensus=CaptureNativeCensus();
+        Check(OrdinaryRetirementCurrent(g_ordinaryRetirements[0])&&ConsumeOrdinaryRetirements(798,currentCensus)&&
+              leaveCalls==1&&!g_ordinaryRetirements[0].completed&&!ReleaseClientClaims(798),
+              "B cuts7..15 new IDs6..10 cannot reanchor or relabel old living body");
+    }
+    // Bounded wait refuses; no kill fallback or second request.
+    currentCensus=CaptureNativeCensus();ConsumeOrdinaryRetirements(917,currentCensus);
+    Check(g_ordinaryRetirements[0].failed&&leaveCalls==1&&Read<int>(status+0x300)==20,
+          "native noncompletion explicitly refuses after120 frames with no retry/kill");
+    for(unsigned mutation=0;mutation<14;++mutation) {
+        retirementSetup();leaveCalls=0;auto& ticket=g_ordinaryRetirements[0];
+        switch(mutation) {
+        case 0:++ticket.source.sourceConnectionId;break;
+        case 1:++ticket.source.sourceDeliverySerial;break;
+        case 2:++ticket.source.targetDeliverySerial;break;
+        case 3:++ticket.generation;break;
+        case 4:++ticket.load;break;
+        case 5:++ticket.occurrence.terminalSequence;break;
+        case 6:++ticket.original.status;break;
+        case 7:++ticket.original.record;break;
+        case 8:g_inst.spawns[3].ordinaryBinding.highWater=6;break;
+        case 9:Put(status+0x300,std::int32_t{0});break;
+        case 10:++ticket.source.targetConnectionId;break;
+        case 11:ticket.source.sessionId[0]^=1;break;
+        case 12:++ticket.occurrence.birthSequence;break;
+        case 13:++ticket.transition;break;
+        }
+        currentCensus=CaptureNativeCensus();ConsumeOrdinaryRetirements(796,currentCensus);
+        Check(leaveCalls==0&&ticket.failed,"foreign/reused/unbound/dead retirement refuses before native operation");
+    }
+    retirementSetup();leaveCalls=0;currentCensus=CaptureNativeCensus();
+    currentCensus.state=CensusState::Unavailable;
+    Check(!ConsumeOrdinaryRetirements(796,currentCensus)&&leaveCalls==0&&!g_ordinaryRetirements[0].attempted,
+          "incomplete census cannot dispatch or synthesize completion");
+    g_ordinaryLeave=+[](const Spawn&,int)->bool {++leaveCalls;return false;};
+    currentCensus=CaptureNativeCensus();ConsumeOrdinaryRetirements(796,currentCensus);
+    currentCensus=CaptureNativeCensus();
+    Check(!ConsumeOrdinaryRetirements(797,currentCensus)&&leaveCalls==1&&g_ordinaryRetirements[0].failed,
+          "native fault/unknown result poisons and holds without retry");
+    retirementSetup();g_ordinaryLeave=originalLeave;
+    currentCensus=CaptureNativeCensus();ConsumeOrdinaryRetirements(796,currentCensus);
+    Check(g_ordinaryRetirements[0].failed&&Read<int>(status+0x300)==20,
+          "production native leave refuses unqualified code bytes before any native write");
+    g_ordinaryLeave=+[](const Spawn&,int hp)->bool {++leaveCalls;return hp==20;};
+    retirementSetup();leaveCalls=0;currentCensus=CaptureNativeCensus();ConsumeOrdinaryRetirements(796,currentCensus);
+    // Model only the native unlink result in owned memory, never fake production
+    // completion: the real reader must independently enumerate its absence.
+    Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+        static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+    currentCensus=CaptureNativeCensus();TrackSpawns(currentCensus);
+    Check(ConsumeOrdinaryRetirements(797,currentCensus)&&g_ordinaryRetirements[0].completed&&leaveCalls==1,
+          "only fresh complete native absence completes exact old retirement");
+    EnemyManifest replacementManifest;replacementManifest.epoch=9;replacementManifest.replace=false;
+    EnemyManifestEntry newEntry;newEntry.netId=6;newEntry.objectId=302;newEntry.spawnIndex=5;newEntry.battleProgram=1;
+    replacementManifest.entries.push_back(newEntry);
+    g_bridge.incoming.push_back(HostEnvelope(encode(replacementManifest),4));ReceiveWorldPackets();
+    auto replacementCut=*OrdinaryCut();replacementCut.sequence=7;auto newRow=replacementCut.entries[3];
+    newRow.netId=6;newRow.birthSequence=newRow.occurrence=7;newRow.terminal=newRow.removed=false;newRow.terminalSequence=0;
+    replacementCut.entries.push_back(newRow);g_bridge.incoming.push_back(HostEnvelope(encode(replacementCut),5));ReceiveWorldPackets();
+    const auto newActor=enemy+0xA000,newStatus=status+0x500;
+    std::memcpy(reinterpret_cast<void*>(newActor),reinterpret_cast<void*>(enemy+0x6000),0x1000);
+    Put(newActor+ACTOR_STATUS,newStatus);Put(newStatus,std::int32_t{20});Put(newStatus+4,std::int32_t{20});
+    Put(newActor+offsets::actor::LINKED_NEXT_HANDLE,std::uint32_t{0});
+    Put(enemy+0x8000+offsets::actor::LINKED_NEXT_HANDLE,
+        static_cast<std::uint32_t>(newActor&offsets::active_entity_list::HANDLE_LOW_MASK));
+    Put(image+offsets::active_entity_list::TAIL,newActor);
+    currentCensus=CaptureNativeCensus();TrackSpawns(currentCensus);
+    Check(ResolveOrdinaryBindings(currentCensus,WorldSessionGeneration())&&
+          g_inst.spawns[g_inst.byActor.at(newActor)].netId==6&&!g_inst.spawns[3].present,
+          "fresh different native body binds replacement only after authenticated old absence");
+    EnemyHp replacementHp;replacementHp.epoch=9;replacementHp.sequence=7;
+    for(unsigned id:{1u,2u,3u,5u,6u})replacementHp.entries.push_back({static_cast<std::uint16_t>(id),20,20});
+    g_bridge.incoming.push_back(HostEnvelope(encode(replacementHp),6));ReceiveWorldPackets();
+    Check(ReleaseClientClaims(798)&&leaveCalls==1&&deathCalls==0,
+          "replacement complete current native readback releases without relabel/kill credit");
+    g_ordinaryLeave=originalLeave;
     cc::enabled.store(false);Reset();
 }
 

@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "source": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\practice-activation-corrected-B-20261010-01\\inject-1.log",
+  "sourceSha256": "df726b852d9034f9254a78696b32a208436c110d87736fa2be8f4017a11905ad",
+  "rows": [
+    {
+      "line": 332,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=5 epoch=2 hostLoad=3 hostTransition=2 rows=5 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 352,
+      "text": "[client-claims] schema=1 seq=11 holdId=3 action=release reason=complete-stable-readback held=0 bound=1 generation=2 ordered=2 delivery=1 slot=1 host=1 self=2 peer0=1 peer1=2 peer2=0 epoch=2 world=5 room=6 door=0 map=1 battle=1 event=0 load=4 transition=3 manifestRevision=11 hpSequence=6 frame=691 rows=5 dropped=0 submitted=0 receiptGaps=0 transactionAvailable=0 session=unavailable request=0 phase=0 cut=0 targetConnection=0 targetDelivery=0 claimAvailable=0 claimSeq=0 claimNetId=0 claimObjectId=0 claimRequester=0 matchComplete=1 missing=0 extra=0 conflicts=0 replaySeq=0 replayReceiptGaps=0"
+    },
+    {
+      "line": 538,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=6 epoch=2 hostLoad=3 hostTransition=2 rows=5 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 540,
+      "text": "[enemy-binding] epoch=2 frame=796 spawn=3 actor=7FF6468B7F10 objentry=7FF646D49F18 status=7FF646D42940 controller=7FF646E08340 record=7FF646D06454 objectId=302 prior=0 floor=4 candidate=0 selected=0 reason=authenticated-membership-retired conflict=0 sampledIdentityOnly=1"
+    },
+    {
+      "line": 547,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=7 epoch=2 hostLoad=3 hostTransition=2 rows=6 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 737,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=8 epoch=2 hostLoad=3 hostTransition=2 rows=6 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 739,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=9 epoch=2 hostLoad=3 hostTransition=2 rows=7 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 885,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=10 epoch=2 hostLoad=3 hostTransition=2 rows=7 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 887,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=11 epoch=2 hostLoad=3 hostTransition=2 rows=8 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 1137,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=12 epoch=2 hostLoad=3 hostTransition=2 rows=8 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 1143,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=13 epoch=2 hostLoad=3 hostTransition=2 rows=9 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 1339,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=14 epoch=2 hostLoad=3 hostTransition=2 rows=9 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 1341,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=15 epoch=2 hostLoad=3 hostTransition=2 rows=10 killCredit=0 nativeWrite=0"
+    },
+    {
+      "line": 1619,
+      "text": "[ordinary-lifecycle] action=client-admitted cut=16 epoch=2 hostLoad=3 hostTransition=2 rows=10 killCredit=0 nativeWrite=0"
+    }
+  ],
+  "oldBody": {
+    "actor": "7FF6468B7F10",
+    "netId": 4,
+    "hp": 20
+  },
+  "originalRunNotPromoted": true,
+  "nativeCompletionRetained": false
+}

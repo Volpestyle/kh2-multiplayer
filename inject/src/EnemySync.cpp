@@ -2546,6 +2546,35 @@ std::vector<NativeRecordContentCandidate> RecordCandidates(const std::vector<Nat
 #include "EnemyPopulationRepair.inl"
 #include "EnemyOrdinaryLifecycle.inl"
 
+// Actor-domain equivalent of native script leave42C810, whose handle-stack
+// wrapper is NOT called with a fabricated script context. Retained disassembly
+// proves RCX=actor+A08, XMM1=1.0f, XMM2=XMM3=0, then actor+9B8 |=0x10.
+// Byte-gate both original wrapper and fade leaf; no damage/death/count function.
+bool RequestOrdinaryNativeLeave(const Spawn& original,int hp) {
+    static constexpr std::uint8_t wrapperBytes[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x8B,0x09,0xE8,0x53,0x0A,0x08,0x00,0x8B,0x48,0x04,0xE8,0x4B,0x0A,0x08,0x00,0x48,0x8B,0xD8,0x8B,0x90,0xB8,0x09,0x00,0x00,0x8B,0xCA,0xC1,0xE9,0x04,0xF6,0xC1,0x01,0x75,0x20,0xF3,0x0F,0x10,0x0D,0x40,0x72,0x1F,0x00,0x48,0x8D,0x88,0x08,0x0A,0x00,0x00,0x0F,0x57,0xDB,0x0F,0x57,0xD2,0xE8,0xBE,0xAF,0xF8,0xFF,0x8B,0x93,0xB8,0x09,0x00,0x00,0x83,0xCA,0x10,0x89,0x93,0xB8,0x09,0x00,0x00,0x48,0x83,0xC4,0x20,0x5B,0xC3};
+    static constexpr std::uint8_t fadeBytes[]={0xF3,0x0F,0x10,0x05,0x00,0xC3,0x26,0x00,0x0F,0x2F,0xC3,0x72,0x08,0xF3,0x0F,0x10,0x1D,0x5B,0xC2,0x26,0x00,0x0F,0x57,0xC0,0x0F,0x2F,0xD8,0x76,0x12,0xF3,0x0F,0x5C,0xD1,0xF3,0x0F,0x11,0x09,0xF3,0x0F,0x5E,0xD3,0xF3,0x0F,0x11,0x51,0x04,0xC3,0xF3,0x0F,0x11,0x11,0xF3,0x0F,0x11,0x41,0x04,0xC3,0xCC,0xCC,0xCC,0xCC,0xCC,0xCC,0xCC};
+    // POD-only SEH boundary: independent final roots/positive HP before writes.
+    __try {
+        if(!g_exeBase || hp<=0 || original.objectId!=302 || original.objectType!=4 ||
+           std::memcmp(reinterpret_cast<void*>(g_exeBase+0x42C810),wrapperBytes,sizeof(wrapperBytes))!=0 ||
+           std::memcmp(reinterpret_cast<void*>(g_exeBase+0x3B7810),fadeBytes,sizeof(fadeBytes))!=0 ||
+           *reinterpret_cast<const float*>(g_exeBase+0x623A80)!=1.0f ||
+           *reinterpret_cast<const uintptr_t*>(original.actor+offsets::actor::OBJENTRY_PTR)!=original.objentry ||
+           *reinterpret_cast<const uintptr_t*>(original.actor+ACTOR_STATUS)!=original.status ||
+           *reinterpret_cast<const uintptr_t*>(original.actor+0x9E8)!=original.controller ||
+           *reinterpret_cast<const uintptr_t*>(original.actor+0x9F0)!=original.record ||
+           *reinterpret_cast<const int*>(original.status)!=hp ||
+           *reinterpret_cast<const std::uint32_t*>(original.objentry+offsets::objentry::OBJECT_ID)!=302 ||
+           *reinterpret_cast<const std::uint8_t*>(original.objentry+offsets::objentry::TYPE_FLAGS)!=4)return false;
+        using FadeFn=void(__fastcall*)(float*,float,float,float);
+        auto* flags=reinterpret_cast<std::uint32_t*>(original.actor+0x9B8);
+        if((*flags&0x10)==0)
+            reinterpret_cast<FadeFn>(g_exeBase+0x3B7810)(reinterpret_cast<float*>(original.actor+0xA08),1.0f,0.0f,0.0f);
+        *flags|=0x10;
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
+
 bool PopulationDeathHelperReady() {return g_populationDeathHelperVerified && g_applyStatDelta!=nullptr;}
 bool InvokePopulationNativeDeath(uintptr_t actor,int hp) {
     __try {g_applyStatDelta(reinterpret_cast<void*>(actor),-hp,0,0);return true;}
@@ -5150,6 +5179,7 @@ void OnFrameStart(std::uint32_t frame) {
                      static_cast<unsigned long long>(g_inst.spawns[i].actor),
                      g_inst.spawns[i].spawnPos.x, g_inst.spawns[i].spawnPos.y, g_inst.spawns[i].spawnPos.z);
         }
+        if(!ConsumeOrdinaryRetirements(frame,census)) {DrainPendingSpawnTrace(false);return;}
         if (!ClientFrame(census)) { DrainPendingSpawnTrace(false); return; }
         TickPopulationRepair(frame, census);
         if(!ConsumePopulationDisposals(frame,census)) {

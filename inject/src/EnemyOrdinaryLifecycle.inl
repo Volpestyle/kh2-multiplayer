@@ -11,8 +11,22 @@ ordinarylifecycle::History g_ordinaryHostHistory,g_ordinaryClientHistory;
 std::uint64_t g_ordinarySequence=0;
 std::uint32_t g_ordinaryGeneration=0,g_ordinaryLoad=0,g_ordinaryTransition=0;
 std::optional<WorldScope> g_ordinarySource;
+// Original cut/connection/native roots survive later replacement births; never re-anchor.
+struct OrdinaryRetirement {
+    Spawn original;
+    PopulationOccurrence occurrence;
+    NativeRecordContentDefinition definition;
+    WorldScope source;
+    std::uint32_t generation{},load{},transition{},frame{},attemptFrame{};
+    bool attempted{},failed{},completed{};
+    const char* outcome="queued";
+};
+std::vector<OrdinaryRetirement> g_ordinaryRetirements;
+bool RequestOrdinaryNativeLeave(const Spawn& original,int hp);
+using OrdinaryLeaveFn=bool(*)(const Spawn&,int);
+OrdinaryLeaveFn g_ordinaryLeave=RequestOrdinaryNativeLeave;
 void ResetOrdinaryLifecycle() {
-    g_ordinaryBirths.clear();g_ordinaryHostHistory.Reset();g_ordinaryClientHistory.Reset();
+    g_ordinaryBirths.clear();g_ordinaryRetirements.clear();g_ordinaryHostHistory.Reset();g_ordinaryClientHistory.Reset();
     g_ordinarySequence=0;g_ordinaryGeneration=g_ordinaryLoad=g_ordinaryTransition=0;g_ordinarySource.reset();
 }
 bool OrdinaryLifecycleRoom() {
@@ -208,12 +222,19 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
        !ReadClientClaimScope(productAfter) || !SameClientClaimScope(productBefore,productAfter) ||
        !g_host.ackSent || !salt || salt!=g_bridge.SpawnPickSalt() || !CensusMatchesInstance(census))return;
     for(unsigned i=0;i<3;++i)if(deliveries[i]!=g_bridge.PeerDeliverySerial(static_cast<std::uint8_t>(i)))return;
+    if(g_ordinaryRetirements.size()+retiring.size()>POPULATION_MAX_ENTRIES)return;
     for(const auto& pending:retiring) {
         const auto& row=*pending.row;
         // Observer loss still hard-refuses the diagnostic, never the already
         // authenticated product membership transition or subsequent HP cache.
         if(combatcausal::Requested())(void)combatcausal::engine.RetireMember(before,row.netId,row.birthSequence,
             row.terminalSequence,pending.target,bytes.data(),static_cast<unsigned>(bytes.size()),combatcausal::Now());
+    }
+    // Reserve bounded tickets before committing any source membership mutation.
+    for(const auto& pending:retiring) {
+        const auto& row=*pending.row;
+        g_ordinaryRetirements.push_back({g_inst.spawns[pending.index],row,cut.definitions[row.definition],source,
+            WorldSessionGeneration(),census.load,census.transition,g_hitTraceFrame});
     }
     for(const auto& pending:retiring) {
         auto& spawn=g_inst.spawns[pending.index];spawn.ordinaryBinding.removed=true;
@@ -224,6 +245,105 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
     g_ordinaryGeneration=WorldSessionGeneration();g_ordinaryLoad=warp::LoadSerial();g_ordinaryTransition=warp::TransitionSerial();
     AdvanceClientManifestRevision();InvalidateClientClaims("ordinary-membership-retired");
     OrdinaryCutReceipt(cut,"client-admitted");
+}
+// A request is not completion. Only a later complete, current census can prove
+// absence; until then the original living body blocks replacement/release.
+void OrdinaryRetirementOutcome(OrdinaryRetirement& ticket,const char* outcome) {
+    if(std::strcmp(ticket.outcome,outcome)==0)return;
+    ticket.outcome=outcome;
+    if(g_log)g_log("[ordinary-lifecycle] native-retire netId=%u birth=%llu retire=%llu actor=%llX frame=%u outcome=%s killCredit=0 roots=%llX/%llX/%llX/%llX generation=%u load=%u transition=%u source=%llu/%llu/%llu target=%llu/%llu",
+        ticket.occurrence.netId,(unsigned long long)ticket.occurrence.birthSequence,
+        (unsigned long long)ticket.occurrence.terminalSequence,(unsigned long long)ticket.original.actor,g_hitTraceFrame,outcome,
+        (unsigned long long)ticket.original.objentry,(unsigned long long)ticket.original.status,
+        (unsigned long long)ticket.original.controller,(unsigned long long)ticket.original.record,
+        ticket.generation,ticket.load,ticket.transition,(unsigned long long)ticket.source.sourceConnectionId,
+        (unsigned long long)ticket.source.sourceDeliverySerial,(unsigned long long)ticket.source.hostSourceSerial,
+        (unsigned long long)ticket.source.targetConnectionId,(unsigned long long)ticket.source.targetDeliverySerial);
+}
+bool OrdinaryRetirementCurrent(const OrdinaryRetirement& ticket) {
+    if(!OrdinaryCutCurrent() || g_role!=Role::Client || ticket.generation!=WorldSessionGeneration() ||
+       ticket.load!=warp::LoadSerial() || ticket.transition!=warp::TransitionSerial() ||
+       !g_ordinarySource || ticket.source.sessionId!=g_ordinarySource->sessionId ||
+       ticket.source.sourceConnectionId!=g_ordinarySource->sourceConnectionId ||
+       ticket.source.sourceDeliverySerial!=g_ordinarySource->sourceDeliverySerial ||
+       ticket.source.targetConnectionId!=g_ordinarySource->targetConnectionId ||
+       ticket.source.targetDeliverySerial!=g_ordinarySource->targetDeliverySerial ||
+       ticket.source.hostSourceSerial>g_ordinarySource->hostSourceSerial || g_resyncWriteFence!=ResyncWriteFence::None)return false;
+    const auto* row=ordinarylifecycle::Find(*OrdinaryCut(),ticket.occurrence.netId);
+    return row && row->removed && row->terminal && row->birthSequence==ticket.occurrence.birthSequence &&
+        row->terminalSequence==ticket.occurrence.terminalSequence && row->record==ticket.occurrence.record &&
+        population_cut_detail::sameDefinition(OrdinaryCut()->definitions[row->definition],ticket.definition);
+}
+bool OrdinaryRetirementBody(const OrdinaryRetirement& ticket,const NativeCensus& census,NativeEnemy& native) {
+    if(!CensusMatchesInstance(census) || !OrdinaryRetirementCurrent(ticket))return false;
+    const auto it=g_inst.byActor.find(ticket.original.actor);
+    if(it==g_inst.byActor.end() || it->second>=g_inst.spawns.size())return false;
+    const auto& tracked=g_inst.spawns[it->second];
+    if(!tracked.present || !tracked.lifecycleRetired || !tracked.ordinaryBinding.removed || tracked.netId>0 ||
+       tracked.ordinaryBinding.highWater!=ticket.occurrence.netId ||
+       PopulationSpawnRoots(tracked)!=PopulationSpawnRoots(ticket.original))return false;
+    const auto* found=FindNativeEnemy(census,tracked);
+    if(!found || found->hp<=0 || found->objectId!=302)return false;
+    native=*found;
+    const auto target=OrdinaryHistoricalTarget(ticket.original,native,ticket.occurrence.netId);
+    if(!combatcausal::SameTarget(target,target))return false;
+    RecordCatalog first,last;spawncontroller::NativeRecordMembership member;
+    if(!FreshRecordCatalog(census,first) || !RecordMember(first,census,native.actor,member) || member.issues ||
+       member.tableIndex>=first.entryCount || member.recordIndex!=ticket.occurrence.record ||
+       member.controller[0]!=ticket.original.controller || member.controller[1]!=ticket.original.controller ||
+       member.record[0]!=ticket.original.record || member.record[1]!=ticket.original.record ||
+       !population_cut_detail::sameDefinition(first.entries[member.tableIndex].content,ticket.definition))return false;
+    unsigned aliases=0;
+    for(std::uint32_t entry=0;entry<first.entryCount;++entry)
+        if(population_cut_detail::sameDefinition(first.entries[entry].content,ticket.definition))++aliases;
+    return aliases==1 && FreshRecordCatalog(census,last) && SameRecordCatalogSample(first,last) &&
+        CensusMatchesInstance(census) && OrdinaryRetirementCurrent(ticket);
+}
+bool ConsumeOrdinaryRetirements(std::uint32_t frame,NativeCensus& census) {
+    for(auto& ticket:g_ordinaryRetirements) {
+        if(ticket.failed)return false; // poisoned original retirement holds all downstream release
+        if(ticket.completed)continue;
+        if(!OrdinaryRetirementCurrent(ticket)) {
+            ticket.failed=true;OrdinaryRetirementOutcome(ticket,"refuse-original-scope");return false;
+        }
+        if(!CensusMatchesInstance(census))return false;
+        if(frame<ticket.frame || frame-ticket.frame>120) {
+            ticket.failed=true;OrdinaryRetirementOutcome(ticket,"refuse-native-removal-timeout");return false;
+        }
+        if(!CensusHasActor(census,ticket.original.actor)) {
+            const auto bookend=CaptureNativeCensus(ticket.original.actor);
+            if(!CensusMatchesInstance(bookend) || bookend.watchedActorPresent || !OrdinaryRetirementCurrent(ticket))return false;
+            ticket.completed=true;OrdinaryRetirementOutcome(ticket,"complete-native-absence");continue;
+        }
+        NativeEnemy expected;
+        if(!OrdinaryRetirementBody(ticket,census,expected)) {
+            ticket.failed=true;OrdinaryRetirementOutcome(ticket,"refuse-original-body");return false;
+        }
+        if(ticket.attempted) {OrdinaryRetirementOutcome(ticket,"waiting-native-absence");continue;}
+        if(!spawncontroller::IsDiagnosticGameThread()) {
+            OrdinaryRetirementOutcome(ticket,"refuse-owner-thread");continue;
+        }
+        // Independent final complete census/record/source proof immediately before
+        // the native leave operation. Poison once, including fault/unknown results.
+        const auto finalCensus=CaptureNativeCensus(ticket.original.actor);NativeEnemy finalNative;
+        if(!OrdinaryRetirementBody(ticket,finalCensus,finalNative) || !SameNativeIdentity(expected,finalNative) ||
+           finalNative.hp!=expected.hp) {ticket.failed=true;OrdinaryRetirementOutcome(ticket,"refuse-dispatch-bookend");return false;}
+        ticket.attempted=true;ticket.attemptFrame=frame;
+        auto dispatched=ticket; // native code must not leave a reference into resettable state
+        const bool returned=g_ordinaryLeave(dispatched.original,expected.hp);
+        const auto live=std::find_if(g_ordinaryRetirements.begin(),g_ordinaryRetirements.end(),[&](const auto& row) {
+            return row.occurrence.netId==dispatched.occurrence.netId &&
+                row.occurrence.birthSequence==dispatched.occurrence.birthSequence &&
+                row.source.sessionId==dispatched.source.sessionId && PopulationSpawnRoots(row.original)==PopulationSpawnRoots(dispatched.original);
+        });
+        if(live!=g_ordinaryRetirements.end()) {
+            live->failed=!returned;
+            OrdinaryRetirementOutcome(*live,returned?"requested-native-leave":"refuse-native-leaf-unavailable-or-fault");
+        } else OrdinaryRetirementOutcome(dispatched,"refuse-state-retired-during-leaf");
+        // No pre-call census may authorize a store, hash, claim or release.
+        census=CaptureNativeCensus();return false;
+    }
+    return true;
 }
 // Source certificate matches local record CONTENT, not native pointers or point.
 int OrdinaryCertifiedId(const NativeCensus& census,const NativeEnemy& native,const RecordCatalog& catalog) {
@@ -236,6 +356,10 @@ int OrdinaryCertifiedId(const NativeCensus& census,const NativeEnemy& native,con
            !population_cut_detail::sameDefinition(cut.definitions[row.definition],catalog.entries[member.tableIndex].content))continue;
         // A previously bound local body cannot be reused for this or another ID.
         for(const auto& old:g_inst.spawns)if(old.ordinaryBinding.highWater==row.netId && old.actor!=native.actor)return 0;
+        // A poisoned/unknown request never manufactures completion, even if a
+        // later unrelated removal eventually makes the old body disappear.
+        for(const auto& pending:g_ordinaryRetirements)
+            if(!pending.completed && pending.original.controller==member.controller[0] && pending.original.record==member.record[0])return 0;
         // Retired live bodies must disappear natively before a replacement binds.
         for(const auto& old:g_inst.spawns)if(old.lifecycleRetired && old.present && old.controller==member.controller[0] && old.record==member.record[0])return 0;
         if(selected)return 0;selected=row.netId;
