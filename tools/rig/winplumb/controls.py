@@ -6,7 +6,7 @@ entrypoint once there. Every child is owned, bounded and reaped.
 import argparse,ctypes,hashlib,json,os,subprocess,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
-from winplumb.text import read_text,read_json,write_json,encoded_command,checked_text
+from winplumb.text import read_text,read_json,write_json,encoded_command,checked_text,powershell_argv
 from winplumb.atomic import replacement_script
 from winplumb.desktop import overlay_off_argv,worker_argv
 
@@ -19,7 +19,7 @@ def main():
  def ps(name,code,flags=subprocess.CREATE_NO_WINDOW):
   start=time.perf_counter();si=subprocess.STARTUPINFO();si.dwFlags=subprocess.STARTF_USESHOWWINDOW;si.wShowWindow=0
   with (root/(name+'.stdout.log')).open('xb') as out,(root/(name+'.stderr.log')).open('xb') as err:
-   proc=subprocess.Popen(['powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',encoded_command(code)],stdin=subprocess.DEVNULL,stdout=out,stderr=err,creationflags=flags,startupinfo=si)
+   proc=subprocess.Popen(powershell_argv('-EncodedCommand',encoded_command(code)),stdin=subprocess.DEVNULL,stdout=out,stderr=err,creationflags=flags,startupinfo=si)
    try:rc=proc.wait(timeout=12)
    finally:
     if proc.poll() is None:proc.terminate();proc.wait(timeout=2)
@@ -44,6 +44,11 @@ def main():
   assert parsed[0]['word']=='日本語' and parsed[-1]['ps']==5 and parsed[-1]['input']==parsed[-1]['output']==65001 and parsed[-1]['preamble']==0 and parsed[-1]['py']==parsed[-1]['unbuffered']=='1'
   if flags==subprocess.CREATE_NEW_CONSOLE:assert parsed[-1]['console']==65001
   assert read_json(root/(name+'.json'))==payload and not (root/(name+'.json')).read_bytes().startswith(b'\xef\xbb\xbf')
+ # Restrictive inherited process policy must not block a module child entry.
+ child=profile+"if((Get-ExecutionPolicy) -ne 'Bypass'){throw 'child policy'};Write-Output 'MODULE_POLICY_OK'"
+ child_command='& '+ ' '.join(q(v) for v in powershell_argv('-EncodedCommand',encoded_command(child)))
+ restrictive="Set-ExecutionPolicy -Scope Process -ExecutionPolicy Restricted -Force;$ErrorActionPreference='Stop';if((Get-ExecutionPolicy) -ne 'Restricted'){throw 'parent policy'};"+child_command+";if($LASTEXITCODE -ne 0){throw 'child failed'};if((Get-ExecutionPolicy) -ne 'Restricted'){throw 'parent policy changed'}"
+ rc,data=ps('restricted-parent-module-child',restrictive);assert rc==0 and b'MODULE_POLICY_OK' in data
  for index,bad in enumerate([b'\xef\xbb\xbf\xef\xbb\xbfparam()', 'ï»¿param()'.encode(), '‹¯¨param()'.encode()]):
   file=root/('bad-bom-'+str(index)+'.ps1');file.write_bytes(bad)
   assert ps('ps5-bom-refusal-'+str(index),profile+'Read-WinPlumbText '+q(file))[0]!=0
@@ -65,7 +70,7 @@ def main():
   try:
    code=replacement_script(str(src),str(target),retry_journal=str(journal))
    with (root/(name+'.stdout.log')).open('xb') as out,(root/(name+'.stderr.log')).open('xb') as err:
-    proc=subprocess.Popen(['powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',encoded_command(code)],stdin=subprocess.DEVNULL,stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
+    proc=subprocess.Popen(powershell_argv('-EncodedCommand',encoded_command(code)),stdin=subprocess.DEVNULL,stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
     end=time.perf_counter()+5
     while not journal.exists() and proc.poll() is None and time.perf_counter()<end:time.sleep(.005)
     assert journal.exists(),'real sharing retry not observed'
@@ -128,7 +133,7 @@ def main():
   admission=prepare(packet,runtime)
   worker=root/'desktop-worker.py'
   worker.write_text("import os,sys\nfrom pathlib import Path\nsys.path.insert(0,"+repr(str(module.parent))+ ")\nfrom winplumb.bootstrap import bootstrap,configure_logging\nroot=Path(os.environ['PC2_OPERATOR_LOG_DIR']);root.mkdir(exist_ok=False)\nlog,invalid=bootstrap(root/'worker.log');configure_logging(root/'worker.log')\nimport json,logging\nsys.path.insert(0,"+repr(str(packet/'dependencies'))+")\nimport PIL.Image,PIL._imaging\nassert sys.version_info[:2]==(3,11)\nassert PIL.Image.new('RGB',(1,1),(1,2,3)).getpixel((0,0))==(1,2,3)\nlogging.info('BUNDLED_DESKTOP_OK')\n(root/'worker.json').write_text(json.dumps({'pid':os.getpid(),'version':list(sys.version_info[:3]),'executable':sys.executable}),encoding='utf-8')\n",encoding='utf-8')
-  argv=['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(module/'desktop.ps1'),'-Worker',str(worker),'-OperatorLogDir',str(root/'desktop-operator'),'-RuntimeRoot',str(runtime),'-Packet',str(packet)]
+  argv=powershell_argv('-File',module/'desktop.ps1','-Worker',worker,'-OperatorLogDir',root/'desktop-operator','-RuntimeRoot',runtime,'-Packet',packet)
   with (root/'desktop.stdout.log').open('xb') as out,(root/'desktop.stderr.log').open('xb') as err:
    proc=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
    try:rc=proc.wait(timeout=25)

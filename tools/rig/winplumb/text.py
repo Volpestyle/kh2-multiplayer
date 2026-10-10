@@ -21,3 +21,9 @@ def write_json(path,value,*,exclusive=True):
 def encoded_command(script):return base64.b64encode(checked_text(script).encode('utf-16le')).decode('ascii')
 def utf8_env(extra=None):
     return {**os.environ,**(extra or {}),'PYTHONUTF8':'1','PYTHONUNBUFFERED':'1'}
+
+
+def powershell_argv(*arguments):
+    """Process-scoped policy only; never changes machine/user policy."""
+    return ["powershell.exe", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", *map(str, arguments)]

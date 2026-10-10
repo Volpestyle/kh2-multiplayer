@@ -59,3 +59,5 @@ machine. Copy the group and run that SAME entrypoint through the authorized
 SSH path for remote qualification. The optional packet argument also exercises
 fresh full ZIP runtime extraction and actual bundled311/Pillow desktop launch,
 without game boot. No CMake/native build is required.
+
+All PowerShell child/control calls use `text.powershell_argv`, which explicitly supplies process-scoped `-ExecutionPolicy Bypass`. Never change CurrentUser or LocalMachine policy. The restrictive-parent control sets only its own Process policy to Restricted, invokes the module child, and confirms the parent remains Restricted.
