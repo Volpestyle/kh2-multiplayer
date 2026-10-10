@@ -1,0 +1,12 @@
+[
+  {
+    "case": 0,
+    "log": "inject-0.log",
+    "sha256": "5749261eeebd41d64eef6cd93a9aecf04e90c1df48dee621ff8b4652371c305b",
+    "actualGate": {
+      "sourceClass": "1",
+      "reason": "11",
+      "supported": "1"
+    }
+  }
+]

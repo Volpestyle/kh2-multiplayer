@@ -14,6 +14,7 @@
 
 #include "EnemySync.hpp"
 #include "CombatCausalTrace.hpp"
+#include "CausalDisappearance.hpp"
 #include "OrdinaryEnemyBinding.hpp"
 #include "SpawnRowIdentity.hpp"
 #include "SpawnPick.hpp"
@@ -4118,6 +4119,76 @@ combatcausal::Target CausalTarget(const Spawn& s,const NativeEnemy& n,unsigned i
         s.objentry!=n.objentry || s.status!=n.status) return {};
     return {n.actor,n.objentry,n.status,roots.controller,roots.record,id,n.objectId,n.objectType,n.hp,n.maxHp};
 }
+// At most one diagnostic per original actor, default-off with the causal observer.
+// Additional reads only; never feed these probes back into gameplay or admission.
+combatcausal::DisappearanceTracker g_causalDisappearance;
+void LogCausalDisappearance(const combatcausal::Target& original,const NativeCensus& prior,
+                            const combatcausal::Scope& before) {
+    if(!combatcausal::Requested() || !g_log || !nativehittrace::IsOwnerThread())return;
+    const auto start=combatcausal::Now();
+    const auto revisionBefore=g_clientManifestRevision,hpSequenceBefore=g_hostHpSequence;
+    const auto watched=CaptureNativeCensus(original.actor);
+    uintptr_t objentry=0,status=0,controller=0,record=0;
+    std::int32_t hp=0,maxHp=0;std::uint8_t type=0;char prefix[2]{};
+    const bool objRead=ReadNative(original.actor+offsets::actor::OBJENTRY_PTR,objentry);
+    const bool inModule=objRead && objentry>g_exeBase && objentry<g_exeBase+0x3000000;
+    const bool typeRead=inModule && ReadNative(objentry+offsets::objentry::TYPE_FLAGS,type);
+    const bool prefixRead=inModule && CopyNative(objentry+offsets::objentry::NAME,prefix,sizeof(prefix));
+    const bool statusRead=ReadNative(original.actor+ACTOR_STATUS,status);
+    const bool hpRead=statusRead && status && ReadNative(status,hp) && ReadNative(status+4,maxHp);
+    const bool controllerRead=ReadNative(original.actor+0x9E8,controller);
+    const bool recordRead=ReadNative(original.actor+0x9F0,record);
+    NativeEnemy classified{};bool isEnemy=false;
+    const bool classifierRead=ReadNativeEnemy(original.actor,classified,isEnemy);
+    const char* exclusion=!objRead?"objentry-read":!objentry?"null-objentry":!inModule?"objentry-range":
+        !typeRead?"type-read":(type!=offsets::objentry::TYPE_BOSS && type!=offsets::objentry::TYPE_MOB)?"nonenemy-type":
+        !prefixRead?"prefix-read":(prefix[0]=='F' && prefix[1]=='_')?"friendly-prefix":
+        !statusRead?"status-read":!status?"null-status":!hpRead?"hp-read":
+        !classifierRead?"remaining-metadata-read":watched.state!=CensusState::Complete?"census-unavailable":
+        !watched.watchedActorPresent?"not-in-list":"listed-enemy";
+    const auto state=spawncontroller::CaptureDiagnosticState(g_exeBase,controllerRead?controller:0);
+    std::array<std::uint8_t,64> actorRaw{},controllerRaw{},recordRaw{};
+    std::array<std::uint8_t,44> headerRaw{};
+    const bool actorBytes=CopyNative(original.actor,actorRaw.data(),actorRaw.size());
+    const bool controllerBytes=controllerRead && controller && CopyNative(controller,controllerRaw.data(),controllerRaw.size());
+    const bool recordBytes=recordRead && record && CopyNative(record,recordRaw.data(),recordRaw.size());
+    const bool headerBytes=state.header && CopyNative(state.header,headerRaw.data(),headerRaw.size());
+    const auto after=CausalScope();const auto end=combatcausal::Now();
+    char actorHex[129]{},controllerHex[129]{},recordHex[129]{},headerHex[89]{};
+    TraceHex(actorRaw,actorHex);TraceHex(controllerRaw,controllerHex);TraceHex(recordRaw,recordHex);TraceHex(headerRaw,headerHex);
+    g_log("[combat-disappearance] schema=1 startNs=%llu endNs=%llu nativeReadOnly=1 authority=0 originalNetId=%u originalActor=%llX originalObjentry=%llX originalStatus=%llX originalController=%llX originalRecord=%llX originalHp=%d originalMaxHp=%d originalType=%u originalObjectId=%u role=%u connection=%llu generation=%llu delivery=%llu epoch=%llu load=%llu transition=%llu frame=%llu scopeStable=%u priorComplete=%u priorReason=%s priorNodes=%zu priorEnemies=%zu watchedComplete=%u watchedReason=%s watchedFailedAt=%llX watchedNodes=%zu watchedPresent=%u watchedEnemies=%zu classifierRead=%u isEnemy=%u exclusion=%s objRead=%u objentry=%llX inModule=%u typeRead=%u type=%u prefixRead=%u prefix=%02X%02X statusRead=%u status=%llX hpRead=%u hp=%d maxHp=%d controllerRead=%u controller=%llX recordRead=%u record=%llX controllerStateAvailable=%u header=%llX headerId=%u recordCount=%u flags=%u stage=%u currentCount=%u initialCount=%u actorBytes=%u actorRaw=%s controllerBytes=%u controllerRaw=%s headerBytes=%u headerRaw=%s recordBytes=%u recordRaw=%s instanceLive=%u hostEpoch=%u hostArrived=%u manifestComplete=%u manifestRevisionBefore=%llu manifestRevisionAfter=%llu hpSequenceBefore=%llu hpSequenceAfter=%llu populationRequested=%u spawnRequested=%u",
+        (unsigned long long)start,(unsigned long long)end,original.netId,(unsigned long long)original.actor,
+        (unsigned long long)original.objentry,(unsigned long long)original.status,(unsigned long long)original.controller,
+        (unsigned long long)original.record,original.hp,original.maxHp,original.type,original.objectId,
+        unsigned(before.native.role),(unsigned long long)before.native.connectionId,(unsigned long long)before.native.generation,
+        (unsigned long long)before.delivery,(unsigned long long)before.native.epoch,(unsigned long long)before.native.loadSerial,(unsigned long long)before.native.transitionSerial,
+        (unsigned long long)before.native.frame,combatcausal::SameScope(before,after)?1u:0u,
+        prior.state==CensusState::Complete?1u:0u,prior.reason,prior.nodeCount,prior.enemies.size(),
+        watched.state==CensusState::Complete?1u:0u,watched.reason,(unsigned long long)watched.failedAt,
+        watched.nodeCount,watched.watchedActorPresent?1u:0u,watched.enemies.size(),classifierRead?1u:0u,isEnemy?1u:0u,exclusion,
+        objRead?1u:0u,(unsigned long long)objentry,inModule?1u:0u,typeRead?1u:0u,unsigned(type),prefixRead?1u:0u,
+        unsigned(static_cast<unsigned char>(prefix[0])),unsigned(static_cast<unsigned char>(prefix[1])),statusRead?1u:0u,
+        (unsigned long long)status,hpRead?1u:0u,hp,maxHp,controllerRead?1u:0u,(unsigned long long)controller,
+        recordRead?1u:0u,(unsigned long long)record,state.controllerAvailable?1u:0u,(unsigned long long)state.header,
+        unsigned(state.headerId),unsigned(state.recordCount),state.flags,unsigned(state.stage),state.currentCount,state.initialCount,
+        actorBytes?1u:0u,actorHex,controllerBytes?1u:0u,controllerHex,headerBytes?1u:0u,headerHex,recordBytes?1u:0u,recordHex,
+        g_inst.live?1u:0u,g_host.epoch,g_host.arrived?1u:0u,g_host.manifestComplete?1u:0u,
+        (unsigned long long)revisionBefore,(unsigned long long)g_clientManifestRevision,
+        (unsigned long long)hpSequenceBefore,(unsigned long long)g_hostHpSequence,g_populationRequested?1u:0u,g_populationSpawnRequested?1u:0u);
+}
+void ProbeCausalDisappearance(const NativeCensus& census,const combatcausal::Scope& scope) {
+    if(!combatcausal::Requested() || !combatcausal::engine.Admitted() || !g_log)return;
+    combatcausal::Target observed[combatcausal::TargetCount]{};unsigned count=0;
+    // Only original actor membership matters to this one-shot selector.
+    // Extra enemies must not conceal a disappearance (the oracle still refuses them).
+    for(unsigned i=0;i<combatcausal::TargetCount;++i)
+        for(const auto& enemy:census.enemies)if(enemy.actor==g_causalDisappearance.Original(i).actor){
+            observed[count++].actor=enemy.actor;break;
+        }
+    int index=0;
+    while((index=g_causalDisappearance.Next(scope,CensusMatchesInstance(census),observed,count))>=0)
+        LogCausalDisappearance(g_causalDisappearance.Original(static_cast<unsigned>(index)),census,scope);
+}
 void ObserveCausalPopulation(bool complete) noexcept {
     try {
     auto before=CausalScope();
@@ -4130,6 +4201,7 @@ void ObserveCausalPopulation(bool complete) noexcept {
         return;
     }
     const auto census=CaptureNativeCensus();
+    ProbeCausalDisappearance(census,before);
     combatcausal::Target rows[combatcausal::TargetCount]{}; unsigned count=0;
     bool valid=CensusMatchesInstance(census);
     for(const auto& n:census.enemies) {
@@ -4148,6 +4220,7 @@ void ObserveCausalPopulation(bool complete) noexcept {
     }
     combatcausal::currentScope=after;
     combatcausal::engine.Population(after,rows,count,combatcausal::Now());
+    if(combatcausal::engine.Admitted())g_causalDisappearance.Arm(after,rows,count);
     } catch(...) {
         combatcausal::engine.Retire(combatcausal::currentScope,combatcausal::Now(),combatcausal::Reason::Unavailable);
     }

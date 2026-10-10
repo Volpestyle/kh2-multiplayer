@@ -1,6 +1,7 @@
 // Production observer and NativeHitTrace callbacks over copied facts only.
 // No KH2, hook installation, named mapping, transport or native memory access.
 #include "CombatCausalTrace.hpp"
+#include "CausalDisappearance.hpp"
 #include <cstdio>
 #include <Windows.h>
 #include <type_traits>
@@ -11,6 +12,7 @@
 namespace cc=kh2coop::inject::combatcausal;
 namespace ht=kh2coop::inject::nativehittrace;
 #include "CompanionRetainedFixture.hpp"
+#include "PracticePlayerRetainedFixture.hpp"
 static_assert(static_cast<unsigned>(cc::WireType::HitClaim)==static_cast<unsigned>(kh2coop::PacketType::HitClaim));
 static_assert(static_cast<unsigned>(cc::WireType::EnemyHp)==static_cast<unsigned>(kh2coop::PacketType::EnemyHp));
 static_assert(static_cast<unsigned>(cc::WireType::EnemyDeath)==static_cast<unsigned>(kh2coop::PacketType::EnemyDeath));
@@ -112,6 +114,7 @@ void CompanionControls(){
  auto player=Emit(Scope());auto fake=player;fake.policy=RetainedCompanion(0).policy;
  Check(!cc::HostCompanionEnemyHit(fake,Scope()),"real player path cannot masquerade as companion");
 }
+#include "PracticeCombinedControls.hpp"
 }
 int main(){
  bool published=false;HANDLE reader=CreateThread(nullptr,0,PublicationReader,&published,0,nullptr);
@@ -178,5 +181,5 @@ int main(){
  Admit(cc::engine,s);cc::currentScope=s;
  cc::engine.Consumer(s,23,cc::Reason::RejectDecode,0,0,9,0,hp.data(),static_cast<unsigned>(hp.size()),21);
  cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"actual queued consumer-rejection logger failure is contained");
- cc::Configure(false,Clock);CompanionControls();
+ cc::Configure(false,Clock);CompanionControls();PracticePlayerControls();DisappearanceControls();
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}

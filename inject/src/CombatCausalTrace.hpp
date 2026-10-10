@@ -187,6 +187,51 @@ inline bool HostCompanionEnemyHit(const nativehittrace::Event& e,const Scope& sc
     const auto sum=static_cast<std::int64_t>(a.victim.hp)+c.delta;
     return b.victim.hp==(sum<0?0:sum);
 }
+// Canonical host player direct Apply->Stat is a distinct observed path.
+// Bind the real HostLocalAttack policy and direct Apply parent; no client authority.
+inline bool HostPlayerDirectStatEnemyHit(const nativehittrace::Event& e,const Scope& scope) noexcept {
+    namespace ht=nativehittrace; namespace dp=damagepolicy;
+    const auto& a=e.before;const auto& b=e.after;const auto& h=a.hit;const auto& z=b.hit;
+    const auto& p=e.policy;const auto& f=p.facts;const auto& authority=p.authority;
+    if(scope.native.role!=1 || scope.native.slot!=0 || !ScopeEligible(scope) ||
+        !CompanionContext(a.context,scope.native) || !CompanionContext(a.context,b.context) ||
+        !e.sequence || e.parentSequence || e.depth!=1 || !e.ownerThread || !e.returned ||
+        e.unwound || e.nested || e.overflow || !e.coverageStable || e.coverageMask!=ht::AllHooks ||
+        !e.contextStable || !e.metadataStable || !e.lossStable || !e.callerAvailable || e.callerRva!=0x410EFF ||
+        !SameActor(a.victim,b.victim) || !SameActor(a.source,b.source) ||
+        a.victim.objectId!=302 || a.victim.type!=4 || a.victim.hp<=0 ||
+        a.source.type!=0 || a.source.team!=1 || a.source.namePrefix!=0x5F50 ||
+        a.source.hp<=0 || a.source.maxHp<=0 || a.source.hp!=b.source.hp ||
+        a.source.actor==a.victim.actor || a.source.status==a.victim.status ||
+        !p.recorded || !f.ownerThread || !f.contextAvailable || f.role!=dp::Role::Host ||
+        f.source!=dp::ActorClass::LocalAvatar || f.victim!=dp::ActorClass::Enemy ||
+        !p.decision.supported || p.decision.action!=dp::Action::Native ||
+        p.decision.reason!=dp::Reason::HostLocalAttack || p.zeroAttempted ||
+        p.claimAttempted || p.claimQueued ||
+        std::memcmp(p.roster,scope.roster,sizeof(p.roster))!=0 ||
+        !CompanionContext(authority.context,a.context) ||
+        !SameActor(authority.source,a.source) || authority.source.hp!=a.source.hp ||
+        !SameActor(authority.victim,a.victim) || authority.victim.hp!=a.victim.hp ||
+        !CompanionHitIdentity(authority.hit,h) || authority.hit.flags!=h.flags ||
+        f.hit.readMask!=(dp::RequiredHitReads|dp::KindAvailable) ||
+        f.hit.flags!=h.flags || f.hit.amount!=h.damage || f.hit.stat!=h.stat || f.hit.kind!=h.kind ||
+        !CompanionHitIdentity(h,z) || !h.hit || !h.attack || !h.attackHandle || !h.ownerHandle ||
+        h.owner!=a.source.actor || h.canonicalPlayer!=a.source.actor || h.head!=a.source.actor ||
+        h.tracked!=a.source.actor || h.canonicalPlayer==a.victim.actor ||
+        h.stat!=0 || h.kind==5 || h.kind==6 || h.damage<=0 || h.syncDrop || h.manualFilterOn || h.manualDrop ||
+        (h.flags&2) || z.flags!=(h.flags|2U) ||
+        e.takeCalls!=0 || e.statCalls!=1 || e.childCount!=1 || b.victim.hp<0 || b.victim.hp>=a.victim.hp)
+        return false;
+    const auto& c=e.children[0];
+    if(c.kind!=ht::ChildKind::Stat || c.applySequence!=e.sequence || !c.sequence ||
+        c.takeSequence || c.matching || !c.returned || c.unwound || !c.callerAvailable ||
+        c.callerRva!=0x3D37D2 || c.actor!=a.victim.actor || c.stat!=0 ||
+        static_cast<std::int64_t>(c.delta)!=-static_cast<std::int64_t>(h.damage) ||
+        !SameActor(c.before,a.victim) || !SameActor(c.after,b.victim) ||
+        c.before.hp!=a.victim.hp || c.after.hp!=b.victim.hp || c.result!=b.victim.hp) return false;
+    const auto sum=static_cast<std::int64_t>(a.victim.hp)+c.delta;
+    return b.victim.hp==(sum<0?0:sum);
+}
 inline std::uint64_t Digest(const std::uint8_t* p,unsigned n) noexcept {
     std::uint64_t h=0xcbf29ce484222325ULL;
     for(unsigned i=0;i<n;++i) {h^=p[i];h*=0x100000001b3ULL;} return h;
@@ -316,7 +361,7 @@ public:
         r.returned=e.returned;r.readback=e.contextStable&&e.metadataStable;
         if(l)r.target=l->identity;
         const bool client=s.native.role==2;
-        r.locallyQualified=Current(s)&&l&&(PlayerEnemyHit(e,client)||HostCompanionEnemyHit(e,s))&&
+        r.locallyQualified=Current(s)&&l&&(PlayerEnemyHit(e,client)||HostCompanionEnemyHit(e,s)||HostPlayerDirectStatEnemyHit(e,s))&&
             e.before.context.generation==s.native.generation && e.before.context.epoch==s.native.epoch &&
             e.before.victim.objentry==l->identity.objentry && e.before.victim.status==l->identity.status &&
             (client ? e.before.victim.hp==l->expected : Cause(*l,e.sequence,r.beforeHp,r.afterHp));
@@ -452,9 +497,15 @@ inline void Drain(nativehittrace::LogFn log) noexcept {
     }
     static std::uint64_t lastSummary=0;
     if(Now()-lastSummary<1000000000ULL)return;lastSummary=Now();
-    log("[combat-causal] summary schema=1 admitted=%u retired=%u started=%llu drained=%llu dropped=%llu loss=%llu nativeCoverageQualified=0 acceptance=0",
+    log("[combat-causal] summary schema=1 admitted=%u retired=%u started=%llu drained=%llu dropped=%llu loss=%llu ownerFrame=%llu ownerAvailable=%u generation=%llu delivery=%llu connection=%llu epoch=%llu load=%llu transition=%llu role=%u slot=%u location=%u,%u,%u,%u,%u,%u nativeCoverageQualified=0 acceptance=0",
         unsigned(engine.Admitted()),unsigned(engine.Retired()),static_cast<unsigned long long>(engine.Started()),static_cast<unsigned long long>(engine.Drained()),
-        static_cast<unsigned long long>(engine.Dropped()),static_cast<unsigned long long>(engine.Loss()));
+        static_cast<unsigned long long>(engine.Dropped()),static_cast<unsigned long long>(engine.Loss()),
+        static_cast<unsigned long long>(currentScope.native.frame),unsigned(currentScope.native.available),
+        static_cast<unsigned long long>(currentScope.native.generation),static_cast<unsigned long long>(currentScope.delivery),
+        static_cast<unsigned long long>(currentScope.native.connectionId),static_cast<unsigned long long>(currentScope.native.epoch),
+        static_cast<unsigned long long>(currentScope.native.loadSerial),static_cast<unsigned long long>(currentScope.native.transitionSerial),
+        unsigned(currentScope.native.role),unsigned(currentScope.native.slot),
+        currentScope.native.location[0],currentScope.native.location[1],currentScope.native.location[2],currentScope.native.location[3],currentScope.native.location[4],currentScope.native.location[5]);
     } catch(...) {
         engine.Retire(currentScope,Now(),Reason::Loss);
     }
