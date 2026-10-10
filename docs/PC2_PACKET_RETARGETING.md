@@ -48,7 +48,14 @@ buildid `15194255`. This qualifies the lane, not other fixtures or networking.
 5. The ZIP's Python is isolated by `python311._pth`. Add packet, tools and
    dependency directories explicitly. Carry matching-ABI dependencies such as
    Pillow, pin them, and test with the actual bundled interpreter. A system
-   Python pass does not establish package portability.
+   Python pass does not establish package portability. The `_pth` file also
+   drops the script's own directory from `sys.path`, so every child script must
+   add its package-relative import roots from `__file__`. Causal05 failed at the
+   friend's `console_diag.py` on 2026-10-10 with `ModuleNotFoundError:
+   system_sessions` after the entry itself passed. Before sealing, replay the
+   full host and friend Setup from a copied unpack with the bundled `-I`
+   interpreter and no checkout on the path, running every spawned child up to
+   game launch with native, game and network leaves stubbed.
 6. Reuse the guarded canonical `BoundBoot` load path: highlighted LOAD row,
    recognized save-list OCR before confirmation, bounded deadline and no prompt
    dismissal. Keep all scenario steps inside the fixture's reviewed scope.
@@ -97,8 +104,14 @@ lock in new packets; existing sealed packets remain intact.
 
 Validate hashes, scenario structure, script syntax/BOM bytes and bundled Python
 imports offline. Seal `pins.json` PENDING, obtain independent review, then have
-the lead write the actual ADOPT receipt and fresh same-UTC-day consent. Use a
+the lead write the actual ADOPT receipt and a same-UTC-day consent record. Use a
 seal-specific exclusive-create spent marker: one attempt per sealed packet.
+
+Consent records James's standing availability; it is not a per-run question.
+James says when PC2 is free and when he reclaims it. While it is free, the lead
+writes consent for each reviewed packet from that standing statement and the
+run proceeds on review approval, without asking him first. A reclaim stops the
+run immediately and ends the availability until he frees PC2 again.
 
 Copied offline controls must accept explicit packet/scratch paths or resolve
 their new location correctly. A fixed `parents[2]` root that worked under

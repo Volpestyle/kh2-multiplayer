@@ -1,5 +1,11 @@
 # Passive combat causal diagnostic
 
+Saved host/friend receipts can be checked with the offline
+[combat causal auditor](COMBAT_CAUSAL_AUDIT.md) for VUH-1503 AC3. It reports
+orphan/duplicate source links and unqualified coverage separately. Schema 1's
+explicitly unqualified native coverage prevents a PASS even for a consistent
+recorded graph; it grants no live or landing authority.
+
 Offline product prerequisite for the two-PC shared-combat design, based on clean source 7d622b414694167c70794931bb58e253db18344f. These are new coherent DLL/runtime products, not the original JOIN27 binaries. Full combat remains BLOCKED until the source/product reviews, measured transport coverage and a separate executable fixture qualify. No game run or recording-window decision is included.
 
 Set `KH2COOP_COMBAT_CAUSAL_TRACE=1` explicitly on both the inject process and its runtime. Absent or any other value is off. The flag reuses the installed ApplyHitDamage/TakeDamage/StatHP observation hooks and owner-thread trace; it adds no hook registrations, network packets, damage calls, retries or gameplay permissions. Existing NativeHitTrace::Witness is unchanged.
