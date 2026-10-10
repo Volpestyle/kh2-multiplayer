@@ -852,7 +852,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     })) return; // duplicates never renew a routing lease
                 if (pending.size() == ACTIVATION_MAX_OUTSTANDING) pending.erase(pending.begin());
                 pending.push_back({request, now});
-                sendTo(host->transportPeer, encode(request), false);
+                sendTo(host->transportPeer, encode(request), true);
                 break;
             }
 
@@ -885,7 +885,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     });
                 if (match == pending->second.end()) { ++rejectedWorld_; return; }
                 pending->second.erase(match); // a response can be routed only once
-                sendTo(target->transportPeer, encode(point), false);
+                sendTo(target->transportPeer, encode(point), true);
                 break;
             }
 

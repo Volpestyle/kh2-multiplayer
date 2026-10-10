@@ -969,12 +969,26 @@ int main() {
           "a non-host progress update is dropped");
 
     std::cout << "\n=== Late joiner ===\n";
+    // Deterministic single-drop control, strengthened to 100% unreliable loss
+    // in BOTH directions of both clients. LinkConditioner models reliable
+    // retransmission by delay/delivery, not by discarding reliable packets.
+    LinkConditioner dropControl;dropControl.configure({0,0,1.0f,730});
+    check(!dropControl.enqueue(0,{1},false) && dropControl.dropped()==1,
+          "activation loss control drops the first unreliable request");
+    host->setLinkConditions({0,0,1.0f,731},{0,0,1.0f,732});
+    c1->setLinkConditions({0,0,1.0f,733},{0,0,1.0f,734});
     ActivationRequest activation {goa, {123, 456}, 1, 2}; // forged slot must be overwritten
-    c1->sendActivationRequest(activation);
+    // Exactly the production WorldPump false argument, not just the helper.
+    check(c1->sendNativeWorld(encode(activation),c1->makeTestingWorldContext(),false),
+          "DLL-style activation submission accepts reliable promotion");
     check(waitFor([&] { return hostSeen.activationRequests.size() == 1; }) &&
               hostSeen.activationRequests.back().requesterSlot == 1 &&
               hostSeen.activationRequests.back().incarnation == activation.incarnation,
           "activation challenge reaches only host with verified requester slot");
+    c1->sendActivationRequest(activation);
+    pump(30);
+    check(hostSeen.activationRequests.size()==1,
+          "duplicate activation request does not forward twice or renew routing lease");
     HostActivationPoint activationPoint {hostSeen.activationRequests.back(), 1,
                                         {45.0f, -260.0f, 1950.0f, 1.0f}};
     c1->sendHostActivationPoint(activationPoint);
@@ -988,6 +1002,19 @@ int main() {
     host->sendHostActivationPoint(activationPoint);
     pump(50);
     check(c1Seen.activationPoints.size() == 1, "duplicate activation response is not routed twice");
+    auto staleActivation=activation;++staleActivation.location.epoch;++staleActivation.requestSeq;
+    c1->sendActivationRequest(staleActivation);
+    auto foreignActivation=activation;foreignActivation.requestSeq+=10;
+    const auto foreignBytes=worldfixture::capture(*c1,encode(foreignActivation));
+    const std::uint8_t* foreignPayload=nullptr;std::size_t foreignSize=0;
+    decodePacketHeader(foreignBytes.data(),foreignBytes.size(),foreignPayload,foreignSize);
+    ByteReader foreignReader(foreignPayload,foreignSize);WorldEnvelope foreignEnvelope;read(foreignReader,foreignEnvelope);
+    ++foreignEnvelope.scope.sourceConnectionId;
+    check(worldfixture::raw(*c1,encode(foreignEnvelope)),"foreign activation control submitted through actual transport");
+    pump(50);
+    check(hostSeen.activationRequests.size()==1 && c1Seen.activationPoints.size()==1,
+          "reliable stale-room and foreign-connection activation refuse");
+    host->setLinkConditions({},{});c1->setLinkConditions({},{});
     auto c2 = makeClient("c2", SlotType::Friend2, c2Seen);
     live = {host.get(), c1.get(), c2.get()};
     check(waitFor([&] {

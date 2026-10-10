@@ -25,7 +25,10 @@ bool NetworkClient::sendNativeWorld(const std::vector<std::uint8_t>& bytes,const
         if(type==PacketType::RoomTransition && avatarLocalSlot_==0){const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader r(p,n);RoomTransition room;readRoomTransitionPacket(r,room);if(!r.atEnd())return false;hostRoom_=room;}
         WorldEnvelope e{{avatarSessionId_,worldBinding_->selfConnectionId,c.deliverySerial,c.hostSourceSerial,0,0},bytes};
         const bool material=resyncPlan_&&avatarLocalSlot_==0&&isMaterialWorldPacket(type);
-        const bool sent=sendPacket(encode(e),reliable||material);
+        // Activation is short-lived, not lossy. The DLL pump historically
+        // submits it as periodic/unreliable; promote both request and reply at
+        // this shared boundary without extending their original leases.
+        const bool sent=sendPacket(encode(e),reliable||material||isEphemeralWorldPacket(type));
         if(!sent&&material)abortResync(ResyncResultReason::Overflow,"required material submission failed");
         return sent;
     }catch(const std::exception&){return false;}
@@ -423,11 +426,11 @@ bool NetworkClient::sendDesyncCaptureDone(const DesyncCaptureDone& m) {
 }
 
 void NetworkClient::sendActivationRequest(const ActivationRequest& m) {
-    if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), false);
+    if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
 
 void NetworkClient::sendHostActivationPoint(const HostActivationPoint& m) {
-    if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), false);
+    if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
 
 void NetworkClient::sendClockPing() {
