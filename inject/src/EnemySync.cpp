@@ -1846,6 +1846,21 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             }
         }
         if (refilled) {
+            // A metadata replacement at the SAME still-listed actor is not a
+            // living membership removal. Outside the certified BC room, keep
+            // the existing fresh-root replacement publication contract. The
+            // old sampled identity is superseded locally, never a death/kill.
+            const bool metadataReplaced = !OrdinaryLifecycleRoom() && !g_populationRequested &&
+                std::any_of(g_inst.spawns.begin(),g_inst.spawns.end(),[&](const Spawn& t) {
+                    return t.spawnIndex>s.spawnIndex && t.present && t.announced &&
+                        t.actor==s.actor && t.objectId==s.objectId && SamePoint(t.spawnPos,s.spawnPos) &&
+                        PopulationSpawnRoots(t)!=PopulationSpawnRoots(s) && FindNativeEnemy(census,t);
+                });
+            if(metadataReplaced) {
+                s.lifecycleRetired=true;
+                SYNC_LOG("[enemysync] host: metadata identity superseded spawn=%u killCredit=0",s.spawnIndex);
+                continue;
+            }
             // No certified membership lifecycle outside the bounded BC room.
             // Neither silently invent deathSent nor turn live removal into a kill.
             SYNC_LOG("[enemysync] host: unqualified refill held spawn=%u killCredit=0",s.spawnIndex);
@@ -3750,8 +3765,7 @@ bool ReceiveWorldPackets() {
                     const auto h=g_host.enemies.find(e.netId);
                     const auto* cut=OrdinaryCut();
                     if(h==g_host.enemies.end() || h->second.removed || (OrdinaryLifecycleRoom() &&
-                       (!OrdinaryCutCurrent() || !ordinarylifecycle::AdmitsHp(cut,e.netId) ||
-                        (combatcausal::Requested()&&combatcausal::engine.Admitted()&&!combatcausal::engine.Member(e.netId))))) {
+                       (!OrdinaryCutCurrent() || !ordinarylifecycle::AdmitsHp(cut,e.netId)))) {
                         ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectUnadmittedLifecycle,e.netId,m.sequence);
                         lifecycleUnknown=true;
                     }

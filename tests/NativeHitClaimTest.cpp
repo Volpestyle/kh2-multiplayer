@@ -315,6 +315,7 @@ void Reset(bool client = false, bool registerReader = true) {
     g_resyncPlan.reset(); g_nativeResync.reset(); g_resyncOutput.clear();
     g_activationRecovery.reset(); g_activationReceiptSequence = g_activationReceiptGaps = 0;
     g_clientClaimHold = {}; g_clientManifestRevision = 0;
+    ResetOrdinaryLifecycle(); // no lifecycle/source certificate survives this owned fixture incarnation
     g_survivingPackEnabled = false; g_survivingPack = SurvivingPackPreparation {};
     g_resyncDeadline = g_resyncFailureFloor = 0; g_resyncHostCaptured = false;
     g_resyncPriorOrderedGeneration = 0;
@@ -1950,22 +1951,59 @@ void TestCombatCausalBoundaries() {
         Put(image+offsets::ROOM_ID,std::uint8_t{6});Put(image+offsets::NOW+2,std::uint8_t{0});
         Put(image+offsets::MAP_PROGRAM,std::uint16_t{1});Put(image+offsets::BATTLE_PROGRAM,std::uint16_t{1});Put(image+offsets::EVENT_PROGRAM,std::uint16_t{0});
         g_inst.spawns[0].objectId=302;g_host.enemies[1].objectId=302;Put(object+offsets::objentry::OBJECT_ID,std::uint32_t{302});
+        cc::enabled.store(enabled);cc::engine.~Engine();new(&cc::engine)cc::Engine;
+        cc::clockFn=+[]() noexcept -> std::uint64_t {return 1;};
         if(client) {
             // Original native-arrival adapter leaves, not a live arrival proof.
             arrivalTarget={};arrivalTarget.epoch=9;arrivalTarget.worldId=5;arrivalTarget.roomId=6;
             arrivalTarget.mapProgram=1;arrivalTarget.battleProgram=1;
             g_host.world=5;g_host.room=6;g_host.btl=1;g_host.ackSent=true;
+            // Five REAL owned native bodies and record associations. The old
+            // one-body/four copied observer leaves cannot authorize BC HP.
+            SeedPreparationShadows(1000);
+            EnemyManifest manifest;manifest.epoch=9;manifest.replace=true;
+            for(auto& spawn:g_inst.spawns) {
+                Put(spawn.status+4,std::int32_t{1000});spawn.lastMaxHp=1000;
+                spawn.controller=RecordController();spawn.record=RecordData(0,spawn.spawnIndex);spawn.identityRead=true;
+                EnemyManifestEntry entry;entry.netId=static_cast<std::uint16_t>(spawn.netId);
+                entry.objectId=302;entry.spawnIndex=spawn.spawnIndex;entry.battleProgram=1;
+                manifest.entries.push_back(entry);
+            }
+            // Source certificate is constructed from the actual reader's
+            // complete owned catalog, then decoded/admitted by the production
+            // consumer with its authenticated host envelope. No history poke.
+            const auto census=CaptureNativeCensus();RecordCatalog catalog;
+            if(!FreshRecordCatalog(census,catalog) || census.enemies.size()!=5 || catalog.entryCount!=1)
+                throw std::runtime_error("BC positive fixture lacks five native records");
+            PopulationCut cut;cut.membershipOnly=true;cut.epoch=9;cut.hostLoad=load;cut.hostTransition=transition;
+            cut.sequence=5;cut.location=PopulationLocation(census.location);cut.definitions.push_back(catalog.entries[0].content);
+            for(unsigned i=0;i<5;++i) {
+                PopulationOccurrence row;row.netId=static_cast<std::uint16_t>(i+1);row.record=static_cast<std::uint16_t>(i);
+                row.objectId=302;row.occurrence=row.birthSequence=i+1;row.activationPoint={0,0,0,1};cut.entries.push_back(row);
+            }
+            QueueHostWorld(encode(manifest));QueueHostWorld(encode(cut));ReceiveWorldPackets();
+            if(!OrdinaryCutCurrent() || !ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration()))
+                throw std::runtime_error("BC positive fixture did not earn source/native membership");
+            for(const auto& spawn:g_inst.spawns)if(spawn.netId!=static_cast<int>(spawn.spawnIndex+1))
+                throw std::runtime_error("BC positive fixture lacks exact record-to-ID binding");
         }
-        cc::enabled.store(enabled);cc::engine.~Engine();new(&cc::engine)cc::Engine;
-        cc::clockFn=+[]() noexcept -> std::uint64_t {return 1;};
         if(enabled) {
             auto scope=CausalScope();Check(cc::ScopeEligible(scope),"actual diagnostic safe BC full scope qualifies");
             cc::currentScope=scope;
             NativeEnemy n{};bool enemyType=false;Check(ReadNativeEnemy(enemy,n,enemyType)&&enemyType,"diagnostic original typed target readable");
             cc::Target rows[5];rows[0]=CausalTarget(g_inst.spawns[0],n,1);
-            for(unsigned i=1;i<5;++i)rows[i]={0x1000+i,0x2000+i,0x3000+i,0x4000+i,0x5000+i,i+1,302,4,1000,1000};
+            for(unsigned i=1;i<5;++i) {
+                if(client) {
+                    NativeEnemy actual;bool enemyType=false;
+                    if(!ReadNativeEnemy(g_inst.spawns[i].actor,actual,enemyType) || !enemyType)
+                        throw std::runtime_error("BC positive observer native target unavailable");
+                    rows[i]=CausalTarget(g_inst.spawns[i],actual,i+1);
+                } else rows[i]={0x1000+i,0x2000+i,0x3000+i,0x4000+i,0x5000+i,i+1,302,4,1000,1000};
+            }
             cc::engine.Population(scope,rows,5,1);++scope.native.frame;cc::engine.Population(scope,rows,5,2);
-            Check(cc::engine.Admitted(),"actual target roots admitted with copied four census leaves (not native coverage)");
+            Check(cc::engine.Admitted(),client?"client observer admits all five actual native record targets":
+                "host observer admits copied four census leaves (not native coverage)");
+            if(client)BindOrdinaryCausalBirths(CaptureNativeCensus());
             cc::Receipt r;while(cc::engine.Pop(r)){}
         }
     };
@@ -1990,9 +2028,9 @@ void TestCombatCausalBoundaries() {
     // Production claim encoder/send while a real NativeHitTrace Apply token is active.
     const auto claimPositive=[&](bool enabled) {
         prepare(enabled,true);
-        EnemyManifest manifest;manifest.epoch=9;manifest.replace=true;
-        EnemyManifestEntry entry;entry.netId=1;entry.objectId=302;entry.battleProgram=1;manifest.entries.push_back(entry);
-        QueueHostWorld(encode(manifest));QueueHostWorld(encode(EnemyHp{9,{{1,1000,1000}},1}));ReceiveWorldPackets();
+        EnemyHp hp;hp.epoch=9;hp.sequence=1;
+        for(unsigned id=1;id<=5;++id)hp.entries.push_back({static_cast<std::uint16_t>(id),1000,1000});
+        QueueHostWorld(encode(hp));ReceiveWorldPackets();
         Check(ReleaseClientClaims(30),"claim positive earns original complete manifest/HP/native-readback release");
         namespace ht=kh2coop::inject::nativehittrace;
         ht::ApplyFacts facts{};facts.context=CaptureNativeHitContext();ht::ApplyToken token{};
@@ -2039,7 +2077,7 @@ void TestCombatCausalBoundaries() {
         case 1:raw=encode(EnemyHp{8,{{1,900,1000}},11});reason=cc::Reason::RejectEpoch;break;
         case 2:std::fill_n(raw.begin()+7,8,std::uint8_t{0});reason=cc::Reason::RejectScope;break; // no authenticated scope: payload decoder is not reached
         case 3:raw=encode(EnemyHp{9,{{1,900,1000}},9});reason=cc::Reason::RejectStaleSequence;break;
-        case 4:raw=encode(EnemyHp{9,{{99,900,1000}},11});reason=cc::Reason::RejectUnknownTarget;break;
+        case 4:raw=encode(EnemyHp{9,{{99,900,1000}},11});reason=cc::Reason::RejectUnadmittedLifecycle;break;
         case 5:raw=encode(EnemyDeath{8,1});reason=cc::Reason::RejectEpoch;break;
         case 6:raw=encode(EnemyDeath{9,99});reason=cc::Reason::RejectUnknownTarget;break;
         case 7:raw.pop_back();raw[1]=static_cast<std::uint8_t>(raw.size()-3);reason=cc::Reason::RejectScope;break; // bare frame reaches scope gate first
@@ -2090,6 +2128,58 @@ void TestCombatCausalBoundaries() {
     Check(cc::engine.Retired()&&cc::engine.Loss()>0,"actual consumer observer ring failure is explicit loss");
     QueueHostWorld(raw);ReceiveWorldPackets();
     Check(g_hostHpSequence==1&&g_host.enemies.at(1).hp==900,"observer overflow cannot change subsequent native consumer acceptance");
+    // Missing source proof remains a product refusal, even with five native
+    // bodies and a fully admitted observer. No floor/cache/write/claim release.
+    for(bool enabled:{false,true}) {
+        prepare(enabled,true);ResetOrdinaryLifecycle();
+        QueueHostWorld(encode(EnemyHp{9,{{1,900,1000}},1}));ReceiveWorldPackets();
+        Check(g_hostHpSequence==0&&!g_host.enemies.at(1).hpKnown&&Read<int>(status)==1000&&nativeCalls==0&&
+              !ReleaseClientClaims(30),"missing BC lifecycle proof refuses HP and claims without native writes OFF/ON");
+        bool exact=false;cc::Receipt receipt;
+        while(cc::engine.Pop(receipt))if(receipt.kind==cc::Kind::ConsumerRejected&&
+            receipt.reason==cc::Reason::RejectUnadmittedLifecycle&&receipt.target.netId==1&&receipt.hpSequence==1)exact=true;
+        Check(enabled?exact:!exact,"missing BC lifecycle proof retains exact reason21 only when opted in");
+    }
+    // Source birth is ordered before HP, while the replacement body is not yet
+    // locally bound. HP caching is product-owned; native writes/claim release
+    // still require the complete current native association. Observer failure
+    // must not prevent source retirement or alter sequence/cache decisions.
+    const auto birthBeforeLocalBinding=[&](unsigned observer) {
+        prepare(observer!=0,true);
+        if(observer==2)cc::engine.Retire(CausalScope(),1,cc::Reason::Unavailable);
+        if(observer==3)for(unsigned i=0;i<cc::QueueCount+1;++i)
+            ObserveCombatConsumerOutcome(encode(EnemyHp{9,{{1,1000,1000}},1}),cc::Reason::RejectScope);
+        auto retired=*OrdinaryCut();retired.sequence=6;
+        retired.entries[0].terminal=retired.entries[0].removed=true;retired.entries[0].terminalSequence=6;
+        g_bridge.incoming.push_back(HostEnvelope(encode(retired),2));ReceiveWorldPackets();
+        Check(OrdinaryCutCurrent()&&g_host.enemies.at(1).removed&&g_inst.spawns[0].lifecycleRetired,
+              "authenticated source retirement is independent of observer OFF/ON/retired/overflow");
+        EnemyManifest append;append.epoch=9;append.replace=false;
+        EnemyManifestEntry entry;entry.netId=6;entry.objectId=302;entry.spawnIndex=5;entry.battleProgram=1;append.entries.push_back(entry);
+        g_bridge.incoming.push_back(HostEnvelope(encode(append),3));ReceiveWorldPackets();
+        auto born=retired;born.sequence=7;
+        auto replacement=born.entries[0];replacement.netId=6;replacement.occurrence=replacement.birthSequence=7;
+        replacement.terminal=replacement.removed=false;replacement.terminalSequence=0;born.entries.push_back(replacement);
+        g_bridge.incoming.push_back(HostEnvelope(encode(born),4));ReceiveWorldPackets();
+        Check(OrdinaryCutCurrent()&&ordinarylifecycle::AdmitsHp(OrdinaryCut(),6)&&!cc::engine.Member(6),
+              "source birth admitted before replacement local/observer binding");
+        g_bridge.incoming.push_back(HostEnvelope(encode(EnemyHp{9,{{6,900,1000}},1}),5));ReceiveWorldPackets();
+        Check(g_hostHpSequence==1&&g_host.enemies.at(6).hpKnown&&g_host.enemies.at(6).hp==900&&
+              Read<int>(status)==1000&&nativeCalls==0&&!ReleaseClientClaims(30),
+              "new birth HP caches without native writes or premature claim release");
+        if(observer==1) {
+            bool unqualified=false;cc::Receipt receipt;
+            while(cc::engine.Pop(receipt))if(receipt.kind==cc::Kind::HpReceive&&
+                !receipt.locallyQualified&&receipt.reason==cc::Reason::RejectUnadmittedLifecycle)unqualified=true;
+            Check(unqualified,"missing local replacement proof cannot qualify diagnostic HP receipt");
+        } else if(observer)Check(cc::engine.Retired(),"retired/overflow observer remains hard-retired after product admission");
+        const auto& h=g_host.enemies.at(6);
+        return std::make_tuple(g_hostHpSequence,h.hp,h.maxHp,h.hpKnown,g_host.enemies.at(1).removed,
+            g_inst.spawns[0].lifecycleRetired,g_clientManifestRevision,nativeCalls,Read<int>(status),g_bridge.outgoing);
+    };
+    const auto noObserver=birthBeforeLocalBinding(0);
+    for(unsigned mode=1;mode<=3;++mode)Check(noObserver==birthBeforeLocalBinding(mode),
+        "actual lifecycle retirement/birth/HP gameplay identical with observer ON/retired/overflow");
     cc::enabled.store(false);Reset();
 }
 
@@ -2189,6 +2279,10 @@ int main() try {
           "callback metadata replacement creates a fresh binding before HP publication");
     Check(HasHash(hashAppliedEnemies({{2, 309, 993}})) && !HasHash(hashAppliedEnemies({{1, 309, 993}})),
           "decoded StateHash after replacement covers new binding and excludes old binding");
+    bool metadataDeath=false;
+    for(const auto& bytes:g_bridge.outgoing)if(!bytes.empty()&&bytes[0]==static_cast<std::uint8_t>(PacketType::EnemyDeath))metadataDeath=true;
+    Check(g_inst.spawns[0].lifecycleRetired&&!g_inst.spawns[0].deathSent&&!metadataDeath,
+          "non-BC metadata supersession never invents a native death or kill credit");
 
     Reset(true); AdmitClientClaimFixture();
     Check(RecordLocalPlayerEnemyHit(LocalHit()) && g_bridge.outgoing.size() == 1,

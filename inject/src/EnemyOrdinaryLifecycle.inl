@@ -148,8 +148,8 @@ bool PublishOrdinaryLifecycle(const NativeCensus& census) {
         for(const auto& b:births)if(b.occurrence.removed) {
             const auto prior=std::find_if(g_ordinaryBirths.begin(),g_ordinaryBirths.end(),[&](const auto& a){return a.occurrence.netId==b.occurrence.netId;});
             if(prior!=g_ordinaryBirths.end() && !prior->occurrence.terminal && combatcausal::Requested())
-                if(!combatcausal::engine.RetireMember(CausalScope(),b.occurrence.netId,b.occurrence.birthSequence,
-                    b.occurrence.terminalSequence,b.target,bytes.data(),static_cast<unsigned>(bytes.size()),combatcausal::Now()))return false;
+                (void)combatcausal::engine.RetireMember(CausalScope(),b.occurrence.netId,b.occurrence.birthSequence,
+                    b.occurrence.terminalSequence,b.target,bytes.data(),static_cast<unsigned>(bytes.size()),combatcausal::Now());
             for(auto& s:g_inst.spawns)if(s.spawnIndex+1==b.occurrence.netId)s.lifecycleRetired=true;
         }
         g_ordinaryHostHistory=std::move(history);g_ordinarySequence=sequence;
@@ -172,6 +172,13 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
         if(host==g_host.enemies.end() || host->second.objectId!=row.objectId)return;
     }
     const auto bytes=encode(cut);
+    // Product bookends must exist with the optional observer OFF as well.
+    // CausalScope deliberately returns unavailable when it is not requested.
+    ClientClaimScope productBefore,productAfter;
+    if(!ReadClientClaimScope(productBefore) || !g_host.ackSent)return;
+    const auto salt=g_bridge.SpawnPickSalt();
+    std::array<std::uint64_t,3> deliveries{};
+    for(unsigned i=0;i<3;++i)deliveries[i]=g_bridge.PeerDeliverySerial(static_cast<std::uint8_t>(i));
     const auto before=CausalScope();const auto census=CaptureNativeCensus();
     if(!CensusMatchesInstance(census) || !SafeNativeGameplay())return;
     RecordCatalog catalogBefore,catalogAfter;
@@ -198,11 +205,15 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
         }
     }
     if(!FreshRecordCatalog(census,catalogAfter) || !SameRecordCatalogSample(catalogBefore,catalogAfter) ||
-       !combatcausal::SameScope(before,CausalScope()) || !CensusMatchesInstance(census))return;
+       !ReadClientClaimScope(productAfter) || !SameClientClaimScope(productBefore,productAfter) ||
+       !g_host.ackSent || !salt || salt!=g_bridge.SpawnPickSalt() || !CensusMatchesInstance(census))return;
+    for(unsigned i=0;i<3;++i)if(deliveries[i]!=g_bridge.PeerDeliverySerial(static_cast<std::uint8_t>(i)))return;
     for(const auto& pending:retiring) {
         const auto& row=*pending.row;
-        if(combatcausal::Requested() && !combatcausal::engine.RetireMember(before,row.netId,row.birthSequence,
-            row.terminalSequence,pending.target,bytes.data(),static_cast<unsigned>(bytes.size()),combatcausal::Now()))return;
+        // Observer loss still hard-refuses the diagnostic, never the already
+        // authenticated product membership transition or subsequent HP cache.
+        if(combatcausal::Requested())(void)combatcausal::engine.RetireMember(before,row.netId,row.birthSequence,
+            row.terminalSequence,pending.target,bytes.data(),static_cast<unsigned>(bytes.size()),combatcausal::Now());
     }
     for(const auto& pending:retiring) {
         auto& spawn=g_inst.spawns[pending.index];spawn.ordinaryBinding.removed=true;

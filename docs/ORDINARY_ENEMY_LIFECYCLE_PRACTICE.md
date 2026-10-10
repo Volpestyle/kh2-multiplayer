@@ -37,6 +37,15 @@ invokes native removal or grants kill credit. An unproved same-point refill
 outside BC is held instead of silently marking deathSent; unrelated existing
 grace-death handling is not extended. Concurrent population-repair mode refuses.
 
+Native-01 exposed an exception needed for the existing non-BC metadata contract:
+the same still-listed actor can acquire changed sampled roots and become a fresh
+spawn row. Outside BC and population-repair mode only, a newer announced row at
+that same actor, object and point with changed roots and a fresh census match
+locally supersedes the old identity. Publication proceeds for the new row;
+neither deathSent nor EnemyDeath/kill credit is manufactured. Actual living
+removal and different-actor refill still require lifecycle proof. The unchanged
+native callback test must publish ID2 HP and StateHash and exclude ID1.
+
 Relay validation binds complete manifest coverage and ordered history to the
 existing authenticated source envelope, removes retired cached HP and sends the
 certificate before bootstrap HP. Client qualification retains original
@@ -51,6 +60,16 @@ The narrower HP choice is explicit rejection. Any unknown, retired or not yet
 admitted entry rejects the whole packet before its sequence floor or rows mutate.
 Reason21 retains the exact raw packet and offending ID. Later normal periodic HP
 can qualify after birth admission; no stale replay or fabricated damage source.
+HP cache admission uses product-owned source history, never diagnostic engine
+membership. A source-admitted birth may cache HP before its local body binds;
+native writes and claim release still require current native association.
+Observer loss or unqualified receipts retain their diagnostic refusal but cannot
+veto authenticated product retirement/birth or change HP cache decisions.
+Receiver product bookends use the existing full client claim scope, roster,
+peer deliveries, spawn salt and fresh catalog/census. They remain available when
+the optional observer is OFF; the diagnostic-only CausalScope cannot be used as
+product permission. Source session/delivery, arrival ACK and all native scope
+checks remain mandatory.
 
 ## Ledger and scope limits
 
@@ -83,3 +102,15 @@ duplicate/reorder/reuse, raw unknown-ID HP, old claims and kill-credit refusal.
 They are not compiled or executed by story. kh2-steam owns the native slot and
 coherent build, reporting unrelated failures separately. A build pass alone
 does not authorize live use or landing.
+
+The native-01 suite on `7406803c` was 185/188, including thirteen nativehit
+assertion failures; no practice ran. Two failures exposed the non-BC metadata
+publication regression. Ten positive assertions lacked the new BC source cut,
+and one still expected unknown-target reason17 rather than lifecycle reason21.
+The successor preserves those positive claim/payload/HP/overflow assertions,
+constructs five real owned-memory actors and records, admits a catalog-derived
+cut through the actual consumer, and resets fixture lifecycle history. New
+native controls require missing-proof refusal and identical product decisions
+for OFF/ON/retired/overflow observers across a source retirement/new birth before
+local replacement binding. These native controls await the operator build;
+Python source checks are not a substitute for their execution.
