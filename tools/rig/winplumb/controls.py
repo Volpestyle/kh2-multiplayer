@@ -98,6 +98,29 @@ def main():
  except ValueError:pass
  else:raise AssertionError('wrong interpreter hash admitted')
  record('desktop-overlay-command-binding',passed=True)
+ # Real retained child must be reaped even before its first identity/journal.
+ from winplumb import bundled
+ from unittest.mock import patch
+ original_popen=subprocess.Popen;original_write=Path.write_text
+ for failure in ('identity','journal'):
+  dest=root/('import-failure-'+failure);dest.mkdir();created=[]
+  def tracked(*args,**kw):
+   proc=original_popen(*args,**kw);created.append(proc);return proc
+  def broken_write(self,*args,**kw):
+   if self.name=='import-owned.json':raise OSError('injected journal refusal')
+   return original_write(self,*args,**kw)
+  try:
+   with patch.object(bundled.subprocess,'Popen',tracked):
+    if failure=='identity':
+     with patch.object(bundled,'_process_identity',side_effect=OSError('injected identity refusal')):
+      bundled.run_import([sys.executable,'-c','import time;time.sleep(15)'],dest)
+    else:
+     with patch.object(Path,'write_text',broken_write):
+      bundled.run_import([sys.executable,'-c','import time;time.sleep(15)'],dest)
+  except OSError:pass
+  else:raise AssertionError('injected admission failure not raised')
+  assert len(created)==1 and created[0].poll() is not None
+  record('import-'+failure+'-failure-cleanup',pid=created[0].pid,closed=True,exit=created[0].returncode)
  if a.packet:
   # Exact real bundled runtime/Pillow+PS5 desktop path, not a mocked Python.
   from winplumb.bundled import prepare
