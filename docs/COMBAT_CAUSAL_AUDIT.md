@@ -55,6 +55,9 @@ does not qualify gameplay before admission.
 
 The top-level result separates recorded graph consistency from coverage:
 
+`recordedGraphConsistent=True` is NOT acceptance; it describes only consistency
+of the supplied recorded graph and never qualifies missing native coverage.
+
 | Result | Meaning |
 | --- | --- |
 | `FAIL` | The supplied records contain orphan/duplicate/ambiguous sources or contradictory graph facts. |

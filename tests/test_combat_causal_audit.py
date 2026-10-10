@@ -229,6 +229,23 @@ class CombatCausalAuditTest(unittest.TestCase):
                 self.assertIn(expected_codes[name],{i['code'] for i in result['issues']},name)
 
     def test_coverage_mutations(self):
+        expected_codes = {
+            'lost_receipt':'retired_or_loss',
+            'admission_missing':'missing_or_duplicate_admission',
+            'admission_duplicate':'missing_or_duplicate_admission',
+            'root_replacement':'target_replacement_or_unmapped',
+            'scope_load':'scope_replacement',
+            'scope_transition':'scope_replacement',
+            'scope_epoch':'scope_replacement',
+            'scope_generation':'scope_replacement',
+            'scope_delivery':'scope_replacement',
+            'scope_salt':'scope_replacement',
+            'scope_peer':'scope_replacement',
+            'unqualified_hit':'unqualified_receipt',
+            'unqualified_application':'unqualified_receipt',
+            'unsupported_location':'invalid_scope',
+            'bad_local_qpc':'invalid_local_clock',
+        }
         mutations = [
             ("lost_receipt", lambda h,c: h[0].update(loss=1)),
             ("admission_missing", lambda h,c: c.pop(4)),
@@ -254,8 +271,33 @@ class CombatCausalAuditTest(unittest.TestCase):
                 result=audit(h,c)
                 self.assertFalse(result['recordedGraphConsistent'],(name,result))
                 self.assertNotEqual(result['status'],'PASS')
+                self.assertIn(expected_codes[name],{i['code'] for i in result['issues']},name)
 
     def test_text_mutations(self):
+        expected_codes = {
+            'no_logs':'missing_receipts',
+            'no_host':'missing_receipts',
+            'no_summary':'missing_summary',
+            'unfinished_line':'malformed_or_truncated_line',
+            'duplicate_field':'invalid_record',
+            'missing_field':'invalid_record',
+            'unknown_kind':'invalid_record',
+            'invalid_hex':'invalid_record',
+            'changed_checksum':'invalid_record',
+            'invalid_boolean':'invalid_record',
+            'summary_drop':'unqualified_summary',
+            'summary_retired':'unqualified_summary',
+            'summary_pending':'pending_or_unsealed_tail',
+            'forged_coverage':'unsupported_coverage_assertion',
+            'forged_acceptance':'unsupported_coverage_assertion',
+            'consumer_missing':'missing_or_unexpected_consumer',
+            'consumer_original_scope':'scope_replacement',
+            'consumer_truncated':'invalid_consumer_supplement',
+            'consumer_outcome':'invalid_consumer_supplement',
+            'association_gap':'association_count_or_order',
+            'serial_gap':'receipt_serial_gap_or_duplicate',
+            'unknown_record':'invalid_record',
+        }
         h,c=fixture(); host,client=render(h),render(c)
         mutations = [
             ('no_logs','',''),
@@ -286,6 +328,19 @@ class CombatCausalAuditTest(unittest.TestCase):
                 result=AUDIT.audit_texts(h,c)
                 self.assertFalse(result['recordedGraphConsistent'],(name,result['issues']))
                 self.assertFalse(result['exactlyOneSourceProven'])
+                self.assertIn(expected_codes[name],{i['code'] for i in result['issues']},name)
+
+    def test_retired_receipt_refuses_coverage(self):
+        h,c=fixture()
+        h.append(row('host',11,reason=2,qualified=0,netId=0,objectId=0,type=0,
+                     actor=0,objentry=0,status=0,controller=0,record=0,targetHp=0,maxHp=0))
+        result=AUDIT.audit_texts(render(finalize(h),{'Retired':1}),render(c))
+        matches=[i for i in result['issues'] if i['code']=='retired_or_loss']
+        self.assertEqual(len(matches),1)
+        self.assertEqual((matches[0]['peer'],matches[0]['serial'],matches[0]['detail']),('host',12,2))
+        self.assertFalse(result['recordedGraphConsistent'])
+        self.assertFalse(result['coverageQualified'])
+        self.assertEqual(result['status'],'INCONCLUSIVE')
 
     def test_rejection_is_not_a_cause(self):
         h,c=fixture()
