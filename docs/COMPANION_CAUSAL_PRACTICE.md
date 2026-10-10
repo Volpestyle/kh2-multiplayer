@@ -1,5 +1,9 @@
 # Companion causal diagnostic: PC1 practice candidate
 
+The ordinary BC membership successor is documented in
+[ORDINARY_ENEMY_LIFECYCLE_PRACTICE.md](ORDINARY_ENEMY_LIFECYCLE_PRACTICE.md).
+It preserves the source predicates and hard UnknownDelta guard.
+
 The host damage policy already admits a positively observed native AI companion. Causal08 serial101 and causal10 serial151 recorded Goofy as NativeCompanion/HostCompanionAttack, but the separate causal witness only understood the canonical player Apply->Take->Stat path. Both real companion hits used Apply caller0x410EFF and one direct Stat caller0x3D37D2, reducing a Shadow from20 to18. Removing the ally avoids this requirement rather than meeting it.
 
 This candidate adds HostCompanionEnemyHit beside unchanged PlayerEnemyHit. It requires the actual copied production policy decision and authority snapshots to match the event's original host context, roster, actors and hit record. It requires stable type1/team1 source metadata, canonical-player exclusion, one explicitly bound direct Stat under this Apply, exact HP arithmetic and no intervention/claim. NativeHitTrace now records each child's enclosing applySeq. Existing Take/Stat matching and unmatched counters are unchanged: direct Stat is not silently reclassified as a matched Take child. Unknown-source retirement remains unchanged.

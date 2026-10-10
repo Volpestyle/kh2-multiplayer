@@ -1,4 +1,5 @@
 #pragma once
+#include "kh2coop/OrdinaryLifecycle.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
@@ -219,6 +220,7 @@ private:
     std::optional<EventHold> hold_;
     EnemyManifest manifest_;
     std::optional<PopulationCut> populationCut_;
+    ordinarylifecycle::History ordinaryLifecycle_;
     std::uint64_t populationCutFloor_=0;
     std::map<std::uint16_t, EnemyHpEntry> enemyHp_;
     // Host connection/world lifetime, not room/cache lifetime. Cached union

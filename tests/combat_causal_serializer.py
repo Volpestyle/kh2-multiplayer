@@ -39,6 +39,7 @@ def namespace(row):
         ("transition", "transitionSerial"), ("connection", "connectionId"),
         ("host", "hostConnectionId"), ("role", "role"), ("slot", "slot"),
         ("frame", "frame"), ("location", "location"))})
+    native.available = True
     scope = NS(native=native, delivery=row["delivery"], sessionSalt=row["sessionSalt"],
                roster=[row["host"], row["peer"], 0],
                peerDelivery=[row["hostDelivery"], row["peerDelivery"], 0])
@@ -84,4 +85,5 @@ def render(rows, summary_changes=None):
     fields = dict(Admitted=1, Retired=0, Started=len(rows), Drained=len(rows), Dropped=0, Loss=0)
     fields.update(summary_changes or {})
     engine = NS(**{k: (lambda value=v: value) for k, v in fields.items()})
-    return text + emit("summary", engine=engine)
+    current = namespace(rows[-1]).scope if rows else NS(delivery=0,native=NS(frame=0,available=False,generation=0,connectionId=0,epoch=0,loadSerial=0,transitionSerial=0,role=0,slot=0,location=(0,)*6))
+    return text + emit("summary", engine=engine,currentScope=current)

@@ -32,6 +32,7 @@
 #include "kh2coop/ActivationLease.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/PopulationCutJson.hpp"
+#include "kh2coop/OrdinaryLifecycle.hpp"
 #include "kh2coop/Revive.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
 #include "kh2coop/SurvivingPackPreparation.hpp"
@@ -64,6 +65,7 @@ void ObserveCausalPopulation(bool complete) noexcept;
 struct Spawn;
 struct NativeEnemy;
 combatcausal::Target CausalTarget(const Spawn& s, const NativeEnemy& n, unsigned id);
+bool ReadOrdinaryIdentity(const NativeEnemy&,ordinarybinding::Identity&);
 
 constexpr std::uint32_t HP_INTERVAL_FRAMES = 6;  // ~10 Hz
 constexpr std::uint64_t HASH_INTERVAL_MS = 1000;
@@ -141,7 +143,8 @@ struct Spawn {
     std::int32_t lastHp = 1;  // HP when last seen (<= 0: dead, the slot may be reused)
     std::int32_t lastMaxHp = 0;
     bool announced = false;   // host: sent in a manifest this epoch
-    bool deathSent = false;   // host: EnemyDeath sent (or superseded by a refill)
+    bool deathSent = false;   // host: real EnemyDeath sent only
+    bool lifecycleRetired = false; // non-death membership retirement, no kill credit
     std::uint64_t goneSinceMs = 0;  // host: left the list alive at this time
     bool killed = false;      // client: native HP confirmed dead
     bool deathAttempted = false; // at most one native lethal call per local spawn
@@ -268,6 +271,7 @@ struct HostEnemy {
     std::uint64_t hpSourceSequence = 0;
     bool hpKnown = false;
     bool dead = false;
+    bool removed = false;
 };
 struct HostRoom {
     std::uint32_t epoch = 0;
@@ -423,6 +427,7 @@ void LogClaim(const char* action, const HitClaim& claim, const char* reason) {
 }
 
 void ResetPopulationRepair();
+void ResetOrdinaryLifecycle();
 void ClearActivation() {
     g_activationLease.Clear();
     g_activationChallenges = {};
@@ -462,6 +467,7 @@ bool ReleaseClientClaims(std::uint32_t frame);
 
 void RetireWorldSession() {
     ResetPopulationRepair();
+    ResetOrdinaryLifecycle();
     g_recordLease.Interrupt(); g_recordKeys.clear(); g_recordAuthority.clear(); g_recordContext={};
     eventholdnative::RetireOwner();
     g_eventControlScope = {}; g_eventControlRoom = {};
@@ -1530,7 +1536,7 @@ bool ReleaseClientClaims(std::uint32_t frame) {
     if (!CensusMatchesInstance(census) || !SameLocation(census.location, scope.room)) return false;
     std::size_t living = 0;
     for (const auto& [id, host] : g_host.enemies) {
-        if (host.dead) continue;
+        if (host.dead || host.removed) continue;
         ++living;
         if (!id || !host.hpKnown || host.hp <= 0 || host.maxHp <= 0 || host.hp > host.maxHp) return false;
         const Spawn* selected = nullptr;
@@ -1555,7 +1561,7 @@ bool ReleaseClientClaims(std::uint32_t frame) {
         for (const auto& spawn : g_inst.spawns) {
             const auto host = g_host.enemies.find(static_cast<std::uint16_t>(spawn.netId));
             if (spawn.present && !spawn.killed && spawn.netId > 0 && spawn.netId <= UINT16_MAX &&
-                host != g_host.enemies.end() && !host->second.dead &&
+                host != g_host.enemies.end() && !host->second.dead && !host->second.removed &&
                 FindNativeEnemy(census, spawn) == &native) ++matches;
         }
         if (matches != 1) return false;
@@ -1567,7 +1573,7 @@ bool ReleaseClientClaims(std::uint32_t frame) {
     for (const auto& spawn : g_inst.spawns) {
         if (!spawn.present || spawn.killed || spawn.netId <= 0) continue;
         const auto host = g_host.enemies.find(static_cast<std::uint16_t>(spawn.netId));
-        if (host == g_host.enemies.end() || host->second.dead) continue;
+        if (host == g_host.enemies.end() || (host->second.dead || host->second.removed)) continue;
         const auto* native = FindNativeEnemy(census, spawn);
         if (g_log && native && h.sequence <= 4096) g_log("[client-claims-row] schema=1 holdId=%llu witnessSeq=%llu frame=%u netId=%d objectId=%u objectType=%u actor=%llX objentry=%llX status=%llX hpObserved=%d maxHpObserved=%d hpAdmitted=%d maxHpAdmitted=%d hpSourceSequence=%llu",
             static_cast<unsigned long long>(h.id), static_cast<unsigned long long>(h.sequence), frame, spawn.netId, spawn.objectId, static_cast<unsigned>(native->objectType),
@@ -1764,6 +1770,10 @@ bool HostBeginInstance() {
 bool CaptureRecordPopulation(const NativeCensus&, std::vector<recordbinding::Local>&, spawncontroller::NativeRecordCatalog&);
 bool ResolveRecordPopulation(const NativeCensus&, bool host);
 
+bool PublishOrdinaryLifecycle(const NativeCensus&);
+bool OrdinaryLifecycleRoom();
+void BindOrdinaryCausalBirths(const NativeCensus&);
+
 bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                const NativeCensus& census) {
     // The bounded event-control lane needs an authenticated empty host roster
@@ -1782,6 +1792,7 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
     // before publishing, as well as before consuming the queued claims.
     if (g_recordBindingRequested && recordbinding::Population({g_inst.world,g_inst.room,g_inst.door,g_inst.map,g_inst.btl,g_inst.evt}))
         ResolveRecordPopulation(census, true);
+    if(!PublishOrdinaryLifecycle(census))return false; // old-retire precedes appended manifest/new-birth
     if (!newSpawns.empty()) {
         EnemyManifest m;
         m.epoch = g_epoch;
@@ -1815,11 +1826,17 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                  m.entries.back().spawnPosition.z);
     }
 
+    if(!newSpawns.empty() && !PublishOrdinaryLifecycle(census))return false; // newly announced births precede their HP
+
+    BindOrdinaryCausalBirths(census);
+
     // Despawns: refilled at the same point -> superseded (clients re-bind);
     // otherwise, after the grace time, reported as a death.
     const std::uint64_t now = GetTickCount64();
     for (Spawn& s : g_inst.spawns) {
-        if (s.present || s.deathSent) continue;
+        if (s.present || s.deathSent || s.lifecycleRetired) continue;
+        // A living BC disappearance without a certified retirement stays a hard failure.
+        if(OrdinaryLifecycleRoom() && s.lastHp>0)return false;
         if (s.goneSinceMs == 0) s.goneSinceMs = now;
         bool refilled = false;
         for (const Spawn& t : g_inst.spawns) {
@@ -1829,14 +1846,10 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             }
         }
         if (refilled) {
-            // Population terminal history includes superseded IDs as well as native deaths.
-            if (g_populationRequested) {
-                EnemyDeath terminal;terminal.epoch=g_epoch;
-                terminal.netId=static_cast<std::uint16_t>(s.spawnIndex+1);
-                if(!Send(encode(terminal)))continue;
-            }
-            s.deathSent = true;
-            SYNC_LOG("[enemysync] host: spawn %u despawned, refilled at its point", s.spawnIndex);
+            // No certified membership lifecycle outside the bounded BC room.
+            // Neither silently invent deathSent nor turn live removal into a kill.
+            SYNC_LOG("[enemysync] host: unqualified refill held spawn=%u killCredit=0",s.spawnIndex);
+            return false;
         } else if (s.lastHp <= 0 || now - s.goneSinceMs > DESPAWN_GRACE_MS) {
             EnemyDeath d;
             d.epoch = g_epoch;
@@ -1859,7 +1872,7 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
     EnemyHp hp;
     hp.epoch = g_epoch;
     for (Spawn& s : g_inst.spawns) {
-        if (!s.present) continue;
+        if (!s.present || s.lifecycleRetired) continue;
         s.goneSinceMs = 0;
         const auto* native = FindNativeEnemy(census, s);
         if (!native) return false;
@@ -1958,7 +1971,7 @@ void PublishHostMotion(std::uint32_t frame, const NativeCensus& census) {
     bool truncated = false;
     for (std::size_t k = 0; k < count; ++k) {
         const Spawn& s = g_inst.spawns[(first + k) % count];
-        if (!s.present || !s.announced || s.deathSent || !enemymirror::FamilyAllowed(s.objectId)) continue;
+        if (!s.present || !s.announced || s.deathSent || s.lifecycleRetired || !enemymirror::FamilyAllowed(s.objectId)) continue;
         const auto* native = FindNativeEnemy(census, s);
         if (!native || native->hp <= 0) continue;
         std::uint32_t parent = 0;
@@ -2515,6 +2528,7 @@ std::vector<NativeRecordContentCandidate> RecordCandidates(const std::vector<Nat
     return candidates; // completeness/unique association supplied by the native capture or checked wire
 }
 #include "EnemyPopulationRepair.inl"
+#include "EnemyOrdinaryLifecycle.inl"
 
 bool PopulationDeathHelperReady() {return g_populationDeathHelperVerified && g_applyStatDelta!=nullptr;}
 bool InvokePopulationNativeDeath(uintptr_t actor,int hp) {
@@ -3584,7 +3598,8 @@ bool ReceiveWorldPackets() {
             }
             if (type == PacketType::PopulationCut) {
                 ByteReader r(payload,size);PopulationCut cut;read(r,cut);
-                ReceivePopulationCut(cut,*scope);continue;
+                if(cut.membershipOnly)ReceiveOrdinaryLifecycle(cut,*scope);
+                else ReceivePopulationCut(cut,*scope);continue;
             }
             if (type == PacketType::ActivationRequest) {
                 ByteReader r(payload, size);
@@ -3728,6 +3743,20 @@ bool ReceiveWorldPackets() {
                         !m.sequence?combatcausal::Reason::RejectZeroSequence:combatcausal::Reason::RejectStaleSequence;
                     ObserveCombatConsumerOutcome(packet,reason,0,m.sequence);continue;
                 }
+                // Reject unknown/unadmitted/retired occurrences before ANY HP floor
+                // or row mutation; raw reasoned packet receipt is retained.
+                bool lifecycleUnknown=false;
+                for(const auto& e:m.entries) {
+                    const auto h=g_host.enemies.find(e.netId);
+                    const auto* cut=OrdinaryCut();
+                    if(h==g_host.enemies.end() || h->second.removed || (OrdinaryLifecycleRoom() &&
+                       (!OrdinaryCutCurrent() || !ordinarylifecycle::AdmitsHp(cut,e.netId) ||
+                        (combatcausal::Requested()&&combatcausal::engine.Admitted()&&!combatcausal::engine.Member(e.netId))))) {
+                        ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectUnadmittedLifecycle,e.netId,m.sequence);
+                        lifecycleUnknown=true;
+                    }
+                }
+                if(lifecycleUnknown)continue;
                 // Equal trusted relay cache replay can restore a replaced
                 // manifest. NetworkClient admits equality only when reliable.
                 ObserveCombatConsumerOutcome(packet,combatcausal::Reason::Ok,0,m.sequence,true);
@@ -4205,13 +4234,20 @@ void ObserveCausalPopulation(bool complete) noexcept {
     combatcausal::Target rows[combatcausal::TargetCount]{}; unsigned count=0;
     bool valid=CensusMatchesInstance(census);
     for(const auto& n:census.enemies) {
-        if(count==combatcausal::TargetCount){valid=false;break;}
         const auto it=g_inst.byActor.find(n.actor);
         if(it==g_inst.byActor.end() || it->second>=g_inst.spawns.size()){valid=false;break;}
         const auto& spawn=g_inst.spawns[it->second];
         const auto id=g_role==Role::Host ? static_cast<unsigned>(spawn.spawnIndex)+1 : static_cast<unsigned>(spawn.netId);
-        if((g_role==Role::Host&&!spawn.announced) || (g_role==Role::Client&&spawn.netId<=0)){valid=false;break;}
-        rows[count++]=CausalTarget(spawn,n,id);
+        if((g_role==Role::Host&&!spawn.announced) || (g_role==Role::Client&&spawn.netId<=0&&!spawn.lifecycleRetired)){valid=false;break;}
+        const auto target=CausalTarget(spawn,n,id);
+        if(spawn.lifecycleRetired) {
+            const auto oldId=g_role==Role::Host?unsigned(spawn.spawnIndex+1):unsigned(spawn.ordinaryBinding.highWater);
+            const auto historical=OrdinaryHistoricalTarget(spawn,n,oldId);
+            if(combatcausal::engine.Removed(historical))continue;
+            valid=false;break; // known retired body changed HP/identity: never hide it
+        }
+        if(count==combatcausal::TargetCount){valid=false;break;}
+        rows[count++]=target;
     }
     const auto after=CausalScope();
     if(!valid || !combatcausal::SameScope(before,after)) {
@@ -4219,7 +4255,9 @@ void ObserveCausalPopulation(bool complete) noexcept {
         return;
     }
     combatcausal::currentScope=after;
+    BindOrdinaryCausalBirths(census);
     combatcausal::engine.Population(after,rows,count,combatcausal::Now());
+    BindOrdinaryCausalBirths(census);
     if(combatcausal::engine.Admitted())g_causalDisappearance.Arm(after,rows,count);
     } catch(...) {
         combatcausal::engine.Retire(combatcausal::currentScope,combatcausal::Now(),combatcausal::Reason::Unavailable);
@@ -4231,6 +4269,11 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
     std::vector<ob::Local> locals;
     std::vector<std::size_t> indices;
     std::vector<ob::Host> hosts;
+    RecordCatalog ordinaryBefore,ordinaryAfter;
+    const bool certified=OrdinaryLifecycleRoom();
+    if(certified && (!OrdinaryCutCurrent() || !FreshRecordCatalog(census,ordinaryBefore))) {
+        for(auto& s:g_inst.spawns){s.netId=-1;s.ordinaryBinding.bound=0;}return false;
+    }
     const auto holdAll = [&] {
         for (auto& s : g_inst.spawns) { s.netId = -1; s.ordinaryBinding.bound = 0; }
         return false;
@@ -4246,6 +4289,8 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         if (!ReadOrdinaryIdentity(native, local.identity)) return holdAll();
         local.point = {s.spawnPos.x, s.spawnPos.y, s.spawnPos.z};
         local.prior = s.ordinaryBinding;
+        local.certificateRequired=certified;
+        if(certified)local.certifiedId=OrdinaryCertifiedId(census,native,ordinaryBefore);
         local.available = !(s.killed && native.hp > 0); // observed lifetime contradiction stays unmatched
         local.living = native.hp > 0;
         locals.push_back(local);
@@ -4253,8 +4298,9 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
     }
     for (const auto& [id, h] : g_host.enemies) {
         if (h.battleProgram == g_inst.btl && !RecordFamily(h.objectId))
-            hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead});
+            hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed});
     }
+    if(certified && (!FreshRecordCatalog(census,ordinaryAfter) || !SameRecordCatalogSample(ordinaryBefore,ordinaryAfter)))return holdAll();
     const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame});
     if (WorldSessionGeneration() != generation || !CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
     // The entire fresh population is resolved before any native HP/death write.
@@ -4330,6 +4376,7 @@ bool ClientFrame(const NativeCensus& initialCensus) {
         }
     }
     if (!contentRequired && !ResolveOrdinaryBindings(current, generation)) return false;
+    if(!contentRequired)BindOrdinaryCausalBirths(current);
     for (Spawn& s : g_inst.spawns) {
         if (!s.present || s.killed || !RecordAuthorityCurrent(s.actor,s.objectId,g_host.enemies.contains(static_cast<std::uint16_t>(s.netId)) && g_host.enemies.at(static_cast<std::uint16_t>(s.netId)).dead)) continue;
         const NativeRecordWriteCheck* recordCheck = nullptr;
@@ -4343,6 +4390,7 @@ bool ClientFrame(const NativeCensus& initialCensus) {
         }
         if (s.netId < 0) continue;
         const HostEnemy& h = g_host.enemies[static_cast<std::uint16_t>(s.netId)];
+        if(h.removed || s.lifecycleRetired)continue;
         const auto* sampled = FindNativeEnemy(current, s);
         if (!sampled) continue; // a preceding native lethal may have removed it
         NativeEnemy native;
@@ -4720,7 +4768,7 @@ bool ProcessHostHitClaims(NativeCensus& census) {
         }
         const auto target = std::find_if(g_inst.spawns.begin(), g_inst.spawns.end(), [&](const Spawn& spawn) {
             return static_cast<std::uint32_t>(spawn.spawnIndex) + 1 == claim.netId &&
-                   spawn.objectId == claim.objectId && spawn.present && spawn.announced && !spawn.deathSent;
+                   spawn.objectId == claim.objectId && spawn.present && spawn.announced && !spawn.deathSent && !spawn.lifecycleRetired;
         });
         const NativeEnemy* sampled = target == g_inst.spawns.end() ? nullptr : FindNativeEnemy(census, *target);
         NativeEnemy native;
@@ -4972,6 +5020,7 @@ void OnFrameStart(std::uint32_t frame) {
         // Requests invalidate cached pointers before the native fade/teardown;
         // load callbacks do the same for initial loads and same-room reloads.
         g_inst = {};
+        ResetOrdinaryLifecycle();
         g_population.Clear();  // VUH-1788 C1: the native teardown owns every forced copy
         ClearActivation();
         ClearPendingHits();
@@ -4986,6 +5035,7 @@ void OnFrameStart(std::uint32_t frame) {
     if (!warp::TransitionPending() && (newLoad || g_inst.world == 0xFFFF) &&
         location.worldId != 0xFF && location.roomId != 0xFF) {
         g_inst = {};
+        ResetOrdinaryLifecycle();
         g_population.Clear();
         g_inst.world = location.worldId;
         g_inst.room = location.roomId;
@@ -5197,7 +5247,7 @@ enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     if (s.actor != actor || !s.present || s.killed || s.netId <= 0 || s.netId > 0xFFFF ||
         !RecordAuthorityCurrent(s.actor,s.objectId) || !enemymirror::FamilyAllowed(s.objectId)) return Gate::None;
     const auto host = g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
-    if (host == g_host.enemies.end() || host->second.dead || host->second.objectId != s.objectId) return Gate::None;
+    if (host == g_host.enemies.end() || host->second.dead || host->second.removed || host->second.objectId != s.objectId) return Gate::None;
     // N5: the live status pointer must still be this binding's (closes a mid-frame reuse window).
     uintptr_t liveStatus = 0;
     std::int32_t hp = 0;
@@ -5282,7 +5332,7 @@ bool RecordLocalPlayerEnemyHit(const LocalPlayerEnemyHit& hit) noexcept {
         claim.objectId = spawn.objectId;
         const auto host = g_host.enemies.find(claim.netId);
         if (host == g_host.enemies.end() || host->second.objectId != claim.objectId ||
-            host->second.battleProgram != g_inst.btl || host->second.dead)
+            host->second.battleProgram != g_inst.btl || host->second.dead || host->second.removed)
             return reject("host manifest target unavailable/dead");
         const auto* sampled = FindNativeEnemy(census, spawn);
         NativeEnemy native;

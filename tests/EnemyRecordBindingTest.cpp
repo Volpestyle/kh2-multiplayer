@@ -86,7 +86,21 @@ void OrdinaryTerminalControls() {
           resolve(l,{1,302,point,false},{2,2,988}).id==0);
 }
 
+void OrdinaryLifecycleControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    ob::Local l{{100,200,300,400,500,302},{1,2,3},{},true,true};
+    auto go=[&](ob::Local local,std::vector<ob::Host> host){return ob::Resolve(std::array{local},host,{2,2,737})[0];};
+    auto original=go(l,{{4,302,{1,2,3},false}});check("lifecycle original bound",original.id==4);l.prior=original.next;
+    auto relabel=go(l,{{4,302,{1,2,3},false},{6,302,{1,2,3},false}});
+    check("ca007 line796 live 4->6 refuses",relabel.id==0 && relabel.reason==ob::Reason::Relabel);
+    l.prior.removed=true;l.certificateRequired=true;l.certifiedId=6;
+    check("retired live body cannot become replacement",go(l,{{6,302,{1,2,3},false}}).id==0);
+    l.prior={};l.identity.actor=101;
+    check("fresh body exact certificate allows replacement",go(l,{{6,302,{9,9,9},false}}).id==6);
+    l.certifiedId=0;check("missing birth certificate refuses",go(l,{{6,302,{1,2,3},false}}).id==0);
+}
 int main(int argc,char** argv) {
+    OrdinaryLifecycleControls();
     OrdinaryTerminalControls();
     (void)argc; (void)argv;
     for (auto oid:{317u,76u}) {
@@ -250,7 +264,7 @@ int main(int argc,char** argv) {
     check("unsupported schema refused",refused);
     m.entries[0].recordKey.reset();const auto ordinary=encode(m);decodePacketHeader(ordinary.data(),ordinary.size(),payload,size);
     ByteReader normal(payload,size);read(normal,decoded);check("default manifest has no experimental key",normal.atEnd()&&!decoded.entries[0].recordKey);
-    check("v14/v15 peers require the newer population protocol",PROTOCOL_VERSION==16);
+    check("v14/v15 peers require the newer population protocol",PROTOCOL_VERSION==17);
     if (argc>=2) {
         std::ifstream input(argv[1],std::ios::binary);
         for (const auto oid:{317u,76u}) {

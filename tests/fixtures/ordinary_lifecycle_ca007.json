@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "source": "ca007d4",
+  "status": "ORIGINAL_FAIL_PRESERVED",
+  "files": [
+    {
+      "file": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\practice-ca007-B-20261010-01\\inject-0.log",
+      "sha256": "dbd87a135614fa1bba913d7825728a33e47843edf89592cb2f9392711bce07bc",
+      "rows": [
+        {
+          "line": 624,
+          "text": "[enemysync] spawn 3 @7FF6F67E7F10 left the list (last hp 20)"
+        },
+        {
+          "line": 625,
+          "text": "[combat-disappearance] schema=1 startNs=764431503957300 endNs=764431503962200 nativeReadOnly=1 authority=0 originalNetId=4 originalActor=7FF6F67E7F10 originalObjentry=7FF6F6C79F18 originalStatus=7FF6F6C72940 originalController=7FF6F6D38340 originalRecord=7FF6F6C36454 originalHp=20 originalMaxHp=20 originalType=4 originalObjectId=302 role=1 connection=1 generation=2 delivery=1 epoch=2 load=3 transition=2 frame=3352 scopeStable=1 priorComplete=1 priorReason=complete priorNodes=13 priorEnemies=4 watchedComplete=1 watchedReason=complete watchedFailedAt=0 watchedNodes=13 watchedPresent=0 watchedEnemies=4 classifierRead=1 isEnemy=1 exclusion=not-in-list objRead=1 objentry=7FF6F6C79F18 inModule=1 typeRead=1 type=4 prefixRead=1 prefix=4D5F statusRead=1 status=7FF6F6C72940 hpRead=1 hp=20 maxHp=20 controllerRead=1 controller=7FF6F6D38340 recordRead=1 record=7FF6F6C36454 controllerStateAvailable=1 header=7FF6F6C36368 headerId=30 recordCount=5 flags=10 stage=0 currentCount=5 initialCount=5 actorBytes=1 actorRaw=E8289A80107F7E84189FC78450099A8000000000000000000000000000000000000000000000000000000000000000000000803F081F7C3F0000803F0000803F controllerBytes=1 controllerRaw=625F30300A0000006863C3F6F67F000080567AF6F67F0000405A7AF6F67F0000000000410500000005000000000000009463C3F6F67F0000D464C3F6F67F0000 headerBytes=1 headerRaw=02001E0005000700000000000000010000000000000000000000000000000800000000000000000000000000 recordBytes=1 recordRaw=2E01000032993344000034C38726AC4400000000000000000000000002000E000000000000000000000008000000000000000000000000000000000000000000 instanceLive=1 hostEpoch=0 hostArrived=0 manifestComplete=0 manifestRevisionBefore=0 manifestRevisionAfter=0 hpSequenceBefore=0 hpSequenceAfter=0 populationRequested=0 spawnRequested=0"
+        },
+        {
+          "line": 626,
+          "text": "[combat-causal] receipt schema=1 serial=91 qpc=764431503972900 kind=11 reason=3 qualified=0 event=0 hpSequence=0 loss=0 generation=2 delivery=1 sessionSalt=4289048146971526317 connection=1 host=1 peer=2 hostDelivery=1 peerDelivery=1 epoch=2 load=3 transition=2 frame=3352 role=1 slot=0 location=5,6,0,1,1,0 netId=0 objectId=0 type=0 actor=0 objentry=0 status=0 controller=0 record=0 targetHp=0 maxHp=0 claimConnection=0 claimSeq=0 attackId=0 damage=0 beforeHp=0 afterHp=0 requestedHp=0 attempted=0 returned=0 readback=0 enqueued=0 causeCount=0 payloadBytes=0 payloadFnv64=0 payload= incarnationAuthority=0"
+        },
+        {
+          "line": 628,
+          "text": "[enemysync] host manifest epoch 2 frame 3353: 1 new (append), 6 total; last objectId=302@7FF6F67F8190 at (718,-173,1377)"
+        }
+      ]
+    },
+    {
+      "file": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\practice-ca007-B-20261010-01\\inject-1.log",
+      "sha256": "1e6b91d6b4ede10f0cb09b4753c713dc370aaed46e3d7f064ef730c21e2ada6c",
+      "rows": [
+        {
+          "line": 796,
+          "text": "[enemy-binding] epoch=2 frame=737 spawn=3 actor=7FF6F67E7F10 objentry=7FF6F6C79F18 status=7FF6F6C72940 controller=7FF6F6D38340 record=7FF6F6C36454 objectId=302 prior=4 floor=4 candidate=6 selected=6 reason=newest-live-point conflict=0 sampledIdentityOnly=1"
+        },
+        {
+          "line": 799,
+          "text": "[combat-causal] receipt schema=1 serial=194 qpc=764431578468100 kind=5 reason=1 qualified=0 event=0 hpSequence=24 loss=0 generation=2 delivery=1 sessionSalt=4289048146971526317 connection=2 host=1 peer=2 hostDelivery=1 peerDelivery=1 epoch=2 load=4 transition=3 frame=737 role=2 slot=1 location=5,6,0,1,1,0 netId=1 objectId=302 type=4 actor=7FF6F67C8080 objentry=7FF6F6C79F18 status=7FF6F6C730A8 controller=7FF6F6D38340 record=7FF6F6C36394 targetHp=20 maxHp=20 claimConnection=0 claimSeq=0 attackId=0 damage=0 beforeHp=20 afterHp=20 requestedHp=20 attempted=0 returned=0 readback=0 enqueued=1 causeCount=0 payloadBytes=67 payloadFnv64=11463169780330651658 payload=17400002000000180000000000000005000100140000001400000002001400000014000000030014000000140000000500140000001400000006001400000014000000 incarnationAuthority=0"
+        },
+        {
+          "line": 807,
+          "text": "[combat-causal] receipt schema=1 serial=198 qpc=764431578471700 kind=5 reason=1 qualified=0 event=0 hpSequence=24 loss=0 generation=2 delivery=1 sessionSalt=4289048146971526317 connection=2 host=1 peer=2 hostDelivery=1 peerDelivery=1 epoch=2 load=4 transition=3 frame=737 role=2 slot=1 location=5,6,0,1,1,0 netId=0 objectId=0 type=0 actor=0 objentry=0 status=0 controller=0 record=0 targetHp=0 maxHp=0 claimConnection=0 claimSeq=0 attackId=0 damage=0 beforeHp=0 afterHp=0 requestedHp=20 attempted=0 returned=0 readback=0 enqueued=1 causeCount=0 payloadBytes=0 payloadFnv64=0 payload= incarnationAuthority=0"
+        },
+        {
+          "line": 808,
+          "text": "[combat-causal] consumer schema=1 serial=198 outcome=1 wireType=23 reason=1 expectedEpoch=0 sequenceFloor=0 originalBytes=67 retainedBytes=0 truncated=0 admittedGeneration=2 admittedDelivery=1 admittedSessionSalt=4289048146971526317 admittedConnection=2 admittedHost=1 admittedPeer=2 admittedHostDelivery=1 admittedPeerDelivery=1 admittedEpoch=2 admittedLoad=4 admittedTransition=3 admittedRole=2 admittedSlot=1 admittedLocation=5,6,0,1,1,0"
+        },
+        {
+          "line": 809,
+          "text": "[combat-causal] receipt schema=1 serial=199 qpc=764431578505100 kind=11 reason=6 qualified=0 event=0 hpSequence=0 loss=0 generation=2 delivery=1 sessionSalt=4289048146971526317 connection=2 host=1 peer=2 hostDelivery=1 peerDelivery=1 epoch=2 load=4 transition=3 frame=737 role=2 slot=1 location=5,6,0,1,1,0 netId=0 objectId=0 type=0 actor=0 objentry=0 status=0 controller=0 record=0 targetHp=0 maxHp=0 claimConnection=0 claimSeq=0 attackId=0 damage=0 beforeHp=0 afterHp=0 requestedHp=0 attempted=0 returned=0 readback=0 enqueued=0 causeCount=0 payloadBytes=0 payloadFnv64=0 payload= incarnationAuthority=0"
+        }
+      ]
+    }
+  ],
+  "limits": "No full native five-record catalogue or authenticated membership cut was retained. Positive schema2 certificates in controls are constructed, not retroactive live qualification."
+}

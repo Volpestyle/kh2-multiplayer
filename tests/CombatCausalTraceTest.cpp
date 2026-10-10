@@ -119,6 +119,84 @@ void CompanionControls(){
 #include "PracticeCombinedControls.hpp"
 #include "PracticeClientControls.hpp"
 }
+kh2coop::PopulationCut LifecycleFixture() {
+    kh2coop::PopulationCut c;c.membershipOnly=true;c.epoch=9;c.hostLoad=3;c.hostTransition=2;c.sequence=5;c.location={5,6,0,1,1,0};
+    kh2coop::NativeRecordContentDefinition d;d.location=c.location;d.groupKey=1;d.layoutSha256.fill(1);d.header[4]=5;d.records.resize(5);
+    for(auto& r:d.records){r[0]=0x2e;r[1]=1;}c.definitions.push_back(d);
+    for(unsigned i=0;i<5;++i)c.entries.push_back({static_cast<std::uint16_t>(i+1),0,static_cast<std::uint16_t>(i),302,i+1,i+1,0,false,{float(i),0,0,1}});
+    return c;
+}
+void LifecycleControls() {
+    auto initial=LifecycleFixture();const auto first=kh2coop::encode(initial);
+    auto removed=initial;removed.sequence=6;removed.entries[0].terminal=true;removed.entries[0].removed=true;removed.entries[0].terminalSequence=6;
+    const auto retire=kh2coop::encode(removed);
+    auto born=removed;born.sequence=7;auto row=initial.entries[0];row.netId=6;row.occurrence=row.birthSequence=7;born.entries.push_back(row);
+    const auto birth=kh2coop::encode(born);
+    for(unsigned mode=0;mode<10;++mode) {
+        cc::Scope s=Scope();Admit(local,s);
+        for(unsigned id=1;id<=5;++id)Check(local.BindBirth(s,Target(id),id,first.data(),static_cast<unsigned>(first.size()),3),"original source certificate binds");
+        auto t=Target();auto badScope=s;auto proof=retire;auto event=std::uint64_t(6);auto oldBirth=std::uint64_t(1);
+        switch(mode) {
+        case 1:proof.clear();break;
+        case 2:proof=first;break; // no removal proof
+        case 3:event=1;break;
+        case 4:oldBirth=2;break;
+        case 5:++t.actor;break;
+        case 6:--t.hp;break;
+        case 7:++badScope.native.epoch;break;
+        case 8:proof.back()^=1;break;
+        case 9:proof=birth;break; // cut may contain ordered new birth, but retirement must still precede local admission
+        }
+        const bool accepted=local.RetireMember(badScope,1,oldBirth,event,t,proof.data(),static_cast<unsigned>(proof.size()),4);
+        Check(accepted==(mode==0 || mode==9),"membership missing/reused/reordered/foreign proof refuses");
+        if(!accepted)continue;
+        Check(!local.Member(1)&&local.Removed(t),"old membership retired with positive unchanged HP");
+        auto fresh=Target(6);fresh.controller=t.controller;fresh.record=t.record;
+        Check(local.BindBirth(s,fresh,7,birth.data(),static_cast<unsigned>(birth.size()),5),"ordered independent new native body admitted");
+        cc::Receipt receipt;bool oldRow=false,newRow=false,death=false;
+        while(local.Pop(receipt)) {
+            if(receipt.kind==cc::Kind::MembershipRetire)oldRow=receipt.locallyQualified&&receipt.beforeHp==100&&receipt.afterHp==100&&!receipt.attempted;
+            if(receipt.kind==cc::Kind::MembershipBirth && receipt.target.netId==6)newRow=receipt.locallyQualified;
+            death=death||receipt.kind==cc::Kind::DeathPublish||receipt.kind==cc::Kind::DeathApply;
+        }
+        Check(oldRow&&newRow&&!death,"membership lifecycle never grants kill credit/native death");
+        auto payload=kh2coop::encode(kh2coop::EnemyHp{9,{{1,100,100}},2});
+        local.Packet(s,cc::Kind::HpReceive,1,2,100,100,payload.data(),static_cast<unsigned>(payload.size()),true,false,6);
+        bool unknown=false;while(local.Pop(receipt))if(receipt.kind==cc::Kind::HpReceive)unknown=receipt.reason==cc::Reason::RejectUnadmittedLifecycle&&receipt.payloadBytes==payload.size()&&!receipt.locallyQualified;
+        Check(unknown,"retired-ID HP retains exact raw explicit rejection");
+        cc::Key key{101,1,9,1,302,1,1};
+        local.HostApply(s,key,t,100,99,true,true,true,7);Check(local.Retired(),"old claim cannot damage retired ID");
+    }
+    cc::Scope s=Scope();Admit(local,s);for(unsigned id=1;id<=5;++id)local.BindBirth(s,Target(id),id,first.data(),static_cast<unsigned>(first.size()),3);
+    auto fresh=Target(6);fresh.controller=Target().controller;fresh.record=Target().record;
+    Check(!local.BindBirth(s,fresh,7,birth.data(),static_cast<unsigned>(birth.size()),4),"new birth cannot precede actual retirement receipt");
+    s=Scope();Admit(local,s);for(unsigned id=1;id<=5;++id)local.BindBirth(s,Target(id),id,first.data(),static_cast<unsigned>(first.size()),3);
+    auto t=Target();local.RetireMember(s,1,1,6,t,retire.data(),static_cast<unsigned>(retire.size()),4);
+    Check(!local.RetireMember(s,1,1,6,t,retire.data(),static_cast<unsigned>(retire.size()),5),"duplicate retirement hard refuses");
+    s=Scope();Admit(local,s);for(unsigned id=1;id<=5;++id)local.BindBirth(s,Target(id),id,first.data(),static_cast<unsigned>(first.size()),3);
+    local.RetireMember(s,1,1,6,t,retire.data(),static_cast<unsigned>(retire.size()),4);fresh.actor=t.actor;
+    Check(!local.BindBirth(s,fresh,7,birth.data(),static_cast<unsigned>(birth.size()),5),"reused actor cannot acquire fresh ID");
+    // Actual ca007 B frame3352 copied roots/HP/scope. Full source certificate
+    // was NOT retained: positive proof below is explicitly constructed.
+    for(unsigned withProof=0;withProof<2;++withProof) {
+        local.~Engine();new(&local)cc::Engine;
+        s=Scope();s.native.generation=2;s.native.epoch=2;s.native.frame=3350;
+        s.native.connectionId=s.native.hostConnectionId=1;s.delivery=1;
+        s.sessionSalt=4289048146971526317ULL;s.roster[0]=1;s.roster[1]=2;
+        cc::Target actual[5];for(unsigned i=0;i<5;++i){actual[i]=Target(i+1);actual[i].hp=actual[i].maxHp=20;}
+        actual[3]={0x7FF6F67E7F10ULL,0x7FF6F6C79F18ULL,0x7FF6F6C72940ULL,
+                   0x7FF6F6D38340ULL,0x7FF6F6C36454ULL,4,302,4,20,20};
+        local.Population(s,actual,5,1);++s.native.frame;local.Population(s,actual,5,2);
+        auto copied=LifecycleFixture();copied.epoch=2;auto certificate=kh2coop::encode(copied);
+        for(unsigned i=0;i<5;++i)local.BindBirth(s,actual[i],i+1,certificate.data(),static_cast<unsigned>(certificate.size()),3);
+        copied.sequence=6;copied.entries[3].terminal=copied.entries[3].removed=true;copied.entries[3].terminalSequence=6;
+        certificate=kh2coop::encode(copied);++s.native.frame;
+        Check(local.RetireMember(s,4,4,6,actual[3],withProof?certificate.data():nullptr,
+            withProof?static_cast<unsigned>(certificate.size()):0,4)==bool(withProof),
+            "retained frame3352 refuses missing proof; constructed full source proof admits membership only");
+        if(withProof)Check(local.Removed(actual[3])&&!local.Member(4),"retained live HP20 never converted to native death");
+    }
+}
 int main(){
  bool published=false;HANDLE reader=CreateThread(nullptr,0,PublicationReader,&published,0,nullptr);
  Check(reader!=nullptr,"independent clock publication reader created");cc::Configure(true,PublishedClock);
@@ -184,5 +262,5 @@ int main(){
  Admit(cc::engine,s);cc::currentScope=s;
  cc::engine.Consumer(s,23,cc::Reason::RejectDecode,0,0,9,0,hp.data(),static_cast<unsigned>(hp.size()),21);
  cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"actual queued consumer-rejection logger failure is contained");
- cc::Configure(false,Clock);CompanionControls();PracticePlayerControls();PracticeClientControls();DisappearanceControls();
+ cc::Configure(false,Clock);LifecycleControls();CompanionControls();PracticePlayerControls();PracticeClientControls();DisappearanceControls();
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}

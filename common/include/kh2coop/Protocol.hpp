@@ -10,9 +10,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 16;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 17;
 
 // ===========================================================================
+// Protocol v17 adds distinct non-death membership retirement in PopulationCut schema2.
 // Protocol v16 adds bounded host PopulationCut (48) and occurrence bootstrap.
 // v15 adds optional scoped record identity to EnemyManifest entries.
 // v14 adds RemoteHit (45) and TargetAuthority (46) (VUH-1515, enemy targeting of remote players)

@@ -16,15 +16,18 @@ import re
 import struct
 import sys
 
+from ordinary_lifecycle_audit import History as LifecycleHistory, decode as decode_lifecycle
+
 KINDS = ("Admission", "Hit", "Claim", "HostApply", "HpPublish", "HpReceive",
          "HpApply", "DeathPublish", "DeathReceive", "DeathApply", "Packet",
-         "Retired", "ConsumerRejected", "ConsumerAccepted")
+         "Retired", "ConsumerRejected", "ConsumerAccepted", "MembershipRetire", "MembershipBirth")
 SCOPE = "generation delivery sessionSalt connection host peer hostDelivery peerDelivery epoch load transition role slot location".split()
 ROOTS = "actor objentry status controller record objectId type maxHp".split()
 HEX = set("actor objentry status controller record".split())
 BITS = set("qualified attempted returned readback enqueued".split())
 RECEIPT = set(("schema serial qpc kind reason qualified event hpSequence loss generation delivery sessionSalt connection host peer hostDelivery peerDelivery epoch load transition frame role slot location netId objectId type actor objentry status controller record targetHp maxHp claimConnection claimSeq attackId damage beforeHp afterHp requestedHp attempted returned readback enqueued causeCount payloadBytes payloadFnv64 payload incarnationAuthority").split())
 SUMMARY = set("schema admitted retired started drained dropped loss nativeCoverageQualified acceptance".split())
+SUMMARY_OWNER = SUMMARY | set("ownerFrame ownerAvailable generation delivery connection epoch load transition role slot location".split())
 CONSUMER = set(("schema serial outcome wireType reason expectedEpoch sequenceFloor originalBytes retainedBytes truncated admittedGeneration admittedDelivery admittedSessionSalt admittedConnection admittedHost admittedPeer admittedHostDelivery admittedPeerDelivery admittedEpoch admittedLoad admittedTransition admittedRole admittedSlot admittedLocation").split())
 ASSOCIATION = set("schema serial index event".split())
 LIMITS = [
@@ -84,6 +87,8 @@ def parse(text, peer, audit):
                 if key in fields:
                     raise ValueError("duplicate field " + key)
                 fields[key] = value
+            if name=="summary" and fields.keys()==SUMMARY_OWNER:
+                expected=SUMMARY_OWNER
             if expected is None or fields.keys() != expected:
                 raise ValueError("unknown/missing schema fields")
             converted = {"line": number}
@@ -113,7 +118,7 @@ def parse(text, peer, audit):
             if row["schema"] != 1:
                 raise ValueError("schema")
             if name == "receipt":
-                if row["kind"] >= len(KINDS) or row["reason"] > 20 or row["causeCount"] > 16:
+                if row["kind"] >= len(KINDS) or row["reason"] > 21 or row["causeCount"] > 16:
                     raise ValueError("kind/reason/cause capacity")
                 if row["payloadBytes"] != len(row["payload"]) or len(row["payload"]) > 4096:
                     raise ValueError("payload size")
@@ -236,6 +241,7 @@ def prepare(rows, peer, audit):
     if (len(admissions) != 5 or len(mapping) != 5 or
             len({r["actor"] for r in admissions}) != 5):
         audit.issue("missing_or_duplicate_admission", peer, category="coverage")
+    lifecycle=LifecycleHistory(); lifecycle_raw=None; births={}; retired=set()
     anchor = scope(admissions[0]) if admissions else None
     for row in rows:
         if anchor != scope(row) or ("admittedScope" in row and row["admittedScope"] != anchor):
@@ -252,6 +258,40 @@ def prepare(rows, peer, audit):
             if row["kind"] in (12, 13) and row["qualified"]:
                 audit.issue("consumer_promoted_to_cause", peer, row)
             continue
+        net=row["netId"]
+        if row["kind"] in (14,15):
+            try:
+                if row["payload"] != lifecycle_raw:
+                    cut=lifecycle.admit(row["payload"]);lifecycle_raw=row["payload"]
+                else:
+                    cut=lifecycle.cut
+                occurrence=cut["rows"].get(net)
+                if not occurrence or cut["epoch"]!=row["epoch"] or not row["qualified"] or row["reason"]:
+                    raise ValueError("unqualified lifecycle row")
+                if peer=="host" and (cut["load"]!=row["load"] or cut["transition"]!=row["transition"]):
+                    raise ValueError("host lifecycle native scope differs")
+                if row["causes"] or row["attempted"] or row["returned"] or row["damage"] or row["afterHp"] != row["beforeHp"] or row["afterHp"] <= 0:
+                    raise ValueError("lifecycle granted kill/damage/native write")
+                if row["kind"]==14:
+                    original=mapping.get(net)
+                    if occurrence["state"]!=2 or row["event"]!=occurrence["terminal"] or net in retired or not original or target(original)!=target(row) or births.get(net)!=occurrence["birth"]:
+                        raise ValueError("missing/mismatched retirement proof")
+                    retired.add(net)
+                else:
+                    if occurrence["state"] or row["event"]!=occurrence["birth"] or net in retired or net in births:
+                        raise ValueError("duplicate/reused birth")
+                    if net not in mapping:
+                        if any(r["actor"]==row["actor"] for r in mapping.values()):
+                            raise ValueError("actor address reuse")
+                        predecessors=[n for n,e in cut["rows"].items() if n!=net and e["key"]==occurrence["key"] and e["birth"]<occurrence["birth"]]
+                        if not predecessors or max(predecessors,key=lambda n:cut["rows"][n]["birth"]) not in retired:
+                            raise ValueError("new birth before original retirement receipt")
+                        mapping[net]=row
+                    births[net]=occurrence["birth"]
+            except ValueError as error:
+                audit.issue("invalid_membership_lifecycle",peer,row,str(error))
+        elif net in retired:
+            audit.issue("operation_on_retired_occurrence",peer,row)
         admitted = mapping.get(row["netId"])
         if not admitted or target(row) != target(admitted):
             audit.issue("target_replacement_or_unmapped", peer, row, category="coverage")
@@ -291,6 +331,9 @@ def audit_texts(host_text, client_text):
     peers = {p: parse(t, p, audit) for p, t in (("host", host_text), ("client", client_text))}
     mappings = {p: prepare(rows, p, audit) for p, rows in peers.items()}
     hmap, cmap = mappings["host"], mappings["client"]
+    lifecycle_keys=lambda rows:{(r["kind"],r["netId"],r["event"],r["payload"]) for r in rows if r["kind"] in (14,15)}
+    if lifecycle_keys(peers["host"])!=lifecycle_keys(peers["client"]):
+        audit.issue("paired_membership_lifecycle_mismatch",category="coverage")
     if hmap.keys() != cmap.keys() or any(hmap[n]["maxHp"] != cmap[n]["maxHp"] or
             hmap[n]["targetHp"] != cmap[n]["targetHp"] for n in hmap.keys() & cmap.keys()):
         audit.issue("paired_admission_mismatch", category="coverage")
@@ -486,7 +529,7 @@ def audit_texts(host_text, client_text):
             if not any(r.get("publication") is pub for r in peers["client"]):
                 audit.issue("publication_without_receive", "host", pub, category="coverage")
     for peer, rows in peers.items():
-        allowed = {0, 1, 3, 4, 7, 11, 12, 13} if peer == "host" else {0, 1, 2, 5, 6, 8, 9, 11, 12, 13}
+        allowed = {0, 1, 3, 4, 7, 11, 12, 13, 14, 15} if peer == "host" else {0, 1, 2, 5, 6, 8, 9, 11, 12, 13, 14, 15}
         last_hit, last_frame = 0, 0
         for row in rows:
             if row["kind"] not in allowed:

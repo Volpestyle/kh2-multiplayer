@@ -27,6 +27,7 @@ struct State {
     // Set only after a continuous authenticated host death is observed locally
     // dead. Retained on refusal so the same tracked body cannot resurrect.
     bool terminal{};
+    bool removed{}; // authenticated non-death retirement; never reusable as a new ID
 };
 struct Local {
     Identity identity{};
@@ -34,16 +35,21 @@ struct Local {
     State prior{};
     bool available{};
     bool living{};
+    bool certificateRequired{};
+    int certifiedId{};
 };
 struct Host {
     int id{};
     std::uint32_t objectId{};
     std::array<float, 3> point{};
     bool dead{};
+    bool removed{};
 };
-enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath };
+enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath, Retired, Relabel };
 inline const char* Name(Reason r) noexcept {
     switch (r) {
+    case Reason::Retired: return "authenticated-membership-retired";
+    case Reason::Relabel: return "live-body-id-relabel-refused";
     case Reason::Unavailable: return "native-unavailable";
     case Reason::NoPoint: return "no-point-match";
     case Reason::Older: return "older-than-binding";
@@ -94,13 +100,15 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         d.next.living = l.living;
         if (!now.generation || !now.epoch || !l.identity.actor ||
             !l.identity.objentry || !l.identity.status || !Finite(l.point)) continue;
+        if(l.prior.removed){d.reason=Reason::Retired;continue;}
         const Host* best = nullptr;
         for (const auto& h : hosts) {
-            if (h.id > 0 && h.objectId == l.identity.objectId && SamePoint(h.point,l.point) &&
+            if (!h.removed && h.id > 0 && h.objectId == l.identity.objectId && (l.certificateRequired ? h.id==l.certifiedId : SamePoint(h.point,l.point)) &&
                 (!best || h.id > best->id)) best = &h;
         }
         if (!best) { d.reason = Reason::NoPoint; continue; }
         d.candidate = best->id;
+        if(l.prior.highWater>0 && best->id!=l.prior.highWater){d.reason=Reason::Relabel;continue;}
         if (!l.available) continue; // retain the candidate for whole-census conflict detection
         if (best->id < l.prior.highWater) { d.reason = Reason::Older; continue; }
         // A terminal body never becomes a new live candidate. Dead continuation

@@ -1,7 +1,9 @@
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/PopulationCutJson.hpp"
+#include "kh2coop/OrdinaryLifecycle.hpp"
 #include <cstdio>
 #include <limits>
+#include <string>
 using namespace kh2coop;
 static int failures=0;
 #define CHECK(x) do {if(!(x)){std::printf("FAIL %d: %s\n",__LINE__,#x);++failures;}}while(0)
@@ -18,7 +20,52 @@ static PopulationCut sample() {
 template<class F> static bool refuses(F operation) {
     try {operation();return false;}catch(const std::exception&) {return true;}
 }
-int main() {
+static PopulationCut membership() {
+    PopulationCut c;c.membershipOnly=true;c.epoch=2;c.hostLoad=3;c.hostTransition=2;c.sequence=5;c.location={5,6,0,1,1,0};
+    NativeRecordContentDefinition d;d.location=c.location;d.groupKey=1;d.layoutSha256.fill(1);d.header[4]=5;d.records.resize(5);
+    for(auto& r:d.records){r[0]=0x2e;r[1]=1;}c.definitions.push_back(d);
+    for(unsigned i=0;i<5;++i)c.entries.push_back({static_cast<std::uint16_t>(i+1),0,static_cast<std::uint16_t>(i),302,i+1,i+1,0,false,{float(i),0,0,1}});
+    return c;
+}
+static void lifecycleControls() {
+    auto first=membership();ordinarylifecycle::History history;CHECK(history.Admit(first));
+    auto retire=first;retire.sequence=6;retire.entries[3].terminal=true;retire.entries[3].removed=true;retire.entries[3].terminalSequence=6;
+    CHECK(history.Admit(retire));CHECK(!history.Admit(retire)); // duplicate
+    auto birth=retire;birth.sequence=7;auto row=first.entries[3];row.netId=6;row.occurrence=row.birthSequence=7;birth.entries.push_back(row);
+    CHECK(history.Admit(birth));
+    ByteWriter w;write(w,birth);ByteReader r(w.data());PopulationCut decoded;read(r,decoded);
+    CHECK(decoded.membershipOnly && decoded.entries[3].removed && encode(decoded)==encode(birth));
+    CHECK(PopulationCutJson(birth,"s").find("\"deathSequence\":0")!=std::string::npos);
+    // Retained ca007 B friend serial198: epoch2/HPseq24 includes replacement6.
+    // Its original cut admits1..5, so the whole HP packet must be rejected
+    // before advancing the floor. The ordered constructed successor admits6.
+    const char* retained="17400002000000180000000000000005000100140000001400000002001400000014000000030014000000140000000500140000001400000006001400000014000000";
+    std::vector<std::uint8_t> raw;
+    for(std::size_t i=0;retained[i];i+=2)raw.push_back(static_cast<std::uint8_t>(std::stoul(std::string(retained+i,2),nullptr,16)));
+    const std::uint8_t* payload=nullptr;std::size_t bytes=0;
+    CHECK(decodePacketHeader(raw.data(),raw.size(),payload,bytes)==PacketType::EnemyHp);
+    ByteReader hpReader(payload,bytes);EnemyHp hp;read(hpReader,hp);
+    CHECK(hp.epoch==2 && hp.sequence==24 && hp.entries.size()==5 && hp.entries.back().netId==6);
+    bool unknown=false;for(const auto& e:hp.entries)unknown=unknown||!ordinarylifecycle::AdmitsHp(&first,e.netId);
+    CHECK(unknown);CHECK(!ordinarylifecycle::AdmitsHp(&retire,4));
+    for(const auto& e:hp.entries)CHECK(ordinarylifecycle::AdmitsHp(&birth,e.netId));
+    for(unsigned mode=0;mode<9;++mode) {
+        ordinarylifecycle::History h;CHECK(h.Admit(first));auto bad=birth;
+        switch(mode) {
+        case 0:bad.entries[3]=first.entries[3];break; // missing retirement
+        case 1:bad.entries.back().netId=4;break; // reused ID
+        case 2:bad.entries.back().birthSequence=bad.entries.back().occurrence=6;break; // reorder
+        case 3:bad.entries.push_back(bad.entries.back());break;
+        case 4:++bad.hostLoad;break;
+        case 5:++bad.epoch;break;
+        case 6:bad.entries[3].removed=false;break; // kill cannot stand in for alive retirement
+        case 7:bad.definitions[0].records[3][4]^=1;break; // changed original content
+        case 8:bad.entries.erase(bad.entries.begin());break;
+        }
+        CHECK(!h.Admit(bad));CHECK(h.Current()->sequence==5);
+    }
+}
+int main() {lifecycleControls();
     auto cut=sample();ByteWriter writer;write(writer,cut);PopulationCut out;ByteReader reader(writer.data());read(reader,out);
     CHECK(out.entries.size()==2 && out.entries[0].terminalSequence==90 && out.sequence==100);
     CHECK(encode(out)==encode(cut));CHECK(isScopedWorldPacket(PacketType::PopulationCut));

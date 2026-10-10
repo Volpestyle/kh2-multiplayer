@@ -30,11 +30,11 @@ inline std::string PopulationMembershipJson(const NativeRecordContentDefinition&
 inline std::string PopulationCutJson(const PopulationCut& cut,const std::string& session) {
     ValidatePopulationCut(cut);std::ostringstream s;
     s<<"{\"schema\":1,\"session\":"<<PopulationJsonString(session)<<",\"epoch\":"<<cut.epoch
-        <<",\"location\":"<<PopulationLocationJson(cut.location)<<",\"revision\":"<<cut.sequence
+        <<",\"membershipOnly\":"<<(cut.membershipOnly?"true":"false")<<",\"location\":"<<PopulationLocationJson(cut.location)<<",\"revision\":"<<cut.sequence
         <<",\"sequence\":"<<cut.sequence<<",\"complete\":true,\"rows\":[";
     bool first=true;for(const auto& e:cut.entries){if(!first)s<<',';first=false;
         s<<"{\"netId\":"<<e.netId<<",\"objectId\":"<<e.objectId<<",\"terminal\":"<<(e.terminal?"true":"false")
-            <<",\"birthSequence\":"<<e.birthSequence<<",\"deathSequence\":"<<e.terminalSequence
+            <<",\"removed\":"<<(e.removed?"true":"false")<<",\"birthSequence\":"<<e.birthSequence<<",\"terminalSequence\":"<<e.terminalSequence<<",\"deathSequence\":"<<(e.removed?0:e.terminalSequence)
             <<",\"membership\":"<<PopulationMembershipJson(cut.definitions[e.definition],e.record)<<'}';}
     s<<"]}";return s.str();
 }

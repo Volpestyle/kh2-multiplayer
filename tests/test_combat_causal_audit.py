@@ -13,6 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(ROOT / "tools/scenario"))
 from combat_causal_serializer import CALLS, render
 
 SPEC = importlib.util.spec_from_file_location("combat_causal_audit", ROOT / "tools/scenario/combat_causal_audit.py")

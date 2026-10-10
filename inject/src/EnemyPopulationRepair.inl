@@ -194,7 +194,7 @@ bool PopulationCutCoversHost(const PopulationCut& cut) {
     return true;
 }
 void ReceivePopulationCut(const PopulationCut& cut,const WorldScope& scope) {
-    if(!g_populationRequested || CurrentRole()!=Role::Client || cut.sequence<=g_populationClientFloor ||
+    if(cut.membershipOnly || !g_populationRequested || CurrentRole()!=Role::Client || cut.sequence<=g_populationClientFloor ||
         !g_lastRoomPacket || cut.location!=PopulationLocation(*g_lastRoomPacket) ||
         !PopulationCutCoversHost(cut))return;
     g_populationCut=cut;g_populationCutScope=scope;g_populationClientFloor=cut.sequence;

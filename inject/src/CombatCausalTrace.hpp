@@ -1,11 +1,13 @@
 #pragma once
 // Passive, fixed-capacity owner-thread diagnostic. No native memory or I/O here.
 #include "NativeHitTrace.hpp"
+#include "kh2coop/OrdinaryLifecycle.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace kh2coop::inject::combatcausal {
 constexpr unsigned TargetCount = 5, QueueCount = 128, CauseCount = 16, PayloadMax = 4096;
@@ -13,10 +15,10 @@ constexpr unsigned TargetCount = 5, QueueCount = 128, CauseCount = 16, PayloadMa
 // declares an unrelated HitClaim. Production-codec static_asserts live in controls.
 enum class WireType : std::uint8_t { HitClaim=8, EnemyHp=23, EnemyDeath=24 };
 enum class Kind : unsigned { Admission, Hit, Claim, HostApply, HpPublish, HpReceive,
-    HpApply, DeathPublish, DeathReceive, DeathApply, Packet, Retired, ConsumerRejected, ConsumerAccepted };
+    HpApply, DeathPublish, DeathReceive, DeathApply, Packet, Retired, ConsumerRejected, ConsumerAccepted, MembershipRetire, MembershipBirth };
 enum class Reason : unsigned { Ok, Unavailable, Scope, Mapping, Source, Native,
     UnknownDelta, Payload, Capacity, Duplicate, Despawn, Loss, Pending, RejectFraming, RejectEpoch, RejectZeroSequence,
-    RejectStaleSequence, RejectUnknownTarget, RejectDecode, RejectScope, RejectRole };
+    RejectStaleSequence, RejectUnknownTarget, RejectDecode, RejectScope, RejectRole, RejectUnadmittedLifecycle };
 struct Scope {
     nativehittrace::Context native{};
     std::uint64_t delivery{}, sessionSalt{}, roster[3]{}, peerDelivery[3]{};
@@ -289,9 +291,31 @@ class Engine {
     struct Ledger { Target identity{}; std::int32_t expected{}, published{};
         std::uint64_t lastEvent{}, lastClaimConnection{}; std::uint32_t lastClaimSequence{};
         std::int32_t causeBefore{}, causeAfter{}; unsigned count{};
-        std::uint64_t causes[CauseCount]{}; bool deathSent{}, deathReceived{}, dead{};
+        std::uint64_t causes[CauseCount]{}; bool deathSent{}, deathReceived{}, dead{}, removed{};
+        std::uint64_t birth{}, retirement{};
         std::uint64_t appliedHpSequence{}, receivedHpSequence{}; std::int32_t receivedHp{}; };
-    Scope original_{}; std::array<Ledger,TargetCount> targets_{};
+    ordinarylifecycle::History lifecycleProof_;
+    std::array<std::uint8_t,PayloadMax> lifecycleBytes_{};unsigned lifecycleSize_{};
+    bool LifecycleProof(const Scope& s,unsigned id,std::uint64_t event,bool removal,
+                        const std::uint8_t* bytes,unsigned size,ordinarylifecycle::History& next) noexcept {
+        try {
+            if(!bytes || size<4 || size>PayloadMax || bytes[0]!=48 ||
+               (unsigned(bytes[1])|(unsigned(bytes[2])<<8))!=size-3)return false;
+            ByteReader reader(bytes+3,size-3);PopulationCut cut;read(reader,cut);
+            if(!reader.atEnd() || !cut.membershipOnly || cut.epoch!=s.native.epoch ||
+               (s.native.role==1 && (cut.hostLoad!=s.native.loadSerial || cut.hostTransition!=s.native.transitionSerial)))return false;
+            const auto* row=ordinarylifecycle::Find(cut,id);
+            if(!row || (removal?(!row->removed || row->terminalSequence!=event):(row->terminal || row->birthSequence!=event)))return false;
+            next=lifecycleProof_;
+            if(size!=lifecycleSize_ || std::memcmp(lifecycleBytes_.data(),bytes,size)!=0)
+                if(!next.Admit(cut))return false;
+            return true;
+        } catch(...) {return false;}
+    }
+    void CommitLifecycle(ordinarylifecycle::History&& next,const std::uint8_t* bytes,unsigned size) noexcept {
+        lifecycleProof_=std::move(next);std::memcpy(lifecycleBytes_.data(),bytes,size);lifecycleSize_=size;
+    }
+    Scope original_{}; std::array<Ledger,64> targets_{};
     std::array<Receipt,QueueCount> queue_{};
     unsigned read_{},size_{}; std::uint64_t serial_{},loss_{},dropped_{},started_{},drained_{};
     bool admitted_{},retired_{},pending_{};
@@ -313,7 +337,7 @@ class Engine {
     }
     Scope pendingScope_{}; std::array<Target,TargetCount> pendingTargets_{};
     Ledger* Find(unsigned id) noexcept {
-        for(auto& t:targets_) if(t.identity.netId==id) return &t; return nullptr;
+        if(!id)return nullptr;for(auto& t:targets_) if(t.identity.netId==id && !t.removed) return &t; return nullptr;
     }
     Receipt Row(Kind kind,const Scope& scope,std::uint64_t now) noexcept {
         Receipt r{};r.kind=kind;r.scope=scope;r.admittedScope=original_;r.qpc=now;r.loss=loss_;return r;
@@ -371,6 +395,67 @@ class Engine {
         r.event=l.lastEvent;
     }
 public:
+    bool BirthBound(const Scope& s,const Target& target,std::uint64_t birth) noexcept {
+        const auto* l=Find(target.netId);return l && l->birth==birth && SameTarget(l->identity,target) && Current(s);
+    }
+    bool Member(unsigned id) noexcept {return Find(id)!=nullptr;}
+    bool Removed(const Target& target) noexcept {
+        for(const auto& l:targets_)if(l.removed && SameTarget(l.identity,target))return target.hp==l.expected;
+        return false;
+    }
+    bool BindBirth(const Scope& s,const Target& target,std::uint64_t birth,
+                   const std::uint8_t* bytes,unsigned size,std::uint64_t now) noexcept {
+        if(!admitted_ || retired_)return !retired_;
+        auto r=Row(Kind::MembershipBirth,s,now);r.target=target;r.event=birth;
+        auto* present=Find(target.netId);
+        ordinarylifecycle::History proof;
+        bool ok=Current(s)&&birth&&SameTarget(target,target)&&target.objectId==302&&target.type==4&&target.hp>0&&target.hp<=target.maxHp&&Payload(r,bytes,size)&&
+            LifecycleProof(s,target.netId,birth,false,bytes,size,proof);
+        if(present && present->birth==birth && SameTarget(present->identity,target) && ok) {
+            CommitLifecycle(std::move(proof),bytes,size);return true;
+        }
+        Ledger* slot=present;
+        if(present)ok=ok&&!present->birth&&SameTarget(present->identity,target)&&present->expected==target.hp;
+        else {
+            unsigned active=0;
+            for(auto& l:targets_) {
+                if(l.identity.netId && !l.removed && !l.dead)++active;
+                if(l.identity.netId==target.netId || l.identity.actor==target.actor)ok=false;
+                if(!l.identity.netId && !slot)slot=&l;
+            }
+            ok=ok&&slot&&active<TargetCount;
+            if(ok) {
+                const auto& cut=*proof.Current();const auto* row=ordinarylifecycle::Find(cut,target.netId);
+                bool retired=false;
+                for(const auto& old:targets_)if(old.removed) {
+                    const auto* prior=ordinarylifecycle::Find(cut,old.identity.netId);
+                    if(prior && ordinarylifecycle::SameRecord(cut,*prior,cut,*row) && prior->birthSequence==old.birth &&
+                       prior->terminalSequence==old.retirement && old.retirement<birth &&
+                       target.controller==old.identity.controller && target.record==old.identity.record &&
+                       target.maxHp==old.identity.maxHp)retired=true;
+                }
+                ok=retired;
+            }
+        }
+        if(ok) {
+            if(!present){*slot={};slot->identity=target;slot->expected=slot->published=target.hp;}
+            slot->birth=birth;CommitLifecycle(std::move(proof),bytes,size);
+        }
+        r.beforeHp=r.afterHp=target.hp;r.locallyQualified=ok;r.reason=ok?Reason::Ok:Reason::Mapping;Push(r);
+        if(!ok)Retire(s,now,Reason::Mapping);return ok;
+    }
+    bool RetireMember(const Scope& s,unsigned id,std::uint64_t birth,std::uint64_t retirement,
+                      const Target& current,const std::uint8_t* bytes,unsigned size,std::uint64_t now) noexcept {
+        if(!admitted_ || retired_)return !retired_;
+        auto r=Row(Kind::MembershipRetire,s,now);r.event=retirement;r.target=current;
+        auto* l=Find(id);ordinarylifecycle::History proof;
+        bool ok=Current(s)&&l&&l->birth==birth&&retirement>birth&&!l->dead&&
+            SameTarget(l->identity,current)&&current.hp==l->expected&&current.hp>0&&Payload(r,bytes,size)&&
+            LifecycleProof(s,id,retirement,true,bytes,size,proof);
+        if(ok){l->removed=true;l->retirement=retirement;r.beforeHp=r.afterHp=l->expected;CommitLifecycle(std::move(proof),bytes,size);}
+        r.locallyQualified=ok;r.reason=ok?Reason::Ok:Reason::Mapping;Push(r);
+        if(!ok)Retire(s,now,Reason::Mapping);return ok;
+    }
     bool Admitted() const noexcept{return admitted_;}
     bool Retired() const noexcept{return retired_;}
     std::uint64_t Loss() const noexcept{return loss_;}
@@ -414,6 +499,7 @@ public:
         }
         for(auto& l:targets_) {
             bool found=false;for(unsigned i=0;i<count;++i)if(rows[i].netId==l.identity.netId)found=true;
+            if(l.removed || !l.identity.netId)continue;
             if(!found && !(l.dead && l.expected==0)) {Retire(s,now,Reason::Mapping);return;}
         }
     }
@@ -428,7 +514,7 @@ public:
         const bool consumed=client && ConsumeClientClaim(s,e,l);
         const bool queuedDirect=consumed && e.sequence>lastClientDirectEvent_;
         if(client && e.sequence>lastClientDirectEvent_)lastClientDirectEvent_=e.sequence;
-        r.locallyQualified=Current(s)&&l&&(PlayerEnemyHit(e,client)||HostCompanionEnemyHit(e,s)||HostPlayerDirectStatEnemyHit(e,s)||(queuedDirect&&ClientPlayerDirectStatEnemyHit(e,s)))&&
+        r.locallyQualified=Current(s)&&l&&!l->removed&&(PlayerEnemyHit(e,client)||HostCompanionEnemyHit(e,s)||HostPlayerDirectStatEnemyHit(e,s)||(queuedDirect&&ClientPlayerDirectStatEnemyHit(e,s)))&&
             e.before.context.generation==s.native.generation && e.before.context.epoch==s.native.epoch &&
             e.before.victim.objentry==l->identity.objentry && e.before.victim.status==l->identity.status &&
             (client ? e.before.victim.hp==l->expected : Cause(*l,e.sequence,r.beforeHp,r.afterHp));
@@ -493,7 +579,8 @@ public:
         auto r=Row(kind,s,now);r.hpSequence=hpSequence;r.enqueued=outcome;r.requestedHp=hp;
         if(kind==Kind::HpReceive||kind==Kind::DeathReceive){r.consumerOutcome=1;r.wireType=bytes&&size?bytes[0]:0;r.payloadOriginalBytes=size;}
         auto* l=Find(id);if(l){r.target=l->identity;Causes(r,*l);r.beforeHp=l->published;r.afterHp=hp;}
-        bool ok=Current(s)&&l&&Payload(r,bytes,size)&&PacketWire(s,kind,id,hpSequence,hp,maxHp,bytes,size)&&outcome&&!despawn;
+        const bool payloadOk=Payload(r,bytes,size);
+        bool ok=Current(s)&&l&&payloadOk&&PacketWire(s,kind,id,hpSequence,hp,maxHp,bytes,size)&&outcome&&!despawn;
         if(l && kind==Kind::HpPublish) {
             ok=ok&&hpSequence&&hp==l->expected&&maxHp==l->identity.maxHp&&
                (hp==l->published||l->count>0);
@@ -508,7 +595,7 @@ public:
             ok=ok&&!l->deathSent&&l->expected==0&&l->causeBefore>0&&l->causeAfter==0&&l->lastEvent;
             if(ok){l->deathSent=true;l->dead=true;}
         }
-        r.locallyQualified=ok;r.reason=despawn?Reason::Despawn:(ok?Reason::Ok:Reason::Unavailable);Push(r);
+        r.locallyQualified=ok;r.reason=despawn?Reason::Despawn:(ok?Reason::Ok:(!l?Reason::RejectUnadmittedLifecycle:Reason::Unavailable));Push(r);
         if(kind==Kind::DeathPublish&&!ok)Retire(s,now,Reason::UnknownDelta);
     }
     void Applied(const Scope& s,Kind kind,const Target& target,std::uint64_t hpSequence,

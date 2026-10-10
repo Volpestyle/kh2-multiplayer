@@ -14,6 +14,7 @@ struct PopulationOccurrence {
     std::uint64_t occurrence{},birthSequence{},terminalSequence{};
     bool terminal{};
     std::array<float,4> activationPoint{};
+    bool removed{}; // membership retirement, NEVER native death or kill credit
 };
 struct PopulationCut {
     std::uint32_t epoch{},hostLoad{},hostTransition{};
@@ -21,6 +22,7 @@ struct PopulationCut {
     NativeRecordLocation location{};
     std::vector<NativeRecordContentDefinition> definitions;
     std::vector<PopulationOccurrence> entries;
+    bool membershipOnly{}; // schema2: ordinary BC lifecycle; no population repair authority
 };
 namespace population_cut_detail {
 inline void require(bool b){if(!b)throw std::runtime_error("PopulationCut: invalid bounded record");}
@@ -47,6 +49,7 @@ inline void ValidatePopulationCut(const PopulationCut& cut){
     using namespace population_cut_detail;
     require(cut.epoch && cut.sequence && cut.hostLoad && cut.hostTransition &&
         cut.definitions.size()<=POPULATION_MAX_DEFINITIONS && cut.entries.size()<=POPULATION_MAX_ENTRIES);
+    require(!cut.membershipOnly || cut.location==NativeRecordLocation{5,6,0,1,1,0});
     std::size_t total=0;
     for(const auto& d:cut.definitions){
         require(validDefinition(d) && d.location==cut.location);
@@ -55,6 +58,7 @@ inline void ValidatePopulationCut(const PopulationCut& cut){
     // Same content associated to multiple definitions is ambiguous, including aliases.
     for(std::size_t i=0;i<cut.definitions.size();++i)
         for(std::size_t j=0;j<i;++j)require(!sameDefinition(cut.definitions[i],cut.definitions[j]));
+    std::set<std::uint64_t> lifecycleEvents;std::uint64_t lastLifecycleEvent=0;
     std::set<std::uint16_t> ids;
     std::set<std::uint64_t> occurrences;
     for(const auto& e:cut.entries){
@@ -65,16 +69,24 @@ inline void ValidatePopulationCut(const PopulationCut& cut){
         require(e.record<d.records.size() && object(d.records[e.record])==e.objectId && e.objectId &&
             std::all_of(e.activationPoint.begin(),e.activationPoint.end(),[](float v){return std::isfinite(v);}) &&
             e.activationPoint[3]==1.0f);
+        if(cut.membershipOnly) {
+            require(e.occurrence==e.birthSequence && lifecycleEvents.insert(e.birthSequence).second);
+            lastLifecycleEvent=(std::max)(lastLifecycleEvent,e.birthSequence);
+            if(e.terminal){require(e.terminalSequence>e.birthSequence && lifecycleEvents.insert(e.terminalSequence).second);lastLifecycleEvent=(std::max)(lastLifecycleEvent,e.terminalSequence);}
+        }
+        require(!e.removed || (cut.membershipOnly && e.terminal));
+        require(!cut.membershipOnly || e.objectId==302);
         require(e.terminal ? (e.terminalSequence>=e.birthSequence && e.terminalSequence<=cut.sequence) : e.terminalSequence==0);
         for(const auto& other:cut.entries)
             if(&other!=&e && !e.terminal && !other.terminal)
                 require(e.definition!=other.definition || e.record!=other.record);
     }
+    require(!cut.membershipOnly || lastLifecycleEvent==cut.sequence);
 }
 inline void write(ByteWriter& writer,const PopulationCut& cut){
     using namespace population_cut_detail;
     ValidatePopulationCut(cut);ByteWriter w;
-    w.writeU8(1);w.writeU32(cut.epoch);w.writeU64(cut.sequence);w.writeU32(cut.hostLoad);w.writeU32(cut.hostTransition);
+    w.writeU8(cut.membershipOnly?2:1);w.writeU32(cut.epoch);w.writeU64(cut.sequence);w.writeU32(cut.hostLoad);w.writeU32(cut.hostTransition);
     location(w,cut.location);w.writeU16(static_cast<std::uint16_t>(cut.definitions.size()));
     for(const auto& d:cut.definitions){
         for(auto b:d.layoutSha256) { w.writeU8(b); }
@@ -85,13 +97,13 @@ inline void write(ByteWriter& writer,const PopulationCut& cut){
     }
     w.writeU16(static_cast<std::uint16_t>(cut.entries.size()));
     for(const auto& e:cut.entries){w.writeU16(e.netId);w.writeU16(e.definition);w.writeU16(e.record);w.writeU32(e.objectId);
-        w.writeU64(e.occurrence);w.writeU64(e.birthSequence);w.writeU64(e.terminalSequence);w.writeBool(e.terminal);
+        w.writeU64(e.occurrence);w.writeU64(e.birthSequence);w.writeU64(e.terminalSequence);w.writeU8(e.removed?2:(e.terminal?1:0));
         for(auto v:e.activationPoint)w.writeF32(v);}
     require(w.size()<=POPULATION_MAX_PAYLOAD);for(auto b:w.data())writer.writeU8(b);
 }
 inline void read(ByteReader& r,PopulationCut& destination){
     using namespace population_cut_detail;
-    require(r.remaining()<=POPULATION_MAX_PAYLOAD && r.readU8()==1);PopulationCut cut;
+    require(r.remaining()<=POPULATION_MAX_PAYLOAD);const auto schema=r.readU8();require(schema==1 || schema==2);PopulationCut cut;cut.membershipOnly=schema==2;
     cut.epoch=r.readU32();cut.sequence=r.readU64();cut.hostLoad=r.readU32();cut.hostTransition=r.readU32();
     cut.location=location(r);auto n=r.readU16();require(n<=POPULATION_MAX_DEFINITIONS);std::size_t total=0;
     for(std::size_t i=0;i<n;++i){NativeRecordContentDefinition d;
@@ -105,7 +117,7 @@ inline void read(ByteReader& r,PopulationCut& destination){
     n=r.readU16();require(n<=POPULATION_MAX_ENTRIES);cut.entries.reserve(n);
     for(std::size_t i=0;i<n;++i){PopulationOccurrence e;e.netId=r.readU16();e.definition=r.readU16();e.record=r.readU16();
         e.objectId=r.readU32();e.occurrence=r.readU64();e.birthSequence=r.readU64();e.terminalSequence=r.readU64();
-        const auto terminal=r.readU8();require(terminal<=1);e.terminal=terminal!=0;
+        const auto terminal=r.readU8();require(terminal<=(cut.membershipOnly?2:1));e.terminal=terminal!=0;e.removed=terminal==2;
         for(auto& v:e.activationPoint) { v=r.readF32(); }
         cut.entries.push_back(e);}
     require(r.atEnd());ValidatePopulationCut(cut);destination=std::move(cut); // no partial install or poisoned floors

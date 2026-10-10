@@ -778,7 +778,22 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 NativeRecordLocation room;
                 if(room_)room={room_->worldId,room_->roomId,room_->door,room_->mapProgram,room_->battleProgram,room_->eventProgram};
                 if(!room_ || cut.epoch!=room_->epoch || cut.location!=room || cut.epoch!=manifest_.epoch ||
-                   cut.sequence<=populationCutFloor_){++rejectedWorld_;return;}
+                   (!cut.membershipOnly && cut.sequence<=populationCutFloor_)){++rejectedWorld_;return;}
+                if(cut.membershipOnly) {
+                    auto history=ordinaryLifecycle_;
+                    bool complete=cut.entries.size()==manifest_.entries.size();
+                    for(const auto& row:cut.entries) {
+                        const auto it=std::find_if(manifest_.entries.begin(),manifest_.entries.end(),[&](const auto& m){return m.netId==row.netId;});
+                        complete=complete && it!=manifest_.entries.end() && it->objectId==row.objectId &&
+                            (!row.terminal || row.removed || deadEnemies_.count(row.netId));
+                    }
+                    if(!complete || !history.Admit(cut)){++rejectedWorld_;log("ordinary lifecycle refused: incomplete/reordered/reused certificate");return;}
+                    ordinaryLifecycle_=std::move(history);
+                    for(const auto& row:cut.entries)if(row.removed)enemyHp_.erase(row.netId);
+                    lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
+                    if(resyncPlan_)finishResync(ResyncResultReason::NativeFailed,"ordinary membership changed");
+                    forwardToOthers(peer,std::vector<std::uint8_t>(data,data+size),true);break;
+                }
                 std::set<std::uint16_t> covered;
                 for(const auto& row:cut.entries){
                     const auto found=std::find_if(manifest_.entries.begin(),manifest_.entries.end(),[&](const auto& e){return e.netId==row.netId;});
@@ -1323,6 +1338,9 @@ void SessionHost::sendWorldStateTo(TransportPeer* peer) try {
         m.replace = true;
         sendTo(peer, encode(m), true, true);
     }
+    // Reliable membership retirement precedes any cached HP for a replacement.
+    if(ordinaryLifecycle_.Current() && ordinaryLifecycle_.Current()->epoch==manifest_.epoch)
+        sendTo(peer,encode(*ordinaryLifecycle_.Current()),true,true);
     if (!enemyHp_.empty()) {
         EnemyHp hp;
         hp.epoch = manifest_.epoch;
@@ -1490,6 +1508,7 @@ void SessionHost::clearWorldState() {
     hold_.reset();
     manifest_ = {};
     populationCut_.reset();
+    ordinaryLifecycle_.Reset();
     enemyHp_.clear();
     deadEnemies_.clear();
 }
