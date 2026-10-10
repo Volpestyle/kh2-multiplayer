@@ -48,7 +48,14 @@ buildid `15194255`. This qualifies the lane, not other fixtures or networking.
 5. The ZIP's Python is isolated by `python311._pth`. Add packet, tools and
    dependency directories explicitly. Carry matching-ABI dependencies such as
    Pillow, pin them, and test with the actual bundled interpreter. A system
-   Python pass does not establish package portability.
+   Python pass does not establish package portability. The `_pth` file also
+   drops the script's own directory from `sys.path`, so every child script must
+   add its package-relative import roots from `__file__`. Causal05 failed at the
+   friend's `console_diag.py` on 2026-10-10 with `ModuleNotFoundError:
+   system_sessions` after the entry itself passed. Before sealing, replay the
+   full host and friend Setup from a copied unpack with the bundled `-I`
+   interpreter and no checkout on the path, running every spawned child up to
+   game launch with native, game and network leaves stubbed.
 6. Reuse the guarded canonical `BoundBoot` load path: highlighted LOAD row,
    recognized save-list OCR before confirmation, bounded deadline and no prompt
    dismissal. Keep all scenario steps inside the fixture's reviewed scope.
