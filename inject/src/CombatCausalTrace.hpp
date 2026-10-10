@@ -232,6 +232,55 @@ inline bool HostPlayerDirectStatEnemyHit(const nativehittrace::Event& e,const Sc
     const auto sum=static_cast<std::int64_t>(a.victim.hp)+c.delta;
     return b.victim.hp==(sum<0?0:sum);
 }
+// Client direct Stat proves suppression, never native HP authority. The engine
+// additionally requires exactly one actual queued claim bound to this Apply.
+inline bool ClientPlayerDirectStatEnemyHit(const nativehittrace::Event& e,const Scope& scope) noexcept {
+    namespace ht=nativehittrace; namespace dp=damagepolicy;
+    const auto& a=e.before;const auto& b=e.after;const auto& h=a.hit;const auto& z=b.hit;
+    const auto& p=e.policy;const auto& f=p.facts;const auto& authority=p.authority;
+    // The real decision precedes SyncDropsHit; only the observer adds syncDrop.
+    auto authorityHit=authority.hit;authorityHit.syncDrop=h.syncDrop;
+    auto afterIdentity=z;afterIdentity.damage=h.damage;
+    if(scope.native.role!=2 || scope.native.slot!=1 || !ScopeEligible(scope) ||
+        !CompanionContext(a.context,scope.native) || !CompanionContext(a.context,b.context) ||
+        !e.sequence || e.parentSequence || e.depth!=1 || !e.ownerThread || !e.returned ||
+        e.unwound || e.nested || e.overflow || !e.coverageStable || e.coverageMask!=ht::AllHooks ||
+        !e.contextStable || !e.metadataStable || !e.lossStable || !e.callerAvailable || e.callerRva!=0x410EFF ||
+        !SameActor(a.victim,b.victim) || !SameActor(a.source,b.source) ||
+        a.victim.objectId!=302 || a.victim.type!=4 || a.victim.hp<=0 ||
+        a.source.type!=0 || a.source.team!=1 || a.source.namePrefix!=0x5F50 ||
+        a.source.hp<=0 || a.source.maxHp<=0 || a.source.hp!=b.source.hp ||
+        a.source.actor==a.victim.actor || a.source.status==a.victim.status ||
+        !p.recorded || !f.ownerThread || !f.contextAvailable || f.role!=dp::Role::Client ||
+        f.source!=dp::ActorClass::LocalAvatar || f.victim!=dp::ActorClass::Enemy ||
+        !p.decision.supported || p.decision.action!=dp::Action::ClaimThenZeroHp ||
+        p.decision.reason!=dp::Reason::ClientClaim || !p.zeroAttempted ||
+        !p.revalidationAttempted || !p.revalidationPassed ||
+        (p.zeroResult!=dp::ZeroResult::Changed && p.zeroResult!=dp::ZeroResult::Zeroed) ||
+        !p.claimAttempted || !p.claimQueued ||
+        std::memcmp(p.roster,scope.roster,sizeof(p.roster))!=0 ||
+        !CompanionContext(authority.context,a.context) ||
+        !SameActor(authority.source,a.source) || authority.source.hp!=a.source.hp ||
+        !SameActor(authority.victim,a.victim) || authority.victim.hp!=a.victim.hp ||
+        !CompanionHitIdentity(authorityHit,h) || authority.hit.syncDrop || authority.hit.flags!=h.flags ||
+        f.hit.readMask!=(dp::RequiredHitReads|dp::KindAvailable) ||
+        f.hit.flags!=h.flags || f.hit.amount!=h.damage || f.hit.stat!=h.stat || f.hit.kind!=h.kind ||
+        !CompanionHitIdentity(h,afterIdentity) || !h.hit || !h.attack || !h.attackHandle || !h.ownerHandle ||
+        h.owner!=a.source.actor || h.canonicalPlayer!=a.source.actor || h.head!=a.source.actor ||
+        h.tracked!=a.source.actor || h.canonicalPlayer==a.victim.actor ||
+        h.stat!=0 || h.kind==5 || h.kind==6 || h.damage<=0 || !h.syncDrop || !z.syncDrop || z.damage!=0 || h.manualFilterOn || h.manualDrop ||
+        (h.flags&2) || z.flags!=(h.flags|2U) ||
+        e.takeCalls!=0 || e.statCalls!=1 || e.childCount!=1 || b.victim.hp!=a.victim.hp)
+        return false;
+    const auto& c=e.children[0];
+    if(c.kind!=ht::ChildKind::Stat || c.applySequence!=e.sequence || !c.sequence ||
+        c.takeSequence || c.matching || !c.returned || c.unwound || !c.callerAvailable ||
+        c.callerRva!=0x3D37D2 || c.actor!=a.victim.actor || c.stat!=0 ||
+        c.delta!=0 ||
+        !SameActor(c.before,a.victim) || !SameActor(c.after,b.victim) ||
+        c.before.hp!=a.victim.hp || c.after.hp!=b.victim.hp || c.result!=b.victim.hp) return false;
+    return b.victim.hp==a.victim.hp;
+}
 inline std::uint64_t Digest(const std::uint8_t* p,unsigned n) noexcept {
     std::uint64_t h=0xcbf29ce484222325ULL;
     for(unsigned i=0;i<n;++i) {h^=p[i];h*=0x100000001b3ULL;} return h;
@@ -247,6 +296,21 @@ class Engine {
     unsigned read_{},size_{}; std::uint64_t serial_{},loss_{},dropped_{},started_{},drained_{};
     bool admitted_{},retired_{},pending_{};
     std::uint32_t lastHostClaimSequence_{}, lastLocalClaimSequence_{};
+    // Diagnostic-only, bounded Apply-to-queue association. Every queue attempt
+    // for an Apply is counted, including rejects; consumption is one-shot.
+    struct PendingClaim { std::uint64_t event{}, frame{}; Key key{}; unsigned count{}; bool qualified{}; };
+    std::array<PendingClaim,CauseCount> pendingClaims_{};
+    std::uint64_t lastClientDirectEvent_{};
+    bool ConsumeClientClaim(const Scope& s,const nativehittrace::Event& e,const Ledger* l) noexcept {
+        for(auto& p:pendingClaims_)if(p.event==e.sequence && p.event) {
+            const auto copy=p;p={};
+            return l && copy.count==1 && copy.qualified && copy.frame==e.before.context.frame &&
+                copy.key.connection==s.native.connectionId && copy.key.epoch==s.native.epoch &&
+                copy.key.netId==l->identity.netId && copy.key.objectId==l->identity.objectId &&
+                copy.key.attackId==e.before.hit.attackId && copy.key.damage==e.before.hit.damage;
+        }
+        return false;
+    }
     Scope pendingScope_{}; std::array<Target,TargetCount> pendingTargets_{};
     Ledger* Find(unsigned id) noexcept {
         for(auto& t:targets_) if(t.identity.netId==id) return &t; return nullptr;
@@ -361,7 +425,10 @@ public:
         r.returned=e.returned;r.readback=e.contextStable&&e.metadataStable;
         if(l)r.target=l->identity;
         const bool client=s.native.role==2;
-        r.locallyQualified=Current(s)&&l&&(PlayerEnemyHit(e,client)||HostCompanionEnemyHit(e,s)||HostPlayerDirectStatEnemyHit(e,s))&&
+        const bool consumed=client && ConsumeClientClaim(s,e,l);
+        const bool queuedDirect=consumed && e.sequence>lastClientDirectEvent_;
+        if(client && e.sequence>lastClientDirectEvent_)lastClientDirectEvent_=e.sequence;
+        r.locallyQualified=Current(s)&&l&&(PlayerEnemyHit(e,client)||HostCompanionEnemyHit(e,s)||HostPlayerDirectStatEnemyHit(e,s)||(queuedDirect&&ClientPlayerDirectStatEnemyHit(e,s)))&&
             e.before.context.generation==s.native.generation && e.before.context.epoch==s.native.epoch &&
             e.before.victim.objentry==l->identity.objentry && e.before.victim.status==l->identity.status &&
             (client ? e.before.victim.hp==l->expected : Cause(*l,e.sequence,r.beforeHp,r.afterHp));
@@ -375,10 +442,19 @@ public:
         if(!admitted_||retired_)return;
         auto r=Row(Kind::Claim,s,now);r.key=key;r.event=event;r.enqueued=queued;
         auto* l=Find(key.netId);if(l)r.target=l->identity;
-        r.locallyQualified=Current(s)&&l&&event&&key.connection==s.native.connectionId&&
+        r.locallyQualified=Current(s)&&l&&event&&(s.native.role!=2 || event>lastClientDirectEvent_)&&key.connection==s.native.connectionId&&
             key.epoch==s.native.epoch&&key.objectId==302&&key.sequence>lastLocalClaimSequence_&&key.damage>0&&
             queued&&Payload(r,bytes,size)&&ClaimWire(s,key,bytes,size);
         if(!r.payloadBytes)Payload(r,bytes,size);
+        if(s.native.role==2 && event) {
+            PendingClaim* pending=nullptr;
+            for(auto& p:pendingClaims_)if(p.event==event){pending=&p;break;}
+            if(!pending)for(auto& p:pendingClaims_)if(!p.event){pending=&p;break;}
+            if(!pending){r.locallyQualified=false;Retire(s,now,Reason::Capacity);}
+            else { if(!pending->event){pending->event=event;pending->frame=s.native.frame;pending->key=key;pending->qualified=r.locallyQualified;}
+                if(pending->count<UINT32_MAX)++pending->count;
+                pending->qualified=pending->qualified&&r.locallyQualified; }
+        }
         if(r.locallyQualified)lastLocalClaimSequence_=key.sequence;
         r.reason=r.locallyQualified?Reason::Pending:Reason::Unavailable;Push(r);
     }

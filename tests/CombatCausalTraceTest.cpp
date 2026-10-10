@@ -6,6 +6,7 @@
 #include <Windows.h>
 #include <type_traits>
 #include <new>
+#include <memory>
 #include <cstdlib>
 #include <vector>
 #include "kh2coop/Codec.hpp"
@@ -13,6 +14,7 @@ namespace cc=kh2coop::inject::combatcausal;
 namespace ht=kh2coop::inject::nativehittrace;
 #include "CompanionRetainedFixture.hpp"
 #include "PracticePlayerRetainedFixture.hpp"
+#include "PracticeClientRetainedFixture.hpp"
 static_assert(static_cast<unsigned>(cc::WireType::HitClaim)==static_cast<unsigned>(kh2coop::PacketType::HitClaim));
 static_assert(static_cast<unsigned>(cc::WireType::EnemyHp)==static_cast<unsigned>(kh2coop::PacketType::EnemyHp));
 static_assert(static_cast<unsigned>(cc::WireType::EnemyDeath)==static_cast<unsigned>(kh2coop::PacketType::EnemyDeath));
@@ -115,6 +117,7 @@ void CompanionControls(){
  Check(!cc::HostCompanionEnemyHit(fake,Scope()),"real player path cannot masquerade as companion");
 }
 #include "PracticeCombinedControls.hpp"
+#include "PracticeClientControls.hpp"
 }
 int main(){
  bool published=false;HANDLE reader=CreateThread(nullptr,0,PublicationReader,&published,0,nullptr);
@@ -181,5 +184,5 @@ int main(){
  Admit(cc::engine,s);cc::currentScope=s;
  cc::engine.Consumer(s,23,cc::Reason::RejectDecode,0,0,9,0,hp.data(),static_cast<unsigned>(hp.size()),21);
  cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"actual queued consumer-rejection logger failure is contained");
- cc::Configure(false,Clock);CompanionControls();PracticePlayerControls();DisappearanceControls();
+ cc::Configure(false,Clock);CompanionControls();PracticePlayerControls();PracticeClientControls();DisappearanceControls();
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}
