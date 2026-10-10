@@ -76,3 +76,22 @@ refusal of fresh reads, authenticated completion, binding/release, unchanged
 remaining HP, gaps, reuse and timeout. Compilation is kh2-steam's next step;
 Python controls prove sampler/projection/evidence behavior only. The original
 runs remain unqualified. Causal queue/drain coverage (#4) is still separate.
+
+
+### Release between retirement and replacement birth
+
+Cut6 can legitimately release the four surviving IDs after net4's authenticated
+retirement and independently proven native absence. A later replacement birth
+is not part of the current manifest until its message arrives. Release does not
+mean that a replacement was admitted: the unchanged `ReleaseClientClaims` gate
+requires a complete manifest, admitted HP for every surviving ID, unique current
+native associations, equal native/admitted HP, exact full-census cardinality,
+and unchanged scope/manifest/HP bookends. An extra native body refuses even
+while no replacement birth is known. Manifest append changes the revision, which rearms the hold at the next
+claim-scope check; birth alone, missing local binding, or missing HP still refuses.
+
+The first native-first build passed cut6 admission but failed the new test's
+unconditional refusal expectation. The successor corrects that expectation and
+adds explicit negative controls for incomplete manifest, unknown/mismatched HP,
+extra living body, append-before-birth, birth-before-binding, and binding-before-HP.
+No product release, lifecycle or avatar code changes in this correction.

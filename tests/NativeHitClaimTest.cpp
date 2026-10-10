@@ -2337,17 +2337,47 @@ void TestCombatCausalBoundaries() {
             Check(pendingRead&&OrdinaryCut()->sequence==6&&g_ordinaryRetirements.size()==1&&
                 g_ordinaryRetirements[0].completed&&leaveCalls==0&&nativeCalls==0&&deathCalls==0,
                 "B frame801 native-first leave accepts authenticated cut6 already complete with no disposed read/kill/native call");
-            Check(!ReleaseClientClaims(801),"absent-before-cut retirement cannot weaken full manifest release");
+            // Cut6 is a complete authenticated four-survivor membership, not
+            // a promise that cut7 has already arrived. Release is legal only
+            // after the unchanged full census/identity/HP/scope readback gate.
+            Check(g_clientClaimHold.held&&g_host.manifestComplete&&g_hostHpSequence==6&&
+                  g_host.enemies.at(4).removed&&CaptureNativeCensus().enemies.size()==4&&
+                  ReleaseClientClaims(801),
+                  "cut6 alone releases only the complete matching four-survivor native census");
+            InvalidateClientClaims("test-incomplete-manifest");g_host.manifestComplete=false;
+            Check(!ReleaseClientClaims(801),"already-absent retirement cannot release incomplete manifest");
+            g_host.manifestComplete=true;
+            InvalidateClientClaims("test-unknown-survivor-hp");g_host.enemies.at(1).hpKnown=false;
+            Check(!ReleaseClientClaims(801),"already-absent retirement cannot release unknown survivor HP");
+            g_host.enemies.at(1).hpKnown=true;
+            InvalidateClientClaims("test-mismatched-survivor-hp");g_host.enemies.at(1).hp=19;
+            Check(!ReleaseClientClaims(801),"already-absent retirement cannot release mismatched survivor HP");
+            g_host.enemies.at(1).hp=20;
+            // Reintroduce only the native census leaf, not a source birth or
+            // binding. The removed ID must never cover an extra living body.
+            Put(enemy+0x6000+ACTOR_STATUS,status+0x300);
+            Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+                static_cast<std::uint32_t>((enemy+0x6000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+            InvalidateClientClaims("test-extra-living-body");
+            Check(CaptureNativeCensus().enemies.size()==5&&!ReleaseClientClaims(801),
+                  "retired source ID cannot account for an extra living native body");
+            Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+                static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+            Put(enemy+0x6000+ACTOR_STATUS,std::uintptr_t{0});
+            Check(ReleaseClientClaims(801),"restored exact four-survivor census independently re-earns release");
             EnemyManifest delayedManifest;delayedManifest.epoch=9;delayedManifest.replace=false;
             EnemyManifestEntry delayedEntry;delayedEntry.netId=6;delayedEntry.objectId=302;
             delayedEntry.spawnIndex=5;delayedEntry.battleProgram=1;delayedManifest.entries.push_back(delayedEntry);
             g_bridge.incoming.push_back(HostEnvelope(encode(delayedManifest),4));ReceiveWorldPackets();
+            Check(!ReleaseClientClaims(801)&&g_clientClaimHold.held,
+                  "replacement manifest rearms release at the next scope check before birth or native binding");
             auto delayedBirth=delayedCut;delayedBirth.sequence=7;
             auto replacementOccurrence=delayedCut.entries[3];replacementOccurrence.netId=6;
             replacementOccurrence.terminal=replacementOccurrence.removed=false;replacementOccurrence.terminalSequence=0;
             replacementOccurrence.birthSequence=replacementOccurrence.occurrence=7;delayedBirth.entries.push_back(replacementOccurrence);
             g_bridge.incoming.push_back(HostEnvelope(encode(delayedBirth),5));ReceiveWorldPackets();
             Check(OrdinaryCut()->sequence==7,"native-first cut6 commits before ordered cut7 birth");
+            Check(!ReleaseClientClaims(801),"authenticated cut7 birth alone cannot release an unbound replacement");
             std::memcpy(reinterpret_cast<void*>(newActor),reinterpret_cast<void*>(enemy),0x1000);
             Put(newActor+offsets::actor::OBJENTRY_PTR,object);Put(newActor+ACTOR_STATUS,newStatus);
             Put(newStatus,std::int32_t{20});Put(newStatus+4,std::int32_t{20});
@@ -2360,6 +2390,7 @@ void TestCombatCausalBoundaries() {
             Check(ResolveOrdinaryBindings(currentCensus,WorldSessionGeneration())&&
                   g_inst.spawns[g_inst.byActor.at(newActor)].netId==6,
                   "native-first removal binds new body only after exact old retire and new birth, never relabels");
+            Check(!ReleaseClientClaims(802),"replacement native binding without admitted HP cannot release claims");
             EnemyHp delayedHp;delayedHp.epoch=9;delayedHp.sequence=7;
             for(unsigned id: {1u,2u,3u,5u,6u})delayedHp.entries.push_back({static_cast<std::uint16_t>(id),20,20});
             g_bridge.incoming.push_back(HostEnvelope(encode(delayedHp),6));ReceiveWorldPackets();

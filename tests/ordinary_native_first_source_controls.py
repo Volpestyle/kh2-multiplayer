@@ -67,8 +67,24 @@ check(net.index('callbacks_.onWorldEnvelope') < net.index('Unknown packet type f
 sync, impl = source('inject/src/EnemySync.cpp'), source('inject/src/EnemyOrdinaryLifecycle.inl')
 check(body(sync, 'bool RequestOrdinaryNativeLeave(') == body(original('inject/src/EnemySync.cpp'), 'bool RequestOrdinaryNativeLeave('),
       'native leaf byte-exact from033')
-check(body(sync, 'bool ReleaseClientClaims(') == body(original('inject/src/EnemySync.cpp'), 'bool ReleaseClientClaims('),
+check(body(sync, 'bool ReleaseClientClaims(std::uint32_t frame) {') == body(original('inject/src/EnemySync.cpp'), 'bool ReleaseClientClaims(std::uint32_t frame) {'),
       'complete manifest/native release gate byte-exact')
+release = body(sync, 'bool ReleaseClientClaims(std::uint32_t frame) {')
+for predicate in ('!g_host.manifestComplete', '!host.hpKnown', 'native->hp != host.hp',
+                  'living != census.enemies.size()', 'matches != 1',
+                  'revision != g_clientManifestRevision', 'hpSequence != g_hostHpSequence'):
+    check(predicate in release, 'unchanged release hard predicate: ' + predicate)
+control = source('tests/NativeHitClaimTest.cpp')
+check('absent-before-cut retirement cannot weaken full manifest release' not in control and
+      'cut6 alone releases only the complete matching four-survivor native census' in control,
+      'cut6 current membership positive replaces the incorrect future-birth expectation')
+for label in ('already-absent retirement cannot release incomplete manifest',
+              'already-absent retirement cannot release unknown survivor HP',
+              'already-absent retirement cannot release mismatched survivor HP',
+              'retired source ID cannot account for an extra living native body',
+              'authenticated cut7 birth alone cannot release an unbound replacement',
+              'replacement native binding without admitted HP cannot release claims'):
+    check(label in control, 'actual-handler negative control added: ' + label)
 check('presence.seen+1!=g_hitTraceFrame' in impl and 'presence.checked+1!=g_hitTraceFrame' in impl and
       'g_hitTraceFrame-presence.absent>120' in impl, 'adjacent living/absence proofs with original bounded wait')
 check('refuse-reappeared-or-reused-actor' in impl and 'refuse-presence-bookend' in impl,
