@@ -13,7 +13,7 @@ def build(source, clip_cli, encoder, module, output):
     source,clip_cli,encoder,module,output=map(Path,(source,clip_cli,encoder,module,output))
     if output.exists():raise ValueError('fresh output ZIP required')
     payloads={'bin/kh2ctl_clip_v2.exe':clip_cli.read_bytes(),'bin/ffmpeg.exe':encoder.read_bytes()}
-    for name in ('__init__.py','adapter.py','metrics.py','pc2-owned-clip-v2.schema.json',
+    for name in ('__init__.py','adapter.py','metrics.py','release.py','pc2-owned-clip-v2.schema.json',
                  'pc2-owned-clip-failure-v1.schema.json','pc2-decoded-frames-v2.schema.json'):
         payloads['tools/pc2_clip_v2/'+name]=(module/name).read_bytes()
     roles={role:dict(packagePath=name,sha256=digest(payloads[name])) for role,name in

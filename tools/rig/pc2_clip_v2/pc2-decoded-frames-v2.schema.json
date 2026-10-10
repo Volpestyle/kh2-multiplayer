@@ -616,6 +616,9 @@
         },
         "driver": {
           "$ref": "#/$defs/processIdentity"
+        },
+        "captureReleaseJournal": {
+          "$ref": "#/$defs/artifact"
         }
       },
       "required": [
@@ -677,6 +680,9 @@
                       "const": 90
                     }
                   }
+                },
+                "captureReleaseJournal": {
+                  "type": "null"
                 }
               }
             },
@@ -718,7 +724,10 @@
                     }
                   }
                 }
-              }
+              },
+              "required": [
+                "captureReleaseJournal"
+              ]
             }
           ]
         }

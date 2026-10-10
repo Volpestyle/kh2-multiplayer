@@ -12,6 +12,13 @@ std::uint64_t AcquisitionEnd(std::uint64_t original, std::uint64_t now, const Mo
     return (std::min)(original, now + duration);
 }
 
+std::uint64_t PhaseEnd(std::uint64_t original, std::uint64_t now, const Mode& mode) {
+    if (mode.seconds == 3) return original;
+    constexpr std::uint64_t duration = 90000000000ULL;
+    if (now > UINT64_MAX - duration) throw std::runtime_error("Phase clock overflow");
+    return (std::min)(original, now + duration);
+}
+
 struct Handle {
     HANDLE value = nullptr;
     explicit Handle(HANDLE h = nullptr) : value(h) {}
@@ -106,6 +113,20 @@ std::filesystem::path ImagePath(HANDLE process) {
 void Write(const std::filesystem::path& path, const std::string& data) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << data; out.flush(); if (!out) throw std::runtime_error("Clip receipt write failed");
+}
+
+// Fresh atomic journal. Called only after the lexical CaptureLease scope exits.
+void PublishRelease(const std::filesystem::path& path, const std::string& data) {
+    const auto pending = std::filesystem::path(path.wstring() + L".pending");
+    {
+        Handle file(CreateFileW(pending.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
+        if (!file) throw std::runtime_error("Fresh release journal unavailable");
+        DWORD written = 0;
+        if (data.size() > MAXDWORD || !WriteFile(file.value, data.data(), static_cast<DWORD>(data.size()), &written, nullptr) ||
+            written != data.size() || !FlushFileBuffers(file.value)) throw std::runtime_error("Release journal flush failed");
+    }
+    if (!MoveFileExW(pending.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH))
+        throw std::runtime_error("Release journal publication failed");
 }
 
 struct ChildResult { std::string json; };
@@ -239,7 +260,7 @@ CommandResult CmdOwnedClip(std::vector<std::string> args) {
     if (cancelName.rfind("Local\\kh2coop_clip_cancel_", 0) != 0) throw std::runtime_error("Explicit media cancellation event required");
     Handle cancel(OpenEventW(SYNCHRONIZE, FALSE, std::filesystem::path(cancelName).c_str()));
     if (!cancel) throw std::runtime_error("Media cancellation event unavailable");
-    Bound bound{deadline, cancel.value}; bound.Check();
+    Bound bound{PhaseEnd(deadline, NowNs(), mode), cancel.value}; bound.Check();
     const DWORD pid = ResolveTargetPid();
     Handle game(OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid));
     if (!game || ProcessCreationTime(game.value) != creation || ModuleBase(game.value) != base || WaitForSingleObject(game.value, 0) != WAIT_TIMEOUT)
@@ -273,6 +294,24 @@ CommandResult CmdOwnedClip(std::vector<std::string> args) {
         finished = NowNs(); bound.Check();
         during = (channel.get()->presentCount - presents) * 1e9 / static_cast<double>(finished - started);
     }
+    std::string releaseName;
+    if (mode.seconds == 16) {
+        // CaptureLease's destructor has completed above, before any encode job.
+        bound.Check();
+        const auto released = NowNs();
+        std::ostringstream release;
+        release << "{\"schema\":\"pc2-capture-release-v1\",\"helper\":{\"pid\":" << GetCurrentProcessId()
+                << ",\"creationTicks\":" << ProcessCreationTime(GetCurrentProcess()) << "},\"target\":{\"pid\":" << pid
+                << ",\"creationTicks\":" << creation << ",\"moduleBase\":" << base
+                << "},\"seconds\":16,\"frames\":480,\"output\":" << JsonString((rawDir / "f_%05u.bmp").string())
+                << ",\"releasedNs\":" << released << ",\"deadlineNs\":" << bound.end
+                << ",\"capture\":{\"expectedRequestSeq\":" << completion.expectedRequestSeq << ",\"doneSeq\":" << completion.doneSeq
+                << ",\"nativeStatus\":" << completion.nativeStatus << ",\"framesWritten\":" << completion.framesWritten
+                << ",\"startedNs\":" << started << ",\"finishedNs\":" << finished << ",\"captureLeaseReleased\":true}}";
+        releaseName = stem + "_capture_released.json";
+        PublishRelease(evidence / releaseName, release.str());
+        bound.Check();
+    }
     Handle job(CreateJobObjectW(nullptr, nullptr)); JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if (!job || !SetInformationJobObject(job.value, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) throw std::runtime_error("Owned media job unavailable");
@@ -292,5 +331,5 @@ CommandResult CmdOwnedClip(std::vector<std::string> args) {
             << ",\"renderer\":" << completion.renderer << ",\"backbufferFormat\":" << completion.backbufferFormat
             << ",\"gameFpsBefore\":" << rate << ",\"gameFpsDuringCapture\":" << during << ",\"encodedFps\":" << encodedFps
             << ",\"startedNs\":" << started << ",\"finishedNs\":" << finished << ",\"captureLeaseReleased\":true}";
-    return {0, "{\"ok\":true,\"target\":" + target.str() + ",\"capture\":" + capture.str() + ",\"processes\":{\"encoder\":" + encoder.json + ",\"verifier\":" + verifier.json + "}}"};
+    return {0, "{\"ok\":true," + (releaseName.empty() ? std::string{} : "\"captureReleaseJournal\":" + JsonString(releaseName) + ",") + "\"target\":" + target.str() + ",\"capture\":" + capture.str() + ",\"processes\":{\"encoder\":" + encoder.json + ",\"verifier\":" + verifier.json + "}}"};
 }

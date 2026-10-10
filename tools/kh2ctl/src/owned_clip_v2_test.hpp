@@ -28,6 +28,25 @@ int OwnedClipOfflineTest(int argc, char** argv) {
             if (!refused) throw std::runtime_error("Unsupported mode admitted");
         }
         if (AcquisitionEnd(100000000000ULL,1,shortMode)!=10000000001ULL || AcquisitionEnd(100000000000ULL,1,longMode)!=23000000001ULL || AcquisitionEnd(2,1,longMode)!=2) throw std::runtime_error("Acquisition hard cap changed");
+        if (PhaseEnd(100000000000ULL,1,longMode)!=90000000001ULL || PhaseEnd(2,1,longMode)!=2 || PhaseEnd(100000000000ULL,1,shortMode)!=100000000000ULL) throw std::runtime_error("Phase deadline changed");
+    } else if (name == "capture_release") {
+        const auto path = root / "capture_released.json";
+        PublishRelease(path,"{\"test\":true}");
+        if (!std::filesystem::exists(path) || std::filesystem::exists(std::filesystem::path(path.wstring()+L".pending"))) throw std::runtime_error("Atomic release publication incomplete");
+        bool refused = false;
+        try { PublishRelease(path,"{\"test\":false}"); } catch (const std::exception&) { refused = true; }
+        if (!refused) throw std::runtime_error("Release overwrite admitted");
+    } else if (name == "lease_busy") {
+        const auto pid = GetCurrentProcessId();
+        kh2coop::CaptureLeaseStatus status = kh2coop::CaptureLeaseStatus::Error;
+        {
+            kh2coop::CaptureLease original;
+            if (original.Acquire(pid)!=kh2coop::CaptureLeaseStatus::Acquired) throw std::runtime_error("Test lease unavailable");
+            std::thread competing([&]() { kh2coop::CaptureLease other; status=other.Acquire(pid); }); competing.join();
+            if (status!=kh2coop::CaptureLeaseStatus::Busy) throw std::runtime_error("Busy capture admitted");
+        }
+        std::thread after([&]() { kh2coop::CaptureLease other; status=other.Acquire(pid); }); after.join();
+        if (status!=kh2coop::CaptureLeaseStatus::Acquired) throw std::runtime_error("Actual destructor did not release");
     } else if (name == "clock") {
         const auto first = NowNs(); Sleep(1); if (NowNs() <= first) throw std::runtime_error("Clock did not advance");
     } else if (name == "hash") {

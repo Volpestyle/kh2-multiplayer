@@ -552,3 +552,5 @@ $env:KH2CTL_BIN="<repo>\build\Release\kh2ctl.exe"
 ### Separate internal clip v2
 
 The opt-in `kh2ctl_clip_v2` target and `tools/rig/pc2_clip_v2` adapter admit only default 3s/90 frames or explicit 16s/480 frames at requested 30fps. They leave clip04 products and schemas unchanged. V2 receipts cross-check mode and counts; acquisition is capped by the earlier of the original deadline and seconds plus seven. Encoding and full decode share the original caller deadline; 16s does not imply finalization fits a short phase. See `tools/rig/pc2_clip_v2/README.md` for ownership, budgets, build controls and measured resource limits.
+
+The16s release-journal revision caps the entire synchronous phase at90s and requires the original JOIN deadline minus60s cleanup. A second local window requires a validated original capture-release journal emitted after the native CaptureLease destructor, complete raw inventory and owned worker state. This is a separate product review; clip04 and causal best-effort3s media remain independent.

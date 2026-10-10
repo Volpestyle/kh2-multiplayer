@@ -34,9 +34,13 @@ def run(retained):
         receipt['request'].update(mode=mode, seconds=seconds, frameCount=count)
         receipt['capture'].update(mode=mode, seconds=seconds, frameCount=count, framesWritten=count)
         receipt['decode']['decodedFrames'] = count
+        if count==480:receipt['captureReleaseJournal']=copy.deepcopy(success['rawCliReceipt'])
         schema = schemas['pc2-owned-clip-v2.schema.json']
         validate(receipt, schema)
         checks.append(mode + '-success-shape')
+        if count==480:
+            bad=copy.deepcopy(receipt);del bad['captureReleaseJournal']
+            refused('16s480-missing-release-artifact',lambda:validate(bad,schema))
         # Shape-only synthetic extension: never promoted to actual retained media.
         manifest = copy.deepcopy(frames)
         manifest.update(schema='pc2-decoded-frames-v2', mode=mode, frameCount=count)

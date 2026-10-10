@@ -14,6 +14,7 @@ import uuid
 from PIL import Image
 
 from . import metrics
+from .release import WindowSequence
 
 
 def read(path):
@@ -190,6 +191,7 @@ def validate(value, schema):
 class MediaProduct:
     def __init__(self, runner, package, manifest, game_sha256, snapshot):
         self.runner=runner; self.package=Path(package).resolve(); self.snapshot=snapshot
+        self.long_windows=WindowSequence(read,lambda helper:not self.native.absent(helper))
         self.native=Native(); self.manifest=copy.deepcopy(manifest); self.game_sha256=game_sha256
         self.products={}
         for role in ('clipCli','encoder','verifier','metrics'):
@@ -226,7 +228,7 @@ class MediaProduct:
         self.runner.STEPS['wm_route']=route
         self.runner.pc2_owned_clip=self.clip
 
-    def clip(self,ctx,instance,output,deadline,*,mode="3s90"):
+    def clip(self,ctx,instance,output,deadline,*,mode="3s90",join_deadline=None):
         seconds,frame_count=metrics.mode_spec(mode)
         # Reject malformed API calls before creating any artifact or native handle.
         # A typed failure is meaningful only for one of the two admitted peers.
@@ -235,6 +237,12 @@ class MediaProduct:
         if type(deadline) is not float or not math.isfinite(deadline) or deadline<=0:
             raise self.runner.StepFailed('owned clip requires finite positive float deadline')
         started=time.perf_counter_ns(); output=Path(output); root=Path(ctx.run_dir).resolve()
+        window=None
+        if seconds==16:
+            if type(join_deadline) is not float or not math.isfinite(join_deadline):
+                raise self.runner.StepFailed('original JOIN deadline required for16s mode')
+            deadline=min(deadline,started/1e9+90.,join_deadline-60.)
+            if deadline<=started/1e9:raise self.runner.StepFailed('JOIN cleanup reserve exhausted')
         proc=None; game=None; event=None; stage='admission'; raw=None
         helper_attempted=False;helper_admitted=False;helper_exit_proven=False;cleanup_uncertain=False
         cancel=getattr(ctx,'pc2_media_cancel',None); original_event=cancel; original=None
@@ -260,6 +268,8 @@ class MediaProduct:
             original=copy.deepcopy(ctx.pc2_media_targets[instance])
             if set(original)!={'pid','creationTicks','moduleBase'} or any(type(v) is not int or v<=0 for v in original.values()) or original['pid']!=ctx.inst(instance).pid:
                 raise ValueError('original source media target required')
+            if seconds==16:
+                window=self.long_windows.reserve(instance,original,root,started,deadline_ns,math.floor(join_deadline*1e9))
             # Freeze source Event and admission rather than accepting a replacement during polling.
             game=self.native.open(original['pid'],module=True)
             admitted=self.native.identity(game)
@@ -288,6 +298,7 @@ class MediaProduct:
                 if Path(helper['imagePath'])!=Path(self.products['clipCli']['packagePath']):raise ValueError('clip helper image changed')
                 helpers['helper']=helper
                 write(root/f'{stem}_helper.identity.json',helper)
+                if window is not None:self.long_windows.update(window,helper=copy.deepcopy(helper))
                 ensure();self.native.resume(proc,identity,ensure);helper_admitted=True
                 while proc.poll() is None:
                     ensure()
@@ -356,8 +367,15 @@ class MediaProduct:
                         capture=capture,artifact=video,decode=decode,processes=processes,closure=closure,
                         rawCliReceipt=art(stdout),rawLogs=logs(),acceptance=False)
             result['finishedNs']=time.perf_counter_ns(); ensure()
+            if window is not None:
+                self.long_windows.released(window,time.perf_counter_ns())
+                release_path=root/f'{stem}_capture_released.json'
+                if raw.get('captureReleaseJournal')!=release_path.name:raise ValueError('native release journal binding changed')
+                result['captureReleaseJournal']=art(release_path)
             validate(result,read(Path(__file__).with_name('pc2-owned-clip-v2.schema.json')))
-            write(root/f'{stem}_clip.json',result);ensure();return result
+            write(root/f'{stem}_clip.json',result);ensure()
+            if window is not None:self.long_windows.update(window,state='FINISHED',closed=True)
+            return result
         except Exception as error:
             primary_error=str(error)
             # Signal native cancellation first; native KILL_ON_JOB_CLOSE contains only its own descendants.
@@ -410,6 +428,8 @@ class MediaProduct:
                          rawCliReceipt=(lambda a:a if a and a['bytes']>0 else None)(partial_art(root/f'{stem}_helper.stdout.log')),
                          rawLogs=streams if all(v is not None for logs0 in streams.values() for v in logs0.values()) else None)
             validate(failure,failure_schema);write(root/f'{stem}_clip_failure.json',failure)
+            if window is not None:self.long_windows.update(window,state='FAILED',closed=failure['closure']['ownedDescendantsAbsent'] is True)
             raise self.runner.StepFailed('owned clip '+stage+' failed: '+str(error)) from error
         finally:
+            if window is not None and window['state']=='RUNNING':self.long_windows.update(window,state='FAILED',closed=False)
             self.native.close(event);self.native.close(game)
