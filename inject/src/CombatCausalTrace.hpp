@@ -123,6 +123,70 @@ inline bool PlayerEnemyHit(const nativehittrace::Event& e, bool client) noexcept
     const auto sum=static_cast<std::int64_t>(a.victim.hp)+stat->delta;
     return b.victim.hp==(sum<0?0:sum);
 }
+// Separate host-only native-companion path. Production policy already proves
+// current AI ownership; bind that actual copied decision to this exact event.
+// The canonical player predicate and unknown-source retirement stay unchanged.
+inline bool CompanionContext(const nativehittrace::Context& a,
+                             const nativehittrace::Context& b) noexcept {
+    return a.available && b.available && a.readMask==nativehittrace::ContextComplete &&
+        b.readMask==nativehittrace::ContextComplete && a.frame==b.frame &&
+        a.generation==b.generation && a.epoch==b.epoch && a.loadSerial==b.loadSerial &&
+        a.transitionSerial==b.transitionSerial && a.connectionId==b.connectionId &&
+        a.hostConnectionId==b.hostConnectionId && a.role==b.role && a.slot==b.slot &&
+        std::memcmp(a.location,b.location,sizeof(a.location))==0;
+}
+inline bool CompanionHitIdentity(const nativehittrace::HitSnapshot& a,
+                                 const nativehittrace::HitSnapshot& b) noexcept {
+    return a.readMask==nativehittrace::HitComplete && b.readMask==nativehittrace::HitComplete &&
+        a.hit==b.hit && a.attack==b.attack && a.owner==b.owner &&
+        a.canonicalPlayer==b.canonicalPlayer && a.head==b.head && a.tracked==b.tracked &&
+        a.attackHandle==b.attackHandle && a.atkpHandle==b.atkpHandle && a.ownerHandle==b.ownerHandle &&
+        a.attackId==b.attackId && a.stat==b.stat && a.kind==b.kind && a.damage==b.damage &&
+        a.syncDrop==b.syncDrop && a.manualFilterOn==b.manualFilterOn && a.manualDrop==b.manualDrop;
+}
+inline bool HostCompanionEnemyHit(const nativehittrace::Event& e,const Scope& scope) noexcept {
+    namespace ht=nativehittrace; namespace dp=damagepolicy;
+    const auto& a=e.before;const auto& b=e.after;const auto& h=a.hit;const auto& z=b.hit;
+    const auto& p=e.policy;const auto& f=p.facts;const auto& authority=p.authority;
+    if(scope.native.role!=1 || scope.native.slot!=0 || !ScopeEligible(scope) ||
+        !CompanionContext(a.context,scope.native) || !CompanionContext(a.context,b.context) ||
+        !e.sequence || e.parentSequence || e.depth!=1 || !e.ownerThread || !e.returned ||
+        e.unwound || e.nested || e.overflow || !e.coverageStable || e.coverageMask!=ht::AllHooks ||
+        !e.contextStable || !e.metadataStable || !e.lossStable || !e.callerAvailable || e.callerRva!=0x410EFF ||
+        !SameActor(a.victim,b.victim) || !SameActor(a.source,b.source) ||
+        a.victim.objectId!=302 || a.victim.type!=4 || a.victim.hp<=0 ||
+        a.source.type!=1 || a.source.team!=1 || a.source.namePrefix!=0x5F50 ||
+        a.source.hp<=0 || a.source.maxHp<=0 || a.source.hp!=b.source.hp ||
+        a.source.actor==a.victim.actor || a.source.status==a.victim.status ||
+        !p.recorded || !f.ownerThread || !f.contextAvailable || f.role!=dp::Role::Host ||
+        f.source!=dp::ActorClass::NativeCompanion || f.victim!=dp::ActorClass::Enemy ||
+        !p.decision.supported || p.decision.action!=dp::Action::Native ||
+        p.decision.reason!=dp::Reason::HostCompanionAttack || p.zeroAttempted ||
+        p.claimAttempted || p.claimQueued ||
+        std::memcmp(p.roster,scope.roster,sizeof(p.roster))!=0 ||
+        !CompanionContext(authority.context,a.context) ||
+        !SameActor(authority.source,a.source) || authority.source.hp!=a.source.hp ||
+        !SameActor(authority.victim,a.victim) || authority.victim.hp!=a.victim.hp ||
+        !CompanionHitIdentity(authority.hit,h) || authority.hit.flags!=h.flags ||
+        f.hit.readMask!=(dp::RequiredHitReads|dp::KindAvailable) ||
+        f.hit.flags!=h.flags || f.hit.amount!=h.damage || f.hit.stat!=h.stat || f.hit.kind!=h.kind ||
+        !CompanionHitIdentity(h,z) || !h.hit || !h.attack || !h.attackHandle || !h.ownerHandle ||
+        h.owner!=a.source.actor || !h.canonicalPlayer || h.canonicalPlayer!=h.head || h.head!=h.tracked ||
+        h.canonicalPlayer==a.source.actor || h.canonicalPlayer==a.victim.actor ||
+        h.stat!=0 || h.kind==5 || h.kind==6 || h.damage<=0 || h.syncDrop || h.manualFilterOn || h.manualDrop ||
+        (h.flags&2) || z.flags!=(h.flags|2U) ||
+        e.takeCalls!=0 || e.statCalls!=1 || e.childCount!=1 || b.victim.hp<0 || b.victim.hp>=a.victim.hp)
+        return false;
+    const auto& c=e.children[0];
+    if(c.kind!=ht::ChildKind::Stat || c.applySequence!=e.sequence || !c.sequence ||
+        c.takeSequence || c.matching || !c.returned || c.unwound || !c.callerAvailable ||
+        c.callerRva!=0x3D37D2 || c.actor!=a.victim.actor || c.stat!=0 ||
+        static_cast<std::int64_t>(c.delta)!=-static_cast<std::int64_t>(h.damage) ||
+        !SameActor(c.before,a.victim) || !SameActor(c.after,b.victim) ||
+        c.before.hp!=a.victim.hp || c.after.hp!=b.victim.hp || c.result!=b.victim.hp) return false;
+    const auto sum=static_cast<std::int64_t>(a.victim.hp)+c.delta;
+    return b.victim.hp==(sum<0?0:sum);
+}
 inline std::uint64_t Digest(const std::uint8_t* p,unsigned n) noexcept {
     std::uint64_t h=0xcbf29ce484222325ULL;
     for(unsigned i=0;i<n;++i) {h^=p[i];h*=0x100000001b3ULL;} return h;
@@ -252,7 +316,7 @@ public:
         r.returned=e.returned;r.readback=e.contextStable&&e.metadataStable;
         if(l)r.target=l->identity;
         const bool client=s.native.role==2;
-        r.locallyQualified=Current(s)&&l&&PlayerEnemyHit(e,client)&&
+        r.locallyQualified=Current(s)&&l&&(PlayerEnemyHit(e,client)||HostCompanionEnemyHit(e,s))&&
             e.before.context.generation==s.native.generation && e.before.context.epoch==s.native.epoch &&
             e.before.victim.objentry==l->identity.objentry && e.before.victim.status==l->identity.status &&
             (client ? e.before.victim.hp==l->expected : Cause(*l,e.sequence,r.beforeHp,r.afterHp));

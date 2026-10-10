@@ -63,6 +63,9 @@ struct PolicyObservation {
 enum class ChildKind : std::uint8_t { Take = 1, Stat = 2 };
 struct Child {
     std::uint64_t sequence = 0, takeSequence = 0;
+    // Actual enclosing Apply token; direct Stat has no Take token. This does
+    // not change the existing Take/Stat matching flag or unmatched counter.
+    std::uint64_t applySequence = 0;
     uintptr_t actor = 0, callerRva = 0;
     std::int32_t delta = 0, stat = 0, react = 0, result = 0;
     ActorSnapshot before {}, after {};

@@ -10,6 +10,7 @@
 #include "kh2coop/Codec.hpp"
 namespace cc=kh2coop::inject::combatcausal;
 namespace ht=kh2coop::inject::nativehittrace;
+#include "CompanionRetainedFixture.hpp"
 static_assert(static_cast<unsigned>(cc::WireType::HitClaim)==static_cast<unsigned>(kh2coop::PacketType::HitClaim));
 static_assert(static_cast<unsigned>(cc::WireType::EnemyHp)==static_cast<unsigned>(kh2coop::PacketType::EnemyHp));
 static_assert(static_cast<unsigned>(cc::WireType::EnemyDeath)==static_cast<unsigned>(kh2coop::PacketType::EnemyDeath));
@@ -47,6 +48,70 @@ ht::Event Emit(const cc::Scope& s,bool client=false){auto before=Facts(s),after=
  else {apply.event.policy.recorded=true;apply.event.policy.claimAttempted=true;apply.event.policy.claimQueued=true;}
  ht::EndApply(apply,true,0xABC,&after);ht::Event e{};Check(ht::PopEvent(e),"actual NativeHitTrace event emitted");return e;}
 bool Has(cc::Engine& e,cc::Kind k,bool qualified){cc::Receipt r;bool found=false;while(e.Pop(r))if(r.kind==k&&r.locallyQualified==qualified)found=true;return found;}
+ht::Event EmitCompanion(const ht::Event& retained){
+ ht::ApplyToken apply{};ht::BeginApply(apply,retained.callerRva,true,retained.before);
+ apply.event.policy=retained.policy;
+ const auto& child=retained.children[0];ht::ChildToken stat{};
+ ht::BeginStat(stat,child.actor,child.delta,child.stat,child.react,child.callerRva,true,child.before);
+ ht::EndStat(stat,true,child.result,&child.after);
+ ht::EndApply(apply,true,retained.rawResult,&retained.after);
+ ht::Event emitted{};Check(ht::PopEvent(emitted),"retained companion actual Apply/direct-Stat callbacks emit");return emitted;
+}
+void CompanionControls(){
+ for(unsigned sample=0;sample<2;++sample){
+  auto retained=RetainedCompanion(sample);auto e=EmitCompanion(retained);
+  auto s=Scope();s.native=e.before.context;for(unsigned i=0;i<3;++i)s.roster[i]=e.policy.roster[i];
+  Check(!cc::PlayerEnemyHit(e,false),"retained companion still refuses unchanged player predicate");
+  Check(cc::HostCompanionEnemyHit(e,s),sample==0?"causal08 serial101 companion witness PASS":"causal10 serial151 companion witness PASS");
+  Check(!e.children[0].matching && e.children[0].applySequence==e.sequence && !e.children[0].takeSequence,
+        "direct Apply relation explicit; original Take/Stat matching unchanged");
+  for(unsigned m=0;m<28;++m){auto bad=e;auto scope=s;
+   switch(m){
+    case 0:bad.policy.recorded=false;break;
+    case 1:bad.policy.decision.reason=kh2coop::inject::damagepolicy::Reason::UnknownSource;break;
+    case 2:bad.policy.decision.supported=false;break;
+    case 3:scope.native.role=2;scope.native.slot=1;break;
+    case 4:bad.before.hit.owner++;break;
+    case 5:bad.policy.authority.source.actor++;break;
+    case 6:bad.policy.roster[1]++;break;
+    case 7:bad.policy.authority.context.frame++;break;
+    case 8:bad.policy.facts.source=kh2coop::inject::damagepolicy::ActorClass::RemoteRepresentation;break;
+    case 9:bad.policy.facts.role=kh2coop::inject::damagepolicy::Role::Client;break;
+    case 10:bad.children[0].applySequence++;break;
+    case 11:bad.children[0].callerRva++;break;
+    case 12:bad.children[0].actor++;break;
+    case 13:bad.children[0].before.status++;break;
+    case 14:bad.children[0].delta=2;break;
+    case 15:bad.children[0].result++;break;
+    case 16:bad.takeCalls=1;break;
+    case 17:bad.childCount=2;break;
+    case 18:bad.callerRva=0x3D613C;break;
+    case 19:bad.before.source.type=0;bad.after.source.type=0;break;
+    case 20:bad.before.hit.canonicalPlayer=bad.before.source.actor;break;
+    case 21:bad.after.source.status++;break;
+    case 22:bad.policy.facts.hit.amount++;break;
+    case 23:bad.policy.authority.hit.attack++;break;
+    case 24:bad.lossStable=false;break;
+    case 25:bad.unwound=true;break;
+    case 26:bad.policy.zeroAttempted=true;break;
+    case 27:bad.children[0].takeSequence=99;break;
+   }
+   Check(!cc::HostCompanionEnemyHit(bad,scope),"companion policy/owner/client/masquerade/child mutant REFUSE");
+  }
+  cc::Engine ledger;cc::Target targets[5];for(unsigned i=0;i<5;++i){targets[i]=Target(i+1);targets[i].hp=targets[i].maxHp=20;}
+  targets[0].actor=e.before.victim.actor;targets[0].objentry=e.before.victim.objentry;targets[0].status=e.before.victim.status;
+  auto initial=s;--initial.native.frame;ledger.Population(initial,targets,5,1);ledger.Population(s,targets,5,2);
+  Check(ledger.Admitted(),"companion fixture consecutive original population admitted");cc::Receipt ignored;while(ledger.Pop(ignored)){}
+  ledger.Hit(s,e,3);Check(Has(ledger,cc::Kind::Hit,true)&&!ledger.Retired(),"retained companion accounts once in native causal ledger");
+  auto hp=kh2coop::encode(kh2coop::EnemyHp{static_cast<std::uint32_t>(s.native.epoch),{{1,18,20}},1});
+  ledger.Packet(s,cc::Kind::HpPublish,1,1,18,20,hp.data(),static_cast<unsigned>(hp.size()),true,false,4);
+  Check(ledger.Pop(ignored)&&ignored.locallyQualified&&ignored.causeCount==1&&ignored.causes[0]==e.sequence,
+        "companion source associates unchanged native publication");
+  ledger.Hit(s,e,5);Check(ledger.Retired(),"duplicate companion event still retires unknown delta");
+ }
+ auto player=Emit(Scope());auto fake=player;fake.policy=RetainedCompanion(0).policy;
+ Check(!cc::HostCompanionEnemyHit(fake,Scope()),"real player path cannot masquerade as companion");
+}
 }
 int main(){
  bool published=false;HANDLE reader=CreateThread(nullptr,0,PublicationReader,&published,0,nullptr);
@@ -113,4 +178,5 @@ int main(){
  Admit(cc::engine,s);cc::currentScope=s;
  cc::engine.Consumer(s,23,cc::Reason::RejectDecode,0,0,9,0,hp.data(),static_cast<unsigned>(hp.size()),21);
  cc::Drain(ThrowLogger);Check(cc::engine.Retired(),"actual queued consumer-rejection logger failure is contained");
+ cc::Configure(false,Clock);CompanionControls();
  ht::Shutdown();std::printf("combat-causal checks=%u failed=%u nativeCoverageQualified=0 acceptance=0\n",checks,failed);return failed?1:0;}

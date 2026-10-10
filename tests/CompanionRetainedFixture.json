@@ -1,0 +1,22 @@
+[
+  {
+    "case": 0,
+    "log": "kh2coop_inject_597732.log",
+    "sha256": "c6cc606e37fc3f6eea0f9e41758f92025873ea34d6c35c122b74ee26a91c57e2",
+    "actualGate": {
+      "sourceClass": "4",
+      "reason": "12",
+      "supported": "1"
+    }
+  },
+  {
+    "case": 1,
+    "log": "kh2coop_inject_254372.log",
+    "sha256": "cac0ab8f937d3682c1eaff64ed3d335d2b180a36d916a037e2e82b6121dbde6b",
+    "actualGate": {
+      "sourceClass": "4",
+      "reason": "12",
+      "supported": "1"
+    }
+  }
+]

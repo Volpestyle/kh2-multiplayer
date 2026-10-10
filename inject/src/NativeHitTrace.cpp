@@ -89,6 +89,7 @@ void BeginChild(ChildToken& token, ChildKind kind, uintptr_t actor, std::int32_t
         token.index = e.childCount++;
         auto& c = e.children[token.index];
         c.sequence = ++g_sequence; c.kind = kind; c.actor = actor; c.delta = delta; c.stat = stat; c.react = react;
+        c.applySequence = e.sequence;
         c.callerRva = caller; c.callerAvailable = callerAvailable; c.before = before;
         c.matching = actor == e.before.victim.actor && before.actor == actor;
         if (!token.isTake) {
@@ -213,7 +214,7 @@ void Drain(LogFn log, std::uint32_t ownerFrame) {
         }
         for (unsigned i = 0; i < e.childCount; ++i) {
             const auto& c = e.children[i];
-            log("[hittrace] child schema=1 seq=%llu index=%u childSeq=%llu takeSeq=%llu kind=%u actor=%llX callerRva=%llX callerAvailable=%u delta=%d stat=%d react=%d result=%d matching=%u returned=%u unwound=%u",U(e.sequence),i,U(c.sequence),U(c.takeSequence),unsigned(c.kind),U(c.actor),U(c.callerRva),unsigned(c.callerAvailable),c.delta,c.stat,c.react,c.result,unsigned(c.matching),unsigned(c.returned),unsigned(c.unwound));
+            log("[hittrace] child schema=1 seq=%llu index=%u childSeq=%llu takeSeq=%llu kind=%u actor=%llX callerRva=%llX callerAvailable=%u delta=%d stat=%d react=%d result=%d matching=%u returned=%u unwound=%u applySeq=%llu",U(e.sequence),i,U(c.sequence),U(c.takeSequence),unsigned(c.kind),U(c.actor),U(c.callerRva),unsigned(c.callerAvailable),c.delta,c.stat,c.react,c.result,unsigned(c.matching),unsigned(c.returned),unsigned(c.unwound),U(c.applySequence));
             LogActor(log,e.sequence,0,2+i,c.before);LogActor(log,e.sequence,1,2+i,c.after);
         }
         if (e.policy.recorded) {
