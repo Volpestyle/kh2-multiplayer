@@ -1994,8 +1994,8 @@ void TestCombatCausalBoundaries() {
             cc::Target rows[5];rows[0]=CausalTarget(g_inst.spawns[0],n,1);
             for(unsigned i=1;i<5;++i) {
                 if(client) {
-                    NativeEnemy actual;bool enemyType=false;
-                    if(!ReadNativeEnemy(g_inst.spawns[i].actor,actual,enemyType) || !enemyType)
+                    NativeEnemy actual;bool actualEnemyType=false;
+                    if(!ReadNativeEnemy(g_inst.spawns[i].actor,actual,actualEnemyType) || !actualEnemyType)
                         throw std::runtime_error("BC positive observer native target unavailable");
                     rows[i]=CausalTarget(g_inst.spawns[i],actual,i+1);
                 } else rows[i]={0x1000+i,0x2000+i,0x3000+i,0x4000+i,0x5000+i,i+1,302,4,1000,1000};
