@@ -57,6 +57,7 @@ def frame_metrics(image, baseline):
 
 def decoder_rows(log, count=90):
     """Parse retained showinfo RGB-frame PTS, never invented index/fps timestamps."""
+    if type(count) is not int or count not in (90,480):raise ValueError('exact90/480 decoder count required')
     timebases = re.findall(r'config in time_base:\s*(\d+)/(\d+)', log)
     if len(timebases) != 1:
         raise ValueError('one decoder time base required')
@@ -66,7 +67,7 @@ def decoder_rows(log, count=90):
     rows = [(int(i), int(pts), int(w), int(h)) for i, pts, w, h in re.findall(
         r'\bn:\s*(\d+)\s+pts:\s*(-?\d+).*?\bs:(\d+)x(\d+)', log)]
     if len(rows) != count or [r[0] for r in rows] != list(range(count)):
-        raise ValueError('full exact ninety-frame decode required')
+        raise ValueError('full exact requested-frame decode required')
     if any(r[1] < 0 for r in rows) or any(a[1] >= b[1] for a, b in zip(rows, rows[1:])):
         raise ValueError('decoder PTS did not advance')
     return dict(numerator=numerator, denominator=denominator), rows
@@ -75,8 +76,9 @@ def decoder_rows(log, count=90):
 def summarize(manifest, encoded_fps):
     if type(encoded_fps) not in (int, float) or not math.isfinite(encoded_fps) or encoded_fps <= 0:
         raise ValueError('invalid encoded frame rate')
-    _,count=mode_spec(manifest['mode'],manifest['frameCount']); rows = manifest['rows']; tb = manifest['timeBase'];
-    if len(rows)!=count:raise ValueError('mode/frame inventory mismatch')
+    rows = manifest['rows']; tb = manifest['timeBase']
+    count=len(rows)
+    if count not in (90,480):raise ValueError('exact90/480 decoded rows required')
     nonblack = [r for r in rows if r['blackFraction'] < .99]
     distinct = len({r['rgbSha256'] for r in nonblack})
     changed = max(r['changedPixels'] for r in rows)
@@ -94,10 +96,9 @@ def summarize(manifest, encoded_fps):
 def recompute(manifest, root, deadline, cancel):
     """Source can independently recompute every row and retain its own aggregates."""
     ensure(deadline, cancel)
-    _,count=mode_spec(manifest['mode'],manifest['frameCount'])
     rows = manifest['rows']
-    if type(rows) is not list or len(rows) != count:
-        raise ValueError('exact mode-count retained decoded images required')
+    if type(rows) is not list or len(rows) not in (90,480):
+        raise ValueError('exact90/480 retained decoded images required')
     baseline = None
     for index, row in enumerate(rows):
         ensure(deadline, cancel)
@@ -126,10 +127,3 @@ def recompute(manifest, root, deadline, cancel):
             raise ValueError('decoded PTS regression')
     ensure(deadline, cancel)
     return True
-
-MODES = {'3s90': (3,90), '16s480': (16,480)}
-def mode_spec(mode='3s90', count=None):
-    if type(mode) is not str or mode not in MODES:raise ValueError('exact3s90 or16s480 mode required')
-    seconds,frames=MODES[mode]
-    if count is not None and (type(count) is not int or count!=frames):raise ValueError('mode/frame count mismatch')
-    return seconds,frames

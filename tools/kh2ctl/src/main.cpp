@@ -3054,6 +3054,9 @@ int main(int argc, char* argv[]) {
         const std::unique_ptr<void, decltype(&CloseHandle)> diagnosticTarget(
             [&]() -> HANDLE {
                 if (command == "help" || command == "--help" || command == "-h") return nullptr;
+#if defined(KH2COOP_CLIP_V2)
+                if (command == "clip-postprocess") return nullptr; // No game target in post-run processing.
+#endif
 #if defined(KH2COOP_INTERNAL_CLIP)
                 if (command != "clip") {
 #else
@@ -3111,7 +3114,11 @@ int main(int argc, char* argv[]) {
         // Rig commands manage processes themselves (inject/kill take their
         // own --pid). Every other command attaches to one instance: the one
         // named by --pid, or the only KH2 running.
-        const bool rigCommand = command == "launch" || command == "inject" ||
+        const bool rigCommand =
+#if defined(KH2COOP_CLIP_V2)
+                                command == "clip-postprocess" ||
+#endif
+                                command == "launch" || command == "inject" ||
                                 command == "instances" || command == "kill" ||
                                 command == "mute" ||
                                 command == "world-resync" ||
@@ -3151,6 +3158,10 @@ int main(int argc, char* argv[]) {
             result = CmdOwnedClip(std::move(args));
 #else
             result = CmdClip(std::move(args));
+#endif
+#if defined(KH2COOP_CLIP_V2)
+        } else if (command == "clip-postprocess") {
+            result = CmdOwnedClipPostprocess(std::move(args));
 #endif
         } else if (command == "overlay") {
             result = CmdOverlay(std::move(args));

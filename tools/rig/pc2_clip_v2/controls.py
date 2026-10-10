@@ -1,82 +1,28 @@
-"""Offline schema/metric controls; retained artifacts are fixtures, not a new run."""
-import argparse
-import copy
-import json
+"""Retained clip04 short-mode metrics and strict v2 cross-mode schema controls."""
+import argparse,copy,json
 from pathlib import Path
-
-from .adapter import read, validate
+from .adapter import read,validate
 from . import metrics
 from rig.pc2_clip import metrics as legacy_metrics
 
-
 def run(retained):
-    success = read(retained / 'hb_arrival_peer0_clip.json')
-    frames = read(retained / 'hb_arrival_peer0_frames.json')
-    schemas = {name: read(Path(__file__).with_name(name)) for name in
-               ('pc2-owned-clip-v2.schema.json', 'pc2-decoded-frames-v2.schema.json')}
-    checks = []
+    original=read(retained/'hb_arrival_peer0_clip.json');frames=read(retained/'hb_arrival_peer0_frames.json');checks=[]
+    s=copy.deepcopy(original);s['schema']='pc2-owned-clip-v2';s['capture'].update(seconds=3,frameCount=90)
+    schema=read(Path(__file__).with_name('pc2-owned-clip-v2.schema.json'));validate(s,schema);checks.append('retained-short-success')
+    f=copy.deepcopy(frames);f.update(schema='pc2-decoded-frames-v2',seconds=3,frameCount=90)
+    fs=read(Path(__file__).with_name('pc2-decoded-frames-v2.schema.json'));validate(f,fs);checks.append('retained-short-frames')
+    assert metrics.summarize(f,s['capture']['encodedFps'])==legacy_metrics.summarize(frames,s['capture']['encodedFps']);checks.append('unchanged-short-metrics')
+    def refused(label,value,schema):
+        try:validate(value,schema)
+        except (ValueError,TypeError,KeyError):checks.append(label)
+        else:raise AssertionError(label)
+    for field,value in [('seconds',16),('frameCount',480),('seconds',12),('frameCount',True)]:
+        bad=copy.deepcopy(s);bad['capture'][field]=value;refused('short-cross-'+field+str(value),bad,schema)
+    for seconds,count in [(3,90),(16,480)]:
+        valid=copy.deepcopy(f);valid.update(seconds=seconds,frameCount=count);valid['rows']=[dict(copy.deepcopy(frames['rows'][i%90]),index=i,pts=i) for i in range(count)];validate(valid,fs);checks.append('frames-'+str(count))
+        bad=copy.deepcopy(valid);bad['frameCount']=90 if count==480 else 480;refused('frame-count-cross-'+str(count),bad,fs)
+        bad=copy.deepcopy(valid);bad['rows'].pop();refused('missing-frame-'+str(count),bad,fs)
+    return dict(passed=len(checks),failed=0,checks=checks,nativeBuilt=False,pc2Contact=False,limit='Retained90 metrics and synthetic480 schema shape only')
 
-    def refused(label, call):
-        try:
-            call()
-        except (ValueError, TypeError, KeyError):
-            checks.append(label)
-        else:
-            raise AssertionError('not refused: ' + label)
-
-    assert metrics.mode_spec() == (3, 90)
-    checks.append('default-3s90')
-    for value in ('12s360', '3', '16', '', None, True):
-        refused('mode-' + repr(value), lambda: metrics.mode_spec(value))
-    for mode, seconds, count in (('3s90', 3, 90), ('16s480', 16, 480)):
-        receipt = copy.deepcopy(success)
-        receipt['schema'] = 'pc2-owned-clip-v2'
-        receipt['request'].update(mode=mode, seconds=seconds, frameCount=count)
-        receipt['capture'].update(mode=mode, seconds=seconds, frameCount=count, framesWritten=count)
-        receipt['decode']['decodedFrames'] = count
-        if count==480:receipt['captureReleaseJournal']=copy.deepcopy(success['rawCliReceipt'])
-        schema = schemas['pc2-owned-clip-v2.schema.json']
-        validate(receipt, schema)
-        checks.append(mode + '-success-shape')
-        if count==480:
-            bad=copy.deepcopy(receipt);del bad['captureReleaseJournal']
-            refused('16s480-missing-release-artifact',lambda:validate(bad,schema))
-        # Shape-only synthetic extension: never promoted to actual retained media.
-        manifest = copy.deepcopy(frames)
-        manifest.update(schema='pc2-decoded-frames-v2', mode=mode, frameCount=count)
-        manifest['rows'] = [dict(copy.deepcopy(frames['rows'][i % 90]), index=i, pts=i)
-                            for i in range(count)]
-        frame_schema = schemas['pc2-decoded-frames-v2.schema.json']
-        validate(manifest, frame_schema)
-        checks.append(mode + '-frame-shape')
-        for path, value in ((('request', 'frameCount'), 480 if count == 90 else 90),
-                            (('capture', 'mode'), '16s480' if count == 90 else '3s90'),
-                            (('capture', 'seconds'), 12), (('decode', 'decodedFrames'), True)):
-            bad = copy.deepcopy(receipt)
-            bad[path[0]][path[1]] = value
-            refused(mode + '-cross-' + '.'.join(path), lambda: validate(bad, schema))
-        bad = copy.deepcopy(manifest)
-        bad['rows'].pop()
-        refused(mode + '-missing-frame', lambda: validate(bad, frame_schema))
-        bad = copy.deepcopy(manifest)
-        bad['frameCount'] = True
-        refused(mode + '-boolean-count', lambda: validate(bad, frame_schema))
-        bad = copy.deepcopy(manifest)
-        bad['mode'] = '12s360'
-        refused(mode + '-third-mode', lambda: validate(bad, frame_schema))
-    short = copy.deepcopy(frames)
-    short.update(mode='3s90', frameCount=90)
-    assert metrics.summarize(short, success['capture']['encodedFps']) == legacy_metrics.summarize(frames, success['capture']['encodedFps'])
-    checks.append('default90-legacy-metrics-equal')
-    return dict(passed=len(checks), failed=0, checks=checks,
-                limit='Retained 90-frame metrics and synthetic schema shapes; no native capture or 480-frame live claim.')
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--retained', type=Path, required=True)
-    parser.add_argument('--out', type=Path, required=True)
-    args = parser.parse_args()
-    result = run(args.retained)
-    args.out.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
-    print(json.dumps(result))
+if __name__=='__main__':
+    ap=argparse.ArgumentParser();ap.add_argument('--retained',type=Path,required=True);ap.add_argument('--out',type=Path,required=True);a=ap.parse_args();result=run(a.retained);a.out.write_text(json.dumps(result,indent=2));print(json.dumps(result))

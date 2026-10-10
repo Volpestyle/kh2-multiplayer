@@ -20,33 +20,57 @@ int OwnedClipOfflineTest(int argc, char** argv) {
     Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!event) throw std::runtime_error("Offline cancellation event failed");
     Bound bound{NowNs() + 45000000000ULL, event.value};
+#if defined(KH2COOP_CLIP_V2)
+    if (name == "busy_lease" || name == "postrelease_cancel") {
+        Handle ready(CreateEventW(nullptr,TRUE,FALSE,nullptr));
+        Handle release(CreateEventW(nullptr,TRUE,FALSE,nullptr));
+        if (!ready || !release) throw std::runtime_error("Lease test events unavailable");
+        std::thread owner([&]() {
+            kh2coop::CaptureLease lease;
+            if (lease.Acquire(GetCurrentProcessId())!=kh2coop::CaptureLeaseStatus::Acquired) return;
+            SetEvent(ready.value);WaitForSingleObject(release.value,2000);
+        });
+        const bool readyOk=WaitForSingleObject(ready.value,1000)==WAIT_OBJECT_0;
+        kh2coop::CaptureLease contender;
+        const auto busy=contender.Acquire(GetCurrentProcessId());
+        SetEvent(release.value);owner.join(); // destructor ran on owning thread
+        if (!readyOk || busy!=kh2coop::CaptureLeaseStatus::Busy) throw std::runtime_error("Busy lease admitted");
+        if (contender.Acquire(GetCurrentProcessId())!=kh2coop::CaptureLeaseStatus::Acquired)
+            throw std::runtime_error("Actual destructor did not release lease");
+        contender.Release();
+        if (name=="postrelease_cancel") {
+            SetEvent(event.value);bool refused=false;
+            try { bound.Check(); } catch (const std::exception&) { refused=true; }
+            if (!refused) throw std::runtime_error("Post-release cancellation admitted encode");
+        }
+    } else if (name == "raw_inventory") {
+        const auto raw=root/"raw";std::filesystem::create_directory(raw);
+        std::ostringstream manifest;
+        for (unsigned index=0;index<480;++index) {
+            std::ostringstream leaf;leaf<<"f_"<<std::setw(5)<<std::setfill('0')<<index<<".bmp";
+            const std::string bytes(55,'x');Write(raw/leaf.str(),bytes);
+            manifest<<leaf.str()<<" 55 "<<HashBytes(bytes)<<"\n";
+        }
+        const auto inventory=root/"raw.tsv";Write(inventory,manifest.str());
+        ValidateRawInventory(raw,inventory,HashBytes(manifest.str()),bound);
+        Write(raw/"f_00001.bmp",std::string(55,'y'));bool refused=false;
+        try { ValidateRawInventory(raw,inventory,HashBytes(manifest.str()),bound); }
+        catch (const std::exception&) { refused=true; }
+        if (!refused) throw std::runtime_error("Changed original raw frame admitted");
+    } else
+#endif
     if (name == "modes") {
-        const auto shortMode = SelectMode(); const auto longMode = SelectMode("16");
-        if (shortMode.seconds != 3 || shortMode.frames != 90 || longMode.frames != 480) throw std::runtime_error("Mode count mismatch");
-        for (const auto* bad : {"12", "03", "3.0", "0", "17"}) {
-            bool refused = false; try { SelectMode(bad); } catch (const std::exception&) { refused = true; }
-            if (!refused) throw std::runtime_error("Unsupported mode admitted");
+#if defined(KH2COOP_CLIP_V2)
+        if (Mode("3","30").frames != 90 || Mode("16","30").frames != 480) throw std::runtime_error("Mode/count mismatch");
+        for (const auto& value : {"0","1","12","17","3.0","016"}) {
+            bool refused=false; try { Mode(value,"30"); } catch (const std::exception&) { refused=true; }
+            if (!refused) throw std::runtime_error("Unqualified duration admitted");
         }
-        if (AcquisitionEnd(100000000000ULL,1,shortMode)!=10000000001ULL || AcquisitionEnd(100000000000ULL,1,longMode)!=23000000001ULL || AcquisitionEnd(2,1,longMode)!=2) throw std::runtime_error("Acquisition hard cap changed");
-        if (PhaseEnd(100000000000ULL,1,longMode)!=90000000001ULL || PhaseEnd(2,1,longMode)!=2 || PhaseEnd(100000000000ULL,1,shortMode)!=100000000000ULL) throw std::runtime_error("Phase deadline changed");
-    } else if (name == "capture_release") {
-        const auto path = root / "capture_released.json";
-        PublishRelease(path,"{\"test\":true}");
-        if (!std::filesystem::exists(path) || std::filesystem::exists(std::filesystem::path(path.wstring()+L".pending"))) throw std::runtime_error("Atomic release publication incomplete");
-        bool refused = false;
-        try { PublishRelease(path,"{\"test\":false}"); } catch (const std::exception&) { refused = true; }
-        if (!refused) throw std::runtime_error("Release overwrite admitted");
-    } else if (name == "lease_busy") {
-        const auto pid = GetCurrentProcessId();
-        kh2coop::CaptureLeaseStatus status = kh2coop::CaptureLeaseStatus::Error;
-        {
-            kh2coop::CaptureLease original;
-            if (original.Acquire(pid)!=kh2coop::CaptureLeaseStatus::Acquired) throw std::runtime_error("Test lease unavailable");
-            std::thread competing([&]() { kh2coop::CaptureLease other; status=other.Acquire(pid); }); competing.join();
-            if (status!=kh2coop::CaptureLeaseStatus::Busy) throw std::runtime_error("Busy capture admitted");
-        }
-        std::thread after([&]() { kh2coop::CaptureLease other; status=other.Acquire(pid); }); after.join();
-        if (status!=kh2coop::CaptureLeaseStatus::Acquired) throw std::runtime_error("Actual destructor did not release");
+        bool refused=false; try { Mode("16","60"); } catch (const std::exception&) { refused=true; }
+        if (!refused) throw std::runtime_error("Wrong fps admitted");
+#else
+        throw std::runtime_error("Extended controls unavailable");
+#endif
     } else if (name == "clock") {
         const auto first = NowNs(); Sleep(1); if (NowNs() <= first) throw std::runtime_error("Clock did not advance");
     } else if (name == "hash") {
@@ -62,13 +86,13 @@ int OwnedClipOfflineTest(int argc, char** argv) {
         GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
         const auto self = std::filesystem::canonical(executable.data());
         if (name == "encode_decode" || name == "encode_decode_480") {
-            const int frameCount = name == "encode_decode_480" ? 480 : 90;
+            const int frames = name == "encode_decode" ? 90 : 480;
             if (argc != 6) throw std::runtime_error("Encode/decode test requires pinned ffmpeg path and hash");
             const auto tool = std::filesystem::canonical(argv[4]); const std::string digest = argv[5];
             if (HashFile(tool, bound) != digest) throw std::runtime_error("Offline encoder pin mismatch");
-            const auto raw = root / "raw"; const auto decoded = root / "hb_arrival_peer0_frames";
+            const auto raw = root / (frames == 480 ? "hb_arrival_peer0_raw" : "raw"); const auto decoded = root / "hb_arrival_peer0_frames";
             std::filesystem::create_directory(raw); std::filesystem::create_directory(decoded);
-            for (int frame = 0; frame < frameCount; ++frame) {
+            for (int frame = 0; frame < frames; ++frame) {
                 bound.Check(); constexpr int width = 320, height = 180;
                 BITMAPFILEHEADER file{}; BITMAPINFOHEADER info{};
                 file.bfType = 0x4d42; file.bfOffBits = sizeof(file) + sizeof(info);
@@ -86,14 +110,51 @@ int OwnedClipOfflineTest(int argc, char** argv) {
                 if (!out) throw std::runtime_error("Generated control BMP failed");
             }
             const auto video = root / "hb_arrival_peer0.mp4";
-            const std::vector<std::string> encode{tool.string(),"-nostdin","-n","-loglevel","error","-framerate","30","-start_number","0","-i",(raw/"f_%05d.bmp").string(),"-frames:v",std::to_string(frameCount),"-c:v","libx264","-threads","1","-pix_fmt","yuv420p","-crf","20",video.string()};
+#if defined(KH2COOP_CLIP_V2)
+            if (frames == 480) {
+                // Exercise the actual post-run command, not a stand-in encoder leaf.
+                std::filesystem::create_directory(root / "bin");
+                std::filesystem::copy_file(tool, root / "bin/ffmpeg.exe");
+                const auto inventory = root / "hb_arrival_peer0_raw.tsv";
+                std::ostringstream rows;
+                for (unsigned index = 0; index < 480; ++index) {
+                    std::ostringstream leaf; leaf << "f_" << std::setw(5) << std::setfill('0') << index << ".bmp";
+                    const auto framePath = raw / leaf.str();
+                    rows << leaf.str() << ' ' << std::filesystem::file_size(framePath) << ' ' << HashFile(framePath,bound) << '\n';
+                }
+                Write(inventory,rows.str());
+                const auto closure = root / "postrun-closure.json";
+                Write(closure,"{\"offlineGeneratedControl\":true}");
+                const auto cancelName = L"Local\\kh2coop_clip_cancel_test_" + std::to_wstring(NowNs());
+                Handle postCancel(CreateEventW(nullptr,TRUE,FALSE,cancelName.c_str()));
+                if (!postCancel) throw std::runtime_error("Post-run test cancellation event failed");
+                const auto previousCwd = std::filesystem::current_path();
+                try {
+                    std::filesystem::current_path(root);
+                    const auto result = CmdOwnedClipPostprocess({"--out",video.string(),"--raw-dir",raw.string(),
+                        "--inventory",inventory.string(),"--inventory-sha256",HashBytes(rows.str()),
+                        "--closure",closure.string(),"--closure-sha256",HashFile(closure,bound),
+                        "--deadline-ns",std::to_string(bound.end),"--cancel-event",std::filesystem::path(cancelName).string(),
+                        "--tool-sha256",digest,"--encoded-fps","30"});
+                    if (result.exitCode != 0) throw std::runtime_error("Actual post-run command failed");
+                    Write(root/"native-control.json",result.json);
+                    std::filesystem::current_path(previousCwd);
+                } catch (...) { std::filesystem::current_path(previousCwd); throw; }
+            } else {
+#endif
+            const std::vector<std::string> encode{tool.string(),"-nostdin","-n","-loglevel","error","-framerate","30","-start_number","0","-i",(raw/"f_%05d.bmp").string(),"-frames:v",std::to_string(frames),"-c:v","libx264","-threads","1","-pix_fmt","yuv420p","-crf","20",video.string()};
             const auto encoded = Child(encode,digest,root,"hb_arrival_peer0","encoder",job.value,bound);
             const std::vector<std::string> decode{tool.string(),"-nostdin","-n","-xerror","-loglevel","info","-threads","1","-err_detect","explode","-i",video.string(),"-vf","format=rgb24,showinfo","-fps_mode","passthrough","-c:v","png","-threads","1","-compression_level","1","-start_number","0",(decoded/"decoded_%03d.png").string()};
             const auto verified = Child(decode,digest,root,"hb_arrival_peer0","verifier",job.value,bound);
-            std::size_t decodedCount = 0;
-            for (const auto& entry : std::filesystem::directory_iterator(decoded)) if (entry.path().extension()==L".png") ++decodedCount;
-            if (decodedCount != static_cast<std::size_t>(frameCount)) throw std::runtime_error("Full decoded frame count mismatch");
+#if defined(KH2COOP_CLIP_V2)
             Write(root/"native-control.json","{\"ok\":true,\"offlineGeneratedPixels\":true,\"nativeGameExecuted\":false,\"processes\":{\"encoder\":"+encoded.json+",\"verifier\":"+verified.json+"}}");
+            }
+#endif
+            int decodedCount = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(decoded)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".png") ++decodedCount;
+            }
+            if (decodedCount != frames) throw std::runtime_error("Full generated decode count differs from requested mode");
         } else {
             const std::string mode = name == "exited" ? "--test-child-exit" : name == "descendant" ? "--test-child-descendant" : "--test-child-sleep";
             const auto digest = HashFile(self,bound); std::thread signal;

@@ -271,6 +271,20 @@
         "captureLeaseReleased": {
           "const": true,
           "type": "boolean"
+        },
+        "seconds": {
+          "type": "integer",
+          "enum": [
+            3,
+            16
+          ]
+        },
+        "frameCount": {
+          "type": "integer",
+          "enum": [
+            90,
+            480
+          ]
         }
       },
       "required": [
@@ -288,7 +302,9 @@
         "encodedFps",
         "startedNs",
         "finishedNs",
-        "captureLeaseReleased"
+        "captureLeaseReleased",
+        "seconds",
+        "frameCount"
       ]
     },
     "decode": {
