@@ -257,13 +257,22 @@ Default off. **`KH2COOP_PARTY_KITS=1` on every machine** of a party-native sessi
 
 **Puppets.** With two clones of different kits, each puppet drives the clone whose objentry equals its owner's kit (`PuppetKit`). The entity-list order no longer matters.
 
-**Ally hits (VUH-1808, `KH2COOP_ALLY_HIT`, default off; meant on in co-op).** Clones are player-class actors,
+**Ally hits (VUH-1808, `KH2COOP_ALLY_HIT`; default puppet mode since 2026-10-09).** Clones are player-class actors,
 and the puppet driver keeps them on team 0 so nothing hits them. Their own replayed attacks then carry
 team 0, whose hit mask (`~((1 << team) | 1)` = `~1`) includes the local player's team 1, so a clone's swing
 that overlaps the local player creates a native hit. `DamagePolicy` zeroes its HP (`RemoteSource`), but the
 reaction still plays (star burst, red portrait flash). Run `20261007-115923` logged 15 on one machine: the
 Mickey clone's attack motion 186 lands twice (6, then 2) and reached the host on 8 of 9 swings; Sora's 151
 lands once and rarely reached anyone. The local's attacks never hit a clone (bit 0 is never in a mask).
+- Unset (the default; the friend package strips every `KH2COOP_*` variable, so this is what players get):
+  puppet mode. At `3D2060` it refuses a native-allowed hit only when the attacker (owner `+0x10`, or source
+  `+0x14`) is an actor the puppet driver is driving right now (`BindPuppetDrive` until release clears
+  `applied`): a party-native clone or a friend-slot companion puppet. Victims refused: player-class actors and
+  team-1 non-players. Atkp kinds 5/6 stay native. With no driven puppet the hook returns the native answer
+  without reading anything. The local player's own attacks, enemy attacks and the client claim path are
+  unchanged. Log: `[allyhit] installed mode=puppet`, `f=… puppet attacker=…` rows, `puppetRefused=` in stats.
+  `DamagePolicy`'s `RemoteSource` zero stays as the backstop. Offline only so far; live acceptance is open.
+- `=0` is the explicit opt-out: no hook.
 - `=1` refuses every native-allowed hit between two distinct player-class actors (clone â†’ local, local â†’
   clone, clone â†’ clone) at `3D2060`, after the original ran, so no hit record, `[hit]` line or reaction exists.
   Atkp kinds 5/6 (they bypass the mask natively) stay native. Enemies are untouched either way.

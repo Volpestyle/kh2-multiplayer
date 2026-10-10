@@ -1,7 +1,9 @@
 #pragma once
-// Ally player-to-player hit filter (co-op) and its live measurement. Default off.
-// KH2COOP_ALLY_HIT=1: refuse ally player pairs at 3D2060 (before any hit record) and trace them;
-// KH2COOP_ALLY_HIT=trace: trace only. Policy: AllyHitPolicy.hpp.
+// Ally player-to-player hit filter (co-op) and its live measurement.
+// Unset (default, VUH-1808): Puppet mode, refusing at 3D2060 only the hits whose attacker is a puppet
+// actor driven right now (DrivenFn), so a remote player's swing never makes a hit record on the local
+// player; with no driven puppet every answer is native. KH2COOP_ALLY_HIT=0: off (no hook);
+// =1: refuse every ally player pair and trace them; =trace: trace only. Policy: AllyHitPolicy.hpp.
 #include "AllyHitPolicy.hpp"
 #include <cstdint>
 
@@ -10,6 +12,9 @@ namespace kh2coop::inject::allyhit {
 using LogFn = void (*)(const char* fmt, ...);
 using ResolveFn = std::uintptr_t(__fastcall*)(std::uint32_t handle); // the engine's 4AD270 handle lookup
 using FrameFn = std::uint32_t (*)();
+// Owner thread (3D2060 runs inside the entity update): writes the puppet actors driven right now into
+// out[0..1] and returns how many (0..2). Never reads game memory.
+using DrivenFn = unsigned (*)(std::uintptr_t (&out)[2]);
 
 constexpr std::uint64_t RVA_CAN_HIT = 0x3D2060;        // bool(attack, victim): may this attack hit this victim
 constexpr std::uint64_t RVA_NATIVE_PLAYER = 0x2A105D0; // the canonical (local) player actor
@@ -27,11 +32,13 @@ constexpr unsigned TRACE_NATIVE_ZERO_BUDGET = 32;
 
 struct Stats {
     std::uint64_t calls = 0, playerPairs = 0, nativeAllowed = 0, refused = 0, kindKept = 0, faults = 0, viaSource = 0;
+    std::uint64_t puppetRefused = 0; // Puppet mode refusals (also counted in refused)
     unsigned traced = 0, tracedNativeZero = 0;
 };
 
-// Reads KH2COOP_ALLY_HIT; Off: no hook, no reads. Returns false only on a refused install.
-bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame);
+// Reads KH2COOP_ALLY_HIT; Off: no hook, no reads. Returns false only on a refused install (then native).
+// Puppet mode (the default) also needs `driven`.
+bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame, DrivenFn driven = nullptr);
 // Owner thread, once per frame: a stats line every 600 frames while anything changed.
 void Tick(std::uint32_t frame);
 Mode CurrentMode();

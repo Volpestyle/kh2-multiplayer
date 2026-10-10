@@ -19,11 +19,18 @@ static void Log(const char* f, ...) { char b[512]; va_list a; va_start(a, f); st
 static bool Has(const char* s) { return g_logged.find(s) != std::string::npos; }
 
 static std::uintptr_t g_image = 0, g_heap = 0;
-static std::uintptr_t g_local = 0, g_clone = 0, g_clone2 = 0, g_enemy = 0, g_bullet = 0;
+static std::uintptr_t g_local = 0, g_clone = 0, g_clone2 = 0, g_enemy = 0, g_bullet = 0, g_companion = 0;
 static std::uint64_t g_nativeAnswer = 1;
-static std::uintptr_t __fastcall Resolve(std::uint32_t h) { return h == 1 ? g_local : h == 2 ? g_clone : h == 3 ? g_clone2 : h == 4 ? g_enemy : h == 5 ? g_bullet : 0; }
+static std::uintptr_t __fastcall Resolve(std::uint32_t h) { return h == 1 ? g_local : h == 2 ? g_clone : h == 3 ? g_clone2 : h == 4 ? g_enemy : h == 5 ? g_bullet : h == 6 ? g_companion : 0; }
 static std::uint32_t Frame() { return 77; }
 static std::uint64_t __fastcall Native(std::uintptr_t, std::uintptr_t) { return g_nativeAnswer; }
+static std::uintptr_t g_drivenActors[2] {};
+static unsigned g_drivenCalls = 0;
+static unsigned Driven(std::uintptr_t (&out)[2]) {
+    ++g_drivenCalls; unsigned n = 0;
+    for (auto a : g_drivenActors) if (a) out[n++] = a;
+    return n;
+}
 template <class T> static void Put(std::uintptr_t p, T v) { std::memcpy(reinterpret_cast<void*>(p), &v, sizeof(v)); }
 
 static std::uintptr_t Objentry(unsigned slot, std::uint8_t type, const char* name) {
@@ -72,7 +79,28 @@ int main() {
     }
     CHECK("gap 2 grid: refuses exactly co-op, native-allowed, clone -> team-1 non-player, non-5/6", gap2 == 1 && gap2Cells == 3 * 3 * 3 * 2 * 2);
     bool ok = false;
-    CHECK("parse: unset/0 off", ParseMode(nullptr, ok) == Mode::Off && ok && ParseMode("0", ok) == Mode::Off && ok);
+    CHECK("parse: unset/empty puppet (VUH-1808 default), 0 off", ParseMode(nullptr, ok) == Mode::Puppet && ok &&
+          ParseMode("", ok) == Mode::Puppet && ok && ParseMode("0", ok) == Mode::Off && ok);
+    // Puppet mode (VUH-1808): refuses exactly a native-allowed, non-5/6 hit whose attacker is a driven
+    // puppet, on a player-class or team-1 victim. The attacker's own side does not matter (a driven
+    // friend-slot companion is Side::Other).
+    unsigned puppetRefusals = 0, puppetCells = 0;
+    for (auto a : S) for (auto v : S) for (std::uint32_t team : {0u, 1u, 2u}) for (bool n : {false, true})
+    for (bool driven : {false, true}) for (int ki : {0, 4, 5, 6}) {
+        ++puppetCells; const auto k = static_cast<std::uint8_t>(ki);
+        Pair p {Mode::Puppet, a, v, n, k, team}; p.attackerDriven = driven;
+        const bool refuse = Decide(p) == Verdict::Refuse;
+        const bool want = n && driven && k != 5 && k != 6 && (PlayerSide(v) || team == 1);
+        if (refuse != want) { ++g_fail; std::printf("FAIL puppet a=%u v=%u team=%u n=%u d=%u k=%u\n", unsigned(a), unsigned(v), team, unsigned(n), unsigned(driven), unsigned(k)); }
+        puppetRefusals += refuse;
+    }
+    // 3 attackers x (2 player victims x 3 teams + Other x team 1) x 2 kinds = 42
+    CHECK("puppet grid: refuses exactly driven, native-allowed, player or team-1 victims, non-5/6",
+          puppetRefusals == 42 && puppetCells == 3 * 3 * 3 * 2 * 2 * 4);
+    {
+        Pair p {Mode::CoOp, Side::Other, Side::LocalPlayer, true, 0, 1}; p.attackerDriven = true;
+        CHECK("policy: attackerDriven changes nothing outside puppet mode", Decide(p) == Verdict::Native);
+    }
     CHECK("parse: 1 co-op, trace", ParseMode("1", ok) == Mode::CoOp && ok && ParseMode("trace", ok) == Mode::Trace && ok);
     CHECK("parse: anything else invalid", ParseMode("2", ok) == Mode::Off && !ok && ParseMode("on", ok) == Mode::Off && !ok);
 
@@ -87,8 +115,10 @@ int main() {
     Put(g_image + RVA_NATIVE_PLAYER, g_local);
     TestSetOriginal(&Native);
 
+    CHECK("0: off, no hook, no log", InstallMode("0") && g_logged.empty() && CurrentMode() == Mode::Off);
     SetEnvironmentVariableA("KH2COOP_ALLY_HIT", nullptr);
-    CHECK("default off: no log", Install(g_image, &Log, &Resolve, &Frame) && g_logged.empty() && CurrentMode() == Mode::Off);
+    CHECK("unset without a driven-puppet source refuses (native)",
+          !Install(g_image, &Log, &Resolve, &Frame) && Has("no driven-puppet source") && CurrentMode() == Mode::Off);
     CHECK("bytes mismatch refuses", InstallMode("1") == false && Has("3D2060 bytes differ"));
     std::memcpy(reinterpret_cast<void*>(g_image + RVA_CAN_HIT), kCanHitBytes, sizeof(kCanHitBytes));
     CHECK("invalid value refuses", InstallMode("yes") == false && Has("must be 0, 1 or trace"));
@@ -153,6 +183,50 @@ int main() {
     g_nativeAnswer = 1;
     const auto traceSwing = Attack(6, 2, 0, 1192, 0);
     CHECK("trace: clone -> local untouched, traced as native", HookedCanHit(traceSwing, g_local) == 1 && Has("trace attacker=P_EX200@") && Has("atkp=1192 native=1 verdict=native"));
+
+    // ---- puppet mode (VUH-1808 default: KH2COOP_ALLY_HIT unset)
+    SetEnvironmentVariableA("KH2COOP_ALLY_HIT", nullptr);
+    CHECK("unset: puppet mode installs", Install(g_image, &Log, &Resolve, &Frame, &Driven) && CurrentMode() == Mode::Puppet &&
+          Has("[allyhit] installed mode=puppet"));
+    g_nativeAnswer = 0x1234501;
+    const Stats p0 = GetStats();
+    const auto cloneSwing = Attack(80, 2, 0, 1700, 0);
+    CHECK("puppet: no driven puppet -> clone -> local native, no reads", HookedCanHit(cloneSwing, g_local) == 0x1234501 &&
+          GetStats().calls == p0.calls && g_drivenCalls > 0);
+    g_drivenActors[0] = g_clone;
+    CHECK("puppet: driven clone -> local refused, upper bits kept", HookedCanHit(cloneSwing, g_local) == 0x1234500);
+    CHECK("puppet: the refusal is traced", Has("puppet attacker=P_EX200@") && Has("atkp=1700 native=1 verdict=refuse via=owner"));
+    CHECK("puppet: enemy -> local native", HookedCanHit(Attack(81, 4, 0, 1701, 2), g_local) == 0x1234501);
+    CHECK("puppet: local -> enemy native (client claim path untouched)", HookedCanHit(Attack(82, 1, 0, 1702, 1), g_enemy) == 0x1234501);
+    CHECK("puppet: local -> clone native (its own mask decides)", HookedCanHit(Attack(83, 1, 0, 1703, 1), g_clone) == 0x1234501);
+    CHECK("puppet: driven clone -> enemy native", HookedCanHit(Attack(84, 2, 0, 1704, 0), g_enemy) == 0x1234501);
+    CHECK("puppet: driven clone heal (kind 5) -> local native", HookedCanHit(Attack(85, 2, 5, 1705, 0), g_local) == 0x1234501);
+    CHECK("puppet: an undriven player-class actor -> local native", HookedCanHit(Attack(86, 3, 0, 1706, 0), g_local) == 0x1234501);
+    CHECK("puppet: driven-clone-sourced projectile -> local refused", HookedCanHit(Attack(87, 5, 0, 1707, 0, 2), g_local) == 0x1234500 &&
+          Has("atkp=1707 native=1 verdict=refuse via=source"));
+    CHECK("puppet: enemy-sourced projectile -> local native", HookedCanHit(Attack(88, 5, 0, 1708, 0, 4), g_local) == 0x1234501);
+    CHECK("puppet: driven clone -> Goofy (team 1) refused", HookedCanHit(Attack(89, 2, 0, 1709, 0), goofy) == 0x1234500);
+    CHECK("puppet: local -> Goofy native", HookedCanHit(Attack(90, 1, 0, 1710, 1), goofy) == 0x1234501);
+    CHECK("puppet: driven clone -> team-0 prop native", HookedCanHit(Attack(91, 2, 0, 1711, 0), prop) == 0x1234501);
+    g_nativeAnswer = 0;
+    CHECK("puppet: a native refusal stays a refusal", HookedCanHit(Attack(92, 2, 0, 1712, 0), g_local) == 0);
+    g_nativeAnswer = 0x1234501;
+    // A friend-slot companion puppet (objentry type 1) driven with team 0: its swings are a remote player's too.
+    const auto donaldObj = Objentry(6, 1, "P_EX020");
+    g_companion = Actor(7, donaldObj, 0);
+    g_drivenActors[1] = g_companion;
+    CHECK("puppet: driven companion puppet -> local refused", HookedCanHit(Attack(93, 6, 0, 1713, 0), g_local) == 0x1234500 &&
+          Has("attacker=P_EX020@"));
+    // Defensive: a driver that ever named the canonical player never vetoes the local player's own hits.
+    g_drivenActors[1] = g_local;
+    CHECK("puppet: the local player's own swing is never a puppet's", HookedCanHit(Attack(94, 1, 0, 1714, 1), goofy) == 0x1234501 &&
+          HookedCanHit(Attack(95, 1, 0, 1715, 1), g_clone) == 0x1234501);
+    g_drivenActors[0] = g_drivenActors[1] = 0;
+    CHECK("puppet: released puppet -> native again", HookedCanHit(Attack(96, 2, 0, 1716, 0), g_local) == 0x1234501);
+    const Stats p1 = GetStats();
+    CHECK("puppet stats: refusals counted", p1.puppetRefused == 4 && p1.refused - p0.refused == 4 && p1.faults == 0);
+    Tick(2100);
+    CHECK("puppet tick: stats line names puppetRefused", Has("puppetRefused=4"));
 
     std::printf("allyhit: %d passed, %d failed\n", g_pass, g_fail);
     if (g_fail) std::printf("--- log ---\n%s", g_logged.c_str());

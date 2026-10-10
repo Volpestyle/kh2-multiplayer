@@ -17,8 +17,10 @@ std::uintptr_t g_base = 0;
 LogFn g_log = nullptr;
 ResolveFn g_resolve = nullptr;
 FrameFn g_frame = nullptr;
+DrivenFn g_driven = nullptr;
 std::atomic<std::uint8_t> g_mode{static_cast<std::uint8_t>(Mode::Off)};
 std::atomic<std::uint64_t> g_calls{}, g_pairs{}, g_allowed{}, g_refused{}, g_kindKept{}, g_faults{}, g_viaSource{};
+std::atomic<std::uint64_t> g_puppetRefused{};
 std::atomic<unsigned> g_traced{}, g_tracedZero{};
 std::uint64_t g_lastLogged = ~0ull;
 std::uint32_t g_lastTick = 0;
@@ -69,12 +71,58 @@ bool FirstSight(std::uintptr_t attack, std::uintptr_t victim) {
     g_seen[g_seenNext++ % 64] = {attack, victim};
     return true;
 }
+void TraceRow(const char* mode, const ActorFacts& o, std::uintptr_t attacker, const ActorFacts& v, std::uintptr_t victim,
+              const AttackFacts& a, bool allows, Verdict verdict, bool viaSource) {
+    g_log("[allyhit] f=%u %s attacker=%s@%llX(%s team=%u) -> victim=%s@%llX(%s team=%u) atkTeam=%u mask=0x%02X kind=%u atkp=%u native=%u verdict=%s via=%s",
+          g_frame ? g_frame() : 0u, mode,
+          o.name, static_cast<unsigned long long>(attacker), SideName(o.side), o.team,
+          v.name, static_cast<unsigned long long>(victim), SideName(v.side), v.team,
+          a.team, a.mask, a.kind, a.atkp, allows ? 1u : 0u, verdict == Verdict::Refuse ? "refuse" : "native",
+          viaSource ? "source" : "owner");
+}
+// Puppet mode (VUH-1808 default). Only ever narrows a native yes, and only when the attacker (the
+// attack's owner, or its source, as native checks both) is a puppet actor driven right now.
+std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t native) {
+    if ((native & 0xFF) == 0 || !g_driven) return native;
+    std::uintptr_t driven[2] {};
+    const unsigned n = g_driven(driven);
+    if (n == 0) return native; // no co-op puppet: no reads at all
+    const auto isDriven = [&](std::uintptr_t actor) {
+        for (unsigned i = 0; i < n && i < 2; ++i) if (actor && driven[i] == actor) return true;
+        return false;
+    };
+    g_calls.fetch_add(1, std::memory_order_relaxed);
+    AttackFacts a {};
+    if (!ReadAttack(attack, a)) { g_faults.fetch_add(1); return native; }
+    std::uintptr_t attacker = 0; bool viaSource = false;
+    if (isDriven(a.owner)) attacker = a.owner;
+    else if (a.source && a.source != a.owner && isDriven(a.source)) { attacker = a.source; viaSource = true; }
+    const std::uintptr_t player = Player();
+    // The local player's own attacks are never a puppet's, even if a driver ever named it.
+    if (!attacker || attacker == victim || attacker == player) return native;
+    ActorFacts v {}, o {};
+    if (!ReadActor(victim, player, v) || !ReadActor(attacker, player, o)) { g_faults.fetch_add(1); return native; }
+    g_pairs.fetch_add(1, std::memory_order_relaxed);
+    g_allowed.fetch_add(1, std::memory_order_relaxed);
+    Pair pair {Mode::Puppet, o.side, v.side, true, a.kind, v.team};
+    pair.attackerDriven = true;
+    const Verdict verdict = Decide(pair);
+    if (BypassKind(a.kind)) g_kindKept.fetch_add(1, std::memory_order_relaxed);
+    if (verdict == Verdict::Refuse) { g_refused.fetch_add(1, std::memory_order_relaxed); g_puppetRefused.fetch_add(1, std::memory_order_relaxed); }
+    if (viaSource) g_viaSource.fetch_add(1, std::memory_order_relaxed);
+    if (g_log && g_traced.load() < TRACE_BUDGET && FirstSight(attack, victim)) {
+        g_traced.fetch_add(1);
+        TraceRow("puppet", o, attacker, v, victim, a, true, verdict, viaSource);
+    }
+    return verdict == Verdict::Refuse ? (native & ~0xFFull) : native;
+}
 } // namespace
 
 std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t victim) {
     const std::uint64_t native = g_original(attack, victim);
     const auto mode = static_cast<Mode>(g_mode.load(std::memory_order_acquire));
     if (mode == Mode::Off) return native;
+    if (mode == Mode::Puppet) return PuppetCanHit(attack, victim, native);
     g_calls.fetch_add(1, std::memory_order_relaxed);
     const std::uintptr_t player = Player();
     ActorFacts v {};
@@ -104,12 +152,7 @@ std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t vict
     if (g_log && attacker != victim && zeroBudget && g_traced.load() < TRACE_BUDGET && FirstSight(attack, victim)) {
         g_traced.fetch_add(1);
         if (!allows) g_tracedZero.fetch_add(1);
-        g_log("[allyhit] f=%u %s attacker=%s@%llX(%s team=%u) -> victim=%s@%llX(%s team=%u) atkTeam=%u mask=0x%02X kind=%u atkp=%u native=%u verdict=%s via=%s",
-              g_frame ? g_frame() : 0u, mode == Mode::CoOp ? "coop" : "trace",
-              o.name, static_cast<unsigned long long>(attacker), SideName(o.side), o.team,
-              v.name, static_cast<unsigned long long>(victim), SideName(v.side), v.team,
-              a.team, a.mask, a.kind, a.atkp, allows ? 1u : 0u, verdict == Verdict::Refuse ? "refuse" : "native",
-              viaSource ? "source" : "owner");
+        TraceRow(mode == Mode::CoOp ? "coop" : "trace", o, attacker, v, victim, a, allows, verdict, viaSource);
     }
     return verdict == Verdict::Refuse ? (native & ~0xFFull) : native;
 }
@@ -122,9 +165,10 @@ void Tick(std::uint32_t frame) {
     if (key == g_lastLogged) return;
     g_lastLogged = key;
     const Stats s = GetStats();
-    g_log("[allyhit] stats f=%u calls=%llu playerPairs=%llu nativeAllowed=%llu refused=%llu kindKept=%llu viaSource=%llu faults=%llu traced=%u",
+    g_log("[allyhit] stats f=%u calls=%llu playerPairs=%llu nativeAllowed=%llu refused=%llu puppetRefused=%llu kindKept=%llu viaSource=%llu faults=%llu traced=%u",
           frame, static_cast<unsigned long long>(s.calls), static_cast<unsigned long long>(s.playerPairs),
           static_cast<unsigned long long>(s.nativeAllowed), static_cast<unsigned long long>(s.refused),
+          static_cast<unsigned long long>(s.puppetRefused),
           static_cast<unsigned long long>(s.kindKept), static_cast<unsigned long long>(s.viaSource),
           static_cast<unsigned long long>(s.faults), s.traced);
 }
@@ -134,7 +178,7 @@ Stats GetStats() {
     Stats s;
     s.calls = g_calls.load(); s.playerPairs = g_pairs.load(); s.nativeAllowed = g_allowed.load();
     s.refused = g_refused.load(); s.kindKept = g_kindKept.load(); s.faults = g_faults.load(); s.traced = g_traced.load();
-    s.viaSource = g_viaSource.load(); s.tracedNativeZero = g_tracedZero.load();
+    s.viaSource = g_viaSource.load(); s.tracedNativeZero = g_tracedZero.load(); s.puppetRefused = g_puppetRefused.load();
     return s;
 }
 
@@ -142,18 +186,22 @@ Stats GetStats() {
 void TestSetOriginal(CanHitFn original) { g_original = original; }
 #endif
 
-bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame) {
+bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame, DrivenFn driven) {
     char text[8] {};
+    // Unset (0) or empty: Puppet mode, the VUH-1808 default. "0" is the explicit opt-out.
     const DWORD n = GetEnvironmentVariableA("KH2COOP_ALLY_HIT", text, sizeof(text));
-    if (n == 0) return true; // default off: no hook, no reads
     bool valid = false;
-    const Mode mode = n < sizeof(text) ? ParseMode(text, valid) : Mode::Off;
+    const Mode mode = n < sizeof(text) ? ParseMode(n == 0 ? nullptr : text, valid) : Mode::Off;
     if (!valid || n >= sizeof(text)) {
         if (log) log("[allyhit] REFUSED: KH2COOP_ALLY_HIT must be 0, 1 or trace; not hooked");
         return false;
     }
     if (mode == Mode::Off) return true;
-    g_base = exeBase; g_log = log; g_resolve = resolve; g_frame = frame;
+    g_base = exeBase; g_log = log; g_resolve = resolve; g_frame = frame; g_driven = driven;
+    if (mode == Mode::Puppet && !driven) {
+        if (log) log("[allyhit] REFUSED: puppet mode has no driven-puppet source; not hooked");
+        return false;
+    }
     if (!resolve) {
         if (log) log("[allyhit] REFUSED: the engine handle lookup (4AD270) is unverified; not hooked");
         return false;
@@ -172,9 +220,11 @@ bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame
     }
 #endif
     g_mode.store(static_cast<std::uint8_t>(mode), std::memory_order_release);
-    if (log) log("[allyhit] installed mode=%s: %s", mode == Mode::CoOp ? "coop" : "trace",
+    if (log) log("[allyhit] installed mode=%s: %s",
+                 mode == Mode::CoOp ? "coop" : mode == Mode::Puppet ? "puppet" : "trace",
                  mode == Mode::CoOp ? "ally player-to-player hits refused at 3D2060 (atkp kinds 5/6 kept); traced"
-                                    : "ally player-to-player hit checks traced only (no change)");
+                 : mode == Mode::Puppet ? "driven-puppet hits on players and the team-1 party refused at 3D2060 (atkp kinds 5/6 kept); traced"
+                                        : "ally player-to-player hit checks traced only (no change)");
     return true;
 }
 
