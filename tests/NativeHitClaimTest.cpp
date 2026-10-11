@@ -2086,6 +2086,12 @@ void TestCombatCausalBoundaries() {
     Check(!OrdinaryLifecycleRoom(),"ordinary living-removal experiment is disabled without explicit opt-in");
     prepare(false,true);
     const auto relayBootstrapCut=*OrdinaryCut();const auto relayBootstrapRoom=arrivalTarget;
+    EnemyManifest relayBootstrapManifest;relayBootstrapManifest.epoch=9;relayBootstrapManifest.replace=true;
+    for(const auto& relayOriginal:g_inst.spawns) {
+        EnemyManifestEntry relayEntry;relayEntry.netId=static_cast<std::uint16_t>(relayOriginal.netId);
+        relayEntry.objectId=302;relayEntry.spawnIndex=relayOriginal.spawnIndex;relayEntry.battleProgram=1;
+        relayBootstrapManifest.entries.push_back(relayEntry);
+    }
     ResetOrdinaryLifecycle();ClearPendingOrdinaryCuts();g_host={};
     g_bridge.incoming.push_back(HostEnvelope(encode(relayBootstrapRoom),50));
     g_bridge.incoming.push_back(HostEnvelope(encode(relayBootstrapCut),51));ReceiveWorldPackets();
@@ -2095,7 +2101,14 @@ void TestCombatCausalBoundaries() {
     for(auto& relaySpawn:g_inst.spawns){Put(relaySpawn.status+4,std::int32_t{1000});relaySpawn.lastMaxHp=1000;}
     g_host.arrived=true;g_host.ackSent=true;
     RetryOrdinaryLifecycle();
-    Check(OrdinaryCutCurrent()&&g_pendingOrdinaryCuts.empty(),
+    Check(!OrdinaryCut()&&g_pendingOrdinaryCuts.size()==1&&g_host.enemies.empty(),
+          "native arrival alone cannot admit a cut without its authenticated host manifest");
+    // RoomTransition correctly discarded the old manifest. Deliver the real
+    // bootstrap manifest, not a direct cache write or another membership event.
+    g_bridge.incoming.push_back(HostEnvelope(encode(relayBootstrapManifest),52));ReceiveWorldPackets();
+    RetryOrdinaryLifecycle();
+    Check(OrdinaryCutCurrent()&&g_pendingOrdinaryCuts.empty()&&
+          OrdinaryCut()->sequence==relayBootstrapCut.sequence&&g_ordinarySource&&g_ordinarySource->hostSourceSerial==51,
           "relay bootstrap native recovery admits the original cut without another host membership event");
     for(unsigned delayedCase=0;delayedCase<7;++delayedCase) {
         prepare(false,true);

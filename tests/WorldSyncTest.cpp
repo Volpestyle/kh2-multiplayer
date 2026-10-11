@@ -361,8 +361,49 @@ void testWorldCacheEpoch() {
     host.sendEnemyManifest(EnemyManifest {11, true, {entry(1, 0, 309), entry(2, 1, 309)}});
     check(wait([&] { return !friendSeen.manifests.empty() && friendSeen.manifests.back().epoch == 11; }),
           "old nonempty manifest is received before priming periodic HP");
+    // HP is an absolute periodic publication, not a one-shot reliable event.
+    // Keep the original 3 s acquisition bound and require actual exact receipt.
+    const auto receivePeriodicHp = [&](EnemyHp periodicHp) {
+        const auto firstPeriodicSequence = hpSequence + 1;
+        const auto periodicDeadline = nowMs() + 3000;
+        auto nextPeriodicSend = nowMs();
+        unsigned periodicSends = 0;
+        const bool periodicReceived = wait([&] {
+            if (!friendSeen.hps.empty()) {
+                const auto& receivedHp = friendSeen.hps.back();
+                bool exactPeriodicHp = receivedHp.epoch == periodicHp.epoch &&
+                    receivedHp.sequence >= firstPeriodicSequence && receivedHp.sequence <= hpSequence &&
+                    receivedHp.entries.size() == periodicHp.entries.size();
+                for (std::size_t periodicIndex = 0; exactPeriodicHp && periodicIndex < periodicHp.entries.size(); ++periodicIndex) {
+                    const auto& expectedEntry = periodicHp.entries[periodicIndex];
+                    const auto& receivedEntry = receivedHp.entries[periodicIndex];
+                    exactPeriodicHp = receivedEntry.netId == expectedEntry.netId &&
+                        receivedEntry.hp == expectedEntry.hp && receivedEntry.maxHp == expectedEntry.maxHp;
+                }
+                if (exactPeriodicHp) return true;
+            }
+            const auto periodicNow = nowMs();
+            if (periodicNow < periodicDeadline && periodicNow >= nextPeriodicSend && periodicSends < 60) {
+                periodicHp.sequence = ++hpSequence;
+                host.sendEnemyHp(periodicHp); // production unreliable channel, no promotion
+                ++periodicSends;
+                nextPeriodicSend = periodicNow + 50;
+            }
+            return false;
+        });
+        std::cout << "  HP prime epoch=" << periodicHp.epoch << " sends=" << periodicSends
+                  << " exactReceipt=" << periodicReceived << "\n";
+        return periodicReceived;
+    };
+    // Drop the actual first send at the existing production conditioner seam.
+    // Recovery must use a newer absolute HP publication over ordinary ENet.
+    host.setLinkConditions({0,0,1.0f,811}, {});
+    const auto droppedHpBefore = host.outbound_.dropped();
     host.sendEnemyHp(EnemyHp {11, {{1, 41, 100}, {2, 51, 100}}, ++hpSequence});
-    check(wait([&] { return !friendSeen.hps.empty() && friendSeen.hps.back().epoch == 11; }),
+    check(host.outbound_.dropped() == droppedHpBefore + 1 && friendSeen.hps.empty(),
+          "periodic HP priming deliberately drops the first actual unreliable publication");
+    host.setLinkConditions({}, {});
+    check(receivePeriodicHp(EnemyHp {11, {{1, 41, 100}, {2, 51, 100}}, 0}),
           "actual unreliable old-room HP is positively received");
     host.sendRoomTransition(RoomTransition {12, 4, 27, 0, 0, 3, 0, 1, 0xA5A55A5Au});  // spawn-pick shared bit + salt tag
     check(wait([&] { return !friendSeen.rooms.empty() && friendSeen.rooms.back().epoch == 12; }),
@@ -376,8 +417,7 @@ void testWorldCacheEpoch() {
     host.sendEnemyManifest(EnemyManifest {12, true, {entry(1, 0, 309), entry(2, 1, 309)}});
     check(wait([&] { return !friendSeen.manifests.empty() && friendSeen.manifests.back().epoch == 12; }),
           "new manifest is established before current periodic HP");
-    host.sendEnemyHp(EnemyHp {12, {{1, 72, 120}, {2, 82, 120}}, ++hpSequence});
-    check(wait([&] { return !friendSeen.hps.empty() && friendSeen.hps.back().epoch == 12; }),
+    check(receivePeriodicHp(EnemyHp {12, {{1, 72, 120}, {2, 82, 120}}, 0}),
           "actual unreliable current-room HP is positively received");
     host.sendEventHold(EventHold {12, true, 0x33});
     host.sendEnemyDeath(EnemyDeath {12, 2});

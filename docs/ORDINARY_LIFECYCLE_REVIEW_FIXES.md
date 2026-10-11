@@ -48,9 +48,52 @@ is `.local/rig-operator/practice-native-first-release-control-native-01/run/test
 | revive | Lines 80–81: accepted request did not reach owner ring, so the dependent single native-attempt check failed | Unadjudicated. Revive request/pump/owner-gate source is unchanged; the test changes only its protocol assertion/label. The range does alter shared NetworkClient/SessionHost code, for activation reliability and membership cuts. Those branches do not process this ReviveRequest (the ephemeral predicate contains only activation request/point), but retained logs do not isolate which routing/timing predicate lost it. No comparable main revive run was found. |
 | desync collector | Lines 450/454/458: `worker starts before retirement`; remaining retirement/absence checks passed | No changed collector/test/lease implementation was found in the range. This control gives collection only 10 ms, including spool work before Provider.Begin; the worker skips capture if that budget is exhausted (DesyncCollector.cpp). That explains a possible zero-Begin outcome, but per-job timing is not retained, so it is a hypothesis rather than a retrospective pass. No comparable main collector run was found. |
 
-Revive and collector therefore remain visible unresolved suite failures pending
-an operator baseline or explicit lead disposition. None is waived by the practice
-pass, source equality, or these offline controls. No suite was rerun for this report.
+The later operator baseline in
+`.local/rig-operator/practice-review-fixes-results-01/README.md` resolves the
+missing comparison: revive and desync_collector pass on exact main `3c0f8e4`
+and on `b0b3fadd`; avatar fails on both (170 and 233 per mille respectively).
+The older failures remain recorded above; they are not reproduced regressions
+in this candidate. The b0b3 suite is still failed, because nativehit and world
+failed their required assertions. No rerun was performed by story.
+
+## b0b3fadd failed-control diagnosis
+
+**Native bootstrap:** the control delivers RoomTransition and the schema-2 cut,
+then native arrival, but never the host manifest. RoomTransition intentionally
+clears `g_host.enemies`; TryReceiveOrdinaryLifecycle requires every cut row to
+exist there with the same object ID. SeedPreparationShadows creates native
+actors, not an authenticated host manifest. The failed positive therefore asks
+native arrival to authorize missing remote membership. This is a fixture error,
+not permission to weaken that predicate. The correction first asserts that
+arrival alone still holds the original cut, then delivers the five-entry host
+manifest through HostEnvelope/ReceiveWorldPackets and retries that same cut.
+There is no second host membership event, direct cache write or re-anchor.
+
+**Old-room HP:** the control sends periodic absolute HP exactly once on the
+unreliable channel and requires that single packet to arrive. It received the
+old manifest, failed this HP receipt, then successfully received current-room
+HP later. This establishes missing receipt, not the hop or reason. Retained
+output has no packet-specific trace that distinguishes loss from rejection;
+a retrospective claim of a particular transport drop would be unsupported.
+
+The HIGH-1 ordered-transition change cannot execute in kh2coop_world_test:
+CMake links that target only to server_core and common, not the inject consumer.
+All common/ and server/ inputs, CMakeLists.txt, WorldWireFixture.hpp and the
+world test itself are byte-identical between `6472df95` and `b0b3fadd` (checked
+as Git blobs). Thus no changed product branch in that range affects old-room
+HP delivery. This does not claim that every existing transport/admission path
+is bug-free; it refutes attribution of this observed failure to HIGH-1.
+
+The correction primes both room caches with periodic absolute HP, still using
+NetworkClient::sendEnemyHp's unreliable channel, within the original 3-second
+wait (50 ms cadence, at most 60 sends, strictly increasing source sequences).
+Success now requires the exact epoch, net IDs, HP/maxHP and a sequence from
+that acquisition. The original positive receipt assertions and subsequent
+stale/wrong-epoch/cache checks remain. A deterministic control drops the first
+actual HP send using the existing outbound LinkConditioner and requires later
+ordinary ENet publication to recover. No reliable promotion, wider timeout,
+synthetic receive or product change is included. Operator native execution is
+still required; source inspection alone is not a native pass.
 
 ## Static compile-risk check
 
@@ -63,3 +106,9 @@ was added. New native-control locals use distinct population/refill/removal/rela
 delayed prefixes; their loop and enclosing scopes were checked for the prior
 C4456 shadow class. The same-actor metadata fixture avoids overlapping memcpy.
 This is a source inspection, not a claim that MSVC /W4 /WX has compiled the tree.
+
+The b0b3fadd parent compiled clean in the operator slot. The successor changes
+only native bootstrap/HP priming test setup, these notes and source projections.
+New locals use relay/periodic prefixes; lambda and enclosing scopes were checked
+for /WX shadowing, existing headers supply the types, and no test target or
+registration changed. The successor has not been compiled by story.
