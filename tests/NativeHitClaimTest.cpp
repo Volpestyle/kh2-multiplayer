@@ -2009,6 +2009,29 @@ void TestCombatCausalBoundaries() {
             cc::Receipt r;while(cc::engine.Pop(r)){}
         }
     };
+    prepare(false);SeedPreparationShadows(20);
+    g_populationRequested=true;g_mirrorRequested=true;
+    std::vector<std::size_t> populationFresh;
+    for(std::size_t populationIndex=0;populationIndex<g_inst.spawns.size();++populationIndex) {
+        auto& populationSpawn=g_inst.spawns[populationIndex];
+        populationSpawn.announced=false;populationFresh.push_back(populationIndex);
+        Put(populationSpawn.actor+0x6A0,std::uint32_t{0});
+        Put(populationSpawn.actor+offsets::actor::ANIM_ID,std::uint16_t{0});
+    }
+    const auto populationCensus=CaptureNativeCensus();
+    Check(!OrdinaryLifecycleRoom()&&HostFrame(120,populationFresh,populationCensus),
+          "BC population-enabled host frame is independent of schema2 membership admission");
+    PublishHostMotion(120,populationCensus);
+    bool populationManifest=false,populationMotion=false;
+    for(const auto& populationPacket:g_bridge.outgoing) {
+        const std::uint8_t* populationPayload=nullptr;std::size_t populationSize=0;
+        const auto populationType=decodePacketHeader(populationPacket.data(),populationPacket.size(),populationPayload,populationSize);
+        populationManifest=populationManifest||populationType==PacketType::EnemyManifest;
+        populationMotion=populationMotion||populationType==PacketType::EnemyMotion;
+    }
+    Check(populationManifest&&HasHp(1,20)&&populationMotion&&!OrdinaryCut(),
+          "BC population-enabled manifest HP and motion still publish without schema2 retirement");
+    g_populationRequested=false;g_mirrorRequested=false;
     for(unsigned delayedCase=0;delayedCase<5;++delayedCase) {
         prepare(false,true);
         const auto bootstrapCut=*OrdinaryCut();

@@ -50,7 +50,7 @@ void ResetOrdinaryLifecycle() {
     g_ordinarySequence=0;g_ordinaryGeneration=g_ordinaryLoad=g_ordinaryTransition=0;g_ordinarySource.reset();
 }
 bool OrdinaryLifecycleRoom() {
-    return g_inst.live && g_inst.world==5 && g_inst.room==6 && g_inst.door==0 &&
+    return !g_populationRequested && g_inst.live && g_inst.world==5 && g_inst.room==6 && g_inst.door==0 &&
         g_inst.map==1 && g_inst.btl==1 && g_inst.evt==0;
 }
 const PopulationCut* OrdinaryCut() {
@@ -226,7 +226,7 @@ bool OrdinaryPendingReplacement(const NativeCensus& census,const NativeEnemy& na
 }
 bool PublishOrdinaryLifecycle(const NativeCensus& census) {
     if(!OrdinaryLifecycleRoom())return true;
-    if(g_populationRequested || g_role!=Role::Host || !CensusMatchesInstance(census) || !SafeNativeGameplay())return false;
+    if(g_role!=Role::Host || !CensusMatchesInstance(census) || !SafeNativeGameplay())return false;
     const auto generation=WorldSessionGeneration();
     if(!generation || (g_ordinaryGeneration && (generation!=g_ordinaryGeneration ||
         census.load!=g_ordinaryLoad || census.transition!=g_ordinaryTransition)))return false;
@@ -467,7 +467,7 @@ void RetryOrdinaryLifecycle() {
 }
 void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source) {
     const auto role=CurrentRole();const auto generation=WorldSessionGeneration();
-    if(role!=Role::Client || !generation || !cut.membershipOnly ||
+    if(g_populationRequested || role!=Role::Client || !generation || !cut.membershipOnly ||
        cut.epoch!=g_host.epoch || !g_lastRoomPacket || cut.location!=PopulationLocation(*g_lastRoomPacket) ||
        source.sessionId.empty() || source.kind!=WorldSourceKind::Native || !source.hostSourceSerial ||
        source.sourceConnectionId!=g_bridge.ConnectionId(0) || source.sourceDeliverySerial!=g_bridge.PeerDeliverySerial(0) ||
