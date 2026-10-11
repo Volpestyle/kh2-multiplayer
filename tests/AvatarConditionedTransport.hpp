@@ -14,7 +14,7 @@ public:
     bool createClient(std::size_t p, std::size_t c) override { return inner_->createClient(p,c); }
     kh2coop::TransportOpenResult listen(const std::string& a, std::uint16_t p, std::size_t n, std::size_t c) override { return inner_->listen(a,p,n,c); }
     kh2coop::TransportPeer* connect(const std::string& a, std::uint16_t p, std::size_t c, bool& resolved) override {
-        auto* peer = inner_->connect(a,p,c,resolved); configure(peer); return peer;
+        return inner_->connect(a,p,c,resolved);
     }
     bool isOpen() const override { return inner_->isOpen(); }
     void close() override { inner_->close(); }
