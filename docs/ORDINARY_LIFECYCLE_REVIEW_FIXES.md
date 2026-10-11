@@ -36,3 +36,30 @@ application, not a complete host-hit/lifecycle causal graph or issue acceptance.
 
 Native execution of the added consumer/producer controls belongs to kh2-steam.
 Offline source checks and Python controls do not substitute for that build.
+
+## Retained suite failures
+
+The exact `6472df95` run was **185/188**, not a clean suite pass. Its raw output
+is `.local/rig-operator/practice-native-first-release-control-native-01/run/tests-01-stdout.txt`.
+
+| Suite | Retained failure | Range attribution |
+|---|---|---|
+| avatar | Lines 285–298: proximity maxima 106–111 units, relay count, loss `4294967295` | Not unique to this range: exact main `3c0f8e4` reproduced proximity, relay and the same sentinel in `.local/rig-operator/practice-main-timing-01/report.md`, three serial repetitions. The range changes only the protocol-version compatibility assertion in AvatarRelayTest; avatar stream/test predicates are unchanged. This rules out the earlier branch-only inference, not every possible interaction. |
+| revive | Lines 80–81: accepted request did not reach owner ring, so the dependent single native-attempt check failed | Unadjudicated. Revive request/pump/owner-gate source is unchanged; the test changes only its protocol assertion/label. The range does alter shared NetworkClient/SessionHost code, for activation reliability and membership cuts. Those branches do not process this ReviveRequest (the ephemeral predicate contains only activation request/point), but retained logs do not isolate which routing/timing predicate lost it. No comparable main revive run was found. |
+| desync collector | Lines 450/454/458: `worker starts before retirement`; remaining retirement/absence checks passed | No changed collector/test/lease implementation was found in the range. This control gives collection only 10 ms, including spool work before Provider.Begin; the worker skips capture if that budget is exhausted (DesyncCollector.cpp). That explains a possible zero-Begin outcome, but per-job timing is not retained, so it is a hypothesis rather than a retrospective pass. No comparable main collector run was found. |
+
+Revive and collector therefore remain visible unresolved suite failures pending
+an operator baseline or explicit lead disposition. None is waived by the practice
+pass, source equality, or these offline controls. No suite was rerun for this report.
+
+## Static compile-risk check
+
+The new pending helpers are defined inside EnemyOrdinaryLifecycle.inl before
+ReceiveWorldPackets/Tick use them. ClearPendingOrdinaryCuts has an early matching
+declaration for RetireWorldSession. The two new global mode/latch fields precede
+HostFrame and the include. Existing vector, exception, Windows clock, codec and
+scope headers supply the referenced types; no new CMake target or registration
+was added. New native-control locals use distinct population/refill/removal/relay/
+delayed prefixes; their loop and enclosing scopes were checked for the prior
+C4456 shadow class. The same-actor metadata fixture avoids overlapping memcpy.
+This is a source inspection, not a claim that MSVC /W4 /WX has compiled the tree.

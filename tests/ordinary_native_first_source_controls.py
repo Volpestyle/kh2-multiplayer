@@ -94,7 +94,7 @@ check('originals!=1' in impl and 'PopulationSpawnRoots(tracked)==PopulationSpawn
       'pending proof requires the unchanged unique tracked original binding')
 check('target=original->target' in impl and 'complete-native-absence-before-cut' in impl,
       'cut uses authenticated cached positive target and independently completed native absence')
-receiver = body(impl, 'void ReceiveOrdinaryLifecycle(')
+receiver = body(impl, 'void TryReceiveOrdinaryLifecycle(')
 check(receiver.index('bookend.watchedActorPresent') < receiver.index('g_ordinaryRetirements.push_back'),
       'independent final absence precedes retirement mutation')
 check('localAliases!=1' in impl and 'census.enemies.size()>5' in impl, 'replacement exclusion cannot hide ambiguous/extra bodies')

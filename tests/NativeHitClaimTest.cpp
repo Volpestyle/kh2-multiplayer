@@ -2011,13 +2011,13 @@ void TestCombatCausalBoundaries() {
         }
     };
     prepare(false);SeedPreparationShadows(20);
-    g_populationRequested=true;g_mirrorRequested=true;
+    g_populationRequested=true;g_mirrorRequested=true;g_mirrorMuted=false;
     std::vector<std::size_t> populationFresh;
     for(std::size_t populationIndex=0;populationIndex<g_inst.spawns.size();++populationIndex) {
         auto& populationSpawn=g_inst.spawns[populationIndex];
         populationSpawn.announced=false;populationFresh.push_back(populationIndex);
         Put(populationSpawn.actor+0x6A0,std::uint32_t{0});
-        Put(populationSpawn.actor+offsets::actor::ANIM_ID,std::uint16_t{0});
+        Put(populationSpawn.actor+offsets::actor::ANIM_ID,std::uint32_t{0});
     }
     const auto populationCensus=CaptureNativeCensus();
     Check(!OrdinaryLifecycleRoom()&&HostFrame(120,populationFresh,populationCensus),
@@ -2041,7 +2041,7 @@ void TestCombatCausalBoundaries() {
         // Independent allocation with the same native spawn point; never reuse
         // a client live binding. The metadata case keeps actor, changes status.
         const auto listedRefill=refillCase==2?enemy:refillActor;
-        std::memcpy(reinterpret_cast<void*>(listedRefill),reinterpret_cast<void*>(enemy),0x1000);
+        if(listedRefill!=enemy)std::memcpy(reinterpret_cast<void*>(listedRefill),reinterpret_cast<void*>(enemy),0x1000);
         Put(listedRefill+ACTOR_STATUS,refillStatus);
         Put(refillStatus,std::int32_t{1000});Put(refillStatus+4,std::int32_t{1000});
         Put(listedRefill+offsets::actor::LINKED_NEXT_HANDLE,std::uint32_t{0});
@@ -2091,11 +2091,13 @@ void TestCombatCausalBoundaries() {
     g_bridge.incoming.push_back(HostEnvelope(encode(relayBootstrapCut),51));ReceiveWorldPackets();
     Check(g_host.epoch==9&&!g_host.arrived&&!OrdinaryCut()&&g_pendingOrdinaryCuts.size()==1,
           "actual relay RoomTransition then cut retains bootstrap before native arrival");
-    SeedPreparationShadows(1000);g_host.arrived=true;g_host.ackSent=true;
+    SeedPreparationShadows(1000);
+    for(auto& relaySpawn:g_inst.spawns){Put(relaySpawn.status+4,std::int32_t{1000});relaySpawn.lastMaxHp=1000;}
+    g_host.arrived=true;g_host.ackSent=true;
     RetryOrdinaryLifecycle();
     Check(OrdinaryCutCurrent()&&g_pendingOrdinaryCuts.empty(),
           "relay bootstrap native recovery admits the original cut without another host membership event");
-    for(unsigned delayedCase=0;delayedCase<5;++delayedCase) {
+    for(unsigned delayedCase=0;delayedCase<7;++delayedCase) {
         prepare(false,true);
         const auto bootstrapCut=*OrdinaryCut();
         // Preserve the exact RoomTransition supplied by the arrival adapter.
@@ -2120,6 +2122,8 @@ void TestCombatCausalBoundaries() {
             if(delayedCase==2)++g_host.epoch;
             if(delayedCase==3)++g_bridge.connections[0];
             if(delayedCase==4)g_pendingOrdinaryCuts.front().receivedMs=GetTickCount64()-30001;
+            if(delayedCase==5)++load;
+            if(delayedCase==6)++g_bridge.deliverySerial;
             g_host.ackSent=true;RetryOrdinaryLifecycle();
             Check(!OrdinaryCut()&&g_pendingOrdinaryCuts.empty(),"superseding epoch/connection/expiry clears pending authority");
         }

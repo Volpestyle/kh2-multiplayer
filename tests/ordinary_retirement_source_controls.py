@@ -32,7 +32,7 @@ def body(text, name):
 sync = source("inject/src/EnemySync.cpp")
 old = original("inject/src/EnemySync.cpp")
 impl = source("inject/src/EnemyOrdinaryLifecycle.inl")
-check(body(sync, "bool ReleaseClientClaims(") == body(old, "bool ReleaseClientClaims("), "full claim release gate byte-exact")
+check(body(sync, "bool ReleaseClientClaims(std::uint32_t frame) {") == body(old, "bool ReleaseClientClaims(std::uint32_t frame) {"), "full claim release gate byte-exact")
 begin, end = "bool lifecycleUnknown=false;", "g_hostHpSequence = m.sequence;"
 check(sync[sync.index(begin):sync.index(end)] == old[old.index(begin):old.index(end)], "reason21 in-flight-birth refusal byte-exact")
 for path in ("inject/src/OrdinaryEnemyBinding.hpp", "inject/src/EnemyMirror.inl", "CMakeLists.txt"):

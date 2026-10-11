@@ -34,9 +34,9 @@ hp=sync[sync.index("bool lifecycleUnknown=false;"):sync.index("g_hostHpSequence 
 check("RejectUnadmittedLifecycle" in hp and "if(lifecycleUnknown)continue;" in hp,"whole raw unknown-ID HP rejected before floor update")
 predicate=hp[:hp.index("if(lifecycleUnknown)continue;")]
 check("combatcausal::" not in predicate.replace("ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectUnadmittedLifecycle,e.netId,m.sequence);", ""),"diagnostic membership never controls product HP admission")
-check("!OrdinaryLifecycleRoom() && !g_populationRequested" in sync and
+check("!OrdinaryLifecycleRoom() &&" in sync and
       "t.actor==s.actor" in sync and "PopulationSpawnRoots(t)!=PopulationSpawnRoots(s)" in sync and
-      "FindNativeEnemy(census,t)" in sync,"non-BC metadata replacement requires same listed actor with fresh changed roots")
+      "FindNativeEnemy(census,t)" in sync,"non-lifecycle metadata replacement requires same listed actor with fresh changed roots")
 check("(void)combatcausal::engine.RetireMember" in impl and
       "if(!combatcausal::engine.RetireMember" not in impl,"observer retirement cannot veto authenticated product lifecycle")
 check("SameClientClaimScope(productBefore,productAfter)" in impl and
@@ -45,7 +45,7 @@ check("SameClientClaimScope(productBefore,productAfter)" in impl and
       "receiver product scope bookends remain complete with observer OFF")
 native=source("tests/NativeHitClaimTest.cpp")
 check("SeedPreparationShadows(1000)" in native and "QueueHostWorld(encode(cut))" in native and
-      "ResetOrdinaryLifecycle(); // no lifecycle/source certificate" in native,
+      "ClearPendingOrdinaryCuts(); // no lifecycle/source certificate" in native,
       "native BC positive fixtures use five owned actors plus decoded source certificate with isolated history")
 check("missing BC lifecycle proof refuses HP and claims" in native and
       "actual lifecycle retirement/birth/HP gameplay identical" in native,
