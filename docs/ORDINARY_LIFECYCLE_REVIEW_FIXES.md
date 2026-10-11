@@ -145,3 +145,53 @@ body against main and preserve the experimental admission implementation exactly
 New absence-prefixed locals were checked for nested shadowing and declaration
 order; no new headers or CMake registration are used. Native compilation and
 execution belong to kh2-steam; these controls are not yet native passing evidence.
+
+## 5170d399 native-control failure diagnosis
+
+The operator run is `.local/rig-operator/practice-default-off-native-01/run/tests-01-stdout.txt`;
+summary `.local/rig-operator/practice-default-off-results-01/README.md`.
+It compiled clean but nativehit failed six assertions. These new-control failures
+have two concrete fixture causes; no product correction is indicated by them.
+The other required suites passed. The failed run remains failed.
+
+Both main `3c0f8e4` and the candidate publish HP only when
+`frame % HP_INTERVAL_FRAMES == 0`, with interval 6. The fixture called frame 40
+for its bootstrap and 41 for its pre-grace observation, neither a publication
+frame. SeedPreparationShadows also leaves every Spawn.spawnPos zero. After the
+fourth body leaves, the fifth body has a higher spawn index, the same object and
+the same point. Main's exact refill predicate therefore supersedes that fourth
+row immediately; without population mode it intentionally sends no EnemyDeath.
+Changing goneSinceMs later cannot turn that already-superseded row into a grace
+death. The clock itself is not mismatched: both fixture and HostFrame use the
+real GetTickCount64; the post-grace predicate check passed in both modes.
+
+| Failed assertion | Mode/count | Exact cause and main expectation |
+|---|---|---|
+| Living leave before grace keeps survivor publication/no premature death | OFF and ON, two failures | Neither frame41 call can publish periodic HP. OFF additionally takes main's same-point refill branch, so its deathSent bookkeeping is already true. ON correctly does not fake a death, but HasHp is still false. |
+| Only OFF grace emits the original terminal packet | OFF, one failure | The coincident-point fixture already superseded net4; main does not send a nonpopulation refill death. This was not an unrefilled grace test. ON's no-packet assertion passed. |
+| Original five-member client readback releases | OFF and ON, two failures | Frame40 bootstrap contained a manifest (and experimental cut), but no HP. The unchanged release guard requires a nonzero HP source sequence and known positive HP for every living member; main's frame40 also supplies no HP. |
+| OFF four-survivor release versus ON missing-membership hold | OFF, one failure | With no net4 death packet, that host member remains living in the client cache; no baseline HP was delivered for it either. Refusal is correct. ON's held/no-kill/no-relabel counterpart passed. |
+
+The fixture correction retains every outcome assertion. It assigns five
+well-separated initial points to both the owned native actor transforms and
+historical Spawn rows, and checks complete census/pairwise point separation.
+That makes the disappearance genuinely unrefilled. Calls at frames42/48/54
+supply baseline, pre-grace and expired periodic HP; constexpr/static_assert ties
+them to the actual interval. Frame43 remains the adjacent removal-proof step,
+with an explicit assertion that it correctly emits no periodic HP. Baseline
+publication now must contain actual HP for both a survivor and net4 before
+feeding those original packets through the real client consumer. No direct host
+cache authority, synthetic terminal packet or weakened release is introduced.
+Existing separate refill controls continue to test main's intentional refill
+behavior. Product bytes are unchanged from 5170d399.
+
+The Python checks passed because their source projection correctly compared
+production statements with main, while their fixture checks only checked the
+presence of calls and assertions. They did not execute NativeHitClaimTest,
+evaluate the chosen frames modulo the publication interval, or inspect the five
+seeded spawn points. Those omissions allowed invalid positive fixtures to pass
+source review. New offline fixture checks cover the actual six-frame schedule
+and point-seeding prerequisites; compiled assertions and actual packet/census
+checks independently enforce them in C++. Neither form of source check is
+reported as native passing evidence. Native execution remains pending with the
+operator; the original six failures are not retrospectively promoted.

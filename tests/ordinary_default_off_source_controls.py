@@ -62,14 +62,40 @@ check((ROOT / 'inject/src/EnemyOrdinaryLifecycle.inl').read_text().replace('\r\n
       'experimental proof/suspension/pending/retirement implementation unchanged')
 check('constexpr std::uint64_t DESPAWN_GRACE_MS = 3000;' in sync, 'original 3000ms grace constant unchanged')
 native = (ROOT / 'tests/NativeHitClaimTest.cpp').read_text()
-control = native[native.index('for(unsigned absenceMode='):native.index('for(auto& removalSpawn:')]
+control = native[native.index('// Same native living leave with experiment OFF/ON.'):native.index('for(auto& removalSpawn:')]
 for marker in ('absenceMode<2', 'g_ordinaryLifecycleRequested=absenceMode!=0',
                'GetTickCount64()-DESPAWN_GRACE_MS-1', 'encode(EnemyDeath{9,4})',
                'absenceBootstrapPackets', 'absenceBeforeGracePackets', 'absenceTerminalPackets',
                'HostEnvelope(absencePacket,++absenceSourceSerial)',
-               '!ReleaseClientClaims(41)', 'ReleaseClientClaims(42)==(absenceMode==0)',
+               '!ReleaseClientClaims(absenceBeforeGraceFrame)', 'ReleaseClientClaims(absenceExpiryFrame)==(absenceMode==0)',
                'g_ordinaryHostBlocked&&OrdinaryCutCurrent()', 'nativeCalls==0&&deathCalls==0'):
     check(marker in control, 'actual host/client default-OFF vs ON control: ' + marker)
+check(not subprocess.check_output(['git', 'diff', '5170d399', '--', 'inject', 'common', 'server', 'CMakeLists.txt'], cwd=ROOT).strip(),
+      'fixture correction changes no product or build inputs')
+interval = int(re.search(r'HP_INTERVAL_FRAMES = (\d+);', sync).group(1))
+main_interval = int(re.search(r'HP_INTERVAL_FRAMES = (\d+);', main).group(1))
+check(interval == main_interval == 6, 'main and candidate use the same actual six-frame HP cadence')
+check(40 % interval != 0 and 41 % interval != 0 and 42 % interval == 0,
+      'former40/41 fixture cannot publish baseline/pregrace HP;42 can')
+check('absenceInitialFrame=7*HP_INTERVAL_FRAMES' in control and
+      'absenceBeforeGraceFrame=absenceInitialFrame+HP_INTERVAL_FRAMES' in control and
+      'absenceExpiryFrame=absenceBeforeGraceFrame+HP_INTERVAL_FRAMES' in control and
+      all(frame % interval == 0 for frame in (7*interval, 8*interval, 9*interval)),
+      'corrected baseline/pregrace/expired calls are actual HP publication frames42/48/54')
+check('static_assert(absenceInitialFrame%HP_INTERVAL_FRAMES==0' in control and
+      'HostFrame(absenceInitialFrame+1' in control and '!HasHp(1,1000)' in control,
+      'compiled fixture asserts cadence and distinguishes adjacent nonpublication frame43')
+check('absencePointSpacing=100.0f' in control and 'static_assert(absencePointSpacing>SPAWN_POINT_TOLERANCE)' in control and
+      'offsets::entity::POS_X,absencePointSpawn.spawnPos.x' in control and
+      '!SamePoint(g_inst.spawns[absenceLeft].spawnPos,g_inst.spawns[absenceRight].spawnPos)' in control,
+      'actual native and historical spawn points are spread and independently checked against false refill')
+check(control.count('seedAbsencePoints();') == 2 and 'SamePoint(absenceNative->position' in control,
+      'both owned host/client fixtures use matching checked native point layout')
+check('HostFrame(absenceInitialFrame,absenceFresh,absenceCensus)&&HasHp(1,1000)&&HasHp(4,1000)' in control,
+      'original bootstrap assertion now proves actual baseline HP publication before client admission')
+check('if (frame % HP_INTERVAL_FRAMES == 0 && !hp.entries.empty())' in main and
+      't.spawnIndex > s.spawnIndex && t.objectId == s.objectId && SamePoint(t.spawnPos, s.spawnPos)' in main,
+      'both missing prerequisites are exact main policy, not new experimental product behavior')
 check('only schema1 population sends terminal history' in native,
       'different-allocation/refill/metadata fixture checks main terminal disposition')
 print(json.dumps(dict(status='PASS', count=len(checks), checks=checks, nativeExecuted=False, acceptance=False), indent=2))

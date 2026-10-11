@@ -2065,6 +2065,19 @@ void TestCombatCausalBoundaries() {
     }
     // Same native living leave with experiment OFF/ON. Keep four survivors so
     // exact release can succeed after the default-path grace, never empty-set.
+    constexpr std::uint32_t absenceInitialFrame=7*HP_INTERVAL_FRAMES;
+    constexpr std::uint32_t absenceBeforeGraceFrame=absenceInitialFrame+HP_INTERVAL_FRAMES;
+    constexpr std::uint32_t absenceExpiryFrame=absenceBeforeGraceFrame+HP_INTERVAL_FRAMES;
+    static_assert(absenceInitialFrame%HP_INTERVAL_FRAMES==0&&
+                  absenceBeforeGraceFrame%HP_INTERVAL_FRAMES==0&&absenceExpiryFrame%HP_INTERVAL_FRAMES==0);
+    constexpr float absencePointSpacing=100.0f;
+    static_assert(absencePointSpacing>SPAWN_POINT_TOLERANCE);
+    const auto seedAbsencePoints=[&] {
+        for(auto& absencePointSpawn:g_inst.spawns) {
+            absencePointSpawn.spawnPos={static_cast<float>(absencePointSpawn.spawnIndex)*absencePointSpacing,0,0};
+            Put(absencePointSpawn.actor+offsets::actor::ENTITY_TRANSFORM+offsets::entity::POS_X,absencePointSpawn.spawnPos.x);
+        }
+    };
     for(unsigned absenceMode=0;absenceMode<2;++absenceMode) {
         prepare(false);SeedPreparationShadows(1000);
         g_ordinaryLifecycleRequested=absenceMode!=0;
@@ -2075,22 +2088,34 @@ void TestCombatCausalBoundaries() {
             absenceSpawn.controller=RecordController();absenceSpawn.record=RecordData(0,absenceSpawn.spawnIndex);
             absenceSpawn.identityRead=true;absenceSpawn.announced=false;absenceFresh.push_back(absenceIndex);
         }
-        g_manifestSent=false;g_hitTraceFrame=40;
+        seedAbsencePoints();g_manifestSent=false;g_hitTraceFrame=absenceInitialFrame;
         auto absenceCensus=CaptureNativeCensus();
-        Check(HostFrame(40,absenceFresh,absenceCensus),"absence control publishes original five living members");
+        bool absenceDistinct=absenceCensus.enemies.size()==5;
+        for(std::size_t absenceLeft=0;absenceLeft<g_inst.spawns.size();++absenceLeft) {
+            const auto* absenceNative=FindNativeEnemy(absenceCensus,g_inst.spawns[absenceLeft]);
+            absenceDistinct=absenceDistinct&&absenceNative&&SamePoint(absenceNative->position,g_inst.spawns[absenceLeft].spawnPos);
+            for(std::size_t absenceRight=absenceLeft+1;absenceRight<g_inst.spawns.size();++absenceRight)
+                absenceDistinct=absenceDistinct&&!SamePoint(g_inst.spawns[absenceLeft].spawnPos,g_inst.spawns[absenceRight].spawnPos);
+        }
+        Check(absenceDistinct,"absence fixture has five distinct native and historical points, not a same-point refill");
+        Check(HostFrame(absenceInitialFrame,absenceFresh,absenceCensus)&&HasHp(1,1000)&&HasHp(4,1000),
+              "absence control publishes original five living members");
         const auto absenceBootstrapPackets=g_bridge.outgoing;g_bridge.outgoing.clear();
         // Native fourth body leaves; its disposed status cannot be a witness.
         Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
             static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
         Put(enemy+0x6000+ACTOR_STATUS,std::uintptr_t{0});
-        g_hitTraceFrame=41;absenceCensus=CaptureNativeCensus();TrackSpawns(absenceCensus);
+        g_hitTraceFrame=absenceInitialFrame+1;absenceCensus=CaptureNativeCensus();TrackSpawns(absenceCensus);
         g_inst.spawns[3].goneSinceMs=GetTickCount64();
-        Check(HostFrame(41,{},absenceCensus)&&!g_inst.spawns[3].deathSent&&HasHp(1,1000),
+        Check(HostFrame(absenceInitialFrame+1,{},absenceCensus)&&!g_inst.spawns[3].deathSent&&!HasHp(1,1000),
+              "adjacent leave frame keeps membership pending and correctly has no periodic HP publication");
+        g_hitTraceFrame=absenceBeforeGraceFrame;
+        Check(HostFrame(absenceBeforeGraceFrame,{},absenceCensus)&&!g_inst.spawns[3].deathSent&&HasHp(1,1000),
               "living leave before grace keeps survivor publication and no premature default death");
         const auto absenceBeforeGracePackets=g_bridge.outgoing;g_bridge.outgoing.clear();
         g_inst.spawns[3].goneSinceMs=GetTickCount64()-DESPAWN_GRACE_MS-1;
-        g_hitTraceFrame=42;
-        Check(HostFrame(42,{},absenceCensus)&&HasHp(1,1000)&&
+        g_hitTraceFrame=absenceExpiryFrame;
+        Check(HostFrame(absenceExpiryFrame,{},absenceCensus)&&HasHp(1,1000)&&
               g_inst.spawns[3].deathSent==(absenceMode==0),
               "default-off grace matches main; experiment-on suspended membership never invents death");
         const auto absenceTerminalPackets=g_bridge.outgoing;
@@ -2102,7 +2127,7 @@ void TestCombatCausalBoundaries() {
                   !g_inst.spawns[3].lifecycleRetired,
                   "experiment failure remains bounded to one suspended load with no fabricated membership");
         }
-        prepare(false,true);deathCalls=0;
+        prepare(false,true);deathCalls=0;seedAbsencePoints();
         g_ordinaryLifecycleRequested=absenceMode!=0;
         ResetOrdinaryLifecycle();ClearPendingOrdinaryCuts();
         std::uint64_t absenceSourceSerial=100;
@@ -2111,20 +2136,20 @@ void TestCombatCausalBoundaries() {
             g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
         }
         ReceiveWorldPackets();
-        Check(ReleaseClientClaims(40),"absence client original five-member readback releases before native leave");
+        Check(ReleaseClientClaims(absenceInitialFrame),"absence client original five-member readback releases before native leave");
         Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
             static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
-        g_hitTraceFrame=41;TrackSpawns(CaptureNativeCensus());
+        g_hitTraceFrame=absenceBeforeGraceFrame;TrackSpawns(CaptureNativeCensus());
         // Fresh survivor HP rearms the unchanged release guard, as in the
         // real client Tick; never test its already-released fast path.
         for(const auto& absencePacket:absenceBeforeGracePackets)
             g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
         ReceiveWorldPackets();
-        Check(!ReleaseClientClaims(41),"missing live member still refuses exact client release before terminal authority");
+        Check(!ReleaseClientClaims(absenceBeforeGraceFrame),"missing live member still refuses exact client release before terminal authority");
         for(const auto& absencePacket:absenceTerminalPackets)
             g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
         ReceiveWorldPackets();
-        Check(g_host.enemies.at(4).dead==(absenceMode==0)&&ReleaseClientClaims(42)==(absenceMode==0)&&
+        Check(g_host.enemies.at(4).dead==(absenceMode==0)&&ReleaseClientClaims(absenceExpiryFrame)==(absenceMode==0)&&
               !g_inst.spawns[3].present&&g_inst.spawns[3].netId==4&&nativeCalls==0&&deathCalls==0,
               "default-off grace releases exact four survivors; experiment missing membership stays held without native kill or relabel");
     }
