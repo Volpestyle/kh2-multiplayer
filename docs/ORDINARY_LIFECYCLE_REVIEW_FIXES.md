@@ -12,7 +12,7 @@ for that load immediately; it does not retry the departed allocation. Present
 bodies can still publish manifest, HP and motion. Clients retain their original
 native admission, exact-release and no-live-relabel guards. This fallback cannot
 qualify a replacement or complete a missing lifecycle. Absence or grace expiry
-does not generate a death. A new load clears the suspension, not the old binding
+does not generate a death inside the supported experiment. A new load clears the suspension, not the old binding
 into a new load. Production lifecycle acceptance remains blocked on a proper
 native removal witness and independent qualification.
 
@@ -24,11 +24,14 @@ renews a deadline. Session, connection, delivery, host epoch or an already-arriv
 native-load replacement retires the queued authority. Expiry/capacity refusal is
 explicitly logged and supplies no permission to release claims.
 
-Outside this mode, an unsupported living refill holds its own historical row
-without freezing other publication. It neither manufactures a remote retirement
-nor relabels an existing live client body. A checked same-actor metadata replacement
-supersedes only the old local sampled identity. Schema-1 repair still needs its own
-complete certificate; an unresolved living historical row cannot mint one.
+Outside this mode (including default OFF and schema-1 population mode), host
+absence/refill follows main `3c0f8e4`: a newer same-object/same-point spawn
+supersedes the old host row immediately; population mode additionally publishes
+its existing schema-1 terminal history. Other absent rows publish EnemyDeath
+when last HP is zero or the existing 3000 ms grace expires. This is the retained
+main compatibility policy, not a schema-2 non-kill membership certificate. No
+client live-body relabel or release-predicate relaxation is added. Schema-1
+repair retains its existing independent complete-certificate requirement.
 
 The BC absent-party configuration from `ca007d4b` is practice-only and is not
 approved for main by this work. The practice six-action pass proves friend claim
@@ -112,3 +115,33 @@ only native bootstrap/HP priming test setup, these notes and source projections.
 New locals use relay/periodic prefixes; lambda and enclosing scopes were checked
 for /WX shadowing, existing headers supply the types, and no test target or
 registration changed. The successor has not been compiled by story.
+
+## Default-off absence/refill compatibility correction
+
+Review2's b0b3 re-review identified that its global positive-HP hold could leave
+an absent default-off manifest row unresolved for the entire epoch. The fix
+restricts both the refill hold and the no-grace-death policy to
+OrdinaryLifecycleRoom: exact experiment ON, BC 05/06/00/01/01/00, population OFF.
+Every other configuration restores main's HostFrame refill branch and grace
+predicate. The existing client binding, release, reason21 and native retirement
+functions are unchanged. A supported experiment whose removal proof fails still
+suspends membership once per load, keeps publishing current bodies, and cannot
+turn a living absence into death even after the compatibility grace.
+
+Actual native controls author five original host rows, unlink the living fourth
+body and invalidate its status, then check both sides of the grace. The elapsed
+interval is simulated by setting the fixture's prior goneSinceMs; no sleep or
+native wall-clock claim is implied. The original host manifest/HP packets, fresh
+survivor HP and eventual default-off death pass through HostEnvelope and the real
+client consumer. Fresh HP rearms the original release guard: before terminal
+authority it refuses the missing live member; default OFF subsequently releases
+only the four exact surviving bodies. The experiment-ON counterpart remains held
+with no death/native kill/relabel. Existing different-allocation refill cases now
+assert main's supersession disposition, including the population-only terminal
+message. No changes to the native bindings or exact release function are needed.
+
+Source projections compare the restored refill statements and death-publication
+body against main and preserve the experimental admission implementation exactly.
+New absence-prefixed locals were checked for nested shadowing and declaration
+order; no new headers or CMake registration are used. Native compilation and
+execution belong to kh2-steam; these controls are not yet native passing evidence.

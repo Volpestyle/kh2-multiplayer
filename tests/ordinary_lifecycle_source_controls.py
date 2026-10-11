@@ -34,9 +34,9 @@ hp=sync[sync.index("bool lifecycleUnknown=false;"):sync.index("g_hostHpSequence 
 check("RejectUnadmittedLifecycle" in hp and "if(lifecycleUnknown)continue;" in hp,"whole raw unknown-ID HP rejected before floor update")
 predicate=hp[:hp.index("if(lifecycleUnknown)continue;")]
 check("combatcausal::" not in predicate.replace("ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectUnadmittedLifecycle,e.netId,m.sequence);", ""),"diagnostic membership never controls product HP admission")
-check("!OrdinaryLifecycleRoom() &&" in sync and
-      "t.actor==s.actor" in sync and "PopulationSpawnRoots(t)!=PopulationSpawnRoots(s)" in sync and
-      "FindNativeEnemy(census,t)" in sync,"non-lifecycle metadata replacement requires same listed actor with fresh changed roots")
+check("if (refilled && !OrdinaryLifecycleRoom())" in sync and
+      "terminal.netId=static_cast<std::uint16_t>(s.spawnIndex+1);" in sync and
+      "s.deathSent = true;" in sync,"non-lifecycle refill restores main supersession and schema1 terminal bookkeeping")
 check("(void)combatcausal::engine.RetireMember" in impl and
       "if(!combatcausal::engine.RetireMember" not in impl,"observer retirement cannot veto authenticated product lifecycle")
 check("SameClientClaimScope(productBefore,productAfter)" in impl and

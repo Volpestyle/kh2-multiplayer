@@ -25,8 +25,8 @@ for path in ('CMakeLists.txt', 'tests/WorldWireFixture.hpp', 'tests/WorldSyncTes
     check(git('show', BASE + ':' + path) == git('show', FAILED + ':' + path),
           path + ' Git blob unchanged at failed candidate')
 for path in ('inject/src/EnemySync.cpp', 'inject/src/EnemyOrdinaryLifecycle.inl'):
-    check(not git('diff', FAILED, '--', path).strip(),
-          path + ' product unchanged in correction')
+    check(git('show', '2e845b73:' + path) == git('show', FAILED + ':' + path),
+          path + ' product unchanged by prior failed-control correction 2e845b73')
 cmake = (ROOT / 'CMakeLists.txt').read_text()
 check('target_link_libraries(kh2coop_world_test PRIVATE kh2coop_server_core kh2coop_common)' in cmake,
       'world target excludes inject consumer')

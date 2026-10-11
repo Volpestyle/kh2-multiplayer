@@ -64,8 +64,9 @@ check('g_ordinaryLifecycleRequested && !g_populationRequested' in body(impl, 'bo
 check('bool g_ordinaryLifecycleRequested = false;' in sync and 'KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL' in sync,
       'living-removal limitation explicitly defaults off')
 host = body(sync, 'bool HostFrame(')
-check('now - s.goneSinceMs > DESPAWN_GRACE_MS' not in host and 'else if (s.lastHp>0)' in host,
-      'unknown living absence cannot fall back to grace death')
+check('(!OrdinaryLifecycleRoom() && now - s.goneSinceMs > DESPAWN_GRACE_MS)' in host and
+      'if (refilled && !OrdinaryLifecycleRoom())' in host,
+      'only supported experiment forbids default grace and refill supersession')
 check('g_ordinaryHostBlocked=true' in impl and 'if(!OrdinaryLifecycleRoom() || g_ordinaryHostBlocked)return true;' in impl,
       'failed experimental proof suspends cuts instead of retrying disposed roots')
 for label in ('actual relay RoomTransition then cut retains bootstrap before native arrival',

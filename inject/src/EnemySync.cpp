@@ -1851,33 +1851,19 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                 break;
             }
         }
-        if (refilled && s.lastHp>0) {
-            // A metadata replacement at the SAME still-listed actor is not a
-            // living membership removal. Outside the certified BC room, keep
-            // the existing fresh-root replacement publication contract. The
-            // old sampled identity is superseded locally, never a death/kill.
-            const bool metadataReplaced = !OrdinaryLifecycleRoom() &&
-                std::any_of(g_inst.spawns.begin(),g_inst.spawns.end(),[&](const Spawn& t) {
-                    return t.spawnIndex>s.spawnIndex && t.present && t.announced &&
-                        t.actor==s.actor && t.objectId==s.objectId && SamePoint(t.spawnPos,s.spawnPos) &&
-                        PopulationSpawnRoots(t)!=PopulationSpawnRoots(s) && FindNativeEnemy(census,t);
-                });
-            if(metadataReplaced) {
-                s.lifecycleRetired=true;
-                SYNC_LOG("[enemysync] host: metadata identity superseded spawn=%u killCredit=0",s.spawnIndex);
-                continue;
+        if (refilled && !OrdinaryLifecycleRoom()) {
+            // Default gameplay retains main's supersession semantics. Schema-1
+            // population terminal history is independent of schema-2 cuts.
+            if (g_populationRequested) {
+                EnemyDeath terminal;terminal.epoch=g_epoch;
+                terminal.netId=static_cast<std::uint16_t>(s.spawnIndex+1);
+                if(!Send(encode(terminal)))continue;
             }
-            // Unsupported living removal holds ONLY this historical row. Keep
-            // publishing other current bodies; do not invent a death, remote
-            // retirement, or permission to relabel a still-live client body.
-            // Schema-1 repair still requires its own complete certificate.
-            if(frame%120==0)SYNC_LOG("[enemysync] host: unqualified refill row held spawn=%u killCredit=0",s.spawnIndex);
-            continue;
-        } else if (s.lastHp>0) {
-            // Absence/grace expiry is not a death witness. In particular, an
-            // experimental membership failure cannot fall back to a fake kill.
-            continue;
-        } else {
+            s.deathSent = true;
+            SYNC_LOG("[enemysync] host: spawn %u despawned, refilled at its point", s.spawnIndex);
+        } else if (s.lastHp <= 0 || (!OrdinaryLifecycleRoom() && now - s.goneSinceMs > DESPAWN_GRACE_MS)) {
+            // Only the scoped experiment forbids absence/grace as terminal
+            // authority. Its suspended living rows never fall back to a kill.
             EnemyDeath d;
             d.epoch = g_epoch;
             d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);

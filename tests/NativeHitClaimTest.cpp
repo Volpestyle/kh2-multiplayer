@@ -2059,9 +2059,74 @@ void TestCombatCausalBoundaries() {
                 refillDeath=refillDeath||refillMessage.netId==1;
             }
         }
-        Check(refillDeath==(refillCase==1)&&g_inst.spawns[0].deathSent==(refillCase==1),
-              "only previously native-zero refill original publishes death; living or metadata replacement never fabricates kill");
+        Check(refillDeath==(refillCase==2)&&g_inst.spawns[0].deathSent,
+              "default-off refill matches main supersession; only schema1 population sends terminal history");
         g_populationRequested=false;
+    }
+    // Same native living leave with experiment OFF/ON. Keep four survivors so
+    // exact release can succeed after the default-path grace, never empty-set.
+    for(unsigned absenceMode=0;absenceMode<2;++absenceMode) {
+        prepare(false);SeedPreparationShadows(1000);
+        g_ordinaryLifecycleRequested=absenceMode!=0;
+        std::vector<std::size_t> absenceFresh;
+        for(std::size_t absenceIndex=0;absenceIndex<g_inst.spawns.size();++absenceIndex) {
+            auto& absenceSpawn=g_inst.spawns[absenceIndex];
+            Put(absenceSpawn.status+4,std::int32_t{1000});absenceSpawn.lastMaxHp=1000;
+            absenceSpawn.controller=RecordController();absenceSpawn.record=RecordData(0,absenceSpawn.spawnIndex);
+            absenceSpawn.identityRead=true;absenceSpawn.announced=false;absenceFresh.push_back(absenceIndex);
+        }
+        g_manifestSent=false;g_hitTraceFrame=40;
+        auto absenceCensus=CaptureNativeCensus();
+        Check(HostFrame(40,absenceFresh,absenceCensus),"absence control publishes original five living members");
+        const auto absenceBootstrapPackets=g_bridge.outgoing;g_bridge.outgoing.clear();
+        // Native fourth body leaves; its disposed status cannot be a witness.
+        Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+            static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+        Put(enemy+0x6000+ACTOR_STATUS,std::uintptr_t{0});
+        g_hitTraceFrame=41;absenceCensus=CaptureNativeCensus();TrackSpawns(absenceCensus);
+        g_inst.spawns[3].goneSinceMs=GetTickCount64();
+        Check(HostFrame(41,{},absenceCensus)&&!g_inst.spawns[3].deathSent&&HasHp(1,1000),
+              "living leave before grace keeps survivor publication and no premature default death");
+        const auto absenceBeforeGracePackets=g_bridge.outgoing;g_bridge.outgoing.clear();
+        g_inst.spawns[3].goneSinceMs=GetTickCount64()-DESPAWN_GRACE_MS-1;
+        g_hitTraceFrame=42;
+        Check(HostFrame(42,{},absenceCensus)&&HasHp(1,1000)&&
+              g_inst.spawns[3].deathSent==(absenceMode==0),
+              "default-off grace matches main; experiment-on suspended membership never invents death");
+        const auto absenceTerminalPackets=g_bridge.outgoing;
+        const auto absenceDeathBytes=encode(EnemyDeath{9,4});
+        Check((std::find(absenceTerminalPackets.begin(),absenceTerminalPackets.end(),absenceDeathBytes)!=absenceTerminalPackets.end())==(absenceMode==0),
+              "only default-off grace emits main terminal packet for the missing original");
+        if(absenceMode) {
+            Check(g_ordinaryHostBlocked&&OrdinaryCutCurrent()&&OrdinaryCut()->sequence==5&&
+                  !g_inst.spawns[3].lifecycleRetired,
+                  "experiment failure remains bounded to one suspended load with no fabricated membership");
+        }
+        prepare(false,true);deathCalls=0;
+        g_ordinaryLifecycleRequested=absenceMode!=0;
+        ResetOrdinaryLifecycle();ClearPendingOrdinaryCuts();
+        std::uint64_t absenceSourceSerial=100;
+        for(const auto& absencePacket:absenceBootstrapPackets) {
+            if(!absenceMode&&!absencePacket.empty()&&absencePacket[0]==static_cast<std::uint8_t>(PacketType::PopulationCut))continue;
+            g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
+        }
+        ReceiveWorldPackets();
+        Check(ReleaseClientClaims(40),"absence client original five-member readback releases before native leave");
+        Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+            static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+        g_hitTraceFrame=41;TrackSpawns(CaptureNativeCensus());
+        // Fresh survivor HP rearms the unchanged release guard, as in the
+        // real client Tick; never test its already-released fast path.
+        for(const auto& absencePacket:absenceBeforeGracePackets)
+            g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
+        ReceiveWorldPackets();
+        Check(!ReleaseClientClaims(41),"missing live member still refuses exact client release before terminal authority");
+        for(const auto& absencePacket:absenceTerminalPackets)
+            g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
+        ReceiveWorldPackets();
+        Check(g_host.enemies.at(4).dead==(absenceMode==0)&&ReleaseClientClaims(42)==(absenceMode==0)&&
+              !g_inst.spawns[3].present&&g_inst.spawns[3].netId==4&&nativeCalls==0&&deathCalls==0,
+              "default-off grace releases exact four survivors; experiment missing membership stays held without native kill or relabel");
     }
     prepare(false);SeedPreparationShadows(20);
     for(auto& removalSpawn:g_inst.spawns) {
@@ -2635,8 +2700,8 @@ int main() try {
           "decoded StateHash after replacement covers new binding and excludes old binding");
     bool metadataDeath=false;
     for(const auto& bytes:g_bridge.outgoing)if(!bytes.empty()&&bytes[0]==static_cast<std::uint8_t>(PacketType::EnemyDeath))metadataDeath=true;
-    Check(g_inst.spawns[0].lifecycleRetired&&!g_inst.spawns[0].deathSent&&!metadataDeath,
-          "non-BC metadata supersession never invents a native death or kill credit");
+    Check(!g_inst.spawns[0].lifecycleRetired&&g_inst.spawns[0].deathSent&&!metadataDeath,
+          "default-off metadata supersession matches main host bookkeeping without a remote death or native kill");
 
     Reset(true); AdmitClientClaimFixture();
     Check(RecordLocalPlayerEnemyHit(LocalHit()) && g_bridge.outgoing.size() == 1,
