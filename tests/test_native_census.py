@@ -14,7 +14,8 @@ FIXTURE = json.loads((Path(__file__).parent / 'fixtures/native_census_nullable_p
 class Memory:
     """Synthetic memory projection of retained actor descriptors."""
 
-    def __init__(self, row, *, torn=False, unreadable=False, hp_delta=0):
+    def __init__(self, row, *, torn=False, unreadable=False, hp_delta=0,
+                 native_name=None):
         self.row = row
         self.actor = int(row['address'], 16)
         self.obj = 0x20000
@@ -24,6 +25,7 @@ class Memory:
         self.hp_delta = hp_delta
         self.status_reads = 0
         self.hp_reads = 0
+        self.native_name = row['name'].encode() if native_name is None else native_name
 
     def value(self, address, fmt):
         if address == self.actor + 0x918:
@@ -44,7 +46,7 @@ class Memory:
         assert address == self.obj and size == 40
         row = self.row
         return (row['objectId'].to_bytes(4, 'little') + bytes([row['objectType']])
-                + bytes(3) + row['name'].encode().ljust(32, b'\0'))
+                + bytes(3) + self.native_name.ljust(32, b'\0'))
 
 
 class NativeCensusTests(unittest.TestCase):
@@ -95,6 +97,33 @@ class NativeCensusTests(unittest.TestCase):
         row.update(objectType=22, status='0x0')
         with self.assertRaises(CENSUS.CensusRefused):
             self.invoke(row)
+
+    def test_review3_native_enemy_disguised_as_prize_refuses(self):
+        row = FIXTURE['actors'][2]
+        self.assertEqual(row['name'], 'PRIZE')
+        memory = Memory(row, native_name=b'M_EX020')
+        with self.assertRaisesRegex(CENSUS.CensusRefused, 'name mismatch'):
+            CENSUS.actor_roots(memory, {'actors': [row]}, check=lambda: None)
+        self.assertEqual(memory.hp_reads, 0)
+
+    def test_native_prop_disguised_as_enemy_refuses(self):
+        with self.assertRaisesRegex(CENSUS.CensusRefused, 'name mismatch'):
+            self.invoke(self.enemy(), native_name=b'PRIZE')
+
+    def test_malformed_native_name_refuses(self):
+        with self.assertRaisesRegex(CENSUS.CensusRefused, 'invalid native descriptor name'):
+            self.invoke(FIXTURE['actors'][2], native_name=b'PRIZE\xff')
+
+    def test_native_enemy_prefix_requires_hp_outside_enemy_types(self):
+        for prefix in ('M_', 'B_'):
+            with self.subTest(prefix=prefix):
+                row = self.enemy()
+                row.update(name=prefix + 'EX020', objectType=22)
+                result, memory = self.invoke(row)
+                self.assertEqual(result[0]['combatClass'], 'enemy')
+                self.assertEqual(memory.hp_reads, 2)
+                with self.assertRaises(OSError):
+                    self.invoke(row, unreadable=True)
 
     def test_cancellation_propagates_before_reads(self):
         def cancel():

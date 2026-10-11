@@ -26,12 +26,18 @@ def actor_roots(reader, entities, *, check):
                 or int.from_bytes(raw[:4], 'little') != actor_row['objectId']
                 or raw[4] != actor_row['objectType']):
             raise CensusRefused('native descriptor/status mismatch')
+        try:
+            native_name = raw[8:40].split(b'\0', 1)[0].decode('ascii')
+        except UnicodeDecodeError as error:
+            raise CensusRefused('invalid native descriptor name') from error
+        if native_name != actor_row['name']:
+            raise CensusRefused('native descriptor name mismatch')
         if reader.value(actor + 0x4DC, 'I') != actor_row['team']:
             raise CensusRefused('native team mismatch')
         enemy = (actor_row['objectType'] in (3, 4)
-                 or actor_row['name'].startswith(('M_', 'B_')))
+                 or native_name.startswith(('M_', 'B_')))
         player = (actor_row['objectType'] in (0, 1)
-                  or actor_row['name'].startswith('P_EX'))
+                  or native_name.startswith('P_EX'))
         combat = enemy or player
         if combat:
             if status < 0x10000:
@@ -43,7 +49,7 @@ def actor_roots(reader, entities, *, check):
                 or reader.value(actor + 0x5C0, 'Q') != status):
             raise CensusRefused('native roots replaced')
         rows.append(dict(
-            name=actor_row['name'], actor=actor, objentry=obj, status=status,
+            name=native_name, actor=actor, objentry=obj, status=status,
             objectId=actor_row['objectId'], objectType=actor_row['objectType'],
             team=actor_row['team'], hp=actor_row['hp'], motionId=actor_row['motionId'],
             position=[actor_row['position'][axis] for axis in ('x', 'y', 'z')],

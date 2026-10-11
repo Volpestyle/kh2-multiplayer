@@ -3,6 +3,9 @@
 `native_census.actor_roots(reader, entities, check=...)` validates native
 ObjEntry, status roots and team, then brackets both roots again. It retains
 every supplied actor, including PRIZE (type 22), scenery and weapon props.
+The native descriptor name is decoded as ASCII and must match the supplied
+name. Classification uses that authenticated native name; native `M_`/`B_`
+prefixes require enemy HP validation even outside enemy object types.
 Non-combat rows are labeled `non-combat`; their nullable status block is never
 dereferenced for HP. Player and enemy candidates still require readable,
 matching HP/max HP. Torn roots and read errors refuse, including for enemies.
