@@ -31,7 +31,7 @@ def normalized(text):
     return re.sub(r'\s+', '', re.sub(r'//[^\n]*', '', text))
 
 
-sync = (ROOT / 'inject/src/EnemySync.cpp').read_text()
+sync = (ROOT / 'inject/src/EnemySync.cpp').read_text(encoding='utf-8')
 main = original('3c0f8e4', 'inject/src/EnemySync.cpp')
 parent = original('2e845b73', 'inject/src/EnemySync.cpp')
 start = '// Despawns: refilled at the same point'
@@ -70,8 +70,21 @@ for marker in ('absenceMode<2', 'g_ordinaryLifecycleRequested=absenceMode!=0',
                '!ReleaseClientClaims(absenceBeforeGraceFrame)', 'ReleaseClientClaims(absenceExpiryFrame)==(absenceMode==0)',
                'g_ordinaryHostBlocked&&OrdinaryCutCurrent()', 'nativeCalls==0&&deathCalls==0'):
     check(marker in control, 'actual host/client default-OFF vs ON control: ' + marker)
-check(not subprocess.check_output(['git', 'diff', '5170d399', '--', 'inject', 'common', 'server', 'CMakeLists.txt'], cwd=ROOT).strip(),
-      'fixture correction changes no product or build inputs')
+loss_parent = original('d9412a21', 'inject/src/EnemySync.cpp')
+loss_helper = body(sync, 'bool ClientClaimNativeMembershipCurrent(')
+loss_rearm = '''    if(!h.held && !ClientClaimNativeMembershipCurrent(h.scope)) {
+        h.held=true;
+        LogClientClaim("rearm","native-membership-changed");
+    }
+'''
+loss_comment = '''// A cached release is authority only while its exact admitted native members
+// still exist. This read-only check can revoke authority, never grant it; the
+// original full HP/identity readback below is the only way to re-earn release.
+'''
+check(sync.replace(loss_comment + loss_helper + '\n', '', 1).replace(loss_rearm, '', 1) == loss_parent,
+      'only product change is native-membership revocation helper and cache guard')
+check(not subprocess.check_output(['git', 'diff', 'd9412a21', '--', 'common', 'server', 'CMakeLists.txt'], cwd=ROOT).strip(),
+      'no protocol, server or build changes')
 interval = int(re.search(r'HP_INTERVAL_FRAMES = (\d+);', sync).group(1))
 main_interval = int(re.search(r'HP_INTERVAL_FRAMES = (\d+);', main).group(1))
 check(interval == main_interval == 6, 'main and candidate use the same actual six-frame HP cadence')
@@ -98,8 +111,8 @@ check('if (frame % HP_INTERVAL_FRAMES == 0 && !hp.entries.empty())' in main and
       'both missing prerequisites are exact main policy, not new experimental product behavior')
 # Main uses a cached release, not an unconditional current-census proof.
 # The original fixture's unchanged HP packet advances only the HP sequence.
-check(body(sync, 'bool EnsureClientClaimScope() {') == body(main, 'bool EnsureClientClaimScope() {'),
-      'scope/revision cache rearm is byte-identical to main')
+check(body(sync, 'bool EnsureClientClaimScope() {').replace(loss_rearm, '') == body(main, 'bool EnsureClientClaimScope() {'),
+      'scope/revision logic otherwise byte-identical to main; only native revocation added')
 release_projection = body(sync, 'bool ReleaseClientClaims(std::uint32_t frame) {')
 release_projection = release_projection.replace('host.dead || host.removed', 'host.dead')
 release_projection = release_projection.replace(' && !host->second.removed', '')
@@ -116,10 +129,22 @@ check('g_hostHpSequence>absenceInitialHpSequence&&g_clientManifestRevision==abse
       'absenceLiveRows==5' in control and 'absenceClientCensus.enemies.size()==4' in control and
       'absence-input mode=' in control and 'absence-release mode=' in control,
       'native fixture asserts and prints exact five-live/four-native cached-release inputs')
-check(control.index('unchanged HP preserves main cached release') <
-      control.index('InvalidateClientClaims("test-absence-fresh-readback")') <
-      control.index('missing live member still refuses exact client release'),
-      'native fixture exposes cached result first then explicitly rearms test hold for full readback')
+check('InvalidateClientClaims("test-absence-fresh-readback")' not in control and
+      '!EnsureClientClaimScope()&&g_clientClaimHold.held' in control and
+      'native loss revokes cached release before claim dispatch' in control,
+      'native fixture requires production revocation without explicit test rearm')
+check('same-cardinality foreign status root revokes cached release' in control and
+      'native unlink revokes cached release before TrackSpawns' in control and
+      'restored exact five-member census independently re-earns release' in control,
+      'native cache controls cover root replacement, stale tracker and full recovery')
+for predicate in ('CensusMatchesInstance(membershipCensus)', 'SameLocation(membershipCensus.location,scope.room)',
+                  'membershipBindings!=1', 'membershipLiving!=membershipCensus.enemies.size()',
+                  'membershipMatches!=1', 'ReadClientClaimScope(membershipAfter)',
+                  'SameClientClaimScope(scope,membershipAfter)'):
+    check(predicate in loss_helper, 'read-only cached-membership revocation: ' + predicate)
+check('Send(' not in loss_helper and 'Write' not in loss_helper and 'deathSent' not in loss_helper and
+      'ReadClientClaimScope(membershipAfter)' in loss_helper,
+      'membership helper has no HP/death/native write or publication authority')
 check('only schema1 population sends terminal history' in native,
       'different-allocation/refill/metadata fixture checks main terminal disposition')
 print(json.dumps(dict(status='PASS', count=len(checks), checks=checks, nativeExecuted=False, acceptance=False), indent=2))

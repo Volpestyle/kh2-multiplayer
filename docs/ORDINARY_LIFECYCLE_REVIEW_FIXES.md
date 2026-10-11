@@ -254,3 +254,44 @@ conditional revision update. New checks compare the entire applicable gate
 and scope function to main, prove unchanged-HP revision behavior, and enforce
 that the native fixture exposes the cache before explicitly testing held
 readback. The native compiler/test remains the execution authority.
+
+
+## Native membership loss now revokes a cached claim release
+
+Lead51 authorizes fixing the inherited release cache as a separate product
+delta on `fix/claim-release-native-loss`, based on landing `d9412a21`.
+Previously, unchanged HP did not rearm a released revision when a native body
+left. The preceding historical diagnoses remain accurate for those commits.
+
+`EnsureClientClaimScope` now checks cached authority against a fresh complete
+native census in the original admitted scope. Every live host ID must have
+exactly one present, non-killed binding with matching actor/objentry/status
+roots, object and battle program. Native cardinality and reverse coverage must
+also be exact. An unavailable census or changed scope refuses as well. Loss,
+extra bodies, or a root replacement re-holds the release without changing its
+scope or granting any new authority. This runs at both existing claim admission
+and final publication gates, not only after `TrackSpawns`.
+
+Only the original full `ReleaseClientClaims` HP/identity/cardinality/bookend gate
+can re-earn release; its body is unchanged. The new helper is read-only and
+can only revoke a cache hit. It adds no message, native call, kill, relabel, HP
+writer, terminal or membership admission. Default-off is **strictly safer**
+than main at this boundary, not behaviorally identical: it now holds missing
+or extra native membership even with an unchanged host revision. Main's
+supersession/3000ms grace/EnemyDeath policy and population mode remain intact.
+
+The e5 absence fixture now has no explicit test rearm. In both OFF/ON modes it
+checks stable cache preservation, same-cardinality foreign status rejection,
+extra-body rejection, native unlink rejection before stale tracker flags are
+updated, and re-earning release after exact native restoration. The original
+five-live/four-native state with unchanged survivor HP must re-hold through the
+production claim scope gate and refuse full release. OFF then receives its
+original grace death and re-releases exactly four survivors; ON stays held
+without a kill or relabel. Existing negative controls and source comparisons
+for reason21, native retirement, HP/death admission and the full release body
+remain unchanged.
+
+This adds complete read-only census work on cache hits at the existing scope
+gates. The encounter sizes are bounded by the existing census limits; no
+new native hook or asynchronous observer is introduced. Native execution and
+the delta review remain pending kh2-steam/review2, not inferred from Python.

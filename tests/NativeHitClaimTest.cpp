@@ -2139,12 +2139,39 @@ void TestCombatCausalBoundaries() {
         Check(ReleaseClientClaims(absenceInitialFrame),"absence client original five-member readback releases before native leave");
         const auto absenceReleasedRevision=g_clientManifestRevision;
         const auto absenceInitialHpSequence=g_hostHpSequence;
+        Check(EnsureClientClaimScope(),"unchanged exact native membership preserves cached release OFF/ON");
+        Put(status+0x700,std::int32_t{1000});Put(status+0x704,std::int32_t{1000});
+        Put(enemy+0x6000+ACTOR_STATUS,status+0x700);
+        Check(CaptureNativeCensus().enemies.size()==5&&!EnsureClientClaimScope()&&g_clientClaimHold.held,
+              "same-cardinality foreign status root revokes cached release OFF/ON");
+        Put(enemy+0x6000+ACTOR_STATUS,status+0x300);
+        Check(ReleaseClientClaims(absenceInitialFrame),"restored original roots re-earn full release OFF/ON");
+        const auto absenceExtraActor=enemy+0xA000;
+        std::memcpy(reinterpret_cast<void*>(absenceExtraActor),reinterpret_cast<void*>(enemy+0x8000),0x1000);
+        Put(absenceExtraActor+ACTOR_STATUS,status+0x800);
+        Put(status+0x800,std::int32_t{1000});Put(status+0x804,std::int32_t{1000});
+        Put(absenceExtraActor+offsets::actor::LINKED_NEXT_HANDLE,std::uint32_t{0});
+        Put(enemy+0x8000+offsets::actor::LINKED_NEXT_HANDLE,
+            static_cast<std::uint32_t>(absenceExtraActor&offsets::active_entity_list::HANDLE_LOW_MASK));
+        Put(image+offsets::active_entity_list::TAIL,absenceExtraActor);
+        Check(CaptureNativeCensus().enemies.size()==6&&!EnsureClientClaimScope()&&g_clientClaimHold.held,
+              "extra unadmitted native body revokes cached release OFF/ON");
+        Put(enemy+0x8000+offsets::actor::LINKED_NEXT_HANDLE,std::uint32_t{0});
+        Put(image+offsets::active_entity_list::TAIL,enemy+0x8000);
+        Check(ReleaseClientClaims(absenceInitialFrame),"exact native cardinality restoration re-earns full release OFF/ON");
         Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
             static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
-        g_hitTraceFrame=absenceBeforeGraceFrame;TrackSpawns(CaptureNativeCensus());
-        // Main caches a release by manifest revision, not HP packet sequence.
-        // Unchanged survivor HP does NOT rearm it, even with a newer sequence.
-        // Expose that exact input/path before separately testing held readback.
+        g_hitTraceFrame=absenceBeforeGraceFrame;
+        Check(g_inst.spawns[3].present&&!EnsureClientClaimScope()&&g_clientClaimHold.held,
+              "native unlink revokes cached release before TrackSpawns updates present flags OFF/ON");
+        Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+            static_cast<std::uint32_t>((enemy+0x6000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+        Check(ReleaseClientClaims(absenceBeforeGraceFrame),"restored exact five-member census independently re-earns release OFF/ON");
+        Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+            static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+        TrackSpawns(CaptureNativeCensus());
+        // Unchanged HP leaves the host revision untouched. Native membership
+        // loss alone must now revoke the cached release in BOTH modes.
         for(const auto& absencePacket:absenceBeforeGracePackets)
             g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
         ReceiveWorldPackets();
@@ -2165,13 +2192,10 @@ void TestCombatCausalBoundaries() {
               absenceClientCensus.enemies.size()==4&&!g_inst.spawns[3].present&&
               g_hostHpSequence>absenceInitialHpSequence&&g_clientManifestRevision==absenceReleasedRevision&&
               !g_clientClaimHold.held&&g_clientClaimHold.releasedRevision==absenceReleasedRevision&&
-              ReleaseClientClaims(absenceBeforeGraceFrame),
-              "unchanged HP preserves main cached release despite native leave; no new full readback is claimed");
-        // Test-only reset of the cache, NOT a claimed production transition.
-        // Now invoke the exact held gate with the same five-live/four-native
-        // inputs. Main and the candidate both must refuse this fresh readback.
-        InvalidateClientClaims("test-absence-fresh-readback");
-        Check(g_clientClaimHold.held&&!ReleaseClientClaims(absenceBeforeGraceFrame),"missing live member still refuses exact client release before terminal authority");
+              !EnsureClientClaimScope()&&g_clientClaimHold.held,
+              "native loss revokes cached release before claim dispatch without host revision change OFF/ON");
+        Check(!ReleaseClientClaims(absenceBeforeGraceFrame)&&g_clientClaimHold.held,
+              "missing live member still refuses exact client release before terminal authority");
         for(const auto& absencePacket:absenceTerminalPackets)
             g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
         ReceiveWorldPackets();

@@ -1507,6 +1507,41 @@ bool ReadClientClaimScope(ClientClaimScope& out) {
         !warp::MatchesArrivedHostTransition(out.room)) return false;
     return WorldSessionGeneration() == out.generation && g_bridge.DeliverySerial() == out.delivery;
 }
+// A cached release is authority only while its exact admitted native members
+// still exist. This read-only check can revoke authority, never grant it; the
+// original full HP/identity readback below is the only way to re-earn release.
+bool ClientClaimNativeMembershipCurrent(const ClientClaimScope& scope) {
+    const auto membershipCensus=CaptureNativeCensus();
+    if(!g_host.manifestComplete || !g_hostHpSequence || !CensusMatchesInstance(membershipCensus) ||
+       !SameLocation(membershipCensus.location,scope.room))return false;
+    std::size_t membershipLiving=0;
+    for(const auto& [membershipId,membershipHost]:g_host.enemies) {
+        if(membershipHost.dead || membershipHost.removed)continue;
+        ++membershipLiving;
+        unsigned membershipBindings=0;
+        for(const auto& membershipSpawn:g_inst.spawns) {
+            if(membershipSpawn.present && !membershipSpawn.killed && membershipSpawn.netId==membershipId &&
+               membershipSpawn.objectId==membershipHost.objectId && membershipHost.battleProgram==g_inst.btl &&
+               FindNativeEnemy(membershipCensus,membershipSpawn))++membershipBindings;
+        }
+        if(membershipBindings!=1)return false;
+    }
+    if(!membershipLiving || membershipLiving!=membershipCensus.enemies.size())return false;
+    for(const auto& membershipNative:membershipCensus.enemies) {
+        unsigned membershipMatches=0;
+        for(const auto& membershipSpawn:g_inst.spawns) {
+            if(!membershipSpawn.present || membershipSpawn.killed || membershipSpawn.netId<=0 ||
+               membershipSpawn.netId>UINT16_MAX)continue;
+            const auto membershipRow=g_host.enemies.find(static_cast<std::uint16_t>(membershipSpawn.netId));
+            if(membershipRow!=g_host.enemies.end() && !membershipRow->second.dead && !membershipRow->second.removed &&
+               FindNativeEnemy(membershipCensus,membershipSpawn)==&membershipNative)++membershipMatches;
+        }
+        if(membershipMatches!=1)return false;
+    }
+    ClientClaimScope membershipAfter;
+    return ReadClientClaimScope(membershipAfter) && SameClientClaimScope(scope,membershipAfter) &&
+           CensusMatchesInstance(membershipCensus);
+}
 bool EnsureClientClaimScope() {
     // This precedes any old release/replay predicate. A new header generation
     // cannot publish while its FIFO ordered marker is still waiting to drain.
@@ -1524,6 +1559,10 @@ bool EnsureClientClaimScope() {
     if (!h.held && h.releasedRevision != g_clientManifestRevision) {
         h.held = true;
         LogClientClaim("rearm", "manifest-or-hp-changed");
+    }
+    if(!h.held && !ClientClaimNativeMembershipCurrent(h.scope)) {
+        h.held=true;
+        LogClientClaim("rearm","native-membership-changed");
     }
     return !h.poisoned && h.bound && !h.held;
 }
