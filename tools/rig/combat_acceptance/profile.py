@@ -20,6 +20,12 @@ ACTIONS = tuple([(f"friend_position_{i}", "friend", MOVE) for i in range(3)] +
 ENVIRONMENT = {"KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL":"0",
                "KH2COOP_COMBAT_CAUSAL_TRACE":"1"}
 MARKER = "VUH1503_PRACTICE_A_INPUTS_COMPLETE_EVIDENCE_PENDING"
+SAMPLE_BUDGET_NS = 3_000_000_000
+
+def adapter_contract():
+    """Serializable source-owned values; packet manifests must match exactly."""
+    return dict(sampleBudgetNs=SAMPLE_BUDGET_NS,
+                actions=[[name,role,list(argv)] for name,role,argv in ACTIONS])
 
 class Refused(RuntimeError): pass
 
@@ -34,6 +40,8 @@ def authorize(action, role, argv, history):
 class Profile:
     def __init__(self, adapter):
         self.a=adapter
+        need(getattr(adapter,'contract',None)==adapter_contract(),
+             'adapter sample/action contract differs from source profile')
         need(adapter.role in ('host','friend'), 'one local role required')
         need(adapter.protocol==17, 'protocol17 products required')
         need(all(adapter.environment.get(k)==v for k,v in ENVIRONMENT.items()),
@@ -61,7 +69,7 @@ class Profile:
     def sample(self, label):
         # One complete bracket retry ONLY for a fully authenticated intervening
         # native hit. Never retry an input, reanchor, or renew the read deadline.
-        end=min(self.end,self.a.clock_ns()+3_000_000_000)
+        end=min(self.end,self.a.clock_ns()+SAMPLE_BUDGET_NS)
         for attempt in range(2):
             self.check();row=self.a.sample(end)
             flags=[r['experimental'] for r in population.records(row['injectAfter'],'[ordinary-lifecycle] ') if 'experimental' in r]
@@ -140,9 +148,10 @@ class Profile:
             actual=output if self.a.role==role else ack['output']
             need(ack['action']==action and ack['role']!=self.a.role and actual.get('ok') is True,'peer input ACK missing')
             self.history.append(action)
+            self.a.action_acked(action,actual)
             if action.startswith('friend_position_'):self.moves.ack(action)
             if action in ('friend_claim','host_hit'):
-                self.a.passive_observe(min(self.end,self.a.clock_ns()+3_000_000_000))
+                self.a.passive_observe(min(self.end,self.a.clock_ns()+SAMPLE_BUDGET_NS))
             self.sample(action+':after')
         result=dict(schema='vuh1503-practice-a-result-v1',marker=MARKER,
             actions=self.history,acceptance=False,criteria={'1':'EVIDENCE_PENDING','2':'EVIDENCE_PENDING','3':'NOT_QUALIFIED'},

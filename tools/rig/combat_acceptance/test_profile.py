@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from . import profile as p, health
 class Adapter:
+    contract=p.adapter_contract()
     role='friend';protocol=17;environment=p.ENVIRONMENT.copy()
     owned={'pid':10,'creationTicks':100,'moduleBase':'0x100000','imageSha256':'a'*64}
     peer_owned={'pid':20,'creationTicks':200,'moduleBase':'0x100000','imageSha256':'a'*64}
@@ -22,7 +23,11 @@ class Adapter:
         gate();self.calls.append(('spawn',action));return {'ok':True}
     def passive_observe(self,end):self.calls.append(('passive',end))
     def original_identity(self):return self.owned
+    def action_acked(self,action,result):self.calls.append(('ack',action))
 class Controls(unittest.TestCase):
+    def test_legacy_adapter_contract_refuses(self):
+        a=Adapter();a.contract=dict(p.adapter_contract(),sampleBudgetNs=5_000_000_000)
+        with self.assertRaises(p.Refused):p.Profile(a)
     def test_default_off(self):
         a=Adapter();a.environment=dict(p.ENVIRONMENT,KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL='1')
         with self.assertRaises(p.Refused):p.Profile(a)

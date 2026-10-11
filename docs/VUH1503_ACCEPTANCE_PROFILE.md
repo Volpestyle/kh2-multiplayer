@@ -111,6 +111,9 @@ operator script. Its exact bytes must be pinned and reviewed before any GO.
 
 Required adapter members:
 
+- contract: exactly `profile.adapter_contract()`, generated from this source at
+  packet assembly. Both Profile and PacketAdapter refuse a mismatching budget or
+  action sequence before native I/O. Do not maintain another action/budget table.
 - role/run_id/protocol, exact game+runtime environment; owned and peer_owned
   ORIGINAL {pid,creationTicks,moduleBase,imageSha256}; authenticated
   runtime_session; ORIGINAL local encounter_started_ns (host warp preparation,
@@ -127,14 +130,36 @@ Required adapter members:
   final memory-only STOP/deadline, actual QPC stamp and single helper spawn;
   retain original helper identity/argv/ACK. No logging between final stamp and
   spawn. Cancellation must stop owned processes even if a callback fails.
+- action_acked(action,result): advance the adapter's source-ordered history only
+  after Profile validates the paired ACK. A local ACK requires its original
+  single dispatch attempt; failure never enables another attempt.
 - begin_paired_evidence(deadline_ns), passive_observe(end_ns): reads/media only;
   retain both endpoint native+canonical samples and game-only recording/QPC.
 - stop_owned_and_retain(): original Event first, existing owned game/job stop,
   media joins, original cleanup deadline; preserve errors/UNKNOWN for independent
   canonical inventory/descendant/job/port/protected-file closure.
 
+The source-owned projection is `adapter.PacketAdapter`. It reads the sample cap
+and action table directly from profile.py. Every bracket read and summary wait
+receives the SAME absolute deadline, capped by SAMPLE_BUDGET_NS and the original
+run deadline. The inherited diagnostic.sample five-second wait is not called.
+Dispatch calls the existing Driver diagnostic hooks directly, never the inherited
+Encounter.dispatch eight-action authorizer. The durable attempt precedes the
+final native gate; process_journal invokes the memory-only final QPC stamp at
+actual creation. Hook cleanup is unconditional and an attempted dispatch cannot
+repeat after gate failure, cancellation or ACK loss.
+
+`adapter.DriverCalls` supplies the actual Driver.call/avatarctl/read-log leaves.
+It refuses phase.child's unowned fixed-timeout fallback: the original installed
+Reclaim.child must own helpers. It temporarily narrows Driver.deadline by a QPC
+remaining-duration conversion, restoring the original budget afterwards; it
+never compares QPC and monotonic epochs. All other packet services (authenticated
+exchange, original read-only RAM/identity, media, retention, STOP and independent
+closure) remain required and must be bound/reviewed in the final sealed packet.
+Neither helper starts a process at import.
+
 Still required: actual coherent source-matched protocol17 native products;
-packet adapter projection and full actual bundled Setup/child/import replay;
+final packet service binding and full actual bundled Setup/child/import replay;
 independent review2 SAFE/lead adoption/new sealed packet; positively free PC2,
 standing availability consent/session/account/window and fresh PC1 gate; paired
 impact footage and closure; AC3 coverage solution separately. No old seal,
@@ -149,6 +174,7 @@ failure will stop rather than inherit practice's record-only disposition.
 python -m unittest discover -s tools/launcher -p test_friend_package.py
 python tools/packaging/test_product_protocol.py
 python -m unittest tools.rig.combat_acceptance.test_profile tools.rig.combat_acceptance.test_evidence
+python -m unittest tools.rig.combat_acceptance.test_adapter
 python -m tools.rig.combat_acceptance.retained_controls --evidence <retained-A> --output <outside-packet.json>
 ```
 
