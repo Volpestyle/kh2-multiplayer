@@ -17,6 +17,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'tools/launcher'))
 from friend_package import SUPPORTED_GAME, digest
+from product_protocol import validate_protocol_set, AVATAR_BRIDGE_VERSION
 
 FORBIDDEN_PARTS = {'site-packages', '__pycache__', 'ensurepip', 'idlelib', 'test', 'tests', 'demos', '.local', '.git', 'pip'}
 FORBIDDEN_SUFFIXES = {'.pyc', '.pyo', '.pdb', '.lib', '.exp', '.obj', '.log'}
@@ -112,11 +113,22 @@ def select_products(transport, selection):
     if transport not in ('steam','enet'):raise ValueError('Unknown package transport.')
     if transport == 'steam' and not selection:
         raise ValueError('Steam packaging requires --products with explicit reviewed Steam-capable product pins; release09 inputs are not reused.')
-    selected = json.loads((Path(selection) if selection else ROOT/'tools/packaging/friend-products.json').read_text())
+    selected = json.loads((Path(selection) if selection else ROOT/'tools/packaging/friend-products.json').read_text(encoding='utf-8-sig'))
     if transport == 'steam' and selected.get('transport') != 'steam':
         raise ValueError('Selected product receipt does not declare Steam transport.')
     if set(selected['products']) != {'dll','runtime','server','avatarctl'}:
         raise ValueError('Product selection must contain exactly DLL, runtime, server and avatarctl roles.')
+    header = (ROOT/'common/include/kh2coop/Protocol.hpp').read_text(encoding='utf-8-sig')
+    version = re.search(r'PROTOCOL_VERSION\s*=\s*(\d+)\s*;', header)
+    if not version:raise ValueError('Source protocol declaration unavailable.')
+    bridge_header = (ROOT/'common/include/kh2coop/AvatarBridge.hpp').read_text(encoding='utf-8-sig')
+    bridge = re.search(r'AVATAR_BRIDGE_VERSION\s*=\s*(\d+)\s*;', bridge_header)
+    if not bridge or int(bridge.group(1)) != AVATAR_BRIDGE_VERSION or selected.get('avatarBridgeVersion') != AVATAR_BRIDGE_VERSION:
+        raise ValueError('Selected AvatarBridge version differs from this source checkout.')
+    builds = {**selected['products'], 'cli':selected.get('cli', {})}
+    validate_protocol_set(selected.get('protocol'), builds)
+    if selected['protocol'] != int(version.group(1)):
+        raise ValueError('Selected product protocol differs from this source checkout.')
     return selected
 
 
@@ -139,8 +151,10 @@ def build(args):
         dest = 'bin/'+source.name; copy(source, dest); products[role]=dest
     cli = Path(args.cli).resolve()
     if digest(cli) != args.cli_sha256:raise ValueError('Private portable CLI hash mismatch')
+    if selected['cli']['sha256'] != args.cli_sha256 or (ROOT/selected['cli']['path']).resolve() != cli:
+        raise ValueError('CLI input differs from reviewed coherent product receipt.')
     copy(cli, 'bin/kh2ctl.exe'); products['cli']='bin/kh2ctl.exe'
-    for name in ('friend.py','friend_package.py','launcher.py','plan.py','windows_owned.py','steam_flow.py'):
+    for name in ('friend.py','friend_package.py','launcher.py','plan.py','windows_owned.py','steam_flow.py','product_protocol.py'):
         copy(ROOT/'tools/launcher'/name, 'tools/launcher/'+name)
     for name in ('python.exe','pythonw.exe','python3.dll','python311.dll','vcruntime140.dll','vcruntime140_1.dll'):
         copy(python/name, 'python/'+name)
@@ -165,8 +179,11 @@ def build(args):
     (output/'KH2COOP-PACKAGE').write_text('kh2coop-friend-package-v1\n',encoding='ascii')
     (output/'Start KH2 Co-op.cmd').write_text('@echo off\ncd /d "%~dp0"\n"%~dp0python\\pythonw.exe" -I -B "%~dp0tools\\launcher\\friend.py"\n',encoding='ascii')
     files={p.relative_to(output).as_posix():digest(p) for p in sorted(output.rglob('*')) if p.is_file()}
-    manifest={'schema':1,'name':'KH2 Co-op private friend preview','avatarBridgeVersion':3,'protocol':10,'defaultTransport':transport,
-              'gameBuild':'1.0.0.10-steam-global','content':'none','mod':'none',
+    product_builds = {role:{**{k:spec[k] for k in ('protocol','sourceRevision','buildId','sha256')}, 'path':products[role]}
+                      for role,spec in {**selected['products'],'cli':selected['cli']}.items()}
+    validate_protocol_set(selected['protocol'], product_builds, files)
+    manifest={'schema':1,'name':'KH2 Co-op private friend preview','avatarBridgeVersion':AVATAR_BRIDGE_VERSION,'protocol':selected['protocol'],'productBuilds':product_builds,'defaultTransport':transport,
+              'ordinaryLifecycleExperimental':False,'gameBuild':'1.0.0.10-steam-global','content':'none','mod':'none',
               'supportedGame':{'sha256':SUPPORTED_GAME,'fileVersion':'1.0.0.2','edition':'Steam Global'},
               'products':products,'files':files}
     (output/'package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')

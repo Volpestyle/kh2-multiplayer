@@ -1,0 +1,3 @@
+health.py -text whitespace=cr-at-eol
+preposition.py -text whitespace=cr-at-eol
+population.py -text whitespace=cr-at-eol

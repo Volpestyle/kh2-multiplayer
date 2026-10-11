@@ -11,6 +11,7 @@ import time
 import re
 
 from plan import steam_id
+from product_protocol import validate_protocol_set, AVATAR_BRIDGE_VERSION
 from steam_flow import AppIdFile, broker_error
 
 GAME_NAME = 'KINGDOM HEARTS II FINAL MIX.exe'
@@ -24,8 +25,8 @@ def digest(path):
 
 def verify_package(root):
     root = Path(root).resolve()
-    manifest = json.loads((root / 'package.json').read_text(encoding='utf-8'))
-    if manifest.get('schema') != 1 or manifest.get('avatarBridgeVersion') != 3:
+    manifest = json.loads((root / 'package.json').read_text(encoding='utf-8-sig'))
+    if manifest.get('schema') != 1 or manifest.get('avatarBridgeVersion') != AVATAR_BRIDGE_VERSION:
         raise ValueError('This package is incomplete or has incompatible components. Unpack a fresh copy.')
     if manifest.get('defaultTransport','enet') not in ('steam','enet'):
         raise ValueError('This package has an unknown connection mode. Unpack a fresh copy.')
@@ -39,6 +40,11 @@ def verify_package(root):
     for role, name in manifest['products'].items():
         if name not in manifest['files'] or not (root / name).is_file():
             raise ValueError(f'Missing verified {role} product.')
+    validate_protocol_set(manifest.get('protocol'), manifest.get('productBuilds', {}), manifest['files'])
+    if any(manifest['productBuilds'][role]['path'] != name for role,name in manifest['products'].items()):
+        raise ValueError('Product paths disagree with build receipts.')
+    if manifest.get('ordinaryLifecycleExperimental') is not False:
+        raise ValueError('This acceptance package must keep the ordinary lifecycle experiment OFF.')
     if manifest['supportedGame']['sha256'] != SUPPORTED_GAME:
         raise ValueError('Unsupported game allowlist in this package.')
     return manifest
@@ -65,6 +71,7 @@ def child_environment(root, *, steam_broker=False):
         raise ValueError('Steam broker opt-in must be explicit.')
     if steam_broker:
         env['KH2COOP_STEAM_BROKER'] = '1'
+    env['KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL'] = '0'
     env['SteamAppId'] = env['SteamGameId'] = '2552430'
     return env
 

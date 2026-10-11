@@ -34,9 +34,12 @@ class Safety(unittest.TestCase):
         self.products={r:'bin/'+r for r in ('cli','dll','runtime','server','avatarctl')}
         for name in self.products.values():
             p=self.root/name;p.parent.mkdir(exist_ok=True);p.write_bytes(b'fixture')
-        self.manifest={'schema':1,'avatarBridgeVersion':3,'products':self.products,
+        self.manifest={'schema':1,'avatarBridgeVersion':4,'products':self.products,
                        'files':{n:f.digest(self.root/n) for n in self.products.values()},
                        'supportedGame':{'sha256':f.SUPPORTED_GAME}}
+        self.manifest['ordinaryLifecycleExperimental']=False
+        self.manifest['protocol']=17
+        self.manifest['productBuilds']={r:dict(protocol=17,sourceRevision='a'*40,buildId='fixture',path=n,sha256=f.digest(self.root/n)) for r,n in self.products.items()}
         self.save_manifest();self.win=Win();self.calls=[]
     def save_manifest(self):(self.root/'package.json').write_text(json.dumps(self.manifest))
     def owner(self,command=None):return f.GameOwner(self.root,self.manifest,self.win,command or self.command)
@@ -50,9 +53,18 @@ class Safety(unittest.TestCase):
         f.verify_package(self.root)
         self.manifest['avatarBridgeVersion']=2;self.save_manifest()
         with self.assertRaises(ValueError):f.verify_package(self.root)
-        self.manifest['avatarBridgeVersion']=3;self.save_manifest()
+        self.manifest['avatarBridgeVersion']=4;self.save_manifest()
         (self.root/'bin/dll').write_bytes(b'wrong')
         with self.assertRaises(ValueError):f.verify_package(self.root)
+    def test_mixed_protocol_build_and_experiment_refused(self):
+        self.manifest['productBuilds']['runtime']['protocol']=16;self.save_manifest()
+        with self.assertRaisesRegex(ValueError,'Mixed protocols'):f.verify_package(self.root)
+        self.manifest['productBuilds']['runtime']['protocol']=17
+        self.manifest['ordinaryLifecycleExperimental']=True;self.save_manifest()
+        with self.assertRaisesRegex(ValueError,'experiment OFF'):f.verify_package(self.root)
+    def test_build_receipt_cannot_name_other_product_bytes(self):
+        self.manifest['productBuilds']['runtime']['sha256']='a'*64;self.save_manifest()
+        with self.assertRaisesRegex(ValueError,'hash disagrees'):f.verify_package(self.root)
     def test_escape_path_refused(self):
         self.manifest['files']['../outside']='bad';self.save_manifest()
         with self.assertRaises(ValueError):f.verify_package(self.root)

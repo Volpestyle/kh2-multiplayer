@@ -1,0 +1,90 @@
+{
+  "schema": "vuh1503-practice-a-v1",
+  "protocol": 17,
+  "environment": {
+    "KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL": "0",
+    "KH2COOP_COMBAT_CAUSAL_TRACE": "1"
+  },
+  "encounterSeconds": 90,
+  "passiveObservationSeconds": 3,
+  "start": {
+    "friendPosition": [
+      -64.36,
+      -260,
+      1950
+    ],
+    "radius": 30,
+    "yaw": 3.141592653589793,
+    "yawTolerance": 0.05
+  },
+  "actions": [
+    {
+      "id": "friend_position_0",
+      "role": "friend",
+      "argv": [
+        "player-input",
+        "--ly",
+        "1",
+        "--duration-ms",
+        "900"
+      ]
+    },
+    {
+      "id": "friend_position_1",
+      "role": "friend",
+      "argv": [
+        "player-input",
+        "--ly",
+        "1",
+        "--duration-ms",
+        "900"
+      ]
+    },
+    {
+      "id": "friend_position_2",
+      "role": "friend",
+      "argv": [
+        "player-input",
+        "--ly",
+        "1",
+        "--duration-ms",
+        "900"
+      ]
+    },
+    {
+      "id": "host_activate_0",
+      "role": "host",
+      "argv": [
+        "player-input",
+        "--ly",
+        "1",
+        "--duration-ms",
+        "900"
+      ]
+    },
+    {
+      "id": "friend_claim",
+      "role": "friend",
+      "argv": [
+        "player-press",
+        "--button",
+        "cross",
+        "--duration-ms",
+        "80"
+      ]
+    },
+    {
+      "id": "host_hit",
+      "role": "host",
+      "argv": [
+        "player-press",
+        "--button",
+        "cross",
+        "--duration-ms",
+        "80"
+      ]
+    }
+  ],
+  "setup": "existing reviewed host-only BC warp and product follower, no HP/party/save writes",
+  "terminal": "VUH1503_PRACTICE_A_INPUTS_COMPLETE_EVIDENCE_PENDING"
+}
