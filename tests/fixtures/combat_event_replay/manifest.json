@@ -1,0 +1,16 @@
+{
+  "sourceCommit": "2725ff71b6c70701c266bc6c7c2442d7c4487258",
+  "run": "practice-activation-first-A-20261010-01",
+  "files": {
+    "host": {
+      "source": "inject-0.log",
+      "bytes": 188646,
+      "sha256": "b86a2efff854d76a0855c3f6f005437edf453c837d7478525a4dc0b359fa4b8a"
+    },
+    "client": {
+      "source": "inject-1.log",
+      "bytes": 353015,
+      "sha256": "29a74b33db83522f943a62bdbe8defd3ffd08917b2a2d78a1090d4c27fbc5377"
+    }
+  }
+}

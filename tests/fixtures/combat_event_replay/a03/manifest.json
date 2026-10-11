@@ -1,0 +1,17 @@
+{
+  "run": "acceptance-runner-rehearsal-A-03",
+  "originalAcceptance": false,
+  "coverageQualified": false,
+  "files": {
+    "host": {
+      "sha256": "ccec116019c88266ad8b62f1f14cee026bab56b30bfc7124329208c8af176a3a",
+      "bytes": 367726,
+      "original": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\acceptance-runner-rehearsal-A-03\\inject-0.log"
+    },
+    "client": {
+      "sha256": "a0f5c07af47a82a38761810d58e991788a4aa0d8dbfa812c10a6182106e5d510",
+      "bytes": 744053,
+      "original": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\rig-operator\\acceptance-runner-rehearsal-A-03\\inject-1.log"
+    }
+  }
+}
