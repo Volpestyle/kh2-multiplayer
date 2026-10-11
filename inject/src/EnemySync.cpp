@@ -1848,12 +1848,12 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                 break;
             }
         }
-        if (refilled) {
+        if (refilled && s.lastHp>0) {
             // A metadata replacement at the SAME still-listed actor is not a
             // living membership removal. Outside the certified BC room, keep
             // the existing fresh-root replacement publication contract. The
             // old sampled identity is superseded locally, never a death/kill.
-            const bool metadataReplaced = !OrdinaryLifecycleRoom() && !g_populationRequested &&
+            const bool metadataReplaced = !OrdinaryLifecycleRoom() &&
                 std::any_of(g_inst.spawns.begin(),g_inst.spawns.end(),[&](const Spawn& t) {
                     return t.spawnIndex>s.spawnIndex && t.present && t.announced &&
                         t.actor==s.actor && t.objectId==s.objectId && SamePoint(t.spawnPos,s.spawnPos) &&
@@ -1864,10 +1864,12 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                 SYNC_LOG("[enemysync] host: metadata identity superseded spawn=%u killCredit=0",s.spawnIndex);
                 continue;
             }
-            // No certified membership lifecycle outside the bounded BC room.
-            // Neither silently invent deathSent nor turn live removal into a kill.
-            SYNC_LOG("[enemysync] host: unqualified refill held spawn=%u killCredit=0",s.spawnIndex);
-            return false;
+            // Unsupported living removal holds ONLY this historical row. Keep
+            // publishing other current bodies; do not invent a death, remote
+            // retirement, or permission to relabel a still-live client body.
+            // Schema-1 repair still requires its own complete certificate.
+            if(frame%120==0)SYNC_LOG("[enemysync] host: unqualified refill row held spawn=%u killCredit=0",s.spawnIndex);
+            continue;
         } else if (s.lastHp <= 0 || now - s.goneSinceMs > DESPAWN_GRACE_MS) {
             EnemyDeath d;
             d.epoch = g_epoch;

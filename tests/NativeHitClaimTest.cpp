@@ -2032,6 +2032,36 @@ void TestCombatCausalBoundaries() {
     Check(populationManifest&&HasHp(1,20)&&populationMotion&&!OrdinaryCut(),
           "BC population-enabled manifest HP and motion still publish without schema2 retirement");
     g_populationRequested=false;g_mirrorRequested=false;
+    for(unsigned refillCase=0;refillCase<3;++refillCase) {
+        Reset();cc::enabled.store(false);
+        const auto refillActor=enemy+0x4000;
+        const auto refillStatus=status+0x400;
+        if(refillCase==1) {Put(status,std::int32_t{0});g_inst.spawns[0].lastHp=0;}
+        // Independent allocation with the same native spawn point; never reuse
+        // a client live binding. The metadata case keeps actor, changes status.
+        const auto listedRefill=refillCase==2?enemy:refillActor;
+        std::memcpy(reinterpret_cast<void*>(listedRefill),reinterpret_cast<void*>(enemy),0x1000);
+        Put(listedRefill+ACTOR_STATUS,refillStatus);
+        Put(refillStatus,std::int32_t{1000});Put(refillStatus+4,std::int32_t{1000});
+        Put(listedRefill+offsets::actor::LINKED_NEXT_HANDLE,std::uint32_t{0});
+        Put(player+offsets::actor::LINKED_NEXT_HANDLE,static_cast<std::uint32_t>(listedRefill&offsets::active_entity_list::HANDLE_LOW_MASK));
+        Put(image+offsets::active_entity_list::TAIL,listedRefill);
+        if(refillCase==2)g_populationRequested=true;
+        const auto refillCensus=CaptureNativeCensus();const auto refillFresh=TrackSpawns(refillCensus);
+        Check(refillFresh.size()==1&&HostFrame(120,refillFresh,refillCensus)&&HasHp(2,1000),
+              "outside ordinary lifecycle different-allocation living/dead or population metadata refill cannot freeze HP publication");
+        bool refillDeath=false;
+        for(const auto& refillPacket:g_bridge.outgoing) {
+            const std::uint8_t* refillPayload=nullptr;std::size_t refillSize=0;
+            if(decodePacketHeader(refillPacket.data(),refillPacket.size(),refillPayload,refillSize)==PacketType::EnemyDeath) {
+                ByteReader refillReader(refillPayload,refillSize);EnemyDeath refillMessage;read(refillReader,refillMessage);
+                refillDeath=refillDeath||refillMessage.netId==1;
+            }
+        }
+        Check(refillDeath==(refillCase==1)&&g_inst.spawns[0].deathSent==(refillCase==1),
+              "only previously native-zero refill original publishes death; living or metadata replacement never fabricates kill");
+        g_populationRequested=false;
+    }
     for(unsigned delayedCase=0;delayedCase<5;++delayedCase) {
         prepare(false,true);
         const auto bootstrapCut=*OrdinaryCut();
