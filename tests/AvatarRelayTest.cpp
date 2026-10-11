@@ -22,6 +22,7 @@
 #include "kh2coop/SessionHost.hpp"
 
 #include <enet/enet.h>
+#include "AvatarConditionedTransport.hpp"
 
 #include <array>
 #include <chrono>
@@ -488,7 +489,7 @@ void testEndToEnd() {
     cfg.contentHash = "avatar-content";
     cfg.modHash = "avatar-mod";
     cfg.sessionId = "avatar-test";
-    SessionHost host(cfg, {});
+    SessionHost host(cfg, {}, std::make_unique<AvatarConditionedTransport>());
     check(host.start(), "relay starts");
 
     struct Viewer {
@@ -532,7 +533,8 @@ void testEndToEnd() {
         clients[i] = std::make_unique<NetworkClient>(
             "127.0.0.1", kPort, cfg.gameBuild, cfg.modHash,
             "avatar_" + std::to_string(i), static_cast<SlotType>(i), std::move(cb),
-            RuntimeMode::CampaignCoop, cfg.contentHash);
+            RuntimeMode::CampaignCoop, cfg.contentHash, PROTOCOL_VERSION, std::string{},
+            std::make_unique<AvatarConditionedTransport>());
         const LinkConditions link {50, 10, 0.02f, static_cast<std::uint32_t>(11 + i)};
         clients[i]->setLinkConditions(link, LinkConditions {50, 10, 0.02f,
                                       static_cast<std::uint32_t>(21 + i)});
