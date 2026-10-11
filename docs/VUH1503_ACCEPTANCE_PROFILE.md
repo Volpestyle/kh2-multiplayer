@@ -72,7 +72,7 @@ pre-activation gates from practice A. The population oracle's activation trigger
 now requires full admission if EITHER native endpoint has an enemy, either log
 prefix has an original admission receipt, or the oracle has already anchored.
 Local, peer and final gates share that rule. Its five-body Admission implementation
-is byte-identical; it still refuses a partial set rather than accommodating it.
+retains every native/root/scope/five-body predicate; its freshness predicate additionally verifies the immutable gap-summary proof below. It still refuses a partial set.
 Original/current source hashes and the narrow delta are retained
 in practice-provenance.json. It does not import the evolving practice runner or
 its absolute developer paths. The copied population module's legacy ACTIONS
@@ -98,7 +98,7 @@ the precise HP delta. Identity replacement, unreadable/low HP or persistent
 skew stops. No input retry. An ACK is mailbox delivery, not damage.
 
 Paired evidence begins without a new recording-live input barrier. The two
-Cross turns each have a passive observation window <=3s, within the ORIGINAL
+Cross turns each have a passive observation window <=0.25s, within the ORIGINAL
 90s encounter deadline and original JOIN600/cleanup reserve. Nothing renews
 these budgets. HP safety can terminate observation at any time. No extra
 attacks are allowed to manufacture a kill or an incoming hit.
@@ -201,3 +201,38 @@ leaves in orchestration controls are standins; there is no native build, wire
 compatibility, paired renderer or live acceptance qualification from them.
 
 Final local validation:26 launcher tests +6 packaging tests +11 profile/evidence tests PASS;5 retained-A checks PASS. No full ctest requested or run. Independent review2 disposition remains pending.
+
+## Rehearsal A-01/A-02 runner corrections (unadopted)
+
+Acquisition returns the first complete bracket with a qualified fresh summary,
+not at the 3s ceiling. When a summary arrives between calls/brackets, the source
+retains and recomputes `source-summary-gap-v1` against the immutable prior log
+prefix, ownerFrame, original identities, runtime prefix, five typed admissions
+and their original scope. The returned native bracket is newly read; no old
+sample is reused and no admission is reset. Loss, retirement, nonadmission,
+replaced prefixes or scope still refuse. Every child/read/wait shares the
+original 3s cap. Empty preactivation brackets return immediately to native gates.
+The separate passive post-Cross settle is 0.25s; it does not renew any budget.
+
+`start.Settle` is A-specific: canonical Sora and its authenticated native Donald
+peer body (not B's two-Sora recipe), unchanged original roots/runtime/world/load,
+empty population, safe HP, fixed host [0,-260,1950] and friend [-64.36,-260,1950]
+corridors (30 units), yaw pi +/-0.05, and <=1 unit observed endpoint drift.
+Both peers need at least two fresh brackets spanning >=0.25s inside one local
+3s settle cap and original 90s. No fixed sleep, pose write or corridor re-anchor.
+A paired fresh check runs inside the first active dispatch callback after media;
+the active side then rereads its own full native gate after that blocking
+exchange. Drift yields HOLD with zero inputs. These are observed endpoints,
+not continuous physics stability or a future guarantee; peer QPC epochs are
+never subtracted. Existing original ownership/STOP/HP/source admission gates
+remain hard. If this strict settle cannot qualify within its budget, it holds.
+
+Local services must use `failure.run_with_evidence(adapter)` and serialize
+`failure.failure_record(error)` in their terminal result. Both retain the whole
+canonical HealthRefusal evidence object (original pointers, status, identities,
+HP, flags and disagreements), not just a reason string. CLI profile.main uses
+the same wrapper. Historical A-01/A-02 reports are unchanged: A-02 was five ACKs
+then correct HP8 STOP, not an acceptance PASS. A frozen local-services projection
+and new handoff are outside the packet; its PROFILE path still needs binding to
+this committed source by Steam, followed by the normal offline service/Setup
+replay and review3. No live attempt, product change or AC3 change is authorized.

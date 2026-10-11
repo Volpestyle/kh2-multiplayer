@@ -10,7 +10,8 @@ import importlib
 import json
 import time
 from pathlib import Path
-from . import health, preposition, population
+from . import health, preposition, population, start
+from .failure import failure_record
 
 MOVE = population.MOVE
 CROSS = population.CROSS
@@ -21,10 +22,11 @@ ENVIRONMENT = {"KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL":"0",
                "KH2COOP_COMBAT_CAUSAL_TRACE":"1"}
 MARKER = "VUH1503_PRACTICE_A_INPUTS_COMPLETE_EVIDENCE_PENDING"
 SAMPLE_BUDGET_NS = 3_000_000_000
+PASSIVE_OBSERVATION_NS = 250_000_000
 
 def adapter_contract():
     """Serializable source-owned values; packet manifests must match exactly."""
-    return dict(sampleBudgetNs=SAMPLE_BUDGET_NS,
+    return dict(sampleBudgetNs=SAMPLE_BUDGET_NS,passiveObservationNs=PASSIVE_OBSERVATION_NS,
                 actions=[[name,role,list(argv)] for name,role,argv in ACTIONS])
 
 class Refused(RuntimeError): pass
@@ -63,13 +65,17 @@ class Profile:
 
     def canonical(self):
         self.check()
-        return self.guard.read(self.a.ram,self.owned,self.a.original_identity,
-                               clock=self.a.clock_ns,stage='acceptance')
+        try:
+            return self.guard.read(self.a.ram,self.owned,self.a.original_identity,
+                                   clock=self.a.clock_ns,stage='acceptance')
+        except health.HealthRefusal as error:
+            self.a.retain('canonical-health-refusal',failure_record(error))
+            raise
 
-    def sample(self, label):
+    def sample(self, label, deadline_ns=None):
         # One complete bracket retry ONLY for a fully authenticated intervening
         # native hit. Never retry an input, reanchor, or renew the read deadline.
-        end=min(self.end,self.a.clock_ns()+SAMPLE_BUDGET_NS)
+        end=min(self.end,self.a.clock_ns()+SAMPLE_BUDGET_NS,deadline_ns if deadline_ns is not None else self.end)
         for attempt in range(2):
             self.check();row=self.a.sample(end)
             flags=[r['experimental'] for r in population.records(row['injectAfter'],'[ordinary-lifecycle] ') if 'experimental' in r]
@@ -111,12 +117,35 @@ class Profile:
             value['admission']=self.admission_for(action,sample,self.population,self.a.clock_ns())
         return value
 
+    def settle_start(self):
+        # Each peer validates chronology in its OWN QPC domain. One local cap
+        # bounds acquisition plus exchanges; it never renews the encounter.
+        end=min(self.end,self.a.clock_ns()+start.SETTLE_BUDGET_NS)
+        other='friend' if self.a.role=='host' else 'host'
+        self.start_local=start.Settle(self.a.role,self.owned,self.runtime_session)
+        self.start_peer=start.Settle(other,self.peer_owned,self.runtime_session)
+        for i in range(64):
+            self.check();need(self.a.clock_ns()<end,'HOLD A start: settle deadline expired')
+            local=self.sample('start-settle-'+str(i),end)
+            local_proof=self.start_local.observe(local)
+            peer=self.a.exchange('start-settle-'+str(i),local,end)
+            peer_proof=self.start_peer.observe(peer)
+            self.a.retain('start-settle-proof',dict(local=local_proof,peer=peer_proof,deadlineNs=end))
+            need(self.a.clock_ns()<=end,'HOLD A start: paired settle deadline expired')
+            if local_proof['ready'] and peer_proof['ready']:return
+        raise Refused('HOLD A start: bounded observation exhausted; zero input')
+
+    def first_dispatch_pair(self,local):
+        # Called by the active role INSIDE the final dispatch callback (after
+        # blocking media), and by the passive role before waiting for the ACK.
+        proof=self.start_local.observe(local,final=True)
+        peer=self.a.exchange('start-first-dispatch',local,self.end)
+        peer_proof=self.start_peer.observe(peer,final=True)
+        self.a.retain('start-first-dispatch-proof',dict(local=proof,peer=peer_proof))
+        self.check()
+
     def run(self):
-        initial=self.sample('initial-start')
-        if self.a.role=='friend':preposition.proven_a_start(initial['sample'],initial['canonical'])
-        peer=self.a.exchange('initial-start',initial,self.end)
-        need(peer['role']!=self.a.role and peer['sample']['ownedBefore']==peer['sample']['ownedAfter']==peer['canonical']['session']==self.peer_owned,'original peer identity mismatch')
-        if self.a.role=='host':preposition.proven_a_start(peer['sample'],peer['canonical'])
+        self.settle_start()
         # Existing packet already established one host warp/product follower.
         # Start evidence recording, not an input barrier. Missing media never
         # authorizes another attack and cannot qualify AC2 afterwards.
@@ -142,7 +171,10 @@ class Profile:
                 need(not self.issuing,'dispatch is single-use')
                 self.issuing=True
                 def final_gate():
-                    self.gate(action)
+                    fresh=self.gate(action)
+                    if action==ACTIONS[0][0]:
+                        self.first_dispatch_pair(fresh)
+                        self.start_local.observe(self.gate(action),final=True) # After the blocking peer exchange.
                     self.canonical() # original actor/status and HP>12, last native read
                     self.check()
                 # Packet must call final_gate AFTER all blocking transport/media
@@ -150,6 +182,8 @@ class Profile:
                 output=self.a.dispatch_once(action,argv,final_gate,self.end)
                 need(output.get('ok') is True,'input ACK missing; never repeat')
                 self.issuing=False
+            elif action==ACTIONS[0][0]:
+                self.first_dispatch_pair(self.gate(action))
             ack=self.a.exchange(action+':ack',dict(role=self.a.role,action=action,output=output),self.end)
             actual=output if self.a.role==role else ack['output']
             need(ack['action']==action and ack['role']!=self.a.role and actual.get('ok') is True,'peer input ACK missing')
@@ -157,7 +191,7 @@ class Profile:
             self.a.action_acked(action,actual)
             if action.startswith('friend_position_'):self.moves.ack(action)
             if action in ('friend_claim','host_hit'):
-                self.a.passive_observe(min(self.end,self.a.clock_ns()+SAMPLE_BUDGET_NS))
+                self.a.passive_observe(min(self.end,self.a.clock_ns()+PASSIVE_OBSERVATION_NS))
             self.sample(action+':after')
         result=dict(schema='vuh1503-practice-a-result-v1',marker=MARKER,
             actions=self.history,acceptance=False,criteria={'1':'EVIDENCE_PENDING','2':'EVIDENCE_PENDING','3':'NOT_QUALIFIED'},
@@ -172,7 +206,8 @@ def main(argv=None):
     p.add_argument('--config',required=True,type=Path)
     a=p.parse_args(argv)
     adapter=importlib.import_module(a.adapter).create_adapter(a.role,a.config)
-    try:return Profile(adapter).run()
+    from .failure import run_with_evidence
+    try:return run_with_evidence(adapter)
     finally:adapter.stop_owned_and_retain() # original cancellation/cleanup budget, no retry
 
 if __name__=='__main__':main()

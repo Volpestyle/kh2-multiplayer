@@ -1,0 +1,1771 @@
+{
+  "host": {
+    "sample": {
+      "readStartedNs": 810583919433200,
+      "injectBefore": "[ordinary-lifecycle] experimental=0 hostRemovalLifetimeWitness=0\n[load-cause] seq=1 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=1 transition=0 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=05/01 door=99 map=0 btl=0 evt=20\n[warp] load complete serial=1 transition=0 room=05/01 door=99 map=0 btl=0 evt=20\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=54 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=114 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=174 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=234 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=294 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=353 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=413 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=473 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=533 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=593 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=653 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=713 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=773 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=833 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=893 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=953 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1013 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1073 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1133 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1193 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1253 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1313 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1373 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1433 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1493 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1553 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1613 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1673 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1733 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1793 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1853 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1913 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1973 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2033 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2093 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2153 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2213 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2274 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2334 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2394 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2454 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2515 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2575 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2635 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2695 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=2 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=2 transition=1 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[warp] load complete serial=2 transition=1 room=04/1A door=0 map=0 btl=0 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2727 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2788 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2848 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2908 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2968 ownerAvailable=1 generation=2 delivery=1 connection=1 epoch=1 load=2 transition=1 role=1 slot=0 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=3 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=3 transition=2 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=05/06 door=0 map=1 btl=1 evt=0\n[warp] load complete serial=3 transition=2 room=05/06 door=0 map=1 btl=1 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=3028 ownerAvailable=1 generation=2 delivery=1 connection=1 epoch=2 load=3 transition=2 role=1 slot=0 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=3089 ownerAvailable=1 generation=2 delivery=1 connection=1 epoch=2 load=3 transition=2 role=1 slot=0 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n",
+      "runtimeBefore": "[runtime-identity] schema=1 seq=1 stage=initial-connect-attempted observationClock=runtime-steady-ms observationMs=810579650 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=2 stage=recovery-state observationClock=runtime-steady-ms observationMs=810579651 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=3 stage=bridge-open-bound observationClock=runtime-steady-ms observationMs=810579652 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=392320 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=4 stage=transport-connected observationClock=runtime-steady-ms observationMs=810579657 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=392320 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=5 stage=recovery-state observationClock=runtime-steady-ms observationMs=810579669 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=392320 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=6 stage=world-reset observationClock=runtime-steady-ms observationMs=810579675 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=7 stage=roster-admitted observationClock=runtime-steady-ms observationMs=810579675 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=8 stage=world-binding observationClock=runtime-steady-ms observationMs=810579676 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=9 stage=recovery-state observationClock=runtime-steady-ms observationMs=810579686 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=10 stage=roster-admitted observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=392320 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n",
+      "ownedBefore": {
+        "pid": 392320,
+        "creationTicks": 134361761201434067,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "peekBefore": {
+        "ok": true,
+        "processId": 392320,
+        "moduleBase": "0x7FF64DF30000",
+        "samples": [
+          {
+            "t": 0,
+            "0x717008": 5,
+            "0x717009": 6,
+            "0x71700A": 0,
+            "0x71700C": 1,
+            "0x71700E": 1,
+            "0x717010": 0,
+            "0xB65210": 0,
+            "0x2A11478": "0x0",
+            "0x2A171E8": 0,
+            "0x9BA8D0": 1,
+            "0x7435D0": 255,
+            "0xABB878": 0
+          }
+        ]
+      },
+      "stateBefore": {
+        "ok": true,
+        "attached": true,
+        "processId": 392320,
+        "atTitleOrLoading": false,
+        "room": {
+          "worldId": 5,
+          "roomId": 6,
+          "mapProgram": 1,
+          "battleProgram": 1,
+          "eventProgram": 0,
+          "inTransition": false,
+          "inCutscene": false
+        },
+        "actors": {
+          "player": {
+            "actorId": 0,
+            "slot": 0,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 24,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend1": {
+            "actorId": 1,
+            "slot": 1,
+            "position": {
+              "x": -64.2659,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 0,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend2": {
+            "actorId": 2,
+            "slot": 2,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 1320670800,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          }
+        },
+        "enemies": []
+      },
+      "entitiesBefore": {
+        "ok": true,
+        "processId": 392320,
+        "world": 5,
+        "room": 6,
+        "actors": [
+          {
+            "address": "0x7FF65044B820",
+            "name": "P_EX100",
+            "objectId": 84,
+            "objectType": 0,
+            "team": 1,
+            "moveState": 2,
+            "motionId": 0,
+            "status": "0x7FF650953598",
+            "hp": 24,
+            "maxHp": 24,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF6504782B0",
+            "name": "P_EX030",
+            "objectId": 93,
+            "objectType": 1,
+            "team": 1,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF6509530A8",
+            "hp": 28,
+            "maxHp": 28,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            }
+          },
+          {
+            "address": "0x7FF650466540",
+            "name": "P_EX020",
+            "objectId": 92,
+            "objectType": 1,
+            "team": 0,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF650953320",
+            "hp": 18,
+            "maxHp": 18,
+            "position": {
+              "x": -64.2932,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF65043ADC0",
+            "name": "PRIZE",
+            "objectId": 1475,
+            "objectType": 22,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF65048DB70",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 2930,
+              "y": 3.50296e-05,
+              "z": 1000
+            }
+          },
+          {
+            "address": "0x7FF65048C590",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": -2935,
+              "y": 0.000109932,
+              "z": -1700
+            }
+          },
+          {
+            "address": "0x7FF65048AFB0",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 305,
+              "y": -0.999955,
+              "z": -1590
+            }
+          },
+          {
+            "address": "0x7FF650489700",
+            "name": "W_EX030",
+            "objectId": 109,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF650476C30",
+            "name": "W_EX020",
+            "objectId": 108,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF6504643B0",
+            "name": "W_EX010",
+            "objectId": 103,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          }
+        ]
+      },
+      "avatarObserve": {
+        "ok": true,
+        "schema": 1,
+        "command": "observe",
+        "processId": 392320,
+        "readOnly": true,
+        "atomicAcrossBridges": false,
+        "avatarBridgeVersion": 4,
+        "worldBridgeVersion": 12,
+        "samples": [
+          {
+            "index": 0,
+            "beginMonotonicMs": 810584170,
+            "endMonotonicMs": 810584170,
+            "worldMappingAvailable": true,
+            "avatarMappingAvailable": true,
+            "identityStable": true,
+            "complete": true,
+            "worldBefore": {
+              "localSlot": 0,
+              "generation": 2,
+              "deliverySerial": 1,
+              "authorityMode": 2,
+              "connectionIds": [
+                1,
+                2,
+                0
+              ],
+              "peerDeliverySerials": [
+                1,
+                1,
+                0
+              ]
+            },
+            "worldAfter": {
+              "localSlot": 0,
+              "generation": 2,
+              "deliverySerial": 1,
+              "authorityMode": 2,
+              "connectionIds": [
+                1,
+                2,
+                0
+              ],
+              "peerDeliverySerials": [
+                1,
+                1,
+                0
+              ]
+            },
+            "localReadAvailable": true,
+            "local": {
+              "seq": 3145,
+              "serverTimeMs": 0,
+              "ownerSlot": 0,
+              "character": 0,
+              "colorVariant": 0,
+              "worldId": 5,
+              "roomId": 6,
+              "finite": true,
+              "position": [
+                22.482851,
+                -260,
+                1950
+              ],
+              "rotationY": 3.14159274,
+              "velocity": [
+                0,
+                0,
+                0
+              ],
+              "motionId": 0,
+              "motionTime": 118,
+              "motionSpeed": 1,
+              "flags": 0,
+              "hp": 24,
+              "maxHp": 24,
+              "mp": 0,
+              "maxMp": 0
+            },
+            "puppets": [
+              {
+                "index": 0,
+                "readAvailable": true,
+                "value": {
+                  "active": 1,
+                  "provenanceMatchesWorld": true,
+                  "provenance": {
+                    "producer": 2,
+                    "localSlot": 0,
+                    "generation": 2,
+                    "ownerConnectionId": 2,
+                    "localConnectionId": 1,
+                    "hostConnectionId": 1
+                  },
+                  "pose": {
+                    "seq": 115,
+                    "serverTimeMs": 810584080,
+                    "ownerSlot": 1,
+                    "character": 0,
+                    "colorVariant": 0,
+                    "worldId": 5,
+                    "roomId": 6,
+                    "finite": true,
+                    "position": [
+                      -64.2932053,
+                      -260,
+                      1950
+                    ],
+                    "rotationY": 3.14159274,
+                    "velocity": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "motionId": 0,
+                    "motionTime": 21.75,
+                    "motionSpeed": 1,
+                    "flags": 0,
+                    "hp": 24,
+                    "maxHp": 24,
+                    "mp": 0,
+                    "maxMp": 0
+                  }
+                }
+              },
+              {
+                "index": 1,
+                "readAvailable": true,
+                "value": {
+                  "active": 0,
+                  "provenanceMatchesWorld": false,
+                  "provenance": {
+                    "producer": 2,
+                    "localSlot": 0,
+                    "generation": 2,
+                    "ownerConnectionId": 0,
+                    "localConnectionId": 1,
+                    "hostConnectionId": 1
+                  },
+                  "pose": {
+                    "seq": 0,
+                    "serverTimeMs": 0,
+                    "ownerSlot": 0,
+                    "character": 0,
+                    "colorVariant": 0,
+                    "worldId": 0,
+                    "roomId": 0,
+                    "finite": true,
+                    "position": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "rotationY": 0,
+                    "velocity": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "motionId": 0,
+                    "motionTime": 0,
+                    "motionSpeed": 1,
+                    "flags": 0,
+                    "hp": 0,
+                    "maxHp": 0,
+                    "mp": 0,
+                    "maxMp": 0
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "stateAfter": {
+        "ok": true,
+        "attached": true,
+        "processId": 392320,
+        "atTitleOrLoading": false,
+        "room": {
+          "worldId": 5,
+          "roomId": 6,
+          "mapProgram": 1,
+          "battleProgram": 1,
+          "eventProgram": 0,
+          "inTransition": false,
+          "inCutscene": false
+        },
+        "actors": {
+          "player": {
+            "actorId": 0,
+            "slot": 0,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 24,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend1": {
+            "actorId": 1,
+            "slot": 1,
+            "position": {
+              "x": -64.2932,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 0,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend2": {
+            "actorId": 2,
+            "slot": 2,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 1320670800,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          }
+        },
+        "enemies": []
+      },
+      "entitiesAfter": {
+        "ok": true,
+        "processId": 392320,
+        "world": 5,
+        "room": 6,
+        "actors": [
+          {
+            "address": "0x7FF65044B820",
+            "name": "P_EX100",
+            "objectId": 84,
+            "objectType": 0,
+            "team": 1,
+            "moveState": 2,
+            "motionId": 0,
+            "status": "0x7FF650953598",
+            "hp": 24,
+            "maxHp": 24,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF6504782B0",
+            "name": "P_EX030",
+            "objectId": 93,
+            "objectType": 1,
+            "team": 1,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF6509530A8",
+            "hp": 28,
+            "maxHp": 28,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            }
+          },
+          {
+            "address": "0x7FF650466540",
+            "name": "P_EX020",
+            "objectId": 92,
+            "objectType": 1,
+            "team": 0,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF650953320",
+            "hp": 18,
+            "maxHp": 18,
+            "position": {
+              "x": -64.2932,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF65043ADC0",
+            "name": "PRIZE",
+            "objectId": 1475,
+            "objectType": 22,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF65048DB70",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 2930,
+              "y": 3.50296e-05,
+              "z": 1000
+            }
+          },
+          {
+            "address": "0x7FF65048C590",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": -2935,
+              "y": 0.000109932,
+              "z": -1700
+            }
+          },
+          {
+            "address": "0x7FF65048AFB0",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 305,
+              "y": -0.999955,
+              "z": -1590
+            }
+          },
+          {
+            "address": "0x7FF650489700",
+            "name": "W_EX030",
+            "objectId": 109,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF650476C30",
+            "name": "W_EX020",
+            "objectId": 108,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF6504643B0",
+            "name": "W_EX010",
+            "objectId": 103,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          }
+        ]
+      },
+      "peekAfter": {
+        "ok": true,
+        "processId": 392320,
+        "moduleBase": "0x7FF64DF30000",
+        "samples": [
+          {
+            "t": 0,
+            "0x717008": 5,
+            "0x717009": 6,
+            "0x71700A": 0,
+            "0x71700C": 1,
+            "0x71700E": 1,
+            "0x717010": 0,
+            "0xB65210": 0,
+            "0x2A11478": "0x0",
+            "0x2A171E8": 0,
+            "0x9BA8D0": 1,
+            "0x7435D0": 255,
+            "0xABB878": 0
+          }
+        ]
+      },
+      "readFinishedNs": 810584360370900,
+      "injectAfter": "[ordinary-lifecycle] experimental=0 hostRemovalLifetimeWitness=0\n[load-cause] seq=1 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=1 transition=0 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=05/01 door=99 map=0 btl=0 evt=20\n[warp] load complete serial=1 transition=0 room=05/01 door=99 map=0 btl=0 evt=20\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=54 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=114 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=174 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=234 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=294 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=353 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=413 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=473 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=533 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=593 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=653 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=713 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=773 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=833 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=893 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=953 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1013 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1073 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1133 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1193 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1253 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1313 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1373 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1433 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1493 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1553 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1613 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1673 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1733 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1793 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1853 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1913 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1973 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2033 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2093 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2153 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2213 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2274 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2334 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2394 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2454 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2515 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2575 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2635 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2695 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=2 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=2 transition=1 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[warp] load complete serial=2 transition=1 room=04/1A door=0 map=0 btl=0 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2727 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2788 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2848 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2908 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=2968 ownerAvailable=1 generation=2 delivery=1 connection=1 epoch=1 load=2 transition=1 role=1 slot=0 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=3 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=3 transition=2 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=05/06 door=0 map=1 btl=1 evt=0\n[warp] load complete serial=3 transition=2 room=05/06 door=0 map=1 btl=1 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=3028 ownerAvailable=1 generation=2 delivery=1 connection=1 epoch=2 load=3 transition=2 role=1 slot=0 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=3089 ownerAvailable=1 generation=2 delivery=1 connection=1 epoch=2 load=3 transition=2 role=1 slot=0 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=3149 ownerAvailable=1 generation=2 delivery=1 connection=1 epoch=2 load=3 transition=2 role=1 slot=0 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n",
+      "runtimeAfter": "[runtime-identity] schema=1 seq=1 stage=initial-connect-attempted observationClock=runtime-steady-ms observationMs=810579650 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=2 stage=recovery-state observationClock=runtime-steady-ms observationMs=810579651 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=3 stage=bridge-open-bound observationClock=runtime-steady-ms observationMs=810579652 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=392320 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=4 stage=transport-connected observationClock=runtime-steady-ms observationMs=810579657 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=392320 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=5 stage=recovery-state observationClock=runtime-steady-ms observationMs=810579669 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=392320 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=6 stage=world-reset observationClock=runtime-steady-ms observationMs=810579675 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=7 stage=roster-admitted observationClock=runtime-steady-ms observationMs=810579675 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=8 stage=world-binding observationClock=runtime-steady-ms observationMs=810579676 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=9 stage=recovery-state observationClock=runtime-steady-ms observationMs=810579686 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=0 roster2=0 attachedPid=392320 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=10 stage=roster-admitted observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657230 peerBytes=5 stringsComplete=1 slot=0 selfConnection=1 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=392320 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=0 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=0 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n",
+      "ownedAfter": {
+        "pid": 392320,
+        "creationTicks": 134361761201434067,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "operationFinishedNs": 810584390601800
+    },
+    "canonical": {
+      "stage": "acceptance",
+      "session": {
+        "pid": 392320,
+        "creationTicks": 134361761201434067,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "readStartedNs": 810584397369800,
+      "identityBefore": {
+        "pid": 392320,
+        "creationTicks": 134361761201434067,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "before": {
+        "actor": 140695885363232,
+        "head": 140695885363232,
+        "objentry": 140695890651320,
+        "status": 140695890638232,
+        "objectId": 84,
+        "objectType": 0,
+        "team": 1,
+        "hp": 24,
+        "maxHp": 24
+      },
+      "flags": [
+        {
+          "name": "cutscene",
+          "rva": "0xB65210",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "name": "eventContext",
+          "rva": "0x2A11478",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "name": "frozenGroups",
+          "rva": "0x2A171E8",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "name": "inField",
+          "rva": "0x9BA8D0",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "name": "openMenu",
+          "rva": "0x7435D0",
+          "expected": 255,
+          "actual": 255
+        },
+        {
+          "name": "pauseBlockers",
+          "rva": "0xABB878",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "cachedSlot": {
+        "hp": 24,
+        "maxHp": 24
+      },
+      "after": {
+        "actor": 140695885363232,
+        "head": 140695885363232,
+        "objentry": 140695890651320,
+        "status": 140695890638232,
+        "objectId": 84,
+        "objectType": 0,
+        "team": 1,
+        "hp": 24,
+        "maxHp": 24
+      },
+      "identityAfter": {
+        "pid": 392320,
+        "creationTicks": 134361761201434067,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "readFinishedNs": 810584403284300,
+      "nativeDeath": false,
+      "cachedLagObserved": false,
+      "failedFlags": [],
+      "ok": true,
+      "cachedStateLagObserved": []
+    },
+    "role": "host"
+  },
+  "hostOriginalSha256": "4e50d640adb66c89268e4632a28059cbcc961893924ddbb341e7839540ad57ed",
+  "friend": {
+    "sample": {
+      "readStartedNs": 810583920394600,
+      "injectBefore": "[ordinary-lifecycle] experimental=0 hostRemovalLifetimeWitness=0\n[load-cause] seq=1 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=1 transition=0 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=05/01 door=99 map=0 btl=0 evt=20\n[warp] load complete serial=1 transition=0 room=05/01 door=99 map=0 btl=0 evt=20\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=54 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=114 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=174 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=234 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=294 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=2 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=2 transition=1 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[warp] load complete serial=2 transition=1 room=04/1A door=0 map=0 btl=0 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=298 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=359 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=419 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=3 complete=1 event=queue cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=2 transition=1 issueTransition=0 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=4 complete=1 event=issue cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=2 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=5 complete=1 event=load cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=3 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[warp] load complete serial=3 transition=2 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=6 complete=1 event=arrival cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=3 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=448 ownerAvailable=1 generation=2 delivery=1 connection=2 epoch=1 load=3 transition=2 role=2 slot=1 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=508 ownerAvailable=1 generation=2 delivery=1 connection=2 epoch=1 load=3 transition=2 role=2 slot=1 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=7 complete=1 event=superseded cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=3 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=8 complete=1 event=queue cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=3 transition=2 issueTransition=0 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=9 complete=1 event=issue cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=3 transition=3 issueTransition=3 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=10 complete=1 event=load cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=4 transition=3 issueTransition=3 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=05/06 door=0 map=1 btl=1 evt=0\n[warp] load complete serial=4 transition=3 room=05/06 door=0 map=1 btl=1 evt=0\n[load-cause] seq=11 complete=1 event=arrival cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=4 transition=3 issueTransition=3 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=05/06 door=0 map=1 btl=1 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=524 ownerAvailable=1 generation=2 delivery=1 connection=2 epoch=2 load=4 transition=3 role=2 slot=1 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n",
+      "runtimeBefore": "[runtime-identity] schema=1 seq=1 stage=initial-connect-attempted observationClock=runtime-steady-ms observationMs=810580170 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=2 stage=recovery-state observationClock=runtime-steady-ms observationMs=810580171 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=3 stage=bridge-open-bound observationClock=runtime-steady-ms observationMs=810580171 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=265072 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=4 stage=transport-connected observationClock=runtime-steady-ms observationMs=810580179 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=265072 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=5 stage=recovery-state observationClock=runtime-steady-ms observationMs=810580188 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=265072 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=6 stage=world-reset observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=7 stage=roster-admitted observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=8 stage=world-binding observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=9 stage=recovery-state observationClock=runtime-steady-ms observationMs=810580205 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n",
+      "ownedBefore": {
+        "pid": 265072,
+        "creationTicks": 134361761635514491,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "peekBefore": {
+        "ok": true,
+        "processId": 265072,
+        "moduleBase": "0x7FF64DF30000",
+        "samples": [
+          {
+            "t": 0,
+            "0x717008": 5,
+            "0x717009": 6,
+            "0x71700A": 0,
+            "0x71700C": 1,
+            "0x71700E": 1,
+            "0x717010": 0,
+            "0xB65210": 0,
+            "0x2A11478": "0x0",
+            "0x2A171E8": 0,
+            "0x9BA8D0": 1,
+            "0x7435D0": 255,
+            "0xABB878": 0
+          }
+        ]
+      },
+      "stateBefore": {
+        "ok": true,
+        "attached": true,
+        "processId": 265072,
+        "atTitleOrLoading": false,
+        "room": {
+          "worldId": 5,
+          "roomId": 6,
+          "mapProgram": 1,
+          "battleProgram": 1,
+          "eventProgram": 0,
+          "inTransition": false,
+          "inCutscene": false
+        },
+        "actors": {
+          "player": {
+            "actorId": 0,
+            "slot": 0,
+            "position": {
+              "x": -64.2932,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 24,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend1": {
+            "actorId": 1,
+            "slot": 1,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 0,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend2": {
+            "actorId": 2,
+            "slot": 2,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            },
+            "rotationY": 0.736178,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 1320670800,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          }
+        },
+        "enemies": []
+      },
+      "entitiesBefore": {
+        "ok": true,
+        "processId": 265072,
+        "world": 5,
+        "room": 6,
+        "actors": [
+          {
+            "address": "0x7FF65044B820",
+            "name": "P_EX100",
+            "objectId": 84,
+            "objectType": 0,
+            "team": 1,
+            "moveState": 2,
+            "motionId": 0,
+            "status": "0x7FF650953598",
+            "hp": 24,
+            "maxHp": 24,
+            "position": {
+              "x": -64.2932,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF6504782B0",
+            "name": "P_EX030",
+            "objectId": 93,
+            "objectType": 1,
+            "team": 1,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF6509530A8",
+            "hp": 28,
+            "maxHp": 28,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            }
+          },
+          {
+            "address": "0x7FF650466540",
+            "name": "P_EX020",
+            "objectId": 92,
+            "objectType": 1,
+            "team": 0,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF650953320",
+            "hp": 18,
+            "maxHp": 18,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF65043ADC0",
+            "name": "PRIZE",
+            "objectId": 1475,
+            "objectType": 22,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF65048DB70",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 2930,
+              "y": 3.50296e-05,
+              "z": 1000
+            }
+          },
+          {
+            "address": "0x7FF65048C590",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": -2935,
+              "y": 0.000109932,
+              "z": -1700
+            }
+          },
+          {
+            "address": "0x7FF65048AFB0",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 305,
+              "y": -0.999955,
+              "z": -1590
+            }
+          },
+          {
+            "address": "0x7FF650489700",
+            "name": "W_EX030",
+            "objectId": 109,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF650476C30",
+            "name": "W_EX020",
+            "objectId": 108,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF6504643B0",
+            "name": "W_EX010",
+            "objectId": 103,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          }
+        ]
+      },
+      "avatarObserve": {
+        "ok": true,
+        "schema": 1,
+        "command": "observe",
+        "processId": 265072,
+        "readOnly": true,
+        "atomicAcrossBridges": false,
+        "avatarBridgeVersion": 4,
+        "worldBridgeVersion": 12,
+        "samples": [
+          {
+            "index": 0,
+            "beginMonotonicMs": 810584184,
+            "endMonotonicMs": 810584184,
+            "worldMappingAvailable": true,
+            "avatarMappingAvailable": true,
+            "identityStable": true,
+            "complete": true,
+            "worldBefore": {
+              "localSlot": 1,
+              "generation": 2,
+              "deliverySerial": 1,
+              "authorityMode": 2,
+              "connectionIds": [
+                1,
+                2,
+                0
+              ],
+              "peerDeliverySerials": [
+                1,
+                1,
+                0
+              ]
+            },
+            "worldAfter": {
+              "localSlot": 1,
+              "generation": 2,
+              "deliverySerial": 1,
+              "authorityMode": 2,
+              "connectionIds": [
+                1,
+                2,
+                0
+              ],
+              "peerDeliverySerials": [
+                1,
+                1,
+                0
+              ]
+            },
+            "localReadAvailable": true,
+            "local": {
+              "seq": 551,
+              "serverTimeMs": 0,
+              "ownerSlot": 0,
+              "character": 0,
+              "colorVariant": 0,
+              "worldId": 5,
+              "roomId": 6,
+              "finite": true,
+              "position": [
+                -64.2932053,
+                -260,
+                1950
+              ],
+              "rotationY": 3.14159274,
+              "velocity": [
+                0,
+                0,
+                0
+              ],
+              "motionId": 0,
+              "motionTime": 28,
+              "motionSpeed": 1,
+              "flags": 0,
+              "hp": 24,
+              "maxHp": 24,
+              "mp": 0,
+              "maxMp": 0
+            },
+            "puppets": [
+              {
+                "index": 0,
+                "readAvailable": true,
+                "value": {
+                  "active": 1,
+                  "provenanceMatchesWorld": true,
+                  "provenance": {
+                    "producer": 2,
+                    "localSlot": 1,
+                    "generation": 2,
+                    "ownerConnectionId": 1,
+                    "localConnectionId": 2,
+                    "hostConnectionId": 1
+                  },
+                  "pose": {
+                    "seq": 174,
+                    "serverTimeMs": 810584096,
+                    "ownerSlot": 0,
+                    "character": 0,
+                    "colorVariant": 0,
+                    "worldId": 5,
+                    "roomId": 6,
+                    "finite": true,
+                    "position": [
+                      22.482851,
+                      -260,
+                      1950
+                    ],
+                    "rotationY": 3.14159274,
+                    "velocity": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "motionId": 0,
+                    "motionTime": 113.8125,
+                    "motionSpeed": 1,
+                    "flags": 0,
+                    "hp": 24,
+                    "maxHp": 24,
+                    "mp": 0,
+                    "maxMp": 0
+                  }
+                }
+              },
+              {
+                "index": 1,
+                "readAvailable": true,
+                "value": {
+                  "active": 0,
+                  "provenanceMatchesWorld": false,
+                  "provenance": {
+                    "producer": 2,
+                    "localSlot": 1,
+                    "generation": 2,
+                    "ownerConnectionId": 0,
+                    "localConnectionId": 2,
+                    "hostConnectionId": 1
+                  },
+                  "pose": {
+                    "seq": 0,
+                    "serverTimeMs": 0,
+                    "ownerSlot": 0,
+                    "character": 0,
+                    "colorVariant": 0,
+                    "worldId": 0,
+                    "roomId": 0,
+                    "finite": true,
+                    "position": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "rotationY": 0,
+                    "velocity": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "motionId": 0,
+                    "motionTime": 0,
+                    "motionSpeed": 1,
+                    "flags": 0,
+                    "hp": 0,
+                    "maxHp": 0,
+                    "mp": 0,
+                    "maxMp": 0
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "stateAfter": {
+        "ok": true,
+        "attached": true,
+        "processId": 265072,
+        "atTitleOrLoading": false,
+        "room": {
+          "worldId": 5,
+          "roomId": 6,
+          "mapProgram": 1,
+          "battleProgram": 1,
+          "eventProgram": 0,
+          "inTransition": false,
+          "inCutscene": false
+        },
+        "actors": {
+          "player": {
+            "actorId": 0,
+            "slot": 0,
+            "position": {
+              "x": -64.2932,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 24,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend1": {
+            "actorId": 1,
+            "slot": 1,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            },
+            "rotationY": 3.14159,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 0,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          },
+          "friend2": {
+            "actorId": 2,
+            "slot": 2,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            },
+            "rotationY": 0.736178,
+            "velocity": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "motionId": 0,
+            "action": 1,
+            "comboStep": 0,
+            "hp": 1320670800,
+            "mp": 0,
+            "drive": 0,
+            "targetId": 0,
+            "airborne": false,
+            "invuln": false,
+            "staggered": false,
+            "downed": false
+          }
+        },
+        "enemies": []
+      },
+      "entitiesAfter": {
+        "ok": true,
+        "processId": 265072,
+        "world": 5,
+        "room": 6,
+        "actors": [
+          {
+            "address": "0x7FF65044B820",
+            "name": "P_EX100",
+            "objectId": 84,
+            "objectType": 0,
+            "team": 1,
+            "moveState": 2,
+            "motionId": 0,
+            "status": "0x7FF650953598",
+            "hp": 24,
+            "maxHp": 24,
+            "position": {
+              "x": -64.2932,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF6504782B0",
+            "name": "P_EX030",
+            "objectId": 93,
+            "objectType": 1,
+            "team": 1,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF6509530A8",
+            "hp": 28,
+            "maxHp": 28,
+            "position": {
+              "x": -150,
+              "y": -260,
+              "z": 1850
+            }
+          },
+          {
+            "address": "0x7FF650466540",
+            "name": "P_EX020",
+            "objectId": 92,
+            "objectType": 1,
+            "team": 0,
+            "moveState": 0,
+            "motionId": 0,
+            "status": "0x7FF650953320",
+            "hp": 18,
+            "maxHp": 18,
+            "position": {
+              "x": 22.4829,
+              "y": -260,
+              "z": 1950
+            }
+          },
+          {
+            "address": "0x7FF65043ADC0",
+            "name": "PRIZE",
+            "objectId": 1475,
+            "objectType": 22,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF65048DB70",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 2930,
+              "y": 3.50296e-05,
+              "z": 1000
+            }
+          },
+          {
+            "address": "0x7FF65048C590",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": -2935,
+              "y": 0.000109932,
+              "z": -1700
+            }
+          },
+          {
+            "address": "0x7FF65048AFB0",
+            "name": "F_EX030_BB",
+            "objectId": 321,
+            "objectType": 10,
+            "team": 0,
+            "moveState": 52,
+            "motionId": 151,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 305,
+              "y": -0.999955,
+              "z": -1590
+            }
+          },
+          {
+            "address": "0x7FF650489700",
+            "name": "W_EX030",
+            "objectId": 109,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF650476C30",
+            "name": "W_EX020",
+            "objectId": 108,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          },
+          {
+            "address": "0x7FF6504643B0",
+            "name": "W_EX010",
+            "objectId": 103,
+            "objectType": 5,
+            "team": 1,
+            "moveState": 52,
+            "motionId": 4294967295,
+            "status": "0x0",
+            "hp": 0,
+            "maxHp": 0,
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            }
+          }
+        ]
+      },
+      "peekAfter": {
+        "ok": true,
+        "processId": 265072,
+        "moduleBase": "0x7FF64DF30000",
+        "samples": [
+          {
+            "t": 0,
+            "0x717008": 5,
+            "0x717009": 6,
+            "0x71700A": 0,
+            "0x71700C": 1,
+            "0x71700E": 1,
+            "0x717010": 0,
+            "0xB65210": 0,
+            "0x2A11478": "0x0",
+            "0x2A171E8": 0,
+            "0x9BA8D0": 1,
+            "0x7435D0": 255,
+            "0xABB878": 0
+          }
+        ]
+      },
+      "readFinishedNs": 810584370807800,
+      "injectAfter": "[ordinary-lifecycle] experimental=0 hostRemovalLifetimeWitness=0\n[load-cause] seq=1 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=1 transition=0 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=05/01 door=99 map=0 btl=0 evt=20\n[warp] load complete serial=1 transition=0 room=05/01 door=99 map=0 btl=0 evt=20\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=1 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=54 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=114 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=174 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=234 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=294 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=1 transition=0 role=0 slot=255 location=5,1,99,0,0,20 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=2 complete=1 event=load cause=0 origin=unattributed available=0 generation=0 delivery=0 hostSource=0 session=- host=0 request=0 target=0 targetDelivery=0 phase=255 cut=0 snapshot=- loadBefore=0 load=2 transition=1 issueTransition=0 epoch=0 targetRoom=00/00 targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[warp] load complete serial=2 transition=1 room=04/1A door=0 map=0 btl=0 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=298 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=359 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=419 ownerAvailable=0 generation=0 delivery=0 connection=0 epoch=0 load=2 transition=1 role=0 slot=255 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=3 complete=1 event=queue cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=2 transition=1 issueTransition=0 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=4 complete=1 event=issue cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=2 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=5 complete=1 event=load cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=3 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[warp] load complete serial=3 transition=2 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=6 complete=1 event=arrival cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=3 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=448 ownerAvailable=1 generation=2 delivery=1 connection=2 epoch=1 load=3 transition=2 role=2 slot=1 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=508 ownerAvailable=1 generation=2 delivery=1 connection=2 epoch=1 load=3 transition=2 role=2 slot=1 location=4,26,0,0,0,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[load-cause] seq=7 complete=1 event=superseded cause=3 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=2 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=2 load=3 transition=2 issueTransition=2 epoch=1 targetRoom=04/1A targetDoor=0 targetMap=0 targetBtl=0 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=8 complete=1 event=queue cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=3 transition=2 issueTransition=0 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=9 complete=1 event=issue cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=3 transition=3 issueTransition=3 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=04/1A door=0 map=0 btl=0 evt=0\n[load-cause] seq=10 complete=1 event=load cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=4 transition=3 issueTransition=3 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=05/06 door=0 map=1 btl=1 evt=0\n[warp] load complete serial=4 transition=3 room=05/06 door=0 map=1 btl=1 evt=0\n[load-cause] seq=11 complete=1 event=arrival cause=8 origin=ordinary_host_room available=1 generation=2 delivery=1 hostSource=5 session=ab0348df6fb34dfdbcd1320cd539c5b6 host=1 request=0 target=2 targetDelivery=1 phase=255 cut=0 snapshot=- loadBefore=3 load=4 transition=3 issueTransition=3 epoch=2 targetRoom=05/06 targetDoor=0 targetMap=1 targetBtl=1 targetEvt=0 room=05/06 door=0 map=1 btl=1 evt=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=524 ownerAvailable=1 generation=2 delivery=1 connection=2 epoch=2 load=4 transition=3 role=2 slot=1 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n[combat-causal] summary schema=1 admitted=0 retired=0 started=0 drained=0 dropped=0 loss=0 ownerFrame=585 ownerAvailable=1 generation=2 delivery=1 connection=2 epoch=2 load=4 transition=3 role=2 slot=1 location=5,6,0,1,1,0 pendingNativeLeave=0 nativeCoverageQualified=0 acceptance=0\n",
+      "runtimeAfter": "[runtime-identity] schema=1 seq=1 stage=initial-connect-attempted observationClock=runtime-steady-ms observationMs=810580170 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=2 stage=recovery-state observationClock=runtime-steady-ms observationMs=810580171 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=0 generation=0 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=0 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=3 stage=bridge-open-bound observationClock=runtime-steady-ms observationMs=810580171 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=265072 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=0 recoveryState=1 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=4 stage=transport-connected observationClock=runtime-steady-ms observationMs=810580179 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=265072 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=5 stage=recovery-state observationClock=runtime-steady-ms observationMs=810580188 identitySource=runtime-admission-snapshot identityCurrent=0 session=- peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=255 selfConnection=0 hostConnection=0 roster0=0 roster1=0 roster2=0 attachedPid=265072 generation=1 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=255 worldRoster0=0 worldRoster1=0 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=0 peerFloor1=0 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=0 transportConnected=1 recoveryState=2 recoveryAttempts=0 pinPresent=0 pinSession=- pinHostConnection=0 pinSlot=255 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=6 stage=world-reset observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=7 stage=roster-admitted observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=0 generationSource=runtime-owned delivery=0 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=0 authoritySource=bridge-header bridgeOpen=1 quarantine=1 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=8 stage=world-binding observationClock=runtime-steady-ms observationMs=810580196 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n[runtime-identity] schema=1 seq=9 stage=recovery-state observationClock=runtime-steady-ms observationMs=810580205 identitySource=runtime-admission-snapshot identityCurrent=1 session=ab0348df6fb34dfdbcd1320cd539c5b6 peerHex=7065657231 peerBytes=5 stringsComplete=1 slot=1 selfConnection=2 hostConnection=1 roster0=1 roster1=2 roster2=0 attachedPid=265072 generation=2 generationValid=1 generationSource=runtime-owned delivery=1 deliverySource=runtime-owned worldSlot=1 worldRoster0=1 worldRoster1=2 worldRoster2=0 worldRosterSource=runtime-owned peerFloor0=1 peerFloor1=1 peerFloor2=0 peerFloorSource=runtime-owned authority=2 authoritySource=bridge-header bridgeOpen=1 quarantine=0 admitted=1 transportConnected=1 recoveryState=3 recoveryAttempts=0 pinPresent=1 pinSession=ab0348df6fb34dfdbcd1320cd539c5b6 pinHostConnection=1 pinSlot=1 nativeBootstrapReady=unverified atomicBinding=0 errors=0\n",
+      "ownedAfter": {
+        "pid": 265072,
+        "creationTicks": 134361761635514491,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "operationFinishedNs": 810584779307000
+    },
+    "canonical": {
+      "stage": "acceptance",
+      "session": {
+        "pid": 265072,
+        "creationTicks": 134361761635514491,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "readStartedNs": 810584782674400,
+      "identityBefore": {
+        "pid": 265072,
+        "creationTicks": 134361761635514491,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "before": {
+        "actor": 140695885363232,
+        "head": 140695885363232,
+        "objentry": 140695890651320,
+        "status": 140695890638232,
+        "objectId": 84,
+        "objectType": 0,
+        "team": 1,
+        "hp": 24,
+        "maxHp": 24
+      },
+      "flags": [
+        {
+          "name": "cutscene",
+          "rva": "0xB65210",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "name": "eventContext",
+          "rva": "0x2A11478",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "name": "frozenGroups",
+          "rva": "0x2A171E8",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "name": "inField",
+          "rva": "0x9BA8D0",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "name": "openMenu",
+          "rva": "0x7435D0",
+          "expected": 255,
+          "actual": 255
+        },
+        {
+          "name": "pauseBlockers",
+          "rva": "0xABB878",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "cachedSlot": {
+        "hp": 24,
+        "maxHp": 24
+      },
+      "after": {
+        "actor": 140695885363232,
+        "head": 140695885363232,
+        "objentry": 140695890651320,
+        "status": 140695890638232,
+        "objectId": 84,
+        "objectType": 0,
+        "team": 1,
+        "hp": 24,
+        "maxHp": 24
+      },
+      "identityAfter": {
+        "pid": 265072,
+        "creationTicks": 134361761635514491,
+        "moduleBase": "0x7ff64df30000",
+        "imageSha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+      },
+      "readFinishedNs": 810584787763500,
+      "nativeDeath": false,
+      "cachedLagObserved": false,
+      "failedFlags": [],
+      "ok": true,
+      "cachedStateLagObserved": []
+    },
+    "role": "friend"
+  },
+  "friendOriginalSha256": "762e54fe43836e12c1120ca70e7758b31a2af631152735e214166ce04615664d",
+  "projection": "Exact native/canonical A-02 initial brackets. Logs projected to load/arrival/combat/lifecycle/runtime identity lines only; no native fields mutated."
+}

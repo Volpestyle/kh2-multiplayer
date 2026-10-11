@@ -8,7 +8,7 @@ import copy
 from contextlib import contextmanager
 import json
 import time
-from . import profile
+from . import profile, summary_acquisition
 
 
 class DriverCalls:
@@ -78,6 +78,7 @@ class PacketAdapter:
         self.contract = copy.deepcopy(declared_contract)
         self.history = []
         self.issued = set()
+        self.last_sample = None
 
     def __getattr__(self, name):
         return getattr(self.s, name)
@@ -96,28 +97,51 @@ class PacketAdapter:
         return result
 
     def sample(self, deadline_ns):
-        start = self.s.clock_ns()
-        end = min(deadline_ns, self.s.deadline_ns, start + profile.SAMPLE_BUDGET_NS)
+        end = min(deadline_ns, self.s.deadline_ns, self.s.clock_ns()+profile.SAMPLE_BUDGET_NS)
+        baseline=copy.deepcopy(self.last_sample)
+        if baseline:baseline.pop('summaryAcquisition',None)
+        previous=baseline
+        row={}
         self.check(end)
-        row = dict(readStartedNs=start)
         try:
-            before, runtime_before = self.take('read_logs', end)
-            row.update(injectBefore=before, runtimeBefore=runtime_before)
-            row['ownedBefore'] = self.take('read_owned', end)
-            # Exactly the inherited native bracket, without its five-second wait.
-            for name in ('peekBefore','stateBefore','entitiesBefore','avatarObserve',
-                         'stateAfter','entitiesAfter','peekAfter'):
-                row[name] = self.take('native', end, name)
-            row['readFinishedNs'] = self.s.clock_ns()
-            after, runtime_after = self.take('read_logs', end)
-            while '[combat-causal] summary ' not in after[len(before):]:
-                self.take('wait_tick', end)
+            for _ in range(64):
+                self.check(end)
+                row=dict(readStartedNs=self.s.clock_ns())
+                before, runtime_before = self.take('read_logs', end)
+                row.update(injectBefore=before, runtimeBefore=runtime_before)
+                row['ownedBefore'] = self.take('read_owned', end)
+                for name in ('peekBefore','stateBefore','entitiesBefore','avatarObserve',
+                             'stateAfter','entitiesAfter','peekAfter'):
+                    row[name] = self.take('native', end, name)
+                row['readFinishedNs'] = self.s.clock_ns()
                 after, runtime_after = self.take('read_logs', end)
-            row.update(injectAfter=after, runtimeAfter=runtime_after,
-                       ownedAfter=self.take('read_owned', end))
-            self.check(end)
-            row['operationFinishedNs'] = self.s.clock_ns()
-            return row
+                row.update(injectAfter=after,runtimeAfter=runtime_after,
+                           ownedAfter=self.take('read_owned',end))
+                self.check(end)
+                row['operationFinishedNs']=self.s.clock_ns()
+                profile.need(after.startswith(before),'sample log prefix replaced/truncated')
+                if previous:
+                    profile.need(before.startswith(previous['injectAfter']),
+                                 'inter-bracket log prefix replaced/truncated')
+                admitted=[r for r in profile.population.receipt_rows(after)
+                          if profile.population.number(r,'kind')==0]
+                summaries=profile.population.records(after[len(before):],summary_acquisition.SUMMARY)
+                # Empty/pre-admission brackets return immediately to the source
+                # native gates. Partial sets still fail the unchanged oracle.
+                ready=len(admitted)!=5 or bool(summaries and profile.population.number(summaries[-1],'admitted')==1
+                                               and int(summaries[-1].get('pendingNativeLeave','0'))==0)
+                if not ready and baseline:
+                    proof=summary_acquisition.qualify(row,baseline)
+                    if proof:
+                        row['summaryAcquisition']=proof
+                        ready=True
+                if ready:
+                    self.last_sample=copy.deepcopy(row)
+                    return row
+                if baseline is None:baseline=copy.deepcopy(row)
+                previous=copy.deepcopy(row)
+                self.take('wait_tick', end)
+            raise profile.Refused('summary acquisition attempt cap')
         except BaseException as error:
             # Retention must not rescue an expired operation or dispatch input.
             row.update(error=repr(error), deadlineNs=end)

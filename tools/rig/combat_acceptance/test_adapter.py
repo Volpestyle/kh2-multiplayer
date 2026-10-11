@@ -87,9 +87,10 @@ class Controls(unittest.TestCase):
         with self.assertRaises(profile.Refused):a.sample(s.deadline_ns)
         self.assertEqual([c[0] for c in s.calls],['logs','retain'])
 
-    def test_missing_summary_expires_without_renewal(self):
+    def test_empty_sample_does_not_wait_for_summary(self):
         s,a=self.make(); s.summary=False; s.step=100_000_000
-        with self.assertRaises(profile.Refused):a.sample(s.deadline_ns)
+        a.sample(s.deadline_ns)
+        self.assertFalse(any(k=='wait' for k,v in s.calls))
         self.assertEqual({v for k,v in s.calls if k!='retain'},{1+profile.SAMPLE_BUDGET_NS})
 
     def test_both_roles_exact_source_six_and_no_seventh(self):

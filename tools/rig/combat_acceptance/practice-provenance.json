@@ -10,10 +10,17 @@
     "copiedByteIdentically": true
   },
   "population.py": {
-    "sha256": "74d013ea0f285a7a99ab47693f3cf0f45dfa9a1613fedc19ce128f299653b9e4",
+    "sha256": "bbc56db5c20ba3b3e75cff11a774db8a3e3270b80d4f3c69ba5bdc5a6b8f257f",
     "origin": "qualified practice A population/source05 oracle",
     "copiedByteIdentically": false,
     "originalSha256": "fafcf6199f4f1b0d174a2730cfb9e3058b4f64323da56e8f6e51f4881b586b0d",
-    "delta": "review3 MEDIUM: activation_requires_admission now tests enemies in either native endpoint and kind=0 in either log prefix. Five-body Admission and all other oracle bytes unchanged."
+    "delta": "Activation requires full admission on either native enemy endpoint or original kind=0 receipt (1ec91ce6). Fresh-summary predicate additionally accepts a recomputed immutable prior-prefix/frame proof for gap acquisition. All remaining five-body/native/root/scope predicates unchanged."
+  },
+  "summary_acquisition.py": {
+    "sha256": "f4b5feb51d374527ef14c7f7d1cecd4f8147beb0109aea45470096e57ed869fe",
+    "origin": "practice-summary-gap-fix-01 causal_summary_acquisition.py",
+    "originalSha256": "2b3a24146b9d1b65b0082e108ec537c038452bf8bd93f24ce1764701c7b023ea",
+    "copiedByteIdentically": false,
+    "delta": "File-only proof/replay projection; adapter owns fresh read loop, original QPC budget and STOP. Raw native brackets are not rewritten."
   }
 }

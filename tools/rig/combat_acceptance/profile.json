@@ -6,7 +6,7 @@
     "KH2COOP_COMBAT_CAUSAL_TRACE": "1"
   },
   "encounterSeconds": 90,
-  "passiveObservationSeconds": 3,
+  "passiveObservationSeconds": 0.25,
   "start": {
     "friendPosition": [
       -64.36,
@@ -15,7 +15,23 @@
     ],
     "radius": 30,
     "yaw": 3.141592653589793,
-    "yawTolerance": 0.05
+    "yawTolerance": 0.05,
+    "pairedSettle": {
+      "budgetSeconds": 3,
+      "minimumObservedSpanSeconds": 0.25,
+      "minimumFreshBrackets": 2,
+      "maximumObservedDrift": 1,
+      "hostCorridor": [
+        0,
+        -260,
+        1950
+      ],
+      "peerNativeBody": "P_EX020/object92/type1/team0 with original stream provenance",
+      "finalPairedRecheck": true,
+      "finalLocalRecheckAfterExchange": true,
+      "continuousStabilityProven": false,
+      "driftDisposition": "HOLD_ZERO_INPUT_NO_REANCHOR"
+    }
   },
   "actions": [
     {
@@ -86,5 +102,6 @@
     }
   ],
   "setup": "existing reviewed host-only BC warp and product follower, no HP/party/save writes",
-  "terminal": "VUH1503_PRACTICE_A_INPUTS_COMPLETE_EVIDENCE_PENDING"
+  "terminal": "VUH1503_PRACTICE_A_INPUTS_COMPLETE_EVIDENCE_PENDING",
+  "sampleBudgetSeconds": 3
 }

@@ -128,7 +128,11 @@ class Admission:
         activation_snapshot(s,self.owned,now_ns)
         before,after=s['injectBefore'],s['injectAfter'];rb,ra=s['runtimeBefore'],s['runtimeAfter']
         need(after.startswith(before) and before.startswith(self.last_log) and ra.startswith(rb) and rb.startswith(self.last_runtime),'raw log prefix replaced/truncated')
-        need('[combat-causal] summary ' in after[len(before):],'fresh owner-frame mapping summary missing')
+        if 'summaryAcquisition' in s:
+            from .summary_acquisition import verify
+            verify(s) # Original prior-prefix/frame proof, not a rewritten bracket.
+        else:
+            need('[combat-causal] summary ' in after[len(before):],'fresh owner-frame mapping summary missing')
         summary(after)
         need(not any(number(r,'kind')==11 or number(r,'loss') for r in receipt_rows(after)),'observer retired/lost')
         load=latest_load(after);need(latest_load(before)==load and load[2:]==LOCATION,'native load bookend changed')

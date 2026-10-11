@@ -8,6 +8,7 @@ import copy
 import json
 from pathlib import Path
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from . import profile, population
 from .test_profile import Adapter
@@ -68,6 +69,7 @@ class RetainedAdapter(Adapter):
 class ActivationControls(unittest.TestCase):
     def make(self, endpoints=(), final_only=False):
         a=RetainedAdapter();v=profile.Profile(a);activation_reads=[]
+        v.settle_start=lambda:None;v.first_dispatch_pair=lambda row:None;v.start_local=SimpleNamespace(observe=lambda *a,**k:None) # Tested in test_start.
         def acquire(label):
             row=a.empty
             if label=='host_activate_0':

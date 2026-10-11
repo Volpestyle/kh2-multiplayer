@@ -37,13 +37,14 @@ class Controls(unittest.TestCase):
         for args in [('host_hit','host',p.CROSS,history),('host_activate_0','host',p.MOVE,[]),('friend_position_0','friend',p.CROSS,[])]:
             with self.assertRaises(p.Refused):p.authorize(*args)
     def test_actual_run_exact_six_final_health(self):
-        a=Adapter();v=p.Profile(a);move=SimpleNamespace(ack=lambda a:None,mark_activation_issuing=lambda:None)
+        a=Adapter();v=p.Profile(a);v.settle_start=lambda:None;v.first_dispatch_pair=lambda row:None;v.start_local=SimpleNamespace(observe=lambda *a,**k:None);move=SimpleNamespace(ack=lambda a:None,mark_activation_issuing=lambda:None)
         def gate(action):
             v.moves=move;a.calls.append(('gate',action));return dict(sample={},canonical={},role='friend',admission={'role':'friend'})
         start=dict(sample={},canonical={},role='friend')
         with patch.object(v,'sample',return_value=start),patch.object(v,'gate',side_effect=gate),patch.object(v,'canonical',side_effect=lambda:a.calls.append(('canonical',None))),patch.object(p.preposition,'proven_a_start'),patch.object(p.population,'activation_snapshot'),patch.object(p.population,'activation_requires_admission',return_value=True),patch.object(v.peer_population,'check',return_value={'role':'host'}),patch.object(p.population,'paired'),patch.object(health,'crosscheck_sample'):
             result=v.run()
         self.assertEqual(result['actions'],[r[0] for r in p.ACTIONS]);self.assertFalse(result['acceptance'])
+        self.assertTrue(all(end==250_000_001 for kind,end in a.calls if kind=='passive'))
         self.assertEqual([x[1] for x in a.calls if x[0]=='spawn'],['friend_position_0','friend_position_1','friend_position_2','friend_claim'])
         for i,row in enumerate(a.calls):
             if row[0]=='spawn':self.assertEqual(a.calls[i-1][0],'canonical')
