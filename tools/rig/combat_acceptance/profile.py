@@ -89,6 +89,14 @@ class Profile:
             return result
         raise Refused('persistent health straddle')
 
+    def admission_for(self, action, sample, oracle, now_ns):
+        if action.startswith('friend_position_'):
+            return None
+        if (action!='host_activate_0' or oracle.anchor is not None or
+                population.activation_requires_admission(sample)):
+            return oracle.check(sample,now_ns)
+        return None
+
     def gate(self, action):
         value=self.sample(action)
         sample=value['sample']
@@ -98,11 +106,9 @@ class Profile:
                 self.moves=preposition.PreActivationMovement(self.owned,world,self.runtime_session)
             self.moves.check(action,MOVE,sample,self.a.clock_ns(),population,self.canonical)
             value['admission']=None
-        elif action=='host_activate_0':
-            # A full typed admission becomes mandatory as soon as any enemy is
-            # present, even during the sole activation move. Never downgrade.
-            value['admission']=self.population.check(sample,self.a.clock_ns()) if population.activation_requires_admission(sample) else None
-        else:value['admission']=self.population.check(sample,self.a.clock_ns())
+        else:
+            # Local and final gates use the same rule as the peer gate below.
+            value['admission']=self.admission_for(action,sample,self.population,self.a.clock_ns())
         return value
 
     def run(self):
@@ -126,7 +132,7 @@ class Profile:
             population.activation_snapshot(peer['sample'],self.peer_owned,peer['sample']['readFinishedNs'])
             need(peer['canonical']['session']==self.peer_owned,'peer canonical identity replaced')
             health.crosscheck_sample(peer['sample'],peer['canonical'])
-            peer['admission']=self.peer_population.check(peer['sample'],peer['sample']['readFinishedNs']) if (not action.startswith('friend_position_') and (action!='host_activate_0' or population.activation_requires_admission(peer['sample']))) else None
+            peer['admission']=self.admission_for(action,peer['sample'],self.peer_population,peer['sample']['readFinishedNs'])
             if not action.startswith('friend_position_') and (local['admission'] or peer['admission']):
                 need(local['admission'] and peer['admission'],'paired full admission unavailable')
                 population.paired(local['admission'] if self.a.role=='host' else peer['admission'],

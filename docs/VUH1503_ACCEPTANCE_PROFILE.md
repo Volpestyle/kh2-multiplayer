@@ -67,8 +67,13 @@ invulnerability, HP write, party mutation or save import is permitted.
 ## Executable source profile
 
 `tools/rig/combat_acceptance/profile.py` is an executable per-role profile with
-a reviewed packet Adapter. It reuses byte-identical canonical-health,
-pre-activation and population gates from practice A; source hashes are retained
+a reviewed packet Adapter. It reuses byte-identical canonical-health and
+pre-activation gates from practice A. The population oracle's activation trigger
+now requires full admission if EITHER native endpoint has an enemy, either log
+prefix has an original admission receipt, or the oracle has already anchored.
+Local, peer and final gates share that rule. Its five-body Admission implementation
+is byte-identical; it still refuses a partial set rather than accommodating it.
+Original/current source hashes and the narrow delta are retained
 in practice-provenance.json. It does not import the evolving practice runner or
 its absolute developer paths. The copied population module's legacy ACTIONS
 and classify helpers are NOT used: profile.authorize owns the exact six inputs.
@@ -187,6 +192,7 @@ python -m unittest discover -s tools/launcher -p test_friend_package.py
 python tools/packaging/test_product_protocol.py
 python -m unittest tools.rig.combat_acceptance.test_profile tools.rig.combat_acceptance.test_evidence
 python -m unittest tools.rig.combat_acceptance.test_adapter
+python -m unittest tools.rig.combat_acceptance.test_activation
 python -m tools.rig.combat_acceptance.retained_controls --evidence <retained-A> --output <outside-packet.json>
 ```
 

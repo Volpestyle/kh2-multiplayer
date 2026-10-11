@@ -80,7 +80,14 @@ def activation_snapshot(sample,owned,now_ns):
     return True
 
 def activation_requires_admission(sample):
-    return bool([r for r in receipt_rows(sample['injectAfter']) if number(r,'kind')==0])
+    # Either endpoint can observe the population before its typed receipt.
+    # Original admission in either retained prefix never reopens the empty gate.
+    return (any(r['objectType']==4 or r['name'].startswith(('M_','B_'))
+                for key in ('entitiesBefore','entitiesAfter')
+                for r in sample[key]['actors']) or
+            any(number(r,'kind')==0
+                for key in ('injectBefore','injectAfter')
+                for r in receipt_rows(sample[key])))
 
 def peer_freshness(sent_ns,received_ns,now_ns):
     """All THREE timestamps are original local QPC, not remote clock values.

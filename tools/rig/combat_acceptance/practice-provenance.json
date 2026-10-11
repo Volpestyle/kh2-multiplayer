@@ -10,8 +10,10 @@
     "copiedByteIdentically": true
   },
   "population.py": {
-    "sha256": "fafcf6199f4f1b0d174a2730cfb9e3058b4f64323da56e8f6e51f4881b586b0d",
+    "sha256": "74d013ea0f285a7a99ab47693f3cf0f45dfa9a1613fedc19ce128f299653b9e4",
     "origin": "qualified practice A population/source05 oracle",
-    "copiedByteIdentically": true
+    "copiedByteIdentically": false,
+    "originalSha256": "fafcf6199f4f1b0d174a2730cfb9e3058b4f64323da56e8f6e51f4881b586b0d",
+    "delta": "review3 MEDIUM: activation_requires_admission now tests enemies in either native endpoint and kind=0 in either log prefix. Five-body Admission and all other oracle bytes unchanged."
   }
 }
