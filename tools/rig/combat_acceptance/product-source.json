@@ -1,0 +1,50 @@
+{
+  "schema": "vuh1503-product-source-candidate-v1",
+  "status": "UNADOPTED_CANDIDATE",
+  "sourceRevision": "c1b0469e93b5ff8cc25ca048993c8021ae92a822",
+  "sourceTree": "f50043b9f4e32badc4c8c7d7a44628c49dcb0885",
+  "protocol": 17,
+  "avatarBridgeVersion": 4,
+  "buildDirectory": ".local/build-practice-claim-release-native-loss-native-01",
+  "productsReceipt": {
+    "path": ".local/rig-operator/practice-claim-release-native-loss-native-01/run/products.json",
+    "sha256": "5de3237ed596853c873fc3dd77780d8ae3fb890f4222d492ae1f2afd60c3984c"
+  },
+  "completionReceipt": {
+    "path": ".local/rig-operator/practice-claim-release-native-loss-native-01/completion.json",
+    "sha256": "c0dbaf9d4a6ab027d5aad41872cf9a658d295778e359636d9cc25426a23bff35",
+    "status": "TEST_FAILURE",
+    "passed": 184,
+    "failed": 3
+  },
+  "candidateProducts": {
+    "dll": {
+      "buildRelativePath": "inject/staging/kh2coop_inject.dll",
+      "sha256": "cc31f932091078ebc773ae11e3fa8f9c2befebaa406f96f81d66dd45712be8d8",
+      "bytes": 3397632
+    },
+    "runtime": {
+      "buildRelativePath": "Release/kh2coop_runtime_scaffold.exe",
+      "sha256": "020e40be19eebdc6b5f3e26e269efeb011312e473fd44e24a497670a3d12db66",
+      "bytes": 887296
+    },
+    "server": {
+      "buildRelativePath": "Release/kh2coop_server.exe",
+      "sha256": "319a27651cce1295821e5a429d1dcb9668ed399fb5fd9f087ce59c1364d184f4",
+      "bytes": 530944
+    },
+    "avatarctl": {
+      "buildRelativePath": "Release/avatarctl.exe",
+      "sha256": "709fb82714e10870fef434091bde59eb1425e62146fa7944c21cc0dac58f60ab",
+      "bytes": 93184
+    },
+    "cli": {
+      "buildRelativePath": "tools/kh2ctl/Release/kh2ctl.exe",
+      "sha256": "c55e6a7ab5e08c9a9038b3dc2588f2e925d38333ac96f1d4275411cfe8d2c0a1",
+      "bytes": 332800
+    }
+  },
+  "ordinaryLifecycleExperimental": false,
+  "buildPerformedByThisLane": false,
+  "qualification": "References existing Steam receipt only; not a build_friend input, binary attestation, portable diagnostic qualification or acceptance approval. Steam/review2 must supply/adjudicate the complete coherent package product set."
+}

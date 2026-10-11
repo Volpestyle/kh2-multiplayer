@@ -11,3 +11,8 @@ values; generate the packet declaration with `profile.adapter_contract()`.
 `adapter.DriverCalls` binds the existing owned, deadline-bounded packet helper
 path. Final authenticated transport/identity/media/closure services and actual
 bundled Setup replay still need packet integration and review.
+
+Product-source candidate: c1b0469e/tree f50043b9, recorded in product-source.json
+with references to Steam's existing products/completion receipts. No native
+rebuild; the retained TEST_FAILURE disposition is unchanged. This candidate
+binding does not qualify missing package tools or grant live authority.

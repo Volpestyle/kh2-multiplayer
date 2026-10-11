@@ -1,8 +1,20 @@
 # VUH-1503: protocol17 / practice A acceptance preparation
 
-Base: landing/ordinary-lifecycle-3c0f8e4 at d9412a21 (tree 3b742dad).
+Base/product source: landed main c1b0469e (tree f50043b9), the claim-release
+re-hold on top of d9412a21. The two profile commits were re-stacked onto this tip.
 This branch changes packaging and source-owned profiles only. No binary build,
 PC2 contact, injection, live attempt or AC3/native-coverage change.
+
+`tools/rig/combat_acceptance/product-source.json` binds the candidate source/tree
+to Steam's existing `.local/build-practice-claim-release-native-loss-native-01`
+products, referencing its actual manifest at
+`.local/rig-operator/practice-claim-release-native-loss-native-01/run/products.json`.
+The build directory itself has no products.json. The exact completion receipt
+records TEST_FAILURE (184 passed,3 failed), not a qualified full-suite PASS.
+This binding preserves that result and is NOT a replacement build receipt for
+build_friend.py: portable/internal tool qualification and the full coherent
+product set still require Steam/review2's disposition. No rebuild or binary
+inspection was performed by this lane. Profiles/packaging remain unadopted.
 
 ## Protocol metadata disposition (for review2)
 
