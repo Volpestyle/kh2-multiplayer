@@ -195,3 +195,62 @@ and point-seeding prerequisites; compiled assertions and actual packet/census
 checks independently enforce them in C++. Neither form of source check is
 reported as native passing evidence. Native execution remains pending with the
 operator; the original six failures are not retrospectively promoted.
+
+
+## 0111f2e6 native-control failure diagnosis: cached release
+
+Evidence: `.local/rig-operator/practice-default-off-fixture-native-01/run/tests-01-stdout.txt`.
+The three remaining failures are wrong fixture expectations about the release
+cache, not a new default-off or experiment release regression. This conclusion
+is from the exact C++ sequence and comparison with main `3c0f8e4`; the corrected
+native assertions have not yet been executed.
+
+`EnsureClientClaimScope` is identical to main. A previously released hold is
+rearmed when the manifest **revision** changes, not merely when HP packet
+sequence advances. The HP consumer increments that revision only if a row's
+HP becomes known or its HP/maxHP changes. Every survivor remains 1000/1000 in
+this fixture. `TrackSpawns` does not rearm the hold. `ReleaseClientClaims` then
+executes `if (!h.held) return true` before capturing a census. Main does exactly
+the same under these inputs. Its full gate differs only by the experiment's
+removed-row exclusions, which are inactive here: all removed flags are false.
+
+Frame-by-frame replay (each mode starts from a fresh `prepare`):
+
+| Phase | Host membership / native census | Revision and release outcome |
+|---|---|---|
+| Host 42 | Five distinct live members; manifest and five HP rows published | Bootstrap packets retained |
+| Host 43 | Fourth body unlinked and status invalidated; four survivors | No periodic HP; no terminal |
+| Host 48 | Four survivors at 1000/1000, missing original still live in authority | Survivor HP packet, no terminal |
+| Host 54 | OFF emits net4 death after grace; ON stays suspended with no death | Expiry packets retained separately |
+| Client bootstrap 42 | Five host live rows, dead=false/removed=false, five bound native bodies, known HP1000/max1000 | Full readback releases and caches revision R |
+| Client leave/48 | Host still five live rows, native census four; local net4 present=false | TrackSpawns leaves revision R and released hold unchanged |
+| Client survivor HP/48 | Same five host live rows; four native bodies; survivor HP values unchanged | HP sequence advances but revision remains R. Main and candidate return cached true without new census readback |
+| Explicit test-only rearm/48 | Same five-live/four-native inputs | Fresh full readback refuses: no present net4 binding and cardinality mismatch |
+| Client expiry/54 OFF | Net4 dead=true, removed=false; four matching survivors | Death advances revision; exact four-survivor readback releases |
+| Client expiry/54 ON | Net4 dead=false/removed=false; four matching survivors | Test hold stays armed; unchanged HP cannot satisfy missing member, so refusal persists |
+
+Thus the two pre-terminal failures were cached true, not successful five-vs-four
+full readbacks. The experiment's final failure was the same cache carrying
+through unchanged survivor HP. OFF's final assertion already passed because
+the real EnemyDeath advances the revision. The prior comment claiming a fresh
+survivor HP packet necessarily rearms the gate was incorrect.
+
+The corrected fixture explicitly checks and prints all host rows, dead/removed/
+HP-known flags, native cardinality, local net4 presence, revision, released
+revision and HP sequence. It first asserts the inherited cached result, then
+calls `InvalidateClientClaims("test-absence-fresh-readback")` as an explicit
+**test-only** reset before the original missing-member refusal assertions.
+This does not claim a production rearm occurs at native leave. No product
+source, gate, packet, grace policy, or assertion about the held gate is relaxed.
+
+The inherited cache behavior means a true return alone is not a fresh census
+certificate. Any requirement to revoke a released hold immediately on native
+membership loss would be a separate main behavior change, not a fixture fix or
+proof that this range weakened main. It is recorded here rather than hidden.
+
+Why Python missed this: the source projection verified the unchanged gate and
+the fixture's text, but did not evaluate the cache branch or the HP consumer's
+conditional revision update. New checks compare the entire applicable gate
+and scope function to main, prove unchanged-HP revision behavior, and enforce
+that the native fixture exposes the cache before explicitly testing held
+readback. The native compiler/test remains the execution authority.

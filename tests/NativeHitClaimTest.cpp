@@ -2137,15 +2137,41 @@ void TestCombatCausalBoundaries() {
         }
         ReceiveWorldPackets();
         Check(ReleaseClientClaims(absenceInitialFrame),"absence client original five-member readback releases before native leave");
+        const auto absenceReleasedRevision=g_clientManifestRevision;
+        const auto absenceInitialHpSequence=g_hostHpSequence;
         Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
             static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
         g_hitTraceFrame=absenceBeforeGraceFrame;TrackSpawns(CaptureNativeCensus());
-        // Fresh survivor HP rearms the unchanged release guard, as in the
-        // real client Tick; never test its already-released fast path.
+        // Main caches a release by manifest revision, not HP packet sequence.
+        // Unchanged survivor HP does NOT rearm it, even with a newer sequence.
+        // Expose that exact input/path before separately testing held readback.
         for(const auto& absencePacket:absenceBeforeGracePackets)
             g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
         ReceiveWorldPackets();
-        Check(!ReleaseClientClaims(absenceBeforeGraceFrame),"missing live member still refuses exact client release before terminal authority");
+        const auto absenceClientCensus=CaptureNativeCensus();
+        std::size_t absenceLiveRows=0;
+        for(const auto& [absenceId,absenceHost]:g_host.enemies) {
+            if(!absenceHost.dead&&!absenceHost.removed)++absenceLiveRows;
+            std::printf("absence-input mode=%u frame=%u id=%u dead=%u removed=%u hpKnown=%u hp=%d maxHp=%d\n",
+                absenceMode,absenceBeforeGraceFrame,static_cast<unsigned>(absenceId),
+                absenceHost.dead?1u:0u,absenceHost.removed?1u:0u,absenceHost.hpKnown?1u:0u,absenceHost.hp,absenceHost.maxHp);
+        }
+        std::printf("absence-release mode=%u frame=%u liveRows=%zu nativeRows=%zu present4=%u held=%u revision=%llu releasedRevision=%llu hpSequence=%llu\n",
+            absenceMode,absenceBeforeGraceFrame,absenceLiveRows,absenceClientCensus.enemies.size(),
+            g_inst.spawns[3].present?1u:0u,g_clientClaimHold.held?1u:0u,
+            static_cast<unsigned long long>(g_clientManifestRevision),
+            static_cast<unsigned long long>(g_clientClaimHold.releasedRevision),static_cast<unsigned long long>(g_hostHpSequence));
+        Check(g_host.manifestComplete&&g_host.enemies.size()==5&&absenceLiveRows==5&&
+              absenceClientCensus.enemies.size()==4&&!g_inst.spawns[3].present&&
+              g_hostHpSequence>absenceInitialHpSequence&&g_clientManifestRevision==absenceReleasedRevision&&
+              !g_clientClaimHold.held&&g_clientClaimHold.releasedRevision==absenceReleasedRevision&&
+              ReleaseClientClaims(absenceBeforeGraceFrame),
+              "unchanged HP preserves main cached release despite native leave; no new full readback is claimed");
+        // Test-only reset of the cache, NOT a claimed production transition.
+        // Now invoke the exact held gate with the same five-live/four-native
+        // inputs. Main and the candidate both must refuse this fresh readback.
+        InvalidateClientClaims("test-absence-fresh-readback");
+        Check(g_clientClaimHold.held&&!ReleaseClientClaims(absenceBeforeGraceFrame),"missing live member still refuses exact client release before terminal authority");
         for(const auto& absencePacket:absenceTerminalPackets)
             g_bridge.incoming.push_back(HostEnvelope(absencePacket,++absenceSourceSerial));
         ReceiveWorldPackets();

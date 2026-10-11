@@ -96,6 +96,30 @@ check('HostFrame(absenceInitialFrame,absenceFresh,absenceCensus)&&HasHp(1,1000)&
 check('if (frame % HP_INTERVAL_FRAMES == 0 && !hp.entries.empty())' in main and
       't.spawnIndex > s.spawnIndex && t.objectId == s.objectId && SamePoint(t.spawnPos, s.spawnPos)' in main,
       'both missing prerequisites are exact main policy, not new experimental product behavior')
+# Main uses a cached release, not an unconditional current-census proof.
+# The original fixture's unchanged HP packet advances only the HP sequence.
+check(body(sync, 'bool EnsureClientClaimScope() {') == body(main, 'bool EnsureClientClaimScope() {'),
+      'scope/revision cache rearm is byte-identical to main')
+release_projection = body(sync, 'bool ReleaseClientClaims(std::uint32_t frame) {')
+release_projection = release_projection.replace('host.dead || host.removed', 'host.dead')
+release_projection = release_projection.replace(' && !host->second.removed', '')
+release_projection = release_projection.replace('(host->second.dead || host->second.removed)', 'host->second.dead')
+check(release_projection == body(main, 'bool ReleaseClientClaims(std::uint32_t frame) {'),
+      'full release gate exactly matches main when all removed flags are false')
+check(sync.index('if (!h.held) return true;', sync.index('bool ReleaseClientClaims(std::uint32_t frame) {')) <
+      sync.index('const auto census = CaptureNativeCensus();', sync.index('bool ReleaseClientClaims(std::uint32_t frame) {')),
+      'cached release returns before census in main-equivalent gate')
+for text, label in ((sync, 'candidate'), (main, 'main')):
+    check('if (!host.hpKnown || host.hp != e.hp || host.maxHp != e.maxHp) AdvanceClientManifestRevision();' in text,
+          label + ' unchanged HP values do not advance manifest revision')
+check('g_hostHpSequence>absenceInitialHpSequence&&g_clientManifestRevision==absenceReleasedRevision' in control and
+      'absenceLiveRows==5' in control and 'absenceClientCensus.enemies.size()==4' in control and
+      'absence-input mode=' in control and 'absence-release mode=' in control,
+      'native fixture asserts and prints exact five-live/four-native cached-release inputs')
+check(control.index('unchanged HP preserves main cached release') <
+      control.index('InvalidateClientClaims("test-absence-fresh-readback")') <
+      control.index('missing live member still refuses exact client release'),
+      'native fixture exposes cached result first then explicitly rearms test hold for full readback')
 check('only schema1 population sends terminal history' in native,
       'different-allocation/refill/metadata fixture checks main terminal disposition')
 print(json.dumps(dict(status='PASS', count=len(checks), checks=checks, nativeExecuted=False, acceptance=False), indent=2))
