@@ -132,7 +132,8 @@ class Admission:
             from .summary_acquisition import verify
             verify(s) # Original prior-prefix/frame proof, not a rewritten bracket.
         else:
-            need('[combat-causal] summary ' in after[len(before):],'fresh owner-frame mapping summary missing')
+            from .summary_acquisition import in_bracket
+            need(in_bracket(s),'fresh qualified owner-frame mapping summary missing')
         summary(after)
         need(not any(number(r,'kind')==11 or number(r,'loss') for r in receipt_rows(after)),'observer retired/lost')
         load=latest_load(after);need(latest_load(before)==load and load[2:]==LOCATION,'native load bookend changed')

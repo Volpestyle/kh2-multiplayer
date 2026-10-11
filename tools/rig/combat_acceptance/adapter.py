@@ -125,16 +125,17 @@ class PacketAdapter:
                                  'inter-bracket log prefix replaced/truncated')
                 admitted=[r for r in profile.population.receipt_rows(after)
                           if profile.population.number(r,'kind')==0]
-                summaries=profile.population.records(after[len(before):],summary_acquisition.SUMMARY)
-                # Empty/pre-admission brackets return immediately to the source
-                # native gates. Partial sets still fail the unchanged oracle.
-                ready=len(admitted)!=5 or bool(summaries and profile.population.number(summaries[-1],'admitted')==1
-                                               and int(summaries[-1].get('pendingNativeLeave','0'))==0)
-                if not ready and baseline:
-                    proof=summary_acquisition.qualify(row,baseline)
-                    if proof:
-                        row['summaryAcquisition']=proof
-                        ready=True
+                # The immutable prior bracket covers BOTH gap and in-bracket
+                # rows. Without it, direct acquisition uses its before prefix.
+                # No last-row fast path may conceal an earlier contradictory row.
+                ready=len(admitted)!=5
+                if len(admitted)==5:
+                    if baseline:
+                        proof=summary_acquisition.qualify(row,baseline)
+                        if proof:
+                            row['summaryAcquisition']=proof
+                            ready=True
+                    else:ready=summary_acquisition.in_bracket(row)
                 if ready:
                     self.last_sample=copy.deepcopy(row)
                     return row

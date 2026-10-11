@@ -236,3 +236,22 @@ then correct HP8 STOP, not an acceptance PASS. A frozen local-services projectio
 and new handoff are outside the packet; its PROFILE path still needs binding to
 this committed source by Steam, followed by the normal offline service/Setup
 replay and review3. No live attempt, product change or AC3 change is authorized.
+
+## Entire summary suffix (review3 correction, unadopted)
+
+Both PacketAdapter acquisition and Admission replay share the same validator for
+all summary rows after the immutable baseline. A good final row cannot hide a
+foreign middle row, a stale foreign tail, a reversed frame or conflicting equal
+frames. The direct in-bracket path uses the same checks; when an original prior
+bracket exists, it covers the gap AND the direct suffix together. Raw native
+brackets and all other five-body/native/root/scope predicates are unchanged.
+
+The exact c1b0469e `inject/src/CombatCausalTrace.hpp` Drain serializer throttles
+summaries to about one per second, serializes ownerFrame and nine scope fields,
+and has no unique summary ID. A stalled owner can repeat a frame legitimately.
+Coverage therefore requires strictly increasing frames: even exact duplicates
+refuse conservatively as insufficient unambiguous progress, without claiming
+log corruption. They cannot manufacture coverage or conceal a conflict. Original
+3864/3924 gap positives remain valid. Permanent controls exercise real
+PacketAdapter acquisition plus full Admission over retained native structures
+with explicit synthetic summaries/five Shadows; no native I/O is performed.

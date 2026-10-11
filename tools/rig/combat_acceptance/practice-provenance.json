@@ -10,17 +10,17 @@
     "copiedByteIdentically": true
   },
   "population.py": {
-    "sha256": "bbc56db5c20ba3b3e75cff11a774db8a3e3270b80d4f3c69ba5bdc5a6b8f257f",
+    "sha256": "7082311747b85ee85d54dd15a675eef034e3c14197bcacbac0d702b572315789",
     "origin": "qualified practice A population/source05 oracle",
     "copiedByteIdentically": false,
     "originalSha256": "fafcf6199f4f1b0d174a2730cfb9e3058b4f64323da56e8f6e51f4881b586b0d",
-    "delta": "Activation requires full admission on either native enemy endpoint or original kind=0 receipt (1ec91ce6). Fresh-summary predicate additionally accepts a recomputed immutable prior-prefix/frame proof for gap acquisition. All remaining five-body/native/root/scope predicates unchanged."
+    "delta": "Activation requires full admission on either native enemy endpoint or original kind=0 receipt (1ec91ce6). Fresh-summary predicate additionally accepts a recomputed immutable prior-prefix/frame proof for gap acquisition. All remaining five-body/native/root/scope predicates unchanged. Review3 #13: direct freshness path calls the same full-suffix verifier as gap proofs; remaining five-body/native/root/scope bytes unchanged."
   },
   "summary_acquisition.py": {
-    "sha256": "f4b5feb51d374527ef14c7f7d1cecd4f8147beb0109aea45470096e57ed869fe",
+    "sha256": "3fe685d069c0a1197bf26c32d167e5f706e47546636ffcacd91c731fdf2047cb",
     "origin": "practice-summary-gap-fix-01 causal_summary_acquisition.py",
     "originalSha256": "2b3a24146b9d1b65b0082e108ec537c038452bf8bd93f24ce1764701c7b023ea",
     "copiedByteIdentically": false,
-    "delta": "File-only proof/replay projection; adapter owns fresh read loop, original QPC budget and STOP. Raw native brackets are not rewritten."
+    "delta": "File-only proof/replay projection; adapter owns fresh read loop, original QPC budget and STOP. Raw native brackets are not rewritten. Review3 #13: every suffix summary must match original serialized scope/admissions and strictly advance ownerFrame. Equal frames (including exact duplicates) conservatively refuse, without a corruption claim."
   }
 }
