@@ -3728,6 +3728,7 @@ bool ReceiveWorldPackets() {
                         if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
                         continue;
                     }
+                    ResetOrdinaryLifecycle(); // retire old history before this batch can carry the new cut
                     ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority
                     g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
                     g_spawnPickUnknownEpoch = 0;

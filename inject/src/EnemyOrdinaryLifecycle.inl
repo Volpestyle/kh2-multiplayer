@@ -467,6 +467,10 @@ void RetryOrdinaryLifecycle() {
             OrdinaryCutReceipt(pending.cut,"client-pending-expired-or-superseded");
             ClearPendingOrdinaryCuts();return;
         }
+        if(!pending.arrived && g_host.arrived && warp::HostTransitionArrived(pending.cut.epoch)) {
+            auto& firstArrival=g_pendingOrdinaryCuts.front();
+            firstArrival.arrived=true;firstArrival.load=warp::LoadSerial();firstArrival.transition=warp::TransitionSerial();
+        }
         TryReceiveOrdinaryLifecycle(pending.cut,pending.source);
         if(g_pendingOrdinaryCuts.empty())return;
         if(!g_ordinaryClientHistory.Current() || !g_ordinarySource ||

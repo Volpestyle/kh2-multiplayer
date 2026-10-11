@@ -2084,6 +2084,17 @@ void TestCombatCausalBoundaries() {
           "experimental disposed-allocation failure never retries membership or grace-kills an unknown original");
     g_ordinaryLifecycleRequested=false;
     Check(!OrdinaryLifecycleRoom(),"ordinary living-removal experiment is disabled without explicit opt-in");
+    prepare(false,true);
+    const auto relayBootstrapCut=*OrdinaryCut();const auto relayBootstrapRoom=arrivalTarget;
+    ResetOrdinaryLifecycle();ClearPendingOrdinaryCuts();g_host={};
+    g_bridge.incoming.push_back(HostEnvelope(encode(relayBootstrapRoom),50));
+    g_bridge.incoming.push_back(HostEnvelope(encode(relayBootstrapCut),51));ReceiveWorldPackets();
+    Check(g_host.epoch==9&&!g_host.arrived&&!OrdinaryCut()&&g_pendingOrdinaryCuts.size()==1,
+          "actual relay RoomTransition then cut retains bootstrap before native arrival");
+    SeedPreparationShadows(1000);g_host.arrived=true;g_host.ackSent=true;
+    RetryOrdinaryLifecycle();
+    Check(OrdinaryCutCurrent()&&g_pendingOrdinaryCuts.empty(),
+          "relay bootstrap native recovery admits the original cut without another host membership event");
     for(unsigned delayedCase=0;delayedCase<5;++delayedCase) {
         prepare(false,true);
         const auto bootstrapCut=*OrdinaryCut();
