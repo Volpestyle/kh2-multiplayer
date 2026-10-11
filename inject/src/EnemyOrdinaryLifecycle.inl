@@ -11,6 +11,17 @@ ordinarylifecycle::History g_ordinaryHostHistory,g_ordinaryClientHistory;
 std::uint64_t g_ordinarySequence=0;
 std::uint32_t g_ordinaryGeneration=0,g_ordinaryLoad=0,g_ordinaryTransition=0;
 std::optional<WorldScope> g_ordinarySource;
+// Transport authentication is retained separately from native admission. Native
+// load initialization clears bindings, but must not discard an in-flight bootstrap.
+struct PendingOrdinaryCut {
+    PopulationCut cut;
+    WorldScope source;
+    std::uint32_t generation{},load{},transition{};
+    std::uint64_t receivedMs{};
+    bool arrived{};
+};
+std::vector<PendingOrdinaryCut> g_pendingOrdinaryCuts;
+void ClearPendingOrdinaryCuts() {g_pendingOrdinaryCuts.clear();}
 // Original cut/connection/native roots survive later replacement births; never re-anchor.
 struct OrdinaryRetirement {
     Spawn original;
@@ -325,7 +336,7 @@ bool PublishOrdinaryLifecycle(const NativeCensus& census) {
     g_ordinaryBirths=std::move(births);g_ordinaryGeneration=generation;g_ordinaryLoad=census.load;g_ordinaryTransition=census.transition;
     return true;
 }
-void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source) {
+void TryReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source) {
     if(!OrdinaryLifecycleRoom() || CurrentRole()!=Role::Client || cut.epoch!=g_host.epoch ||
        source.kind!=WorldSourceKind::Native || !source.hostSourceSerial ||
        source.sourceConnectionId!=g_bridge.ConnectionId(0) || source.sourceDeliverySerial!=g_bridge.PeerDeliverySerial(0) ||
@@ -425,6 +436,63 @@ void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source)
     g_ordinaryGeneration=WorldSessionGeneration();g_ordinaryLoad=warp::LoadSerial();g_ordinaryTransition=warp::TransitionSerial();
     AdvanceClientManifestRevision();InvalidateClientClaims("ordinary-membership-retired");
     OrdinaryCutReceipt(cut,"client-admitted");
+}
+bool PendingOrdinarySourceCurrent(const PendingOrdinaryCut& pending) {
+    return g_role==Role::Client && pending.generation==WorldSessionGeneration() &&
+        pending.cut.epoch==g_host.epoch && g_lastRoomPacket &&
+        pending.cut.location==PopulationLocation(*g_lastRoomPacket) &&
+        pending.source.sourceConnectionId==g_bridge.ConnectionId(0) &&
+        pending.source.sourceDeliverySerial==g_bridge.PeerDeliverySerial(0) &&
+        pending.source.targetConnectionId==g_bridge.ConnectionId(g_bridge.LocalSlot()) &&
+        pending.source.targetDeliverySerial==g_bridge.DeliverySerial() &&
+        (!pending.arrived || (pending.load==warp::LoadSerial() && pending.transition==warp::TransitionSerial())) &&
+        GetTickCount64()>=pending.receivedMs && GetTickCount64()-pending.receivedMs<=30000;
+}
+void RetryOrdinaryLifecycle() {
+    while(!g_pendingOrdinaryCuts.empty()) {
+        // Role/scope readers may retire session state. Never retain a reference
+        // across those readers or the native admission bookends.
+        const auto pending=g_pendingOrdinaryCuts.front();
+        if(!PendingOrdinarySourceCurrent(pending)) {
+            OrdinaryCutReceipt(pending.cut,"client-pending-expired-or-superseded");
+            ClearPendingOrdinaryCuts();return;
+        }
+        TryReceiveOrdinaryLifecycle(pending.cut,pending.source);
+        if(g_pendingOrdinaryCuts.empty())return;
+        if(!g_ordinaryClientHistory.Current() || !g_ordinarySource ||
+           g_ordinaryClientHistory.Current()->sequence!=pending.cut.sequence ||
+           g_ordinarySource->hostSourceSerial!=pending.source.hostSourceSerial)return;
+        g_pendingOrdinaryCuts.erase(g_pendingOrdinaryCuts.begin());
+    }
+}
+void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source) {
+    const auto role=CurrentRole();const auto generation=WorldSessionGeneration();
+    if(role!=Role::Client || !generation || !cut.membershipOnly ||
+       cut.epoch!=g_host.epoch || !g_lastRoomPacket || cut.location!=PopulationLocation(*g_lastRoomPacket) ||
+       source.sessionId.empty() || source.kind!=WorldSourceKind::Native || !source.hostSourceSerial ||
+       source.sourceConnectionId!=g_bridge.ConnectionId(0) || source.sourceDeliverySerial!=g_bridge.PeerDeliverySerial(0) ||
+       source.targetConnectionId!=g_bridge.ConnectionId(g_bridge.LocalSlot()) || source.targetDeliverySerial!=g_bridge.DeliverySerial())return;
+    try {ValidatePopulationCut(cut);}catch(const std::exception&) {return;}
+    if(g_ordinarySource && (g_ordinarySource->sessionId!=source.sessionId ||
+       source.hostSourceSerial<=g_ordinarySource->hostSourceSerial))return;
+    // Validate monotonic cumulative history before reserving bounded storage.
+    auto history=g_ordinaryClientHistory;
+    for(const auto& queued:g_pendingOrdinaryCuts) {
+        if(queued.source.sessionId!=source.sessionId || queued.generation!=generation ||
+           queued.source.sourceConnectionId!=source.sourceConnectionId ||
+           queued.source.sourceDeliverySerial!=source.sourceDeliverySerial ||
+           queued.source.targetConnectionId!=source.targetConnectionId ||
+           queued.source.targetDeliverySerial!=source.targetDeliverySerial)return;
+        if(!history.Admit(queued.cut))return;
+    }
+    if(!history.Admit(cut))return; // duplicates do not renew the original deadline
+    if(!g_pendingOrdinaryCuts.empty() && source.hostSourceSerial<=g_pendingOrdinaryCuts.back().source.hostSourceSerial)return;
+    if(g_pendingOrdinaryCuts.size()>=16) {
+        OrdinaryCutReceipt(cut,"client-pending-capacity-refused");return;
+    }
+    g_pendingOrdinaryCuts.push_back({cut,source,generation,warp::LoadSerial(),warp::TransitionSerial(),GetTickCount64(),g_host.arrived});
+    OrdinaryCutReceipt(cut,"client-pending-authenticated");
+    RetryOrdinaryLifecycle();
 }
 // A request is not completion. Only a later complete, current census can prove
 // absence; until then the original living body blocks replacement/release.

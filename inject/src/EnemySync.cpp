@@ -429,6 +429,7 @@ void LogClaim(const char* action, const HitClaim& claim, const char* reason) {
 
 void ResetPopulationRepair();
 void ResetOrdinaryLifecycle();
+void ClearPendingOrdinaryCuts();
 void ClearActivation() {
     g_activationLease.Clear();
     g_activationChallenges = {};
@@ -469,6 +470,7 @@ bool ReleaseClientClaims(std::uint32_t frame);
 void RetireWorldSession() {
     ResetPopulationRepair();
     ResetOrdinaryLifecycle();
+    ClearPendingOrdinaryCuts();
     g_recordLease.Interrupt(); g_recordKeys.clear(); g_recordAuthority.clear(); g_recordContext={};
     eventholdnative::RetireOwner();
     g_eventControlScope = {}; g_eventControlRoom = {};
@@ -3643,6 +3645,7 @@ bool ReceiveWorldPackets() {
             }
             if (type == PacketType::PopulationCut) {
                 ByteReader r(payload,size);PopulationCut cut;read(r,cut);
+                if(!r.atEnd())continue;
                 if(cut.membershipOnly)ReceiveOrdinaryLifecycle(cut,*scope);
                 else ReceivePopulationCut(cut,*scope);continue;
             }
@@ -3716,6 +3719,7 @@ bool ReceiveWorldPackets() {
                         if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
                         continue;
                     }
+                    ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority
                     g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
                     g_spawnPickUnknownEpoch = 0;
                     g_host = {};
@@ -5184,6 +5188,7 @@ void OnFrameStart(std::uint32_t frame) {
                      static_cast<unsigned long long>(g_inst.spawns[i].actor),
                      g_inst.spawns[i].spawnPos.x, g_inst.spawns[i].spawnPos.y, g_inst.spawns[i].spawnPos.z);
         }
+        RetryOrdinaryLifecycle(); // ordered bootstrap may precede native arrival/catalog
         if(!RefreshOrdinaryPresence(census)) {DrainPendingSpawnTrace(false);return;}
         if(!ConsumeOrdinaryRetirements(frame,census)) {DrainPendingSpawnTrace(false);return;}
         if (!ClientFrame(census)) { DrainPendingSpawnTrace(false); return; }

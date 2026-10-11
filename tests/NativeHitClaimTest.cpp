@@ -315,7 +315,8 @@ void Reset(bool client = false, bool registerReader = true) {
     g_resyncPlan.reset(); g_nativeResync.reset(); g_resyncOutput.clear();
     g_activationRecovery.reset(); g_activationReceiptSequence = g_activationReceiptGaps = 0;
     g_clientClaimHold = {}; g_clientManifestRevision = 0;
-    ResetOrdinaryLifecycle(); // no lifecycle/source certificate survives this owned fixture incarnation
+    ResetOrdinaryLifecycle();
+    ClearPendingOrdinaryCuts(); // no lifecycle/source certificate survives this owned fixture incarnation
     g_survivingPackEnabled = false; g_survivingPack = SurvivingPackPreparation {};
     g_resyncDeadline = g_resyncFailureFloor = 0; g_resyncHostCaptured = false;
     g_resyncPriorOrderedGeneration = 0;
@@ -1958,6 +1959,7 @@ void TestCombatCausalBoundaries() {
             arrivalTarget={};arrivalTarget.epoch=9;arrivalTarget.worldId=5;arrivalTarget.roomId=6;
             arrivalTarget.mapProgram=1;arrivalTarget.battleProgram=1;
             g_host.world=5;g_host.room=6;g_host.btl=1;g_host.ackSent=true;
+            g_lastRoomPacket=arrivalTarget;
             // Five REAL owned native bodies and record associations. The old
             // one-body/four copied observer leaves cannot authorize BC HP.
             SeedPreparationShadows(1000);
@@ -2007,6 +2009,35 @@ void TestCombatCausalBoundaries() {
             cc::Receipt r;while(cc::engine.Pop(r)){}
         }
     };
+    for(unsigned delayedCase=0;delayedCase<5;++delayedCase) {
+        prepare(false,true);
+        const auto bootstrapCut=*OrdinaryCut();
+        // Preserve the exact RoomTransition supplied by the arrival adapter.
+        g_lastRoomPacket=arrivalTarget;
+        ResetOrdinaryLifecycle();ClearPendingOrdinaryCuts();
+        if(delayedCase==0){g_host.arrived=false;g_host.ackSent=false;}
+        if(delayedCase==1)Put(RecordController()+8,std::uintptr_t{0});
+        g_bridge.incoming.push_back(HostEnvelope(encode(bootstrapCut),40));ReceiveWorldPackets();
+        if(delayedCase<2) {
+            Check(!OrdinaryCut()&&g_pendingOrdinaryCuts.size()==1,
+                  "authenticated relay bootstrap waits for native arrival/catalog, not packet replay");
+            g_host.arrived=true;g_host.ackSent=true;
+            if(delayedCase==1)Put(RecordController()+8,RecordHeader());
+            RetryOrdinaryLifecycle();
+            Check(OrdinaryCutCurrent()&&OrdinaryCut()->sequence==5&&g_pendingOrdinaryCuts.empty(),
+                  "pending relay cut revalidates after recovery without another host event");
+        } else {
+            // Force a deferred cut, then replace only its original authority.
+            ResetOrdinaryLifecycle();ClearPendingOrdinaryCuts();g_host.ackSent=false;
+            g_bridge.incoming.push_back(HostEnvelope(encode(bootstrapCut),41));ReceiveWorldPackets();
+            Check(g_pendingOrdinaryCuts.size()==1,"negative control retained original pending cut");
+            if(delayedCase==2)++g_host.epoch;
+            if(delayedCase==3)++g_bridge.connections[0];
+            if(delayedCase==4)g_pendingOrdinaryCuts.front().receivedMs=GetTickCount64()-30001;
+            g_host.ackSent=true;RetryOrdinaryLifecycle();
+            Check(!OrdinaryCut()&&g_pendingOrdinaryCuts.empty(),"superseding epoch/connection/expiry clears pending authority");
+        }
+    }
     prepare(false);auto c=Claim();c.objectId=302;QueueTestClaim(c);Check(Process(),"off actual host claim handler succeeds");
     auto census=CaptureNativeCensus();Check(HostFrame(6,{},census),"off actual normal HP publisher succeeds");
     const auto offBytes=g_bridge.outgoing;const auto offCalls=nativeCalls;const auto offHp=*reinterpret_cast<int*>(status);
