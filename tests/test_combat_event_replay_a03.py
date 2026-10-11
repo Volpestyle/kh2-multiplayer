@@ -134,6 +134,71 @@ class A03ReplayTests(unittest.TestCase):
                 i=next(i for i in r['incoming'] if i['serial']==(528 if 'seq=8 ' in marker else 450))
                 self.assertFalse(i['linked']);self.assertTrue(i['disposition'].startswith('unresolved'))
 
+    def test_review3_duplicate_incoming_serial450_refuses_both(self):
+        c=duplicate(CLIENT,'receipt schema=1 serial=450 ')
+        r=replay.replay(HOST,c)
+        rows=[i for i in r['incoming'] if i['event']==5]
+        self.assertEqual(len(rows),2)
+        self.assertTrue(all(not i['linked'] and i['disposition']=='unresolved_incoming' and
+                            i['refusal']=='duplicate_incoming_ledger_serial' for i in rows))
+        self.assertEqual(len({i['receiptIdentity'] for i in rows}),2)
+        self.assertEqual(len(r['receiptDispositions']),len(self.baseline['receiptDispositions'])+1)
+        self.assertEqual(r['wholeGraph'],replay.causal.audit_texts(HOST,c))
+
+    def test_review3_foreign_session450_refuses(self):
+        c=edit(CLIENT,'receipt schema=1 serial=450 ','sessionSalt',999)
+        r=replay.replay(HOST,c)
+        i=next(i for i in r['incoming'] if i['event']==5)
+        self.assertFalse(i['linked']);self.assertEqual(i['refusal'],'incoming_admitted_scope_mismatch')
+        self.assertEqual(i['disposition'],'unresolved_incoming')
+        self.assertTrue(next(i for i in r['incoming'] if i['event']==8)['linked'])
+
+    def test_review3_serial450_to528_collision_never_relabels_noop(self):
+        c=edit(CLIENT,'receipt schema=1 serial=450 ','serial',528)
+        r=replay.replay(HOST,c)
+        rows=[i for i in r['incoming'] if i['serial']==528]
+        self.assertEqual(len(rows),2)
+        self.assertTrue(all(not i['linked'] and i['refusal']=='duplicate_incoming_ledger_serial' for i in rows))
+        typed=[i for i in r['receiptDispositions'] if i['peer']=='client' and i['kind']==1 and i['netId']==0]
+        self.assertEqual([i['fields']['event'] for i in typed],[5,8])
+        self.assertEqual([i['fields']['afterHp']-i['fields']['beforeHp'] for i in typed],[-8,0])
+        self.assertTrue(all(i['disposition']=='unresolved_incoming' for i in typed))
+        for i in typed:
+            self.assertEqual(i['receiptIdentity'],next(x['receiptIdentity'] for x in rows if x['line']==i['line']))
+            self.assertTrue(all(issue['line']==i['line'] for issue in i['receiptIssues']))
+        self.assertNotEqual(typed[0]['receiptIdentity'],typed[1]['receiptIdentity'])
+
+    def test_incoming_full_admission_scope_and_parse_contradictions_refuse(self):
+        # Cover every shared scope field, including those unavailable in native hit context.
+        for key in replay.causal.SCOPE:
+            with self.subTest(scopeField=key):
+                value='5,7,0,1,1,0' if key=='location' else 999
+                c=edit(CLIENT,'receipt schema=1 serial=450 ',key,value)
+                i=next(i for i in replay.replay(HOST,c)['incoming'] if i['event']==5)
+                self.assertFalse(i['linked']);self.assertEqual(i['refusal'],'incoming_admitted_scope_mismatch')
+        for key,value,code in [('qpc',0,'invalid_local_clock'),('loss',1,'retired_or_loss'),('serial',999,'receipt_serial_gap_or_duplicate')]:
+            with self.subTest(key=key):
+                c=edit(CLIENT,'receipt schema=1 serial=450 ',key,value)
+                i=next(i for i in replay.replay(HOST,c)['incoming'] if i['event']==5)
+                self.assertFalse(i['linked']);self.assertIn(code,i['refusal'])
+                self.assertTrue(i['refusal'].startswith('invalid_incoming_receipt:'))
+
+    def test_incoming_duplicate_event_with_distinct_serial_refuses(self):
+        line,=[l for l in CLIENT.splitlines(keepends=True) if 'receipt schema=1 serial=450 ' in l]
+        c=CLIENT+line.replace('serial=450 ','serial=999 ')
+        r=replay.replay(HOST,c)
+        rows=[i for i in r['incoming'] if i['event']==5]
+        self.assertEqual(len(rows),2)
+        self.assertTrue(all(not i['linked'] and i['refusal']=='duplicate_incoming_ledger_event' for i in rows))
+
+    def test_incoming_invalid_original_admission_refuses(self):
+        c=edit(CLIENT,'receipt schema=1 serial=1 ','qualified',0)
+        r=replay.replay(HOST,c)
+        self.assertTrue(all(not i['linked'] and 'unqualified_receipt' in i['refusal'] for i in r['incoming']))
+        line,=[l for l in CLIENT.splitlines(keepends=True) if 'receipt schema=1 serial=1 ' in l]
+        r=replay.replay(HOST,CLIENT.replace(line,''))
+        self.assertTrue(all(not i['linked'] and i['refusal']=='invalid_incoming_original_admission' for i in r['incoming']))
+
     def test_forged_consumer_header_refuses_link(self):
         for key,value in [('outcome',2),('admittedEpoch',99),('originalBytes',1),('wireType',24)]:
             with self.subTest(key=key):

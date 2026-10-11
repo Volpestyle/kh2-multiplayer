@@ -214,10 +214,50 @@ def claim_proof(host, client, raw, applied):
             "claimSequence": claim["claimSeq"], "claimPayloadSha256": hashlib.sha256(claim["payload"]).hexdigest()}
 
 
-def incoming_disposition(raw, hit, native_events):
+def receipt_identity(peer, row):
+    """A parsed row identity, independent of potentially colliding event/serial fields."""
+    return (peer, row["line"], row["serial"], row["kind"], row["event"], row["qpc"], causal.scope(row))
+
+
+# These are the unchanged enemy-only schema-1 graph's disclosed net0 domain
+# limitations. All other contradictions refuse the incoming replay. The native
+# and policy proof below must still establish the actual player-side domain.
+INCOMING_DOMAIN_ISSUES = frozenset({
+    "target_replacement_or_unmapped", "invalid_target", "unqualified_receipt",
+    "unqualified_reason", "invalid_target_net_id", "unadmitted_client_native_delta",
+    "unresolved_or_duplicate_client_hit",
+})
+
+
+def incoming_disposition(raw, hit, native_events, client, parse_issues, graph_issues):
     """Type a local enemy->Sora event; never silently exclude a netId=0 row."""
-    item = {"serial": hit["serial"], "event": hit["event"], "disposition": "unresolved_incoming", "linked": False}
+    item = {"serial": hit["serial"], "event": hit["event"], "line": hit["line"],
+            "receiptIdentity": receipt_identity("client", hit), "disposition": "unresolved_incoming", "linked": False}
     try:
+        require(sum(r["serial"] == hit["serial"] for r in client) == 1, "duplicate_incoming_ledger_serial")
+        # One native Apply must not be consumed by multiple ledger Hits, including
+        # a conflicting enemy-domain Hit, or by an incoming Hit plus a queued claim.
+        require(sum(r["kind"] == 1 and r["event"] == hit["event"] for r in client) == 1 and
+                not any(r["kind"] == 2 and r["event"] == hit["event"] for r in client), "duplicate_incoming_ledger_event")
+        admissions = [r for r in client if r["kind"] == 0]
+        require(len(admissions) == 5 and len({r["netId"] for r in admissions}) == 5 and
+                len({r["actor"] for r in admissions}) == 5 and
+                all(r["kind"] == 0 for r in client[:5]) and max(r["line"] for r in admissions) < hit["line"],
+                "invalid_incoming_original_admission")
+        anchor = causal.scope(admissions[0])
+        require(causal.scope(hit) == anchor and all(causal.scope(r) == anchor for r in admissions),
+                "incoming_admitted_scope_mismatch")
+        admission_lines = {r["line"] for r in admissions}
+        def contradiction(issue):
+            if issue.get("peer") != "client":
+                return False
+            if issue.get("line") in admission_lines:
+                return True
+            if issue.get("line") == hit["line"] or issue.get("serial") == hit["serial"]:
+                return issue["code"] not in INCOMING_DOMAIN_ISSUES
+            return False
+        contradictions = [i for i in parse_issues + graph_issues if contradiction(i)]
+        require(not contradictions, "invalid_incoming_receipt:" + str(sorted({i["code"] for i in contradictions})))
         matches = [e for e in native_events if e["sequence"] == hit["event"]]
         require(len(matches) == 1, "missing_or_duplicate_incoming_native")
         event = matches[0]
@@ -361,7 +401,9 @@ def replay(host_text, client_text):
                              "disposition": disposition, "receiveCount": len(matches), "events": pub["causes"],
                              "transportDisposition": "NOT_ESTABLISHED" if not matches else "recorded_receive"})
     trace = trace_audit.audit_text(client_text)["nativeHitTrace"]
-    incoming = [incoming_disposition(client_raw, r, trace["events"]) for r in client if r["kind"] == 1 and r["netId"] == 0]
+    incoming = [incoming_disposition(client_raw, r, trace["events"], client, audit.issues, whole["issues"])
+                for r in client if r["kind"] == 1 and r["netId"] == 0]
+    incoming_by_identity = {i["receiptIdentity"]: i for i in incoming}
     # Every parsed receipt is retained and typed, including rejected and no-op rows.
     claims = [{"serial":r["serial"],"claimSequence":r["claimSeq"],"disposition":
                "linked_claim" if len([e for e in events if e["linked"] and e["native"].get("claimSerial") == r["serial"]]) == 1
@@ -374,11 +416,11 @@ def replay(host_text, client_text):
             elif row["kind"] == 13: disposition = "recorded_consumer_admission"
             elif row["kind"] in (4,5,6) and row["beforeHp"] == row["afterHp"]: disposition = "recorded_noop_" + disposition
             elif row["kind"] == 1 and peer == "client" and row["netId"] == 0:
-                disposition = next(i["disposition"] for i in incoming if i["serial"] == row["serial"])
-            receipts.append({"peer":peer,"serial":row["serial"],"line":row["line"],"kind":row["kind"],"reason":row["reason"],
+                disposition = incoming_by_identity[receipt_identity(peer, row)]["disposition"]
+            receipts.append({"peer":peer,"receiptIdentity":receipt_identity(peer,row),"serial":row["serial"],"line":row["line"],"kind":row["kind"],"reason":row["reason"],
                              "netId":row["netId"],"disposition":disposition,"payloadSha256":hashlib.sha256(row["payload"]).hexdigest(),
                              "fields":{k:(v.hex() if isinstance(v,bytes) else v) for k,v in row.items()},
-                             "receiptIssues":[i for i in whole["issues"] if i.get("peer") == peer and i.get("serial") == row["serial"]]})
+                             "receiptIssues":[i for i in whole["issues"] if i.get("peer") == peer and i.get("line") == row["line"]]})
     return {"schemaVersion": 1, "status": "RECORDED_LOCAL_CHAINS_LINKED" if events and all(e["linked"] for e in events) and
             not any(e["disposition"] == "unresolved_enemy_damage" for e in native_events) and
             all(c["disposition"] == "linked_claim" for c in claims) else "UNRESOLVED",
@@ -390,7 +432,8 @@ def replay(host_text, client_text):
             "clientNativeEvents":[{"applySequence":e["sequence"],"line":e["line"],"disposition":
                 "linked_claim" if any(c["linked"] and c["native"].get("sourceKind") == "client_canonical_claim" and
                                       c["native"].get("applySequence") == e["sequence"] for c in events) else
-                next((i["disposition"] for i in incoming if i["event"] == e["sequence"]),"unresolved_native_event")}
+                (next(i["disposition"] for i in incoming if i["event"] == e["sequence"])
+                 if sum(i["event"] == e["sequence"] for i in incoming) == 1 else "unresolved_native_event")}
                 for e in trace["events"]],
             "wholeRunStatus": whole["status"], "coverageIssues": whole["issues"],
             "limits": ["Recorded host direct-Stat, client queued-claim zero-Stat and incoming Take/Stat paths are replayed; unsupported paths refuse.",
