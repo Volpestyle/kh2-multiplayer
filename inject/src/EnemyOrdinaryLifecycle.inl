@@ -47,10 +47,11 @@ using OrdinaryLeaveFn=bool(*)(const Spawn&,int);
 OrdinaryLeaveFn g_ordinaryLeave=RequestOrdinaryNativeLeave;
 void ResetOrdinaryLifecycle() {
     g_ordinaryBirths.clear();g_ordinaryRetirements.clear();g_ordinaryPresence.clear();g_ordinaryHostHistory.Reset();g_ordinaryClientHistory.Reset();
+    g_ordinaryHostBlocked=false;
     g_ordinarySequence=0;g_ordinaryGeneration=g_ordinaryLoad=g_ordinaryTransition=0;g_ordinarySource.reset();
 }
 bool OrdinaryLifecycleRoom() {
-    return !g_populationRequested && g_inst.live && g_inst.world==5 && g_inst.room==6 && g_inst.door==0 &&
+    return g_ordinaryLifecycleRequested && !g_populationRequested && g_inst.live && g_inst.world==5 && g_inst.room==6 && g_inst.door==0 &&
         g_inst.map==1 && g_inst.btl==1 && g_inst.evt==0;
 }
 const PopulationCut* OrdinaryCut() {
@@ -224,8 +225,16 @@ bool OrdinaryPendingReplacement(const NativeCensus& census,const NativeEnemy& na
        member.recordIndex==presence.anchor.occurrence.record && OrdinaryPresenceRecord(presence,first))++matches;
     return matches==1 && FreshRecordCatalog(census,last) && SameRecordCatalogSample(first,last) && CensusMatchesInstance(census);
 }
+// One failed experimental removal proof suspends membership publication for
+// the original load. No retries of departed allocations, no synthetic terminal.
+// Current bodies still publish normally; client native admission stays strict.
+bool SuspendOrdinaryHost(const char* reason) {
+    g_ordinaryHostBlocked=true;
+    if(g_log)g_log("[ordinary-lifecycle] experimental-suspended reason=%s killCredit=0 fallback=present-body-publication-only",reason);
+    return true;
+}
 bool PublishOrdinaryLifecycle(const NativeCensus& census) {
-    if(!OrdinaryLifecycleRoom())return true;
+    if(!OrdinaryLifecycleRoom() || g_ordinaryHostBlocked)return true;
     if(g_role!=Role::Host || !CensusMatchesInstance(census) || !SafeNativeGameplay())return false;
     const auto generation=WorldSessionGeneration();
     if(!generation || (g_ordinaryGeneration && (generation!=g_ordinaryGeneration ||
@@ -259,22 +268,23 @@ bool PublishOrdinaryLifecycle(const NativeCensus& census) {
                 if(!next(old->occurrence.terminalSequence))return false;
                 old->occurrence.terminal=true;
             } else {
-                // Full current census + immediately previous authenticated living
-                // five-root member + still-readable original roots/HP/content.
-                // This proves membership removal, NOT the script/cull trigger.
+                // EXPERIMENTAL ONLY: readable old roots are NOT allocation-
+                // lifetime proof. This adjacent-frame observation must not be
+                // enabled for production acceptance. On any missing proof,
+                // suspend once for the load instead of retrying disposed memory.
                 if(old->lastSeenFrame+1!=g_hitTraceFrame || old->target.hp<=0 || spawn.lastHp!=old->target.hp ||
-                   std::any_of(census.enemies.begin(),census.enemies.end(),[&](const auto& n){return n.actor==old->target.actor;}))return false;
+                   std::any_of(census.enemies.begin(),census.enemies.end(),[&](const auto& n){return n.actor==old->target.actor;}))return SuspendOrdinaryHost("nonadjacent-or-unknown-removal");
                 NativeEnemy original;bool enemy=false;
                 if(!ReadNativeEnemy(spawn.actor,original,enemy) || !enemy || original.objentry!=old->target.objentry ||
                    original.status!=old->target.status || original.hp!=old->target.hp || original.maxHp!=old->target.maxHp ||
-                   !PopulationBirthRootsCurrent(spawn,PopulationSpawnRoots(spawn)))return false;
+                   !PopulationBirthRootsCurrent(spawn,PopulationSpawnRoots(spawn)))return SuspendOrdinaryHost("departed-allocation-unavailable");
                 unsigned definitions=0;
                 for(std::uint32_t i=0;i<before.entryCount;++i)if(population_cut_detail::sameDefinition(before.entries[i].content,old->definition)) {
                     const auto& entry=before.entries[i];
-                    if(entry.controller!=old->target.controller || entry.spawnArray+64*old->occurrence.record!=old->target.record)return false;
+                    if(entry.controller!=old->target.controller || entry.spawnArray+64*old->occurrence.record!=old->target.record)return SuspendOrdinaryHost("departed-record-changed");
                     ++definitions;
                 }
-                if(definitions!=1 || !next(old->occurrence.terminalSequence))return false;
+                if(definitions!=1 || !next(old->occurrence.terminalSequence))return SuspendOrdinaryHost("departed-record-unproved");
                 old->occurrence.terminal=true;old->occurrence.removed=true;
             }
             continue;
@@ -467,7 +477,7 @@ void RetryOrdinaryLifecycle() {
 }
 void ReceiveOrdinaryLifecycle(const PopulationCut& cut,const WorldScope& source) {
     const auto role=CurrentRole();const auto generation=WorldSessionGeneration();
-    if(g_populationRequested || role!=Role::Client || !generation || !cut.membershipOnly ||
+    if(!g_ordinaryLifecycleRequested || g_populationRequested || role!=Role::Client || !generation || !cut.membershipOnly ||
        cut.epoch!=g_host.epoch || !g_lastRoomPacket || cut.location!=PopulationLocation(*g_lastRoomPacket) ||
        source.sessionId.empty() || source.kind!=WorldSourceKind::Native || !source.hostSourceSerial ||
        source.sourceConnectionId!=g_bridge.ConnectionId(0) || source.sourceDeliverySerial!=g_bridge.PeerDeliverySerial(0) ||

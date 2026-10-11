@@ -206,6 +206,9 @@ std::uint64_t g_motionPublished = 0, g_motionSendFailures = 0;
 enemymirror::Stream g_mirror;
 // VUH-1788: client population follows the host (KH2COOP_ENEMY_POPULATION=1).
 bool g_populationRequested = false;
+// No production allocation-lifetime witness exists for a living BC leave.
+bool g_ordinaryLifecycleRequested = false;
+bool g_ordinaryHostBlocked = false;
 // Force-spawn has its own sub-flag (default off): the cull hold and forced-copy cleanup run with
 // KH2COOP_ENEMY_POPULATION=1 alone; creation needs KH2COOP_ENEMY_POPULATION_SPAWN=1 as well.
 bool g_populationSpawnRequested = false;
@@ -1839,7 +1842,7 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
     for (Spawn& s : g_inst.spawns) {
         if (s.present || s.deathSent || s.lifecycleRetired) continue;
         // A living BC disappearance without a certified retirement stays a hard failure.
-        if(OrdinaryLifecycleRoom() && s.lastHp>0)return false;
+        if(OrdinaryLifecycleRoom() && s.lastHp>0 && !g_ordinaryHostBlocked)return false;
         if (s.goneSinceMs == 0) s.goneSinceMs = now;
         bool refilled = false;
         for (const Spawn& t : g_inst.spawns) {
@@ -1870,7 +1873,11 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             // Schema-1 repair still requires its own complete certificate.
             if(frame%120==0)SYNC_LOG("[enemysync] host: unqualified refill row held spawn=%u killCredit=0",s.spawnIndex);
             continue;
-        } else if (s.lastHp <= 0 || now - s.goneSinceMs > DESPAWN_GRACE_MS) {
+        } else if (s.lastHp>0) {
+            // Absence/grace expiry is not a death witness. In particular, an
+            // experimental membership failure cannot fall back to a fake kill.
+            continue;
+        } else {
             EnemyDeath d;
             d.epoch = g_epoch;
             d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
@@ -4942,6 +4949,11 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     if (g_mirrorRequested && g_log)
         g_log("[latency] enemyCursorDelayFrames=%u source=%s traceBudget=%u", g_mirror.delayFrames(),
               !delayLength ? "default" : delay ? "env" : "invalid-default", g_latencyTraceBudget);
+    char ordinaryExperimental[2] {};
+    g_ordinaryLifecycleRequested =
+        GetEnvironmentVariableA("KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL", ordinaryExperimental, sizeof(ordinaryExperimental))==1 &&
+        ordinaryExperimental[0]=='1';
+    if(g_log)g_log("[ordinary-lifecycle] experimental=%u hostRemovalLifetimeWitness=0",g_ordinaryLifecycleRequested?1u:0u);
     char population[2] {};
     g_populationRequested = g_mirrorRequested &&
         GetEnvironmentVariableA("KH2COOP_ENEMY_POPULATION", population, sizeof(population)) == 1 && population[0] == '1';

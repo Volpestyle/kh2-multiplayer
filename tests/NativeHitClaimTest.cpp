@@ -297,6 +297,7 @@ void Reset(bool client = false, bool registerReader = true) {
     object = image + 0x30000; status = image + 0x40000;
     g_exeBase = image; g_log = nullptr; g_logBudget = 400;
     g_takeDamage = NativeDamage; g_envRole = Role::Off;
+    g_ordinaryLifecycleRequested=false;
     g_role = client ? Role::Client : Role::Host;
     // Reset owns a new synthetic bridge incarnation; production leases never reset.
     g_writerLease.~RuntimeWriterLease(); new (&g_writerLease) RuntimeWriterLease;
@@ -1946,7 +1947,7 @@ void TestResourceSerialization() {
 void TestCombatCausalBoundaries() {
     namespace cc=kh2coop::inject::combatcausal;
     const auto prepare=[](bool enabled,bool client=false) {
-        Reset(client);
+        Reset(client);g_ordinaryLifecycleRequested=true;
         g_bridge.connections[2]=0;g_bridge.spawnPickSalt=55;
         g_inst.room=6;g_inst.door=0;g_inst.map=1;g_inst.btl=1;g_inst.evt=0;
         Put(image+offsets::ROOM_ID,std::uint8_t{6});Put(image+offsets::NOW+2,std::uint8_t{0});
@@ -2062,6 +2063,27 @@ void TestCombatCausalBoundaries() {
               "only previously native-zero refill original publishes death; living or metadata replacement never fabricates kill");
         g_populationRequested=false;
     }
+    prepare(false);SeedPreparationShadows(20);
+    for(auto& removalSpawn:g_inst.spawns) {
+        removalSpawn.controller=RecordController();removalSpawn.record=RecordData(0,removalSpawn.spawnIndex);
+        removalSpawn.identityRead=true;
+    }
+    g_hitTraceFrame=30;
+    Check(PublishOrdinaryLifecycle(CaptureNativeCensus())&&OrdinaryCutCurrent(),
+          "experimental host control first authenticates five living record members");
+    Put(enemy+0x4000+offsets::actor::LINKED_NEXT_HANDLE,
+        static_cast<std::uint32_t>((enemy+0x8000)&offsets::active_entity_list::HANDLE_LOW_MASK));
+    Put(enemy+0x6000+ACTOR_STATUS,std::uintptr_t{0});
+    g_hitTraceFrame=31;
+    const auto invalidatedRemovalCensus=CaptureNativeCensus();TrackSpawns(invalidatedRemovalCensus);
+    Check(HostFrame(120,{},invalidatedRemovalCensus)&&g_ordinaryHostBlocked&&OrdinaryCut()->sequence==5&&
+          !g_inst.spawns[3].deathSent&&!g_inst.spawns[3].lifecycleRetired&&HasHp(1,20),
+          "unlink plus invalidated status suspends experimental membership once but does not freeze present-body publication or invent kill");
+    g_hitTraceFrame=200;
+    Check(HostFrame(240,{},CaptureNativeCensus())&&OrdinaryCut()->sequence==5&&!g_inst.spawns[3].deathSent,
+          "experimental disposed-allocation failure never retries membership or grace-kills an unknown original");
+    g_ordinaryLifecycleRequested=false;
+    Check(!OrdinaryLifecycleRoom(),"ordinary living-removal experiment is disabled without explicit opt-in");
     for(unsigned delayedCase=0;delayedCase<5;++delayedCase) {
         prepare(false,true);
         const auto bootstrapCut=*OrdinaryCut();
