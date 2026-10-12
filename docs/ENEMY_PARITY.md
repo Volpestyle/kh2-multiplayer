@@ -7,6 +7,14 @@ driven, two-sample retake, and whole-stream loss restoring native brain/motion
 pass-through. The fixture supplies binding correspondence and native functions;
 it does not establish live colliders, incoming damage or three-instance parity.
 
+The owned-memory NativeHitClaimTest also exercises the actual EnemySync
+`MirrorPose` admission function: living matching Soldier binding, initial
+two-sample acquisition, status-pointer replacement, zero HP, host removal,
+family mismatch, stale release, partial retake and default-off refusal. This
+removes the pose-gate stand-in for those checks; binding setup and native memory
+are still fixture-owned. Native hook/collider behavior and boss phases need live
+evidence before broader acceptance.
+
 EnemyMotion ingestion now expires an enemy's previous arrival before refreshing
 it. A gap greater than 30 local frames requires two new samples even when the
 first returning packet arrives before the next stream tick. An interrupted

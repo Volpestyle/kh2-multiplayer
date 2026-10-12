@@ -370,6 +370,63 @@ void Reset(bool client = false, bool registerReader = true) {
     SeedRecordCatalog();
 }
 
+void TestMirrorPoseAdmission() {
+    namespace em = kh2coop::inject::enemymirror;
+    Reset(true);
+    g_mirrorRequested = true;
+    g_mirror.Reset(9);
+    g_mirrorFrame = 100;
+    // Use the actual EnemySync gate and its existing owned native binding.
+    // No MirrorPose stand-in: status reads touch the fixture's native bytes.
+    g_inst.spawns[0].objectId = em::kSoldierObjectId;
+    g_host.enemies[1].objectId = em::kSoldierObjectId;
+    Put(object + offsets::objentry::OBJECT_ID, em::kSoldierObjectId);
+    em::Pose pose;
+    auto gate = [&] { pose = {}; return MirrorPose(enemy, pose); };
+    Check(gate() == em::Gate::Bound && pose.netId == 1,
+          "actual MirrorPose: living bound Soldier without stream stays native");
+    EnemyMotion motion; motion.epoch = 9; motion.sequence = 1; motion.hostFrame = 100;
+    EnemyMotionEntry row; row.netId = 1; row.objectId = em::kSoldierObjectId;
+    row.motionId = 9; row.motionTime = 12; row.position = {80, -20, 8};
+    motion.entries.push_back(row);
+    Check(g_mirror.Ingest(motion, 100), "actual gate fixture accepts initial stream sample");
+    g_mirror.Tick(100);
+    Check(gate() == em::Gate::Bound, "actual MirrorPose requires two stream samples");
+    motion.sequence = 2; motion.hostFrame = 103; g_mirrorFrame = 103;
+    Check(g_mirror.Ingest(motion, 103), "actual gate fixture accepts second stream sample");
+    g_mirror.Tick(103);
+    Check(gate() == em::Gate::Drive && pose.netId == 1 && pose.objectId == row.objectId &&
+          pose.motionId == 9 && pose.position.x == 80,
+          "actual MirrorPose admits the matching living native copy and host pose");
+    Put(enemy + ACTOR_STATUS, status + 0x100);
+    Put(status + 0x100, std::int32_t{1000});
+    Check(gate() == em::Gate::None, "actual MirrorPose refuses live status-pointer replacement");
+    Put(enemy + ACTOR_STATUS, status);
+    Put(status, std::int32_t{0});
+    Check(gate() == em::Gate::None, "actual MirrorPose refuses native zero HP");
+    Put(status, std::int32_t{1000});
+    g_host.enemies[1].removed = true;
+    Check(gate() == em::Gate::None, "actual MirrorPose refuses removed host enemy");
+    g_host.enemies[1].removed = false;
+    g_host.enemies[1].objectId = em::kShadowObjectId;
+    Check(gate() == em::Gate::None, "actual MirrorPose refuses host/local family disagreement");
+    g_host.enemies[1].objectId = row.objectId;
+    g_mirrorFrame = 134; g_mirror.Tick(134);
+    Check(gate() == em::Gate::Bound, "actual MirrorPose releases stale stream to native AI");
+    motion.sequence = 3; motion.hostFrame = 136;
+    Check(g_mirror.Ingest(motion, 134), "actual gate fixture accepts recovery sample");
+    g_mirror.Tick(134);
+    Check(gate() == em::Gate::Bound, "actual MirrorPose retains fallback during partial retake");
+    motion.sequence = 4; motion.hostFrame = 139; g_mirrorFrame = 135;
+    Check(g_mirror.Ingest(motion, 135), "actual gate fixture accepts second recovery sample");
+    g_mirror.Tick(135);
+    Check(gate() == em::Gate::Drive, "actual MirrorPose retakes after fresh pair and restored identity");
+    g_mirrorRequested = false;
+    Check(gate() == em::Gate::None, "actual MirrorPose default-off bypass grants no drive authority");
+    g_mirror.Reset(0);
+    Reset();
+}
+
 HitClaim Claim(std::uint32_t seq = 1) {
     HitClaim claim; claim.epoch = 9; claim.seq = seq; claim.netId = 1;
     claim.attackId = 65; claim.damage = 7; claim.objectId = 309;
@@ -2934,6 +2991,7 @@ int main() try {
     Reset(); pendingTransition = true;
     Check(!CurrentPuppetActor(player, transition, load),
           "pending native teardown prevents puppet release");
+    TestMirrorPoseAdmission();
     TestWorldRetirement();
     TestEnemyHpOrdering();
     TestCombatCausalBoundaries();
