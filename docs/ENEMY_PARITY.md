@@ -1,5 +1,12 @@
 ## VUH-1515 offline stream recovery fix (2026-10-12)
 
+The native driver test now also connects the real stream to three fake-memory
+client enemies (Soldier/Shadow/Rabid Dog). It checks simultaneous moving-pose
+playback and alternating motions, per-enemy loss while the other copies remain
+driven, two-sample retake, and whole-stream loss restoring native brain/motion
+pass-through. The fixture supplies binding correspondence and native functions;
+it does not establish live colliders, incoming damage or three-instance parity.
+
 EnemyMotion ingestion now expires an enemy's previous arrival before refreshing
 it. A gap greater than 30 local frames requires two new samples even when the
 first returning packet arrives before the next stream tick. An interrupted

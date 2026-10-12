@@ -1,6 +1,7 @@
 // VUH-1515 step 2: the native client driver (inject/src/EnemyMirror.inl) over
 // fake game memory. Headless: MinHook, the motion setter, the handle resolver
-// and enemysync::MirrorPose are stand-ins; no game process, no real hooks.
+// and binding correspondence are stand-ins; the common-pack case connects
+// the real EnemyMirrorState stream to the driver. No game process, no real hooks.
 #include <Windows.h>
 #include <cmath>
 #include <cstdarg>
@@ -9,7 +10,7 @@
 #include <cstring>
 #include <initializer_list>
 #include "kh2coop/KH2Offsets.hpp"
-#include "EnemyMirrorPose.hpp"
+#include "EnemyMirrorState.hpp"
 #include "EnemyPopulation.hpp"
 
 enum MH_STATUS { MH_OK = 0, MH_ERROR_NOT_EXECUTABLE = 9 };
@@ -59,6 +60,11 @@ static bool g_requested = true;
 static enemymirror::Gate g_gate = enemymirror::Gate::None;
 static uintptr_t g_for = 0;
 static enemymirror::Pose g_pose {};
+// Optional real-stream adapter for the common-pack integration case below.
+// Correspondence is supplied by the fixture; EnemySync's binder is not simulated.
+static bool g_streamMode = false;
+static enemymirror::Stream g_stream;
+static uintptr_t g_packActors[3] {};
 static bool MirrorRequested() noexcept { return g_requested; }
 static bool RecordMirrorAuthorityCurrent(uintptr_t) noexcept { return g_recordCurrent; }
 static bool g_trace = false;
@@ -79,6 +85,14 @@ static std::uint32_t g_popGeneration = 0;
 static void PopulationForget(uintptr_t actor) noexcept { g_forgotten = actor; }
 static std::uint32_t PopulationGeneration() noexcept { return g_popGeneration; }
 static enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
+    if (g_streamMode) {
+        for (unsigned i = 0; i < 3; ++i) if (actor == g_packActors[i]) {
+            out.netId = static_cast<std::uint16_t>(i + 1);
+            return g_stream.PoseAt(out.netId, g_frameCounter, out)
+                ? enemymirror::Gate::Drive : enemymirror::Gate::Bound;
+        }
+        return enemymirror::Gate::None;
+    }
     if (actor != g_for) return enemymirror::Gate::None;
     out.netId = g_pose.netId;
     if (g_gate == enemymirror::Gate::Drive) out = g_pose;
@@ -108,6 +122,87 @@ static void Update(uintptr_t a) {
     enemymirror::PreUpdate(a);
     if (g_detour) g_detour(reinterpret_cast<void*>(g_handler), reinterpret_cast<void*>(a));
     enemymirror::PostUpdate(a);
+}
+
+static void TestCommonPack(uintptr_t heap, uintptr_t vtable) {
+    // Retire earlier single-actor fixtures through their normal None gate.
+    enemysync::g_for = 0;
+    for (const auto offset : {0x1000, 0x4000, 0xA000, 0xC000})
+        enemymirror::PreUpdate(heap + offset);
+    enemysync::g_popRequested = false;
+    Q(g_handler) = vtable;
+    g_detour = enemymirror::kDetours[0]; // earlier negative fixture disabled its call site
+    constexpr std::uint32_t families[] = {enemymirror::kSoldierObjectId,
+        enemymirror::kShadowObjectId, enemymirror::kRabidDogObjectId};
+    for (unsigned i = 0; i < 3; ++i) {
+        const uintptr_t a = heap + 0x1000 + i * 0x3000;
+        enemysync::g_packActors[i] = a;
+        std::memset(reinterpret_cast<void*>(a), 0, 0x1000);
+        U(a) = 0x80001234;
+        Q(a + 0x5C0) = heap + 0xE000 + i * 0x100;
+        U(heap + 0xE000 + i * 0x100) = 20;
+        F(a + 0x158 + 0x40) = 100.0f;
+    }
+    enemysync::g_stream.Reset(1);
+    enemysync::g_streamMode = true;
+    const auto start = ++g_frameCounter;
+    std::uint64_t sequence = 0;
+    auto frame = [&](bool publish, bool first) {
+        ++g_frameCounter;
+        if (publish) {
+            kh2coop::EnemyMotion packet;
+            packet.epoch = 1; packet.sequence = ++sequence; packet.hostFrame = g_frameCounter;
+            for (unsigned i = first ? 0u : 1u; i < 3; ++i) {
+                kh2coop::EnemyMotionEntry row;
+                row.netId = static_cast<std::uint16_t>(i + 1); row.objectId = families[i];
+                row.position = {static_cast<float>(g_frameCounter - start) + 100.0f * i, -20.0f, 5.0f};
+                row.rotationY = 0.5f;
+                row.motionId = 9 + ((g_frameCounter - start) / 12) % 2;
+                row.motionTime = static_cast<float>((g_frameCounter - start) % 12);
+                packet.entries.push_back(row);
+            }
+            CHECK(enemysync::g_stream.Ingest(packet, g_frameCounter));
+        }
+        enemysync::g_stream.Tick(g_frameCounter);
+        for (const auto a : enemysync::g_packActors) Update(a);
+    };
+    for (unsigned i = 0; i < 80; ++i) frame(i % 3 == 0, true);
+    for (unsigned i = 0; i < 3; ++i) {
+        const auto a = enemysync::g_packActors[i];
+        enemymirror::Pose pose;
+        CHECK(enemysync::g_stream.PoseAt(static_cast<std::uint16_t>(i + 1), g_frameCounter, pose));
+        auto* d = enemymirror::Find(a);
+        CHECK(d && enemymirror::DrivenNow(a) && d->blend == 0 && d->skips == d->drivenUpdates);
+        CHECK(std::fabs(F(a + offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X) - pose.position.x) < 0.001f);
+        CHECK(U(a + offsets::actor::ANIM_ID) == pose.motionId && enemymirror::BlockMotion(a));
+        CHECK(std::fabs(F(a + 0x158 + 0x44) - pose.motionTime) <= PUPPET_TIME_DRIFT_FRAMES);
+        CHECK(U(heap + 0xE000 + i * 0x100) == 20);
+    }
+    // Withhold just Soldier's samples while the other two keep playing back.
+    for (unsigned i = 0; i < 32; ++i) frame(true, false);
+    CHECK(!enemymirror::DrivenNow(enemysync::g_packActors[0]));
+    CHECK(!enemymirror::BlockMotion(enemysync::g_packActors[0]));
+    CHECK(enemymirror::DrivenNow(enemysync::g_packActors[1]) && enemymirror::DrivenNow(enemysync::g_packActors[2]));
+    auto nativeCalls = g_brainCalls;
+    frame(true, false);
+    CHECK(g_brainCalls == nativeCalls + 1); // released Soldier only
+    frame(true, true);
+    CHECK(!enemymirror::DrivenNow(enemysync::g_packActors[0]));
+    frame(true, true);
+    CHECK(enemymirror::DrivenNow(enemysync::g_packActors[0]));
+    CHECK(enemymirror::Find(enemysync::g_packActors[0])->runs == 2);
+    // Whole-stream stop restores all native brains and motion requests.
+    for (unsigned i = 0; i < 31; ++i) frame(false, false);
+    nativeCalls = g_brainCalls;
+    const auto sets = g_sets;
+    frame(false, false);
+    CHECK(g_brainCalls == nativeCalls + 3 && g_sets == sets);
+    for (const auto a : enemysync::g_packActors) {
+        CHECK(!enemymirror::DrivenNow(a) && !enemymirror::BlockMotion(a));
+        CHECK(U(Q(a + 0x5C0)) == 20);
+    }
+    enemysync::g_streamMode = false;
+    for (const auto a : enemysync::g_packActors) enemymirror::PreUpdate(a);
 }
 
 int main() {
@@ -453,6 +548,7 @@ int main() {
     ++g_frameCounter;enemymirror::PreUpdate(actor);
     g_frameCounter+=enemymirror::kSpawnSettleFrames;enemymirror::PreUpdate(actor);
     d=enemymirror::Find(actor);
+    TestCommonPack(reinterpret_cast<uintptr_t>(heap), vtable);
     std::printf("EnemyMirrorDriverTest: %s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }
