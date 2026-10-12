@@ -239,6 +239,83 @@ void testStream() {
     check(cap.cursor() >= 0.0 && em::Stream{}.cursor() < 0.0, "cursor() is the displayed cursor, negative before any sample");
 }
 
+void testStreamRecovery() {
+    // Existing common-pack families; no game memory or new family admission.
+    std::vector<EnemyMotionEntry> pack;
+    for (const auto family : {em::kSoldierObjectId, em::kShadowObjectId, em::kRabidDogObjectId}) {
+        auto e = row(static_cast<std::uint16_t>(pack.size() + 1), 10.0f);
+        e.objectId = family;
+        pack.push_back(e);
+    }
+    auto allDrive = [&](const em::Stream& stream, std::uint32_t frame, bool expected) {
+        em::Pose pose;
+        for (const auto& e : pack) {
+            if (stream.Drivable(e.netId, frame) != expected ||
+                stream.PoseAt(e.netId, frame, pose) != expected) return false;
+            if (expected && pose.objectId != e.objectId) return false;
+        }
+        return true;
+    };
+    // Use the real production order: packets first, Tick second.
+    em::Stream gap;
+    gap.Ingest(motion(1, 1, 100, pack), 1); gap.Tick(1);
+    gap.Ingest(motion(1, 2, 103, pack), 2); gap.Tick(2);
+    check(allDrive(gap, 2, true), "common pack starts driving after two fresh samples");
+    check(allDrive(gap, 33, false), "expired pack refuses poses even before the next Tick");
+    gap.Ingest(motion(1, 3, 136, pack), 33); gap.Tick(33);
+    check(allDrive(gap, 33, false) && gap.stats().releases == 3,
+          "ingest before Tick cannot conceal a stale gap or skip retake hysteresis");
+    gap.Ingest(motion(1, 4, 139, pack), 34); gap.Tick(34);
+    check(allDrive(gap, 34, true) && gap.stats().retakes == 6,
+          "common pack retakes only after the second fresh recovery sample");
+
+    // A pending recovery sample expires too, both with and without intervening Tick.
+    for (const bool ticking : {false, true}) {
+        em::Stream partial;
+        partial.Ingest(motion(1, 1, 100, pack), 1); partial.Tick(1);
+        if (ticking) partial.Tick(32);
+        partial.Ingest(motion(1, 2, 133, pack), 32); partial.Tick(32);
+        check(allDrive(partial, 32, false) && partial.stats().releases == 0,
+              "isolated initial samples cannot combine across a stale gap");
+        partial.Ingest(motion(1, 3, 136, pack), 33); partial.Tick(33);
+        partial.Tick(64);
+        partial.Ingest(motion(1, 4, 169, pack), 65); partial.Tick(65);
+        if (ticking) partial.Tick(96);
+        partial.Ingest(motion(1, 5, 202, pack), 96); partial.Tick(96);
+        check(allDrive(partial, 96, false) && partial.stats().releases == 3,
+              "interrupted retake resets credit without counting a second release");
+        // Neither duplicate sequence nor stale host frame earns retake credit.
+        check(!partial.Ingest(motion(1, 5, 205, pack), 97), "recovery rejects duplicate sequence");
+        partial.Ingest(motion(1, 6, 201, pack), 97); partial.Tick(97);
+        check(allDrive(partial, 97, false), "stale per-enemy samples cannot complete recovery");
+        partial.Ingest(motion(1, 7, 205, pack), 98); partial.Tick(98);
+        check(allDrive(partial, 98, true) && partial.stats().retakes == 6,
+              "uninterrupted fresh pair restores a partially recovered pack");
+    }
+    em::Stream boundary;
+    boundary.Ingest(motion(1, 1, 100, pack), 1); boundary.Tick(1);
+    boundary.Ingest(motion(1, 2, 103, pack), 31); boundary.Tick(31);
+    check(allDrive(boundary, 31, true) && boundary.stats().releases == 0,
+          "exactly thirty frames remains fresh for initial acquisition");
+    boundary.Ingest(motion(1, 3, 133, pack), 61); boundary.Tick(61);
+    check(allDrive(boundary, 61, true) && boundary.stats().releases == 0,
+          "exactly thirty frames remains fresh for active driving");
+    // Traffic for another enemy must not refresh the omitted body's arrival.
+    boundary.Ingest(motion(1, 4, 166, {pack[0]}), 92); boundary.Tick(92);
+    check(!boundary.Drivable(1, 92) && !boundary.Drivable(2, 92) && boundary.stats().releases == 3,
+          "per-enemy expiry is independent of packet-level traffic");
+    boundary.Ingest(motion(1, 5, 169, {pack[0]}), 93); boundary.Tick(93);
+    check(boundary.Drivable(1, 93) && !boundary.Drivable(2, 93) && !boundary.Drivable(3, 93),
+          "one enemy recovers without reacquiring omitted pack members");
+    em::Stream wrap;
+    const auto beforeWrap = std::numeric_limits<std::uint32_t>::max() - 10;
+    wrap.Ingest(motion(1, 1, 100, pack), beforeWrap); wrap.Tick(beforeWrap);
+    wrap.Ingest(motion(1, 2, 103, pack), beforeWrap + 1); wrap.Tick(beforeWrap + 1);
+    wrap.Ingest(motion(1, 3, 136, pack), 22); wrap.Tick(22);
+    check(allDrive(wrap, 22, false) && wrap.stats().releases == 3,
+          "local frame wrap preserves stale-gap expiry before refresh");
+}
+
 void testHelpers() {
     const std::uintptr_t at = 0x140419B10, brain = 0x1403B4460;
     std::uint8_t good[8] = {0x48, 0x8B, 0xCA, 0xE9, 0, 0, 0, 0};
@@ -524,6 +601,7 @@ void testRelay() {
 }  // namespace
 
 int main() {
+    testStreamRecovery();
     if (enet_initialize() != 0) return 2;
     testCodec();
     testStream();

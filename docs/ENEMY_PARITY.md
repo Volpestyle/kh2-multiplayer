@@ -1,3 +1,19 @@
+## VUH-1515 offline stream recovery fix (2026-10-12)
+
+EnemyMotion ingestion now expires an enemy's previous arrival before refreshing
+it. A gap greater than 30 local frames requires two new samples even when the
+first returning packet arrives before the next stream tick. An interrupted
+initial acquisition or retake loses its partial sample credit; isolated packets
+cannot accumulate across stale gaps. Exactly 30 frames remains fresh, and only
+accepted, advancing per-enemy samples count toward recovery. Release counters
+still count active-to-released transitions, not repeated gaps while released.
+
+Offline regression uses Soldier, Shadow and Rabid Dog streams, including the
+ingest-before-tick order, interrupted recovery, per-enemy omissions and local
+frame wrap. This changes no family admission, native hook, HP/death or default
+flag. Three-instance position/hit acceptance and a complete boss mirror remain
+open; prior family-specific live qualifications below retain their original scope.
+
 ## Scoped 317/76 authority: partial live qualification (2026-10-08)
 
 Lead approved the default-off scoped record binder/authority implementation

@@ -72,6 +72,9 @@ public:
                 ++stats_.staleSamples;
                 continue;
             }
+            // Packets are consumed before Tick. Expire the previous arrival
+            // before refreshing it so a frame gap cannot bypass retake.
+            Expire(t, localFrame);
             t.ring[t.head] = {m.hostFrame, e.objectId, e.motionId, e.motionTime, e.position, e.rotationY};
             t.head = (t.head + 1) % kRing;
             if (t.count < kRing) ++t.count;
@@ -126,11 +129,7 @@ public:
         }
         for (auto& [id, t] : tracks_) {
             (void)id;
-            if (!t.released && (!t.haveArrival || localFrame - t.lastArrival > kStaleFrames)) {
-                t.released = true;
-                t.sinceRelease = 0;
-                ++stats_.releases;
-            }
+            Expire(t, localFrame);
         }
     }
 
@@ -192,6 +191,14 @@ private:
         bool haveArrival = false;
         bool released = true;  // a new netId needs kRetake samples too
     };
+    void Expire(Track& t, std::uint32_t localFrame) noexcept {
+        if (t.haveArrival && localFrame - t.lastArrival <= kStaleFrames) return;
+        if (!t.released) ++stats_.releases;
+        t.released = true;
+        // Isolated samples must not accumulate recovery credit across gaps,
+        // including while the track is already released or newly discovered.
+        t.sinceRelease = 0;
+    }
     std::map<std::uint16_t, Track> tracks_;
     std::uint32_t epoch_ = 0;
     std::uint64_t sequence_ = 0;
