@@ -6,6 +6,9 @@
 > model sections of `kh2_three_client_coop_design.md`. Work is tracked in the
 > Linear project **KH2 Multiplayer** (vuhlp workspace); this doc holds the
 > design, decisions, risks and phase gates.
+>
+> **Direction (2026-10-12):** an automated 30-minute soak now drives the
+> backlog; see [D13](#decisions).
 
 ## Goal
 
@@ -1027,6 +1030,37 @@ Format: decision — why (rejected alternative).
   leader rather than a single session host.
 - **D12. Autonomy first.** P0 makes every later phase verifiable by an agent
   alone; live RE and gameplay work wait for it.
+- **D13. Playable over provable: an automated soak drives the backlog**
+  (James, 2026-10-12). Development stays fully automated; no human playtest
+  gates progress. From 2026-10-10 to 2026-10-12 about 1.5k product lines landed
+  against 8.4k test, 2.3k rig and 1k docs lines, mostly hardening admission,
+  receipts and acceptance tooling, while no player-facing milestone moved since
+  UX07 (2026-10-08). The north star is a soak: two native instances, both
+  bot-driven through `kh2ctl` player/friend input, play a fixed 30-minute route
+  over Steam on PC1+PC2 (loopback first), TT then HB or BC with transitions and
+  ordinary combat (`warp_room` until bot pathing holds), built on the scenario
+  runner. Each run ranks its failures with clip and log excerpt: crash or
+  disconnect, enemy census desync, HP/death disagreement, invisible or stuck
+  puppet, room-follow failure, protected-save change. The tracked metric is
+  minutes of continuous play to first hard failure, per main commit.
+  Lane rules:
+  1. Work is pulled from soak failures or features the route needs.
+  2. A fix carries one regression test from the observed failure plus the next
+     soak run. No new admission, receipt, attestation or census machinery
+     unless it would have caught a failure that actually happened.
+  3. Review findings either block (wrong behavior, crash, save risk) or go to
+     notes without blocking landing. After two review rounds the lead decides.
+  4. AC3 offline replay, the VUH-1503 profile/receipts, practice-mode
+     extensions and census authentication are frozen; fix only on breakage.
+  5. Each default-off feature is enabled in the soak profile or parked with a
+     one-line reason; the soak runs what would ship.
+  6. One results row per soak run, no disclaimer paragraphs; refresh the
+     current-state section weekly.
+  7. Closing lanes delete their merged or proof worktrees under `.local/`.
+  Save protection, one lane per rig and owned-process cleanup stay hard gates.
+  (Continuing per-fix proof machinery and multi-round reviews: they kept
+  raising the bar without moving playability. A human-playtest gate: it would
+  stall the automated loop.)
 
 ## Architecture
 
