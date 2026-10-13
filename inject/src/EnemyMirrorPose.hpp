@@ -73,6 +73,10 @@ inline constexpr std::uint32_t kRabidDogObjectId = 3;
 inline constexpr std::uint32_t kHammerFrameObjectId = 8;
 inline constexpr std::uint32_t kAerialChampObjectId = 2410;
 inline constexpr std::uint32_t kBeffudlerObjectId = 2404;
+// VUH-1789 route T1: Iron Hammer (HB04/15 btl26), a type-4 melee
+// variant sharing the existing handler. Lance Warrior remains native:
+// its HB04/17 btl25 smoke crashed before qualification.
+inline constexpr std::uint32_t kIronHammerObjectId = 2405;
 // T2 batch8: Bookmaster5 and Creeper Plant125 passed non-projectile gates in b8-07.
 // Projectile damage remains UNQUALIFIED; Robot306 stays OFF. Mirror defaults OFF.
 inline constexpr std::uint32_t kSurveillanceRobotObjectId = 306;
@@ -88,6 +92,7 @@ inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId,
                                               kDuskObjectId, kSamuraiObjectId, kDancerObjectId,
                                               kSilverRockObjectId, kIcyCubeObjectId, kAssassinObjectId,
                                               kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId,
+                                              kIronHammerObjectId,
                                               kBookmasterObjectId, kCreeperPlantObjectId, kCreeperObjectId, 76};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)

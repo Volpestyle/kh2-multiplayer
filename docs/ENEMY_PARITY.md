@@ -1,3 +1,26 @@
+## VUH-1789 route T1 smoke (2026-10-13)
+
+Iron Hammer `M_EX560_HB` (2405) joins the explicit mirror allowlist. It uses
+the existing type-4 handler, population path and all-player targeting family
+rule. No classifier, hook shape, T2/T3 or boss policy changed.
+
+Two-player loopback `20261013-032757_net_route_t1_ordinary_waves_1` passed
+four rooms with MIRROR, POPULATION and TARGET_ALL enabled and host Normal
+difficulty. Native max HP matched on both peers: Iron Hammer 122→196 (HB
+04/15 btl26), Driller Mole 21→34 and Soldier 29→47 (TT 02/0D btl4), Armored
+Knight 16→26 (HB 04/02 btl1), Hammer Frame 63→101 and Large Body 98→157 (BC
+05/0C btl10). All 312 matched-frame motion samples agreed, with zero position
+error; damage HP matched and deaths were 17/17. Four saves were unchanged;
+owned processes closed. Evidence and twelve reviewed short clips:
+`.local/vuh1789/evidence/20261013-032757_net_route_t1_ordinary_waves_1/`.
+
+Lance Warrior 2409 stays native: HB04/17 btl25 crashed during load before
+qualification (`20261013-032235_net_route_t1_hb_lance_warrior_1`). The crash
+dump remained empty after a locked-file bundle failure, so the cause is unknown.
+TARGET_ALL's family rule and hook were exercised; attacks against a remote
+Sora were not qualified here. Existing private-clone room scope is BC Courtyard
+and GoA, which these rooms do not widen.
+
 ## VUH-1515 offline stream recovery fix (2026-10-12)
 
 The native driver test now also connects the real stream to three fake-memory

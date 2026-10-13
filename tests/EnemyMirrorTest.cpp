@@ -5,6 +5,7 @@
 #include "WorldWireFixture.hpp"
 #include "kh2coop/SessionHost.hpp"
 #include "EnemyMirrorState.hpp"
+#include "EnemyTargetRemote.hpp"
 #include <enet/enet.h>
 #include <chrono>
 #include <cmath>
@@ -345,12 +346,12 @@ void testHelpers() {
               em::FamilyAllowed(10) && !em::FamilyAllowed(9) && !em::FamilyAllowed(11) &&
               em::FamilyAllowed(304) && em::FamilyAllowed(1843) && em::FamilyAllowed(1889) && !em::FamilyAllowed(1842) &&
               !em::FamilyAllowed(1844) && !em::FamilyAllowed(1888) && !em::FamilyAllowed(1890),
-          "batches 2-4 allow 17, 303, 368, 10, 304 (+1843/1889) and the batch-4 test families 305, 18, 120, 367: not their skins (1833, 1836, 1845), neighbours, other skins (2025, 2409) or type-21 122/73");
+          "batches 2-4 retain their qualified families; unqualified skins/type-21 stay native");
     {
-        char line[128] {};
+        char line[256] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125,317,76").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,5,125,317,76",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -412,7 +413,7 @@ void testHelpers() {
                   "batch7 family streams beside excluded Sniper311");
         }
         check(!em::FamilyAllowed(2) && !em::FamilyAllowed(7) && !em::FamilyAllowed(9) &&
-                  !em::FamilyAllowed(2403) && !em::FamilyAllowed(2405) && !em::FamilyAllowed(2409) &&
+                  !em::FamilyAllowed(2403) &&
                   !em::FamilyAllowed(2411) && em::FamilyAllowed(76),
               "batch7 neighbours stay native; Fiery Globe76 is a scoped-record stream candidate");
     }
@@ -601,6 +602,27 @@ void testRelay() {
 }  // namespace
 
 int main() {
+    // VUH-1789: Iron Hammer uses the same motion and all-player target
+    // allowlist; unqualified Lance, projectile and type-21 neighbours stay native.
+    {
+        em::Stream stream;
+        std::vector<EnemyMotionEntry> pack;
+        for (const auto oid : {2405u, 2409u, 2403u, 2408u}) {
+            auto entry = row(static_cast<std::uint16_t>(oid), 10.0f);
+            entry.objectId = oid; pack.push_back(entry);
+        }
+        stream.Ingest(motion(7, 1, 100, pack), 1);
+        stream.Ingest(motion(7, 2, 103, pack), 2); stream.Tick(2);
+        bool correct = true;
+        for (const auto oid : {2405u, 2409u, 2403u, 2408u}) {
+            em::Pose pose;
+            const bool added = oid == 2405;
+            correct = correct && stream.Drivable(static_cast<std::uint16_t>(oid), 2) == added &&
+                kh2coop::inject::enemytarget::rules::AllowedObject(oid, true) == added;
+            if (added) correct = correct && stream.PoseAt(static_cast<std::uint16_t>(oid), 2, pose) && pose.objectId == oid;
+        }
+        check(correct, "route T1 Iron Hammer mirrors and targets all; unqualified Lance/T2/T3 stay native");
+    }
     testStreamRecovery();
     if (enet_initialize() != 0) return 2;
     testCodec();

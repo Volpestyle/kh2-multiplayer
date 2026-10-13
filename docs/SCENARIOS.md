@@ -3039,6 +3039,17 @@ and [prior source review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-
   restrictions remain, and this single save authorization is consumed.
 
 
+## Route T1 mirror smoke (VUH-1789)
+
+`net_route_t1_ordinary_waves.json` visits HB Iron Hammer, TT Driller/Soldier,
+HB Armored Knight and BC Hammer Frame on one two-player loopback. Each visit
+requires living target families on both peers, matching native Normal-scaled
+max HP, mirror driving, shared damage HP and death agreement. MIRROR,
+POPULATION and TARGET_ALL are enabled. `net_route_t1_hb_iron_hammer.json`
+is the shorter addition-only fixture. Clips show native waves and their deaths;
+the report records numerical HP. The fixtures do not qualify remote-player
+attacks beyond the existing native Sora-clone room scope.
+
 ## Poll subprocesses and console cleanup
 
 The canonical `kh2ctl` wrapper and `bridge()` avatar poll use
