@@ -1,5 +1,22 @@
 ## VUH-1789 route T1 smoke (2026-10-13)
 
+Continuation batch `20261013-035916_route_t1_remainder_1` completed ten
+visits (four passed, six parked). Assassin309/Dusk318 at TT02/0D btl2,
+Lance Soldier17 at BC05/00 btl3, Beffudler2404 at HB04/15 btl25 and Dancer312
+at HB04/19 btl26 had living copies, matching HP, multiple driven motions and
+original-copy death agreement. They were already allowlisted; no IDs were added.
+The eight host/friend clips were reviewed. The HB04/19 camera partly views
+unrendered space, so this is an enemy smoke rather than a route-geometry pass.
+Four protected saves were unchanged and owned resources closed.
+
+Parked recipes: Creeper317 (TT02/0D btl7) and Gargoyle Warrior368 (BC05/00
+btl3) did not yield required living copies on both peers. Samurai310 and
+Neoshadow120 (TT02/1F), Gargoyle Knight367 (BC05/09), Aerial Champ2410
+(HB04/17 btl26) did not meet room/Sora readiness. Their earlier qualifications
+and existing allowlist remain unchanged. Per-visit outcomes and clips are in
+`.local/vuh1789-tiers/evidence/20261013-035916_route_t1_remainder_1/`;
+the batch's overall PASS means it completed, not that every visit qualified.
+
 Iron Hammer `M_EX560_HB` (2405) joins the explicit mirror allowlist. It uses
 the existing type-4 handler, population path and all-player targeting family
 rule. No classifier, hook shape, T2/T3 or boss policy changed.
