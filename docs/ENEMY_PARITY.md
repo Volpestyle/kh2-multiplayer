@@ -957,7 +957,11 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 **Fixture controls.** `KH2COOP_ENEMY_MIRROR_TRACE=1` logs host positions and every tracked client copy's position (with `driven=0/1`) on host frames that are multiples of 30. `KH2COOP_ENEMY_MIRROR_CONTROL=<file>` (host) reads a phase word from a disk file every 30 frames; `mute` pauses publishing. Use kh2ctl injection for fixtures (Panacea's double frame tick suppresses the client trace).
 
 **Known gaps.**
-- Host enemies only target the host's Sora (aggro).
+- Default host aggro still chooses the host's Sora. The default-off
+  `KH2COOP_ENEMY_TARGET_ALL=1` plus mirror mode extends the common search path
+  to eligible remote players; BC Soldier passed loopback with native damage
+  on the friend. Other families and close-contact puppet collision remain
+  unqualified. See [enemy targeting](ENEMY_TARGET_REMOTE.md).
 - Projectiles and other script-spawned attacks are not mirrored.
 - FIELD_COMMAND/time-snap edge triggers can repeat VFX/SFX.
 - Whether skipping the brain during spawn bookkeeping leaves a copy un-hittable is unknown; the settle is a time bound.

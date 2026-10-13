@@ -1,6 +1,6 @@
 # Enemy targeting of remote players (VUH-1515)
 
-## Ordinary mirrored waves (VUH-2193 candidate)
+## Ordinary mirrored waves (VUH-2193)
 
 `KH2COOP_ENEMY_TARGET_ALL=1` requires `KH2COOP_ENEMY_MIRROR=1` and
 uses the current mirror-family list for the common `target_search` path.
@@ -27,6 +27,35 @@ Attacks that bypass `+0xBF8`, scripted player-only targets, projectiles and
 bosses are parked: the common search override does not change their separate
 targeting paths. Family-specific targeting qualification remains a live check.
 No party/status room expansion or package/profile change is included.
+
+### BC Soldier loopback, 2026-10-12
+
+Run [201627](../build/scenarios/20261012-201627_net_enemy_target_all_soldier_1/report.md)
+passed using the qualified BC clone leaf and mirror mode. The
+[friend clip](../build/scenarios/20261012-201627_net_enemy_target_all_soldier_1/friend_soldier_attack_1.mp4)
+shows Soldiers attacking the friend's real Sora. Host search assignments name
+owner 1 and object 301. Client native hit records have `driven=1`, with attack
+motions 201/202 entered during the mirror run. Friend HP went 24 to 12 to 0;
+the host puppet stayed at 24 despite incoming host-side hit records. No
+forward, veto or remote-hit records occurred. Four protected files, tracked
+files and installed game files were unchanged; owned cleanup completed.
+
+Focused CTest passed 2/2 (targeting and DamagePolicy); the existing production
+adapter harness passed 75/75, including all-mode refusal of owner veto/apply
+and all-mode coexistence with native party configuration. The first live
+attempt stopped during friend bootstrap; the scenario now waits for both
+actors and their matching full location before placement.
+
+Limits: this run qualifies Soldier's common search path. Other mirror families
+remain unqualified live; attacks that bypass the common slot stay parked.
+The players were separated during combat, so host swings against the puppet
+and close-contact pushing/blocking remain untested. Native-party coexistence
+was checked offline; BC is outside that mode's qualified room scope.
+
+Proposed play flags are `KH2COOP_ENEMY_TARGET_ALL=1` and
+`KH2COOP_ENEMY_MIRROR=1`, with legacy `KH2COOP_ENEMY_TARGET_REMOTE` unset.
+Existing party/private-status qualification still applies. The lead decides
+promotion and where these flags belong; no play profile was created.
 
 `KH2COOP_ENEMY_TARGET_REMOTE=1` (exactly `1`; default off). Set it on every machine of the
 session. With the flag off nothing is hooked, swapped, written or sent. This flag and
