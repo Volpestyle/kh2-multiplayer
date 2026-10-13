@@ -8,7 +8,8 @@
 > design, decisions, risks and phase gates.
 >
 > **Direction (2026-10-12):** an automated 30-minute soak now drives the
-> backlog; see [D13](#decisions).
+> backlog; see [D13](#decisions). Amended 2026-10-13: functionality first, soak
+> harness deferred.
 
 ## Goal
 
@@ -1061,6 +1062,13 @@ Format: decision — why (rejected alternative).
   (Continuing per-fix proof machinery and multi-round reviews: they kept
   raising the bar without moving playability. A human-playtest gate: it would
   stall the automated loop.)
+
+  *Amendment (James, 2026-10-13):* build functionality first; the soak
+  harness is deferred ("i feel like we can always find bugs, but should be
+  building out functionality rn"). Lane rules 2–7 still apply, and work is
+  pulled from features the play route needs (first: enemies target every
+  player, VUH-2193; then population follows the host, VUH-1788; then co-op
+  difficulty scaling, VUH-2194).
 
 ## Architecture
 
