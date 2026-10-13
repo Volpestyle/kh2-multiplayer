@@ -48,9 +48,24 @@ actors and their matching full location before placement.
 
 Limits: this run qualifies Soldier's common search path. Other mirror families
 remain unqualified live; attacks that bypass the common slot stay parked.
-The players were separated during combat, so host swings against the puppet
-and close-contact pushing/blocking remain untested. Native-party coexistence
+The initial run separated the players; close contact is covered below. Native-party coexistence
 was checked offline; BC is outside that mode's qualified room scope.
+
+### Close contact, 2026-10-12
+
+Run [202545](../build/scenarios/20261012-202545_net_enemy_target_all_contact_1/report.md)
+passed with ALL and MIRROR enabled. The host hit a nearby Soldier for 4 native
+damage (39 to 35 HP), then was placed 30 units from the friend's puppet and
+walked in both directions. The
+[host clip](../build/scenarios/20261012-202545_net_enemy_target_all_contact_1/host_contact_0.mp4)
+shows no reaction worth fixing or stuck/push loop. Host movement covered about
+706 units on the first leg and 648 on the return. Puppet HP stayed 24 after the
+swing and contact; no forward, veto or remote-hit records occurred. All four
+protected files and installed game files were unchanged; owned cleanup passed.
+KeepNative was left unchanged. This is a short Soldier smoke check, not broad
+collision qualification. A preceding attempt stopped before the contact actions
+on an unnecessary owner-target assignment wait; that wait was removed from the
+bounded contact fixture.
 
 Proposed play flags are `KH2COOP_ENEMY_TARGET_ALL=1` and
 `KH2COOP_ENEMY_MIRROR=1`, with legacy `KH2COOP_ENEMY_TARGET_REMOTE` unset.

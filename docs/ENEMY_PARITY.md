@@ -960,8 +960,8 @@ The motion tick, hurtboxes, physics and the hit pass keep running. A mirrored at
 - Default host aggro still chooses the host's Sora. The default-off
   `KH2COOP_ENEMY_TARGET_ALL=1` plus mirror mode extends the common search path
   to eligible remote players; BC Soldier passed loopback with native damage
-  on the friend. Other families and close-contact puppet collision remain
-  unqualified. See [enemy targeting](ENEMY_TARGET_REMOTE.md).
+  on the friend, and a short Soldier/contact check found no stuck/push loop.
+  Other families remain unqualified. See [enemy targeting](ENEMY_TARGET_REMOTE.md).
 - Projectiles and other script-spawned attacks are not mirrored.
 - FIELD_COMMAND/time-snap edge triggers can repeat VFX/SFX.
 - Whether skipping the brain during spawn bookkeeping leaves a copy un-hittable is unknown; the settle is a time bound.
