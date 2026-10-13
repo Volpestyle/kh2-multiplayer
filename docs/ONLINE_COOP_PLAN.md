@@ -86,8 +86,10 @@ No shared-HP/hash-policy change is included in this slice.
 
 These route runs exercise the source player's child-launch functions, not the
 ZIP or complete GUI flow. VUH-2234 supplied a coherent protocol-18/AvatarBridge-4
-package from `545b550`; this new native extension needs a refreshed package
-cohort before it appears in that ZIP.
+package from `545b550`; the refreshed `7331a05` cohort now includes the route
+private-Sora extension. Installed-package TT rehearsal `20261013-123603` passes:
+defaults on, HP21->34 /29->47 both, real friend24->18, deaths4/4, no relay/runtime
+desync, four protected saves unchanged. ENet loopback; two-PC Steam remains separate.
 
 ## Where the project stands (updated 2026-10-08)
 

@@ -3,11 +3,11 @@
 `build_friend.py` copies explicitly selected local products and the installed
 CPython 3.11 standard library/Tk. It never downloads, installs, launches KH2,
 opens a listener or writes the game folder. `friend-products.json` pins the
-protocol-18 / AvatarBridge-4 cohort built from `545b550`. DLL, runtime, relay,
+protocol-18 / AvatarBridge-4 cohort built from `7331a05`. DLL, runtime, relay,
 avatarctl and portable CLI share one source revision and build ID. Refresh all
 five product receipts together; the existing validator rejects mixed versions,
 cohorts and packaged hashes. The pinned local copies live under
-`build/rig/vuh2234-protocol18-20261013-01/products/`.
+`build/rig/vuh2239-protocol18-20261013-01/products/`.
 
 This cohort builds all five native products with the static MSVC CRT. Earlier
 release01/release02 products remain historical evidence, not current inputs.
@@ -82,3 +82,9 @@ loopback. BC HP scaled 39 to 63 on both peers, the friend's real Sora took an
 enemy hit, deaths agreed and the room transition produced no desync notice.
 Four protected saves were unchanged. This validates the installed native cohort;
 it does not establish a clean-machine install or two-PC Steam acceptance.
+
+The refreshed `7331a05` cohort also passes installed-package TT rehearsal
+`20261013-123603`: launcher defaults on, Driller/Soldier HP21->34 /29->47 on
+both peers, real friend HP24->18, deaths4/4, no relay/runtime desync notice,
+and four protected saves unchanged. All native launches use the extracted ZIP;
+the developer CLI is only a PID/birth-bound rehearsal input/capture aid.
