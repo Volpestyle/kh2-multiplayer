@@ -116,6 +116,9 @@ public:
 
     // Attempt to connect. Returns false on immediate failure.
     bool connect();
+    void setCoopDifficulty(CoopDifficulty mode) noexcept {
+        if (!attemptActive_ && ValidDifficulty(mode)) requestedDifficulty_ = mode;
+    }
 
     // Pump ENet events. Call once per frame.
     void tick(std::uint32_t timeoutMs = 0);
@@ -279,6 +282,7 @@ private:
     std::string peerId_;
     std::string peerName_;
     std::optional<SlotType> requestedSlot_;
+    CoopDifficulty requestedDifficulty_{CoopDifficulty::Off};
     RuntimeMode requestedMode_{RuntimeMode::CampaignCoop};
     std::uint16_t protocolVersion_{PROTOCOL_VERSION};
     ClientCallbacks callbacks_;

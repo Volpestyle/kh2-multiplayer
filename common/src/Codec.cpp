@@ -627,6 +627,7 @@ void write(ByteWriter& w, const SessionState& ss) {
     for (const auto& a : ss.actors) {
         write(w, a);
     }
+    w.writeU8(static_cast<std::uint8_t>(ss.coopDifficulty));
 }
 
 void write(ByteWriter& w, const ActorSnapshot& as) {
@@ -659,6 +660,7 @@ void write(ByteWriter& w, const ClientHello& ch) {
     w.writeString(ch.peerName);
     w.writeU8(static_cast<std::uint8_t>(ch.requestedMode));
     w.writeU8(ch.requestedSlot);
+    if (ch.protocolVersion >= 18) w.writeU8(static_cast<std::uint8_t>(ch.coopDifficulty));
 }
 
 void write(ByteWriter& w, const AvatarState& a) {
@@ -1049,6 +1051,8 @@ void read(ByteReader& r, SessionState& ss) {
     for (auto& a : ss.actors) {
         read(r, a);
     }
+    ss.coopDifficulty = static_cast<CoopDifficulty>(r.readU8());
+    if (!ValidDifficulty(ss.coopDifficulty)) throw std::runtime_error("SessionState: invalid co-op difficulty");
 }
 
 void read(ByteReader& r, ActorSnapshot& as) {
@@ -1081,6 +1085,10 @@ void read(ByteReader& r, ClientHello& ch) {
     ch.peerName = r.readString();
     ch.requestedMode = static_cast<RuntimeMode>(r.readU8());
     ch.requestedSlot = r.readU8();
+    // Decode the legacy hello far enough for the existing version gate to
+    // return an explicit rejection; v17 has no difficulty byte.
+    ch.coopDifficulty = ch.protocolVersion >= 18 ? static_cast<CoopDifficulty>(r.readU8()) : CoopDifficulty::Off;
+    if (!ValidDifficulty(ch.coopDifficulty)) throw std::runtime_error("ClientHello: invalid co-op difficulty");
 }
 
 void read(ByteReader& r, AvatarState& a) {
@@ -1128,6 +1136,7 @@ void writeRoomTransitionPacket(ByteWriter& w, const RoomTransition& m) {
     write(w, m);
     w.writeU8(m.spawnPickShared);
     w.writeU32(m.spawnPickSaltTag);
+    w.writeU8(m.difficultyPlayers);
 }
 
 void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
@@ -1135,6 +1144,9 @@ void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
     m.spawnPickShared = r.readU8();
     if (m.spawnPickShared > 1) throw std::runtime_error("RoomTransition: spawnPickShared not 0/1");
     m.spawnPickSaltTag = r.readU32();
+    m.difficultyPlayers = r.readU8();
+    if (m.difficultyPlayers < 1 || m.difficultyPlayers > 3)
+        throw std::runtime_error("RoomTransition: invalid difficulty player count");
 }
 
 void read(ByteReader& r, TransitionAck& m) {

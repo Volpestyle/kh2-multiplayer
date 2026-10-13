@@ -1394,6 +1394,7 @@ int main(int argc, char* argv[]) {
         avatarSync.setRoster(static_cast<kh2coop::SlotType>(0xFF), {});
 #ifdef _WIN32
         admittedHudNames = {};
+        worldBridge.SetCoopDifficulty(kh2coop::CoopDifficulty::Off);
         admittedHudNameSession.clear();
         closeMailbox();
         worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
@@ -1431,6 +1432,9 @@ int main(int argc, char* argv[]) {
 
         callbacks.onSessionState = [&](const kh2coop::SessionState& ss) {
             if (!netClient || !netClient->isConnected()) return;
+#ifdef _WIN32
+            worldBridge.SetCoopDifficulty(netClient->ready() ? ss.coopDifficulty : kh2coop::CoopDifficulty::Off);
+#endif
             if (!netClient->ready()) {
                 if (resumePin) membershipInvalidated = true;
                 retireNetworkState();
@@ -1794,6 +1798,8 @@ int main(int argc, char* argv[]) {
             options.config.runtimeMode,
             options.config.contentHash,
             kh2coop::PROTOCOL_VERSION, std::string{}, std::move(steamTransports.client));
+        const char* coopDifficulty = std::getenv("KH2COOP_COOP_DIFFICULTY");
+        netClient->setCoopDifficulty(kh2coop::ParseDifficulty(coopDifficulty ? coopDifficulty : "off"));
         if (causalDiagnosticsEnabled) {
             netClient->sealRequestDiagnostics("begin");
             netClient->sealWorldAdmissionDiagnostics("begin");

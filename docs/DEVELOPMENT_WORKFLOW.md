@@ -58,6 +58,37 @@ hooks, about 2 s from launch to injection.
 Loading a save is still manual or step-by-step `tap-key`; `boot-load-save` is
 known broken (see `KH2_CONTROL_CLI.md`).
 
+## Co-op enemy health (VUH-2194)
+
+Set `KH2COOP_COOP_DIFFICULTY=off|normal|hard` on the **host runtime**.
+Unset or unknown values select Off. The relay advertises the admitted host's
+mode; a friend's environment cannot override it. Protocol v18 is required;
+v17 peers receive a protocol mismatch rejection.
+
+The host locks the mode and connected player count when it announces a native
+room, including when hosting starts mid-room. Joins/leaves apply to the next
+room. The room packet carries this count to friends, including late joiners.
+Factors are placeholders, in one/two/three-player order:
+
+| Mode | Ordinary enemies | Bosses |
+|---|---|---|
+| Off | 1 / 1 / 1 | 1 / 1 / 1 |
+| Normal | 1 / 1.6 / 2.2 | 1 / 1.3 / 1.6 |
+| Hard | 1.3 / 2 / 2.7 | 1.2 / 1.7 / 2.2 |
+
+On the host, the first valid living HP sample for each existing native spawn
+scales current and max HP once, rounding upward and saturating at INT32_MAX.
+Transport resets retain this once-only history; native room teardown clears it.
+Friends mirror both values through the existing shared-HP path; native deaths
+still use its existing death path. Off makes no difficulty HP writes and keeps
+the vanilla native values. Enemy count and incoming player damage are unchanged.
+
+Focused checks: `kh2coop_coop_difficulty_test`, `kh2coop_avatar_test`,
+`kh2coop_world_test`, and `kh2coop_bridge_test`. Live regression:
+`python -B tools/scenario/run.py tools/scenario/scenarios/net_coop_difficulty_health.json`.
+That fixture checks host Normal versus friend Hard, two-player native current/max
+HP, once-only scaling after damage, and shared deaths, with game clips.
+
 ## Safety
 
 - The rig records the processes it launches in `build/rig/owned.txt` and kills

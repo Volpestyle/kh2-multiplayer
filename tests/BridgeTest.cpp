@@ -452,6 +452,11 @@ int main() {
     hostRuntimeSide.SetConnectionIds({0, 0, 0});
     hostRuntimeSide.SetLocalSlot(0);
     clientRuntimeSide.SetLocalSlot(1);
+    hostRuntimeSide.SetCoopDifficulty(CoopDifficulty::Hard);
+    hostRuntimeSide.SetLocalSlot(0);
+    check(hostDll.GetCoopDifficulty() == CoopDifficulty::Hard && hostDll.LocalSlot() == 0,
+          "advertised difficulty and slot share control word without overwriting each other");
+    hostRuntimeSide.SetCoopDifficulty(CoopDifficulty::Off);
     check(hostDll.LocalSlot() == 0 && clientDll.LocalSlot() == 1,
           "DLL side reads the slot the runtime set");
     check(hostDll.NetStats().rttMs == WORLD_NET_UNKNOWN &&
@@ -536,6 +541,8 @@ int main() {
     };
     check(waitFor([&] { return relay.verifiedPeerCount() == 2 && host.worldReady() && client.worldReady() && clientDll.ConnectionId(2) != 0; }),
           "host and client verified with published requester identity");
+    check(hostDll.ConnectionId(0) != 0 && hostDll.ConnectionId(2) != 0 && hostDll.ConnectionId(1) == 0,
+          "difficulty roster includes host slot zero and the one admitted friend");
 
     hostInbox.Flush(hostRuntimeSide, hostStats);
     clientInbox.Flush(clientRuntimeSide, clientStats);

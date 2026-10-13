@@ -14,7 +14,8 @@
 // and native host source64. The runtime checks them without relabeling queues.
 // toDll records retain exact scoped envelopes or local transaction/reset records.
 // Either side may open first; the first opener formats the rings.
-// Header words: [0] magic, [1] version, [2] the runtime's session slot
+// Header words: [0] magic, [1] version, [2] the runtime's session slot in low8
+// bits and advertised co-op difficulty in bits8..15 (zero is Off).
 // (0 = Player = host, 1/2 = clients, 0xFF = not known yet; VUH-1502),
 // [3] round trip ms and [4] loss per-mille for the overlay (VUH-1493;
 // WORLD_NET_UNKNOWN until the runtime is connected).
@@ -45,6 +46,7 @@
 #include "kh2coop/PacketRing.hpp"
 #include "kh2coop/PuppetProvenance.hpp"
 #include "kh2coop/WorldContext.hpp"
+#include "kh2coop/CoopDifficulty.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -244,7 +246,23 @@ public:
     // Runtime sets its session slot once known; the DLL reads it to decide
     // whether it is the host (slot 0). WORLD_SLOT_UNKNOWN until set.
     void SetLocalSlot(std::uint8_t slot) {
-        if (view_) reinterpret_cast<volatile std::uint32_t*>(view_)[2] = slot;
+        if (!view_) return;
+        auto* word = reinterpret_cast<volatile LONG*>(view_ + 8);
+        const LONG current = InterlockedCompareExchange(word, 0, 0);
+        InterlockedExchange(word, (current & ~0xFFL) | slot);
+    }
+    // Runtime is the sole writer of this control word; retain the slot byte.
+    void SetCoopDifficulty(CoopDifficulty mode) {
+        if (!view_) return;
+        auto* word = reinterpret_cast<volatile LONG*>(view_ + 8);
+        const LONG current = InterlockedCompareExchange(word, 0, 0);
+        InterlockedExchange(word, (current & ~0xFF00L) | (static_cast<LONG>(mode) << 8));
+    }
+    [[nodiscard]] CoopDifficulty GetCoopDifficulty() const {
+        if (!view_) return CoopDifficulty::Off;
+        const auto word = InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 8), 0, 0);
+        const auto mode = static_cast<CoopDifficulty>((word >> 8) & 0xFF);
+        return ValidDifficulty(mode) ? mode : CoopDifficulty::Off;
     }
     [[nodiscard]] std::uint8_t LocalSlot() const {
         if (!view_) return WORLD_SLOT_UNKNOWN;

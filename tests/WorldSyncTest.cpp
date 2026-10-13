@@ -556,8 +556,9 @@ void testWorldCacheEpoch() {
         ByteReader r(body, n);
         RoomTransition back;
         readRoomTransitionPacket(r, back);
-        check(header && n == 16 + 5 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
-                  back.spawnPickSaltTag == 0x01020304u, "RoomTransition packet: 16 generic bytes + u8 shared + u32 salt tag");
+        check(header && n == 16 + 6 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
+                  back.spawnPickSaltTag == 0x01020304u && back.difficultyPlayers == 1,
+              "RoomTransition packet: 16 generic bytes + shared/salt/count trailer");
         ByteWriter generic;
         write(generic, shared);
         check(generic.data().size() == 16, "embedded RoomTransition (activation/resync/party) stays 16 bytes");

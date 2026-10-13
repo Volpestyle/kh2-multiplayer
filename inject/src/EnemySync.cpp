@@ -155,6 +155,7 @@ struct Spawn {
 };
 
 struct Instance {
+    RoomDifficulty difficulty;
     std::uint16_t world = 0xFFFF, room = 0xFFFF, btl = 0;
     std::uint16_t door = 0, map = 0, evt = 0;
     bool live = false;        // tracking spawns (not mid-transition)
@@ -164,6 +165,8 @@ struct Instance {
 };
 
 Instance g_inst;
+RoomDifficulty g_hostHealthDifficulty;
+HealthScalingHistory g_hostHealthHistory;
 spawnpick::LoadOutcome g_spawnPickOutcome {};  // the latest load's random spawn ops (game thread)
 bool g_spawnPickLive = false;                   // review F1: the spawn-pick detour is installed (EntityHook)
 std::optional<RoomTransition> g_lastRoomPacket; // review F2: the last accepted RoomTransition packet (client)
@@ -1696,7 +1699,17 @@ void FlushActivationResponses() {
 
 void QueueHostBeginInstance(const RoomTransition& location) {
     ClearPendingHits();
+    unsigned players = 0;
+    for (std::uint8_t slot = 0; slot < 3; ++slot) if (g_bridge.ConnectionId(slot)) ++players;
+    g_hostHealthDifficulty.Lock(g_bridge.GetCoopDifficulty(), players);
+    g_inst.difficulty = g_hostHealthDifficulty;
+    if (g_log && g_inst.difficulty.mode != CoopDifficulty::Off)
+        g_log("[coop-difficulty] room role=host mode=%u players=%u mob=%u boss=%u",
+            static_cast<unsigned>(g_inst.difficulty.mode), g_inst.difficulty.players,
+            HealthFactor(g_inst.difficulty.mode, g_inst.difficulty.players, false),
+            HealthFactor(g_inst.difficulty.mode, g_inst.difficulty.players, true));
     g_pendingHostRoom = location;
+    g_pendingHostRoom.difficultyPlayers = static_cast<std::uint8_t>(g_inst.difficulty.players);
     g_pendingHostRoomContext = {};
     CaptureWorldContext(g_pendingHostRoomContext);
     g_pendingHostRoom.epoch = g_epoch + 1;
@@ -2671,13 +2684,14 @@ bool CollectResyncBindings(const ResyncSnapshot& expected, const ProducerWorldCo
         });
         if (row == expected.enemies.end() || row->life != ResyncLife::Alive ||
             row->identity.objectId != native.objectId || row->objectType != native.objectType ||
-            row->maxHp != native.maxHp || RecordObjectId(local[member.tableIndex].records[member.recordIndex]) != native.objectId)
+            (g_bridge.GetCoopDifficulty() == CoopDifficulty::Off && row->maxHp != native.maxHp) ||
+            RecordObjectId(local[member.tableIndex].records[member.recordIndex]) != native.objectId)
             return false;
         const auto host = g_host.enemies.find(row->identity.netId);
         if (host == g_host.enemies.end() || host->second.objectId != row->identity.objectId ||
             host->second.battleProgram != row->identity.battleProgram ||
             host->second.spawnIndex != row->identity.spawnIndex ||
-            (!host->second.dead && (host->second.hp <= 0 || host->second.hp > native.maxHp))) return false;
+            (!host->second.dead && (host->second.hp <= 0 || host->second.hp > row->maxHp))) return false;
         if (std::any_of(staged.begin(), staged.end(), [&](const auto& b) { return b.netId == row->identity.netId; })) return false;
         const auto tracked = g_inst.byActor.find(native.actor);
         if (tracked == g_inst.byActor.end() || tracked->second >= g_inst.spawns.size() ||
@@ -3962,7 +3976,7 @@ bool RecordAuthorityCurrent(uintptr_t actor,std::uint32_t id,bool death=false) n
 
 // No C++ objects requiring unwinding in the SEH leaves that call/write native memory.
 bool WriteNativeHp(const NativeEnemy& expected, std::int32_t hp, std::uint32_t generation,
-                   const NativeRecordWriteCheck* record = nullptr) {
+                   const NativeRecordWriteCheck* record = nullptr, std::int32_t maxHp = 0) {
     __try {
         if (!RecordAuthorityCurrent(expected.actor,expected.objectId)) return false;
         if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
@@ -3973,9 +3987,16 @@ bool WriteNativeHp(const NativeEnemy& expected, std::int32_t hp, std::uint32_t g
         if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
             Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
             Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId) return false;
-        if (record && (hp <= 0 || hp > expected.maxHp || !ResyncNativeSampleCurrent(expected) ||
+        if (record && (hp <= 0 || hp > (maxHp > 0 ? maxHp : expected.maxHp) || !ResyncNativeSampleCurrent(expected) ||
                        !ResyncFinalWriteContext(*record))) return false;
         if (!RecordAuthorityCurrent(expected.actor,expected.objectId)) return false;
+        if (!HealthWriteWithinMax(hp, Read<std::int32_t>(expected.status + 4), maxHp)) return false;
+        if (maxHp > 0) {
+            if (g_bridge.GetCoopDifficulty() == CoopDifficulty::Off ||
+                Read<std::int32_t>(expected.status) != expected.hp ||
+                Read<std::int32_t>(expected.status + 4) != expected.maxHp) return false;
+            *reinterpret_cast<std::int32_t*>(expected.status + 4) = maxHp;
+        }
         *reinterpret_cast<std::int32_t*>(expected.status) = hp;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -4579,10 +4600,13 @@ bool ClientFrame(const NativeCensus& initialCensus) {
             // ordinary batch into another write: next owner frame resolves
             // the whole fresh census again. Existing per-spawn once fence stays.
             if (ordinaryLethal) return WorldSessionGeneration() == generation;
-        } else if (h.hp > 0 && native.hp != h.hp) {
+        } else if (h.hp > 0 && (g_bridge.GetCoopDifficulty() == CoopDifficulty::Off ||
+                   (h.maxHp > 0 && h.hp <= h.maxHp)) && (native.hp != h.hp ||
+                   (g_bridge.GetCoopDifficulty() != CoopDifficulty::Off && native.maxHp != h.maxHp))) {
             combatcausal::Target causalTarget{};
             if (combatcausal::Requested()) causalTarget=CausalTarget(s,native,static_cast<unsigned>(s.netId));
-            if (!WriteNativeHp(native, h.hp, generation, recordCheck)) { // never 0: deaths are explicit
+            if (!WriteNativeHp(native, h.hp, generation, recordCheck,
+                               g_bridge.GetCoopDifficulty() != CoopDifficulty::Off ? h.maxHp : 0)) { // never 0: deaths are explicit
                 if (contentRequired) {
                     clearBindings(); g_resyncWriteFence = ResyncWriteFence::Failed;
                     if (g_nativeResync && !g_nativeResync->finished)
@@ -4742,6 +4766,51 @@ spawnrow::Row SpawnRowOf(const Spawn& s) {
 }
 
 // Commit presence only from a complete native list; callbacks are not a census.
+bool WriteHostScaledHealth(const NativeEnemy& expected, uintptr_t controller, uintptr_t record,
+                           EnemyHealth scaled, std::uint32_t generation) {
+    __try {
+        if (!generation || WorldSessionGeneration() != generation || CurrentRole() != Role::Host ||
+            !SafeNativeGameplay() || warp::LoadSerial() != g_seenLoad || warp::TransitionSerial() != g_seenTransition ||
+            scaled.hp <= 0 || scaled.hp > scaled.maxHp) return false;
+        if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
+            Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
+            Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId ||
+            Read<uintptr_t>(expected.actor + 0x9E8) != controller || Read<uintptr_t>(expected.actor + 0x9F0) != record ||
+            Read<std::int32_t>(expected.status) != expected.hp ||
+            Read<std::int32_t>(expected.status + 4) != expected.maxHp) return false;
+        *reinterpret_cast<std::int32_t*>(expected.status + 4) = scaled.maxHp;
+        *reinterpret_cast<std::int32_t*>(expected.status) = scaled.hp;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+bool ScaleHostHealth(NativeCensus& census) {
+    const auto generation = WorldSessionGeneration();
+    if (!CensusMatchesInstance(census)) return false;
+    g_inst.difficulty = g_hostHealthDifficulty;
+    if (g_inst.difficulty.mode == CoopDifficulty::Off) return true;
+    for (auto& s : g_inst.spawns) {
+        if (!s.present || !s.identityRead) continue;
+        auto native = std::find_if(census.enemies.begin(), census.enemies.end(), [&](const auto& n) {
+            return n.actor == s.actor && n.objentry == s.objentry && n.status == s.status && n.objectId == s.objectId;
+        });
+        if (native == census.enemies.end() || native->hp <= 0 || native->maxHp <= 0 || native->hp > native->maxHp) continue;
+        const HealthIdentity identity{s.actor, s.objentry, s.status, s.controller, s.record, s.spawnIndex};
+        const auto scaled = g_inst.difficulty.Scale({native->hp, native->maxHp},
+            native->objectType == offsets::objentry::TYPE_BOSS, g_hostHealthHistory.Applied(identity));
+        if (scaled.hp != native->hp || scaled.maxHp != native->maxHp) {
+            if (!WriteHostScaledHealth(*native, s.controller, s.record, scaled, generation)) return false;
+            if (g_log) g_log("[coop-difficulty] scale frame=%u objectId=%u actor=%llX players=%u mode=%u hp=%d->%d max=%d->%d",
+                g_hitTraceFrame, s.objectId, static_cast<unsigned long long>(s.actor), g_inst.difficulty.players,
+                static_cast<unsigned>(g_inst.difficulty.mode), native->hp, scaled.hp, native->maxHp, scaled.maxHp);
+            native->hp = scaled.hp; native->maxHp = scaled.maxHp;
+            s.lastHp = scaled.hp; s.lastMaxHp = scaled.maxHp;
+        }
+        g_hostHealthHistory.Remember(identity);
+    }
+    return CensusMatchesInstance(census);
+}
+
 std::vector<std::size_t> TrackSpawns(const NativeCensus& census) {
     std::vector<std::size_t> fresh;
     std::unordered_map<uintptr_t, std::size_t> present;
@@ -4899,7 +4968,12 @@ bool ProcessHostHitClaims(NativeCensus& census) {
                 causalTarget, native.hp, afterAvailable ? after->hp : -1, attempted, nativeOk,
                 afterAvailable&&combatcausal::SameTarget(causalTarget,repeated), combatcausal::Now());
         }
-        if (postAvailable) TrackSpawns(census);
+        if (postAvailable) {
+            TrackSpawns(census);
+            // A native hit can activate the next wave synchronously. Initialize
+            // its HP before that wave's first manifest/HP publication too.
+            if (!ScaleHostHealth(census)) return false;
+        }
         if (!postAvailable || !nativeOk) {
             InterruptCensus(!nativeOk ? "native claim fault; outcome unknown" : "claim post-census unavailable",
                             native.actor, census.nodeCount);
@@ -5110,6 +5184,8 @@ void OnFrameStart(std::uint32_t frame) {
     const auto load = warp::LoadSerial();
     const bool newLoad = load != g_seenLoad;
     if (transition != g_seenTransition || newLoad || warp::TransitionPending()) {
+        g_hostHealthDifficulty = {};
+        g_hostHealthHistory.Clear();
         // Requests invalidate cached pointers before the native fade/teardown;
         // load callbacks do the same for initial loads and same-room reloads.
         g_inst = {};
@@ -5196,6 +5272,7 @@ void OnFrameStart(std::uint32_t frame) {
     auto fresh = TrackSpawns(census);
     PopulationPrune(frame, census);  // VUH-1788 rev3 C1: any role, every complete census
     if (g_role == Role::Host) {
+        if (!ScaleHostHealth(census)) { InterruptCensus("co-op HP initialization unavailable", 0); return; }
         // Track while progress or ring capacity delays the announcement. No
         // manifest/HP/hash may escape under the previous room's epoch.
         if (!HostBeginInstance()) { DrainPendingSpawnTrace(false); return; }
@@ -5222,6 +5299,19 @@ void OnFrameStart(std::uint32_t frame) {
         FlushActivationResponses();
         TickHostPartyLayout();
     } else if (g_role == Role::Client) {
+        // Reporting only: clients never lock policy from asynchronous arrival.
+        // HP stores consult the live advertised mode and the host HP sample.
+        if (g_lastRoomPacket) {
+            const auto mode = g_bridge.GetCoopDifficulty();
+            const auto players = g_lastRoomPacket->difficultyPlayers;
+            if (g_inst.difficulty.mode != mode || g_inst.difficulty.players != players) {
+                g_inst.difficulty.mode = mode; g_inst.difficulty.players = players;
+                if (g_log && mode != CoopDifficulty::Off)
+                    g_log("[coop-difficulty] room role=client mode=%u players=%u mob=%u boss=%u",
+                        static_cast<unsigned>(mode), static_cast<unsigned>(players),
+                        HealthFactor(mode, players, false), HealthFactor(mode, players, true));
+            }
+        }
         for (const std::size_t i : fresh) {
             SYNC_LOG("[enemysync] client: local spawn %u frame %u objectId %u @%llX at (%.0f,%.0f,%.0f)",
                      g_inst.spawns[i].spawnIndex, frame, g_inst.spawns[i].objectId,

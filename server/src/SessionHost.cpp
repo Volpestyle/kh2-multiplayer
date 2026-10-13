@@ -621,6 +621,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                         return;
                     }
                     session_.sessionId = *incarnation;
+                    session_.coopDifficulty = hello.coopDifficulty;
                     lastEnemyHpSequence_ = 0;lastEnemyMotionSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
                     log("New world incarnation " + session_.sessionId + " (label=" + config_.sessionId + ")");
                 }

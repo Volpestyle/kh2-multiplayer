@@ -12,7 +12,8 @@ namespace kh2coop {
 // Zero identifies an unmatched actor. Multiple identical records are retained:
 // a second unmatched or multiply-bound actor must change the population hash.
 // Step 1 runs independent AI, so positions are deliberately absent. maxHP is
-// absent too: only current HP is mirrored by the native client implementation.
+// absent too: this diagnostic schema predates optional co-op max-HP mirroring.
+// Difficulty max HP is checked separately; keep the Off hash bytes unchanged.
 struct AppliedEnemyState {
     std::uint16_t netId = 0;
     std::uint32_t objectId = 0;

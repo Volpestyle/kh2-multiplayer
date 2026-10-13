@@ -606,7 +606,7 @@ def step_capture(ctx: Context, step: dict) -> dict:
 def step_clip(ctx: Context, step: dict) -> dict:
     inst = ctx.inst(step.get("instance", 0))
     out = ctx.run_dir / f"{step.get('name', 'clip')}_{inst.index}.mp4"
-    kh2ctl("clip", "--seconds", str(step.get("seconds", 5)), "--out", str(out), pid=inst.pid,
+    kh2ctl("clip", "--seconds", str(step.get("seconds", 5)), "--fps", str(step.get("fps", 30)), "--out", str(out), pid=inst.pid,
            timeout=120)
     ctx.artifacts.append(out.name)
     return {"path": out.name}
@@ -718,7 +718,8 @@ def step_runtime(ctx: Context, step: dict) -> dict:
                 args[n] == "--pid" and n + 1 < len(args) and str(args[n + 1]) == str(inst.pid)
                 for n in range(len(args))):
             raise StepFailed(f"game {inst.pid} already has a live runtime writer")
-    proc = start_process(ctx, name, cmd)
+    proc = start_process(ctx, name, cmd,
+                         env=dict(os.environ, **{k: str(v) for k, v in step.get("env", {}).items()}))
     log = ctx.run_dir / f"{name}.log"
     expect = step.get("expect", "Verified membership; native bootstrap remains separate")
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "kh2coop/Types.hpp"
 #include "kh2coop/EnemyRecordKey.hpp"
+#include "kh2coop/CoopDifficulty.hpp"
 #include <optional>
 #include <array>
 #include <cstddef>
@@ -10,9 +11,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 17;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 18;
 
 // ===========================================================================
+// Protocol v18 adds host co-op difficulty to ClientHello/SessionState and
+// the locked player count to the RoomTransition packet trailer.
 // Protocol v17 adds distinct non-death membership retirement in PopulationCut schema2.
 // Protocol v16 adds bounded host PopulationCut (48) and occurrence bootstrap.
 // v15 adds optional scoped record identity to EnemyManifest entries.
@@ -44,6 +47,7 @@ struct SessionState {
     std::string modHash;
     RoomState room {};
     std::vector<SessionActor> actors;
+    CoopDifficulty coopDifficulty{CoopDifficulty::Off};
 };
 
 struct ActorSnapshot {
@@ -128,6 +132,8 @@ struct RoomTransition {
     // RoomTransition (activation, resync, party) ignore both, and the generic codec does not write them.
     std::uint8_t spawnPickShared {0};
     std::uint32_t spawnPickSaltTag {0};
+    // Packet-only: host roster count locked for this native room, including late joins.
+    std::uint8_t difficultyPlayers {1};
 };
 
 // Ephemeral native activation challenge. The requester owns the deadline on
@@ -368,6 +374,7 @@ struct ClientHello {
     /// CampaignCoop: which party slot this client requests (0=Player, 1=Friend1, 2=Friend2).
     /// 0xFF = no preference (server assigns next free slot).
     std::uint8_t requestedSlot {0xFF};
+    CoopDifficulty coopDifficulty{CoopDifficulty::Off}; // only the admitted host's request is used
 };
 
 /// Realm seed — derived from a KH2 save file import.
