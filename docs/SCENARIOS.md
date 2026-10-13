@@ -3080,3 +3080,27 @@ python -B tools/scenario/console_process_control.py --out .local/console-control
 It makes no game calls. Total process/console counts are recorded as observations;
 any retained owned poll child or console process fails the control. A new sealed
 fixture must repin the canonical runner hash after adopting this change.
+
+### VUH-1498 repeated host event hold and skip (2026-10-13)
+
+`20261013-062809_net_event_hold_and_skip_1` passes in 211.6 s with two owned loopback
+games. Natural 08/0C evt1 and its repeated, natively skipped playback both hold
+the client behind the automatic waiting overlay. A 250 ms client movement command
+moves0 units while paused; fresh 350 ms commands after release move 159.5/175.3
+units. Both cycles land at `[8,12,50,0,0,22]` with 8,108 shared masked progress
+bytes equal. All four protected saves remain unchanged; owned games/runtimes
+and relay close, port27796 is free. Four 3 s / 6 fps clips (72 total frames) were
+reviewed. Evidence and the natural-event profile are retained under the
+builder worktree's `.local/vuh1498/`.
+
+[net_host_cutscene_skip.json](../tools/scenario/scenarios/net_host_cutscene_skip.json)
+uses the standard runner and native Start/Down/Cross skip controls. The host DLL
+needs `KH2COOP_EVENT_HOLD_PRODUCER=1`; the client DLL and runtime need
+`KH2COOP_EVENT_HOLD_CONTROL=1` (the fixture supplies them). It checks input
+suppression, exact resulting location, masked progress equality and fresh
+movement after release. These flags remain off by default and native eligibility
+remains empty-room-only. Natural playback of this known event lasts about 85 s;
+its live profile reuses the existing `MenuLiveness` helper rather than relaxing
+the gameplay hang watchdog. Synchronized playback, populated holds and
+reconnect during a hold remain outside this result.
+The standard fixture also passes: `20261013-063723_net_host_cutscene_skip_1`, 111.4 s, 28 steps, including exact room/progress equality, suppressed then restored movement, and two reviewed client clips. Four saves unchanged and owned processes closed.

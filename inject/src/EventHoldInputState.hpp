@@ -26,11 +26,14 @@ public:
         return phase_ != Phase::Idle && phase_ != Phase::Complete && phase_ != Phase::Failed;
     }
     bool Acquire(const Sample& s) noexcept {
-        if (phase_ != Phase::Idle || !s.healthy || !s.safeToPause || s.menu != 255 || !s.now) {
+        if ((phase_ != Phase::Idle && phase_ != Phase::Complete) ||
+            !s.healthy || !s.safeToPause || s.menu != 255 || !s.now) {
             Fail(); return false;
         }
         phase_ = Phase::OpenRelease;
         deadline_ = s.now + 1000;
+        owned_ = false;
+        wake_ = false;
         press_ = true;
         return true;
     }

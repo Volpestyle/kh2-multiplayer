@@ -162,14 +162,20 @@ bool ApplyInput(void* inputStruct) {
         if (command.kind == eventhold::Kind::Reset) inputScope = command.scope;
         else if (command.scope != inputScope) { channel.Invalidate(eventhold::Abort::WrongScope); input.Fail(); }
         else if (command.kind == eventhold::Kind::Acquire) {
+            release = {};
             eventhold::Ack ack {};
             if (!channel.ReadAck(ack) || ack.scope != command.scope || ack.epoch != command.epoch ||
                 ack.flags != (eventhold::SafeConverged | eventhold::LiveEligible) || !input.Acquire(native.value)) {
                 channel.Invalidate(eventhold::Abort::Unsupported); input.Fail();
             }
         } else if (command.kind == eventhold::Kind::Transition || command.kind == eventhold::Kind::Release) {
-            if (!input.Holding()) { channel.Invalidate(eventhold::Abort::InvalidOrder); input.Fail(); }
-            else { input.Wake(); if (command.kind == eventhold::Kind::Release) release = command; }
+            // Ordinary host-led room changes also use this channel. Between
+            // events they service the world without opening/closing a pause.
+            if (input.Holding()) { input.Wake(); if (command.kind == eventhold::Kind::Release) release = command; }
+            else if (command.kind != eventhold::Kind::Transition ||
+                (input.Current() != InputState::Phase::Idle && input.Current() != InputState::Phase::Complete)) {
+                channel.Invalidate(eventhold::Abort::InvalidOrder); input.Fail();
+            }
         }
         if (log) log("[event-control] input receipt ordinal=%llu source=%llu kind=%u epoch=%u tid=%lu",
             static_cast<unsigned long long>(command.ordinal), static_cast<unsigned long long>(command.hostSourceSerial),

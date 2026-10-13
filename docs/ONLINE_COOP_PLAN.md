@@ -33,7 +33,7 @@ establish a full playthrough or the two-hour friend-session gate.
 | Network layer | ENet relay remains available. Steam relay-only transport passed on two separate Windows PCs in rev11, including authenticated/encrypted admission, reconnect, room follow, combat and host-leave closure. This supersedes the earlier second-installation gap; physical-controller friend-session acceptance remains open. |
 | Package | The Steam friend GUI is on main: confirmed host account/allowlist, consent, copy/paste invitation, guarded owned launch and persistent errors. UX07 covers the friend flow. JOIN05 reached technical two-PC package-GUI host/join acceptance; effective movement and a clearly visible responding puppet on both screens still need qualification. No release or publication is implied. |
 | Enemy combat | Shared HP/deaths and exactly-once client claims remain qualified within their fixtures. Mirroring batches 1-5, 7 and the final batch-6 subset are on main with family/room-specific live evidence. Creeper 317 and Fiery Globe 76 remain off. General projectile, boss and separated-player wave acceptance remain open. |
-| Rooms and progress | Host-follow, late join/reload and masked native progress have bounded live passes, including the earlier three-instance routes and BB04 two-wave gate. Populated reconnect and proximity/wave/cull consistency remain incomplete. Connected cutscene hold stays default-off and empty-room-only. |
+| Rooms and progress | Host-follow, late join/reload and masked native progress have bounded live passes, including the earlier three-instance routes and BB04 two-wave gate. Populated reconnect and proximity/wave/cull consistency remain incomplete. Connected cutscene hold stays default-off and empty-room-only; repeated natural/skip cycles now have loopback evidence. |
 | Downed and camera | Downed/revive has pair/trio evidence. Default-off held-down spectate is on main and live-qualified for target cycling and release on revive; this does not qualify every camera mode or whole-party-down recovery. |
 | Command and SAVE safety | The puppet gauge hold that copied back into persistent Drive bytes is removed on main. Mandatory native command gates replace it. Smoke-07 qualifies Drive refusal and protected bytes; Summon was UNQUALIFIED without a charm, and active-puppet Revert timed out. Disk-save preservation remains mandatory and grants no permission to save. |
 | Latency | Defaults are avatar 80 ms and enemy cursor 6 host frames, with bounded overrides and logged invalid fallbacks. The selected 80/6 setting has short loopback A/B evidence, not Steam/internet latency acceptance or input-to-photon measurements. |
@@ -582,6 +582,23 @@ stayed unchanged. The feature defaults off and covers one already-bound
 empty-room client/event; populated rooms, repeated events, skip and reconnect
 during a hold remain open. See the [hold result](../build/rig/vuh1498-cutscene-prep-20261005-01/client-hold-result.md)
 and [independent review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-client-candidate/acceptance-root15/review.md).
+
+VUH-1498 follow-up (2026-10-13): the existing host EventHold and host-led
+room/progress paths now support another hold after completion and ordinary room
+changes between events. The native input state resets its wake/ownership state
+on the next acquire; the existing render overlay automatically says "Waiting
+for host event..." while input is held. One regression covers the second event,
+ordinary transition and same-room skip release. Loopback
+`20261013-062809_net_event_hold_and_skip_1` passes both natural 08/0C evt1 playback
+and a host Start/Down/Cross skip in the same session: client movement is zero
+while held, both land at `[8,12,50,0,0,22]`, all 8,108 masked shared progress bytes
+match, and fresh client movement works after each release. Four short client
+clips show the pause/overlay and resulting village. The two original flags
+remain opt-in (host `KH2COOP_EVENT_HOLD_PRODUCER=1`, client DLL and runtime
+`KH2COOP_EVENT_HOLD_CONTROL=1`); populated rooms and reconnect remain outside
+this slice. The natural-event profile reuses the existing bounded menu-liveness
+helper; [the short skip fixture](../tools/scenario/scenarios/net_host_cutscene_skip.json)
+uses the standard runner.
 
 Populated hold prep is accepted offline, with 29 controls and a strict ordinary
 populated-admission checkpoint. Its 59-step scaffold refuses before boot and

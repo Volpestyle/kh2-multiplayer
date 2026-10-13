@@ -20,6 +20,7 @@
 
 #include "RenderHook.hpp"
 #include "EnemySync.hpp"
+#include "EventHoldNativeInput.hpp"
 
 #include "kh2coop/CaptureChannel.hpp"
 #include "CoopHudMailbox.hpp"
@@ -841,7 +842,11 @@ void RefreshOverlayText(DXGI_FORMAT format) {
     FillRect(g_overlayDc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
     SetTextColor(g_overlayDc, RGB(255, 255, 255));
     TextOutW(g_overlayDc, 8, 5, text, static_cast<int>(wcslen(text)));
-    DrawCoopHudRows();
+    if (eventholdnative::HoldingInput()) {
+        SetTextColor(g_overlayDc, RGB(255, 210, 90));
+        constexpr wchar_t waiting[] = L"Waiting for host event...";
+        TextOutW(g_overlayDc, 8, 39, waiting, static_cast<int>(std::size(waiting) - 1));
+    } else DrawCoopHudRows();
     GdiFlush();
 
     const size_t bytes = static_cast<size_t>(kOverlayWidth) * kOverlayHeight * 4;
@@ -1060,7 +1065,7 @@ void OnPresent(IDXGISwapChain* swapChain) {
             g_job.issued < g_job.frameCount) {
             captureFrame = (g_presentIndex - g_job.startPresent) % g_job.interval == 0;
         }
-        const bool drawOverlay = g_channel->overlay != 0;
+        const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput();
         if (drawOverlay || captureFrame) SubmitFrameWork(drawOverlay, captureFrame);
     }
 

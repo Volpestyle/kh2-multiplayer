@@ -47,6 +47,20 @@ int main(int argc,char** argv){
  n::Observe(scope,e::Kind::Acquire,8,1,nullptr,1);n::Observe(scope,e::Kind::Transition,7,2,&room,22);n::Observe(scope,e::Kind::Release,12,2,nullptr,22);
  n::OwnerAck(scope,2,true,false);tick();check(n::HoldingInput()&&buttons()==0,"owner applied order without convergence stays held");
  n::OwnerAck(scope,2,true,true);tick();check(n::HoldingInput()&&buttons()==0,"first converged boundary stays neutral");tick();check(!n::HoldingInput()&&buttons()==0,"last held sample discarded on final release");tick();check(buttons()==0x4d4d,"next callback restores newly collected physical input");
+ // One regression: a normal room change between two completed host events
+ // must not poison the channel, and the second hold must not inherit Wake.
+ transition.hostSourceSerial=14;transition.epoch=3;
+ check(runtime.Publish(transition,GetTickCount64()),"ordinary transition between events published");tick();
+ room.epoch=3;n::Observe(scope,e::Kind::Transition,14,3,&room,22);n::OwnerAck(scope,3,true,true);
+ acquire.hostSourceSerial=16;acquire.epoch=3;
+ check(runtime.Publish(acquire,GetTickCount64()),"second event acquire published");tick();
+ check(buttons()==8&&n::HoldingInput()&&runtime.Reason()==e::Abort::None,"second event opens a fresh owned pause after ordinary transition");
+ tick();menu=10;tick();tick();check(buttons()==0&&n::HoldingInput(),"second event stays paused without stale Wake");
+ release.hostSourceSerial=18;release.epoch=3;
+ check(runtime.Publish(release,GetTickCount64()),"same-room skipped event release published");tick();tick();menu=255;tick();
+ n::Observe(scope,e::Kind::Acquire,16,3,nullptr,1);n::Observe(scope,e::Kind::Release,18,3,nullptr,22);
+ n::OwnerAck(scope,3,true,true);tick();tick();tick();
+ check(!n::HoldingInput()&&buttons()==0x4d4d,"second event releases only after fresh convergence and boundary");
  }
  }
  }
