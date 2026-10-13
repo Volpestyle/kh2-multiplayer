@@ -13,6 +13,7 @@
     {"do":"runtime","instance":0,"role":"player"},
     {"do":"runtime","instance":1,"role":"friend1"},
     {"do":"wait_until","expr":"log_count('[enemy-target] search-swap ok=1',0)>0 and log_count('[privatestatus] kind=3',0)>0","timeoutMs":12000},
+    {"do":"wait_until","expr":"len(actors(0))>0 and len(actors(1))>0 and location(0)==[5,6,0,1,2,0] and location(1)==location(0)","timeoutMs":20000},
     {"do":"save","as":"before","expr":"[actors(0),actors(1)]"},
     {"do":"kh2ctl","instance":1,"argsExpr":"['poke','--addr',str(int(actors(1)[0]['address'],16)+0x670),'--type','f32x3','--value','-2790,0,-1650']"},
     {"do":"kh2ctl","instance":0,"argsExpr":"['poke','--addr',str(int(actors(0)[0]['address'],16)+0x670),'--type','f32x3','--value','-2850,0,-1650']"},
