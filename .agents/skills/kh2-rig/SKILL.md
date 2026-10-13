@@ -16,6 +16,7 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 | **Video clip** | `kh2ctl clip --pid N --seconds S --fps 30 [--out x.mp4]`; scenario step `{"do":"clip","instance":i,"seconds":S,"name":...}` | Also in-renderer. It needs `ffmpeg` on PATH. Examples: `build/scenarios/20261002-*_net_soak_10min_1/puppet_view_1.mp4`. |
 | Overlay / HUD | `kh2ctl overlay --pid N on` | It's drawn into the backbuffer, so it shows in captures. |
 | Scripted runs | `python -B tools/scenario/run.py <scenario.json>` | Steps, assertions, report and captures go to `build/scenarios/<stamp>_<name>_<n>/`. |
+| Avatar stream stall | `net_avatar_stall.json`, scenario `avatar_stall` | Two-second pause of the owned sender runtime through `runtime_lifecycle.OwnedHandleAPI`; viewer keeps pumping. Records hold/resume clip. `kh2ctl mute` controls audio only. |
 | Puppet without network | `avatarctl` (`synth`, `record`/`replay`, `peek`) | Usage is in `tools/avatarctl/main.cpp`. |
 | Mac relay (private, Tailscale) | `tools/rig/relay.ps1 -Action start -RunId UNIQUE` (also `status`, `stop`, `fetch`), with required producer/script/receipt paths from `tools/rig/README.md` | Existing installed producer only. Stop, then fetch, by exact run ID. The helper exits its PowerShell host: use separate invocations for subsequent checks. |
 | Physical keyboard stand-in | `tools/rig/rehearsal-key.ps1` | Explicit rehearsal/game-view/receipt paths; exact owned process, scan/focus/modifier checks and finally-UP. Rehearsal10 allowlist,80–1500ms; no Alt. |

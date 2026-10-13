@@ -1843,7 +1843,8 @@ protected actor. Protection is best effort during loads.
 | `save` | `as expr` | Store a value in `saved[...]` |
 | `protect` | `on` | Start/stop team-0 protection polling; stopping does not restore the previous team |
 | `capture` | `name` | PNG from inside the renderer; retain the actual CLI response under `receipt` alongside the relative artifact `path` |
-| `clip` | `name seconds` | MP4 → artifact |
+| `clip` | `name seconds fps` | MP4 → artifact |
+| `avatar_stall` | none | Two-player `net_avatar_stall.json`: suspend the original sender runtime handle for 2 s, move its Sora 150 units in RAM, resume in `finally`; both games and viewer keep running. Six-second viewer clip and bridge samples check active/held/live states. Native `[ptrace]` logs retain per-frame hold and resume positions |
 | `crash`, `freeze` | | Runner self-tests: fault or suspend the instance |
 | `relay` | `port build content mod args` | Start `kh2coop_server` on loopback for this run; the version gate defaults to what the runtime sends |
 | `runtime` | `instance role peerId link args expect timeoutMs` | Start `kh2coop_runtime_scaffold --network --no-camera --pid <instance>` and wait for `expect` in its log (default `Verified membership; native bootstrap remains separate`). Refuse an existing owned runtime/log or live owned writer for the same game PID before opening the log. `link: {latencyMs, jitterMs, lossPct}` sets the runtime's impairment both ways (owner→viewer crosses two runtimes, so 50 ms each = 100 ms) |

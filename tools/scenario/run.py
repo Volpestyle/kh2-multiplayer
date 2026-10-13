@@ -650,6 +650,62 @@ def step_clip(ctx: Context, step: dict) -> dict:
     return {"path": out.name}
 
 
+def step_avatar_stall(ctx: Context, step: dict) -> dict:
+    """VUH-1787: stall our sender runtime for 2 s; keep viewer/game running."""
+    sender, viewer = ctx.inst(0), ctx.inst(1)
+    owned = [p for name, p, _ in ctx.processes if name == "runtime_0" and p.poll() is None]
+    if len(owned) != 1:
+        raise StepFailed("avatar stall requires the original owned sender runtime")
+    proc = owned[0]
+    api = _runtime_lifecycle.OwnedHandleAPI()
+    handle = int(proc._handle)
+    if api.process_id(handle) != proc.pid or Path(api.executable(handle)).resolve() != RUNTIME.resolve():
+        raise StepFailed("owned runtime handle changed")
+    if [str(sender.pid)] != _runtime_lifecycle._flag_values(proc.args, "--pid"):
+        raise StepFailed("owned runtime is bound to another game")
+    read = lambda: ctx.eval("bridge(1, seconds=0.02)['puppet0']")
+    before = read()
+    if not before or not before["active"]:
+        raise StepFailed("viewer puppet must be active before stall")
+    path = ctx.run_dir / "avatar_stall_resume_1.mp4"
+    clip = start_process(ctx, "stall_clip", [str(KH2CTL), "clip", "--pid", str(viewer.pid),
+        "--seconds", "6", "--fps", "12", "--out", str(path)])
+    ctx.artifacts.append(path.name)
+    ctx.sleep(0.5)
+    rows = []
+    if api.suspend(handle) < 0:
+        raise StepFailed("owned runtime suspension failed")
+    began = time.monotonic()
+    try:
+        sora = ctx.actor("P_EX100", 0)
+        p = sora["position"]
+        kh2ctl("poke", "--addr", str(int(sora["address"], 16) + 0x670), "--type", "f32x3",
+               "--value", f"{p['x'] + 150},{p['y']},{p['z']}", pid=sender.pid)
+        while time.monotonic() - began < 2:
+            rows.append({"seconds": time.monotonic() - began, "puppet": read()})
+            ctx.sleep(0.04)
+    finally:
+        if api.resume(handle) < 0:
+            raise StepFailed("owned runtime resumption failed")
+    duration = time.monotonic() - began
+    ctx.sleep(0.6)
+    after = read()
+    while clip.poll() is None:
+        ctx.sleep(0.1)
+    result = {"suspendedSeconds": duration, "before": before, "during": rows, "after": after,
+              "clip": path.name}
+    (ctx.run_dir / "avatar_stall.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    ctx.artifacts.append("avatar_stall.json")
+    held = [r["puppet"] for r in rows if r["puppet"] and r["puppet"]["pose"]["flags"] & 8]
+    if clip.returncode or not path.exists() or not rows or not held:
+        raise StepFailed("stall clip failed or held band was not observed")
+    if any(not r["puppet"] or not r["puppet"]["active"] for r in rows):
+        raise StepFailed("viewer puppet dropped during the stall")
+    if not after or not after["active"] or after["pose"]["flags"] & 8:
+        raise StepFailed("viewer puppet did not resume live")
+    return {"suspendedSeconds": duration, "samples": len(rows), "heldSamples": len(held), "clip": path.name}
+
+
 def step_crash(ctx: Context, step: dict) -> dict:
     """Test hook: faults the instance (kh2ctl crash). The runner should then
     produce a crash bundle and a failed report."""
@@ -4131,7 +4187,8 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
 STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": step_input, "walk_to": step_walk_to,
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until,
          "assert": step_assert, "save": step_save, "protect": step_protect,
-         "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze,
+         "capture": step_capture, "clip": step_clip, "avatar_stall": step_avatar_stall,
+         "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
          "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all,
          "kh2ctl": step_kh2ctl, "transition_check": step_transition_check,

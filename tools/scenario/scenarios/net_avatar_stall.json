@@ -1,0 +1,17 @@
+{
+  "name": "net_avatar_stall",
+  "description": "VUH-1787: owned sender runtime pauses for 2 s while both games and viewer run. Move sender Sora 150 units during the gap; film hold and smooth resume in GoA.",
+  "steps": [
+    {"do":"boot","instance":0,"initTimeoutMs":60000,"env":{"KH2COOP_PUPPET_TRACE":"1"}},
+    {"do":"boot","instance":1,"initTimeoutMs":60000,"env":{"KH2COOP_PUPPET_TRACE":"1"}},
+    {"do":"warp","instance":0,"world":4,"room":26},
+    {"do":"warp","instance":1,"world":4,"room":26},
+    {"do":"relay","port":27796,"args":["--bind","127.0.0.1"]},
+    {"do":"runtime","instance":0,"role":"player"},
+    {"do":"runtime","instance":1,"role":"friend1"},
+    {"do":"wait_until","expr":"(bridge(0).get('puppet0') or {}).get('active') and (bridge(1).get('puppet0') or {}).get('active')","timeoutMs":20000},
+    {"do":"kh2ctl","instance":0,"argsExpr":"['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value',','.join(str(v) for v in [actor('P_EX100',1)['position']['x']+120,actor('P_EX100',1)['position']['y'],actor('P_EX100',1)['position']['z']])]"},
+    {"do":"wait","ms":1500},
+    {"do":"avatar_stall"}
+  ]
+}
