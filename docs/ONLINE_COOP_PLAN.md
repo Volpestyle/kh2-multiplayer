@@ -78,11 +78,24 @@ have no relay/runtime desync notice; four protected saves are unchanged. Enemy
 deaths/transition and HB attack use separate fresh launches because a level-8
 friend cannot survive that native 24-damage attack and cleared waves stay cleared.
 
-HB `04/02` Armored Knight clean-room qualification is parked: the friend took a
-native hit, but the run raised an enemy-hash desync notice. Its seven deaths
-were all received; one used native population disposal rather than an HP-write
-log. Attribution to this change or the existing population/hash path is unresolved.
-No shared-HP/hash-policy change is included in this slice.
+VUH-2239 attributes HB `04/02`'s notice in `20261013-113901` to two
+same-population binding-lag samples followed by a different pre-kill/post-kill
+sample. The enemy hash includes living netId/objectId/HP, not maxHP. The server
+now grants one fresh enemy-only debounce when the existing complete native
+population summaries change between equal and unequal counts. The allowance
+is bounded once per uninterrupted mismatch; persistent HP/binding divergence,
+unequal populations and alternating population relationships still report.
+Missing-pack recovery and room/progress thresholds are unchanged. This does
+not change enemy hashing, native binding behavior or shared HP.
+
+Clean no-env source-player rerun `20261013-125650` passes: Armored Knights
+16->26 on both peers, native friend hit24->8, seven host deaths received and
+both living lists empty, no relay/runtime desync, four protected saves unchanged.
+Native disposal counts as removal even without an HP-write application log.
+The regression replays the preserved hashes and checks persistent divergence;
+58 focused checks pass. Local evidence is under `.local/vuh2239/`. The refreshed
+installed package below is the requested `7331a05` baseline, preceding this
+server-only diagnostic fix; its immutable products are not silently replaced.
 
 These route runs exercise the source player's child-launch functions, not the
 ZIP or complete GUI flow. VUH-2234 supplied a coherent protocol-18/AvatarBridge-4

@@ -60,6 +60,9 @@ struct PeerState {
     StateHash lastHash{};
     std::uint64_t hashReceiptSeq{0}, hashReceiptMs{0}; // relay receipts, NOT native frame IDs
     std::uint32_t mismatchStreak{0};
+    bool mismatchPopulationKnown{false};
+    bool mismatchPopulationEqual{false};
+    bool mismatchPopulationChanged{false};
     std::uint8_t reportedFields{0};
     std::uint8_t mismatchFields{0};
     std::uint64_t comparedHashReceiptSeq{0};

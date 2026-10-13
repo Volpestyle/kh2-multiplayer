@@ -51,6 +51,61 @@ void waveDeathRegression() {
     check(delivered&&relay.desyncNoticeCount()==1,"a real persistent living-versus-dead divergence still triggers on third fresh sample");
     host.disconnect();friend1.disconnect();relay.stop();
 }
+void hbPopulationDeathRegression() {
+    SessionConfig cfg; cfg.bindAddress="127.0.0.1"; cfg.port=22122;
+    SessionHost relay(cfg);
+    if (!relay.start()) { check(false,"HB mismatch regression relay starts"); return; }
+    NetworkClient host("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"hb-host",SlotType::Player,{},RuntimeMode::CampaignCoop,cfg.contentHash);
+    NetworkClient friend1("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"hb-friend",SlotType::Friend1,{},RuntimeMode::CampaignCoop,cfg.contentHash);
+    const auto wait=[&](auto predicate){
+        const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+        while(!predicate()&&std::chrono::steady_clock::now()<end){
+            relay.tick(0);host.tick(0);friend1.tick(0);host.sendHeartbeat();friend1.sendHeartbeat();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return predicate();
+    };
+    host.connect();friend1.connect();
+    if(!wait([&]{return host.worldReady()&&friend1.worldReady();})){check(false,"HB mismatch peers ready");return;}
+    host.sendRoomTransition({3,4,2,0,1,1,0});
+    if(!wait([&]{return relay.currentRoom().has_value();})){check(false,"HB mismatch room ready");return;}
+    std::uint64_t hostSeq=0,friendSeq=0;
+    const auto publish=[&](NetworkClient& client,SlotType slot,const StateHash& hash,std::uint64_t& seq){
+        client.sendStateHash(hash);++seq;
+        return wait([&]{const auto* peer=relay.peerBySlot(slot);return peer&&peer->hashReceiptSeq==seq;});
+    };
+    // Preserved113901: two7/7 samples differ by bindings, then host frame3757
+    // is live before kill and client1185 is empty after kill (dead actors6).
+    StateHash live{3,4,2,0x50C3A129u,0xD0223C7Fu,true,7,7};
+    auto unbound=live;unbound.enemiesHash=0x384EA84Cu;
+    auto beforeKill=live;beforeKill.enemiesHash=0xC96A627Bu;
+    auto afterKill=live;afterKill.enemiesHash=0x17EFA678u;afterKill.nativeLivingCount=0;afterKill.nativeCombatCount=6;
+    auto empty=afterKill;empty.nativeCombatCount=0;
+    bool delivered=publish(host,SlotType::Player,live,hostSeq);
+    for(unsigned i=0;i<2;++i)delivered=delivered&&publish(friend1,SlotType::Friend1,unbound,friendSeq);
+    delivered=delivered&&publish(host,SlotType::Player,beforeKill,hostSeq)&&publish(friend1,SlotType::Friend1,afterKill,friendSeq);
+    check(delivered&&relay.desyncNoticeCount()==0&&relay.peerBySlot(SlotType::Friend1)->mismatchStreak==1,
+          "HB7/7 binding lag then7/0 death sample do not combine into false fields2 notice");
+    delivered=delivered&&publish(host,SlotType::Player,empty,hostSeq)&&publish(friend1,SlotType::Friend1,empty,friendSeq);
+    check(delivered&&relay.desyncNoticeCount()==0,"observed HB empty lists converge cleanly");
+    delivered=publish(host,SlotType::Player,live,hostSeq);
+    for(unsigned i=0;i<3;++i){auto drift=unbound;drift.enemiesHash+=i;delivered=delivered&&publish(friend1,SlotType::Friend1,drift,friendSeq);}
+    check(delivered&&relay.desyncNoticeCount()==1,"changing hashes with persistent7/7 HP or binding divergence still trigger");
+    delivered=publish(friend1,SlotType::Friend1,live,friendSeq);
+    for(unsigned i=0;i<3;++i){
+        auto growing=beforeKill;growing.nativeLivingCount=7+i;growing.nativeCombatCount=7+i;growing.enemiesHash+=i;
+        delivered=delivered&&publish(host,SlotType::Player,growing,hostSeq)&&publish(friend1,SlotType::Friend1,afterKill,friendSeq);
+    }
+    check(delivered&&relay.desyncNoticeCount()==2,"persistent unequal populations still trigger while host count changes");
+    auto agreed=beforeKill;agreed.nativeLivingCount=9;agreed.nativeCombatCount=9;agreed.enemiesHash+=2;
+    delivered=publish(friend1,SlotType::Friend1,agreed,friendSeq);
+    for(unsigned i=0;i<6;++i){
+        auto changing=unbound;changing.nativeLivingCount=(i%2)?8:9;changing.nativeCombatCount=9;changing.enemiesHash+=i;
+        delivered=delivered&&publish(friend1,SlotType::Friend1,changing,friendSeq);
+    }
+    check(delivered&&relay.desyncNoticeCount()==3,"alternating equal and unequal populations cannot conceal persistent enemy divergence");
+    host.disconnect();friend1.disconnect();relay.stop();
+}
 int main(){
     if(enet_initialize())return 2;
     std::ofstream raw("relay-raw.log");std::vector<std::string> rows;
@@ -126,5 +181,6 @@ int main(){
     stream.highWater=CausalStream::Limit;stream.emit(sink,"control",[](auto&){});check(stream.highWater==CausalStream::Limit&&stream.dropped==3,"bounded sequence never wraps");
     stream.seals=UINT64_MAX;stream.seal(sink,"control","interval");check(stream.seals==UINT64_MAX&&stream.dropped==4,"seal sequence never wraps");
     waveDeathRegression();
+    hbPopulationDeathRegression();
     enet_deinitialize();std::cout<<"checks="<<checks<<" failures="<<failures<<'\n';return failures?1:0;
 }

@@ -1411,6 +1411,8 @@ void SessionHost::compareWithHost(PeerState& client) {
     client.comparedHashReceiptSeq = client.hashReceiptSeq;
     if (client.comparedHashEpoch != c.epoch) {
         client.comparedHashEpoch = c.epoch;
+        client.mismatchPopulationKnown = false;
+        client.mismatchPopulationChanged = false;
         client.mismatchStreak = 0;
         client.reportedFields = 0;
         client.mismatchFields = 0;
@@ -1431,9 +1433,29 @@ void SessionHost::compareWithHost(PeerState& client) {
         c.enemiesHash == hashAppliedEnemies({})) fields |= DesyncMissingEnemies;
     if (client.mismatchFields != fields) {
         client.mismatchFields = fields;
+        client.mismatchPopulationChanged = false;
         client.mismatchStreak = 0;
         client.diagnosticPreviousCompare = 0;
     }
+    // HB04/02: two temporary unmatched-binding samples followed by a
+    // different live/dead population pair get one fresh debounce.
+    // Reuse the existing complete native count relationship; never suppress a stable
+    // missing population or HP/binding divergence. Missing-pack recovery and
+    // room/progress diagnostics retain their existing thresholds.
+    const bool populationKnown = fields == DesyncEnemies &&
+        h.nativeCensusComplete && c.nativeCensusComplete;
+    const bool populationEqual = h.nativeLivingCount == c.nativeLivingCount;
+    if (populationKnown && client.mismatchPopulationKnown &&
+        !client.mismatchPopulationChanged &&
+        client.mismatchPopulationEqual != populationEqual) {
+        // One allowance per uninterrupted field mismatch: changing waves must
+        // not conceal persistent divergence indefinitely.
+        client.mismatchPopulationChanged = true;
+        client.mismatchStreak = 0;
+        client.diagnosticPreviousCompare = 0;
+    }
+    client.mismatchPopulationKnown = populationKnown;
+    client.mismatchPopulationEqual = populationEqual;
     const auto previousCompare = client.diagnosticPreviousCompare;
     std::uint64_t comparisonRecord = 0;
     if (callbacks_.onHashDiagnostic) {
