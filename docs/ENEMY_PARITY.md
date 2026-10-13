@@ -1,3 +1,44 @@
+## VUH-1789 route T2 continuation (2026-10-13)
+
+Magic Phantom `M_EX500_HB` (2403) joins the explicit allowlist. Its spell
+orbs were visible on the friend, alongside matching native motion and HP.
+Final narrowed-build loopback `20261013-045806_net_route_t2_magic_phantom_1`
+passed in118.3s: two-player Normal max HP122→196 on both peers, deaths3/3,
+no relay desync notices, four protected saves unchanged and owned cleanup.
+Clips: `host_magic_shots_0.mp4`, `friend_magic_shots_1.mp4`,
+`friend_magic_dead_1.mp4` under `.local/vuh1789-tiers/evidence/20261013-045806_net_route_t2_magic_phantom_1/`.
+The caster's motion/all-player family rule has one regression in EnemyMirrorTest;
+legacy Shadow forwarding and unqualified families remain unchanged. This does
+not qualify remote-Sora targeting beyond the existing clone-room scope, nor
+projectile timing/damage equivalence between peers.
+
+T2 candidate batches `20261013-041609` and `20261013-043354` exercised the
+remaining route rows. Only2403 is newly enabled; Bookmaster5 showed lightning
+on both screens and retains its previous qualification. Other outcomes:
+
+| Family | Park reason for this pass |
+|---|---|
+| Cannon Gun14 | TT29 room/Sora readiness failed. |
+| Bulky Vendor75 | Required living copies did not appear. |
+| Magnum Loader121 | No attributable ranged volley on both screens. |
+| Tornado Step123 | Required living copies did not appear. |
+| Crescendo124 | TT39 room/Sora readiness failed. |
+| Creeper Plant125 | Seed effects were not visible on friend; prior motion-only allowlist unchanged. |
+| Surveillance Robot306 | No laser attack observed in the casting window. |
+| Sniper311 | Host shots observed; friend effect not qualified, isolated friend clip hit disk gate. |
+| Gambler314 | Required living copies did not appear. |
+| Strafer1114 | Required living copies did not appear. |
+| Camo Cannon2407 | Effects confounded by native type-21 neighbours/helpers. |
+| Necromancer2411 | Friend summon/spell not qualified; isolated retake hit disk gate. |
+| Spring Metal2412 | HB23 btl25 hit the known load-fault/safety-stop path. |
+| Aerial Viking2413 | HB23 room/Sora readiness failed. |
+| Runemaster2414 | HB23 room/Sora readiness failed. |
+
+All candidate-only IDs were removed before final build. Type-21, bosses,
+story/RAW/minigame policy and classifier are unchanged. Batch completion is
+not family qualification; per-visit JSON and reviewed clips are retained in
+`.local/vuh1789-tiers/evidence/`. No census machinery was added.
+
 ## VUH-1789 route T1 smoke (2026-10-13)
 
 Continuation batch `20261013-035916_route_t1_remainder_1` completed ten

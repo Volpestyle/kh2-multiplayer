@@ -350,8 +350,8 @@ void testHelpers() {
     {
         char line[256] {};
         const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76",
+        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76,2403").size() &&
+                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76,2403",
               "the configured line prints every allowlisted family, in order");
         char tiny[9] {};
         em::FormatFamilies(tiny, sizeof(tiny));
@@ -413,7 +413,7 @@ void testHelpers() {
                   "batch7 family streams beside excluded Sniper311");
         }
         check(!em::FamilyAllowed(2) && !em::FamilyAllowed(7) && !em::FamilyAllowed(9) &&
-                  !em::FamilyAllowed(2403) &&
+                  em::FamilyAllowed(2403) &&
                   !em::FamilyAllowed(2411) && em::FamilyAllowed(76),
               "batch7 neighbours stay native; Fiery Globe76 is a scoped-record stream candidate");
     }
@@ -616,12 +616,30 @@ int main() {
         bool correct = true;
         for (const auto oid : {2405u, 2409u, 2403u, 2408u}) {
             em::Pose pose;
-            const bool added = oid == 2405;
+            const bool added = oid == 2405 || oid == 2403;
             correct = correct && stream.Drivable(static_cast<std::uint16_t>(oid), 2) == added &&
                 kh2coop::inject::enemytarget::rules::AllowedObject(oid, true) == added;
             if (added) correct = correct && stream.PoseAt(static_cast<std::uint16_t>(oid), 2, pose) && pose.objectId == oid;
         }
-        check(correct, "route T1 Iron Hammer mirrors and targets all; unqualified Lance/T2/T3 stay native");
+        check(correct, "route Iron Hammer and qualified Magic Phantom mirror and target all; Lance/T3 stay native");
+    }
+    { // VUH-1789: the observed Magic Phantom stream must acquire its own pose;
+      // unqualified spell families and type-21 helpers cannot acquire alongside it.
+        em::Stream stream;
+        std::vector<EnemyMotionEntry> pack;
+        for (const auto oid : {2403u, 2407u, 2411u, 2406u}) {
+            auto entry = row(static_cast<std::uint16_t>(oid), 123.0f, 151);
+            entry.objectId = oid; pack.push_back(entry);
+        }
+        stream.Ingest(motion(7, 1, 100, pack), 1);
+        stream.Ingest(motion(7, 2, 103, pack), 2); stream.Tick(2);
+        em::Pose pose;
+        check(stream.Drivable(2403, 2) && stream.PoseAt(2403, 2, pose) &&
+              pose.objectId == 2403 && pose.position.x == 123.0f && pose.motionId == 151 &&
+              kh2coop::inject::enemytarget::rules::AllowedObject(2403, true) &&
+              !kh2coop::inject::enemytarget::rules::AllowedObject(2403, false) &&
+              !stream.Drivable(2407, 2) && !stream.Drivable(2411, 2) && !stream.Drivable(2406, 2),
+              "Magic Phantom acquires mirrored spell motion and all-player policy; unqualified casters/helpers and legacy forwarding remain native");
     }
     testStreamRecovery();
     if (enet_initialize() != 0) return 2;

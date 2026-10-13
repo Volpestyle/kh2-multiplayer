@@ -82,6 +82,8 @@ inline constexpr std::uint32_t kIronHammerObjectId = 2405;
 inline constexpr std::uint32_t kSurveillanceRobotObjectId = 306;
 inline constexpr std::uint32_t kBookmasterObjectId = 5;
 inline constexpr std::uint32_t kCreeperPlantObjectId = 125;
+// VUH-1789 T2: HB04/15 btl26, purple spell shots observed on both peers.
+inline constexpr std::uint32_t kMagicPhantomObjectId = 2403;
 // The whole allowlist, in the order the configured line prints it.
 inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
                                               kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
@@ -93,7 +95,8 @@ inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId,
                                               kSilverRockObjectId, kIcyCubeObjectId, kAssassinObjectId,
                                               kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId,
                                               kIronHammerObjectId,
-                                              kBookmasterObjectId, kCreeperPlantObjectId, kCreeperObjectId, 76};
+                                              kBookmasterObjectId, kCreeperPlantObjectId, kCreeperObjectId, 76,
+                                              kMagicPhantomObjectId};
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
     for (const auto family : kFamilies)
         if (objectId == family) return true;

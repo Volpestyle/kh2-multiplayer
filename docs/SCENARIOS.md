@@ -3041,6 +3041,12 @@ and [prior source review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-
 
 ## Route T1 mirror smoke (VUH-1789)
 
+`net_route_t2_magic_phantom.json` is the retained T2 casting smoke at HB04/15
+btl26. It checks two-player Normal current/max HP and shared deaths, and
+records host/friend spell clips for visual review. Only the owned local Soras
+receive temporary RAM HP999 for survival; protected saves remain guarded.
+It does not assert projectile timing, damage or remote-target equivalence.
+
 `net_route_t1_ordinary_waves.json` visits HB Iron Hammer, TT Driller/Soldier,
 HB Armored Knight and BC Hammer Frame on one two-player loopback. Each visit
 requires living target families on both peers, matching native Normal-scaled
