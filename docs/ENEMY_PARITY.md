@@ -17,6 +17,13 @@ owned processes closed. Evidence and twelve reviewed short clips:
 Lance Warrior 2409 stays native: HB04/17 btl25 crashed during load before
 qualification (`20261013-032235_net_route_t1_hb_lance_warrior_1`). The crash
 dump remained empty after a locked-file bundle failure, so the cause is unknown.
+The flags-off single-instance check `20261013-034336_lance_vanilla_1` also
+faulted: Windows Application event1000 records owned PID176932 with access
+violation `0xC0000005` in `ntdll.dll` at `0xCB776`, the same module/offset as
+the earlier co-op run. The runner stopped on an unowned KH2 process before
+its observation window completed; that process's ancestry was not retained.
+Lance is parked as a game/rig load issue, with no family or ownership widening.
+Evidence: `.local/vuh1789-tiers/lance-windows-fault.json` and the run report.
 TARGET_ALL's family rule and hook were exercised; attacks against a remote
 Sora were not qualified here. Existing private-clone room scope is BC Courtyard
 and GoA, which these rooms do not widen.

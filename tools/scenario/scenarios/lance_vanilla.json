@@ -1,0 +1,50 @@
+{
+  "name": "lance_vanilla",
+  "description": "VUH-1789 exact HB04/17 btl25 host-crash baseline: co-op flags disabled, no relay/runtime; canonical rig and save guard retained.",
+  "protect": [
+    0
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR": "0",
+        "KH2COOP_ENEMY_POPULATION": "0",
+        "KH2COOP_ENEMY_TARGET_ALL": "0",
+        "KH2COOP_ENEMY_TARGET_REMOTE": "0",
+        "KH2COOP_ENEMY_MIRROR_TRACE": "0",
+        "KH2COOP_PARTY_NATIVE": "0",
+        "KH2COOP_NATIVE_SORA_PRIVATE_STATUS": "0",
+        "KH2COOP_COOP_DIFFICULTY": "off"
+      },
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 23,
+      "door": 0,
+      "map": 1,
+      "btl": 25,
+      "evt": 32767
+    },
+    {
+      "do": "wait",
+      "ms": 12000
+    },
+    {
+      "do": "save",
+      "as": "native",
+      "expr": "[location(0),actors(0)]"
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 2,
+      "fps": 12,
+      "name": "lance_flags_off"
+    }
+  ]
+}
