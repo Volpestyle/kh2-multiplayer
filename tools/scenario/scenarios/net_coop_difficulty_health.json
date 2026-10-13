@@ -152,6 +152,15 @@
       "seconds": 2,
       "name": "friend_deaths_agree",
       "fps": 12
+    },
+    {
+      "do": "wait",
+      "ms": 2500
+    },
+    {
+      "do": "assert",
+      "expr": "not any(line.startswith('[Runtime] Desync notice ') and line.endswith(' fields=2') for i in range(2) for line in runtime_log(i).splitlines())",
+      "message": "Staggered HP/death samples raised an enemy-only false desync notice"
     }
   ]
 }

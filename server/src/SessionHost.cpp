@@ -1360,8 +1360,8 @@ void SessionHost::sendWorldStateTo(TransportPeer* peer) try {
     throw;
 }
 
-// A client disagreeing with the host on the same epoch for two consecutive
-// comparisons is reported once per distinct set of fields (transient
+// A client disagreeing with the host on the same epoch is reported once per
+// distinct set of fields after consecutive fresh comparisons (transient
 // mismatches during a load don't fire). Different epochs aren't compared:
 // the client may simply still be loading.
 void SessionHost::hashDiagnostic(const char* action, const PeerState& client, const PeerState* host,
@@ -1447,7 +1447,12 @@ void SessionHost::compareWithHost(PeerState& client) {
         client.reportedFields = 0;
         return;
     }
-    if (++client.mismatchStreak < 2 || fields == client.reportedFields) return;
+    // Damage followed by death can span two staggered one-second hash samples:
+    // client HP60 vs cached host HP63, then client empty vs cached host HP60.
+    // Give enemy-only diagnostics one more fresh sample to converge. Preserve
+    // the existing room/progress and complete-missing-pack notice thresholds.
+    const auto requiredSamples = fields == DesyncEnemies ? 3u : 2u;
+    if (++client.mismatchStreak < requiredSamples || fields == client.reportedFields) return;
     client.reportedFields = fields;
     ++desyncNotices_;
     log("Desync: " + client.peerId + " fields=" + std::to_string(fields) +

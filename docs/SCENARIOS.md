@@ -30,6 +30,15 @@ intact. Fresh control `131241` measured 16.661754 seconds with QPC and qualified
 both endpoints under the same bounds, without adding polling or a tolerance.
 See the [clock correction and live result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/no-observer-endpoints-root02/result.md).
 
+## Enemy hash notice debounce (VUH-2212)
+
+Enemy-only hash notices (`fields=2`) require three fresh client samples on the
+same epoch. This debounces the observed damage-then-death ordering against the
+relay's cached host hash; agreement resets the streak. Room, progress and
+complete-missing-pack notices retain their two-sample threshold. Hashes still
+use native current HP, not the host's cached HP or max HP. Persistent enemy
+divergence still raises a notice on the third fresh sample.
+
 ## Automatic reconnect: one cycle (2026-10-04)
 
 Run [20261004-213052](../build/scenarios/20261004-213052_outside_automatic_once_1/report.md)

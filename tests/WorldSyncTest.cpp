@@ -1206,6 +1206,9 @@ int main() {
     pump(150);
     check(relay.desyncNoticeCount() == 0, "a single mismatch (e.g. mid-load) is tolerated");
     c2->sendStateHash(diverged);
+    pump(150);
+    check(relay.desyncNoticeCount() == 0, "two enemy-only samples can straddle damage then death");
+    c2->sendStateHash(diverged);
     check(waitFor([&] { return !hostSeen.desyncs.empty(); }) &&
               hostSeen.desyncs.back().slot == SlotType::Friend2 &&
               hostSeen.desyncs.back().fields == DesyncEnemies &&
