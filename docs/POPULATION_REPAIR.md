@@ -2,9 +2,37 @@
 
 Repair-06 is independently reviewed and lead-ADOPTed. Live run
 `20261009-000023_vuh1788_late_join_population_repair_1` passed the frozen fixture's
-own oracle and safety closure. The landing candidate is rebased onto main
-`079f9a3` in `.local/wt-waves-landing`; that rebased tree still needs its scheduled
-build and full serial CTest before landing. The shared root is unchanged.
+own oracle and safety closure. The repair landed in `2d45f39`; the population
+cull hold and gated factory landed earlier in `a91c301`.
+
+## BC Soldier play-route check, 2026-10-12
+
+The landed code passed [run 203547](../build/scenarios/20261012-203547_net_population_soldier_late_join_1/report.md)
+with `KH2COOP_ENEMY_MIRROR=1` and `KH2COOP_ENEMY_POPULATION=1`;
+`KH2COOP_ENEMY_POPULATION_SPAWN` was unset. The host triggered three Soldiers
+at the west activator and killed one before Friend1 joined. The friend stayed
+over 2,000 units from that point and received the wave through the existing
+native activation lease. PopulationCut authorized one native stale-copy death
+at frame 345 and confirmed physical absence at frame 406. Both peers matched
+living IDs 2/3, object 301, HP 39. Killing the remaining host Soldiers applied
+native deaths on the friend; both complete actor lists then contained no enemies.
+The [host clip](../build/scenarios/20261012-203547_net_population_soldier_late_join_1/host_shared_soldiers_0.mp4)
+shows the surviving wave; the report/logs establish the friend's matching set
+and subsequent absence.
+
+An earlier [run 203145](../build/scenarios/20261012-203145_net_population_soldier_late_join_1/report.md)
+also passed with SPAWN enabled, but made no factory calls. These runs validate
+the existing native death/removal and late-join paths; no additional native
+removal implementation was needed. Focused population planner, mirror driver
+and native repair tests passed 3/3. Four protected files and installed game
+files were unchanged, and owned cleanup completed for both runs.
+
+Proposed play flags: MIRROR and POPULATION enabled. Generic SPAWN stays parked
+because neither run exercised creation and its native family-readiness gate
+still applies. Alive-despawn/supersession, reconnect and other families remain
+unqualified by these checks. The existing ordinary alive-despawn path reports
+a death after its three-second grace; this fixture exercised host kills instead.
+The lead owns promotion; no profile or new authority machinery was added.
 
 ## Scope and authority
 

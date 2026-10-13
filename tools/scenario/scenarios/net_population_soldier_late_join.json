@@ -1,0 +1,142 @@
+{
+  "name": "net_population_soldier_late_join",
+  "description": "VUH-1788 BC btl2: host activates Soldier wave before friend joins; friend never approaches west activator. Verify living population after late join and physical absence after host deaths. Existing population/cut/runner only.",
+  "protect": [
+    0,
+    1
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR": "1",
+        "KH2COOP_ENEMY_POPULATION": "1"
+      }
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR": "1",
+        "KH2COOP_ENEMY_POPULATION": "1"
+      }
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 5,
+      "room": 6,
+      "door": 0,
+      "map": 1,
+      "btl": 2,
+      "evt": 0
+    },
+    {
+      "do": "relay",
+      "port": 27796,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(int(actors(0)[0]['address'],16)+0x670),'--type','f32x3','--value','-2850,0,-1650']"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len([a for a in enemies(0) if a['name']=='M_EX010' and a['hp']>0])==3",
+      "timeoutMs": 12000
+    },
+    {
+      "do": "save",
+      "as": "host_wave",
+      "expr": "enemies(0)"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['hit','kill','--victim',[a for a in enemies(0) if a['name']=='M_EX010'][0]['address']]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len([a for a in enemies(0) if a['hp']>0])==2",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(actors(1))>0 and location(1)==[5,6,0,1,2,0]",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "wait_until",
+      "expr": "len([a for a in enemies(1) if a['hp']>0])==2",
+      "timeoutMs": 30000
+    },
+    {
+      "do": "statehash_check",
+      "as": "late_join",
+      "instances": [
+        0,
+        1
+      ],
+      "minEnemies": 2,
+      "timeoutMs": 12000
+    },
+    {
+      "do": "save",
+      "as": "late_join_actors",
+      "expr": "[actors(0),actors(1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "dist(pos('P_EX100',1),(-2850,0,-1650))>2000",
+      "message": "Friend approached host-only activator"
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 5,
+      "name": "host_shared_soldiers"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "friend_late_join"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "kill"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemies(0))==0 and len(enemies(1))==0",
+      "timeoutMs": 25000
+    },
+    {
+      "do": "save",
+      "as": "removed",
+      "expr": "[enemies(0),enemies(1)]"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "friend_after_host_removal"
+    }
+  ]
+}
