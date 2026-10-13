@@ -3,27 +3,30 @@
 `build_friend.py` copies explicitly selected local products and the installed
 CPython 3.11 standard library/Tk. It never downloads, installs, launches KH2,
 opens a listener or writes the game folder. `friend-products.json` pins the
-matched AvatarBridge v3 DLL/runtime/avatarctl and protocol-10 relay. Updating
-those products requires an explicitly reviewed matched set.
+protocol-18 / AvatarBridge-4 cohort built from `545b550`. DLL, runtime, relay,
+avatarctl and portable CLI share one source revision and build ID. Refresh all
+five product receipts together; the existing validator rejects mixed versions,
+cohorts and packaged hashes. The pinned local copies live under
+`build/rig/vuh2234-protocol18-20261013-01/products/`.
 
-Release02 selects the private static-CRT build of the same reviewed v3 inject
-source. Runtime/avatarctl stay on the original matched v3 products. The game
-child's PATH is unchanged; the injected DLL does not depend on a dynamically
-selected system MSVC runtime. The bundled helper EXEs continue to use their
-adjacent MSVC redistributable DLLs. Release01 remains historical offline evidence.
+This cohort builds all five native products with the static MSVC CRT. Earlier
+release01/release02 products remain historical evidence, not current inputs.
 Only the direct/transitive CRT import closure from the shipped products is copied
 to `bin`; `crt-imports.json` retains each dumpbin output and the kept/omitted set
 outside the ZIP. Python's own runtime DLLs remain in its separate directory.
 
-Build the canonical CLI in a private CMake directory with
-`-DKH2COOP_PORTABLE_PACKAGE=ON`. This changes only its package-root guard,
+Build the matched native products in one CMake directory with
+`-DKH2COOP_PORTABLE_PACKAGE=ON`. This changes only the CLI package-root guard,
 absolute rig root, portable command allowlist and disabled rebuild/restart path.
-Normal developer builds default OFF and retain existing behavior. Use installed
+Normal developer builds default OFF and retain existing behavior. Use
+`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` for this static-CRT cohort. Use installed
 ENet/MinHook source via `FETCHCONTENT_SOURCE_DIR_ENET` and
 `FETCHCONTENT_SOURCE_DIR_MINHOOK`, with `FETCHCONTENT_FULLY_DISCONNECTED=ON`.
 For MSVC, retain its default CXX flags and append
 `/experimental:deterministic /pathmap:<absolute-repo>=/source`; pass linker
-`/PDBALTPATH:portable.pdb`. Do not package PDBs. Build only target `kh2ctl`.
+`/PDBALTPATH:portable.pdb`. Do not package PDBs. Build targets `kh2coop_inject`,
+`kh2coop_runtime_scaffold`, `kh2coop_server`, `avatarctl` and `kh2ctl` from the
+same checkout, then refresh the existing per-role receipt paths and hashes.
 
 ```powershell
 python -B tools/launcher/test_friend_package.py
@@ -34,6 +37,7 @@ python -B tools/packaging/build_friend.py `
   --crt <installed-x64-Microsoft.VC145.CRT-directory> `
   --dumpbin <installed-MSVC-x64-dumpbin.exe> `
   --vs-licenses <installed-VS-Licenses/1033-directory> `
+  --transport steam --products tools/packaging/friend-products.json `
   --cli <private-portable-kh2ctl.exe> --cli-sha256 <its-reviewed-SHA256>
 <new-parent>/KH2-Co-op/python/python.exe -I -B <new-parent>/KH2-Co-op/tools/launcher/friend.py --self-check
 ```
@@ -53,8 +57,14 @@ assets, game DLLs, Steam files, original saves or local result receipts enter th
 ZIP. Every decompressed entry and PE byte stream is scanned for case-insensitive
 local user/repository identifiers in ASCII/UTF-8 and both UTF-16 byte orders.
 
-The friend UI strips inherited `KH2COOP_*` test flags. Its game child receives
-only Steam app-ID environment overrides; no `steam_appid.txt` is created. Exact
+The friend launcher applies the qualified gameplay defaults to both game and
+runtime children through the existing `child_environment`: mirror, population,
+TARGET_ALL, Normal difficulty and the two event-hold flags. Explicit inherited
+`0`/`off` disables still win. Parked spawn/legacy targeting and developer test
+flags remain excluded. The shipped set and scope are in
+[`ONLINE_COOP_PLAN.md`](../../docs/ONLINE_COOP_PLAN.md). Steam app-ID environment
+overrides are retained; the Steam broker uses its existing guarded app-ID-file
+handling. ENet launch does not create an app-ID file. Exact
 EXE SHA is checked before canonical launch/injection. SaveGuard must be logged
 at this package's absolute log path before connection. A known failed launch
 receipt with a PID is closed through canonical retained ownership; a timeout
@@ -65,3 +75,10 @@ Offline tests do not prove clean-machine dependencies, visible UI, startup
 without an app-ID file, live guard installation, connect/disconnect, name/HP
 rendering, or save preservation. Those require the lead's bounded desktop
 rehearsal in a fresh unpacked folder. Never test by attempting an in-game save.
+
+The v18 installed-package rehearsal used the extracted ZIP's GameOwner and
+Session APIs, without feature environment overrides, on a two-player ENet
+loopback. BC HP scaled 39 to 63 on both peers, the friend's real Sora took an
+enemy hit, deaths agreed and the room transition produced no desync notice.
+Four protected saves were unchanged. This validates the installed native cohort;
+it does not establish a clean-machine install or two-PC Steam acceptance.

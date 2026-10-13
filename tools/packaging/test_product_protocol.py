@@ -26,6 +26,10 @@ class Controls(unittest.TestCase):
             self.assertEqual(builder.select_products('steam',file)['protocol'],18)
             self.receipt['products']['runtime']['protocol']=10;file.write_text(json.dumps(self.receipt))
             with self.assertRaisesRegex(ValueError,'Mixed protocols'):builder.select_products('steam',file)
-    def test_legacy_default_refused(self):
-        with self.assertRaises(ValueError):builder.select_products('enet',None)
+    def test_shipped_default_is_coherent18(self):
+        selected=builder.select_products('enet',None)
+        self.assertEqual(selected['protocol'],18)
+        self.assertEqual(selected['avatarBridgeVersion'],4)
+        rows={**selected['products'],'cli':selected['cli']}
+        self.assertEqual(p.validate_protocol_set(18,rows),18)
 if __name__=='__main__':unittest.main()

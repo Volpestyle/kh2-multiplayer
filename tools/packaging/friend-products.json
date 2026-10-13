@@ -1,9 +1,42 @@
 {
-  "avatarBridgeVersion": 3,
+  "protocol": 18,
+  "avatarBridgeVersion": 4,
+  "transport": "steam",
   "products": {
-    "dll": {"path": "build/rig/vuh1510-static-crt-20261006-01/build/inject/staging/kh2coop_inject.dll", "sha256": "edd135d5499cb61803bc508c5636a88b1e9b37a5b58e431daa2590677c21cfb6"},
-    "runtime": {"path": "build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/build/Release/kh2coop_runtime_scaffold.exe", "sha256": "d1b621e74d55254af75a0c1a4cb91ecd85d93918c37e1812cf59d37734430454"},
-    "avatarctl": {"path": "build/rig/vuh1507-hud-names-prep-20261006-01/integration-build/build/Release/avatarctl.exe", "sha256": "61c9a802b34ba263b85093290e2b712596071bb857a5ed6db87385100b6300bc"},
-    "server": {"path": "build/Release/kh2coop_server.exe", "sha256": "7798aa42c14072e067dfd962d68a6be5403473d7e7730d123c846d10ebf53cd8"}
+    "dll": {
+      "path": "build/rig/vuh2234-protocol18-20261013-01/products/kh2coop_inject.dll",
+      "sha256": "1fa7f6a419d595b5984582e117e5e616003b989f3e55b031dbab66ad6dd39dd2",
+      "protocol": 18,
+      "sourceRevision": "545b550b077d3531507ff7481cc7095ab4c5ed52",
+      "buildId": "vuh2234-protocol18-20261013-01"
+    },
+    "runtime": {
+      "path": "build/rig/vuh2234-protocol18-20261013-01/products/kh2coop_runtime_scaffold.exe",
+      "sha256": "d0cf6bbfd5f8e383ea765bd86bb2dc563897d1cc2e310f611e8419db841814b8",
+      "protocol": 18,
+      "sourceRevision": "545b550b077d3531507ff7481cc7095ab4c5ed52",
+      "buildId": "vuh2234-protocol18-20261013-01"
+    },
+    "server": {
+      "path": "build/rig/vuh2234-protocol18-20261013-01/products/kh2coop_server.exe",
+      "sha256": "47174bf36db54c86b4cb06e3d92ebb14a9b2e9e76d0526577c604588843384b2",
+      "protocol": 18,
+      "sourceRevision": "545b550b077d3531507ff7481cc7095ab4c5ed52",
+      "buildId": "vuh2234-protocol18-20261013-01"
+    },
+    "avatarctl": {
+      "path": "build/rig/vuh2234-protocol18-20261013-01/products/avatarctl.exe",
+      "sha256": "70c5d31adba6d9dd15f8742d3a2d1539ef86ff983fc7645ad5f7071ca6802575",
+      "protocol": 18,
+      "sourceRevision": "545b550b077d3531507ff7481cc7095ab4c5ed52",
+      "buildId": "vuh2234-protocol18-20261013-01"
+    }
+  },
+  "cli": {
+    "path": "build/rig/vuh2234-protocol18-20261013-01/products/kh2ctl.exe",
+    "sha256": "854e54c17a61beeddc42880d057ddb23fa1522025e27e12e94878ecaa89a509d",
+    "protocol": 18,
+    "sourceRevision": "545b550b077d3531507ff7481cc7095ab4c5ed52",
+    "buildId": "vuh2234-protocol18-20261013-01"
   }
 }
