@@ -16,8 +16,12 @@
 
 namespace kh2coop::inject::playerkit {
 
+bool BcCloneWorld(std::uint8_t world) {
+    for (const auto qualified : AUTO_CLONE_WORLDS) if (world == qualified) return true;
+    return false;
+}
 bool BcCloneEligible(bool requested, bool twoPlayers, bool prerequisites, const LoadContext& c) {
-    return requested && twoPlayers && prerequisites && c.world == 5 &&
+    return requested && twoPlayers && prerequisites && BcCloneWorld(c.world) && c.resolved0 == SORA &&
         c.evtProgram == 0 && c.eventContext == 0 && c.cutsceneState == 0;
 }
 std::uint32_t BcCloneRow(std::uint32_t row, bool eligible, bool& owned, bool deferRestore) {
@@ -173,7 +177,7 @@ std::atomic<bool> g_remote {false};
 ResolveObserver g_observer = nullptr;    // VUH-1519 party-native; set once before Install
 ResolveObserverLog g_observerLog = nullptr;
 std::atomic<bool> g_bcRequested {false};
-std::atomic<bool> g_bcOwned {false};
+std::atomic<std::uint32_t> g_bcOwned {0}; // bit per verified world; guarded writes
 SRWLOCK g_bcLock = SRWLOCK_INIT;
 std::atomic<bool (*)()> g_bcNeutralReady {nullptr};
 std::atomic<std::uint8_t> g_remoteRoster {0};
@@ -184,6 +188,11 @@ std::uint32_t g_remoteApplied = 0, g_remoteSkipped = 0;
 void HookedResolveMembers() {
     UpdateBcClone(true); // before native selectors are consumed by the room's factory
     g_original();
+    // TT prologue/forms may change member0 on this very load. Restore before
+    // factory consumption; a newly standard Sora waits for the next load.
+    __try {
+        if (*reinterpret_cast<const std::uint16_t*>(g_base + RVA_RESOLVED_MEMBERS) != SORA) UpdateBcClone(true);
+    } __except(EXCEPTION_EXECUTE_HANDLER) { ++g_stats.faults; }
     if (!g_active.load(std::memory_order_acquire)) return;
     LoadContext c;
     Reason r = Reason::Disabled;
@@ -262,11 +271,13 @@ bool BcCloneRequested() {
     return on("KH2COOP_ENEMY_TARGET_ALL") && on("KH2COOP_ENEMY_MIRROR") && !on("KH2COOP_PARTY_NATIVE");
 }
 void SetBcNeutralReady(bool (*probe)()) { g_bcNeutralReady.store(probe, std::memory_order_release); }
-bool BcCloneApplied() { return g_bcOwned.load(std::memory_order_acquire); }
+bool BcCloneApplied(std::uint8_t world) {
+    return BcCloneWorld(world) && (g_bcOwned.load(std::memory_order_acquire) & (1u << world)) != 0;
+}
 void UpdateBcClone(bool resolving) {
     if (!g_base || (!g_bcRequested && !g_bcOwned)) return;
     AcquireSRWLockExclusive(&g_bcLock);
-    bool changed = false, nowOwned = false;
+    std::uint32_t applied = 0, restored = 0;
     __try {
         LoadContext c;
         c.world = *reinterpret_cast<const std::uint8_t*>(g_base + RVA_WORLD);
@@ -274,26 +285,36 @@ void UpdateBcClone(bool resolving) {
         c.evtProgram = *reinterpret_cast<const std::uint16_t*>(g_base + RVA_EVT_PROGRAM);
         c.eventContext = *reinterpret_cast<const std::uint64_t*>(g_base + RVA_EVENT_CONTEXT);
         c.cutsceneState = *reinterpret_cast<const std::int32_t*>(g_base + RVA_CUTSCENE_STATE);
+        c.resolved0 = *reinterpret_cast<const std::uint16_t*>(g_base + RVA_RESOLVED_MEMBERS);
         const auto neutral = g_bcNeutralReady.load(std::memory_order_acquire);
         const bool ready = g_active.load(std::memory_order_acquire) && privatestatus::Ready() && neutral && neutral();
         const bool eligible = BcCloneEligible(g_bcRequested, enemysync::TwoPlayerSessionLive(), ready, c);
         if (*reinterpret_cast<const std::uint32_t*>(g_base + RVA_SAVE) == 0x4A32484B) { // KH2J
-            auto* row = reinterpret_cast<volatile LONG*>(g_base + RVA_SAVE + PARTY_ROWS_OFFSET + 4 * 5);
+            auto mask = g_bcOwned.load(std::memory_order_acquire);
+            for (const auto world : AUTO_CLONE_WORLDS) {
+            const auto bit = 1u << world;
+            auto* row = reinterpret_cast<volatile LONG*>(g_base + RVA_SAVE + PARTY_ROWS_OFFSET + 4 * world);
             const auto before = static_cast<std::uint32_t>(InterlockedCompareExchange(row, 0, 0));
-            bool owned = g_bcOwned;
+            bool owned = (mask & bit) != 0;
             // A consumed selector must keep its private status through construction,
             // even if the runtime disconnects during this load. The next resolver
             // may restore before consuming selectors; gameplay restores after load.
-            const auto after = BcCloneRow(before, eligible, owned, !resolving && warp::TransitionPending());
+            const auto after = BcCloneRow(before, eligible && world == c.world, owned, !resolving && warp::TransitionPending());
             if (after != before) {
-                changed = static_cast<std::uint32_t>(InterlockedCompareExchange(row, static_cast<LONG>(after), static_cast<LONG>(before))) == before;
-                if (changed) g_bcOwned = owned;
-            } else g_bcOwned = owned;
+                const bool changed = static_cast<std::uint32_t>(InterlockedCompareExchange(row, static_cast<LONG>(after), static_cast<LONG>(before))) == before;
+                if (!changed) continue; // competing story write: retry next frame
+                if (owned) applied |= bit; else restored |= bit;
+            }
+            if (owned) mask |= bit; else mask &= ~bit;
+            g_bcOwned.store(mask, std::memory_order_release);
+            }
         }
-        nowOwned = g_bcOwned;
     } __except(EXCEPTION_EXECUTE_HANDLER) { ++g_stats.faults; }
     ReleaseSRWLockExclusive(&g_bcLock);
-    if (changed && g_log) g_log("[bc-clone] party leaf %s (two-player TARGET_ALL; RAM only)", nowOwned ? "applied" : "restored");
+    if (g_log) for (const auto world : AUTO_CLONE_WORLDS) {
+        const auto bit = 1u << world;
+        if ((applied | restored) & bit) g_log("[bc-clone] party leaf %s world=%u (two-player TARGET_ALL; RAM only)", applied & bit ? "applied" : "restored", world);
+    }
 }
 
 void SetResolveObserver(ResolveObserver observer, ResolveObserverLog log) {

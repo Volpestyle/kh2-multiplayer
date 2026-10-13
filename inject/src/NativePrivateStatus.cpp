@@ -120,7 +120,10 @@ bool EnemyTargetProfile(Stamp& s, bool automatic = false) {
     if(!StampNow(s) || !Read(g_base+0x9A98B0,magic) || magic!=std::array<std::uint8_t,4>{'K','H','2','J'})return false;
     if(automatic) {
         std::uint64_t event=0;std::int32_t cutscene=0;
-        if(!playerkit::BcCloneApplied() || !Read(g_base+0x2A11478,event) || !Read(g_base+0xB65210,cutscene) || event || cutscene)return false;
+        std::uint16_t member0=0;
+        if(!playerkit::BcCloneApplied(s.now[0]) || !Read(g_base+playerkit::RVA_RESOLVED_MEMBERS,member0) || member0!=playerkit::SORA ||
+            !Read(g_base+0x2A11478,event) || !Read(g_base+0xB65210,cutscene) || event || cutscene)return false;
+        return Read(g_base+0x9A98B0+0x3534+4*s.now[0],row) && row==std::array<std::uint8_t,4>{0,0,2,0x12} && s.now[8]==0 && s.now[9]==0;
     }
     for(const auto& r:kEnemyTargetRooms)
         if(s.now[0]==r.world && (automatic || s.now[1]==r.room))return Read(g_base+0x9A98B0+0x3534+4*r.world,row) && row==r.row && (!automatic || (s.now[8]==0 && s.now[9]==0));

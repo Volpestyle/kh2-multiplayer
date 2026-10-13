@@ -31,7 +31,7 @@ Direct developer launches retain their native defaults.
 |---|---|---|
 | `ENEMY_MIRROR` | `1` | Existing qualified per-objectId allowlist only. |
 | `ENEMY_POPULATION` | `1` | Remove a friend's living copy when the host removes it. |
-| `ENEMY_TARGET_ALL` | `1` | Automatic private Sora on the next ordinary two-player BC load; qualified mirrored enemy families can target the friend. |
+| `ENEMY_TARGET_ALL` | `1` | Automatic private Sora on the next ordinary two-player TT/HB/BC load; qualified mirrored enemy families can target the friend. |
 | `COOP_DIFFICULTY` | `normal` | Host room-locked health factor; two-player mobs ×1.6. |
 | `EVENT_HOLD_PRODUCER` | `1` | Host event announcements within the existing empty-room scope. |
 | `EVENT_HOLD_CONTROL` | `1` | Client input hold/overlay followed by host-led room/state resync. |
@@ -48,10 +48,11 @@ that dependency is now automatic under `ENEMY_TARGET_ALL=1` plus
 private-status/neutral-input code is enabled with this dependency; those
 developer switches are not separate player settings.
 
-Setup changes only the exact default BC party leaf in RAM, then restores only
-its own unchanged row on scope exit. Events, story-modified rows and three-player
-parties stay native. The clone appears on the next native BC room load; this
-slice does not force a reload of an already-loaded host room. An applied load
+Setup changes only the verified default TT/HB/BC party leaves in RAM (worlds
+2/4/5, `00/01/02/12` -> `00/00/02/12`), then restores only its own unchanged
+rows on scope exit. Each world has separate ownership. Events, story-modified
+rows, nonstandard local members and three-player parties stay native. The clone
+appears on the next native qualified room load; this slice does not force a reload of an already-loaded host room. An applied load
 retains private status through a disconnect until construction completes.
 
 No-feature-env run `20261013-090127` confirmed distinct-status Soras on both
@@ -62,9 +63,31 @@ Sora's avatar mode `0` with enemy mirror mode `1`; the original failed report is
 retained and the corrected read-only log check passes with six assignments.
 All native assertions passed live, and all 22 clip frames were reviewed.
 
-These runs exercise the source player's child-launch functions, not a released
-ZIP or the complete GUI flow. Fresh protocol-18 products/receipts remain a
-separate packaging task; the checked-in older receipts remain rejected.
+Route extension: native leaf probe `20261013-112702` found that TT and HB use
+BC's same default row. Standard Sora is checked before the resolver and again
+before factory consumption; TT's Roxas prologue/nonstandard members stay native. A load from
+a nonstandard member to Sora may stay native until the next room load. The
+existing private-status/neutral-input path and shipped disable policy are reused.
+
+No-env player-launch scenarios `20261013-115917` and `20261013-120109` pass:
+TT `02/0D` Drillers/Soldier scale 21->34 / 29->47, friend HP 24->18 and deaths 4/4;
+HB `04/15` Iron Hammers scale 122->196, protected-wave deaths 3/3, then a fresh
+launch records the native Hammer hit on the real friend Sora (24->0). GoA
+`04/1A` follows with the HB leaf, and TT's owned leaf restores. Both scenarios
+have no relay/runtime desync notice; four protected saves are unchanged. Enemy
+deaths/transition and HB attack use separate fresh launches because a level-8
+friend cannot survive that native 24-damage attack and cleared waves stay cleared.
+
+HB `04/02` Armored Knight clean-room qualification is parked: the friend took a
+native hit, but the run raised an enemy-hash desync notice. Its seven deaths
+were all received; one used native population disposal rather than an HP-write
+log. Attribution to this change or the existing population/hash path is unresolved.
+No shared-HP/hash-policy change is included in this slice.
+
+These route runs exercise the source player's child-launch functions, not the
+ZIP or complete GUI flow. VUH-2234 supplied a coherent protocol-18/AvatarBridge-4
+package from `545b550`; this new native extension needs a refreshed package
+cohort before it appears in that ZIP.
 
 ## Where the project stands (updated 2026-10-08)
 

@@ -5,6 +5,7 @@
 #include "PlayerKit.cpp"
 
 #include <cstdio>
+#include <initializer_list>
 #include <cstring>
 
 using namespace kh2coop::inject::playerkit;
@@ -32,7 +33,7 @@ int main() {
         c.evtProgram = 1; ok = ok && !BcCloneEligible(true, true, true, c);
         c.evtProgram = 0; c.eventContext = 1; ok = ok && !BcCloneEligible(true, true, true, c);
         c.eventContext = 0; c.cutsceneState = 1; ok = ok && !BcCloneEligible(true, true, true, c);
-        c.cutsceneState = 0; c.world = 4; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.cutsceneState = 0; c.world = 6; ok = ok && !BcCloneEligible(true, true, true, c);
         row = BcCloneRow(row, false, owned); ok = ok && row == BC_NATIVE_ROW && !owned;
         row = BcCloneRow(0x12020300, true, owned); ok = ok && row == 0x12020300 && !owned;
         row = BcCloneRow(BC_NATIVE_ROW, true, owned);
@@ -48,6 +49,23 @@ int main() {
         row = BcCloneRow(row, false, owned, false); // load complete / next pre-resolver
         ok = ok && !owned && row == BC_NATIVE_ROW;
         CHECK("lease expiry during BC construction retains applied private scope", ok);
+    }
+    for (const auto world : {2, 4}) {
+        auto c = Ctx(static_cast<std::uint8_t>(world), SORA);
+        bool owned = false;
+        bool ok = BcCloneEligible(true, true, true, c);
+        auto row = BcCloneRow(BC_NATIVE_ROW, ok, owned);
+        ok = ok && owned && row == BC_CLONE_ROW;
+        row = BcCloneRow(row, false, owned);
+        ok = ok && !owned && row == BC_NATIVE_ROW;
+        c.resolved0 = ROXAS; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.resolved0 = SORA; c.evtProgram = 1; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.evtProgram = 0; c.eventContext = 1; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.eventContext = 0; c.cutsceneState = 1; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.cutsceneState = 0; ok = ok && !BcCloneEligible(true, false, true, c) && !BcCloneEligible(false, true, true, c);
+        row = BcCloneRow(0x12020300, true, owned);
+        ok = ok && row == 0x12020300 && !owned;
+        CHECK(world == 2 ? "TT default Sora clone; prologue/story/3player native" : "HB default Sora clone; story/3player native", ok);
     }
     std::uint16_t k = 1;
     // Parsing: exact allow-list, numeric only, unset = off.

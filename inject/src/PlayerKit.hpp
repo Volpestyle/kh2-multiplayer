@@ -3,7 +3,7 @@
 // PlayerKit — per-session player-class kit for the local slot-0 player
 // (VUH-1513 step 2). Default OFF: nothing is hooked unless KH2COOP_PLAYER_KIT
 // names an allowed vanilla kit, or TARGET_ALL/MIRROR requests the automatic
-// two-player BC clone dependency. That path owns only the default BC RAM leaf.
+// two-player route clone dependency. That path owns only verified default RAM leaves.
 //
 // Mechanism (static RE on exe 9002b2de, live-proven by VUH-1513 E1-02/03):
 //   area load 39C860 -> 3E2EB0 walks the MEMT ([exe+0x2A252E0]) into the
@@ -70,14 +70,16 @@ struct Stats {
     Reason lastReason = Reason::Disabled;
 };
 
-// Automatic two-player BC clone uses the already-qualified selector row.
+// Automatic two-player route clone uses the same verified selector row in TT/HB/BC.
 // Only the default row is ours to change; restoration never overwrites story changes.
 constexpr std::uint32_t BC_NATIVE_ROW = 0x12020100, BC_CLONE_ROW = 0x12020000;
 bool BcCloneEligible(bool requested, bool twoPlayers, bool prerequisites, const LoadContext& c);
 std::uint32_t BcCloneRow(std::uint32_t row, bool eligible, bool& owned, bool deferRestore = false);
 bool BcCloneRequested();
 void SetBcNeutralReady(bool (*probe)());
-bool BcCloneApplied();
+constexpr std::uint8_t AUTO_CLONE_WORLDS[] = {2, 4, 5}; // TT, HB (including GoA), BC
+bool BcCloneWorld(std::uint8_t world);
+bool BcCloneApplied(std::uint8_t world);
 void UpdateBcClone(bool resolving = false); // game frame and pre-resolver
 
 // Reads KH2COOP_PLAYER_KIT. Unset/0: returns true without hooking. Unknown
