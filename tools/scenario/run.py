@@ -496,6 +496,44 @@ def step_warp(ctx: Context, step: dict) -> dict:
     return {"seconds": data.get("seconds"), "room": data.get("room")}
 
 
+def step_walk_to(ctx: Context, step: dict) -> dict:
+    """Measured native walking using the same camera basis as the GoA approach."""
+    index = step.get("instance", 0)
+    helpers = ctx.namespace()
+    target = (float(step["x"]), float(step["z"]))
+    start = helpers["pos"]("P_EX100", index)
+    samples = []
+    deadline = time.monotonic() + step.get("timeoutMs", 12000) / 1000
+    while time.monotonic() < deadline:
+        ctx.check_all()
+        position = helpers["pos"]("P_EX100", index)
+        samples.append({"position": position, "enemies": {
+            peer: helpers["enemies"](peer) for peer in range(len(ctx.instances))}})
+        dx, dz = target[0] - position[0], target[1] - position[2]
+        distance = math.hypot(dx, dz)
+        if distance <= 100 or (step.get("until") and ctx.eval(step["until"])):
+            break
+        keys = ("0x718C68", "0x718C70", "0x718C78", "0x718C80")
+        sample = kh2ctl("peek", "--rva", ",".join(f"{key}:f32" for key in keys),
+                       pid=ctx.inst(index).pid)["samples"][0]
+        fx, fz = sample[keys[0]] - sample[keys[2]], sample[keys[1]] - sample[keys[3]]
+        length = math.hypot(fx, fz)
+        if not math.isfinite(length) or length < 1:
+            raise StepFailed("walk_to camera has no usable horizontal basis")
+        fx, fz, dx, dz = fx / length, fz / length, dx / distance, dz / distance
+        kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.5f}",
+               "--ly", f"{dx * fx + dz * fz:.5f}", "--duration-ms", "200", pid=ctx.inst(index).pid)
+    end = helpers["pos"]("P_EX100", index)
+    evidence = {"target": target, "start": start, "end": end,
+                "displacement": math.hypot(end[0] - start[0], end[2] - start[2]), "samples": samples}
+    name = step.get("as", "walk_to")
+    path = ctx.run_dir / f"{name}.json"
+    path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+    ctx.artifacts.append(path.name)
+    ctx.saved[name] = evidence
+    return {"path": path.name, "displacement": evidence["displacement"], "samples": len(samples)}
+
+
 def step_input(ctx: Context, step: dict) -> dict:
     args = ["player-input", "--duration-ms", str(step.get("ms", 500))]
     for axis in ("lx", "ly", "rx", "ry"):
@@ -4090,7 +4128,7 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
     return out
 
 
-STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": step_input,
+STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": step_input, "walk_to": step_walk_to,
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until,
          "assert": step_assert, "save": step_save, "protect": step_protect,
          "capture": step_capture, "clip": step_clip, "crash": step_crash, "freeze": step_freeze,
@@ -4354,7 +4392,7 @@ def validate_scenario(scenario: dict) -> None:
     if not scenario["steps"]:
         raise ValueError("scenario needs at least one step")
     count = 0
-    required = {"forced_resync_evidence": ("statehash", "census"), "warp": ("world", "room"), "press": ("button",),
+    required = {"forced_resync_evidence": ("statehash", "census"), "warp": ("world", "room"), "walk_to": ("x", "z"), "press": ("button",),
                 "assert": ("expr",), "wait_until": ("expr",), "save": ("as", "expr"),
                 "runtime": ("role",), "record": ("as",), "record_stop": ("as",),
                 "reconnect_mark": ("as",), "runtime_pause": ("instance", "after"),

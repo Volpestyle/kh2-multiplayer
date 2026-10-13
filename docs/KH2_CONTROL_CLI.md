@@ -485,6 +485,14 @@ fixture must check actual world displacement; command duration alone does not
 show that Sora moved far from a wave. Use short forward/steering segments and
 read positions before claiming a distance-triggered cull.
 
+The scenario `walk_to` step steers toward world `x`/`z` with 200ms native
+pulses using the same camera basis as the GoA approach. It records measured
+displacement and enemy observations; a timeout alone does not prove a cull.
+`net_population_soldier_alive_removal.json` uses this walk and an authorized
+warp fallback. Its passing 20261013-014659 run moved 928 units without a cull,
+then the GoA warp removed all three living Soldier copies on host and friend,
+with zero host death events. Same-room distance culling remains unclaimed.
+
 Accepted player button names include:
 
 - `confirm`, `cross`, `a`

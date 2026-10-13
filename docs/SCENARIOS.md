@@ -1825,6 +1825,7 @@ protected actor. Protection is best effort during loads.
 | `launch` | `mute initTimeoutMs` | Launch + inject only (stays on the title). `initTimeoutMs` is an integer1..60000, default15000, passed to the CLI's existing hook wait. A valid returned launched PID is registered for owned cleanup before initialization failure is raised; failed initialization never advances into boot/input. Missing/malformed PIDs do not supply a cleanup target. |
 | `warp` | `world room door map btl evt` | `kh2ctl warp`; returns once the room has loaded |
 | `input` | `lx ly rx ry ms` | Hold sticks (`player-input`) |
+| `walk_to` | `x z instance timeoutMs until as` | Steer with the current camera basis in 200ms native pulses. Record start/end displacement and peer enemy lists in JSON. Stops near the target, at `until`, or at the time budget; reaching the budget makes no cull claim. |
 | `align_courtyard_exit` | `instance as blockedExpr` | BC courtyard entrance-0 fixture only: pulse screen-left (`lx=-1`) for 250 ms at a time, recording each start/end position. Stop at `abs(x)<60` or a true `blockedExpr`, with a 6 s limit. Each unblocked pulse must reduce `abs(x)`; otherwise capture and fail with a diagnostic JSON. No host movement |
 | `press` | `button ms times gapMs` | Press a button (`player-press`; PS2 names: `cross`, `circle`, `triangle`, `square`, `start`, …) |
 | `wait` | `ms` | Sleep while watching the instances |
