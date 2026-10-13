@@ -57,7 +57,9 @@ class Flow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'products.json';p.write_text(json.dumps({'products':{}}))
             with self.assertRaisesRegex(ValueError,'declare Steam'):select_products('steam',p)
-            receipt={'transport':'steam','products':{k:{} for k in ('dll','runtime','server','avatarctl')}}
+            receipt={'transport':'steam','avatarBridgeVersion':f.AVATAR_BRIDGE_VERSION,'protocol':18,
+                     'products':{k:dict(protocol=18,sourceRevision='a'*40,buildId='fixture',sha256='b'*64) for k in ('dll','runtime','server','avatarctl')},
+                     'cli':dict(protocol=18,sourceRevision='a'*40,buildId='fixture',sha256='b'*64)}
             p.write_text(json.dumps(receipt));self.assertEqual(select_products('steam',p),receipt)
             receipt['products']['extra']={};p.write_text(json.dumps(receipt))
             with self.assertRaisesRegex(ValueError,'exactly'):select_products('steam',p)

@@ -64,9 +64,26 @@ def verify_game(game_dir, package_root):
     return exe
 
 
+SHIPPED_DEFAULTS = {
+    'KH2COOP_ENEMY_MIRROR': '1',
+    'KH2COOP_ENEMY_POPULATION': '1',
+    'KH2COOP_ENEMY_TARGET_ALL': '1',
+    'KH2COOP_COOP_DIFFICULTY': 'normal',
+    'KH2COOP_EVENT_HOLD_PRODUCER': '1',
+    'KH2COOP_EVENT_HOLD_CONTROL': '1',
+}
+
+
 def child_environment(root, *, steam_broker=False):
-    # Do not inherit a developer's test/trace/write-policy switches into a friend game.
+    # One player policy for game and runtime children. Developer diagnostics and
+    # write-policy switches stay excluded; explicit disables of shipped features
+    # survive the package launcher and have priority over these defaults.
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith('KH2COOP_')}
+    overrides = {k.upper(): v for k, v in os.environ.items() if k.upper() in SHIPPED_DEFAULTS}
+    env.update(SHIPPED_DEFAULTS)
+    env.update(overrides)
+    env['KH2COOP_ENEMY_POPULATION_SPAWN'] = '0'
+    env['KH2COOP_ENEMY_TARGET_REMOTE'] = '0'
     if type(steam_broker) is not bool:
         raise ValueError('Steam broker opt-in must be explicit.')
     if steam_broker:

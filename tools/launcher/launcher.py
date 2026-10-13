@@ -71,6 +71,10 @@ class Session:
     def spawn(self, name, argv):
         log = (self.path / f'{name}.log').open('xb', buffering=0)
         self.files.append(log)
+        from friend_package import child_environment, SHIPPED_DEFAULTS
+        env = child_environment(ROOT)
+        keys = (*SHIPPED_DEFAULTS, 'KH2COOP_ENEMY_POPULATION_SPAWN', 'KH2COOP_ENEMY_TARGET_REMOTE')
+        log.write(('[launcher] gameplay ' + json.dumps({k:env[k] for k in keys}, sort_keys=True) + '\n').encode('utf-8'))
         self.processes[name] = self.win.spawn(self.job, argv, ROOT, log)
 
     def start(self):

@@ -19,6 +19,36 @@ with their own camera and full controls. Then widen who you can play as: three
 recolored Soras first, then Roxas and Riku, party and world characters, and
 possibly enemies.
 
+## Player launch defaults (2026-10-13)
+
+The friend/package launcher uses `tools/launcher/friend_package.py`'s
+`child_environment` for both game and runtime children. Explicit parent env
+values for the six enabled features, including `0`/`off`, override the defaults.
+Developer switches remain filtered; the two parked flags stay forced off.
+Direct developer launches retain their native defaults.
+
+| Flag (`KH2COOP_` prefix) | Player default | Scope or parked reason |
+|---|---|---|
+| `ENEMY_MIRROR` | `1` | Existing qualified per-objectId allowlist only. |
+| `ENEMY_POPULATION` | `1` | Remove a friend's living copy when the host removes it. |
+| `ENEMY_TARGET_ALL` | `1` | Requires an eligible private player clone; the ordinary BC player launch currently lacks that dependency. |
+| `COOP_DIFFICULTY` | `normal` | Host room-locked health factor; two-player mobs ×1.6. |
+| `EVENT_HOLD_PRODUCER` | `1` | Host event announcements within the existing empty-room scope. |
+| `EVENT_HOLD_CONTROL` | `1` | Client input hold/overlay followed by host-led room/state resync. |
+| `ENEMY_POPULATION_SPAWN` | `0` (parked) | General client spawn/lifecycle behavior is not qualified. |
+| `ENEMY_TARGET_REMOTE` | `0` (parked) | Legacy target path is superseded by the qualified all-target path. |
+
+The no-feature-env BC loopback `20261013-083241` confirmed all settings in
+the launcher logs, players=2, Soldier HP 39→63 on both peers, three agreeing
+deaths, a BC→GoA transition and no logged desync. It **failed friend targeting**:
+there was only local Sora plus native Donald/Goofy. The earlier target fixture
+requires private-status/neutral-input flags and a manual BC party-leaf change;
+those unqualified automatic clone changes are not enabled here. Acceptance
+remains blocked on that dependency. This run exercised the source player's
+child-launch functions, not a released ZIP or the complete GUI flow. The package
+gate now matches protocol 18; a fresh coherent product receipt set is still
+needed before packaging (the checked-in older receipts remain rejected).
+
 ## Where the project stands (updated 2026-10-08)
 
 This snapshot describes main `23e9c52` and the bounded live evidence below.

@@ -4,6 +4,7 @@ import ipaddress
 import math
 from pathlib import Path
 import re
+from product_protocol import SUPPORTED_PROTOCOL
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL = Path(__file__).resolve().parent / '.local'
@@ -76,7 +77,7 @@ def make_plan(options: Options, run_dir: Path, *, runtime: Path, server: Path) -
         relay_argv = [str(server), '--bind', endpoint, '--port', str(options.port),
                       '--build', options.game_build, '--content', options.content, '--mod', options.mod,
                       '--max-peers', '3', '--desync-dir', str(run_dir / 'relay-desync')]
-    return {'options': asdict(options), 'role': role, 'protocol': 10,
+    return {'options': asdict(options), 'role': role, 'protocol': SUPPORTED_PROTOCOL,
             'runtime_config': config, 'runtime_argv': runtime_argv, 'relay_argv': relay_argv,
             'wall_limit_seconds': options.seconds, 'run_dir': str(run_dir)}
 

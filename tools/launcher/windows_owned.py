@@ -10,6 +10,7 @@ import subprocess
 import time
 import math
 import weakref
+from friend_package import child_environment
 
 
 class BasicLimit(c.Structure):
@@ -212,8 +213,11 @@ class Windows:
             startup.startup.stdin, startup.startup.stdout, startup.startup.stderr = inherited[0], inherited[1], inherited[1]
             startup.attributes = c.cast(storage, c.c_void_p)
             command = c.create_unicode_buffer(subprocess.list2cmdline(argv))
+            env = child_environment(cwd)
+            environment = c.create_unicode_buffer('\0'.join(
+                f'{key}={value}' for key, value in sorted(env.items(), key=lambda item: item[0].upper())) + '\0')
             if not self.k.CreateProcessW(argv[0], command, None, None, True,
-                                         0x00080010, None, os.fspath(cwd), c.byref(startup), c.byref(pi)):
+                                         0x00080410, c.cast(environment, c.c_void_p), os.fspath(cwd), c.byref(startup), c.byref(pi)):
                 raise c.WinError(c.get_last_error())
             # JOB_LIST establishes membership before any child instruction.
             # Failure never retries without the attribute or assigns afterward.

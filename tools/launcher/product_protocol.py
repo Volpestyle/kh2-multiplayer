@@ -1,7 +1,7 @@
 """Offline build-receipt coherence; not binary protocol introspection."""
 import re
 
-SUPPORTED_PROTOCOL = 17
+SUPPORTED_PROTOCOL = 18
 AVATAR_BRIDGE_VERSION = 4
 
 ROLES = {"dll", "runtime", "server", "avatarctl", "cli"}

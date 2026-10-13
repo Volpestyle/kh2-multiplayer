@@ -154,9 +154,8 @@ def main():
     args = parser.parse_args()
     os.chdir(ROOT)
     manifest = verify_package(ROOT)
-    for key in list(os.environ):
-        if key.upper().startswith('KH2COOP_'):
-            del os.environ[key]
+    # Game/runtime child_environment owns filtering and qualified defaults.
+    # Keep the parent's explicit feature overrides until the child is created.
     os.environ['TCL_LIBRARY'] = str(ROOT/'python/tcl/tcl8.6')
     os.environ['TK_LIBRARY'] = str(ROOT/'python/tcl/tk8.6')
     import tkinter as tk

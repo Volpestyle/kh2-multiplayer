@@ -38,8 +38,8 @@ class Safety(unittest.TestCase):
                        'files':{n:f.digest(self.root/n) for n in self.products.values()},
                        'supportedGame':{'sha256':f.SUPPORTED_GAME}}
         self.manifest['ordinaryLifecycleExperimental']=False
-        self.manifest['protocol']=17
-        self.manifest['productBuilds']={r:dict(protocol=17,sourceRevision='a'*40,buildId='fixture',path=n,sha256=f.digest(self.root/n)) for r,n in self.products.items()}
+        self.manifest['protocol']=18
+        self.manifest['productBuilds']={r:dict(protocol=18,sourceRevision='a'*40,buildId='fixture',path=n,sha256=f.digest(self.root/n)) for r,n in self.products.items()}
         self.save_manifest();self.win=Win();self.calls=[]
     def save_manifest(self):(self.root/'package.json').write_text(json.dumps(self.manifest))
     def owner(self,command=None):return f.GameOwner(self.root,self.manifest,self.win,command or self.command)
@@ -59,7 +59,7 @@ class Safety(unittest.TestCase):
     def test_mixed_protocol_build_and_experiment_refused(self):
         self.manifest['productBuilds']['runtime']['protocol']=16;self.save_manifest()
         with self.assertRaisesRegex(ValueError,'Mixed protocols'):f.verify_package(self.root)
-        self.manifest['productBuilds']['runtime']['protocol']=17
+        self.manifest['productBuilds']['runtime']['protocol']=18
         self.manifest['ordinaryLifecycleExperimental']=True;self.save_manifest()
         with self.assertRaisesRegex(ValueError,'experiment OFF'):f.verify_package(self.root)
     def test_build_receipt_cannot_name_other_product_bytes(self):
@@ -174,6 +174,19 @@ class Safety(unittest.TestCase):
             self.assertEqual(env['SteamAppId'],'2552430');self.assertEqual(env['SteamGameId'],'2552430')
             self.assertEqual(env.get('PATH'),os.environ.get('PATH'))
             self.assertEqual(os.environ['SteamAppId'],'other')
+    def test_shipped_features_default_on_and_explicit_disables_win(self):
+        with patch.dict(os.environ, {'PATH':'kept'}, clear=True):
+            self.assertEqual({k:f.child_environment(self.root)[k] for k in f.SHIPPED_DEFAULTS}, f.SHIPPED_DEFAULTS)
+            os.environ.update({k:('off' if k=='KH2COOP_COOP_DIFFICULTY' else '0') for k in f.SHIPPED_DEFAULTS})
+            os.environ.update({'KH2COOP_ENEMY_POPULATION_SPAWN':'1','KH2COOP_ENEMY_TARGET_REMOTE':'1',
+                               'KH2COOP_SAVEGUARD_TEST_DIR':'unsafe','KH2COOP_TRACE_HITS':'1'})
+            before=dict(os.environ);env=f.child_environment(self.root)
+            self.assertEqual({k:env[k] for k in f.SHIPPED_DEFAULTS},
+                             {k:before[k] for k in f.SHIPPED_DEFAULTS})
+            self.assertEqual(env['KH2COOP_ENEMY_POPULATION_SPAWN'],'0')
+            self.assertEqual(env['KH2COOP_ENEMY_TARGET_REMOTE'],'0')
+            self.assertNotIn('KH2COOP_SAVEGUARD_TEST_DIR',env);self.assertNotIn('KH2COOP_TRACE_HITS',env)
+            self.assertEqual(dict(os.environ),before)
     def hud_setup(self, response=None):
         o=self.owner()
         with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME):
