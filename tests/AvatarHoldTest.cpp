@@ -252,8 +252,35 @@ void testWorldAndMovedResume() {
     }
     const auto settled = sync.sample(7400, kWorld, kRoom)[0];
     check(allActive && !anyHeld, "moved resume stays active and live");
-    check(first > 500.0f && first <= 900.0f, "first resumed sample is on the way to the new position");
+    check(first == h.pose.position.x, "first resumed sample preserves the last rendered position");
     check(std::fabs(settled.pose.position.x - 900.0f) < 1e-3f, "puppet reaches the moved owner within the render delay");
+}
+
+void testTwoSecondMovedStallResume() {
+    auto sync = streamed(5000);
+    const auto before = sync.sample(5000, kWorld, kRoom)[0];
+    bool visible = true;
+    for (std::uint64_t now = 5016; now < 7000; now += 16) {
+        const auto t = sync.sample(now, kWorld, kRoom)[0];
+        visible = visible && t.active && t.ownerConnectionId == before.ownerConnectionId &&
+            t.pose.position.x == before.pose.position.x;
+    }
+    sync.onRemote(pose(SlotType::Player, 7000, 900.0f));
+    const auto first = sync.sample(7000, kWorld, kRoom)[0];
+    float previous = first.pose.position.x;
+    bool smooth = live(first) && previous == 500.0f;
+    for (std::uint64_t now = 7016; now <= 7200; now += 16) {
+        sync.onRemote(pose(SlotType::Player, now, 900.0f));
+        const auto t = sync.sample(now, kWorld, kRoom)[0];
+        smooth = smooth && live(t) && t.ownerConnectionId == before.ownerConnectionId &&
+            t.pose.position.x >= previous && t.pose.position.x - previous <= 40.0f;
+        previous = t.pose.position.x;
+    }
+    const auto settled = sync.sample(7200, kWorld, kRoom)[0];
+    check(visible && smooth && settled.pose.position.x == 900.0f,
+          "2 s moved-owner stall: no drop, no first-packet snap, 200 ms monotonic blend");
+    sync.clear();
+    check(!sync.sample(7201, kWorld, kRoom)[0].active, "room reset retires resume state immediately");
 }
 
 void testHoldEnvParsing() {
@@ -332,6 +359,7 @@ int main() {
     testMarkerIsLocal();
     testConfig();
     testWorldAndMovedResume();
+    testTwoSecondMovedStallResume();
     testHoldEnvParsing();
     testOwnRoomLoad();
     testHeldMotion();

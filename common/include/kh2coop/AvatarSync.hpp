@@ -69,7 +69,7 @@ public:
             clear();
         } else {
             for (unsigned i = 0; i < 3; ++i)
-                if (ids[i] != roster_[i]) { interp_[i].clear(); admittedIds_[i] = 0; }
+                if (ids[i] != roster_[i]) { interp_[i].clear(); admittedIds_[i] = 0; recovery_[i] = {}; }
         }
         localSlot_ = localSlot;
         roster_ = valid ? ids : std::array<std::uint64_t, 3> {};
@@ -85,7 +85,18 @@ public:
             relay.ownerConnectionId == 0 || relay.ownerConnectionId != roster_[owner]) return false;
         AvatarState admitted = s;
         admitted.flags = static_cast<std::uint8_t>(admitted.flags & ~AvatarHeld); // receiver-local marker
+        const auto* previous = interp_[owner].latest();
+        const bool resumed = previous && s.serverTimeMs > previous->serverTimeMs &&
+            s.serverTimeMs - previous->serverTimeMs > config_.staleAfterMs &&
+            s.serverTimeMs - previous->serverTimeMs <= releaseAfterMs();
         if (!interp_[owner].push(admitted)) return false;
+        auto& recovery = recovery_[owner];
+        if (resumed && recovery.last.active && recovery.last.pose.worldId == s.worldId &&
+            recovery.last.pose.roomId == s.roomId && !(s.flags & AvatarInCutscene)) {
+            recovery.pending = true;
+            recovery.blending = false;
+            recovery.from = recovery.last.pose;
+        }
         admittedIds_[owner] = relay.ownerConnectionId;
         return true;
     }
@@ -104,7 +115,7 @@ public:
     // Poses to publish for the two puppets at the given server time.
     [[nodiscard]] std::array<PuppetTarget, 2> sample(
         std::uint64_t serverNowMs, std::uint16_t localWorld,
-        std::uint16_t localRoom) const {
+        std::uint16_t localRoom) {
         std::array<PuppetTarget, 2> out {};
         if (!rosterValid_) return out;
         const auto owners = puppetOwners();
@@ -132,6 +143,28 @@ public:
                 out[i].pose.flags = static_cast<std::uint8_t>(out[i].pose.flags | AvatarHeld);
                 out[i].pose.velocity = {}; // a held puppet is not moving
             }
+            auto& recovery = recovery_[owners[i]];
+            if (!held && recovery.pending) {
+                recovery.pending = false;
+                recovery.blending = true;
+                recovery.started = serverNowMs;
+            }
+            if (!held && recovery.blending) {
+                constexpr std::uint64_t blendMs = 200;
+                const auto elapsed = serverNowMs >= recovery.started ? serverNowMs - recovery.started : 0;
+                const float alpha = static_cast<float>(std::min(elapsed, blendMs)) / blendMs;
+                auto& p = out[i].pose;
+                const auto& from = recovery.from;
+                p.position = {from.position.x + (p.position.x - from.position.x) * alpha,
+                              from.position.y + (p.position.y - from.position.y) * alpha,
+                              from.position.z + (p.position.z - from.position.z) * alpha};
+                p.rotationY = AvatarInterpolator::lerpAngle(from.rotationY, p.rotationY, alpha);
+                if (elapsed >= blendMs) recovery.blending = false;
+            }
+        }
+        for (int i = 0; i < 2; ++i) {
+            recovery_[owners[i]].last = out[i];
+            if (!out[i].active) recovery_[owners[i]] = {};
         }
         return out;
     }
@@ -144,6 +177,7 @@ public:
     void clear() {
         for (auto& b : interp_) b.clear();
         admittedIds_ = {};
+        recovery_ = {};
     }
 
 private:
@@ -153,6 +187,15 @@ private:
     std::array<std::uint64_t, 3> admittedIds_ {};
     bool rosterValid_ {false};
     std::array<AvatarInterpolator, 3> interp_;
+    // Only a still-visible puppet resumes from its last rendered pose. Room,
+    // identity and timeout retirement discard this state along with the stream.
+    struct Recovery {
+        PuppetTarget last {};
+        AvatarState from {};
+        std::uint64_t started {};
+        bool pending {false}, blending {false};
+    };
+    std::array<Recovery, 3> recovery_ {};
 };
 
 } // namespace kh2coop
