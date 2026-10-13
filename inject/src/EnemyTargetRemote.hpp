@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include "EnemyMirrorPose.hpp"
 
 namespace kh2coop::inject::enemytarget::rules {
 
@@ -14,9 +15,16 @@ namespace kh2coop::inject::enemytarget::rules {
 // Shadow (302, M_EX020): mode_battle PC 2275/2290/2078, verified statically and live (VUH-1515
 // attempt07, run 20261007-033207). Every other object id keeps the native behaviour.
 inline constexpr std::uint32_t kAllowedObjectIds[] = {302};
-inline bool AllowedObject(std::uint32_t objectId) noexcept {
+inline bool AllowedObject(std::uint32_t objectId, bool allMirrored = false) noexcept {
+    if (allMirrored) return enemymirror::FamilyAllowed(objectId);
     for (const auto id : kAllowedObjectIds) if (id == objectId) return true;
     return false;
+}
+
+// The broader route uses native victim-side mirrored damage only. Legacy
+// forwarding remains Shadow-only and cannot run with the native-party mode.
+inline bool Requested(bool all, bool legacy, bool mirror, bool party) noexcept {
+    return all ? mirror : (legacy && !party);
 }
 
 // ---- bdscript "target_search" (bank1/121) ---------------------------------------------------

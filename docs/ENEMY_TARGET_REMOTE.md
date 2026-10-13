@@ -1,5 +1,33 @@
 # Enemy targeting of remote players (VUH-1515)
 
+## Ordinary mirrored waves (VUH-2193 candidate)
+
+`KH2COOP_ENEMY_TARGET_ALL=1` requires `KH2COOP_ENEMY_MIRROR=1` and
+uses the current mirror-family list for the common `target_search` path.
+It is default off and can coexist with `KH2COOP_PARTY_NATIVE=1`; leave the
+legacy `KH2COOP_ENEMY_TARGET_REMOTE` flag unset. Native-party room and private
+status qualification are unchanged. A clone still needs its own status and a
+fresh, living owner pose to become a target.
+
+Headless Ghidra confirms selector `0x3BE2B0` mode 2 always chooses canonical
+Sora; mode 0 uses the attention list and falls back to Sora. Changing party or
+team flags alone cannot change those player-only searches. The existing
+byte-checked syscall replacement runs the native search, then chooses among
+the host and both eligible remote players and writes the chosen handle to
+enemy `+0xBF8`. It preserves the existing nearest-player policy, hold,
+hysteresis and per-clone cap. A valid host-side remote candidate keeps its
+native team and collision before the first assignment.
+
+This route does not advertise cancellation authority, register a forwarded-hit
+callback, forward damage or veto the owner's local hits. The host-side puppet
+remains protected by DamagePolicy `RemoteVictim`; a mirrored attack against the
+friend's real Sora stays native through `LocalVictim`.
+
+Attacks that bypass `+0xBF8`, scripted player-only targets, projectiles and
+bosses are parked: the common search override does not change their separate
+targeting paths. Family-specific targeting qualification remains a live check.
+No party/status room expansion or package/profile change is included.
+
 `KH2COOP_ENEMY_TARGET_REMOTE=1` (exactly `1`; default off). Set it on every machine of the
 session. With the flag off nothing is hooked, swapped, written or sent. This flag and
 `KH2COOP_PARTY_NATIVE=1` refuse each other (no joint fixture yet): enemy-target's `Configure` and

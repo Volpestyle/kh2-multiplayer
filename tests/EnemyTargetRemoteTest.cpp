@@ -140,6 +140,23 @@ int main() {
     // Shape constant sanity (the live bytes are checked by the lane's static_bytes against the exe).
     CHECK("target_search bytes end in jmp rel32 to the selector", R::kTargetSearch[70] == 0xE9 && R::kTargetSearch[0] == 0x48);
 
+    // VUH-2193: ordinary non-Shadow waves were excluded even with mirroring,
+    // and PARTY_NATIVE made the entire legacy targeting route unavailable.
+    CHECK("all targets stays off by default", !R::Requested(false, false, true, true));
+    CHECK("all targets needs mirror even with legacy requested", !R::Requested(true, true, false, false));
+    CHECK("all targets works with native party", R::Requested(true, false, true, true));
+    CHECK("legacy native-party exclusion preserved", !R::Requested(false, true, true, true));
+    CHECK("legacy forwarding still available", R::Requested(false, true, false, false));
+    CHECK("non-Shadow ordinary waves selectable", R::AllowedObject(301, true) && R::AllowedObject(4, true) &&
+          R::AllowedObject(18, true) && R::AllowedObject(305, true));
+    CHECK("legacy families remain Shadow-only", !R::AllowedObject(301) && R::AllowedObject(302));
+    CHECK("unsupported families remain native", !R::AllowedObject(306, true) && !R::AllowedObject(0, true));
+    R::Candidate wave[3] = {{true, 1000, 0}, {true, 0, 0}, {true, 2000, 0}};
+    std::uint32_t waveLoad[3] {};
+    CHECK("ordinary wave chooses friend1 near enemy", R::Choose(wave, 0, 0, nullptr, waveLoad, 1000) == 1);
+    CHECK("ordinary wave chooses friend2 near enemy", R::Choose(wave, 2000, 0, nullptr, waveLoad, 1000) == 2);
+    CHECK("mirror never cancels owner's native hit", !R::OwnerCancels(true, 1, 6, 1, 1, 302));
+
     std::printf("EnemyTargetRemoteTest: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

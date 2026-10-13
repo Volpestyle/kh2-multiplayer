@@ -66,6 +66,7 @@ struct Stats {
 
 struct State {
     bool requested = false, swapped = false, swapRefused = false, hostActive = false;
+    bool allMirrored = false; // VUH-2193: common search path, native mirrored damage only
     std::uint8_t role = 0;
     std::uint32_t generation = 0, transition = 0, load = 0;
     uintptr_t candidateActor[R::kCandidates] {};
@@ -151,25 +152,33 @@ static bool EligibleEnemy(uintptr_t enemy, uintptr_t& objentry) noexcept {
     return ReadHitTrace(enemy + offsets::actor::OBJENTRY_PTR, objentry) && objentry > g_exeBase &&
            objentry < g_exeBase + 0x3000000 && ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) &&
            type == offsets::objentry::TYPE_MOB && ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, id) &&
-           R::AllowedObject(id) && ReadHitTrace(enemy + OFF_TEAM, team) && team == ENEMY_TEAM && ReadLive(enemy, status);
+           R::AllowedObject(id, g.allMirrored) && ReadHitTrace(enemy + OFF_TEAM, team) && team == ENEMY_TEAM && ReadLive(enemy, status);
 }
 
 static void Configure() {
     g = {};
-    if (!Env1("KH2COOP_ENEMY_TARGET_REMOTE")) return;
-    if (Env1("KH2COOP_PARTY_NATIVE")) {  // no joint fixture yet: the two flags refuse each other
-        Log("[enemy-target] configure refused=party-native");
+    const bool all = Env1("KH2COOP_ENEMY_TARGET_ALL");
+    const bool legacy = Env1("KH2COOP_ENEMY_TARGET_REMOTE");
+    if (!all && !legacy) return;
+    if (!R::Requested(all, legacy, enemysync::MirrorRequested(), Env1("KH2COOP_PARTY_NATIVE"))) {
+        Log("[enemy-target] configure refused=%s", all ? "mirror-required" : "party-native");
         return;
     }
+    g.allMirrored = all;
     g.requested = true;
     // Distinct clone status is a candidate requirement; the private-status scope must be able to
     // give a clone one outside GoA (verified rooms only, party row 00/00/02/12; review S2).
     privatestatus::EnableEnemyTargetScope();
     g.mode = static_cast<std::uint8_t>(enemysync::MirrorRequested() ? R::Mode::Mirror : R::Mode::Forward);
     g.reviveCount = downedspike::g_down.reviveCount;
-    Log("[enemy-target] configure requested=1 schema=2 allow=302 hysteresis=%.0f hold=%u cap=%u table=%u mirror=%u",
-        double(R::Policy::Hysteresis), R::Policy::MinHoldFrames, R::Policy::CloneCap, R::Policy::TableCapacity,
+    Log("[enemy-target] configure requested=1 schema=2 allow=%s hysteresis=%.0f hold=%u cap=%u table=%u mirror=%u",
+        all ? "mirrored" : "302", double(R::Policy::Hysteresis), R::Policy::MinHoldFrames, R::Policy::CloneCap, R::Policy::TableCapacity,
         unsigned(g.mode));
+    if (all) {
+        char families[256] {};
+        enemymirror::FormatFamilies(families, sizeof(families));
+        Log("[enemy-target] all=1 families=%s nativeDamage=1 partyNative=%u", families, unsigned(Env1("KH2COOP_PARTY_NATIVE")));
+    }
 }
 
 // ---- target_search detour -------------------------------------------------------------------
@@ -227,9 +236,12 @@ static void __fastcall SearchDetour(std::uint32_t* stack) {
         g.nativePart[index] = now.part;
         ++g.stats.rewrites;
     } __except (EXCEPTION_EXECUTE_HANDLER) { g.written[index] = 0; }
-    if (LogAllowed())
-        Log("[enemy-target] assign frame=%u enemy=%llX target=%d owner=%u mode=%u", g_frameCounter, U(enemy), k,
-            unsigned(g.ownerSlot[k]), now.mode);
+    if (LogAllowed()) {
+        std::uint32_t objectId = 0;
+        ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, objectId);
+        Log("[enemy-target] assign frame=%u enemy=%llX target=%d owner=%u mode=%u objectId=%u", g_frameCounter, U(enemy), k,
+            unsigned(g.ownerSlot[k]), now.mode, objectId);
+    }
 }
 static void* const g_ourSearch = reinterpret_cast<void*>(&SearchDetour);
 
@@ -373,7 +385,7 @@ static void OnFrameStart() {
     const std::uint8_t role = enemysync::ActivationRole();
     const std::uint32_t generation = enemysync::WorldSessionGeneration();
     if (g_frameCounter - g.statsFrame >= STATS_INTERVAL) { g.statsFrame = g_frameCounter; LogStats(); }
-    if (role == 2) RefreshOwnerView(); else { g.view = {}; g.coveredSinceMs = 0; }
+    if (role == 2 && !g.allMirrored) RefreshOwnerView(); else { g.view = {}; g.coveredSinceMs = 0; }
     if (role != 1 || !generation) {  // not the host of a live session (1 = Role::Host)
         if (g.hostActive || g.swapped) Stop(role != 1 ? "not-host" : "no-session");
         g.role = role; g.generation = generation;
@@ -418,6 +430,7 @@ static void LogStats() {
 }
 // Host: on every change of slotMask or mode, and at least every AuthorityPeriodFrames.
 static void Advertise(bool force) {
+    if (g.allMirrored) return; // no forwarding/cancellation authority in the mirror-only route
     bool valid[R::kCandidates] {};
     for (unsigned k = 0; k < R::kCandidates; ++k) valid[k] = g.candidates[k].valid;
     const std::uint8_t mask = R::SlotMask(g.hostActive, g.swapped, valid, g.ownerSlot);
@@ -470,6 +483,7 @@ static bool KeepNative(uintptr_t actor) noexcept {
     if (!g.hostActive || !actor) return false;
     for (unsigned k = 1; k < R::kCandidates; ++k) {
         if (g.candidateActor[k] != actor || !g.candidateHandle[k]) continue;
+        if (g.allMirrored && g.candidates[k].valid) { ++g.stats.keeps; return true; }
         for (unsigned i = 0; i < R::Policy::TableCapacity; ++i)
             if (g.table[i].used && g.table[i].target == k && g.written[i] == g.candidateHandle[k]) { ++g.stats.keeps; return true; }
     }
@@ -501,7 +515,7 @@ static void ForwardHit(uintptr_t victim, const nativehittrace::ActorSnapshot& so
 // Only with a held forward-mode TargetAuthority naming our slot (review B2): every failure, stale
 // or missing advertisement leaves the local hit native, so the owner is never immune.
 static bool OwnerVetoesLocalFamily(std::uint32_t sourceObjectId, bool localVictim) noexcept {
-    if (!g.requested || enemysync::ActivationRole() != 2 || !R::AllowedObject(sourceObjectId)) return false;  // 2 = Client
+    if (!g.requested || g.allMirrored || enemysync::ActivationRole() != 2 || !R::AllowedObject(sourceObjectId)) return false;  // 2 = Client
     const auto& v = g.view;
     const auto now = GetTickCount64();
     const bool fresh = v.held && v.rxMs != 0 && now >= v.rxMs && now - v.rxMs <= R::Policy::AuthorityMaxAgeMs;
@@ -528,7 +542,7 @@ static void NoteVeto(uintptr_t attacker, std::uint32_t objectId, std::int32_t am
 static int __cdecl OwnerApplyRemoteHit(std::int32_t damage, std::uint32_t attackId, std::uint32_t objectId,
                                        std::uint64_t seq) {
     ++g.stats.ownerSeen;
-    if (!g.requested || !GameThread()) { ++g.stats.ownerRefused; return 0; }
+    if (!g.requested || g.allMirrored || !GameThread()) { ++g.stats.ownerRefused; return 0; }
     R::OwnerFacts f {};
     uintptr_t player = 0, status = 0;
     std::uint32_t f9b8 = 0;
@@ -569,7 +583,7 @@ static int __cdecl OwnerApplyRemoteHit(std::int32_t damage, std::uint32_t attack
 
 static void Install() {
     Configure();
-    if (g.requested) enemysync::SetRemoteHitApply(&OwnerApplyRemoteHit);
+    if (g.requested && !g.allMirrored) enemysync::SetRemoteHitApply(&OwnerApplyRemoteHit);
 }
 
 static void Shutdown() {
