@@ -1,0 +1,276 @@
+{
+  "name": "net_player_progress_route",
+  "description": "VUH1497 no-env source player loopback. Natural HB Postern ordinary chest204/205 (no flag reset), native08/0C event skip/story acquisition, next-load opened chest, full personal snapshots and immediate apply invariance. Uses the existing source-player/event bounded-menu profile under .local/vuh1497-player/live.py. No save writes.",
+  "protect": [
+    0,
+    1
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "relay",
+      "port": 27796,
+      "mod": "none",
+      "args": [
+        "--bind",
+        "100.108.214.60"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 6,
+      "map": 0,
+      "btl": 0,
+      "evt": 0
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[4,6,0,0,0,0] and location(1)==location(0)",
+      "timeoutMs": 30000
+    },
+    {
+      "do": "save",
+      "as": "route_chest",
+      "expr": "[c for c in chests(0) if not c['openedBit'] and c['flag'] in [204,205]][0]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "any(c['flag']==saved['route_chest']['flag'] and not c['openedBit'] for c in chests(1))",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "save",
+      "as": "story_before",
+      "expr": "[peek(0x9AB647,'u8',i) for i in range(2)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all((v&2)==0 for v in saved['story_before'])",
+      "message": "Natural event story bit must start unset"
+    },
+    {
+      "do": "progress_snapshot",
+      "as": "personal_before",
+      "instances": [
+        0,
+        1
+      ]
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(int(actors(0)[0]['address'],16)+0x670),'--type','f32x3','--value',str(saved['route_chest']['position']['x']+140)+','+str(saved['route_chest']['position']['y'])+','+str(saved['route_chest']['position']['z'])]"
+    },
+    {
+      "do": "walk_saved",
+      "instance": 0
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "host_closed_route_chest"
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "triangle",
+      "ms": 100
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek(saved['route_chest']['flagRva'],'u8',0)&(1<<(saved['route_chest']['flag']%8))!=0",
+      "timeoutMs": 5000
+    },
+    {
+      "do": "wait",
+      "ms": 2000
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "host_opened_route_chest"
+    },
+    {
+      "do": "progress_snapshot",
+      "as": "after_chest",
+      "instances": [
+        0,
+        1
+      ],
+      "compare": "personal_before"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26,
+      "map": 0,
+      "btl": 0,
+      "evt": 0
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[4,26,0,0,0,0] and location(1)==location(0)",
+      "timeoutMs": 30000
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 6,
+      "map": 0,
+      "btl": 0,
+      "evt": 0
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(any(c['flag']==saved['route_chest']['flag'] and c['openedBit'] and c['motionId']==152 for c in chests(i)) for i in range(2))",
+      "timeoutMs": 30000
+    },
+    {
+      "do": "progress_snapshot",
+      "as": "first_reload",
+      "instances": [
+        0,
+        1
+      ],
+      "compare": "personal_before"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(int(actors(1)[0]['address'],16)+0x670),'--type','f32x3','--value',str(saved['route_chest']['position']['x']+140)+','+str(saved['route_chest']['position']['y'])+','+str(saved['route_chest']['position']['z'])]"
+    },
+    {
+      "do": "walk_saved",
+      "instance": 1
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "r3",
+      "ms": 100
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "rx": 1,
+      "ms": 1200
+    },
+    {
+      "do": "wait",
+      "ms": 250
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "name": "client_chest_first_reload",
+      "seconds": 2,
+      "fps": 1
+    },
+    {
+      "do": "event_cycle",
+      "as": "story_event",
+      "skip": true
+    },
+    {
+      "do": "assert",
+      "expr": "peek(0x9AB647,'u8',0)&2 and peek(0x9AB647,'u8',1)&2",
+      "message": "Native skipped event must advance ordinary story flag on both peers"
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 6,
+      "map": 0,
+      "btl": 0,
+      "evt": 0
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[4,6,0,0,0,0] and location(1)==location(0)",
+      "timeoutMs": 30000
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(any(c['flag']==saved['route_chest']['flag'] and c['openedBit'] and c['motionId']==152 for c in chests(i)) for i in range(2))",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "progress_snapshot",
+      "as": "after_reload",
+      "instances": [
+        0,
+        1
+      ],
+      "compare": "personal_before"
+    },
+    {
+      "do": "save",
+      "as": "apply_evidence",
+      "expr": "log_matches(r'\\[progresssync\\] apply version=(?P<version>\\d+).*personal_before=(?P<before>[0-9A-F]+) personal_after=(?P<after>[0-9A-F]+) personal_unchanged=(?P<unchanged>[01])',1)"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['apply_evidence'])>0 and all(x['unchanged']=='1' and x['before']==x['after'] for x in saved['apply_evidence'])",
+      "message": "Every progress apply must preserve full personal exclusions exactly"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(int(actors(1)[0]['address'],16)+0x670),'--type','f32x3','--value',str(saved['route_chest']['position']['x']+140)+','+str(saved['route_chest']['position']['y'])+','+str(saved['route_chest']['position']['z'])]"
+    },
+    {
+      "do": "walk_saved",
+      "instance": 1
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "r3",
+      "ms": 100
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "rx": 1,
+      "ms": 1200
+    },
+    {
+      "do": "wait",
+      "ms": 250
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "name": "client_route_chest_open",
+      "seconds": 2,
+      "fps": 1
+    },
+    {
+      "do": "route_verify"
+    }
+  ]
+}

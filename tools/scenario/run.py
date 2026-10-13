@@ -1404,8 +1404,11 @@ def step_progress_snapshot(ctx: Context, step: dict, *, _read=None) -> dict:
         for label, offset, length in (*PROGRESS_RANGES, *PERSONAL_RANGES):
             fields = [(0x9A98B0 + offset + n, min(8, length - n)) for n in range(0, length, 8)]
             raw = bytearray()
-            for start in range(0, len(fields), 128):
-                batch = fields[start:start + 128]
+            # PC1 refused the observed64/128-field helper invocations,
+            # while32-field peeks launched. Smaller batches preserve every
+            # byte without depending on the cause of those launch refusals.
+            for start in range(0, len(fields), 32):
+                batch = fields[start:start + 32]
                 specs = [f"0x{rva:X}:u{size * 8}" for rva, size in batch]
                 sample = read("peek", "--rva", ",".join(specs), pid=ctx.inst(index).pid)["samples"][0]
                 for rva, size in batch:

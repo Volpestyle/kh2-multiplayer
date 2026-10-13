@@ -108,6 +108,41 @@ private-Sora extension. Installed-package TT rehearsal `20261013-123603` passes:
 defaults on, HP21->34 /29->47 both, real friend24->18, deaths4/4, no relay/runtime
 desync, four protected saves unchanged. ENet loopback; two-PC Steam remains separate.
 
+## Session progress qualification (VUH-1497, 2026-10-13)
+
+ProgressSync already runs with the network world's host/client role; no opt-in
+flag is required in the player launcher. The existing verified allowlist sends
+8,108 masked shared bytes (programs, story, visited rooms and chest flags).
+Clients apply the latest state before native room initialization. Character
+records, inventory, EXP and munny are outside that write allowlist.
+
+No-feature-env player run `20261013-142019` passes in 146.4 seconds. The host
+opens the naturally closed Postern AP Boost chest (HB04/06, flag205) with the
+native Triangle reaction. Only the host gains the inventory item. After
+HB->GoA->HB loads, both peers initialize the chest opened (motion152). The
+host then skips the native08/0C event, acquiring story SAVE+0x1D97 bit1 (0->2);
+the client receives the resulting programs/story/visited state and retains it
+on returning to HB. All 8,108 shared bytes match. All sampled client character,
+inventory, EXP and munny bytes remain exact, including at event completion;
+every progress apply preserves its immediate personal before/after bytes.
+Goofy's MP100/100 is visible in the hold capture; the earlier MP drop did not
+reproduce in these samples. No MP copying/freezing or native code change is made.
+Four protected saves stay unchanged, with no relay/runtime desync notice.
+
+The snapshot harness now uses32-field reads: PC1 rejected observed64/128-field
+helper invocations with CreateProcess error5, while32 launched. One regression
+checks complete shared/personal snapshots and a detectable personal-byte change.
+This is an observed refusal, not an attributed Windows command-length policy.
+
+Qualification remains open for a clear chest clip. The passing run's camera
+cuts off most of the chest. Supplementary `20261013-142606` passes the chest
+checks and films an improved but still obstructed view, then fails its optional
+paused-menu recording (not presenting frames). The subsequent focused clear-view
+attempt was refused before launch because C: fell below the10GiB rig minimum.
+Passing/failed reports and local player/event profile are under
+`.local/vuh1497-player/`; the scenario is `net_player_progress_route.json`.
+These are source-player ENet loopbacks, not an installed-package or two-PC claim.
+
 ## Where the project stands (updated 2026-10-08)
 
 This snapshot describes main `23e9c52` and the bounded live evidence below.
