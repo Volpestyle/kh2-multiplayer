@@ -1498,6 +1498,7 @@ static bool UpdatePuppetSuspension() {
 
 static void PollPositionFaultIdle();
 static void PollPuppetPoses() {
+    playerkit::UpdateBcClone();
     PollPositionFaultIdle();
     const bool suspended = UpdatePuppetSuspension();
     if (suspended || !hud::ValidAuthority(enemysync::CapturePuppetAuthority()))
@@ -3681,6 +3682,7 @@ bool Initialize(uintptr_t exeBase) {
                 ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
                 : "[privatestatus] initialization refused; profile unqualified");
     cloneneutral::Install(exeBase); // VUH-1489: default off (KH2COOP_CLONE_NEUTRAL_INPUT)
+    playerkit::SetBcNeutralReady(&cloneneutral::Enabled);
     // Ally hits (KH2COOP_ALLY_HIT): after the handle resolver is verified. Default (unset) is puppet mode
     // (VUH-1808): only a driven puppet's attacks on players / the team-1 party are refused; "0" opts out.
     // A driver is "driven" from BindPuppetDrive until its release restores the team (applied cleared),

@@ -121,6 +121,7 @@ bool NetStats(std::uint32_t& rttMs, std::uint32_t& lossPermille);
 bool HasClientAuthority();
 // Loading-thread admission for a cached, generation-tagged party plan.
 bool PartyLoadAdmitted(std::uint32_t generation) noexcept;
+bool TwoPlayerSessionLive() noexcept; // same loading-safe lease and existing roster
 
 // Read-only on the registered game thread: the nonzero header generation whose
 // ordered reset has been consumed, or zero while retired/unavailable. Callers

@@ -49,6 +49,7 @@ static bool TransitionPending() { return g_pending; }
 namespace playerkit {
 static bool g_blocks = false;
 static bool BlocksNativeSoraPuppets() { return g_blocks; }
+static bool BcCloneRequested() { return false; } // existing explicit/off controls; automatic BC is live-qualified
 }  // namespace playerkit
 namespace partynative {
 static bool g_kits = false;

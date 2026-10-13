@@ -18,6 +18,8 @@
 namespace kh2coop::inject::privatestatus {
 // VUH-1515 (KH2COOP_ENEMY_TARGET_REMOTE): widens Profile, see EnemyTargetProfile below.
 static std::atomic<bool> g_enemyTargetScope{};
+static bool g_bcAutomatic{};
+static bool g_nativeExplicit{};
 void EnableEnemyTargetScope(){g_enemyTargetScope=true;}
 namespace {
 constexpr unsigned DepthCap=8, PoolCount=80, HookCount=8;
@@ -113,14 +115,20 @@ bool Same(const Stamp& a,const Stamp& b){return a.now==b.now && a.transition==b.
 // native row 00/01/02/12 (run 20261007-033207).
 struct EnemyTargetRoom { std::uint8_t world,room; std::array<std::uint8_t,4> row; };
 constexpr EnemyTargetRoom kEnemyTargetRooms[]={{5,6,{0,0,2,0x12}}};
-bool EnemyTargetProfile(Stamp& s) {
+bool EnemyTargetProfile(Stamp& s, bool automatic = false) {
     std::array<std::uint8_t,4> row{},magic{};
     if(!StampNow(s) || !Read(g_base+0x9A98B0,magic) || magic!=std::array<std::uint8_t,4>{'K','H','2','J'})return false;
+    if(automatic) {
+        std::uint64_t event=0;std::int32_t cutscene=0;
+        if(!playerkit::BcCloneApplied() || !Read(g_base+0x2A11478,event) || !Read(g_base+0xB65210,cutscene) || event || cutscene)return false;
+    }
     for(const auto& r:kEnemyTargetRooms)
-        if(s.now[0]==r.world && s.now[1]==r.room)return Read(g_base+0x9A98B0+0x3534+4*r.world,row) && row==r.row;
+        if(s.now[0]==r.world && (automatic || s.now[1]==r.room))return Read(g_base+0x9A98B0+0x3534+4*r.world,row) && row==r.row && (!automatic || (s.now[8]==0 && s.now[9]==0));
     return false;
 }
 bool Profile(Stamp& s) {
+    if(g_bcAutomatic && EnemyTargetProfile(s, true))return true;
+    if(!g_nativeExplicit)return false;
     if(g_enemyTargetScope.load() && EnemyTargetProfile(s))return true; // VUH-1515
     std::array<std::uint8_t,4> row{},magic{};
     return StampNow(s) && s.now[0]==4 && s.now[1]==0x1A &&
@@ -517,7 +525,9 @@ bool Enabled(const char* name){char v[2]{};return GetEnvironmentVariableA(name,v
 } // namespace
 bool Initialize(uintptr_t base) {
     const DWORD error=GetLastError();
-    if(!Enabled("KH2COOP_NATIVE_SORA_PRIVATE_STATUS")){SetLastError(error);return true;}
+    g_nativeExplicit = Enabled("KH2COOP_NATIVE_SORA_PRIVATE_STATUS");
+    g_bcAutomatic = playerkit::BcCloneRequested();
+    if(!g_nativeExplicit && !g_bcAutomatic){SetLastError(error);return true;}
     // VUH-1513: with a player kit requested, the Friend1 clone would be the kit (selector 0
     // resolves through member 0). Refuse before any hook or allocation; the caller logs it.
     if(playerkit::BlocksNativeSoraPuppets()){SetLastError(error);return false;}

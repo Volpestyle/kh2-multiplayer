@@ -31,7 +31,7 @@ Direct developer launches retain their native defaults.
 |---|---|---|
 | `ENEMY_MIRROR` | `1` | Existing qualified per-objectId allowlist only. |
 | `ENEMY_POPULATION` | `1` | Remove a friend's living copy when the host removes it. |
-| `ENEMY_TARGET_ALL` | `1` | Requires an eligible private player clone; the ordinary BC player launch currently lacks that dependency. |
+| `ENEMY_TARGET_ALL` | `1` | Automatic private Sora on the next ordinary two-player BC load; qualified mirrored enemy families can target the friend. |
 | `COOP_DIFFICULTY` | `normal` | Host room-locked health factor; two-player mobs ×1.6. |
 | `EVENT_HOLD_PRODUCER` | `1` | Host event announcements within the existing empty-room scope. |
 | `EVENT_HOLD_CONTROL` | `1` | Client input hold/overlay followed by host-led room/state resync. |
@@ -43,11 +43,28 @@ the launcher logs, players=2, Soldier HP 39→63 on both peers, three agreeing
 deaths, a BC→GoA transition and no logged desync. It **failed friend targeting**:
 there was only local Sora plus native Donald/Goofy. The earlier target fixture
 requires private-status/neutral-input flags and a manual BC party-leaf change;
-those unqualified automatic clone changes are not enabled here. Acceptance
-remains blocked on that dependency. This run exercised the source player's
-child-launch functions, not a released ZIP or the complete GUI flow. The package
-gate now matches protocol 18; a fresh coherent product receipt set is still
-needed before packaging (the checked-in older receipts remain rejected).
+that dependency is now automatic under `ENEMY_TARGET_ALL=1` plus
+`ENEMY_MIRROR=1`. Either shipped flag set to `0` disables it. The existing
+private-status/neutral-input code is enabled with this dependency; those
+developer switches are not separate player settings.
+
+Setup changes only the exact default BC party leaf in RAM, then restores only
+its own unchanged row on scope exit. Events, story-modified rows and three-player
+parties stay native. The clone appears on the next native BC room load; this
+slice does not force a reload of an already-loaded host room. An applied load
+retains private status through a disconnect until construction completes.
+
+No-feature-env run `20261013-090127` confirmed distinct-status Soras on both
+peers, six host Soldier assignments to Friend1, native mirrored attacks on the
+friend's canonical Sora (HP 24→6), enemy HP 39→63, three agreeing deaths,
+BC→GoA follow, restored BC leaves and no logged desync. Its final helper confused
+Sora's avatar mode `0` with enemy mirror mode `1`; the original failed report is
+retained and the corrected read-only log check passes with six assignments.
+All native assertions passed live, and all 22 clip frames were reviewed.
+
+These runs exercise the source player's child-launch functions, not a released
+ZIP or the complete GUI flow. Fresh protocol-18 products/receipts remain a
+separate packaging task; the checked-in older receipts remain rejected.
 
 ## Where the project stands (updated 2026-10-08)
 

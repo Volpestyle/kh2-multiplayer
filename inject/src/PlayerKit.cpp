@@ -9,9 +9,23 @@
 
 #ifndef KH2COOP_PLAYERKIT_POLICY_ONLY
 #include "MinHook.h"
+#include "NativePrivateStatus.hpp"
+#include "EnemySync.hpp"
+#include "Warp.hpp"
 #endif
 
 namespace kh2coop::inject::playerkit {
+
+bool BcCloneEligible(bool requested, bool twoPlayers, bool prerequisites, const LoadContext& c) {
+    return requested && twoPlayers && prerequisites && c.world == 5 &&
+        c.evtProgram == 0 && c.eventContext == 0 && c.cutsceneState == 0;
+}
+std::uint32_t BcCloneRow(std::uint32_t row, bool eligible, bool& owned, bool deferRestore) {
+    if (eligible && row == BC_NATIVE_ROW) { owned = true; return BC_CLONE_ROW; }
+    if (!eligible && owned && row == BC_CLONE_ROW && !deferRestore) { owned = false; return BC_NATIVE_ROW; }
+    if (row != BC_CLONE_ROW) owned = false;
+    return row;
+}
 
 // ---------------------------------------------------------------- policy
 // A qualified non-Sora kit of the reviewed table (kh2coop/PlayerKits.hpp); 0x323/0x5B: one fixture each.
@@ -158,12 +172,17 @@ std::atomic<std::uint32_t> g_refusedClones {0};
 std::atomic<bool> g_remote {false};
 ResolveObserver g_observer = nullptr;    // VUH-1519 party-native; set once before Install
 ResolveObserverLog g_observerLog = nullptr;
+std::atomic<bool> g_bcRequested {false};
+std::atomic<bool> g_bcOwned {false};
+SRWLOCK g_bcLock = SRWLOCK_INIT;
+std::atomic<bool (*)()> g_bcNeutralReady {nullptr};
 std::atomic<std::uint8_t> g_remoteRoster {0};
 RemoteValues g_remoteSet{}, g_remoteOriginal{};
 bool g_remoteRecorded = false;
 std::uint32_t g_remoteApplied = 0, g_remoteSkipped = 0;
 
 void HookedResolveMembers() {
+    UpdateBcClone(true); // before native selectors are consumed by the room's factory
     g_original();
     if (!g_active.load(std::memory_order_acquire)) return;
     LoadContext c;
@@ -236,6 +255,47 @@ FlagMatrix ReadFlagMatrix() {
     return f;
 }
 
+bool BcCloneRequested() {
+    const auto on = [](const char* name) {
+        char v[2]{}; return GetEnvironmentVariableA(name, v, sizeof(v)) == 1 && v[0] == '1';
+    };
+    return on("KH2COOP_ENEMY_TARGET_ALL") && on("KH2COOP_ENEMY_MIRROR") && !on("KH2COOP_PARTY_NATIVE");
+}
+void SetBcNeutralReady(bool (*probe)()) { g_bcNeutralReady.store(probe, std::memory_order_release); }
+bool BcCloneApplied() { return g_bcOwned.load(std::memory_order_acquire); }
+void UpdateBcClone(bool resolving) {
+    if (!g_base || (!g_bcRequested && !g_bcOwned)) return;
+    AcquireSRWLockExclusive(&g_bcLock);
+    bool changed = false, nowOwned = false;
+    __try {
+        LoadContext c;
+        c.world = *reinterpret_cast<const std::uint8_t*>(g_base + RVA_WORLD);
+        c.room = *reinterpret_cast<const std::uint8_t*>(g_base + RVA_ROOM);
+        c.evtProgram = *reinterpret_cast<const std::uint16_t*>(g_base + RVA_EVT_PROGRAM);
+        c.eventContext = *reinterpret_cast<const std::uint64_t*>(g_base + RVA_EVENT_CONTEXT);
+        c.cutsceneState = *reinterpret_cast<const std::int32_t*>(g_base + RVA_CUTSCENE_STATE);
+        const auto neutral = g_bcNeutralReady.load(std::memory_order_acquire);
+        const bool ready = g_active.load(std::memory_order_acquire) && privatestatus::Ready() && neutral && neutral();
+        const bool eligible = BcCloneEligible(g_bcRequested, enemysync::TwoPlayerSessionLive(), ready, c);
+        if (*reinterpret_cast<const std::uint32_t*>(g_base + RVA_SAVE) == 0x4A32484B) { // KH2J
+            auto* row = reinterpret_cast<volatile LONG*>(g_base + RVA_SAVE + PARTY_ROWS_OFFSET + 4 * 5);
+            const auto before = static_cast<std::uint32_t>(InterlockedCompareExchange(row, 0, 0));
+            bool owned = g_bcOwned;
+            // A consumed selector must keep its private status through construction,
+            // even if the runtime disconnects during this load. The next resolver
+            // may restore before consuming selectors; gameplay restores after load.
+            const auto after = BcCloneRow(before, eligible, owned, !resolving && warp::TransitionPending());
+            if (after != before) {
+                changed = static_cast<std::uint32_t>(InterlockedCompareExchange(row, static_cast<LONG>(after), static_cast<LONG>(before))) == before;
+                if (changed) g_bcOwned = owned;
+            } else g_bcOwned = owned;
+        }
+        nowOwned = g_bcOwned;
+    } __except(EXCEPTION_EXECUTE_HANDLER) { ++g_stats.faults; }
+    ReleaseSRWLockExclusive(&g_bcLock);
+    if (changed && g_log) g_log("[bc-clone] party leaf %s (two-player TARGET_ALL; RAM only)", nowOwned ? "applied" : "restored");
+}
+
 void SetResolveObserver(ResolveObserver observer, ResolveObserverLog log) {
     if (g_stats.installed) return; // only before Install
     g_observer = observer; g_observerLog = log;
@@ -247,7 +307,8 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
     const DWORD n = GetEnvironmentVariableA("KH2COOP_PLAYER_KIT", text, sizeof(text));
     char remoteText[4] {};
     const DWORD rn = GetEnvironmentVariableA("KH2COOP_REMOTE_KIT_SLOT", remoteText, sizeof(remoteText));
-    if (n == 0 && rn == 0 && !g_observer) return true; // default OFF: no hook, no reads
+    g_bcRequested = BcCloneRequested() && n == 0 && rn == 0 && !g_observer;
+    if (n == 0 && rn == 0 && !g_observer && !g_bcRequested) return true;
     const FlagMatrix flags = ReadFlagMatrix(); // VUH-1519 flag matrix
     if (g_observer && ((flags.kit && !flags.partyKits) || flags.remote)) {
         if (log) log("[playerkit] REFUSED: the party-native observer cannot combine with KH2COOP_PLAYER_KIT/KH2COOP_REMOTE_KIT_SLOT; not hooked");
@@ -290,7 +351,7 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
             remote = true;
         }
     }
-    if (kit == 0 && !remote && !g_observer) return true;
+    if (kit == 0 && !remote && !g_observer && !g_bcRequested) return true;
     const void* target = reinterpret_cast<const void*>(exeBase + RVA_RESOLVE_MEMBERS);
     if (std::memcmp(target, kResolveMembersBytes, sizeof(kResolveMembersBytes)) != 0) {
         if (log) log("[playerkit] REFUSED: 3E2EB0 bytes differ from 9002b2de; not hooked");
@@ -327,6 +388,8 @@ void StopResolver() {
 void Shutdown() {
     if (!g_stats.installed) return;
     StopResolver();
+    g_bcRequested = false;
+    UpdateBcClone(true); // hook disabled: restore the exact owned row during teardown
     __try {
         auto* resolved = reinterpret_cast<std::uint16_t*>(g_base + RVA_RESOLVED_MEMBERS);
         const std::uint16_t before = resolved[0];

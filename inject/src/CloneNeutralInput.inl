@@ -1,6 +1,7 @@
 // CloneNeutralInput.inl - VUH-1489 follow-up, private candidate v3, default off.
 // Included by EntityHook.cpp after the clone registry (g_clonesNow,
-// IsPlayerClassActor). Enabled only by KH2COOP_CLONE_NEUTRAL_INPUT=1, and only
+// IsPlayerClassActor). Enabled by KH2COOP_CLONE_NEUTRAL_INPUT=1 or the automatic
+// BC TARGET_ALL/MIRROR dependency, and only
 // once Install() has verified the image and hooked 0x3A89A0.
 //
 // Two native input paths reach a player-class actor [GHIDRA]:
@@ -270,7 +271,7 @@ static void __fastcall HookedMovementUpdate(void* actorObj) {
 // whole module off (vanilla behaviour); nothing is half-enabled.
 static void Install(uintptr_t exeBase) {
     char v[2] {};
-    if (GetEnvironmentVariableA("KH2COOP_CLONE_NEUTRAL_INPUT", v, sizeof(v)) != 1 || v[0] != '1') return;
+    if ((GetEnvironmentVariableA("KH2COOP_CLONE_NEUTRAL_INPUT", v, sizeof(v)) != 1 || v[0] != '1') && !playerkit::BcCloneRequested()) return;
     const char* refused = nullptr;
     if (playerkit::BlocksNativeSoraPuppets()) refused = "player-kit";
     else if (!VerifyMovementImage(exeBase)) refused = "image";

@@ -5718,6 +5718,15 @@ bool PartyLoadAdmitted(std::uint32_t generation) noexcept {
     return generation != 0 && RuntimeWriterLive(generation);
 }
 
+bool TwoPlayerSessionLive() noexcept {
+    const auto generation = g_bridge.SessionGeneration();
+    if (!PartyLoadAdmitted(generation)) return false;
+    const auto host = g_bridge.ConnectionId(0), one = g_bridge.ConnectionId(1), two = g_bridge.ConnectionId(2);
+    return host != 0 && ((one != 0) != (two != 0)) &&
+        g_bridge.ConnectionId(0) == host && g_bridge.ConnectionId(1) == one && g_bridge.ConnectionId(2) == two &&
+        g_bridge.SessionGeneration() == generation && PartyLoadAdmitted(generation);
+}
+
 std::uint32_t WorldSessionGeneration() noexcept {
     if (!spawncontroller::IsDiagnosticGameThread() || !g_bridge.IsOpen()) return 0;
     const auto generation = g_bridge.SessionGeneration();

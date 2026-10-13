@@ -17,6 +17,38 @@ static LoadContext Ctx(std::uint8_t world, std::uint16_t resolved0) {
 }
 
 int main() {
+    // Regression: ordinary BC default party acquires a private-clone selector
+    // only inside the enabled live two-player scope, then restores only our row.
+    {
+        auto c = Ctx(5, SORA); c.room = 6;
+        bool owned = false;
+        bool ok = BcCloneEligible(true, true, true, c);
+        auto row = BcCloneRow(BC_NATIVE_ROW, ok, owned);
+        ok = ok && row == BC_CLONE_ROW && owned;
+        row = BcCloneRow(row, true, owned); // repeat setup is idempotent
+        ok = ok && row == BC_CLONE_ROW && owned;
+        ok = ok && !BcCloneEligible(false, true, true, c) &&
+            !BcCloneEligible(true, false, true, c) && !BcCloneEligible(true, true, false, c);
+        c.evtProgram = 1; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.evtProgram = 0; c.eventContext = 1; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.eventContext = 0; c.cutsceneState = 1; ok = ok && !BcCloneEligible(true, true, true, c);
+        c.cutsceneState = 0; c.world = 4; ok = ok && !BcCloneEligible(true, true, true, c);
+        row = BcCloneRow(row, false, owned); ok = ok && row == BC_NATIVE_ROW && !owned;
+        row = BcCloneRow(0x12020300, true, owned); ok = ok && row == 0x12020300 && !owned;
+        row = BcCloneRow(BC_NATIVE_ROW, true, owned);
+        row = BcCloneRow(0x12020300, false, owned); // story changed the row: preserve it
+        ok = ok && row == 0x12020300 && !owned;
+        CHECK("automatic BC clone setup and owned restoration", ok);
+    }
+    {
+        bool owned = false;
+        auto row = BcCloneRow(BC_NATIVE_ROW, true, owned);
+        row = BcCloneRow(row, false, owned, true); // lease expired after selectors consumed
+        bool ok = owned && row == BC_CLONE_ROW; // Factory still receives private status
+        row = BcCloneRow(row, false, owned, false); // load complete / next pre-resolver
+        ok = ok && !owned && row == BC_NATIVE_ROW;
+        CHECK("lease expiry during BC construction retains applied private scope", ok);
+    }
     std::uint16_t k = 1;
     // Parsing: exact allow-list, numeric only, unset = off.
     CHECK("parse empty", ParseKit("", k) && k == 0);
