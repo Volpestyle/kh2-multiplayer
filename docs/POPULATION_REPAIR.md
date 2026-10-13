@@ -34,6 +34,24 @@ unqualified by these checks. The existing ordinary alive-despawn path reports
 a death after its three-second grace; this fixture exercised host kills instead.
 The lead owns promotion; no profile or new authority machinery was added.
 
+### Alive-removal attempt, 2026-10-12: inconclusive
+
+[Run 204320](../build/scenarios/20261012-204320_net_population_soldier_alive_despawn_1/report.md)
+failed its living-removal event wait. The
+[Soldier walk clip](../build/scenarios/20261012-204320_net_population_soldier_alive_despawn_1/host_walkaway_0.mp4)
+and position samples show camera-relative lateral input orbiting near the west
+wave instead of walking far away. All three Soldiers stayed at 39 HP. A fallback
+within the same owned session to BC btl1 also left its two Shadows and three
+Hook Bats alive. Neither path witnessed a living removal or supersession, so
+this does not establish a removal failure or prove Soldiers never cull at any
+reachable distance. No native behavior change was made.
+
+Four protected files and installed game files were unchanged; all owned games,
+runtimes, relay and clip helpers exited, and UDP 27796 was free. PC1 was released
+for James after this last run. Alive-removal acceptance remains open until the
+lead authorizes another live window; the next fixture needs measured outward
+world movement rather than a sustained sideways pulse.
+
 ## Scope and authority
 
 The feature remains default-off under `KH2COOP_ENEMY_POPULATION` and

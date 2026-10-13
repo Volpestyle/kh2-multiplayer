@@ -479,6 +479,12 @@ kh2ctl player-input --buttons confirm --duration-ms 120
 kh2ctl player-input --lx 0.0 --ly 1.0 --rx 0.5 --ry 0.0 --duration-ms 500
 ```
 
+Stick movement is camera-relative. In BC run 204320, repeated four-second
+`--lx -1 --ly 0` pulses produced an orbit as the camera turned. A walk-away
+fixture must check actual world displacement; command duration alone does not
+show that Sora moved far from a wave. Use short forward/steering segments and
+read positions before claiming a distance-triggered cull.
+
 Accepted player button names include:
 
 - `confirm`, `cross`, `a`
