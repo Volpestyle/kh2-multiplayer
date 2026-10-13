@@ -3,11 +3,11 @@
 `build_friend.py` copies explicitly selected local products and the installed
 CPython 3.11 standard library/Tk. It never downloads, installs, launches KH2,
 opens a listener or writes the game folder. `friend-products.json` pins the
-protocol-18 / AvatarBridge-4 cohort built from `7331a05`. DLL, runtime, relay,
+protocol-18 / AvatarBridge-4 cohort built from `bb7122a` (including the VUH-2239 server fix). DLL, runtime, relay,
 avatarctl and portable CLI share one source revision and build ID. Refresh all
 five product receipts together; the existing validator rejects mixed versions,
 cohorts and packaged hashes. The pinned local copies live under
-`build/rig/vuh2239-protocol18-20261013-01/products/`.
+`build/rig/vuh2239-protocol18-20261013-02/products/`.
 
 This cohort builds all five native products with the static MSVC CRT. Earlier
 release01/release02 products remain historical evidence, not current inputs.

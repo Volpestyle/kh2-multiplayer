@@ -93,9 +93,13 @@ Clean no-env source-player rerun `20261013-125650` passes: Armored Knights
 both living lists empty, no relay/runtime desync, four protected saves unchanged.
 Native disposal counts as removal even without an HP-write application log.
 The regression replays the preserved hashes and checks persistent divergence;
-58 focused checks pass. Local evidence is under `.local/vuh2239/`. The refreshed
-installed package below is the requested `7331a05` baseline, preceding this
-server-only diagnostic fix; its immutable products are not silently replaced.
+58 focused checks pass. Local evidence is under `.local/vuh2239/`. The initial
+installed `7331a05` package below precedes this server-only diagnostic fix;
+its immutable products are retained. The follow-up `bb7122a` cohort includes
+the fix, using the same five-role receipts and packaging scripts. Its scratch
+install self-check and all five installed product hash/cohort checks pass;
+protocol18/AvatarBridge4 and the shipped defaults are retained. No additional
+live run was needed; evidence is under `.local/vuh2239-refresh/`.
 
 These route runs exercise the source player's child-launch functions, not the
 ZIP or complete GUI flow. VUH-2234 supplied a coherent protocol-18/AvatarBridge-4
