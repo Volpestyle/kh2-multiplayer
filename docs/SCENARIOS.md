@@ -3090,8 +3090,10 @@ details).
   desync notice.
 - Waves spawn only when a Sora enters their trigger, so combat segments
   teleport each Sora there first, as the T1 fixtures do, before the bots fight.
-  A synthetic kill leaves a boss at 1 HP, so the boss segment lands its last hit
-  natively.
+  A synthetic kill starts the Thresholder's native defeat (bonus, then a ~10 s
+  host event). Its actor stays listed at 1 HP, so the boss segment waits for a
+  new host event hold with the boss at 1 HP or less on all three, rather than
+  for it to leave the list.
 - Soras are protected (team 0) during combat so the route can keep going. The
   last segment removes friend2's protection and deals a lethal native hit, to
   show what a death does under the shipped defaults.

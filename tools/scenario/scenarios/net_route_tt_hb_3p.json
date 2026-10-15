@@ -1,6 +1,6 @@
 {
  "name": "net_route_tt_hb_3p",
- "description": "VUH-2253 route run: three instances with the player package's shipped defaults on an ENet loopback relay, host-led through TT and HB combat, a host-skipped cutscene, the BC Thresholder boss and a friend's death. Teleports stand in for walking into each battle trigger; the boss's last hit lands natively because a synthetic kill leaves it at 1 HP. Bots fight with native player input; host warps stand in for pathing. Soras are protected (team 0) in combat so the route can continue; the last segment kills a friend on purpose and the host revives them with the Triangle prompt. Each segment that breaks is reported and the run moves on to the next one.",
+ "description": "VUH-2253 route run: three instances with the player package's shipped defaults on an ENet loopback relay, host-led through TT and HB combat, a host-skipped cutscene, the BC Thresholder boss and a friend's death. Teleports stand in for walking into each battle trigger; a synthetic kill starts the Thresholder's native defeat (bonus and defeat event), which leaves its actor listed at 1 HP. Bots fight with native player input; host warps stand in for pathing. Soras are protected (team 0) in combat so the route can continue; the last segment kills a friend on purpose and the host revives them with the Triangle prompt. Each segment that breaks is reported and the run moves on to the next one.",
  "playerDefaults": true,
  "protect": [
   0,
@@ -710,34 +710,26 @@
    "message": "The boss fight was not reached, so there is no boss to defeat"
   },
   {
+   "do": "save",
+   "as": "defeat_events",
+   "expr": "len(log_matches(r'\\[event-hold\\] observed active=1 ', 0))"
+  },
+  {
    "do": "hit_all",
    "instance": 0,
    "op": "kill"
   },
   {
-   "do": "wait",
-   "ms": 12000
-  },
-  {
-   "do": "fight",
-   "instances": [
-    0,
-    1,
-    2
-   ],
-   "seconds": 30,
-   "as": "boss_finish",
-   "clip": {
-    "instance": 2,
-    "seconds": 10,
-    "fps": 10,
-    "name": "boss_finish_friend2"
-   }
-  },
-  {
    "do": "wait_until",
-   "expr": "all(not any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(3))",
+   "expr": "len(log_matches(r'\\[event-hold\\] observed active=1 ', 0))>saved['defeat_events'] and all(all(a['hp']<=1 for a in enemies(i) if a.get('objectId')==353) for i in range(3))",
    "timeoutMs": 30000
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "name": "boss_finish_friend2",
+   "seconds": 8,
+   "fps": 10
   },
   {
    "do": "wait",
