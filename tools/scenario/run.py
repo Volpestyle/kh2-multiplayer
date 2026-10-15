@@ -195,6 +195,7 @@ class Context:
         self.protect: set[int] = set()
         self.processes: list[tuple] = []  # (name, Popen, log file) to stop at the end
         self.relay_port = "7782"
+        self.player_env: dict[str, str] = {}  # scenario "playerDefaults": the package's KH2COOP_ policy
         self._stop = threading.Event()
         self._protector = threading.Thread(target=self._protect_loop, daemon=True)
         self._protector.start()
@@ -418,7 +419,7 @@ def step_launch(ctx: Context, step: dict) -> dict:
     # also covers the CLI's window, settle and injection waits (max 165s).
     data = kh2ctl("launch", "--init-timeout-ms", str(init_timeout_ms), check=False,
                   timeout=120 + max(0, init_timeout_ms - 15000) / 1000,
-                  env={k: str(v) for k, v in step.get("env", {}).items()})
+                  env={**getattr(ctx, "player_env", {}), **{k: str(v) for k, v in step.get("env", {}).items()}})
     if type(data) is not dict:
         raise StepFailed("kh2ctl launch: invalid reply")
     pid = data.get("processId")
@@ -534,6 +535,85 @@ def step_walk_to(ctx: Context, step: dict) -> dict:
     return {"path": path.name, "displacement": evidence["displacement"], "samples": len(samples)}
 
 
+def step_fight(ctx: Context, step: dict) -> dict:
+    """Bot combat for route runs: every listed instance's own Sora walks at its
+    nearest living enemy (camera-basis pulses, as walk_to) and attacks with
+    native player input, all instances at once, until `seconds` pass or that
+    instance sees no living enemy. Records what each bot did; asserts nothing."""
+    indices = step.get("instances", [0])
+    seconds = float(step.get("seconds", 10))
+    reach = float(step.get("reach", 250))
+    button = step.get("button", "cross")
+    keys = ("0x718C68", "0x718C70", "0x718C78", "0x718C80")
+    results: dict = {}
+
+    def bot(index: int) -> None:
+        pid = ctx.inst(index).pid
+        out = {"presses": 0, "pulses": 0, "closest": None, "enemiesStart": None, "enemiesEnd": None}
+        results[index] = out
+        end = time.monotonic() + seconds
+        try:
+            while time.monotonic() < end:
+                actors = ctx.actors(index)
+                me = next((a for a in actors if a["name"] == "P_EX100"), None)
+                foes = [a for a in actors if a.get("objectType") in (3, 4) and not a["name"].startswith("F_")
+                        and a.get("hp", -1) > 0]
+                if out["enemiesStart"] is None:
+                    out["enemiesStart"] = len(foes)
+                out["enemiesEnd"] = len(foes)
+                if not foes:
+                    break
+                if me is None:
+                    time.sleep(0.3)
+                    continue
+                p = me["position"]
+                target = min(foes, key=lambda a: math.hypot(a["position"]["x"] - p["x"], a["position"]["z"] - p["z"]))
+                dx, dz = target["position"]["x"] - p["x"], target["position"]["z"] - p["z"]
+                distance = math.hypot(dx, dz)
+                out["closest"] = distance if out["closest"] is None else min(out["closest"], distance)
+                if distance > reach:
+                    sample = kh2ctl("peek", "--rva", ",".join(f"{key}:f32" for key in keys), pid=pid)["samples"][0]
+                    fx, fz = sample[keys[0]] - sample[keys[2]], sample[keys[1]] - sample[keys[3]]
+                    length = math.hypot(fx, fz)
+                    if not math.isfinite(length) or length < 1:
+                        raise StepFailed("fight: camera has no usable horizontal basis")
+                    fx, fz, dx, dz = fx / length, fz / length, dx / distance, dz / distance
+                    kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.5f}", "--ly", f"{dx * fx + dz * fz:.5f}",
+                           "--duration-ms", "200", pid=pid)
+                    out["pulses"] += 1
+                else:
+                    kh2ctl("player-press", "--button", button, "--duration-ms", "80", pid=pid)
+                    out["presses"] += 1
+                    time.sleep(0.25)
+        except (StepFailed, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as exc:
+            out["error"] = f"{type(exc).__name__}: {exc}"
+
+    threads = [threading.Thread(target=bot, args=(i,), daemon=True) for i in indices]
+    clip = step.get("clip")  # {"instance", "seconds", "fps", "name"}: film the fight while it runs
+    if clip:
+        inst = ctx.inst(clip.get("instance", 0))
+        out = ctx.run_dir / f"{clip.get('name', 'fight')}_{inst.index}.mp4"
+        clip_result: dict = {}
+
+        def film() -> None:
+            clip_result.update(kh2ctl("clip", "--seconds", str(clip.get("seconds", 5)), "--fps",
+                                      str(clip.get("fps", 10)), "--out", str(out), pid=inst.pid,
+                                      check=False, timeout=180))
+
+        threads.append(threading.Thread(target=film, daemon=True))
+    for thread in threads:
+        thread.start()
+    while any(thread.is_alive() for thread in threads):
+        ctx.sleep(0.5)
+    name = step.get("as", "fight")
+    ctx.saved[name] = {str(k): v for k, v in results.items()}
+    if clip:
+        if out.exists():
+            ctx.artifacts.append(out.name)
+        ctx.saved[name]["clip"] = {"path": out.name, "ok": clip_result.get("ok"), "error": clip_result.get("error")}
+    return ctx.saved[name]
+
+
 def step_input(ctx: Context, step: dict) -> dict:
     args = ["player-input", "--duration-ms", str(step.get("ms", 500))]
     for axis in ("lx", "ly", "rx", "ry"):
@@ -606,6 +686,11 @@ def step_press(ctx: Context, step: dict) -> dict:
 def step_wait(ctx: Context, step: dict) -> dict:
     ctx.sleep(step.get("ms", 1000) / 1000)
     return {}
+
+
+def step_checkpoint(ctx: Context, step: dict) -> dict:
+    # Opens a route segment; run_scenario does the bookkeeping (see there).
+    return {"name": step["name"]}
 
 
 def step_wait_until(ctx: Context, step: dict) -> dict:
@@ -813,7 +898,7 @@ def step_runtime(ctx: Context, step: dict) -> dict:
                 for n in range(len(args))):
             raise StepFailed(f"game {inst.pid} already has a live runtime writer")
     proc = start_process(ctx, name, cmd,
-                         env=dict(os.environ, **{k: str(v) for k, v in step.get("env", {}).items()}))
+                         env=dict(os.environ, **{**getattr(ctx, "player_env", {}), **{k: str(v) for k, v in step.get("env", {}).items()}}))
     log = ctx.run_dir / f"{name}.log"
     expect = step.get("expect", "Verified membership; native bootstrap remains separate")
 
@@ -4188,7 +4273,8 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
 
 
 STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": step_input, "walk_to": step_walk_to,
-         "press": step_press, "wait": step_wait, "wait_until": step_wait_until,
+         "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
+         "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect,
          "capture": step_capture, "clip": step_clip, "avatar_stall": step_avatar_stall,
          "crash": step_crash, "freeze": step_freeze,
@@ -4356,10 +4442,35 @@ def run_scenario(path: Path, attempt: int) -> dict:
     report = {"scenario": name, "file": str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path),
               "attempt": attempt, "started": dt.datetime.now().isoformat(timespec="seconds"),
               "status": "pass", "steps": [], "artifacts": ctx.artifacts}
+    # Route segments: steps after a "checkpoint" belong to it. Before the first
+    # checkpoint a failure ends the run as usual; after it, a failure ends only
+    # its segment and the run skips to the next checkpoint, so one run reports
+    # how far the route got and every segment that broke.
+    segments: list[dict] = []
+    total_segments = sum(s.get("do") == "checkpoint" for s in scenario["steps"])
+    if total_segments:
+        report["segments"] = segments
     t0 = time.monotonic()
     try:
+        if scenario.get("playerDefaults"):
+            sys.path.insert(0, str(ROOT / "tools" / "launcher"))
+            import friend_package  # noqa: PLC0415 - only player-default scenarios need the launcher
+            leaked = sorted(k for k in os.environ if k.upper().startswith("KH2COOP_"))
+            if leaked:
+                raise StepFailed(f"playerDefaults: unset developer variables first: {', '.join(leaked)}")
+            ctx.player_env = {k: v for k, v in friend_package.child_environment(ROOT).items()
+                              if k.startswith("KH2COOP_")}
+            report["playerEnv"] = ctx.player_env
+        skipping = False
         for i, step in enumerate(scenario["steps"]):
             kind = step["do"]
+            if kind == "checkpoint":
+                segments.append({"name": step["name"], "status": "pass",
+                                 "startedAt": round(time.monotonic() - t0, 1), "firstStep": i})
+                skipping = False
+            elif skipping:
+                report["steps"].append({"index": i, "do": kind, "status": "skipped"})
+                continue
             entry = {"index": i, "do": kind, "status": "pass"}
             s0 = time.monotonic()
             try:
@@ -4370,15 +4481,21 @@ def run_scenario(path: Path, attempt: int) -> dict:
             except StepFailed as e:
                 entry.update(status="fail", error=str(e))
                 report["status"] = "fail"
-                report["error"] = f"step {i} ({kind}): {e}"
+                report.setdefault("error", f"step {i} ({kind}): {e}")
+                if segments:
+                    segments[-1].update(status="fail", error=f"step {i} ({kind}): {e}")
             except InstanceDied as died:
                 entry.update(status="crash", error=str(died))
+                if segments:
+                    segments[-1].update(status="crash" if died.kind == "exited" else "hang", error=str(died))
                 raise
             finally:
                 entry["seconds"] = round(time.monotonic() - s0, 2)
                 report["steps"].append(entry)
             if entry["status"] != "pass":
-                break
+                if not segments:
+                    break
+                skipping = True
     except InstanceDied as died:
         report["status"] = "crash" if died.kind == "exited" else "hang"
         report["error"] = str(died)
@@ -4404,6 +4521,13 @@ def run_scenario(path: Path, attempt: int) -> dict:
             ctx.artifacts.append(summary["path"])
         report["seconds"] = round(time.monotonic() - t0, 1)
         report["instances"] = [inst.pid for inst in ctx.instances]
+        if total_segments:
+            passed = [s["name"] for s in segments if s["status"] == "pass"]
+            report["route"] = {"segments": total_segments, "entered": len(segments), "passed": len(passed),
+                               "reached": segments[-1]["name"] if segments else None,
+                               "furthestPass": passed[-1] if passed else None,
+                               "failures": [{"segment": s["name"], "status": s["status"], "error": s["error"]}
+                                            for s in segments if s["status"] != "pass"]}
         (run_dir / "report.json").write_text(json.dumps(report, indent=2))
         (run_dir / "report.md").write_text(render_md(report))
     report["dir"] = str(run_dir)
@@ -4430,6 +4554,17 @@ def render_md(report: dict) -> str:
         lines += [""]
     if report.get("error"):
         lines += [f"**Error:** {report['error']}", ""]
+    route = report.get("route")
+    if route:
+        lines += [f"Route: entered {route['entered']} of {route['segments']} segments, {route['passed']} passed; "
+                  f"reached **{route['reached']}**, furthest passing **{route['furthestPass']}**.", ""]
+        if route["failures"]:
+            lines += ["Failures, in route order (the first one is the breaker to fix first):", ""]
+            lines += [f"{n}. **{f['segment']}** ({f['status']}): {f['error']}" for n, f in enumerate(route["failures"], 1)]
+            lines += [""]
+        lines += ["| segment | status | started (s) |", "|---|---|---|"]
+        lines += [f"| {s['name']} | {s['status']} | {s['startedAt']} |" for s in report.get("segments", [])]
+        lines += [""]
     lines += ["| # | step | status | s | detail |", "|---|---|---|---|---|"]
     for s in report["steps"]:
         detail = s.get("error") or json.dumps(s.get("result", {}))
@@ -4457,7 +4592,7 @@ def validate_scenario(scenario: dict) -> None:
                 "runtime": ("role",), "record": ("as",), "record_stop": ("as",),
                 "reconnect_mark": ("as",), "runtime_pause": ("instance", "after"),
                 "reconnect_check": ("after",),
-                "align_courtyard_exit": ("blockedExpr",)}
+                "align_courtyard_exit": ("blockedExpr",), "checkpoint": ("name",)}
     for number, step in enumerate(scenario["steps"]):
         prefix = f"step {number}"
         if not isinstance(step, dict) or step.get("do") not in STEPS:

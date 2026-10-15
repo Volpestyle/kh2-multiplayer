@@ -29,6 +29,8 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 
 ## Gotchas (each cost real attempts)
 
+- **Agent shells are in Session 0:** a KH2 launched from an agent's shell gets no desktop or GPU. It logs `Render: D3D12 probe failed; no Present hook` and exits with `0xC0000005` about 3 s into boot (VUH-2253, 2026-10-14). Start live runs in Session 1 through the desk bridge: `C:\desk\agent.ps1` runs as James's scheduled task and executes each `.ps1` dropped into `C:\desk\jobs\`, one at a time, writing `C:\desk\done\<job>.out`. Write the job to `C:\desk\job-stage\` first, then rename it into `jobs\`. A job that waits for its run holds the bridge for every other lane. `tools/rig/desk-scenario.ps1` runs one scenario this way: queue a one-line job such as `& 'C:/path/to/worktree/tools/rig/desk-scenario.ps1' -Scenario tools/scenario/scenarios/x.json -Tag x-01`. Check your session with `[Diagnostics.Process]::GetCurrentProcess().SessionId`.
+
 - **Desktop-job UTF-8 BOM:** read `.ps1` source explicitly as UTF-8 (`utf-8-sig` accepts one BOM), never with the locale default. Emit at most one real BOM (`EF BB BF`); reject duplicate BOMs and the mojibake prefix `C3 AF C2 BB C2 BF` before sealing. Windows PowerShell5 may parse that mojibake as code instead of treating it as a signature. Check raw bytes as well as parser syntax. Preserve a sealed/live packet; repair only the writer or a new revision.
 
 - **Python text output on the rig:** the bridge console is cp1252. A `write_text`, `open` or `print` without `encoding='utf-8'` crashes the runner on characters like U+FFFD (empty-seat fixture-05, b8-06). Profiles must write UTF-8 or copy bytes. The lead also wraps bridge jobs with `$env:PYTHONUTF8="1"`.

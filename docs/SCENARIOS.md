@@ -1837,6 +1837,8 @@ protected actor. Protection is best effort during loads.
 | `walk_to` | `x z instance timeoutMs until as` | Steer with the current camera basis in 200ms native pulses. Record start/end displacement and peer enemy lists in JSON. Stops near the target, at `until`, or at the time budget; reaching the budget makes no cull claim. |
 | `align_courtyard_exit` | `instance as blockedExpr` | BC courtyard entrance-0 fixture only: pulse screen-left (`lx=-1`) for 250 ms at a time, recording each start/end position. Stop at `abs(x)<60` or a true `blockedExpr`, with a 6 s limit. Each unblocked pulse must reduce `abs(x)`; otherwise capture and fail with a diagnostic JSON. No host movement |
 | `press` | `button ms times gapMs` | Press a button (`player-press`; PS2 names: `cross`, `circle`, `triangle`, `square`, `start`, …) |
+| `fight` | `instances seconds reach button as clip` | Bot combat: each listed instance's own Sora walks at its nearest living enemy (camera-basis 200 ms pulses) and presses `button` (default `cross`) within `reach` units (default 250), all instances at once, until `seconds` pass or it sees no enemy. `clip: {instance, seconds, fps, name}` films the fight while it runs. Records presses, pulses, closest distance and enemy counts; asserts nothing |
+| `checkpoint` | `name` | Opens a route segment (see "Route runs" below) |
 | `wait` | `ms` | Sleep while watching the instances |
 | `wait_until` | `expr timeoutMs pollMs` | Poll an expression until true |
 | `assert` | `expr message` | Fail the run unless the expression is true |
@@ -3039,6 +3041,47 @@ and [prior source review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-
   (`0x1512B0`); no direct native writer/task invocation was used. Standing save
   restrictions remain, and this single save authorization is consumed.
 
+
+## Route runs (VUH-2253)
+
+`net_route_tt_hb_3p.json` is the milestone route run (VUH-2250): three
+instances on an ENet loopback relay, host-led through TT and HB combat, a
+host-skipped cutscene, the BC Thresholder boss and a friend's death.
+
+```powershell
+python -B tools/scenario/run.py tools/scenario/scenarios/net_route_tt_hb_3p.json
+```
+
+Live KH2 must start in the desktop session (Session 1). Agent shells run in
+Session 0, where D3D12 fails and the game dies about 3 s into boot
+(`0xC0000005`, `Render: D3D12 probe failed`). Queue the command through the
+desk bridge with `tools/rig/desk-scenario.ps1` (the kh2-rig skill has the
+details).
+
+- `"playerDefaults": true` gives every `boot` and `runtime` the player
+  package's `KH2COOP_` policy (`friend_package.child_environment`): the
+  shipped defaults, with parked features forced off. A step's own `env` still
+  wins. The run refuses if the runner's environment already has `KH2COOP_`
+  variables. The applied set is in `report.json` under `playerEnv`.
+- `checkpoint` steps split the route into segments. Before the first
+  checkpoint, setup failures end the run as usual. After it, a failing step
+  ends only its segment, and the run skips to the next checkpoint. Crashes and
+  hangs still end the run. `report.md` lists how far the route got, the furthest
+  passing segment, and every failed segment in route order. The first one is the
+  breaker to file.
+- Each segment checks that all three are in the host's room, that their enemy
+  HP lists match, that friends can move, and that no runtime logged a new
+  desync notice.
+- Waves spawn only when a Sora enters their trigger, so combat segments
+  teleport each Sora there first, as the T1 fixtures do, before the bots fight.
+  A synthetic kill leaves a boss at 1 HP, so the boss segment lands its last hit
+  natively.
+- Soras are protected (team 0) during combat so the route can keep going. The
+  last segment removes friend2's protection and deals a lethal native hit, to
+  show what a death does under the shipped defaults.
+- The HB rooms are the proven T1 wave rooms (`04/15` is the Cavern of
+  Remembrance), not first-visit HB. The route's own first-visit rooms and a
+  door-entered boss are still to add.
 
 ## Route T1 mirror smoke (VUH-1789)
 

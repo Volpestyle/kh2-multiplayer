@@ -1,0 +1,890 @@
+{
+ "name": "net_route_tt_hb_3p",
+ "description": "VUH-2253 route run: three instances with the player package's shipped defaults on an ENet loopback relay, host-led through TT and HB combat, a host-skipped cutscene, the BC Thresholder boss and a friend's death. Teleports stand in for walking into each battle trigger; the boss's last hit lands natively because a synthetic kill leaves it at 1 HP. Bots fight with native player input; host warps stand in for pathing. Soras are protected (team 0) in combat so the route can continue; the last segment kills a friend on purpose. Each segment that breaks is reported and the run moves on to the next one.",
+ "playerDefaults": true,
+ "protect": [
+  0,
+  1,
+  2
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 2,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 1,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 2,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "relay",
+   "port": 27796,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "runtime",
+   "instance": 2,
+   "role": "friend2"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+   "timeoutMs": 30000,
+   "pollMs": 1000
+  },
+  {
+   "do": "checkpoint",
+   "name": "1 TT: host-led arrival"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 2,
+   "room": 13,
+   "door": 0,
+   "map": 1,
+   "btl": 4,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[2,13,0,1,4,32767] and location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+   "timeoutMs": 20000,
+   "pollMs": 1000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "tt_arrive"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "tt_arrive"
+  },
+  {
+   "do": "capture",
+   "instance": 2,
+   "name": "tt_arrive"
+  },
+  {
+   "do": "checkpoint",
+   "name": "2 TT: combat"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))",
+   "timeoutMs": 15000
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','349.736,-147.029,24.181']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','409.736,-147.029,24.181']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','469.736,-147.029,24.181']"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(enemy_hps(0))>0 and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "save",
+   "as": "tt_before",
+   "expr": "[enemy_hps(i) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "tt_hits_before",
+   "expr": "[log_count('attacker=P_EX100', i) for i in range(3)]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1,
+    2
+   ],
+   "seconds": 15,
+   "as": "tt_fight",
+   "clip": {
+    "instance": 1,
+    "seconds": 8,
+    "fps": 10,
+    "name": "tt_fight_friend1"
+   }
+  },
+  {
+   "do": "save",
+   "as": "tt_hits_after",
+   "expr": "[log_count('attacker=P_EX100', i) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "tt_scale",
+   "expr": "log_matches(r'\\[coop-difficulty\\] scale .*objectId=(?P<objectId>\\d+) .*players=(?P<players>\\d+) .*hp=(?P<hp>\\d+)->(?P<scaledHp>\\d+)', 0)[-4:]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(enemy_hps(0))==0 and len(enemy_hps(1))==0 and len(enemy_hps(2))==0",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "assert",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+   "message": "A runtime logged a new desync notice during TT"
+  },
+  {
+   "do": "checkpoint",
+   "name": "3 TT -> HB: host-led world change"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 10
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)[:2]==[4,10] and location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+   "timeoutMs": 20000,
+   "pollMs": 1000
+  },
+  {
+   "do": "input",
+   "instance": 1,
+   "ly": 1,
+   "ms": 900
+  },
+  {
+   "do": "input",
+   "instance": 2,
+   "lx": 1,
+   "ms": 900
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "hb_borough"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "hb_borough"
+  },
+  {
+   "do": "capture",
+   "instance": 2,
+   "name": "hb_borough"
+  },
+  {
+   "do": "checkpoint",
+   "name": "4 HB: combat (Iron Hammers 04/15)"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 21,
+   "door": 0,
+   "map": 1,
+   "btl": 26,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[4,21,0,1,26,32767] and location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))",
+   "timeoutMs": 15000
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','859.696,450,-599.768']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','919.696,450,-599.768']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','979.696,450,-599.768']"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(enemy_hps(0))>0 and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "save",
+   "as": "hb1_before",
+   "expr": "[enemy_hps(i) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "hb1_hits_before",
+   "expr": "[log_count('attacker=P_EX100', i) for i in range(3)]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1,
+    2
+   ],
+   "seconds": 15,
+   "as": "hb1_fight",
+   "clip": {
+    "instance": 2,
+    "seconds": 8,
+    "fps": 10,
+    "name": "hb_hammers_friend2"
+   }
+  },
+  {
+   "do": "save",
+   "as": "hb1_hits_after",
+   "expr": "[log_count('attacker=P_EX100', i) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "hb1_scale",
+   "expr": "log_matches(r'\\[coop-difficulty\\] scale .*objectId=(?P<objectId>\\d+) .*players=(?P<players>\\d+) .*hp=(?P<hp>\\d+)->(?P<scaledHp>\\d+)', 0)[-4:]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(enemy_hps(0))==0 and len(enemy_hps(1))==0 and len(enemy_hps(2))==0",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "assert",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+   "message": "A runtime logged a new desync notice during HB Iron Hammers"
+  },
+  {
+   "do": "checkpoint",
+   "name": "5 HB: combat (Armored Knights 04/02)"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 2,
+   "door": 0,
+   "map": 1,
+   "btl": 1,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[4,2,0,1,1,32767] and location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))",
+   "timeoutMs": 15000
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','-410.121,-50,-818.887']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','-350.121,-50,-818.887']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','-290.121,-50,-818.887']"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(enemy_hps(0))>0 and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "save",
+   "as": "hb2_before",
+   "expr": "[enemy_hps(i) for i in range(3)]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1,
+    2
+   ],
+   "seconds": 15,
+   "as": "hb2_fight",
+   "clip": {
+    "instance": 0,
+    "seconds": 8,
+    "fps": 10,
+    "name": "hb_knights_host"
+   }
+  },
+  {
+   "do": "wait_until",
+   "expr": "enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(enemy_hps(0))==0 and len(enemy_hps(1))==0 and len(enemy_hps(2))==0",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "assert",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+   "message": "A runtime logged a new desync notice during HB Armored Knights"
+  },
+  {
+   "do": "checkpoint",
+   "name": "6 Cutscene: host skips, clients held (08/0C evt1)"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "hold_armed",
+   "expr": "['[eventhold-control] armed' in runtime_log(i) and 'aborted' not in runtime_log(i) for i in [1,2]]"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 8,
+   "room": 12,
+   "evt": 1
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "save",
+   "as": "held_flags",
+   "expr": "[peek('0x7435D0','u8',1), peek('0x7435D0','u8',2)]"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "name": "cutscene_held_friend2",
+   "seconds": 3,
+   "fps": 6
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "start",
+   "ms": 100
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "down",
+   "ms": 100
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "cross",
+   "ms": 100
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[8,12,50,0,0,22]",
+   "timeoutMs": 25000
+  },
+  {
+   "do": "assert",
+   "expr": "saved['held_flags']==[10,10]",
+   "message": "Friends were not held while the host's cutscene played"
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(1)==location(0) and location(2)==location(0) and peek('0x7435D0','u8',1)==255 and peek('0x7435D0','u8',2)==255",
+   "timeoutMs": 25000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "save",
+   "as": "resumed_pos",
+   "expr": "pos('P_EX100',2)"
+  },
+  {
+   "do": "input",
+   "instance": 2,
+   "lx": 1,
+   "ms": 350
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "assert",
+   "expr": "dist(saved['resumed_pos'],pos('P_EX100',2))>1",
+   "message": "Friend2 could not move after the cutscene"
+  },
+  {
+   "do": "assert",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+   "message": "A runtime logged a new desync notice during the cutscene"
+  },
+  {
+   "do": "checkpoint",
+   "name": "7 Boss: Thresholder fight (BC 05/0B btl72)"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 5,
+   "room": 11,
+   "door": 0,
+   "map": 0,
+   "btl": 72,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[5,11,0,0,72,32767] and location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(3))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "boss_arrive"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "boss_arrive"
+  },
+  {
+   "do": "capture",
+   "instance": 2,
+   "name": "boss_arrive"
+  },
+  {
+   "do": "save",
+   "as": "boss_before",
+   "expr": "[[(a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a.get('objectId') in [353,356]] for i in range(3)]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1,
+    2
+   ],
+   "seconds": 25,
+   "as": "boss_fight",
+   "clip": {
+    "instance": 1,
+    "seconds": 10,
+    "fps": 10,
+    "name": "boss_fight_friend1"
+   }
+  },
+  {
+   "do": "save",
+   "as": "boss_after",
+   "expr": "[[(a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a.get('objectId') in [353,356]] for i in range(3)]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(sorted((a['objectId'],a['hp']) for a in enemies(i) if a.get('objectId') in [353,356])==sorted((a['objectId'],a['hp']) for a in enemies(0) if a.get('objectId') in [353,356]) for i in range(3))",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "save",
+   "as": "boss_friend_pos",
+   "expr": "[pos('P_EX100',1), pos('P_EX100',2)]"
+  },
+  {
+   "do": "input",
+   "instance": 1,
+   "ly": 1,
+   "ms": 700
+  },
+  {
+   "do": "input",
+   "instance": 2,
+   "ly": 1,
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "boss_friend_moved",
+   "expr": "[dist(saved['boss_friend_pos'][0],pos('P_EX100',1)), dist(saved['boss_friend_pos'][1],pos('P_EX100',2))]"
+  },
+  {
+   "do": "assert",
+   "expr": "min(saved['boss_friend_moved'])>30",
+   "message": "A friend could not move during the boss fight (client input still held)"
+  },
+  {
+   "do": "assert",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+   "message": "A runtime logged a new desync notice during the boss fight"
+  },
+  {
+   "do": "checkpoint",
+   "name": "8 Boss: defeat and aftermath"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "assert",
+   "expr": "location(0)[:2]==[5,11] and any(a.get('objectId')==353 and a['hp']>0 for a in enemies(0))",
+   "message": "The boss fight was not reached, so there is no boss to defeat"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 12000
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1,
+    2
+   ],
+   "seconds": 30,
+   "as": "boss_finish",
+   "clip": {
+    "instance": 2,
+    "seconds": 10,
+    "fps": 10,
+    "name": "boss_finish_friend2"
+   }
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(not any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(3))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "boss_after"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "boss_after"
+  },
+  {
+   "do": "capture",
+   "instance": 2,
+   "name": "boss_after"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "name": "boss_defeated_friend2",
+   "seconds": 4,
+   "fps": 6
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "start",
+   "ms": 100
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "down",
+   "ms": 100
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "cross",
+   "ms": 100
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "save",
+   "as": "boss_aftermath_location",
+   "expr": "[location(i) for i in range(3)]"
+  },
+  {
+   "do": "checkpoint",
+   "name": "9 Regroup in GoA: three players, no desync"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)[:2]==[4,26] and location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+   "timeoutMs": 20000,
+   "pollMs": 1000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "goa_regroup"
+  },
+  {
+   "do": "assert",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+   "message": "A runtime logged a new desync notice by the end of the route"
+  },
+  {
+   "do": "checkpoint",
+   "name": "10 Downed: friend2 takes a lethal hit"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "protect",
+   "instance": 2,
+   "on": false
+  },
+  {
+   "do": "wait",
+   "ms": 1500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['hit','kill','--victim',actor('P_EX100',2)['address']]"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "capture",
+   "instance": 2,
+   "name": "downed"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "downed"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "name": "downed_friend2",
+   "seconds": 4,
+   "fps": 6
+  },
+  {
+   "do": "wait_until",
+   "expr": "any(a['name']=='P_EX100' and a['hp']>0 for a in actors(2)) and location(2)==location(0)",
+   "timeoutMs": 8000
+  }
+ ]
+}
