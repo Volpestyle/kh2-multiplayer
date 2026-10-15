@@ -7,9 +7,11 @@
 > Linear project **KH2 Multiplayer** (vuhlp workspace); this doc holds the
 > design, decisions, risks and phase gates.
 >
-> **Direction (2026-10-12):** an automated 30-minute soak now drives the
-> backlog; see [D13](#decisions). Amended 2026-10-13: functionality first, soak
-> harness deferred.
+> **Direction (2026-10-14):** [D14](#decisions) supersedes D13's work
+> selection: one host brain for every enemy, a story route that three players
+> can play, and a lighter definition of done. Next milestones, in order:
+> 3-player playable co-op (James playtests), then PvP, then a hosted
+> "Minecraft server" mode.
 
 ## Goal
 
@@ -1210,6 +1212,59 @@ Format: decision — why (rejected alternative).
   pulled from features the play route needs (first: enemies target every
   player, VUH-2193; then population follows the host, VUH-1788; then co-op
   difficulty scaling, VUH-2194).
+- **D14. Catch up: one brain, a playable route, light done** (James,
+  2026-10-14). Prompted by comparing notes with TCM-Murray's KH2 co-op mod
+  ([prior art](research/PRIOR_ART.md#kh2fm-online-co-op-tcm-murray-oct-2026)).
+  In ten days it went from first commit to two PCs playing TT through HB's
+  first visit plus bosses to the credits, with reaction commands, Limits and
+  boss pushes mirrored. Over the same period this repo qualified about twenty
+  enemy families one at a time and spent 10-10 to 10-13 mostly on rig and
+  acceptance tooling (22k rig lines against 2k DLL lines). Its board held 22
+  started issues and closed almost none.
+  1. **Milestones.** First, 3-player playable co-op: three players, each on
+     their own instance, play the story route TT → HB (first visit) with
+     ordinary combat, at least one boss, cutscenes, host-led rooms and
+     downed/revive, launched from the package. No crash or soft lock is
+     allowed, and a known gap must not end the session. James playtests at
+     this point and not before. After that comes PvP (D11), then the hosted
+     server and presence mode (D11 Realm stages 3-4).
+  2. **One brain for every enemy.** The host's AI drives every enemy and
+     object on every client by default. This includes bosses and field
+     objects. Clients run no enemy AI. The per-family allowlist becomes a
+     denylist of families that observably break: start with Creeper 317,
+     Fiery Globe 76 and Lance Warrior, each with a one-line reason. Boss
+     problems are logged per boss as the route meets them and are not
+     pre-qualified. Murray: "one brain for every enemy is the only way".
+  3. **Mirror the script calls, not just transforms.** Forward the host's
+     calls on existing actors, effects and rooms to clients:
+     `obj_set_xyzrot`/`obj_set_rot`, `obj_texanm_start/stop`,
+     `effect_set_pos/dir/scale/rot/color/pause`, `bg_hide/show` and
+     `light_*`. Each call needs one check that it is safe to call outside the
+     script. Send a call only when its arguments change, because boss scripts
+     repeat the same call every frame (at 120 fps this floods the link).
+     Mission gauges and timers (`mission_*`) follow the host. They are shown,
+     not owned, on clients.
+  4. **Done = landed on main + one live run showing it**, with its report or
+     clip on the issue. Freezing, sealing and independent review are for
+     inject code near the save or memory-write paths only. Everything else is
+     run and read. The "Verifying" status is not a parking lot: an issue with
+     a landed change and a run closes, and its gaps become new small issues.
+  5. **WIP.** At most six started issues in the project. Anything else goes
+     back to Backlog with one line on where it stopped. A feature ships
+     default-on in the player launcher, or it is parked with a one-line
+     reason.
+  6. **Velocity check.** Each lead round compares product lines (inject,
+     common, server, launcher) with rig, test and doc lines since the last
+     milestone, and counts the player-facing features that landed. If rig and
+     test lines lead for two days running, or a day ends with no
+     player-facing change, the lead stops tooling work and picks the next
+     route feature.
+  7. **Borrow openly.** Read Murray's MODLOG, VERIFIED_OFFSETS and DECISIONS
+     each week. Both repos are GPL-3.0, so port with credit in the commit and
+     the code. Our leads to share back are progress sync between saves, the
+     Steam package and GUI, three players, reconnect and census repair.
+  D13's lane rules 2, 3, 6 and 7 still apply. Save protection, one lane per rig
+  and owned-process cleanup stay hard gates.
 
 ## Architecture
 

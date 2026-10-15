@@ -54,6 +54,32 @@ public on 2026-10-07. Its author emailed James: they had used this repo's docs
 as a reference, copied no code, and offered their notes in return. Their
 MODLOG credits this repo's findings as leads.
 
+- **Update 2026-10-14 (read at `e0f39af`, session 35).** The author has also
+  talked with James directly. Their reported state:
+  - Two PCs play TT through HB's first visit, plus boss fights in OC, LoD, BC,
+    AG and TWTNW to the credits.
+  - Connection works over a Steam overlay join. Co-op saves are kept apart
+    behind a LOAD (CO-OP) title entry, and there is a reconnect window.
+  - The host wears a gold crown. The other player is a Sora copy spawned
+    *beside* Donald and Goofy (three party HUDs) instead of replacing one.
+  - **One brain** (`world_mirror.cpp`) is now the only mode: the host's AI
+    drives every enemy and field object, and the friend runs none.
+  - Reaction commands go to the nearer player. Grabs act on the grabbed
+    player's own Sora. Bosses target the nearer player and hold that pick
+    for 4 s.
+  - Spells and Limit motions show on the other Sora.
+  - Gaps they list: progress sync between saves, Gummi Ship, Drive Form
+    visuals on the copy, mission gauges and timers, and their test suite.
+  - **Script-call mirroring.** Their next list forwards the host's
+    `obj_set_xyzrot/rot`, `obj_texanm_*`, `effect_set_*` (pos, dir, scale,
+    rot, color, pause), `bg_hide/show` and `light_*`. Without
+    `effect_set_pos`, a travelling effect stays where it started on the
+    friend's screen. They warn that boss scripts repeat the same call every
+    frame, so forward only changes.
+  - Their process: one Claude Pro session per "session", a human two-PC
+    "bench" run per fix, and a decisions register (`docs/DECISIONS.md`)
+    holding the owner's rules of play.
+  - D14 adopts the one-brain default and script-call mirroring from this.
 - **Architecture.** OpenKH Panacea loads a C++ DLL (MinHook) from an OpenKH mod
   ([README](https://github.com/TCM-Murray/Kingdom-Hearts-II-Coop-Multiplayer/blob/main/README.md)).
   - The two players run on two PCs over Radmin VPN, with a link handshake.
