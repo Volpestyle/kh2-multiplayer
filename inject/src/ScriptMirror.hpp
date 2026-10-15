@@ -135,10 +135,11 @@ struct Call {
     std::uint16_t netId = 0;
     std::uint32_t objectId = 0;
     std::uint8_t trap = 0;         // index into kTraps
+    std::uint32_t effect = 0;      // host effect key (effect calls, next slice); 0 for actor calls
     std::uint64_t values[4] {};
 };
 inline bool SameValue(const Call& a, const Call& b) noexcept {
-    return a.trap == b.trap && std::memcmp(a.values, b.values, sizeof(a.values)) == 0;
+    return a.trap == b.trap && a.effect == b.effect && std::memcmp(a.values, b.values, sizeof(a.values)) == 0;
 }
 // netId, group and (texanm) the id the call acts on.
 inline std::uint64_t KeyOf(const Call& c) noexcept {

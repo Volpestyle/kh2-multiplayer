@@ -42,7 +42,7 @@ void codecChecks() {
     const auto bytes = encode(m);
     const std::uint8_t* p = nullptr; std::size_t n = 0;
     check(PacketType::ScriptCall == static_cast<PacketType>(49) && decodePacketHeader(bytes.data(), bytes.size(), p, n) == PacketType::ScriptCall &&
-          n == SCRIPT_CALL_HEADER_BYTES + 2u * SCRIPT_CALL_ENTRY_BYTES, "script call is packet type 49, 37 + 41 * n payload bytes");
+          n == SCRIPT_CALL_HEADER_BYTES + 2u * SCRIPT_CALL_ENTRY_BYTES, "script call is packet type 49, 37 + 45 * n payload bytes");
     ByteReader reader(p, n); ScriptCall copy; read(reader, copy);
     check(encode(copy) == bytes && reader.atEnd() && copy.seq == 42 && copy.hostConnectionId == 10 && copy.hostFrame == 900 &&
           copy.entries.size() == 2 && copy.entries[0].args == m.entries[0].args && copy.entries[1].index == 85 &&
@@ -66,7 +66,8 @@ void codecChecks() {
     bad = m; bad.entries[0].args[2] = num(1); check(refusedWrite(bad), "an int inside a vector refused");
     bad = m; bad.entries[0].args[0] = flt(std::numeric_limits<float>::quiet_NaN()); check(refusedWrite(bad), "NaN refused");
     bad = m; bad.entries[0].args[0] = flt(2.0e5f); check(refusedWrite(bad), "out-of-bound float refused");
-    // Same refusals on read: patch one byte of a valid frame (entry 1 index low byte at 37 + 41 + 7).
+    // Same refusals on read: patch one byte of a valid frame (entry 1 index low byte at 37 + 45 + 7).
+    auto withEffect = m; withEffect.entries[1].effect = 9; check(refusedWrite(withEffect), "an effect key on an actor call refused");
     auto patched = bytes; patched[3 + SCRIPT_CALL_HEADER_BYTES + SCRIPT_CALL_ENTRY_BYTES + 7] = 121;
     check(refusedRead(patched), "reader refuses a trap outside the list");
     patched = bytes; patched[3 + SCRIPT_CALL_HEADER_BYTES - 1] = 0;

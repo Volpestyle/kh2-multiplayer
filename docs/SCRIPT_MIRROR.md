@@ -47,7 +47,9 @@ scoped to the admitted room. It is never cached or replayed to late joiners.
 
 - **Payload:** `{room tuple, seq, hostConnectionId, hostFrame, count}` (37
   bytes), followed by `count` entries (1–32).
-- **Entry:** `{netId, objectId, table, index, u64 args[4]}` (41 bytes each).
+- **Entry:** `{netId, objectId, table, index, u32 effect, u64 args[4]}` (45 bytes each).
+  `effect` is the host effect key for the effect calls (next slice) and must be
+  zero for the calls listed here.
 - **Args** are the call's values after the actor, tagged as the script passed
   them: `'@INT'` (`0x544E4940`) or `'@FLT'` (`0x544C4640`). A vector travels as
   four `'@FLT'`.

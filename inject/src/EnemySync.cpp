@@ -6139,6 +6139,7 @@ void AdmitScriptCall(const WorldScope& scope, const std::uint8_t* payload, std::
     for (const auto& e : calls.entries) {
         ScriptCallRecord record;
         record.netId = e.netId; record.objectId = e.objectId; record.table = e.table; record.index = e.index;
+        record.effect = e.effect;
         for (std::size_t i = 0; i < 4; ++i) record.args[i] = e.args[i];
         ++g_scriptCallStats.records;
         if (g_scriptCallApply(record) == 1) ++g_scriptCallStats.applied; else ++g_scriptCallStats.refused;
@@ -6239,6 +6240,7 @@ bool SendScriptCalls(const ScriptCallRecord* records, std::size_t count, std::ui
     for (std::size_t k = 0; k < count; ++k) {
         ScriptCallEntry e;
         e.netId = records[k].netId; e.objectId = records[k].objectId; e.table = records[k].table; e.index = records[k].index;
+        e.effect = records[k].effect;
         for (std::size_t i = 0; i < 4; ++i) e.args[i] = records[k].args[i];
         if (!validScriptCallEntry(e)) { ++g_scriptCallStats.sendFailed; return false; }
         calls.entries.push_back(e);

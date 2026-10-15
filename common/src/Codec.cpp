@@ -919,7 +919,7 @@ std::vector<std::uint8_t> encode(const TargetAuthority& m) {
 
 bool validScriptCallEntry(const ScriptCallEntry& e) {
     const auto shape = scriptCallShape(e.table, e.index);
-    if (shape.kind == ScriptCallKind::None || !e.netId) return false;
+    if (shape.kind == ScriptCallKind::None || !e.netId || e.effect != 0) return false;
     for (std::size_t i = 0; i < e.args.size(); ++i) {
         const auto tag = static_cast<std::uint32_t>(e.args[i] >> 32);
         const auto bits = static_cast<std::uint32_t>(e.args[i]);
@@ -939,7 +939,7 @@ void write(ByteWriter& w, const ScriptCall& m) {
     w.writeU8(static_cast<std::uint8_t>(m.entries.size()));
     for (const auto& e : m.entries) {
         if (!validScriptCallEntry(e)) throw std::runtime_error("ScriptCall: invalid entry");
-        w.writeU16(e.netId); w.writeU32(e.objectId); w.writeU8(e.table); w.writeU16(e.index);
+        w.writeU16(e.netId); w.writeU32(e.objectId); w.writeU8(e.table); w.writeU16(e.index); w.writeU32(e.effect);
         for (auto a : e.args) w.writeU64(a);
     }
 }
@@ -953,7 +953,7 @@ void read(ByteReader& r, ScriptCall& m) {
         throw std::runtime_error("ScriptCall: wrong entry count or length");
     out.entries.resize(count);
     for (auto& e : out.entries) {
-        e.netId = r.readU16(); e.objectId = r.readU32(); e.table = r.readU8(); e.index = r.readU16();
+        e.netId = r.readU16(); e.objectId = r.readU32(); e.table = r.readU8(); e.index = r.readU16(); e.effect = r.readU32();
         for (auto& a : e.args) a = r.readU64();
         if (!validScriptCallEntry(e)) throw std::runtime_error("ScriptCall: invalid entry");
     }

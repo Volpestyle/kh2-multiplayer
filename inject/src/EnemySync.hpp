@@ -219,6 +219,7 @@ struct ScriptCallRecord {
     std::uint32_t objectId = 0;
     std::uint8_t table = 0;
     std::uint16_t index = 0;
+    std::uint32_t effect = 0;  // host effect key (effect calls); 0 for actor calls
     std::uint64_t args[4] {};
 };
 // Host: one reliable ScriptCall for the current room (1..32 records, in call order).

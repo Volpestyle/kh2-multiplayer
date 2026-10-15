@@ -303,7 +303,9 @@ inline constexpr std::uint8_t TARGET_AUTHORITY_MAX_MODE = 1;
 // args are the call's values after the actor, as bdscript tags them: high 32
 // bits '@INT' or '@FLT', low 32 bits the value. A vector argument travels as
 // its four floats. Only the traps scriptCallShape names are accepted, and
-// unused args must be zero. Wire order is field order: 37 + 41 * n bytes.
+// unused args must be zero. effect names a host effect for the effect calls
+// (the next slice) and is zero for every call on this list. Wire order is
+// field order: 37 + 45 * n bytes.
 inline constexpr std::uint32_t SCRIPT_TAG_INT = 0x544E4940;   // '@INT'
 inline constexpr std::uint32_t SCRIPT_TAG_FLOAT = 0x544C4640; // '@FLT'
 inline constexpr float SCRIPT_CALL_MAX_FLOAT = 100000.0f;
@@ -323,6 +325,7 @@ struct ScriptCallEntry {
     std::uint32_t objectId{0};     // its objentry id, checked by clients
     std::uint8_t table{0};
     std::uint16_t index{0};
+    std::uint32_t effect{0};       // host effect key; 0 for the actor calls
     std::array<std::uint64_t, 4> args{};
 };
 struct ScriptCall {
@@ -334,7 +337,7 @@ struct ScriptCall {
 };
 inline constexpr std::size_t SCRIPT_CALL_MAX_ENTRIES = 32;
 inline constexpr std::uint16_t SCRIPT_CALL_HEADER_BYTES = 37;
-inline constexpr std::uint16_t SCRIPT_CALL_ENTRY_BYTES = 41;
+inline constexpr std::uint16_t SCRIPT_CALL_ENTRY_BYTES = 45;
 // Every arg the shape uses is tagged and finite (floats within the bound); unused args are zero.
 bool validScriptCallEntry(const ScriptCallEntry& e);
 inline constexpr float REVIVE_RANGE = 200.0f; // native world units; initial policy

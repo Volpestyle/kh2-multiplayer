@@ -178,6 +178,7 @@ static void SmFlush() {
             records[k].objectId = batch[k].objectId;
             records[k].table = t.table;
             records[k].index = t.index;
+            records[k].effect = batch[k].effect;
             for (std::size_t a = 0; a < 4; ++a) records[k].args[a] = batch[k].values[a];
         }
         std::uint64_t seq = 0;
@@ -276,8 +277,9 @@ static int SmApplyRecord(const enemysync::ScriptCallRecord& r) {
     c.netId = r.netId;
     c.objectId = r.objectId;
     c.trap = static_cast<std::uint8_t>(i);
+    c.effect = r.effect;
     for (std::size_t a = 0; a < 4; ++a) c.values[a] = r.args[a];
-    if (!R::ValidValues(static_cast<std::size_t>(i), c.values)) { ++g_sm.second.refused; return 0; }
+    if (c.effect || !R::ValidValues(static_cast<std::size_t>(i), c.values)) { ++g_sm.second.refused; return 0; }
     const uintptr_t actor = SmDrivenActor(c.netId, c.objectId);
     if (!actor) {
         if (g_sm.hold.Put(c, g_frameCounter)) ++g_sm.second.held; else ++g_sm.second.refused;
