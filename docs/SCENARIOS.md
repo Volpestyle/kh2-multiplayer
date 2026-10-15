@@ -3187,3 +3187,14 @@ all five wave receipts and match the four remaining native enemies' IDs and HP.
 After the host clears them, every peer must reach an empty native population
 and unmatched0. A run without terminal record0 adoption is insufficient.
 The helper preserves a JSON timing/receipt/recovery artifact even on failure.
+
+### Route friend movement at the BC wall (VUH-2305)
+
+The full three-player route measures each friend's native displacement after
+700ms forward input and700ms reverse input, taking the larger individual leg.
+This preserves the30-unit movement threshold when one direction hits the BC
+south wall. The identical probe runs during the active host cutscene hold and
+must remain below1 unit on both friends; the released boss check requires the
+native menu closed and more than30 units each. Route reports retain the start,
+forward and reverse positions and per-friend maxima. Count full-route passes
+across all attempted repeats; a partial segment pass is not a route pass.

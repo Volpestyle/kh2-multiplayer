@@ -1,6 +1,6 @@
 {
  "name": "net_route_tt_hb_3p",
- "description": "VUH-2253 route run: three instances with the player package's shipped defaults on an ENet loopback relay, host-led through TT and HB combat, a host-skipped cutscene, the BC Thresholder boss and a friend's death. Teleports stand in for walking into each battle trigger; a synthetic kill starts the Thresholder's native defeat (bonus and defeat event), which leaves its actor listed at 1 HP. Bots fight with native player input; host warps stand in for pathing. Soras are protected (team 0) in combat so the route can continue; the last segment kills a friend on purpose and the host revives them with the Triangle prompt. Each segment that breaks is reported and the run moves on to the next one.",
+ "description": "VUH-2253 route run: three instances with the player package's shipped defaults on an ENet loopback relay, host-led through TT and HB combat, a host-skipped cutscene, the BC Thresholder boss and a friend's death. Teleports stand in for walking into each battle trigger; a synthetic kill starts the Thresholder's native defeat (bonus and defeat event), which leaves its actor listed at 1 HP. Bots fight with native player input; host warps stand in for pathing. Soras are protected (team 0) in combat so the route can continue; the last segment kills a friend on purpose and the host revives them with the Triangle prompt. Each segment that breaks is reported and the run moves on to the next one. Friend movement is measured in both forward and reverse directions to avoid a wall; the same probe must reject movement during an active host event hold.",
  "playerDefaults": true,
  "protect": [
   0,
@@ -511,6 +511,70 @@
    "expr": "[peek('0x7435D0','u8',1), peek('0x7435D0','u8',2)]"
   },
   {
+   "do": "assert",
+   "expr": "saved['held_flags']==[10,10]",
+   "message": "Both friends must be held before the negative movement control"
+  },
+  {
+   "do": "save",
+   "as": "held_friend_pos",
+   "expr": "[pos('P_EX100',1), pos('P_EX100',2)]"
+  },
+  {
+   "do": "input",
+   "instance": 1,
+   "ly": 1,
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "held_friend_forward1",
+   "expr": "pos('P_EX100',1)"
+  },
+  {
+   "do": "input",
+   "instance": 1,
+   "ly": -1,
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "held_friend_reverse1",
+   "expr": "pos('P_EX100',1)"
+  },
+  {
+   "do": "input",
+   "instance": 2,
+   "ly": 1,
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "held_friend_forward2",
+   "expr": "pos('P_EX100',2)"
+  },
+  {
+   "do": "input",
+   "instance": 2,
+   "ly": -1,
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "held_friend_reverse2",
+   "expr": "pos('P_EX100',2)"
+  },
+  {
+   "do": "save",
+   "as": "held_friend_moved",
+   "expr": "[max(dist(saved['held_friend_pos'][i-1],saved[f'held_friend_forward{i}']),dist(saved[f'held_friend_forward{i}'],saved[f'held_friend_reverse{i}'])) for i in (1,2)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(peek('0x7435D0','u8',i)==10 for i in (1,2)) and max(saved['held_friend_moved'])<1",
+   "message": "The same forward/reverse movement probe must reject both friends while the host event holds their input"
+  },
+  {
    "do": "clip",
    "instance": 2,
    "name": "cutscene_held_friend2",
@@ -675,6 +739,22 @@
    "ms": 700
   },
   {
+   "do": "save",
+   "as": "boss_friend_forward1",
+   "expr": "pos('P_EX100',1)"
+  },
+  {
+   "do": "input",
+   "instance": 1,
+   "ly": -1,
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "boss_friend_reverse1",
+   "expr": "pos('P_EX100',1)"
+  },
+  {
    "do": "input",
    "instance": 2,
    "ly": 1,
@@ -682,13 +762,29 @@
   },
   {
    "do": "save",
+   "as": "boss_friend_forward2",
+   "expr": "pos('P_EX100',2)"
+  },
+  {
+   "do": "input",
+   "instance": 2,
+   "ly": -1,
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "boss_friend_reverse2",
+   "expr": "pos('P_EX100',2)"
+  },
+  {
+   "do": "save",
    "as": "boss_friend_moved",
-   "expr": "[dist(saved['boss_friend_pos'][0],pos('P_EX100',1)), dist(saved['boss_friend_pos'][1],pos('P_EX100',2))]"
+   "expr": "[max(dist(saved['boss_friend_pos'][i-1],saved[f'boss_friend_forward{i}']),dist(saved[f'boss_friend_forward{i}'],saved[f'boss_friend_reverse{i}'])) for i in (1,2)]"
   },
   {
    "do": "assert",
-   "expr": "min(saved['boss_friend_moved'])>30",
-   "message": "A friend could not move during the boss fight (client input still held)"
+   "expr": "all(peek('0x7435D0','u8',i)==255 for i in (1,2)) and min(saved['boss_friend_moved'])>30",
+   "message": "A friend did not move more than30 units in either direction during the boss fight, or a menu remained active"
   },
   {
    "do": "assert",
