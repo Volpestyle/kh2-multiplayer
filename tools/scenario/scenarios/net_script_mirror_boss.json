@@ -1,6 +1,6 @@
 {
   "name": "net_script_mirror_boss",
-  "description": "VUH-2252: the host's script calls on a mirrored boss reach the client. Two instances with the player package's shipped defaults on a loopback relay; the host leads to the BC Thresholder fight (05/0B btl72, as in net_route_tt_hb_3p), both Soras fight, and both screens are filmed at the same time for a side-by-side clip. The inject logs' per-second [script-mirror] lines are the message counts: calls the host saw, repeats that cost nothing on the wire, records and packets sent, and what the client applied. Soras are protected (team 0).",
+  "description": "VUH-2252: the host's script calls on a mirrored boss reach the client. Two instances with the player package's shipped defaults on a loopback relay; the host leads to the BC Thresholder fight (05/0B btl72 as in net_route_tt_hb_3p, but evt 0: no intro event, whose hold pressed Start on a client still in the previous room and crashed its two-player pause menu at exe+0x36A4AB in run vuh2252-boss-01), both Soras fight, and both screens are filmed at the same time for a side-by-side clip. The inject logs' per-second [script-mirror] lines are the message counts: calls the host saw, repeats that cost nothing on the wire, records and packets sent, and what the client applied. Soras are protected (team 0).",
   "playerDefaults": true,
   "protect": [0, 1],
   "steps": [
@@ -16,8 +16,8 @@
     {"do": "wait_until", "expr": "log_count('[script-mirror] swap ok', 0)>0", "timeoutMs": 15000},
     {"do": "checkpoint", "name": "1 Boss: Thresholder fight (BC 05/0B btl72)"},
     {"do": "save", "as": "notices_start", "expr": "[runtime_log(i).count('Desync notice') for i in range(2)]"},
-    {"do": "warp", "instance": 0, "world": 5, "room": 11, "door": 0, "map": 0, "btl": 72, "evt": 32767},
-    {"do": "wait_until", "expr": "location(0)==[5,11,0,0,72,32767] and location(1)==location(0)", "timeoutMs": 40000},
+    {"do": "warp", "instance": 0, "world": 5, "room": 11, "door": 0, "map": 0, "btl": 72, "evt": 0},
+    {"do": "wait_until", "expr": "location(0)[:5]==[5,11,0,0,72] and location(1)[:5]==location(0)[:5]", "timeoutMs": 40000},
     {"do": "wait_until", "expr": "all(any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(2))", "timeoutMs": 30000},
     {"do": "capture", "instance": 0, "name": "boss_arrive"},
     {"do": "capture", "instance": 1, "name": "boss_arrive"},
