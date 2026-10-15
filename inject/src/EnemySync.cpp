@@ -3927,7 +3927,7 @@ bool ReceiveWorldPackets() {
                         continue;
                     }
                     ResetOrdinaryLifecycle(); // retire old history before this batch can carry the new cut
-                    g_emissionLedger.Clear(); g_emissionDeniedLogs = 0;
+                    g_emissionLedger.Clear();g_localEmissionBirths.clear(); g_emissionDeniedLogs = 0;
                     ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority
                     g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
                     g_spawnPickUnknownEpoch = 0;
@@ -4583,6 +4583,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         local.point = {s.spawnPos.x, s.spawnPos.y, s.spawnPos.z};
         local.prior = s.ordinaryBinding;
         local.certificateRequired=certified;
+        if(!certified && g_resyncWriteFence==ResyncWriteFence::None)local.birthId=LocalEmissionBirthId(native);
         if(certified)local.certifiedId=OrdinaryCertifiedId(census,native,ordinaryBefore);
         local.available = !(s.killed && native.hp > 0); // observed lifetime contradiction stays unmatched
         local.living = native.hp > 0;
@@ -4594,6 +4595,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
             hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed,h.left});
     }
     if(certified && (!FreshRecordCatalog(census,ordinaryAfter) || !SameRecordCatalogSample(ordinaryBefore,ordinaryAfter)))return holdAll();
+    if(!certified && g_resyncWriteFence==ResyncWriteFence::None)RetireAbsentEmissionBirths(census);
     const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame});
     if (WorldSessionGeneration() != generation || !CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
     // The entire fresh population is resolved before any native HP/death write.
@@ -4617,6 +4619,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         }
         s.ordinaryLogReason = static_cast<int>(d.reason);
         s.ordinaryLogCandidate = d.candidate;
+        if(d.id>0)AdoptEmissionBirth(identity.actor,d.id);
         s.ordinaryBinding = d.next;
         s.netId = d.id > 0 ? d.id : -1;
     }
@@ -5495,7 +5498,7 @@ void OnFrameStart(std::uint32_t frame) {
         // VUH-2292: publish old leave and replacement identity before allowing
         // its native emission on friends, even when reliable delivery splits.
         PublishFieldObjects(frame,census);
-        FlushSpawnEmissions();
+        FlushSpawnEmissions(census);
         CapturePopulationBirths(census); // only the successfully announced, current incarnation
         PublishPopulationCut(census);
         PublishHostMotion(frame, census);
@@ -6099,30 +6102,58 @@ void CaptureHostActivation(const float* position4) {
     }
 }
 
-bool SpawnEmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* trigger, bool emitted) {
-    if (!spawncontroller::IsDiagnosticGameThread()) return false;
-    const auto role = CurrentRole();
-    if (role == Role::Client) {
-        RoomTransition room;
-        const bool allowed = ActivationContext(Role::Client, room) && g_lastRoomPacket &&
-            sameActivationLocation(room, *g_lastRoomPacket) && g_emissionLedger.Permit(key, header, record, emitted);
-        if (g_log && (emitted || (!allowed && g_emissionDeniedLogs++ < 32)))
-            g_log("[spawn-emission] client %s epoch=%u key=%u header=%u record=%u", emitted ? "emitted" : "blocked", g_host.epoch, key, header, record);
-        return allowed;
+bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t record,const float* trigger,
+                         spawncontroller::EmissionPhase phase,spawncontroller::EmissionPermit& permit,
+                         const spawncontroller::EmissionBirth* birth) {
+    using spawncontroller::EmissionPhase;
+    if(!spawncontroller::IsDiagnosticGameThread())return false;
+    const auto role=CurrentRole();
+    if(role==Role::Client) {
+        if(phase==EmissionPhase::Cancel || phase==EmissionPhase::Abandon) {
+            if(!EmissionPermitCurrent(permit))return false;
+            return phase==EmissionPhase::Cancel ? g_emissionLedger.Cancel(permit.sequence) :
+                g_emissionLedger.Commit(permit.sequence); // ambiguous birth gets no retry or ticket
+        }
+        if(phase==EmissionPhase::Reserve) {
+            RoomTransition room;
+            if(!ActivationContext(Role::Client,room) || !g_lastRoomPacket || !sameActivationLocation(room,*g_lastRoomPacket))return false;
+            const auto* e=g_emissionLedger.Reserve(key,header,record);
+            if(!e){if(g_log && g_emissionDeniedLogs++<32)g_log("[spawn-emission] client blocked epoch=%u key=%u header=%u record=%u",g_host.epoch,key,header,record);return false;}
+            permit={};permit.sequence=e->sequence;permit.netId=e->netId;permit.epoch=e->location.epoch;
+            permit.generation=WorldSessionGeneration();permit.load=warp::LoadSerial();permit.transition=warp::TransitionSerial();
+            permit.hostConnection=g_bridge.ConnectionId(0);permit.hostDelivery=g_bridge.PeerDeliverySerial(0);permit.writerDelivery=g_bridge.DeliverySerial();
+            if(!EmissionPermitCurrent(permit))return false;
+            return true;
+        }
+        if(!EmissionPermitCurrent(permit))return false;
+        const auto* e=g_emissionLedger.Pending(key,header,record);
+        if(!e || e->sequence!=permit.sequence || e->netId!=permit.netId || !g_emissionLedger.Commit(permit.sequence))return false;
+        if(g_log)g_log("[spawn-emission] client emitted epoch=%u key=%u header=%u record=%u netId=%u seq=%llu",
+            g_host.epoch,key,header,record,permit.netId,static_cast<unsigned long long>(permit.sequence));
+        // Unknown metadata never becomes helper0, nor reusable spawn permission.
+        if(!birth || !birth->available || (permit.netId==0)!=birth->helper) {
+            if(g_log)g_log("[spawn-birth] refused reason=returned-root-or-class netId=%u seq=%llu",permit.netId,static_cast<unsigned long long>(permit.sequence));
+            return true;
+        }
+        if(permit.netId && !RecordFamily(birth->objectId) && g_resyncWriteFence==ResyncWriteFence::None &&
+           !OrdinaryLifecycleRoom() && g_localEmissionBirths.size()<SPAWN_EMISSION_CAP) {
+            g_localEmissionBirths.push_back({*birth,permit,g_hitTraceFrame,false,false,{g_hitTraceFrame,g_hitTraceFrame}});
+            if(g_log)g_log("[spawn-birth] ticket frame=%u netId=%u seq=%llu actor=%llX objectId=%u",g_hitTraceFrame,permit.netId,
+                static_cast<unsigned long long>(permit.sequence),static_cast<unsigned long long>(birth->actor),birth->objectId);
+        }
+        return true;
     }
-    if (role != Role::Host || !emitted || !trigger || !WorldSessionGeneration() || g_emissionSequence == UINT64_MAX) return false;
-    RoomTransition location;
-    if (!ReadLocationChecked(location)) return false;
-    // Bound pending storage and retire stale loads before accepting new facts.
-    std::erase_if(g_emissionOutbox, [](const PendingSpawnEmission& p) {
-        return p.generation != WorldSessionGeneration() || p.transition != warp::TransitionSerial() || p.load != warp::LoadSerial();
-    });
-    if (g_emissionOutbox.size() >= SPAWN_EMISSION_CAP) return false;
-    SpawnEmission value {location, ++g_emissionSequence, key, header, record, {}};
-    std::copy_n(trigger, 4, value.point.begin());
-    g_emissionOutbox.push_back({value, WorldSessionGeneration(), warp::TransitionSerial(), warp::LoadSerial()});
-    return true;
+    const auto generation=WorldSessionGeneration();
+    if(role!=Role::Host || phase!=EmissionPhase::Birth || !trigger || !birth || !birth->available ||
+       !generation || g_emissionSequence==UINT64_MAX)return false;
+    RoomTransition location;if(!ReadLocationChecked(location))return false;
+    std::erase_if(g_emissionOutbox,[generation](const PendingSpawnEmission& p){return p.generation!=generation ||
+        p.transition!=warp::TransitionSerial() || p.load!=warp::LoadSerial();});
+    if(g_emissionOutbox.size()>=SPAWN_EMISSION_CAP)return false;
+    SpawnEmission value{location,++g_emissionSequence,key,header,record,{}};std::copy_n(trigger,4,value.point.begin());
+    g_emissionOutbox.push_back({value,*birth,generation,warp::TransitionSerial(),warp::LoadSerial(),{g_hitTraceFrame,g_hitTraceFrame}});return true;
 }
+
 bool CopySpawnEmissionPoint(std::uint32_t key, std::uint16_t header, float* output) {
     RoomTransition room;
     if (!output || !ActivationContext(Role::Client, room) || !g_lastRoomPacket ||

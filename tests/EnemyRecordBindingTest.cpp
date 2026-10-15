@@ -87,6 +87,48 @@ void OrdinaryTerminalControls() {
           resolve(l,{1,302,point,false},{2,2,988}).id==0);
 }
 
+void OrdinaryBirthControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    ob::Local fresh;fresh.identity={11,12,13,14,15,2405};fresh.available=fresh.living=true;fresh.birthId=4;
+    const ob::Host dead{4,2405,{900,800,700},true};
+    auto resolve=[&](const ob::Local& l,std::vector<ob::Host> hs,ob::Scope scope=ob::Scope{2,3,101}) {
+        return ob::Resolve(std::array{l},hs,scope)[0];
+    };
+    check("exact receipt birth can adopt terminal occurrence without a positional death exemption",resolve(fresh,{dead}).id==4);
+    auto noTicket=fresh;noTicket.birthId=0;noTicket.point=dead.point;
+    check("same position without birth proof still refuses unestablished death",resolve(noTicket,{dead}).id==0);
+    check("receipt before manifest holds exact identity",resolve(fresh,{}).id==0);
+    check("later terminal manifest admits the retained exact ticket",resolve(fresh,{dead}).id==4);
+    auto mismatch=dead;mismatch.objectId=2407;
+    check("ticket cannot name another object class",resolve(fresh,{mismatch}).id==0);
+    auto removed=dead;removed.removed=true;
+    check("retired host identity never grants ticket death",resolve(fresh,{removed}).id==0);
+    auto certified=fresh;certified.certificateRequired=true;certified.certifiedId=4;
+    check("birth ticket cannot bypass certified lifecycle authority",resolve(certified,{dead}).id==0);
+    auto missing=fresh;missing.identity.controller=0;
+    check("missing native controller cannot use birth ticket",resolve(missing,{dead}).id==0);
+    missing=fresh;missing.identity.record=0;
+    check("missing native record cannot use birth ticket",resolve(missing,{dead}).id==0);
+    auto retired=fresh;retired.prior.removed=true;
+    check("removed local body cannot reuse birth ticket",resolve(retired,{dead}).id==0);
+    auto used=fresh;used.prior.highWater=4;
+    check("an earlier adoption prevents fresh terminal ticket exception",resolve(used,{dead}).id==0);
+    auto live=dead;live.dead=false;
+    auto adopted=resolve(fresh,{live});used=fresh;used.prior=adopted.next;used.birthId=0;
+    used.point=dead.point; // after adoption all ordinary point/continuity checks still apply
+    check("live-first birth adoption keeps ordinary contiguous death",resolve(used,{dead},{2,3,102}).id==4);
+    check("spent live birth ticket cannot repair a later continuity gap",resolve(used,{dead},{2,3,103}).id==0);
+    auto refill=live;refill.id=7;refill.point=dead.point;
+    check("exact old terminal ticket never selects newer same-point refill",resolve(fresh,{dead,refill}).id==4);
+    auto next=fresh;next.birthId=7;
+    check("new refill ticket selects its own distinct living occurrence",resolve(next,{dead,refill}).id==7);
+    next.birthId=8;
+    check("unknown ticket cannot fall back to a living same-point occurrence",resolve(next,{dead,refill}).id==0);
+    auto other=fresh;other.identity.actor=31;other.identity.status=33;other.birthId=0;other.point=dead.point;
+    const auto conflict=ob::Resolve(std::array{fresh,other},std::array{dead},ob::Scope{2,3,101});
+    check("whole census duplicate claimant blocks ticket and positional claimant",!conflict[0].id && !conflict[1].id && conflict[0].conflict && conflict[1].conflict);
+}
+
 void OrdinaryLifecycleControls() {
     namespace ob=kh2coop::inject::ordinarybinding;
     ob::Local l{{100,200,300,400,500,302},{1,2,3},{},true,true};
@@ -193,6 +235,7 @@ void SplitRefillDeliveryControls() {
 
 int main(int argc,char** argv) {
     OrdinaryRefillControls();
+    OrdinaryBirthControls();
 #ifndef RECORD_PURE_ONLY
     SplitRefillDeliveryControls();
 #endif
@@ -360,7 +403,7 @@ int main(int argc,char** argv) {
     check("unsupported schema refused",refused);
     m.entries[0].recordKey.reset();const auto ordinary=encode(m);decodePacketHeader(ordinary.data(),ordinary.size(),payload,size);
     ByteReader normal(payload,size);read(normal,decoded);check("default manifest has no experimental key",normal.atEnd()&&!decoded.entries[0].recordKey);
-    check("v14/v15 peers require the newer population protocol",PROTOCOL_VERSION==21);
+    check("v14/v15 peers require the newer population protocol",PROTOCOL_VERSION==22);
     if (argc>=2) {
         std::ifstream input(argv[1],std::ios::binary);
         for (const auto oid:{317u,76u}) {

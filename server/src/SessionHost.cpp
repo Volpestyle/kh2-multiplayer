@@ -1135,6 +1135,14 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     emission.sequence <= lastSpawnEmission_ || spawnEmissions_.size() >= SPAWN_EMISSION_CAP) {
                     ++rejectedWorld_; return;
                 }
+                if (emission.netId &&
+                    (manifest_.epoch != room_->epoch ||
+                     std::none_of(manifest_.entries.begin(), manifest_.entries.end(), [&](const auto& enemy) { return enemy.netId == emission.netId; }) ||
+                     std::any_of(spawnEmissions_.begin(), spawnEmissions_.end(), [&](const auto& prior) { return prior.netId == emission.netId; }))) {
+                    ++rejectedWorld_; return;
+                }
+                // Dead manifest members are valid: the host may have killed
+                // this exact birth before its reliable announcement arrives.
                 lastSpawnEmission_ = emission.sequence;
                 spawnEmissions_.push_back(emission);
                 lastHostSourceSerial_ = (std::max)(lastHostSourceSerial_, admittedScope->hostSourceSerial);

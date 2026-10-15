@@ -15,10 +15,28 @@ using CaptureFn = void (*)(const float* nativePoint4);
 // False holds a qualified client controller, including its native cooldown.
 // The owner validates epoch, full location, lifecycle, session and lease expiry.
 using CopyFn = bool (*)(float* output4, uintptr_t controller, std::uint64_t updateSequence);
-// Game-thread policy: false before a client call suppresses only this record.
-// Successful returns consume one client receipt or enqueue one host emission.
+enum class EmissionPhase : std::uint8_t { Reserve, Birth, Cancel, Abandon };
+struct EmissionPermit {
+    std::uint64_t sequence{},hostConnection{},hostDelivery{},writerDelivery{};
+    std::uint32_t generation{},epoch{},load{},transition{};
+    std::uint16_t netId{};
+};
+struct EmissionBirth {
+    uintptr_t actor{},objentry{},status{},controller{},record{},header{},spawnArray{};
+    std::uint32_t objectId{},objectType{},handle{},key{};
+    std::uint16_t headerId{},recordIndex{},records{};
+    std::array<std::uint8_t,64> recordBytes{};
+    bool available{},helper{};
+    bool operator==(const EmissionBirth&) const = default;
+};
+// Read-only root revalidation; grants no room, binding or death authority.
+bool EmissionBirthCurrent(const EmissionBirth& birth) noexcept;
+// Reserve one exact receipt around the native call. Cancel normal null returns;
+// ambiguous outcomes spend the reservation without a ticket;
+// a successful birth spends that receipt and retains checked local provenance.
 using EmissionFn = bool (*)(std::uint32_t key, std::uint16_t header, std::uint16_t record,
-                            const float* triggerPoint4, bool emitted);
+                            const float* triggerPoint4, EmissionPhase phase,
+                            EmissionPermit& permit, const EmissionBirth* birth);
 using ReplayFn = bool (*)(std::uint32_t key, std::uint16_t header, float* output4);
 
 // Default-off negative fence: current means only no observed known mutation

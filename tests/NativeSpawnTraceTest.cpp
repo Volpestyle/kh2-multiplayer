@@ -1940,7 +1940,7 @@ unsigned emissionUpdateCalls = 0, emissionCopyCalls = 0;
 std::array<float,4> emissionLastUpdatePoint {};
 std::array<float,4> emissionTrigger {};
 const void* emissionRecord = nullptr;
-bool emissionGenerated = false, emissionFault = false;
+bool emissionGenerated = false, emissionFault = false, emissionWrapperFault = false;
 void* emissionFiberRoot = nullptr;
 bool emissionFiberMode = false, emissionFiberPreserved = true;
 void __fastcall EmissionNativeUpdate(void* controller, const float* point) {
@@ -1976,11 +1976,20 @@ bool MixedCopy(float* out,uintptr_t,std::uint64_t) {
     ++emissionCopyCalls;std::copy(emissionTrigger.begin(),emissionTrigger.end(),out);return true;
 }
 PVOID WINAPI EmissionBadFls(DWORD) { return reinterpret_cast<void*>(1); }
-void* __fastcall EmissionFixed(const void*, void*) { ++emissionCalls; return emissionResult; }
-void* __fastcall EmissionGenerated(const void*, void*, const float*) { ++emissionCalls; return emissionResult; }
-bool EmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* point, bool emitted) {
-    if (emissionRole == 2) return emissionLedger.Permit(key,header,record,emitted);
-    if (emitted && point) { ++emissionPublished; std::copy_n(point,4,emissionTrigger.begin()); }
+void* __fastcall EmissionFixed(const void*, void*) { ++emissionCalls;if(emissionWrapperFault)RaiseException(kDeliberateException,0,0,nullptr);return emissionResult; }
+void* __fastcall EmissionGenerated(const void*, void*, const float*) { ++emissionCalls;if(emissionWrapperFault)RaiseException(kDeliberateException,0,0,nullptr);return emissionResult; }
+bool EmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t record,const float* point,
+                    EmissionPhase phase,EmissionPermit& permit,const EmissionBirth*) {
+    if(emissionRole==2) {
+        if(phase==EmissionPhase::Reserve) {
+            const auto* e=emissionLedger.Reserve(key,header,record);if(!e)return false;
+            permit.sequence=e->sequence;permit.netId=e->netId;return true;
+        }
+        if(phase==EmissionPhase::Cancel)return emissionLedger.Cancel(permit.sequence);
+        if(phase==EmissionPhase::Abandon)return emissionLedger.Commit(permit.sequence);
+        return emissionLedger.Commit(permit.sequence);
+    }
+    if(phase==EmissionPhase::Birth && point){++emissionPublished;std::copy_n(point,4,emissionTrigger.begin());}
     return true;
 }
 void EmissionControls(std::uint8_t* image) {
@@ -2002,7 +2011,36 @@ void EmissionControls(std::uint8_t* image) {
     Check(g_emissionStorage.Init(reinterpret_cast<const void*>(&EmissionControls)),"emission FLS storage initializes");
     g_diagnosticGameThread=GetCurrentThreadId();emissionLedger.Clear();emissionCalls=emissionPublished=0;
     auto* record=records.data()+44;alignas(16) float point[4]{1,2,3,1};
-    emissionRecord=record;emissionRole=2;emissionResult=&controller;
+    std::array<std::uint8_t,0xA00> born{};std::array<int,2> bornStatus{100,100};
+    put(born.data(),std::uint32_t{123});put(born.data()+0x918,reinterpret_cast<uintptr_t>(emissionObject));
+    put(born.data()+0x5C0,reinterpret_cast<uintptr_t>(bornStatus.data()));
+    put(born.data()+0x9E8,reinterpret_cast<uintptr_t>(&controller));put(born.data()+0x9F0,reinterpret_cast<uintptr_t>(record));
+    emissionRecord=record;emissionRole=2;emissionResult=born.data();
+    std::array<std::uint8_t,64> birthRecord{};std::memcpy(birthRecord.data(),record,64);
+    const auto birthQ=Qualify(reinterpret_cast<uintptr_t>(&controller));
+    const auto captured=CaptureEmissionBirth(born.data(),birthQ,record,birthRecord);
+    Check(captured.available && EmissionBirthCurrent(captured),"successful wrapper captures exact current actor/objentry/status/controller/record/handle roots");
+    put(born.data()+0x5C0,uintptr_t{0});
+    const auto initializing=CaptureEmissionBirth(born.data(),birthQ,record,birthRecord);
+    Check(initializing.available && !initializing.status && EmissionBirthCurrent(initializing),"normally returned birth retains provenance before native status initialization");
+    put(born.data()+0x5C0,reinterpret_cast<uintptr_t>(bornStatus.data()));
+    auto completed=initializing;completed.status=reinterpret_cast<uintptr_t>(bornStatus.data());
+    Check(EmissionBirthCurrent(completed) && !EmissionBirthCurrent(initializing),"one-way status completion still requires exact returned roots and fresh current status");
+    std::array<int,2> replacementStatus{100,100};put(born.data()+0x5C0,reinterpret_cast<uintptr_t>(replacementStatus.data()));
+    Check(!EmissionBirthCurrent(completed),"completed status is frozen and cannot be completed again on a later publication retry");
+    put(born.data()+0x5C0,reinterpret_cast<uintptr_t>(bornStatus.data()));
+    put(born.data(),std::uint32_t{124});Check(!EmissionBirthCurrent(completed),"deferred status cannot donate a replacement handle");put(born.data(),std::uint32_t{123});
+    put(born.data(),std::uint32_t{124});Check(!EmissionBirthCurrent(captured),"same-address handle reuse refuses birth proof");put(born.data(),std::uint32_t{123});
+    for(auto offset:{0x918u,0x5C0u,0x9E8u,0x9F0u}) {
+        uintptr_t prior=0;std::memcpy(&prior,born.data()+offset,8);put(born.data()+offset,uintptr_t{0});
+        Check(!EmissionBirthCurrent(captured),"changed birth root refuses proof");put(born.data()+offset,prior);
+    }
+    record[4]=1;Check(!EmissionBirthCurrent(captured),"changed native record bytes refuse proof");record[4]=0;
+    controller.key=1235;Check(!EmissionBirthCurrent(captured),"changed controller key refuses birth proof");controller.key=1234;
+    put(records.data()+2,std::uint16_t{751});Check(!EmissionBirthCurrent(captured),"changed header id refuses birth proof");put(records.data()+2,std::uint16_t{750});
+    const auto savedSpawnArray=controller.spawnArray;controller.spawnArray+=64;
+    Check(!EmissionBirthCurrent(captured),"changed spawn array refuses birth proof");controller.spawnArray=savedSpawnArray;
+    objects[12]=3;Check(!EmissionBirthCurrent(captured),"changed objentry class refuses proof");objects[12]=4;
     Check(Qualify(reinterpret_cast<uintptr_t>(&controller)).scope==Scope::Qualified,"emission fixture qualifies through production object and controller reads");
     CallEmissionUpdate(&controller,point);
     Check(emissionCalls==0,"native fixed wrapper denied without a host receipt");
@@ -2017,17 +2055,21 @@ void EmissionControls(std::uint8_t* image) {
     kh2coop::SpawnEmission e{{7,4,0x15,0,0,26,0},1,1234,750,0,{1,2,3,1}};emissionLedger.Add(e);
     emissionResult=nullptr;CallEmissionUpdate(&controller,point);
     Check(emissionCalls==1 && emissionLedger.Permit(1234,750,0,false),"native null allocation keeps receipt pending");
-    emissionResult=&controller;
+    emissionResult=born.data();
     emissionGenerated=true;CallEmissionUpdate(&controller,point);emissionGenerated=false;
     Check(emissionCalls==2 && !emissionLedger.Permit(1234,750,0,false),"successful generated native return consumes receipt once");
     CallEmissionUpdate(&controller,point);
     Check(emissionCalls==2,"duplicate native spawn is suppressed after consumption");
+    emissionLedger.Clear();e.sequence=2;emissionLedger.Add(e);emissionWrapperFault=true;
+    Check(CatchEmissionUpdate(&controller,point),"native wrapper unwind propagates");emissionWrapperFault=false;
+    Check(!emissionLedger.Permit(1234,750,0,false),"ambiguous allocation unwind spends exact receipt without retry");
+    emissionCalls=2;
     emissionRole=1;CallEmissionUpdate(&controller,point);
     Check(emissionCalls==3 && emissionPublished==1 && emissionTrigger==e.point,"successful host native return announces its enclosing trigger");
     emissionResult=nullptr;CallEmissionUpdate(&controller,point);
     Check(emissionPublished==1,"failed host allocation announces nothing");
-    emissionRole=2;emissionResult=&controller;
-    Check(HookedWrapper(record,&controller)==&controller && emissionCalls==5,"script producer outside verified update keeps native behavior");
+    emissionRole=2;emissionResult=born.data();
+    Check(HookedWrapper(record,&controller)==born.data() && emissionCalls==5,"script producer outside verified update keeps native behavior");
     emissionFault=true;Check(CatchEmissionUpdate(&controller,point),"native emission update unwind propagates");emissionFault=false;
     Check(!g_emissionStorage.Current()->available,"native unwind clears the emission scope");
     emissionRole=1;emissionFiberMode=true;
@@ -2069,7 +2111,7 @@ void EmissionControls(std::uint8_t* image) {
     Check(!qualifies(),"different mixed controller key stays excluded");mixedController.key--;
     put(image+CONTROLLER_TABLE,TableEntry{mixedController.key,0,reinterpret_cast<uintptr_t>(&mixedController)});
     image[kh2coop::offsets::NOW+1]=20;Check(!qualifies(),"other room stays excluded");image[kh2coop::offsets::NOW+1]=21;
-    emissionLedger.Clear();emissionRecord=mixed.data()+44;emissionGenerated=false;emissionRole=2;emissionResult=&mixedController;
+    emissionLedger.Clear();emissionRecord=mixed.data()+44;emissionGenerated=false;emissionRole=2;emissionResult=born.data();
     g_capture=&PhaseCapture;g_copy=&MixedCopy;g_replay=&MixedReplay;
     const auto updatesBefore=emissionUpdateCalls;emissionCopyCalls=0;
     RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
@@ -2077,6 +2119,8 @@ void EmissionControls(std::uint8_t* image) {
     for(unsigned i=0;i<5;++i) {
         kh2coop::SpawnEmission receipt{{7,4,21,0,1,26,32767},i+1,mixedController.key,753,static_cast<std::uint16_t>(i),{-900,700,142,1}};
         emissionLedger.Add(receipt);emissionRecord=mixed.data()+44+i*64;
+        put(born.data()+0x918,reinterpret_cast<uintptr_t>(ids[i]==2406 ? helper : mixedObjects.data()+8));
+        put(born.data()+0x9E8,reinterpret_cast<uintptr_t>(&mixedController));put(born.data()+0x9F0,reinterpret_cast<uintptr_t>(emissionRecord));
         const auto calls=emissionCalls;
         RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
         Check(emissionCalls==calls+1 && emissionLastUpdatePoint==receipt.point && !emissionLedger.Permit(mixedController.key,753,static_cast<std::uint16_t>(i),false),

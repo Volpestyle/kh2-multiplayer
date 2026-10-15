@@ -1,0 +1,347 @@
+{
+  "name": "net_spawn_emission_hb750_late_birth_3p",
+  "description": "VUH-2302 phase(b): pause both original friend runtimes for at most2s while host enters750, announces record0 and natively kills its uniquely live Hammer2405. Resume in finally; require that exact ticket adopted already terminal on both friends, all five receipts consumed, remaining four bodies at HP parity, then native host clear with empty matching populations and no desync.",
+  "playerDefaults": true,
+  "protect": [
+    0,
+    1,
+    2
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_SPAWN_TRACE": "1"
+      }
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_SPAWN_TRACE": "1"
+      }
+    },
+    {
+      "do": "boot",
+      "instance": 2,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_SPAWN_TRACE": "1"
+      }
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay",
+      "port": 27796,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+      "timeoutMs": 30000,
+      "pollMs": 1000
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 21,
+      "door": 0,
+      "map": 1,
+      "btl": 26,
+      "evt": 32767
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(location(i)==[4,21,0,1,26,32767] and any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))",
+      "timeoutMs": 40000
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','859.696,450,-599.768']"
+    },
+    {
+      "do": "wait",
+      "ms": 2000
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "geometry750",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 1,
+      "intervalMs": 0,
+      "controllerIdCoverage": true
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemy_hps(0))==3 and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+      "timeoutMs": 15000
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "kill"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(len(enemy_hps(i))==0 for i in range(3))",
+      "timeoutMs": 15000
+    },
+    {
+      "do": "save",
+      "as": "admission_cleared",
+      "expr": "[(peek(0x2A0F7DC,'f32',i),peek(0x2A0F830,'f32',i)) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "controllers750",
+      "expr": "[[c for c in saved['geometry750']['snapshots'][0]['peers'][str(i)]['causeContext']['controllers'] if c.get('headerFields',{}).get('headerId')==750][0] for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(c['geometry']['complete'] and c['geometry']['bytesStable'] and c['key']==saved['controllers750'][0]['key'] for c in saved['controllers750'])",
+      "message": "All three peers must expose the same live controller 750 with stable native region geometry"
+    },
+    {
+      "do": "save",
+      "as": "regions750",
+      "expr": "[c['geometry']['regions'][0] for c in saved['controllers750']]"
+    },
+    {
+      "do": "save",
+      "as": "center750",
+      "expr": "[saved['controllers750'][0]['geometry']['descriptors'][saved['regions750'][0]['descriptorIndex']]['position'][j]+(80 if j==1 else 0) for j in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "notices_start",
+      "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(log_matches(r'\\[spawn-emission\\] sent .*header=750 ',0))==0",
+      "message": "Host must start outside the 750 emission region"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value',','.join(str(v) for v in saved['center750'])]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 2,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value',','.join(str(v) for v in saved['center750'])]"
+    },
+    {
+      "do": "wait",
+      "ms": 500
+    },
+    {
+      "do": "save",
+      "as": "friends_in750",
+      "expr": "[pos('P_EX100',i) for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "friends_local750",
+      "expr": "[[sum(saved['regions750'][i]['inverseMatrix'][j+k*4]*saved['friends_in750'][i][k] for k in range(3))+saved['regions750'][i]['inverseMatrix'][j+12] for j in range(3)] for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all((saved['regions750'][i]['kind']=='BOX' and all(abs(saved['friends_local750'][i][j])<saved['regions750'][i]['extents'][j] for j in range(3))) or (saved['regions750'][i]['kind']=='CYLINDER' and abs(saved['friends_local750'][i][1])<saved['regions750'][i]['extents'][1] and sum((saved['friends_local750'][i][j]/saved['regions750'][i]['extents'][j])**2 for j in (0,2))<1) for i in (1,2))",
+      "message": "Both friends must be strictly inside controller 750's actual native region"
+    },
+    {
+      "do": "assert",
+      "expr": "not (all((saved['regions750'][i]['kind']=='BOX' and all(abs(saved['friends_local750'][i][j])<saved['regions750'][i]['extents'][j] for j in range(3))) or (saved['regions750'][i]['kind']=='CYLINDER' and abs(saved['friends_local750'][i][1])<saved['regions750'][i]['extents'][1] and sum((saved['friends_local750'][i][j]/saved['regions750'][i]['extents'][j])**2 for j in (0,2))<1) for i in (0,)))",
+      "message": "The host must remain outside the same native controller-750 region during the friend-only entry control"
+    },
+    {
+      "do": "wait",
+      "ms": 4000
+    },
+    {
+      "do": "assert",
+      "expr": "len(log_matches(r'\\[spawn-emission\\] sent .*header=750 ',0))==0 and all(len(log_matches(r'\\[spawn-emission\\] client emitted .*header=750 ',i))==0 for i in (1,2))",
+      "message": "Friends reaching 750 must not emit a wave before the host enters"
+    },
+    {
+      "do": "save",
+      "as": "prehost_camo",
+      "expr": "[[(a['objectId'],a['hp'],a['address']) for a in enemies(i) if a['objectId']==2407 and a['hp']>0] for i in range(3)]"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "friends_750_host_outside"
+    },
+    {
+      "do": "spawn_late_birth",
+      "as": "late_birth750",
+      "maxPauseMs": 2000
+    },
+    {
+      "do": "assert",
+      "expr": "saved['late_birth750']['completed'] and saved['late_birth750']['resumedAll'] and saved['late_birth750']['friendEmittedBeforeDeath']=={'1':0,'2':0} and saved['late_birth750']['hostDeaths']==[int(saved['late_birth750']['hostTarget']['netId'])]",
+      "message": "Both original friend runtimes resume after exact record0 Hammer terminal publication; neither friend emitted750 before its death"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(any(e['netId']==saved['late_birth750']['hostTarget']['netId'] and e['seq']==saved['late_birth750']['hostTarget']['seq'] and e['record']=='0' for e in log_matches('\\\\[spawn-emission\\\\] client emitted epoch=(?P<epoch>\\\\d+) key=(?P<key>\\\\d+) header=750 record=(?P<record>\\\\d+) netId=(?P<netId>\\\\d+) seq=(?P<seq>\\\\d+)',i)) and any(a['netId']==a['expected'] and a['netId']==saved['late_birth750']['hostTarget']['netId'] and a['seq']==saved['late_birth750']['hostTarget']['seq'] and a['objectId']=='2405' and a['terminal']=='1' for a in log_matches('\\\\[spawn-birth\\\\] adopted frame=(?P<frame>\\\\d+) netId=(?P<netId>\\\\d+) expected=(?P<expected>\\\\d+) seq=(?P<seq>\\\\d+) actor=(?P<actor>[0-9A-Fa-f]+) objectId=(?P<objectId>\\\\d+) terminal=(?P<terminal>[01])',i)) for i in (1,2))",
+      "timeoutMs": 15000,
+      "pollMs": 100
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches('\\\\[spawn-emission\\\\] sent epoch=(?P<epoch>\\\\d+) seq=(?P<seq>\\\\d+) key=(?P<key>\\\\d+) header=750 record=(?P<record>\\\\d+) netId=(?P<netId>\\\\d+) ',0))==5 and sorted(int(h['record']) for h in log_matches('\\\\[spawn-emission\\\\] sent epoch=(?P<epoch>\\\\d+) seq=(?P<seq>\\\\d+) key=(?P<key>\\\\d+) header=750 record=(?P<record>\\\\d+) netId=(?P<netId>\\\\d+) ',0))==[0,1,2,3,4] and len(set(h['netId'] for h in log_matches('\\\\[spawn-emission\\\\] sent epoch=(?P<epoch>\\\\d+) seq=(?P<seq>\\\\d+) key=(?P<key>\\\\d+) header=750 record=(?P<record>\\\\d+) netId=(?P<netId>\\\\d+) ',0)))==5",
+      "timeoutMs": 20000,
+      "pollMs": 250
+    },
+    {
+      "do": "save",
+      "as": "all_host750",
+      "expr": "log_matches('\\\\[spawn-emission\\\\] sent epoch=(?P<epoch>\\\\d+) seq=(?P<seq>\\\\d+) key=(?P<key>\\\\d+) header=750 record=(?P<record>\\\\d+) netId=(?P<netId>\\\\d+) ',0)"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(all(any(e['netId']==h['netId'] and e['seq']==h['seq'] and e['record']==h['record'] for e in log_matches('\\\\[spawn-emission\\\\] client emitted epoch=(?P<epoch>\\\\d+) key=(?P<key>\\\\d+) header=750 record=(?P<record>\\\\d+) netId=(?P<netId>\\\\d+) seq=(?P<seq>\\\\d+)',i)) for h in saved['all_host750']) for i in (1,2))",
+      "timeoutMs": 20000,
+      "pollMs": 250
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(enemy_hps(0))==4 and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+      "timeoutMs": 20000,
+      "pollMs": 250
+    },
+    {
+      "do": "statehash_check",
+      "as": "late_birth_remaining",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 4,
+      "consecutiveSamples": 2,
+      "timeoutMs": 15000
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 3,
+      "fps": 10,
+      "name": "late_birth_host_remaining4"
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "seconds": 3,
+      "fps": 10,
+      "name": "late_birth_friend1_remaining4"
+    },
+    {
+      "do": "clip",
+      "instance": 2,
+      "seconds": 3,
+      "fps": 10,
+      "name": "late_birth_friend2_remaining4"
+    },
+    {
+      "do": "hit_all",
+      "instance": 0,
+      "op": "kill"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(len(enemy_hps(i))==0 for i in range(3))",
+      "timeoutMs": 15000,
+      "pollMs": 250
+    },
+    {
+      "do": "statehash_check",
+      "as": "late_birth_empty",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 15000
+    },
+    {
+      "do": "save",
+      "as": "late_birth_metrics",
+      "expr": "{'pausedMs':saved['late_birth750']['pausedMs'],'hostLiveMs':saved['late_birth750']['hostLiveMs'],'hostTerminalPublishedMs':saved['late_birth750']['hostTerminalPublishedMs'],'target':saved['late_birth750']['hostTarget'],'friends':[{'instance':i,'consumed':len([e for e in log_matches('\\\\[spawn-emission\\\\] client emitted epoch=(?P<epoch>\\\\d+) key=(?P<key>\\\\d+) header=750 record=(?P<record>\\\\d+) netId=(?P<netId>\\\\d+) seq=(?P<seq>\\\\d+)',i) if any(e['netId']==h['netId'] and e['seq']==h['seq'] for h in saved['all_host750'])]),'terminalRecord0':len([a for a in log_matches('\\\\[spawn-birth\\\\] adopted frame=(?P<frame>\\\\d+) netId=(?P<netId>\\\\d+) expected=(?P<expected>\\\\d+) seq=(?P<seq>\\\\d+) actor=(?P<actor>[0-9A-Fa-f]+) objectId=(?P<objectId>\\\\d+) terminal=(?P<terminal>[01])',i) if a['netId']==a['expected'] and a['netId']==saved['late_birth750']['hostTarget']['netId'] and a['seq']==saved['late_birth750']['hostTarget']['seq'] and a['objectId']=='2405' and a['terminal']=='1']),'remainingBeforeClear':saved['late_birth_remaining']['instances'][str(i)]['count'],'living':len(enemy_hps(i)),'unmatched':saved['late_birth_empty']['instances'][str(i)]['unmatched']} for i in (1,2)]}"
+    },
+    {
+      "do": "assert",
+      "expr": "all(p['consumed']==5 and p['terminalRecord0']==1 and p['remainingBeforeClear']==4 and p['living']==0 and p['unmatched']==0 for p in saved['late_birth_metrics']['friends'])",
+      "message": "Both friends adopt terminal record0 via its exact ticket, consume all five750 receipts, converge the remaining four and clear without living unmatched copies"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "late_birth_friend1_empty"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "late_birth_friend2_empty"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['prehost_camo']==[[],[],[]] and all(log_count('unsupported producer=outside-update',i)==0 for i in range(3))",
+      "message": "No friend-only Camo before the host wave or unsupported producer bypass"
+    },
+    {
+      "do": "assert",
+      "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+      "message": "No desync through late exact-netId birth, remaining wave convergence and terminal removal"
+    }
+  ]
+}

@@ -805,6 +805,13 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             // restore state after a targeted resend without minting a sequence.
             enemyHpSequence_ = hp.sequence;
             admittedHp = std::move(hp);
+        } else if (type == PacketType::SpawnEmission) {
+            SpawnEmission emission; read(reader, emission);
+            if (!admittedScope || admittedScope->kind != WorldSourceKind::Native ||
+                !avatarConnections_[0] || admittedScope->sourceConnectionId != avatarConnections_[0] ||
+                !hostRoom_ || !sameResyncRoom(emission.location, *hostRoom_)) return;
+            // Cache order intentionally permits receipts before the manifest.
+            // The game-thread ledger supplies one-use birth admission.
         } else if (type == PacketType::FieldObjects) {
             FieldObjects fields; read(reader, fields);
             if (!admittedScope || admittedScope->kind != WorldSourceKind::Native ||

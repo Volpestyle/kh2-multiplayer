@@ -1719,3 +1719,32 @@ Clients tick it only on a pending receipt's historical point; without a receipt
 they hold the ordinary update. Other mixed/noncombat controllers remain excluded.
 All object-table, layout, static-mode and lifecycle checks still apply. Native
 admission and HP handling are unchanged.
+
+### Late native births (VUH-2302)
+
+Protocol22 appends the exact host manifest netId to each combat emission receipt.
+The host joins the normally returned native birth to a fresh census and an
+announced manifest occurrence after HostFrame succeeds. Unreadable combat roots
+refuse publication; only positively identified noncombat helpers use netId0.
+The relay requires a known current-room occurrence, including terminal ones.
+
+Clients reserve one immutable receipt sequence across the native wrapper. A
+normal null return cancels the reservation for retry; a successful or ambiguous
+allocation spends it once. A successful checked combat birth retains actor,
+handle, objentry, status, controller, header, indexed record and record content,
+plus session/delivery/load/transition scope. Native status can still be null at
+wrapper return; a fresh census completes it once only after revalidating all
+captured immutable roots and the native handle. Nonzero status is then frozen.
+A still-null status may wait at most32 owner observations with fresh complete
+linked-list membership and unchanged birth roots; absence or drift refuses it.
+This pending observation supplies no binding authority. Every census rechecks these roots
+and continuous membership. An unspent ticket selects only its exact netId,
+including a host death delivered before local allocation. It cannot select a
+newer refill at the same point. Whole-census conflicts still refuse all claimants;
+certified lifecycle, record-family and resync authority remain separate.
+
+First committed adoption, live or dead, spends the exception. Later gaps use the
+ordinary unchanged continuous-death rules. Native death/removal still runs once
+through the existing checked path. No positional dead-body exception, admission
+budget, capacity or HP-policy adjustment is introduced. Matched protocol22
+products are required on all peers.

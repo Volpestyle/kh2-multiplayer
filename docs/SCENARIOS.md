@@ -3171,3 +3171,19 @@ its live profile reuses the existing `MenuLiveness` helper rather than relaxing
 the gameplay hang watchdog. Synchronized playback, populated holds and
 reconnect during a hold remain outside this result.
 The standard fixture also passes: `20261013-063723_net_host_cutscene_skip_1`, 111.4 s, 28 steps, including exact room/progress equality, suppressed then restored movement, and two reviewed client clips. Four saves unchanged and owned processes closed.
+
+### Host death before delayed wave allocation
+
+`net_spawn_emission_hb750_late_birth_3p.json` reuses the corrected native750
+geometry and friend-only entry control. Its `spawn_late_birth` step holds only
+the runner's two original friend runtime HANDLEs, after checking executable and
+bound game PID. It lets the host emit and kill the first Hammer2405 (record0),
+waits for that exact host death publication, and resumes both transports in a
+`finally` block. The hold is bounded to2000ms and always records recovery.
+It changes no controller, cache, budget or save state.
+
+Both friends must adopt that exact already-terminal Hammer2405, then consume
+all five wave receipts and match the four remaining native enemies' IDs and HP.
+After the host clears them, every peer must reach an empty native population
+and unmatched0. A run without terminal record0 adoption is insufficient.
+The helper preserves a JSON timing/receipt/recovery artifact even on failure.

@@ -1435,7 +1435,11 @@ loaded, get several instances into a known room, act, look, and judge.
   that verified update: friends allow each record only after the host's successful
   wrapper return, and replay its retained triggering point through ordinary
   native ticks. This covers missed transient crossings without copying controller
-  stage/cache state. Script-driven emissions outside the update remain native
+  stage/cache state. Protocol22 ties each combat receipt to its announced host
+  netId. A checked one-use native birth ticket lets a delayed friend allocate
+  and retire that exact already-dead occurrence; it cannot borrow a refill or
+  bypass ordinary death continuity after adoption. See `ENEMY_PARITY.md`.
+  Script-driven emissions outside the update remain native
   with bounded unsupported diagnostics; non-spatial replay is separate work.
   The default-off all-alive recovery exception temporarily selects the recorded
   host first-emission point under the current512-completed-update/30s bounds,

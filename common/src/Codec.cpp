@@ -978,12 +978,14 @@ void write(ByteWriter& w, const SpawnEmission& m) {
     write(w, m.location); w.writeU64(m.sequence); w.writeU32(m.controllerKey);
     w.writeU16(m.headerId); w.writeU16(m.recordIndex);
     for (float v : m.point) w.writeF32(v);
+    w.writeU16(m.netId);
 }
 void read(ByteReader& r, SpawnEmission& m) {
-    if (r.remaining() != 48) throw std::runtime_error("SpawnEmission: wrong length");
+    if (r.remaining() != 50) throw std::runtime_error("SpawnEmission: wrong length");
     SpawnEmission out; read(r, out.location); out.sequence = r.readU64();
     out.controllerKey = r.readU32(); out.headerId = r.readU16(); out.recordIndex = r.readU16();
     for (float& v : out.point) v = r.readF32();
+    out.netId = r.readU16();
     ByteWriter checked; write(checked, out); m = out;
 }
 std::vector<std::uint8_t> encode(const SpawnEmission& m) {
@@ -1635,7 +1637,7 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("RemoteHit: wrong frame length");
     if (type == PacketType::TargetAuthority && (len != TARGET_AUTHORITY_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("TargetAuthority: wrong frame length");
-    if (type == PacketType::SpawnEmission && (len != 48 || size != 51))
+    if (type == PacketType::SpawnEmission && (len != 50 || size != 53))
         throw std::runtime_error("SpawnEmission: wrong frame length");
     if (type == PacketType::ScriptCall &&
         (len < SCRIPT_CALL_HEADER_BYTES || (len - SCRIPT_CALL_HEADER_BYTES) % SCRIPT_CALL_ENTRY_BYTES != 0 ||

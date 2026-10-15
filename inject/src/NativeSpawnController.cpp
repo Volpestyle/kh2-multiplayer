@@ -1641,6 +1641,32 @@ void* ObserveWrapper(const void* record, void* controller, const float* point,
     SetLastError(nativeError);return actor;
 }
 
+EmissionBirth CaptureEmissionBirth(void* actor,const Qualification& q,const void* record,
+                                    const std::array<std::uint8_t,64>& before) {
+    EmissionBirth b;b.actor=reinterpret_cast<uintptr_t>(actor);b.controller=q.controller;b.record=reinterpret_cast<uintptr_t>(record);
+    b.header=q.header;b.spawnArray=q.spawnArray;b.key=q.key;b.headerId=q.headerId;b.records=q.records;
+    if(q.scope!=Scope::Qualified || b.record<q.spawnArray || (b.record-q.spawnArray)%64 ||
+       (b.record-q.spawnArray)/64>=q.records)return b;
+    b.recordIndex=static_cast<std::uint16_t>((b.record-q.spawnArray)/64);
+    if(!b.actor || !CopyNative(b.record,b.recordBytes.data(),b.recordBytes.size()) || b.recordBytes!=before ||
+       !ReadNative(b.actor,b.handle) || !b.handle || !ReadNative(b.actor+offsets::actor::OBJENTRY_PTR,b.objentry) || !b.objentry ||
+       !ReadNative(b.objentry,b.objectId))return b;
+    std::uint8_t type=0;std::array<char,32> name{};
+    if(!ReadNative(b.objentry+4,type) || !CopyNative(b.objentry+8,name.data(),name.size()) ||
+       b.objectId!=Field<std::uint32_t>(before.data(),0))return b;
+    b.objectType=type;
+    if(q.mixedEmission && b.objectId==2406 && type==21 &&
+       std::memcmp(name.data(),"M_EX640_HB",sizeof("M_EX640_HB"))==0) {
+        b.helper=true;b.available=true;return b;
+    }
+    uintptr_t controller=0,definition=0;
+    if((type!=offsets::objentry::TYPE_BOSS && type!=offsets::objentry::TYPE_MOB) ||
+       (name[0]=='F' && name[1]=='_') || !ReadNative(b.actor+0x5C0,b.status) ||
+       !ReadNative(b.actor+0x9E8,controller) || controller!=b.controller ||
+       !ReadNative(b.actor+0x9F0,definition) || definition!=b.record)return b;
+    b.available=true;return b;
+}
+
 void* PolicyWrapper(const void* record, void* controller, const float* point, TraceWrapper wrapper, uintptr_t caller) {
     const auto entryError = GetLastError();
     const auto role = g_emission && IsDiagnosticGameThread() && g_role ? g_role() : 0;
@@ -1664,17 +1690,47 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
             g_log("[spawn-emission] unsupported producer=outside-update role=%u key=%u header=%u record=%u caller=%llX",
                 role, q.key, q.headerId, index, static_cast<unsigned long long>(caller - g_exeBase));
     }
-    if (enclosed && role == 2 && !g_emission(q.key, q.headerId, index, nullptr, false)) {
-        SetLastError(entryError); return nullptr;
+    EmissionPermit permit{};
+    if(enclosed && role==2 && !g_emission(q.key,q.headerId,index,nullptr,EmissionPhase::Reserve,permit,nullptr)) {
+        SetLastError(entryError);return nullptr;
     }
-    SetLastError(entryError);
-    void* actor = g_rawDiagnosticEnabled ? ObserveWrapper(record, controller, point, wrapper, caller) :
-        wrapper == TraceWrapper::Fixed ? CallOriginalWrapper(record, controller) : CallOriginalGenerated(record, controller, point);
-    const auto nativeError = GetLastError();
-    if (enclosed && actor && g_role() == role && g_emissionStorage.Same(update) && SameStamp(q.stamp)) {
-        g_emission(q.key, q.headerId, index, update->point.data(), true);
+    std::array<std::uint8_t,64> before{};
+    const bool definitionRead=enclosed && CopyNative(reinterpret_cast<uintptr_t>(record),before.data(),before.size());
+    void* actor=nullptr;bool committed=false,returned=false;
+    __try {
+        SetLastError(entryError);
+        actor=g_rawDiagnosticEnabled ? ObserveWrapper(record,controller,point,wrapper,caller) :
+            wrapper==TraceWrapper::Fixed ? CallOriginalWrapper(record,controller) : CallOriginalGenerated(record,controller,point);
+        returned=true;
+        const auto nativeError=GetLastError();
+        if(enclosed && actor && g_role()==role && g_emissionStorage.Same(update) && SameStamp(q.stamp)) {
+            const auto birth=definitionRead ? CaptureEmissionBirth(actor,q,record,before) : EmissionBirth{};
+            static unsigned unavailableBirthLogs=0;
+            if(!birth.available && g_log && unavailableBirthLogs++<32) {
+                uintptr_t linkedController=0,linkedRecord=0;
+                ReadNative(reinterpret_cast<uintptr_t>(actor)+0x9E8,linkedController);
+                ReadNative(reinterpret_cast<uintptr_t>(actor)+0x9F0,linkedRecord);
+                g_log("[spawn-birth] capture-refused header=%u record=%u actor=%llX handle=%u objentry=%llX status=%llX objectId=%u type=%u controller=%llX expectedController=%llX definition=%llX expectedDefinition=%llX",
+                    q.headerId,index,reinterpret_cast<unsigned long long>(actor),birth.handle,
+                    static_cast<unsigned long long>(birth.objentry),static_cast<unsigned long long>(birth.status),birth.objectId,birth.objectType,
+                    static_cast<unsigned long long>(linkedController),static_cast<unsigned long long>(q.controller),
+                    static_cast<unsigned long long>(linkedRecord),reinterpret_cast<unsigned long long>(record));
+            }
+            // A nonnull return spends its exact grant even if metadata refused.
+            committed=g_emission(q.key,q.headerId,index,update->point.data(),EmissionPhase::Birth,permit,&birth);
+        }
+        SetLastError(nativeError);
+    } __finally {
+        if(enclosed && role==2 && !committed) {
+            const auto nativeError=GetLastError();
+            // Only an observed normal null return is safe to retry. An unwind
+            // or unqualified nonnull outcome may already have allocated a body.
+            g_emission(q.key,q.headerId,index,nullptr,
+                returned && !actor ? EmissionPhase::Cancel : EmissionPhase::Abandon,permit,nullptr);
+            SetLastError(nativeError);
+        }
     }
-    SetLastError(nativeError); return actor;
+    return actor;
 }
 
 void* __fastcall HookedWrapper(const void* record, void* controller) {
@@ -2198,6 +2254,15 @@ void InstallEventGateObserver(bool trace) {
 }
 
 } // namespace
+
+bool EmissionBirthCurrent(const EmissionBirth& birth) noexcept {
+    if(!birth.available || !IsDiagnosticGameThread())return false;
+    const auto q=Qualify(birth.controller,QualificationUse::Emission);
+    if(q.scope!=Scope::Qualified || q.header!=birth.header || q.spawnArray!=birth.spawnArray ||
+       q.key!=birth.key || q.headerId!=birth.headerId || q.records!=birth.records ||
+       q.spawnArray+static_cast<uintptr_t>(birth.recordIndex)*64!=birth.record)return false;
+    return CaptureEmissionBirth(reinterpret_cast<void*>(birth.actor),q,reinterpret_cast<void*>(birth.record),birth.recordBytes)==birth;
+}
 
 namespace {
 // One implementation is exercised over test-owned buffers in the same-TU

@@ -37,6 +37,7 @@ struct Local {
     bool living{};
     bool certificateRequired{};
     int certifiedId{};
+    int birthId{}; // one-use receipt + fresh native birth proof supplied by owner adapter
 };
 struct Host {
     int id{};
@@ -102,15 +103,17 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         if (!now.generation || !now.epoch || !l.identity.actor ||
             !l.identity.objentry || !l.identity.status || !Finite(l.point)) continue;
         if(l.prior.removed){d.reason=Reason::Retired;continue;}
+        if(l.birthId>0 && (l.certificateRequired || !l.identity.controller || !l.identity.record))continue;
         const Host* best = nullptr;
         for (const auto& h : hosts) {
-            if (!h.removed && h.id > 0 && h.objectId == l.identity.objectId && (l.certificateRequired ? h.id==l.certifiedId : SamePoint(h.point,l.point)) &&
+            if (!h.removed && h.id > 0 && h.objectId == l.identity.objectId &&
+                (l.birthId>0 ? h.id==l.birthId : l.certificateRequired ? h.id==l.certifiedId : SamePoint(h.point,l.point)) &&
                 (!best || h.id > best->id)) best = &h;
         }
         // VUH-2292: a reliable leave and its refill manifest can drain in one
         // owner frame. Keep the continuously established OLD identity for
         // native removal; never relabel its living body to the new occurrence.
-        if (!l.certificateRequired && Continuous(l,now)) {
+        if (!l.birthId && !l.certificateRequired && Continuous(l,now)) {
             for (const auto& h : hosts) {
                 if (h.id == l.prior.bound && h.dead && h.left && !h.removed &&
                     h.objectId == l.identity.objectId && SamePoint(h.point,l.point)) {
@@ -130,7 +133,9 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
             d.reason = Reason::UnestablishedDeath;
             continue;
         }
-        if (best->dead && (l.prior.bound != best->id || !Continuous(l,now))) {
+        const bool exactBirth=l.birthId==best->id && !l.prior.bound && !l.prior.highWater && !l.prior.terminal &&
+            !l.certificateRequired && l.identity.controller && l.identity.record;
+        if (best->dead && !exactBirth && (l.prior.bound != best->id || !Continuous(l,now))) {
             d.reason = Reason::UnestablishedDeath;
             continue;
         }

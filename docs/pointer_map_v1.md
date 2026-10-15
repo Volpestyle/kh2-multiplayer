@@ -856,6 +856,20 @@ is before caller-owned cooldown assignment at `0x3FE99E` and stage advancement.
 Generated wrapper call `0x3FE984` instead returns `0x3FE989`; do not merge scopes.
 Observe enclosing controller tick completion to obtain truthful post-state.
 
+Live2302 run20261015-163914 found successful fixed-wrapper returns with a valid
+objentry but actor+0x5C0 status still null. Wrapper virtual+0x68 has already run
+provenance initialization; 0x3B4BD0 writes controller+record at actor+0x9E8/+0x9F0,
+not status. Do not require a nonzero combat-status pointer at this early boundary.
+Retain the successful-read zero and mandatory handle/object/controller/record
+roots, then complete status once from a fresh complete census after all captured
+roots and indexed definition still match. Freeze the nonzero pointer thereafter.
+The combat classifier successfully excludes status-null actors, so even a
+complete combat census can precede initialization. Pending birth checks must
+separately witness current linked-list membership (the existing watched-actor
+census), bounded to32 observations and granting no binding identity. First
+absence or root drift refuses. A wrapper-return trace alone cannot claim
+census-ready combat metadata.
+
 Wrapper cache insertion uses objentry-type mask `0xA02010`: it includes mob
 type4 (also 13/21/23), **not boss type3**. A successful boss creation need not
 insert its record ID. The wrapper does not perform the caller's region,

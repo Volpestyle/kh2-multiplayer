@@ -107,6 +107,11 @@ public:
 #define PopNativeConstructionLineage TestPopNativeConstructionLineage
 #define WorldBridge HeadlessWorldBridge
 #include "../inject/src/EnemySync.cpp"
+// This owned-memory harness does not install the field callback hook.
+namespace kh2coop::inject::enemymirror {
+bool EnterFieldCallback() noexcept { return true; }
+void LeaveFieldCallback() noexcept {}
+}
 #include "kh2coop/WorldPump.hpp"
 #undef WorldBridge
 #undef PopNativeConstructionLineage
@@ -2741,6 +2746,13 @@ int main() try {
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
                                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
     if (!image) return 2;
+    EmissionWarmup warmup{100,130};
+    Check(warmup.Current(131,true),"pending native initialization accepts last bounded consecutive frame");
+    warmup.seenFrame=131;
+    Check(!warmup.Current(132,true) && warmup.Current(132,false),"initialization deadline cannot be bypassed by first completion; completed births retain ordinary continuity");
+    Check(!warmup.Current(133,false) && !warmup.Current(130,false),"birth observation refuses skipped and backward owner frames");
+    Check(warmup.Current(131,true) && warmup.Current(131,true) && warmup.firstFrame==100,
+          "repeated same-frame pending observation cannot refresh initialization deadline");
     // Production registration is one-way; exercise these existing controls
     // before the first registration instead of resetting a test-only stub.
     Reset(true, false);

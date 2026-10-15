@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 21;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 22;
 
 // ===========================================================================
+// Protocol v22 appends exact combat netId to SpawnEmission (VUH-2302 phase b).
 // Protocol v21 adds FieldObjects (51): complete periodic host field-object snapshots (VUH-2276).
 // Protocol v20 adds SpawnEmission (50): host controller records and trigger points (VUH-2302).
 // Protocol v19 adds ScriptCall (49): the host's mirrored enemies' script calls (VUH-2252).
@@ -147,6 +148,7 @@ struct SpawnEmission {
     std::uint32_t controllerKey {0};
     std::uint16_t headerId {0}, recordIndex {0};
     std::array<float, 4> point {};
+    std::uint16_t netId {0}; // exact host combat occurrence; zero is a helper, never late-death authority
 };
 inline constexpr std::size_t SPAWN_EMISSION_CAP = 4096;
 

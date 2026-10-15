@@ -802,6 +802,137 @@ def step_avatar_stall(ctx: Context, step: dict) -> dict:
     return {"suspendedSeconds": duration, "samples": len(rows), "heldSamples": len(held), "clip": path.name}
 
 
+
+def step_spawn_late_birth(ctx: Context, step: dict) -> dict:
+    """Hold both owned friend transports for the first HB750 Hammer death."""
+    name = step.get("as", "late_birth750")
+    budget = int(step.get("maxPauseMs", 2000)) / 1000
+    if not 0 < budget <= 2 or name in ctx.saved:
+        raise StepFailed("late-birth helper requires a fresh result name and pause budget <=2000ms")
+    center = ctx.saved.get("center750")
+    if not isinstance(center, list) or len(center) != 3 or not all(math.isfinite(v) for v in center):
+        raise StepFailed("late-birth helper requires the saved native controller750 center")
+    host = ctx.inst(0)
+    sora = ctx.actor("P_EX100", 0)
+    api = _runtime_lifecycle.OwnedHandleAPI()
+    owned = []
+    for index in (1, 2):
+        matches = [p for label, p, _ in ctx.processes if label == f"runtime_{index}" and p.poll() is None]
+        if len(matches) != 1:
+            raise StepFailed(f"late-birth helper requires original owned runtime_{index}")
+        proc = matches[0]
+        handle = int(proc._handle)
+        if (api.process_id(handle) != proc.pid or Path(api.executable(handle)).resolve() != RUNTIME.resolve()
+                or [str(ctx.inst(index).pid)] != _runtime_lifecycle._flag_values(proc.args, "--pid")):
+            raise StepFailed(f"owned runtime_{index} handle or game binding changed")
+        owned.append((index, proc, handle))
+    paths = {i: ctx.inst(i).inject_log or LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log" for i in range(3)}
+    def text(index):
+        return paths[index].read_text(encoding="utf-8", errors="replace")
+    sent_pattern = re.compile(r"\[spawn-emission\] sent epoch=(?P<epoch>\d+) seq=(?P<seq>\d+) key=(?P<key>\d+) header=750 record=(?P<record>\d+) netId=(?P<netId>\d+) ")
+    emitted_pattern = re.compile(r"\[spawn-emission\] client emitted .*header=750 record=\d+\b")
+    result = {"maxPauseMs": int(budget * 1000), "runtimes": [], "hostReceipts": [], "hostDeaths": [],
+              "friendEmittedBeforeDeath": {}, "completed": False}
+    for i in (1, 2):
+        if emitted_pattern.search(text(i)):
+            raise StepFailed(f"friend{i} already emitted header750 before the transport hold")
+    if sent_pattern.search(text(0)):
+        raise StepFailed("host already emitted header750 before the transport hold")
+    began = time.monotonic()
+    paused = []
+    def remaining():
+        left = budget - (time.monotonic() - began)
+        if left <= 0:
+            raise StepFailed("late-birth transport hold exceeded its bounded pause budget")
+        return left
+    def poll():
+        ctx.check_all()
+        for _, proc, _ in owned:
+            if proc.poll() is not None:
+                raise StepFailed("owned friend runtime exited during late-birth hold")
+        time.sleep(min(0.02, remaining()))
+    try:
+        for index, proc, handle in owned:
+            row = {"instance": index, "runtimePid": proc.pid, "gamePid": ctx.inst(index).pid, "resumed": False}
+            result["runtimes"].append(row)
+            # Retain the attempted handle before calling: even a failed native
+            # suspend can require matching recovery, as in runtime_lifecycle.
+            paused.append((handle, row))
+            status = api.suspend(handle)
+            row["suspendStatus"] = status
+            if status < 0:
+                raise StepFailed(f"owned friend{index} runtime suspension failed")
+        kh2ctl("poke", "--addr", str(int(sora["address"], 16) + 0x670), "--type", "f32x3",
+               "--value", ",".join(str(v) for v in center), pid=host.pid, timeout=remaining())
+        while True:
+            receipts = [m.groupdict() for m in sent_pattern.finditer(text(0)) if m["record"] == "0"]
+            if len(receipts) > 1:
+                raise StepFailed("host emitted more than one controller750 record0 receipt")
+            if receipts:
+                ids = {int(receipts[0]["netId"])}
+                if 0 in ids:
+                    raise StepFailed("host750 record0 receipt does not name a combat occurrence")
+                actors = kh2ctl("entities", pid=host.pid, timeout=remaining())["actors"]
+                live = [a for a in actors if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0]
+                hammers = [a for a in live if a["objectId"] == 2405]
+                if len(hammers) > 1:
+                    raise StepFailed("first750 Hammer is no longer uniquely attributable to record0")
+                if len(hammers) == 1:
+                    break
+            poll()
+        result["hostReceipts"] = receipts
+        result["hostTarget"] = {**receipts[0], "objectId": 2405, "actor": hammers[0]["address"]}
+        result["hostLiveObjectIds"] = sorted(a["objectId"] for a in live)
+        result["hostLiveMs"] = round((time.monotonic() - began) * 1000)
+        kill = kh2ctl("hit", "kill", "--victim", hammers[0]["address"], pid=host.pid, timeout=remaining())
+        if not kill.get("ok"):
+            raise StepFailed("host750 record0 Hammer native kill did not complete")
+        epoch = int(receipts[0]["epoch"])
+        death_pattern = re.compile(r"\[enemysync\] host death epoch " + str(epoch) + r" netId (?P<netId>\d+)\b")
+        while True:
+            deaths = {int(m["netId"]) for m in death_pattern.finditer(text(0))} & ids
+            if deaths == ids:
+                break
+            poll()
+        result["hostDeaths"] = sorted(deaths)
+        result["hostTerminalPublishedMs"] = round((time.monotonic() - began) * 1000)
+        result["friendEmittedBeforeDeath"] = {str(i): len(emitted_pattern.findall(text(i))) for i in (1, 2)}
+        if any(result["friendEmittedBeforeDeath"].values()):
+            raise StepFailed("a friend emitted750 before host terminal publication while its runtime was held")
+        remaining()
+        result["completed"] = True
+    except BaseException as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+        raise
+    finally:
+        resume_errors = []
+        # Recover every retained handle even when an earlier resume fails.
+        for handle, row in reversed(paused):
+            row["resumeAttempts"] = []
+            for _ in range(3):
+                try:
+                    status = api.resume(handle)
+                    row["resumeAttempts"].append(status)
+                    if status >= 0:
+                        row["resumed"] = True
+                        break
+                except Exception as error:
+                    row["resumeAttempts"].append(str(error))
+            if not row["resumed"]:
+                resume_errors.append(row["instance"])
+        result["pausedMs"] = round((time.monotonic() - began) * 1000)
+        result["resumedAll"] = bool(paused) and all(row["resumed"] for _, row in paused)
+        ctx.saved[name] = result
+        path = ctx.run_dir / f"{name}.json"
+        path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        ctx.artifacts.append(path.name)
+        if resume_errors:
+            raise StepFailed(f"late-birth helper could not resume owned runtime(s) {resume_errors}")
+    if result["pausedMs"] > int(budget * 1000):
+        raise StepFailed("late-birth hold/recovery exceeded its pause budget; inspect retained metrics")
+    return result
+
+
 def step_crash(ctx: Context, step: dict) -> dict:
     """Test hook: faults the instance (kh2ctl crash). The runner should then
     produce a crash bundle and a failed report."""
@@ -4288,6 +4419,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect,
          "capture": step_capture, "clip": step_clip, "avatar_stall": step_avatar_stall,
+         "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
          "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all,

@@ -4,6 +4,8 @@
 // the real EnemyMirrorState stream to the driver. No game process, no real hooks.
 #include <Windows.h>
 #include <cmath>
+#include <atomic>
+#include "DownedSpectateAdapter.hpp"
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -65,6 +67,12 @@ static enemymirror::Pose g_pose {};
 static bool g_streamMode = false;
 static enemymirror::Stream g_stream;
 static uintptr_t g_packActors[3] {};
+// This fixture exercises enemy driving; field and escaped-leave ownership are
+// supplied by their separate native controls.
+static bool FieldActorCurrent(uintptr_t) noexcept { return false; }
+static bool SuppressFieldBrain(uintptr_t) noexcept { return false; }
+static bool ConsumeFieldLeave(uintptr_t) noexcept { return false; }
+static bool PopulationLeftCleanupRequested(uintptr_t) noexcept { return false; }
 static bool MirrorRequested() noexcept { return g_requested; }
 static bool RecordMirrorAuthorityCurrent(uintptr_t) noexcept { return g_recordCurrent; }
 static bool g_trace = false;
