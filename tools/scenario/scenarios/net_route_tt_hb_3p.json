@@ -1,6 +1,6 @@
 {
  "name": "net_route_tt_hb_3p",
- "description": "VUH-2253 route run: three instances with the player package's shipped defaults on an ENet loopback relay, host-led through TT and HB combat, a host-skipped cutscene, the BC Thresholder boss and a friend's death. Teleports stand in for walking into each battle trigger; the boss's last hit lands natively because a synthetic kill leaves it at 1 HP. Bots fight with native player input; host warps stand in for pathing. Soras are protected (team 0) in combat so the route can continue; the last segment kills a friend on purpose. Each segment that breaks is reported and the run moves on to the next one.",
+ "description": "VUH-2253 route run: three instances with the player package's shipped defaults on an ENet loopback relay, host-led through TT and HB combat, a host-skipped cutscene, the BC Thresholder boss and a friend's death. Teleports stand in for walking into each battle trigger; the boss's last hit lands natively because a synthetic kill leaves it at 1 HP. Bots fight with native player input; host warps stand in for pathing. Soras are protected (team 0) in combat so the route can continue; the last segment kills a friend on purpose and the host revives them with the Triangle prompt. Each segment that breaks is reported and the run moves on to the next one.",
  "playerDefaults": true,
  "protect": [
   0,
@@ -852,6 +852,12 @@
    "on": false
   },
   {
+   "do": "input",
+   "instance": 2,
+   "ly": 1,
+   "ms": 2500
+  },
+  {
    "do": "wait",
    "ms": 1500
   },
@@ -882,9 +888,51 @@
    "fps": 6
   },
   {
+   "do": "assert",
+   "expr": "log_count('[downed] gate intercept', 2)>=1",
+   "message": "friend2's lethal hit was not held as downed (no [downed] gate intercept)"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value',f'{pos(index=2)[0]},{pos(index=2)[1]},{pos(index=2)[2]-90}']"
+  },
+  {
+   "do": "wait",
+   "ms": 1500
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "triangle",
+   "ms": 1600
+  },
+  {
    "do": "wait_until",
    "expr": "any(a['name']=='P_EX100' and a['hp']>0 for a in actors(2)) and location(2)==location(0)",
-   "timeoutMs": 8000
+   "timeoutMs": 10000
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('[revive-prompt] hold complete', 0)>=1 and log_count('[downed] revive returned', 2)>=1",
+   "message": "friend2 came back without the host's revive prompt"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "input",
+   "instance": 2,
+   "ly": 1,
+   "ms": 900
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "name": "revived_friend2",
+   "seconds": 3,
+   "fps": 6
   }
  ]
 }

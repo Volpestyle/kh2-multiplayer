@@ -25,7 +25,7 @@ possibly enemies.
 
 The friend/package launcher uses `tools/launcher/friend_package.py`'s
 `child_environment` for both game and runtime children. Explicit parent env
-values for the six enabled features, including `0`/`off`, override the defaults.
+values for the eight enabled features, including `0`/`off`, override the defaults.
 Developer switches remain filtered; the two parked flags stay forced off.
 Direct developer launches retain their native defaults.
 
@@ -37,6 +37,8 @@ Direct developer launches retain their native defaults.
 | `COOP_DIFFICULTY` | `normal` | Host room-locked health factor; two-player mobs ×1.6. |
 | `EVENT_HOLD_PRODUCER` | `1` | Host event announcements within the existing empty-room scope. |
 | `EVENT_HOLD_CONTROL` | `1` | Client input hold/overlay followed by host-led room/state resync. |
+| `DOWNED_SPIKE` | `1` | Downed/revive: a player at 0 HP is held downed instead of Game Over (VUH-2269, `docs/DOWNED_REVIVE.md`). |
+| `REVIVE_PROMPT` | `1` | Hold Triangle near a downed teammate to revive them. |
 | `ENEMY_POPULATION_SPAWN` | `0` (parked) | General client spawn/lifecycle behavior is not qualified. |
 | `ENEMY_TARGET_REMOTE` | `0` (parked) | Legacy target path is superseded by the qualified all-target path. |
 

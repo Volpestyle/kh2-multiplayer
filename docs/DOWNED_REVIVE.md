@@ -102,7 +102,9 @@ The native producer, consumer and requester described above exist in
 in `inject/src/EnemySync.cpp`. The names say "spike" because the live evidence
 was gathered under them; they are the feature, not throwaway code.
 
-**Feature flag: `KH2COOP_DOWNED_SPIKE=1`.** Default off. Unless the variable is
+**Feature flag: `KH2COOP_DOWNED_SPIKE=1`.** On in the player package
+(`tools/launcher/friend_package.py`, VUH-2269); off for direct developer
+launches. Unless the variable is
 exactly `1`, `Install` returns before any byte check, hook, mapping or log;
 `Tick`, `StatDelta` and `NoteHit` return on their first test, no publication is
 made, no ReviveRequest is applied, and the game-over functions are untouched.
@@ -226,7 +228,8 @@ No downed spectator behavior is live-qualified yet. Pending fixture and limits:
 
 ## Revive prompt (`KH2COOP_REVIVE_PROMPT=1`)
 
-The player-facing trigger for a ReviveRequest. Default off; it needs
+The player-facing trigger for a ReviveRequest. On in the player package,
+off for direct developer launches; it needs
 `KH2COOP_DOWNED_SPIKE=1` and is never active in the `_CONTROL` run. When off,
 `PromptInput` and `PromptTick` return on their first test and the HUD snapshot
 carries `promptKind = 0`, so the overlay is unchanged.
