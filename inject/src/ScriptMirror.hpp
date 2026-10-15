@@ -362,7 +362,7 @@ struct Second {
     std::uint32_t perTrap[kTrapCount] {};                                     // host sent calls / client records by trap
     bool Any() const noexcept {
         return raw || offThread || calls || unmapped || notMirrored || untracked || packets || received || refused ||
-               expired || held || unpaired || stale;
+               expired || held || heldApplied || unpaired || stale;
     }
 };
 

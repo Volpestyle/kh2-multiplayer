@@ -45,6 +45,7 @@ struct State {
     R::Second second;
     std::uint64_t secondMs = 0;
     std::uint64_t faults = 0, invalid = 0;
+    unsigned unmappedLogs = 0;  // this room
 };
 static State g_sm;
 
@@ -175,12 +176,21 @@ static void SmEmit(R::Call c) {
     }
 }
 
-// The announced, mirrored host spawn an actor argument names; 0 otherwise (counted).
-static std::uint16_t SmMirroredSpawn(std::uint64_t arg, std::uint32_t& objectId) {
+// The announced, mirrored host spawn an actor argument names; 0 otherwise (counted, and the first
+// kUnmappedLogs per room logged with their object id: which actors a fight's calls come from).
+static constexpr unsigned kUnmappedLogs = 12;
+static std::uint16_t SmMirroredSpawn(std::size_t trap, std::uint64_t arg, std::uint32_t& objectId) {
     const uintptr_t actor = SmActorOf(arg, objectId);
-    if (!actor) { ++g_sm.second.unmapped; return 0; }
-    const std::uint16_t netId = enemysync::HostEnemyNetId(actor, objectId);
-    if (!netId) { ++g_sm.second.unmapped; return 0; }  // not an announced spawn: the player, party, weapons
+    const std::uint16_t netId = actor ? enemysync::HostEnemyNetId(actor, objectId) : std::uint16_t{0};
+    if (!netId) {  // not an announced spawn: the player, party, weapons, script-made actors
+        ++g_sm.second.unmapped;
+        if (g_sm.unmappedLogs < kUnmappedLogs) {
+            ++g_sm.unmappedLogs;
+            Log("[script-mirror] unmapped trap=%s objectId=%u actor=%llX", R::kTraps[trap].name, objectId,
+                static_cast<unsigned long long>(actor ? actor - g_exeBase : 0));
+        }
+        return 0;
+    }
     if (!enemymirror::FamilyAllowed(objectId)) { ++g_sm.second.notMirrored; return 0; }  // its client copy keeps its brain
     return netId;
 }
@@ -196,7 +206,7 @@ static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after
     switch (t.kind) {
         case R::Kind::Actor:
         case R::Kind::ActorEvent: {
-            c.netId = SmMirroredSpawn(b.args[0], c.objectId);
+            c.netId = SmMirroredSpawn(i, b.args[0], c.objectId);
             if (!c.netId) return;
             if (t.vector) {
                 if (R::TagOf(b.args[1]) != R::kTagAddress || !SmReadFloat4(SmDecode(R::BitsOf(b.args[1])), c.values)) { ++g_sm.faults; return; }
@@ -209,7 +219,7 @@ static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after
         }
         case R::Kind::EffectStart:
         case R::Kind::EffectStartPos: {
-            c.netId = SmMirroredSpawn(b.args[0], c.objectId);
+            c.netId = SmMirroredSpawn(i, b.args[0], c.objectId);
             if (!c.netId) return;
             std::uint64_t result = 0;
             if (!SmCopyArgs(after, &result, 1) || R::TagOf(result) != R::kTagAddress || !R::BitsOf(result)) return;  // no effect made
@@ -325,6 +335,7 @@ static void SmFlush() {
 }
 
 static void SmResetRoom() {
+    g_sm.unmappedLogs = 0;
     g_sm.sender.Reset();
     g_sm.hostEffects.Reset();
     g_sm.clientEffects.Reset();
