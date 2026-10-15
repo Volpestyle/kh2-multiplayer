@@ -119,6 +119,11 @@ HeldAuthority g_authority {};                  // owner: latest admitted adverti
 std::uint64_t g_authorityFloor = 0, g_authorityFloorHost = 0;
 unsigned g_authorityLogs = 0;
 unsigned g_remoteHitLogs = 0;
+ScriptCallApplyFn g_scriptCallApply = nullptr; // VUH-2252: set once by EntityHook
+std::uint64_t g_scriptCallSeq = 0;             // host: DLL lifetime; never recycled
+std::uint64_t g_scriptCallFloor = 0, g_scriptCallFloorHost = 0; // client: last admitted seq per host connection
+ScriptCallStats g_scriptCallStats {};
+unsigned g_scriptCallLogs = 0;
 ReviveStats g_reviveStats {};
 std::uint32_t g_reviveLogs = 0, g_reviveLogGeneration = 0;  // peer-driven lines: 16 per generation
 bool ReviveLogAllowed() {
@@ -534,6 +539,7 @@ void CheckActivationGeneration() {
 bool ActivationContext(Role role, RoomTransition& location);
 void AdmitRemoteHit(const WorldScope& scope, const std::uint8_t* payload, std::size_t size); // VUH-1515
 void AdmitTargetAuthority(const WorldScope& scope, const std::uint8_t* payload, std::size_t size); // VUH-1515
+void AdmitScriptCall(const WorldScope& scope, const std::uint8_t* payload, std::size_t size); // VUH-2252
 void RequestActivation();
 void FlushActivationResponses();
 
@@ -3743,6 +3749,7 @@ bool ReceiveWorldPackets() {
             }
             if (type == PacketType::RemoteHit) { AdmitRemoteHit(*scope, payload, size); continue; } // VUH-1515
             if (type == PacketType::TargetAuthority) { AdmitTargetAuthority(*scope, payload, size); continue; } // VUH-1515
+            if (type == PacketType::ScriptCall) { AdmitScriptCall(*scope, payload, size); continue; } // VUH-2252
             if (CurrentRole() != Role::Client) {ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectRole);continue;}
             ByteReader r(payload, size);
             if (progresssync::HandlePacket(type, r)) {
@@ -6093,6 +6100,50 @@ void AdmitTargetAuthority(const WorldScope& scope, const std::uint8_t* payload, 
     g_authority = {GetTickCount64(), a.hostConnectionId, a.seq, a.location.epoch, a.familyMask, a.location.worldId,
                    a.location.roomId, a.slotMask, a.mode};
 }
+
+// VUH-2252: ScriptCall from the host (same host-source admission as TargetAuthority). Each record
+// then goes to the apply callback in call order; a refused packet is dropped whole.
+void AdmitScriptCall(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {
+    ++g_scriptCallStats.seen;
+    const auto local = g_bridge.LocalSlot();
+    const char* why = nullptr;  // first failing admission rule (logged)
+    if (!(CurrentRole() == Role::Client && local < 3 && local != 0)) why = "role-or-slot";
+    else if (!(scope.sourceConnectionId && scope.sourceConnectionId == g_bridge.ConnectionId(0) && scope.hostSourceSerial &&
+               scope.sourceDeliverySerial == g_bridge.PeerDeliverySerial(0) && scope.hostSourceSerial > g_resyncAppliedCut)) why = "source";
+    ScriptCall calls;
+    if (!why) {
+        ByteReader reader(payload, size);
+        read(reader, calls);
+        if (!reader.atEnd()) why = "payload";
+    }
+    if (!why && calls.hostConnectionId != scope.sourceConnectionId) why = "host-connection";
+    if (!why && !(g_host.arrived && g_host.epoch != 0)) why = "not-arrived";
+    if (!why && calls.location.epoch != g_host.epoch) why = "epoch";
+    RoomTransition room;
+    if (!why && !(ActivationContext(Role::Client, room) && room.epoch == calls.location.epoch &&
+                  room.worldId == calls.location.worldId && room.roomId == calls.location.roomId)) why = "room";
+    if (!why && calls.hostConnectionId != g_scriptCallFloorHost) { g_scriptCallFloorHost = calls.hostConnectionId; g_scriptCallFloor = 0; }
+    if (!why && calls.seq <= g_scriptCallFloor) why = "sequence";
+    if (!why && !g_scriptCallApply) why = "apply-unset";
+    if (why) {
+        ++g_scriptCallStats.admissionRefused;
+        if (g_log && g_scriptCallLogs < 32) {
+            ++g_scriptCallLogs;
+            g_log("[script-mirror] admission refused reason=%s local=%u seq=%llu epoch=%u/%u arrived=%u", why,
+                  static_cast<unsigned>(local), static_cast<unsigned long long>(calls.seq), calls.location.epoch,
+                  g_host.epoch, g_host.arrived ? 1u : 0u);
+        }
+        return;
+    }
+    g_scriptCallFloor = calls.seq;
+    for (const auto& e : calls.entries) {
+        ScriptCallRecord record;
+        record.netId = e.netId; record.objectId = e.objectId; record.table = e.table; record.index = e.index;
+        for (std::size_t i = 0; i < 4; ++i) record.args[i] = e.args[i];
+        ++g_scriptCallStats.records;
+        if (g_scriptCallApply(record) == 1) ++g_scriptCallStats.applied; else ++g_scriptCallStats.refused;
+    }
+}
 } // namespace
 
 std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept {
@@ -6169,6 +6220,37 @@ TargetAuthorityView CurrentTargetAuthority(std::uint64_t maxAgeMs) noexcept {
 
 void SetRemoteHitApply(RemoteHitApplyFn apply) noexcept { g_remoteHitApply = apply; }
 RemoteHitStats GetRemoteHitStats() noexcept { return g_remoteHitStats; }
+
+bool SendScriptCalls(const ScriptCallRecord* records, std::size_t count, std::uint32_t hostFrame, std::uint64_t& seqOut) {
+    seqOut = 0;
+    DownedScope s;
+    if (CurrentRole() != Role::Host || !records || count == 0 || count > SCRIPT_CALL_MAX_ENTRIES ||
+        !CaptureDownedScope(s) || s.localSlot != 0 || !s.connections[0] || g_scriptCallSeq == UINT64_MAX) {
+        ++g_scriptCallStats.sendFailed; return false;
+    }
+    ProducerWorldContext context;
+    if (!CaptureWorldContext(context) || context.generation != s.context.generation ||
+        context.deliverySerial != s.context.deliverySerial) { ++g_scriptCallStats.sendFailed; return false; }
+    ScriptCall calls;
+    calls.location = {s.epoch, s.worldId, s.roomId, s.door, s.mapProgram, s.battleProgram, s.eventProgram};
+    calls.hostConnectionId = s.connections[0];
+    calls.hostFrame = hostFrame;
+    calls.entries.reserve(count);
+    for (std::size_t k = 0; k < count; ++k) {
+        ScriptCallEntry e;
+        e.netId = records[k].netId; e.objectId = records[k].objectId; e.table = records[k].table; e.index = records[k].index;
+        for (std::size_t i = 0; i < 4; ++i) e.args[i] = records[k].args[i];
+        if (!validScriptCallEntry(e)) { ++g_scriptCallStats.sendFailed; return false; }
+        calls.entries.push_back(e);
+    }
+    calls.seq = ++g_scriptCallSeq;  // consumed even if the send fails
+    seqOut = calls.seq;
+    const bool sent = SendCapturedWorld(encode(calls), context);
+    if (sent) ++g_scriptCallStats.sent; else ++g_scriptCallStats.sendFailed;
+    return sent;
+}
+void SetScriptCallApply(ScriptCallApplyFn apply) noexcept { g_scriptCallApply = apply; }
+ScriptCallStats GetScriptCallStats() noexcept { return g_scriptCallStats; }
 
 } // namespace enemysync
 } // namespace inject

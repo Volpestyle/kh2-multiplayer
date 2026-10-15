@@ -211,6 +211,27 @@ struct TargetAuthorityView {
 };
 TargetAuthorityView CurrentTargetAuthority(std::uint64_t maxAgeMs) noexcept;
 
+// VUH-2252 ScriptCall (ScriptMirror.inl). A script call a host mirrored enemy's script made on
+// that enemy: bdscript trap table/index and its tagged values after the actor (Protocol.hpp
+// ScriptCallEntry; that header stays out of EntityHook's unit). Game thread.
+struct ScriptCallRecord {
+    std::uint16_t netId = 0;
+    std::uint32_t objectId = 0;
+    std::uint8_t table = 0;
+    std::uint16_t index = 0;
+    std::uint64_t args[4] {};
+};
+// Host: one reliable ScriptCall for the current room (1..32 records, in call order).
+bool SendScriptCalls(const ScriptCallRecord* records, std::size_t count, std::uint32_t hostFrame, std::uint64_t& seqOut);
+// Client: after source/epoch/room/sequence admission enemysync calls this once per record, in order.
+// Returns 1 when applied to the mirrored enemy, 0 when refused.
+using ScriptCallApplyFn = int (*)(const ScriptCallRecord& record);
+void SetScriptCallApply(ScriptCallApplyFn apply) noexcept;
+struct ScriptCallStats {
+    std::uint64_t sent = 0, sendFailed = 0, seen = 0, admissionRefused = 0, records = 0, applied = 0, refused = 0;
+};
+ScriptCallStats GetScriptCallStats() noexcept;
+
 } // namespace enemysync
 } // namespace inject
 } // namespace kh2coop

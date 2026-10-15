@@ -337,6 +337,9 @@ void NetworkClient::sendRemoteHit(const RemoteHit& m) {
 void NetworkClient::sendTargetAuthority(const TargetAuthority& m) {
     if (ready() && avatarLocalSlot_ == 0) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
+void NetworkClient::sendScriptCall(const ScriptCall& m) {
+    if (ready() && avatarLocalSlot_ == 0) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
+}
 void NetworkClient::sendHitClaim(const HitClaim& m) {
     if (ready()) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
@@ -535,6 +538,7 @@ void NetworkClient::resetTransportState() {
     reviveLocal_ = {}; reviveLocalMs_ = 0; receivedReviveEpisode_ = 0;
     receivedRemoteHitHost_ = 0; receivedRemoteHitSeq_ = 0;
     receivedTargetAuthorityHost_ = 0; receivedTargetAuthoritySeq_ = 0;
+    receivedScriptCallHost_ = 0; receivedScriptCallSeq_ = 0;
     clockOffsetMs_ = 0;
     bestRttMs_ = 0;
     lastRttMs_ = 0;
@@ -940,6 +944,23 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             }
             reader = ByteReader(payload,payloadSize);
         }
+        if (type == PacketType::ScriptCall) {
+            // VUH-2252: same host-source and room admission as TargetAuthority, its own sequence floor.
+            ScriptCall calls; read(reader, calls);
+            const auto host = avatarConnections_[0];
+            const auto floor = host == receivedScriptCallHost_ ? receivedScriptCallSeq_ : 0;
+            const char* why = !admittedScope || admittedScope->kind != WorldSourceKind::Native ? "no-native-scope" :
+                !host || admittedScope->sourceConnectionId != host || calls.hostConnectionId != host ? "host-connection" :
+                !hostRoom_ || !sameResyncRoom(calls.location,*hostRoom_) ? "room-mismatch" :
+                calls.seq <= floor ? "sequence" : nullptr;
+            if (why) {
+                static unsigned scriptCallLogs = 0;
+                if (scriptCallLogs < 32) { ++scriptCallLogs; log(std::string("[script-mirror] drop reason=") + why + " seq=" + std::to_string(calls.seq)); }
+                return;
+            }
+            receivedScriptCallHost_ = host; receivedScriptCallSeq_ = calls.seq;
+            reader = ByteReader(payload,payloadSize);
+        }
 
         // Actual accepted inner body and original received envelope, before bridge callbacks.
         // Diagnostic failure must neither fabricate a delivery nor change admission.
@@ -1134,6 +1155,8 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             }
             case PacketType::EnemyMotion:
                 break; // raw world delivery only (VUH-1515)
+            case PacketType::ScriptCall:
+                break; // raw world delivery only (VUH-2252)
             case PacketType::PartyLayout: {
                 PartyLayout m;read(reader,m);if(callbacks_.onPartyLayout)callbacks_.onPartyLayout(m);break;
             }

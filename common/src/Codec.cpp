@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <algorithm>
 #include <bit>
@@ -224,7 +225,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -916,6 +917,52 @@ std::vector<std::uint8_t> encode(const TargetAuthority& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::TargetAuthority, w.data());
 }
 
+bool validScriptCallEntry(const ScriptCallEntry& e) {
+    const auto shape = scriptCallShape(e.table, e.index);
+    if (shape.kind == ScriptCallKind::None || !e.netId) return false;
+    for (std::size_t i = 0; i < e.args.size(); ++i) {
+        const auto tag = static_cast<std::uint32_t>(e.args[i] >> 32);
+        const auto bits = static_cast<std::uint32_t>(e.args[i]);
+        if (i >= shape.argc) { if (e.args[i] != 0) return false; continue; }
+        if (tag == SCRIPT_TAG_FLOAT) {
+            float f; std::memcpy(&f, &bits, sizeof(f));
+            if (!std::isfinite(f) || std::fabs(f) > SCRIPT_CALL_MAX_FLOAT) return false;
+        } else if (tag != SCRIPT_TAG_INT || shape.kind == ScriptCallKind::Vector4) return false;
+    }
+    return true;
+}
+void write(ByteWriter& w, const ScriptCall& m) {
+    if (m.entries.empty() || m.entries.size() > SCRIPT_CALL_MAX_ENTRIES || !m.seq)
+        throw std::runtime_error("ScriptCall: bad entry count or sequence");
+    write(w, m.location);
+    w.writeU64(m.seq); w.writeU64(m.hostConnectionId); w.writeU32(m.hostFrame);
+    w.writeU8(static_cast<std::uint8_t>(m.entries.size()));
+    for (const auto& e : m.entries) {
+        if (!validScriptCallEntry(e)) throw std::runtime_error("ScriptCall: invalid entry");
+        w.writeU16(e.netId); w.writeU32(e.objectId); w.writeU8(e.table); w.writeU16(e.index);
+        for (auto a : e.args) w.writeU64(a);
+    }
+}
+void read(ByteReader& r, ScriptCall& m) {
+    if (r.remaining() < SCRIPT_CALL_HEADER_BYTES) throw std::runtime_error("ScriptCall: short payload");
+    ScriptCall out;
+    read(r, out.location);
+    out.seq = r.readU64(); out.hostConnectionId = r.readU64(); out.hostFrame = r.readU32();
+    const std::size_t count = r.readU8();
+    if (!out.seq || count == 0 || count > SCRIPT_CALL_MAX_ENTRIES || r.remaining() != count * SCRIPT_CALL_ENTRY_BYTES)
+        throw std::runtime_error("ScriptCall: wrong entry count or length");
+    out.entries.resize(count);
+    for (auto& e : out.entries) {
+        e.netId = r.readU16(); e.objectId = r.readU32(); e.table = r.readU8(); e.index = r.readU16();
+        for (auto& a : e.args) a = r.readU64();
+        if (!validScriptCallEntry(e)) throw std::runtime_error("ScriptCall: invalid entry");
+    }
+    m = std::move(out);
+}
+std::vector<std::uint8_t> encode(const ScriptCall& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::ScriptCall, w.data());
+}
+
 void write(ByteWriter& w, const HitClaim& m) {
     w.writeU32(m.epoch);
     w.writeU32(m.seq);
@@ -1515,6 +1562,10 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("RemoteHit: wrong frame length");
     if (type == PacketType::TargetAuthority && (len != TARGET_AUTHORITY_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("TargetAuthority: wrong frame length");
+    if (type == PacketType::ScriptCall &&
+        (len < SCRIPT_CALL_HEADER_BYTES || (len - SCRIPT_CALL_HEADER_BYTES) % SCRIPT_CALL_ENTRY_BYTES != 0 ||
+         size != kHeaderSize + len))
+        throw std::runtime_error("ScriptCall: wrong frame length");
     if (type == PacketType::HitClaim && (len != 43 || size != kHeaderSize + len))
         throw std::runtime_error("HitClaim: wrong frame length");
     if (type == PacketType::EnemyHp && (len < 14 || size != kHeaderSize + len))

@@ -1,0 +1,226 @@
+// VUH-2252: ScriptCall wire format, relay forwarding and the DLL's send-on-change rules.
+#include "kh2coop/Codec.hpp"
+#include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/SessionHost.hpp"
+#include "ScriptMirror.hpp"
+#include <enet/enet.h>
+#include <array>
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <thread>
+using namespace kh2coop;
+namespace R = kh2coop::inject::scriptmirror::rules;
+namespace {
+int errors = 0;
+void check(bool ok, const char* text) { std::cout << (ok ? "PASS " : "FAIL ") << text << '\n'; if (!ok) ++errors; }
+
+std::uint64_t flt(float f) { std::uint32_t b; std::memcpy(&b, &f, 4); return R::Tagged(R::kTagFloat, b); }
+std::uint64_t num(std::uint32_t v) { return R::Tagged(R::kTagInt, v); }
+
+ScriptCall sample() {
+    ScriptCall m;
+    m.location = {7, 2, 0x19, 0, 0, 149, 0};
+    m.seq = 42; m.hostConnectionId = 10; m.hostFrame = 900;
+    ScriptCallEntry tilt; tilt.netId = 3; tilt.objectId = 0x1FF; tilt.table = 8; tilt.index = 2;
+    tilt.args = {flt(0.25f), flt(1.5f), flt(-0.125f), flt(1.0f)};
+    ScriptCallEntry tex; tex.netId = 3; tex.objectId = 0x1FF; tex.table = 1; tex.index = 85; tex.args = {num(4), 0, 0, 0};
+    m.entries = {tilt, tex};
+    return m;
+}
+bool refusedRead(const std::vector<std::uint8_t>& bytes) {
+    try { const std::uint8_t* p; std::size_t n; decodePacketHeader(bytes.data(), bytes.size(), p, n); ByteReader r(p, n); ScriptCall out; read(r, out); }
+    catch (const std::exception&) { return true; }
+    return false;
+}
+bool refusedWrite(const ScriptCall& m) { try { encode(m); } catch (const std::exception&) { return true; } return false; }
+
+void codecChecks() {
+    const auto m = sample();
+    const auto bytes = encode(m);
+    const std::uint8_t* p = nullptr; std::size_t n = 0;
+    check(PacketType::ScriptCall == static_cast<PacketType>(49) && decodePacketHeader(bytes.data(), bytes.size(), p, n) == PacketType::ScriptCall &&
+          n == SCRIPT_CALL_HEADER_BYTES + 2u * SCRIPT_CALL_ENTRY_BYTES, "script call is packet type 49, 37 + 41 * n payload bytes");
+    ByteReader reader(p, n); ScriptCall copy; read(reader, copy);
+    check(encode(copy) == bytes && reader.atEnd() && copy.seq == 42 && copy.hostConnectionId == 10 && copy.hostFrame == 900 &&
+          copy.entries.size() == 2 && copy.entries[0].args == m.entries[0].args && copy.entries[1].index == 85 &&
+          sameResyncRoom(copy.location, m.location), "script call exact codec roundtrip in field order");
+    for (int delta : {-1, 1}) {
+        auto bad = bytes; if (delta < 0) bad.pop_back(); else bad.push_back(0);
+        check(refusedRead(bad), "truncated or trailing script call frame refused");
+        bad[1] = static_cast<std::uint8_t>(bad.size() - 3); bad[2] = static_cast<std::uint8_t>((bad.size() - 3) >> 8);
+        check(refusedRead(bad), "script call with a self-consistent length off the entry grid refused");
+    }
+    check(isWorldPacket(PacketType::ScriptCall) && isScopedWorldPacket(PacketType::ScriptCall) &&
+          !isMaterialWorldPacket(PacketType::ScriptCall) && !isEphemeralWorldPacket(PacketType::ScriptCall) &&
+          validateScopedWorldPacket(bytes) == PacketType::ScriptCall, "script call is a scoped, non-material world packet");
+    auto bad = m; bad.entries.clear(); check(refusedWrite(bad), "empty script call refused");
+    bad = m; bad.entries.assign(SCRIPT_CALL_MAX_ENTRIES + 1, m.entries[1]); check(refusedWrite(bad), "33 entries refused");
+    bad = m; bad.seq = 0; check(refusedWrite(bad), "zero sequence refused");
+    bad = m; bad.entries[1].index = 121; check(refusedWrite(bad), "a trap outside the list (target_search) refused");
+    bad = m; bad.entries[1].netId = 0; check(refusedWrite(bad), "netId 0 refused");
+    bad = m; bad.entries[1].args[1] = num(1); check(refusedWrite(bad), "a nonzero unused value refused");
+    bad = m; bad.entries[1].args[0] = R::Tagged(R::kTagAddress, 5); check(refusedWrite(bad), "a handle value refused");
+    bad = m; bad.entries[0].args[2] = num(1); check(refusedWrite(bad), "an int inside a vector refused");
+    bad = m; bad.entries[0].args[0] = flt(std::numeric_limits<float>::quiet_NaN()); check(refusedWrite(bad), "NaN refused");
+    bad = m; bad.entries[0].args[0] = flt(2.0e5f); check(refusedWrite(bad), "out-of-bound float refused");
+    // Same refusals on read: patch one byte of a valid frame (entry 1 index low byte at 37 + 41 + 7).
+    auto patched = bytes; patched[3 + SCRIPT_CALL_HEADER_BYTES + SCRIPT_CALL_ENTRY_BYTES + 7] = 121;
+    check(refusedRead(patched), "reader refuses a trap outside the list");
+    patched = bytes; patched[3 + SCRIPT_CALL_HEADER_BYTES - 1] = 0;
+    check(refusedRead(patched), "reader refuses a zero entry count");
+}
+
+void rulesAgreeWithCodec() {
+    bool shapes = true, values = true;
+    for (std::size_t i = 0; i < R::kTrapCount; ++i) {
+        const auto& t = R::kTraps[i];
+        const auto shape = scriptCallShape(t.table, t.index);
+        shapes = shapes && shape.argc == t.values && (shape.kind == ScriptCallKind::Vector4) == t.vector &&
+                 shape.kind != ScriptCallKind::None && R::FindTrap(t.table, t.index) == static_cast<int>(i) &&
+                 (t.flags & 0xFFFF) == 1u + (t.vector ? 1u : t.values) && R::kBodies[i].size > 0;
+        const std::uint64_t cases[][4] = {{0, 0, 0, 0}, {num(1), 0, 0, 0}, {flt(0.5f), 0, 0, 0}, {flt(1), flt(2), flt(3), flt(4)},
+                                          {num(1), num(2), 0, 0}, {flt(1), num(2), flt(3), flt(4)}, {R::Tagged(R::kTagAddress, 1), 0, 0, 0}};
+        for (const auto& v : cases) {
+            ScriptCallEntry e; e.netId = 1; e.table = t.table; e.index = t.index;
+            for (int k = 0; k < 4; ++k) e.args[static_cast<std::size_t>(k)] = v[k];
+            values = values && R::ValidValues(i, v) == validScriptCallEntry(e);
+        }
+    }
+    check(shapes, "every DLL trap is on the wire list with the same shape, argument count and a pinned body");
+    check(values, "DLL value rules and wire validation agree on every trap");
+    check(R::FindTrap(1, 121) < 0 && scriptCallShape(1, 121).kind == ScriptCallKind::None, "target_search is not mirrored");
+}
+
+R::Call call(std::uint16_t netId, std::uint8_t trap, std::uint64_t v0 = 0) {
+    R::Call c; c.netId = netId; c.objectId = 0x1FF; c.trap = trap;
+    if (R::kTraps[trap].vector) { c.values[0] = v0 ? v0 : flt(0); c.values[1] = flt(0); c.values[2] = flt(0); c.values[3] = flt(1); }
+    else if (R::kTraps[trap].values) c.values[0] = v0;
+    return c;
+}
+void senderChecks() {
+    using O = R::Sender::Outcome;
+    const auto rot = static_cast<std::uint8_t>(R::FindTrap(1, 1)), xyz = static_cast<std::uint8_t>(R::FindTrap(8, 2));
+    const auto texOn = static_cast<std::uint8_t>(R::FindTrap(1, 85)), texOff = static_cast<std::uint8_t>(R::FindTrap(1, 86));
+    const auto hide = static_cast<std::uint8_t>(R::FindTrap(6, 45)), show = static_cast<std::uint8_t>(R::FindTrap(6, 64));
+    R::Sender s;
+    check(s.Observe(call(3, xyz, flt(0.2f))) == O::Queued && s.Observe(call(3, xyz, flt(0.2f))) == O::Repeat,
+          "an identical queued call is a repeat");
+    check(s.Observe(call(3, xyz, flt(0.3f))) == O::Replaced && s.Pending() == 1, "a changed value replaces the queued one");
+    check(s.Observe(call(3, rot, flt(1.0f))) == O::Replaced && s.Pending() == 1, "set_rot and set_xyzrot share the rotation key");
+    check(s.Observe(call(4, rot, flt(1.0f))) == O::Queued && s.Pending() == 2, "another enemy has its own key");
+    R::Call out[32];
+    check(s.Peek(out, 32) == 2 && out[0].netId == 3 && out[0].trap == rot && out[1].netId == 4, "queued calls flush in call order");
+    s.Commit(2);
+    check(s.Pending() == 0 && s.Observe(call(3, rot, flt(1.0f))) == O::Repeat && s.Observe(call(4, rot, flt(1.0f))) == O::Repeat,
+          "every frame's identical call after a send is not re-sent");
+    check(s.Observe(call(3, rot, flt(1.5f))) == O::Queued, "a change after the send queues again");
+    check(s.Observe(call(3, texOn, num(4))) == O::Queued && s.Observe(call(3, texOn, num(5))) == O::Queued &&
+          s.Observe(call(3, texOff, num(4))) == O::Replaced, "texture animations are keyed by id; stop replaces its start");
+    check(s.Observe(call(3, hide)) == O::Queued && s.Observe(call(3, show)) == O::Replaced, "shadow hide and show share a key");
+    std::size_t n = s.Peek(out, 32);
+    check(n == 4, "four keys pending");
+    s.Commit(1);  // only the first went out: the rest stay queued for the next packet
+    check(s.Pending() == 3 && s.Observe(call(3, rot, flt(1.5f))) == O::Repeat, "a partial commit keeps the rest queued");
+    s.Reset();
+    check(s.Pending() == 0 && s.Observe(call(3, rot, flt(1.0f))) == O::Queued, "reset (room change) forgets every baseline");
+    R::Sender full;
+    bool ok = true;
+    for (std::uint16_t id = 1; id <= R::Sender::kPendingCap; ++id) ok = ok && full.Observe(call(id, rot, flt(1))) == O::Queued;
+    check(ok && full.Observe(call(999, rot, flt(1))) == O::Full, "pending is bounded");
+    // Per-second counts: 120 frames of the same tilt from 3 enemies cost 3 records.
+    R::Sender boss; unsigned queued = 0, repeats = 0;
+    for (int frame = 0; frame < 120; ++frame) {
+        for (std::uint16_t id = 1; id <= 3; ++id) { const auto o = boss.Observe(call(id, xyz, flt(0.4f))); queued += o == O::Queued; repeats += o == O::Repeat; }
+        boss.Commit(boss.Pending());
+    }
+    check(queued == 3 && repeats == 357, "a boss repeating the same call every frame sends it once");
+}
+
+void holdChecks() {
+    const auto rot = static_cast<std::uint8_t>(R::FindTrap(1, 1));
+    R::Hold h;
+    check(h.Put(call(3, rot, flt(1)), 10) && h.Put(call(3, rot, flt(2)), 11) && h.Size() == 1, "hold keeps the latest value per key");
+    check(h.Put(call(4, rot, flt(1)), 12) && h.Size() == 2, "hold keeps one item per key");
+    std::size_t expired = 0; std::vector<std::uint16_t> applied;
+    auto ready3 = [&](const R::Call& c) { if (c.netId != 3) return false; applied.push_back(c.netId); return true; };
+    check(h.Drain(20, ready3, expired) == 1 && applied.size() == 1 && h.Size() == 1 && expired == 0, "drain applies ready copies only");
+    check(h.Drain(12 + R::Hold::kHoldFrames + 1, ready3, expired) == 0 && expired == 1 && h.Size() == 0, "an unbound copy's call expires");
+    h.Put(call(3, rot, flt(1)), 30); h.Erase(R::KeyOf(call(3, rot, flt(9))));
+    check(h.Size() == 0, "erase drops the held value for a key a newer call already set");
+}
+
+void enetChecks() {
+    SessionConfig config; config.bindAddress = "127.0.0.1"; config.port = 29881;
+    config.gameBuild = "script-call-test"; config.modHash = "none";
+    std::string lastReason;
+    SessionCallbacks relayCallbacks; relayCallbacks.onLog = [&](const std::string& m) {
+        const std::string key = "ScriptCall refused reason="; const auto at = m.find(key);
+        if (at != std::string::npos) { const auto start = at + key.size(); lastReason = m.substr(start, m.find(' ', start) - start); }
+    };
+    SessionHost server(config, relayCallbacks); if (!server.start()) { check(false, "script call ENet bind"); return; }
+    std::array<std::vector<ScriptCall>, 3> received;
+    std::array<std::unique_ptr<NetworkClient>, 3> clients;
+    auto make = [&](unsigned i) {
+        ClientCallbacks cb;
+        cb.onWorldEnvelope = [&, i](const WorldEnvelope& e) {
+            if (e.packet.front() != static_cast<std::uint8_t>(PacketType::ScriptCall)) return;
+            const std::uint8_t* p; std::size_t n; decodePacketHeader(e.packet.data(), e.packet.size(), p, n);
+            ByteReader r(p, n); ScriptCall c; read(r, c); received[i].push_back(c);
+        };
+        clients[i] = std::make_unique<NetworkClient>("127.0.0.1", config.port, "script-call-test", "none", "sc" + std::to_string(i),
+                                                     static_cast<SlotType>(i), cb);
+        clients[i]->connect();
+    };
+    auto pump = [&] { for (unsigned k = 0; k < 30; ++k) { server.tick(); for (auto& c : clients) if (c) c->tick(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); } };
+    make(0); make(1); pump(); pump();
+    check(server.verifiedPeerCount() == 2, "script call: host and first friend admitted");
+    if (server.verifiedPeerCount() != 2) { for (auto& c : clients) if (c) c->disconnect(); server.stop(); return; }
+    const RoomTransition room{20, 2, 0x19, 0, 0, 149, 0};
+    clients[0]->sendRoomTransition(room); pump();
+    const auto hostId = server.peerBySlot(SlotType::Player)->connectionId;
+    auto calls = sample(); calls.location = room; calls.seq = 1; calls.hostConnectionId = hostId;
+    clients[0]->sendScriptCall(calls); pump();
+    check(received[1].size() == 1 && received[0].empty() && received[1][0].entries.size() == 2 && received[1][0].entries[0].table == 8,
+          "script call forwarded to the friend, not back to the host");
+    make(2); pump(); pump();
+    check(server.verifiedPeerCount() == 3 && received[2].empty(), "late joiner gets no script call replay");
+    ++calls.seq; clients[0]->sendScriptCall(calls); pump();
+    check(received[1].size() == 2 && received[2].size() == 1 && received[0].empty(), "script call forwarded to both clients");
+    auto total = [&] { return received[0].size() + received[1].size() + received[2].size(); };
+    auto refusedBy = [&](const char* reason, const char* label, const auto& send) {
+        const auto before = total(); const auto rejected = server.rejectedWorldMessages(); lastReason.clear();
+        send(); pump();
+        check(total() == before && server.rejectedWorldMessages() == rejected + 1 && lastReason == reason, label);
+        if (lastReason != reason) std::cout << "  relay reason=" << lastReason << " expected=" << reason << '\n';
+    };
+    {   auto forged = calls; forged.seq = 1000;
+        refusedBy("sender-not-verified-host", "non-host script call refused", [&] {
+            clients[1]->sendNativeWorld(encode(forged), ProducerWorldContext{1, clients[1]->deliverySerial(), 0}, true); });
+    }
+    refusedBy("sequence", "duplicate script call sequence refused", [&] { clients[0]->sendScriptCall(calls); });
+    auto stale = calls; ++calls.seq; stale.seq = calls.seq; stale.location.epoch = 19;
+    refusedBy("room-mismatch", "old room epoch script call refused", [&] { clients[0]->sendScriptCall(stale); });
+    auto forgedHost = calls; ++calls.seq; forgedHost.seq = calls.seq; forgedHost.hostConnectionId = hostId + 1;
+    refusedBy("host-connection", "forged host connection script call refused", [&] { clients[0]->sendScriptCall(forgedHost); });
+    ++calls.seq; clients[0]->sendScriptCall(calls); pump();
+    check(received[1].size() == 3 && received[2].size() == 2, "a valid script call after refusals still forwards");
+    for (auto& c : clients) if (c) c->disconnect();
+    server.stop();
+}
+} // namespace
+
+int main() {
+    if (enet_initialize() != 0) return 2;
+    codecChecks();
+    rulesAgreeWithCodec();
+    senderChecks();
+    holdChecks();
+    enetChecks();
+    enet_deinitialize();
+    std::cout << "failures=" << errors << '\n';
+    if (!errors) std::cout << "ALL CHECKS PASSED\n";
+    return errors ? 1 : 0;
+}

@@ -1114,6 +1114,33 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::ScriptCall: {
+                // VUH-2252: the host's mirrored enemies' script calls for the current room. Forwarded
+                // reliably to every verified client; never cached or replayed to late joiners.
+                ScriptCall calls; read(reader, calls);
+                static unsigned scriptCallLogs = 0;
+                const char* why = ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined ? "sender-not-verified-host" :
+                    !admittedScope ? "no-scope" : !room_ || !room_->epoch ? "no-room" :
+                    !sameResyncRoom(calls.location, *room_) ? "room-mismatch" :
+                    calls.seq <= ps->lastScriptCallSeq ? "sequence" :
+                    calls.hostConnectionId != ps->connectionId ? "host-connection" : nullptr;
+                if (why) {
+                    if (scriptCallLogs < 32) {
+                        ++scriptCallLogs;
+                        log(std::string("ScriptCall refused reason=") + why + " seq=" + std::to_string(calls.seq));
+                    }
+                    ++rejectedWorld_;
+                    return;
+                }
+                ps->lastScriptCallSeq = calls.seq;
+                lastHostSourceSerial_ = (std::max)(lastHostSourceSerial_, admittedScope->hostSourceSerial);
+                const auto packet = encode(calls);
+                for (auto& other : peers_)
+                    if (other.status == PeerStatus::Verified && !fromHost(other) && other.transportPeer)
+                        sendTo(other.transportPeer, packet, true);
+                break;
+            }
+
             case PacketType::HitClaim: {
                 if (ps->status != PeerStatus::Verified || fromHost(*ps)) {
                     // The host applies its own hits natively.

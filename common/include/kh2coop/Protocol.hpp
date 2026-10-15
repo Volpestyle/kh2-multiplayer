@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 18;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 19;
 
 // ===========================================================================
+// Protocol v19 adds ScriptCall (49): the host's mirrored enemies' script calls (VUH-2252).
 // Protocol v18 adds host co-op difficulty to ClientHello/SessionState and
 // the locked player count to the RoomTransition packet trailer.
 // Protocol v17 adds distinct non-death membership retirement in PopulationCut schema2.
@@ -292,6 +293,50 @@ inline constexpr std::uint16_t TARGET_AUTHORITY_PAYLOAD_SIZE = 38;
 inline constexpr std::uint8_t TARGET_AUTHORITY_SLOT_BITS = 0x06;
 inline constexpr std::uint32_t TARGET_AUTHORITY_FAMILY_BITS = 0x1u;
 inline constexpr std::uint8_t TARGET_AUTHORITY_MAX_MODE = 1;
+
+// Reliable, scoped host report (VUH-2252, D14 item 3): script calls a host
+// mirrored enemy's script made on that enemy, sent only when the value changed.
+// A client runs no brain for a mirrored enemy, so without these a tilt, a
+// texture animation or a shadow set by its script never shows there. The
+// relay checks host, room and sequence and forwards it to every verified
+// client; never cached, never replayed to late joiners.
+// args are the call's values after the actor, as bdscript tags them: high 32
+// bits '@INT' or '@FLT', low 32 bits the value. A vector argument travels as
+// its four floats. Only the traps scriptCallShape names are accepted, and
+// unused args must be zero. Wire order is field order: 37 + 41 * n bytes.
+inline constexpr std::uint32_t SCRIPT_TAG_INT = 0x544E4940;   // '@INT'
+inline constexpr std::uint32_t SCRIPT_TAG_FLOAT = 0x544C4640; // '@FLT'
+inline constexpr float SCRIPT_CALL_MAX_FLOAT = 100000.0f;
+enum class ScriptCallKind : std::uint8_t { None, Scalars, Vector4 };
+struct ScriptCallShape { ScriptCallKind kind{ScriptCallKind::None}; std::uint8_t argc{0}; };
+// bdscript trap table/index (OpenKH BdxTraps.cs names; tables at exe+0x753490).
+inline constexpr ScriptCallShape scriptCallShape(std::uint8_t table, std::uint16_t index) {
+    return table == 1 && index == 1 ? ScriptCallShape{ScriptCallKind::Scalars, 1}     // trap_obj_set_rot (float)
+         : table == 8 && index == 2 ? ScriptCallShape{ScriptCallKind::Vector4, 4}     // trap_obj_set_xyzrot
+         : table == 1 && (index == 85 || index == 86) ? ScriptCallShape{ScriptCallKind::Scalars, 1} // texanm start/stop
+         : table == 6 && (index == 45 || index == 64) ? ScriptCallShape{ScriptCallKind::Scalars, 0} // hide/show shadow
+         : table == 6 && index == 65 ? ScriptCallShape{ScriptCallKind::Scalars, 1}    // trap_obj_set_scissoring
+         : ScriptCallShape{};
+}
+struct ScriptCallEntry {
+    std::uint16_t netId{0};        // host spawn (spawn index + 1) the call acted on
+    std::uint32_t objectId{0};     // its objentry id, checked by clients
+    std::uint8_t table{0};
+    std::uint16_t index{0};
+    std::array<std::uint64_t, 4> args{};
+};
+struct ScriptCall {
+    RoomTransition location{};     // host's admitted room tuple
+    std::uint64_t seq{0};          // nonzero, strictly increasing within the host connection
+    std::uint64_t hostConnectionId{0};
+    std::uint32_t hostFrame{0};
+    std::vector<ScriptCallEntry> entries; // 1..SCRIPT_CALL_MAX_ENTRIES, in call order
+};
+inline constexpr std::size_t SCRIPT_CALL_MAX_ENTRIES = 32;
+inline constexpr std::uint16_t SCRIPT_CALL_HEADER_BYTES = 37;
+inline constexpr std::uint16_t SCRIPT_CALL_ENTRY_BYTES = 41;
+// Every arg the shape uses is tagged and finite (floats within the bound); unused args are zero.
+bool validScriptCallEntry(const ScriptCallEntry& e);
 inline constexpr float REVIVE_RANGE = 200.0f; // native world units; initial policy
 inline constexpr std::uint64_t REVIVE_AVATAR_MAX_AGE_MS = 1000;
 

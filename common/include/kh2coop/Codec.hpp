@@ -62,6 +62,7 @@ enum class PacketType : std::uint8_t {
     TargetAuthority = 46, // host -> relay validation -> clients (reliable, periodic)
     PartyIntent = 47, // host -> relay (cached per target; no joiner replay, the host republishes) -> all incl. host (VUH-1786)
     PopulationCut = 48, // complete certified native occurrence state, host only
+    ScriptCall = 49, // host -> relay validation -> clients, reliable, sent on change (VUH-2252)
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
 inline bool isDesyncDiagnosticPacket(PacketType type) {
@@ -118,6 +119,7 @@ void write(ByteWriter& w, const PartyIntent& m);
 void write(ByteWriter& w, const ReviveRequest& m);
 void write(ByteWriter& w, const RemoteHit& m);
 void write(ByteWriter& w, const TargetAuthority& m);
+void write(ByteWriter& w, const ScriptCall& m);
 void write(ByteWriter& w, const HitClaim& m);
 void write(ByteWriter& w, const ProgressUpdate& m);
 void write(ByteWriter& w, const StateHash& m);
@@ -153,6 +155,7 @@ void read(ByteReader& r, PartyIntent& m);
 void read(ByteReader& r, ReviveRequest& m);
 void read(ByteReader& r, RemoteHit& m);
 void read(ByteReader& r, TargetAuthority& m);
+void read(ByteReader& r, ScriptCall& m);
 void read(ByteReader& r, HitClaim& m);
 void read(ByteReader& r, ProgressUpdate& m);
 void read(ByteReader& r, StateHash& m);
@@ -235,6 +238,7 @@ std::vector<std::uint8_t> encode(const PartyIntent& m);
 std::vector<std::uint8_t> encode(const ReviveRequest& m);
 std::vector<std::uint8_t> encode(const RemoteHit& m);
 std::vector<std::uint8_t> encode(const TargetAuthority& m);
+std::vector<std::uint8_t> encode(const ScriptCall& m);
 std::vector<std::uint8_t> encode(const HitClaim& m);
 std::vector<std::uint8_t> encode(const ProgressUpdate& m);
 std::vector<std::uint8_t> encode(const StateHash& m);
@@ -265,6 +269,7 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::ReviveRequest:
         case PacketType::RemoteHit:
         case PacketType::TargetAuthority:
+        case PacketType::ScriptCall:
         case PacketType::HitClaim:
         case PacketType::TransitionAck:
         case PacketType::StateHash:

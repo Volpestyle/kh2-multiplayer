@@ -45,6 +45,7 @@
 #include "CombatCausalTrace.hpp"
 #include "DamagePolicy.hpp"
 #include "EnemyTargetRemote.hpp" // VUH-1515 (default off)
+#include "ScriptMirror.hpp" // VUH-2252: rules for ScriptMirror.inl
 #include "AllyHit.hpp" // ally player-to-player hits (default off)
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
@@ -1202,6 +1203,7 @@ static int PuppetIndexFor(uintptr_t actor) {
 #include "CloneNeutralInput.inl"
 #include "EnemyMirror.inl" // VUH-1515 step 2: mirrored enemies on clients (default off)
 #include "EnemyTargetRemote.inl" // VUH-1515: KH2COOP_ENEMY_TARGET_REMOTE, default off
+#include "ScriptMirror.inl" // VUH-2252: host script calls on mirrored enemies, on with the enemy mirror
 
 // Permission to treat a native friend as AI-owned is positive, frame-local
 // evidence from the branch which actually invokes the original friend AI.
@@ -3162,6 +3164,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 PollPuppetPoses();
                 downedspectate::Tick();
                 enemytarget::OnFrameStart(); // VUH-1515 (default off), after poses
+                scriptmirror::OnFrameStart(); // VUH-2252: host flush / client held calls, after enemysync
                 ProcessHitRequest();
                 BeginHandleFrame();
                 allyhit::Tick(g_frameCounter); // stats line (silent when off or unchanged)
@@ -3617,6 +3620,7 @@ bool Initialize(uintptr_t exeBase) {
         enemysync::Install(exeBase, &Log, g_origApplyStatDelta, verifiedTakeDamage,
                            (hitTraceVerified & hitTraceInstalled & 4U)!=0);
         enemytarget::Install(); // VUH-1515: default off (KH2COOP_ENEMY_TARGET_REMOTE)
+        scriptmirror::Install(); // VUH-2252: with the enemy mirror unless KH2COOP_SCRIPT_MIRROR=0
         enemysync::SetHashDiagnosticSink([](const std::string& row) {
             if (!g_logFile) return false;
             const bool written = fprintf(g_logFile,"%s\n",row.c_str()) >= 0;
@@ -3768,6 +3772,7 @@ void Shutdown() {
     }
 
     enemytarget::Shutdown(); // VUH-1515: restore the target_search slot (no actor writes here)
+    scriptmirror::Shutdown(); // VUH-2252: restore the trap slots (no actor writes here)
     render::Shutdown();
     nativehittrace::Shutdown(); // Quiescent teardown: stop observations before hooks/context retire.
     ClearNativeAiStamps();

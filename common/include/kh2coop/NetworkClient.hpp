@@ -148,6 +148,7 @@ public:
     void sendReviveRequest(const ReviveRequest& m);
     void sendRemoteHit(const RemoteHit& m); // host only; relay forwards to the target owner
     void sendTargetAuthority(const TargetAuthority& m); // host only; relay forwards to every client
+    void sendScriptCall(const ScriptCall& m);           // host only; relay forwards to every client (VUH-2252)
     bool sendPartyLayout(const PartyLayout& m);
     bool requestPartyReapply(const PartyReapply& m); // host story-forced change only
     const std::optional<PartyLayout>& partyLayout() const { return partyLayout_; }
@@ -341,6 +342,7 @@ private:
     std::uint64_t reviveLocalMs_{0}, receivedReviveEpisode_{0};
     std::uint64_t receivedRemoteHitHost_{0}, receivedRemoteHitSeq_{0}; // per host connection
     std::uint64_t receivedTargetAuthorityHost_{0}, receivedTargetAuthoritySeq_{0}; // per host connection
+    std::uint64_t receivedScriptCallHost_{0}, receivedScriptCallSeq_{0}; // per host connection (VUH-2252)
 };
 
 } // namespace kh2coop
