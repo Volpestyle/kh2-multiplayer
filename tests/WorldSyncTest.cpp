@@ -1235,6 +1235,9 @@ int main() {
 
     std::cout << "\n=== Desync detection and resync ===\n";
     const StateHash good {2, 4, 0x1B, hashAppliedEnemies({{1, 0x210, 153}, {2, 0x210, 160}}), 20};
+    // Two host samples: the relay only counts an enemy mismatch against a
+    // settled host hash (VUH-2270).
+    host->sendStateHash(good);
     host->sendStateHash(good);
     c1->sendStateHash(good);
     pump(300);
@@ -1247,6 +1250,8 @@ int main() {
     c2->sendStateHash(diverged);
     pump(150);
     check(relay.desyncNoticeCount() == 0, "two enemy-only samples can straddle damage then death");
+    host->sendStateHash(good); // keeps the host hash fresh, as its 1 s cadence does
+    pump(150);
     c2->sendStateHash(diverged);
     check(waitFor([&] { return !hostSeen.desyncs.empty(); }) &&
               hostSeen.desyncs.back().slot == SlotType::Friend2 &&

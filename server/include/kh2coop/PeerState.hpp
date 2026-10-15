@@ -3,6 +3,7 @@
 #include "kh2coop/Types.hpp"
 #include "kh2coop/Transport.hpp"
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -68,6 +69,14 @@ struct PeerState {
     std::uint8_t mismatchFields{0};
     std::uint64_t comparedHashReceiptSeq{0};
     std::uint32_t comparedHashEpoch{0};
+    // VUH-2270: this peer's last enemy hashes and native living counts
+    // (UINT32_MAX = incomplete census) in recentEnemiesEpoch, newest first,
+    // and (for clients) hashes received since the host's latest one.
+    std::array<std::uint32_t, 4> recentEnemiesHashes{};
+    std::array<std::uint32_t, 4> recentLivingCounts{};
+    std::uint8_t recentEnemiesCount{0};
+    std::uint32_t recentEnemiesEpoch{0};
+    std::uint32_t hashesSinceHost{0};
     // Diagnostic-only references into the relay-hash stream; never wire fields.
     std::uint64_t diagnosticHashReceive{0}, diagnosticPreviousCompare{0};
     WorldScope diagnosticHashScope{};

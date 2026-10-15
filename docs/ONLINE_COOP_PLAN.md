@@ -92,6 +92,16 @@ unequal populations and alternating population relationships still report.
 Missing-pack recovery and room/progress thresholds are unchanged. This does
 not change enemy hashing, native binding behavior or shared HP.
 
+VUH-2270: the relay raised `fields=2` for both friends in two 3-player route runs
+where all peers converged. In TT `02/0D` (`20261014-205117`), friends sampled
+HP between host samples (`43F79513` was never a host hash), so three fresh
+samples in a row mismatched the cached host hash. In BC `05/0B`
+(`20261014-203940`), the host sent no state hash for ~10 s after the Possessor
+kill while friends hashed two living against its stale four. An enemy mismatch
+now counts only against a fresh host hash that lag can't explain, and HP-only
+mismatches also need a settled host hash ([SCENARIOS](SCENARIOS.md#enemy-hash-notice-debounce-vuh-2212-vuh-2270)).
+The regression replays both runs' recorded hashes.
+
 Clean no-env source-player rerun `20261013-125650` passes: Armored Knights
 16->26 on both peers, native friend hit24->8, seven host deaths received and
 both living lists empty, no relay/runtime desync, four protected saves unchanged.

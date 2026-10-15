@@ -68,14 +68,21 @@ int run(const std::filesystem::path& output, std::uint16_t port) {
         if (!phase && relay.verifiedPeerCount() == 3 && clients[0]->worldReady() && clients[1]->worldReady()) {
             const auto* runtime = relay.peerBySlot(SlotType::Friend1);
             if (!runtime || runtime->peerId != "offline-runtime") return 4;
+            // Two host samples: enemy mismatches count only against a settled
+            // host hash, and a fresh one between client samples (VUH-2270).
+            clients[0]->sendStateHash(StateHash {9, 4, 26, 100, 200});
             clients[0]->sendStateHash(StateHash {9, 4, 26, 100, 200}); phase = 1;
         }
         const auto* host = relay.peerBySlot(SlotType::Player);
         const auto* friend2 = relay.peerBySlot(SlotType::Friend2);
-        if (phase == 1 && host && host->hasHash) {
+        if (phase == 1 && host && host->hashReceiptSeq == 2) {
             clients[1]->sendStateHash(StateHash {9, 4, 26, 101, 200}); phase = 2;
         } else if (phase == 2 && friend2 && friend2->hashReceiptSeq == 1) {
             clients[1]->sendStateHash(StateHash {9, 4, 26, 101, 200}); phase = 3;
+        } else if (phase == 3 && friend2 && friend2->hashReceiptSeq == 2) {
+            clients[0]->sendStateHash(StateHash {9, 4, 26, 100, 200}); phase = 4;
+        } else if (phase == 4 && host && host->hashReceiptSeq == 3) {
+            clients[1]->sendStateHash(StateHash {9, 4, 26, 101, 200}); phase = 5;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

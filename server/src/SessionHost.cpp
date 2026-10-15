@@ -1212,6 +1212,22 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 if(!reader.atEnd() || size!=payloadSize+3)return;
                 ps->lastHash=hash;
                 ps->hasHash = true;
+                if (ps->recentEnemiesEpoch != hash.epoch) {
+                    ps->recentEnemiesEpoch = hash.epoch;
+                    ps->recentEnemiesCount = 0;
+                }
+                for (std::size_t i = ps->recentEnemiesHashes.size() - 1; i > 0; --i) {
+                    ps->recentEnemiesHashes[i] = ps->recentEnemiesHashes[i - 1];
+                    ps->recentLivingCounts[i] = ps->recentLivingCounts[i - 1];
+                }
+                ps->recentEnemiesHashes[0] = hash.enemiesHash;
+                ps->recentLivingCounts[0] = hash.nativeCensusComplete ? hash.nativeLivingCount : UINT32_MAX;
+                if (ps->recentEnemiesCount < ps->recentEnemiesHashes.size()) ++ps->recentEnemiesCount;
+                if (fromHost(*ps)) {
+                    for (auto& other : peers_) other.hashesSinceHost = 0;
+                } else if (ps->hashesSinceHost != UINT32_MAX) {
+                    ++ps->hashesSinceHost;
+                }
                 if (ps->hashReceiptSeq != UINT64_MAX) ++ps->hashReceiptSeq;
                 ps->hashReceiptMs = currentTimeMs();
                 if (callbacks_.onHashDiagnostic) {
@@ -1458,6 +1474,46 @@ void SessionHost::compareWithHost(PeerState& client) {
         h.nativeLivingCount > 0 && c.nativeLivingCount == 0 &&
         h.nativeCombatCount >= h.nativeLivingCount && c.nativeCombatCount == 0 &&
         c.enemiesHash == hashAppliedEnemies({})) fields |= DesyncMissingEnemies;
+    // VUH-2270: enemy hashes carry live HP, and the host and each client
+    // sample about a second apart. In active combat a client can be a sample
+    // ahead of or behind the cached host hash, or carry an HP the host never
+    // sampled; during a host event the host stops hashing and its last hash
+    // goes stale. An enemy mismatch counts only against a fresh host hash
+    // (at most two client samples since it) and only when lag doesn't explain
+    // it: the client showing one of the host's last four hashes (behind) or
+    // having shown the host's hash one sample ago (ahead). With equal or
+    // unknown populations the mismatch is HP or binding, so the host's hash
+    // must also have settled (its last two samples equal). With complete,
+    // unequal populations the living counts get the same lag test instead,
+    // so a missing pack still reports while the host's HP changes. Any other
+    // sample is skipped: it neither counts nor resets the streak.
+    if ((fields & DesyncEnemies) && !(fields & DesyncRoom)) {
+        const auto recent = [](const PeerState& peer, std::uint32_t epoch, const auto& values,
+                               std::uint32_t value, std::uint8_t depth) {
+            if (peer.recentEnemiesEpoch != epoch) return false;
+            for (std::uint8_t i = 0; i < peer.recentEnemiesCount && i < depth; ++i)
+                if (values[i] == value) return true;
+            return false;
+        };
+        bool evidence = client.hashesSinceHost <= 2 &&
+            !recent(*host, c.epoch, host->recentEnemiesHashes, c.enemiesHash, 4) &&
+            !recent(client, h.epoch, client.recentEnemiesHashes, h.enemiesHash, 2);
+        if (h.nativeCensusComplete && c.nativeCensusComplete && h.nativeLivingCount != c.nativeLivingCount) {
+            evidence = evidence &&
+                !recent(*host, c.epoch, host->recentLivingCounts, c.nativeLivingCount, 4) &&
+                !recent(client, h.epoch, client.recentLivingCounts, h.nativeLivingCount, 2);
+        } else {
+            evidence = evidence && host->recentEnemiesEpoch == h.epoch && host->recentEnemiesCount >= 2 &&
+                host->recentEnemiesHashes[0] == host->recentEnemiesHashes[1];
+        }
+        if (!evidence) {
+            fields &= static_cast<std::uint8_t>(~(DesyncEnemies | DesyncMissingEnemies));
+            if (fields == 0) {
+                if (callbacks_.onHashDiagnostic) hashDiagnostic("skip",client,host,0,client.diagnosticPreviousCompare);
+                return;
+            }
+        }
+    }
     if (client.mismatchFields != fields) {
         client.mismatchFields = fields;
         client.mismatchPopulationChanged = false;

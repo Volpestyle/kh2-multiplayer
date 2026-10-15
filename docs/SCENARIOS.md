@@ -30,14 +30,30 @@ intact. Fresh control `131241` measured 16.661754 seconds with QPC and qualified
 both endpoints under the same bounds, without adding polling or a tolerance.
 See the [clock correction and live result](../build/rig/vuh1502-native-waves-mac-relay-20261005-01/no-observer-endpoints-root02/result.md).
 
-## Enemy hash notice debounce (VUH-2212)
+## Enemy hash notice debounce (VUH-2212, VUH-2270)
 
-Enemy-only hash notices (`fields=2`) require three fresh client samples on the
-same epoch. This debounces the observed damage-then-death ordering against the
-relay's cached host hash; agreement resets the streak. Room, progress and
+Enemy-only hash notices (`fields=2`) require three counted client samples on
+the same epoch. This debounces the observed damage-then-death ordering against
+the relay's cached host hash; agreement resets the streak. Room, progress and
 complete-missing-pack notices retain their two-sample threshold. Hashes still
-use native current HP, not the host's cached HP or max HP. Persistent enemy
-divergence still raises a notice on the third fresh sample.
+use native current HP, not the host's cached HP or max HP.
+
+VUH-2270: a client sample counts toward an enemy notice only when:
+- the host hash is fresh (at most two client samples since the host's latest);
+- lag doesn't explain the mismatch (the client isn't showing one of the host's
+  last four hashes and didn't show the host's hash one sample ago);
+- with equal or unknown populations, the host's last two hashes are equal
+  (settled);
+- with complete, unequal populations, the same lag test passes on the living
+  counts.
+
+Other samples are skipped, without counting or resetting. This stops the false
+notices from staggered HP sampling in active combat (TT `02/0D`, run
+`20261014-205117`) and from friends applying deaths while the host's census is
+silent during a boss event (BC `05/0B`, run `20261014-203940`). Persistent
+HP divergence reports once the host settles, and a missing pack still reports
+while the host's HP changes. A client about 2 s behind with HP the host never
+sampled can still report.
 
 ## Automatic reconnect: one cycle (2026-10-04)
 
