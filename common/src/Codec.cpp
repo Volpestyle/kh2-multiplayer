@@ -812,8 +812,10 @@ void write(ByteWriter& w, const EnemyMotion& m) {
 }
 
 void write(ByteWriter& w, const EnemyDeath& m) {
+    if (m.left > 1) throw std::runtime_error("EnemyDeath: invalid left flag");
     w.writeU32(m.epoch);
     w.writeU16(m.netId);
+    if (m.left) w.writeU8(m.left);
 }
 
 void write(ByteWriter& w, const PartyLayout& m) {
@@ -1244,6 +1246,11 @@ void read(ByteReader& r, EnemyHp& m) {
 void read(ByteReader& r, EnemyDeath& m) {
     m.epoch = r.readU32();
     m.netId = r.readU16();
+    m.left = 0;
+    if (!r.atEnd()) {
+        m.left = r.readU8();
+        if (m.left != 1) throw std::runtime_error("EnemyDeath: invalid left flag");
+    }
 }
 
 void read(ByteReader& r, HitClaim& m) {

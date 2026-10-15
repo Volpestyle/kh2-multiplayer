@@ -203,6 +203,11 @@ struct EnemyHp {
 struct EnemyDeath {
     std::uint32_t epoch {0};
     std::uint16_t netId {0};
+    // VUH-2272: 1 = the host's enemy left the list alive (escaped or faded), not
+    // a kill. Clients remove their copy without kill credit, so their native
+    // spawn controller doesn't advance a wave the host's never advanced. Encoded
+    // only when set, so a kill keeps the original 6-byte payload.
+    std::uint8_t left {0};
 };
 
 // VUH-1515 step 2: host pose/motion for bound, allowlisted, living enemies.

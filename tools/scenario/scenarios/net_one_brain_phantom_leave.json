@@ -1,0 +1,268 @@
+{
+ "name": "net_one_brain_phantom_leave",
+ "description": "VUH-2272: three loopback instances in HB 04/15 btl 26 with the player defaults. Bots fight for 15 s, as in route run 20261014-205834, until the host's Magic Phantom 2403 escapes alive. When it is not refilled, the host must send it as a leave (left=1) and both friends must fade their copy out without a kill. Either way no friend may spawn a wave enemy (Camo Cannon 2407) the host never spawns, and every screen ends with the same living enemies.",
+ "protect": [
+  0,
+  1,
+  2
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR": "1",
+    "KH2COOP_ENEMY_POPULATION": "1",
+    "KH2COOP_ENEMY_TARGET_ALL": "1"
+   },
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR": "1",
+    "KH2COOP_ENEMY_POPULATION": "1",
+    "KH2COOP_ENEMY_TARGET_ALL": "1"
+   },
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 2,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR": "1",
+    "KH2COOP_ENEMY_POPULATION": "1",
+    "KH2COOP_ENEMY_TARGET_ALL": "1"
+   },
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "relay",
+   "port": 27796,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player",
+   "env": {
+    "KH2COOP_COOP_DIFFICULTY": "normal"
+   }
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1",
+   "env": {
+    "KH2COOP_COOP_DIFFICULTY": "normal"
+   }
+  },
+  {
+   "do": "runtime",
+   "instance": 2,
+   "role": "friend2",
+   "env": {
+    "KH2COOP_COOP_DIFFICULTY": "normal"
+   }
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 21,
+   "door": 0,
+   "map": 1,
+   "btl": 26,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 30000,
+   "expr": "location(0)==[4, 21, 0, 1, 26, 32767] and location(1)==location(0) and location(2)==location(0) and all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','859.696,450,-599.768']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','919.696,450,-599.768']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','799.696,450,-599.768']"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 25000,
+   "expr": "all(any(a['objectId']==2403 and a['hp']>0 for a in enemies(i)) for i in range(3)) and enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "save",
+   "as": "field_objects_start",
+   "expr": "[sorted([(a['name'], a.get('objectType'), a.get('objectId'), a.get('motionId'), [round(a['position'][k]) for k in ('x', 'y', 'z')] if a.get('position') else None) for a in actors(i) if a['name'].startswith('F_')]) for i in range(3)]"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 3,
+   "fps": 10,
+   "name": "phantom_before_friend1"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1,
+    2
+   ],
+   "seconds": 15,
+   "as": "hb_fight",
+   "clip": {
+    "instance": 1,
+    "seconds": 8,
+    "fps": 10,
+    "name": "hb_fight_friend1"
+   }
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 30000,
+   "expr": "len(log_matches(r'host death epoch \\d+ netId \\d+ \\(despawned, not refilled, left=1\\)', 0)) >= 1 or log_count('despawned, refilled at its point', 0) >= 1"
+  },
+  {
+   "do": "save",
+   "as": "phantom_outcome",
+   "expr": "{'left': len(log_matches(r'host death epoch \\d+ netId \\d+ \\(despawned, not refilled, left=1\\)', 0)), 'refilled': log_count('despawned, refilled at its point', 0)}"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 10000,
+   "expr": "len(log_matches(r'host death epoch \\d+ netId \\d+ \\(despawned, not refilled, left=1\\)', 0)) == 0 or all(len(log_matches(r'client: host leave netId \\d+ objectId 2403 applied', i)) >= 1 for i in (1, 2))"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 3,
+   "fps": 10,
+   "name": "phantom_left_host"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 3,
+   "fps": 10,
+   "name": "phantom_left_friend1"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 3,
+   "fps": 10,
+   "name": "phantom_left_friend2"
+  },
+  {
+   "do": "wait",
+   "ms": 8000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "save",
+   "as": "after_leave",
+   "expr": "[sorted((a['objectId'], a['hp']) for a in enemies(i) if a.get('hp', 0) > 0) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "field_objects_after_leave",
+   "expr": "[sorted([(a['name'], a.get('objectType'), a.get('objectId'), a.get('motionId'), [round(a['position'][k]) for k in ('x', 'y', 'z')] if a.get('position') else None) for a in actors(i) if a['name'].startswith('F_')]) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "friend_2407_spawns",
+   "expr": "[log_count('objectId 2407 @', i) for i in (1, 2)]"
+  },
+  {
+   "do": "save",
+   "as": "host_2407_spawns",
+   "expr": "log_count('last objectId=2407@', 0)"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['after_leave'][0]==saved['after_leave'][1]==saved['after_leave'][2]",
+   "message": "After the host's Magic Phantom left, every screen must hold the same living enemies"
+  },
+  {
+   "do": "assert",
+   "expr": "all(n <= saved['host_2407_spawns'] for n in saved['friend_2407_spawns'])",
+   "message": "A friend spawned Camo Cannon 2407 that the host never spawned (VUH-2272)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 20000,
+   "expr": "all(len(enemy_hps(i))==0 for i in range(3))"
+  },
+  {
+   "do": "save",
+   "as": "final_unmatched",
+   "expr": "[[int(r['u']) for r in log_matches(r'\\[statehash\\] role=\\w+ epoch=\\d+ frame=\\d+ room=04/15 .*count=\\d+ unmatched=(?P<u>\\d+)', i)][-1:] for i in range(3)]"
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('objectId 2407 @', 1) <= log_count('last objectId=2407@', 0) and log_count('objectId 2407 @', 2) <= log_count('last objectId=2407@', 0)",
+   "message": "A friend spawned Camo Cannon 2407 that the host never spawned during the clear (VUH-2272)"
+  }
+ ]
+}

@@ -278,6 +278,7 @@ struct HostEnemy {
     std::uint64_t hpSourceSequence = 0;
     bool hpKnown = false;
     bool dead = false;
+    bool left = false;  // VUH-2272: the host's copy left alive; remove without kill credit
     bool removed = false;
 };
 struct HostRoom {
@@ -1919,6 +1920,7 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             EnemyDeath d;
             d.epoch = g_epoch;
             d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
+            d.left = s.lastHp > 0 ? 1 : 0;  // VUH-2272: escaped, not killed
             bool sent;
             if (!combatcausal::Requested()) sent = Send(encode(d));
             else {
@@ -1929,7 +1931,8 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
             }
             if (sent) {
                 s.deathSent = true;
-                SYNC_LOG("[enemysync] host death epoch %u netId %u (despawned, not refilled)", g_epoch, d.netId);
+                SYNC_LOG("[enemysync] host death epoch %u netId %u (despawned, not refilled, left=%u)", g_epoch, d.netId,
+                         static_cast<unsigned>(d.left));
             }
         }
     }
@@ -2599,15 +2602,26 @@ std::vector<NativeRecordContentCandidate> RecordCandidates(const std::vector<Nat
 // wrapper is NOT called with a fabricated script context. Retained disassembly
 // proves RCX=actor+A08, XMM1=1.0f, XMM2=XMM3=0, then actor+9B8 |=0x10.
 // Byte-gate both original wrapper and fade leaf; no damage/death/count function.
+// Shared with VUH-2272's host-left leave (ApplyNativeLeave): removes an actor without a kill.
+static constexpr std::uint8_t kNativeLeaveWrapperBytes[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x8B,0x09,0xE8,0x53,0x0A,0x08,0x00,0x8B,0x48,0x04,0xE8,0x4B,0x0A,0x08,0x00,0x48,0x8B,0xD8,0x8B,0x90,0xB8,0x09,0x00,0x00,0x8B,0xCA,0xC1,0xE9,0x04,0xF6,0xC1,0x01,0x75,0x20,0xF3,0x0F,0x10,0x0D,0x40,0x72,0x1F,0x00,0x48,0x8D,0x88,0x08,0x0A,0x00,0x00,0x0F,0x57,0xDB,0x0F,0x57,0xD2,0xE8,0xBE,0xAF,0xF8,0xFF,0x8B,0x93,0xB8,0x09,0x00,0x00,0x83,0xCA,0x10,0x89,0x93,0xB8,0x09,0x00,0x00,0x48,0x83,0xC4,0x20,0x5B,0xC3};
+static constexpr std::uint8_t kNativeLeaveFadeBytes[]={0xF3,0x0F,0x10,0x05,0x00,0xC3,0x26,0x00,0x0F,0x2F,0xC3,0x72,0x08,0xF3,0x0F,0x10,0x1D,0x5B,0xC2,0x26,0x00,0x0F,0x57,0xC0,0x0F,0x2F,0xD8,0x76,0x12,0xF3,0x0F,0x5C,0xD1,0xF3,0x0F,0x11,0x09,0xF3,0x0F,0x5E,0xD3,0xF3,0x0F,0x11,0x51,0x04,0xC3,0xF3,0x0F,0x11,0x11,0xF3,0x0F,0x11,0x41,0x04,0xC3,0xCC,0xCC,0xCC,0xCC,0xCC,0xCC,0xCC};
+bool NativeLeaveCodeCurrent() {
+    return std::memcmp(reinterpret_cast<void*>(g_exeBase+0x42C810),kNativeLeaveWrapperBytes,sizeof(kNativeLeaveWrapperBytes))==0 &&
+        std::memcmp(reinterpret_cast<void*>(g_exeBase+0x3B7810),kNativeLeaveFadeBytes,sizeof(kNativeLeaveFadeBytes))==0 &&
+        *reinterpret_cast<const float*>(g_exeBase+0x623A80)==1.0f;
+}
+// Caller holds the SEH boundary and has checked the actor's roots.
+void NativeLeaveActor(uintptr_t actor) {
+    using FadeFn=void(__fastcall*)(float*,float,float,float);
+    auto* flags=reinterpret_cast<std::uint32_t*>(actor+0x9B8);
+    if((*flags&0x10)==0)
+        reinterpret_cast<FadeFn>(g_exeBase+0x3B7810)(reinterpret_cast<float*>(actor+0xA08),1.0f,0.0f,0.0f);
+    *flags|=0x10;
+}
 bool RequestOrdinaryNativeLeave(const Spawn& original,int hp) {
-    static constexpr std::uint8_t wrapperBytes[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x8B,0x09,0xE8,0x53,0x0A,0x08,0x00,0x8B,0x48,0x04,0xE8,0x4B,0x0A,0x08,0x00,0x48,0x8B,0xD8,0x8B,0x90,0xB8,0x09,0x00,0x00,0x8B,0xCA,0xC1,0xE9,0x04,0xF6,0xC1,0x01,0x75,0x20,0xF3,0x0F,0x10,0x0D,0x40,0x72,0x1F,0x00,0x48,0x8D,0x88,0x08,0x0A,0x00,0x00,0x0F,0x57,0xDB,0x0F,0x57,0xD2,0xE8,0xBE,0xAF,0xF8,0xFF,0x8B,0x93,0xB8,0x09,0x00,0x00,0x83,0xCA,0x10,0x89,0x93,0xB8,0x09,0x00,0x00,0x48,0x83,0xC4,0x20,0x5B,0xC3};
-    static constexpr std::uint8_t fadeBytes[]={0xF3,0x0F,0x10,0x05,0x00,0xC3,0x26,0x00,0x0F,0x2F,0xC3,0x72,0x08,0xF3,0x0F,0x10,0x1D,0x5B,0xC2,0x26,0x00,0x0F,0x57,0xC0,0x0F,0x2F,0xD8,0x76,0x12,0xF3,0x0F,0x5C,0xD1,0xF3,0x0F,0x11,0x09,0xF3,0x0F,0x5E,0xD3,0xF3,0x0F,0x11,0x51,0x04,0xC3,0xF3,0x0F,0x11,0x11,0xF3,0x0F,0x11,0x41,0x04,0xC3,0xCC,0xCC,0xCC,0xCC,0xCC,0xCC,0xCC};
     // POD-only SEH boundary: independent final roots/positive HP before writes.
     __try {
-        if(!g_exeBase || hp<=0 || original.objectId!=302 || original.objectType!=4 ||
-           std::memcmp(reinterpret_cast<void*>(g_exeBase+0x42C810),wrapperBytes,sizeof(wrapperBytes))!=0 ||
-           std::memcmp(reinterpret_cast<void*>(g_exeBase+0x3B7810),fadeBytes,sizeof(fadeBytes))!=0 ||
-           *reinterpret_cast<const float*>(g_exeBase+0x623A80)!=1.0f ||
+        if(!g_exeBase || hp<=0 || original.objectId!=302 || original.objectType!=4 || !NativeLeaveCodeCurrent() ||
            *reinterpret_cast<const uintptr_t*>(original.actor+offsets::actor::OBJENTRY_PTR)!=original.objentry ||
            *reinterpret_cast<const uintptr_t*>(original.actor+ACTOR_STATUS)!=original.status ||
            *reinterpret_cast<const uintptr_t*>(original.actor+0x9E8)!=original.controller ||
@@ -2615,11 +2629,7 @@ bool RequestOrdinaryNativeLeave(const Spawn& original,int hp) {
            *reinterpret_cast<const int*>(original.status)!=hp ||
            *reinterpret_cast<const std::uint32_t*>(original.objentry+offsets::objentry::OBJECT_ID)!=302 ||
            *reinterpret_cast<const std::uint8_t*>(original.objentry+offsets::objentry::TYPE_FLAGS)!=4)return false;
-        using FadeFn=void(__fastcall*)(float*,float,float,float);
-        auto* flags=reinterpret_cast<std::uint32_t*>(original.actor+0x9B8);
-        if((*flags&0x10)==0)
-            reinterpret_cast<FadeFn>(g_exeBase+0x3B7810)(reinterpret_cast<float*>(original.actor+0xA08),1.0f,0.0f,0.0f);
-        *flags|=0x10;
+        NativeLeaveActor(original.actor);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
 }
@@ -3879,14 +3889,17 @@ bool ReceiveWorldPackets() {
                 }
                 ObserveCombatConsumerOutcome(packet,combatcausal::Reason::Ok,m.netId,0,true);
                 auto it = g_host.enemies.find(m.netId);
-                if (it != g_host.enemies.end()) { it->second.dead = true; AdvanceClientManifestRevision(); }
+                if (it != g_host.enemies.end()) {
+                    it->second.dead = true; it->second.left = m.left != 0; AdvanceClientManifestRevision();
+                }
                 if (it==g_host.enemies.end()) ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectUnknownTarget,m.netId);
                 else if (combatcausal::Requested()) combatcausal::engine.Packet(CausalScope(),
                     combatcausal::Kind::DeathReceive, m.netId, 0, 0, 0, packet.data(),
                     static_cast<unsigned>(packet.size()), packet.size() == size + 3 && r.remaining() == 0,
                     false, combatcausal::Now());
                 g_mirror.Erase(m.netId);  // VUH-1515 N6: a death is not a stream release
-                SYNC_LOG("[enemysync] client: host death epoch %u netId %u", m.epoch, m.netId);
+                SYNC_LOG("[enemysync] client: host death epoch %u netId %u left=%u", m.epoch, m.netId,
+                         static_cast<unsigned>(m.left));
                 ContinuePackPreparation(scope->hostSourceSerial, true);
             } else if (type == PacketType::EnemyMotion) {
                 // VUH-1515: pose/motion only; never HP, binding, manifest or hash state.
@@ -4020,6 +4033,24 @@ bool ApplyNativeDeath(const NativeEnemy& expected, int hp, std::uint32_t generat
                        !ResyncFinalWriteContext(*record))) return false;
         if (!RecordAuthorityCurrent(expected.actor,expected.objectId,true)) return false;
         g_applyStatDelta(reinterpret_cast<void*>(expected.actor), -hp, 0, 0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// VUH-2272: the host's enemy left alive. Fade the client copy out natively
+// instead of a lethal, so the local spawn controller counts no kill.
+bool ApplyNativeLeave(const NativeEnemy& expected, int hp, std::uint32_t generation) {
+    __try {
+        if (!g_exeBase || hp <= 0 || !NativeLeaveCodeCurrent() ||
+            !RecordAuthorityCurrent(expected.actor,expected.objectId,true)) return false;
+        if (!generation || WorldSessionGeneration() != generation || CurrentRole() != Role::Client) return false;
+        if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
+            Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status ||
+            Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID) != expected.objectId ||
+            Read<std::int32_t>(expected.status) != hp) return false;
+        NativeLeaveActor(expected.actor);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -4530,7 +4561,20 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 h.hpSourceSequence,native.hp,h.hp,native.hp,false,true,true,combatcausal::Now());
         }
         bool ordinaryLethal = false;
-        if (h.dead) {
+        if (h.dead && h.left && !contentRequired) {
+            if (native.hp > 0 && !s.deathAttempted) {
+                s.deathAttempted = true;
+                const bool left = ApplyNativeLeave(native, native.hp, generation);
+                if (g_log) g_log("[enemysync] client: host leave netId %d objectId %u %s (hp %d)", s.netId, s.objectId,
+                                 left ? "applied" : "FAILED", native.hp);
+                if (!left) {
+                    InterruptCensus("native leave refused or faulted", s.actor);
+                    return false;
+                }
+                // Same rule as a lethal: re-resolve the whole census next owner frame.
+                return WorldSessionGeneration() == generation;
+            }
+        } else if (h.dead) {
             if (native.hp > 0 && g_applyStatDelta && !s.deathAttempted) {
                 s.deathAttempted = true;
                 ordinaryLethal = !contentRequired;

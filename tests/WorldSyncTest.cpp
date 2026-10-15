@@ -134,6 +134,39 @@ void testHitClaimCodec() {
     check(rejects(malformed), "trailing declared payload bytes are rejected");
 }
 
+// VUH-2272: a kill keeps the 6-byte payload; a left-alive death adds one flag byte.
+void testEnemyDeathCodec() {
+    const auto payloadOf = [](const EnemyDeath& m, std::size_t& size) {
+        const auto packet = encode(m);
+        const std::uint8_t* payload = nullptr;
+        size = 0;
+        decodePacketHeader(packet.data(), packet.size(), payload, size);
+        ByteReader reader(payload, size);
+        EnemyDeath decoded;
+        read(reader, decoded);
+        check(reader.atEnd(), "enemy death decodes to the end of its payload");
+        return decoded;
+    };
+    std::size_t size = 0;
+    auto decoded = payloadOf(EnemyDeath {7, 3}, size);
+    check(size == 6 && decoded.epoch == 7 && decoded.netId == 3 && decoded.left == 0, "a kill stays 6 bytes, left=0");
+    decoded = payloadOf(EnemyDeath {7, 3, 1}, size);
+    check(size == 7 && decoded.epoch == 7 && decoded.netId == 3 && decoded.left == 1, "a left-alive death is 7 bytes, left=1");
+    bool threw = false;
+    try { (void)encode(EnemyDeath {7, 3, 2}); } catch (const std::exception&) { threw = true; }
+    check(threw, "an invalid left flag is not encoded");
+    ByteWriter writer;
+    write(writer, EnemyDeath {7, 3});
+    writer.writeU8(2);
+    threw = false;
+    try {
+        ByteReader reader(writer.data().data(), writer.data().size());
+        EnemyDeath m;
+        read(reader, m);
+    } catch (const std::exception&) { threw = true; }
+    check(threw, "an invalid left flag is rejected on decode");
+}
+
 void testActivationCodec() {
     const ActivationRequest request {{7, 5, 6, 0, 1, 1, 0}, {12, 34}, 56, 1};
     const HostActivationPoint point {request, 78, {12.5f, -260.0f, 1950.0f, 1.0f}};
@@ -805,6 +838,7 @@ int main() {
     std::uint64_t hpSequence = 0; // Host-lifetime HP order survives room/replacement controls.
     if (enet_initialize() != 0) return 2;
     testHitClaimCodec();
+    testEnemyDeathCodec();
     testActivationCodec();
     testAppliedEnemyHash();
     testProgressMirror();
@@ -934,8 +968,13 @@ int main() {
               c1Seen.hps.back().entries[0].maxHp == 120,
           "client receives absolute enemy HP");
     host->sendEnemyDeath(EnemyDeath {1, 2});
-    check(waitFor([&] { return !c1Seen.deaths.empty(); }) && c1Seen.deaths.back().netId == 2,
+    check(waitFor([&] { return !c1Seen.deaths.empty(); }) && c1Seen.deaths.back().netId == 2 &&
+              c1Seen.deaths.back().left == 0,
           "client receives an enemy death");
+    host->sendEnemyDeath(EnemyDeath {1, 4, 1});
+    check(waitFor([&] { return c1Seen.deaths.size() == 2; }) && c1Seen.deaths.back().netId == 4 &&
+              c1Seen.deaths.back().left == 1,
+          "the relay forwards a left-alive death with its flag (VUH-2272)");
     c1->sendEnemyDeath(EnemyDeath {1, 3});
     pump(200);
     check(hostSeen.deaths.empty(), "a non-host enemy death is dropped");

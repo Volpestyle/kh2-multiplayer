@@ -2178,7 +2178,7 @@ void TestCombatCausalBoundaries() {
               g_inst.spawns[3].deathSent==(absenceMode==0),
               "default-off grace matches main; experiment-on suspended membership never invents death");
         const auto absenceTerminalPackets=g_bridge.outgoing;
-        const auto absenceDeathBytes=encode(EnemyDeath{9,4});
+        const auto absenceDeathBytes=encode(EnemyDeath{9,4,1}); // VUH-2272: a living leave is sent as left alive
         Check((std::find(absenceTerminalPackets.begin(),absenceTerminalPackets.end(),absenceDeathBytes)!=absenceTerminalPackets.end())==(absenceMode==0),
               "only default-off grace emits main terminal packet for the missing original");
         if(absenceMode) {
