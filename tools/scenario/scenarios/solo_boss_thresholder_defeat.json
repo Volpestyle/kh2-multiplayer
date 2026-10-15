@@ -1,0 +1,116 @@
+{
+ "name": "solo_boss_thresholder_defeat",
+ "description": "VUH-2290 control: one instance, no relay or runtime (co-op inactive), the same Thresholder fight and synthetic hit_all kill sequence as net_boss_thresholder_defeat. A crash here is the game or the synthetic kill, not co-op.",
+ "protect": [
+  0
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 5,
+   "room": 11,
+   "door": 0,
+   "map": 0,
+   "btl": 72,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[5,11,0,0,72,32767]",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(1))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "boss_arrive"
+  },
+  {
+   "do": "save",
+   "as": "boss_before",
+   "expr": "[[(a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a.get('objectId') in [353,356]] for i in range(1)]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0
+   ],
+   "seconds": 25,
+   "as": "boss_fight",
+   "clip": {
+    "instance": 0,
+    "seconds": 10,
+    "fps": 10,
+    "name": "boss_fight_friend1"
+   }
+  },
+  {
+   "do": "save",
+   "as": "boss_after",
+   "expr": "[[(a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a.get('objectId') in [353,356]] for i in range(1)]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(sorted((a['objectId'],a['hp']) for a in enemies(i) if a.get('objectId') in [353,356])==sorted((a['objectId'],a['hp']) for a in enemies(0) if a.get('objectId') in [353,356]) for i in range(1))",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 12000
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0
+   ],
+   "seconds": 30,
+   "as": "boss_finish",
+   "clip": {
+    "instance": 0,
+    "seconds": 10,
+    "fps": 10,
+    "name": "boss_finish_friend2"
+   }
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(not any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(1))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "boss_after"
+  },
+  {
+   "do": "save",
+   "as": "host_alive_after_defeat",
+   "expr": "location(0)"
+  }
+ ]
+}
