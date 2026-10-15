@@ -303,21 +303,34 @@ inline constexpr std::uint8_t TARGET_AUTHORITY_MAX_MODE = 1;
 // args are the call's values after the actor, as bdscript tags them: high 32
 // bits '@INT' or '@FLT', low 32 bits the value. A vector argument travels as
 // its four floats. Only the traps scriptCallShape names are accepted, and
-// unused args must be zero. effect names a host effect for the effect calls
-// (the next slice) and is zero for every call on this list. Wire order is
-// field order: 37 + 45 * n bytes.
+// unused args must be zero. effect is the host-minted id of an effect a
+// mirrored enemy's script started: nonzero for exactly the effect calls, zero
+// for every other call. Wire order is field order: 37 + 45 * n bytes.
 inline constexpr std::uint32_t SCRIPT_TAG_INT = 0x544E4940;   // '@INT'
 inline constexpr std::uint32_t SCRIPT_TAG_FLOAT = 0x544C4640; // '@FLT'
 inline constexpr float SCRIPT_CALL_MAX_FLOAT = 100000.0f;
 enum class ScriptCallKind : std::uint8_t { None, Scalars, Vector4 };
-struct ScriptCallShape { ScriptCallKind kind{ScriptCallKind::None}; std::uint8_t argc{0}; };
+struct ScriptCallShape {
+    ScriptCallKind kind{ScriptCallKind::None};
+    std::uint8_t argc{0};
+    bool effect{false};            // the entry names an effect id
+};
 // bdscript trap table/index (OpenKH BdxTraps.cs names; tables at exe+0x753490).
+// obj_effect_start_pos (1/22) travels as a start (1/21) and a set_pos (0/38);
+// effect_set_dir (0/41) as the set_rot (0/40) it results in.
 inline constexpr ScriptCallShape scriptCallShape(std::uint8_t table, std::uint16_t index) {
-    return table == 1 && index == 1 ? ScriptCallShape{ScriptCallKind::Scalars, 1}     // trap_obj_set_rot (float)
-         : table == 8 && index == 2 ? ScriptCallShape{ScriptCallKind::Vector4, 4}     // trap_obj_set_xyzrot
-         : table == 1 && (index == 85 || index == 86) ? ScriptCallShape{ScriptCallKind::Scalars, 1} // texanm start/stop
-         : table == 6 && (index == 45 || index == 64) ? ScriptCallShape{ScriptCallKind::Scalars, 0} // hide/show shadow
-         : table == 6 && index == 65 ? ScriptCallShape{ScriptCallKind::Scalars, 1}    // trap_obj_set_scissoring
+    using K = ScriptCallKind;
+    return table == 1 && index == 1 ? ScriptCallShape{K::Scalars, 1}     // trap_obj_set_rot (float)
+         : table == 8 && index == 2 ? ScriptCallShape{K::Vector4, 4}     // trap_obj_set_xyzrot
+         : table == 1 && (index == 85 || index == 86) ? ScriptCallShape{K::Scalars, 1} // texanm start/stop
+         : table == 6 && (index == 45 || index == 64) ? ScriptCallShape{K::Scalars, 0} // hide/show shadow
+         : table == 6 && index == 65 ? ScriptCallShape{K::Scalars, 1}    // trap_obj_set_scissoring
+         : table == 1 && (index == 21 || index == 87) ? ScriptCallShape{K::Scalars, 3, true} // obj_effect_start / _bind
+         : table == 0 && (index == 38 || index == 39 || index == 40 || index == 67) ? ScriptCallShape{K::Vector4, 4, true} // effect pos/scale/rot/color
+         : table == 0 && index == 66 ? ScriptCallShape{K::Scalars, 1, true} // trap_effect_pause
+         : table == 0 && (index == 44 || index == 51 || index == 85) ? ScriptCallShape{K::Scalars, 0, true} // loop_end / kill / loop_end_kill
+         : table == 0 && index == 52 ? ScriptCallShape{K::Scalars, 2, true} // trap_effect_fadeout (time, mode)
+         : table == 1 && index == 349 ? ScriptCallShape{K::Scalars, 0}   // trap_obj_effect_kill_all
          : ScriptCallShape{};
 }
 struct ScriptCallEntry {
@@ -325,7 +338,7 @@ struct ScriptCallEntry {
     std::uint32_t objectId{0};     // its objentry id, checked by clients
     std::uint8_t table{0};
     std::uint16_t index{0};
-    std::uint32_t effect{0};       // host effect key; 0 for the actor calls
+    std::uint32_t effect{0};       // host effect id for the effect calls; 0 otherwise
     std::array<std::uint64_t, 4> args{};
 };
 struct ScriptCall {

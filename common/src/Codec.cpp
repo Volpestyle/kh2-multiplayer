@@ -919,7 +919,7 @@ std::vector<std::uint8_t> encode(const TargetAuthority& m) {
 
 bool validScriptCallEntry(const ScriptCallEntry& e) {
     const auto shape = scriptCallShape(e.table, e.index);
-    if (shape.kind == ScriptCallKind::None || !e.netId || e.effect != 0) return false;
+    if (shape.kind == ScriptCallKind::None || !e.netId || (e.effect != 0) != shape.effect) return false;
     for (std::size_t i = 0; i < e.args.size(); ++i) {
         const auto tag = static_cast<std::uint32_t>(e.args[i] >> 32);
         const auto bits = static_cast<std::uint32_t>(e.args[i]);

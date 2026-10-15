@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <thread>
+#include <vector>
 using namespace kh2coop;
 namespace R = kh2coop::inject::scriptmirror::rules;
 namespace {
@@ -75,23 +76,36 @@ void codecChecks() {
 }
 
 void rulesAgreeWithCodec() {
-    bool shapes = true, values = true;
+    bool shapes = true, values = true, converted = true;
     for (std::size_t i = 0; i < R::kTrapCount; ++i) {
         const auto& t = R::kTraps[i];
         const auto shape = scriptCallShape(t.table, t.index);
-        shapes = shapes && shape.argc == t.values && (shape.kind == ScriptCallKind::Vector4) == t.vector &&
-                 shape.kind != ScriptCallKind::None && R::FindTrap(t.table, t.index) == static_cast<int>(i) &&
-                 (t.flags & 0xFFFF) == 1u + (t.vector ? 1u : t.values) && R::kBodies[i].size > 0;
+        const unsigned scriptArgs = t.kind == R::Kind::EffectStartPos ? 5u : 1u + (t.vector ? 1u : t.values);
+        const bool pinned = t.body && t.bodySize > 0 && (t.flags & 0xFFFF) == scriptArgs &&
+                            R::FindTrap(t.table, t.index) == static_cast<int>(i);
+        if (t.replay == R::Replay::None) {  // never on the wire itself: it travels as another trap
+            const int wire = R::FindWire(t.wireTable, t.wireIndex);
+            converted = converted && pinned && shape.kind == ScriptCallKind::None && wire >= 0 &&
+                        R::kTraps[wire].kind != R::Kind::EffectStartPos && R::kTraps[wire].replay != R::Replay::None;
+            continue;
+        }
+        shapes = shapes && pinned && shape.argc == t.values && (shape.kind == ScriptCallKind::Vector4) == t.vector &&
+                 shape.kind != ScriptCallKind::None && shape.effect == R::EffectRecord(i) &&
+                 t.wireTable == t.table && t.wireIndex == t.index;
         const std::uint64_t cases[][4] = {{0, 0, 0, 0}, {num(1), 0, 0, 0}, {flt(0.5f), 0, 0, 0}, {flt(1), flt(2), flt(3), flt(4)},
-                                          {num(1), num(2), 0, 0}, {flt(1), num(2), flt(3), flt(4)}, {R::Tagged(R::kTagAddress, 1), 0, 0, 0}};
+                                          {num(1), num(2), 0, 0}, {flt(1), num(2), flt(3), flt(4)}, {R::Tagged(R::kTagAddress, 1), 0, 0, 0},
+                                          {num(1), num(2), num(3), 0}, {flt(0.5f), num(1), 0, 0}};
         for (const auto& v : cases) {
-            ScriptCallEntry e; e.netId = 1; e.table = t.table; e.index = t.index;
+            ScriptCallEntry e; e.netId = 1; e.table = t.table; e.index = t.index; e.effect = R::EffectRecord(i) ? 7u : 0u;
             for (int k = 0; k < 4; ++k) e.args[static_cast<std::size_t>(k)] = v[k];
             values = values && R::ValidValues(i, v) == validScriptCallEntry(e);
+            auto wrongEffect = e; wrongEffect.effect = e.effect ? 0u : 7u;
+            values = values && !validScriptCallEntry(wrongEffect);
         }
     }
-    check(shapes, "every DLL trap is on the wire list with the same shape, argument count and a pinned body");
-    check(values, "DLL value rules and wire validation agree on every trap");
+    check(shapes, "every DLL trap sent as itself is on the wire list with the same shape, effect id rule, argument count and a pinned body");
+    check(converted, "start_pos and set_dir never go on the wire; each travels as a trap that does");
+    check(values, "DLL value rules and wire validation agree on every trap; an effect id is required exactly for effect calls");
     check(R::FindTrap(1, 121) < 0 && scriptCallShape(1, 121).kind == ScriptCallKind::None, "target_search is not mirrored");
 }
 
@@ -151,6 +165,77 @@ void holdChecks() {
     check(h.Drain(12 + R::Hold::kHoldFrames + 1, ready3, expired) == 0 && expired == 1 && h.Size() == 0, "an unbound copy's call expires");
     h.Put(call(3, rot, flt(1)), 30); h.Erase(R::KeyOf(call(3, rot, flt(9))));
     check(h.Size() == 0, "erase drops the held value for a key a newer call already set");
+}
+
+R::Call effectCall(std::uint32_t effect, std::uint8_t table, std::uint16_t index, float v0 = 0) {
+    R::Call c; c.netId = 5; c.objectId = 0x161; c.effect = effect;
+    c.trap = static_cast<std::uint8_t>(R::FindWire(table, index));
+    const auto& t = R::kTraps[c.trap];
+    if (t.vector) { c.values[0] = flt(v0); c.values[1] = flt(0); c.values[2] = flt(0); c.values[3] = flt(1); }
+    else for (unsigned k = 0; k < t.values; ++k) c.values[k] = num(k + 1);
+    return c;
+}
+void effectChecks() {
+    using O = R::Sender::Outcome;
+    R::Sender s;
+    check(s.Observe(effectCall(1, 1, 21)) == O::Queued && s.Observe(effectCall(1, 1, 21)) == O::Queued,
+          "an effect start is an event: two identical starts both queue");
+    check(s.Observe(effectCall(1, 0, 38, 10)) == O::Queued && s.Observe(effectCall(1, 0, 38, 10)) == O::Repeat &&
+          s.Observe(effectCall(1, 0, 38, 11)) == O::Replaced, "an effect's position is sent on change");
+    check(s.Observe(effectCall(2, 0, 38, 11)) == O::Queued && s.Observe(effectCall(1, 0, 40, 11)) == O::Queued,
+          "each effect and each field has its own key");
+    check(s.Observe(effectCall(1, 0, 51)) == O::Queued && s.Observe(effectCall(1, 0, 51)) == O::Queued,
+          "kills are events too");
+    R::Call out[32];
+    const std::size_t n = s.Peek(out, 32);
+    check(n == 7 && out[0].trap == R::FindWire(1, 21) && out[2].values[0] == flt(11) && out[6].trap == R::FindWire(0, 51),
+          "starts, fields and kills flush in call order");
+    s.Commit(n);
+    check(s.Observe(effectCall(1, 0, 38, 11)) == O::Repeat && s.Observe(effectCall(1, 1, 21)) == O::Queued,
+          "a sent field is a baseline; a sent event is not");
+    // A moving effect: 120 frames of set_pos that changes every 4 frames costs 30 records.
+    R::Sender moving; unsigned queued = 0;
+    for (int frame = 0; frame < 120; ++frame) {
+        queued += moving.Observe(effectCall(9, 0, 38, static_cast<float>(frame / 4))) == O::Queued;
+        moving.Commit(moving.Pending());
+    }
+    check(queued == 30, "a travelling effect sends one record per new position");
+
+    R::HostEffects host;
+    const auto a = host.Add(0x100, 0x5000, 0x6000, 5, 0x161), b = host.Add(0x200, 0x5100, 0x6100, 6, 0x162);
+    check(a && b > a && host.Find(0x100)->id == a && host.Find(0x200)->netId == 6 && !host.Find(0x300), "host effects get fresh ids by handle");
+    const auto again = host.Add(0x100, 0x5200, 0x6200, 5, 0x161);
+    check(again > b && host.Find(0x100)->id == again && host.Find(0x100)->part == 0x6200, "a reused handle gets a new id");
+    host.EraseOwner(5);
+    check(!host.Find(0x100) && host.Find(0x200), "kill_all drops only that enemy's effects");
+    R::HostEffects full;
+    for (std::uint32_t h = 1; h <= R::HostEffects::kCap; ++h) full.Add(h, h, h, 1, 1);
+    full.Add(9999, 1, 1, 1, 1);
+    check(full.Size() == R::HostEffects::kCap && !full.Find(1) && full.Find(9999), "host effects are bounded, oldest out first");
+
+    R::ClientEffects client;
+    client.Put(a, {0x11, 0x5000, 0x6000, 5}); client.Put(b, {0x12, 0x5100, 0x6100, 6});
+    check(client.Find(a)->handle == 0x11 && client.Find(b)->netId == 6 && !client.Find(999), "client pairs a host id with its own effect");
+    client.EraseOwner(6); client.Erase(a);
+    check(!client.Find(a) && !client.Find(b), "client pairs end with the effect or its enemy");
+
+    R::Hold h;
+    h.Put(effectCall(4, 1, 21), 10);
+    h.Put(effectCall(4, 0, 38, 1), 10);
+    h.Put(effectCall(4, 0, 38, 2), 11);
+    check(h.Size() == 2 && h.HoldsStart(4) && !h.HoldsStart(5) && h.HoldsNetId(5) && !h.HoldsNetId(6),
+          "a held start keeps its later field (latest value) behind it");
+    std::vector<std::uint8_t> order; std::size_t expired = 0; bool ready = false;
+    auto apply = [&](const R::Call& c) { if (!ready) return false; order.push_back(c.trap); return true; };
+    check(h.Drain(12, apply, expired) == 0 && h.Size() == 2, "nothing drains before the copy is driven");
+    ready = true;
+    check(h.Drain(13, apply, expired) == 2 && order.size() == 2 && order[0] == R::FindWire(1, 21) && order[1] == R::FindWire(0, 38),
+          "once driven, the start lands before its field");
+    R::Hold blocked; std::size_t exp2 = 0;
+    blocked.Put(call(5, static_cast<std::uint8_t>(R::FindTrap(1, 1)), flt(1)), 1);  // netId 5, not ready
+    blocked.Put(effectCall(4, 1, 21), 1);                                          // netId 5 too: waits behind it
+    auto onlyEffects = [&](const R::Call& c) { return c.effect != 0; };
+    check(blocked.Drain(2, onlyEffects, exp2) == 0 && blocked.Size() == 2, "a later record for a netId waits behind an earlier one");
 }
 
 void enetChecks() {
@@ -219,6 +304,7 @@ int main() {
     rulesAgreeWithCodec();
     senderChecks();
     holdChecks();
+    effectChecks();
     enetChecks();
     enet_deinitialize();
     std::cout << "failures=" << errors << '\n';
