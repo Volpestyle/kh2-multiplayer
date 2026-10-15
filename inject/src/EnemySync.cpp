@@ -2197,8 +2197,8 @@ void TickStrayCopies(std::uint32_t frame, const NativeCensus& census) {
         if (!enemypop::LeaveStuck(frame - s.strayFrame)) continue;
         const auto before = ReadStrayFade(s.actor);
         const bool finished = FinishNativeFade(*row);
-        s.strayActFrame = frame;
-        if (g_log) g_log("[enemy-pop] stray-remove frame=%u kind=host-left netId=%d objectId=%u actor=%llX age=%u hp=%d "
+        s.strayActFrame = finished ? frame : 0;
+        if (g_log && (finished || frame % 300 == 0)) g_log("[enemy-pop] stray-remove frame=%u kind=host-left netId=%d objectId=%u actor=%llX age=%u hp=%d "
                          "flags9B8=%X flags120=%X alpha=%.3f rate=%.3f aac=%.3f finished=%u", frame, s.netId, s.objectId,
                          static_cast<unsigned long long>(s.actor), frame - s.strayFrame, row->hp, before.flags,
                          before.flags120, before.alpha, before.rate, before.aac, finished ? 1u : 0u);
@@ -2206,9 +2206,17 @@ void TickStrayCopies(std::uint32_t frame, const NativeCensus& census) {
 }
 // The cull override's second route for a copy whose fade was finished.
 bool StrayForceRemove(const enemypop::Identity& id) noexcept {
-    if (g_role != Role::Client || !id.actor) return false;
+    if (g_role != Role::Client || CurrentRole() != Role::Client || !id.actor ||
+        !WorldSessionGeneration() || !g_inst.live || !g_host.arrived ||
+        g_seenLoad != warp::LoadSerial() || g_seenTransition != warp::TransitionSerial() ||
+        g_resyncWriteFence != ResyncWriteFence::None || !SafeNativeGameplay()) return false;
+    RoomTransition room {};
+    if (!ReadLocationChecked(room) || room.worldId != g_inst.world || room.roomId != g_inst.room ||
+        room.door != g_inst.door || room.mapProgram != g_inst.map || room.battleProgram != g_inst.btl ||
+        room.eventProgram != g_inst.evt || !warp::HostTransitionArrived(g_host.epoch)) return false;
     for (const Spawn& s : g_inst.spawns)
-        if (s.strayActFrame && s.actor == id.actor && s.objentry == id.objentry && s.status == id.status) return true;
+        if (s.present && s.strayActFrame && s.actor == id.actor && s.objentry == id.objentry &&
+            s.status == id.status && LeaveStuckCopy(s)) return true;
     return false;
 }
 
@@ -5487,6 +5495,9 @@ bool PopulationForceRemove(uintptr_t actor) noexcept {
     const auto host = g_host.enemies.find(f->netId);
     const bool known = client && host != g_host.enemies.end();
     return enemypop::ForceRemove(*f, known, known && host->second.dead, client ? g_host.epoch : 0);
+}
+bool PopulationLeftCleanupRequested(uintptr_t actor) noexcept {
+    return g_populationRequested && StrayForceRemove(ReadPopulationIdentity(actor));
 }
 void PopulationForget(uintptr_t actor) noexcept {
     if (!g_populationRequested) return;

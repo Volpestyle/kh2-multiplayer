@@ -90,6 +90,9 @@ bool PopulationRequested() noexcept;
 // or a native duplicate claims it: the removal predicate forces true.
 bool PopulationStaleRequested(uintptr_t actor) noexcept;
 bool PopulationForceRemove(uintptr_t actor) noexcept;
+// A confirmed host-left copy whose fade settled; allows native effect cleanup,
+// while preserving the removal predicate's resource/child terms.
+bool PopulationLeftCleanupRequested(uintptr_t actor) noexcept;
 // Owner thread: `actor` is a live forced copy whose host enemy lives (held from creation).
 bool PopulationForcedHold(uintptr_t actor) noexcept;
 // Owner thread: the cull hook committed a forced removal of `actor` (its +0x48 dispose follows): forget it.
