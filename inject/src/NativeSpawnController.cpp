@@ -159,6 +159,16 @@ LogFn g_log = nullptr;
 RoleFn g_role = nullptr;
 CaptureFn g_capture = nullptr;
 CopyFn g_copy = nullptr;
+EmissionFn g_emission = nullptr;
+ReplayFn g_replay = nullptr;
+struct EmissionUpdate {
+    uintptr_t controller = 0;
+    std::array<float, 4> point {};
+    bool available = false;
+};
+tracefiber::Store<EmissionUpdate> g_emissionStorage;
+std::uint32_t g_emissionUnsupportedLoad = UINT32_MAX;
+unsigned g_emissionUnsupportedLogs = 0;
 UpdateFn g_original = nullptr;
 LookupFn g_lookup = nullptr;
 bool g_installed = false;
@@ -1613,13 +1623,48 @@ void* ObserveWrapper(const void* record, void* controller, const float* point,
     SetLastError(nativeError);return actor;
 }
 
+void* PolicyWrapper(const void* record, void* controller, const float* point, TraceWrapper wrapper, uintptr_t caller) {
+    const auto entryError = GetLastError();
+    const auto role = g_emission && IsDiagnosticGameThread() && g_role ? g_role() : 0;
+    Qualification q;
+    bool qualified = false;
+    std::uint16_t index = 0;
+    if (role == 1 || role == 2) {
+        q = Qualify(reinterpret_cast<uintptr_t>(controller));
+        const auto address = reinterpret_cast<uintptr_t>(record);
+        qualified = q.scope == Scope::Qualified && address >= q.spawnArray &&
+            address - q.spawnArray < static_cast<uintptr_t>(q.records) * 0x40 &&
+            (address - q.spawnArray) % 0x40 == 0;
+        if (qualified) index = static_cast<std::uint16_t>((address - q.spawnArray) / 0x40);
+    }
+    const auto* update = g_emission ? g_emissionStorage.Current() : nullptr;
+    if (qualified && role == 2 && !update) { SetLastError(entryError); return nullptr; }
+    const bool enclosed = qualified && update && update->available && update->controller == reinterpret_cast<uintptr_t>(controller);
+    if (qualified && !enclosed && g_log) {
+        if (g_emissionUnsupportedLoad != q.stamp.load) { g_emissionUnsupportedLoad = q.stamp.load; g_emissionUnsupportedLogs = 0; }
+        if (g_emissionUnsupportedLogs++ < 32)
+            g_log("[spawn-emission] unsupported producer=outside-update role=%u key=%u header=%u record=%u caller=%llX",
+                role, q.key, q.headerId, index, static_cast<unsigned long long>(caller - g_exeBase));
+    }
+    if (enclosed && role == 2 && !g_emission(q.key, q.headerId, index, nullptr, false)) {
+        SetLastError(entryError); return nullptr;
+    }
+    SetLastError(entryError);
+    void* actor = g_rawDiagnosticEnabled ? ObserveWrapper(record, controller, point, wrapper, caller) :
+        wrapper == TraceWrapper::Fixed ? CallOriginalWrapper(record, controller) : CallOriginalGenerated(record, controller, point);
+    const auto nativeError = GetLastError();
+    if (enclosed && actor && g_role() == role && g_emissionStorage.Same(update) && SameStamp(q.stamp)) {
+        g_emission(q.key, q.headerId, index, update->point.data(), true);
+    }
+    SetLastError(nativeError); return actor;
+}
+
 void* __fastcall HookedWrapper(const void* record, void* controller) {
-    return ObserveWrapper(record, controller, nullptr, TraceWrapper::Fixed,
-                          reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    return PolicyWrapper(record, controller, nullptr, TraceWrapper::Fixed, reinterpret_cast<uintptr_t>(_ReturnAddress()));
 }
 
 void* __fastcall HookedGenerated(const void* record, void* controller, const float* point) {
-    return ObserveWrapper(record, controller, point, TraceWrapper::Generated,
+    return PolicyWrapper(record, controller, point, TraceWrapper::Generated,
                           reinterpret_cast<uintptr_t>(_ReturnAddress()));
 }
 
@@ -1724,6 +1769,24 @@ std::uint64_t __fastcall HookedScript(const void* args) {
     } \
 } while (false)
 
+// Enter only after the caller and full controller qualifier have passed.
+// FLS keeps parked native fibers from overwriting another update's receipt.
+void CallEmissionUpdate(void* controller, const float* point) {
+    auto* scope = g_emission ? g_emissionStorage.Current() : nullptr;
+    // Storage refusal must never turn a historical-point client tick into an
+    // unguarded native update. A true script producer enters no helper at all.
+    if (g_emission && !scope && g_role && g_role() == 2) return;
+    EmissionUpdate previous;
+    if (scope) {
+        previous = *scope;
+        *scope = {};
+        scope->controller = reinterpret_cast<uintptr_t>(controller);
+        scope->available = CopyNative(reinterpret_cast<uintptr_t>(point), scope->point.data(), sizeof(scope->point)) && FinitePoint(scope->point.data());
+    }
+    __try { g_original(controller, point); }
+    __finally { if (scope && g_emissionStorage.Same(scope)) *scope = previous; }
+}
+
 void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddress) {
     const auto role = g_role();
     if (g_traceTick.active && g_traceTick.stampAvailable && !g_traceNestedDepth && IsDiagnosticGameThread())
@@ -1761,7 +1824,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
             Report(3, "unavailable", q);
         }
         BeginHostEmission(reinterpret_cast<uintptr_t>(controller), nativePoint);
-        OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::HostPassThrough, nativePoint, g_original(controller, nativePoint));
+        OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::HostPassThrough, nativePoint, CallEmissionUpdate(controller, nativePoint));
         FinishHostEmission();
         return;
     }
@@ -1769,9 +1832,14 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
         OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::RoleChangedBeforeSelection, nativePoint, g_original(controller, nativePoint));
         return;
     }
+    if (g_emission && !g_emissionStorage.Current()) {
+        q.reason = "emission scope storage unavailable; native tick paused";
+        ++g_holds; Report(1, "hold", q); return;
+    }
     BeginGeometry(q, role); // All diagnostic native reads precede both lease copies.
     const auto clientReturnMutation = AcquireKnownMutationTicket();
-    const bool havePoint = g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence);
+    const bool replay = g_replay && g_replay(q.key, q.headerId, point);
+    const bool havePoint = replay || g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence);
     if (g_role() != 2) {
         OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::RoleChangedAfterFirstCopy, nativePoint, g_original(controller, nativePoint));
         return;
@@ -1788,7 +1856,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     // The role check above can observe a new session generation and invalidate
     // the first copy while still returning Client. Refresh after that check;
     // no role query or telemetry may invalidate/delay this final copied lease.
-    if (!g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence) || !FinitePoint(point) || !SameStamp(q.stamp)) {
+    if (!(replay ? g_replay(q.key, q.headerId, point) : g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence)) || !FinitePoint(point) || !SameStamp(q.stamp)) {
         q.reason = "final host lease unavailable; native tick paused";
         ++g_holds;
         Report(1, "hold", q);
@@ -1796,7 +1864,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
             g_geometryScope->geometry.originalPhase.hold = OriginalHold::FinalLeaseOrLifecycle;
         return;
     }
-    OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::ClientLeaseApply, point, g_original(controller, point));
+    OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::ClientLeaseApply, point, CallEmissionUpdate(controller, point));
     if (g_traceInstalled.load() && g_traceTick.active && !g_traceNestedDepth &&
         g_traceTick.controller == reinterpret_cast<uintptr_t>(controller) &&
         g_traceTick.sequence && g_traceTick.sequence != UINT64_MAX && IsDiagnosticGameThread() &&
@@ -2793,7 +2861,7 @@ TraceState CaptureDiagnosticState(uintptr_t exeBase, uintptr_t controller) {
     return ReadDiagnosticState(exeBase, controller);
 }
 
-bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyFn copy, bool trace) {
+bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyFn copy, bool trace, EmissionFn emission, ReplayFn replay) {
     if (g_installed) return true;
     g_exeBase = exeBase;
     g_log = log;
@@ -2819,6 +2887,11 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
     g_role = role;
     g_capture = capture;
     g_copy = copy;
+    g_emission = nullptr; g_replay = nullptr; // publish only after both wrapper gates are live
+    if (emission && !g_emissionStorage.Init(reinterpret_cast<const void*>(&Install))) {
+        if (g_log) g_log("[spawn-emission] unavailable: FLS storage");
+        return false;
+    }
     g_lookup = reinterpret_cast<LookupFn>(exeBase + LOOKUP_RVA);
     auto* address = reinterpret_cast<void*>(exeBase + UPDATE_RVA);
     auto status = MH_CreateHook(address, reinterpret_cast<void*>(&HookedUpdate),
@@ -2835,6 +2908,12 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
     }
     g_installed = true;
     InstallKnownMutationHooks(); // Independent of every diagnostic trace flag.
+    if (emission && !trace) {
+        g_fixedInstalled = Matches(exeBase + WRAPPER_CALL_RVA, kWrapperCallBytes) &&
+            InstallDiagnosticHook(WRAPPER_RVA, kWrapperBytes, reinterpret_cast<void*>(&HookedWrapper), g_originalWrapper, true);
+        g_generatedInstalled = InstallDiagnosticHook(GENERATED_RVA, kGeneratedBytes,
+            reinterpret_cast<void*>(&HookedGenerated), g_originalGenerated, true);
+    }
     if (trace) {
         std::uint32_t peOffset = 0, signature = 0, imageSize = 0;
         std::uint16_t magic = 0;
@@ -2890,6 +2969,12 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
     ConfigureConstructionLineage(trace);
     // Recording uses the already installed diagnostic return hooks. PREPARE
     // alone never quietly expands the installed trace profile.
+    if (emission) {
+        const bool ready = g_fixedInstalled.load() && g_generatedInstalled.load();
+        if (ready) { g_emission = emission; g_replay = replay; }
+        if (g_log) g_log("[spawn-emission] %s fixed=%u generated=%u", ready ? "ready" : "unavailable",
+            g_fixedInstalled ? 1U : 0U, g_generatedInstalled ? 1U : 0U);
+    }
     g_hostEmissionConfigured = false; // this profile supplies no policy-qualified first emission
     if (g_knownMutationRequested && g_log)
         g_log("[hostfirstemission] configured=%u requires=PREPARE+SPAWN_TRACE boundedCandidates=1 creationAuthority=0",
@@ -3083,6 +3168,7 @@ void Shutdown() {
     g_role = nullptr;
     g_capture = nullptr;
     g_copy = nullptr;
+    g_emission = nullptr; g_replay = nullptr;
     g_lastReport = {};
     g_captures = g_applies = g_holds = g_unsupported = g_unavailable = 0;
     AcquireSRWLockExclusive(&g_traceLock);

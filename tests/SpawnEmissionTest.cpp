@@ -20,7 +20,7 @@ void codec() {
     check(decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::SpawnEmission && n==48, "emission packet 50 has 48 payload bytes");
     ByteReader r(p,n); SpawnEmission out; read(r,out);
     check(encode(out)==bytes && r.atEnd(), "exact emission round trip including historical trigger point");
-    check(isScopedWorldPacket(PacketType::SpawnEmission) && validateScopedWorldPacket(bytes)==PacketType::SpawnEmission,
+    check(isScopedWorldPacket(PacketType::SpawnEmission) && isMaterialWorldPacket(PacketType::SpawnEmission) && validateScopedWorldPacket(bytes)==PacketType::SpawnEmission,
           "emissions travel through authenticated world envelopes");
     for (int delta : {-1,1}) {
         auto bad=bytes; if(delta<0)bad.pop_back();else bad.push_back(0);

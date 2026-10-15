@@ -1431,8 +1431,12 @@ loaded, get several instances into a known room, act, look, and judge.
   native/session generations and the full six-field location bind its use.
   Qualified clients hold their native controller tick when authority expires.
   Unsupported or unreadable controllers retain native behavior with diagnostics.
-  This addresses the measured client-position trigger mismatch; it does not
-  guarantee transient crossings, native cache/stage parity or every producer.
+  Protocol20 adds host emission receipts for qualified records emitted inside
+  that verified update: friends allow each record only after the host's successful
+  wrapper return, and replay its retained triggering point through ordinary
+  native ticks. This covers missed transient crossings without copying controller
+  stage/cache state. Script-driven emissions outside the update remain native
+  with bounded unsupported diagnostics; non-spatial replay is separate work.
   The default-off all-alive recovery exception temporarily selects the recorded
   host first-emission point under the current512-completed-update/30s bounds,
   then restores live input and verifies120 completed updates. It adds no emitter

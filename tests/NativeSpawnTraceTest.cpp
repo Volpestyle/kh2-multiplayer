@@ -6,6 +6,7 @@
 #endif
 
 #include "../inject/src/NativeSpawnController.cpp"
+#include "kh2coop/SpawnEmissionLedger.hpp"
 
 #include <iostream>
 #include <cstdlib>
@@ -1928,6 +1929,110 @@ DWORD WINAPI FactoryDepthCapObservation(void* argument) {
     return 0;
 }
 
+namespace {
+kh2coop::SpawnEmissionLedger emissionLedger;
+std::uint8_t emissionRole = 2;
+unsigned emissionCalls = 0, emissionPublished = 0;
+void* emissionResult = nullptr;
+const void* emissionObject = nullptr;
+std::array<float,4> emissionTrigger {};
+const void* emissionRecord = nullptr;
+bool emissionGenerated = false, emissionFault = false;
+void* emissionFiberRoot = nullptr;
+bool emissionFiberMode = false, emissionFiberPreserved = true;
+void __fastcall EmissionNativeUpdate(void* controller, const float* point) {
+    if (emissionFiberMode) {
+        SwitchToFiber(emissionFiberRoot);
+        const auto* current = g_emissionStorage.Current();
+        emissionFiberPreserved = emissionFiberPreserved && current && current->available && current->point[0] == point[0];
+    }
+    if (emissionFault) RaiseException(kDeliberateException, 0, 0, nullptr);
+    if (emissionGenerated) HookedGenerated(emissionRecord, controller, point);
+    else HookedWrapper(emissionRecord, controller);
+}
+struct EmissionFiberRun { void* controller; std::array<float,4> point; bool done = false, clear = false; };
+void WINAPI EmissionFiber(void* raw) {
+    auto& run = *static_cast<EmissionFiberRun*>(raw);
+    CallEmissionUpdate(run.controller, run.point.data());
+    const auto* scope = g_emissionStorage.Current(); run.clear = scope && !scope->available;
+    run.done = true; SwitchToFiber(emissionFiberRoot);
+}
+bool CatchEmissionUpdate(void* controller, const float* point) {
+    __try { CallEmissionUpdate(controller, point); }
+    __except (GetExceptionCode() == kDeliberateException ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) { return true; }
+    return false;
+}
+std::uint8_t EmissionRole() { return emissionRole; }
+const void* __fastcall EmissionLookup(std::int32_t) { return emissionObject; }
+PVOID WINAPI EmissionBadFls(DWORD) { return reinterpret_cast<void*>(1); }
+void* __fastcall EmissionFixed(const void*, void*) { ++emissionCalls; return emissionResult; }
+void* __fastcall EmissionGenerated(const void*, void*, const float*) { ++emissionCalls; return emissionResult; }
+bool EmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* point, bool emitted) {
+    if (emissionRole == 2) return emissionLedger.Permit(key,header,record,emitted);
+    if (emitted && point) { ++emissionPublished; std::copy_n(point,4,emissionTrigger.begin()); }
+    return true;
+}
+void EmissionControls(std::uint8_t* image) {
+    auto put=[](void* to,const auto& v){std::memcpy(to,&v,sizeof(v));};
+    std::array<std::uint8_t,8+0x60> objects{};
+    put(objects.data()+4,std::int32_t{1});put(objects.data()+8,std::uint32_t{2405});objects[12]=4;objects[16]='M';
+    emissionObject=objects.data()+8;
+    put(image+OBJECT_TABLES,reinterpret_cast<uintptr_t>(objects.data()));
+    put(image+OBJECT_TABLES+8,uintptr_t{0});put(image+OBJECT_TABLES+16,uintptr_t{0});
+    std::array<std::uint8_t,44+64> records{};records[0]=2;
+    put(records.data()+2,std::uint16_t{750});put(records.data()+4,std::uint16_t{1});
+    put(records.data()+44,std::uint32_t{2405});records[44+0x1C]=2;
+    Controller controller;controller.key=1234;controller.header=reinterpret_cast<uintptr_t>(records.data());
+    controller.spawnArray=controller.header+44;controller.regionArray=controller.spawnArray+64;
+    put(image+CONTROLLER_TABLE,TableEntry{1234,0,reinterpret_cast<uintptr_t>(&controller)});put(image+CONTROLLER_COUNT,std::int32_t{1});
+    g_lookup=&EmissionLookup;g_role=&EmissionRole;g_emission=&EmissionPolicy;
+    g_originalWrapper=&EmissionFixed;g_originalGenerated=&EmissionGenerated;g_rawDiagnosticEnabled=false;
+    g_original=&EmissionNativeUpdate;
+    Check(g_emissionStorage.Init(reinterpret_cast<const void*>(&EmissionControls)),"emission FLS storage initializes");
+    g_diagnosticGameThread=GetCurrentThreadId();emissionLedger.Clear();emissionCalls=emissionPublished=0;
+    auto* record=records.data()+44;alignas(16) float point[4]{1,2,3,1};
+    emissionRecord=record;emissionRole=2;emissionResult=&controller;
+    Check(Qualify(reinterpret_cast<uintptr_t>(&controller)).scope==Scope::Qualified,"emission fixture qualifies through production object and controller reads");
+    CallEmissionUpdate(&controller,point);
+    Check(emissionCalls==0,"native fixed wrapper denied without a host receipt");
+    emissionGenerated=true;CallEmissionUpdate(&controller,point);emissionGenerated=false;
+    Check(emissionCalls==0,"native generated wrapper denied without a host receipt");
+    const auto flsGet = g_emissionStorage.services.get;
+    g_emissionStorage.services.get = &EmissionBadFls;
+    CallEmissionUpdate(&controller,point);
+    Check(HookedWrapper(record,&controller)==nullptr,"qualified client wrapper refuses unavailable fiber storage");
+    g_emissionStorage.services.get = flsGet;
+    Check(emissionCalls==0,"unavailable fiber storage holds client native update instead of failing open");
+    kh2coop::SpawnEmission e{{7,4,0x15,0,0,26,0},1,1234,750,0,{1,2,3,1}};emissionLedger.Add(e);
+    emissionResult=nullptr;CallEmissionUpdate(&controller,point);
+    Check(emissionCalls==1 && emissionLedger.Permit(1234,750,0,false),"native null allocation keeps receipt pending");
+    emissionResult=&controller;
+    emissionGenerated=true;CallEmissionUpdate(&controller,point);emissionGenerated=false;
+    Check(emissionCalls==2 && !emissionLedger.Permit(1234,750,0,false),"successful generated native return consumes receipt once");
+    CallEmissionUpdate(&controller,point);
+    Check(emissionCalls==2,"duplicate native spawn is suppressed after consumption");
+    emissionRole=1;CallEmissionUpdate(&controller,point);
+    Check(emissionCalls==3 && emissionPublished==1 && emissionTrigger==e.point,"successful host native return announces its enclosing trigger");
+    emissionResult=nullptr;CallEmissionUpdate(&controller,point);
+    Check(emissionPublished==1,"failed host allocation announces nothing");
+    emissionRole=2;emissionResult=&controller;
+    Check(HookedWrapper(record,&controller)==&controller && emissionCalls==5,"script producer outside verified update keeps native behavior");
+    emissionFault=true;Check(CatchEmissionUpdate(&controller,point),"native emission update unwind propagates");emissionFault=false;
+    Check(!g_emissionStorage.Current()->available,"native unwind clears the emission scope");
+    emissionRole=1;emissionFiberMode=true;
+    const bool converted=!IsThreadAFiber();emissionFiberRoot=converted?ConvertThreadToFiber(nullptr):GetCurrentFiber();
+    EmissionFiberRun a{&controller,{11,2,3,1}}, b{&controller,{22,2,3,1}};
+    auto* fa=CreateFiber(0,&EmissionFiber,&a);auto* fb=CreateFiber(0,&EmissionFiber,&b);
+    if (fa && fb && emissionFiberRoot) {
+        SwitchToFiber(fa);SwitchToFiber(fb);SwitchToFiber(fa);SwitchToFiber(fb);
+        Check(a.done&&b.done&&a.clear&&b.clear&&emissionFiberPreserved&&!g_emissionStorage.Current()->available,
+            "overlapping native fibers retain their own triggers and clear their scopes");
+    } else Check(false,"emission test fibers created");
+    if(fa)DeleteFiber(fa);if(fb)DeleteFiber(fb);if(converted)ConvertFiberToThread();
+    emissionFiberMode=false;g_emission=nullptr;g_replay=nullptr;g_lookup=nullptr;
+}
+}
+
 int main() {
     // No game executable or process is opened. The implementation's native
     // offset reads resolve entirely inside this zeroed, test-owned allocation.
@@ -2354,6 +2459,7 @@ int main() {
     KnownMutationControls(image);
     SelectedOccupancyControls(image);
     ConstructionLineageControls(image);
+    EmissionControls(image);
 
     g_original = nullptr;
     g_originalWrapper = nullptr;

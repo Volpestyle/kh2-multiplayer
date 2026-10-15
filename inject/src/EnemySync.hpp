@@ -154,6 +154,8 @@ void NoteSpawnPickOp(bool shared, std::uint64_t salt);
 // Review F1: whether the spawn-pick detour is live (spawnpick::Install's result); the host stamps the bit only then.
 void SetSpawnPickLive(bool live);
 void CaptureHostActivation(const float* position4);
+bool SpawnEmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* trigger, bool emitted);
+bool CopySpawnEmissionPoint(std::uint32_t key, std::uint16_t header, float* output);
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence);
 
 void Shutdown();

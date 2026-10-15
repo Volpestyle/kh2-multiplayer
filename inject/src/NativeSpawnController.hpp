@@ -15,6 +15,11 @@ using CaptureFn = void (*)(const float* nativePoint4);
 // False holds a qualified client controller, including its native cooldown.
 // The owner validates epoch, full location, lifecycle, session and lease expiry.
 using CopyFn = bool (*)(float* output4, uintptr_t controller, std::uint64_t updateSequence);
+// Game-thread policy: false before a client call suppresses only this record.
+// Successful returns consume one client receipt or enqueue one host emission.
+using EmissionFn = bool (*)(std::uint32_t key, std::uint16_t header, std::uint16_t record,
+                            const float* triggerPoint4, bool emitted);
+using ReplayFn = bool (*)(std::uint32_t key, std::uint16_t header, float* output4);
 
 // Default-off negative fence: current means only no observed known mutation
 // since this ticket. No incarnation, pending exclusion or creation permission.
@@ -431,7 +436,7 @@ TraceStats GetTraceStats();
 
 // MinHook must already be initialized. No network polling or actor writes here.
 bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyFn copy,
-             bool trace = false);
+               bool trace = false, EmissionFn emission = nullptr, ReplayFn replay = nullptr);
 void Shutdown();
 
 } // namespace kh2coop::inject::spawncontroller

@@ -30,6 +30,7 @@
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
+#include "kh2coop/SpawnEmissionLedger.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/PopulationCutJson.hpp"
 #include "kh2coop/OrdinaryLifecycle.hpp"
@@ -444,6 +445,7 @@ void LogClaim(const char* action, const HitClaim& claim, const char* reason) {
 void ResetPopulationRepair();
 void ResetOrdinaryLifecycle();
 void ClearPendingOrdinaryCuts();
+void ResetSpawnEmissions();
 void ClearActivation() {
     g_activationLease.Clear();
     g_activationChallenges = {};
@@ -482,6 +484,7 @@ bool EnsureClientClaimScope();
 bool ReleaseClientClaims(std::uint32_t frame);
 
 void RetireWorldSession() {
+    ResetSpawnEmissions();
     ResetPopulationRepair();
     ResetOrdinaryLifecycle();
     ClearPendingOrdinaryCuts();
@@ -1463,6 +1466,8 @@ bool ActivationContext(Role role, RoomTransition& location) {
     }
     return location.epoch != 0 && g_bridge.SessionGeneration() == g_activationGeneration;
 }
+
+#include "SpawnEmission.inl"
 
 bool SameClientClaimScope(const ClientClaimScope& a, const ClientClaimScope& b) {
     return a.generation == b.generation && a.ordered == b.ordered && a.delivery == b.delivery &&
@@ -3795,6 +3800,10 @@ bool ReceiveWorldPackets() {
                 if(cut.membershipOnly)ReceiveOrdinaryLifecycle(cut,*scope);
                 else ReceivePopulationCut(cut,*scope);continue;
             }
+            if (type == PacketType::SpawnEmission) {
+                ByteReader r(payload, size); SpawnEmission value; read(r, value);
+                ReceiveSpawnEmission(*scope, value); continue;
+            }
             if (type == PacketType::ActivationRequest) {
                 ByteReader r(payload, size);
                 ActivationRequest request;
@@ -3867,6 +3876,7 @@ bool ReceiveWorldPackets() {
                         continue;
                     }
                     ResetOrdinaryLifecycle(); // retire old history before this batch can carry the new cut
+                    g_emissionLedger.Clear(); g_emissionDeniedLogs = 0;
                     ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority
                     g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
                     g_spawnPickUnknownEpoch = 0;
@@ -5409,6 +5419,7 @@ void OnFrameStart(std::uint32_t frame) {
         // Track while progress or ring capacity delays the announcement. No
         // manifest/HP/hash may escape under the previous room's epoch.
         if (!HostBeginInstance()) { DrainPendingSpawnTrace(false); return; }
+        FlushSpawnEmissions();
         if (!TickHostEventHold(frame, true)) { DrainPendingSpawnTrace(false); return; }
         // Refresh the frame-local proof before consuming queued native claims.
         if (g_recordBindingRequested) ResolveRecordPopulation(census,true);
@@ -5996,6 +6007,39 @@ void CaptureHostActivation(const float* position4) {
         if (!CaptureWorldContext(pending->responseContext)) continue;
         pending->response = response;
     }
+}
+
+bool SpawnEmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* trigger, bool emitted) {
+    if (!spawncontroller::IsDiagnosticGameThread()) return false;
+    const auto role = CurrentRole();
+    if (role == Role::Client) {
+        RoomTransition room;
+        const bool allowed = ActivationContext(Role::Client, room) && g_lastRoomPacket &&
+            sameActivationLocation(room, *g_lastRoomPacket) && g_emissionLedger.Permit(key, header, record, emitted);
+        if (g_log && (emitted || (!allowed && g_emissionDeniedLogs++ < 32)))
+            g_log("[spawn-emission] client %s epoch=%u key=%u header=%u record=%u", emitted ? "emitted" : "blocked", g_host.epoch, key, header, record);
+        return allowed;
+    }
+    if (role != Role::Host || !emitted || !trigger || !WorldSessionGeneration() || g_emissionSequence == UINT64_MAX) return false;
+    RoomTransition location;
+    if (!ReadLocationChecked(location)) return false;
+    // Bound pending storage and retire stale loads before accepting new facts.
+    std::erase_if(g_emissionOutbox, [](const PendingSpawnEmission& p) {
+        return p.generation != WorldSessionGeneration() || p.transition != warp::TransitionSerial() || p.load != warp::LoadSerial();
+    });
+    if (g_emissionOutbox.size() >= SPAWN_EMISSION_CAP) return false;
+    SpawnEmission value {location, ++g_emissionSequence, key, header, record, {}};
+    std::copy_n(trigger, 4, value.point.begin());
+    g_emissionOutbox.push_back({value, WorldSessionGeneration(), warp::TransitionSerial(), warp::LoadSerial()});
+    return true;
+}
+bool CopySpawnEmissionPoint(std::uint32_t key, std::uint16_t header, float* output) {
+    RoomTransition room;
+    if (!output || !ActivationContext(Role::Client, room) || !g_lastRoomPacket ||
+        !sameActivationLocation(room, *g_lastRoomPacket)) return false;
+    const auto* pending = g_emissionLedger.Pending(key, header);
+    if (!pending || !sameActivationLocation(room, pending->location)) return false;
+    std::copy(pending->point.begin(), pending->point.end(), output); return true;
 }
 
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence) {

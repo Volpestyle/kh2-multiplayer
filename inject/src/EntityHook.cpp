@@ -3740,7 +3740,8 @@ bool Initialize(uintptr_t exeBase) {
                                                    sizeof(spawnTraceSetting)) == 1 &&
                             spawnTraceSetting[0] == '1';
     spawncontroller::Install(exeBase, &Log, &enemysync::ActivationRole,
-                             &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace);
+                             &enemysync::CaptureHostActivation, &enemysync::CopyHostActivation, spawnTrace,
+                             &enemysync::SpawnEmissionPolicy, &enemysync::CopySpawnEmissionPoint);
     // VUH-1515: host-agreed random spawn picks; default off (KH2COOP_SPAWN_PICK)
     const bool spawnPickLive = spawnpick::Install(exeBase, &Log, [](spawnpick::Context& out, const char*& reason) {
         enemysync::SpawnPickInputs in;

@@ -1,3 +1,27 @@
+## Host controller emissions (VUH-2302, protocol 20)
+
+For qualified static combat type-2 controllers, an emission enclosed by the
+verified native update (`3FF000`, caller `3A5063`) now announces the controller
+key, header ID, record index and its actual triggering float4 after a successful
+fixed/generated wrapper return. Friends suppress each such wrapper call until
+the matching host receipt arrives. A successful return consumes it once; a null
+allocation retains it. Native cooldown, stage, defeated-set and enrollment logic
+still run normally. Receipt order is preserved per controller, including refills.
+
+Pending receipts select their retained trigger point instead of the live lease
+point. They survive a friend's intro hold and wait for that native room to arrive.
+Generation, delivery, full room/epoch and native load checks retire stale authority.
+Reliable relay history and client receipts are bounded at 4096 emissions per room;
+overflow cannot grant a friend spawn. This does not enable the parked general
+population factory path.
+
+Script-driven dispatch (`42DC10 -> 3FE320`) has no spatial trigger and remains
+native. Qualified wrapper calls outside the verified update log bounded
+`unsupported producer=outside-update` diagnostics. Route acceptance must verify
+that HB header 750 and BC header 96 use the covered update path. Non-spatial
+script announce/replay is a separate follow-up if the route needs it. The trigger
+scope uses retained fiber-owned storage and clears on native return or unwind.
+
 ## D14 one brain: denylist replaces the allowlist (VUH-2251, 2026-10-14)
 
 The host's AI now drives every censused enemy on clients: objentry type 3
