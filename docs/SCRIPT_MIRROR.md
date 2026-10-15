@@ -146,9 +146,27 @@ message counts the issue asks for:
 - `repeats`: calls that cost nothing on the wire.
 - `records` / `packets`: what was sent.
 
-Run `vuh2252-boss-02` (Thresholder, two instances, slice 1 only) logged no
-`host sec` line at all. Slice 1 had no `raw` counter, so that run can't
-distinguish "none of the seven traps ran" from "the detours never counted".
+Live runs (`net_script_mirror_boss`, BC Thresholder `05/0B` btl 72, three
+instances on the package defaults):
+
+- **`vuh2252-boss-04b` (2026-10-14 22:24, PASS) and `-05` (22:44, PASS, branch
+  rebased on main `788dd05`).** Thresholder's (353) own script makes
+  `obj_effect_start_bind`, `obj_effect_start` and `effect_fadeout` calls. Each
+  went out as one record in one packet, about one per second at most. Both
+  clients applied every record: a start that arrived before its copy was driven
+  waited in the hold and was then applied, and each fade-out reached its paired
+  effect. Nothing was refused, stale, unpaired or faulted, and nothing crashed.
+- **No tilt in this fight.** Thresholder makes no `obj_set_rot`,
+  `obj_set_xyzrot` or `set_pos` calls on its own effects here, so this fight
+  shows starts and ends but no tilt or travelling effect.
+- **Object 92 is not mirrored.** Most trap entries came from object 92, which
+  is not an announced spawn. Its effect starts and one script-moved projectile
+  (11 `effect_set_pos` and 11 `effect_set_dir` in one second) were counted as
+  `unmapped` / `untracked` and not sent. That's correct for an actor whose
+  client copy keeps its own brain.
+- **Earlier runs.** `-01` and `-03` (two instances) crashed the client in the
+  pause menu (VUH-2289, fixed separately). `-02` logged no `host sec` line,
+  before the `raw` counter existed.
 
 Offline: `kh2coop_script_mirror_test` covers the codec, relay forwarding and
 refusals over loopback ENet, the send-on-change and hold rules, the effect
