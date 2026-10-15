@@ -1114,6 +1114,21 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::SpawnEmission: {
+                SpawnEmission emission; read(reader, emission);
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined ||
+                    !admittedScope || !room_ || !sameResyncRoom(emission.location, *room_) ||
+                    emission.sequence <= lastSpawnEmission_ || spawnEmissions_.size() >= SPAWN_EMISSION_CAP) {
+                    ++rejectedWorld_; return;
+                }
+                lastSpawnEmission_ = emission.sequence;
+                spawnEmissions_.push_back(emission);
+                lastHostSourceSerial_ = (std::max)(lastHostSourceSerial_, admittedScope->hostSourceSerial);
+                for (auto& other : peers_)
+                    if (other.status == PeerStatus::Verified && !fromHost(other) && other.transportPeer)
+                        sendTo(other.transportPeer, encode(emission), true);
+                break;
+            }
             case PacketType::ScriptCall: {
                 // VUH-2252: the host's mirrored enemies' script calls for the current room. Forwarded
                 // reliably to every verified client; never cached or replayed to late joiners.
@@ -1373,6 +1388,7 @@ void SessionHost::sendWorldStateTo(TransportPeer* peer) try {
     // on the roster change (HostIntentDue). The cache only bounds targets and keeps the version floor.
     if (!room_) return;
     sendTo(peer, encode(*room_), true, true);
+    for (const auto& emission : spawnEmissions_) sendTo(peer, encode(emission), true, true);
     if (hold_ && hold_->epoch == room_->epoch) sendTo(peer, encode(*hold_), true, true);
     // A received complete-empty replacement is state too. Default/absent or
     // append-only empty packets must not manufacture a complete baseline.
@@ -1618,6 +1634,7 @@ void SessionHost::clearWorldState() {
     for (auto& p:peers_) p.reviveAvatarMs=0;
     hold_.reset();
     manifest_ = {};
+    spawnEmissions_.clear(); lastSpawnEmission_ = 0;
     populationCut_.reset();
     ordinaryLifecycle_.Reset();
     enemyHp_.clear();

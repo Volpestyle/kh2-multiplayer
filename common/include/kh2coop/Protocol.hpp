@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 19;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 20;
 
 // ===========================================================================
+// Protocol v20 adds SpawnEmission (50): host controller records and trigger points (VUH-2302).
 // Protocol v19 adds ScriptCall (49): the host's mirrored enemies' script calls (VUH-2252).
 // Protocol v18 adds host co-op difficulty to ClientHello/SessionState and
 // the locked player count to the RoomTransition packet trailer.
@@ -136,6 +137,17 @@ struct RoomTransition {
     // Packet-only: host roster count locked for this native room, including late joins.
     std::uint8_t difficultyPlayers {1};
 };
+
+// One successful native wrapper return, not permission to run a controller's
+// other records. Sequence is host-connection scoped; room binds replay lifetime.
+struct SpawnEmission {
+    RoomTransition location {};
+    std::uint64_t sequence {0};
+    std::uint32_t controllerKey {0};
+    std::uint16_t headerId {0}, recordIndex {0};
+    std::array<float, 4> point {};
+};
+inline constexpr std::size_t SPAWN_EMISSION_CAP = 4096;
 
 // Ephemeral native activation challenge. The requester owns the deadline on
 // its monotonic clock; receipt never renews it. A host response must be captured

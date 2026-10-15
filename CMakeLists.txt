@@ -253,6 +253,13 @@ endif()
 # VUH-2252: ScriptCall codec, relay forwarding and the send-on-change rules
 # (inject/src/ScriptMirror.hpp). Loopback ENet, no KH2.
 add_executable(kh2coop_script_mirror_test tests/ScriptMirrorTest.cpp)
+add_executable(kh2coop_spawn_emission_test tests/SpawnEmissionTest.cpp)
+target_link_libraries(kh2coop_spawn_emission_test PRIVATE kh2coop_server_core)
+if(MSVC)
+    target_compile_options(kh2coop_spawn_emission_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_spawn_emission_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
 target_link_libraries(kh2coop_script_mirror_test PRIVATE kh2coop_server_core kh2coop_common)
 target_include_directories(kh2coop_script_mirror_test PRIVATE inject/src)
 if(MSVC)

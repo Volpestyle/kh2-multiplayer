@@ -225,7 +225,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -917,6 +917,26 @@ std::vector<std::uint8_t> encode(const TargetAuthority& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::TargetAuthority, w.data());
 }
 
+void write(ByteWriter& w, const SpawnEmission& m) {
+    if (!m.location.epoch || !m.sequence || m.recordIndex >= 256)
+        throw std::runtime_error("SpawnEmission: invalid identity");
+    for (float v : m.point) if (!std::isfinite(v))
+        throw std::runtime_error("SpawnEmission: nonfinite point");
+    write(w, m.location); w.writeU64(m.sequence); w.writeU32(m.controllerKey);
+    w.writeU16(m.headerId); w.writeU16(m.recordIndex);
+    for (float v : m.point) w.writeF32(v);
+}
+void read(ByteReader& r, SpawnEmission& m) {
+    if (r.remaining() != 48) throw std::runtime_error("SpawnEmission: wrong length");
+    SpawnEmission out; read(r, out.location); out.sequence = r.readU64();
+    out.controllerKey = r.readU32(); out.headerId = r.readU16(); out.recordIndex = r.readU16();
+    for (float& v : out.point) v = r.readF32();
+    ByteWriter checked; write(checked, out); m = out;
+}
+std::vector<std::uint8_t> encode(const SpawnEmission& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::SpawnEmission, w.data());
+}
+
 bool validScriptCallEntry(const ScriptCallEntry& e) {
     const auto shape = scriptCallShape(e.table, e.index);
     if (shape.kind == ScriptCallKind::None || !e.netId || (e.effect != 0) != shape.effect) return false;
@@ -1562,6 +1582,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("RemoteHit: wrong frame length");
     if (type == PacketType::TargetAuthority && (len != TARGET_AUTHORITY_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("TargetAuthority: wrong frame length");
+    if (type == PacketType::SpawnEmission && (len != 48 || size != 51))
+        throw std::runtime_error("SpawnEmission: wrong frame length");
     if (type == PacketType::ScriptCall &&
         (len < SCRIPT_CALL_HEADER_BYTES || (len - SCRIPT_CALL_HEADER_BYTES) % SCRIPT_CALL_ENTRY_BYTES != 0 ||
          size != kHeaderSize + len))

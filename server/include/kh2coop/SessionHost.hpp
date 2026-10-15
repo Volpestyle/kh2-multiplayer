@@ -219,6 +219,8 @@ private:
     std::optional<RoomTransition> room_;
     std::optional<EventHold> hold_;
     EnemyManifest manifest_;
+    std::vector<SpawnEmission> spawnEmissions_;
+    std::uint64_t lastSpawnEmission_ = 0;
     std::optional<PopulationCut> populationCut_;
     ordinarylifecycle::History ordinaryLifecycle_;
     std::uint64_t populationCutFloor_=0;
