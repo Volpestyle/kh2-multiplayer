@@ -1,0 +1,129 @@
+{
+ "name": "net_boss_intro_2p",
+ "description": "VUH-2289: two players on the player package's shipped defaults. The host warps into the BC Thresholder room with its intro (05/0B btl72 evt32767) while the client is still in GoA, so the client's cutscene hold opens its pause menu outside the event room. In two-player play the TARGET_ALL clone seats Sora as a companion, which used to crash that menu at exe+0x36A4AB. The client must survive the hold, follow into the boss room and move afterwards.",
+ "playerDefaults": true,
+ "protect": [
+  0,
+  1
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 1,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "relay",
+   "port": 27798,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get('puppet0') or {}).get('active') for i in range(2))",
+   "timeoutMs": 30000,
+   "pollMs": 1000
+  },
+  {
+   "do": "assert",
+   "expr": "[log_count('[partyempty] seven native row/menu guards installed', i) for i in range(2)]==[1,1]",
+   "message": "The pause-menu companion guard is not installed with the shipped defaults"
+  },
+  {
+   "do": "checkpoint",
+   "name": "1 Boss intro: client held outside the event room"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 5,
+   "room": 11,
+   "door": 0,
+   "map": 0,
+   "btl": 72,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[event-control] input phase=3 menu=10', 1)>=1",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('[bc-clone] party leaf applied', 1)>=1",
+   "message": "The two-player clone party leaf was not applied on the client, so this run cannot show the crash guard"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "name": "intro_hold_friend1",
+   "seconds": 4,
+   "fps": 8
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[5,11,0,0,72,32767] and location(1)==location(0)",
+   "timeoutMs": 60000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(2))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('released=1', 1)>=1 or log_count('owner did not converge', 1)>=1",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "save",
+   "as": "friend_pos",
+   "expr": "pos('P_EX100',1)"
+  },
+  {
+   "do": "input",
+   "instance": 1,
+   "ly": 1,
+   "ms": 700
+  },
+  {
+   "do": "assert",
+   "expr": "dist(saved['friend_pos'],pos('P_EX100',1))>30",
+   "message": "The client could not move after the boss intro (input still held)"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "boss_after_hold"
+  }
+ ]
+}

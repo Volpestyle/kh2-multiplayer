@@ -10,6 +10,7 @@
 #ifndef KH2COOP_PLAYERKIT_POLICY_ONLY
 #include "MinHook.h"
 #include "NativePrivateStatus.hpp"
+#include "PartyEmptySeat.hpp"
 #include "EnemySync.hpp"
 #include "Warp.hpp"
 #endif
@@ -329,6 +330,12 @@ bool Install(std::uintptr_t exeBase, LogFn log) {
     char remoteText[4] {};
     const DWORD rn = GetEnvironmentVariableA("KH2COOP_REMOTE_KIT_SLOT", remoteText, sizeof(remoteText));
     g_bcRequested = BcCloneRequested() && n == 0 && rn == 0 && !g_observer;
+    // VUH-2289: the clone seats Sora as a companion, and the pause menu's
+    // companion loops fault on a player key unless partyempty's guard is in.
+    if (g_bcRequested && !partyempty::Install(exeBase, log)) {
+        if (log) log("[bc-clone] REFUSED: pause-menu companion guard unavailable; party leaf stays native");
+        g_bcRequested = false;
+    }
     if (n == 0 && rn == 0 && !g_observer && !g_bcRequested) return true;
     const FlagMatrix flags = ReadFlagMatrix(); // VUH-1519 flag matrix
     if (g_observer && ((flags.kit && !flags.partyKits) || flags.remote)) {

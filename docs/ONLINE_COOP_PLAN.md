@@ -733,9 +733,13 @@ the host's current room) plus a safe native pause. Otherwise it skips that one
 hold instead of aborting the channel for the session, so a friend in another
 room keeps control rather than pausing there. A new acquire supersedes a hold
 that is only waiting on convergence, and a client that hasn't converged 10 s
-after the release gets its input back. Known gap: the pause menu crashes a
-2-player client whose party has an empty seat (exe+0x36A4AB, filed from the
-VUH-2252 boss run). The natural-event profile reuses the existing bounded menu-liveness
+after the release gets its input back. A room-entry cutscene's acquire is
+published before the host's room transition (the transition waits for the
+event to end), so friends are paused in the room they're in and follow once it
+ends. VUH-2289: in two-player play the TARGET_ALL clone seats Sora as a
+companion, and the pause menu's companion loops faulted on that player key
+(exe+0x36A4AB). The clone path now installs partyempty's guards and the
+two-caller key skip is unconditional; `net_boss_intro_2p` covers it. The natural-event profile reuses the existing bounded menu-liveness
 helper; [the short skip fixture](../tools/scenario/scenarios/net_host_cutscene_skip.json)
 uses the standard runner.
 

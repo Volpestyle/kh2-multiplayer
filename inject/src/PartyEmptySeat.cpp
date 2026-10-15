@@ -105,8 +105,11 @@ std::int32_t __fastcall MenuKey(const std::uint8_t* menu, std::int32_t index) {
     // and Roxas (14, normalized to 1) have no companion history row: otherwise
     // native code computes (1-2)*0x30, then a huge unsigned bitset index.
     // The loops' separate player-history block and every other reader delegate.
+    // Unconditional (VUH-2289): vanilla never seats a player there, and the
+    // two-player TARGET_ALL clone puts Sora in a companion seat without an
+    // owned tuple, which crashed the pause menu at exe+0x36A4AB.
     const bool skip = (caller == g_base + 0x36A46A || caller == g_base + 0x36A727) &&
-        (key == 1 || key == 14) && OwnedTuple();
+        (key == 1 || key == 14);
     SetLastError(savedError);
     return skip ? 0 : key;
 }
