@@ -37,7 +37,17 @@ int main(int argc,char** argv){
   auto out=step(255,12000);check(out.released&&out.timedOut&&!s.Holding(),"input returned at the release timeout");
   check(s.Acquire(ok),"next hold works after a timeout");step(255,12001);step(255,12002);step(10,12003);
   s.Wake();step(10,12004);step(10,12005);step(255,12006);
-  check(s.Current()==S::Phase::OwnerWait&&s.Supersede()&&!s.Holding()&&s.Acquire(ok),"a new event supersedes an owner wait");}
+  check(s.Current()==S::Phase::OwnerWait&&s.Supersede()&&!s.Holding()&&s.Acquire(ok),"a new event supersedes an owner wait");
+  // In a fight Start opens the combat pause (8), not the menu (10): it is the
+  // owned pause, held until wake and closed with Start like the menu.
+  S c;check(c.Acquire(ok),"combat acquire");at=ok;
+  auto cstep=[&](unsigned menuNow,std::uint64_t now){at.menu=menuNow;at.now=now;return c.Tick(at);};
+  cstep(255,1001);cstep(255,1002);cstep(8,1003);check(c.Current()==S::Phase::Paused,"combat pause is the owned pause");
+  auto cheld=cstep(8,1004);check(cheld.neutral&&!cheld.failed&&c.Holding(),"held in the combat pause");
+  c.Wake();auto close=cstep(8,1005);check(close.start,"wake presses Start to close the combat pause");
+  cstep(8,1006);cstep(255,1007);check(c.Current()==S::Phase::OwnerWait,"combat pause closed, waiting on owner");
+  S d;check(d.Acquire(ok),"menu-change acquire");at=ok;at.menu=255;at.now=1001;d.Tick(at);at.now=1002;d.Tick(at);
+  at.menu=8;at.now=1003;d.Tick(at);at.menu=10;at.now=1004;check(d.Tick(at).failed,"a different menu replacing the owned pause still fails");}
  if(mode=="off"){fresh();check(!n::Enabled()&&!n::ApplyInput(data)&&buttons()==0x4d4d,"default off leaves fresh physical untouched");}
  else{
  e::Channel runtime;check(runtime.Open(GetCurrentProcessId()),"independent runtime view opened");

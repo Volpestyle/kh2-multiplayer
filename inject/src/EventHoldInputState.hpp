@@ -62,11 +62,14 @@ public:
             phase_ = Phase::Opening;
             return {true, false, false, false};
         case Phase::Opening:
-            if (s.menu == 10) { owned_ = true; phase_ = Phase::Paused; }
+            // Start opens the full menu (10) in the field and the combat
+            // pause (8) in fights where the menu is locked, such as boss
+            // rooms (VUH-2268 follow-up). Either one is the owned pause.
+            if (s.menu == 10 || s.menu == 8) { owned_ = true; pauseMenu_ = s.menu; phase_ = Phase::Paused; }
             else if (s.menu != 255 || s.now >= deadline_) { Fail(); break; }
             return {true, false, false, false};
         case Phase::Paused:
-            if (!owned_ || s.menu != 10) { Fail(); break; }
+            if (!owned_ || s.menu != pauseMenu_) { Fail(); break; }
             if (wake_) {
                 phase_ = Phase::CloseRelease;
                 deadline_ = s.now + 1000;
@@ -78,7 +81,7 @@ public:
             return {true, false, false, false};
         case Phase::Closing:
             if (s.menu == 255) { owned_ = false; phase_ = Phase::OwnerWait; }
-            else if (s.menu != 10 || s.now >= deadline_) { Fail(); break; }
+            else if (s.menu != pauseMenu_ || s.now >= deadline_) { Fail(); break; }
             return {true, false, false, false};
         case Phase::OwnerWait:
             if (s.menu != 255) { Fail(); break; }
@@ -100,5 +103,6 @@ private:
     Phase phase_ = Phase::Idle;
     std::uint64_t deadline_ = 0, releaseDeadline_ = 0;
     bool owned_ = false, wake_ = false, press_ = false;
+    unsigned pauseMenu_ = 10;
 };
 } // namespace kh2coop::inject::eventholdnative
