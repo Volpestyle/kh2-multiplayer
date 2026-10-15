@@ -358,23 +358,23 @@
    "timeoutMs": 10000
   },
   {
-   "do": "hit_all",
-   "instance": 0,
-   "op": "kill"
-  },
-  {
-   "do": "wait",
-   "ms": 3000
-  },
-  {
-   "do": "hit_all",
-   "instance": 0,
-   "op": "kill"
+   "do": "clear_host_enemies",
+   "timeoutMs": 30000,
+   "emptyMs": 3000,
+   "pollMs": 500,
+   "as": "hb1_cleanup"
   },
   {
    "do": "wait_until",
    "expr": "len(enemy_hps(0))==0 and len(enemy_hps(1))==0 and len(enemy_hps(2))==0",
    "timeoutMs": 20000
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 2,
+   "fps": 10,
+   "name": "hb_hammers_cleared_friend2"
   },
   {
    "do": "assert",

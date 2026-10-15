@@ -962,6 +962,47 @@ def step_hit_all(ctx: Context, step: dict) -> dict:
     return {"hit": done}
 
 
+def step_clear_host_enemies(ctx: Context, step: dict) -> dict:
+    """Keep killing host combat enemies until a quiet empty interval, bounded.
+    Friends are never hit: a separate all-peer empty check must catch leftovers.
+    """
+    timeout = step.get("timeoutMs", 30000) / 1000
+    empty = step.get("emptyMs", 3000) / 1000
+    poll = step.get("pollMs", 500) / 1000
+    if not 0 < poll <= empty < timeout <= 60:
+        raise StepFailed("clear_host_enemies requires 0 < pollMs <= emptyMs < timeoutMs <= 60000")
+    start = time.monotonic()
+    deadline = start + timeout
+    empty_since = None
+    result = {"cleared": False, "hit": 0, "samples": []}
+    path = ctx.run_dir / f"{step.get('as', 'host_cleanup')}.json"
+    try:
+        while time.monotonic() < deadline:
+            ctx.check_all()
+            enemies = ctx.eval("enemy_hps(0)")
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            sample = {"ms": round((now - start) * 1000), "enemies": enemies}
+            result["samples"].append(sample)
+            if enemies:
+                empty_since = None
+                sample["hit"] = step_hit_all(ctx, {"instance": 0, "op": "kill"})["hit"]
+                result["hit"] += sample["hit"]
+            else:
+                if empty_since is None:
+                    empty_since = now
+                if now - empty_since >= empty:
+                    result["cleared"] = True
+                    return result
+            ctx.sleep(min(poll, max(0, deadline - time.monotonic())))
+        raise StepFailed(f"host enemies did not stay empty for {empty:g}s within {timeout:g}s")
+    finally:
+        result["elapsedMs"] = round((time.monotonic() - start) * 1000)
+        path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        ctx.artifacts.append(path.name)
+
+
 def step_freeze(ctx: Context, step: dict) -> dict:
     """Test hook: suspends the instance so gameplay frames stop, then waits
     past the hang threshold. The runner should dump it and report HANG."""
@@ -4423,6 +4464,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": s
          "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
          "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all,
+         "clear_host_enemies": step_clear_host_enemies,
          "kh2ctl": step_kh2ctl, "transition_check": step_transition_check,
          "align_courtyard_exit": step_align_courtyard_exit,
          "progress_snapshot": step_progress_snapshot, "statehash_check": step_statehash_check,

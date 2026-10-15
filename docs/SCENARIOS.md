@@ -1872,6 +1872,7 @@ protected actor. Protection is best effort during loads.
 | `record` / `record_stop` | `as instances` | Sample every party actor's position (with the instance's world/room) on those instances in the background; `record_stop` writes `<as>.csv` |
 | `wander` | `instances seconds seed` | Seeded random stick walks with occasional jumps, taking turns (soaks) |
 | `hit_all` | `instance op amount` | `kh2ctl hit damage/kill` on every live combat enemy of that instance (host-only damage tests) |
+| `clear_host_enemies` | `timeoutMs emptyMs pollMs as` | Kill only host live combat enemies until continuously empty for `emptyMs`; poll for delayed waves within `timeoutMs` (maximum60s). Defaults30s/3s/500ms. Preserve every sample and hit count in `<as>.json`, including on timeout. Follow with a separate all-peer empty assertion |
 | `kh2ctl` | `instance args` or `argsExpr` | Run the supplied argument array against that instance. `argsExpr` evaluates an expression to an array, for explicit reversible fixture writes |
 | `transition_check` | `as after instances target timeoutMs capture` | Wait for completed-load parity, relay ACKs, and restored puppet slots; save structured evidence under `as` (default `transition`). `after` names an earlier checkpoint whose epoch must advance; `target` is the expected `[world, room]`. Default instances are `[0,1,2]`, default timeout 30 s. On timeout, capture every participating instance and preserve the last observation as `<as>_failed.json`. `capture: true` also captures successful checkpoints |
 
@@ -3209,3 +3210,14 @@ the host nearby, the fixture requires nativeRC0, a closed menu and revive range
 before pressing Triangle. It retains the1600ms hold and10-second revive timeout,
 records both positions and the native RC, and requires exactly one new prompt
 fire and native revive return. Runtime RC ownership and revive behavior are unchanged.
+
+### Route HB delayed-wave cleanup (VUH-2318)
+
+After the Iron Hammers combat, `clear_host_enemies` polls every500ms and
+kills living host combat enemies for up to30s, requiring3s continuously empty.
+A new birth resets that quiet interval. This replaces two fixed kill sweeps,
+which could finish before controller747 emitted its later Camo Cannons.
+The report keeps the sampled populations and successful hit counts, including
+partial results on timeout. The following20s all-peer empty check is unchanged:
+the cleanup never hits friend actors, so retained friend enemies still fail.
+Game emission, admission, HP and controller qualification are unchanged.
