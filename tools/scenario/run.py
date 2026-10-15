@@ -81,7 +81,9 @@ def kh2ctl(*args: str, pid: int | None = None, check: bool = True, timeout: floa
     except json.JSONDecodeError:
         data = {"ok": False, "error": text or proc.stderr.strip()}
     if check and not data.get("ok", False):
-        raise StepFailed(f"kh2ctl {' '.join(map(str, args))}: {data.get('error', data)}")
+        # A held warp says which gate input held it (an open menu, an event).
+        gate = f" gate={data['gate']}" if "gate" in data else ""
+        raise StepFailed(f"kh2ctl {' '.join(map(str, args))}: {data.get('error', data)}{gate}")
     return data
 
 

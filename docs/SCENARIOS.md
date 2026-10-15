@@ -3094,6 +3094,12 @@ details).
   host event). Its actor stays listed at 1 HP, so the boss segment waits for a
   new host event hold with the boss at 1 HP or less on all three, rather than
   for it to leave the list.
+- After that event every instance stays on the white loading screen with the
+  heart. The solo control without co-op (`solo_boss_thresholder_defeat`) does
+  the same, so it comes from warping straight into the fight, not from co-op.
+  The host's warp to GoA leaves it. Don't press Start there: it opens the
+  pause, which stops gameplay frames (the runner reports a hang) and holds the
+  warp at the safe-state gate (VUH-2303, run `20261015-002627`).
 - Soras are protected (team 0) during combat so the route can keep going. The
   last segment removes friend2's protection and deals a lethal native hit, to
   show what a death does under the shipped defaults.

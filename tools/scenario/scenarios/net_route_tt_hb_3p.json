@@ -758,30 +758,9 @@
    "fps": 6
   },
   {
-   "do": "press",
-   "instance": 0,
-   "button": "start",
-   "ms": 100
-  },
-  {
-   "do": "wait",
-   "ms": 300
-  },
-  {
-   "do": "press",
-   "instance": 0,
-   "button": "down",
-   "ms": 100
-  },
-  {
-   "do": "wait",
-   "ms": 300
-  },
-  {
-   "do": "press",
-   "instance": 0,
-   "button": "cross",
-   "ms": 100
+   "do": "save",
+   "as": "boss_aftermath_menu",
+   "expr": "[peek('0x7435D0','u8',i) for i in range(3)]"
   },
   {
    "do": "wait_until",
