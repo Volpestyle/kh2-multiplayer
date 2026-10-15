@@ -54,6 +54,9 @@ function Get-ForeignGames {
       $_.MainWindowHandle -ne [IntPtr]::Zero })
 }
 
+# The previous bridge job's games can still be exiting; give them 20 s.
+$busyUntil = (Get-Date).AddSeconds(20)
+while ((Get-ForeignGames).Count -and (Get-Date) -lt $busyUntil) { Start-Sleep -Seconds 1 }
 if ((Get-ForeignGames).Count) { "PC1 occupied; no run: $((Get-ForeignGames | ForEach-Object ProcessName) -join ',')"; return }
 if ((Get-PSDrive C).Free -lt 10GB) { 'PC1 below 10 GiB free; no run'; return }
 # A relay left over from a stopped run holds its UDP port, and the next run then
