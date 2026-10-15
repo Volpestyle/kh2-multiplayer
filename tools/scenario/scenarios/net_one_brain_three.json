@@ -118,6 +118,11 @@
   },
   {
    "do": "save",
+   "as": "tt_driller_soldier_field_objects",
+   "expr": "sorted(set((a['name'], a.get('objectType'), a.get('objectId')) for a in actors(0) if a['name'].startswith('F_') or (a.get('objectType') in (3, 4) and a.get('hp', -1) < 0)))"
+  },
+  {
+   "do": "save",
    "as": "tt_driller_soldier_driven",
    "expr": "[sorted(set(int(r['oid']) for r in log_matches(r'\\[enemy-mirror\\] take-over .*objectId=(?P<oid>\\d+)', i))) for i in (1, 2)]"
   },
@@ -255,6 +260,11 @@
    "do": "save",
    "as": "hb_armored_knight_families",
    "expr": "[sorted(set(a['objectId'] for a in enemies(i) if a.get('hp',0)>0)) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "hb_armored_knight_field_objects",
+   "expr": "sorted(set((a['name'], a.get('objectType'), a.get('objectId')) for a in actors(0) if a['name'].startswith('F_') or (a.get('objectType') in (3, 4) and a.get('hp', -1) < 0)))"
   },
   {
    "do": "save",
@@ -398,6 +408,11 @@
   },
   {
    "do": "save",
+   "as": "hb_iron_hammer_field_objects",
+   "expr": "sorted(set((a['name'], a.get('objectType'), a.get('objectId')) for a in actors(0) if a['name'].startswith('F_') or (a.get('objectType') in (3, 4) and a.get('hp', -1) < 0)))"
+  },
+  {
+   "do": "save",
    "as": "hb_iron_hammer_driven",
    "expr": "[sorted(set(int(r['oid']) for r in log_matches(r'\\[enemy-mirror\\] take-over .*objectId=(?P<oid>\\d+)', i))) for i in (1, 2)]"
   },
@@ -520,6 +535,11 @@
    "do": "save",
    "as": "tt_neoshadow_jazz_families",
    "expr": "[sorted(set(a['objectId'] for a in enemies(i) if a.get('hp',0)>0)) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "tt_neoshadow_jazz_field_objects",
+   "expr": "sorted(set((a['name'], a.get('objectType'), a.get('objectId')) for a in actors(0) if a['name'].startswith('F_') or (a.get('objectType') in (3, 4) and a.get('hp', -1) < 0)))"
   },
   {
    "do": "save",
