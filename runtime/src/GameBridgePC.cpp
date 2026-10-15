@@ -537,6 +537,22 @@ std::vector<GameBridgePC::ActorInfo> GameBridgePC::ListActors() const {
         info.position = {readAbs<float>(entityAddr + entity::POS_X),
                          readAbs<float>(entityAddr + entity::POS_Y),
                          readAbs<float>(entityAddr + entity::POS_Z)};
+        info.rotationY = readAbs<float>(entityAddr + entity::ROT_Y);
+        info.flags = readAbs<std::uint32_t>(actorAddr + 0x120);
+        info.modelFlags = readAbs<std::uint32_t>(actorAddr + 0x124);
+        if (info.motionId != 0xFFFFFFFFu)
+            info.motionTime = readAbs<float>(actorAddr + 0x158 + 0x44);
+        if (!std::isfinite(info.motionTime)) info.motionTime = 0;
+        info.handlerAddress = resolveActorHandle(readAbs<std::uint32_t>(actorAddr));
+        if (info.handlerAddress) {
+            const auto vtable = readAbs<std::uint64_t>(info.handlerAddress);
+            if (vtable >= baseAddress_ && vtable < baseAddress_ + 0x3000000) {
+                info.handlerVtableRva = vtable - baseAddress_;
+                const auto update = readAbs<std::uint64_t>(vtable + 0x20);
+                if (update >= baseAddress_ && update < baseAddress_ + 0x3000000)
+                    info.updateRva = update - baseAddress_;
+            }
+        }
         const std::uint64_t status = readAbs<std::uint64_t>(actorAddr + 0x5C0);
         if (status > 0x10000 && status < 0x7FFFFFFFFFFFULL) {
             info.statusAddress = status;

@@ -1,0 +1,236 @@
+{
+  "name": "net_field_objects",
+  "description": "VUH-2276: host-driven HB04/15 chests, rotating F_HB040 and jigsaw pieces. Friend proximity cannot collect a piece; host collection removes it on both friends through native field cleanup.",
+  "protect": [
+    0,
+    1,
+    2
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR": "1",
+        "KH2COOP_ENEMY_POPULATION": "1",
+        "KH2COOP_ENEMY_TARGET_ALL": "1"
+      },
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR": "1",
+        "KH2COOP_ENEMY_POPULATION": "1",
+        "KH2COOP_ENEMY_TARGET_ALL": "1"
+      },
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 2,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR": "1",
+        "KH2COOP_ENEMY_POPULATION": "1",
+        "KH2COOP_ENEMY_TARGET_ALL": "1"
+      },
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "relay",
+      "port": 27796,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player",
+      "env": {
+        "KH2COOP_COOP_DIFFICULTY": "normal"
+      }
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1",
+      "env": {
+        "KH2COOP_COOP_DIFFICULTY": "normal"
+      }
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2",
+      "env": {
+        "KH2COOP_COOP_DIFFICULTY": "normal"
+      }
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 21,
+      "door": 0,
+      "map": 1,
+      "btl": 26,
+      "evt": 32767
+    },
+    {
+      "do": "wait_until",
+      "timeoutMs": 30000,
+      "expr": "location(0)==[4, 21, 0, 1, 26, 32767] and location(1)==location(0) and location(2)==location(0) and all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','859.696,450,-599.768']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','919.696,450,-599.768']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 2,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','799.696,450,-599.768']"
+    },
+    {
+      "do": "wait_until",
+      "timeoutMs": 25000,
+      "expr": "all(any(a['objectId']==2403 and a['hp']>0 for a in enemies(i)) for i in range(3)) and enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+    },
+    {
+      "do": "save",
+      "as": "first_phantoms",
+      "expr": "[[a['address'] for a in enemies(i) if a['objectId']==2403 and a['hp']>0] for i in range(3)]"
+    },
+    {
+      "do": "save",
+      "as": "field_before",
+      "expr": "[[a for a in actors(i) if a['name'].startswith('F_')] for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len([a for a in saved['field_before'][i] if a['name']=='F_EX030'])==6 and len([a for a in saved['field_before'][i] if a['name']=='F_EX260'])==2 and len([a for a in saved['field_before'][i] if a['name']=='F_HB040'])==1 for i in range(3))"
+    },
+    {
+      "do": "wait_until",
+      "timeoutMs": 15000,
+      "expr": "all(len(set(int(m['id']) for m in log_matches(r'\\[field-mirror\\] bind .*?netId=(?P<id>\\d+)',i)))==9 for i in [1,2]) and all(log_count('take-over',i)>=9 for i in [1,2])"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','3175,133,1465']"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "save",
+      "as": "friend_hb040",
+      "expr": "[[a for a in actors(i) if a['name'].startswith('F_')] for i in range(3)]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','-800,-1020,1220']"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "save",
+      "as": "friend_ex260",
+      "expr": "[[a for a in actors(i) if a['name'].startswith('F_')] for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len([a for a in saved['friend_ex260'][i] if a['name']=='F_EX260'])==2 for i in range(3))"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','3175,133,1465']"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "save",
+      "as": "host_hb040",
+      "expr": "[[a for a in actors(i) if a['name'].startswith('F_')] for i in range(3)]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','-800,-1020,1220']"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "save",
+      "as": "host_ex260",
+      "expr": "[[a for a in actors(i) if a['name'].startswith('F_')] for i in range(3)]"
+    },
+    {
+      "do": "wait_until",
+      "timeoutMs": 5000,
+      "expr": "all(len([a for a in actors(i) if a['name']=='F_EX260'])==1 for i in range(3))"
+    },
+    {
+      "do": "wait_until",
+      "timeoutMs": 10000,
+      "expr": "all(abs(actor('F_HB040',i)['motionTime']-actor('F_HB040',0)['motionTime'])<=8 for i in [1,2])"
+    },
+    {
+      "do": "save",
+      "as": "field_after",
+      "expr": "[[a for a in actors(i) if a['name'].startswith('F_')] for i in range(3)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(sorted((a['name'],a['objectId'],a['objectType'],a['motionId'],round(a['position']['x']),round(a['position']['y']),round(a['position']['z'])) for a in saved['field_after'][i])==sorted((a['name'],a['objectId'],a['objectType'],a['motionId'],round(a['position']['x']),round(a['position']['y']),round(a['position']['z'])) for a in saved['field_after'][0]) for i in [1,2])"
+    },
+    {
+      "do": "assert",
+      "expr": "all(log_count('[field-mirror] host-left',i)==1 and log_count('[field-mirror] leave-fault',i)==0 and log_count('[field-mirror] slot-protection-fault',i)==0 for i in [1,2])"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 2,
+      "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','-800,-1020,1220']"
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 2,
+      "fps": 10,
+      "name": "field_final_0"
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "seconds": 2,
+      "fps": 10,
+      "name": "field_final_1"
+    },
+    {
+      "do": "clip",
+      "instance": 2,
+      "seconds": 2,
+      "fps": 10,
+      "name": "field_final_2"
+    }
+  ]
+}

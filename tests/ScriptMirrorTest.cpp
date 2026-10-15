@@ -266,6 +266,9 @@ void enetChecks() {
     if (server.verifiedPeerCount() != 2) { for (auto& c : clients) if (c) c->disconnect(); server.stop(); return; }
     const RoomTransition room{20, 2, 0x19, 0, 0, 149, 0};
     clients[0]->sendRoomTransition(room); pump();
+    EnemyManifest manifest; manifest.epoch = room.epoch;
+    EnemyManifestEntry enemy; enemy.netId = 3; enemy.objectId = 0x1FF; manifest.entries.push_back(enemy);
+    clients[0]->sendEnemyManifest(manifest); pump();
     const auto hostId = server.peerBySlot(SlotType::Player)->connectionId;
     auto calls = sample(); calls.location = room; calls.seq = 1; calls.hostConnectionId = hostId;
     clients[0]->sendScriptCall(calls); pump();

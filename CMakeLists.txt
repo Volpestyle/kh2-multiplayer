@@ -254,6 +254,16 @@ endif()
 # (inject/src/ScriptMirror.hpp). Loopback ENet, no KH2.
 add_executable(kh2coop_script_mirror_test tests/ScriptMirrorTest.cpp)
 add_executable(kh2coop_spawn_emission_test tests/SpawnEmissionTest.cpp)
+
+# VUH-2276: complete field roster codec, host admission and script identity retirement.
+add_executable(kh2coop_field_objects_test tests/FieldObjectsTest.cpp)
+target_link_libraries(kh2coop_field_objects_test PRIVATE kh2coop_server_core)
+if(MSVC)
+    target_compile_options(kh2coop_field_objects_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_field_objects_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 target_link_libraries(kh2coop_spawn_emission_test PRIVATE kh2coop_server_core)
 if(MSVC)
     target_compile_options(kh2coop_spawn_emission_test PRIVATE /W4 /WX)

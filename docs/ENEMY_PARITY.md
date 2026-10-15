@@ -1673,3 +1673,36 @@ Reconnect, forced-host-id and used-budget reclamation are not claimed. Build and
 because of a GCC13 compiler ICE, waived by Lead as a live gate. See
 [population repair and evidence limits](POPULATION_REPAIR.md). The landing tree
 rebased onto079f9a3 awaits its own scheduled build and full serial CTest.
+
+
+## Field objects: host decisions (VUH-2276)
+
+`ENEMY_MIRROR=1` also drives every censused `F_` actor on clients. Field
+objects use a separate complete periodic roster (`FieldObjects`, protocol 21),
+with high-bit identities, immutable spawn anchors, native type, pose and motion.
+They never enter enemy HP, hit or population tables. The relay accepts only the
+current native host, room tuple and increasing sequence; periodic snapshots are
+not replayed as world state. Script calls may name a currently present field ID.
+
+Client decisions are suppressed before pose takeover, including while waiting
+for a binding or fresh snapshot. The native puzzle updater needs a verified
+class-slot hook because it performs proximity pickup directly. Host pickup
+retains an absent identity in subsequent snapshots. A uniquely bound client
+copy calls its verified native class leave once, including the puzzle effect
+unlink, then lets native removal and destruction finish. No host pointers or
+inventory writes are copied. Chests retain the existing shared-progress path.
+The callback gate, pinned original and recorded page protection cover hook
+installation and shutdown.
+
+A binding requires unique host and local occurrences at an anchor, matching
+actor/objentry/handler roots, current owner frame, session, load and transition.
+A changed identity or interrupted established binding holds. Snapshots older
+than 500 ms hold pose while client field decisions remain suppressed. The room
+roster retains at most 64 live and retired occurrences; overflow refuses the
+whole snapshot. New live occurrences outrank old tombstones at the same point;
+multiple live matches refuse binding.
+
+`net_field_objects` checks HB04/15's six `F_EX030` chests, two `F_EX260`
+pieces and rotating `F_HB040`: friend-only pickup must leave both pieces,
+then host pickup must remove one on all three instances. Remaining type, motion
+and rounded positions must agree, with rotating motion time within eight frames.

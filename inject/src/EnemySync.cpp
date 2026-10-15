@@ -1,6 +1,6 @@
 #include "EnemyRecordBinding.hpp"
 // ============================================================================
-// EnemySync — see EnemySync.hpp.
+// EnemySync â€” see EnemySync.hpp.
 //
 // Room instances follow Warp's native request/load-completion generations.
 // Cached actors are forgotten at requests and loads, including same-room
@@ -483,7 +483,10 @@ void AdvanceClientManifestRevision() {
 bool EnsureClientClaimScope();
 bool ReleaseClientClaims(std::uint32_t frame);
 
+void ResetFieldObjects();
+
 void RetireWorldSession() {
+    ResetFieldObjects();
     ResetSpawnEmissions();
     ResetPopulationRepair();
     ResetOrdinaryLifecycle();
@@ -636,6 +639,45 @@ bool SameLocation(const RoomTransition& a, const RoomTransition& b) {
            a.eventProgram == b.eventProgram;
 }
 
+
+struct NativeField {
+    uintptr_t actor{}, objentry{}, handler{}, vtable{};
+    std::uint32_t handle{};
+    FieldObjectEntry value{};
+};
+bool SameFieldIdentity(const NativeField& a,const NativeField& b) {
+    return a.actor==b.actor && a.objentry==b.objentry && a.handler==b.handler &&
+           a.handle==b.handle && a.vtable==b.vtable && a.value.objectId==b.value.objectId && a.value.objectType==b.value.objectType;
+}
+bool ReadNativeField(uintptr_t actor,NativeField& out,bool& field) {
+    field=false;out={};out.actor=actor;
+    if(!ReadNative(actor+offsets::actor::OBJENTRY_PTR,out.objentry))return false;
+    if(!out.objentry)return true;
+    char prefix[2]{};
+    if(!CopyNative(out.objentry+offsets::objentry::NAME,prefix,2))return false;
+    if(prefix[0]!='F' || prefix[1]!='_')return true;
+    std::uint8_t type{};
+    if(!ReadNative(out.objentry+offsets::objentry::TYPE_FLAGS,type) ||
+       !ReadNative(out.objentry+offsets::objentry::OBJECT_ID,out.value.objectId) ||
+       !ReadNative(actor,out.handle) || !out.handle)return false;
+    uintptr_t region{};
+    if(!ReadNative(g_exeBase+offsets::active_entity_list::HANDLE_REGION_TABLE+
+          ((out.handle&0x7FFFFFFFu)>>25)*8,region) || !region || region==UINT64_MAX ||
+       (region&offsets::active_entity_list::HANDLE_LOW_MASK))return false;
+    out.handler=region|(out.handle&offsets::active_entity_list::HANDLE_LOW_MASK);
+    if(!ReadNative(out.handler,out.vtable) || out.vtable<g_exeBase || out.vtable>=g_exeBase+0x3000000)return false;
+    out.value.objectType=type;
+    const auto e=actor+offsets::actor::ENTITY_TRANSFORM;
+    if(!ReadNative(e+offsets::entity::POS_X,out.value.position.x) ||
+       !ReadNative(e+offsets::entity::POS_Y,out.value.position.y) ||
+       !ReadNative(e+offsets::entity::POS_Z,out.value.position.z) ||
+       !ReadNative(e+offsets::entity::ROT_Y,out.value.rotationY) ||
+       !ReadNative(actor+offsets::actor::ANIM_ID,out.value.motionId))return false;
+    if(out.value.motionId!=FIELD_OBJECT_NO_MOTION &&
+       !ReadNative(actor+0x158+0x44,out.value.motionTime))return false;
+    out.value.anchor=out.value.position;field=true;return true;
+}
+
 enum class CensusState { Unavailable, Complete };
 struct NativeCensus {
     CensusState state = CensusState::Unavailable;
@@ -646,6 +688,7 @@ struct NativeCensus {
     std::uint32_t transition = 0, load = 0;
     RoomTransition location {};
     std::vector<NativeEnemy> enemies;
+    std::vector<NativeField> fields;
 };
 
 bool SafeNativeGameplay();
@@ -691,6 +734,9 @@ NativeCensus CaptureNativeCensus(uintptr_t watchedActor = 0) {
         bool isEnemy = false;
         if (!ReadNativeEnemy(actor, enemy, isEnemy)) return fail("enemy metadata read", actor);
         if (isEnemy) result.enemies.push_back(enemy);
+        NativeField field;bool isField=false;
+        if(!ReadNativeField(actor,field,isField))return fail("field metadata read",actor);
+        if(isField)result.fields.push_back(field);
         if (next == 0) {
             if (actor != tail) return fail("tail mismatch", actor);
             actor = 0;
@@ -2707,6 +2753,8 @@ bool NativeLeaveCodeCurrent() {
         std::memcmp(reinterpret_cast<void*>(g_exeBase+0x3B7810),kNativeLeaveFadeBytes,sizeof(kNativeLeaveFadeBytes))==0 &&
         *reinterpret_cast<const float*>(g_exeBase+0x623A80)==1.0f;
 }
+#include "FieldObjects.inl"
+
 // Caller holds the SEH boundary and has checked the actor's roots.
 void NativeLeaveActor(uintptr_t actor) {
     using FadeFn=void(__fastcall*)(float*,float,float,float);
@@ -4003,6 +4051,9 @@ bool ReceiveWorldPackets() {
                 SYNC_LOG("[enemysync] client: host death epoch %u netId %u left=%u", m.epoch, m.netId,
                          static_cast<unsigned>(m.left));
                 ContinuePackPreparation(scope->hostSourceSerial, true);
+            } else if (type == PacketType::FieldObjects) {
+                FieldObjects fields;read(r,fields);
+                ReceiveFieldObjects(*scope,fields);
             } else if (type == PacketType::EnemyMotion) {
                 // VUH-1515: pose/motion only; never HP, binding, manifest or hash state.
                 if (!g_mirrorRequested) {  // N2: a flag mismatch is visible and costs no parse
@@ -5336,6 +5387,7 @@ void OnFrameStart(std::uint32_t frame) {
         // load callbacks do the same for initial loads and same-room reloads.
         g_inst = {};
         ResetOrdinaryLifecycle();
+        ResetFieldObjects();
         g_population.Clear();  // VUH-1788 C1: the native teardown owns every forced copy
         ClearActivation();
         ClearPendingHits();
@@ -5351,6 +5403,7 @@ void OnFrameStart(std::uint32_t frame) {
         location.worldId != 0xFF && location.roomId != 0xFF) {
         g_inst = {};
         ResetOrdinaryLifecycle();
+        ResetFieldObjects();
         g_population.Clear();
         g_inst.world = location.worldId;
         g_inst.room = location.roomId;
@@ -5441,6 +5494,7 @@ void OnFrameStart(std::uint32_t frame) {
         if (!HostFrame(frame, fresh, census)) { DrainPendingSpawnTrace(false); return; }
         // VUH-2292: publish old leave and replacement identity before allowing
         // its native emission on friends, even when reliable delivery splits.
+        PublishFieldObjects(frame,census);
         FlushSpawnEmissions();
         CapturePopulationBirths(census); // only the successfully announced, current incarnation
         PublishPopulationCut(census);
@@ -5448,6 +5502,7 @@ void OnFrameStart(std::uint32_t frame) {
         FlushActivationResponses();
         TickHostPartyLayout();
     } else if (g_role == Role::Client) {
+        BindFieldObjects(census);
         // Reporting only: clients never lock policy from asynchronous arrival.
         // HP stores consult the live advertised mode and the host HP sample.
         if (g_lastRoomPacket) {
@@ -5581,10 +5636,40 @@ bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept {
     WithdrawRecordBindings("native-mirror-boundary-held");return false;
 }
 
+bool SuppressFieldBrain(uintptr_t actor) noexcept {
+    enemymirror::FieldCallbackReader reader;if(!reader)return false;
+    // Suppress decisions while connected even before binding or during a stream
+    // hold. Pose readiness must never authorize a client-only puzzle pickup.
+    if(!g_mirrorRequested || !spawncontroller::IsDiagnosticGameThread() ||
+       CurrentRole()!=Role::Client || g_role!=Role::Client || !WorldSessionGeneration() ||
+       !g_orderedDeliverySerial || g_orderedDeliverySerial!=g_bridge.DeliverySerial() ||
+       !RuntimeWriterLive())return false;
+    NativeField f;bool field=false;
+    return ReadNativeField(actor,f,field) && field;
+}
+bool FieldActorCurrent(uintptr_t actor) noexcept {
+    enemymirror::FieldCallbackReader reader;if(!reader)return false;
+    if(!spawncontroller::IsDiagnosticGameThread() || !FieldBindingCurrent(actor,true))return false;
+    std::uint32_t flags=0;
+    return ReadNative(actor+0x120,flags) && !(flags&(1u<<28));
+}
+bool ConsumeFieldLeave(uintptr_t actor) noexcept {
+    enemymirror::FieldCallbackReader reader;if(!reader)return false;
+    if(!spawncontroller::IsDiagnosticGameThread() || !FieldBindingCurrent(actor,false))return false;
+    auto& b=g_fieldLocal.at(actor);
+    if(b.present || b.leaveAttempted)return false;
+    b.leaveAttempted=true; // one native attempt, including ambiguous native faults
+    if(g_log)g_log("[field-mirror] host-left frame=%u netId=%u objectId=%u actor=%llX",
+        g_mirrorFrame,b.host.netId,b.host.objectId,static_cast<unsigned long long>(actor));
+    return true;
+}
+
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     using enemymirror::Gate;
     if (!g_mirrorRequested || g_role != Role::Client || !g_inst.live || !g_host.arrived || actor == 0) return Gate::None;
     if (!spawncontroller::IsDiagnosticGameThread()) return Gate::None;
+    const auto fieldGate=FieldMirrorPose(actor,out);
+    if(fieldGate!=Gate::None)return fieldGate;
     const auto found = g_inst.byActor.find(actor);
     if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return Gate::None;
     const Spawn& s = g_inst.spawns[found->second];
@@ -6287,6 +6372,7 @@ void AdmitScriptCall(const WorldScope& scope, const std::uint8_t* payload, std::
 
 std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept {
     if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending || !actor) return 0;
+    if(const auto field=HostFieldNetId(actor,objectId))return field;
     const auto found = g_inst.byActor.find(actor);
     if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return 0;
     const auto& spawn = g_inst.spawns[found->second];

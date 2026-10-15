@@ -81,6 +81,9 @@ public:
         std::uint32_t moveState {0};   // entity+0x100
         std::uint32_t motionId {0};
         Vec3 position {};
+        float rotationY {0}, motionTime {0};
+        std::uint64_t handlerAddress {0}, handlerVtableRva {0}, updateRva {0};
+        std::uint32_t flags {0}, modelFlags {0};
         std::uint64_t statusAddress {0}; // *(actor+0x5C0): HP i32 at +0, max HP at +4 (VUH-1501)
         std::int32_t hp {0};
         std::int32_t maxHp {0};

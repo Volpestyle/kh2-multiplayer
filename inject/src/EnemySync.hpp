@@ -80,6 +80,11 @@ bool MirrorRequested() noexcept;
 // EntityHook's counter, which Panacea's loader also advances).
 bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept;
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept;
+// Field authority is independent of motion readiness: local pickups stay held while binding.
+bool SuppressFieldBrain(uintptr_t actor) noexcept;
+bool FieldActorCurrent(uintptr_t actor) noexcept;
+bool ConsumeFieldLeave(uintptr_t actor) noexcept;
+
 bool MirrorTrace() noexcept;  // KH2COOP_ENEMY_MIRROR_TRACE=1: fixture position trace lines
 bool MirrorLatencyTrace() noexcept; // bounded denser trace for latency A/B only
 double MirrorCursor() noexcept;  // the stream's displayed host-frame cursor; < 0 when none

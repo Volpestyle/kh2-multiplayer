@@ -3824,6 +3824,7 @@ bool Initialize(uintptr_t exeBase) {
 void Shutdown() {
     // Drain spectate before clearing ANY restoration/lifetime authority.
     if (!downedspectate::Shutdown()) return;
+    if (!enemymirror::ShutdownFields()) return;
     render::InvalidateCoopHud();
     eventholdnative::Disable();
     AcquireSRWLockExclusive(&g_inputTraceLogLock);

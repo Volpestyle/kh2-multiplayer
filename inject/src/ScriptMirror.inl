@@ -387,6 +387,7 @@ static uintptr_t SmDrivenActor(std::uint16_t netId, std::uint32_t objectId) {
     if (!enemymirror::OwnerThread()) return 0;
     for (const auto& d : enemymirror::g_driven) {
         if (!d.actor || d.netId != netId || !d.running || g_frameCounter - d.frame > 2) continue;
+        if(d.pose.field && !enemysync::FieldActorCurrent(d.actor))continue;
         uintptr_t objentry = 0;
         std::uint32_t id = 0;
         if (ReadHitTrace(d.actor + offsets::actor::OBJENTRY_PTR, objentry) && objentry &&

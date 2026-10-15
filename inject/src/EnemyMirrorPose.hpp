@@ -1,7 +1,7 @@
 #pragma once
 #include "kh2coop/LatencyConfig.hpp"
 // ============================================================================
-// EnemyMirrorPose — VUH-1515 step 2 shared constants, the sampled Pose and the
+// EnemyMirrorPose â€” VUH-1515 step 2 shared constants, the sampled Pose and the
 // pure helpers used by both the stream (EnemyMirrorState.hpp) and the native
 // driver (EnemyMirror.inl). Types.hpp only: safe beside HitChannel.hpp.
 // ============================================================================
@@ -14,6 +14,18 @@
 #include <cstring>
 
 namespace kh2coop::inject::enemymirror {
+
+// New field callbacks and owner-frame work share shutdown admission.
+bool EnterFieldCallback() noexcept;
+void LeaveFieldCallback() noexcept;
+struct FieldCallbackReader {
+    bool admitted=EnterFieldCallback();
+    ~FieldCallbackReader(){if(admitted)LeaveFieldCallback();}
+    explicit operator bool() const noexcept{return admitted;}
+    FieldCallbackReader()=default;
+    FieldCallbackReader(const FieldCallbackReader&)=delete;
+    FieldCallbackReader& operator=(const FieldCallbackReader&)=delete;
+};
 
 
 // D14 (2026-10-14), one brain: the host's AI drives every censused enemy on clients (objentry type 3 boss or
@@ -128,6 +140,7 @@ struct Pose {
     float motionTime = 0.0f;
     Vec3 position {};
     float rotationY = 0.0f;
+    bool field = false;
     double cursor = 0.0;  // displayed host-frame cursor (integral)
 };
 

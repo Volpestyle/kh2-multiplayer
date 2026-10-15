@@ -50,7 +50,8 @@ public:
     }
     bool send(TransportPeer* peer, const std::uint8_t* data, std::size_t size,
               std::uint8_t channel, bool reliable) override {
-        auto* packet = enet_packet_create(data, size, reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
+        // Preserve periodic delivery above the MTU: flags0 fragments reliably in ENet.
+        auto* packet = enet_packet_create(data, size, reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
         if (!packet) return false;
         if (enet_peer_send(native(peer), channel, packet) < 0) {
             enet_packet_destroy(packet); return false;

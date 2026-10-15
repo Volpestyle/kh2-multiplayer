@@ -1,9 +1,11 @@
 #include "kh2coop/Transport.hpp"
 #include <enet/enet.h>
 #include <array>
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <vector>
 
 using namespace kh2coop;
 int main() {
@@ -50,6 +52,22 @@ int main() {
         }
         pump([&] { return seen[0] && seen[1] && seen[2]; });
         check(seen[0] && seen[1] && seen[2], "all channel payloads received");
+        const std::vector<std::uint8_t> large(4096, 77); // full FieldObjects exceeds the native MTU
+        check(client->send(outgoing, large.data(), large.size(), 1, false), "large periodic submission");
+        bool largeReceived = false;
+        const auto largeEnd = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (!largeReceived && std::chrono::steady_clock::now() < largeEnd) {
+            TransportEvent event;
+            while (client->service(event, 0) > 0) {}
+            while (server->service(event, 0) > 0) if (event.type == TransportEventType::Receive) {
+                largeReceived = true;
+                check(!event.packet.reliable && event.packet.size == large.size() &&
+                      std::equal(large.begin(), large.end(), event.packet.data),
+                      "above-MTU periodic packet retains unreliable delivery and complete bytes");
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        check(largeReceived, "large periodic packet reassembled");
         const std::array<std::uint8_t, 2> bytes{37, 99};
         check(!client->send(outgoing, bytes.data(), bytes.size(), 3, true), "invalid channel refuses and frees packet");
         check(client->send(outgoing, bytes.data(), bytes.size(), 0, true), "post-refusal send");

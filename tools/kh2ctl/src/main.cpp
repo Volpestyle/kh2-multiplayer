@@ -2895,6 +2895,10 @@ CommandResult CmdEntities(std::vector<std::string> args) {
             << JsonString(a.name) << ",\"objectId\":" << a.objectId
             << ",\"objectType\":" << a.objectType << ",\"team\":" << a.team
             << ",\"moveState\":" << a.moveState << ",\"motionId\":" << a.motionId
+            << ",\"rotationY\":" << a.rotationY << ",\"motionTime\":" << a.motionTime
+            << ",\"flags\":" << a.flags << ",\"modelFlags\":" << a.modelFlags
+            << ",\"handler\":" << a.handlerAddress << ",\"handlerVtableRva\":" << a.handlerVtableRva
+            << ",\"updateRva\":" << a.updateRva
             << ",\"status\":\"0x" << std::hex << std::uppercase << a.statusAddress << std::dec
             << "\",\"hp\":" << a.hp << ",\"maxHp\":" << a.maxHp
             << ",\"position\":{\"x\":" << a.position.x << ",\"y\":" << a.position.y

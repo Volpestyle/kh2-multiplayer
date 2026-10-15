@@ -148,6 +148,7 @@ public:
     void sendReviveRequest(const ReviveRequest& m);
     void sendRemoteHit(const RemoteHit& m); // host only; relay forwards to the target owner
     void sendTargetAuthority(const TargetAuthority& m); // host only; relay forwards to every client
+    void sendFieldObjects(const FieldObjects& m);      // host only, complete periodic snapshot
     void sendScriptCall(const ScriptCall& m);           // host only; relay forwards to every client (VUH-2252)
     bool sendPartyLayout(const PartyLayout& m);
     bool requestPartyReapply(const PartyReapply& m); // host story-forced change only
@@ -305,6 +306,7 @@ private:
     // newly verified host/world identity change may retire the HP floor.
     std::string enemyHpSessionId_;
     std::uint64_t enemyHpHostConnectionId_{0}, enemyHpSequence_{0};
+    std::uint64_t fieldObjectsSequence_{0};
     std::uint64_t enemyMotionSequence_{0}; // VUH-1515: strictly increasing admitted EnemyMotion
     std::uint32_t enemyHpRoomEpoch_{0};
     std::optional<DesyncCaptureRequest> desyncRequest_;

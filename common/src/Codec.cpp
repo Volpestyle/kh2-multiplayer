@@ -224,7 +224,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
-        RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(ProgressUpdate)
+        RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(ProgressUpdate)
         RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
@@ -810,6 +810,59 @@ void write(ByteWriter& w, const EnemyMotion& m) {
         w.writeF32(e.rotationY);
         w.writeU8(e.flags);
     }
+}
+
+namespace {
+void checkFieldObjects(const FieldObjects& m) {
+    if (!m.location.epoch || !m.sequence || m.entries.size() > FIELD_OBJECT_MAX_ENTRIES)
+        throw std::runtime_error("FieldObjects: bad epoch, sequence or count");
+    const auto coordinate = [](const Vec3& v) {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z) &&
+            std::fabs(v.x) <= ENEMY_MOTION_MAX_COORD && std::fabs(v.y) <= ENEMY_MOTION_MAX_COORD &&
+            std::fabs(v.z) <= ENEMY_MOTION_MAX_COORD;
+    };
+    for (std::size_t i = 0; i < m.entries.size(); ++i) {
+        const auto& e = m.entries[i];
+        if (!isFieldObjectNetId(e.netId) || !e.objectId || !coordinate(e.anchor) || !coordinate(e.position) ||
+            !std::isfinite(e.rotationY) || std::fabs(e.rotationY) > ENEMY_MOTION_MAX_ROTATION ||
+            !std::isfinite(e.motionTime) || e.motionTime < 0 || e.motionTime > ENEMY_MOTION_MAX_TIME ||
+            (e.motionId == FIELD_OBJECT_NO_MOTION ? e.motionTime != 0 : e.motionId >= ENEMY_MOTION_MAX_MOTION_ID))
+            throw std::runtime_error("FieldObjects: invalid entry");
+        for (std::size_t j = 0; j < i; ++j)
+            if (m.entries[j].netId == e.netId) throw std::runtime_error("FieldObjects: duplicate netId");
+    }
+}
+}
+void write(ByteWriter& w, const FieldObjects& m) {
+    checkFieldObjects(m);
+    write(w, m.location); w.writeU64(m.sequence); w.writeU32(m.hostFrame);
+    w.writeU16(static_cast<std::uint16_t>(m.entries.size()));
+    for (const auto& e : m.entries) {
+        w.writeU16(e.netId); w.writeU32(e.objectId); w.writeU8(e.objectType);
+        write(w, e.anchor); write(w, e.position); w.writeF32(e.rotationY);
+        w.writeU32(e.motionId); w.writeF32(e.motionTime); w.writeU8(e.present ? 1 : 0);
+    }
+}
+void read(ByteReader& r, FieldObjects& m) {
+    FieldObjects decoded;
+    read(r, decoded.location); decoded.sequence = r.readU64(); decoded.hostFrame = r.readU32();
+    const auto n = r.readU16();
+    if (n > FIELD_OBJECT_MAX_ENTRIES || r.remaining() != static_cast<std::size_t>(n) * FIELD_OBJECT_ENTRY_BYTES)
+        throw std::runtime_error("FieldObjects: wrong payload length");
+    decoded.entries.resize(n);
+    for (auto& e : decoded.entries) {
+        e.netId = r.readU16(); e.objectId = r.readU32(); e.objectType = r.readU8();
+        read(r, e.anchor); read(r, e.position); e.rotationY = r.readF32();
+        e.motionId = r.readU32(); e.motionTime = r.readF32();
+        const auto presence = r.readU8();
+        if (presence > 1) throw std::runtime_error("FieldObjects: invalid presence flag");
+        e.present = presence != 0;
+    }
+    checkFieldObjects(decoded);
+    m = std::move(decoded);
+}
+std::vector<std::uint8_t> encode(const FieldObjects& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::FieldObjects, w.data());
 }
 
 void write(ByteWriter& w, const EnemyDeath& m) {
@@ -1592,6 +1645,10 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("HitClaim: wrong frame length");
     if (type == PacketType::EnemyHp && (len < 14 || size != kHeaderSize + len))
         throw std::runtime_error("EnemyHp: wrong frame length");
+    if (type == PacketType::FieldObjects &&
+        (len < FIELD_OBJECT_HEADER_BYTES || (len - FIELD_OBJECT_HEADER_BYTES) % FIELD_OBJECT_ENTRY_BYTES != 0 ||
+         size != kHeaderSize + len))
+        throw std::runtime_error("FieldObjects: wrong frame length");
     if (type == PacketType::EnemyMotion &&
         (len < ENEMY_MOTION_HEADER_BYTES || (len - ENEMY_MOTION_HEADER_BYTES) % ENEMY_MOTION_ENTRY_BYTES != 0 ||
          size != kHeaderSize + len))

@@ -48,7 +48,7 @@ constexpr uintptr_t MIRROR_VELOCITY = 0xB98, MIRROR_CARRIED = 0x690, MIRROR_ACCE
 constexpr size_t MIRROR_ACCEL_BYTES = 0x18;
 constexpr uintptr_t MIRROR_ACTOR_STATUS = 0x5C0;
 // D14 mirrors every censused class, bosses included: room for more hooked classes than the type-4 one.
-constexpr unsigned kMaxDriven = 32, kMaxBrains = 16, kLogBudget = 48, kRunLogBudget = 512, kHitLogBudget = 512;
+constexpr unsigned kMaxDriven = 96, kMaxBrains = 16, kLogBudget = 48, kRunLogBudget = 512, kHitLogBudget = 512;
 constexpr std::uint32_t kStatsInterval = 300;
 constexpr std::uint32_t kNoMotion = 0xFFFFFFFFu;
 
@@ -115,12 +115,18 @@ static bool DrivenNow(uintptr_t actor) noexcept {
     if (!OwnerThread()) return false;
     Driven* d = Find(actor);
     if (!d || !d->running || d->frame!=g_frameCounter) return false;
-    if (!enemysync::RecordMirrorAuthorityCurrent(actor)) { Retire(*d,"record-withdraw");return false; }
+    if (d->pose.field && !enemysync::FieldActorCurrent(actor)) {Retire(*d,"field-withdraw");return false;}
+    if (!d->pose.field && !enemysync::RecordMirrorAuthorityCurrent(actor)) { Retire(*d,"record-withdraw");return false; }
     return true;
 }
 
-static void BrainBody(void* handler, void* actor, Brain original) {
+static bool FieldBrainDecision(uintptr_t actor);
+bool EnterFieldCallback() noexcept;
+void LeaveFieldCallback() noexcept;
+
+static void BrainBodyEntered(void* handler, void* actor, Brain original) {
     Driven* d = OwnerThread() ? Find(reinterpret_cast<uintptr_t>(actor)) : nullptr;
+    if(OwnerThread() && FieldBrainDecision(reinterpret_cast<uintptr_t>(actor)))return;
     if (d) {
         if (DrivenNow(reinterpret_cast<uintptr_t>(actor))) {
             ++d->skips;
@@ -131,6 +137,12 @@ static void BrainBody(void* handler, void* actor, Brain original) {
         if (d->boundFrame == g_frameCounter) { ++d->passBound; ++g_mstats.passBound; }
     }
     original(handler, actor);
+}
+static void BrainBody(void* handler, void* actor, Brain original) {
+    // Keep every field-state read admitted until the shared callback returns.
+    if(!EnterFieldCallback()){original(handler,actor);return;}
+    __try {BrainBodyEntered(handler,actor,original);}
+    __finally {LeaveFieldCallback();}
 }
 // One detour per hooked thunk, each bound to its own trampoline slot.
 template <unsigned I> static void __fastcall BrainDetour(void* handler, void* actor) {
@@ -239,6 +251,8 @@ static bool EnsureBrainHook(uintptr_t actor) {
     NoteLog("brain-hook", actor, target - g_exeBase, vtable - g_exeBase);
     return true;
 }
+
+#include "FieldBrain.inl"
 
 static bool LivingNow(uintptr_t actor) noexcept;
 
@@ -462,6 +476,7 @@ static bool EnsureCullHook(uintptr_t actor) {
 }
 
 static bool LivingNow(uintptr_t actor) noexcept {
+    if(const auto* d=Find(actor);d && d->pose.field)return enemysync::FieldActorCurrent(actor);
     uintptr_t status = 0;
     std::int32_t hp = 0;
     return ReadHitTrace(actor + MIRROR_ACTOR_STATUS, status) && status && ReadHitTrace(status, hp) && hp > 0;
@@ -500,10 +515,11 @@ static void NoteSeen(uintptr_t actor, Driven& d, bool driven) {
     d.seenDriven = driven;
 }
 
-void PreUpdate(uintptr_t actor) {
+void PreUpdateEntered(uintptr_t actor) {
     if (!enemysync::MirrorRequested()) return;
     if (g_ownerThread == 0) g_ownerThread = GetCurrentThreadId();
     if (!OwnerThread()) return;
+    PrepareFieldActor(actor);
     // Certified unbound stale copies are consumed at the owner-frame boundary, independently of native bit28.
     Pose pose {};
     const Gate gate = enemysync::MirrorPose(actor, pose);
@@ -514,9 +530,10 @@ void PreUpdate(uintptr_t actor) {
     }
     if (!d) d = Allocate(actor);
     if (!d) { ++g_mstats.tableFull; return; }
+    d->pose.field=pose.field;
     if (!d->firstBound) d->firstBound = g_frameCounter ? g_frameCounter : 1;
     d->boundFrame = g_frameCounter;
-    if (enemysync::PopulationRequested()) { SyncHistory(); NoteBound(actor, pose.netId); }
+    if (enemysync::PopulationRequested() && !pose.field) { SyncHistory(); NoteBound(actor, pose.netId); }
     if (pose.netId) d->netId = pose.netId;
     bool drive = gate == Gate::Drive;
     if (drive && g_frameCounter - d->firstBound < kSpawnSettleFrames) {  // let the local spawn-in finish (S7)
@@ -524,8 +541,8 @@ void PreUpdate(uintptr_t actor) {
         ++d->settleHolds;
         ++g_mstats.settleHolds;
     }
-    if (enemysync::PopulationRequested()) (void)EnsureCullHook(actor);  // bound copies, driven or not
-    if (drive && !EnsureBrainHook(actor)) drive = false;
+    if (enemysync::PopulationRequested() && !pose.field) (void)EnsureCullHook(actor);  // bound copies, driven or not
+    if (drive && !(pose.field && EnsureFieldPuzzleHook(actor)) && !EnsureBrainHook(actor)) drive = false;
     NoteSeen(actor, *d, drive);
     if (!drive) {
         if (d->running) EndRun(*d, "release");
@@ -560,7 +577,7 @@ void PreUpdate(uintptr_t actor) {
 }
 
 // HookedMotionChainSetAnim entry (0x3C88C0): true = swallow the game's set.
-bool BlockMotion(uintptr_t actor) noexcept {
+bool BlockMotionEntered(uintptr_t actor) noexcept {
     if (!enemysync::MirrorRequested() || g_guard || !DrivenNow(actor)) return false;  // DrivenNow: thread first
     if (!LivingNow(actor)) return false;  // a death sequence always stays native
     ++Find(actor)->blocked;
@@ -606,7 +623,7 @@ static bool WritePose(uintptr_t actor, Driven& d) noexcept {
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
-void PostUpdate(uintptr_t actor) {
+void PostUpdateEntered(uintptr_t actor) {
     if (!enemysync::MirrorRequested() || !DrivenNow(actor)) return;
     MaybeStats();
     Driven* d = Find(actor);
@@ -623,6 +640,7 @@ void PostUpdate(uintptr_t actor) {
     if (!LivingNow(actor)) return;  // died during its own update: leave it native
     float time = 0.0f, end = 0.0f;
     const uintptr_t motCtrl = actor + ACTOR_MOTION_CTRL;
+    if (d->pose.field && d->pose.motionId==kNoMotion) { (void)WritePose(actor,*d);return; }
     if (d->forceSet || (haveCurrent && current != d->pose.motionId)) {
         if (!SetMotion(actor, d->pose.motionId) || !DrivenNow(actor)) return; // native motion setter can reenter lifecycle hooks
         d->forceSet = false;
@@ -667,6 +685,24 @@ void NoteHit(uintptr_t attacker, uintptr_t victim, std::uint32_t atkpId, const c
         driven ? g_frameCounter - d->runStart + 1 : 0u, motion, time,
         d->setMotion == kNoMotion ? -1 : static_cast<int>(d->setMotion), d->setFrame, d->pose.cursor, atkpId,
         victimName ? victimName : "?", static_cast<unsigned long long>(victim), damage, stat, d->drivenUpdates, d->skips);
+}
+
+void PreUpdate(uintptr_t actor) {
+    if(!EnterFieldCallback())return;
+    __try {PreUpdateEntered(actor);}
+    __finally {LeaveFieldCallback();}
+}
+
+void PostUpdate(uintptr_t actor) {
+    if(!EnterFieldCallback())return;
+    __try {PostUpdateEntered(actor);}
+    __finally {LeaveFieldCallback();}
+}
+
+bool BlockMotion(uintptr_t actor) noexcept {
+    if(!EnterFieldCallback())return false;
+    __try {return BlockMotionEntered(actor);}
+    __finally {LeaveFieldCallback();}
 }
 
 }  // namespace enemymirror

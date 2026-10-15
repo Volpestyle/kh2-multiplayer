@@ -31,7 +31,7 @@ Direct developer launches retain their native defaults.
 
 | Flag (`KH2COOP_` prefix) | Player default | Scope or parked reason |
 |---|---|---|
-| `ENEMY_MIRROR` | `1` | D14 one brain: every censused enemy (bosses included) except the denylist, Creeper 317, Fiery Globe 76 and Lance Warrior 2409 (`EnemyMirrorPose.hpp`). |
+| `ENEMY_MIRROR` | `1` | D14 one brain: every censused enemy (bosses included) except the denylist, Creeper 317, Fiery Globe 76 and Lance Warrior 2409 (`EnemyMirrorPose.hpp`); field objects use a separate host roster and native client decision suppression (VUH-2276, `docs/ENEMY_PARITY.md`). |
 | `ENEMY_POPULATION` | `1` | Remove a friend's living copy when the host removes it. |
 | `ENEMY_TARGET_ALL` | `1` | Automatic private Sora on the next ordinary two-player TT/HB/BC load; qualified mirrored enemy families can target the friend. |
 | `COOP_DIFFICULTY` | `normal` | Host room-locked health factor; two-player mobs ×1.6. |

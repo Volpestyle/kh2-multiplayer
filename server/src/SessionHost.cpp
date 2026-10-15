@@ -367,7 +367,7 @@ void SessionHost::stop() {
     session_.sessionId.clear();
     lastEnemyHpSequence_ = 0;
     populationCutFloor_ = 0;
-    lastEnemyMotionSequence_ = 0;
+    lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0;
     room_.reset();
     clearWorldState();
     partyIntents_.clear(); partyIntentVersion_ = 0; partyIntentHost_ = 0;
@@ -622,7 +622,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     }
                     session_.sessionId = *incarnation;
                     session_.coopDifficulty = hello.coopDifficulty;
-                    lastEnemyHpSequence_ = 0;lastEnemyMotionSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
+                    lastEnemyHpSequence_ = 0;lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
                     log("New world incarnation " + session_.sessionId + " (label=" + config_.sessionId + ")");
                 }
                 ps->gameBuild = hello.gameBuild;
@@ -812,6 +812,20 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::FieldObjects: {
+                FieldObjects fields; read(reader, fields);
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined ||
+                    !admittedScope || admittedScope->kind != WorldSourceKind::Native ||
+                    admittedScope->sourceConnectionId != ps->connectionId || !room_ ||
+                    !sameResyncRoom(fields.location, *room_) || fields.sequence <= lastFieldObjectsSequence_) {
+                    ++rejectedWorld_; return;
+                }
+                lastFieldObjectsSequence_ = fields.sequence;
+                fieldObjects_ = std::move(fields.entries);
+                lastHostSourceSerial_ = (std::max)(lastHostSourceSerial_, admittedScope->hostSourceSerial);
+                forwardToOthers(peer, std::vector<std::uint8_t>(data, data + size), false);
+                break;
+            }
             case PacketType::EnemyMotion: {
                 // VUH-1515: host-only periodic pose/motion for the current room
                 // epoch. Forwarded unreliably, never cached or replayed to late
@@ -1146,6 +1160,25 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     }
                     ++rejectedWorld_;
                     return;
+                }
+                for (const auto& e : calls.entries) {
+                    bool present = std::any_of(fieldObjects_.begin(), fieldObjects_.end(), [&](const auto& f) {
+                        return f.present && f.netId == e.netId && f.objectId == e.objectId;
+                    });
+                    if (!present && manifest_.epoch == room_->epoch && !deadEnemies_.count(e.netId)) {
+                        present = std::any_of(manifest_.entries.begin(), manifest_.entries.end(), [&](const auto& enemy) {
+                            return enemy.netId == e.netId && enemy.objectId == e.objectId;
+                        });
+                        const auto& lifecycle = ordinaryLifecycle_.Current();
+                        if (lifecycle) {
+                            const auto* row = ordinarylifecycle::Find(*lifecycle, e.netId);
+                            if (row && row->terminal) present = false;
+                        }
+                    }
+                    if (!present) {
+                        if (scriptCallLogs < 32) { ++scriptCallLogs; log("ScriptCall refused reason=actor-identity seq=" + std::to_string(calls.seq)); }
+                        ++rejectedWorld_; return;
+                    }
                 }
                 ps->lastScriptCallSeq = calls.seq;
                 lastHostSourceSerial_ = (std::max)(lastHostSourceSerial_, admittedScope->hostSourceSerial);
@@ -1634,6 +1667,7 @@ void SessionHost::clearWorldState() {
     for (auto& p:peers_) p.reviveAvatarMs=0;
     hold_.reset();
     manifest_ = {};
+    fieldObjects_.clear();
     spawnEmissions_.clear(); lastSpawnEmission_ = 0;
     populationCut_.reset();
     ordinaryLifecycle_.Reset();
@@ -1764,7 +1798,7 @@ void SessionHost::removePeer(TransportPeer* peer) {
         partyIntents_.clear(); partyIntentVersion_ = 0; partyIntentHost_ = 0; // VUH-1786: host gone
         lastEnemyHpSequence_ = 0;
         populationCutFloor_ = 0;
-        lastEnemyMotionSequence_ = 0;
+        lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0;
         room_.reset();
         clearWorldState();
         progress_.clear();

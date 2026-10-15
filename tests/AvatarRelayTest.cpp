@@ -869,7 +869,7 @@ void testVersionReject() {
           "client received the reject reason: " + reason);
     check(host.verifiedPeerCount() == 0, "mismatched client never verified");
     client.disconnect();
-    for (const std::uint16_t legacyVersion : {std::uint16_t{3},std::uint16_t{14},std::uint16_t{15},std::uint16_t{17},std::uint16_t{18}}) {
+    for (const std::uint16_t legacyVersion : {std::uint16_t{3},std::uint16_t{14},std::uint16_t{15},std::uint16_t{17},std::uint16_t{18},std::uint16_t{19},std::uint16_t{20}}) {
     reason.clear(); disconnected = false;
     ClientCallbacks legacyCallbacks;
     legacyCallbacks.onRejected = [&](const HelloReject& r) { reason = r.reason; };
@@ -881,7 +881,7 @@ void testVersionReject() {
     while (steadyMs() < legacyDeadline && !disconnected) {
         host.tick(0); legacy.tick(0); std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    check(PROTOCOL_VERSION == 20 && disconnected && reason == "Protocol mismatch: client="+std::to_string(legacyVersion)+" server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
+    check(PROTOCOL_VERSION == 21 && disconnected && reason == "Protocol mismatch: client="+std::to_string(legacyVersion)+" server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
           "otherwise matching legacy peer is rejected for exact protocol mismatch with free capacity");
     }
 }

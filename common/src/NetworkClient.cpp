@@ -337,6 +337,9 @@ void NetworkClient::sendRemoteHit(const RemoteHit& m) {
 void NetworkClient::sendTargetAuthority(const TargetAuthority& m) {
     if (ready() && avatarLocalSlot_ == 0) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
+void NetworkClient::sendFieldObjects(const FieldObjects& m) {
+    if (ready() && avatarLocalSlot_ == 0) sendNativeWorld(encode(m), makeTestingWorldContext(), false);
+}
 void NetworkClient::sendScriptCall(const ScriptCall& m) {
     if (ready() && avatarLocalSlot_ == 0) sendNativeWorld(encode(m), makeTestingWorldContext(), true);
 }
@@ -513,7 +516,7 @@ void NetworkClient::resetTransportState() {
     enemyHpSessionId_.clear();
     enemyHpHostConnectionId_ = 0;
     enemyHpSequence_ = 0;
-    enemyMotionSequence_ = 0;
+    enemyMotionSequence_ = 0; fieldObjectsSequence_ = 0;
     enemyHpRoomEpoch_ = 0;
     desyncRequest_.reset();
     desyncDeadlineMs_ = 0;
@@ -604,7 +607,7 @@ bool NetworkClient::updateAvatarRoster(const SessionState& session) {
         enemyHpSessionId_ = session.sessionId;
         enemyHpHostConnectionId_ = connections[0];
         enemyHpSequence_ = 0;
-        enemyMotionSequence_ = 0;
+        enemyMotionSequence_ = 0; fieldObjectsSequence_ = 0;
         enemyHpRoomEpoch_ = 0;
     }
     const bool namespaceChanged = !valid || !avatarRosterValid_ ||
@@ -802,6 +805,13 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             // restore state after a targeted resend without minting a sequence.
             enemyHpSequence_ = hp.sequence;
             admittedHp = std::move(hp);
+        } else if (type == PacketType::FieldObjects) {
+            FieldObjects fields; read(reader, fields);
+            if (!admittedScope || admittedScope->kind != WorldSourceKind::Native ||
+                !avatarConnections_[0] || admittedScope->sourceConnectionId != avatarConnections_[0] ||
+                !hostRoom_ || !sameResyncRoom(fields.location, *hostRoom_) ||
+                fields.sequence <= fieldObjectsSequence_) return;
+            fieldObjectsSequence_ = fields.sequence;
         } else if (type == PacketType::EnemyMotion) {
             // VUH-1515: periodic host pose/motion. Current room epoch and a
             // strictly increasing sequence; never cached, never replayed.
@@ -1153,6 +1163,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 if (callbacks_.onEnemyDeath) callbacks_.onEnemyDeath(m);
                 break;
             }
+            case PacketType::FieldObjects:
             case PacketType::EnemyMotion:
                 break; // raw world delivery only (VUH-1515)
             case PacketType::ScriptCall:

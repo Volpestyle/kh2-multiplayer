@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 20;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 21;
 
 // ===========================================================================
+// Protocol v21 adds FieldObjects (51): complete periodic host field-object snapshots (VUH-2276).
 // Protocol v20 adds SpawnEmission (50): host controller records and trigger points (VUH-2302).
 // Protocol v19 adds ScriptCall (49): the host's mirrored enemies' script calls (VUH-2252).
 // Protocol v18 adds host co-op difficulty to ClientHello/SessionState and
@@ -252,6 +253,31 @@ struct EnemyMotion {
     std::vector<EnemyMotionEntry> entries;
 };
 
+// Complete periodic host field roster, independently named from enemies. Never
+// cached/replayed as world state or included in resync, HP or population authority.
+inline constexpr std::size_t FIELD_OBJECT_MAX_ENTRIES = 64;
+inline constexpr std::size_t FIELD_OBJECT_ENTRY_BYTES = 44;
+inline constexpr std::size_t FIELD_OBJECT_HEADER_BYTES = 30; // location16, sequence8, frame4, count2
+inline constexpr std::uint32_t FIELD_OBJECT_NO_MOTION = 0xFFFFFFFFu;
+inline constexpr bool isFieldObjectNetId(std::uint16_t id) { return id > 0x8000u; }
+struct FieldObjectEntry {
+    std::uint16_t netId {0};
+    std::uint32_t objectId {0};
+    std::uint8_t objectType {0};
+    Vec3 anchor {};
+    Vec3 position {};
+    float rotationY {0.0f};
+    std::uint32_t motionId {FIELD_OBJECT_NO_MOTION};
+    float motionTime {0.0f};
+    bool present {true}; // false retains a retired occurrence anchor for late native binding
+};
+struct FieldObjects {
+    RoomTransition location {};
+    std::uint64_t sequence {0};
+    std::uint32_t hostFrame {0};
+    std::vector<FieldObjectEntry> entries; // 0..64, complete known room roster including retired occurrences
+};
+
 // Reliable, scoped teammate request. Relay stamps requesterSlot and forwards
 // once to targetConnectionId only. Episode is minted by the target owner,
 // strictly increasing for that game lifetime, never an HP write authority.
@@ -346,7 +372,7 @@ inline constexpr ScriptCallShape scriptCallShape(std::uint8_t table, std::uint16
          : ScriptCallShape{};
 }
 struct ScriptCallEntry {
-    std::uint16_t netId{0};        // host spawn (spawn index + 1) the call acted on
+    std::uint16_t netId{0};        // host enemy occurrence or high-bit field occurrence the call acted on
     std::uint32_t objectId{0};     // its objentry id, checked by clients
     std::uint8_t table{0};
     std::uint16_t index{0};
