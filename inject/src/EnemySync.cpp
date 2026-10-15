@@ -2022,7 +2022,7 @@ bool MotionEntryInBounds(const EnemyMotionEntry& e) {
         coord(e.position.z);
 }
 
-// VUH-1515 step 2: host pose/motion for bound, announced, living, allowlisted
+// VUH-1515 step 2: host pose/motion for bound, announced, living, mirrored (D14: not denied)
 // spawns, read from the census actors (frame-start: last frame's final pose).
 void PublishHostMotion(std::uint32_t frame, const NativeCensus& census) {
     if (!g_mirrorRequested || g_role != Role::Host) return;
@@ -5080,11 +5080,11 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     const DWORD controlLength = g_mirrorRequested
         ? GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR_CONTROL", g_mirrorControlPath, sizeof(g_mirrorControlPath)) : 0;
     if (controlLength == 0 || controlLength >= sizeof(g_mirrorControlPath)) g_mirrorControlPath[0] = '\0';
-    char families[128] {};
-    enemymirror::FormatFamilies(families, sizeof(families));
+    char denied[128] {};
+    enemymirror::FormatDenied(denied, sizeof(denied));
     if (g_mirrorRequested && g_log)
-        g_log("[enemy-mirror] configured=1 families=%s interval=%u delay=%u maxLag=%u stale=%u retake=%u gap=%u settle=%u "
-              "trace=%d control=%d", families, enemymirror::kPublishInterval, g_mirror.delayFrames(),
+        g_log("[enemy-mirror] configured=1 families=all deny=%s interval=%u delay=%u maxLag=%u stale=%u retake=%u gap=%u settle=%u "
+              "trace=%d control=%d", denied, enemymirror::kPublishInterval, g_mirror.delayFrames(),
               enemymirror::kMaxLag, enemymirror::kStaleFrames, enemymirror::kRetake, enemymirror::kGapTolerance,
               enemymirror::kSpawnSettleFrames, g_mirrorTrace ? 1 : 0, g_mirrorControlPath[0] ? 1 : 0);
     g_envRole = ReadEnvRole();

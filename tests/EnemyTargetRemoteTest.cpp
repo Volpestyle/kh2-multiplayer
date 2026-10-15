@@ -150,7 +150,8 @@ int main() {
     CHECK("non-Shadow ordinary waves selectable", R::AllowedObject(301, true) && R::AllowedObject(4, true) &&
           R::AllowedObject(18, true) && R::AllowedObject(305, true));
     CHECK("legacy families remain Shadow-only", !R::AllowedObject(301) && R::AllowedObject(302));
-    CHECK("unsupported families remain native", !R::AllowedObject(306, true) && !R::AllowedObject(0, true));
+    CHECK("D14: every family but the denylist is selectable", R::AllowedObject(306, true) && R::AllowedObject(2408, true) &&
+          !R::AllowedObject(2409, true) && !R::AllowedObject(317, true) && !R::AllowedObject(76, true) && !R::AllowedObject(0, true));
     R::Candidate wave[3] = {{true, 1000, 0}, {true, 0, 0}, {true, 2000, 0}};
     std::uint32_t waveLoad[3] {};
     CHECK("ordinary wave chooses friend1 near enemy", R::Choose(wave, 0, 0, nullptr, waveLoad, 1000) == 1);

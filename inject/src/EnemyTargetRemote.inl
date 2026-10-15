@@ -175,9 +175,9 @@ static void Configure() {
         all ? "mirrored" : "302", double(R::Policy::Hysteresis), R::Policy::MinHoldFrames, R::Policy::CloneCap, R::Policy::TableCapacity,
         unsigned(g.mode));
     if (all) {
-        char families[256] {};
-        enemymirror::FormatFamilies(families, sizeof(families));
-        Log("[enemy-target] all=1 families=%s nativeDamage=1 partyNative=%u", families, unsigned(Env1("KH2COOP_PARTY_NATIVE")));
+        char denied[128] {};
+        enemymirror::FormatDenied(denied, sizeof(denied));
+        Log("[enemy-target] all=1 families=all deny=%s nativeDamage=1 partyNative=%u", denied, unsigned(Env1("KH2COOP_PARTY_NATIVE")));
     }
 }
 

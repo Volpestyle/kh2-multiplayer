@@ -2,7 +2,7 @@
 // Included by EntityHook.cpp after the hit-trace readers and g_resolveHandle.
 // Default off: everything returns at once unless KH2COOP_ENEMY_MIRROR=1
 // (enemysync::MirrorRequested) and this machine is a client with a fresh
-// host EnemyMotion stream for a bound, living, allowlisted enemy.
+// host EnemyMotion stream for a bound, living, mirrored (not denied) enemy.
 //
 // Per updated actor, owner thread (HookedPerEntityUpdate):
 //   PreUpdate   enemysync::MirrorPose -> Gate None/Bound/Drive for this frame;
@@ -47,7 +47,8 @@ constexpr uintptr_t ENTITY_COS = 0x40, ENTITY_SIN = 0x48;
 constexpr uintptr_t MIRROR_VELOCITY = 0xB98, MIRROR_CARRIED = 0x690, MIRROR_ACCEL = 0xA48;
 constexpr size_t MIRROR_ACCEL_BYTES = 0x18;
 constexpr uintptr_t MIRROR_ACTOR_STATUS = 0x5C0;
-constexpr unsigned kMaxDriven = 32, kMaxBrains = 8, kLogBudget = 48, kRunLogBudget = 512, kHitLogBudget = 512;
+// D14 mirrors every censused class, bosses included: room for more hooked classes than the type-4 one.
+constexpr unsigned kMaxDriven = 32, kMaxBrains = 16, kLogBudget = 48, kRunLogBudget = 512, kHitLogBudget = 512;
 constexpr std::uint32_t kStatsInterval = 300;
 constexpr std::uint32_t kNoMotion = 0xFFFFFFFFu;
 
@@ -137,24 +138,35 @@ template <unsigned I> static void __fastcall BrainDetour(void* handler, void* ac
 }
 using DetourFn = void(__fastcall*)(void*, void*);
 static constexpr DetourFn kDetours[kMaxBrains] = {&BrainDetour<0>, &BrainDetour<1>, &BrainDetour<2>, &BrainDetour<3>,
-                                                  &BrainDetour<4>, &BrainDetour<5>, &BrainDetour<6>, &BrainDetour<7>};
+                                                  &BrainDetour<4>, &BrainDetour<5>, &BrainDetour<6>, &BrainDetour<7>,
+                                                  &BrainDetour<8>, &BrainDetour<9>, &BrainDetour<10>, &BrainDetour<11>,
+                                                  &BrainDetour<12>, &BrainDetour<13>, &BrainDetour<14>, &BrainDetour<15>};
+
+// The actor's family (objentry object id), for per-family hook lines; 0 if unreadable.
+static std::uint32_t FamilyOf(uintptr_t actor) noexcept {
+    uintptr_t objentry = 0;
+    std::uint32_t id = 0;
+    return ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, objentry) && objentry &&
+        ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, id) ? id : 0;
+}
 
 static void NoteLog(const char* what, uintptr_t actor, uintptr_t a, uintptr_t b) {
     if (g_mlogBudget == 0) return;
     --g_mlogBudget;
-    Log("[enemy-mirror] %s frame=%u actor=%llX a=%llX b=%llX", what, g_frameCounter,
-        static_cast<unsigned long long>(actor), static_cast<unsigned long long>(a), static_cast<unsigned long long>(b));
+    Log("[enemy-mirror] %s frame=%u actor=%llX a=%llX b=%llX objectId=%u", what, g_frameCounter,
+        static_cast<unsigned long long>(actor), static_cast<unsigned long long>(a), static_cast<unsigned long long>(b),
+        FamilyOf(actor));
 }
 
 // One per-actor counter line: run events (budgeted) and the stats channel.
 static void ActorLine(const char* what, const Driven& d) {
     Log("[enemy-mirror] %s frame=%u netId=%u actor=%llX running=%d runStart=%u updates=%llu skips=%llu passBound=%llu "
         "sets=%llu blocked=%llu runs=%llu gaps=%llu restarts=%llu settle=%llu noBrain=%llu maxNoBrainRun=%llu "
-        "missMotion=%d motion=%u cursor=%.0f",
+        "missMotion=%d motion=%u cursor=%.0f objectId=%u",
         what, g_frameCounter, d.netId, static_cast<unsigned long long>(d.actor), d.running ? 1 : 0, d.runStart,
         d.drivenUpdates, d.skips, d.passBound, d.ourSets, d.blocked, d.runs, d.gaps, d.restarts, d.settleHolds,
         d.noBrain, d.maxNoBrainRun, d.missMotion == kNoMotion ? -1 : static_cast<int>(d.missMotion), d.pose.motionId,
-        d.pose.cursor);
+        d.pose.cursor, d.pose.objectId);
 }
 static void RunLog(const char* what, const Driven& d) {
     if (g_runLogBudget == 0) { ++g_mstats.runLogDropped; return; }
@@ -347,7 +359,9 @@ template <unsigned I> static bool __fastcall CullDetour(void* handler, void* act
 }
 using CullFn = bool(__fastcall*)(void*, void*);
 static constexpr CullFn kCullDetours[kMaxBrains] = {&CullDetour<0>, &CullDetour<1>, &CullDetour<2>, &CullDetour<3>,
-                                                    &CullDetour<4>, &CullDetour<5>, &CullDetour<6>, &CullDetour<7>};
+                                                    &CullDetour<4>, &CullDetour<5>, &CullDetour<6>, &CullDetour<7>,
+                                                    &CullDetour<8>, &CullDetour<9>, &CullDetour<10>, &CullDetour<11>,
+                                                    &CullDetour<12>, &CullDetour<13>, &CullDetour<14>, &CullDetour<15>};
 
 // Same discovery and refusal rules as the brain hook, on handler slot +0x40.
 static bool EnsureCullHook(uintptr_t actor) {

@@ -189,11 +189,11 @@ void testStream() {
     for (std::uint32_t f = 3; f <= 14; ++f) h.Tick(f);  // natural 14, displayed 12
     check(h.PoseAt(2, 14, p) && p.cursor == 12.0 && std::fabs(p.position.x - 7.0f) < 1e-3f && std::fabs(p.motionTime - 5.0f) < 1e-3f,
           "cursor held at newest-1 stays inside the bracket, time advancing by the overflow");
-    // Families: a non-allowlisted object id is never tracked.
+    // Families: a denied object id is never tracked.
     em::Stream f(9);
-    auto other = row(4, 0.0f); other.objectId = 311;
+    auto other = row(4, 0.0f); other.objectId = em::kLanceWarriorObjectId;
     f.Ingest(motion(3, 1, 10, {other}), 1); f.Ingest(motion(3, 2, 13, {other}), 2); f.Tick(2);
-    check(!f.Drivable(4, 2), "non-allowlisted family is ignored");
+    check(!f.Drivable(4, 2), "a denied family is ignored");
     em::Stream batStream(9);
     auto bat = row(8, 0.0f); bat.objectId = em::kHookBatObjectId;
     batStream.Ingest(motion(3, 1, 10, {bat}), 1); batStream.Ingest(motion(3, 2, 13, {bat}), 2); batStream.Tick(2);
@@ -332,33 +332,28 @@ void testHelpers() {
     check(em::BlendWeight(em::kBlendFrames) > 0.0f && em::BlendWeight(em::kBlendFrames) < em::BlendWeight(1) &&
               em::BlendWeight(1) < 1.0f && em::BlendWeight(0) == 1.0f,
           "take-over blend weight rises monotonically to the stream pose");
+    // D14 one brain: every family except the denylist, including the formerly unqualified ones and bosses.
     check(em::FamilyAllowed(302) && em::FamilyAllowed(4) && em::FamilyAllowed(301) && em::FamilyAllowed(1838) &&
-              em::FamilyAllowed(1839) && em::FamilyAllowed(1849) && !em::FamilyAllowed(311) && !em::FamilyAllowed(0) &&
-              em::FamilyAllowed(5) && !em::FamilyAllowed(84) && !em::FamilyAllowed(300) && !em::FamilyAllowed(306) &&
-              !em::FamilyAllowed(1365) && !em::FamilyAllowed(1837) && !em::FamilyAllowed(1840) && !em::FamilyAllowed(1848) &&
-              !em::FamilyAllowed(1850),
-          "allowlist keeps Shadow (302), Hook Bat (4), Soldier (301) and its skins (1838/1839/1849): not their neighbours, the Shadow skin 1840, RAW 1365 or the player (84)");
-    check(em::FamilyAllowed(17) && em::FamilyAllowed(303) && em::FamilyAllowed(368) && em::FamilyAllowed(367) &&
-              !em::FamilyAllowed(16) && em::FamilyAllowed(18) && !em::FamilyAllowed(2025) && !em::FamilyAllowed(2409) &&
-              em::FamilyAllowed(305) && em::FamilyAllowed(120) && !em::FamilyAllowed(119) && !em::FamilyAllowed(121) &&
-              !em::FamilyAllowed(1833) && !em::FamilyAllowed(1836) && !em::FamilyAllowed(1845) && !em::FamilyAllowed(366) &&
-              !em::FamilyAllowed(122) && !em::FamilyAllowed(73) && !em::FamilyAllowed(369) &&
-              em::FamilyAllowed(10) && !em::FamilyAllowed(9) && !em::FamilyAllowed(11) &&
-              em::FamilyAllowed(304) && em::FamilyAllowed(1843) && em::FamilyAllowed(1889) && !em::FamilyAllowed(1842) &&
-              !em::FamilyAllowed(1844) && !em::FamilyAllowed(1888) && !em::FamilyAllowed(1890),
-          "batches 2-4 retain their qualified families; unqualified skins/type-21 stay native");
+              em::FamilyAllowed(311) && em::FamilyAllowed(306) && em::FamilyAllowed(1840) && em::FamilyAllowed(1365) &&
+              em::FamilyAllowed(16) && em::FamilyAllowed(2025) && em::FamilyAllowed(121) && em::FamilyAllowed(2408) &&
+              !em::FamilyAllowed(0),
+          "every nonzero family mirrors unless denied");
+    check(!em::FamilyAllowed(em::kCreeperObjectId) && !em::FamilyAllowed(em::kFieryGlobeObjectId) &&
+              !em::FamilyAllowed(em::kLanceWarriorObjectId) && std::size(em::kDenied) == 3,
+          "the denylist is Creeper 317, Fiery Globe 76 and Lance Warrior 2409");
     {
-        char line[256] {};
-        const auto n = em::FormatFamilies(line, sizeof(line));
-        check(n == std::string("302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76,2403").size() &&
-                  std::string(line) == "302,4,301,1838,1839,1849,17,303,368,10,304,1843,1889,305,18,120,367,318,310,312,71,77,309,3,8,2410,2404,2405,5,125,317,76,2403",
-              "the configured line prints every allowlisted family, in order");
-        char tiny[9] {};
-        em::FormatFamilies(tiny, sizeof(tiny));
-        check(std::string(tiny) == "302,4", "a short buffer drops whole families, never prints a cut id");
-        check(em::FormatFamilies(nullptr, 8) == 0 && em::FormatFamilies(tiny, 0) == 0, "no buffer: nothing written");
+        bool reasons = true;
+        for (const auto& d : em::kDenied) reasons = reasons && d.reason && *d.reason && em::DeniedReason(d.objectId) == d.reason;
+        check(reasons && em::DeniedReason(302) == nullptr, "each denied family has a one-line reason");
+        char line[64] {};
+        const auto n = em::FormatDenied(line, sizeof(line));
+        check(n == 11 && std::string(line) == "317,76,2409", "the configured line prints the denylist, in order");
+        char tiny[8] {};
+        em::FormatDenied(tiny, sizeof(tiny));
+        check(std::string(tiny) == "317,76", "a short buffer drops whole families, never prints a cut id");
+        check(em::FormatDenied(nullptr, 8) == 0 && em::FormatDenied(tiny, 0) == 0, "no buffer: nothing written");
     }
-    {  // batch 2: each new family streams beside an ignored family (311)
+    {  // batch 2: each family streams beside a denied family
         em::Stream b2(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 40;
@@ -370,101 +365,96 @@ void testHelpers() {
             rows.push_back(r);
         }
         auto ignored = row(49, 0.0f);
-        ignored.objectId = 311;
+        ignored.objectId = em::kLanceWarriorObjectId;
         rows.push_back(ignored);
         b2.Ingest(motion(3, 1, 10, rows), 1); b2.Ingest(motion(3, 2, 13, rows), 2); b2.Tick(2);
         em::Pose bp;
         bool all = !b2.Drivable(49, 2);
         for (std::uint16_t n = 40; n < 49; ++n) all = all && b2.Drivable(n, 2) && b2.PoseAt(n, 2, bp) && bp.objectId == rows[n - 40].objectId;
-        check(all, "batch 2-4 family streams (17, 303, 368, 10, 304, 305, 18, 120, 367) are tracked and drivable; 311 is not");
+        check(all, "batch 2-4 family streams (17, 303, 368, 10, 304, 305, 18, 120, 367) are tracked and drivable; denied 2409 is not");
     }
-    {  // batch5 and scoped-record stream candidates; native authority is separately gated
-        check(em::FamilyAllowed(318) && em::FamilyAllowed(317) && em::FamilyAllowed(310) && em::FamilyAllowed(312) &&
-                  !em::FamilyAllowed(311) && !em::FamilyAllowed(313) &&
-                  !em::FamilyAllowed(314) && !em::FamilyAllowed(315) && !em::FamilyAllowed(316) &&
-                  !em::FamilyAllowed(319) && !em::FamilyAllowed(1365),
-              "batch5 allows Dusk/Samurai/Dancer; Creeper stream candidate; Sniper/neighbours and RAW stay native");
+    {  // batch5 Nobodies stream; denied Creeper does not
+        check(em::FamilyAllowed(318) && !em::FamilyAllowed(317) && em::FamilyAllowed(310) && em::FamilyAllowed(312) &&
+                  em::FamilyAllowed(311) && em::FamilyAllowed(313),
+              "batch5 Dusk/Samurai/Dancer and their neighbours mirror; Creeper is denied");
         em::Stream b5(9);
         std::vector<EnemyMotionEntry> rows;
         std::uint16_t net = 80;
         for (const auto oid : {em::kDuskObjectId, em::kSamuraiObjectId, em::kDancerObjectId}) {
             auto r = row(net++, 12.0f); r.objectId = oid; rows.push_back(r);
         }
-        auto ignored = row(84, 0.0f); ignored.objectId = 311; rows.push_back(ignored);
+        auto ignored = row(84, 0.0f); ignored.objectId = em::kLanceWarriorObjectId; rows.push_back(ignored);
         auto creeper = row(85, 0.0f); creeper.objectId = em::kCreeperObjectId; rows.push_back(creeper);
         b5.Ingest(motion(5, 1, 100, rows), 1); b5.Ingest(motion(5, 2, 103, rows), 2); b5.Tick(2);
         em::Pose pose;
-        bool all = !b5.Drivable(84, 2) && b5.Drivable(85, 2);
+        bool all = !b5.Drivable(84, 2) && !b5.Drivable(85, 2);
         for (std::uint16_t n = 80; n < 83; ++n)
             all = all && b5.Drivable(n, 2) && b5.PoseAt(n, 2, pose) && pose.objectId == rows[n - 80].objectId;
-        check(all, "batch5 streams are tracked and drivable beside ignored Sniper311; Creeper317 stream enabled with scoped native gate");
+        check(all, "batch5 streams are tracked and drivable beside denied Lance Warrior and Creeper");
     }
-    {  // batch7 test-only streams; unchanged native binding/driver
+    {  // batch7 streams; unchanged native binding/driver
         for (const auto oid : {em::kRabidDogObjectId, em::kHammerFrameObjectId,
                                em::kAerialChampObjectId, em::kBeffudlerObjectId}) {
             em::Stream stream;
             auto accepted = row(90, 10.0f); accepted.objectId = oid;
-            auto excluded = row(91, 20.0f); excluded.objectId = 311;
+            auto excluded = row(91, 20.0f); excluded.objectId = em::kLanceWarriorObjectId;
             stream.Ingest(motion(7, 1, 100, {accepted, excluded}), 1);
             stream.Ingest(motion(7, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
             em::Pose pose;
             check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) &&
                       stream.PoseAt(90, 2, pose) && pose.objectId == oid && !stream.Drivable(91, 2),
-                  "batch7 family streams beside excluded Sniper311");
+                  "batch7 family streams beside denied Lance Warrior");
         }
-        check(!em::FamilyAllowed(2) && !em::FamilyAllowed(7) && !em::FamilyAllowed(9) &&
-                  em::FamilyAllowed(2403) &&
-                  !em::FamilyAllowed(2411) && em::FamilyAllowed(76),
-              "batch7 neighbours stay native; Fiery Globe76 is a scoped-record stream candidate");
+        check(em::FamilyAllowed(2) && em::FamilyAllowed(7) && em::FamilyAllowed(9) &&
+                  em::FamilyAllowed(2403) && em::FamilyAllowed(2411) && !em::FamilyAllowed(76),
+              "batch7 neighbours mirror; Fiery Globe76 is denied");
     }
-    {  // batch 6 test-only families: one stream per family, excluded native neighbours
+    {  // batch 6 families: one stream per family beside a denied one
         for (const auto oid : {em::kSilverRockObjectId,
                                em::kIcyCubeObjectId, em::kAssassinObjectId}) {
             em::Stream stream;
             auto accepted = row(90, 10.0f); accepted.objectId = oid;
-            auto excluded = row(91, 20.0f); excluded.objectId = 311;
+            auto excluded = row(91, 20.0f); excluded.objectId = em::kLanceWarriorObjectId;
             stream.Ingest(motion(6, 1, 100, {accepted, excluded}), 1);
             stream.Ingest(motion(6, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
             em::Pose pose;
             check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) &&
                       stream.PoseAt(90, 2, pose) && pose.objectId == oid && !stream.Drivable(91, 2),
-                  "batch6 family streams beside excluded Sniper311");
+                  "batch6 family streams beside denied Lance Warrior");
         }
-        check(!em::FamilyAllowed(70) && !em::FamilyAllowed(72) && !em::FamilyAllowed(73) &&
-                  !em::FamilyAllowed(75) && em::FamilyAllowed(76) && !em::FamilyAllowed(78) && !em::FamilyAllowed(308) &&
-                  !em::FamilyAllowed(311) && em::FamilyAllowed(317),
-              "batch6 neighbours excluded; 76/317 stream eligibility has separate scoped native authority");
+        check(em::FamilyAllowed(70) && em::FamilyAllowed(75) && !em::FamilyAllowed(76) && em::FamilyAllowed(78) &&
+                  !em::FamilyAllowed(317),
+              "batch6 neighbours mirror; 76/317 are denied");
     }
     {
         em::Stream stream;
-        auto nativeOnly = row(91, 20.0f); nativeOnly.objectId = 75;
+        auto nativeOnly = row(91, 20.0f); nativeOnly.objectId = em::kFieryGlobeObjectId;
         stream.Ingest(motion(6, 1, 100, {nativeOnly}), 1);
         stream.Ingest(motion(6, 2, 103, {nativeOnly}), 2); stream.Tick(2);
         em::Pose pose;
         check(!stream.Drivable(91, 2) && !stream.PoseAt(91, 2, pose),
-              "neighbour75 stays native even if a motion row arrives");
+              "denied Fiery Globe76 stays native even if a motion row arrives");
     }
     for (const auto oid:{317u,76u}) {
         em::Stream candidate;auto entry=row(95,20.0f);entry.objectId=oid;
         candidate.Ingest(motion(8,1,100,{entry}),1);candidate.Ingest(motion(8,2,103,{entry}),2);candidate.Tick(2);
-        em::Pose pose;check(candidate.Drivable(95,2) && candidate.PoseAt(95,2,pose) && pose.objectId==oid,
-            "scoped record family stream candidate is decodable; native authority separately guarded");
+        em::Pose pose;check(!candidate.Drivable(95,2) && !candidate.PoseAt(95,2,pose),
+            "denied record families (317/76) are not tracked");
     }
     {  // batch8 mirrored families; projectile damage remains UNQUALIFIED
         for (const auto oid : {em::kBookmasterObjectId, em::kCreeperPlantObjectId}) {
             em::Stream stream;
             auto accepted = row(90, 10.0f); accepted.objectId = oid;
-            auto excluded = row(91, 20.0f); excluded.objectId = 306;
+            auto excluded = row(91, 20.0f); excluded.objectId = em::kLanceWarriorObjectId;
             stream.Ingest(motion(7, 1, 100, {accepted, excluded}), 1);
             stream.Ingest(motion(7, 2, 103, {accepted, excluded}), 2); stream.Tick(2);
             em::Pose pose;
             check(em::FamilyAllowed(oid) && stream.Drivable(90, 2) && stream.PoseAt(90, 2, pose) &&
                       pose.objectId == oid && !stream.Drivable(91, 2),
-                  "batch8 family streams; Robot306 remains excluded");
+                  "batch8 family streams beside denied Lance Warrior");
         }
-        check(!em::FamilyAllowed(306) && em::FamilyAllowed(317) && em::FamilyAllowed(76) && !em::FamilyAllowed(124) &&
-                  !em::FamilyAllowed(1114) && !em::FamilyAllowed(311) && !em::FamilyAllowed(314),
-              "batch8 keeps Robot/summoners/reaction families native; 317/76 require scoped gates");
+        check(em::FamilyAllowed(306) && em::FamilyAllowed(124) && em::FamilyAllowed(1114),
+              "batch8's formerly native Robot/summoner/reaction families mirror under D14");
     }
     {  // each Soldier skin streams like the base family
         em::Stream skins(9);
@@ -602,8 +592,7 @@ void testRelay() {
 }  // namespace
 
 int main() {
-    // VUH-1789: Iron Hammer uses the same motion and all-player target
-    // allowlist; unqualified Lance, projectile and type-21 neighbours stay native.
+    // D14: HB route families mirror and target all players; only denied Lance Warrior stays native.
     {
         em::Stream stream;
         std::vector<EnemyMotionEntry> pack;
@@ -616,15 +605,14 @@ int main() {
         bool correct = true;
         for (const auto oid : {2405u, 2409u, 2403u, 2408u}) {
             em::Pose pose;
-            const bool added = oid == 2405 || oid == 2403;
+            const bool added = oid != em::kLanceWarriorObjectId;
             correct = correct && stream.Drivable(static_cast<std::uint16_t>(oid), 2) == added &&
                 kh2coop::inject::enemytarget::rules::AllowedObject(oid, true) == added;
             if (added) correct = correct && stream.PoseAt(static_cast<std::uint16_t>(oid), 2, pose) && pose.objectId == oid;
         }
-        check(correct, "route Iron Hammer and qualified Magic Phantom mirror and target all; Lance/T3 stay native");
+        check(correct, "route Iron Hammer, Magic Phantom and 2408 mirror and target all; denied Lance stays native");
     }
-    { // VUH-1789: the observed Magic Phantom stream must acquire its own pose;
-      // unqualified spell families and type-21 helpers cannot acquire alongside it.
+    { // The Magic Phantom stream acquires its own pose beside the other HB casters; legacy forwarding stays Shadow-only.
         em::Stream stream;
         std::vector<EnemyMotionEntry> pack;
         for (const auto oid : {2403u, 2407u, 2411u, 2406u}) {
@@ -638,8 +626,8 @@ int main() {
               pose.objectId == 2403 && pose.position.x == 123.0f && pose.motionId == 151 &&
               kh2coop::inject::enemytarget::rules::AllowedObject(2403, true) &&
               !kh2coop::inject::enemytarget::rules::AllowedObject(2403, false) &&
-              !stream.Drivable(2407, 2) && !stream.Drivable(2411, 2) && !stream.Drivable(2406, 2),
-              "Magic Phantom acquires mirrored spell motion and all-player policy; unqualified casters/helpers and legacy forwarding remain native");
+              stream.Drivable(2407, 2) && stream.Drivable(2411, 2) && stream.Drivable(2406, 2),
+              "Magic Phantom acquires mirrored spell motion and all-player policy beside its neighbours; legacy forwarding remains Shadow-only");
     }
     testStreamRecovery();
     if (enet_initialize() != 0) return 2;

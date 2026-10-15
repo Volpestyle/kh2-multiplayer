@@ -4,7 +4,7 @@
 // mirrored enemies (no game memory, no network, no allocation per frame).
 //
 // The host sends EnemyMotion (Protocol.hpp) about every 3 frames for each
-// bound, allowlisted, living enemy. A client keeps a small ring per netId and
+// bound, mirrored (not denied), living enemy. A client keeps a small ring per netId and
 // renders on a host-frame cursor about DELAY frames behind the newest sample,
 // so a Shadow on the client plays the host's motion ~150 ms late but smooth.
 // The cursor has a natural position (advanced one host frame per local frame,

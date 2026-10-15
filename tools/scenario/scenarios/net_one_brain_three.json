@@ -1,0 +1,488 @@
+{
+ "name": "net_one_brain_three",
+ "description": "VUH-2251 (D14 one brain): three loopback instances, host-led TT and HB rooms with the player defaults (mirror, population, target all, Normal). Every living host family must be driven by the host's AI on both clients, with matching HP, deaths and motion; denied families (317/76/2409) stay native.",
+ "protect": [
+  0,
+  1,
+  2
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR": "1",
+    "KH2COOP_ENEMY_POPULATION": "1",
+    "KH2COOP_ENEMY_TARGET_ALL": "1",
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1"
+   },
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR": "1",
+    "KH2COOP_ENEMY_POPULATION": "1",
+    "KH2COOP_ENEMY_TARGET_ALL": "1",
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1"
+   },
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 2,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR": "1",
+    "KH2COOP_ENEMY_POPULATION": "1",
+    "KH2COOP_ENEMY_TARGET_ALL": "1",
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1"
+   },
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "relay",
+   "port": 27796,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player",
+   "env": {
+    "KH2COOP_COOP_DIFFICULTY": "normal"
+   }
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1",
+   "env": {
+    "KH2COOP_COOP_DIFFICULTY": "normal"
+   }
+  },
+  {
+   "do": "runtime",
+   "instance": 2,
+   "role": "friend2",
+   "env": {
+    "KH2COOP_COOP_DIFFICULTY": "normal"
+   }
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 2,
+   "room": 13,
+   "door": 0,
+   "map": 1,
+   "btl": 4,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 30000,
+   "expr": "location(0)==[2, 13, 0, 1, 4, 32767] and location(1)==location(0) and location(2)==location(0) and all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','349.736,-147.029,24.181']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','409.736,-147.029,24.181']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','289.736,-147.029,24.181']"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 25000,
+   "expr": "all(any(a['objectId']==oid and a['hp']>0 for a in enemies(i)) for i in range(3) for oid in [18, 301]) and enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "save",
+   "as": "tt_driller_soldier_families",
+   "expr": "[sorted(set(a['objectId'] for a in enemies(i) if a.get('hp',0)>0)) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "tt_driller_soldier_driven",
+   "expr": "[sorted(set(int(r['oid']) for r in log_matches(r'\\[enemy-mirror\\] take-over .*objectId=(?P<oid>\\d+)', i))) for i in (1, 2)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(all(oid in saved['tt_driller_soldier_driven'][k] for oid in saved['tt_driller_soldier_families'][0]) for k in (0, 1))",
+   "message": "tt_driller_soldier: every living host family must be driven by the host's AI on both clients"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 4,
+   "fps": 15,
+   "name": "tt_driller_soldier_host"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 4,
+   "fps": 15,
+   "name": "tt_driller_soldier_friend1"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 4,
+   "fps": 15,
+   "name": "tt_driller_soldier_friend2"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "damage",
+   "amount": 3
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 8000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 20000,
+   "expr": "all(len(enemy_hps(i))==0 for i in range(3))"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 2,
+   "fps": 15,
+   "name": "tt_driller_soldier_friend2_dead"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 2,
+   "door": 0,
+   "map": 1,
+   "btl": 1,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 30000,
+   "expr": "location(0)==[4, 2, 0, 1, 1, 32767] and location(1)==location(0) and location(2)==location(0) and all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','-410.121,-50,-818.887']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','-350.121,-50,-818.887']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','-470.121,-50,-818.887']"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 25000,
+   "expr": "all(any(a['objectId']==oid and a['hp']>0 for a in enemies(i)) for i in range(3) for oid in [305]) and enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "save",
+   "as": "hb_armored_knight_families",
+   "expr": "[sorted(set(a['objectId'] for a in enemies(i) if a.get('hp',0)>0)) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "hb_armored_knight_driven",
+   "expr": "[sorted(set(int(r['oid']) for r in log_matches(r'\\[enemy-mirror\\] take-over .*objectId=(?P<oid>\\d+)', i))) for i in (1, 2)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(all(oid in saved['hb_armored_knight_driven'][k] for oid in saved['hb_armored_knight_families'][0]) for k in (0, 1))",
+   "message": "hb_armored_knight: every living host family must be driven by the host's AI on both clients"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 4,
+   "fps": 15,
+   "name": "hb_armored_knight_host"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 4,
+   "fps": 15,
+   "name": "hb_armored_knight_friend1"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 4,
+   "fps": 15,
+   "name": "hb_armored_knight_friend2"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "damage",
+   "amount": 3
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 8000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 20000,
+   "expr": "all(len(enemy_hps(i))==0 for i in range(3))"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 2,
+   "fps": 15,
+   "name": "hb_armored_knight_friend2_dead"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 21,
+   "door": 0,
+   "map": 1,
+   "btl": 26,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 30000,
+   "expr": "location(0)==[4, 21, 0, 1, 26, 32767] and location(1)==location(0) and location(2)==location(0) and all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','859.696,450,-599.768']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value','919.696,450,-599.768']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','799.696,450,-599.768']"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 25000,
+   "expr": "all(any(a['objectId']==oid and a['hp']>0 for a in enemies(i)) for i in range(3) for oid in [2405]) and enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "save",
+   "as": "hb_iron_hammer_families",
+   "expr": "[sorted(set(a['objectId'] for a in enemies(i) if a.get('hp',0)>0)) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "hb_iron_hammer_driven",
+   "expr": "[sorted(set(int(r['oid']) for r in log_matches(r'\\[enemy-mirror\\] take-over .*objectId=(?P<oid>\\d+)', i))) for i in (1, 2)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(all(oid in saved['hb_iron_hammer_driven'][k] for oid in saved['hb_iron_hammer_families'][0]) for k in (0, 1))",
+   "message": "hb_iron_hammer: every living host family must be driven by the host's AI on both clients"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 4,
+   "fps": 15,
+   "name": "hb_iron_hammer_host"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 4,
+   "fps": 15,
+   "name": "hb_iron_hammer_friend1"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 4,
+   "fps": 15,
+   "name": "hb_iron_hammer_friend2"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "damage",
+   "amount": 3
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 8000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 20000,
+   "expr": "all(len(enemy_hps(i))==0 for i in range(3))"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 2,
+   "fps": 15,
+   "name": "hb_iron_hammer_friend2_dead"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 2,
+   "room": 31,
+   "door": 0,
+   "map": 1,
+   "btl": 5,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 30000,
+   "expr": "location(0)==[2, 31, 0, 1, 5, 32767] and location(1)==location(0) and location(2)==location(0) and all(any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 25000,
+   "expr": "all(len(enemy_hps(i))>0 for i in range(3)) and enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "save",
+   "as": "tt_neoshadow_jazz_families",
+   "expr": "[sorted(set(a['objectId'] for a in enemies(i) if a.get('hp',0)>0)) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "tt_neoshadow_jazz_driven",
+   "expr": "[sorted(set(int(r['oid']) for r in log_matches(r'\\[enemy-mirror\\] take-over .*objectId=(?P<oid>\\d+)', i))) for i in (1, 2)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(all(oid in saved['tt_neoshadow_jazz_driven'][k] for oid in saved['tt_neoshadow_jazz_families'][0]) for k in (0, 1))",
+   "message": "tt_neoshadow_jazz: every living host family must be driven by the host's AI on both clients"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 4,
+   "fps": 15,
+   "name": "tt_neoshadow_jazz_host"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 4,
+   "fps": 15,
+   "name": "tt_neoshadow_jazz_friend1"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 4,
+   "fps": 15,
+   "name": "tt_neoshadow_jazz_friend2"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "damage",
+   "amount": 3
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 8000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 20000,
+   "expr": "all(len(enemy_hps(i))==0 for i in range(3))"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "seconds": 2,
+   "fps": 15,
+   "name": "tt_neoshadow_jazz_friend2_dead"
+  },
+  {
+   "do": "save",
+   "as": "motion",
+   "expr": "[(lambda h, c: [sum(1 for k in c if k in h and h[k]==c[k]), sum(1 for k in c if k in h)])({(r['n'],r['f']):r['m'] for r in log_matches(r'trace-host netId=(?P<n>\\d+) hostFrame=(?P<f>\\d+) pos=\\S+ motion=(?P<m>\\d+)',0)}, {(r['n'],r['f']):r['m'] for r in log_matches(r'trace-client netId=(?P<n>\\d+) hostFrame=(?P<f>\\d+) frame=\\d+ driven=1 blend=\\d+ pos=\\S+ motion=(?P<m>\\d+)',i)}) for i in (1, 2)]"
+  },
+  {
+   "do": "save",
+   "as": "refused",
+   "expr": "[log_matches(r'\\[enemy-mirror\\] (?P<what>brain-refused-\\w+|brain-hook-failed|brain-hook) .*objectId=(?P<oid>\\d+)', i) for i in (1, 2)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(m[1] >= 20 and m[0] >= 0.9 * m[1] for m in saved['motion'])",
+   "message": "Driven motion must match the host's at matched host frames on both clients (>=90%, >=20 samples)"
+  }
+ ]
+}

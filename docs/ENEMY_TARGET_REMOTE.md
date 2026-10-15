@@ -3,7 +3,8 @@
 ## Ordinary mirrored waves (VUH-2193)
 
 `KH2COOP_ENEMY_TARGET_ALL=1` requires `KH2COOP_ENEMY_MIRROR=1` and
-uses the current mirror-family list for the common `target_search` path.
+uses the mirror families (D14: every mob family except the denylist in
+`EnemyMirrorPose.hpp`) for the common `target_search` path.
 It is default off and can coexist with `KH2COOP_PARTY_NATIVE=1`; leave the
 legacy `KH2COOP_ENEMY_TARGET_REMOTE` flag unset. Native-party room and private
 status qualification are unchanged. A clone still needs its own status and a
@@ -174,7 +175,8 @@ The host's `KH2COOP_ENEMY_MIRROR` decides the mode. The host carries the mode in
 
 ## Families
 
-Allowlist by object id: **Shadow `302` (`M_EX020`)** only. It is verified two ways:
+Legacy `KH2COOP_ENEMY_TARGET_REMOTE` allowlist by object id: **Shadow `302` (`M_EX020`)** only.
+`ENEMY_TARGET_ALL` uses the mirror families instead (see the top section). The Shadow is verified two ways:
 - **Statically**, from its BDX: m_ex020 PC 2275/2290/2078.
 - **Live**, in VUH-1515 attempt07, run `20261007-033207`.
 

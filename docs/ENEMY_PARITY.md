@@ -1,3 +1,29 @@
+## D14 one brain: denylist replaces the allowlist (VUH-2251, 2026-10-14)
+
+The host's AI now drives every censused enemy on clients: objentry type 3
+(boss) or 4 (mob), not an `F_` object. A family stays on local AI only when it
+observably breaks; it goes in `kDenied` (`inject/src/EnemyMirrorPose.hpp`)
+with a one-line reason. The same list gates the host's `EnemyMotion` rows, the
+client stream and driver, population cull holds and `ENEMY_TARGET_ALL`
+retargeting. The configured lines now read `families=all deny=317,76,2409`.
+
+| Denied family | Reason |
+|---|---|
+| Creeper 317 | Client copy fails ordinary point binding (no-point-match, run `20261007-220021`). |
+| Fiery Globe 76 | First-point mismatch on all five bodies (run b6-02). |
+| Lance Warrior 2409 | HB 04/17 btl25 load faults even with co-op flags off (run `20261013-034336`). |
+
+The driver's limits are unchanged. An actor is driven only when its client copy
+binds to a host enemy, the host's copy is unparented and its class brain thunk
+has the shape-checked `mov rcx,rdx; jmp 0x3B4460` form. The hooked-class table
+grew from 8 to 16 for boss classes. A class that fails the shape check stays on
+local AI. Its `brain-refused-shape` line, like the run lines, now names the
+`objectId`, so each boss's problems can be logged as the route reaches it.
+While 317/76 are denied, the default-off scoped record-binding opt-in
+(docs/ENEMY_RECORD_BINDING.md) drives neither of them.
+
+The per-batch sections below are the history of the allowlist this replaced.
+
 ## VUH-1789 route T2 continuation (2026-10-13)
 
 Magic Phantom `M_EX500_HB` (2403) joins the explicit allowlist. Its spell

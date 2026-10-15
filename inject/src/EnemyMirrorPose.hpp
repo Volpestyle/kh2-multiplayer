@@ -16,101 +16,67 @@
 namespace kh2coop::inject::enemymirror {
 
 
-// Per-family opt-in (family = native objentry object id). M_EX020 Shadow is
-// object 302 in both live probe runs (20261006-203449, -205838). M_EX520, the
-// Hook Bat (a winged flyer with the "Bat Cry" reaction command; live run 073546;
-// first mis-named Soldier), is object 4 (BB courtyard second wave). Both are objentry
-// type 4: the generic factory 0x3DF930 builds every type-4 enemy with constructor
-// 0x419E30, whose handler 0x7528E8 has vtable 0x5D2D68, so the Hook Bat's brain
-// (+0x20 = 0x419B10 -> 0x3B4460) and removal predicate (+0x40 = 0x419B90 ->
-// 0x3DAC30) are the same shape-checked thunks the Shadow uses. M_EX010, the real
-// Soldier, is object 301: also type 4, same class (enemy family census T1; BB
-// courtyard battle program 2, groups 68/69; live run 085322). Its world skins M_EX010_NM (1838, Halloween
-// Town), M_EX010_TR (1839, Space Paranoids) and M_EX010_WI (1849, Timeless River) share its enemy stats id
-// (neoStatus 1000), so the same AI and motion layout: allowlisted with it, without a separate live run.
+// D14 (2026-10-14), one brain: the host's AI drives every censused enemy on clients (objentry type 3 boss or
+// type 4 mob, not an F_ object; EnemySync's census). A family (native objentry object id) stays on local AI
+// only when it observably breaks, and goes in kDenied with a one-line reason. This replaced the per-family
+// allowlist of VUH-1515/VUH-1789; that qualification history is in docs/ENEMY_PARITY.md.
+// Families named by tests and comments.
 inline constexpr std::uint32_t kShadowObjectId = 302;
 inline constexpr std::uint32_t kHookBatObjectId = 4;
 inline constexpr std::uint32_t kSoldierObjectId = 301;
 inline constexpr std::uint32_t kSoldierSkinObjectIds[] = {1838, 1839, 1849};
-// T1 batch 2 (enemy family census; BB Entrance Hall 05/00, battle program 3; live run 092758): Lance Soldier
-// M_EX690 (17) and Large Body M_EX050 (303). Both objentry type 4: the same class (0x5D2D68) and shape-checked
-// hooks as the Shadow. Gargoyle Warrior M_BB010_AX (368; a statue that wakes, BB Entrance Hall b_81) is type 4
-// as well: live runs 20261007-121127 (visit 1) and 121709 (both visits) mirrored it with motion agreement 94/94
-// and 235/235, position p95 0. Gargoyle Knight M_BB010_SWORD (367) stays off until a run sees it engage (it
-// stayed a dormant statue in 121127 visit 2).
 inline constexpr std::uint32_t kLanceSoldierObjectId = 17;
 inline constexpr std::uint32_t kLargeBodyObjectId = 303;
 inline constexpr std::uint32_t kGargoyleWarriorObjectId = 368;
-// T1 batch 3: Nightwalker M_EX580 (10; Land of Dragons 08/03 btl 1) is type 4 as well: live run 20261007-131606
-// mirrored it on both visits with motion agreement 50/50 and 78/78, position p95 0, 30/30 hits attributed.
-// Rapid Thruster M_EX660 (304; LoD 08/05 and 08/06 btl 1) passed LoD fixture-02 (run 20261007-132550) at three
-// visits with position p95 0. Its world skins M_EX660_WI (1843, Timeless River) and M_EX660_AL (1889, Agrabah)
-// share its enemy stats id (neoStatus 1020): allowlisted with it, as the Soldier skins were.
 inline constexpr std::uint32_t kNightwalkerObjectId = 10;
 inline constexpr std::uint32_t kRapidThrusterObjectId = 304;
 inline constexpr std::uint32_t kRapidThrusterSkinObjectIds[] = {1843, 1889};
-// T1 batch 4 (candidate, test-only until the batch-4 fixture passes; legs from the no-mirror sweep-02): Armored Knight
-// M_EX760 (305; HB 04/02 btl 1), Driller Mole M_EX700 (18; TT 02/0D btl 4), Neoshadow M_EX420 (120; TT 02/1F btl 5)
-// and the Gargoyle Knight M_BB010_SWORD (367; BB 05/09 btl 10, the engagement retry). All objentry type 4.
 inline constexpr std::uint32_t kArmoredKnightObjectId = 305;
 inline constexpr std::uint32_t kDrillerMoleObjectId = 18;
 inline constexpr std::uint32_t kNeoshadowObjectId = 120;
 inline constexpr std::uint32_t kGargoyleKnightObjectId = 367;
-// T1 batch 5: Nobody families qualified live in TWTNW (run 20261007-220021):
-// 12/0F btl1 Dusk; 12/0C btl1 Samurai and Dancer. Creeper 317 stays native:
-// its client copy failed initial binding (no-point-match) in that run.
 inline constexpr std::uint32_t kDuskObjectId = 318;
-inline constexpr std::uint32_t kCreeperObjectId = 317;  // candidate: native authority requires scoped record lease
 inline constexpr std::uint32_t kSamuraiObjectId = 310;
 inline constexpr std::uint32_t kDancerObjectId = 312;
-// T1 batch 6 test-only candidate: common generic type-4 families. Not live qualified.
 inline constexpr std::uint32_t kSilverRockObjectId = 71;
-// Fiery Globe76 stays native: b6-02 first-point mismatch on all five bodies.
 inline constexpr std::uint32_t kIcyCubeObjectId = 77;
 inline constexpr std::uint32_t kAssassinObjectId = 309;
-// T1 batch7 test-only candidate; direct-ARD smoke qualification pending.
 inline constexpr std::uint32_t kRabidDogObjectId = 3;
 inline constexpr std::uint32_t kHammerFrameObjectId = 8;
 inline constexpr std::uint32_t kAerialChampObjectId = 2410;
 inline constexpr std::uint32_t kBeffudlerObjectId = 2404;
-// VUH-1789 route T1: Iron Hammer (HB04/15 btl26), a type-4 melee
-// variant sharing the existing handler. Lance Warrior remains native:
-// its HB04/17 btl25 smoke crashed before qualification.
 inline constexpr std::uint32_t kIronHammerObjectId = 2405;
-// T2 batch8: Bookmaster5 and Creeper Plant125 passed non-projectile gates in b8-07.
-// Projectile damage remains UNQUALIFIED; Robot306 stays OFF. Mirror defaults OFF.
 inline constexpr std::uint32_t kSurveillanceRobotObjectId = 306;
 inline constexpr std::uint32_t kBookmasterObjectId = 5;
 inline constexpr std::uint32_t kCreeperPlantObjectId = 125;
-// VUH-1789 T2: HB04/15 btl26, purple spell shots observed on both peers.
 inline constexpr std::uint32_t kMagicPhantomObjectId = 2403;
-// The whole allowlist, in the order the configured line prints it.
-inline constexpr std::uint32_t kFamilies[] = {kShadowObjectId, kHookBatObjectId, kSoldierObjectId,
-                                              kSoldierSkinObjectIds[0], kSoldierSkinObjectIds[1], kSoldierSkinObjectIds[2],
-                                              kLanceSoldierObjectId, kLargeBodyObjectId, kGargoyleWarriorObjectId,
-                                              kNightwalkerObjectId, kRapidThrusterObjectId, kRapidThrusterSkinObjectIds[0],
-                                              kRapidThrusterSkinObjectIds[1], kArmoredKnightObjectId, kDrillerMoleObjectId,
-                                              kNeoshadowObjectId, kGargoyleKnightObjectId,
-                                              kDuskObjectId, kSamuraiObjectId, kDancerObjectId,
-                                              kSilverRockObjectId, kIcyCubeObjectId, kAssassinObjectId,
-                                              kRabidDogObjectId, kHammerFrameObjectId, kAerialChampObjectId, kBeffudlerObjectId,
-                                              kIronHammerObjectId,
-                                              kBookmasterObjectId, kCreeperPlantObjectId, kCreeperObjectId, 76,
-                                              kMagicPhantomObjectId};
-inline bool FamilyAllowed(std::uint32_t objectId) noexcept {
-    for (const auto family : kFamilies)
-        if (objectId == family) return true;
-    return false;
+inline constexpr std::uint32_t kCreeperObjectId = 317;
+inline constexpr std::uint32_t kFieryGlobeObjectId = 76;
+inline constexpr std::uint32_t kLanceWarriorObjectId = 2409;
+
+struct DeniedFamily { std::uint32_t objectId; const char* reason; };
+// The denylist, in the order the configured line prints it. 317 and 76 are the scoped record-binding families
+// (docs/ENEMY_RECORD_BINDING.md); while they are listed here that default-off opt-in drives neither.
+inline constexpr DeniedFamily kDenied[] = {
+    {kCreeperObjectId, "client copy fails ordinary point binding (no-point-match, run 20261007-220021)"},
+    {kFieryGlobeObjectId, "first-point mismatch on all five bodies (run b6-02)"},
+    {kLanceWarriorObjectId, "HB 04/17 btl25 load faults even with co-op flags off (run 20261013-034336)"},
+};
+inline const char* DeniedReason(std::uint32_t objectId) noexcept {
+    for (const auto& d : kDenied)
+        if (objectId == d.objectId) return d.reason;
+    return nullptr;
 }
-// "302,4,..." into out (always NUL-terminated when cap > 0); returns the characters written. A family that
+inline bool FamilyAllowed(std::uint32_t objectId) noexcept { return objectId != 0 && !DeniedReason(objectId); }
+// "317,76,2409" into out (always NUL-terminated when cap > 0); returns the characters written. A family that
 // would not fit is dropped whole, never cut, so a short buffer cannot print a wrong id.
-inline std::size_t FormatFamilies(char* out, std::size_t cap) noexcept {
+inline std::size_t FormatDenied(char* out, std::size_t cap) noexcept {
     if (!out || cap == 0) return 0;
     std::size_t at = 0;
-    for (const auto family : kFamilies) {
+    for (const auto& d : kDenied) {
         char digits[10];
         std::size_t n = 0;
-        for (std::uint32_t v = family; n == 0 || v != 0; v /= 10) digits[n++] = static_cast<char>('0' + v % 10);
+        for (std::uint32_t v = d.objectId; n == 0 || v != 0; v /= 10) digits[n++] = static_cast<char>('0' + v % 10);
         const std::size_t need = n + (at ? 1 : 0);
         if (at + need + 1 > cap) break;
         if (at) out[at++] = ',';
@@ -144,8 +110,8 @@ inline constexpr std::size_t kMaxTracks = 256;        // client stream tracks pe
 
 // What the client binding says about one actor this frame.
 enum class Gate : std::uint8_t {
-    None = 0,   // not a bound, living, allowlisted host enemy: never touched
-    Bound = 1,  // bound and allowlisted, but no drivable stream pose (stale, settling, refused)
+    None = 0,   // not a bound, living, mirrored (not denied) host enemy: never touched
+    Bound = 1,  // bound and mirrored, but no drivable stream pose (stale, settling, refused)
     Drive = 2,  // drive it from the pose
 };
 

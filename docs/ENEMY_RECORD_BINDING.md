@@ -1,5 +1,9 @@
 # Scoped record correspondence candidate (VUH-1515)
 
+> **2026-10-14 (D14, VUH-2251):** Creeper 317 and Fiery Globe 76 are on the
+> one-brain denylist, so the opt-ins below drive neither of them until they
+> come off it. Remove them from `kDenied` in `EnemyMirrorPose.hpp` to resume.
+
 The binding-only baseline passed ri-01 (20261008-024015). Lead approved the
 default-off scoped authority code after ra-06e2
 (`20261008-211146_vuh1515_scoped_record_authority_ra06_1`). Both original

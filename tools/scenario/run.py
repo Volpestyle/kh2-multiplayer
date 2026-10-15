@@ -291,7 +291,7 @@ class Context:
                 "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
                 "location": location, "log_matches": log_matches,
-                "range": range, "round": round, "int": int, "str": str,
+                "range": range, "round": round, "int": int, "str": str, "sorted": sorted, "set": set, "sum": sum,
                 "chests": lambda index=0: chest_records(self, index)}
 
     def eval(self, expr: str):

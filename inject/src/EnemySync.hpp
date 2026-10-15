@@ -71,7 +71,7 @@ void NoteActor(uintptr_t actor);
 bool DropLocalEnemyDamage(uintptr_t victim);
 
 // VUH-1515 step 2 (KH2COOP_ENEMY_MIRROR=1). Owner thread only. True when
-// `actor` is a bound, living, allowlisted host enemy on this client whose
+// `actor` is a bound, living, mirrored host enemy on this client whose
 // stream is fresh; `out` is the host pose/motion at the render cursor.
 bool MirrorRequested() noexcept;
 // Gate for one actor this frame (EnemyMirror.inl PreUpdate). Fills out.netId

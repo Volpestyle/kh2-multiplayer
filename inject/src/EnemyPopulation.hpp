@@ -46,7 +46,7 @@ inline constexpr std::size_t kTracked = 64;
 struct HostView {
     std::uint16_t netId = 0;
     std::uint32_t objectId = 0;
-    bool allowed = false;       // family allowlist
+    bool allowed = false;       // family mirrored (not on the D14 denylist)
     bool loadedObject = false;  // this instance's census already showed a native actor of this object id (C5)
     bool dead = false;
     bool boundLocally = false;  // a present local spawn carries this netId
