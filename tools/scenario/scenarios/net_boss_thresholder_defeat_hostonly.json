@@ -1,0 +1,197 @@
+{
+ "name": "net_boss_thresholder_defeat_hostonly",
+ "description": "VUH-2290 A/B: net_boss_thresholder_defeat with the player defaults (one brain on), but only the host's bot fights, so clients send no hit claims on the boss. Separates host-applied boss claims from boss mirroring.",
+ "playerDefaults": true,
+ "protect": [
+  0,
+  1,
+  2
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 2,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 1,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 2,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "relay",
+   "port": 27796,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "runtime",
+   "instance": 2,
+   "role": "friend2"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+   "timeoutMs": 30000,
+   "pollMs": 1000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 5,
+   "room": 11,
+   "door": 0,
+   "map": 0,
+   "btl": 72,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)==[5,11,0,0,72,32767] and location(1)==location(0) and location(2)==location(0)",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(3))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "boss_arrive"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "boss_arrive"
+  },
+  {
+   "do": "capture",
+   "instance": 2,
+   "name": "boss_arrive"
+  },
+  {
+   "do": "save",
+   "as": "boss_before",
+   "expr": "[[(a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a.get('objectId') in [353,356]] for i in range(3)]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0
+   ],
+   "seconds": 25,
+   "as": "boss_fight",
+   "clip": {
+    "instance": 1,
+    "seconds": 10,
+    "fps": 10,
+    "name": "boss_fight_friend1"
+   }
+  },
+  {
+   "do": "save",
+   "as": "boss_after",
+   "expr": "[[(a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a.get('objectId') in [353,356]] for i in range(3)]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(sorted((a['objectId'],a['hp']) for a in enemies(i) if a.get('objectId') in [353,356])==sorted((a['objectId'],a['hp']) for a in enemies(0) if a.get('objectId') in [353,356]) for i in range(3))",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 12000
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0
+   ],
+   "seconds": 30,
+   "as": "boss_finish",
+   "clip": {
+    "instance": 1,
+    "seconds": 10,
+    "fps": 10,
+    "name": "boss_finish_friend2"
+   }
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(not any(a.get('objectId')==353 and a['hp']>0 for a in enemies(i)) for i in range(3))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "boss_after"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "boss_after"
+  },
+  {
+   "do": "capture",
+   "instance": 2,
+   "name": "boss_after"
+  },
+  {
+   "do": "clip",
+   "instance": 2,
+   "name": "boss_defeated_friend2",
+   "seconds": 4,
+   "fps": 6
+  },
+  {
+   "do": "save",
+   "as": "host_alive_after_defeat",
+   "expr": "location(0)"
+  }
+ ]
+}
