@@ -3198,3 +3198,14 @@ must remain below1 unit on both friends; the released boss check requires the
 native menu closed and more than30 units each. Route reports retain the start,
 forward and reverse positions and per-friend maxima. Count full-route passes
 across all attempted repeats; a partial segment pass is not a route pass.
+
+### Route revive placement in GoA (VUH-2317)
+
+The final route segment places friend2 on the open GoA floor at1280,0,-100
+and checks the settled position before the lethal hit. Camera-relative walking
+could leave the friend beside the computer, where the host's90-unit placement
+showed native Examine and correctly suppressed the revive prompt. After placing
+the host nearby, the fixture requires nativeRC0, a closed menu and revive range
+before pressing Triangle. It retains the1600ms hold and10-second revive timeout,
+records both positions and the native RC, and requires exactly one new prompt
+fire and native revive return. Runtime RC ownership and revive behavior are unchanged.

@@ -926,14 +926,28 @@
    "on": false
   },
   {
-   "do": "input",
+   "do": "assert",
+   "expr": "location(0)[:2]==[4,26] and location(2)==location(0) and all(peek('0x7435D0','u8',i)==255 for i in (0,2))",
+   "message": "The revive placement requires both players in settled GoA with menus closed"
+  },
+  {
+   "do": "kh2ctl",
    "instance": 2,
-   "ly": 1,
-   "ms": 2500
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value','1280,0,-100']"
   },
   {
    "do": "wait",
    "ms": 1500
+  },
+  {
+   "do": "save",
+   "as": "revive_before",
+   "expr": "{'friend2':pos(index=2),'fires':log_count('[revive-prompt] hold complete',0),'returns':log_count('[downed] revive returned',2)}"
+  },
+  {
+   "do": "assert",
+   "expr": "dist(saved['revive_before']['friend2'],(1280,0,-100))<50",
+   "message": "friend2 must settle on the open GoA floor before the lethal hit"
   },
   {
    "do": "kh2ctl",
@@ -976,6 +990,22 @@
    "ms": 1500
   },
   {
+   "do": "wait_until",
+   "expr": "peek('0x2A11162','u16',0)==0 and peek('0x7435D0','u8',0)==255 and dist(pos(index=0),pos(index=2))<150",
+   "timeoutMs": 2000,
+   "message": "The native reaction command must release Triangle before a revive hold"
+  },
+  {
+   "do": "save",
+   "as": "revive_ready",
+   "expr": "{'host':pos(index=0),'friend2':pos(index=2),'nativeRC':peek('0x2A11162','u16',0),'menu':peek('0x7435D0','u8',0),'distance':dist(pos(index=0),pos(index=2))}"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "revive_ready"
+  },
+  {
    "do": "press",
    "instance": 0,
    "button": "triangle",
@@ -988,7 +1018,7 @@
   },
   {
    "do": "assert",
-   "expr": "log_count('[revive-prompt] hold complete', 0)>=1 and log_count('[downed] revive returned', 2)>=1",
+   "expr": "log_count('[revive-prompt] hold complete',0)==saved['revive_before']['fires']+1 and log_count('[downed] revive returned',2)==saved['revive_before']['returns']+1",
    "message": "friend2 came back without the host's revive prompt"
   },
   {
