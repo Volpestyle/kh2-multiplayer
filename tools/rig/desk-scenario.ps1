@@ -45,8 +45,13 @@ $run = Start-Process -FilePath 'C:/Users/volpe/AppData/Local/Programs/Python/Pyt
 $null = $run.Handle
 $deadline = (Get-Date).AddMinutes($WallMinutes)
 $stopped = ''
+# A game the run is launching is briefly unowned until kh2ctl records it, so
+# only a foreign game seen for 5 consecutive seconds stops the run.
+$foreignSeconds = 0
 while (!$run.HasExited) {
-  if ((Get-ForeignGames).Count) { $stopped = 'PC1 reclaimed: ' + ((Get-ForeignGames | ForEach-Object ProcessName) -join ',') }
+  $foreign = @(Get-ForeignGames)
+  $foreignSeconds = if ($foreign.Count) { $foreignSeconds + 1 } else { 0 }
+  if ($foreignSeconds -ge 5) { $stopped = 'PC1 reclaimed: ' + (($foreign | ForEach-Object ProcessName) -join ',') }
   elseif ((Get-Date) -gt $deadline) { $stopped = "wall limit $WallMinutes min" }
   if ($stopped) {
     Stop-Process -Id $run.Id -Force -ErrorAction SilentlyContinue
