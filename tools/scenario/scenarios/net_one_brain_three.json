@@ -164,6 +164,43 @@
    "op": "kill"
   },
   {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
    "do": "wait_until",
    "timeoutMs": 20000,
    "expr": "all(len(enemy_hps(i))==0 for i in range(3))"
@@ -265,6 +302,43 @@
    "do": "hit_all",
    "instance": 0,
    "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
   },
   {
    "do": "wait_until",
@@ -370,6 +444,43 @@
    "op": "kill"
   },
   {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
    "do": "wait_until",
    "timeoutMs": 20000,
    "expr": "all(len(enemy_hps(i))==0 for i in range(3))"
@@ -456,6 +567,43 @@
    "do": "hit_all",
    "instance": 0,
    "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 15000,
+   "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
   },
   {
    "do": "wait_until",
