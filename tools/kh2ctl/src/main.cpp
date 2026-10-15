@@ -6,6 +6,7 @@
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/Types.hpp"
 #include "preinject.hpp"
+#include "owned_registry.hpp"
 
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -442,10 +443,7 @@ std::uint64_t ProcessCreationTime(HANDLE process) {
            created.dwLowDateTime;
 }
 
-struct Kh2Process {
-    DWORD pid {0};
-    std::uint64_t creationTime {0};
-};
+using Kh2Process = owned_registry::Entry;
 
 std::vector<Kh2Process> ListKh2Processes() {
     std::vector<Kh2Process> result;
@@ -468,21 +466,9 @@ std::vector<Kh2Process> ListKh2Processes() {
     return result;
 }
 
-std::vector<Kh2Process> ReadOwned() {
-    std::vector<Kh2Process> owned;
-    std::ifstream in(RigDir() / "owned.txt");
-    Kh2Process proc;
-    while (in >> proc.pid >> proc.creationTime) owned.push_back(proc);
-    return owned;
-}
+std::filesystem::path OwnedFile() { return RigDir() / "owned.txt"; }
 
-void WriteOwned(const std::vector<Kh2Process>& owned) {
-    std::filesystem::create_directories(RigDir());
-    std::ofstream out(RigDir() / "owned.txt", std::ios::trunc);
-    for (const auto& proc : owned) {
-        out << proc.pid << " " << proc.creationTime << "\n";
-    }
-}
+std::vector<Kh2Process> ReadOwned() { return owned_registry::Read(OwnedFile()); }
 
 bool IsOwned(const Kh2Process& proc, const std::vector<Kh2Process>& owned) {
     return std::any_of(owned.begin(), owned.end(), [&](const Kh2Process& o) {
@@ -490,15 +476,11 @@ bool IsOwned(const Kh2Process& proc, const std::vector<Kh2Process>& owned) {
     });
 }
 
-// Drops registry entries whose process is gone.
+// Drops registry entries whose process is gone. Concurrent kh2ctl calls share
+// the registry, so this holds its mutex and rewrites only on a change.
 std::vector<Kh2Process> PruneOwned() {
-    const auto live = ListKh2Processes();
-    std::vector<Kh2Process> kept;
-    for (const auto& o : ReadOwned()) {
-        if (IsOwned(o, live)) kept.push_back(o);
-    }
-    WriteOwned(kept);
-    return kept;
+    owned_registry::Lock lock(OwnedFile());
+    return owned_registry::Prune(OwnedFile(), ListKh2Processes());
 }
 
 using kh2coop::preinject::InjectDll;
@@ -648,9 +630,13 @@ CommandResult LaunchInstance(const LaunchOptions& options, const char* command) 
     }
 
     kh2coop::preinject::Child child(info);
-    auto owned = PruneOwned();
-    owned.push_back({info.dwProcessId, ProcessCreationTime(info.hProcess)});
-    WriteOwned(owned);
+    {
+        owned_registry::Lock lock(OwnedFile());
+        auto owned = owned_registry::Prune(OwnedFile(), ListKh2Processes());
+        owned.push_back({info.dwProcessId, ProcessCreationTime(info.hProcess)});
+        if (!owned_registry::WriteAtomic(OwnedFile(), owned))
+            return MakeError("Cannot record the launched game in build/rig/owned.txt");
+    }
 
     const auto launcherLog = logDir / ("kh2ctl_launch_" + std::to_string(info.dwProcessId) +
                                       "_" + std::to_string(NowMs()) + ".log");
