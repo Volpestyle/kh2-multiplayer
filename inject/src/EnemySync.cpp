@@ -1866,6 +1866,57 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
     if (g_recordBindingRequested && recordbinding::Population({g_inst.world,g_inst.room,g_inst.door,g_inst.map,g_inst.btl,g_inst.evt}))
         ResolveRecordPopulation(census, true);
     if(!PublishOrdinaryLifecycle(census))return false; // old-retire precedes appended manifest/new-birth
+    // VUH-2292: retire an announced old occurrence BEFORE publishing a refill.
+    // Death and manifest share reliable world ordering. A not-yet-announced
+    // identity waits until the following frame; its terminal cannot precede it.
+    const std::uint64_t now = GetTickCount64();
+    for (Spawn& s : g_inst.spawns) {
+        if (s.present || !s.announced || s.deathSent || s.lifecycleRetired) continue;
+        // A living BC disappearance without a certified retirement stays a hard failure.
+        if(OrdinaryLifecycleRoom() && s.lastHp>0 && !g_ordinaryHostBlocked)return false;
+        if (s.goneSinceMs == 0) s.goneSinceMs = now;
+        bool refilled = false;
+        for (const Spawn& t : g_inst.spawns) {
+            if (t.spawnIndex > s.spawnIndex && t.objectId == s.objectId && SamePoint(t.spawnPos, s.spawnPos)) {
+                refilled = true;
+                break;
+            }
+        }
+        if (refilled && !OrdinaryLifecycleRoom()) {
+            // An alive escape remains a leave when its record refills: no kill credit.
+            if (g_populationRequested) {
+                EnemyDeath terminal;terminal.epoch=g_epoch;
+                terminal.netId=static_cast<std::uint16_t>(s.spawnIndex+1);
+                terminal.left=s.lastHp>0?1:0;
+                if(!Send(encode(terminal)))return false; // never let the refill overtake its leave
+            }
+            s.deathSent = true;
+            SYNC_LOG("[enemysync] host: spawn %u despawned, refilled at its point netId=%u objectId=%u left=%u frame=%u beforeManifest=1 tickMs=%llu",
+                     s.spawnIndex, static_cast<unsigned>(s.spawnIndex+1), s.objectId, s.lastHp>0?1u:0u, frame,
+                     static_cast<unsigned long long>(GetTickCount64()));
+        } else if (s.lastHp <= 0 || (!OrdinaryLifecycleRoom() && now - s.goneSinceMs > DESPAWN_GRACE_MS)) {
+            // Only the scoped experiment forbids absence/grace as terminal
+            // authority. Its suspended living rows never fall back to a kill.
+            EnemyDeath d;
+            d.epoch = g_epoch;
+            d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
+            d.left = s.lastHp > 0 ? 1 : 0;  // VUH-2272: escaped, not killed
+            bool sent;
+            if (!combatcausal::Requested()) sent = Send(encode(d));
+            else {
+                const auto bytes = encode(d); sent = Send(bytes);
+                combatcausal::engine.Packet(CausalScope(), combatcausal::Kind::DeathPublish,
+                    d.netId, 0, 0, s.lastMaxHp, bytes.data(), static_cast<unsigned>(bytes.size()),
+                    sent, true, combatcausal::Now());
+            }
+            if (sent) {
+                s.deathSent = true;
+                SYNC_LOG("[enemysync] host death epoch %u netId %u (despawned, not refilled, left=%u)", g_epoch, d.netId,
+                         static_cast<unsigned>(d.left));
+            }
+        }
+    }
+
     if (!newSpawns.empty()) {
         EnemyManifest m;
         m.epoch = g_epoch;
@@ -1902,54 +1953,6 @@ bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
     if(!newSpawns.empty() && !PublishOrdinaryLifecycle(census))return false; // newly announced births precede their HP
 
     BindOrdinaryCausalBirths(census);
-
-    // Despawns: refilled at the same point -> superseded (clients re-bind);
-    // otherwise, after the grace time, reported as a death.
-    const std::uint64_t now = GetTickCount64();
-    for (Spawn& s : g_inst.spawns) {
-        if (s.present || s.deathSent || s.lifecycleRetired) continue;
-        // A living BC disappearance without a certified retirement stays a hard failure.
-        if(OrdinaryLifecycleRoom() && s.lastHp>0 && !g_ordinaryHostBlocked)return false;
-        if (s.goneSinceMs == 0) s.goneSinceMs = now;
-        bool refilled = false;
-        for (const Spawn& t : g_inst.spawns) {
-            if (t.spawnIndex > s.spawnIndex && t.objectId == s.objectId && SamePoint(t.spawnPos, s.spawnPos)) {
-                refilled = true;
-                break;
-            }
-        }
-        if (refilled && !OrdinaryLifecycleRoom()) {
-            // Default gameplay retains main's supersession semantics. Schema-1
-            // population terminal history is independent of schema-2 cuts.
-            if (g_populationRequested) {
-                EnemyDeath terminal;terminal.epoch=g_epoch;
-                terminal.netId=static_cast<std::uint16_t>(s.spawnIndex+1);
-                if(!Send(encode(terminal)))continue;
-            }
-            s.deathSent = true;
-            SYNC_LOG("[enemysync] host: spawn %u despawned, refilled at its point", s.spawnIndex);
-        } else if (s.lastHp <= 0 || (!OrdinaryLifecycleRoom() && now - s.goneSinceMs > DESPAWN_GRACE_MS)) {
-            // Only the scoped experiment forbids absence/grace as terminal
-            // authority. Its suspended living rows never fall back to a kill.
-            EnemyDeath d;
-            d.epoch = g_epoch;
-            d.netId = static_cast<std::uint16_t>(s.spawnIndex + 1);
-            d.left = s.lastHp > 0 ? 1 : 0;  // VUH-2272: escaped, not killed
-            bool sent;
-            if (!combatcausal::Requested()) sent = Send(encode(d));
-            else {
-                const auto bytes = encode(d); sent = Send(bytes);
-                combatcausal::engine.Packet(CausalScope(), combatcausal::Kind::DeathPublish,
-                    d.netId, 0, 0, s.lastMaxHp, bytes.data(), static_cast<unsigned>(bytes.size()),
-                    sent, true, combatcausal::Now());
-            }
-            if (sent) {
-                s.deathSent = true;
-                SYNC_LOG("[enemysync] host death epoch %u netId %u (despawned, not refilled, left=%u)", g_epoch, d.netId,
-                         static_cast<unsigned>(d.left));
-            }
-        }
-    }
 
     EnemyHp hp;
     hp.epoch = g_epoch;
@@ -4537,7 +4540,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
     }
     for (const auto& [id, h] : g_host.enemies) {
         if (h.battleProgram == g_inst.btl && !RecordFamily(h.objectId))
-            hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed});
+            hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed,h.left});
     }
     if(certified && (!FreshRecordCatalog(census,ordinaryAfter) || !SameRecordCatalogSample(ordinaryBefore,ordinaryAfter)))return holdAll();
     const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame});
@@ -4890,11 +4893,11 @@ void PublishAppliedHash(std::uint32_t frame, const NativeCensus& beforeApply) {
     // These fixture observations must not disappear when the general sync log
     // budget runs out. frame+epoch associates every raw record with its hash.
     if (g_log) {
-        g_log("[statehash] role=%s epoch=%u frame=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u enemies=%08X progress=%08X count=%zu unmatched=%zu observed=%zu",
+        g_log("[statehash] role=%s epoch=%u frame=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u enemies=%08X progress=%08X count=%zu unmatched=%zu observed=%zu tickMs=%llu",
               g_role == Role::Host ? "host" : "client", epoch, frame, location.worldId,
               location.roomId, location.door, location.mapProgram, location.battleProgram,
               location.eventProgram, state.enemiesHash, state.progressHash, live.size(),
-              static_cast<std::size_t>(unmatched), observed.size());
+              static_cast<std::size_t>(unmatched), observed.size(), static_cast<unsigned long long>(GetTickCount64()));
         for (std::size_t i = 0; i < observed.size(); ++i) {
             const auto& record = observed[i];
             g_log("[statehash] native epoch=%u frame=%u netId=%u objectId=%u hp=%d actor=%llX",
@@ -5419,7 +5422,6 @@ void OnFrameStart(std::uint32_t frame) {
         // Track while progress or ring capacity delays the announcement. No
         // manifest/HP/hash may escape under the previous room's epoch.
         if (!HostBeginInstance()) { DrainPendingSpawnTrace(false); return; }
-        FlushSpawnEmissions();
         if (!TickHostEventHold(frame, true)) { DrainPendingSpawnTrace(false); return; }
         // Refresh the frame-local proof before consuming queued native claims.
         if (g_recordBindingRequested) ResolveRecordPopulation(census,true);
@@ -5437,6 +5439,9 @@ void OnFrameStart(std::uint32_t frame) {
         // their bindings reach the peer would report a transport backlog as a
         // native population mismatch.
         if (!HostFrame(frame, fresh, census)) { DrainPendingSpawnTrace(false); return; }
+        // VUH-2292: publish old leave and replacement identity before allowing
+        // its native emission on friends, even when reliable delivery splits.
+        FlushSpawnEmissions();
         CapturePopulationBirths(census); // only the successfully announced, current incarnation
         PublishPopulationCut(census);
         PublishHostMotion(frame, census);

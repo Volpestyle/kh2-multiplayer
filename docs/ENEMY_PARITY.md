@@ -1253,8 +1253,15 @@ runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1Ã¢â‚¬â€œ2
 - **Host despawns.** Some enemies leave the list alive: the courtyard
   Shadow on its ledge spawn point, host only; and Dusks (M_EX900), which
   vanish and reappear as new actors.
-  - If a new enemy appears at the same spawn point, the old one was
-    superseded and clients re-bind to it.
+  - If a new enemy appears at the same spawn point, the host retires the
+    announced old ID before publishing the refill manifest. An old row last seen
+    alive carries `left=1` (VUH-2292). Emission receipts follow successful
+    terminal/manifest publication so a fresh body cannot bind the old live ID.
+    When both packets drain in one frame, a
+    continuously bound ordinary body retains its old dead+left ID through native
+    leave and disposal (VUH-2304); it never relabels to the refill ID. A fresh
+    native body binds the newer ID. Missing frames, changed roots, and changed
+    session/epoch revoke that old-body authority.
   - If none appears within 3 s, it's reported as a death, so clients don't
     keep a copy that would hold the room open.
 - **Client.**

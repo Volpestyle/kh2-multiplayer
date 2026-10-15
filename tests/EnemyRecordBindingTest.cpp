@@ -3,6 +3,7 @@
 #ifndef RECORD_PURE_ONLY
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
+#include "kh2coop/SpawnEmissionLedger.hpp"
 #include <fstream>
 #endif
 #include <iostream>
@@ -99,7 +100,102 @@ void OrdinaryLifecycleControls() {
     check("fresh body exact certificate allows replacement",go(l,{{6,302,{9,9,9},false}}).id==6);
     l.certifiedId=0;check("missing birth certificate refuses",go(l,{{6,302,{1,2,3},false}}).id==0);
 }
+void OrdinaryRefillControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    ob::Local local{{100,200,300,400,500,2403},{1,2,3},{},true,true};
+    std::vector<ob::Host> hosts{{2,2403,{1,2,3},false}};
+    local.prior=ob::Resolve(std::array{local},hosts,{2,2,100})[0].next;
+    hosts[0].dead=true;hosts[0].left=true;
+    hosts.push_back({7,2403,{1,2,3},false});
+    const auto left=ob::Resolve(std::array{local},hosts,{2,2,101})[0];
+    check("batched leave/refill keeps established old ID",left.id==2 && left.reason==ob::Reason::BoundDeath);
+    auto settling=local;settling.prior=left.next;
+    check("native leave keeps binding until body leaves",ob::Resolve(std::array{settling},hosts,{2,2,102})[0].id==2);
+    auto fresh=local;fresh.prior={};fresh.identity.actor=101;
+    const auto pair=ob::Resolve(std::array{local,fresh},hosts,{2,2,101});
+    check("fresh native refill binds new ID without relabelling old body",pair[0].id==2 && pair[1].id==7);
+    for(int mode=0;mode<13;++mode) {
+        auto l=local;auto h=hosts;ob::Scope now{2,2,101};
+        switch(mode) {
+        case 0:l.prior.bound=0;break;
+        case 1:++now.frame;break;
+        case 2:++now.generation;break;
+        case 3:++now.epoch;break;
+        case 4:++l.identity.actor;break;
+        case 5:++l.identity.objentry;break;
+        case 6:++l.identity.status;break;
+        case 7:++l.identity.controller;break;
+        case 8:++l.identity.record;break;
+        case 9:h[0].left=false;break;
+        case 10:h[0].dead=false;break;
+        case 11:h[0].removed=true;break;
+        case 12:l.certificateRequired=true;l.certifiedId=7;break;
+        }
+        check("refill ambiguity never grants old or new ID "+std::to_string(mode),
+              ob::Resolve(std::array{l},h,now)[0].id==0);
+    }
+}
+
+#ifndef RECORD_PURE_ONLY
+// Real codec and receipt ledger, with every split of the reliable sender order.
+// Native emission is represented by a fresh census row only after Permit succeeds.
+void SplitRefillDeliveryControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const std::array<float,3> point{1,2,3};
+    EnemyDeath leave;leave.epoch=2;leave.netId=2;leave.left=1;
+    EnemyManifest manifest;manifest.epoch=2;manifest.replace=false;
+    manifest.entries.push_back({7,26,6,2403,{1,2,3},{}});
+    SpawnEmission emission{{2,4,21,0,1,26,32767},1,99,750,0,{1,2,3,1}};
+    const std::array ordered{encode(leave),encode(manifest),encode(emission)};
+    for(unsigned absent=0;absent<2;++absent) for(unsigned split=0;split<4;++split) {
+        std::vector<ob::Host> hosts{{2,2403,point,false}};
+        ob::Local old{{100,200,300,400,500,2403},point,{},true,true};
+        old.prior=ob::Resolve(std::array{old},hosts,{2,2,100})[0].next;
+        std::vector<ob::Local> locals;if(!absent)locals.push_back(old);
+        SpawnEmissionLedger receipts;
+        std::uint32_t frame=101;
+        for(unsigned packet=0;packet<ordered.size();++packet) {
+            const std::uint8_t* payload=nullptr;std::size_t size=0;
+            const auto type=decodePacketHeader(ordered[packet].data(),ordered[packet].size(),payload,size);
+            ByteReader reader(payload,size);
+            if(type==PacketType::EnemyDeath) {
+                EnemyDeath d;read(reader,d);hosts[0].dead=true;hosts[0].left=d.left!=0;
+            } else if(type==PacketType::EnemyManifest) {
+                EnemyManifest m;read(reader,m);const auto& e=m.entries[0];
+                hosts.push_back({e.netId,e.objectId,{e.spawnPosition.x,e.spawnPosition.y,e.spawnPosition.z},false});
+            } else {
+                SpawnEmission e;read(reader,e);
+                check("split refill receipt admitted once",receipts.Add(e)&&receipts.Permit(e.controllerKey,e.headerId,e.recordIndex,true));
+                locals.push_back({{101,201,301,400,500,2403},point,{},true,true});
+            }
+            if(packet==2 || (split&(1u<<packet))) {
+                const auto decisions=ob::Resolve(locals,hosts,{2,2,frame++});
+                for(std::size_t i=0;i<locals.size();++i) {
+                    const int expected=locals[i].identity.actor==100?2:7;
+                    check("every split keeps old leave and new incarnation distinct",decisions[i].id==expected);
+                    locals[i].prior=decisions[i].next;
+                }
+            }
+        }
+    }
+    // Sensitivity control: receipt-before-identity lets a new native body steal
+    // still-live old2. Its subsequent leave would then retire the wrong body.
+    ob::Local fresh{{101,201,301,400,500,2403},point,{},true,true};
+    std::vector<ob::Host> stale{{2,2403,point,false}};
+    const auto wrong=ob::Resolve(std::array{fresh},stale,{2,2,100})[0];
+    check("receipt-first split reproduces stale-old-ID capture",wrong.id==2);
+    fresh.prior=wrong.next;stale[0].dead=true;stale[0].left=true;
+    stale.push_back({7,2403,point,false});
+    check("receipt-first split wrongly gives replacement old leave authority",
+          ob::Resolve(std::array{fresh},stale,{2,2,101})[0].reason==ob::Reason::BoundDeath);
+}
+#endif
+
 int main(int argc,char** argv) {
+    OrdinaryRefillControls();
+#ifndef RECORD_PURE_ONLY
+    SplitRefillDeliveryControls();
+#endif
     OrdinaryLifecycleControls();
     OrdinaryTerminalControls();
     (void)argc; (void)argv;

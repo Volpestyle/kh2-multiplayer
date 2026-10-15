@@ -1,6 +1,6 @@
 {
  "name": "net_one_brain_phantom_leave",
- "description": "VUH-2272: three loopback instances in HB 04/15 btl 26 with the player defaults. Bots fight for 15 s, as in route run 20261014-205834, until the host's Magic Phantom 2403 escapes alive. When it is not refilled, the host must send it as a leave (left=1) and both friends must fade their copy out without a kill. Either way no friend may spawn a wave enemy (Camo Cannon 2407) the host never spawns, and every screen ends with the same living enemies.",
+ "description": "VUH-2292: three default loopback players in HB 04/15 btl 26. Withdraw the host until its original Phantom leaves, then return for a native refill. Require a living Magic Phantom escape followed by a same-point refill. The old ID must leave without a live relabel, both friends must have a fresh unmatched=0 sample within 2 seconds of the host refill, and the refill must bind separately. Finish with HP parity and a shared room clear (VUH-2272/2302/2304).",
  "protect": [
   0,
   1,
@@ -106,6 +106,11 @@
   },
   {
    "do": "save",
+   "as": "first_phantoms",
+   "expr": "[[a['address'] for a in enemies(i) if a['objectId']==2403 and a['hp']>0] for i in range(3)]"
+  },
+  {
+   "do": "save",
    "as": "field_objects_start",
    "expr": "[sorted([(a['name'], a.get('objectType'), a.get('objectId'), a.get('motionId'), [round(a['position'][k]) for k in ('x', 'y', 'z')] if a.get('position') else None) for a in actors(i) if a['name'].startswith('F_')]) for i in range(3)]"
   },
@@ -123,29 +128,44 @@
     1,
     2
    ],
-   "seconds": 15,
+   "seconds": 3,
    "as": "hb_fight",
    "clip": {
     "instance": 1,
-    "seconds": 8,
+    "seconds": 3,
     "fps": 10,
     "name": "hb_fight_friend1"
    }
   },
   {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','-2200,450,-600']"
+  },
+  {
+   "do": "wait_until",
+   "timeoutMs": 20000,
+   "expr": "not any(a['address'] in saved['first_phantoms'][0] for a in enemies(0))"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','859.696,450,-599.768']"
+  },
+  {
    "do": "wait_until",
    "timeoutMs": 30000,
-   "expr": "len(log_matches(r'host death epoch \\d+ netId \\d+ \\(despawned, not refilled, left=1\\)', 0)) >= 1 or log_count('despawned, refilled at its point', 0) >= 1"
+   "expr": "len(log_matches(r'refilled at its point netId=(?P<id>\\d+) objectId=2403 left=1 frame=(?P<frame>\\d+) beforeManifest=1 tickMs=(?P<tick>\\d+)', 0)) >= 1"
   },
   {
    "do": "save",
    "as": "phantom_outcome",
-   "expr": "{'left': len(log_matches(r'host death epoch \\d+ netId \\d+ \\(despawned, not refilled, left=1\\)', 0)), 'refilled': log_count('despawned, refilled at its point', 0)}"
+   "expr": "log_matches(r'refilled at its point netId=(?P<id>\\d+) objectId=2403 left=1 frame=(?P<frame>\\d+) beforeManifest=1 tickMs=(?P<tick>\\d+)', 0)[0]"
   },
   {
    "do": "wait_until",
    "timeoutMs": 10000,
-   "expr": "len(log_matches(r'host death epoch \\d+ netId \\d+ \\(despawned, not refilled, left=1\\)', 0)) == 0 or all(len(log_matches(r'client: host leave netId \\d+ objectId 2403 applied', i)) >= 1 for i in (1, 2))"
+   "expr": "all(log_count('client: host leave netId '+saved['phantom_outcome']['id']+' objectId 2403 applied', i) >= 1 for i in (1, 2))"
   },
   {
    "do": "clip",
@@ -176,6 +196,36 @@
    "do": "wait_until",
    "timeoutMs": 15000,
    "expr": "enemy_hps(0)==enemy_hps(1) and enemy_hps(0)==enemy_hps(2)"
+  },
+  {
+   "do": "assert",
+   "expr": "all(not any(a['address'] in saved['first_phantoms'][i] for a in enemies(i)) for i in (1,2))",
+   "message": "The original escaped friend actors must be absent after native disposal"
+  },
+  {
+   "do": "save",
+   "as": "refill_bindings",
+   "expr": "[log_matches(r'\\[enemy-binding\\] epoch=\\d+ frame=(?P<frame>\\d+) spawn=\\d+ actor=(?P<actor>[0-9A-F]+) [^\\r\\n]*objectId=2403 prior=\\d+ floor=\\d+ candidate=(?P<id>\\d+) selected=(?P<selected>\\d+) reason=(?P<reason>[^ ]+)', i) for i in (1, 2)]"
+  },
+  {
+   "do": "save",
+   "as": "refill_hashes",
+   "expr": "[log_matches(r'\\[statehash\\] role=\\w+ epoch=\\d+ frame=(?P<frame>\\d+) room=04/15 [^\\r\\n]*count=\\d+ unmatched=(?P<u>\\d+) observed=\\d+ tickMs=(?P<tick>\\d+)', i) for i in (1, 2)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(any(b['id']==saved['phantom_outcome']['id'] and b['selected']==b['id'] and b['reason']=='established-death' for b in saved['refill_bindings'][i]) and any(int(h['u'])==0 and 0<=int(h['tick'])-int(saved['phantom_outcome']['tick'])<=2000 for h in saved['refill_hashes'][i]) for i in range(2))",
+   "message": "Both friends need unmatched=0 within 2 seconds of the host Phantom refill"
+  },
+  {
+   "do": "assert",
+   "expr": "all(any(old['id']==saved['phantom_outcome']['id'] and old['selected']==old['id'] and old['reason']=='established-death' and any(int(new['selected'])>int(old['id']) and new['reason']=='newest-live-point' and int(new['frame'])>int(old['frame']) and new['actor']!=old['actor'] for new in rows) for old in rows) for rows in saved['refill_bindings'])",
+   "message": "Both friends must bind a fresh replacement Phantom to the newer host ID"
+  },
+  {
+   "do": "assert",
+   "expr": "all(log_count('live-body-id-relabel-refused', i)==0 for i in (1, 2))",
+   "message": "A living old body lost its established identity during the refill"
   },
   {
    "do": "save",

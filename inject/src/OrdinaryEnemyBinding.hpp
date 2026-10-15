@@ -44,6 +44,7 @@ struct Host {
     std::array<float, 3> point{};
     bool dead{};
     bool removed{};
+    bool left{}; // host disappeared alive: finish the established body's leave before a refill
 };
 enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath, Retired, Relabel };
 inline const char* Name(Reason r) noexcept {
@@ -105,6 +106,18 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         for (const auto& h : hosts) {
             if (!h.removed && h.id > 0 && h.objectId == l.identity.objectId && (l.certificateRequired ? h.id==l.certifiedId : SamePoint(h.point,l.point)) &&
                 (!best || h.id > best->id)) best = &h;
+        }
+        // VUH-2292: a reliable leave and its refill manifest can drain in one
+        // owner frame. Keep the continuously established OLD identity for
+        // native removal; never relabel its living body to the new occurrence.
+        if (!l.certificateRequired && Continuous(l,now)) {
+            for (const auto& h : hosts) {
+                if (h.id == l.prior.bound && h.dead && h.left && !h.removed &&
+                    h.objectId == l.identity.objectId && SamePoint(h.point,l.point)) {
+                    best = &h;
+                    break;
+                }
+            }
         }
         if (!best) { d.reason = Reason::NoPoint; continue; }
         d.candidate = best->id;
