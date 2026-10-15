@@ -589,13 +589,17 @@ def step_fight(ctx: Context, step: dict) -> dict:
             out["error"] = f"{type(exc).__name__}: {exc}"
 
     threads = [threading.Thread(target=bot, args=(i,), daemon=True) for i in indices]
-    clip = step.get("clip")  # {"instance", "seconds", "fps", "name"}: film the fight while it runs
-    if clip:
+    # {"instance", "seconds", "fps", "name"}: film the fight while it runs. "clips" films several
+    # instances at the same time (side-by-side evidence, VUH-2252); "clip" is the single form.
+    clips = list(step.get("clips") or ([step["clip"]] if step.get("clip") else []))
+    films: list[tuple[Path, dict]] = []
+    for clip in clips:
         inst = ctx.inst(clip.get("instance", 0))
         out = ctx.run_dir / f"{clip.get('name', 'fight')}_{inst.index}.mp4"
         clip_result: dict = {}
+        films.append((out, clip_result))
 
-        def film() -> None:
+        def film(clip=clip, inst=inst, out=out, clip_result=clip_result) -> None:
             clip_result.update(kh2ctl("clip", "--seconds", str(clip.get("seconds", 5)), "--fps",
                                       str(clip.get("fps", 10)), "--out", str(out), pid=inst.pid,
                                       check=False, timeout=180))
@@ -607,10 +611,15 @@ def step_fight(ctx: Context, step: dict) -> dict:
         ctx.sleep(0.5)
     name = step.get("as", "fight")
     ctx.saved[name] = {str(k): v for k, v in results.items()}
-    if clip:
+    receipts = []
+    for out, clip_result in films:
         if out.exists():
             ctx.artifacts.append(out.name)
-        ctx.saved[name]["clip"] = {"path": out.name, "ok": clip_result.get("ok"), "error": clip_result.get("error")}
+        receipts.append({"path": out.name, "ok": clip_result.get("ok"), "error": clip_result.get("error")})
+    if step.get("clip") and not step.get("clips"):
+        ctx.saved[name]["clip"] = receipts[0]
+    elif receipts:
+        ctx.saved[name]["clips"] = receipts
     return ctx.saved[name]
 
 
