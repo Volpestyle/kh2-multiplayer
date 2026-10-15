@@ -804,6 +804,13 @@
    "name": "goa_regroup"
   },
   {
+   "do": "clip",
+   "instance": 0,
+   "name": "goa_arrival_host",
+   "seconds": 5,
+   "fps": 10
+  },
+  {
    "do": "assert",
    "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
    "message": "A runtime logged a new desync notice by the end of the route"
