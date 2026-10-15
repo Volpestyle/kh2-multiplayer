@@ -1935,12 +1935,16 @@ std::uint8_t emissionRole = 2;
 unsigned emissionCalls = 0, emissionPublished = 0;
 void* emissionResult = nullptr;
 const void* emissionObject = nullptr;
+const void* emissionMixedHelper = nullptr;
+unsigned emissionUpdateCalls = 0, emissionCopyCalls = 0;
+std::array<float,4> emissionLastUpdatePoint {};
 std::array<float,4> emissionTrigger {};
 const void* emissionRecord = nullptr;
 bool emissionGenerated = false, emissionFault = false;
 void* emissionFiberRoot = nullptr;
 bool emissionFiberMode = false, emissionFiberPreserved = true;
 void __fastcall EmissionNativeUpdate(void* controller, const float* point) {
+    ++emissionUpdateCalls;std::copy_n(point,4,emissionLastUpdatePoint.begin());
     if (emissionFiberMode) {
         SwitchToFiber(emissionFiberRoot);
         const auto* current = g_emissionStorage.Current();
@@ -1963,7 +1967,14 @@ bool CatchEmissionUpdate(void* controller, const float* point) {
     return false;
 }
 std::uint8_t EmissionRole() { return emissionRole; }
-const void* __fastcall EmissionLookup(std::int32_t) { return emissionObject; }
+const void* __fastcall EmissionLookup(std::int32_t id) { return id==2406 && emissionMixedHelper ? emissionMixedHelper : emissionObject; }
+bool MixedReplay(std::uint32_t key,std::uint16_t header,float* out) {
+    const auto* e=emissionLedger.Pending(key,header);
+    if(!e)return false;std::copy(e->point.begin(),e->point.end(),out);return true;
+}
+bool MixedCopy(float* out,uintptr_t,std::uint64_t) {
+    ++emissionCopyCalls;std::copy(emissionTrigger.begin(),emissionTrigger.end(),out);return true;
+}
 PVOID WINAPI EmissionBadFls(DWORD) { return reinterpret_cast<void*>(1); }
 void* __fastcall EmissionFixed(const void*, void*) { ++emissionCalls; return emissionResult; }
 void* __fastcall EmissionGenerated(const void*, void*, const float*) { ++emissionCalls; return emissionResult; }
@@ -2029,7 +2040,56 @@ void EmissionControls(std::uint8_t* image) {
             "overlapping native fibers retain their own triggers and clear their scopes");
     } else Check(false,"emission test fibers created");
     if(fa)DeleteFiber(fa);if(fb)DeleteFiber(fb);if(converted)ConvertFiberToThread();
-    emissionFiberMode=false;g_emission=nullptr;g_replay=nullptr;g_lookup=nullptr;
+    emissionFiberMode=false;
+    // Actual qualifier and update/wrapper gates for the observed mixed route.
+    std::array<std::uint8_t,8+2*0x60> mixedObjects{};
+    put(mixedObjects.data()+4,std::int32_t{2});
+    put(mixedObjects.data()+8,std::uint32_t{2407});mixedObjects[12]=4;mixedObjects[16]='M';
+    auto* helper=mixedObjects.data()+8+0x60;
+    put(helper,std::uint32_t{2406});helper[4]=21;std::memcpy(helper+8,"M_EX640_HB",sizeof("M_EX640_HB"));
+    emissionObject=mixedObjects.data()+8;emissionMixedHelper=helper;
+    put(image+OBJECT_TABLES,reinterpret_cast<uintptr_t>(mixedObjects.data()));
+    std::array<std::uint8_t,44+5*64> mixed{};mixed[0]=2;
+    put(mixed.data()+2,std::uint16_t{753});put(mixed.data()+4,std::uint16_t{5});put(mixed.data()+6,std::uint16_t{1});
+    constexpr std::uint32_t ids[]={2406,2407,2407,2407,2406};
+    for(unsigned i=0;i<5;++i){put(mixed.data()+44+i*64,ids[i]);mixed[44+i*64+0x1C]=2;}
+    Controller mixedController;mixedController.key=825778018;mixedController.header=reinterpret_cast<uintptr_t>(mixed.data());
+    mixedController.spawnArray=mixedController.header+44;mixedController.regionArray=mixedController.spawnArray+320;
+    put(image+CONTROLLER_TABLE,TableEntry{mixedController.key,0,reinterpret_cast<uintptr_t>(&mixedController)});
+    std::array<std::uint8_t,10> oldLocation{};std::memcpy(oldLocation.data(),image+kh2coop::offsets::NOW,10);
+    const std::array<std::uint8_t,10> hb{4,21,0,0,1,0,26,0,255,127};std::memcpy(image+kh2coop::offsets::NOW,hb.data(),10);
+    const auto qualifies=[&]{return Qualify(reinterpret_cast<uintptr_t>(&mixedController),QualificationUse::Emission).scope==Scope::Qualified;};
+    Check(Qualify(reinterpret_cast<uintptr_t>(&mixedController)).scope==Scope::OutOfScope && qualifies(),
+        "observed753 qualifies for emission only; combat activation still excludes type21");
+    helper[4]=20;Check(!qualifies(),"other noncombat type stays excluded");helper[4]=21;
+    helper[9]='X';Check(!qualifies(),"changed2406 class stays excluded");helper[9]='_';
+    put(mixed.data()+44+64,std::uint32_t{2405});Check(!qualifies(),"different mixed record order stays excluded");put(mixed.data()+44+64,std::uint32_t{2407});
+    mixed[44+0x1D]=1;Check(!qualifies(),"mixed exception keeps static-mode exclusion");mixed[44+0x1D]=0;
+    mixedController.key++;put(image+CONTROLLER_TABLE,TableEntry{mixedController.key,0,reinterpret_cast<uintptr_t>(&mixedController)});
+    Check(!qualifies(),"different mixed controller key stays excluded");mixedController.key--;
+    put(image+CONTROLLER_TABLE,TableEntry{mixedController.key,0,reinterpret_cast<uintptr_t>(&mixedController)});
+    image[kh2coop::offsets::NOW+1]=20;Check(!qualifies(),"other room stays excluded");image[kh2coop::offsets::NOW+1]=21;
+    emissionLedger.Clear();emissionRecord=mixed.data()+44;emissionGenerated=false;emissionRole=2;emissionResult=&mixedController;
+    g_capture=&PhaseCapture;g_copy=&MixedCopy;g_replay=&MixedReplay;
+    const auto updatesBefore=emissionUpdateCalls;emissionCopyCalls=0;
+    RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
+    Check(emissionUpdateCalls==updatesBefore && emissionCopyCalls==0,"mixed client without receipt holds; live activation lease is never used");
+    for(unsigned i=0;i<5;++i) {
+        kh2coop::SpawnEmission receipt{{7,4,21,0,1,26,32767},i+1,mixedController.key,753,static_cast<std::uint16_t>(i),{-900,700,142,1}};
+        emissionLedger.Add(receipt);emissionRecord=mixed.data()+44+i*64;
+        const auto calls=emissionCalls;
+        RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
+        Check(emissionCalls==calls+1 && emissionLastUpdatePoint==receipt.point && !emissionLedger.Permit(mixedController.key,753,static_cast<std::uint16_t>(i),false),
+            "each mixed helper/combat record consumes exactly its receipt using the historical point");
+        RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
+        Check(emissionCalls==calls+1,"consumed mixed receipt cannot authorize another native birth");
+    }
+    emissionRole=1;emissionRecord=mixed.data()+44;
+    const auto capturesBefore=phaseCaptureCalls,publishedBefore=emissionPublished;
+    RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
+    Check(emissionPublished==publishedBefore+1 && phaseCaptureCalls==capturesBefore,"mixed host opens emission scope without publishing combat activation authority");
+    std::memcpy(image+kh2coop::offsets::NOW,oldLocation.data(),10);emissionMixedHelper=nullptr;
+    g_emission=nullptr;g_replay=nullptr;g_lookup=nullptr;
 }
 }
 

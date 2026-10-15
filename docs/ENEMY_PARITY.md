@@ -1706,3 +1706,16 @@ multiple live matches refuse binding.
 pieces and rotating `F_HB040`: friend-only pickup must leave both pieces,
 then host pickup must remove one on all three instances. Remaining type, motion
 and rounded positions must agree, with rotating motion time within eight frames.
+
+
+### HB753 mixed emission (VUH-2302)
+
+Controller753 in HB04/15 map1 btl26 evt32767, key825778018, contains the
+static ordered records2406,2407,2407,2407,2406. Live identification
+20261015-160201 confirmed2406 as M_EX640_HB, objentry type21, on both friends.
+This exact mixed shape uses the existing host emission receipts for all five
+records, including its helpers. It grants no combat activation authority.
+Clients tick it only on a pending receipt's historical point; without a receipt
+they hold the ordinary update. Other mixed/noncombat controllers remain excluded.
+All object-table, layout, static-mode and lifecycle checks still apply. Native
+admission and HP handling are unchanged.

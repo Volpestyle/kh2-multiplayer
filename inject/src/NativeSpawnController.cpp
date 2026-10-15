@@ -466,6 +466,7 @@ bool SameObjectTables(const ObjectTables& tables) {
 }
 
 enum class Scope { Unavailable, OutOfScope, Qualified };
+enum class QualificationUse { CombatActivation, Emission };
 struct Qualification {
     Scope scope = Scope::Unavailable;
     const char* reason = "not sampled";
@@ -476,9 +477,10 @@ struct Qualification {
     Stamp stamp {};
     std::array<std::uint8_t, 5 * 0x40> geometryRecords {};
     bool geometryRecordsVerified = false;
+    bool mixedEmission = false;
 };
 
-Qualification Qualify(uintptr_t address) {
+Qualification Qualify(uintptr_t address, QualificationUse use = QualificationUse::CombatActivation) {
     Qualification result;
     result.controller = address;
     auto fail = [&](const char* reason, Scope scope = Scope::Unavailable) {
@@ -518,9 +520,20 @@ Qualification Qualify(uintptr_t address) {
         controller.regionArray != controller.spawnArray + recordBytes) return fail("record layout");
     std::array<std::uint8_t, RECORD_CAP * 0x40> records {};
     if (!CopyNative(controller.spawnArray, records.data(), recordBytes)) return fail("record read");
+    // Observed HB753 helpers are M_EX640_HB/type21, not combat actors.
+    // This exception grants emission receipts only, never combat activation.
+    const auto& location=result.stamp.location;
+    bool observedMixed=use==QualificationUse::Emission && result.key==825778018 &&
+        result.headerId==753 && result.records==5 && Field<std::uint16_t>(header.data(),6)==1 &&
+        location[0]==4 && location[1]==21 && location[2]==0 &&
+        Field<std::uint16_t>(location.data(),4)==1 && Field<std::uint16_t>(location.data(),6)==26 &&
+        Field<std::uint16_t>(location.data(),8)==32767;
+    constexpr std::uint32_t mixedIds[]={2406,2407,2407,2407,2406};
+    if(observedMixed)for(unsigned i=0;i<5;++i)
+        if(Field<std::uint32_t>(records.data()+i*0x40,0)!=mixedIds[i])observedMixed=false;
     ObjectTables tables {};
     if (!ReadObjectTables(tables)) return fail("object tables read/cap");
-    struct ObjectIdentity { uintptr_t address = 0; std::array<std::uint8_t, 10> bytes {}; };
+    struct ObjectIdentity { uintptr_t address = 0; std::array<std::uint8_t, 0x28> bytes {}; };
     std::array<ObjectIdentity, RECORD_CAP> identities {};
     for (std::size_t i = 0; i < result.records; ++i) {
         const auto* record = records.data() + i * 0x40;
@@ -543,8 +556,12 @@ Qualification Qualify(uintptr_t address) {
         std::array<std::uint8_t, 0x60> entry {};
         if (!inTable || !CopyNative(object, entry.data(), entry.size()) ||
             Field<std::uint32_t>(entry.data(), 0) != id) return fail("objentry identity/read");
-        if ((entry[4] != offsets::objentry::TYPE_BOSS && entry[4] != offsets::objentry::TYPE_MOB) ||
+        const bool helper=observedMixed && id==2406 && entry[4]==21 &&
+            std::memcmp(entry.data()+8,"M_EX640_HB",sizeof("M_EX640_HB"))==0;
+        if ((!helper && entry[4] != offsets::objentry::TYPE_BOSS && entry[4] != offsets::objentry::TYPE_MOB) ||
             (entry[8] == 'F' && entry[9] == '_')) return fail("noncombat/mixed records", Scope::OutOfScope);
+        if(observedMixed && ((id==2406 && !helper) || (id==2407 && entry[4]!=offsets::objentry::TYPE_MOB)))
+            return fail("observed mixed class changed",Scope::OutOfScope);
         identities[i].address = object;
         std::memcpy(identities[i].bytes.data(), entry.data(), identities[i].bytes.size());
     }
@@ -565,7 +582,7 @@ Qualification Qualify(uintptr_t address) {
         std::memcmp(records.data(), finalRecords.data(), recordBytes) != 0 ||
         !SameObjectTables(tables) || !SameStamp(result.stamp)) return fail("scope changed");
     for (std::size_t i = 0; i < result.records; ++i) {
-        std::array<std::uint8_t, 10> identity {};
+        std::array<std::uint8_t, 0x28> identity {};
         if (!CopyNative(identities[i].address, identity.data(), identity.size()) || identity != identities[i].bytes)
             return fail("objentry changed");
     }
@@ -576,7 +593,8 @@ Qualification Qualify(uintptr_t address) {
         result.geometryRecordsVerified = true;
     }
     result.scope = Scope::Qualified;
-    result.reason = "static combat type2";
+    result.mixedEmission=observedMixed;
+    result.reason = observedMixed ? "observed HB753 mixed emission" : "static combat type2";
     return result;
 }
 
@@ -1630,7 +1648,7 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
     bool qualified = false;
     std::uint16_t index = 0;
     if (role == 1 || role == 2) {
-        q = Qualify(reinterpret_cast<uintptr_t>(controller));
+        q = Qualify(reinterpret_cast<uintptr_t>(controller),QualificationUse::Emission);
         const auto address = reinterpret_cast<uintptr_t>(record);
         qualified = q.scope == Scope::Qualified && address >= q.spawnArray &&
             address - q.spawnArray < static_cast<uintptr_t>(q.records) * 0x40 &&
@@ -1805,6 +1823,8 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
         return;
     }
     auto q = Qualify(reinterpret_cast<uintptr_t>(controller));
+    if(q.scope!=Scope::Qualified && g_emission)
+        q=Qualify(reinterpret_cast<uintptr_t>(controller),QualificationUse::Emission);
     if (q.scope != Scope::Qualified) {
         if (q.scope == Scope::Unavailable) { ++g_unavailable; Report(3, "unavailable", q); }
         else { ++g_unsupported; Report(4, "unsupported", q); }
@@ -1815,9 +1835,9 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     if (role == 1) {
         if (CopyNative(reinterpret_cast<uintptr_t>(nativePoint), point, sizeof(point)) &&
             FinitePoint(point) && SameStamp(q.stamp) && g_role() == 1) {
-            g_capture(point);
-            ++g_captures;
-            Report(0, "capture", q, point);
+            if(!q.mixedEmission) {
+                g_capture(point);++g_captures;Report(0,"capture",q,point);
+            } else Report(0,"emission-host",q,point);
         } else {
             q.reason = "host point/lifecycle unavailable";
             ++g_unavailable;
@@ -1839,7 +1859,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     BeginGeometry(q, role); // All diagnostic native reads precede both lease copies.
     const auto clientReturnMutation = AcquireKnownMutationTicket();
     const bool replay = g_replay && g_replay(q.key, q.headerId, point);
-    const bool havePoint = replay || g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence);
+    const bool havePoint = replay || (!q.mixedEmission && g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence));
     if (g_role() != 2) {
         OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::RoleChangedAfterFirstCopy, nativePoint, g_original(controller, nativePoint));
         return;
