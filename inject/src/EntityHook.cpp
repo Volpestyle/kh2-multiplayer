@@ -2728,6 +2728,71 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
     else if (d.noCollideSaved && !d.savedNoCollide) *collision &= ~ACTOR_NO_COLLIDE;
 }
 
+// VUH-2290: a party member keeps a raw pointer to its combat target at +0xF88. Party AI
+// (0x1B6B80) hands it to 0x1B7BA0, which walks the target's hitboxes along the active
+// actor list. The party AI manager (exe 0x1B6111..0x1B612C) zeroes it only while its
+// own validity check runs; at the Thresholder's defeat Donald still held the Sword or Ax
+// after that part died and was freed, and the walk read the freed actor's list link
+// (crash at exe 0x3BAA80 reading 0x11F; dumps 20261014-230955 and -232054, host and
+// client, puppeted or not). Before a party member updates, drop a target that has left
+// the active list or has no HP, as the manager's zeroing store does.
+static constexpr uint64_t RVA_PARTY_TARGET_CLEAR = 0x1B6111;
+static constexpr uintptr_t PARTY_AI_TARGET = 0xF88;
+static constexpr uintptr_t PARTY_TARGET_STATUS = 0x5C0;  // actor -> status (HP at +0)
+static constexpr uint8_t kPartyTargetClearBytes[] = {
+    0x8B, 0x8B, 0x88, 0x0F, 0x00, 0x00,        // mov ecx,[rbx+0xF88]
+    0x48, 0x85, 0xC9, 0x74, 0x10,              // test rcx,rcx; je
+    0xE8, 0xFF, 0x45, 0x20, 0x00, 0x84, 0xC0,  // call 0x3BA720; test al,al
+    0x75, 0x07,                                // jne
+    0x48, 0x89, 0xB3, 0x88, 0x0F, 0x00, 0x00}; // mov [rbx+0xF88],rsi (0)
+static int g_partyTargetClearShape = -1;  // -1 unchecked, 0 mismatch (never write), 1 verified
+static unsigned g_partyTargetClearLogs = 0;
+
+// The target is in the active actor list (head exe+0x2A171C8, next = handle at +0xA90).
+// Never dereferences the target itself.
+static bool ActiveListContains(uintptr_t target) {
+    if (!g_resolveHandle) return false;
+    uintptr_t node = *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::active_entity_list::HEAD);
+    for (int i = 0; node && i < 1024; ++i) {
+        if (node == target) return true;
+        node = g_resolveHandle(*reinterpret_cast<const uint32_t*>(node + 0xA90));
+    }
+    return false;
+}
+
+static void SanitizePartyTarget(uintptr_t actor, int slot) {
+    if (g_partyTargetClearShape < 0) {
+        __try {
+            g_partyTargetClearShape = std::memcmp(reinterpret_cast<const void*>(g_exeBase + RVA_PARTY_TARGET_CLEAR),
+                kPartyTargetClearBytes, sizeof(kPartyTargetClearBytes)) == 0 ? 1 : 0;
+        } __except (EXCEPTION_EXECUTE_HANDLER) { g_partyTargetClearShape = 0; }
+        Log("[party-target] clear shape=%d (exe 0x%llX)", g_partyTargetClearShape,
+            static_cast<unsigned long long>(RVA_PARTY_TARGET_CLEAR));
+    }
+    if (g_partyTargetClearShape != 1 || !actor || !g_resolveHandle) return;
+    uintptr_t target = 0;
+    int hp = 0;
+    bool listed = false;
+    __try {
+        auto* slotPtr = reinterpret_cast<volatile uintptr_t*>(actor + PARTY_AI_TARGET);
+        target = *slotPtr;
+        if (!target) return;
+        listed = ActiveListContains(target);
+        if (listed) {
+            const auto status = *reinterpret_cast<const uintptr_t*>(target + PARTY_TARGET_STATUS);
+            if (!status) return;  // a target without stats (an object): leave it to the native AI
+            hp = *reinterpret_cast<const int*>(status);
+            if (hp > 0) return;
+        }
+        *slotPtr = 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+    if (g_partyTargetClearLogs < 64) {
+        ++g_partyTargetClearLogs;
+        Log("[party-target] friend %d actor=%llX cleared target=%llX listed=%d hp=%d", slot,
+            static_cast<unsigned long long>(actor), static_cast<unsigned long long>(target), listed ? 1 : 0, hp);
+    }
+}
+
 static void __fastcall HookedFriendAI(void* typeHandler, void* actorObj) {
     const int puppet = PuppetIndexFor(reinterpret_cast<uintptr_t>(actorObj));
     if (puppet >= 0) {
@@ -3191,6 +3256,16 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         // VUH-1489: a P_EX100 clone reads neutral input, not pad 0 (default off).
         cloneneutral::Gate(addr);
         enemymirror::PreUpdate(addr); // VUH-1515 step 2 (default off)
+
+        // VUH-2290: a party member (objentry type 1) never updates holding a freed or dead target.
+        {
+            uint8_t type = 0xFF;
+            __try {
+                const auto objentry = *reinterpret_cast<const uintptr_t*>(addr + offsets::actor::OBJENTRY_PTR);
+                if (objentry) type = *reinterpret_cast<const uint8_t*>(objentry + offsets::objentry::TYPE_FLAGS);
+            } __except (EXCEPTION_EXECUTE_HANDLER) { type = 0xFF; }
+            if (type == 1) SanitizePartyTarget(addr, addr == g_friend1Actor ? 1 : addr == g_friend2Actor ? 2 : 0);
+        }
 
         // Identify friend entities
         if (g_friend1Actor != 0 && addr == g_friend1Actor) {
