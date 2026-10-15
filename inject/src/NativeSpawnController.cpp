@@ -520,16 +520,22 @@ Qualification Qualify(uintptr_t address, QualificationUse use = QualificationUse
         controller.regionArray != controller.spawnArray + recordBytes) return fail("record layout");
     std::array<std::uint8_t, RECORD_CAP * 0x40> records {};
     if (!CopyNative(controller.spawnArray, records.data(), recordBytes)) return fail("record read");
-    // Observed HB753 helpers are M_EX640_HB/type21, not combat actors.
+    // Observed HB749/753 helpers are M_EX640_HB/type21, not combat actors.
     // This exception grants emission receipts only, never combat activation.
     const auto& location=result.stamp.location;
     bool observedMixed=use==QualificationUse::Emission && result.key==825778018 &&
-        result.headerId==753 && result.records==5 && Field<std::uint16_t>(header.data(),6)==1 &&
         location[0]==4 && location[1]==21 && location[2]==0 &&
         Field<std::uint16_t>(location.data(),4)==1 && Field<std::uint16_t>(location.data(),6)==26 &&
         Field<std::uint16_t>(location.data(),8)==32767;
-    constexpr std::uint32_t mixedIds[]={2406,2407,2407,2407,2406};
-    if(observedMixed)for(unsigned i=0;i<5;++i)
+    constexpr std::uint32_t hb749Ids[]={2406,2406,2407,2407};
+    constexpr std::uint32_t hb753Ids[]={2406,2407,2407,2407,2406};
+    const std::uint32_t* mixedIds=nullptr;
+    if(result.headerId==749 && result.records==4 && Field<std::uint16_t>(header.data(),6)==2)
+        mixedIds=hb749Ids;
+    else if(result.headerId==753 && result.records==5 && Field<std::uint16_t>(header.data(),6)==1)
+        mixedIds=hb753Ids;
+    observedMixed=observedMixed && mixedIds;
+    if(observedMixed)for(unsigned i=0;i<result.records;++i)
         if(Field<std::uint32_t>(records.data()+i*0x40,0)!=mixedIds[i])observedMixed=false;
     ObjectTables tables {};
     if (!ReadObjectTables(tables)) return fail("object tables read/cap");
@@ -594,7 +600,7 @@ Qualification Qualify(uintptr_t address, QualificationUse use = QualificationUse
     }
     result.scope = Scope::Qualified;
     result.mixedEmission=observedMixed;
-    result.reason = observedMixed ? "observed HB753 mixed emission" : "static combat type2";
+    result.reason = observedMixed ? "observed HB mixed emission" : "static combat type2";
     return result;
 }
 

@@ -1720,6 +1720,15 @@ they hold the ordinary update. Other mixed/noncombat controllers remain excluded
 All object-table, layout, static-mode and lifecycle checks still apply. Native
 admission and HP handling are unchanged.
 
+VUH-2315 extends this emission-only path to the observed HB749 shape in the
+same room/key: four ordered records2406,2406,2407,2407 and two regions. The
+retained native inventory identifies the same M_EX640_HB/type21 helpers.
+Route173525 left one friend-only749 Camo Cannon alive after host clear;
+route174204 left two on each friend. Without this qualification,749 passed
+through locally because of its helpers. Only749 and753 use this mixed
+exception; other mixed controllers remain excluded. The route's20-second clear
+bound and native admission, HP and death policies are unchanged.
+
 ### Late native births (VUH-2302)
 
 Protocol22 appends the exact host manifest netId to each combat emission receipt.

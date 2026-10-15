@@ -1940,6 +1940,7 @@ unsigned emissionUpdateCalls = 0, emissionCopyCalls = 0;
 std::array<float,4> emissionLastUpdatePoint {};
 std::array<float,4> emissionTrigger {};
 const void* emissionRecord = nullptr;
+EmissionBirth emissionLastBirth{};
 bool emissionGenerated = false, emissionFault = false, emissionWrapperFault = false;
 void* emissionFiberRoot = nullptr;
 bool emissionFiberMode = false, emissionFiberPreserved = true;
@@ -1979,7 +1980,8 @@ PVOID WINAPI EmissionBadFls(DWORD) { return reinterpret_cast<void*>(1); }
 void* __fastcall EmissionFixed(const void*, void*) { ++emissionCalls;if(emissionWrapperFault)RaiseException(kDeliberateException,0,0,nullptr);return emissionResult; }
 void* __fastcall EmissionGenerated(const void*, void*, const float*) { ++emissionCalls;if(emissionWrapperFault)RaiseException(kDeliberateException,0,0,nullptr);return emissionResult; }
 bool EmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t record,const float* point,
-                    EmissionPhase phase,EmissionPermit& permit,const EmissionBirth*) {
+                    EmissionPhase phase,EmissionPermit& permit,const EmissionBirth* birth) {
+    if(phase==EmissionPhase::Birth && birth)emissionLastBirth=*birth;
     if(emissionRole==2) {
         if(phase==EmissionPhase::Reserve) {
             const auto* e=emissionLedger.Reserve(key,header,record);if(!e)return false;
@@ -2083,7 +2085,8 @@ void EmissionControls(std::uint8_t* image) {
     } else Check(false,"emission test fibers created");
     if(fa)DeleteFiber(fa);if(fb)DeleteFiber(fb);if(converted)ConvertFiberToThread();
     emissionFiberMode=false;
-    // Actual qualifier and update/wrapper gates for the observed mixed route.
+    // Actual qualifier and update/wrapper gates for both observed mixed routes.
+    for(const auto headerId : std::array<std::uint16_t,2>{749,753}) {
     std::array<std::uint8_t,8+2*0x60> mixedObjects{};
     put(mixedObjects.data()+4,std::int32_t{2});
     put(mixedObjects.data()+8,std::uint32_t{2407});mixedObjects[12]=4;mixedObjects[16]='M';
@@ -2092,20 +2095,24 @@ void EmissionControls(std::uint8_t* image) {
     emissionObject=mixedObjects.data()+8;emissionMixedHelper=helper;
     put(image+OBJECT_TABLES,reinterpret_cast<uintptr_t>(mixedObjects.data()));
     std::array<std::uint8_t,44+5*64> mixed{};mixed[0]=2;
-    put(mixed.data()+2,std::uint16_t{753});put(mixed.data()+4,std::uint16_t{5});put(mixed.data()+6,std::uint16_t{1});
-    constexpr std::uint32_t ids[]={2406,2407,2407,2407,2406};
-    for(unsigned i=0;i<5;++i){put(mixed.data()+44+i*64,ids[i]);mixed[44+i*64+0x1C]=2;}
+    const std::uint16_t count=headerId==749 ? 4 : 5, regions=headerId==749 ? 2 : 1;
+    put(mixed.data()+2,headerId);put(mixed.data()+4,count);put(mixed.data()+6,regions);
+    const std::array<std::uint32_t,5> ids=headerId==749 ? std::array<std::uint32_t,5>{2406,2406,2407,2407,0} :
+        std::array<std::uint32_t,5>{2406,2407,2407,2407,2406};
+    for(unsigned i=0;i<count;++i){put(mixed.data()+44+i*64,ids[i]);mixed[44+i*64+0x1C]=2;}
     Controller mixedController;mixedController.key=825778018;mixedController.header=reinterpret_cast<uintptr_t>(mixed.data());
-    mixedController.spawnArray=mixedController.header+44;mixedController.regionArray=mixedController.spawnArray+320;
+    mixedController.spawnArray=mixedController.header+44;mixedController.regionArray=mixedController.spawnArray+count*64;
     put(image+CONTROLLER_TABLE,TableEntry{mixedController.key,0,reinterpret_cast<uintptr_t>(&mixedController)});
     std::array<std::uint8_t,10> oldLocation{};std::memcpy(oldLocation.data(),image+kh2coop::offsets::NOW,10);
     const std::array<std::uint8_t,10> hb{4,21,0,0,1,0,26,0,255,127};std::memcpy(image+kh2coop::offsets::NOW,hb.data(),10);
     const auto qualifies=[&]{return Qualify(reinterpret_cast<uintptr_t>(&mixedController),QualificationUse::Emission).scope==Scope::Qualified;};
     Check(Qualify(reinterpret_cast<uintptr_t>(&mixedController)).scope==Scope::OutOfScope && qualifies(),
-        "observed753 qualifies for emission only; combat activation still excludes type21");
+        "observed749/753 qualifies for emission only; combat activation still excludes type21");
     helper[4]=20;Check(!qualifies(),"other noncombat type stays excluded");helper[4]=21;
     helper[9]='X';Check(!qualifies(),"changed2406 class stays excluded");helper[9]='_';
-    put(mixed.data()+44+64,std::uint32_t{2405});Check(!qualifies(),"different mixed record order stays excluded");put(mixed.data()+44+64,std::uint32_t{2407});
+    put(mixed.data()+44+64,std::uint32_t{2405});Check(!qualifies(),"different mixed record order stays excluded");put(mixed.data()+44+64,ids[1]);
+    put(mixed.data()+2,std::uint16_t{752});Check(!qualifies(),"other mixed header stays excluded");put(mixed.data()+2,headerId);
+    put(mixed.data()+6,std::uint16_t{3});Check(!qualifies(),"different mixed region count stays excluded");put(mixed.data()+6,regions);
     mixed[44+0x1D]=1;Check(!qualifies(),"mixed exception keeps static-mode exclusion");mixed[44+0x1D]=0;
     mixedController.key++;put(image+CONTROLLER_TABLE,TableEntry{mixedController.key,0,reinterpret_cast<uintptr_t>(&mixedController)});
     Check(!qualifies(),"different mixed controller key stays excluded");mixedController.key--;
@@ -2116,23 +2123,31 @@ void EmissionControls(std::uint8_t* image) {
     const auto updatesBefore=emissionUpdateCalls;emissionCopyCalls=0;
     RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
     Check(emissionUpdateCalls==updatesBefore && emissionCopyCalls==0,"mixed client without receipt holds; live activation lease is never used");
-    for(unsigned i=0;i<5;++i) {
-        kh2coop::SpawnEmission receipt{{7,4,21,0,1,26,32767},i+1,mixedController.key,753,static_cast<std::uint16_t>(i),{-900,700,142,1}};
+    for(unsigned i=0;i<count;++i) {
+        kh2coop::SpawnEmission receipt{{7,4,21,0,1,26,32767},i+1,mixedController.key,headerId,static_cast<std::uint16_t>(i),{-900,700,142,1}};
         emissionLedger.Add(receipt);emissionRecord=mixed.data()+44+i*64;
         put(born.data()+0x918,reinterpret_cast<uintptr_t>(ids[i]==2406 ? helper : mixedObjects.data()+8));
         put(born.data()+0x9E8,reinterpret_cast<uintptr_t>(&mixedController));put(born.data()+0x9F0,reinterpret_cast<uintptr_t>(emissionRecord));
         const auto calls=emissionCalls;
         RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
-        Check(emissionCalls==calls+1 && emissionLastUpdatePoint==receipt.point && !emissionLedger.Permit(mixedController.key,753,static_cast<std::uint16_t>(i),false),
+        Check(emissionCalls==calls+1 && emissionLastUpdatePoint==receipt.point && !emissionLedger.Permit(mixedController.key,headerId,static_cast<std::uint16_t>(i),false),
             "each mixed helper/combat record consumes exactly its receipt using the historical point");
         RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
         Check(emissionCalls==calls+1,"consumed mixed receipt cannot authorize another native birth");
     }
     emissionRole=1;emissionRecord=mixed.data()+44;
+    put(born.data()+0x918,reinterpret_cast<uintptr_t>(helper));
+    put(born.data()+0x9E8,reinterpret_cast<uintptr_t>(&mixedController));
+    put(born.data()+0x9F0,reinterpret_cast<uintptr_t>(emissionRecord));
+    emissionLastBirth={};
     const auto capturesBefore=phaseCaptureCalls,publishedBefore=emissionPublished;
     RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
-    Check(emissionPublished==publishedBefore+1 && phaseCaptureCalls==capturesBefore,"mixed host opens emission scope without publishing combat activation authority");
+    Check(emissionPublished==publishedBefore+1 && phaseCaptureCalls==capturesBefore &&
+        emissionLastBirth.available && emissionLastBirth.helper && emissionLastBirth.objectId==2406 &&
+        emissionLastBirth.headerId==headerId && emissionLastBirth.recordIndex==0 && emissionLastBirth.records==count,
+        "mixed host publishes checked helper birth without combat activation authority");
     std::memcpy(image+kh2coop::offsets::NOW,oldLocation.data(),10);emissionMixedHelper=nullptr;
+    }
     g_emission=nullptr;g_replay=nullptr;g_lookup=nullptr;
 }
 }
