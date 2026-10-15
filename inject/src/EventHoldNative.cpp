@@ -68,7 +68,7 @@ void Install(uintptr_t exeBase, LogFn sink) {
         return;
     }
     enabled.store(true, std::memory_order_release);
-    if (log) log("[event-control] native configured=1 firstSliceEmptyRoomsOnly=1 noScriptFreeze=1");
+    if (log) log("[event-control] native configured=1 populatedRooms=1 noScriptFreeze=1");
 }
 void Disable() noexcept {
     enabled.store(false, std::memory_order_release);
@@ -162,19 +162,27 @@ bool ApplyInput(void* inputStruct) {
         if (command.kind == eventhold::Kind::Reset) inputScope = command.scope;
         else if (command.scope != inputScope) { channel.Invalidate(eventhold::Abort::WrongScope); input.Fail(); }
         else if (command.kind == eventhold::Kind::Acquire) {
+            // VUH-2268: a hold opens the pause menu only for a client the owner
+            // reports converged in the host's current room (enemies allowed).
+            // Anything else skips this one hold and keeps the channel, so a
+            // client elsewhere keeps control instead of pausing in that room.
             release = {};
+            if (input.Supersede() && log)
+                log("[event-control] previous hold superseded by acquire epoch=%u", command.epoch);
             eventhold::Ack ack {};
-            if (!channel.ReadAck(ack) || ack.scope != command.scope || ack.epoch != command.epoch ||
-                ack.flags != (eventhold::SafeConverged | eventhold::LiveEligible) || !input.Acquire(native.value)) {
-                channel.Invalidate(eventhold::Abort::Unsupported); input.Fail();
-            }
+            const bool hostRoom = channel.ReadAck(ack) && ack.scope == command.scope && ack.epoch == command.epoch &&
+                ack.flags == (eventhold::SafeConverged | eventhold::LiveEligible);
+            if ((!hostRoom || !input.Acquire(native.value)) && log)
+                log("[event-control] hold skipped epoch=%u hostRoom=%u ackEpoch=%u ackFlags=%u menu=%u safe=%u holding=%u",
+                    command.epoch, hostRoom ? 1u : 0u, ack.epoch, ack.flags, native.value.menu,
+                    native.value.safeToPause ? 1u : 0u, input.Holding() ? 1u : 0u);
         } else if (command.kind == eventhold::Kind::Transition || command.kind == eventhold::Kind::Release) {
             // Ordinary host-led room changes also use this channel. Between
             // events they service the world without opening/closing a pause.
-            if (input.Holding()) { input.Wake(); if (command.kind == eventhold::Kind::Release) release = command; }
-            else if (command.kind != eventhold::Kind::Transition ||
-                (input.Current() != InputState::Phase::Idle && input.Current() != InputState::Phase::Complete)) {
-                channel.Invalidate(eventhold::Abort::InvalidOrder); input.Fail();
+            // A release with no hold (a skipped one) has nothing to give back.
+            if (input.Holding()) {
+                input.Wake();
+                if (command.kind == eventhold::Kind::Release) { release = command; input.ReleaseReceived(native.value.now); }
             }
         }
         if (log) log("[event-control] input receipt ordinal=%llu source=%llu kind=%u epoch=%u tid=%lu",
@@ -191,6 +199,9 @@ bool ApplyInput(void* inputStruct) {
         channel.Invalidate(eventhold::Abort::Unsupported); input.Fail(); output.failed = true;
     }
     inputHeld.store(input.Holding(), std::memory_order_release);
+    if (output.timedOut && log)
+        log("[event-control] owner did not converge %llu ms after release epoch=%u; input returned",
+            static_cast<unsigned long long>(InputState::ReleaseTimeoutMs), release.epoch);
     if (log && (oldPhase != input.Current() || output.start || output.released))
         log("[event-control] input phase=%u menu=%u neutral=%u start=%u failed=%u released=%u ordinal=%llu tid=%lu abort=%lu",
             static_cast<unsigned>(input.Current()), native.value.menu, output.neutral ? 1u : 0u, output.start ? 1u : 0u,

@@ -1,4 +1,5 @@
 #include "EventHoldNative.hpp"
+#include "EventHoldInputState.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,22 @@ int main(int argc,char** argv){
  auto fresh=[&]{std::memset(data+offsets::input::RAW_SLOT0,77,6);};
  auto tick=[&]{fresh();const bool entered=n::EnterInput();if(entered){n::ApplyInput(data);n::LeaveInput();}};
  auto buttons=[&]{return *reinterpret_cast<unsigned short*>(data+offsets::input::RAW_SLOT0);};
+ {// VUH-2268: pure hold rules. A refused acquire changes nothing, a closed
+  // pause waiting on the owner gives input back 10 s after the release, and a
+  // new event supersedes that wait.
+  using S=n::InputState;S s;S::Sample ok{};ok.now=1000;ok.safeToPause=true;ok.healthy=true;
+  S::Sample unsafe=ok;unsafe.safeToPause=false;
+  check(!s.Acquire(unsafe)&&s.Current()==S::Phase::Idle&&!s.Holding(),"unsafe acquire is skipped, not failed");
+  check(s.Acquire(ok),"safe acquire");S::Sample at=ok;
+  auto step=[&](unsigned menuNow,std::uint64_t now){at.menu=menuNow;at.now=now;return s.Tick(at);};
+  step(255,1001);step(255,1002);step(10,1003);check(s.Current()==S::Phase::Paused,"paused");
+  s.Wake();s.ReleaseReceived(2000);step(10,2001);step(10,2002);step(255,2003);
+  check(s.Current()==S::Phase::OwnerWait,"waiting on owner after the pause closes");
+  auto held=step(255,11999);check(held.neutral&&!held.released&&s.Holding(),"held before the release timeout");
+  auto out=step(255,12000);check(out.released&&out.timedOut&&!s.Holding(),"input returned at the release timeout");
+  check(s.Acquire(ok),"next hold works after a timeout");step(255,12001);step(255,12002);step(10,12003);
+  s.Wake();step(10,12004);step(10,12005);step(255,12006);
+  check(s.Current()==S::Phase::OwnerWait&&s.Supersede()&&!s.Holding()&&s.Acquire(ok),"a new event supersedes an owner wait");}
  if(mode=="off"){fresh();check(!n::Enabled()&&!n::ApplyInput(data)&&buttons()==0x4d4d,"default off leaves fresh physical untouched");}
  else{
  e::Channel runtime;check(runtime.Open(GetCurrentProcessId()),"independent runtime view opened");
@@ -31,8 +48,10 @@ int main(int argc,char** argv){
  check(runtime.Arm(GetTickCount64()),"test owner baseline arm");tick();
  e::Command acquire{};acquire.scope=scope;acquire.hostSourceSerial=8;acquire.kind=e::Kind::Acquire;acquire.epoch=1;acquire.eventProgram=1;
  if(mode=="unowned")menu=10;
+ if(mode=="elsewhere")n::OwnerAck(scope,1,true,false);
  check(runtime.Publish(acquire,GetTickCount64()),"acquire published");tick();
- if(mode=="unowned")check(buttons()==0x4d4d&&!n::HoldingInput()&&runtime.Reason()!=e::Abort::None,"preexisting pause is not closed or neutralized");
+ if(mode=="unowned")check(buttons()==0x4d4d&&!n::HoldingInput()&&runtime.Reason()==e::Abort::None,"preexisting pause skips the hold without closing it or switching holds off");
+ else if(mode=="elsewhere")check(buttons()==0x4d4d&&!n::HoldingInput()&&runtime.Reason()==e::Abort::None,"a client not converged in the host's room skips the hold without pausing");
  else{
  check(buttons()==8&&n::HoldingInput(),"one native Start opens owned pause");tick();check(buttons()==0,"one release edge");menu=10;tick();
  for(unsigned i=0;i<5;++i){tick();check(buttons()==0&&n::HoldingInput(),"pause held without repeated Start");}

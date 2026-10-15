@@ -35,8 +35,8 @@ Direct developer launches retain their native defaults.
 | `ENEMY_POPULATION` | `1` | Remove a friend's living copy when the host removes it. |
 | `ENEMY_TARGET_ALL` | `1` | Automatic private Sora on the next ordinary two-player TT/HB/BC load; qualified mirrored enemy families can target the friend. |
 | `COOP_DIFFICULTY` | `normal` | Host room-locked health factor; two-player mobs ×1.6. |
-| `EVENT_HOLD_PRODUCER` | `1` | Host event announcements within the existing empty-room scope. |
-| `EVENT_HOLD_CONTROL` | `1` | Client input hold/overlay followed by host-led room/state resync. |
+| `EVENT_HOLD_PRODUCER` | `1` | Host event announcements, in any room. |
+| `EVENT_HOLD_CONTROL` | `1` | Client input hold/overlay followed by host-led room/state resync. Holds work in populated rooms; a client outside the host's room or unable to pause skips that one hold, and a client not converged 10 s after the host's release gets its input back (VUH-2268). |
 | `DOWNED_SPIKE` | `1` | Downed/revive: a player at 0 HP is held downed instead of Game Over (VUH-2269, `docs/DOWNED_REVIVE.md`). |
 | `REVIVE_PROMPT` | `1` | Hold Triangle near a downed teammate to revive them. |
 | `ENEMY_POPULATION_SPAWN` | `0` (parked) | General client spawn/lifecycle behavior is not qualified. |
@@ -724,7 +724,18 @@ match, and fresh client movement works after each release. Four short client
 clips show the pause/overlay and resulting village. The two original flags
 remain opt-in (host `KH2COOP_EVENT_HOLD_PRODUCER=1`, client DLL and runtime
 `KH2COOP_EVENT_HOLD_CONTROL=1`); populated rooms and reconnect remain outside
-this slice. The natural-event profile reuses the existing bounded menu-liveness
+this slice.
+
+VUH-2268 (2026-10-14): the owner's converged ACK no longer requires empty
+enemy lists, so holds work in populated and boss rooms and friends are
+released after a boss intro. An acquire still needs that ACK (the client is in
+the host's current room) plus a safe native pause. Otherwise it skips that one
+hold instead of aborting the channel for the session, so a friend in another
+room keeps control rather than pausing there. A new acquire supersedes a hold
+that is only waiting on convergence, and a client that hasn't converged 10 s
+after the release gets its input back. Known gap: the pause menu crashes a
+2-player client whose party has an empty seat (exe+0x36A4AB, filed from the
+VUH-2252 boss run). The natural-event profile reuses the existing bounded menu-liveness
 helper; [the short skip fixture](../tools/scenario/scenarios/net_host_cutscene_skip.json)
 uses the standard runner.
 

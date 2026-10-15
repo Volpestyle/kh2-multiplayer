@@ -3443,8 +3443,7 @@ void AckEventControl() {
     const bool eligible = !g_resyncPlan && !g_nativeResync && !PackPreparationActive() &&
         g_resyncWriteFence == ResyncWriteFence::None && g_host.arrived && g_host.ackSent &&
         g_host.epoch && warp::HostTransitionArrived(g_host.epoch) && g_inst.live &&
-        g_host.manifestComplete && g_host.enemies.empty() && CensusMatchesInstance(census) &&
-        census.enemies.empty() && g_eventControlRoom.epoch == g_host.epoch &&
+        CensusMatchesInstance(census) && g_eventControlRoom.epoch == g_host.epoch &&
         SameLocation(census.location, g_eventControlRoom) && SafeNativeGameplay();
     const bool converged = eligible && progresssync::ClientConverged(g_eventControlScope.generation);
     // Repeat scope/census/lifecycle checks after masked SAVE readback. These are

@@ -20,18 +20,22 @@ public:
         bool start = false;
         bool failed = false;
         bool released = false;
+        bool timedOut = false;
     };
+    // VUH-2268: after the host's release, a client that has not converged in
+    // this long gets its input back instead of staying frozen.
+    static constexpr std::uint64_t ReleaseTimeoutMs = 10000;
     Phase Current() const noexcept { return phase_; }
     bool Holding() const noexcept {
         return phase_ != Phase::Idle && phase_ != Phase::Complete && phase_ != Phase::Failed;
     }
+    // Refusal leaves the state as it was: the caller skips this one hold and
+    // later holds still work.
     bool Acquire(const Sample& s) noexcept {
-        if ((phase_ != Phase::Idle && phase_ != Phase::Complete) ||
-            !s.healthy || !s.safeToPause || s.menu != 255 || !s.now) {
-            Fail(); return false;
-        }
+        if (Holding() || !s.healthy || !s.safeToPause || s.menu != 255 || !s.now) return false;
         phase_ = Phase::OpenRelease;
         deadline_ = s.now + 1000;
+        releaseDeadline_ = 0;
         owned_ = false;
         wake_ = false;
         press_ = true;
@@ -39,6 +43,14 @@ public:
     }
     // A successor transition wakes world servicing, but does not release input.
     void Wake() noexcept { wake_ = true; }
+    void ReleaseReceived(std::uint64_t now) noexcept { releaseDeadline_ = now + ReleaseTimeoutMs; }
+    // A new host event supersedes a hold whose pause has already closed and
+    // that is only waiting on the owner's convergence.
+    bool Supersede() noexcept {
+        if (phase_ != Phase::OwnerWait && phase_ != Phase::ReleaseBoundary) return false;
+        phase_ = Phase::Complete;
+        return true;
+    }
     void Fail() noexcept { phase_ = Phase::Failed; press_ = false; }
     Output Tick(const Sample& s) noexcept {
         if (phase_ == Phase::Idle || phase_ == Phase::Complete) return {};
@@ -71,6 +83,10 @@ public:
         case Phase::OwnerWait:
             if (s.menu != 255) { Fail(); break; }
             if (s.ownerReleased) phase_ = Phase::ReleaseBoundary;
+            else if (releaseDeadline_ && s.now >= releaseDeadline_) {
+                phase_ = Phase::Complete;
+                return {true, false, false, true, true};
+            }
             return {true, false, false, false};
         case Phase::ReleaseBoundary:
             if (s.menu != 255 || !s.ownerReleased) { Fail(); break; }
@@ -82,7 +98,7 @@ public:
     }
 private:
     Phase phase_ = Phase::Idle;
-    std::uint64_t deadline_ = 0;
+    std::uint64_t deadline_ = 0, releaseDeadline_ = 0;
     bool owned_ = false, wake_ = false, press_ = false;
 };
 } // namespace kh2coop::inject::eventholdnative
