@@ -145,6 +145,8 @@ int main() {
     CHECK(CullDecision(true, false, false, true, false, 0xFFFFFFFFu, true) == 0);          // forced copy (C2)
     CHECK(CullDecision(true, false, false, false, false, 0xFFFFFFFFu, true) == -1);        // forced but dying
     CHECK(CullDecision(false, true, false, false, false, 0, false) == 1);                  // forced removal
+    // VUH-2272: a host-left copy still present after the leave fade is stuck.
+    CHECK(!LeaveStuck(kLeaveSettle - 1) && LeaveStuck(kLeaveSettle) && kLeaveSettle > 60);
     std::printf("EnemyPopulationTest: %d checks, %s\n", g_checks, g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }

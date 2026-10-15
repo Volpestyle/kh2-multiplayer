@@ -154,6 +154,8 @@ struct Spawn {
     std::uint64_t goneSinceMs = 0;  // host: left the list alive at this time
     bool killed = false;      // client: native HP confirmed dead
     bool deathAttempted = false; // at most one native lethal call per local spawn
+    std::uint32_t strayFrame = 0;    // client, VUH-2272: first frame this living copy's host enemy had left
+    std::uint32_t strayActFrame = 0; // client, VUH-2272: frame its fade was finished (0: not yet)
     int netId = -1;           // client: matched host enemy
     ordinarybinding::State ordinaryBinding {};
     int ordinaryLogReason = -1, ordinaryLogCandidate = -1;
@@ -511,6 +513,7 @@ void RetireWorldSession() {
         spawn.netId = -1;
         spawn.killed = false;
         spawn.deathAttempted = false;
+        spawn.strayFrame = spawn.strayActFrame = 0;
     }
 }
 
@@ -2135,6 +2138,78 @@ void PopulationPrune(std::uint32_t frame, const NativeCensus& census) {
             g_population.Forget(f.id.actor);
         }
     }
+}
+
+// VUH-2272: the host's enemy left alive and the native leave didn't remove the
+// client's copy. Route run 20261014-231356: both friends logged the first-wave
+// Phantom's leave as applied, but it stayed alive for the rest of the wave;
+// 0x42C810 starts no fade when +0x9B8 bit 0x10 is already set.
+bool LeaveStuckCopy(const Spawn& s) {
+    if (s.netId <= 0 || !s.deathAttempted) return false;
+    const auto it = g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
+    return it != g_host.enemies.end() && it->second.dead && it->second.left;
+}
+struct StrayFade { std::uint32_t flags = 0, flags120 = 0; float alpha = -1, rate = -1, aac = -1; };
+StrayFade ReadStrayFade(uintptr_t actor) {
+    StrayFade f;
+    (void)ReadNative(actor + 0x9B8, f.flags); (void)ReadNative(actor + 0x120, f.flags120);
+    (void)ReadNative(actor + 0xA08, f.alpha); (void)ReadNative(actor + 0xA0C, f.rate);
+    (void)ReadNative(actor + 0xAAC, f.aac);
+    return f;
+}
+// The state 0x3B7810 leaves when the leave fade ends (+0xA08 alpha 0, rate 0)
+// with 0x42C810's +0x9B8 bit 0x10; the actor update (0x3BFD30) then disposes
+// it through handler slot +0x38. No damage, death or kill credit.
+bool FinishNativeFade(const NativeEnemy& expected) {
+    __try {
+        if (!g_exeBase || g_role != Role::Client || !SafeNativeGameplay() ||
+            Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
+            Read<uintptr_t>(expected.actor + ACTOR_STATUS) != expected.status) return false;
+        auto* fade = reinterpret_cast<float*>(expected.actor + 0xA08);
+        fade[0] = 0.0f;
+        fade[1] = 0.0f;
+        *reinterpret_cast<std::uint32_t*>(expected.actor + 0x9B8) |= 0x10;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+void TickStrayCopies(std::uint32_t frame, const NativeCensus& census) {
+    if (!g_populationRequested || g_role != Role::Client || g_resyncWriteFence != ResyncWriteFence::None) return;
+    if (!frame) frame = 1;
+    for (Spawn& s : g_inst.spawns) {
+        const NativeEnemy* row = s.present ? FindNativeEnemy(census, s) : nullptr;
+        if (s.strayActFrame) {
+            if (!row) {
+                if (g_log) g_log("[enemy-pop] stray-gone frame=%u netId=%d objectId=%u actor=%llX after=%u", frame,
+                                 s.netId, s.objectId, static_cast<unsigned long long>(s.actor), frame - s.strayActFrame);
+                s.strayActFrame = s.strayFrame = 0;
+            } else if (frame - s.strayActFrame == enemypop::kLeaveSettle && g_log) {
+                const auto f = ReadStrayFade(s.actor);
+                g_log("[enemy-pop] stray-stuck frame=%u netId=%d objectId=%u actor=%llX hp=%d flags9B8=%X flags120=%X "
+                      "alpha=%.3f rate=%.3f aac=%.3f", frame, s.netId, s.objectId,
+                      static_cast<unsigned long long>(s.actor), row->hp, f.flags, f.flags120, f.alpha, f.rate, f.aac);
+            }
+            continue;
+        }
+        if (!row || row->hp <= 0 || !LeaveStuckCopy(s)) { s.strayFrame = 0; continue; }
+        if (!s.strayFrame) { s.strayFrame = frame; continue; }
+        if (!enemypop::LeaveStuck(frame - s.strayFrame)) continue;
+        const auto before = ReadStrayFade(s.actor);
+        const bool finished = FinishNativeFade(*row);
+        s.strayActFrame = frame;
+        if (g_log) g_log("[enemy-pop] stray-remove frame=%u kind=host-left netId=%d objectId=%u actor=%llX age=%u hp=%d "
+                         "flags9B8=%X flags120=%X alpha=%.3f rate=%.3f aac=%.3f finished=%u", frame, s.netId, s.objectId,
+                         static_cast<unsigned long long>(s.actor), frame - s.strayFrame, row->hp, before.flags,
+                         before.flags120, before.alpha, before.rate, before.aac, finished ? 1u : 0u);
+    }
+}
+// The cull override's second route for a copy whose fade was finished.
+bool StrayForceRemove(const enemypop::Identity& id) noexcept {
+    if (g_role != Role::Client || !id.actor) return false;
+    for (const Spawn& s : g_inst.spawns)
+        if (s.strayActFrame && s.actor == id.actor && s.objentry == id.objentry && s.status == id.status) return true;
+    return false;
 }
 
 // Client, after a successful ClientFrame (bindings resolved for this census).
@@ -5379,6 +5454,7 @@ void OnFrameStart(std::uint32_t frame) {
         if(!ConsumePopulationDisposals(frame,census)) {
             DrainPendingSpawnTrace(false);return; // mutation/fault never reuses the pre-call population
         }
+        TickStrayCopies(frame, census);  // VUH-2272
         PopulationTick(frame, census);  // VUH-1788 (default off)
     }
     PublishAppliedHash(frame, census);
@@ -5402,8 +5478,10 @@ bool PopulationStaleRequested(uintptr_t actor) noexcept {
 }
 bool PopulationForceRemove(uintptr_t actor) noexcept {
     if (!g_populationRequested) return false;
+    const auto identity = ReadPopulationIdentity(actor);
+    if (StrayForceRemove(identity)) return true;  // VUH-2272
     // Certified stale natives use the explicit owner-frame consumer, never this bit-gated predicate.
-    const auto* f = g_population.ForcedFor(ReadPopulationIdentity(actor));
+    const auto* f = g_population.ForcedFor(identity);
     if (!f) return false;
     const bool client = g_role == Role::Client;
     const auto host = g_host.enemies.find(f->netId);

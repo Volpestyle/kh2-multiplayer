@@ -42,6 +42,10 @@ inline constexpr std::uint32_t kCullHoldFrames = 1800; // a copy driven this rec
 inline constexpr std::uint32_t kBindGap = 30;          // a bind lost for this long still counts (S2)
 inline constexpr std::uint32_t kBindDeadline = 300;    // rev3 C2: a forced copy unbound this long after creation goes
 inline constexpr std::size_t kTracked = 64;
+// VUH-2272: a client copy whose host enemy left alive, still present after the
+// native leave's 60-frame fade, is due for removal.
+inline constexpr std::uint32_t kLeaveSettle = 90;
+inline constexpr bool LeaveStuck(std::uint32_t sinceLeave) noexcept { return sinceLeave >= kLeaveSettle; }
 
 struct HostView {
     std::uint16_t netId = 0;
