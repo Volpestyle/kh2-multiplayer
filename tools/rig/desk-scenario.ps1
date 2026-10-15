@@ -32,7 +32,12 @@ function Get-OwnedIds {
     $f = $row -split ' '
     if ($f.Count -lt 2) { continue }
     $p = Get-Process -Id ([int]$f[0]) -ErrorAction SilentlyContinue
-    if ($p -and $p.StartTime.ToFileTimeUtc() -eq [long]$f[1]) { $ids += $p.Id }
+    if (-not $p) { continue }
+    # While WER holds a crashing owned game its StartTime can be unreadable.
+    # A listed pid we can't check stays owned; never reclaim it mid-dump.
+    $start = $null
+    try { $start = $p.StartTime.ToFileTimeUtc() } catch { }
+    if ($null -eq $start -or $start -eq [long]$f[1]) { $ids += $p.Id }
   }
   $ids
 }
@@ -43,7 +48,10 @@ function Get-ForeignGames {
       ($_.ProcessName -match 'Marvel-Win64-Shipping|KINGDOM HEARTS|r5apex|FortniteClient|VALORANT-Win64|Overwatch|eldenring' -or
        ($_.Path -match '\\steamapps\\common\\|\\Epic Games\\|\\Riot Games\\|\\EA Games\\|\\XboxGames\\' -and
         $_.ProcessName -notmatch '^RiotClient|^Epic(GamesLauncher|WebHelper|OnlineServices)|^EOSOverlay')) -and
-      $_.Id -notin $owned })
+      $_.Id -notin $owned -and
+      # A game someone is playing has a window. A crashing owned game's WER
+      # snapshot clone (a new, unowned KINGDOM HEARTS pid) does not.
+      $_.MainWindowHandle -ne [IntPtr]::Zero })
 }
 
 if ((Get-ForeignGames).Count) { "PC1 occupied; no run: $((Get-ForeignGames | ForEach-Object ProcessName) -join ',')"; return }
@@ -65,7 +73,18 @@ foreach ($port in $relayPorts) {
 # Stops the runner's whole tree (relay, runtimes), anything still running from
 # this checkout's build\ whose parent already exited, and this checkout's games.
 function Stop-RunTree([int]$runnerId) {
-  & taskkill.exe /PID $runnerId /T /F 2>&1 | Out-File -Append "$ops/$Tag.cleanup.log"
+  # Walk the tree ourselves (leaves first) so each kill or failure is logged
+  # with the process name; taskkill /T only reported bare pids.
+  $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+  $tree = [System.Collections.Generic.List[int]]::new(); $tree.Add($runnerId)
+  for ($i = 0; $i -lt $tree.Count; $i++) {
+    foreach ($c in $all) { if ($c.ParentProcessId -eq $tree[$i] -and $c.ProcessId -ne $tree[$i] -and -not $tree.Contains([int]$c.ProcessId)) { $tree.Add([int]$c.ProcessId) } }
+  }
+  for ($i = $tree.Count - 1; $i -ge 0; $i--) {
+    $id = $tree[$i]; $p = $all | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1
+    try { Stop-Process -Id $id -Force -ErrorAction Stop; "stop $id $($p.Name)" | Out-File -Append "$ops/$Tag.cleanup.log" }
+    catch { "could not stop $id $($p.Name) $($p.ExecutablePath): $($_.Exception.Message)" | Out-File -Append "$ops/$Tag.cleanup.log" }
+  }
   $build = [IO.Path]::GetFullPath("$root/build") + [IO.Path]::DirectorySeparatorChar
   foreach ($p in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
       $_.ExecutablePath -and $_.ExecutablePath.StartsWith($build, [StringComparison]::OrdinalIgnoreCase) })) {
@@ -87,6 +106,9 @@ $stopped = ''
 $foreignSeconds = 0
 while (!$run.HasExited) {
   $foreign = @(Get-ForeignGames)
+  # A crash dump in progress (WerFault) means one of the run's games is
+  # crashing, not that someone took the PC; let the dump finish first.
+  if (@(Get-Process WerFault, WerFaultSecure -ErrorAction SilentlyContinue).Count) { $foreign = @() }
   $foreignSeconds = if ($foreign.Count) { $foreignSeconds + 1 } else { 0 }
   if ($foreignSeconds -ge 5) { $stopped = 'PC1 reclaimed: ' + (($foreign | ForEach-Object ProcessName) -join ',') }
   elseif ((Get-Date) -gt $deadline) { $stopped = "wall limit $WallMinutes min" }
