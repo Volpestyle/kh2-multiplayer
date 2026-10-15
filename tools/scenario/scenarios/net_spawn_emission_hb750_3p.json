@@ -1,0 +1,286 @@
+{
+ "name": "net_spawn_emission_hb750_3p",
+ "description": "VUH-2302: clear and converge the entry pack, prove both friends inside native HB750 geometry with host outside, then require all five host-announced records and matching native Camo Cannon 2407 HP before killing the wave. Existing read-only construction tracing diagnoses null factory returns. No controller/cache/save writes.",
+ "playerDefaults": true,
+ "protect": [
+  0,
+  1,
+  2
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_SPAWN_TRACE": "1"
+   }
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_SPAWN_TRACE": "1"
+   }
+  },
+  {
+   "do": "boot",
+   "instance": 2,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_SPAWN_TRACE": "1"
+   }
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 1,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 2,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "relay",
+   "port": 27796,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "runtime",
+   "instance": 2,
+   "role": "friend2"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get(f'puppet{j}') or {}).get('active') for i in range(3) for j in range(2))",
+   "timeoutMs": 30000,
+   "pollMs": 1000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 21,
+   "door": 0,
+   "map": 1,
+   "btl": 26,
+   "evt": 32767
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(location(i)==[4,21,0,1,26,32767] and any(a['name']=='P_EX100' for a in actors(i)) for i in range(3))",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value','859.696,450,-599.768']"
+  },
+  {
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "do": "native_enemy_census",
+   "as": "geometry750",
+   "instances": [
+    0,
+    1,
+    2
+   ],
+   "samples": 1,
+   "intervalMs": 0,
+   "controllerIdCoverage": true
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(enemy_hps(0))==3 and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 15000
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(len(enemy_hps(i))==0 for i in range(3))",
+   "timeoutMs": 15000
+  },
+  {
+   "do": "save",
+   "as": "admission_cleared",
+   "expr": "[(peek(0x2A0F7DC,'f32',i),peek(0x2A0F830,'f32',i)) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "controllers750",
+   "expr": "[[c for c in saved['geometry750']['snapshots'][0]['peers'][str(i)]['causeContext']['controllers'] if c.get('headerFields',{}).get('headerId')==750][0] for i in range(3)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(c['geometry']['complete'] and c['geometry']['bytesStable'] and c['key']==saved['controllers750'][0]['key'] for c in saved['controllers750'])",
+   "message": "All three peers must expose the same live controller 750 with stable native region geometry"
+  },
+  {
+   "do": "save",
+   "as": "regions750",
+   "expr": "[c['geometry']['regions'][0] for c in saved['controllers750']]"
+  },
+  {
+   "do": "save",
+   "as": "center750",
+   "expr": "[saved['controllers750'][0]['geometry']['descriptors'][saved['regions750'][0]['descriptorIndex']]['position'][j]+(80 if j==1 else 0) for j in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "notices_start",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]"
+  },
+  {
+   "do": "assert",
+   "expr": "len(log_matches(r'\\[spawn-emission\\] sent .*header=750 ',0))==0",
+   "message": "Host must start outside the 750 emission region"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',1)['address'],16)+0x670),'--type','f32x3','--value',','.join(str(v) for v in saved['center750'])]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 2,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',2)['address'],16)+0x670),'--type','f32x3','--value',','.join(str(v) for v in saved['center750'])]"
+  },
+  {
+   "do": "wait",
+   "ms": 500
+  },
+  {
+   "do": "save",
+   "as": "friends_in750",
+   "expr": "[pos('P_EX100',i) for i in range(3)]"
+  },
+  {
+   "do": "save",
+   "as": "friends_local750",
+   "expr": "[[sum(saved['regions750'][i]['inverseMatrix'][j+k*4]*saved['friends_in750'][i][k] for k in range(3))+saved['regions750'][i]['inverseMatrix'][j+12] for j in range(3)] for i in range(3)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all((saved['regions750'][i]['kind']=='BOX' and all(abs(saved['friends_local750'][i][j])<saved['regions750'][i]['extents'][j] for j in range(3))) or (saved['regions750'][i]['kind']=='CYLINDER' and abs(saved['friends_local750'][i][1])<saved['regions750'][i]['extents'][1] and sum((saved['friends_local750'][i][j]/saved['regions750'][i]['extents'][j])**2 for j in (0,2))<1) for i in (1,2))",
+   "message": "Both friends must be strictly inside controller 750's actual native region"
+  },
+  {
+   "do": "assert",
+   "expr": "not (all((saved['regions750'][i]['kind']=='BOX' and all(abs(saved['friends_local750'][i][j])<saved['regions750'][i]['extents'][j] for j in range(3))) or (saved['regions750'][i]['kind']=='CYLINDER' and abs(saved['friends_local750'][i][1])<saved['regions750'][i]['extents'][1] and sum((saved['friends_local750'][i][j]/saved['regions750'][i]['extents'][j])**2 for j in (0,2))<1) for i in (0,)))",
+   "message": "The host must remain outside the same native controller-750 region during the friend-only entry control"
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "assert",
+   "expr": "len(log_matches(r'\\[spawn-emission\\] sent .*header=750 ',0))==0 and all(len(log_matches(r'\\[spawn-emission\\] client emitted .*header=750 ',i))==0 for i in (1,2))",
+   "message": "Friends reaching 750 must not emit a wave before the host enters"
+  },
+  {
+   "do": "save",
+   "as": "prehost_camo",
+   "expr": "[[(a['objectId'],a['hp'],a['address']) for a in enemies(i) if a['objectId']==2407 and a['hp']>0] for i in range(3)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "friends_750_host_outside"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(actor('P_EX100',0)['address'],16)+0x670),'--type','f32x3','--value',','.join(str(v) for v in saved['center750'])]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(log_matches(r'\\[spawn-emission\\] sent .*header=750 record=0 ',0))>0 and all(len(log_matches(r'\\[spawn-emission\\] client emitted .*header=750 record=0\\b',i))>0 for i in (1,2)) and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "save",
+   "as": "admission_750",
+   "expr": "[(peek(0x2A0F7DC,'f32',i),peek(0x2A0F830,'f32',i)) for i in range(3)]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(len(log_matches(r'\\[spawn-emission\\] sent .*header=750 record='+str(r)+r' ',0))==1 and all(len(log_matches(r'\\[spawn-emission\\] client emitted .*header=750 record='+str(r)+r'\\b',i))==1 for i in (1,2)) for r in range(5)) and len(enemy_hps(0))==5 and enemy_hps(0)==enemy_hps(1)==enemy_hps(2)",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "save",
+   "as": "camo_parity",
+   "expr": "[sorted((a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a['hp']>0) for i in range(3)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(sum(a[0]==2407 for a in peer)==3 and sum(a[0]==2405 for a in peer)==2 for peer in saved['camo_parity']) and saved['camo_parity'][0]==saved['camo_parity'][1]==saved['camo_parity'][2]",
+   "message": "All five native controller750 bodies, including three Camo Cannons, must match HP on every peer"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 4,
+   "fps": 10,
+   "name": "750_camo_friend1"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 4,
+   "fps": 10,
+   "name": "750_camo_host"
+  },
+  {
+   "do": "hit_all",
+   "instance": 0,
+   "op": "kill"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(len(enemy_hps(i))==0 for i in range(3))",
+   "timeoutMs": 15000
+  },
+  {
+   "do": "assert",
+   "expr": "saved['prehost_camo']==[[],[],[]] and all(log_count('unsupported producer=outside-update',i)==0 for i in range(3))",
+   "message": "No friend-only Camo before the host wave and no unsupported script emission"
+  },
+  {
+   "do": "assert",
+   "expr": "[runtime_log(i).count('Desync notice') for i in range(3)]==saved['notices_start']",
+   "message": "No population desync through the host-authorized wave"
+  }
+ ]
+}
