@@ -122,6 +122,8 @@ inline constexpr std::uint8_t kAddCount[] = {0x8B, 0x51, 0x08, 0x8B, 0x09, 0xE9,
 // 0x3A37A0(arg) ends it and fires signal 0xF with arg. Both set M+4 |= 0x14.
 inline constexpr std::uint8_t kComplete[] = {0x8B, 0x09, 0xE9, 0xF9, 0xFE, 0xF6, 0xFF};                         // -> 0x3A33C0
 inline constexpr std::uint8_t kEndSignal[] = {0x8B, 0x09, 0xE9, 0xA9, 0x02, 0xF7, 0xFF};                        // -> 0x3A37A0
+// The boss end: 0x3A3440(arg) is 0x3A41E0(M, 0x10, arg), the defeat that plays re_deadboss (Shan-Yu, 08/09).
+inline constexpr std::uint8_t kDeadBoss[] = {0x8B, 0x09, 0xE9, 0x69, 0xFF, 0xF6, 0xFF};                         // -> 0x3A3440
 #define KH2_PIN(b) b, sizeof(b)
 inline constexpr Trap kTraps[] = {
     {5, 0x433670, 0x2, Kind::Value, KH2_PIN(kSetCount), "set_count"},
@@ -134,6 +136,7 @@ inline constexpr Trap kTraps[] = {
     {41, 0x4336E0, 0x2, Kind::Value, KH2_PIN(kAddCount), "add_count"},
     {3, 0x4334C0, 0x1, Kind::End, KH2_PIN(kComplete), "mission_complete"},
     {22, 0x4334F0, 0x1, Kind::End, KH2_PIN(kEndSignal), "mission_end_signal"},
+    {16, 0x4334D0, 0x1, Kind::End, KH2_PIN(kDeadBoss), "mission_dead_boss"},
 };
 #undef KH2_PIN
 inline constexpr std::size_t kTrapCount = sizeof(kTraps) / sizeof(kTraps[0]);

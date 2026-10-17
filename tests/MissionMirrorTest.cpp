@@ -44,7 +44,8 @@ void codec() {
     bad = m; bad.gauges[0].gauge = 1e9f; check(throws([&] { encode(bad); }), "out-of-range gauge refused");
     bad = m; bad.timerState = 3; check(throws([&] { encode(bad); }), "unknown timer state refused");
     bad = none; bad.flags = 1; check(throws([&] { encode(bad); }), "inactive state with mission fields refused");
-    bad = m; bad.endTrap = 11; check(throws([&] { encode(bad); }), "only the complete and end-signal traps can be an end");
+    bad = m; bad.endTrap = 11; check(throws([&] { encode(bad); }), "only the complete, boss-defeat and end-signal traps can be an end");
+    auto boss = m; boss.endTrap = 16; check(decode(encode(boss)).endTrap == 16, "a boss defeat (4/16) is a valid end");
     bad = m; bad.endTrap = 0; check(throws([&] { encode(bad); }), "an argument without an end trap refused");
     auto shortFrame = bytes; shortFrame.pop_back();
     check(throws([&] { decode(shortFrame); }), "a short frame is refused");
@@ -96,8 +97,8 @@ void rules() {
     ended.endTrap = 3; check(!MR::HostEndedUnknown(ended), "a host end through 4/3 is replayed, not unknown");
     ended.endTrap = 0; ended.result = MR::kFailedResult; check(!MR::HostEndedUnknown(ended), "a failure is replayed, not unknown");
     const int complete = MR::EndTrapIndex(3), endSignal = MR::EndTrapIndex(22);
-    check(complete >= 0 && endSignal >= 0 && MR::EndTrapIndex(11) < 0 && MR::EndTrapIndex(0) < 0,
-          "the end traps are 4/3 and 4/22 only");
+    check(complete >= 0 && endSignal >= 0 && MR::EndTrapIndex(16) >= 0 && MR::EndTrapIndex(11) < 0 && MR::EndTrapIndex(0) < 0,
+          "the end traps are 4/3, 4/16 (boss defeat) and 4/22 only");
     check(!MR::DropLocalCall(2, false, false, false), "not following: the native call runs");
     check(MR::DropLocalCall(2, true, false, false), "following: a local set_gauge is dropped");
     check(MR::DropLocalCall(MR::kFailedTrap, true, false, false), "following: a local failure before the host's is dropped");
