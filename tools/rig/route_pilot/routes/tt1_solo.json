@@ -24,6 +24,8 @@
     {"do": "door", "to": [-300, -4500], "room": [2, 3], "timeoutSec": 30, "clip": 20, "name": "door-woods-to-alley",
      "note": "The Woods 2/14 -> 2/3; trigger near (-371, -3474). The Hayner/Pence/Olette scene follows and ends in the Usual Spot 2/2"},
     {"do": "wait_room", "room": [2, 2], "timeoutSec": 240},
-    {"do": "door", "to": [1800, 82], "room": [2, 3], "timeoutSec": 20, "note": "Usual Spot 2/2 (save point: no reaction key) -> Back Alley 2/3; trigger near (369, 83). Reaction 604 is offered there"}
+    {"do": "door", "to": [1800, 82], "room": [2, 3], "timeoutSec": 20, "note": "Usual Spot 2/2 (save point: no reaction key) -> Back Alley 2/3; trigger near (369, 83). Reaction 604 is offered there"},
+    {"do": "walk", "to": [600, -480], "tol": 60, "timeoutSec": 15, "note": "Back Alley, along the alley toward the sunset"},
+    {"do": "door", "to": [760, -1400], "room": [2, 4], "timeoutSec": 20, "note": "Back Alley 2/3 -> Sandlot 2/4 near (694, -953); an event follows (route-06 teach). Sandlot exits: top-left, top-right (toward +x,+z, near 1160,1351), bottom-left; which leads on toward the station is not yet known"}
   ]
 }

@@ -321,7 +321,10 @@ class Pilot:
             self.foe_hp, self.foe_at = sum(a["hp"] for a in enemies(self.game.pid)), now
         sig = (s["world"], s["room"], s["story"], self.foe_hp)
         moved = self.mark and s["pos"] and self.mark[1] and math.dist(s["pos"], self.mark[1]) > MOVE_EPSILON
-        if self.mark is None or sig != self.mark[0] or moved or not s["free"]:
+        # A mark taken without a position (during a load or event) must not hide later movement
+        # (route-06: walking the Sandlot counted as no progress for 120 s).
+        unplaced = self.mark is not None and s["pos"] is not None and self.mark[1] is None
+        if self.mark is None or sig != self.mark[0] or moved or unplaced or not s["free"]:
             self.mark, self.idle = (sig, s["pos"]), 0.0
         else:
             self.idle += now - self.tick_at
@@ -759,7 +762,13 @@ def run_teach(pilot: Pilot, box: Path, seconds: float) -> int:
     box.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + seconds
     while time.monotonic() < end:
-        pilot.state()
+        try:
+            pilot.state()  # door logging between commands
+        except Stuck as why:
+            if not pilot.game.alive():
+                raise
+            pilot.write("idle_stuck", reason=str(why))  # an operator is driving; don't end the session
+            pilot.idle, pilot.mark = 0.0, None
         cmds = sorted(box.glob("cmd-*.json"))
         if not cmds:
             time.sleep(0.25)
