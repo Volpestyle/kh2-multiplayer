@@ -77,6 +77,8 @@ bool BcCloneEligible(bool requested, bool twoPlayers, bool prerequisites, const 
 std::uint32_t BcCloneRow(std::uint32_t row, bool eligible, bool& owned, bool deferRestore = false);
 bool BcCloneRequested();
 void SetBcNeutralReady(bool (*probe)());
+// Existing two-player/private-status/neutral-input prerequisites, without a party row write.
+bool MissingPartyReady();
 constexpr std::uint8_t AUTO_CLONE_WORLDS[] = {2, 4, 5}; // TT, HB (including GoA), BC
 bool BcCloneWorld(std::uint8_t world);
 bool BcCloneApplied(std::uint8_t world);

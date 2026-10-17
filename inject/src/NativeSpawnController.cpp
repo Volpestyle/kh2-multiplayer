@@ -1,6 +1,9 @@
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
+#include "NativePrivateStatus.hpp"
+#include "PlayerKit.hpp"
 #include "NativeTraceFiber.hpp"
+#include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
 #include "Warp.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -172,6 +175,7 @@ unsigned g_emissionUnsupportedLogs = 0;
 UpdateFn g_original = nullptr;
 LookupFn g_lookup = nullptr;
 bool g_installed = false;
+bool g_moraleGeneratedVerified = false;
 std::atomic<bool> g_traceRequested {false}, g_traceInstalled {false};
 std::atomic<bool> g_fixedInstalled {false}, g_generatedInstalled {false};
 std::atomic<bool> g_dispatcherInstalled {false}, g_scriptInstalled {false};
@@ -370,6 +374,11 @@ template <std::size_t N> bool Matches(uintptr_t address, const std::uint8_t (&ex
     return CopyNative(address, actual.data(), N) && std::memcmp(actual.data(), expected, N) == 0;
 }
 
+template <std::size_t N> bool Matches(uintptr_t address,const std::array<std::uint8_t,N>& expected) {
+    std::array<std::uint8_t,N> actual{};
+    return CopyNative(address,actual.data(),N) && actual==expected;
+}
+
 struct TableEntry {
     std::uint32_t key = 0, flags = 0;
     uintptr_t controller = 0;
@@ -478,6 +487,7 @@ struct Qualification {
     std::array<std::uint8_t, 5 * 0x40> geometryRecords {};
     bool geometryRecordsVerified = false;
     bool mixedEmission = false;
+    bool generatedEmission = false;
 };
 
 Qualification Qualify(uintptr_t address, QualificationUse use = QualificationUse::CombatActivation) {
@@ -537,13 +547,17 @@ Qualification Qualify(uintptr_t address, QualificationUse use = QualificationUse
     observedMixed=observedMixed && mixedIds;
     if(observedMixed)for(unsigned i=0;i<result.records;++i)
         if(Field<std::uint32_t>(records.data()+i*0x40,0)!=mixedIds[i])observedMixed=false;
+    const bool observedGenerated=g_moraleGeneratedVerified && g_generatedInstalled.load() &&
+        use==QualificationUse::Emission &&
+        routespawn::MoraleGenerated(location,result.key,header,
+            std::span<const std::uint8_t>(records.data(),recordBytes));
     ObjectTables tables {};
     if (!ReadObjectTables(tables)) return fail("object tables read/cap");
     struct ObjectIdentity { uintptr_t address = 0; std::array<std::uint8_t, 0x28> bytes {}; };
     std::array<ObjectIdentity, RECORD_CAP> identities {};
     for (std::size_t i = 0; i < result.records; ++i) {
         const auto* record = records.data() + i * 0x40;
-        if (record[0x1C] != 2 || record[0x1D] != 0)
+        if (record[0x1C] != 2 || (record[0x1D] != 0 && !observedGenerated))
             return fail("nonstatic/mixed record mode", Scope::OutOfScope);
         for (std::size_t offset = 4; offset <= 12; offset += 4) {
             if (!std::isfinite(Field<float>(record, offset))) return fail("nonfinite spawn point");
@@ -600,7 +614,9 @@ Qualification Qualify(uintptr_t address, QualificationUse use = QualificationUse
     }
     result.scope = Scope::Qualified;
     result.mixedEmission=observedMixed;
-    result.reason = observedMixed ? "observed HB mixed emission" : "static combat type2";
+    result.generatedEmission=observedGenerated;
+    result.reason = observedGenerated ? "observed MU01 generated emission" :
+        observedMixed ? "observed HB mixed emission" : "static combat type2";
     return result;
 }
 
@@ -1722,7 +1738,10 @@ bool ObserveMoraleWave(const void* record, void* controller, const float* point,
           (native.key==0x73345F62 && id==1007)) ||          // b_4s
         bytes[0x1C]!=2 || bytes[0x1D]!=1) return false;
     static std::atomic<unsigned> entries {0};
-    if (!after && entries.fetch_add(1,std::memory_order_relaxed)>=64) return false;
+    // Reserve the return budget for real births; startup resource misses must not exhaust it.
+    static std::atomic<unsigned> births {0};
+    if (!after && entries.fetch_add(1,std::memory_order_relaxed)>=8) return true;
+    if (after && (!actor || births.fetch_add(1,std::memory_order_relaxed)>=64)) return true;
     std::array<float,4> generated {};
     const bool pointRead=wrapper==TraceWrapper::Generated &&
         CopyNative(reinterpret_cast<uintptr_t>(point),generated.data(),sizeof(generated));
@@ -1746,9 +1765,58 @@ bool ObserveMoraleWave(const void* record, void* controller, const float* point,
     return true;
 }
 
+// VUH-2343: exact native load-time ingress only. The original raw566 call is
+// delegated once by SpawnMissingParty; no frame-loop creation or party-row write.
+bool BaileyMissingParty(const void* record,void* controller,TraceWrapper wrapper,uintptr_t caller,void*& result) {
+    const auto error=GetLastError();
+    if(wrapper!=TraceWrapper::Fixed || caller!=g_exeBase+0x3FF727 || !IsDiagnosticGameThread())return false;
+    Stamp stamp{};Controller native{};
+    std::array<std::uint8_t,44> header{};
+    std::array<std::uint8_t,256> records{};
+    std::array<std::uint8_t,routespawn::BaileyCaller.size()> call{};
+    if(!ReadStamp(stamp) || stamp.location!=routespawn::BaileyLocation ||
+       !ReadNative(reinterpret_cast<uintptr_t>(controller),native) ||
+       native.spawnArray!=native.header+44 || native.regionArray!=native.spawnArray+records.size() ||
+       reinterpret_cast<uintptr_t>(record)!=native.spawnArray ||
+       !CopyNative(native.header,header.data(),header.size()) ||
+       !CopyNative(native.spawnArray,records.data(),records.size()) ||
+       !routespawn::Bailey(stamp.location,native.key,caller-g_exeBase,header,records) ||
+       !CopyNative(g_exeBase+0x3FF71B,call.data(),call.size()) || call!=routespawn::BaileyCaller)return false;
+    // The direct84 factory resolves the same normal Sora as the authored raw566.
+    // Keep headroom for BOTH native births; each still performs native admission.
+    uintptr_t object=0,event=0;std::int32_t cutscene=0;
+    std::uint16_t member0=0,statusKey=0;std::uint8_t type=255,cost=0,form=255,drive=255;
+    float limit=0,used=0;std::array<char,8> name{};
+    const bool ready=privatestatus::Ready() && playerkit::MissingPartyReady() &&
+        ReadNative(g_exeBase+0x2A11478,event) && !event && ReadNative(g_exeBase+0xB65210,cutscene) && !cutscene &&
+        ReadNative(g_exeBase+playerkit::RVA_RESOLVED_MEMBERS,member0) && member0==84 &&
+        ReadNative(g_exeBase+0x9ACDD4,drive) && drive==0 && LookupNative(84,object) && object &&
+        ReadNative(object+4,type) && type==0 && ReadNative(object+0x4C,statusKey) && statusKey==1 &&
+        ReadNative(object+0x57,form) && form==0 && CopyNative(object+8,name.data(),name.size()) &&
+        std::memcmp(name.data(),"P_EX100",8)==0 && ReadNative(object+0x54,cost) &&
+        ReadNative(g_exeBase+ADMISSION_LIMIT_RVA,limit) && ReadNative(g_exeBase+ADMISSION_USED_RVA,used) &&
+        std::isfinite(limit) && std::isfinite(used) && limit-used>=2.0f*cost && SameStamp(stamp);
+    if(!ready) {
+        if(g_log)g_log("[missing-party] refused prerequisites event=%llX cutscene=%d member0=%u privateReady=%u",event,cutscene,member0,privatestatus::Ready()?1u:0u);
+        return false;
+    }
+    Controller finalController{};std::array<std::uint8_t,44> finalHeader{};std::array<std::uint8_t,256> finalRecords{};
+    if(!ReadNative(reinterpret_cast<uintptr_t>(controller),finalController) || finalController.key!=native.key ||
+       finalController.header!=native.header || finalController.spawnArray!=native.spawnArray || finalController.regionArray!=native.regionArray ||
+       !CopyNative(native.header,finalHeader.data(),finalHeader.size()) || finalHeader!=header ||
+       !CopyNative(native.spawnArray,finalRecords.data(),finalRecords.size()) || finalRecords!=records || !SameStamp(stamp))return false;
+    SetLastError(error);
+    result=privatestatus::SpawnMissingParty(record,controller,g_originalWrapper,g_log);
+    return true;
+}
+
 void* PolicyWrapper(const void* record, void* controller, const float* point, TraceWrapper wrapper, uintptr_t caller) {
     const auto entryError = GetLastError();
     ObserveBaileyPlayer(record, controller, wrapper, caller);
+    void* missingResult=nullptr;
+    // Preserve the caller's error before either native call or a refused qualification.
+    SetLastError(entryError);
+    if(BaileyMissingParty(record,controller,wrapper,caller,missingResult))return missingResult;
     const auto role = g_emission && IsDiagnosticGameThread() && g_role ? g_role() : 0;
     Qualification q;
     bool qualified = false;
@@ -1764,7 +1832,9 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
     const auto* update = g_emission ? g_emissionStorage.Current() : nullptr;
     const bool observeMorale = ObserveMoraleWave(record,controller,point,wrapper,caller,q,role,update,nullptr,false);
     if (qualified && role == 2 && !update) { SetLastError(entryError); return nullptr; }
-    const bool enclosed = qualified && update && update->available && update->controller == reinterpret_cast<uintptr_t>(controller);
+    const bool enclosed = qualified && update && update->available && update->controller == reinterpret_cast<uintptr_t>(controller) &&
+        (!q.generatedEmission || (wrapper==TraceWrapper::Generated && caller==g_exeBase+0x3FE989));
+    if(qualified && q.generatedEmission && role==2 && !enclosed) {SetLastError(entryError);return nullptr;}
     if (qualified && !enclosed && g_log) {
         if (g_emissionUnsupportedLoad != q.stamp.load) { g_emissionUnsupportedLoad = q.stamp.load; g_emissionUnsupportedLogs = 0; }
         if (g_emissionUnsupportedLogs++ < 32)
@@ -1973,7 +2043,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     if (role == 1) {
         if (CopyNative(reinterpret_cast<uintptr_t>(nativePoint), point, sizeof(point)) &&
             FinitePoint(point) && SameStamp(q.stamp) && g_role() == 1) {
-            if(!q.mixedEmission) {
+            if(!q.mixedEmission && !q.generatedEmission) {
                 g_capture(point);++g_captures;Report(0,"capture",q,point);
             } else Report(0,"emission-host",q,point);
         } else {
@@ -1997,7 +2067,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     BeginGeometry(q, role); // All diagnostic native reads precede both lease copies.
     const auto clientReturnMutation = AcquireKnownMutationTicket();
     const bool replay = g_replay && g_replay(q.key, q.headerId, point);
-    const bool havePoint = replay || (!q.mixedEmission && g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence));
+    const bool havePoint = replay || (!q.mixedEmission && !q.generatedEmission && g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence));
     if (g_role() != 2) {
         OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::RoleChangedAfterFirstCopy, nativePoint, g_original(controller, nativePoint));
         return;
@@ -3031,6 +3101,8 @@ TraceState CaptureDiagnosticState(uintptr_t exeBase, uintptr_t controller) {
 bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyFn copy, bool trace, EmissionFn emission, ReplayFn replay) {
     if (g_installed) return true;
     g_exeBase = exeBase;
+    g_moraleGeneratedVerified=Matches(exeBase+GENERATED_RVA,routespawn::MoraleWrapperBody) &&
+        Matches(exeBase+0x3FE96A,routespawn::MoraleCaller);
     g_log = log;
     g_knownMutationRequested = KnownMutationRequested();
     g_traceRequested = trace;

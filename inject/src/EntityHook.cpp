@@ -1142,7 +1142,7 @@ static void BeginCloneFrame() {
 }
 
 static void NoteActorForClones(uintptr_t actor) {
-    if (warp::TransitionPending()) return;
+    if (warp::TransitionPending() || !privatestatus::MissingPartyPuppetAllowed(actor)) return;
     if (actor != g_soraActor && g_cloneCountNow < 2 && IsPlayerClassActor(actor)) {
         if (playerkit::BlocksNativeSoraPuppets()) {
             playerkit::NoteRefusedClone(actor); // never collected; PuppetTarget refuses it live
@@ -1169,7 +1169,7 @@ static uintptr_t PuppetTarget(int index) {
     if (planned == 0 && partynative::AppliedCompanionMember() != 0) return 0;
     if (planned == 1) {
         const uintptr_t one = index == partynative::PresentPuppetIndex() ? g_clones[0] : 0;
-        return one != 0 && playerkit::BlocksNativeSoraPuppets() ? 0 : one;
+        return one != 0 && (playerkit::BlocksNativeSoraPuppets() || !privatestatus::MissingPartyPuppetAllowed(one)) ? 0 : one;
     }
     uintptr_t target = g_clones[0] != 0 || planned == 2 ? g_clones[index]
                                                          : (index == 0 ? g_friend1Actor : g_friend2Actor);
@@ -1187,7 +1187,7 @@ static uintptr_t PuppetTarget(int index) {
     // friend resolves through member 0), so refuse it. Friend-class targets
     // (Donald/Goofy) are unaffected. Per-puppet member slots: VUH-1519.
     if (target != 0 && playerkit::BlocksNativeSoraPuppets() && IsPlayerClassActor(target)) return 0;
-    return target;
+    return target && !privatestatus::MissingPartyPuppetAllowed(target) ? 0 : target;
 }
 
 static int PuppetIndexFor(uintptr_t actor) {

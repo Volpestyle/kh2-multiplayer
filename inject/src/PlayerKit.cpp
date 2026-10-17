@@ -272,6 +272,11 @@ bool BcCloneRequested() {
     return on("KH2COOP_ENEMY_TARGET_ALL") && on("KH2COOP_ENEMY_MIRROR") && !on("KH2COOP_PARTY_NATIVE");
 }
 void SetBcNeutralReady(bool (*probe)()) { g_bcNeutralReady.store(probe, std::memory_order_release); }
+bool MissingPartyReady() {
+    const auto neutral=g_bcNeutralReady.load(std::memory_order_acquire);
+    return g_bcRequested && g_active.load(std::memory_order_acquire) && privatestatus::Ready() &&
+        neutral && neutral() && enemysync::TwoPlayerSessionLive();
+}
 bool BcCloneApplied(std::uint8_t world) {
     return BcCloneWorld(world) && (g_bcOwned.load(std::memory_order_acquire) & (1u << world)) != 0;
 }

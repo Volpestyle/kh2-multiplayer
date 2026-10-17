@@ -768,3 +768,13 @@ if(WIN32)
         add_test(NAME kh2coop_limit_admission_test_${_limit_mode} COMMAND kh2coop_limit_admission_test ${_limit_mode})
     endforeach()
 endif()
+
+# VUH-2343/2352: exact route spawn admission and fail-closed retained-record policy.
+add_executable(kh2coop_route_spawn_policy_test tests/RouteSpawnPolicyTest.cpp)
+target_include_directories(kh2coop_route_spawn_policy_test PRIVATE common/include)
+if(MSVC)
+    target_compile_options(kh2coop_route_spawn_policy_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_route_spawn_policy_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+add_test(NAME kh2coop_route_spawn_policy_test COMMAND kh2coop_route_spawn_policy_test)

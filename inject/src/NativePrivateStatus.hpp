@@ -3,7 +3,8 @@
 namespace kh2coop::inject::privatestatus {
 using LogFn = void (*)(const char*, ...);
 // Exact Steam 9002b2de private status. Explicit legacy experiment, or automatic
-// two-player BC dependency under shipped TARGET_ALL + MIRROR (owned default leaf).
+// two-player route dependency under shipped TARGET_ALL + MIRROR. Bailey uses an
+// explicit retained-record scope; it never claims or writes a party leaf.
 // VUH-1515 (KH2COOP_ENEMY_TARGET_REMOTE): scope also verified rooms (BC 05/06) with their exact leaf row 00/00/02/12.
 void EnableEnemyTargetScope();
 bool Initialize(std::uintptr_t base);
@@ -13,4 +14,11 @@ bool RetainsMinHookResources();
 // VUH-1519: true while every hook is installed and no fault has disarmed selection.
 // PartyNative refuses to spawn clones otherwise (they would share Sora's SAVE-bound record).
 bool Ready();
+using NativeWrapper = void* (__fastcall*)(const void*,void*);
+// Caller qualified exact Bailey ingress. Normal paths call nativeRecord once and return its result;
+// an added direct-Sora construction uses retained immutable storage and explicit FLS selection.
+void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper spawn,LogFn log);
+// Only actors created by that scope are filtered. Unbound/stale/disconnected actors stay quarantined.
+bool MissingPartyPuppetAllowed(std::uintptr_t actor);
+
 }

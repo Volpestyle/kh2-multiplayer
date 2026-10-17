@@ -1,6 +1,6 @@
 {
   "name": "net_lod_morale_spawn_probe",
-  "description": "VUH-2352 diagnostic on protocol23 player defaults: reuse the landed MU01_MS102 morale run, retain exact late-wave generated-wrapper receipts from the scoped read-only observer, then require enemy parity. No spawn/controller admission, point, mission or save logic is changed. This is development with two local instances and a host warp; it is not D15 native-door acceptance.",
+  "description": "VUH-2352 guarded development on player defaults: exact MU01_MS102 type2 b_4p978/999 and b_4s1007 generated-wave admission through existing emission arbitration and birth tickets, then matching host/client receipts and final enemy HP parity. Two local instances and a host warp, not D15 native-door acceptance. No new protocol, native-point semantics, mission or save logic.",
   "playerDefaults": true,
   "protect": [
     0,
@@ -231,24 +231,43 @@
       "expr": "[enemy_hps(0), enemy_hps(1)]"
     },
     {
+      "do": "checkpoint",
+      "name": "3 Generated-wave births and host identities match"
+    },
+    {
       "do": "save",
       "as": "late_wave_actors",
       "expr": "[actors(i) for i in range(2)]"
     },
     {
       "do": "save",
-      "as": "late_wave_observer_counts",
+      "as": "late_wave_success_counts",
       "expr": "[log_count('[morale-wave-spawn] observation-only=1 after=1',i) for i in range(2)]"
     },
     {
+      "do": "save",
+      "as": "generated_wave_receipts",
+      "expr": "{'host':log_matches(r'\\[spawn-emission\\] sent epoch=\\d+ seq=(?P<seq>\\d+) key=(?P<key>1882480482|1932812130) header=(?P<header>978|999|1007) record=(?P<record>\\d+) netId=(?P<netId>\\d+)',0),'client':log_matches(r'\\[spawn-emission\\] client emitted epoch=\\d+ key=(?P<key>1882480482|1932812130) header=(?P<header>978|999|1007) record=(?P<record>\\d+) netId=(?P<netId>\\d+) seq=(?P<seq>\\d+)',1)}"
+    },
+    {
       "do": "assert",
-      "expr": "all(n>0 for n in saved['late_wave_observer_counts'])",
-      "message": "Both roles must reach an observed late-wave native wrapper; otherwise this probe did not qualify its target"
+      "expr": "all(n>0 for n in saved['late_wave_success_counts'])",
+      "message": "Both roles must return successful observed native generated-wave births; null startup attempts do not qualify"
     },
     {
       "do": "assert",
       "expr": "enemy_hps(0)==enemy_hps(1)",
       "message": "Friend-only or missing later-wave enemies remain; inspect exact native generated-wrapper records and host identities"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['generated_wave_receipts']['host'])>=3 and sorted((b['key'],b['header'],b['record'],b['netId'],b['seq']) for b in saved['generated_wave_receipts']['host'])==sorted((b['key'],b['header'],b['record'],b['netId'],b['seq']) for b in saved['generated_wave_receipts']['client']) and all(int(b['netId'])>0 for b in saved['generated_wave_receipts']['client'])",
+      "message": "Generated native births must consume every exact host combat occurrence, without friend-only or missing tickets"
+    },
+    {
+      "do": "assert",
+      "expr": "all(log_count('[spawn-birth] capture-refused',i)==0 and log_count('[privatestatus] stats requested=1 ready=0',i)==0 for i in range(2))",
+      "message": "Native attachment capture and existing private status must remain qualified"
     }
   ]
 }

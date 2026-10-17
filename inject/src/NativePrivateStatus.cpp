@@ -5,6 +5,8 @@
 #include "PartyNative.hpp"
 #include "PlayerKit.hpp"
 #include "Warp.hpp"
+#include "EnemySync.hpp"
+#include "kh2coop/RouteSpawnPolicy.hpp"
 #include <Windows.h>
 #include <MinHook.h>
 #include <intrin.h>
@@ -41,6 +43,7 @@ std::atomic<unsigned> g_installed{};
 // Accessed by checked x64 gateways with byte loads/stores; naturally atomic.
 // Interlocked APIs are used in C++ for the same storage, never std::atomic aliasing.
 alignas(64) volatile char g_owned[PoolCount]{};
+std::array<std::atomic<std::uint64_t>,PoolCount> g_ownedSerial{};
 alignas(8) volatile LONG64 g_retired{},g_excluded{};
 struct Stamp { std::array<std::uint8_t,10> now{}; std::uint32_t transition{},load{}; };
 struct Selection {
@@ -53,6 +56,7 @@ struct Selection {
     // VUH-1519 party profile: an ordinary factory call in a party stamp (candidate); the
     // constructor promotes a Sora build to selected (a clone) or partyLocal (the last one).
     bool candidate{},partyLocal{};
+    unsigned missingSlot{};
     std::uint32_t factoryId{};
 };
 // Never stores caller stack pointers, only numeric stack anchors and owned POD.
@@ -73,6 +77,19 @@ constexpr unsigned PartyClones=2; // the most (three players); a stamp expects A
 struct PartyPending { Stamp stamp{}; std::array<uintptr_t,PartyClones> actor{},status{}; std::array<std::uint64_t,PartyClones> serial{};
     std::array<int,PartyClones> key{}; unsigned claimed{},count{},builds{},canonicalFrames{},expected{}; bool open{},bound{}; };
 PartyPending g_party{};
+struct MissingParty {
+    Stamp stamp{}; ProducerWorldContext context{};
+    alignas(16) std::array<std::uint8_t,64> record{};
+    uintptr_t controller{},actor{},status{},local{},localStatus{};
+    std::uint64_t serial{};
+    std::atomic<FiberContext*> construction{};
+    bool bound{};
+};
+std::array<MissingParty,routespawn::MissingPartyBudget::Capacity> g_missing{};
+routespawn::MissingPartyBudget g_missingBudget{};
+// Negative fence only; active contexts are owned permanent POD, never caller stack pointers.
+std::atomic<unsigned> g_missingInFlight{};
+
 // First binding refusal reason, logging only: 1 null/same actor, 2 not Sora, 3 status owned,
 // 4 status shared with clone, 5 clone status changed, 6 clone not owned, 7 player pointer,
 // 8 stamp changed, 9 second raw566 while pending, 10 new stamp while pending.
@@ -81,6 +98,7 @@ PartyPending g_party{};
 // 15 the canonical player holds a claimed private record (the third Sora never came),
 // 16 party kits: the clones' descriptor keys differ from the clone kits written (members 0/1), or the
 //    canonical local's key differs from this machine's expected own kit.
+// 17 explicit missing-party construction/binding failed; its actor stays quarantined.
 std::atomic<unsigned> g_bindFault{};
 struct Event { unsigned kind{},thread{}; std::uint64_t serial{}; uintptr_t actor{},local{},status{},localStatus{}; int index{},hp{},localHp{};
     std::uint32_t factoryId{}; unsigned order{},role{},frame{}; int key{}; }; // kind 4 (party build order) only
@@ -90,6 +108,13 @@ SRWLOCK g_queueLock=SRWLOCK_INIT;
 unsigned g_read{},g_count{};
 void Fault() {g_faults.fetch_add(1);g_ready=false;}
 void BindFault(unsigned reason){unsigned none=0;g_bindFault.compare_exchange_strong(none,reason);Fault();}
+[[noreturn]] void AbortMissingConstruction() {
+    // The derived Sora constructor assumes its base completed; returning a fake
+    // null from that base is not a native failure contract. Abort before any
+    // shared-status fallback instead. Existing finally blocks preserve this SEH.
+    BindFault(17);RaiseException(0xE0423433,EXCEPTION_NONCONTINUABLE,0,nullptr);
+    __assume(0);
+}
 bool Read(uintptr_t p,void* out,std::size_t n) {
     if(p<0x10000 || p>=0x800000000000ULL || n>0x800000000000ULL-p)return false;
     __try {std::memcpy(out,reinterpret_cast<void*>(p),n);return true;}
@@ -102,6 +127,19 @@ int Index(uintptr_t p) {
 }
 bool Owned(uintptr_t p) {
     const int i=Index(p);return i>=0 && _InterlockedCompareExchange8(&g_owned[i],0,0)!=0;
+}
+std::uint64_t OwnedSerial(uintptr_t p) {
+    const auto index=Index(p);return index>=0?g_ownedSerial[static_cast<unsigned>(index)].load(std::memory_order_acquire):0;
+}
+bool MissingConstructionStack() {
+    if(!g_missingInFlight.load())return false;
+    const auto sample=SampleStack();
+    for(auto& m:g_missing)if(const auto* c=m.construction.load(std::memory_order_acquire)) {
+        // Distinct live fibers have distinct native stacks. A lost FLS slot must
+        // not be mistaken for an ordinary call on this still-active stack.
+        if(routespawn::SameConstructionStack(c->thread,c->stackHigh,sample.thread,sample.low,sample.high))return true;
+    }
+    return false;
 }
 bool StampNow(Stamp& s) {
     if(!spawncontroller::IsDiagnosticGameThread())return false;
@@ -237,7 +275,14 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
         const bool unbound=g_party.claimed!=0;const bool canonical=unbound && CanonicalIsClaimed();
         g_party={};if(unbound)BindFault(canonical?15:11);
     }
-    if(ordinary && g_ready.load() && PartyProfile(stamp)) {
+    auto* enclosing=ordinary && id==84 ? Current(anchor) : nullptr;
+    if(enclosing && enclosing->missingSlot) {
+        if(enclosing->factoryId!=0 || !enclosing->selected || enclosing->constructor || enclosing->used ||
+           !g_ready.load() || !StampNow(stamp) || !Same(stamp,enclosing->stamp)) {
+            Fault();SetLastError(error);return 0; // fixed wrapper's proven null-return path
+        }
+        s=*enclosing;enclosing->used=true;s.used=false;s.factoryId=id;
+    } else if(ordinary && g_ready.load() && PartyProfile(stamp)) {
         if(!g_party.open || !Same(g_party.stamp,stamp)){g_party={};g_party.stamp=stamp;g_party.open=true;g_party.expected=partynative::AppliedClones();}
         s.candidate=true;s.stamp=stamp;s.factoryId=id; // promoted (or not) by the constructor, by descriptor
     } else if(ordinary && id==566 && g_ready.load() && Profile(stamp)) {
@@ -247,7 +292,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
         } else Fault();
     }
     const auto token=PushScope(&s,anchor);
-    if(!token.context){Fault();SetLastError(error);return g_factory(id,point,yaw);}
+    if(!token.context){Fault();SetLastError(error);return s.missingSlot?0:g_factory(id,point,yaw);}
     uintptr_t result=0;bool returned=false;
     __try {SetLastError(error);result=g_factory(id,point,yaw);returned=true;}
     __finally {
@@ -263,7 +308,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
                 else {const unsigned k=g_party.count++;g_party.actor[k]=top->actor;g_party.status[k]=top->status;g_party.serial[k]=top->serial;g_party.key[k]=top->key;
                     PublishBuild(++g_party.builds,top->factoryId,1,top->actor,top->serial,top->key);}
             }
-            else g_pending={top->stamp,top->actor,top->status,top->serial,true,top->key};
+            else if(!top->missingSlot)g_pending={top->stamp,top->actor,top->status,top->serial,true,top->key};
         } else if(top && top->partyLocal) {
             // The last Sora of a party stamp: both clones must already hold owned private
             // records, and this construction must take the canonical pointer with an
@@ -305,6 +350,12 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
 uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,uintptr_t arg4,const float* point,float yaw) {
     const DWORD error=GetLastError();const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     auto* parent=Current(anchor);Selection s{};
+    const bool missingConstruction=parent && parent->missingSlot;
+    if(missingConstruction) {
+        auto& missing=g_missing[parent->missingSlot-1];
+        // Quarantine even when a constructor precondition fails, before native code yields.
+        if(missing.actor && missing.actor!=actor)Fault();else missing.actor=actor;
+    }
     if(parent && parent->candidate && !parent->selected && !parent->partyLocal && !parent->used && g_ready.load() &&
        actor && ConstructorForm(descriptor,form) && (CloneDescriptorKey(descriptor)==1 || (CloneDescriptorKey(descriptor)!=0 && partynative::KitsActive()))) { // qualified kits only (CloneDescriptorKey)
         const int k=CloneDescriptorKey(descriptor); // party kits: each build keeps its own descriptor's key
@@ -323,8 +374,9 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
             {s=*parent;s.actor=actor;s.descriptor=descriptor;s.key=key;s.form=form;s.constructor=true;}
         else Fault();
     }
+    if(missingConstruction && !s.selected)AbortMissingConstruction();
     const auto token=PushScope(&s,anchor);
-    if(!token.context){Fault();SetLastError(error);return g_constructor(actor,descriptor,form,arg4,point,yaw);}
+    if(!token.context){Fault();if(missingConstruction)AbortMissingConstruction();SetLastError(error);return g_constructor(actor,descriptor,form,arg4,point,yaw);}
     uintptr_t result=0;bool returned=false;Selection done{};
     __try {SetLastError(error);result=g_constructor(actor,descriptor,form,arg4,point,yaw);returned=true;}
     __finally {
@@ -344,12 +396,16 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
 uintptr_t __fastcall Allocate(int key,int form) {
     const DWORD error=GetLastError();const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());auto* s=Current(anchor);
+    if(caller==g_base+0x3A7B1B && key==1 && form==0 && MissingConstructionStack() && (!s || !s->missingSlot)) {
+        AbortMissingConstruction();
+    }
     if(!s || !s->selected || !s->constructor || s->used || caller!=g_base+0x3A7B1B || !g_ready.load()) {
+        if(s && s->missingSlot)AbortMissingConstruction();
         SetLastError(error);return g_allocate(key,form);
     }
     Stamp now{};uintptr_t empty=1;
     if(key!=s->key || form!=s->form || !StampNow(now) || !Same(now,s->stamp) || !Read(s->actor+0x5C0,empty) || empty || !HasFreeRecord()) {
-        Fault();SetLastError(error);return g_allocate(key,form);
+        Fault();if(s->missingSlot)AbortMissingConstruction();SetLastError(error);return g_allocate(key,form);
     }
     // Own POD frame stays in FLS pool across actual SwitchToFiber. Nested constructors hide it.
     const auto serial=s->serial;s->fresh=true;s->used=true;bool returned=false;uintptr_t result=0;
@@ -371,6 +427,7 @@ uintptr_t __fastcall InitializeRecord(uintptr_t status) {
     const DWORD error=GetLastError();const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     auto* s=Current(reinterpret_cast<uintptr_t>(_AddressOfReturnAddress()));
     const bool selected=s && s->selected && s->constructor && s->fresh && !s->status && caller==g_base+0x3C0432;
+    if(caller==g_base+0x3C0432 && MissingConstructionStack() && (!selected || !s->missingSlot))AbortMissingConstruction();
     const int index=Index(status);
     // Only verified native pops establish that an old marker is stale. Other callers
     // can reinitialize an in-use record: keep its veto/exclusion and fail the profile.
@@ -384,8 +441,10 @@ uintptr_t __fastcall InitializeRecord(uintptr_t status) {
         const int i=Index(status);
         // Native allocator has already popped this exact slot. Publish exclusion and SAVE veto
         // before native initialization/refresh; no guessed top-of-free-list ownership.
-        if(i<0 || status==s->localStatus || _InterlockedCompareExchange8(&g_owned[i],1,0)!=0)Fault();
-        else {s->status=status;Publish(1,*s);}
+        if(i<0 || status==s->localStatus || _InterlockedCompareExchange8(&g_owned[i],1,0)!=0) {
+            Fault();if(s->missingSlot)AbortMissingConstruction();
+        }
+        else {g_ownedSerial[static_cast<unsigned>(i)].store(s->serial,std::memory_order_release);s->status=status;Publish(1,*s);}
     }
     SetLastError(error);return g_initialize(status);
 }
@@ -547,6 +606,95 @@ bool Initialize(uintptr_t base) {
     constexpr unsigned order[]{4,5,6,7,3,2,1,0};
     for(auto i:order)if(ok){ok=MH_EnableHook(g_hooks[i].target)==MH_OK;if(ok)g_installed.fetch_or(1u<<i);}
     if(ok)g_ready=true;else Fault();SetLastError(error);return ok;
+}
+// This scope encloses the entire wrapper, including native handler attachment. No saved
+// caller stack pointers escape; native exceptions propagate through the finally unchanged.
+void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper spawn,LogFn log) {
+    const DWORD error=GetLastError();
+    if(!spawn){Fault();SetLastError(error);return nullptr;}
+    Stamp stamp{},entrance{}; ProducerWorldContext context{};
+    std::array<std::uint8_t,64> original{};
+    const bool admitted=spawn && g_bcAutomatic && g_ready.load() && playerkit::MissingPartyReady() &&
+        StampNow(stamp) && stamp.now==routespawn::BaileyLocation && stamp.load && stamp.load!=UINT32_MAX &&
+        warp::TransitionPending() &&
+        Read(reinterpret_cast<uintptr_t>(nativeRecord),original) &&
+        routespawn::Equal(original,std::span<const std::uint8_t>(routespawn::BaileyRecords.data(),64)) &&
+        HasFreeRecord() && enemysync::CaptureWorldContext(context) && enemysync::WorldContextCurrent(context) &&
+        StampNow(entrance) && Same(stamp,entrance) && g_ready.load() && warp::TransitionPending();
+    if(!admitted || !g_missingBudget.Claim(stamp.load+1)) {
+        if(log)log("[missing-party] refused admission=%u load=%u retained=%u",admitted?1u:0u,stamp.load,g_missingBudget.count);
+        SetLastError(error);return spawn(nativeRecord,controller);
+    }
+    auto& missing=g_missing[g_missingBudget.count-1];
+    missing.stamp=stamp;missing.context=context;missing.controller=reinterpret_cast<uintptr_t>(controller);
+    missing.record=original;
+    const std::uint32_t sora=84;std::memcpy(missing.record.data(),&sora,sizeof(sora));
+    Selection selection{};selection.selected=true;selection.stamp=stamp;
+    selection.serial=g_serial.fetch_add(1)+1;selection.missingSlot=g_missingBudget.count;missing.serial=selection.serial;
+    const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
+    const auto token=PushScope(&selection,anchor);
+    void* added=nullptr; bool returned=false;
+    if(token.context) {
+        missing.construction.store(token.context,std::memory_order_release);
+        g_missingInFlight.fetch_add(1);
+        __try {SetLastError(error);added=spawn(missing.record.data(),controller);returned=true;}
+        __finally {
+            const auto nativeError=GetLastError();
+            const auto* completed=Top(token);
+            if(!returned || !completed || !completed->used)Fault();
+            if(!RestoreScope(token))Fault();
+            missing.construction.store(nullptr,std::memory_order_release);
+            g_missingInFlight.fetch_sub(1);
+            SetLastError(nativeError);
+        }
+    } else Fault(); // The spent load/storage remain retained; no ambiguous retry.
+    if(added && !missing.actor)missing.actor=reinterpret_cast<uintptr_t>(added);
+    // Even a normal null clone return never suppresses or duplicates the authored local call.
+    SetLastError(error);
+    void* local=nullptr;bool localReturned=false;
+    __try {local=spawn(nativeRecord,controller);localReturned=true;}
+    __finally {if(!localReturned)Fault();}
+    const auto nativeError=GetLastError();
+    uintptr_t cloneStatus=0,localStatus=0,canonical=0,cloneController=0,cloneRecord=0,localController=0,localRecord=0;
+    Stamp after{};std::array<std::uint8_t,64> check{};
+    const bool cloneValid=added && missing.actor==reinterpret_cast<uintptr_t>(added) && SoraActor(missing.actor,cloneStatus);
+    const bool localValid=local && SoraActor(reinterpret_cast<uintptr_t>(local),localStatus);
+    const bool cloneAttached=cloneValid && Read(missing.actor+0x9E8,cloneController) && cloneController==missing.controller &&
+        Read(missing.actor+0x9F0,cloneRecord) && cloneRecord==reinterpret_cast<uintptr_t>(missing.record.data());
+    const bool localAttached=localValid && Read(reinterpret_cast<uintptr_t>(local)+0x9E8,localController) && localController==missing.controller &&
+        Read(reinterpret_cast<uintptr_t>(local)+0x9F0,localRecord) && localRecord==reinterpret_cast<uintptr_t>(nativeRecord);
+    const bool current=g_ready.load() && StampNow(after) && Same(after,stamp) && warp::TransitionPending() && playerkit::MissingPartyReady() &&
+        enemysync::WorldContextCurrent(context) && Read(g_base+PlayerRva,canonical) &&
+        Read(reinterpret_cast<uintptr_t>(nativeRecord),check) && check==original;
+    routespawn::MissingPartyBinding binding{missing.actor,reinterpret_cast<uintptr_t>(local),cloneStatus,localStatus,canonical,
+        cloneValid && Owned(cloneStatus) && OwnedSerial(cloneStatus)==missing.serial,localValid && Owned(localStatus),cloneAttached,localAttached,current};
+    missing.bound=routespawn::Bound(binding);
+    missing.status=cloneStatus;missing.local=binding.local;missing.localStatus=localStatus;
+    if(!missing.bound)BindFault(17);
+    else {Selection b{};b.serial=selection.serial;b.actor=missing.actor;b.status=cloneStatus;b.local=binding.local;b.localStatus=localStatus;Publish(3,b);}
+    if(log)log("[missing-party] born bound=%u clone=%llX local=%llX status=%llX localStatus=%llX controller=%llX record=%llX load=%u transition=%u generation=%u retained=%u",
+        missing.bound?1u:0u,missing.actor,binding.local,cloneStatus,localStatus,missing.controller,
+        reinterpret_cast<uintptr_t>(missing.record.data()),stamp.load,stamp.transition,context.generation,g_missingBudget.count);
+    SetLastError(nativeError);return local;
+}
+bool MissingPartyPuppetAllowed(uintptr_t actor) {
+    const DWORD error=GetLastError();bool allowed=true;
+    for(unsigned i=g_missingBudget.count;i>0;--i) {
+        const auto& m=g_missing[i-1];if(m.actor!=actor)continue;
+        Stamp now{};uintptr_t status=0,canonical=0,localStatus=0,controller=0,record=0;
+        const bool player=SoraActor(actor,status);
+        if(player && routespawn::NewPrivateBirth(m.serial,OwnedSerial(status),Owned(status),g_ready.load()))continue;
+        allowed=m.bound && g_ready.load() && StampNow(now) && now.now==m.stamp.now &&
+            routespawn::MissingPartyLoadCurrent(m.stamp.load,m.stamp.transition,now.load,now.transition,warp::TransitionPending()) &&
+            playerkit::MissingPartyReady() && enemysync::WorldContextCurrent(m.context) &&
+            player && status==m.status && Owned(status) && OwnedSerial(status)==m.serial &&
+            SoraActor(m.local,localStatus) && localStatus==m.localStatus && !Owned(localStatus) &&
+            Read(g_base+PlayerRva,canonical) && canonical==m.local &&
+            Read(actor+0x9E8,controller) && controller==m.controller &&
+            Read(actor+0x9F0,record) && record==reinterpret_cast<uintptr_t>(m.record.data());
+        break;
+    }
+    SetLastError(error);return allowed;
 }
 void StopNewAllocations(){g_ready=false;}
 bool RetainsMinHookResources(){return g_retained.load();}
