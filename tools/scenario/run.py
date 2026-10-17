@@ -656,6 +656,8 @@ def step_fight(ctx: Context, step: dict) -> dict:
     button = step.get("button", "cross")
     keys = ("0x718C68", "0x718C70", "0x718C78", "0x718C80")
     results: dict = {}
+    stop = threading.Event()
+    until_reached = False
 
     def bot(index: int) -> None:
         pid = ctx.inst(index).pid
@@ -663,7 +665,7 @@ def step_fight(ctx: Context, step: dict) -> dict:
         results[index] = out
         end = time.monotonic() + seconds
         try:
-            while time.monotonic() < end:
+            while time.monotonic() < end and not stop.is_set():
                 actors = ctx.actors(index)
                 me = next((a for a in actors if a["name"] == "P_EX100"), None)
                 foes = [a for a in actors if a.get("objectType") in (3, 4) and not a["name"].startswith("F_")
@@ -672,6 +674,9 @@ def step_fight(ctx: Context, step: dict) -> dict:
                     out["enemiesStart"] = len(foes)
                 out["enemiesEnd"] = len(foes)
                 if not foes:
+                    if step.get("until"):
+                        time.sleep(0.1)  # a bounded milestone fight can span native wave gaps
+                        continue
                     break
                 if me is None:
                     time.sleep(0.3)
@@ -734,10 +739,20 @@ def step_fight(ctx: Context, step: dict) -> dict:
         threads.append(threading.Thread(target=sampler, daemon=True))
     for thread in threads:
         thread.start()
-    while any(thread.is_alive() for thread in threads):
-        ctx.sleep(0.5)
+    try:
+        while any(thread.is_alive() for thread in threads):
+            ctx.sleep(0.5)
+            if not until_reached and step.get("until") and ctx.eval(step["until"]):
+                until_reached = True
+                stop.set()
+    finally:
+        stop.set()
+        for thread in bots:
+            thread.join(timeout=5)
     name = step.get("as", "fight")
     ctx.saved[name] = {str(k): v for k, v in results.items()}
+    if step.get("until"):
+        ctx.saved[name]["until"] = {"expr": step["until"], "reached": until_reached}
     if sample:
         path = ctx.run_dir / f"{name}_samples.json"
         path.write_text(json.dumps(samples, indent=1), encoding="utf-8")
@@ -5168,6 +5183,8 @@ def validate_scenario(scenario: dict) -> None:
             compile(step["expr"], f"<{prefix}>", "eval")
         if "blockedExpr" in step:
             compile(step["blockedExpr"], f"<{prefix} blockedExpr>", "eval")
+        if kind == "fight" and "until" in step:
+            compile(step["until"], f"<{prefix} fight until>", "eval")
         if kind == "runtime" and step["role"] not in ("player", "friend1", "friend2", "spectator"):
             raise ValueError(f"{prefix}: invalid runtime role")
         if kind in ("reconnect_mark", "runtime_pause", "reconnect_check"):
