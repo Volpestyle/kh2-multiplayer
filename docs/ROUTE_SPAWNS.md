@@ -149,7 +149,7 @@ return cancels for retry; a nonnull/ambiguous result spends that occurrence.
 Checked actor/controller/record roots supply the existing birth ticket and host
 combat netId. Independent native births are blocked on this scoped client path.
 
-Protocol23 and `SpawnEmission.point` retain their existing controller activation
+The current protocol's `SpawnEmission.point` retains its controller activation
 point semantics. This patch does not replay generated spawn coordinates: native
 placement may differ until existing host pose mirroring takes over. Identity and
 HP parity must therefore be proved through occurrence tickets and native actor

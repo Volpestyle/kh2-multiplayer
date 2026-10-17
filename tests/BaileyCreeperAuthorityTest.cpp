@@ -63,7 +63,8 @@ int main(){
     BaileyCreeperLease changed{10};check(!changed.Observe(10,false)&&!changed.Observe(11,true),"changed roots/session/mission never recover by pointer reuse");
     mr::Mission h{},f{};h.active=f.active=true;std::strcpy(h.file,"HB08_MS102.bar");std::strcpy(f.file,"HB08_MS102.bar");h.flags=f.flags=1;
     check(mr::Follows(h,f)&&!mr::Ended(h)&&!mr::Ended(f),"both Bailey peers start the same native mission");
-    h.flags|=mr::kEnded;check(mr::Ended(h)&&!mr::Ended(f)&&mr::Follows(h,f),"host end still needs replay on friend");
+    h.flags|=mr::kEnded;check(mr::HostEndedUnknown(h),"unknown engine end never fabricates a replay trap");
+    h.endTrap=3;check(!mr::HostEndedUnknown(h)&&mr::Ended(h)&&!mr::Ended(f)&&mr::Follows(h,f),"known host end still needs replay on friend");
     f.flags|=mr::kEnded;check(mr::Ended(h)&&mr::Ended(f)&&!mr::Follows(h,f),"both native ends observed; no second replay");
     check(mr::DropLocalCall(static_cast<std::size_t>(mr::EndTrapIndex(3)),false,false,true),"replayed completion blocks duplicate native end");
     std::cout<<"Bailey Creeper authority: "<<(failures?"FAIL":"PASS")<<" ("<<failures<<" failures)\n";return failures?1:0;
