@@ -9,6 +9,129 @@ Save/app-ID inventories matched; native closure verified no KH2, owned driver
 or descendants, and neither lock remained. PC1 and PC2 both used Steam Global
 buildid `15194255`. This qualifies the lane, not other fixtures or networking.
 
+## D15 desktop readiness (VUH-2339)
+
+**Design only; not installed or qualified.** `bld` belongs to another person
+(`ccroc`). The lead requires James's explicit OK before installing a physical
+input observer, a persistent user task or a reclaim gate there. Until that
+decision, keep `bld` read-only: no bridge starts, queued jobs, Steam starts or
+account changes. The earlier account-B consent does not authorize monitoring
+someone's everyday desktop. James also owns the account-B access decision.
+
+### Read-only inventory, 2026-10-17 06:30–06:32 UTC
+
+- Explorer was in Session 1; the SSH commands were in Session 0. No Steam,
+  KH2, official launcher or desktop PowerShell/Python bridge was observed.
+  Steam `ActiveUser=0`, `pid=0`: the signed-in-B gate currently refuses.
+  Account B appears to be the desktop user's account; do not sign anyone out
+  or assume the historical install owner proves current authentication.
+- The historical queue is `%USERPROFILE%/desk/jobs` (`*.job`), with results
+  under `desk/done` and `desk/agent.log`. The queue was empty; the log's last
+  completion was 2026-10-08 00:08:18, in its original local timestamps.
+  `C:/desk` and the usual `desk/agent.ps1` source paths were absent on PC2.
+  Task Scheduler COM showed no root-folder task matching `desk` or `kh2`;
+  the CIM query was denied to this standard user.
+- The preserved wrapper is `%USERPROFILE%/lead-inbox/rev11-start-bridge.ps1`.
+  It calls the historical
+  `C:/Users/volpe/repos/kh2-multiplayer/build/rig/steam-confirm-20261007-01/live-step2-rev11/pc2/pc2-bridge.ps1`.
+  That source exists and matches its old verifier's SHA-256. The wrapper
+  requires Session 2, while Explorer is now in Session 1. Its stop file is
+  checked only **after the running job finishes**. It cannot establish D15's
+  two-second reclaim behavior. Neither wrapper nor verifier was executed.
+- Two installed `KH2-Co-op` directories were checked beneath
+  `%USERPROFILE%/KH2-package-join27-20261009T124156Z-b5354662-friend/` and
+  `%USERPROFILE%/KH2-causal-20261012T173655Z-f96e8c3e-friend/`. All 1,684 and
+  1,694 manifest-listed files respectively matched their hashes, including
+  the five native products. Both contain `tools/launcher/friend.py` and
+  `python/python.exe`; both default to Steam. They are historical protocol
+  10 / AvatarBridge 3 and protocol 17 / AvatarBridge 4 packages. Main at
+  `1e5e94b` uses protocol 22 / AvatarBridge 4; the packaging product recipe
+  still pins protocol 18. Select a current, matching cohort for both seats
+  before a D15 run. These checks cover only the two named directories, not
+  every package on the machine, and did not execute packaged code.
+- KH2 is installed under Steam's
+  `steamapps/common/KINGDOM HEARTS -HD 1.5+2.5 ReMIX-/`. Its EXE matches the
+  supported Steam Global allowlist and app `2552430` reports build `15194255`.
+  The separate `%USERPROFILE%/dev/kh2-multiplayer` checkout is at `7a37f9b`;
+  it was not updated. Both documented PC2 rig-lock paths were absent.
+  None of these observations proves the person is away or grants a live lane.
+
+Local evidence: `build/rig/vuh2339-readiness-20261017/`. Keep raw account/path
+inventories local; post the sanitized result on
+[VUH-2339](https://linear.app/vuhlp/issue/VUH-2339). No save folder was read
+or written, and no desktop input, launch, installation or persistent change
+was made during this inventory.
+
+### Proposed launch and reclaim gate
+
+After explicit authorization, use one removable, unelevated interactive-user
+task and one exclusive desktop-driver lease per PC. A task name is not proof
+of ownership: record its action, user, driver PID and native creation time.
+Refuse an existing driver or lease; never replace someone else's bridge or
+task. Reuse `pc2_session` to bind the driver to a fresh active-console session,
+and additionally require an unlocked input desktop. SSH Session 0,
+session changes, unavailable observations and stale observer heartbeats refuse.
+
+Before every launch, require all of the following together:
+
+- At least 15 minutes since physical input, measured in the console session.
+  `GetLastInputInfo` alone is insufficient because it also counts injected
+  input. A candidate implementation uses keyboard/mouse low-level hook flags
+  to distinguish injected events; it records only idle duration and health,
+  never keys, text, pointer positions, titles or screenshots. On startup,
+  reboot, observer failure or session change, earn a new 15-minute interval;
+  do not reconstruct physical idle time from an earlier generic idle reading.
+  Unattributed input must conservatively reclaim the desk.
+- No foreign game or fullscreen application, and no existing KH2 or official
+  launcher, regardless of whether an old registry calls it owned. An absent
+  process is not evidence of physical idleness.
+- Steam already running and authenticated as the explicitly approved B on
+  PC2, A on PC1. A remembered login or app-manifest `LastOwner` is insufficient.
+  Mismatch or sign-out refuses; the agent never starts a login flow.
+- The shared live lane is available. On PC2, check both existing lock paths
+  described below before and after acquiring the desktop lease. On PC1,
+  coordinate with the saves/pilot owner and check the canonical live-lane lock;
+  a clean worktree does not make the physical PC available. Keep live-lane
+  ownership with the scenario/runner rather than acquiring its lock twice.
+
+One driver sends all agent OS keyboard input to its exact owned game window;
+other bridge dispatch and launcher paths must pass the same admission and
+lease. D15 gameplay has no warp, teleport or memory-based movement commands.
+Recheck admission immediately before launch, and keep reclaim cancellation
+active during boot and long-running jobs as well as gameplay.
+
+On physical return, stop dispatch and cancel queued/held agent input without
+moving focus. Close only this run's retained PID/creation identities through
+canonical `kh2ctl kill`; verify exit and remove only the matching lease bytes.
+Never kill a foreign game or close Steam. The watchdog must operate independently
+of the input runner; a synchronous job cannot delay reclaim. Missing health or
+an uncertain cleanup stops further input and retains the lease for inspection.
+The two-second requirement covers input cessation, owned-game exit and lease
+release together; it remains unproven until measured in a physical reclaim test.
+
+### Readiness checklist after owner authorization
+
+- [ ] Record permission for monitoring/persistence, its duration and removal;
+  confirm account-B use without changing anyone's account.
+- [ ] Implement the common PC1/PC2 gate and route every agent desktop entry
+  through its single-driver lease, without taking over existing lanes.
+- [ ] Verify default-user task installation/removal and fresh console binding.
+- [ ] Show refusal for recent physical input, foreign game/fullscreen app,
+  existing KH2/launcher, wrong/signed-out Steam, occupied lane and lost health.
+- [ ] Show injected agent input does not reset physical idle, and a real
+  physical reclaim stops input, closes only the owned game and releases the
+  lease within two seconds. Synthetic callbacks alone do not prove this.
+- [ ] Collect 48 hours of authorized availability observations, including gaps
+  and restarts. Retain coarse idle/eligibility intervals and refusal categories,
+  without raw input or account data. Propose run windows from that coverage;
+  no schedule is supported by the current point-in-time inventory.
+- [ ] Verify the selected matching player package on both PCs, then attach
+  the log, reclaim result and proposed schedule to VUH-2339 for lead closure.
+
+These are ordinary harness changes under D14, without sealed-packet ceremony.
+Existing sealed historical packets remain untouched. Inject/save-adjacent
+changes and milestone acceptance retain their separate rigor requirements.
+
 ## Prepare a new revision offline
 
 1. Coordinate with the fixture owner. Copy its scenario, helpers and exact
