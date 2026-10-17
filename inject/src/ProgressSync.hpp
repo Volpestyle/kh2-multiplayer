@@ -30,5 +30,7 @@ bool ReadHash(std::uint32_t& hash); // actual live masked bytes
 bool ClientConverged(std::uint32_t generation);
 // Warp calls at its safe pre-load boundary, before native room initialization.
 // False defers loading until the complete desired snapshot is applied safely.
-bool ApplyAtRoomBoundary(std::uint32_t generation);
+// atNativeExit: the client's own event is at an exit to the host's target
+// (VUH-2344), so its event state does not defer the apply.
+bool ApplyAtRoomBoundary(std::uint32_t generation, bool atNativeExit = false);
 } // namespace kh2coop::inject::progresssync

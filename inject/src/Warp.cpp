@@ -88,6 +88,9 @@ std::uint32_t g_transitionSerial = 0;
 std::uint32_t g_loadSerial = 0;
 std::uint32_t g_blockedNativeExits = 0;
 bool g_travelRequested = false;
+// VUH-2344: the client's last blocked native exit, valid until the next load.
+std::optional<LocationPacket> g_blockedExit;
+std::uint32_t g_blockedExitLoad = 0;
 RoomTransition g_hostTarget {};
 bool g_hostQueued = false;
 bool g_hostIssued = false;
@@ -213,6 +216,8 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
                                         int mode, std::uint8_t flag, int extra) {
     if (enemysync::HasClientAuthority()) {
         ++g_blockedNativeExits;
+        g_blockedExit = *to;
+        g_blockedExitLoad = g_loadSerial;
         if (g_log) g_log("[warp] client native exit blocked count=%u target=%02X/%02X door=%u map=%u btl=%u evt=%u",
                          g_blockedNativeExits, to->world, to->room, to->door, to->map,
                          to->battle, to->event);
@@ -235,6 +240,7 @@ void CompleteLoad() {
         g_hostCause.issueTransition == g_transitionSerial && g_hostCause.loadBefore != UINT32_MAX &&
         g_loadSerial == g_hostCause.loadBefore + 1;
     g_transitionPending = false;
+    g_blockedExit.reset();
     const auto location = ReadLocation();
     auto expected = g_hostCause.room; expected.epoch = location.epoch;
     LogLoadCause("load", hostIssued && SameLoadRoom(expected, location));
@@ -257,13 +263,24 @@ void __fastcall HookedLoadCompleteDirect() {
     CompleteLoad();
 }
 
+// VUH-2344: a client's own event script can request the exit the host is
+// taking (TT basement, after the Dusk fight). That request is blocked and the
+// event then waits for its load, so the safe-state gate never opens. Where the
+// game asked for this exact world/room/door itself, issue the host's target.
+bool BlockedExitMatchesHost() {
+    return g_blockedExit && g_blockedExitLoad == g_loadSerial &&
+           g_blockedExit->world == g_hostTarget.worldId && g_blockedExit->room == g_hostTarget.roomId &&
+           g_blockedExit->door == g_hostTarget.door;
+}
+
 void IssueHostTransition() {
     if (!g_hostQueued || !g_hostGeneration ||
-        enemysync::WorldSessionGeneration() != g_hostGeneration ||
-        g_transitionPending || !SafeToWarp()) return;
+        enemysync::WorldSessionGeneration() != g_hostGeneration || g_transitionPending) return;
+    const bool atNativeExit = BlockedExitMatchesHost();
+    if (!atNativeExit && !SafeToWarp()) return;
     // Room initialization reads programs and chest flags from SAVE. Wait for
     // the complete host snapshot and apply it before starting the native load.
-    if (!progresssync::ApplyAtRoomBoundary(g_hostGeneration)) return;
+    if (!progresssync::ApplyAtRoomBoundary(g_hostGeneration, atNativeExit)) return;
     LocationPacket packet {};
     packet.world = static_cast<std::uint8_t>(g_hostTarget.worldId);
     packet.room = static_cast<std::uint8_t>(g_hostTarget.roomId);
@@ -284,7 +301,9 @@ void IssueHostTransition() {
     LogLoadCause("issue", LoadCauseCurrent(g_hostCause));
     // Only this authority path bypasses the native-exit detour.
     g_requestTransition(&packet, 1, 0, 0, 0);
-    if (g_log) g_log("[warp] client issued epoch=%u transition=%u", issuedEpoch, issuedTransition);
+    if (g_log) g_log("[warp] client issued epoch=%u transition=%u%s", issuedEpoch, issuedTransition,
+                     atNativeExit ? " at its own blocked native exit" : "");
+    g_blockedExit.reset();
 }
 
 void HandOver(std::uint32_t frame) {

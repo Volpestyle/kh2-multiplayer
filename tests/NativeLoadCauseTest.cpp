@@ -86,6 +86,25 @@ void TestOrdinaryAndBootstrap() {
     Check(Has("load","resync_checkpoint") && !Has("load","resync_bootstrap"),
           "diagnostic records forbidden Checkpoint load honestly instead of relabeling it");
 }
+// VUH-2344: a client's own event exit to the host's target opens the gate.
+void TestBlockedNativeExitMatch() {
+    Start(); auto context = Context(); auto scope = Scope();
+    w::QueueHostTransition(arrivalTarget, context, &scope, nullptr, nullptr);
+    Put(image + offsets::CUTSCENE_STATE, std::int32_t{2});  // the client's event is active
+    w::IssueHostTransition();
+    Check(warpCalls == 0 && w::g_hostQueued && !p::g_desiredApplied, "an unsafe client waits for its safe state");
+    w::LocationPacket exit {}; exit.world = 5; exit.room = 7; exit.door = 3;
+    w::g_blockedExit = exit; w::g_blockedExitLoad = w::g_loadSerial;
+    w::IssueHostTransition();
+    Check(warpCalls == 0, "a blocked exit to another room does not bypass the safe-state gate");
+    exit.room = 2; w::g_blockedExit = exit; w::g_blockedExitLoad = w::g_loadSerial - 1;
+    w::IssueHostTransition();
+    Check(warpCalls == 0, "a blocked exit from before the last load is stale");
+    w::g_blockedExitLoad = w::g_loadSerial;
+    w::IssueHostTransition();
+    Check(warpCalls == 1 && w::g_transitionPending && !w::g_blockedExit && p::g_desiredApplied,
+          "the host target issues, with progress applied, at the client's own matching blocked exit");
+}
 void TestRetireSupersedeAndDrift() {
     Start(); auto context = Context(); auto scope = Scope();
     w::QueueHostTransition(arrivalTarget, context, &scope, nullptr, nullptr);
@@ -201,7 +220,7 @@ int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr,0x3000000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if (!image) return 2;
-    TestOrdinaryAndBootstrap(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal();
+    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal();
     Check(hookCalls == 0, "no hook installation occurs in owned-memory controls");
     VirtualFree(reinterpret_cast<void*>(image),0,MEM_RELEASE);
     std::cout << "ERRORS=" << errors << '\n';

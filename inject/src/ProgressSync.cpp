@@ -63,7 +63,9 @@ bool ValidSave() {
            std::memcmp(magic, "KH2J", sizeof(magic)) == 0;
 }
 
-bool SafeGameplay() {
+// atNativeExit (VUH-2344): the client's own event script is at an exit to the
+// host's target, so its event state is expected; field, menu and load still gate.
+bool SafeGameplay(bool atNativeExit = false) {
     // TransitionPending also reads native IN_FIELD. Keep that inherited read
     // inside the same POD-only fault boundary as the remaining checked fields.
     __try {
@@ -76,7 +78,7 @@ bool SafeGameplay() {
            ReadMemory(g_exeBase + offsets::EVENT_CONTEXT, &eventContext, sizeof(eventContext)) &&
            ReadMemory(g_exeBase + offsets::IN_FIELD, &inField, sizeof(inField)) &&
            ReadMemory(g_exeBase + offsets::OPEN_MENU, &menu, sizeof(menu)) &&
-           controllable == 0 && cutsceneState == 0 && eventContext == 0 &&
+           (atNativeExit || (controllable == 0 && cutsceneState == 0 && eventContext == 0)) &&
            inField != 0 && menu == 0xFF;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -417,10 +419,10 @@ bool MatchesFull(const ProgressUpdate& expected, std::uint32_t& hash) {
     return true;
 }
 
-bool ApplyAtRoomBoundary(std::uint32_t generation) {
+bool ApplyAtRoomBoundary(std::uint32_t generation, bool atNativeExit) {
     if (!generation || generation != g_desiredGeneration ||
         enemysync::WorldSessionGeneration() != generation ||
-        g_role != Role::Client || !g_clientFull || g_personalFailure || !SafeGameplay()) return false;
+        g_role != Role::Client || !g_clientFull || g_personalFailure || !SafeGameplay(atNativeExit)) return false;
     Save live {};
     if (!ReadSave(live)) return ApplyFailure("save-read");
     const auto spans = g_policy.diff(live.data(), g_desired.data(), live.size());
