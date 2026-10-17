@@ -2913,6 +2913,7 @@ int __fastcall MoraleTestDeath(void* actor,int delta,int stat,int react) {
     Put(status,std::int32_t{0});return 0;
 }
 void TestMoraleBirthLifetime() {
+    namespace spawncontroller=kh2coop::inject::spawncontroller;
     const auto seed=[] {
         Reset(true);ResetSpawnEmissions();g_mirrorRequested=true;g_hitTraceFrame=100;
         g_recordBindingRequested=g_recordAuthorityRequested=false;
