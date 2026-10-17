@@ -1208,7 +1208,9 @@ class ReviveGuard:
     input and holds Triangle through its DLL input mailbox: no OS keys (the
     host pilot owns window focus) and no position writes."""
 
-    REACH, HOLD_MS, TIMEOUT = 120.0, 1600, 60.0
+    # The revive prompt fired at 54 and 11 units in run 20261017-051854 and
+    # stayed "none" at 144-150, so walk well inside that before holding.
+    REACH, HOLD_MS, TIMEOUT = 50.0, 1600, 60.0
 
     def __init__(self, ctx: Context, host: int, friend: int) -> None:
         spec = _importlib_util.spec_from_file_location("kh2coop_route_pilot", PILOT)
@@ -1255,10 +1257,12 @@ class ReviveGuard:
                     event["lastError"] = str(error)
                     time.sleep(0.5)
                     continue
+                event["last"] = {"free": s["free"], "react": s["react"], "friend": s["pos"], "host": target}
                 if not s["free"] or not s["pos"] or not target:
                     time.sleep(0.5)
                     continue
                 dx, dz = target[0] - s["pos"][0], target[2] - s["pos"][2]
+                event["last"]["distance"] = round(math.hypot(dx, dz), 1)
                 if math.hypot(dx, dz) > self.REACH:
                     fx, fz = s["forward"]
                     d, f = math.hypot(dx, dz), math.hypot(fx, fz) or 1.0
