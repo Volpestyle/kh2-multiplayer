@@ -73,7 +73,8 @@ games run the same mission file and its own mission hasn't ended:
 - **Which mission:** a mission is its object pointer, file name and the load
   it was read in (`warp::LoadSerial`). A Continue retry after a failure reloads
   the room, so it counts as a new mission on both sides, even if the object is
-  reused.
+  reused. Limit: a mission that keeps running across a room load counts as a
+  new one after the load. The LoD missions seen so far stay in one room.
 - **An end the friend can't replay:** sometimes the host's mission ends with no
   end trap the hooks saw (an engine end, or a host without hooks). The friend
   then stops following. If it had dropped its own end meanwhile, it runs that
