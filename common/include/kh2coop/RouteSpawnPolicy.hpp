@@ -36,9 +36,17 @@ inline constexpr auto BaileyCaller=Bytes("488bd3488d4fe4e869eeffff488b4308");
 inline bool MoraleGenerated(const std::array<std::uint8_t,10>& location,std::uint32_t key,
                             std::span<const std::uint8_t> header,std::span<const std::uint8_t> records) {
     if(location!=MoraleLocation)return false;
-    return (key==0x70345F62 && ((Equal(header,MoraleHeader978) && Equal(records,MoraleRecords978)) ||
-                              (Equal(header,MoraleHeader999) && Equal(records,MoraleRecords999)))) ||
-           (key==0x73345F62 && Equal(header,MoraleHeader1007) && Equal(records,MoraleRecords1007));
+    // Probe03: native type2 activation changes only header+0xE from0 to1.
+    // This bounded state is not definition identity; every other byte stays pinned.
+    const auto headerMatches=[&header](const auto& pin) {
+        if(header.size()!=pin.size() || header[0xE]>1)return false;
+        for(std::size_t i=0;i<header.size();++i)
+            if(i!=0xE && header[i]!=pin[i])return false;
+        return true;
+    };
+    return (key==0x70345F62 && ((headerMatches(MoraleHeader978) && Equal(records,MoraleRecords978)) ||
+                              (headerMatches(MoraleHeader999) && Equal(records,MoraleRecords999)))) ||
+           (key==0x73345F62 && headerMatches(MoraleHeader1007) && Equal(records,MoraleRecords1007));
 }
 inline bool Bailey(const std::array<std::uint8_t,10>& location,std::uint32_t key,std::uintptr_t caller,
                    std::span<const std::uint8_t> header,std::span<const std::uint8_t> records) {

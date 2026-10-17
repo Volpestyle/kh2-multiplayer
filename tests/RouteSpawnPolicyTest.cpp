@@ -10,25 +10,49 @@ namespace {
 int failures=0;
 void check(bool pass,const char* label) { if(!pass){++failures;std::cerr<<"FAIL: "<<label<<'\n';} }
 template<class H,class R,class Predicate>
-void mutations(const H& header,const R& records,Predicate accepts) {
+void mutations(const H& header,const R& records,Predicate accepts,bool activation=false) {
     check(accepts(header,records),"installed definition admitted");
     for(std::size_t i=0;i<header.size();++i)for(unsigned bit=0;bit<8;++bit) {
         auto changed=header;changed[i]^=static_cast<std::uint8_t>(1u<<bit);
-        check(!accepts(changed,records),"every changed header bit refuses admission");
+        if(activation && i==0xE && bit==0)
+            check(accepts(changed,records),"native activation 0/1 toggle remains admitted");
+        else check(!accepts(changed,records),"every other changed header bit refuses admission");
     }
     for(std::size_t i=0;i<records.size();++i)for(unsigned bit=0;bit<8;++bit) {
         auto changed=records;changed[i]^=static_cast<std::uint8_t>(1u<<bit);
         check(!accepts(header,changed),"every changed record bit refuses admission");
     }
     check(!accepts(std::span(header).first(header.size()-1),records),"short header refused");
+    std::vector<std::uint8_t> extraHeader(header.begin(),header.end());extraHeader.push_back(0);
+    check(!accepts(extraHeader,records),"additional header bytes refused");
     check(!accepts(header,std::span(records).first(records.size()-1)),"short records refused");
     std::vector<std::uint8_t> extra(records.begin(),records.end());extra.push_back(0);
     check(!accepts(header,extra),"additional record bytes refused");
 }
+template<class H,class R>
+void moraleDefinition(const H& header,const R& records,std::uint32_t key) {
+    const auto accepts=[key](auto h,auto r){return MoraleGenerated(MoraleLocation,key,h,r);};
+    for(unsigned state=0;state<=1;++state) {
+        auto runtime=header;runtime[0xE]=static_cast<std::uint8_t>(state);
+        // Probe03 measured exactly this byte at1 with no record differences.
+        mutations(runtime,records,accepts,true);
+        for(unsigned i=0;i<10;++i) {
+            auto changed=MoraleLocation;changed[i]^=1;
+            check(!MoraleGenerated(changed,key,runtime,records),"activation never relaxes exact location");
+        }
+        check(!MoraleGenerated(MoraleLocation,key==0x70345F62 ? 0x73345F62 : 0x70345F62,runtime,records),
+              "activation never relaxes exact package");
+        check(!MoraleGenerated(MoraleLocation,842162029,runtime,records),"activation never admits m_22");
+    }
+    for(unsigned state=2;state<256;++state) {
+        auto invalid=header;invalid[0xE]=static_cast<std::uint8_t>(state);
+        check(!accepts(invalid,records),"every activation value outside 0/1 is refused");
+    }
+}
 void morale() {
-    mutations(MoraleHeader978,MoraleRecords978,[](auto h,auto r){return MoraleGenerated(MoraleLocation,0x70345F62,h,r);});
-    mutations(MoraleHeader999,MoraleRecords999,[](auto h,auto r){return MoraleGenerated(MoraleLocation,0x70345F62,h,r);});
-    mutations(MoraleHeader1007,MoraleRecords1007,[](auto h,auto r){return MoraleGenerated(MoraleLocation,0x73345F62,h,r);});
+    moraleDefinition(MoraleHeader978,MoraleRecords978,0x70345F62);
+    moraleDefinition(MoraleHeader999,MoraleRecords999,0x70345F62);
+    moraleDefinition(MoraleHeader1007,MoraleRecords1007,0x73345F62);
     for(unsigned i=0;i<10;++i) {
         auto changed=MoraleLocation;changed[i]^=1;
         check(!MoraleGenerated(changed,0x70345F62,MoraleHeader978,MoraleRecords978),"full location required");

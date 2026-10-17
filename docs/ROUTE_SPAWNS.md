@@ -217,7 +217,7 @@ Bailey-05 remains a failed result, and VUH-2352 still needs its own run.
 
 ## LoD: admit only the observed generated waves
 
-`RouteSpawnPolicy.hpp` pins the full header and record bytes for NOW
+`RouteSpawnPolicy.hpp` pins the header and full record bytes for NOW
 `08/01 door0 map68 btl68 evt0`:
 
 | Package | Header | Records |
@@ -282,10 +282,13 @@ combat HP samples match. Both missions end once with flags21/result0 and final
 counts0/0, which does not qualify through-wave parity.
 [Masks, build, logs, reviewed clips and closure](https://linear.app/vuhlp/issue/VUH-2352#comment-d9cfcaf0-af94-45f5-acab-337c70e8a0e1).
 
-The proposed behavior fix admits only the native0/1 activation state at0xE in
-these existing exact LoD groups. Every other header/record byte and the existing
-scope and ticket checks stay strict. Independent review and a fresh live parity
-pass are still required before landing that fix.
+The behavior fix admits only the native0/1 activation state at0xE in these
+existing exact LoD groups, as Bailey already does. Every other header/record
+byte and the existing scope and ticket checks stay strict. The regression tests
+both states on all three groups, every other header/record bit, all invalid
+activation values2..255, changed package/location and short/extra byte spans.
+The existing ordered two-record ticket checks remain. Independent review and a
+fresh Windows build/live parity pass are still required before landing the fix.
 
 ## Provenance and checks
 
