@@ -47,6 +47,12 @@ bool TransitionPending();
 bool LoadPending();
 // Called on the game thread whenever a room transition is requested.
 void SetTransitionObserver(void (*observer)());
+// VUH-2341: the World Map (world 0x0F) is travel, not a room a friend can
+// follow into. The host is travelling from its own request for the map until
+// a load completes in another world.
+constexpr std::uint16_t WORLD_MAP = 0x0F;
+constexpr bool TravelWorld(std::uint16_t world) { return world == WORLD_MAP; }
+bool HostTravelling();
 std::uint32_t TransitionSerial();
 std::uint32_t LoadSerial();
 RoomTransition ReadLocation();

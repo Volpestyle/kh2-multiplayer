@@ -844,7 +844,8 @@ void RefreshOverlayText(DXGI_FORMAT format) {
     TextOutW(g_overlayDc, 8, 5, text, static_cast<int>(wcslen(text)));
     if (eventholdnative::HoldingInput()) {
         SetTextColor(g_overlayDc, RGB(255, 210, 90));
-        constexpr wchar_t waiting[] = L"Waiting for host event...";
+        // Events and World Map travel (VUH-2341) share this hold.
+        constexpr wchar_t waiting[] = L"Waiting for host...";
         TextOutW(g_overlayDc, 8, 39, waiting, static_cast<int>(std::size(waiting) - 1));
     } else DrawCoopHudRows();
     GdiFlush();

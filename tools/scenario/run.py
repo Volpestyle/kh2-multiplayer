@@ -295,7 +295,8 @@ class Context:
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
                 "location": location, "log_matches": log_matches,
                 "range": range, "round": round, "int": int, "str": str, "sorted": sorted, "set": set, "sum": sum,
-                "chests": lambda index=0: chest_records(self, index)}
+                "chests": lambda index=0: chest_records(self, index),
+                "exists": lambda path: (ROOT / path).exists()}
 
     def eval(self, expr: str):
         # Helpers go in globals: comprehensions inside an expression only see globals.
@@ -739,6 +740,15 @@ def step_protect(ctx: Context, step: dict) -> dict:
     index = step.get("instance", 0)
     ctx.inst(index)
     (ctx.protect.add if step.get("on", True) else ctx.protect.discard)(index)
+    return {}
+
+
+def step_hang_check(ctx: Context, step: dict) -> dict:
+    """Turns an instance's stalled-frame hang check off or on, for screens that may
+    stop the field frame counter, such as the World Map (VUH-2341)."""
+    inst = ctx.inst(step.get("instance", 0))
+    inst.in_field = bool(step.get("on", True))
+    inst.live_frame_seen = None
     return {}
 
 
@@ -4471,7 +4481,7 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
 STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": step_input, "walk_to": step_walk_to,
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
-         "assert": step_assert, "save": step_save, "protect": step_protect,
+         "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check,
          "capture": step_capture, "clip": step_clip, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,

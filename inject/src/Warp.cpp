@@ -87,6 +87,7 @@ void (*g_transitionObserver)() = nullptr;
 std::uint32_t g_transitionSerial = 0;
 std::uint32_t g_loadSerial = 0;
 std::uint32_t g_blockedNativeExits = 0;
+bool g_travelRequested = false;
 RoomTransition g_hostTarget {};
 bool g_hostQueued = false;
 bool g_hostIssued = false;
@@ -218,7 +219,14 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
         return;
     }
     BeginTransition();
+    const bool travel = TravelWorld(to->world) && !g_travelRequested;
+    if (TravelWorld(to->world)) g_travelRequested = true;
+    if (travel && g_log) g_log("[travel] native request target=%02X/%02X door=%u from=%02X/%02X",
+                               to->world, to->room, to->door, ReadExe<std::uint8_t>(offsets::WORLD_ID),
+                               ReadExe<std::uint8_t>(offsets::ROOM_ID));
     g_requestTransition(to, fade, mode, flag, extra);
+    // Still in the old room: a host can publish its hold before the map loads.
+    if (travel) enemysync::OnHostTravelRequest();
 }
 
 void CompleteLoad() {
@@ -230,6 +238,10 @@ void CompleteLoad() {
     const auto location = ReadLocation();
     auto expected = g_hostCause.room; expected.epoch = location.epoch;
     LogLoadCause("load", hostIssued && SameLoadRoom(expected, location));
+    if (g_travelRequested && location.worldId != 0xFF && !TravelWorld(location.worldId)) {
+        g_travelRequested = false;
+        if (g_log) g_log("[travel] landed room=%02X/%02X door=%u", location.worldId, location.roomId, location.door);
+    }
     if (g_log) g_log("[warp] load complete serial=%u transition=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
                      g_loadSerial, g_transitionSerial, location.worldId, location.roomId,
                      location.door, location.mapProgram, location.battleProgram, location.eventProgram);
@@ -495,6 +507,10 @@ bool LoadPending() {
 }
 
 void SetTransitionObserver(void (*observer)()) { g_transitionObserver = observer; }
+
+bool HostTravelling() {
+    return g_travelRequested || TravelWorld(ReadExe<std::uint8_t>(offsets::WORLD_ID));
+}
 
 std::uint32_t TransitionSerial() { return g_transitionSerial; }
 

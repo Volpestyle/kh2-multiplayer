@@ -9,9 +9,9 @@ warp or pause hold. Both reached the same fresh safe HB endpoint
 causal/media replay, all owned processes and descendants absent, both locks
 released, and the complete seven-entry native save/app-ID inventory unchanged.
 
-This accepts the constructed-start host-warp/product-follower path. Natural
-world-map travel, simultaneous arrival and a second destination remain
-unqualified. Station Plaza post-input work remains parked. Acceptance04 was the
+This accepts the constructed-start host-warp/product-follower path.
+Simultaneous arrival and a second destination remain unqualified. Natural
+World Map travel is covered in `docs/WORLD_MAP_TRAVEL.md` (VUH-2341). Station Plaza post-input work remains parked. Acceptance04 was the
 final authorized attempt and is spent; this landing grants no retry or successor.
 Historical acceptance02/03 failures and every original packet seal are preserved.
 

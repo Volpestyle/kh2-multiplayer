@@ -1851,8 +1851,11 @@ bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
     if (!flush()) return false;
     HostEventObservation before {}, after {};
     if (!ReadHostEventObservation(before)) return true; // unknown is not idle
-    const bool active = (before.state >= 2 && before.state <= 4) || before.context != 0;
-    const bool idle = before.state == 0 && before.context == 0;
+    // VUH-2341: World Map travel holds friends like an event; it ends only
+    // after the host lands in a room and the ordinary release rules pass.
+    const bool travel = warp::HostTravelling();
+    const bool active = (before.state >= 2 && before.state <= 4) || before.context != 0 || travel;
+    const bool idle = before.state == 0 && before.context == 0 && !travel;
     if ((!active && !idle) || active == publication.activePublished) return true;
     if (!active && (!allowRelease || !SafeNativeGameplay() || g_hostBeginPending || !g_inst.live)) return true;
     ProducerWorldContext captured;
@@ -1861,8 +1864,8 @@ bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
     publication.pending = EventHold {g_epoch, active, before.location.eventProgram};
     publication.context = captured;
     publication.retryDeadlineMs = GetTickCount64() + 3000;
-    if (g_log) g_log("[event-hold] observed active=%u epoch=%u state=%d context=%llX evt=%u frame=%u tid=%lu generation=%u delivery=%llu source=%llu releaseAfterRoom=%u",
-        active ? 1u : 0u, g_epoch, before.state, static_cast<unsigned long long>(before.context),
+    if (g_log) g_log("[event-hold] observed active=%u travel=%u epoch=%u state=%d context=%llX evt=%u frame=%u tid=%lu generation=%u delivery=%llu source=%llu releaseAfterRoom=%u",
+        active ? 1u : 0u, travel ? 1u : 0u, g_epoch, before.state, static_cast<unsigned long long>(before.context),
         before.location.eventProgram, frame, GetCurrentThreadId(), captured.generation,
         static_cast<unsigned long long>(captured.deliverySerial),
         static_cast<unsigned long long>(captured.hostSourceSerial), allowRelease ? 1u : 0u);
@@ -3916,6 +3919,11 @@ bool ReceiveWorldPackets() {
             if (type == PacketType::RoomTransition) {
                 RoomTransition t;
                 readRoomTransitionPacket(r, t);
+                if (warp::TravelWorld(t.worldId)) {  // VUH-2341: never load the World Map natively
+                    if (g_log) g_log("[enemysync] client ignored travel room epoch=%u room=%02X/%02X", t.epoch,
+                                     t.worldId, t.roomId);
+                    continue;
+                }
                 // Reliable delivery normally orders these, but never let an
                 // old/replayed epoch roll back authority. Epoch zero is unset.
                 const auto advance = t.epoch - g_host.epoch;
@@ -5313,6 +5321,13 @@ void NoteActor(uintptr_t) {
     // does not define native presence or the hash population.
 }
 
+void OnHostTravelRequest() {
+    // Same reentrancy rules as OnFrameStart; a later frame retries if skipped.
+    if (g_role != Role::Host || g_hostClaimProcessing || g_populationConsumerActive ||
+        !spawncontroller::IsDiagnosticGameThread()) return;
+    (void)TickHostEventHold(g_hitTraceFrame, false);
+}
+
 void OnFrameStart(std::uint32_t frame) {
     // Native damage can synchronously reenter actor work. The outer claim
     // transaction owns queue/sequence/binding state until its post-call census.
@@ -5414,9 +5429,11 @@ void OnFrameStart(std::uint32_t frame) {
         g_inst.map = location.mapProgram;
         g_inst.btl = location.battleProgram;
         g_inst.evt = location.eventProgram;
-        g_inst.live = true;
-        if (g_role == Role::Host) QueueHostBeginInstance(location);
-        SYNC_LOG("[enemysync] room instance %02X/%02X btl %u", g_inst.world, g_inst.room, g_inst.btl);
+        // VUH-2341: the World Map has no field to share; friends hold where they are.
+        g_inst.live = !warp::TravelWorld(location.worldId);
+        if (g_role == Role::Host && g_inst.live) QueueHostBeginInstance(location);
+        SYNC_LOG("[enemysync] room instance %02X/%02X btl %u%s", g_inst.world, g_inst.room, g_inst.btl,
+                 g_inst.live ? "" : " (travel, not published)");
     } else if (keyChanged) {
         g_inst.live = false;  // transition requested: old room is on its way out
         ClearPendingHits();

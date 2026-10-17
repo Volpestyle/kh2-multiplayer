@@ -68,6 +68,11 @@ bool RecordLocalPlayerEnemyHit(const LocalPlayerEnemyHit& hit) noexcept;
 // Dependency scheduling means this need not be the first actor callback.
 void OnFrameStart(std::uint32_t frame);
 
+// VUH-2341: warp calls this on the game thread right after the host's own
+// native request for the World Map, while NOW still names the room it leaves.
+// The host's event hold covers travel, so friends hold in that room.
+void OnHostTravelRequest();
+
 // Compatibility entry point for EntityHook; callback coverage is not presence.
 void NoteActor(uintptr_t actor);
 
