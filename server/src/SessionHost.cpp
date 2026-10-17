@@ -1537,6 +1537,18 @@ void SessionHost::compareWithHost(PeerState& client) {
     if (h.worldId != c.worldId || h.roomId != c.roomId) fields |= DesyncRoom;
     if (h.enemiesHash != c.enemiesHash) fields |= DesyncEnemies;
     if (h.progressHash != c.progressHash) fields |= DesyncProgress;
+    // VUH-2356: the host stops hashing when it leaves for rooms it never
+    // publishes (TT basement after Axel: 02/13 programs 135, then 12/03), so
+    // its last progress hash goes stale while a friend's own copy of the same
+    // event moves on. As with enemies (VUH-2270), a progress mismatch counts
+    // only against a fresh host hash; a stale one neither counts nor resets.
+    if ((fields & DesyncProgress) && !(fields & DesyncRoom) && client.hashesSinceHost > 2) {
+        fields &= static_cast<std::uint8_t>(~DesyncProgress);
+        if (fields == 0) {
+            if (callbacks_.onHashDiagnostic) hashDiagnostic("skip",client,host,0,client.diagnosticPreviousCompare);
+            return;
+        }
+    }
     // The implemented native replay covers a complete absent living pack.
     // HP lag, incomplete observations and partial/extra populations remain
     // coarse diagnostics; they cannot request a Bootstrap room reload.

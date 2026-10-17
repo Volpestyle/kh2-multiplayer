@@ -203,6 +203,44 @@ void routeCombatRegression() {
           "a missing living pack reports while the host's HP is still changing");
     for(auto* p:peers)p->disconnect();relay.stop();
 }
+// VUH-2356: progress hashes recorded by run 20261017-035405 (TT 02/14). Both
+// peers agree in the room; after Axel the host leaves for rooms it never
+// publishes and stops hashing, while the friend's own copy of the event sets
+// its post-fight flag (53CE558E) and waits at its blocked exit.
+void routeProgressRegression() {
+    SessionConfig cfg; cfg.bindAddress="127.0.0.1"; cfg.port=22124;
+    SessionHost relay(cfg);
+    if (!relay.start()) { check(false,"VUH-2356 relay starts"); return; }
+    std::vector<DesyncNotice> seen;ClientCallbacks hc;hc.onDesyncNotice=[&](const auto& n){seen.push_back(n);};
+    NetworkClient host("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"progress-host",SlotType::Player,hc,RuntimeMode::CampaignCoop,cfg.contentHash);
+    NetworkClient friend1("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"progress-friend1",SlotType::Friend1,{},RuntimeMode::CampaignCoop,cfg.contentHash);
+    std::array<NetworkClient*,2> peers{&host,&friend1};
+    std::array<std::uint64_t,2> seq{};
+    const auto wait=[&](auto predicate){
+        const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+        while(!predicate()&&std::chrono::steady_clock::now()<end){
+            relay.tick(0);for(auto* p:peers){p->tick(0);p->sendHeartbeat();}
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return predicate();
+    };
+    for(auto* p:peers)p->connect();
+    if(!wait([&]{return host.worldReady()&&friend1.worldReady();})){check(false,"VUH-2356 peers ready");return;}
+    const auto enter=[&](std::uint32_t e){host.sendRoomTransition({e,2,0x14,0,137,137,137});
+        return wait([&]{return relay.currentRoom()&&relay.currentRoom()->epoch==e;});};
+    const auto publish=[&](unsigned slot,std::uint32_t epoch,std::uint32_t progress){
+        peers[slot]->sendStateHash(StateHash{epoch,2,0x14,0x17EFA678u,progress});++seq[slot];
+        return wait([&]{const auto* p=relay.peerBySlot(static_cast<SlotType>(slot));return p&&p->hashReceiptSeq==seq[slot];});};
+    bool delivered=enter(3);
+    for(unsigned i=0;i<4;++i)delivered=delivered&&publish(0,3,0x7F55CDFEu)&&publish(1,3,0x7F55CDFEu);
+    for(unsigned i=0;i<10;++i)delivered=delivered&&publish(1,3,0x53CE558Eu);
+    check(delivered&&relay.desyncNoticeCount()==0,"a friend ahead of a host that stopped hashing raises no progress notice");
+    delivered=enter(4);
+    for(unsigned i=0;i<4;++i)delivered=delivered&&publish(0,4,0x7F55CDFEu)&&publish(1,4,0x53CE558Eu);
+    check(delivered&&wait([&]{return seen.size()==1;})&&seen.back().fields==DesyncProgress,
+          "a persistent progress divergence against a fresh host still reports");
+    for(auto* p:peers)p->disconnect();relay.stop();
+}
 int main(){
     if(enet_initialize())return 2;
     std::ofstream raw("relay-raw.log");std::vector<std::string> rows;
@@ -286,6 +324,6 @@ int main(){
     stream.seals=UINT64_MAX;stream.seal(sink,"control","interval");check(stream.seals==UINT64_MAX&&stream.dropped==4,"seal sequence never wraps");
     waveDeathRegression();
     hbPopulationDeathRegression();
-    routeCombatRegression();
+    routeCombatRegression();routeProgressRegression();
     enet_deinitialize();std::cout<<"checks="<<checks<<" failures="<<failures<<'\n';return failures?1:0;
 }
