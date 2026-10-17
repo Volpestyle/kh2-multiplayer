@@ -4647,6 +4647,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
     };
     if (!CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
     ObserveBaileyCreeperBirths(census);
+    ObserveMoraleBirths(census);
     for (const auto& native : census.enemies) {
         const auto found = g_inst.byActor.find(native.actor);
         if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return holdAll();
@@ -4660,9 +4661,9 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         local.prior = s.ordinaryBinding;
         local.certificateRequired=certified;
         if(!certified && g_resyncWriteFence==ResyncWriteFence::None)
-            local.birthId=baileyBirth?baileyBirth:LocalEmissionBirthId(native);
+            local.birthId=baileyBirth?baileyBirth:MoraleBirthActor(native.actor)?MoraleBirthTicketId(native):LocalEmissionBirthId(native);
         if(certified)local.certifiedId=OrdinaryCertifiedId(census,native,ordinaryBefore);
-        local.available = !(s.killed && native.hp > 0); // observed lifetime contradiction stays unmatched
+        local.available = !(s.killed && native.hp > 0) && (!MoraleBirthActor(native.actor) || local.birthId>0);
         local.living = native.hp > 0;
         locals.push_back(local);
         indices.push_back(found->second);
@@ -6256,8 +6257,15 @@ bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t re
         }
         if(permit.netId && (!RecordFamily(birth->objectId) || bailey317) && g_resyncWriteFence==ResyncWriteFence::None &&
            !OrdinaryLifecycleRoom() && g_localEmissionBirths.size()<SPAWN_EMISSION_CAP) {
-            g_localEmissionBirths.push_back({*birth,permit,g_hitTraceFrame,false,false,{g_hitTraceFrame,g_hitTraceFrame},
-                bailey317?baileyMission:0,{bailey317?g_hitTraceFrame:0}});
+            uintptr_t moraleMission=0;
+            const bool morale=routespawn::MoraleGeneratedBirth(birth->key,birth->headerId,birth->recordIndex,birth->records,
+                birth->objectId,birth->objectType) && MoraleMissionCurrent(false,&moraleMission) &&
+                spawncontroller::EmissionBirthCurrent(*birth);
+            LocalEmissionBirth ticket{};ticket.birth=*birth;ticket.permit=permit;ticket.seenFrame=g_hitTraceFrame;
+            ticket.warmup={g_hitTraceFrame,g_hitTraceFrame};
+            ticket.baileyMission=bailey317?baileyMission:0;ticket.baileyLease.seen=bailey317?g_hitTraceFrame:0;
+            ticket.moraleMission=morale?moraleMission:0;ticket.moraleLease.seen=morale?g_hitTraceFrame:0;
+            g_localEmissionBirths.push_back(ticket);
             if(g_log)g_log("[spawn-birth] ticket frame=%u netId=%u seq=%llu actor=%llX objectId=%u",g_hitTraceFrame,permit.netId,
                 static_cast<unsigned long long>(permit.sequence),static_cast<unsigned long long>(birth->actor),birth->objectId);
         }

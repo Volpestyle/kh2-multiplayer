@@ -1882,6 +1882,12 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
     }
     std::array<std::uint8_t,64> before{};
     const bool definitionRead=enclosed && CopyNative(reinterpret_cast<uintptr_t>(record),before.data(),before.size());
+    float moraleLimit=0,moraleUsed=0;std::uint8_t moraleWeight=0;
+    uintptr_t moraleObject=0;std::uint32_t moraleObjectId=0;
+    const bool moraleBudgetRead=qualified && q.generatedEmission && role==2 &&
+        ReadNative(reinterpret_cast<uintptr_t>(record),moraleObjectId) && LookupNative(moraleObjectId,moraleObject) && moraleObject &&
+        ReadNative(g_exeBase+ADMISSION_LIMIT_RVA,moraleLimit) && ReadNative(g_exeBase+ADMISSION_USED_RVA,moraleUsed) &&
+        ReadNative(moraleObject+0x54,moraleWeight);
     void* actor=nullptr;bool committed=false,returned=false;
     __try {
         SetLastError(entryError);
@@ -1890,6 +1896,15 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
         returned=true;
         const auto nativeError=GetLastError();
         if (observeMorale) ObserveMoraleWave(record,controller,point,wrapper,caller,q,role,update,actor,true);
+        static unsigned moraleBudgetLogs=0;
+        if(actor && qualified && q.generatedEmission && role==2 && g_log && moraleBudgetLogs++<64) {
+            float usedAfter=0;const bool afterRead=ReadNative(g_exeBase+ADMISSION_USED_RVA,usedAfter);
+            const bool fits=moraleBudgetRead && std::isfinite(moraleLimit) && std::isfinite(moraleUsed) &&
+                moraleUsed>=0 && moraleUsed<=moraleLimit && static_cast<float>(moraleWeight)<=moraleLimit-moraleUsed;
+            g_log("[morale-birth-budget] header=%u record=%u netId=%u beforeRead=%u limit=%.2f used=%.2f weight=%u fits=%u afterRead=%u usedAfter=%.2f",
+                q.headerId,index,permit.netId,moraleBudgetRead?1U:0U,moraleLimit,moraleUsed,
+                static_cast<unsigned>(moraleWeight),fits?1U:0U,afterRead?1U:0U,usedAfter);
+        }
         if(enclosed && actor && g_role()==role && g_emissionStorage.Same(update) && SameStamp(q.stamp)) {
             const auto birth=definitionRead ? CaptureEmissionBirth(actor,q,record,before) : EmissionBirth{};
             static unsigned unavailableBirthLogs=0;

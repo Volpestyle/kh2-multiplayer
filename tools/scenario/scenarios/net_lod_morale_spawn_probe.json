@@ -255,6 +255,16 @@
       "message": "Both roles must return successful observed native generated-wave births; null startup attempts do not qualify"
     },
     {
+      "do": "save",
+      "as": "morale_birth_budget",
+      "expr": "log_matches(r'\\[morale-birth-budget\\] header=(?P<header>978|999|1007) record=(?P<record>\\d+) netId=(?P<netId>\\d+) beforeRead=(?P<before>\\d+) limit=[^ ]+ used=[^ ]+ weight=(?P<weight>\\d+) fits=(?P<fits>\\d+) afterRead=(?P<after>\\d+)',1)"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['morale_birth_budget'])==4 and set((b['header'],b['record']) for b in saved['morale_birth_budget'])=={('978','0'),('999','0'),('1007','0'),('1007','1')} and all(b['before']=='1' and b['fits']=='1' and b['after']=='1' and b['weight']==('15' if b['header']=='1007' else '8') for b in saved['morale_birth_budget'])",
+      "message": "Separate budget gate: every scoped friend birth, including the fourth Nightwalker, must have proven native headroom at its successful call; orphan occupancy must not strand the last receipt"
+    },
+    {
       "do": "assert",
       "expr": "enemy_hps(0)==enemy_hps(1)",
       "message": "Friend-only or missing later-wave enemies remain; inspect exact native generated-wrapper records and host identities"

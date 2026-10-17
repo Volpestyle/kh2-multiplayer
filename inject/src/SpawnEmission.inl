@@ -1,4 +1,4 @@
-// Game-thread outbox and one-use local birth proofs. Retained native addresses
+// Game-thread outbox, one-use grants and scoped local birth-lifetime proofs. Retained native addresses
 // are comparison roots only; every use requires a fresh complete census.
 struct EmissionWarmup {
     std::uint32_t firstFrame{},seenFrame{};
@@ -26,11 +26,13 @@ struct LocalEmissionBirth {
     EmissionWarmup warmup{};
     uintptr_t baileyMission{};
     routespawn::BaileyCreeperLease baileyLease{};
+    uintptr_t moraleMission{};
+    routespawn::MoraleGeneratedLease moraleLease{};
 };
 std::vector<LocalEmissionBirth> g_localEmissionBirths;
 
 // Read-only scope: never refresh session state while a caller holds native rows.
-bool BaileyMissionCurrent(bool terminal,uintptr_t* mission,const char** refusal) {
+bool NativeBirthMissionCurrent(bool morale,bool terminal,uintptr_t* mission,const char** refusal) {
     if(mission)*mission=0;
     if(refusal)*refusal="ok";
     const auto check=[refusal](bool value,const char* reason){if(!value && refusal)*refusal=reason;return value;};
@@ -57,12 +59,20 @@ bool BaileyMissionCurrent(bool terminal,uintptr_t* mission,const char** refusal)
         static_cast<std::uint8_t>(location.battleProgram),static_cast<std::uint8_t>(location.battleProgram>>8),
         static_cast<std::uint8_t>(location.eventProgram),static_cast<std::uint8_t>(location.eventProgram>>8)};
     uintptr_t after=0;std::uint32_t flagsAfter=0,resultAfter=0;
-    if(!check(routespawn::BaileyCreeperMission(now,file,true,flags,result,terminal),"mission-scope") ||
+    const bool admitted=morale ? routespawn::MoraleGeneratedMission(now,file,true,flags,result,terminal) :
+        routespawn::BaileyCreeperMission(now,file,true,flags,result,terminal);
+    if(!check(admitted,"mission-scope") ||
        !check(ReadNative(g_exeBase+mr::kMissionPtr,after),"mission-bookend-read") || !check(after==base,"mission-bookend") ||
        !check(ReadNative(base+mr::kFlags,flagsAfter),"flags-bookend-read") || !check(flagsAfter==flags,"flags-bookend") ||
        !check(ReadNative(base+mr::kResult,resultAfter),"result-bookend-read") || !check(resultAfter==result,"result-bookend") ||
        !check(load==warp::LoadSerial(),"load-bookend") || !check(transition==warp::TransitionSerial(),"transition-bookend"))return false;
     if(mission)*mission=base;return true;
+}
+bool BaileyMissionCurrent(bool terminal,uintptr_t* mission,const char** refusal) {
+    return NativeBirthMissionCurrent(false,terminal,mission,refusal);
+}
+bool MoraleMissionCurrent(bool terminal,uintptr_t* mission) {
+    return NativeBirthMissionCurrent(true,terminal,mission,nullptr);
 }
 bool BaileyCreeperHostMotion(uintptr_t actor) {
     spawncontroller::EmissionBirth birth{};
@@ -165,8 +175,57 @@ int LocalEmissionBirthId(const NativeEnemy& native) {
     }
     return result;
 }
+// Generated native points differ across peers. Only these exact mission births
+// retain a continuously revalidated occurrence ID after the one-use adoption.
+bool MoraleBirthActor(uintptr_t actor) {
+    return std::any_of(g_localEmissionBirths.begin(),g_localEmissionBirths.end(),[actor](const auto& t) {
+        return t.moraleMission && t.birth.actor==actor;
+    });
+}
+int MoraleBirthTicketId(const NativeEnemy& native) {
+    int id=0;
+    for(auto& t:g_localEmissionBirths)if(t.moraleMission && t.birth.actor==native.actor && !t.retired) {
+        uintptr_t mission=0;
+        const bool current=MoraleMissionCurrent(t.adopted,&mission) && mission==t.moraleMission &&
+            EmissionPermitCurrent(t.permit) && EmissionBirthMatches(t.birth,native) &&
+            routespawn::MoraleGeneratedBirth(t.birth.key,t.birth.headerId,t.birth.recordIndex,t.birth.records,
+                t.birth.objectId,t.birth.objectType);
+        if(!t.moraleLease.Observe(g_hitTraceFrame,current)) {
+            t.retired=true;
+            if(g_log)g_log("[morale-birth] retired frame=%u netId=%u seq=%llu actor=%llX",
+                g_hitTraceFrame,t.permit.netId,static_cast<unsigned long long>(t.permit.sequence),
+                static_cast<unsigned long long>(t.birth.actor));
+            continue;
+        }
+        if(id) {
+            for(auto& other:g_localEmissionBirths)if(other.birth.actor==native.actor)other.retired=true;
+            return 0;
+        }
+        id=t.permit.netId;
+    }
+    return id;
+}
+void ObserveMoraleBirths(const NativeCensus& census) {
+    for(auto& t:g_localEmissionBirths)if(t.moraleMission && !t.retired) {
+        bool found=false;
+        for(const auto& n:census.enemies)if(n.actor==t.birth.actor) {
+            found=true;(void)MoraleBirthTicketId(n);break;
+        }
+        if(found || t.retired)continue;
+        uintptr_t mission=0;
+        const bool current=!t.adopted && MoraleMissionCurrent(false,&mission) && mission==t.moraleMission &&
+            EmissionPermitCurrent(t.permit) && CensusMatchesInstance(census) &&
+            InitializingEmissionBirth(t.birth,census,t.warmup);
+        if(!t.moraleLease.Observe(g_hitTraceFrame,current)) {
+            t.retired=true;
+            if(g_log)g_log("[morale-birth] retired frame=%u netId=%u seq=%llu actor=%llX absent=1",
+                g_hitTraceFrame,t.permit.netId,static_cast<unsigned long long>(t.permit.sequence),
+                static_cast<unsigned long long>(t.birth.actor));
+        }
+    }
+}
 void RetireAbsentEmissionBirths(const NativeCensus& census) {
-    for(auto& t:g_localEmissionBirths)if(!t.adopted && !t.retired) {
+    for(auto& t:g_localEmissionBirths)if(!t.moraleMission && !t.adopted && !t.retired) {
         bool found=false;for(const auto& n:census.enemies)if(EmissionBirthMatches(t.birth,n)){found=true;break;}
         if(!found && EmissionPermitCurrent(t.permit) && g_hitTraceFrame>=t.seenFrame &&
            g_hitTraceFrame-t.seenFrame<=1 && InitializingEmissionBirth(t.birth,census,t.warmup)) {

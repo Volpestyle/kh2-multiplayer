@@ -290,6 +290,35 @@ activation values2..255, changed package/location and short/extra byte spans.
 The existing ordered two-record ticket checks remain. Independent review and a
 fresh Windows build/live parity pass are still required before landing the fix.
 
+Live04 (`20261017-122857_net_lod_morale_spawn_probe_1`, `7bbef9d`) passes
+emission admission but still fails parity: host receipts6..9, friend adoptions
+6/7/8, and final living HP lists host[] versus friend[Shadow17,Shadow17,Nightwalker55].
+Each adopted actor loses its ID on the next owner frame (1320→1321,1594→1595,
+2506→2507). The ordinary one-use birth adapter stops returning its receipt ID
+after adoption; generated native points differ, so point fallback refuses.
+Host deaths arrive without applying. Receipt9 is received but never births.
+Windows build and all five targeted regressions pass; this is a failed feature
+run and the change remains unlanded.
+[Evidence and reviewed clips](https://linear.app/vuhlp/issue/VUH-2352#comment-b54f61e5-7196-4144-9569-d6268f148f6e).
+
+The scoped lifetime fix tags only the same three generated groups in exact
+`MU01_MS102`/NOW. It retains the original mission pointer and host permit,
+revalidates complete native birth roots/handle/record bytes every owner frame,
+and permanently retires on scope/provenance failure or a frame gap. Adopted
+occurrences may drain authenticated deaths through the same native mission end.
+Retired tagged actors cannot fall back to point matching. Other adopted
+receipts retain their one-use behavior; the ordinary resolver is unchanged.
+
+Tests reproduce the one-frame loss and retain the scoped ID across adoption,
+HP updates and host death, with gap and changed-record retirement. The portable
+policy regression passes with ASan/UBSan. The owned-memory MSVC test controls
+only the native birth-provenance leaf; actual mission/scope/census, receipt
+consumer, adoption, resolver and HP/death code run unchanged. Windows validation
+and D14.4 review remain pending. The live fixture separately requires successful
+budget receipts for all four friend births, including1007/record1, with fresh
+finite native headroom and expected weights8/15. Used39/limit40 in live04
+suggests orphan occupancy blocked weight15; that causal link remains unproven.
+
 ## Provenance and checks
 
 The exact definitions were decoded read-only with the retained OpenKH-backed

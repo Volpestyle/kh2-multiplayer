@@ -106,7 +106,15 @@ public:
 #define GetStatistics TestResourceGetStatistics
 #define PopNativeConstructionLineage TestPopNativeConstructionLineage
 #define WorldBridge HeadlessWorldBridge
+// Only the provenance leaf is controlled for the scoped lifetime test; the
+// actual mission/scope/census, adoption, resolver and HP/death consumer run below.
+namespace kh2coop::inject::spawncontroller {
+struct EmissionBirth;
+bool TestEmissionBirthCurrent(const EmissionBirth&) noexcept;
+}
+#define EmissionBirthCurrent TestEmissionBirthCurrent
 #include "../inject/src/EnemySync.cpp"
+#undef EmissionBirthCurrent
 // This owned-memory harness does not install the field callback hook.
 namespace kh2coop::inject::enemymirror {
 bool EnterFieldCallback() noexcept { return true; }
@@ -211,6 +219,15 @@ std::deque<kh2coop::inject::spawncontroller::NativeConstructionLineage> construc
 unsigned constructionPopCalls = 0;
 }
 namespace kh2coop::inject::spawncontroller {
+bool TestEmissionBirthCurrent(const EmissionBirth& b) noexcept {
+    using kh2coop::inject::enemysync::Read;
+    if(!b.available || b.helper || b.actor!=enemy || b.objentry!=object || b.status!=status ||
+       !b.controller || !b.record || b.record!=b.spawnArray+std::uintptr_t{b.recordIndex}*64)return false;
+    return Read<uintptr_t>(enemy+0x9E8)==b.controller && Read<uintptr_t>(enemy+0x9F0)==b.record &&
+        Read<uintptr_t>(enemy+offsets::actor::OBJENTRY_PTR)==b.objentry && Read<uintptr_t>(enemy+0x5C0)==b.status &&
+        Read<std::uint32_t>(enemy)==b.handle && Read<std::uint32_t>(object)==b.objectId &&
+        std::memcmp(reinterpret_cast<const void*>(b.record),b.recordBytes.data(),b.recordBytes.size())==0;
+}
 bool TestPopNativeConstructionLineage(NativeConstructionLineage& out) {
     ++constructionPopCalls;
     if (constructionRows.empty()) return false;
@@ -2887,6 +2904,76 @@ void TestCombatCausalBoundaries() {
     cc::enabled.store(false);Reset();
 }
 
+int __fastcall MoraleTestDeath(void* actor,int delta,int stat,int react) {
+    ++deathCalls;
+    Check(reinterpret_cast<uintptr_t>(actor)==enemy && delta==-Read<int>(status) && stat==0 && react==0,
+          "LoD authenticated death uses existing native lethal arguments");
+    Put(status,std::int32_t{0});return 0;
+}
+void TestMoraleBirthLifetime() {
+    const auto seed=[] {
+        Reset(true);ResetSpawnEmissions();g_mirrorRequested=true;g_hitTraceFrame=100;
+        g_recordBindingRequested=g_recordAuthorityRequested=false;
+        g_inst.world=g_host.world=arrivalTarget.worldId=8;g_inst.room=g_host.room=arrivalTarget.roomId=1;
+        g_inst.door=arrivalTarget.door=0;g_inst.map=arrivalTarget.mapProgram=68;
+        g_inst.btl=g_host.btl=arrivalTarget.battleProgram=68;g_inst.evt=arrivalTarget.eventProgram=0;
+        Put(image+offsets::WORLD_ID,std::uint8_t{8});Put(image+offsets::ROOM_ID,std::uint8_t{1});
+        Put(image+offsets::NOW+2,std::uint8_t{0});Put(image+offsets::MAP_PROGRAM,std::uint16_t{68});
+        Put(image+offsets::BATTLE_PROGRAM,std::uint16_t{68});Put(image+offsets::EVENT_PROGRAM,std::uint16_t{0});
+        g_lastRoomPacket=arrivalTarget;
+        const auto mission=image+0x80000;Put(image+MR::kMissionPtr,mission);Put(mission+MR::kFlags,std::uint32_t{1});
+        constexpr char path[]="msn/us/MU01_MS102.bar";
+        std::memcpy(reinterpret_cast<void*>(mission+MR::kPath),path,sizeof(path));
+        auto host=g_host.enemies.at(1);g_host.enemies.clear();host.objectId=302;host.battleProgram=68;host.spawnPos={0,0,0};
+        g_host.enemies[6]=host;auto& local=g_inst.spawns[0];local.objectId=302;local.spawnPos={1000,0,0};
+        local.netId=-1;local.ordinaryBinding={};Put(object,std::uint32_t{302});Put(enemy,std::uint32_t{77});
+        const auto& record=routespawn::MoraleRecords978;
+        std::memcpy(reinterpret_cast<void*>(RecordData()),record.data(),record.size());
+        spawncontroller::EmissionBirth birth{};birth.actor=enemy;birth.objentry=object;birth.status=status;
+        birth.controller=RecordController();birth.header=RecordHeader();birth.record=birth.spawnArray=RecordData();
+        birth.objectId=302;birth.objectType=4;birth.handle=77;birth.key=0x70345F62;birth.headerId=978;
+        birth.records=1;birth.recordBytes=record;birth.available=true;
+        SpawnEmission emission{arrivalTarget,1,birth.key,978,0,{0,0,0,1}};emission.netId=6;
+        Check(g_emissionLedger.Add(emission),"LoD fixture receives exact host emission");
+        spawncontroller::EmissionPermit permit{};
+        Check(SpawnEmissionPolicy(birth.key,978,0,nullptr,spawncontroller::EmissionPhase::Reserve,permit,nullptr) &&
+              SpawnEmissionPolicy(birth.key,978,0,nullptr,spawncontroller::EmissionPhase::Birth,permit,&birth) &&
+              g_localEmissionBirths.size()==1 && g_localEmissionBirths.front().moraleMission==mission,
+              "actual LoD receipt consumer arms only the exact mission lifetime");
+    };
+    seed();
+    g_localEmissionBirths.front().moraleMission=0; // reproduce the old one-use adapter boundary
+    g_hitTraceFrame=101;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    Check(g_inst.spawns[0].netId==6,"probe04 control adopts the one-use birth");
+    g_hitTraceFrame=102;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    Check(g_inst.spawns[0].netId<0,"probe04 control loses its distant native binding after adoption");
+    seed();
+    for(unsigned frame=101;frame<=104;++frame) {
+        g_hitTraceFrame=frame;
+        Check(ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration()) && g_inst.spawns[0].netId==6 &&
+              !g_localEmissionBirths.front().retired,"adopted LoD actor keeps exact birth ID on consecutive owner frames");
+    }
+    g_bridge.incoming.push_back(HostEnvelope(encode(EnemyHp{9,{{6,700,1000}},1}),1));ReceiveWorldPackets();
+    g_hitTraceFrame=105;
+    Check(ClientFrame(CaptureNativeCensus()) && Read<int>(status)==700,"host LoD HP applies after adoption despite distant native point");
+    g_bridge.incoming.push_back(HostEnvelope(encode(EnemyDeath{9,6}),2));ReceiveWorldPackets();
+    Put(image+0x80000+MR::kFlags,std::uint32_t{0x15});g_applyStatDelta=MoraleTestDeath;deathCalls=0;g_hitTraceFrame=106;
+    Check(ClientFrame(CaptureNativeCensus()) && deathCalls==1 && Read<int>(status)==0,
+          "authenticated host death applies on the friend through its ended LoD mission");
+    g_hitTraceFrame=107;(void)ClientFrame(CaptureNativeCensus());
+    Check(deathCalls==1,"LoD scoped death remains one-shot");
+    seed();g_hitTraceFrame=101;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    g_hitTraceFrame=103;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    Check(g_localEmissionBirths.front().retired && g_inst.spawns[0].netId<0,"LoD frame gap retires without point fallback");
+    g_hitTraceFrame=104;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    Check(g_inst.spawns[0].netId<0,"retired LoD receipt never resumes at the same address");
+    seed();g_hitTraceFrame=101;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    Put(enemy+0x9F0,RecordData()+64);g_hitTraceFrame=102;
+    (void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    Check(g_localEmissionBirths.front().retired && g_inst.spawns[0].netId<0,"changed LoD indexed record retires before native writes");
+    g_mirrorRequested=false;ResetSpawnEmissions();g_lastRoomPacket.reset();Reset();
+}
+
 int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
@@ -3203,6 +3290,7 @@ int main() try {
     Check(WorldSessionGeneration() == 102 && !g_writerRecoveryPacket.has_value(),
           "raced new-generation reset rearms through normal ordered admission");
     TestBaileyMissionEndOrdering();
+    TestMoraleBirthLifetime();
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);
     return errors ? 1 : 0;

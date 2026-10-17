@@ -1,5 +1,7 @@
 #include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/SpawnEmissionLedger.hpp"
+#include "../inject/src/OrdinaryEnemyBinding.hpp"
+#include "../inject/src/EnemyPopulation.hpp"
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -73,6 +75,42 @@ void morale() {
     check(ledger.Commit(1)&&!ledger.Reserve(first.controllerKey,1007,0),"nonnull or ambiguous return cannot retry spent occurrence");
     reserved=ledger.Reserve(first.controllerKey,1007,1);
     check(reserved && reserved->netId==7 && ledger.Commit(2),"second birth keeps independent identity");
+    check(MoraleGeneratedMission(MoraleLocation,"MU01_MS102.bar",true,1,0,false),"exact morale mission admits lifetime scope");
+    check(!MoraleGeneratedMission(BaileyLocation,"MU01_MS102.bar",true,1,0,false),"other room refuses morale lifetime");
+    check(!MoraleGeneratedMission(MoraleLocation,"MU02_MS103A.bar",true,1,0,false),"other mission refuses morale lifetime");
+    check(!MoraleGeneratedMission(MoraleLocation,"MU01_MS102.bar",false,1,0,false),"missing mission refuses morale lifetime");
+    check(!MoraleGeneratedMission(MoraleLocation,"MU01_MS102.bar",true,0x15,0,false) &&
+        MoraleGeneratedMission(MoraleLocation,"MU01_MS102.bar",true,0x15,0,true),"only adopted morale births can drain the ended mission");
+    check(!MoraleGeneratedMission(MoraleLocation,"MU01_MS102.bar",true,1,2,true),"failed morale mission refuses authority");
+    for(unsigned header: {978U,999U}) {
+        check(MoraleGeneratedBirth(0x70345F62,header,0,1,302,4),"exact Shadow birth metadata");
+        check(!MoraleGeneratedBirth(0x70345F62,header,1,1,302,4),"extra Shadow ordinal refused");
+    }
+    for(unsigned record=0;record<2;++record)
+        check(MoraleGeneratedBirth(0x73345F62,1007,record,2,10,4),"exact two Nightwalker birth metadata");
+    check(!MoraleGeneratedBirth(0x73345F62,1007,2,2,10,4) && !MoraleGeneratedBirth(0x73345F62,1007,0,1,10,4) &&
+        !MoraleGeneratedBirth(0x70345F62,1007,0,2,10,4) && !MoraleGeneratedBirth(0x73345F62,1007,0,2,302,4) &&
+        !MoraleGeneratedBirth(0x73345F62,1007,0,2,10,3),"ordinal/count/package/object/type negatives refuse lifetime");
+    namespace ob=kh2coop::inject::ordinarybinding;
+    ob::Local local{};local.identity={1,2,3,4,5,302};local.point={1000,0,0};local.available=local.living=true;local.birthId=6;
+    ob::Host host{6,302,{0,0,0},false,false,false};MoraleGeneratedLease lease{100};
+    auto bound=ob::Resolve(std::vector{local},std::vector{host},{1,2,100});
+    check(bound[0].id==6,"LoD birth adopts exact occurrence despite distant native point");local.prior=bound[0].next;
+    auto old=local;old.birthId=0;
+    check(ob::Resolve(std::vector{old},std::vector{host},{1,2,101})[0].id==0,"probe04 reproduced: adopted one-use receipt falls back and loses binding");
+    for(unsigned frame=101;frame<105;++frame) {
+        check(lease.Observe(frame,true),"adopted LoD roots revalidated on each owner frame");
+        auto next=ob::Resolve(std::vector{local},std::vector{host},{1,2,frame});
+        check(next[0].id==6,"retained scoped birth ID keeps adopted actor bound across frames");local.prior=next[0].next;
+    }
+    host.dead=true;auto death=ob::Resolve(std::vector{local},std::vector{host},{1,2,105});
+    check(lease.Observe(105,true) && death[0].id==6 && death[0].reason==ob::Reason::BoundDeath,
+        "authenticated host death keeps continuous exact birth authority on friend");
+    check(!lease.Observe(107,true) && !lease.Observe(108,true),"LoD frame gap permanently retires occurrence");
+    MoraleGeneratedLease changed{100};check(!changed.Observe(101,false) && !changed.Observe(102,true),"changed LoD proof cannot recover by address reuse");
+    namespace ep=kh2coop::inject::enemypop;
+    check(!ep::BudgetAllows(40,39,15) && ep::BudgetAllows(40,24,15),
+        "probe04 budget hypothesis control: orphan occupancy blocks weight15 until native headroom returns");
 }
 void bailey() {
     mutations(BaileyHeader,BaileyRecords,[](auto h,auto r){return Bailey(BaileyLocation,808738658,0x3FF727,h,r);});
