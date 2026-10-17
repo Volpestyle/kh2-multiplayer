@@ -128,15 +128,22 @@ bool BaileyCreeperAuthority(uintptr_t actor,bool terminal) {
     if(found==g_inst.byActor.end() || found->second>=g_inst.spawns.size())return false;
     const auto& s=g_inst.spawns[found->second];
     if(!s.present || s.objectId!=317 || s.netId<=0 || s.netId>0xFFFF || s.ordinaryBinding.bound!=s.netId)return false;
+    const auto retire=[actor] {
+        for(auto& ticket:g_localEmissionBirths)if(ticket.baileyMission && ticket.birth.actor==actor) {
+            ticket.retired=true;ticket.baileyLease.retired=true;
+        }
+        return false;
+    };
     const auto host=g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
-    if(host==g_host.enemies.end() || host->second.objectId!=317 || host->second.removed || host->second.dead!=terminal)return false;
+    if(host==g_host.enemies.end() || host->second.objectId!=317 || host->second.removed)return retire();
+    if(host->second.dead!=terminal)return false; // living callbacks cannot consume the pending terminal handoff
     try {
         const auto census=CaptureNativeCensus(actor);
-        if(!CensusMatchesInstance(census) || !census.watchedActorPresent)return false;
+        if(!CensusMatchesInstance(census) || !census.watchedActorPresent)return retire();
         const auto* native=FindNativeEnemy(census,s);ordinarybinding::Identity roots{};
-        return native && ReadOrdinaryIdentity(*native,roots) && roots==s.ordinaryBinding.identity &&
-            BaileyCreeperTicketId(*native,terminal)==s.netId;
-    } catch(...) {return false;}
+        if(!native || !ReadOrdinaryIdentity(*native,roots) || roots!=s.ordinaryBinding.identity)return retire();
+        return BaileyCreeperTicketId(*native,terminal)==s.netId;
+    } catch(...) {return retire();}
 }
 int LocalEmissionBirthId(const NativeEnemy& native) {
     int result=0;
