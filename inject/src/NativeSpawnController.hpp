@@ -5,6 +5,7 @@
 #include <vector>
 #include "kh2coop/NativeRecordContentTypes.hpp"
 #include "kh2coop/KnownControllerMutation.hpp"
+#include "kh2coop/RouteSpawnPolicy.hpp"
 
 namespace kh2coop::inject::spawncontroller {
 
@@ -33,8 +34,30 @@ struct EmissionBirth {
 bool EmissionBirthCurrent(const EmissionBirth& birth) noexcept;
 // Exact Bailey header58/group content and indexed native roots only. No mission,
 // host receipt, mirror or write authority is supplied by this read-only capture.
-bool CaptureBaileyCreeperBirth(uintptr_t actor,EmissionBirth& birth) noexcept;
-bool BaileyCreeperBirthCurrent(const EmissionBirth& birth) noexcept;
+struct BaileyCreeperDiagnostic {
+    const char* reason="not-run";
+    int offset=-1;
+    unsigned observed{},expected{},changed{};
+};
+// Describes already-read bytes only; never supplies admission or native writes.
+inline BaileyCreeperDiagnostic DescribeBaileyCreeperGroup(const std::array<std::uint8_t,10>& location,
+    std::uint32_t key,const std::array<std::uint8_t,44>& header,const std::array<std::uint8_t,640>& records,unsigned ordinal) noexcept {
+    BaileyCreeperDiagnostic d;
+    if(location!=routespawn::BaileyLocation){d.reason="group-location";return d;}
+    if(key!=808738658){d.reason="group-key";return d;}
+    if(ordinal>=5){d.reason="group-ordinal";return d;}
+    for(unsigned i=0;i<header.size();++i)if(header[i]!=routespawn::BaileyCreeperHeader[i]) {
+        d.reason="group-header";d.offset=static_cast<int>(i);
+        d.observed=header[i];d.expected=routespawn::BaileyCreeperHeader[i];return d;
+    }
+    for(unsigned i=0;i<records.size();++i)if(records[i]!=routespawn::BaileyCreeperRecords[i]) {
+        d.reason="group-records";d.offset=static_cast<int>(i);
+        d.observed=records[i];d.expected=routespawn::BaileyCreeperRecords[i];return d;
+    }
+    d.reason="ok";return d;
+}
+bool CaptureBaileyCreeperBirth(uintptr_t actor,EmissionBirth& birth,BaileyCreeperDiagnostic* diagnostic=nullptr) noexcept;
+bool BaileyCreeperBirthCurrent(const EmissionBirth& birth,BaileyCreeperDiagnostic* diagnostic=nullptr) noexcept;
 // Reserve one exact receipt around the native call. Cancel normal null returns;
 // ambiguous outcomes spend the reservation without a ticket;
 // a successful birth spends that receipt and retains checked local provenance.

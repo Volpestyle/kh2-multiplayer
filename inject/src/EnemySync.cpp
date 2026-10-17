@@ -73,7 +73,7 @@ struct NativeEnemy;
 std::array<uintptr_t,5> PopulationSpawnRoots(const Spawn& spawn);
 combatcausal::Target CausalTarget(const Spawn& s, const NativeEnemy& n, unsigned id);
 bool ReadOrdinaryIdentity(const NativeEnemy&,ordinarybinding::Identity&);
-bool BaileyMissionCurrent(bool terminal=false,uintptr_t* mission=nullptr);
+bool BaileyMissionCurrent(bool terminal=false,uintptr_t* mission=nullptr,const char** refusal=nullptr);
 bool BaileyCreeperAuthority(uintptr_t actor,bool terminal=false);
 bool BaileyCreeperHostMotion(uintptr_t actor);
 
@@ -6209,9 +6209,21 @@ bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t re
             if(g_log)g_log("[spawn-birth] refused reason=returned-root-or-class netId=%u seq=%llu",permit.netId,static_cast<unsigned long long>(permit.sequence));
             return true;
         }
-        uintptr_t baileyMission=0;
-        const bool bailey317=birth->objectId==317 && birth->key==key && birth->headerId==header && birth->recordIndex==record &&
-            BaileyMissionCurrent(false,&baileyMission) && spawncontroller::BaileyCreeperBirthCurrent(*birth);
+        uintptr_t baileyMission=0;const char* missionRefusal="not-run";
+        spawncontroller::BaileyCreeperDiagnostic nativeDiagnostic{};
+        const bool baileyMetadata=birth->objectId==317 && birth->key==key && birth->headerId==header && birth->recordIndex==record;
+        const bool baileyMissionCurrent=baileyMetadata && BaileyMissionCurrent(false,&baileyMission,&missionRefusal);
+        const bool bailey317=baileyMissionCurrent && spawncontroller::BaileyCreeperBirthCurrent(*birth,&nativeDiagnostic);
+        static unsigned baileyAdmissionLogs=0;
+        if(birth->objectId==317 && key==808738658 && header==58 && baileyAdmissionLogs<16 && g_log) {
+            ++baileyAdmissionLogs;
+            g_log("[bailey317] admission frame=%u seq=%llu netId=%u metadata=%u mission=%u missionReason=%s native=%u nativeReason=%s offset=%d observed=%u expected=%u changed=%u fence=%u lifecycle=%u capacity=%u",
+                g_hitTraceFrame,static_cast<unsigned long long>(permit.sequence),permit.netId,baileyMetadata?1U:0U,
+                baileyMissionCurrent?1U:0U,missionRefusal,bailey317?1U:0U,nativeDiagnostic.reason,nativeDiagnostic.offset,
+                nativeDiagnostic.observed,nativeDiagnostic.expected,nativeDiagnostic.changed,
+                static_cast<unsigned>(g_resyncWriteFence),OrdinaryLifecycleRoom()?1U:0U,
+                static_cast<unsigned>(g_localEmissionBirths.size()));
+        }
         if(permit.netId && (!RecordFamily(birth->objectId) || bailey317) && g_resyncWriteFence==ResyncWriteFence::None &&
            !OrdinaryLifecycleRoom() && g_localEmissionBirths.size()<SPAWN_EMISSION_CAP) {
             g_localEmissionBirths.push_back({*birth,permit,g_hitTraceFrame,false,false,{g_hitTraceFrame,g_hitTraceFrame},

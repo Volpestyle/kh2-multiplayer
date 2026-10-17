@@ -2416,30 +2416,55 @@ bool EmissionBirthCurrent(const EmissionBirth& birth) noexcept {
     return CaptureEmissionBirth(reinterpret_cast<void*>(birth.actor),q,reinterpret_cast<void*>(birth.record),birth.recordBytes)==birth;
 }
 
-bool CaptureBaileyCreeperBirth(uintptr_t actor,EmissionBirth& birth) noexcept {
+bool CaptureBaileyCreeperBirth(uintptr_t actor,EmissionBirth& birth,BaileyCreeperDiagnostic* diagnostic) noexcept {
+    if(diagnostic)*diagnostic={};
+    const auto check=[diagnostic](bool value,const char* reason){if(!value && diagnostic)diagnostic->reason=reason;return value;};
     birth={};uintptr_t controller=0,record=0;
-    if(!actor || !IsDiagnosticGameThread() || !ReadNative(actor+0x9E8,controller) || !ReadNative(actor+0x9F0,record))return false;
+    if(!check(actor!=0,"actor-null") || !check(IsDiagnosticGameThread(),"owner-thread") ||
+       !check(ReadNative(actor+0x9E8,controller),"controller-read") || !check(ReadNative(actor+0x9F0,record),"record-read"))return false;
     const auto q=Qualify(controller,QualificationUse::Emission);
-    if(q.scope!=Scope::Qualified || q.records!=10 || record<q.spawnArray ||
-       record-q.spawnArray>=640 || (record-q.spawnArray)%64)return false;
+    if(!check(q.scope==Scope::Qualified,q.reason) || !check(q.records==10,"record-count") ||
+       !check(record>=q.spawnArray,"record-below") || !check(record-q.spawnArray<640,"record-above") ||
+       !check((record-q.spawnArray)%64==0,"record-alignment"))return false;
     std::array<std::uint8_t,44> header{};std::array<std::uint8_t,640> records{};
     const auto ordinal=static_cast<unsigned>((record-q.spawnArray)/64);
-    if(!CopyNative(q.header,header.data(),header.size()) || !CopyNative(q.spawnArray,records.data(),records.size()) ||
-       !routespawn::BaileyCreeperGroup(q.stamp.location,q.key,header,records,ordinal))return false;
+    if(!check(CopyNative(q.header,header.data(),header.size()),"header-read") ||
+       !check(CopyNative(q.spawnArray,records.data(),records.size()),"records-read"))return false;
+    if(!routespawn::BaileyCreeperGroup(q.stamp.location,q.key,header,records,ordinal)) {
+        if(diagnostic)*diagnostic=DescribeBaileyCreeperGroup(q.stamp.location,q.key,header,records,ordinal);
+        return false;
+    }
     std::array<std::uint8_t,64> bytes{};std::memcpy(bytes.data(),records.data()+ordinal*64,64);
     birth=CaptureEmissionBirth(reinterpret_cast<void*>(actor),q,reinterpret_cast<void*>(record),bytes);
     Controller after{};std::array<std::uint8_t,44> headerAfter{};std::array<std::uint8_t,640> recordsAfter{};
-    return birth.available && birth.objectId==317 && birth.objectType==offsets::objentry::TYPE_MOB &&
-        ReadNative(controller,after) && after.key==q.key && after.header==q.header &&
-        after.spawnArray==q.spawnArray && after.regionArray==q.spawnArray+640 &&
-        CopyNative(q.header,headerAfter.data(),headerAfter.size()) && headerAfter==header &&
-        CopyNative(q.spawnArray,recordsAfter.data(),recordsAfter.size()) && recordsAfter==records && SameStamp(q.stamp);
+    if(!check(birth.available,"birth-recapture") || !check(birth.objectId==317,"birth-object") ||
+       !check(birth.objectType==offsets::objentry::TYPE_MOB,"birth-type") || !check(ReadNative(controller,after),"controller-bookend-read") ||
+       !check(after.key==q.key,"key-bookend") || !check(after.header==q.header,"header-root-bookend") ||
+       !check(after.spawnArray==q.spawnArray,"records-root-bookend") || !check(after.regionArray==q.spawnArray+640,"region-root-bookend") ||
+       !check(CopyNative(q.header,headerAfter.data(),headerAfter.size()),"header-bookend-read") || !check(headerAfter==header,"header-bookend") ||
+       !check(CopyNative(q.spawnArray,recordsAfter.data(),recordsAfter.size()),"records-bookend-read") || !check(recordsAfter==records,"records-bookend") ||
+       !check(SameStamp(q.stamp),"stamp-bookend"))return false;
+    if(diagnostic)diagnostic->reason="ok";
+    return true;
 }
-bool BaileyCreeperBirthCurrent(const EmissionBirth& birth) noexcept {
+bool BaileyCreeperBirthCurrent(const EmissionBirth& birth,BaileyCreeperDiagnostic* diagnostic) noexcept {
+    if(diagnostic)*diagnostic={};
     EmissionBirth current{};
-    return birth.available && CaptureBaileyCreeperBirth(birth.actor,current) && current==birth;
+    if(!birth.available){if(diagnostic)diagnostic->reason="original-unavailable";return false;}
+    if(!CaptureBaileyCreeperBirth(birth.actor,current,diagnostic))return false;
+    if(current==birth)return true;
+    if(diagnostic) {
+        diagnostic->reason="birth-changed";
+        diagnostic->changed=(current.actor!=birth.actor?1U:0U)|(current.objentry!=birth.objentry?2U:0U)|
+            (current.status!=birth.status?4U:0U)|(current.controller!=birth.controller?8U:0U)|
+            (current.record!=birth.record?16U:0U)|(current.header!=birth.header?32U:0U)|
+            (current.spawnArray!=birth.spawnArray?64U:0U)|(current.recordBytes!=birth.recordBytes?128U:0U)|
+            (current.objectId!=birth.objectId || current.objectType!=birth.objectType || current.handle!=birth.handle ||
+             current.key!=birth.key || current.headerId!=birth.headerId || current.recordIndex!=birth.recordIndex ||
+             current.records!=birth.records || current.available!=birth.available || current.helper!=birth.helper?256U:0U);
+    }
+    return false;
 }
-
 namespace {
 // One implementation is exercised over test-owned buffers in the same-TU
 // harness. Production always supplies the existing checked native read leaves.

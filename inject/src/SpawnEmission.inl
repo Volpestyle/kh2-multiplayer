@@ -30,30 +30,35 @@ struct LocalEmissionBirth {
 std::vector<LocalEmissionBirth> g_localEmissionBirths;
 
 // Read-only scope: never refresh session state while a caller holds native rows.
-bool BaileyMissionCurrent(bool terminal,uintptr_t* mission) {
+bool BaileyMissionCurrent(bool terminal,uintptr_t* mission,const char** refusal) {
     if(mission)*mission=0;
+    if(refusal)*refusal="ok";
+    const auto check=[refusal](bool value,const char* reason){if(!value && refusal)*refusal=reason;return value;};
     namespace mr=missionmirror::rules;
     RoomTransition location{};uintptr_t base=0;std::uint32_t flags=0,result=0;
     char path[mr::kPathBytes]{},file[mr::kFileBytes]{};
     const auto load=warp::LoadSerial(),transition=warp::TransitionSerial();
-    if(!g_mirrorRequested || !spawncontroller::IsDiagnosticGameThread() || !g_bridge.IsOpen() ||
-       g_recordBindingRequested || g_recordAuthorityRequested || g_resyncWriteFence!=ResyncWriteFence::None ||
-       !g_activationGeneration || g_bridge.SessionGeneration()!=g_activationGeneration ||
-       !g_orderedDeliverySerial || g_orderedDeliverySerial!=g_bridge.DeliverySerial() || !RuntimeWriterLive() ||
-       !g_inst.live || !SafeNativeGameplay() || g_seenLoad!=load || g_seenTransition!=transition ||
-       !ReadLocationChecked(location) || !ReadNative(g_exeBase+mr::kMissionPtr,base) || !base ||
-       !CopyNative(base+mr::kPath,path,sizeof(path)) || !mr::FileOf(path,sizeof(path),file) ||
-       !ReadNative(base+mr::kFlags,flags) || !ReadNative(base+mr::kResult,result))return false;
+    if(!check(g_mirrorRequested,"mirror") || !check(spawncontroller::IsDiagnosticGameThread(),"owner-thread") ||
+       !check(g_bridge.IsOpen(),"bridge") || !check(!g_recordBindingRequested,"legacy-binding") ||
+       !check(!g_recordAuthorityRequested,"legacy-authority") || !check(g_resyncWriteFence==ResyncWriteFence::None,"resync-fence") ||
+       !check(g_activationGeneration!=0,"activation") || !check(g_bridge.SessionGeneration()==g_activationGeneration,"generation") ||
+       !check(g_orderedDeliverySerial!=0,"ordered") || !check(g_orderedDeliverySerial==g_bridge.DeliverySerial(),"delivery") ||
+       !check(RuntimeWriterLive(),"writer") || !check(g_inst.live,"instance") || !check(SafeNativeGameplay(),"gameplay") ||
+       !check(g_seenLoad==load,"seen-load") || !check(g_seenTransition==transition,"seen-transition") ||
+       !check(ReadLocationChecked(location),"location-read") || !check(ReadNative(g_exeBase+mr::kMissionPtr,base),"mission-read") ||
+       !check(base!=0,"mission-null") || !check(CopyNative(base+mr::kPath,path,sizeof(path)),"path-read") ||
+       !check(mr::FileOf(path,sizeof(path),file),"file") || !check(ReadNative(base+mr::kFlags,flags),"flags-read") ||
+       !check(ReadNative(base+mr::kResult,result),"result-read"))return false;
     const std::array<std::uint8_t,10> now{location.worldId,location.roomId,location.door,0,
         static_cast<std::uint8_t>(location.mapProgram),static_cast<std::uint8_t>(location.mapProgram>>8),
         static_cast<std::uint8_t>(location.battleProgram),static_cast<std::uint8_t>(location.battleProgram>>8),
         static_cast<std::uint8_t>(location.eventProgram),static_cast<std::uint8_t>(location.eventProgram>>8)};
     uintptr_t after=0;std::uint32_t flagsAfter=0,resultAfter=0;
-    if(!routespawn::BaileyCreeperMission(now,file,true,flags,result,terminal) ||
-       !ReadNative(g_exeBase+mr::kMissionPtr,after) || after!=base ||
-       !ReadNative(base+mr::kFlags,flagsAfter) || flagsAfter!=flags ||
-       !ReadNative(base+mr::kResult,resultAfter) || resultAfter!=result ||
-       load!=warp::LoadSerial() || transition!=warp::TransitionSerial())return false;
+    if(!check(routespawn::BaileyCreeperMission(now,file,true,flags,result,terminal),"mission-scope") ||
+       !check(ReadNative(g_exeBase+mr::kMissionPtr,after),"mission-bookend-read") || !check(after==base,"mission-bookend") ||
+       !check(ReadNative(base+mr::kFlags,flagsAfter),"flags-bookend-read") || !check(flagsAfter==flags,"flags-bookend") ||
+       !check(ReadNative(base+mr::kResult,resultAfter),"result-bookend-read") || !check(resultAfter==result,"result-bookend") ||
+       !check(load==warp::LoadSerial(),"load-bookend") || !check(transition==warp::TransitionSerial(),"transition-bookend"))return false;
     if(mission)*mission=base;return true;
 }
 bool BaileyCreeperHostMotion(uintptr_t actor) {

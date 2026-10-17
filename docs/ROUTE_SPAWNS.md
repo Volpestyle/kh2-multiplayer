@@ -179,3 +179,20 @@ limits, exact load completion, negative binding conditions, and the production
 emission ledger's ordered reserve/cancel/commit behavior for the two-record wave.
 It is portable and registered in CTest. Run the Windows build and live scenarios
 only in the lead-assigned lane under the main checkout's rig.lock.
+
+### Bailey ticket-admission observation
+
+Bailey-07 (`20261017-070014_net_hb1_bailey_1`, source `3a7ead0`) sent,
+received and emitted all five header58 Creepers but retained no317 action
+birth tickets. Native returned-root capture did not report refusal. The old
+logs cannot distinguish the mission scope from native group/root revalidation;
+they contain no live header/record bytes, so no exact sub-check is established.
+The sixteen-line, package/header-scoped `[bailey317] admission` diagnostic now
+reports the first failed mission/native check and the first differing definition
+byte, or changed birth fields. It grants no permission and leaves every pin,
+lease, denylist and default unchanged. In particular header activation byte0xE
+is still compared exactly; changing it to1 is an offline negative control,
+not a measurement from that run. The logged five receipts replay as spent in
+`BaileyCreeperAuthorityTest`; all5472 definition-bit mutations remain refused
+and report the correct byte. A new reviewed live probe is required to name the
+actual refusal before changing authority.

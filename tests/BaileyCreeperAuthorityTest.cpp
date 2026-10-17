@@ -4,6 +4,7 @@
 #include "EnemyPopulation.hpp"
 #include "OrdinaryEnemyBinding.hpp"
 #include "MissionMirror.hpp"
+#include "NativeSpawnController.hpp"
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -13,6 +14,7 @@ namespace ob=kh2coop::inject::ordinarybinding;
 namespace em=kh2coop::inject::enemymirror;
 namespace ep=kh2coop::inject::enemypop;
 namespace mr=kh2coop::inject::missionmirror::rules;
+namespace sc=kh2coop::inject::spawncontroller;
 int failures=0;
 void check(bool ok,const char* why){if(!ok){++failures;std::cerr<<"FAIL "<<why<<'\n';}}
 int main(){
@@ -28,10 +30,16 @@ int main(){
     for(std::size_t at=0;at<BaileyCreeperHeader.size();++at)for(unsigned bit=0;bit<8;++bit){
         auto h=BaileyCreeperHeader;h[at]^=static_cast<std::uint8_t>(1u<<bit);
         check(!BaileyCreeperGroup(BaileyLocation,808738658,h,BaileyCreeperRecords,0),"all header mutations refuse scope");
+        const auto d=sc::DescribeBaileyCreeperGroup(BaileyLocation,808738658,h,BaileyCreeperRecords,0);
+        check(std::strcmp(d.reason,"group-header")==0 && d.offset==static_cast<int>(at) && d.observed==h[at] &&
+              d.expected==BaileyCreeperHeader[at],"refused header reports its exact first byte without relaxing the pin");
     }
     for(std::size_t at=0;at<BaileyCreeperRecords.size();++at)for(unsigned bit=0;bit<8;++bit){
         auto r=BaileyCreeperRecords;r[at]^=static_cast<std::uint8_t>(1u<<bit);
         check(!BaileyCreeperGroup(BaileyLocation,808738658,BaileyCreeperHeader,r,0),"all full-group mutations refuse scope");
+        const auto d=sc::DescribeBaileyCreeperGroup(BaileyLocation,808738658,BaileyCreeperHeader,r,0);
+        check(std::strcmp(d.reason,"group-records")==0 && d.offset==static_cast<int>(at) && d.observed==r[at] &&
+              d.expected==BaileyCreeperRecords[at],"refused record group reports its exact first byte");
     }
     check(!BaileyCreeperGroup(BaileyLocation,808738659,BaileyCreeperHeader,BaileyCreeperRecords,0),"wrong package refused");
     // Production receipt ledger plus binder: far native positions are not correspondence.
@@ -41,6 +49,22 @@ int main(){
     check(ledger.Cancel(8),"normal null permits same occurrence retry");
     check(ledger.Reserve(808738658,58,0)!=nullptr&&ledger.Commit(8),"nonnull birth spends receipt once");
     check(ledger.Reserve(808738658,58,0)==nullptr,"spent receipt cannot create replacement");
+    // Captured bailey-07 seq8..12: sent, received and emitted, but no action
+    // ticket. Replay the known receipt boundary; native proof bytes were not
+    // logged, so this cannot identify the refusing mission/native sub-check.
+    SpawnEmissionLedger replay;
+    constexpr std::array<std::uint16_t,5> observedIds{8,10,9,12,11};
+    for(std::uint16_t i=0;i<observedIds.size();++i) {
+        auto received=e;received.sequence=8+i;received.recordIndex=i;received.netId=observedIds[i];
+        check(replay.Add(received),"bailey-07 receipt replay admitted");
+        const auto* pending=replay.Reserve(808738658,58,i);
+        check(pending && pending->sequence==8U+i && pending->netId==observedIds[i],"exact observed receipt reserved");
+        check(replay.Commit(8U+i) && !replay.Reserve(808738658,58,i),"emitted occurrence is spent even when no action ticket follows");
+    }
+    auto activation=BaileyCreeperHeader;activation[14]=1;
+    const auto d=sc::DescribeBaileyCreeperGroup(BaileyLocation,808738658,activation,BaileyCreeperRecords,0);
+    check(!BaileyCreeperGroup(BaileyLocation,808738658,activation,BaileyCreeperRecords,0) && d.offset==14 &&
+          d.observed==1 && d.expected==0,"activation-byte hypothesis stays refused and identifiable; not a measured run value");
     ob::Local local{};local.identity={1,2,3,4,5,317};local.point={1000,0,0};local.available=true;local.living=true;
     ob::Host host{8,317,{0,0,0},false,false,false};
     auto held=ob::Resolve(std::vector{local},std::vector{host},{1,4,10});check(held[0].id==0,"no point fallback for separated birth");
