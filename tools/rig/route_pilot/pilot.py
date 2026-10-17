@@ -139,7 +139,7 @@ class Keyboard:
     """SendInput scan codes to the owned game, only while its window has focus."""
 
     def __init__(self, game: Game, keys: dict) -> None:
-        self.game, self.keys, self.held = game, keys, set()
+        self.game, self.keys, self.held, self.sent_at = game, keys, set(), 0.0
         self.unfocused_since: float | None = None
 
     @staticmethod
@@ -168,6 +168,9 @@ class Keyboard:
                        creationflags=subprocess.CREATE_NO_WINDOW)
         u32.GetWindowThreadProcessId(u32.GetForegroundWindow(), ctypes.byref(pid))
         if pid.value == self.game.pid:
+            # The game drops key-downs that arrive before it has taken focus
+            # (teach-02: the first walk got no input), so let it settle.
+            time.sleep(0.4)
             self.unfocused_since = None
             return True
         self.unfocused_since = self.unfocused_since or time.monotonic()
@@ -180,8 +183,13 @@ class Keyboard:
             return
         for k in self.held - want:
             self.send(k, True)
-        for k in want - self.held:
+        # Key-downs are re-sent every half second, like typematic repeat, so a
+        # held key the game missed still registers.
+        repeat = time.monotonic() - self.sent_at > 0.5
+        for k in (want if repeat else want - self.held):
             self.send(k, False)
+        if repeat or want != self.held:
+            self.sent_at = time.monotonic()
         self.held = want
 
     def tap(self, action: str, ms: int = 90) -> bool:
@@ -245,6 +253,10 @@ def steer(s: dict, target: tuple[float, float], dead: float = 0.38) -> set[str]:
 
 class Stuck(Exception):
     pass
+
+
+class Retry(Exception):
+    """Game Over → Continue reloaded another room: replay from the step that leads back."""
 
 
 class Pilot:
@@ -433,7 +445,9 @@ class Pilot:
         native retry of this room) up to `retries` times."""
         reach, low = float(step.get("reach", 220)), float(step.get("lowHp", 0.35))
         stats = {"enemiesStart": None, "swings": 0, "reactions": {}, "minHp": None, "deaths": 0, "evades": 0}
-        calm_since, locked, healed = None, False, 0.0
+        calm_since, locked, healed, reacted = None, False, 0.0, 0.0
+        first = self.state()
+        room = (first["world"], first["room"])
         while time.monotonic() < deadline:
             s = self.state()
             stats["minHp"] = s["hp"] if stats["minHp"] is None else min(stats["minHp"], s["hp"])
@@ -447,6 +461,10 @@ class Pilot:
                 self.capture(f"gameover-{stats['deaths']}")
                 self.kb.tap("confirm")
                 time.sleep(3)
+                self.settle(True, 1.0, time.monotonic() + 120)
+                s = self.state()
+                if (s["world"], s["room"]) != room:
+                    raise Retry(f"Continue reloaded {s['world']}/{s['room']}")
                 locked = False
                 continue
             if not s["free"]:
@@ -455,13 +473,17 @@ class Pilot:
                     self.kb.tap("confirm")
                 time.sleep(0.3)
                 continue
-            if s["react"] and s["battle"] and s["react"] not in SAVE_REACTIONS:
+            if s["react"] and s["battle"] and s["react"] not in SAVE_REACTIONS \
+                    and time.monotonic() > reacted + float(step.get("reactGapSec", 0.8)):
+                reacted = time.monotonic()
                 stats["reactions"][s["react"]] = stats["reactions"].get(s["react"], 0) + 1
                 self.kb.tap("react")
                 continue
             foes = enemies(self.game.pid)
             if stats["enemiesStart"] is None:
                 stats["enemiesStart"] = len(foes)
+            if (s["world"], s["room"]) != room:
+                raise Retry(f"left the fight room for {s['world']}/{s['room']}")
             if not foes:
                 self.kb.hold(set())
                 calm_since = calm_since or time.monotonic()
@@ -478,7 +500,8 @@ class Pilot:
             tx, tz = target["position"]["x"], target["position"]["z"]
             gap = math.hypot(tx - p[0], tz - p[2])
             heal = step.get("heal")  # {"below": 0.4, "keys": [...], "max": 3}: menu keys to use a Potion
-            if heal and s["hp"] < heal.get("below", 0.4) * max(s["maxHp"], 1)                     and stats.setdefault("heals", 0) < heal.get("max", 3) and time.monotonic() > healed + 3:
+            if heal and s["hp"] < heal.get("below", 0.4) * max(s["maxHp"], 1) \
+                    and stats.setdefault("heals", 0) < heal.get("max", 3) and time.monotonic() > healed + 3:
                 stats["heals"] += 1
                 healed = time.monotonic()
                 self.kb.hold(set())
@@ -516,12 +539,24 @@ class Pilot:
 
 
 def run_route(pilot: Pilot, route: dict, first: int) -> int:
-    steps = route["steps"]
-    for i, step in enumerate(steps[first:], start=first):
+    steps, i, retries = route["steps"], first, 0
+    while i < len(steps):
+        step = steps[i]
         pilot.write("step", index=i, step=step)
         t0 = time.monotonic()
         try:
             result = pilot.run_step(step)
+        except Retry as why:
+            retries += 1
+            pilot.write("retry", index=i, reason=str(why), to=step.get("retryFrom", first))
+            if "retryFrom" in step and retries <= int(route.get("retries", 3)):
+                i = step["retryFrom"]
+                continue
+            why = Stuck(f"{why}; no retry left")
+            pilot.kb.release()
+            pilot.write("stuck", index=i, reason=str(why), state=pilot.last)
+            print(json.dumps({"ok": False, "stuckAt": i, "reason": str(why)}))
+            return 3
         except Stuck as why:
             pilot.kb.release()
             pilot.write("stuck", index=i, reason=str(why), state=pilot.last)
@@ -534,7 +569,8 @@ def run_route(pilot: Pilot, route: dict, first: int) -> int:
             return 3
         pilot.write("done", index=i, seconds=round(time.monotonic() - t0, 1), result=result,
                     room=[pilot.last["world"], pilot.last["room"]] if pilot.last else None)
-    print(json.dumps({"ok": True, "steps": len(steps) - first}))
+        i += 1
+    print(json.dumps({"ok": True, "steps": len(steps) - first, "retries": retries}))
     return 0
 
 
@@ -575,7 +611,7 @@ def run_teach(pilot: Pilot, box: Path, seconds: float) -> int:
                 res["capture"] = pilot.capture(f"teach-{cmd_path.stem[4:]}")
             res["state"] = pilot.state()
             res["ok"] = True
-        except Stuck as why:
+        except (Stuck, Retry) as why:
             pilot.kb.release()
             res = {"ok": False, "stuck": str(why), "state": pilot.last}
         except Exception as error:  # report and keep serving commands
