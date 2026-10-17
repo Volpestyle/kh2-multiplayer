@@ -475,6 +475,19 @@ def step_boot(ctx: Context, step: dict) -> dict:
 
     wait_for(ctx, in_save_list, "save list", timeout)
     ctx.sleep(1)
+    moves = int(step.get("slotMoves", 0))
+    if moves:
+        # The list opens on the last-used slot and wraps through all 99, so
+        # there is no absolute position to count from: move relative to it
+        # (+down, -up). The cursor is kept in a capture; the scenario should
+        # also assert the loaded room.
+        for _ in range(abs(moves)):
+            press(inst, "down" if moves > 0 else "up")
+            ctx.sleep(0.5)
+        ctx.sleep(0.5)
+        chosen = ctx.run_dir / f"save_list_{inst.index}.png"
+        kh2ctl("capture", "--out", str(chosen), pid=inst.pid)
+        ctx.artifacts.append(chosen.name)
     press(inst, "cross")
 
     def loaded() -> bool:

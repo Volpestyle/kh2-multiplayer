@@ -1846,7 +1846,7 @@ protected actor. Protection is best effort during loads.
 
 | Step | Fields | Does |
 |---|---|---|
-| `boot` | `timeoutSec initTimeoutMs` | Launch + inject, mute, pick LOAD on the title menu (checked by pixel in captures), load the save list's default slot, wait until the room is live. Menu presses go through the DLL's input collector (`player-press`), so no window focus is needed |
+| `boot` | `timeoutSec initTimeoutMs slotMoves` | Launch + inject, mute, pick LOAD on the title menu (checked by pixel in captures), load the save list's default slot (or `slotMoves` rows from it: + down, − up; the cursor is kept as `save_list_N.png`), wait until the room is live. Menu presses go through the DLL's input collector (`player-press`), so no window focus is needed |
 | `launch` | `mute initTimeoutMs` | Launch + inject only (stays on the title). `initTimeoutMs` is an integer1..60000, default15000, passed to the CLI's existing hook wait. A valid returned launched PID is registered for owned cleanup before initialization failure is raised; failed initialization never advances into boot/input. Missing/malformed PIDs do not supply a cleanup target. |
 | `warp` | `world room door map btl evt` | `kh2ctl warp`; returns once the room has loaded |
 | `input` | `lx ly rx ry ms` | Hold sticks (`player-input`) |
@@ -3048,8 +3048,12 @@ and [prior source review](../build/rig/vuh1498-cutscene-prep-20261005-01/native-
 
 ## Known limits
 
-- `boot` loads whatever slot the save list opens on (the last used one) and
-  doesn't pick a slot. The pixel checks assume 1920×1080.
+- `boot` opens the save list on the last-used slot. The list wraps through
+  all 99 slots, so there is no absolute row to count from: `slotMoves` moves
+  relative to that slot. Saveguard keeps the last-used slot unchanged on PC1
+  (slot 4, BC Parlor, as of 2026-10-17), so `"slotMoves": -1` loads slot 3
+  (FM-02, `boot_fm02.json`). Assert the loaded room as well. The pixel checks
+  assume 1920×1080.
 - The hang check needs the room to be live: it doesn't cover the title
   screen or a load that never finishes (those surface as step timeouts).
 - A protected native menu write was observed once in the authorized attempt

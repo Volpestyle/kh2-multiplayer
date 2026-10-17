@@ -1,0 +1,10 @@
+{
+  "name": "boot_fm02",
+  "description": "VUH-2338: boot, move up one row from the last-used save slot (4, which saveguard keeps unchanged) to slot 3 (FM-02, Roxas's Day 6 in the TT Mansion), and capture the loaded room. No warps and no in-game save.",
+  "steps": [
+    {"do": "boot", "slotMoves": -1},
+    {"do": "wait", "ms": 3000},
+    {"do": "capture", "name": "fm02_loaded"},
+    {"do": "assert", "expr": "room()[0] == 2", "message": "loaded slot is not in Twilight Town"}
+  ]
+}
