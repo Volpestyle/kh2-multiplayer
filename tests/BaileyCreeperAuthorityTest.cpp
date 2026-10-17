@@ -46,7 +46,9 @@ int main(){
     auto held=ob::Resolve(std::vector{local},std::vector{host},{1,4,10});check(held[0].id==0,"no point fallback for separated birth");
     local.birthId=8;auto bound=ob::Resolve(std::vector{local},std::vector{host},{1,4,10});check(bound[0].id==8,"checked ticket binds exact netId despite placement");
     local.prior=bound[0].next;local.birthId=0;host.dead=true;
-    auto terminal=ob::Resolve(std::vector{local},std::vector{host},{1,4,11});check(terminal[0].id==8,"established occurrence receives host terminal death");
+    auto lost=ob::Resolve(std::vector{local},std::vector{host},{1,4,11});check(lost[0].id==0,"lost receipt cannot obtain terminal authority through a point mismatch");
+    local.birthId=8;
+    auto terminal=ob::Resolve(std::vector{local},std::vector{host},{1,4,11});check(terminal[0].id==8,"retained established receipt receives host terminal death");
     // The global denylist and generic factory repair never gain family-wide permission.
     check(!em::FamilyAllowed(317)&&!em::FamilyAllowed(76),"global denylist stays unchanged");
     EnemyMotion m{};m.epoch=4;m.sequence=1;m.hostFrame=10;m.entries={{8,317},{9,76}};
