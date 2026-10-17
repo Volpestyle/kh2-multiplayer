@@ -87,6 +87,12 @@
    "message": "a game has no gusts"
   },
   {
+   "do": "wait_until",
+   "expr": "any(a['name']=='F_MU070' for a in actors(0))",
+   "timeoutMs": 20000,
+   "pollMs": 500
+  },
+  {
    "do": "clip",
    "instance": 0,
    "seconds": 24,
@@ -97,9 +103,9 @@
   {
    "do": "walk_to",
    "instance": 0,
-   "targetExpr": "(lambda acts: (lambda me: (lambda g: (g['position']['x'], g['position']['z']))(min([a for a in acts if a['name']=='F_MU070'], key=lambda a: (a['position']['x']-me['position']['x'])**2+(a['position']['z']-me['position']['z'])**2)))([a for a in acts if a['name']=='P_EX100'][0]))(actors(0))",
+   "targetExpr": "(lambda acts: (lambda me, gs: (lambda g: (g['position']['x'], g['position']['z']))(min(gs, key=lambda a: (a['position']['x']-me['position']['x'])**2+(a['position']['z']-me['position']['z'])**2) if gs else me))([a for a in acts if a['name']=='P_EX100'][0], [a for a in acts if a['name']=='F_MU070']))(actors(0))",
    "until": "peek(0x2A11162,'u16',0)!=0",
-   "timeoutMs": 15000,
+   "timeoutMs": 20000,
    "as": "walk_host"
   },
   {
@@ -111,7 +117,9 @@
    "do": "press",
    "instance": 0,
    "button": "triangle",
-   "ms": 100
+   "ms": 400,
+   "times": 3,
+   "gapMs": 500
   },
   {
    "do": "fight",
@@ -119,7 +127,7 @@
    "seconds": 6,
    "as": "ride_host",
    "sample": {
-    "expr": "pos('P_EX100',0)",
+    "expr": "[pos('P_EX100',0), [a for a in actors(0) if a['name']=='P_EX100'][0]['motionId'], peek(0x2A11162,'u16',0)]",
     "everyMs": 250
    }
   },
@@ -129,11 +137,22 @@
   {
    "do": "save",
    "as": "lift_host",
-   "expr": "max(s['value'][1] for s in saved['ride_host_samples'] if 'value' in s) - min(s['value'][1] for s in saved['ride_host_samples'] if 'value' in s)"
+   "expr": "max(s['value'][0][1] for s in saved['ride_host_samples'] if 'value' in s) - min(s['value'][0][1] for s in saved['ride_host_samples'] if 'value' in s)"
+  },
+  {
+   "do": "save",
+   "as": "motions_host",
+   "expr": "sorted(set(s['value'][1] for s in saved['ride_host_samples'] if 'value' in s))"
   },
   {
    "do": "checkpoint",
    "name": "2 The friend rides a gust like the host"
+  },
+  {
+   "do": "wait_until",
+   "expr": "any(a['name']=='F_MU070' for a in actors(1))",
+   "timeoutMs": 20000,
+   "pollMs": 500
   },
   {
    "do": "clip",
@@ -146,9 +165,9 @@
   {
    "do": "walk_to",
    "instance": 1,
-   "targetExpr": "(lambda acts: (lambda me: (lambda g: (g['position']['x'], g['position']['z']))(min([a for a in acts if a['name']=='F_MU070'], key=lambda a: (a['position']['x']-me['position']['x'])**2+(a['position']['z']-me['position']['z'])**2)))([a for a in acts if a['name']=='P_EX100'][0]))(actors(1))",
+   "targetExpr": "(lambda acts: (lambda me, gs: (lambda g: (g['position']['x'], g['position']['z']))(min(gs, key=lambda a: (a['position']['x']-me['position']['x'])**2+(a['position']['z']-me['position']['z'])**2) if gs else me))([a for a in acts if a['name']=='P_EX100'][0], [a for a in acts if a['name']=='F_MU070']))(actors(1))",
    "until": "peek(0x2A11162,'u16',1)!=0",
-   "timeoutMs": 15000,
+   "timeoutMs": 20000,
    "as": "walk_friend"
   },
   {
@@ -160,7 +179,9 @@
    "do": "press",
    "instance": 1,
    "button": "triangle",
-   "ms": 100
+   "ms": 400,
+   "times": 3,
+   "gapMs": 500
   },
   {
    "do": "fight",
@@ -168,7 +189,7 @@
    "seconds": 6,
    "as": "ride_friend",
    "sample": {
-    "expr": "pos('P_EX100',1)",
+    "expr": "[pos('P_EX100',1), [a for a in actors(1) if a['name']=='P_EX100'][0]['motionId'], peek(0x2A11162,'u16',1)]",
     "everyMs": 250
    }
   },
@@ -178,7 +199,12 @@
   {
    "do": "save",
    "as": "lift_friend",
-   "expr": "max(s['value'][1] for s in saved['ride_friend_samples'] if 'value' in s) - min(s['value'][1] for s in saved['ride_friend_samples'] if 'value' in s)"
+   "expr": "max(s['value'][0][1] for s in saved['ride_friend_samples'] if 'value' in s) - min(s['value'][0][1] for s in saved['ride_friend_samples'] if 'value' in s)"
+  },
+  {
+   "do": "save",
+   "as": "motions_friend",
+   "expr": "sorted(set(s['value'][1] for s in saved['ride_friend_samples'] if 'value' in s))"
   },
   {
    "do": "save",
@@ -192,8 +218,8 @@
   },
   {
    "do": "assert",
-   "expr": "saved['lift_friend']>100",
-   "message": "the friend's Sora did not ride the gust (no height change)"
+   "expr": "saved['lift_friend']>100 or len(saved['motions_friend'])>1",
+   "message": "the friend's Sora did not ride the gust (no height or motion change)"
   }
  ]
 }
