@@ -1,0 +1,11 @@
+{
+  "name": "pilot_axel_fm02",
+  "description": "VUH-2340: boot FM-02, a short teach phase (calibrate mouse buttons; the route file can be edited before the route starts), the solo route through the Basement Hall Dusks and Axel, then teach again. Real keyboard and mouse-button input only; no warps.",
+  "steps": [
+    {"do": "boot", "slotMoves": -1},
+    {"do": "assert", "expr": "room()[0] == 2", "message": "loaded slot is not in Twilight Town"},
+    {"do": "pilot", "teach": "build/vuh2338/teach", "seconds": 180, "name": "calibrate"},
+    {"do": "pilot", "route": "tools/rig/route_pilot/routes/tt1_solo.json", "seconds": 900, "name": "route", "allowStuck": true},
+    {"do": "pilot", "teach": "build/vuh2338/teach", "seconds": 480, "name": "teach"}
+  ]
+}
