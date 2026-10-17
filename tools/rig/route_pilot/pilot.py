@@ -510,8 +510,13 @@ class Pilot:
             return max(window) - s["hp"] >= share * max(s["maxHp"], 1)
 
         def want_heal(s: dict) -> bool:
+            # Menu presses during hit-stun don't use the Potion (route-02: 6 of 9 heals), so
+            # wait for a short gap in the damage; the pinned escape makes one if it never comes.
+            now = time.monotonic()
+            quiet = all(hp <= s["hp"] for at, hp in recent if now - at <= float(heal.get("quietSec", 0.7))) \
+                if heal else False
             return bool(heal) and 0 < s["hp"] < heal.get("below", 0.5) * max(s["maxHp"], 1) \
-                and stats["heals"] < heal.get("max", 3) and time.monotonic() > healed + 3
+                and stats["heals"] < heal.get("max", 3) and now > healed + 3 and quiet
 
         while time.monotonic() < deadline:
             s = self.state()
