@@ -1292,6 +1292,28 @@ Format: decision — why (rejected alternative).
      Steam package and GUI, three players, reconnect and census repair.
   D13's lane rules 2, 3, 6 and 7 still apply. Save protection, one lane per rig
   and owned-process cleanup stay hard gates.
+- **D15. Agent-played two-PC co-op through real doors** (James, 2026-10-17;
+  [VUH-2337](https://linear.app/vuhlp/issue/VUH-2337)). This replaces the
+  warped bot route (VUH-2250) as the next milestone. The route passed 3/3 on
+  one PC, but every room was a warp and no story door ran.
+  1. **Milestone.** Two players on two real PCs play the first visits to TT,
+     HB 1 and Land of Dragons 1 through native doors, events and story
+     scripts, with no warps. PC1 (account A) hosts and `bld` (account B, which
+     owns KH2) is the friend. They connect over Steam through the player
+     launcher, with the ENet internet link (VUH-1493) as the fallback.
+  2. **Agents play both seats.** Each desktop has exactly one driver sending
+     real OS keyboard input to the owned game. No `warp_room`, teleports or
+     memory writes move a player.
+  3. **Agents judge.** Pass/fail comes from both PCs' logs, enemy count and
+     HP parity, crash and soft-lock checks, and clips, all posted to Linear.
+     James's playtest is not a gate: he watches the clips and plays when he
+     wants. He is needed only for taste or feel, money, or access agents lack.
+  4. **Shared `bld`.** Runs start only in an idle window and stop the moment
+     its user returns. An agent never takes over a live session, switches
+     Steam accounts or signs anyone in.
+  5. **Murray's mod is a map, not a source.** Use its route checklist and
+     notes to anticipate breakage. Don't copy its code; GPL porting is James's
+     call. This amends D14.7.
 
 ## Architecture
 
