@@ -224,8 +224,9 @@ completes through4/16. Main `ae0a918` reverted global4/16 replay because it gran
 local rewards. The scoped portable test covers only replayable traps3 and22;
 the shared script's4/16 branch grants no mirrored completion. The fixture still requires
 one actual host end, exactly one friend replay, ended flags on both, and empty
-matching enemy HP/counts. The next live run must report the actual trap;
-no Bailey end has yet been observed.
+matching enemy HP/counts. Bailey-11 observed exactly one host `mission_complete`
+(4/3) and one successful friend replay, but final native flags and enemy parity
+still differed; see the terminal-death observation below.
 
 ### Bailey native pause check
 
@@ -264,4 +265,30 @@ Dusks each at the post-fight snapshot; later both match68/68/68/74/68), but
 neither mission ends. The resumed fight now uses its existing bounded `until`
 milestone to span those empty wave gaps and requires both native mission ends
 with no living enemies. It keeps the150s budget, native input and all ticket,
-pause, parity and once-only end checks. A new live run remains required.
+pause, parity and once-only end checks.
+
+### Bailey terminal death across the end hold
+
+Bailey-11 (`20261017-093331_net_hb1_bailey_1`, `df84ab7`) spans the wave gap
+and reaches one host4/3 `mission_complete` and one friend replay (`ok=1`).
+It still fails final HP/count parity: host empty, friend one Dusk318 at11HP.
+The final paired samples show mission flags21 on the host and1 on the friend;
+the replay receipt alone does not prove both native missions finished.
+[Report and clips](https://linear.app/vuhlp/issue/VUH-2343#comment-7473215f-907a-476b-b285-e0216e60f168).
+
+The Dusk had exact emission ticket20/header58/record7. The friend receives its
+host death immediately before replaying the native end, which enters an event
+hold. After that gap the same body remains11HP but cannot regain its terminal
+binding (`death-without-continuous-binding`, selected0). Relaxing continuity or
+writing through a retained actor pointer would weaken the lifetime boundary.
+
+The candidate fix defers only `HB08_MS102.bar` successful end replay until a
+fresh complete current Bailey census has no living enemies, with the mission
+pointer and scope checked on both sides. It leaves the replay one-shot pending
+so the normal client frame can apply the authenticated final death first. It
+does not grant any death/HP authority, change owner-frame ordering, relax
+binding continuity, or alter other mission ends or failures. An unknown/live
+extra body or unavailable census keeps the end held. The owned-memory
+`kh2coop_nativehit_test` reproduces death plus end in one owner frame and an
+immediate native end hold; native compile, independent review and live final
+parity/ended flags/egress remain required before landing.

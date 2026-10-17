@@ -117,12 +117,25 @@ outcome).
 
 ## Logs and checks
 
+VUH-2343 adds a scoped Bailey completion gate: a successful end replay for
+`HB08_MS102.bar` waits for a fresh complete enemy census with no living enemies
+in the current Bailey mission. The mission pointer/scope is checked before and
+after capture. The end remains pending while the ordinary client frame applies
+authenticated deaths through its existing continuous bindings. This prevents
+the native end hold from interrupting the last Dusk's death before it reaches
+zero HP. It does not authorize an HP/death write or change other missions or
+failure replay. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
+The new gate is pending native compilation, review and live validation.
+
 - Host: `[mission-mirror] host frame=… file=… gauges=…` every 120 frames.
 - Host: `host end trap=… arg=…` when its mission ends through 4/3 or 4/22.
 - Client: `client ready`, `client follow` / `release`, a `client sec` line per
   second with both games' gauges and the sets, shifts, ends and dropped calls,
   and `client fail like the host` / `client end like the host`.
 - Offline: `kh2coop_mission_mirror_test` covers the codec and the rules.
+- Owned native memory: `kh2coop_nativehit_test` covers the Bailey end/death
+  ordering, deferred one-shot retry, native ended flags and unavailable-census
+  refusal without opening a game or writing a save.
 - Live: `net_lod_morale` (parity and a shared mission end) and
   `net_lod_morale_fail` (the host's morale empties; both fail). The runner's
   `mission(i)` helper reads the same fields.

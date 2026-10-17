@@ -536,6 +536,91 @@ std::vector<std::uint8_t> HostEnvelope(const std::vector<std::uint8_t>& packet,
     return bytes;
 }
 bool QueueHostWorld(const std::vector<std::uint8_t>& packet) { return g_bridge.SendToDll(HostEnvelope(packet)); }
+unsigned baileyEndCalls = 0;
+int __fastcall BaileyEndDeath(void* actor, int delta, int stat, int react) {
+    ++deathCalls;
+    Check(reinterpret_cast<uintptr_t>(actor) == enemy && delta == -11 && stat == 0 && react == 0,
+          "Bailey final Dusk uses the normal native death arguments");
+    Put(status, std::int32_t{0});
+    return 0;
+}
+void __fastcall BaileyNativeEnd(std::uint64_t* args) {
+    ++baileyEndCalls;
+    Check(static_cast<std::uint32_t>(args[0]) == UINT32_MAX && Read<int>(status) == 0,
+          "Bailey native end runs only after the final Dusk death, preserving its argument");
+    Put(image + 0x80000 + MR::kFlags, std::uint32_t{1 | MR::kEnded});
+    Put(image + offsets::OPEN_MENU, std::uint8_t{8}); // native end can immediately block the census
+}
+void TestBaileyMissionEndOrdering() {
+    const auto seed=[] {
+        Reset(true);
+        g_mirrorRequested = true; g_recordBindingRequested = g_recordAuthorityRequested = false;
+        g_inst.world = g_host.world = arrivalTarget.worldId = 4;
+        g_inst.room = g_host.room = arrivalTarget.roomId = 8;
+        g_inst.door = arrivalTarget.door = 0;
+        g_inst.map = arrivalTarget.mapProgram = 52;
+        g_inst.btl = g_host.btl = arrivalTarget.battleProgram = 52;
+        g_inst.evt = arrivalTarget.eventProgram = 0;
+        Put(image + offsets::WORLD_ID, std::uint8_t{4}); Put(image + offsets::ROOM_ID, std::uint8_t{8});
+        Put(image + offsets::NOW + 2, std::uint8_t{0});
+        Put(image + offsets::MAP_PROGRAM, std::uint16_t{52});
+        Put(image + offsets::BATTLE_PROGRAM, std::uint16_t{52});
+        Put(image + offsets::EVENT_PROGRAM, std::uint16_t{0});
+        g_inst.spawns[0].objectId = g_host.enemies[1].objectId = 318;
+        g_host.enemies[1].battleProgram = 52;
+        Put(object + offsets::objentry::OBJECT_ID, std::uint32_t{318});
+        Put(status, std::int32_t{11}); g_host.enemies[1].hp = 11;
+        const auto mission = image + 0x80000;
+        Put(image + MR::kMissionPtr, mission); Put(mission + MR::kFlags, std::uint32_t{1});
+        constexpr char path[] = "msn/us/HB08_MS102.bar";
+        std::memcpy(reinterpret_cast<void*>(mission + MR::kPath), path, sizeof(path));
+        g_missionChecked = g_missionReady = true; g_missionParked = 0;
+        g_missionLocalBase = 0; g_missionReplayed = g_missionWasFollowing = false;
+        g_missionHostFailedSeen = g_missionFallbackPending = false; g_missionDroppedEnd = -1;
+        g_missionHost = ReadMission(); g_missionHost.flags |= MR::kEnded;
+        g_missionHost.endTrap = 3; g_missionHost.endArg = UINT32_MAX;
+        g_missionGeneration = WorldSessionGeneration(); g_missionReceivedMs = GetTickCount64();
+        g_missionHostConnection = g_bridge.ConnectionId(0); g_missionHostDelivery = g_bridge.PeerDeliverySerial(0);
+        g_missionLatest.location = arrivalTarget;
+        g_missionHooks[MR::EndTrapIndex(3)].native = reinterpret_cast<uintptr_t>(&BaileyNativeEnd);
+        g_applyStatDelta = BaileyEndDeath; baileyEndCalls = deathCalls = 0;
+        g_hitTraceFrame = 100;
+        Check(ResolveOrdinaryBindings(CaptureNativeCensus(), WorldSessionGeneration()) &&
+              g_inst.spawns[0].ordinaryBinding.bound == 1, "Bailey final Dusk earns its continuous live binding");
+    };
+    seed();
+    QueueHostWorld(encode(EnemyDeath{9, 1})); ReceiveWorldPackets();
+    Check(g_host.enemies[1].dead, "Bailey final death enters through the actual authenticated consumer");
+    g_hitTraceFrame = 101;
+    ApplyMission(101); // production ordering: mission replay runs before ClientFrame
+    Check(!g_missionReplayed && baileyEndCalls == 0 && Read<int>(status) == 11,
+          "Bailey end/death in one owner frame defers end without consuming its one-shot");
+    Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 1 && Read<int>(status) == 0,
+          "deferred Bailey end lets the unchanged continuous binding reconcile the native death");
+    ApplyMission(101);
+    Check(g_missionReplayed && baileyEndCalls == 1 && LocalMissionEnded(false),
+          "Bailey end retries after zero HP and settles the native ended flags once");
+    Put(image + offsets::OPEN_MENU, std::uint8_t{255}); ApplyMission(102);
+    Check(baileyEndCalls == 1, "Bailey end does not replay twice after the native hold clears");
+
+    seed(); Put(status, std::int32_t{0});
+    Check(MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey zero-HP native body permits end");
+    Put(status, std::int32_t{11});
+    Check(!MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey live body defers even without a death packet");
+    Put(status, std::int32_t{0}); Put(enemy + offsets::actor::LINKED_NEXT_HANDLE, std::uint32_t{1});
+    Check(!MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey incomplete native census fails closed");
+    seed(); Put(status, std::int32_t{0}); Put(image + offsets::OPEN_MENU, std::uint8_t{8});
+    Check(!MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey paused gameplay cannot certify an empty roster");
+    seed(); Put(status, std::int32_t{0}); ++load;
+    Check(!MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey load change cannot certify an empty roster");
+    seed(); Put(status, std::int32_t{0});
+    Check(!MissionEndRosterReady(ReadMission(), image + 0x81000), "Bailey changed mission pointer refuses end");
+    auto other = ReadMission(); std::memset(other.file, 0, sizeof(other.file));
+    constexpr char otherName[] = "MU01_MS102.bar"; std::memcpy(other.file, otherName, sizeof(otherName));
+    Check(MissionEndRosterReady(other, 0), "other missions retain their existing end policy");
+    g_mirrorRequested = false; g_missionReady = g_missionChecked = false;
+}
+
 void TestWorldRetirement() {
     namespace p = kh2coop::inject::progresssync;
     namespace w = kh2coop::inject::recoverywarp;
@@ -3058,6 +3143,7 @@ int main() try {
     OnFrameStart(903);
     Check(WorldSessionGeneration() == 102 && !g_writerRecoveryPacket.has_value(),
           "raced new-generation reset rearms through normal ordered admission");
+    TestBaileyMissionEndOrdering();
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);
     return errors ? 1 : 0;

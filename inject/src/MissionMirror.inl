@@ -282,6 +282,22 @@ void LogMissionSecond(const MR::Mission& local,bool following) {
     g_missionSecond={};g_missionSecond.dropped=keep;
 }
 
+// VUH-2343: HB08's final death and mission end can arrive in the same drain.
+// Replaying the end first enters a native hold, losing the final body's
+// continuous death binding. Let ClientFrame reconcile it through the existing
+// guarded native lethal before replaying the end on a later owner frame.
+// This grants no death/write authority and never treats an unreadable roster
+// as empty. Other missions and the failure path keep their existing policy.
+bool MissionEndRosterReady(const MR::Mission& local, uintptr_t expectedMission) {
+    if(!MR::SameFile(local.file,"HB08_MS102.bar"))return true;
+    uintptr_t before=0,after=0;
+    if(!BaileyMissionCurrent(true,&before) || before!=expectedMission)return false;
+    const auto census=CaptureNativeCensus();
+    if(!CensusMatchesInstance(census) ||
+       std::any_of(census.enemies.begin(),census.enemies.end(),[](const auto& enemy){return enemy.hp>0;}))return false;
+    return BaileyMissionCurrent(true,&after) && after==before && CensusMatchesInstance(census);
+}
+
 void ApplyMission(std::uint32_t frame) {
     (void)frame;
     g_missionRole.store(2,std::memory_order_release);
@@ -350,6 +366,11 @@ void ApplyMission(std::uint32_t frame) {
         // The host's mission ended this way: end ours the same way, once.
         if(!g_missionReplayed && LocalMissionEnded(false))g_missionReplayed=true;  // already ended here: guard only
         if(!g_missionReplayed) {
+            if(!MissionEndRosterReady(local,base)) {
+                if(g_log && g_missionLogs++<64)g_log("[mission-mirror] client end deferred file=%s reason=Bailey-roster-live-or-unavailable",local.file);
+                LogMissionSecond(local,true);
+                return; // do not consume the replay one-shot; normal death reconciliation runs next
+            }
             g_missionReplayed=true;
             const bool ok=MissionEnd(g_missionHooks[end].native,g_missionHost.endArg);
             ++g_missionSecond.ends;
