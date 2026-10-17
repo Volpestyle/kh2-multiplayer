@@ -70,6 +70,20 @@ class CoopVerdictTest(unittest.TestCase):
         self.assertIn("host: 1 EXCEPTION lines", v["problems"])
         self.assertIn("relay desync: peer1 fields=2 epoch=2", v["problems"])
 
+    def test_converged_progress_desync_warns(self):
+        friend = FRIEND.replace("[enemysync] client arrived epoch=1", "[warp] client issued epoch=1\n[enemysync] client arrived epoch=1")
+        friend = friend.replace("[enemysync] client arrived epoch=2", "[warp] client issued epoch=2\n[enemysync] client arrived epoch=2")
+        v = coop_verdict.verdict(HOST, {"friend": friend}, "[SessionHost] Desync: peer1 fields=4 epoch=1\n")
+        self.assertTrue(v["pass"], v["problems"])
+        self.assertIn("converged at the epoch 2 boundary (v2 hash 337247B1)", v["warnings"][-1])
+
+    def test_unconverged_progress_desync_and_enemy_desync_fail(self):
+        friend = FRIEND.replace("[enemysync] client arrived epoch=2", "[warp] client issued epoch=2\n[enemysync] client arrived epoch=2")
+        late = coop_verdict.verdict(HOST, {"friend": friend}, "[SessionHost] Desync: peer1 fields=4 epoch=2\n")
+        self.assertIn("relay desync: peer1 fields=4 epoch=2; progress never converged", late["problems"])
+        enemies = coop_verdict.verdict(HOST, {"friend": friend}, "[SessionHost] Desync: peer1 fields=2 epoch=1\n")
+        self.assertIn("relay desync: peer1 fields=2 epoch=1", enemies["problems"])
+
     def test_no_host_room_fails(self):
         self.assertFalse(coop_verdict.verdict("", {"friend": ""})["pass"])
 

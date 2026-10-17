@@ -12,9 +12,16 @@ not how fast:
   intermediate versions are normal) has the host's hash for that version, and
   personal SAVE bytes stayed unchanged; the host's latest version not applied
   yet is a warning;
-- no relay `Desync:` report and no `EXCEPTION` line in any inject log.
+- no relay `Desync:` report and no `EXCEPTION` line in any inject log. A
+  progress-only desync (fields=4) is a warning instead when every friend later
+  applies, at a room boundary after that epoch, a host version with a matching
+  hash: friends apply progress at boundaries, so their own copies of an event
+  can drift mid-room. One that never converges fails. Room and enemy desyncs
+  always fail. The relay's desync-reports manifests (--desync-dir) add the room
+  and both progress hashes to each entry.
 
-    python -B tools/scenario/coop_verdict.py --host H.log --friend F.log [--relay relay.log] [--out v.json]
+    python -B tools/scenario/coop_verdict.py --host H.log --friend F.log [--relay relay.log]
+        [--desync-dir RUN/desync-reports] [--out v.json]
 
 Exit 0 on pass, 1 on fail.
 """
@@ -38,7 +45,9 @@ HOLD_RELEASED = re.compile(r"\[event-control\] input phase=\d+ .*released=1")
 HOLD_SKIPPED = re.compile(r"\[event-control\] hold skipped epoch=(?P<epoch>\d+)")
 HOLD_TIMEOUT = re.compile(r"\[event-control\] owner did not converge")
 EXIT_BLOCKED = re.compile(r"\[warp\] client native exit blocked")
-DESYNC = re.compile(r"Desync: (?P<detail>.*)")
+DESYNC = re.compile(r"Desync: (?P<detail>(?P<peer>\S+) fields=(?P<fields>\d+) epoch=(?P<epoch>\d+).*)")
+CLIENT_ISSUED = re.compile(r"\[warp\] client issued epoch=(?P<epoch>\d+)")
+DESYNC_PROGRESS = 4  # DesyncField::DesyncProgress
 
 
 def location(m: re.Match) -> dict:
@@ -48,6 +57,35 @@ def location(m: re.Match) -> dict:
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def boundary_applies(text: str) -> list[dict]:
+    """Progress applies, each tagged with the host epoch whose load it preceded."""
+    out, pending = [], []
+    for m in re.finditer(CLIENT_PROGRESS.pattern + "|" + CLIENT_ISSUED.pattern, text):
+        if m["version"] is not None:
+            pending.append({"version": int(m["version"]), "hash": m["hash"], "epoch": None})
+        else:
+            for row in pending:
+                row["epoch"] = int(m["epoch"])
+            out += pending
+            pending = []
+    return out + pending
+
+
+def desync_details(desync_dir: Path | None) -> dict:
+    """(epoch, fields) -> room and both progress hashes from relay manifests."""
+    out = {}
+    for manifest in sorted(desync_dir.glob("*/*/manifest.json")) if desync_dir else []:
+        try:
+            t = json.loads(manifest.read_text(encoding="utf-8"))["trigger"]
+            out[(t["epoch"], t["fields"])] = {
+                "room": f"{t['hostHash']['worldId']:02X}/{t['hostHash']['roomId']:02X}",
+                "hostProgress": f"{t['hostHash']['progressHash']:08X}",
+                "friendProgress": f"{t['clientHash']['progressHash']:08X}"}
+        except (OSError, KeyError, ValueError, TypeError):
+            continue
+    return out
 
 
 def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) -> dict:
@@ -99,7 +137,8 @@ def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) 
     }
 
 
-def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "") -> dict:
+def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "",
+            desync_dir: Path | None = None) -> dict:
     host_rooms = [{"epoch": int(m["epoch"]), "location": location(m)} for m in HOST_ARRIVED.finditer(host_text)]
     host_progress = [{"version": int(m["version"]), "kind": m["kind"], "hash": m["hash"]}
                      for m in HOST_PROGRESS.finditer(host_text)]
@@ -114,14 +153,33 @@ def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "") 
         "friends": {name: friend_report(text, host_rooms, host_progress) for name, text in friend_texts.items()},
         "desync": [m["detail"].strip() for m in DESYNC.finditer(relay_text)],
     }
+    published = {p["version"]: p["hash"] for p in host_progress}
+    applies = {name: boundary_applies(text) for name, text in friend_texts.items()}
+    details = desync_details(desync_dir)
+    desync_problems, desync_warnings = [], []
+    for m in DESYNC.finditer(relay_text):
+        epoch, fields = int(m["epoch"]), int(m["fields"])
+        detail = details.get((epoch, fields), {})
+        text = (f"{m['detail'].strip()}" + (f" room={detail['room']} hostProgress={detail['hostProgress']} "
+                f"friendProgress={detail['friendProgress']}" if detail else ""))
+        converged = {name: next((a for a in rows if a["epoch"] is not None and a["epoch"] > epoch and
+                                 published.get(a["version"]) == a["hash"]), None) for name, rows in applies.items()}
+        if fields == DESYNC_PROGRESS and converged and all(converged.values()):
+            first = min((a for a in converged.values()), key=lambda a: a["epoch"])
+            desync_warnings.append(f"{text}; converged at the epoch {first['epoch']} boundary "
+                                   f"(v{first['version']} hash {first['hash']})")
+        else:
+            desync_problems.append(text + ("; progress never converged" if fields == DESYNC_PROGRESS else ""))
+    result["desyncWarnings"] = desync_warnings
     problems = [f"{name}: {p}" for name, f in result["friends"].items() for p in f["problems"]]
     problems += [f"{name}: {f['exceptions']} EXCEPTION lines" for name, f in result["friends"].items() if f["exceptions"]]
     if result["host"]["exceptions"]:
         problems.append(f"host: {result['host']['exceptions']} EXCEPTION lines")
     if not host_rooms:
         problems.append("host published no room")
-    problems += [f"relay desync: {d}" for d in result["desync"]]
+    problems += [f"relay desync: {d}" for d in desync_problems]
     result["problems"] = problems
+    result["warnings"] = [f"{name}: {w}" for name, f in result["friends"].items() for w in f["warnings"]] +         [f"relay progress desync (converged): {w}" for w in desync_warnings]
     result["pass"] = not problems
     return result
 
@@ -131,10 +189,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", type=Path, required=True)
     parser.add_argument("--friend", type=Path, action="append", required=True)
     parser.add_argument("--relay", type=Path)
+    parser.add_argument("--desync-dir", type=Path)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
     result = verdict(read(args.host), {p.name: read(p) for p in args.friend},
-                     read(args.relay) if args.relay else "")
+                     read(args.relay) if args.relay else "", args.desync_dir)
     text = json.dumps(result, indent=2)
     if args.out:
         args.out.write_text(text, encoding="utf-8")

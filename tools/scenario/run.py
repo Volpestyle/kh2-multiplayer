@@ -813,7 +813,7 @@ def step_coop_verdict(ctx: Context, step: dict) -> dict:
     text = lambda path: path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     log = lambda i: text(LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log")
     result = _coop_verdict.verdict(log(host), {f"friend{i}": log(i) for i in friends},
-                                   text(ctx.run_dir / "relay.log"))
+                                   text(ctx.run_dir / "relay.log"), ctx.run_dir / "desync-reports")
     name = step.get("as", "coop_verdict")
     path = ctx.run_dir / f"{name}.json"
     path.write_text(json.dumps(result, indent=2), encoding="utf-8")
