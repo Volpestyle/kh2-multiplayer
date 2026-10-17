@@ -603,6 +603,12 @@ void testWorldCacheEpoch() {
         try { decodePacketHeader(badRow.data(), badRow.size(), body, n); ByteReader br(body, n); RoomTransition x; readRoomTransitionPacket(br, x); }
         catch (const std::exception&) { refused = true; }
         check(refused, "VUH-2342: a party-row flag other than 0/1 is refused");
+        RoomTransition badMember = party; badMember.partyRow = 0x13020100u;
+        const auto badFrame = encode(badMember);
+        refused = false;
+        try { decodePacketHeader(badFrame.data(), badFrame.size(), body, n); ByteReader br(body, n); RoomTransition x; readRoomTransitionPacket(br, x); }
+        catch (const std::exception&) { refused = true; }
+        check(refused, "VUH-2342: a party member id above 0x12 (empty) is refused");
         ByteWriter generic;
         write(generic, shared);
         check(generic.data().size() == 16, "embedded RoomTransition (activation/resync/party) stays 16 bytes");

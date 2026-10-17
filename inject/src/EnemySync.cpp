@@ -1770,6 +1770,12 @@ void FlushActivationResponses() {
 // the two-player clone (playerkit::UpdateBcClone), which rewrites them on every machine itself.
 constexpr std::uintptr_t kSaveRva = 0x9A98B0, kPartyRows = 0x3534;
 constexpr std::uint16_t kPartyRowWorlds = 19;
+constexpr std::uint32_t kSaveMagic = 0x4A32484B;  // "KH2J" at the save body's start
+// Each member byte is a party entry id: 0x00 the playable character .. 0x12 empty.
+bool PartyRowBytesValid(std::uint32_t row) {
+    for (unsigned k = 0; k < 4; ++k) if (((row >> (8 * k)) & 0xFF) > 0x12) return false;
+    return true;
+}
 bool StoryPartyRowWorld(std::uint16_t world) {
     if (world >= kPartyRowWorlds) return false;
     for (const auto clone : playerkit::AUTO_CLONE_WORLDS) if (world == clone) return false;
@@ -1778,7 +1784,9 @@ bool StoryPartyRowWorld(std::uint16_t world) {
 // The friend takes the host's row before its own load of that world, so a party the host's story
 // changed (Ping joining in LoD) is the one its next room builds. Save RAM only; never saved here.
 void ApplyHostPartyRow(const RoomTransition& t) {
-    if (!t.partyRowValid || !StoryPartyRowWorld(t.worldId)) return;
+    if (!t.partyRowValid || !StoryPartyRowWorld(t.worldId) || !PartyRowBytesValid(t.partyRow)) return;
+    std::uint32_t magic = 0;
+    if (!ReadNative(g_exeBase + kSaveRva, magic) || magic != kSaveMagic) return;  // no loaded save body
     auto* row = reinterpret_cast<volatile LONG*>(g_exeBase + kSaveRva + kPartyRows + 4u * t.worldId);
     std::uint32_t before = 0;
     if (!ReadNative(reinterpret_cast<uintptr_t>(row), before) || before == t.partyRow) return;
@@ -1807,8 +1815,10 @@ void QueueHostBeginInstance(const RoomTransition& location) {
     g_pendingHostRoom = location;
     g_pendingHostRoom.difficultyPlayers = static_cast<std::uint8_t>(g_inst.difficulty.players);
     g_pendingHostRoom.partyRowValid = 0; g_pendingHostRoom.partyRow = 0;
-    if (StoryPartyRowWorld(location.worldId) &&
-        ReadNative(g_exeBase + kSaveRva + kPartyRows + 4u * location.worldId, g_pendingHostRoom.partyRow))
+    std::uint32_t saveMagic = 0;
+    if (StoryPartyRowWorld(location.worldId) && ReadNative(g_exeBase + kSaveRva, saveMagic) && saveMagic == kSaveMagic &&
+        ReadNative(g_exeBase + kSaveRva + kPartyRows + 4u * location.worldId, g_pendingHostRoom.partyRow) &&
+        PartyRowBytesValid(g_pendingHostRoom.partyRow))
         g_pendingHostRoom.partyRowValid = 1;
     else g_pendingHostRoom.partyRow = 0;
     g_pendingHostRoomContext = {};

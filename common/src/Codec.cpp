@@ -1325,6 +1325,8 @@ void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
     m.partyRow = r.readU32();
     if (m.partyRowValid > 1 || (!m.partyRowValid && m.partyRow))
         throw std::runtime_error("RoomTransition: invalid party row");
+    for (unsigned k = 0; k < 4; ++k)  // member ids 0x00 (playable) .. 0x12 (empty)
+        if (((m.partyRow >> (8 * k)) & 0xFF) > 0x12) throw std::runtime_error("RoomTransition: invalid party member");
 }
 
 void read(ByteReader& r, TransitionAck& m) {

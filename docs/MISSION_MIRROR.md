@@ -70,6 +70,18 @@ games run the same mission file and its own mission hasn't ended:
   Trap 4/22 (`0x3A37A0(arg)`) ends it and fires signal 0xF. The client replays
   the same trap with the same argument once. After a replayed end or failure,
   every later end or failure of that mission is dropped, so it never ends twice.
+- **Which mission:** a mission is its object pointer, file name and the load
+  it was read in (`warp::LoadSerial`). A Continue retry after a failure reloads
+  the room, so it counts as a new mission on both sides, even if the object is
+  reused.
+- **An end the friend can't replay:** sometimes the host's mission ends with no
+  end trap the hooks saw (an engine end, or a host without hooks). The friend
+  then stops following. If it had dropped its own end meanwhile, it runs that
+  end once. A stale packet alone never triggers this. The host's last gauge and
+  counter values are applied before any replayed end.
+- **The guards expire:** the follow decision and the replay guard both expire
+  250 ms after the last tick. A friend whose session ended never keeps dropping
+  its own calls.
 - **Local calls dropped:** the client's own script calls that change a gauge or
   counter, or end the mission, are dropped while it follows. Those are the
   table-4 traps `mission_complete` 3, `set_count` 5, `inc_count` 6,

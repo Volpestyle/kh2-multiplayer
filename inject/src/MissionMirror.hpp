@@ -71,6 +71,9 @@ struct Mission {
 };
 inline bool Failed(const Mission& m) noexcept { return m.active && m.result == kFailedResult; }
 inline bool Ended(const Mission& m) noexcept { return m.active && (m.flags & kEnded) == kEnded; }
+// The host's mission ended, not by failing and not through an end trap its hooks saw (an engine end,
+// or a host without hooks): the friend can't replay it, so it stops following and keeps its own end.
+inline bool HostEndedUnknown(const Mission& host) noexcept { return Ended(host) && !Failed(host) && !host.endTrap; }
 
 // The host's mission is shown here only when both games run the same mission file and this one
 // hasn't ended. Everything below assumes Follows() was true.

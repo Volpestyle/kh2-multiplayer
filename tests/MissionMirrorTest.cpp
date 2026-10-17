@@ -90,6 +90,10 @@ void rules() {
     check(MR::TimerStartDelta(host, local) == 100, "counting up: 100 frames further moves the start 100 later");
     local.timerState = 0; check(MR::TimerStartDelta(host, local) == 0, "a stopped timer is left alone");
 
+    MR::Mission ended = host; ended.flags = MR::kEnded; ended.result = 0; ended.endTrap = 0;
+    check(MR::HostEndedUnknown(ended), "a host end with no trap seen is an unknown end: stop following");
+    ended.endTrap = 3; check(!MR::HostEndedUnknown(ended), "a host end through 4/3 is replayed, not unknown");
+    ended.endTrap = 0; ended.result = MR::kFailedResult; check(!MR::HostEndedUnknown(ended), "a failure is replayed, not unknown");
     const int complete = MR::EndTrapIndex(3), endSignal = MR::EndTrapIndex(22);
     check(complete >= 0 && endSignal >= 0 && MR::EndTrapIndex(11) < 0 && MR::EndTrapIndex(0) < 0,
           "the end traps are 4/3 and 4/22 only");

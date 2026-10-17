@@ -710,6 +710,8 @@ world are skipped:
   (`playerkit::UpdateBcClone`) rewrites those rows itself.
 - Worlds 19 and up.
 
+Both sides write only into a loaded save body (`KH2J` at its start). Every
+member byte must be `0x12` (empty) or below; the codec refuses anything else.
 Nothing is saved. The friend logs `[party-row] client world=… local=… host=…`.
 
 **Gap:** the friend has already built the room in which the host's story

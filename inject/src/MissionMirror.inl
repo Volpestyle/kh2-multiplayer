@@ -27,6 +27,10 @@ bool g_missionChecked{},g_missionReady{},g_missionReplayed{},g_missionWasFollowi
 std::atomic<std::uint8_t> g_missionRole{0};  // 1 host, 2 client: what the hooks do
 // The host's end: which end trap ran on the current mission (base pointer + file), and its argument.
 uintptr_t g_missionHostBase{},g_missionLocalBase{};
+std::uint32_t g_missionHostLoad{},g_missionLocalLoad{};  // warp::LoadSerial(): a retry is a new mission
+// Client: the mission's own end this game dropped while following, run natively if the host's end never comes.
+int g_missionDroppedEnd=-1;
+std::uint32_t g_missionDroppedArg{};
 char g_missionHostFile[MR::kFileBytes]{},g_missionLocalFile[MR::kFileBytes]{};
 std::uint8_t g_missionHostEndTrap{};
 std::uint32_t g_missionHostEndArg{};
@@ -76,8 +80,9 @@ void PublishMission(std::uint32_t frame) {
     (void)MissionHooksReady();  // without the hooks the end isn't known; gauges still go out
     uintptr_t base=0;
     const auto m=ReadMission(&base);
-    if(!m.active || base!=g_missionHostBase || std::strncmp(m.file,g_missionHostFile,MR::kFileBytes)) {
-        g_missionHostBase=m.active?base:0;std::memcpy(g_missionHostFile,m.file,MR::kFileBytes);
+    const auto load=warp::LoadSerial();
+    if(!m.active || base!=g_missionHostBase || load!=g_missionHostLoad || std::strncmp(m.file,g_missionHostFile,MR::kFileBytes)) {
+        g_missionHostBase=m.active?base:0;g_missionHostLoad=load;std::memcpy(g_missionHostFile,m.file,MR::kFileBytes);
         g_missionHostEndTrap=0;g_missionHostEndArg=0;
     }
     if(frame%(m.active?3u:15u) || g_missionSequence==UINT64_MAX)return;
@@ -146,11 +151,17 @@ template <std::size_t I> void __fastcall MissionDetour(std::uint64_t* args) {
             }
         }
     } else if(role==2) {
-        // A tick that stopped running (a load, a room change) must not keep dropping calls.
-        const bool following=g_missionFollowing.load(std::memory_order_acquire) &&
-            GetTickCount64()-g_missionFollowMs.load(std::memory_order_acquire)<=250;
-        if(MR::DropLocalCall(I,following,g_missionHostFailed.load(std::memory_order_acquire),g_missionReplayed)) {
+        // A tick that stopped running (a load, a room change, the session ending) must not keep
+        // dropping calls: following and the replay guard both expire with it.
+        const bool fresh=GetTickCount64()-g_missionFollowMs.load(std::memory_order_acquire)<=250;
+        const bool following=fresh && g_missionFollowing.load(std::memory_order_acquire);
+        if(MR::DropLocalCall(I,following,g_missionHostFailed.load(std::memory_order_acquire),fresh && g_missionReplayed)) {
             g_missionDropped.fetch_add(1,std::memory_order_relaxed);
+            std::uint32_t arg=0;
+            if(following && !g_missionReplayed && MR::kTraps[I].kind==MR::Kind::End && g_missionDroppedEnd<0 &&
+               CopyNative(reinterpret_cast<uintptr_t>(args),&arg,sizeof(arg))) {
+                g_missionDroppedEnd=static_cast<int>(I);g_missionDroppedArg=arg;
+            }
             return;  // none of these returns a value: args stay as the script passed them
         }
     }
@@ -269,12 +280,14 @@ void ApplyMission(std::uint32_t frame) {
     if(!g_mirrorRequested || MissionParked() || !MissionHooksReady()) { g_missionFollowing.store(false); return; }
     uintptr_t base=0;
     const auto local=ReadMission(&base);
-    if(base!=g_missionLocalBase || std::strncmp(local.file,g_missionLocalFile,MR::kFileBytes)) {
-        // A new mission here: nothing of it has been replayed yet.
-        g_missionLocalBase=base;std::memcpy(g_missionLocalFile,local.file,MR::kFileBytes);g_missionReplayed=false;
+    const auto load=warp::LoadSerial();
+    if(base!=g_missionLocalBase || load!=g_missionLocalLoad || std::strncmp(local.file,g_missionLocalFile,MR::kFileBytes)) {
+        // A new mission here (or a retry after a reload): nothing of it has been replayed or dropped yet.
+        g_missionLocalBase=base;g_missionLocalLoad=load;std::memcpy(g_missionLocalFile,local.file,MR::kFileBytes);
+        g_missionReplayed=false;g_missionDroppedEnd=-1;
     }
     const bool current=MissionReceiveCurrent();
-    const bool following=current && MR::Follows(g_missionHost,local);
+    const bool following=current && MR::Follows(g_missionHost,local) && !MR::HostEndedUnknown(g_missionHost);
     // Publish to the detours before calling anything that could run a script.
     g_missionHostFailed.store(following && MR::Failed(g_missionHost),std::memory_order_release);
     g_missionFollowMs.store(GetTickCount64(),std::memory_order_release);
@@ -282,8 +295,32 @@ void ApplyMission(std::uint32_t frame) {
     if(following!=g_missionWasFollowing && g_log)
         g_log("[mission-mirror] client %s file=%s host=%s",following?"follow":"release",local.active?local.file:"-",
             g_missionHost.active?g_missionHost.file:"-");
+    const bool released=g_missionWasFollowing && !following;
     g_missionWasFollowing=following;
-    if(!following) { LogMissionSecond(local,false); return; }
+    if(!following) {
+        // The host's mission is over (or gone) but its end can't be replayed, and this game had ended its own:
+        // end it as its own script did. A stale packet alone never does this (the host may still be fighting).
+        const bool hostDone=current && (MR::HostEndedUnknown(g_missionHost) || !g_missionHost.active ||
+                                        !MR::SameFile(g_missionHost.file,local.file));
+        if(released && hostDone && g_missionDroppedEnd>=0 && !g_missionReplayed && local.active && !MR::Ended(local)) {
+            g_missionReplayed=true;
+            const bool ok=MissionEnd(g_missionHooks[g_missionDroppedEnd].native,g_missionDroppedArg);
+            ++g_missionSecond.ends;
+            if(g_log)g_log("[mission-mirror] client end of its own after release file=%s trap=%s arg=%u ok=%u",local.file,
+                MR::kTraps[g_missionDroppedEnd].name,g_missionDroppedArg,ok?1u:0u);
+        }
+        LogMissionSecond(local,false);
+        return;
+    }
+    // The host's last values first, so an end below leaves the friend's HUD where the host's ended.
+    if(!(local.flags&MR::kSettersRefused)) {
+        for(std::size_t i=0;i<MR::kSlots;++i) {
+            if(!local.gaugeLock && MR::GaugeDiffers(g_missionHost.gauges[i],local.gauges[i]) &&
+               MissionCall(g_exeBase+MR::kSetGaugeRva,0,g_missionHost.gauges[i].gauge,0,static_cast<int>(i)))++g_missionSecond.gauges;
+            if(MR::CountDiffers(g_missionHost.counters[i],local.counters[i]) &&
+               MissionCall(g_exeBase+MR::kSetCountRva,1,0,g_missionHost.counters[i].count,static_cast<int>(i)))++g_missionSecond.counters;
+        }
+    }
     if(MR::Failed(g_missionHost)) {
         if(!g_missionReplayed && !MR::Failed(local)) {
             g_missionReplayed=true;
@@ -295,7 +332,7 @@ void ApplyMission(std::uint32_t frame) {
         return;
     }
     if(const int end=MR::EndTrapIndex(g_missionHost.endTrap);end>=0) {
-        // The host's mission ended this way: end ours the same way, once, after its last values.
+        // The host's mission ended this way: end ours the same way, once.
         if(!g_missionReplayed) {
             g_missionReplayed=true;
             const bool ok=MissionEnd(g_missionHooks[end].native,g_missionHost.endArg);
@@ -305,15 +342,6 @@ void ApplyMission(std::uint32_t frame) {
         }
         LogMissionSecond(local,true);
         return;
-    }
-    // The setters refuse by themselves after an end; check the lock bits they read first.
-    if(!(local.flags&MR::kSettersRefused)) {
-        for(std::size_t i=0;i<MR::kSlots;++i) {
-            if(!local.gaugeLock && MR::GaugeDiffers(g_missionHost.gauges[i],local.gauges[i]) &&
-               MissionCall(g_exeBase+MR::kSetGaugeRva,0,g_missionHost.gauges[i].gauge,0,static_cast<int>(i)))++g_missionSecond.gauges;
-            if(MR::CountDiffers(g_missionHost.counters[i],local.counters[i]) &&
-               MissionCall(g_exeBase+MR::kSetCountRva,1,0,g_missionHost.counters[i].count,static_cast<int>(i)))++g_missionSecond.counters;
-        }
     }
     if(const auto delta=MR::TimerStartDelta(g_missionHost,local);delta && MissionShiftTimer(delta)) {
         ++g_missionSecond.timer;
