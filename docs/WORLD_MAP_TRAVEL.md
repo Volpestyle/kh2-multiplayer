@@ -23,6 +23,15 @@ local instances. Run: `build/scenarios/20261017-020254_net_worldmap_observe_1`.
     Rapid Fire (Semi-Auto / Full Auto), Gummi Menu and World Map.
   - Being shot down restarts the route.
   - Returning to the map is a native reload to `0F/00` door 13.
+- **Clearing the route:** with Rapid Fire on Full Auto (Gummi pause menu),
+  holding Cross while weaving cleared Asteroid Sweep on the second attempt. The
+  flight ends with a reload to `0F/00` door 13. The gate then shows a keyhole
+  badge and the route reaches LoD.
+- **First LoD landing:** "Land in the Land of Dragons" loads `08/00` door 0,
+  map 1, evt 1: the Bamboo Grove intro scene. Skipping it (Start → Skip Scene)
+  opens a scripted Party menu, where Ping joins and one member goes out. The
+  room then reloads as `08/00` door 50, map 0, evt 19, which is the first room
+  the host publishes.
 - **Landing:** World Menu → destination. Hollow Bastion → Merlin's House loaded
   `04/0D` door 99 (`0x63`), map 1, evt 21. TCM Murray's notes report the same
   door `0x63` for LoD's arrival room `08/00` (`VERIFIED_OFFSETS.md` row "World
@@ -58,8 +67,15 @@ local instances. Run: `build/scenarios/20261017-020254_net_worldmap_observe_1`.
 - **Host landing (passed):** the host landed in HB `04/0D` door 99. The friend
   woke, applied progress, loaded the same room, door and programs, and walked
   once released.
-- **Asteroid Sweep (open):** the route was not cleared in that run, so a landing
-  in LoD after a Gummi flight is still to be shown.
+- **LoD after Asteroid Sweep (passed,
+  `build/scenarios/20261017-024539_net_worldmap_observe_1`):** the friend stayed
+  held through the map, the whole flight, the intro scene and the party menu.
+  The host published `08/00` door 50 evt 19. The friend applied progress delta
+  version 2 (hash `337247B1`, the same as the host's), loaded the same location
+  and was released.
+- **Open, for VUH-2342:** in LoD the friend's HUD shows only Sora. Walking after
+  release wasn't checked there, because a native "Party Command added" tutorial
+  popup was on screen.
 - **Scenario runner:** stalled field frames read as a hang. On the map the
   frame counter can stop, so `net_worldmap_observe` turns the check off with
   the `hang_check` step.

@@ -1,6 +1,6 @@
 {
   "name": "net_worldmap_observe",
-  "description": "VUH-2341 observation fixture: host and one friend load the default save slot with the player package's shipped defaults on an ENet loopback relay, then hold for up to 20 minutes while an operator drives the host natively to the World Map and on to a world. No warps. Hang checks are off so a paused or World Map instance is not reported as hung.",
+  "description": "VUH-2341 observation fixture: host and one friend load the default save slot with the player package's shipped defaults on an ENet loopback relay, then hold for up to 28 minutes while an operator drives the host natively to the World Map and on to a world. No warps. Hang checks are off so a paused or World Map instance is not reported as hung.",
   "playerDefaults": true,
   "protect": [
     0,
@@ -57,7 +57,7 @@
     {
       "do": "wait_until",
       "expr": "exists('build/rig/worldmap-observe.stop')",
-      "timeoutMs": 1200000,
+      "timeoutMs": 1680000,
       "pollMs": 2000
     }
   ]
