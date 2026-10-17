@@ -5558,6 +5558,7 @@ void OnFrameStart(std::uint32_t frame) {
     }
     if (!g_inst.live) { DrainPendingSpawnTrace(false); return; }
     auto census = CaptureNativeCensus();
+    ObserveNativeMissionEnd(frame,census); // read-only end receipt, including native end holds
     if (!CensusMatchesInstance(census)) {
         InterruptCensus(census.state == CensusState::Complete ? "instance changed" : census.reason,
                         census.failedAt, census.nodeCount);

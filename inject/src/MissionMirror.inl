@@ -25,6 +25,19 @@ std::atomic<bool> g_missionFollowing{false},g_missionHostFailed{false};
 std::atomic<std::uint64_t> g_missionDropped{0},g_missionFollowMs{0};  // the last frame that confirmed following
 bool g_missionChecked{},g_missionReady{},g_missionReplayed{},g_missionWasFollowing{};
 MR::EndReplayDeferral g_missionEndDeferral;
+// Diagnostic-only state: never consulted by replay, following or native-write gates.
+struct MissionEndObservation {
+    uintptr_t base{};
+    std::uint32_t load{},replays{};
+    char file[MR::kFileBytes]{};
+    bool nativeLogged{};
+} g_missionEndObservation;
+void MissionEndObservationContext(const MR::Mission& local,uintptr_t base,std::uint32_t load) {
+    auto& observed=g_missionEndObservation;
+    if(observed.base==base && observed.load==load && MR::SameFile(observed.file,local.file))return;
+    observed={};observed.base=base;observed.load=load;
+    std::memcpy(observed.file,local.file,MR::kFileBytes);
+}
 std::atomic<std::uint8_t> g_missionRole{0};  // 1 host, 2 client: what the hooks do
 // The host's end: which end trap ran on the current mission (base pointer + file), and its argument.
 uintptr_t g_missionHostBase{},g_missionLocalBase{};
@@ -318,12 +331,33 @@ void LogMissionEndOrphans(std::uint32_t frame) {
     }
 }
 
+// Called even when gameplay/census is unavailable during the native end hold.
+// Unknown census counts stay -1; the scenario independently requires fresh
+// empty actor counts and matching ended flags. No cached actor is dereferenced.
+void ObserveNativeMissionEnd(std::uint32_t frame,const NativeCensus& census) {
+    if(!g_log || g_role!=Role::Client || !g_mirrorRequested || !g_inst.live)return;
+    uintptr_t base=0;
+    const auto local=ReadMission(&base);
+    if(!MR::SameFile(local.file,"HB08_MS102.bar"))return;
+    MissionEndObservationContext(local,base,warp::LoadSerial());
+    auto& observed=g_missionEndObservation;
+    if(observed.nativeLogged || observed.replays || !MR::Ended(local) || MR::Failed(local))return;
+    const bool complete=CensusMatchesInstance(census);
+    int living=complete?0:-1;
+    long long hpSum=complete?0:-1;
+    if(complete)for(const auto& enemy:census.enemies)if(enemy.hp>0){++living;hpSum+=enemy.hp;}
+    observed.nativeLogged=true;
+    g_log("[mission-mirror] client end observed file=%s path=native-local replays=0 census=%s living=%d hpSum=%lld frame=%u flags=%u result=%u",
+          local.file,complete?"complete":"unavailable",living,hpSum,frame,local.flags,local.result);
+}
+
 void ApplyMission(std::uint32_t frame) {
     g_missionRole.store(2,std::memory_order_release);
     if(!g_mirrorRequested || MissionParked() || !MissionHooksReady()) { g_missionFollowing.store(false); return; }
     uintptr_t base=0;
     const auto local=ReadMission(&base);
     const auto load=warp::LoadSerial();
+    MissionEndObservationContext(local,base,load);
     if(base!=g_missionLocalBase || load!=g_missionLocalLoad || std::strncmp(local.file,g_missionLocalFile,MR::kFileBytes)) {
         // A new mission here (or a retry after a reload): nothing of it has been replayed or dropped yet.
         g_missionLocalBase=base;g_missionLocalLoad=load;std::memcpy(g_missionLocalFile,local.file,MR::kFileBytes);
@@ -353,6 +387,7 @@ void ApplyMission(std::uint32_t frame) {
            !g_missionReplayed && local.active && !MR::Ended(local) && !LocalMissionEnded(false)) {
             g_missionFallbackPending=false;
             g_missionReplayed=true;
+            ++g_missionEndObservation.replays;
             const bool ok=MissionEnd(g_missionHooks[g_missionDroppedEnd].native,g_missionDroppedArg);
             ++g_missionSecond.ends;
             if(g_log)g_log("[mission-mirror] client end of its own after release file=%s trap=%s arg=%u ok=%u",local.file,
@@ -375,6 +410,7 @@ void ApplyMission(std::uint32_t frame) {
             g_missionReplayed=true;  // its own script failed it (the gauge reached 0 here too): guard later calls
         if(!g_missionReplayed) {
             g_missionReplayed=true;
+            ++g_missionEndObservation.replays;
             const bool ok=MissionCall(g_exeBase+MR::kFailRva,2,0,0,0);
             ++g_missionSecond.ends;
             if(g_log)g_log("[mission-mirror] client fail like the host file=%s ok=%u",local.file,ok?1u:0u);
@@ -397,6 +433,7 @@ void ApplyMission(std::uint32_t frame) {
                 LogMissionEndOrphans(frame); // read-only; cap restores the original end call, never a new lethal
             }
             g_missionReplayed=true;
+            ++g_missionEndObservation.replays;
             const bool ok=MissionEnd(g_missionHooks[end].native,g_missionHost.endArg);
             ++g_missionSecond.ends;
             if(g_log)g_log("[mission-mirror] client end like the host file=%s trap=%s arg=%u ok=%u path=%s",local.file,

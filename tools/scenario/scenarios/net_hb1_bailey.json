@@ -80,7 +80,9 @@
     {"do": "wait_until", "expr": "all(not enemy_hps(i) and mission(i) and mission(i)['file']=='HB08_MS102.bar' and (mission(i)['flags']&0x14)==0x14 and mission(i)['result']!=2 for i in range(2))", "timeoutMs": 20000},
     {"do": "save", "as": "bailey_mission_end", "expr": "[mission(0),mission(1)]"},
     {"do": "save", "as": "bailey317_birth_tickets", "expr": "[log_matches(r'\\[spawn-birth\\] ticket frame=(?P<frame>\\d+) netId=(?P<netId>\\d+) seq=(?P<sequence>\\d+) actor=(?P<actor>[0-9A-Fa-f]+) objectId=317',i) for i in range(2)]"},
-    {"do": "assert", "expr": "len(saved['bailey317_birth_tickets'][1])>=5 and log_count('[mission-mirror] host end trap=',0)>0 and log_count('[mission-mirror] client end like the host file=HB08_MS102.bar',1)==1", "message": "Five Creeper birth tickets and exactly one replayed Bailey mission end are required"},
+    {"do": "wait_until", "expr": "log_count('[mission-mirror] client end observed file=HB08_MS102.bar path=native-local',1)+log_count('[mission-mirror] client end like the host file=HB08_MS102.bar',1)>=1", "timeoutMs": 10000},
+    {"do": "save", "as": "bailey_end_receipts", "expr": "{'native':log_matches(r'\\[mission-mirror\\] client end observed file=HB08_MS102\\.bar path=(?P<path>native-local) replays=(?P<replays>\\d+) census=(?P<census>[^ ]+) living=(?P<living>-?\\d+) hpSum=(?P<hpSum>-?\\d+)',1),'replay':log_matches(r'\\[mission-mirror\\] client end like the host file=HB08_MS102\\.bar[^\\r\\n]* ok=(?P<ok>\\d+) path=(?P<path>clean-census|frame-cap)',1),'replayCount':log_count('[mission-mirror] client end like the host file=HB08_MS102.bar',1),'host':log_matches(r'\\[mission-mirror\\] host end trap=(?P<trap>[^ ]+) arg=(?P<arg>\\d+)',0)}"},
+    {"do": "assert", "expr": "len(saved['bailey317_birth_tickets'][1])>=5 and len(saved['bailey_end_receipts']['host'])==1 and len(saved['bailey_end_receipts']['native'])+len(saved['bailey_end_receipts']['replay'])==1 and saved['bailey_end_receipts']['replayCount']==len(saved['bailey_end_receipts']['replay']) and all(r['replays']=='0' for r in saved['bailey_end_receipts']['native']) and all(r['ok']=='1' for r in saved['bailey_end_receipts']['replay'])", "message": "Five Creeper tickets and exactly one native-local, clean-census or frame-cap end receipt are required; native completion and replay must never both occur"},
     {"do": "save", "as": "bailey_enemy_end", "expr": "[[(a['objectId'],a['hp'],a['maxHp']) for a in enemies(i) if a['hp']>0] for i in range(2)]"},
     {"do": "assert", "expr": "saved['bailey_enemy_end']==[[],[]]", "message": "Both native mission ends require empty, matching living enemy HP/counts"},
     {"do": "save", "as": "bailey_attachments", "expr": "[log_matches(r'\\[missing-party\\] attachment allowed=(?P<allowed>\\d+) roots=(?P<roots>\\d+) clone=(?P<clone>[0-9A-Fa-f]+) controller=(?P<controller>[0-9A-Fa-f]+) expectedController=(?P<expectedController>[0-9A-Fa-f]+) record=(?P<record>[0-9A-Fa-f]+) expectedRecord=(?P<expectedRecord>[0-9A-Fa-f]+)',i) for i in range(2)]"},
@@ -90,6 +92,7 @@
     {"do": "capture", "instance": 0, "name": "bailey_complete_host"},
     {"do": "capture", "instance": 1, "name": "bailey_complete_friend"},
     {"do": "warp", "instance": 0, "world": 4, "room": 26, "map": 0, "btl": 0, "evt": 0},
-    {"do": "transition_check", "instances": [0, 1], "target": [4, 26], "as": "bailey_egress_goa", "timeoutMs": 30000, "capture": true}
+    {"do": "transition_check", "instances": [0, 1], "target": [4, 26], "as": "bailey_egress_goa", "timeoutMs": 30000, "capture": true},
+    {"do": "assert", "expr": "log_count('[mission-mirror] client end observed file=HB08_MS102.bar path=native-local',1)+log_count('[mission-mirror] client end like the host file=HB08_MS102.bar',1)==1 and log_count('[mission-mirror] host end trap=',0)==1", "message": "Bailey egress must retain exactly one host end and one friend end path, with no late replay after native-local"}
   ]
 }

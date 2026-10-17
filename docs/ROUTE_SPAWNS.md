@@ -223,8 +223,9 @@ writer selects2 in this script; that branch's existence does not prove Bailey
 completes through4/16. Main `ae0a918` reverted global4/16 replay because it grants
 local rewards. The scoped portable test covers only replayable traps3 and22;
 the shared script's4/16 branch grants no mirrored completion. The fixture still requires
-one actual host end, exactly one friend replay, ended flags on both, and empty
-matching enemy HP/counts. Bailey-11 observed exactly one host `mission_complete`
+one actual host end, exactly one explicit friend completion path, ended flags
+on both, and empty matching enemy HP/counts. A native-local completion with
+zero mirror replays is valid; it must never coexist with a replay. Bailey-11 observed exactly one host `mission_complete`
 (4/3) and one successful friend replay, but final native flags and enemy parity
 still differed; see the terminal-death observation below.
 
@@ -300,3 +301,22 @@ immediate native end hold, plus an unbound orphan that forces the capped replay
 without a new lethal. Native compile and live final parity/ended flags/egress
 remain required before landing. A capped end is liveness evidence, not a pass
 of the enemy parity gate.
+
+Bailey-12 (`20261017-101224_net_hb1_bailey_1`, `cae373c`) reaches both native
+ended flags21/result0 with living enemies0/0 and HP parity passing, after114.23s
+of resumed combat. The friend applies the final Samurai7 death (4HP to0) and
+finishes without a mirror replay, cap or orphan receipt. The run still fails
+the old replay-only assertion before egress; it is not a passing scenario.
+The lead accepts native-local completion as a valid path and requires an
+explicit zero-replay receipt for the next run.
+
+The diagnostic observer records `path=native-local replays=0` once per local
+mission pointer/load/file. It counts actual mirror end attempts separately
+from the existing replay guard, which can also mean "already ended locally".
+It does not change any completion, following, binding or write decision.
+During a native end hold, the native census can be unavailable: the receipt
+says so with living/HP sum -1 rather than inventing an empty sample. The
+scenario independently requires current empty actor counts and both ended
+flags, exactly one of native-local/clean-census/frame-cap, zero replays on
+native-local, a successful replay otherwise, and no second path after egress.
+Bailey-13 must verify those receipts and the remaining egress/attachment gates.

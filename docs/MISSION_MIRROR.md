@@ -129,7 +129,20 @@ orphan's safely sampled netId/HP/actor, or explicitly says the census is
 unavailable; it never grants death/HP write authority. The end receipt records
 `path=clean-census` or `path=frame-cap`. Other missions and failure replay are
 unchanged. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
-The bounded follow-up is pending native compilation, review and live validation.
+The bounded deferral passed Quill's D14.4 review and the MSVC owned-memory
+regression. Bailey-12 ended on both peers with empty matching HP/counts, but
+failed the old replay-only oracle before egress. The receipt/oracle follow-up
+still needs native compilation and its live run.
+
+The friend may complete `HB08_MS102.bar` natively after the final authenticated
+enemy death, before a mirror replay. That is valid: a diagnostic-only observer
+logs `path=native-local replays=0` once, with the native census availability,
+living count and HP sum. It also runs during a native end hold; unavailable
+counts are -1, never an empty-census claim. Its replay-attempt counter and
+one-shot receipt state do not affect existing gameplay gates. The scenario
+accepts exactly one native-local/clean-census/frame-cap path and independently
+requires both ended flags, empty matching HP/counts and egress; it rejects any
+native-local plus replay combination, including a late replay after egress.
 
 - Host: `[mission-mirror] host frame=… file=… gauges=…` every 120 frames.
 - Host: `host end trap=… arg=…` when its mission ends through 4/3 or 4/22.

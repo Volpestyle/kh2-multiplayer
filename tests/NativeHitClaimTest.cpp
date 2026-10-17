@@ -583,6 +583,7 @@ void TestBaileyMissionEndOrdering() {
         std::memcpy(reinterpret_cast<void*>(mission + MR::kPath), path, sizeof(path));
         g_missionChecked = g_missionReady = true; g_missionParked = 0;
         g_missionLocalBase = 0; g_missionReplayed = g_missionWasFollowing = false;
+        g_missionEndObservation = {};
         g_missionHostFailedSeen = g_missionFallbackPending = false; g_missionDroppedEnd = -1;
         g_missionHost = ReadMission(); g_missionHost.flags |= MR::kEnded;
         g_missionHost.endTrap = 3; g_missionHost.endArg = UINT32_MAX;
@@ -611,6 +612,9 @@ void TestBaileyMissionEndOrdering() {
           "Bailey end retries after zero HP and settles the native ended flags once");
     Check(std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){return line.find("path=clean-census")!=std::string::npos;}),
           "Bailey clean completion reports the census path rather than the cap");
+    ObserveNativeMissionEnd(101,CaptureNativeCensus());
+    Check(g_missionEndObservation.replays == 1 && !g_missionEndObservation.nativeLogged,
+          "a replayed Bailey end never also reports native-local");
     Put(image + offsets::OPEN_MENU, std::uint8_t{255}); ApplyMission(102);
     Check(baileyEndCalls == 1, "Bailey end does not replay twice after the native hold clears");
 
@@ -631,6 +635,26 @@ void TestBaileyMissionEndOrdering() {
           "Bailey cap logs the fresh orphan netId HP actor and the capped replay path");
     Put(image + offsets::OPEN_MENU, std::uint8_t{255}); ApplyMission(282);
     Check(baileyEndCalls == 1, "Bailey capped end remains a one-shot after the hold clears");
+
+    seed(); g_log = BaileyEndLog;
+    Put(status,std::int32_t{0}); Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
+    const auto nativeEndCensus = CaptureNativeCensus();
+    ObserveNativeMissionEnd(102,nativeEndCensus); ObserveNativeMissionEnd(103,nativeEndCensus);
+    Check(g_missionEndObservation.nativeLogged && g_missionEndObservation.replays == 0 && !g_missionReplayed &&
+          baileyEndCalls == 0 && std::count_if(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){
+              return line.find("path=native-local replays=0 census=complete living=0 hpSum=0")!=std::string::npos;
+          }) == 1, "native Bailey completion logs one zero-replay empty-census receipt without changing the replay gate");
+    ApplyMission(103);
+    Check(baileyEndCalls == 0 && g_missionEndObservation.replays == 0,
+          "native Bailey completion and a mirrored end never both run");
+    seed(); g_log = BaileyEndLog;
+    Put(status,std::int32_t{0}); Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
+    Put(image + offsets::OPEN_MENU,std::uint8_t{8});
+    ObserveNativeMissionEnd(104,CaptureNativeCensus());
+    Check(std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){
+              return line.find("path=native-local replays=0 census=unavailable living=-1 hpSum=-1")!=std::string::npos;
+          }) && baileyEndCalls == 0 && !g_missionReplayed,
+          "native end hold logs unavailable census explicitly without treating it as empty or mutating the end gate");
 
     seed(); Put(status, std::int32_t{0});
     Check(MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey zero-HP native body permits end");
