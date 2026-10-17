@@ -247,3 +247,21 @@ and attempted-pause screenshots before its assertion, then records a verified
 paused state before the two-second hold. Resume still requires255. A new run
 must prove the actual pause and report every317 retirement, both native ends
 and enemy count/HP parity.
+
+Bailey-10 (`20261017-085339_net_hb1_bailey_1`, `08d669c`) measures combat
+menu8 on both peers, blockers0 before Start and1 while paused, then255 on
+resume. Both pause-entry and immediate post-resume retirement lists are empty.
+Five later friend317 retirements (IDs11,10,8,9,12) each immediately follow the
+same actor leaving the native list with lastHP0 and a native cull-pass receipt.
+They are completed deaths, rather than observed pause/lease-gap losses; host
+has no retirement lines. This qualifies this pause, not every possible skipped
+owner-frame condition.
+
+The run still fails mission completion. The resumed helper stops at79.23s of
+its150s budget with both `enemiesEnd=0`, while mission flags remain1. The next
+five-Dusk wave18..22 then appears on both games. HP parity passes (five80HP
+Dusks each at the post-fight snapshot; later both match68/68/68/74/68), but
+neither mission ends. The resumed fight now uses its existing bounded `until`
+milestone to span those empty wave gaps and requires both native mission ends
+with no living enemies. It keeps the150s budget, native input and all ticket,
+pause, parity and once-only end checks. A new live run remains required.
