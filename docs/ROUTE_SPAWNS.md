@@ -261,16 +261,31 @@ Both missions ended once with flags21/result0 and final living counts0/0;
 only4/45 sequential combat HP samples matched. The empty final census does
 not qualify wave parity. [Report and reviewed clips](https://linear.app/vuhlp/issue/VUH-2352#comment-68d365af-4fd4-4226-95d8-6ecfded73c78).
 
-The leading cause is the strict installed header pin including byte0xE:
-the native `3FE320` type2 branch sets it to1 before the emitter. This remains
-an inference until a live pin comparison is captured. The next diagnostic adds
+The strict installed header pin includes byte0xE: the native `3FE320` type2
+branch sets it to1 before the emitter. The diagnostic adds
 `[morale-wave-pin]` difference counts and first expected/observed bytes for the
 header and current record, using only the observer's already-copied data and
 existing entry/return log budgets. The 64-bit `headerDiffMask` (44 used bits)
 and `recordDiffMask` (64 bits) set bit N for every differing byte offset N;
 an invalid record ordinal retains the explicit count65/first-offset-2 sentinel.
-Admission predicates and order are unchanged;
-no exception is broadened. Windows compilation and that diagnostic run are pending.
+Admission predicates and order are unchanged; no exception is broadened.
+
+Diagnostic03 (`20261017-120407_net_lod_morale_spawn_probe_1`, source `cb359bd`)
+proves the exact cause: all12 comparisons (8entries,4successful returns) have
+header mask `0x4000`, first offset14/0xE, expected0/observed1, and record mask0.
+The four successful returns cover978/0,999/0 and1007/0,1, so every compared
+header byte besides0xE and every current-record byte remains identical to its
+installed pin. Windows serial Release compilation and the route-spawn, Bailey,
+mission, native-hit and spawntrace regressions passed. The unchanged admission
+still yields host4/friend0 scoped births and zero tickets; only7/41 sequential
+combat HP samples match. Both missions end once with flags21/result0 and final
+counts0/0, which does not qualify through-wave parity.
+[Masks, build, logs, reviewed clips and closure](https://linear.app/vuhlp/issue/VUH-2352#comment-d9cfcaf0-af94-45f5-acab-337c70e8a0e1).
+
+The proposed behavior fix admits only the native0/1 activation state at0xE in
+these existing exact LoD groups. Every other header/record byte and the existing
+scope and ticket checks stay strict. Independent review and a fresh live parity
+pass are still required before landing that fix.
 
 ## Provenance and checks
 
