@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include "kh2coop/MissionFlags.hpp"
 
 namespace kh2coop::routespawn {
 // Exact installed ARD definitions; see docs/ROUTE_SPAWNS.md for provenance.
@@ -52,8 +53,9 @@ inline bool BaileyCreeperGroup(const std::array<std::uint8_t,10>& location,std::
 }
 inline bool BaileyCreeperMission(const std::array<std::uint8_t,10>& location,std::string_view file,
                                  bool active,std::uint32_t flags,std::uint32_t result,bool terminal) {
-    return location==BaileyLocation && file=="HB08_MS102.bar" && active && (flags&1) && result!=2 &&
-        (terminal || (flags&0x14)!=0x14);
+    namespace mr=kh2coop::inject::missionmirror::rules;
+    return location==BaileyLocation && file=="HB08_MS102.bar" && active && (flags&mr::kInUse) && result!=mr::kFailedResult &&
+        (terminal || (flags&mr::kEnded)!=mr::kEnded);
 }
 // A birth's sampled native roots must be observed on continuous owner frames.
 // A failed observation consumes this occurrence; a later same address cannot revive it.

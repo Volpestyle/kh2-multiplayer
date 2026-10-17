@@ -45,6 +45,11 @@ int main(){
     ob::Host host{8,317,{0,0,0},false,false,false};
     auto held=ob::Resolve(std::vector{local},std::vector{host},{1,4,10});check(held[0].id==0,"no point fallback for separated birth");
     local.birthId=8;auto bound=ob::Resolve(std::vector{local},std::vector{host},{1,4,10});check(bound[0].id==8,"checked ticket binds exact netId despite placement");
+    auto colocated=host;colocated.id=9;colocated.point=local.point;
+    auto absent=ob::Resolve(std::vector{local},std::vector{colocated},{1,4,10});
+    check(absent[0].id==0,"a local carrying birthId never point-matches a different colocated host");
+    auto exact=ob::Resolve(std::vector{local},std::vector{colocated,host},{1,4,10});
+    check(exact[0].id==8,"birthId selects its distant host instead of a colocated different host");
     local.prior=bound[0].next;local.birthId=0;host.dead=true;
     auto lost=ob::Resolve(std::vector{local},std::vector{host},{1,4,11});check(lost[0].id==0,"lost receipt cannot obtain terminal authority through a point mismatch");
     local.birthId=8;

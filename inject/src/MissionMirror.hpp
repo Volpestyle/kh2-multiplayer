@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "kh2coop/MissionFlags.hpp"
 
 namespace kh2coop::inject::missionmirror::rules {
 
@@ -31,7 +32,7 @@ inline constexpr std::uintptr_t kGauges = 0x250, kGaugeStride = 0x48, kCounters 
 inline constexpr std::uintptr_t kSlotFlags = 0x18, kSlotMax = 0x24, kSlotValue = 0x38;
 inline constexpr std::uintptr_t kTimerClock = 0xABB850, kTimerStart = 0xABB858, kTimerDuration = 0xABB85C,
                                  kTimerValue = 0xABB860, kTimerState = 0xABB864, kTimerMode = 0xABB868;
-inline constexpr std::uint32_t kSettersRefused = 0x4, kEnded = 0x14, kFailedResult = 2, kInUse = 0x1;
+inline constexpr std::uint32_t kSettersRefused = 0x4;
 inline constexpr std::size_t kPathBytes = 64, kFileBytes = 24, kSlots = 3;
 inline constexpr std::uint32_t kTimerRunning = 2, kTimerCountDown = 1;
 inline constexpr std::int32_t kTimerSlackFrames = 15;  // closer than this is left alone
