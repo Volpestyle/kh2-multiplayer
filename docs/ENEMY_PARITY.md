@@ -1702,6 +1702,20 @@ roster retains at most 64 live and retired occurrences; overflow refuses the
 whole snapshot. New live occurrences outrank old tombstones at the same point;
 multiple live matches refuse binding.
 
+**A boss whose death its own script plays (VUH-2367).** On a client the host's
+death is applied as native lethal damage. A brainless boss copy can refuse it:
+Shan-Yu `B_MU100` went `9 -> 221` HP (`20261017-070818`), because on the host his
+script drives the defeat (mission trap 4/16, `re_deadboss`). When the
+post-lethal sample is still alive and its objentry is a boss (type 3), the
+client fades the copy out once with the native leave (VUH-2272), never inside a
+resync's record-authority write fence. The leaf `ApplyNativeBossLeave` re-checks
+the type at write time. The census is then re-resolved on the next owner frame,
+and the log line is `boss lethal refused; native leave applied`. No kill is
+counted and the friend gets no boss reward. Ordinary enemies keep the failed
+lethal as before. `net_lod_shanyu` checks that the friend's bosses match the
+host's after the defeat, and that neither Shan-Yu nor the hawk `B_MU110` is left
+after the friend follows the host out.
+
 **Natively run fields (VUH-2342).** LoD's wind gusts `F_MU070` (object 0x151,
 08/08) are not field objects for the mirror: every game runs its own, and the
 host leaves them out of the roster (`ReadNativeField`). They are remade every few

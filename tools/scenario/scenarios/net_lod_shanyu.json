@@ -1,6 +1,6 @@
 {
  "name": "net_lod_shanyu",
- "description": "VUH-2342: Shan-Yu's room 08/09 programs 75 (B_MU100 + hawk B_MU110, mission MU09_MS108 with the GATES gauge). Both fight until Shan-Yu is defeated (up to ~340 s), with enemy HP, both missions and the friend's position sampled every 2 s. After the host's defeat the friend releases its mission (the host's boss end isn't replayed) and must stay playable; the host then moves to 08/00 door 50 and the friend must follow, move, and have no Shan-Yu left.",
+ "description": "VUH-2342: Shan-Yu's room 08/09 programs 75 (B_MU100 + hawk B_MU110, mission MU09_MS108 with the GATES gauge). Both fight until Shan-Yu is defeated (up to ~340 s), with enemy HP, both missions and the friend's position sampled every 2 s. After the host's defeat the friend releases its mission (the host's boss end isn't replayed) and must stay playable, its Shan-Yu copy fades out natively (VUH-2367) and its bosses match the host's; the host then moves to 08/00 door 50 and the friend must follow, move, and have neither Shan-Yu nor his hawk.",
  "playerDefaults": true,
  "protect": [
   0,
@@ -165,8 +165,29 @@
    "pollMs": 1000
   },
   {
+   "do": "wait_until",
+   "expr": "not any(n=='B_MU100' for n,h in enemy_hps(1))",
+   "timeoutMs": 15000,
+   "pollMs": 500
+  },
+  {
    "do": "wait",
-   "ms": 8000
+   "ms": 3000
+  },
+  {
+   "do": "save",
+   "as": "parity_after_defeat",
+   "expr": "[sorted(n for n,h in enemy_hps(0) if n.startswith('B_')), sorted(n for n,h in enemy_hps(1) if n.startswith('B_'))]"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['parity_after_defeat'][0]==saved['parity_after_defeat'][1]",
+   "message": "the friend's bosses (Shan-Yu, the hawk) differ from the host's after the defeat"
+  },
+  {
+   "do": "assert",
+   "expr": "not mission(1) or mission(1)['result']!=2",
+   "message": "the friend's MU09_MS108 failed instead of releasing"
   },
   {
    "do": "clip_wait"
@@ -252,8 +273,13 @@
   },
   {
    "do": "assert",
-   "expr": "not any(n=='B_MU100' for n,h in enemy_hps(1))",
-   "message": "the friend still has Shan-Yu after following the host out"
+   "expr": "not any(n in ('B_MU100','B_MU110') for n,h in enemy_hps(1))",
+   "message": "the friend still has Shan-Yu or his hawk after following the host out"
+  },
+  {
+   "do": "save",
+   "as": "boss_leave_lines",
+   "expr": "[log_count('boss lethal refused; native leave applied',1), log_count('boss lethal refused; native leave FAILED',1)]"
   }
  ]
 }

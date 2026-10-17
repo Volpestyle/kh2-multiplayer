@@ -2,6 +2,7 @@
 #include "kh2coop/Codec.hpp"
 #include "MissionMirror.hpp"
 #include "PartyRow.hpp"
+#include "BossLeave.hpp"
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -121,11 +122,20 @@ void partyRows() {
     check(PR::Merge(0x1212125Au, 0x03020100u) == 0x0302015Au, "the friend keeps its own player byte, takes the host's companions");
     check(PR::Merge(0x12121200u, 0x12020100u) == 0x12020100u, "Sora-only LoD row takes the host's Donald and Goofy");
 }
+void bossLeave() {
+    namespace BL = kh2coop::inject::bossleave;
+    check(BL::Fallback(221, 3, false, false), "VUH-2367: a boss copy that refused the lethal fades out");
+    check(!BL::Fallback(0, 3, false, false), "a boss the lethal killed needs no fallback");
+    check(!BL::Fallback(221, 4, false, false), "an ordinary enemy keeps the failed lethal as it was");
+    check(!BL::Fallback(221, 3, true, false), "never inside a resync's record-authority write fence");
+    check(!BL::Fallback(221, 3, false, true), "one attempt per local spawn");
+}
 }  // namespace
 int main() {
     codec();
     rules();
     partyRows();
+    bossLeave();
     std::cout << (errors ? "FAILED" : "ALL PASSED") << '\n';
     return errors ? 1 : 0;
 }

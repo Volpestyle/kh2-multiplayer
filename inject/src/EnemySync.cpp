@@ -28,6 +28,7 @@
 #include "PartyNativePolicy.hpp"
 #include "MissionMirror.hpp"
 #include "PartyRow.hpp"
+#include "BossLeave.hpp"
 
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
@@ -163,6 +164,7 @@ struct Spawn {
     std::uint64_t goneSinceMs = 0;  // host: left the list alive at this time
     bool killed = false;      // client: native HP confirmed dead
     bool deathAttempted = false; // at most one native lethal call per local spawn
+    bool bossLeaveAttempted = false; // VUH-2367: at most one native leave after a boss refused the lethal
     std::uint32_t strayFrame = 0;    // client, VUH-2272: first frame this living copy's host enemy had left
     std::uint32_t strayActFrame = 0; // client, VUH-2272: frame its fade was finished (0: not yet)
     int netId = -1;           // client: matched host enemy
@@ -527,6 +529,7 @@ void RetireWorldSession() {
         spawn.netId = -1;
         spawn.killed = false;
         spawn.deathAttempted = false;
+        spawn.bossLeaveAttempted = false;
         spawn.strayFrame = spawn.strayActFrame = 0;
     }
 }
@@ -4269,6 +4272,18 @@ bool ApplyNativeLeave(const NativeEnemy& expected, int hp, std::uint32_t generat
     }
 }
 
+// VUH-2367: the native leave for a boss copy that refused the host death's lethal. The objentry must
+// still name a boss (TYPE_FLAGS 3) at write time; ApplyNativeLeave re-checks every other root.
+bool ApplyNativeBossLeave(const NativeEnemy& expected, int hp, std::uint32_t generation) {
+    __try {
+        if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
+            Read<std::uint8_t>(expected.objentry + offsets::objentry::TYPE_FLAGS) != bossleave::kBossType) return false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    return ApplyNativeLeave(expected, hp, generation);
+}
+
 // Pointer validation and native invocation stay in one POD-only SEH leaf.
 // A fault after entry has unknown side effects and must never be retried.
 bool ApplyNativeClaim(const NativeEnemy& expected, const PendingHitClaim& pending, bool& attempted) {
@@ -4824,6 +4839,20 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 } else if (g_log) {
                     g_log("[enemysync] client: host death netId %d FAILED (hp %d -> %d)", s.netId,
                           before, native.hp);
+                }
+                // VUH-2367: a boss whose death the host's own script plays refuses the lethal on its brainless
+                // copy (Shan-Yu: 9 -> 221). Fade it out natively instead (VUH-2272's leave, no kill counted),
+                // once, outside a resync's write fence; then re-resolve the whole census next owner frame.
+                if (bossleave::Fallback(native.hp, native.objectType, contentRequired, s.bossLeaveAttempted)) {
+                    s.bossLeaveAttempted = true;
+                    const bool left = ApplyNativeBossLeave(native, native.hp, generation);
+                    if (g_log) g_log("[enemysync] client: host death netId %d boss lethal refused; native leave %s (hp %d)",
+                                     s.netId, left ? "applied" : "FAILED", native.hp);
+                    if (!left) {
+                        InterruptCensus("boss native leave refused or faulted", s.actor);
+                        return false;
+                    }
+                    return WorldSessionGeneration() == generation;
                 }
                 // The native call may mutate the roster. Subsequent targets need
                 // current membership, not addresses retained before the call.

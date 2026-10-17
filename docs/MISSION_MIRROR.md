@@ -72,9 +72,11 @@ games run the same mission file and its own mission hasn't ended:
   boss has no brain, so a replayed defeat flow never finishes: run
   `20261017-074315` left the friend on a white loading screen for over 100 s.
   When the host's mission ends that way, the friend sees an end it can't
-  replay and releases the mission. Its copy of the boss stays until it follows
-  the host to the next room (`20261017-070818`: Shan-Yu at 221 HP; native
-  lethal damage can't finish him). The 4/16 replay landed briefly in
+  replay and releases the mission. Native lethal damage can't finish the
+  friend's copy (`20261017-070818`: Shan-Yu `9 -> 221` HP), so the enemy
+  mirror fades it out with the native leave instead (VUH-2367,
+  `docs/ENEMY_PARITY.md`). The friend gets no boss-defeat reward: the leave
+  counts no kill, and no defeat flow runs in its game. The 4/16 replay landed briefly in
   `d17016d` and was taken out.
   Trap 4/22 (`0x3A37A0(arg)`) ends it and fires signal 0xF. The client replays
   the same trap with the same argument once. After a replayed end or failure,
