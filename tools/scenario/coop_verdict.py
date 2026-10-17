@@ -8,8 +8,10 @@ not how fast:
 - every room the host published (`host arrived epoch=E`) has a friend arrival
   for that epoch at the same location; an epoch the host left before the friend
   issued it is a warning, and the host's last epoch is required;
-- every progress version the host published was applied by each friend with
-  the same hash, and personal SAVE bytes stayed unchanged;
+- every progress version a friend applied (at room boundaries, so skipped
+  intermediate versions are normal) has the host's hash for that version, and
+  personal SAVE bytes stayed unchanged; the host's latest version not applied
+  yet is a warning;
 - no relay `Desync:` report and no `EXCEPTION` line in any inject log.
 
     python -B tools/scenario/coop_verdict.py --host H.log --friend F.log [--relay relay.log] [--out v.json]
@@ -69,17 +71,23 @@ def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) 
         else:
             row["result"] = "followed"
         rooms.append(row)
+    # A friend applies the latest snapshot at each room boundary, so skipped
+    # intermediate versions are normal; whatever it applies must match the host.
+    published = {p["version"]: p["hash"] for p in host_progress}
     progress = []
-    for host in host_progress:
-        got = applied.get(host["version"])
-        row = {"version": host["version"], "hostHash": host["hash"], "friend": got}
-        if got is None:
-            problems.append(f"progress v{host['version']}: not applied")
-        elif got["hash"] != host["hash"]:
-            problems.append(f"progress v{host['version']}: hash {got['hash']} != host {host['hash']}")
+    for version, got in sorted(applied.items()):
+        want = published.get(version)
+        progress.append({"version": version, "hostHash": want, "friend": got})
+        if want is None:
+            problems.append(f"progress v{version}: applied but never published by the host")
+        elif got["hash"] != want:
+            problems.append(f"progress v{version}: hash {got['hash']} != host {want}")
         elif not got["personalUnchanged"]:
-            problems.append(f"progress v{host['version']}: personal bytes changed")
-        progress.append(row)
+            problems.append(f"progress v{version}: personal bytes changed")
+    if host_progress and not applied:
+        problems.append("progress: the friend applied no host snapshot")
+    elif host_progress and host_progress[-1]["version"] not in applied:
+        warnings.append(f"progress v{host_progress[-1]['version']}: not applied yet (next room boundary)")
     return {
         "rooms": rooms, "progress": progress,
         "holdsReleased": len(HOLD_RELEASED.findall(text)),

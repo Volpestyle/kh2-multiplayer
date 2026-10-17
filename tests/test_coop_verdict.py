@@ -56,6 +56,13 @@ class CoopVerdictTest(unittest.TestCase):
         v = coop_verdict.verdict(HOST, {"friend": friend})
         self.assertIn("friend: progress v2: hash 00000000 != host 337247B1", v["problems"])
 
+    def test_skipped_intermediate_progress_passes_and_unapplied_latest_warns(self):
+        host = HOST + "[progresssync] host delta version=3 spans=1 bytes=1 hash=AAAA0003\n"
+        friend = "\n".join(line for line in FRIEND.splitlines() if "apply version=1" not in line)
+        v = coop_verdict.verdict(host, {"friend": friend})
+        self.assertTrue(v["pass"], v["problems"])
+        self.assertIn("progress v3: not applied yet (next room boundary)", v["friends"]["friend"]["warnings"])
+
     def test_relay_desync_and_exceptions_fail(self):
         v = coop_verdict.verdict(HOST + "EXCEPTION in HookedInputCollector post-call\n", {"friend": FRIEND},
                                  "[SessionHost] Desync: peer1 fields=2 epoch=2\n")
