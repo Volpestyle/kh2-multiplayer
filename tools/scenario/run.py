@@ -669,7 +669,8 @@ def step_fight(ctx: Context, step: dict) -> dict:
 
     def sampler() -> None:
         t0 = time.monotonic()
-        while any(b.is_alive() for b in bots):
+        # With no bots (instances: []) the step only films and samples, for `seconds`.
+        while any(b.is_alive() for b in bots) or (not bots and time.monotonic() - t0 < seconds):
             try:
                 samples.append({"t": round(time.monotonic() - t0, 2), "value": ctx.eval(sample["expr"])})
             except Exception as exc:  # a sample that can't be read is recorded, not fatal

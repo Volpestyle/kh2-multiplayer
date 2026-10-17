@@ -1,9 +1,8 @@
 {
  "name": "net_lod_morale_fail",
- "description": "VUH-2342: the first morale fight (08/01 programs 68, MU01_MS102) with the host's morale set to 0.5 (a test-only write to the host's gauge, nothing on the friend). The host's own script empties it and fails the mission; the friend must fail the same mission (its gauge follows to 0, and the host's failure is replayed). Clips film both.",
+ "description": "VUH-2342: the first morale fight (08/01 programs 68, MU01_MS102) with the host's morale set to 0.5 (a test-only write to the host's gauge, nothing on the friend). The host's own script empties it and fails the mission; the friend must fail the same mission (its gauge follows to 0, and the host's failure is replayed). Nobody fights and only the friend is protected, so the Shadows hit the host's Sora. Clips film both.",
  "playerDefaults": true,
  "protect": [
-  0,
   1
  ],
  "steps": [
@@ -112,10 +111,8 @@
   },
   {
    "do": "fight",
-   "instances": [
-    1
-   ],
-   "seconds": 40,
+   "instances": [],
+   "seconds": 45,
    "as": "fail_watch",
    "sample": {
     "expr": "[mission(0), mission(1)]",
