@@ -336,6 +336,9 @@ void LogMissionEndOrphans(std::uint32_t frame) {
 // empty actor counts and matching ended flags. No cached actor is dereferenced.
 void ObserveNativeMissionEnd(std::uint32_t frame,const NativeCensus& census) {
     if(!g_log || g_role!=Role::Client || !g_mirrorRequested || !g_inst.live)return;
+    // The mission object may outlive its room during egress. A new load is not
+    // another Bailey completion receipt for that retained object.
+    if(g_inst.world!=4 || g_inst.room!=8 || g_inst.door!=0 || g_inst.map!=52 || g_inst.btl!=52 || g_inst.evt!=0)return;
     uintptr_t base=0;
     const auto local=ReadMission(&base);
     if(!MR::SameFile(local.file,"HB08_MS102.bar"))return;

@@ -655,6 +655,12 @@ void TestBaileyMissionEndOrdering() {
               return line.find("path=native-local replays=0 census=unavailable living=-1 hpSum=-1")!=std::string::npos;
           }) && baileyEndCalls == 0 && !g_missionReplayed,
           "native end hold logs unavailable census explicitly without treating it as empty or mutating the end gate");
+    seed(); g_log = BaileyEndLog;
+    Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
+    g_inst.room = 26; ++load; // retained ended mission object after the room has changed
+    ObserveNativeMissionEnd(105,CaptureNativeCensus());
+    Check(!g_missionEndObservation.nativeLogged && baileyEndLogs.empty() && baileyEndCalls == 0,
+          "retained Bailey mission object after egress cannot produce a second native-local receipt");
 
     seed(); Put(status, std::int32_t{0});
     Check(MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey zero-HP native body permits end");
