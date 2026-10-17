@@ -88,8 +88,16 @@ It adds no native pool-key, free-list or refcount write. Module, hooks, fiber
 storage, gateways and unwind data are retained until process exit. After
 `StopNewAllocations` (shutdown), existing ownership and the veto stay until the
 native release. Hook points in `EntityHook.cpp`: include, `Drain` at frame
-start, `Initialize` after the lifecycle trace, `StopNewAllocations` at
+start, `Initialize` after player-kit configuration and before spawn-controller
+installation, `StopNewAllocations` at
 shutdown, and the MinHook-retention checks.
+
+The order matters: the full-body pins include wrapper `3FE590`, which the
+default-on spawn-emission policy also hooks. Verifying private status after
+that hook refuses the profile even on the supported executable. Keep the
+original-byte check intact and install private status first. Spawn-controller
+entry checks do not overlap the private-status detour sites; its factory-call
+checks cover call sites rather than the hooked factory entry.
 
 ## Evidence
 

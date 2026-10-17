@@ -3735,6 +3735,17 @@ bool Initialize(uintptr_t exeBase) {
     warp::SetTransitionObserver(&PublishLocalForTransition);
     downedspike::Install(exeBase);
     downedspectate::Install();
+    // Private-status pins include the original 3FE590 wrapper body. Verify and
+    // install its safety hooks before spawncontroller detours that wrapper for
+    // default-on emission policy. Its selection stays disarmed until a live
+    // game-thread stamp and an owned party layout qualify at construction time.
+    const bool partyNativeOk = partynative::Install(exeBase, &Log);
+    playerkit::Install(exeBase, &Log); // guard configuration must precede privatestatus
+    (void)partyNativeOk; // readiness is confirmed below after neutral input installs
+    if (!privatestatus::Initialize(exeBase))
+        Log(playerkit::BlocksNativeSoraPuppets()
+                ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
+                : "[privatestatus] initialization refused; profile unqualified");
     char spawnTraceSetting[2] {};
     const bool spawnTrace = GetEnvironmentVariableA("KH2COOP_SPAWN_TRACE", spawnTraceSetting,
                                                    sizeof(spawnTraceSetting)) == 1 &&
@@ -3753,14 +3764,6 @@ bool Initialize(uintptr_t exeBase) {
     enemysync::SetSpawnPickLive(spawnPickLive);  // review F1: no detour, no shared bit
     resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
     lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
-    // VUH-1519: default off (KH2COOP_PARTY_NATIVE); registers its observer on the playerkit resolver hook.
-    const bool partyNativeOk = partynative::Install(exeBase, &Log);
-    playerkit::Install(exeBase, &Log); // VUH-1513: default off (KH2COOP_PLAYER_KIT); before privatestatus, whose guard reads it
-    (void)partyNativeOk; // readiness is confirmed below, once every prerequisite module has installed
-    if (!privatestatus::Initialize(exeBase))
-        Log(playerkit::BlocksNativeSoraPuppets()
-                ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
-                : "[privatestatus] initialization refused; profile unqualified");
     cloneneutral::Install(exeBase); // VUH-1489: default off (KH2COOP_CLONE_NEUTRAL_INPUT)
     playerkit::SetBcNeutralReady(&cloneneutral::Enabled);
     // Ally hits (KH2COOP_ALLY_HIT): after the handle resolver is verified. Default (unset) is puppet mode
