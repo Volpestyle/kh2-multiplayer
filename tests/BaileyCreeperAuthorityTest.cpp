@@ -66,7 +66,10 @@ int main(){
     BaileyCreeperLease lease{10};check(lease.Observe(10,true)&&lease.Observe(11,true),"continuous same-frame/current native roots remain eligible");
     check(!lease.Observe(13,true)&&!lease.Observe(14,true),"observation gap permanently retires occurrence");
     BaileyCreeperLease changed{10};check(!changed.Observe(10,false)&&!changed.Observe(11,true),"changed roots/session/mission never recover by pointer reuse");
-    mr::Mission h{},f{};h.active=f.active=true;std::strcpy(h.file,"HB08_MS102.bar");std::strcpy(f.file,"HB08_MS102.bar");h.flags=f.flags=1;
+    mr::Mission h{},f{};h.active=f.active=true;
+    constexpr char missionFile[]="HB08_MS102.bar";
+    static_assert(sizeof(missionFile)<=sizeof(h.file));
+    std::memcpy(h.file,missionFile,sizeof(missionFile));std::memcpy(f.file,missionFile,sizeof(missionFile));h.flags=f.flags=mr::kInUse;
     check(mr::Follows(h,f)&&!mr::Ended(h)&&!mr::Ended(f),"both Bailey peers start the same native mission");
     h.flags|=mr::kEnded;check(mr::HostEndedUnknown(h),"unknown engine end never fabricates a replay trap");
     h.endTrap=3;check(!mr::HostEndedUnknown(h)&&mr::Ended(h)&&!mr::Ended(f)&&mr::Follows(h,f),"known host end still needs replay on friend");
