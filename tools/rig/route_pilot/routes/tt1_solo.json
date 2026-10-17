@@ -1,5 +1,6 @@
 {
   "name": "tt1_solo",
+  "retries": 6,
   "description": "VUH-2340 solo route from FM-02 (Roxas, Day 6, Mansion Computer Room save point) to Yen Sid. Positions come from pilot door logs; extend from the last learned step.",
   "steps": [
     {"do": "walk", "to": [-385, -5], "tol": 60, "timeoutSec": 15, "note": "off the save point, west along the room"},
@@ -17,6 +18,6 @@
     {"do": "door", "to": [-2000, -330], "room": [2, 22], "timeoutSec": 15, "note": "Basement Hall 2/19 -> Basement Corridor 2/22; trigger near (-921, -502)"},
     {"do": "walk", "to": [-755, 104], "tol": 40, "timeoutSec": 15, "note": "corridor, in front of the north door"},
     {"do": "door", "to": [-755, 1800], "room": [2, 23], "timeoutSec": 15, "settleSec": 900, "clip": 30, "name": "door-corridor-to-pod-room",
-     "note": "Basement Corridor 2/22 -> 2/23; trigger near (-752, 556). The finale runs 23 -> 9 -> 23 and more; not yet seen to the end"}
+     "note": "Basement Corridor 2/22 -> 2/23; trigger near (-752, 556). The finale runs 23 -> 9 -> 23, then a native transition stays pending while open-menu id 10 shows (route-04); not yet identified or answered"}
   ]
 }

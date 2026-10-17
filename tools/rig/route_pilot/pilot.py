@@ -453,7 +453,7 @@ class Pilot:
     def settle(self, advance: bool = True, calm: float = 2.0, deadline: float | None = None) -> None:
         """Wait until the room is free for `calm` seconds, pressing confirm through dialog."""
         deadline = deadline or time.monotonic() + 300
-        free_since = None
+        free_since, menu_since = None, None
         while time.monotonic() < deadline:
             s = self.state()
             if s["free"]:
@@ -464,6 +464,16 @@ class Pilot:
                 free_since = None
                 if advance and s["event"] and s["inField"]:
                     self.kb.tap("confirm")
+            # A menu with no event is not dialog. The pilot never answers one it
+            # doesn't know: it could be a save prompt (route-04 stopped on menu 10
+            # after the TT prologue finale). Record it and stop for a decision.
+            if s["menu"] != 0xFF and not s["event"] and s["world"] != 0xFF:
+                menu_since = menu_since or time.monotonic()
+                if time.monotonic() - menu_since > 15:
+                    self.capture(f"menu-{s['menu']}")
+                    raise Stuck(f"waiting on unknown menu {s['menu']}")
+            else:
+                menu_since = None
             time.sleep(0.5)
         raise Stuck("dialog/event did not settle")
 
