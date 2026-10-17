@@ -143,6 +143,26 @@ std::size_t SpanBytes(const std::vector<ProgressSpan>& spans) {
     return count;
 }
 
+// VUH-2356 diagnostics: which SAVE offsets a delta or apply touched, so a
+// mid-room story-flag difference can be named from logs. Read-only; at most
+// 16 spans of up to 4 bytes each, "offset:old>new".
+void LogSpanDetail(const char* what, std::uint32_t version, const Save& before,
+                   const std::vector<ProgressSpan>& spans) {
+    if (!g_log || spans.empty()) return;
+    char text[640] {};
+    std::size_t used = 0;
+    for (std::size_t i = 0; i < spans.size() && i < 16; ++i) {
+        const auto& span = spans[i];
+        for (std::size_t b = 0; b < span.bytes.size() && b < 4 && used < sizeof(text) - 24; ++b) {
+            const auto o = span.offset + static_cast<std::uint32_t>(b);
+            const int n = sprintf_s(text + used, sizeof(text) - used, " %04X:%02X>%02X", o,
+                                    o < before.size() ? before[o] : 0, span.bytes[b]);
+            if (n > 0) used += static_cast<std::size_t>(n);
+        }
+    }
+    g_log("[progresssync] %s-spans version=%u%s%s", what, version, text, spans.size() > 16 ? " ..." : "");
+}
+
 bool Newer(std::uint32_t version, std::uint32_t previous) {
     const auto advance = version - previous;
     return advance != 0 && advance < 0x80000000u;
@@ -234,6 +254,7 @@ void Tick(std::uint32_t frame, bool host, bool client) {
     if (!enemysync::CaptureWorldContext(context)) return;
     g_packet = encode(ProgressUpdate {version, full, spans});
     g_packetContext = context;
+    if (!full) LogSpanDetail("host", version, g_baseline, spans);
     g_queuedSave = live;
     g_queuedVersion = version;
     g_queuedFull = full;
@@ -426,6 +447,7 @@ bool ApplyAtRoomBoundary(std::uint32_t generation, bool atNativeExit) {
     Save live {};
     if (!ReadSave(live)) return ApplyFailure("save-read");
     const auto spans = g_policy.diff(live.data(), g_desired.data(), live.size());
+    LogSpanDetail("apply", g_version, live, spans);
     Personal before {}, after {};
     if (!ReadPersonal(before)) return ApplyFailure("personal-before-read");
     bool wrote = true;
