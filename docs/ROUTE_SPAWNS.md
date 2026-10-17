@@ -78,6 +78,43 @@ grounding verdict also requires identity-joined height analysis and visual
 review; an empty Marketplace arrival cannot meet it. This first-visit ambient
 check is separate from scripted HB09_MS101 at battle51 and D15 real-door play.
 First-visit grounding remains unqualified until that live evidence passes.
+
+### Borough height observation and proposed measurement fix
+
+Borough-03 (`20261017-111521_net_hb1_borough_grounding_1`, source `627a3be`)
+reaches the Shadow region through installed entrance2. All25 scenario steps,
+nonempty count/HP parity and GoA egress pass; final enemies on both peers are
+Shadows at8 and14HP. The **separate grounding gate is unresolved**: its
+simultaneous actor reads produce101 current-epoch/netId/actor-joined pairs,
+including18 absolute height differences over20u (maximum259.496u).
+
+The gap is transient and changes sign. Signed friend-minus-host medians by
+netId2/3/4 are0/-0.384/0;83/101 pairs are within20u. All18 outliers occur during
+damage-air/landing motions18/19 or extended motion161. Same-motion nonwrapped
+samples usually trail by10-12 motion frames (80/84 cases, median11). At9.74s,
+ID4 has host motion18/time10/Y=-359.496 versus friend motion18/time0/Y=-100;
+at10.74s the friend is instead higher during descent. Ground returns and both
+clips argue against a constant Y-base error or accumulating gravity drift.
+They do not prove exact frame-aligned parity. No gameplay fix is established.
+
+The existing publisher reads host POS_Y, `Stream::PoseAt` interpolatesXYZ at a
+delayed host-frame cursor, and `WritePose` writesY after native actor update.
+The configured cursor delay is6frames. The proposed fix is to the measurement:
+reuse `KH2COOP_ENEMY_MIRROR_TRACE=1` and `KH2COOP_LATENCY_TRACE=1` to compare
+host and observed client positions at the same hostFrame/cursor, excluding
+stale, missing, undriven or takeover-blended evidence. Keep grounded-rest
+windows and visual review separate from legitimate launch/burrow animation.
+If alignedY still diverges, determine whether the sampled pose is wrong or a
+later native writer overwrites it before proposing a scoped inject fix and
+Quill D14.4 review. Do not add gravity, snap-to-ground or a Y offset based on
+the unaligned reads. No additional live attempt is authorized by this note.
+
+Borough-01 missed the Shadow region because its entrance0 walk hit a wall;
+Borough-02 changed only the expected entrance while still requesting0. Both
+remain failed setup evidence. Borough-03's preflight executes the real warp
+argument builder with a stubbed CLI and verifies entrance2 against the oracle.
+All three protected-file/process closures passed; PC1 was released after each.
+
 F1 records every Constructor/Allocate entry under the missing scope, including
 caller, key and form. Settled Bailey gameplay logs the clone's controller and
 retained-record roots every60 owner frames; the fixture rejects any failed
