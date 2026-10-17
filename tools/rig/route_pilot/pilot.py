@@ -506,7 +506,7 @@ class Pilot:
         reach, low = float(step.get("reach", 220)), float(step.get("lowHp", 0.35))
         stats = {"enemiesStart": None, "swings": 0, "reactions": {}, "minHp": None, "deaths": 0, "evades": 0,
                  "escapes": 0, "downed": 0, "heals": 0}
-        calm_since, locked, healed, reacted = None, False, 0.0, 0.0
+        calm_since, locked, healed, reacted, window_tries = None, False, 0.0, 0.0, 0
         recent: list[tuple[float, int]] = []  # (time, hp) samples for the damage window
         first = self.state()
         room = (first["world"], first["room"])
@@ -520,13 +520,17 @@ class Pilot:
             return max(window) - s["hp"] >= share * max(s["maxHp"], 1)
 
         def want_heal(s: dict) -> bool:
-            # Menu presses during hit-stun don't use the Potion (route-02: 6 of 9 heals), so
-            # wait for a short gap in the damage; the pinned escape makes one if it never comes.
-            now = time.monotonic()
-            quiet = all(hp <= s["hp"] for at, hp in recent if now - at <= float(heal.get("quietSec", 0.7))) \
-                if heal else False
             return bool(heal) and 0 < s["hp"] < heal.get("below", 0.5) * max(s["maxHp"], 1) \
-                and stats["heals"] < heal.get("max", 3) and now > healed + 3 and quiet
+                and stats["heals"] < heal.get("max", 3) and time.monotonic() > healed + 3
+
+        def heal_window(s: dict, foes: list[dict]) -> bool:
+            # Menu presses during hit-stun don't use the Potion (route-02: 6 of 9, route-04: 0 of 3).
+            # Heal only after a gap in the damage with no enemy close enough to start a combo.
+            now, p = time.monotonic(), s["pos"] or (0.0, 0.0, 0.0)
+            quiet = all(hp <= s["hp"] for at, hp in recent if now - at <= float(heal.get("quietSec", 0.7)))
+            clear = all(math.hypot(f["position"]["x"] - p[0], f["position"]["z"] - p[2]) > float(heal.get("clear", 300))
+                        for f in foes)
+            return quiet and clear
 
         while time.monotonic() < deadline:
             s = self.state()
@@ -598,7 +602,15 @@ class Pilot:
             tx, tz = target["position"]["x"], target["position"]["z"]
             gap = math.hypot(tx - p[0], tz - p[2])
             near = [f for f in foes if math.hypot(f["position"]["x"] - p[0], f["position"]["z"] - p[2]) < reach * 2]
+            if want_heal(s) and not heal_window(s, foes) and window_tries < int(heal.get("escapes", 2)):
+                # Make the window: run from the nearby enemies, then heal on a later pass.
+                # Enemies that keep up get a best-effort heal after `escapes` tries.
+                stats["escapes"] += 1
+                window_tries += 1
+                self.escape(s, near or foes)
+                continue
             if want_heal(s):
+                window_tries = 0
                 stats["heals"] += 1
                 healed = time.monotonic()
                 self.kb.hold(set())
@@ -606,7 +618,14 @@ class Pilot:
                     self.kb.tap(action)
                     time.sleep(heal.get("gapMs", 250) / 1000)
                 time.sleep(1.5)
-                self.write("heal", hp=s["hp"], after=self.state()["hp"])
+                after = self.state()["hp"]
+                self.write("heal", hp=s["hp"], after=after)
+                if after <= s["hp"]:
+                    # No Potion went through; back out of any submenu so later presses start clean.
+                    stats["healMisses"] = stats.get("healMisses", 0) + 1
+                    for action in heal.get("reset", ["SPACE", "SPACE"]):
+                        self.kb.tap(action)
+                        time.sleep(0.3)
                 continue
             if near and step.get("escape", True) and hurting(s, float(step.get("pinnedDrop", 0.3))):
                 stats["escapes"] += 1
