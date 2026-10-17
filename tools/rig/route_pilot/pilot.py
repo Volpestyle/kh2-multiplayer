@@ -63,9 +63,18 @@ class KEYBDINPUT(ctypes.Structure):
                 ("time", wt.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [("dx", wt.LONG), ("dy", wt.LONG), ("mouseData", wt.DWORD), ("dwFlags", wt.DWORD),
+                ("time", wt.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+# Mouse buttons as pseudo keys: (down flag, up flag). No movement is ever sent.
+MOUSE = {"MOUSE_LEFT": (0x0002, 0x0004), "MOUSE_RIGHT": (0x0008, 0x0010), "MOUSE_MIDDLE": (0x0020, 0x0040)}
+
+
 class INPUT(ctypes.Structure):
     class _U(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT), ("pad", ctypes.c_byte * 32)]
+        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT), ("pad", ctypes.c_byte * 32)]
     _anonymous_ = ("u",)
     _fields_ = [("type", wt.DWORD), ("u", _U)]
 
@@ -152,6 +161,12 @@ class Keyboard:
         return u32.MapVirtualKeyW(vk, 0), name in EXTENDED  # MAPVK_VK_TO_VSC
 
     def send(self, name: str, up: bool) -> None:
+        if name.upper() in MOUSE:
+            inp = INPUT(type=0)  # INPUT_MOUSE, button only
+            inp.mi = MOUSEINPUT(0, 0, 0, MOUSE[name.upper()][1 if up else 0], 0, 0)
+            if u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+                raise OSError(f"SendInput {name} failed")
+            return
         scan, ext = self.code(name)
         inp = INPUT(type=1)  # INPUT_KEYBOARD
         inp.ki = KEYBDINPUT(0, scan, 0x0008 | (0x0001 if ext else 0) | (0x0002 if up else 0), 0, 0)
@@ -207,7 +222,7 @@ class Keyboard:
         self.held = set()
 
     def release_all(self) -> None:
-        for k in {*self.keys.values(), *VK, "W", "A", "S", "D", "E", "R", "Q", "F"}:
+        for k in {*self.keys.values(), *VK, *MOUSE, "W", "A", "S", "D", "E", "R", "Q", "F"}:
             try:
                 self.send(k, True)
             except (OSError, ValueError):
@@ -551,6 +566,8 @@ class Pilot:
                     self.kb.tap("attack", 70)
                     time.sleep(0.18)
                     stats["swings"] += 1
+                if step.get("guard"):  # e.g. "MOUSE_RIGHT" once calibrated: block the counter
+                    self.kb.tap(step["guard"], 300)
         raise Stuck("fight did not clear")
 
     def finish(self) -> None:
