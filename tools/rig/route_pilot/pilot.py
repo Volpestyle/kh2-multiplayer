@@ -24,6 +24,7 @@ import math
 import struct
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -270,12 +271,14 @@ class Pilot:
         self.tick_at = time.monotonic()
         self.foe_hp: int | None = None
         self.foe_at = 0.0
-        self.clips: list[subprocess.Popen] = []
+        self.clips: list[threading.Thread] = []
+        self.log_lock = threading.Lock()
         self.doors: list[dict] = []
 
     def write(self, kind: str, **data) -> None:
-        self.log.write(json.dumps({"t": round(time.time(), 2), "kind": kind, **data}) + "\n")
-        self.log.flush()
+        with self.log_lock:
+            self.log.write(json.dumps({"t": round(time.time(), 2), "kind": kind, **data}) + "\n")
+            self.log.flush()
 
     def state(self) -> dict:
         if not self.game.alive():
@@ -308,11 +311,30 @@ class Pilot:
         return s
 
     def clip(self, name: str, seconds: int) -> None:
-        path = self.out / f"{name}.mp4"
-        self.clips.append(subprocess.Popen(
-            [str(KH2CTL), "clip", "--pid", str(self.game.pid), "--seconds", str(min(seconds, 30)), "--fps", "30",
-             "--out", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW))
+        """Records in the background. kh2ctl allows one capture per game at a
+        time, so each clip waits for the previous one (a door clip is still
+        encoding when the fight after it starts). A replayed step gets -2, -3."""
+        path, n = self.out / f"{name}.mp4", 1
+        while path.exists() or any(c.name == path.name for c in self.clips):
+            n += 1
+            path = self.out / f"{name}-{n}.mp4"
+        prev = self.clips[-1] if self.clips else None
+
+        def record() -> None:
+            if prev:
+                prev.join(timeout=240)
+            try:
+                done = subprocess.run([str(KH2CTL), "clip", "--pid", str(self.game.pid), "--seconds",
+                                       str(min(seconds, 30)), "--fps", "30", "--out", str(path)],
+                                      capture_output=True, text=True, timeout=240,
+                                      creationflags=subprocess.CREATE_NO_WINDOW)
+                self.write("clip_done", name=path.name, exit=done.returncode, out=done.stdout.strip()[-300:])
+            except subprocess.TimeoutExpired:
+                self.write("clip_done", name=path.name, exit=None, out="timeout")
+
+        thread = threading.Thread(target=record, name=path.name, daemon=True)
+        thread.start()
+        self.clips.append(thread)
         self.write("clip", name=path.name, seconds=seconds)
 
     def capture(self, name: str) -> str:
@@ -533,11 +555,8 @@ class Pilot:
 
     def finish(self) -> None:
         self.kb.release()
-        for proc in self.clips:
-            try:
-                proc.wait(timeout=120)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        for thread in self.clips:
+            thread.join(timeout=300)
         (self.out / "doors.json").write_text(json.dumps(self.doors, indent=1), encoding="utf-8")
 
 
