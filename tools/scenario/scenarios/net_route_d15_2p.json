@@ -19,7 +19,9 @@
     {"do": "checkpoint", "name": "tt1"},
     {"do": "kh2ctl", "instance": 0, "args": ["focus"], "note": "the first key-down after a focus switch is lost (VUH-2340): focus the host first"},
     {"do": "wait", "ms": 2000},
+    {"do": "revive_guard", "host": 0, "friend": 1, "note": "co-op downing waits for a teammate revive; the idle friend walks over and revives through its DLL input"},
     {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/tt1_solo.json", "seconds": 1500, "name": "pilot_tt1", "allowStuck": true},
+    {"do": "revive_guard", "on": false, "as": "revives_tt1"},
     {"do": "capture", "instance": 0, "name": "tt1_end_host"},
     {"do": "clip", "instance": 1, "seconds": 10, "fps": 15, "name": "tt1_end_friend"},
     {"do": "coop_verdict", "as": "verdict_tt1"}

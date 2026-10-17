@@ -1197,6 +1197,98 @@ def step_pilot(ctx: Context, step: dict) -> dict:
     return {"exit": proc.returncode}
 
 
+class ReviveGuard:
+    """VUH-2344: while the host's route pilot fights, an otherwise idle friend
+    revives the host after a co-op downing. The friend walks over with stick
+    input and holds Triangle through its DLL input mailbox: no OS keys (the
+    host pilot owns window focus) and no position writes."""
+
+    REACH, HOLD_MS, TIMEOUT = 120.0, 1600, 60.0
+
+    def __init__(self, ctx: Context, host: int, friend: int) -> None:
+        spec = _importlib_util.spec_from_file_location("kh2coop_route_pilot", PILOT)
+        self.pilot = _importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(self.pilot)  # read-only state helpers only
+        self.ctx, self.host, self.friend = ctx, ctx.inst(host), ctx.inst(friend)
+        self.events: list[dict] = []
+        self.openError = ""
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def count(self, inst: "Instance", needle: str) -> int:
+        path = LOGS / f"kh2coop_inject_{inst.pid}.log"
+        try:
+            return path.read_text(encoding="utf-8", errors="replace").count(needle)
+        except OSError:
+            return 0
+
+    def run(self) -> None:
+        downs = self.count(self.host, "[downed] gate intercept")
+        friend = host = None
+        while not self.stop.wait(0.5):
+            if friend is None or host is None:
+                try:  # camera-target positions: Roxas or Sora alike
+                    friend, host = self.pilot.Game(self.friend.pid), self.pilot.Game(self.host.pid)
+                except OSError as error:
+                    self.openError = str(error)
+                    continue
+            now = self.count(self.host, "[downed] gate intercept")
+            if now <= downs:
+                continue
+            downs = now
+            returned = self.count(self.host, "[downed] revive returned")
+            event = {"downedAt": time.monotonic(), "result": "timeout", "holds": 0}
+            end = time.monotonic() + self.TIMEOUT
+            while time.monotonic() < end and not self.stop.is_set():
+                if self.count(self.host, "[downed] revive returned") > returned:
+                    event["result"] = "revived"
+                    break
+                try:
+                    target = host.state()["pos"]
+                    s = friend.state()
+                except Exception as error:  # a load or menu between samples
+                    event["lastError"] = str(error)
+                    time.sleep(0.5)
+                    continue
+                if not s["free"] or not s["pos"] or not target:
+                    time.sleep(0.5)
+                    continue
+                dx, dz = target[0] - s["pos"][0], target[2] - s["pos"][2]
+                if math.hypot(dx, dz) > self.REACH:
+                    fx, fz = s["forward"]
+                    d, f = math.hypot(dx, dz), math.hypot(fx, fz) or 1.0
+                    dx, dz, fx, fz = dx / d, dz / d, fx / f, fz / f
+                    kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.2f}", "--ly", f"{dx * fx + dz * fz:.2f}",
+                           "--duration-ms", "400", pid=self.friend.pid, check=False)
+                elif s["react"] == 0:
+                    kh2ctl("player-press", "--button", "triangle", "--duration-ms", str(self.HOLD_MS),
+                           pid=self.friend.pid, check=False)
+                    event["holds"] += 1
+                    time.sleep(1.0)
+                else:
+                    time.sleep(0.3)  # the native reaction command still owns Triangle
+            event["seconds"] = round(time.monotonic() - event.pop("downedAt"), 1)
+            self.events.append(event)
+
+
+def step_revive_guard(ctx: Context, step: dict) -> dict:
+    """Start (`on`, default) or stop the friend's revive helper; see ReviveGuard."""
+    guard = getattr(ctx, "revive_guard", None)
+    if step.get("on", True):
+        if guard is None:
+            ctx.revive_guard = ReviveGuard(ctx, step.get("host", 0), step.get("friend", 1))
+            ctx.revive_guard.thread.start()
+        return {"started": True}
+    if guard is None:
+        return {"events": []}
+    guard.stop.set()
+    guard.thread.join(timeout=10)
+    ctx.revive_guard = None
+    name = step.get("as", "revive_guard")
+    ctx.saved[name] = guard.events
+    return {"events": guard.events, "openError": guard.openError}
+
+
 def step_relay(ctx: Context, step: dict) -> dict:
     """Start the relay (kh2coop_server) on loopback for this run."""
     port = str(step.get("port", 7782))
@@ -4622,6 +4714,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
+         "revive_guard": step_revive_guard,
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,
