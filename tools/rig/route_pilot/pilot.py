@@ -482,8 +482,10 @@ class Pilot:
             foes = enemies(self.game.pid)
             if stats["enemiesStart"] is None:
                 stats["enemiesStart"] = len(foes)
-            if (s["world"], s["room"]) != room:
-                raise Retry(f"left the fight room for {s['world']}/{s['room']}")
+            if (s["world"], s["room"]) != room and s["world"] != 0xFF:
+                # No death on the way: the won fight's story moved on (Basement Hall -> 2/20).
+                self.kb.hold(set())
+                return {**stats, "exitRoom": [s["world"], s["room"]]}
             if not foes:
                 self.kb.hold(set())
                 calm_since = calm_since or time.monotonic()
@@ -508,9 +510,10 @@ class Pilot:
                 for action in heal["keys"]:
                     self.kb.tap(action)
                     time.sleep(heal.get("gapMs", 250) / 1000)
+                time.sleep(1.5)
                 self.write("heal", hp=s["hp"], after=self.state()["hp"])
                 continue
-            if s["hp"] < low * max(s["maxHp"], 1) and gap < reach * 2:
+            if low and s["hp"] < low * max(s["maxHp"], 1) and gap < reach * 2:
                 stats["evades"] += 1
                 self.kb.hold(steer(s, (2 * p[0] - tx, 2 * p[2] - tz)))
                 time.sleep(0.15)
