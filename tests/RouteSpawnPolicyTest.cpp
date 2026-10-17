@@ -83,6 +83,9 @@ void bailey() {
     check(!NewPrivateBirth(10,10,true,true),"same private birth cannot retire its own quarantine");
     check(!NewPrivateBirth(10,0,true,true)&&!NewPrivateBirth(0,11,true,true),"unknown serial grants no address-reuse escape");
     check(!NewPrivateBirth(10,11,false,true)&&!NewPrivateBirth(10,11,true,false),"unowned or faulted selection grants no escape");
+    check(MissingPartyAbort(0x3A7B1B,1,0),"only observed normal Sora base allocation has fatal fallback");
+    check(!MissingPartyAbort(0x3C0432,1,0)&&!MissingPartyAbort(0x3A7B1A,1,0),"fresh initializer and other callers remain Fault-only");
+    check(!MissingPartyAbort(0x3A7B1B,2,0)&&!MissingPartyAbort(0x3A7B1B,1,1),"other status keys and forms remain Fault-only");
     MissingPartyBinding b{1,2,3,4,2,true,false,true,true,true};
     check(Bound(b),"distinct private clone and canonical ordinary local with both native attachments");
     auto c=b;c.clone=0;check(!Bound(c),"null clone refused");

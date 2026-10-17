@@ -66,6 +66,10 @@ inline bool SameConstructionStack(std::uint32_t ownerThread,std::uintptr_t owner
 inline bool NewPrivateBirth(std::uint64_t previous,std::uint64_t observed,bool owned,bool ready) {
     return previous && observed && previous!=observed && owned && ready;
 }
+// Only this observed base-constructor allocation has the fatal fallback contract.
+inline bool MissingPartyAbort(std::uintptr_t caller,int key,int form) {
+    return caller==0x3A7B1B && key==1 && form==0;
+}
 struct MissingPartyBinding {
     std::uintptr_t clone{},local{},cloneStatus{},localStatus{},canonical{};
     bool privateOwned{},localOwned{},cloneAttached{},localAttached{},current{};

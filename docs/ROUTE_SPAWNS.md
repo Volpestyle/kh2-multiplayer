@@ -33,11 +33,12 @@ propagate through finally blocks. Null or ambiguous creation spends the load;
 there is no optimistic retry, guessed deletion or record reuse. Sixteen records
 are available per process. Capacity refusal delegates the original call only.
 An explicit-scope factory refusal before native allocation takes the fixed
-wrapper's checked null-return path. After body allocation, a lost constructor or
-status scope raises noncontinuable SEH `E0423433` rather than returning a fake
-base-constructor result or falling back to shared status. The derived Sora
-constructor assumes its base completed. A negative fence also aborts the known
-key1/form0 constructor allocation or fresh-record initialization when its active
+wrapper's checked null-return path. Only the observed base allocation at caller
+`3A7B1B`, key1/form0 can raise noncontinuable SEH `E0423433` on lost selection or
+failed safety checks. The derived Sora constructor assumes its base completed;
+returning a fake base-constructor result is unsafe. Other constructor, allocator
+and initializer cases record a fault and disarm selection without raising this
+exception. A negative fence covers that same exact allocation when its active
 native stack has lost the explicit FLS selection. The retained context has only
 owned POD and numeric thread/stack identity; another fiber's ordinary calls are
 unaffected. This is a negative fence, not creation authority. Such a fault fails the probe and requires
@@ -65,6 +66,10 @@ Leon, private-status health, enemy HP parity, actual `HB08_MS102.bar` start/end,
 and a subsequent GoA arrival. It uses development warps and player protection.
 Its existing `04/0A` control proves clone arrival, not Shadow grounding: installed
 hb10 contains no Shadow302 spawn group. First-visit grounding remains unqualified.
+F1 records every Constructor/Allocate entry under the missing scope, including
+caller, key and form. Settled Bailey gameplay logs the clone's controller and
+retained-record roots every60 owner frames; the fixture rejects any failed
+attachment sample and retains mission start/end plus combat samples.
 
 ## LoD: admit only the observed generated waves
 

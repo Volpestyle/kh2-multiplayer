@@ -89,6 +89,7 @@ std::array<MissingParty,routespawn::MissingPartyBudget::Capacity> g_missing{};
 routespawn::MissingPartyBudget g_missingBudget{};
 // Negative fence only; active contexts are owned permanent POD, never caller stack pointers.
 std::atomic<unsigned> g_missingInFlight{};
+std::atomic<LogFn> g_missingLog{};
 
 // First binding refusal reason, logging only: 1 null/same actor, 2 not Sora, 3 status owned,
 // 4 status shared with clone, 5 clone status changed, 6 clone not owned, 7 player pointer,
@@ -140,6 +141,11 @@ bool MissingConstructionStack() {
         if(routespawn::SameConstructionStack(c->thread,c->stackHigh,sample.thread,sample.low,sample.high))return true;
     }
     return false;
+}
+void LogMissingEntry(const char* entry,uintptr_t caller,int key,int form,uintptr_t actor,uintptr_t descriptor,const Selection* s) {
+    if((s && s->missingSlot) || MissingConstructionStack())if(const auto log=g_missingLog.load())
+        log("[missing-party] entry=%s caller=%llX key=%d form=%d actor=%llX descriptor=%llX slot=%u serial=%llu",
+            entry,caller>=g_base?caller-g_base:caller,key,form,actor,descriptor,s?s->missingSlot:0,s?s->serial:0);
 }
 bool StampNow(Stamp& s) {
     if(!spawncontroller::IsDiagnosticGameThread())return false;
@@ -350,6 +356,7 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
 uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,uintptr_t arg4,const float* point,float yaw) {
     const DWORD error=GetLastError();const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     auto* parent=Current(anchor);Selection s{};
+    LogMissingEntry("Constructor",reinterpret_cast<uintptr_t>(_ReturnAddress()),CloneDescriptorKey(descriptor),form,actor,descriptor,parent);
     const bool missingConstruction=parent && parent->missingSlot;
     if(missingConstruction) {
         auto& missing=g_missing[parent->missingSlot-1];
@@ -374,9 +381,9 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
             {s=*parent;s.actor=actor;s.descriptor=descriptor;s.key=key;s.form=form;s.constructor=true;}
         else Fault();
     }
-    if(missingConstruction && !s.selected)AbortMissingConstruction();
+    if(missingConstruction && !s.selected)Fault();
     const auto token=PushScope(&s,anchor);
-    if(!token.context){Fault();if(missingConstruction)AbortMissingConstruction();SetLastError(error);return g_constructor(actor,descriptor,form,arg4,point,yaw);}
+    if(!token.context){Fault();SetLastError(error);return g_constructor(actor,descriptor,form,arg4,point,yaw);}
     uintptr_t result=0;bool returned=false;Selection done{};
     __try {SetLastError(error);result=g_constructor(actor,descriptor,form,arg4,point,yaw);returned=true;}
     __finally {
@@ -396,16 +403,19 @@ uintptr_t __fastcall Constructor(uintptr_t actor,uintptr_t descriptor,int form,u
 uintptr_t __fastcall Allocate(int key,int form) {
     const DWORD error=GetLastError();const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());auto* s=Current(anchor);
-    if(caller==g_base+0x3A7B1B && key==1 && form==0 && MissingConstructionStack() && (!s || !s->missingSlot)) {
+    LogMissingEntry("Allocate",caller,key,form,s?s->actor:0,s?s->descriptor:0,s);
+    const bool fatalSite=routespawn::MissingPartyAbort(caller-g_base,key,form);
+    if(fatalSite && MissingConstructionStack() && (!s || !s->missingSlot)) {
         AbortMissingConstruction();
     }
+    if(s && s->missingSlot && !fatalSite){Fault();SetLastError(error);return g_allocate(key,form);}
     if(!s || !s->selected || !s->constructor || s->used || caller!=g_base+0x3A7B1B || !g_ready.load()) {
-        if(s && s->missingSlot)AbortMissingConstruction();
+        if(s && s->missingSlot){Fault();if(fatalSite)AbortMissingConstruction();}
         SetLastError(error);return g_allocate(key,form);
     }
     Stamp now{};uintptr_t empty=1;
     if(key!=s->key || form!=s->form || !StampNow(now) || !Same(now,s->stamp) || !Read(s->actor+0x5C0,empty) || empty || !HasFreeRecord()) {
-        Fault();if(s->missingSlot)AbortMissingConstruction();SetLastError(error);return g_allocate(key,form);
+        Fault();if(s->missingSlot && fatalSite)AbortMissingConstruction();SetLastError(error);return g_allocate(key,form);
     }
     // Own POD frame stays in FLS pool across actual SwitchToFiber. Nested constructors hide it.
     const auto serial=s->serial;s->fresh=true;s->used=true;bool returned=false;uintptr_t result=0;
@@ -427,7 +437,7 @@ uintptr_t __fastcall InitializeRecord(uintptr_t status) {
     const DWORD error=GetLastError();const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     auto* s=Current(reinterpret_cast<uintptr_t>(_AddressOfReturnAddress()));
     const bool selected=s && s->selected && s->constructor && s->fresh && !s->status && caller==g_base+0x3C0432;
-    if(caller==g_base+0x3C0432 && MissingConstructionStack() && (!selected || !s->missingSlot))AbortMissingConstruction();
+    if(caller==g_base+0x3C0432 && MissingConstructionStack() && (!selected || !s->missingSlot))Fault();
     const int index=Index(status);
     // Only verified native pops establish that an old marker is stale. Other callers
     // can reinitialize an in-use record: keep its veto/exclusion and fail the profile.
@@ -442,7 +452,7 @@ uintptr_t __fastcall InitializeRecord(uintptr_t status) {
         // Native allocator has already popped this exact slot. Publish exclusion and SAVE veto
         // before native initialization/refresh; no guessed top-of-free-list ownership.
         if(i<0 || status==s->localStatus || _InterlockedCompareExchange8(&g_owned[i],1,0)!=0) {
-            Fault();if(s->missingSlot)AbortMissingConstruction();
+            Fault();
         }
         else {g_ownedSerial[static_cast<unsigned>(i)].store(s->serial,std::memory_order_release);s->status=status;Publish(1,*s);}
     }
@@ -611,6 +621,7 @@ bool Initialize(uintptr_t base) {
 // caller stack pointers escape; native exceptions propagate through the finally unchanged.
 void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper spawn,LogFn log) {
     const DWORD error=GetLastError();
+    g_missingLog.store(log);
     if(!spawn){Fault();SetLastError(error);return nullptr;}
     Stamp stamp{},entrance{}; ProducerWorldContext context{};
     std::array<std::uint8_t,64> original{};
@@ -701,7 +712,16 @@ bool RetainsMinHookResources(){return g_retained.load();}
 bool Ready(){return g_ready.load();}
 void Drain(LogFn log) {
     if(!g_requested.load() || !log || !spawncontroller::IsDiagnosticGameThread())return;
-    const DWORD error=GetLastError();g_ownerFrames.fetch_add(1);
+    const DWORD error=GetLastError();const auto frame=g_ownerFrames.fetch_add(1);
+    if(frame%60==0)for(unsigned i=0;i<g_missingBudget.count;++i) {
+        const auto& m=g_missing[i];Stamp now{};uintptr_t controller=0,record=0;
+        if(!m.bound || !StampNow(now) || now.now!=routespawn::BaileyLocation ||
+           !routespawn::MissingPartyLoadCurrent(m.stamp.load,m.stamp.transition,now.load,now.transition,warp::TransitionPending()))continue;
+        const bool roots=Read(m.actor+0x9E8,controller) && Read(m.actor+0x9F0,record);
+        log("[missing-party] attachment allowed=%u roots=%u clone=%llX controller=%llX expectedController=%llX record=%llX expectedRecord=%llX load=%u transition=%u frame=%llu",
+            MissingPartyPuppetAllowed(m.actor)?1u:0u,roots?1u:0u,m.actor,controller,m.controller,record,
+            reinterpret_cast<uintptr_t>(m.record.data()),now.load,now.transition,frame);
+    }
     for(unsigned i=0;i<8;++i) {
         Event e{};bool have=false;
         if(TryAcquireSRWLockExclusive(&g_queueLock)) {
