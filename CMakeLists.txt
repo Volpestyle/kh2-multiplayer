@@ -543,6 +543,11 @@ if(WIN32)
     if(MSVC)
         target_compile_options(kh2coop_native_hash_receipt_test PRIVATE /W4 /WX)
     endif()
+    # Headless controller users have no installed player/private-status hooks.
+    foreach(target kh2coop_spawntrace_test kh2coop_nativehit_test kh2coop_claim_hold_test
+                   kh2coop_load_cause_test kh2coop_native_hash_receipt_test)
+        target_sources(${target} PRIVATE tests/NativeSpawnCreationStubs.cpp)
+    endforeach()
 endif()
 
 add_executable(kh2coop_causal_stream_boundary_test tests/CausalStreamBoundaryTest.cpp)

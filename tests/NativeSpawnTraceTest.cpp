@@ -37,18 +37,6 @@ std::uint32_t TransitionSerial() { ++transitionReads; return syntheticTransition
 std::uint32_t LoadSerial() { ++loadReads; return syntheticLoad; }
 } // namespace kh2coop::inject::warp
 
-// This headless trace executable has no installed player/private-status hooks.
-// Keep Bailey creation closed without linking the game's creation dependencies.
-namespace kh2coop::inject::playerkit {
-bool MissingPartyReady() { return false; }
-}
-namespace kh2coop::inject::privatestatus {
-bool Ready() { return false; }
-void* SpawnMissingParty(const void*,void*,NativeWrapper,LogFn) {
-    Check(false,"headless trace must never invoke private-status creation");
-    return nullptr;
-}
-
 MH_STATUS WINAPI MH_CreateHook(LPVOID target, LPVOID, LPVOID* original) {
     ++hookCalls;
     if (mutationHookMock) {
