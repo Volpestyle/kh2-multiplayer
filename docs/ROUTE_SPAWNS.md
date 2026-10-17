@@ -253,6 +253,22 @@ fixture requires successful returns on both roles, matching generated-wave
 host/client netId+sequence receipts and final enemy HP parity, alongside the
 landed morale/end checks.
 
+Probe `20261017-114606_net_lod_morale_spawn_probe_1` still failed admission:
+four successful host generated actors (978/999/1007), zero friend actors and
+zero scoped emission tickets. All four host returns were attached to native
+controller/record roots but reported `nonstatic/mixed record mode`, unenclosed.
+Both missions ended once with flags21/result0 and final living counts0/0;
+only4/45 sequential combat HP samples matched. The empty final census does
+not qualify wave parity. [Report and reviewed clips](https://linear.app/vuhlp/issue/VUH-2352#comment-68d365af-4fd4-4226-95d8-6ecfded73c78).
+
+The leading cause is the strict installed header pin including byte0xE:
+the native `3FE320` type2 branch sets it to1 before the emitter. This remains
+an inference until a live pin comparison is captured. The next diagnostic adds
+`[morale-wave-pin]` difference counts and first expected/observed bytes for the
+header and current record, using only the observer's already-copied data and
+existing entry/return log budgets. Admission predicates and order are unchanged;
+no exception is broadened. Windows compilation and that diagnostic run are pending.
+
 ## Provenance and checks
 
 The exact definitions were decoded read-only with the retained OpenKH-backed
