@@ -26,6 +26,11 @@
     {"do": "wait_room", "room": [2, 2], "timeoutSec": 240},
     {"do": "door", "to": [1800, 82], "room": [2, 3], "timeoutSec": 20, "note": "Usual Spot 2/2 (save point: no reaction key) -> Back Alley 2/3; trigger near (369, 83). Reaction 604 is offered there"},
     {"do": "walk", "to": [600, -480], "tol": 60, "timeoutSec": 15, "note": "Back Alley, along the alley toward the sunset"},
-    {"do": "door", "to": [760, -1400], "room": [2, 4], "timeoutSec": 20, "note": "Back Alley 2/3 -> Sandlot 2/4 near (694, -953); an event follows (route-06 teach). Sandlot exits: top-left, top-right (toward +x,+z, near 1160,1351), bottom-left; which leads on toward the station is not yet known"}
+    {"do": "walk", "to": [744, -1240], "tol": 40, "timeoutSec": 15, "note": "the alley's end, where the 'Sandlot' label shows"},
+    {"do": "door", "to": [1500, -1240], "room": [2, 4], "timeoutSec": 10, "note": "Back Alley 2/3 -> Sandlot 2/4, trigger to the +x side near (928, -1219) (route-07); an event follows"},
+    {"do": "walk", "to": [500, 600], "tol": 80, "timeoutSec": 10, "note": "Sandlot, toward its top-right exit"},
+    {"do": "walk", "to": [1160, 1351], "tol": 60, "timeoutSec": 10},
+    {"do": "door", "to": [2600, 1500], "room": [2, 7], "timeoutSec": 10,
+     "note": "Sandlot top-right exit -> 2/7 (entrance 1) near (2052, 1502), a large street hub. Which 2/7 exit leads to the station is not yet known (route-07)"}
   ]
 }
