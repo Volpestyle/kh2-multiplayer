@@ -107,7 +107,20 @@ windows and visual review separate from legitimate launch/burrow animation.
 If alignedY still diverges, determine whether the sampled pose is wrong or a
 later native writer overwrites it before proposing a scoped inject fix and
 Quill D14.4 review. Do not add gravity, snap-to-ground or a Y offset based on
-the unaligned reads. No additional live attempt is authorized by this note.
+the unaligned reads. The lead cleared one matched-frame measurement after the
+finding was posted, with unexplained extra latency kept as a separate finding.
+
+`tools/scenario/grounding_verdict.py` reads these existing traces. It joins
+current Borough epoch/netId and hostFrame, only across adjacent host publications
+(at most3frames). Undriven/takeover-blended samples grant no evidence. The strict
+ground-rest gate requires a contiguous12-host-frame window, stable host motion,
+at most0.5u host vertical range and matching client motion; matched rest |deltaY|
+must be at most2u, separately from the whole-pose5u bound. Each actor needs30
+matched and20 rest observations. Synthetic offset, stale-epoch, missing-bracket,
+empty, undriven and blended controls fail. The latent extra5-frame case remains
+explicitly open even when matched poses agree. On this one PC, QPC joins measure
+host-current minus newest-received (publication/pump/transport freshness) and
+newest-received minus cursor (buffering/hysteresis); no cross-PC clock claim.
 
 Borough-01 missed the Shadow region because its entrance0 walk hit a wall;
 Borough-02 changed only the expected entrance while still requesting0. Both

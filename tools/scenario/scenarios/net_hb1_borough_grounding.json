@@ -4,8 +4,8 @@
   "playerDefaults": true,
   "protect": [0,1],
   "steps": [
-    {"do":"boot","instance":0,"initTimeoutMs":60000},
-    {"do":"boot","instance":1,"initTimeoutMs":60000},
+    {"do":"boot","instance":0,"initTimeoutMs":60000,"env":{"KH2COOP_ENEMY_MIRROR_TRACE":"1","KH2COOP_LATENCY_TRACE":"1"}},
+    {"do":"boot","instance":1,"initTimeoutMs":60000,"env":{"KH2COOP_ENEMY_MIRROR_TRACE":"1","KH2COOP_LATENCY_TRACE":"1"}},
     {"do":"warp","instance":0,"world":4,"room":26,"evt":0},
     {"do":"warp","instance":1,"world":4,"room":26,"evt":0},
     {"do":"relay","port":27803,"args":["--bind","127.0.0.1"]},
