@@ -4,7 +4,7 @@
   "steps": [
     {"do": "boot", "slotMoves": -1},
     {"do": "assert", "expr": "room()[0] == 2", "message": "loaded slot is not in Twilight Town"},
-    {"do": "pilot", "route": "tools/rig/route_pilot/routes/tt1_solo.json", "seconds": 600, "name": "route", "allowStuck": true},
-    {"do": "pilot", "teach": "build/vuh2338/teach", "seconds": 720, "name": "teach"}
+    {"do": "pilot", "route": "tools/rig/route_pilot/routes/tt1_solo.json", "seconds": 1800, "name": "route", "allowStuck": true},
+    {"do": "pilot", "teach": "build/vuh2338/teach", "seconds": 600, "name": "teach"}
   ]
 }

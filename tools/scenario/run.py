@@ -49,8 +49,9 @@ STEAM_OWNED = {"steam_autocloud.vdf"}  # written by the Steam client, not the ga
 WARP_NAME = "Local\\kh2coop_warp_{pid}"
 WARP_LIVE_FRAME = 76  # WarpChannel.liveFrame
 HANG_SECONDS = 30.0   # gameplay frames stalled this long in the field = hang
-GAME_OVER_SECONDS = 120.0  # ...unless the player is at 0 HP (Game Over waits for Continue)
-PLAYER_HP = 0x2A23598  # slot 0 HP (KH2Offsets SLOT0_BASE + 0x80)
+EXCUSED_STALL_SECONDS = 300.0  # ...unless a load, event, movie or Game Over explains it (see stall_excused)
+STALL_READS = {"hp": "0x2A23598:u32", "inField": "0x9BA8D0:u8", "world": "0x717008:u8",
+               "cutscene": "0xB65210:u32", "event": "0x2A11478:u32"}  # KH2Offsets.hpp
 
 EXIT_PASS, EXIT_FAIL, EXIT_CRASH, EXIT_RIG = 0, 1, 2, 3
 
@@ -183,18 +184,22 @@ class Instance:
         if self.live_frame_seen is None or self.live_frame_seen[0] != frame:
             self.live_frame_seen = (frame, now)
         elif now - self.live_frame_seen[1] > HANG_SECONDS:
-            # Game Over also stops gameplay frames, waiting for Continue. With the
-            # player at 0 HP that is recoverable, so allow it longer (VUH-2340).
-            if now - self.live_frame_seen[1] <= GAME_OVER_SECONDS and self.game_over():
+            # Gameplay frames also stop at Game Over (waiting for Continue) and during
+            # some loads and story scenes (the TT prologue finale, VUH-2340). Those
+            # are recoverable, so allow them longer.
+            if now - self.live_frame_seen[1] <= EXCUSED_STALL_SECONDS and self.stall_excused():
                 return
             raise InstanceDied(self.index, self.pid, f"hung (frame {frame} stalled {HANG_SECONDS:.0f}s)")
 
-    def game_over(self) -> bool:
+    def stall_excused(self) -> bool:
+        """Player at 0 HP, a room load (out of the field or world 0xFF), or an
+        active event/cutscene."""
         try:
-            sample = kh2ctl("peek", "--rva", f"0x{PLAYER_HP:X}:u32", pid=self.pid, check=False, timeout=10)
-            return sample["samples"][0][f"0x{PLAYER_HP:X}"] == 0
+            sample = kh2ctl("peek", "--rva", ",".join(STALL_READS.values()), pid=self.pid, check=False, timeout=10)
+            v = {k: sample["samples"][0][spec.split(":")[0]] for k, spec in STALL_READS.items()}
         except (KeyError, IndexError, TypeError, subprocess.TimeoutExpired):
             return False
+        return v["hp"] == 0 or v["inField"] == 0 or v["world"] == 0xFF or v["cutscene"] != 0 or v["event"] != 0
 
 
 # --------------------------------------------------------------------------
