@@ -39,6 +39,7 @@ CAMERA, INPUT_STRUCT_PTR = 0x718C60, 0x79CF00
 SAVE, STORY = 0x9A98B0, (0x1C90, 0x260)  # story flag range of the live SAVE block
 SLOT0_HP = 0x2A23518 + 0x80  # max HP follows at +4
 SAVE_REACTIONS = {55}  # save point "Save" (FM-02 start, 2026-10-17); never taken
+GAME_OVER_MENU = 8  # open-menu id while the Game Over screen is up (solo teach-03); co-op downed has none
 
 STUCK_SECONDS = 120.0
 MOVE_EPSILON = 50.0
@@ -482,34 +483,69 @@ class Pilot:
         raise Stuck("no cutscene to skip")
 
     def fight(self, step: dict, deadline: float) -> dict:
-        """Fight until no living enemy is listed for `clearSec`. In battle it takes
-        any offered reaction (Reversal etc.) except Save, uses `heal` key sequence
-        (a Potion through the command menu) below its threshold, backs off with a
-        jump below `lowHp` of max HP, and answers Game Over with Continue (the
-        native retry of this room) up to `retries` times."""
+        """Fight until no living enemy is listed for `clearSec`.
+
+        In battle it takes any offered reaction except Save (Reversal, a revive),
+        at most every `reactGapSec` unless HP is falling. `heal` runs a menu key
+        sequence (a Potion) below its threshold, checked between swings too.
+        When recent damage says Roxas is pinned (`pinnedDrop` of max HP lost in
+        2 s), it runs from the nearby enemies with a jump, trying the sides when
+        a wall stops it. At 0 HP, Game Over (menu 8) gets Continue, the native
+        retry, up to `retries` times. Without that menu the player is downed
+        (co-op, VUH-1504) and waits up to `downedSec` for a teammate's revive."""
         reach, low = float(step.get("reach", 220)), float(step.get("lowHp", 0.35))
-        stats = {"enemiesStart": None, "swings": 0, "reactions": {}, "minHp": None, "deaths": 0, "evades": 0}
+        stats = {"enemiesStart": None, "swings": 0, "reactions": {}, "minHp": None, "deaths": 0, "evades": 0,
+                 "escapes": 0, "downed": 0, "heals": 0}
         calm_since, locked, healed, reacted = None, False, 0.0, 0.0
+        recent: list[tuple[float, int]] = []  # (time, hp) samples for the damage window
         first = self.state()
         room = (first["world"], first["room"])
+        heal = step.get("heal")  # {"below": 0.5, "keys": [...], "max": 3}: menu keys to use a Potion
+
+        def hurting(s: dict, share: float) -> bool:
+            now = time.monotonic()
+            recent.append((now, s["hp"]))
+            del recent[:-40]
+            window = [hp for at, hp in recent if now - at <= 2.0]
+            return max(window) - s["hp"] >= share * max(s["maxHp"], 1)
+
+        def want_heal(s: dict) -> bool:
+            return bool(heal) and 0 < s["hp"] < heal.get("below", 0.5) * max(s["maxHp"], 1) \
+                and stats["heals"] < heal.get("max", 3) and time.monotonic() > healed + 3
+
         while time.monotonic() < deadline:
             s = self.state()
             stats["minHp"] = s["hp"] if stats["minHp"] is None else min(stats["minHp"], s["hp"])
             if s["hp"] <= 0 and s["world"] != 0xFF:
                 self.kb.hold(set())
+                if s["menu"] != GAME_OVER_MENU:
+                    # Downed in co-op: no Game Over; wait (bounded) for a revive or the menu.
+                    stats["downed"] += 1
+                    self.write("downed", stats=stats)
+                    until = time.monotonic() + float(step.get("downedSec", 60))
+                    while time.monotonic() < until and s["hp"] <= 0 and s["menu"] != GAME_OVER_MENU:
+                        time.sleep(0.5)
+                        s = self.state()
+                    if s["hp"] > 0:
+                        self.write("revived", hp=s["hp"])
+                        recent.clear()
+                        continue
+                    if s["menu"] != GAME_OVER_MENU:
+                        self.capture("downed")
+                        raise Stuck("downed and not revived")
                 stats["deaths"] += 1
                 self.write("death", stats=stats)
                 if stats["deaths"] > int(step.get("retries", 2)):
                     raise Stuck(f"died {stats['deaths']} times")
-                time.sleep(7)  # death animation, then Game Over opens on Continue
                 self.capture(f"gameover-{stats['deaths']}")
-                self.kb.tap("confirm")
+                self.kb.tap("confirm")  # Game Over opens on Continue
                 time.sleep(3)
                 self.settle(True, 1.0, time.monotonic() + 120)
                 s = self.state()
                 if (s["world"], s["room"]) != room:
                     raise Retry(f"Continue reloaded {s['world']}/{s['room']}")
                 locked = False
+                recent.clear()
                 continue
             if not s["free"]:
                 self.kb.hold(set())
@@ -517,8 +553,9 @@ class Pilot:
                     self.kb.tap("confirm")
                 time.sleep(0.3)
                 continue
+            falling = hurting(s, 0.1)
             if s["react"] and s["battle"] and s["react"] not in SAVE_REACTIONS \
-                    and time.monotonic() > reacted + float(step.get("reactGapSec", 0.8)):
+                    and (falling or time.monotonic() > reacted + float(step.get("reactGapSec", 0.8))):
                 reacted = time.monotonic()
                 stats["reactions"][s["react"]] = stats["reactions"].get(s["react"], 0) + 1
                 self.kb.tap("react")
@@ -545,9 +582,8 @@ class Pilot:
             target = min(foes, key=lambda a: math.hypot(a["position"]["x"] - p[0], a["position"]["z"] - p[2]))
             tx, tz = target["position"]["x"], target["position"]["z"]
             gap = math.hypot(tx - p[0], tz - p[2])
-            heal = step.get("heal")  # {"below": 0.4, "keys": [...], "max": 3}: menu keys to use a Potion
-            if heal and s["hp"] < heal.get("below", 0.4) * max(s["maxHp"], 1) \
-                    and stats.setdefault("heals", 0) < heal.get("max", 3) and time.monotonic() > healed + 3:
+            near = [f for f in foes if math.hypot(f["position"]["x"] - p[0], f["position"]["z"] - p[2]) < reach * 2]
+            if want_heal(s):
                 stats["heals"] += 1
                 healed = time.monotonic()
                 self.kb.hold(set())
@@ -556,6 +592,11 @@ class Pilot:
                     time.sleep(heal.get("gapMs", 250) / 1000)
                 time.sleep(1.5)
                 self.write("heal", hp=s["hp"], after=self.state()["hp"])
+                continue
+            if near and step.get("escape", True) and hurting(s, float(step.get("pinnedDrop", 0.3))):
+                stats["escapes"] += 1
+                self.escape(s, near)
+                recent.clear()
                 continue
             if low and s["hp"] < low * max(s["maxHp"], 1) and gap < reach * 2:
                 stats["evades"] += 1
@@ -573,9 +614,35 @@ class Pilot:
                     self.kb.tap("attack", 70)
                     time.sleep(0.18)
                     stats["swings"] += 1
+                    # A Dusk combo can take most of Roxas's HP inside one burst: recheck between swings.
+                    now = self.state()
+                    if now["hp"] <= 0 or want_heal(now) or hurting(now, float(step.get("pinnedDrop", 0.3))) or \
+                            (now["react"] and now["battle"] and now["react"] not in SAVE_REACTIONS):
+                        break
                 if step.get("guard"):  # e.g. "MOUSE_RIGHT" once calibrated: block the counter
                     self.kb.tap(step["guard"], 300)
         raise Stuck("fight did not clear")
+
+    def escape(self, s: dict, near: list[dict]) -> None:
+        """Run from the nearby enemies' centroid with a jump. A wall stops the
+        straight line, so when Roxas barely moves, try each side instead."""
+        p = s["pos"] or (0.0, 0.0, 0.0)
+        cx = sum(f["position"]["x"] for f in near) / len(near)
+        cz = sum(f["position"]["z"] for f in near) / len(near)
+        dx, dz = p[0] - cx, p[2] - cz
+        if math.hypot(dx, dz) < 1:
+            dx, dz = 1.0, 0.0
+        for rx, rz in ((dx, dz), (-dz, dx), (dz, -dx)):
+            now = self.state()
+            start = now["pos"] or p
+            self.kb.hold(steer(now, (start[0] + rx * 10, start[2] + rz * 10)))
+            time.sleep(0.12)
+            self.kb.tap("jump")
+            time.sleep(0.5)
+            self.kb.hold(set())
+            moved = self.state()["pos"] or start
+            if math.dist(moved, start) > 120:
+                return
 
     def finish(self) -> None:
         self.kb.release()

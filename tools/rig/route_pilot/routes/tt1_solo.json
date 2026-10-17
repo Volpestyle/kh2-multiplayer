@@ -7,7 +7,7 @@
     {"do": "door", "to": [-250, -1400], "room": [2, 19], "timeoutSec": 15, "clip": 12, "name": "door-computer-to-basement-hall",
      "note": "Computer Room 2/21 -> Basement Hall 2/19; trigger logged at (-234, -785)"},
     {"do": "fight", "timeoutSec": 300, "clip": 30, "name": "fight-basement-dusks", "retryFrom": 0,
-     "heal": {"below": 0.4, "keys": ["DOWN", "DOWN", "confirm", "confirm", "confirm", "UP", "UP"], "max": 3},
+     "heal": {"below": 0.55, "keys": ["DOWN", "DOWN", "confirm", "confirm", "confirm", "UP", "UP"], "max": 3},
      "note": "Day 6 Dusk ambush; Reversal (react 69) is offered. A win moves the story to 2/20; Continue reloads at the Computer Room save point. Heal: Items is two rows below Attack, then Potion, then the target (Roxas)"},
     {"do": "fight", "timeoutSec": 300, "clip": 30, "name": "fight-axel", "retryFrom": 0, "lowHp": 0,
      "heal": {"below": 0.45, "keys": ["DOWN", "DOWN", "confirm", "confirm", "confirm", "UP", "UP"], "max": 3},
