@@ -1,6 +1,6 @@
 {
  "name": "net_lod_gusts",
- "description": "VUH-2342: 08/08 programs 0/1/0 (three F_MU070 wind gusts). The host, then the friend, walks up the path into the wind for 20 s while filmed; each walk's position samples count pushbacks (the player moved back more than 15 units between samples while walking forward). The friend's gusts run natively on the friend now, so the wind must push the friend too.",
+ "description": "VUH-2342: 08/08 programs 0/1/0, the wind gusts (F_MU070). Each game runs its own gusts now. The host, then the friend, walks into its nearest gust until the Ride the Wind reaction command appears, presses it, and its height is sampled while it rides. The friend must get the command and be lifted, as the host is. Both walks are filmed.",
  "playerDefaults": true,
  "protect": [
   0,
@@ -70,7 +70,7 @@
   },
   {
    "do": "checkpoint",
-   "name": "1 Wind gusts F_MU070 act on both players"
+   "name": "1 Wind gusts F_MU070 exist and offer Ride the Wind on both games"
   },
   {
    "do": "wait",
@@ -82,9 +82,14 @@
    "expr": "[[(round(a['position']['x']),round(a['position']['z'])) for a in actors(i) if a['name']=='F_MU070'] for i in range(2)]"
   },
   {
+   "do": "assert",
+   "expr": "len(saved['gusts_enter'][0])>=1 and len(saved['gusts_enter'][1])>=1",
+   "message": "a game has no gusts"
+  },
+  {
    "do": "clip",
    "instance": 0,
-   "seconds": 22,
+   "seconds": 24,
    "fps": 15,
    "name": "gust_host",
    "background": true
@@ -92,18 +97,48 @@
   {
    "do": "walk_to",
    "instance": 0,
-   "x": 0,
-   "z": 2500,
-   "timeoutMs": 20000,
+   "targetExpr": "(lambda acts: (lambda me: (lambda g: (g['position']['x'], g['position']['z']))(min([a for a in acts if a['name']=='F_MU070'], key=lambda a: (a['position']['x']-me['position']['x'])**2+(a['position']['z']-me['position']['z'])**2)))([a for a in acts if a['name']=='P_EX100'][0]))(actors(0))",
+   "until": "peek(0x2A11162,'u16',0)!=0",
+   "timeoutMs": 15000,
    "as": "walk_host"
+  },
+  {
+   "do": "save",
+   "as": "rc_host",
+   "expr": "peek(0x2A11162,'u16',0)"
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "triangle",
+   "ms": 100
+  },
+  {
+   "do": "fight",
+   "instances": [],
+   "seconds": 6,
+   "as": "ride_host",
+   "sample": {
+    "expr": "pos('P_EX100',0)",
+    "everyMs": 250
+   }
   },
   {
    "do": "clip_wait"
   },
   {
+   "do": "save",
+   "as": "lift_host",
+   "expr": "max(s['value'][1] for s in saved['ride_host_samples'] if 'value' in s) - min(s['value'][1] for s in saved['ride_host_samples'] if 'value' in s)"
+  },
+  {
+   "do": "checkpoint",
+   "name": "2 The friend rides a gust like the host"
+  },
+  {
    "do": "clip",
    "instance": 1,
-   "seconds": 22,
+   "seconds": 24,
    "fps": 15,
    "name": "gust_friend",
    "background": true
@@ -111,13 +146,39 @@
   {
    "do": "walk_to",
    "instance": 1,
-   "x": 0,
-   "z": 2500,
-   "timeoutMs": 20000,
+   "targetExpr": "(lambda acts: (lambda me: (lambda g: (g['position']['x'], g['position']['z']))(min([a for a in acts if a['name']=='F_MU070'], key=lambda a: (a['position']['x']-me['position']['x'])**2+(a['position']['z']-me['position']['z'])**2)))([a for a in acts if a['name']=='P_EX100'][0]))(actors(1))",
+   "until": "peek(0x2A11162,'u16',1)!=0",
+   "timeoutMs": 15000,
    "as": "walk_friend"
   },
   {
+   "do": "save",
+   "as": "rc_friend",
+   "expr": "peek(0x2A11162,'u16',1)"
+  },
+  {
+   "do": "press",
+   "instance": 1,
+   "button": "triangle",
+   "ms": 100
+  },
+  {
+   "do": "fight",
+   "instances": [],
+   "seconds": 6,
+   "as": "ride_friend",
+   "sample": {
+    "expr": "pos('P_EX100',1)",
+    "everyMs": 250
+   }
+  },
+  {
    "do": "clip_wait"
+  },
+  {
+   "do": "save",
+   "as": "lift_friend",
+   "expr": "max(s['value'][1] for s in saved['ride_friend_samples'] if 'value' in s) - min(s['value'][1] for s in saved['ride_friend_samples'] if 'value' in s)"
   },
   {
    "do": "save",
@@ -125,24 +186,14 @@
    "expr": "[[(round(a['position']['x']),round(a['position']['z'])) for a in actors(i) if a['name']=='F_MU070'] for i in range(2)]"
   },
   {
-   "do": "save",
-   "as": "pushback",
-   "expr": "[sum(1 for k in range(1,len(saved[w]['samples'])) if saved[w]['samples'][k]['position'][2] < saved[w]['samples'][k-1]['position'][2]-15) for w in ('walk_host','walk_friend')]"
-  },
-  {
-   "do": "save",
-   "as": "progress",
-   "expr": "[round(saved[w]['end'][2]-saved[w]['start'][2]) for w in ('walk_host','walk_friend')]"
+   "do": "assert",
+   "expr": "saved['rc_friend']!=0",
+   "message": "the friend's gust offered no reaction command"
   },
   {
    "do": "assert",
-   "expr": "len(saved['gusts_after'][1])>=1",
-   "message": "the friend has no gusts"
-  },
-  {
-   "do": "assert",
-   "expr": "saved['pushback'][1]>=1",
-   "message": "no gust pushed the friend back while it walked into the wind"
+   "expr": "saved['lift_friend']>100",
+   "message": "the friend's Sora did not ride the gust (no height change)"
   }
  ]
 }

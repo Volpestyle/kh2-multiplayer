@@ -558,13 +558,16 @@ def step_walk_to(ctx: Context, step: dict) -> dict:
     """Measured native walking using the same camera basis as the GoA approach."""
     index = step.get("instance", 0)
     helpers = ctx.namespace()
-    target = (float(step["x"]), float(step["z"]))
+    # targetExpr (VUH-2342): an (x, z) re-evaluated every pulse, for a target that moves (LoD's gusts).
+    target = (float(step["x"]), float(step["z"])) if "targetExpr" not in step else tuple(ctx.eval(step["targetExpr"]))
     start = helpers["pos"]("P_EX100", index)
     samples = []
     deadline = time.monotonic() + step.get("timeoutMs", 12000) / 1000
     while time.monotonic() < deadline:
         ctx.check_all()
         position = helpers["pos"]("P_EX100", index)
+        if "targetExpr" in step:
+            target = tuple(ctx.eval(step["targetExpr"]))
         samples.append({"position": position, "enemies": {
             peer: helpers["enemies"](peer) for peer in range(len(ctx.instances))}})
         dx, dz = target[0] - position[0], target[1] - position[2]
