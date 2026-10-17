@@ -392,10 +392,18 @@ class Pilot:
         self.clips.append(thread)
         self.write("clip", name=path.name, seconds=seconds)
 
-    def capture(self, name: str) -> str:
-        path = self.out / f"{name}.png"
-        kh2ctl("capture", "--pid", str(self.game.pid), "--out", str(path))
-        return path.name
+    def capture(self, name: str) -> str | None:
+        """A running clip holds the capture lease, so retry past it (clips are
+        at most 30 s here). None, logged, when no screenshot was written."""
+        path, end = self.out / f"{name}.png", time.monotonic() + 45
+        while True:
+            out = kh2ctl("capture", "--pid", str(self.game.pid), "--out", str(path))
+            if path.exists():
+                return path.name
+            if time.monotonic() > end:
+                self.write("capture_failed", name=name, error=out.get("error") or out)
+                return None
+            time.sleep(2)
 
     # ---- route steps ----
     def run_step(self, step: dict) -> dict:
@@ -793,6 +801,11 @@ def run_teach(pilot: Pilot, box: Path, seconds: float) -> int:
     `key` holds raw keys ({"keys": ["W"], "ms": 400}) and reports the pad
     bits seen mid-hold: that is how the key map is calibrated."""
     box.mkdir(parents=True, exist_ok=True)
+    for stale in sorted(box.glob("cmd-*.json")):  # left by a session that died; never replay them
+        (box / stale.name.replace("cmd-", "res-")).write_text(
+            json.dumps({"ok": False, "error": "stale: sent to an earlier session, not run"}), encoding="utf-8")
+        stale.unlink()
+        pilot.write("stale_cmd", cmd=stale.name)
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         try:
