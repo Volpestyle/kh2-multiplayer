@@ -1673,8 +1673,38 @@ EmissionBirth CaptureEmissionBirth(void* actor,const Qualification& q,const void
     b.available=true;return b;
 }
 
+// VUH-2343: read-only receipt for the forced-solo player's actual ingress.
+// This observes the original record; it grants no extra actor or party write.
+void ObserveBaileyPlayer(const void* record, void* controller, TraceWrapper wrapper, uintptr_t caller) {
+    if (!g_log || wrapper != TraceWrapper::Fixed) return;
+    std::array<std::uint8_t, 10> now {};
+    std::array<std::uint8_t, 64> bytes {};
+    constexpr std::array<std::uint8_t, 10> bailey {4,8,0,0,52,0,52,0,0,0};
+    if (!CopyNative(g_exeBase + offsets::NOW, now.data(), now.size()) || now != bailey ||
+        !CopyNative(reinterpret_cast<uintptr_t>(record), bytes.data(), bytes.size()) ||
+        Field<std::uint32_t>(bytes.data(), 0) != 566) return;
+    static std::atomic<unsigned> lines {0};
+    if (lines.fetch_add(1, std::memory_order_relaxed) >= 8) return;
+    Controller native {};
+    std::array<std::uint8_t, 0x2C> header {};
+    const bool read = ReadNative(reinterpret_cast<uintptr_t>(controller), native) &&
+        CopyNative(native.header, header.data(), header.size());
+    char recordHex[129] {};
+    constexpr char hex[] = "0123456789ABCDEF";
+    for (unsigned i = 0; i < bytes.size(); ++i) {
+        recordHex[2*i] = hex[bytes[i] >> 4]; recordHex[2*i+1] = hex[bytes[i] & 15];
+    }
+    g_log("[bailey-player-spawn] observation-only=1 tid=%u ownerThread=%u caller=%llX transition=%u load=%u controller=%llX record=%llX headerRead=%u key=%u headerId=%u type=%u records=%u firstRecord=%u bytes=%s",
+        GetCurrentThreadId(), IsDiagnosticGameThread() ? 1u : 0u,
+        static_cast<unsigned long long>(caller - g_exeBase), warp::TransitionSerial(), warp::LoadSerial(),
+        reinterpret_cast<unsigned long long>(controller), reinterpret_cast<unsigned long long>(record),
+        read ? 1u : 0u, native.key, Field<std::uint16_t>(header.data(), 2), header[0],
+        Field<std::uint16_t>(header.data(), 4), native.spawnArray == reinterpret_cast<uintptr_t>(record) ? 1u : 0u, recordHex);
+}
+
 void* PolicyWrapper(const void* record, void* controller, const float* point, TraceWrapper wrapper, uintptr_t caller) {
     const auto entryError = GetLastError();
+    ObserveBaileyPlayer(record, controller, wrapper, caller);
     const auto role = g_emission && IsDiagnosticGameThread() && g_role ? g_role() : 0;
     Qualification q;
     bool qualified = false;
