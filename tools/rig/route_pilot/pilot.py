@@ -162,6 +162,13 @@ class Keyboard:
 
     def send(self, name: str, up: bool) -> None:
         if name.upper() in MOUSE:
+            # A click lands on the window under the cursor, which might not be
+            # the game: refuse unless the cursor is over the owned game.
+            point, pid = wt.POINT(), wt.DWORD()
+            u32.GetCursorPos(ctypes.byref(point))
+            u32.GetWindowThreadProcessId(u32.WindowFromPoint(point), ctypes.byref(pid))
+            if pid.value != self.game.pid and not up:
+                raise OSError(f"cursor ({point.x},{point.y}) is not over the game; {name} refused")
             inp = INPUT(type=0)  # INPUT_MOUSE, button only
             inp.mi = MOUSEINPUT(0, 0, 0, MOUSE[name.upper()][1 if up else 0], 0, 0)
             if u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
@@ -397,8 +404,8 @@ class Pilot:
                 self.kb.hold(steer(s, aim))
                 time.sleep(0.06)
             self.kb.hold(set())
-            if want:
-                self.settle()
+            if want:  # story scenes after a door can run for minutes (the pod room finale)
+                self.settle(True, 2.0, time.monotonic() + float(step.get("settleSec", 300)))
             result = {"from": start["pos"], "to": self.state()["pos"]}
         elif kind == "hold":
             self.kb.hold(set(step["keys"]))

@@ -11,6 +11,12 @@
      "note": "Day 6 Dusk ambush; Reversal (react 69) is offered. A win moves the story to 2/20; Continue reloads at the Computer Room save point. Heal: Items is two rows below Attack, then Potion, then the target (Roxas)"},
     {"do": "fight", "timeoutSec": 300, "clip": 30, "name": "fight-axel", "retryFrom": 0, "lowHp": 0,
      "heal": {"below": 0.45, "keys": ["DOWN", "DOWN", "confirm", "confirm", "confirm", "UP", "UP"], "max": 3},
-     "note": "Axel in 2/20, the arena ringed by fire. No backing off at low HP: it walks into the fire wall. Not yet won"}
+     "note": "Axel in 2/20, the arena ringed by fire. No backing off at low HP: it walks into the fire wall. Won 2026-10-17 (axel-01); the story then runs 20 -> 19 -> 18/3 -> 19"},
+    {"do": "wait_room", "room": [2, 19], "timeoutSec": 120},
+    {"do": "walk", "to": [-880, -330], "tol": 30, "timeoutSec": 15, "note": "Basement Hall west wall, beside the corridor door"},
+    {"do": "door", "to": [-2000, -330], "room": [2, 22], "timeoutSec": 15, "note": "Basement Hall 2/19 -> Basement Corridor 2/22; trigger near (-921, -502)"},
+    {"do": "walk", "to": [-755, 104], "tol": 40, "timeoutSec": 15, "note": "corridor, in front of the north door"},
+    {"do": "door", "to": [-755, 1800], "room": [2, 23], "timeoutSec": 15, "settleSec": 900, "clip": 30, "name": "door-corridor-to-pod-room",
+     "note": "Basement Corridor 2/22 -> 2/23; trigger near (-752, 556). The finale runs 23 -> 9 -> 23 and more; not yet seen to the end"}
   ]
 }
