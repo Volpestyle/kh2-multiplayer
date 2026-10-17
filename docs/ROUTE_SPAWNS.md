@@ -322,6 +322,10 @@ identity. The owned-memory regression covers same-root reuse with a valid new
 ticket, refused capture, capacity, missing mission, failed provenance and stale
 permit, including old HP/death packets. First-birth failures also stay fenced
 even when their native point exactly matches the host.
+The wrapper's `__finally` Abandon path also carries normally returned actor/group
+metadata when the enclosing update scope is lost: it retires old tickets without
+granting a successor ticket. An accepted new host epoch clears the capacity fault
+alongside its old-room tickets.
 
 Tests reproduce the one-frame loss and retain the scoped ID across adoption,
 HP updates and host death, with gap and changed-record retirement. The portable

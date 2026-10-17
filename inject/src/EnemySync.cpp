@@ -3985,7 +3985,7 @@ bool ReceiveWorldPackets() {
                     // frame, so the row is in place before the resolver reads it.
                     ApplyHostPartyRow(t);
                     ResetOrdinaryLifecycle(); // retire old history before this batch can carry the new cut
-                    g_emissionLedger.Clear();g_localEmissionBirths.clear(); g_emissionDeniedLogs = 0;
+                    g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false; g_emissionDeniedLogs = 0;
                     ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority
                     g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
                     g_spawnPickUnknownEpoch = 0;
@@ -6215,6 +6215,7 @@ bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t re
     const auto role=CurrentRole();
     if(role==Role::Client) {
         if(phase==EmissionPhase::Cancel || phase==EmissionPhase::Abandon) {
+            if(phase==EmissionPhase::Abandon && birth)(void)ObserveReturnedEmissionBirth(*birth,permit);
             if(!EmissionPermitCurrent(permit))return false;
             return phase==EmissionPhase::Cancel ? g_emissionLedger.Cancel(permit.sequence) :
                 g_emissionLedger.Commit(permit.sequence); // ambiguous birth gets no retry or ticket

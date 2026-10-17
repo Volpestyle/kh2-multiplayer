@@ -61,6 +61,8 @@ bool CaptureBaileyCreeperBirth(uintptr_t actor,EmissionBirth& birth,BaileyCreepe
 bool BaileyCreeperBirthCurrent(const EmissionBirth& birth,BaileyCreeperDiagnostic* diagnostic=nullptr) noexcept;
 // Reserve one exact receipt around the native call. Cancel normal null returns;
 // ambiguous outcomes spend the reservation without a ticket;
+// a normally returned actor on Abandon carries unavailable group metadata only,
+// so the consumer can retire recycled identities without granting a new ticket;
 // a successful birth spends that receipt and retains checked local provenance.
 using EmissionFn = bool (*)(std::uint32_t key, std::uint16_t header, std::uint16_t record,
                             const float* triggerPoint4, EmissionPhase phase,

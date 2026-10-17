@@ -892,11 +892,13 @@ void TestEnemyHpOrdering() {
           "next valid HP sample applies after rejected high-sequence packets");
 
     auto nextRoom = arrivalTarget; nextRoom.epoch = 10;
+    g_moraleBirthCapacityFault=true;
     QueueHostWorld(encode(nextRoom)); QueueHpManifest(10);
     QueueHostWorld(encode(OrderedHp(base + 2, 410, 10)));
     ReceiveWorldPackets();
     Check(g_host.epoch == 10 && g_host.enemies[1].hp == -1 && g_hostHpSequence == base + 3,
           "ordinary room transition preserves HP ordering independently of HostRoom replacement");
+    Check(!g_moraleBirthCapacityFault,"accepted new host epoch clears old-room birth capacity fault");
     RetireWorldSession();
     Check(g_hostHpSequence == base + 3, "role-only world retirement preserves the HP floor");
     QueueHostWorld(encodeWorldSessionReset(1, 1));
@@ -3007,6 +3009,23 @@ void TestMoraleBirthLifetime() {
         (void)ClientFrame(CaptureNativeCensus());
         Check(Read<int>(status)==1000 && deathCalls==0,"predecessor HP and death packets never affect same-address successor");
     }
+    seed();g_hitTraceFrame=101;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    const auto oldBirth=g_localEmissionBirths.front().birth;
+    SpawnEmission successor{arrivalTarget,2,oldBirth.key,978,0,{0,0,0,1}};successor.netId=7;
+    Check(g_emissionLedger.Add(successor),"scope-lost successor receives host receipt");
+    spawncontroller::EmissionPermit abandonedPermit{};
+    Check(SpawnEmissionPolicy(oldBirth.key,978,0,nullptr,spawncontroller::EmissionPhase::Reserve,abandonedPermit,nullptr),
+          "scope-lost successor reserves a still-current permit");
+    spawncontroller::EmissionBirth abandoned{};abandoned.actor=enemy;abandoned.key=oldBirth.key;
+    abandoned.headerId=978;abandoned.records=1; // no native actor reads on the finally path
+    Check(EmissionPermitCurrent(abandonedPermit) &&
+          SpawnEmissionPolicy(oldBirth.key,978,0,nullptr,spawncontroller::EmissionPhase::Abandon,abandonedPermit,&abandoned),
+          "nonnull return with changed update scope spends its current grant through Abandon");
+    Check(g_localEmissionBirths.front().retired && g_localEmissionBirths.back().retired &&
+          g_localEmissionBirths.back().moraleGroup,"Abandon retires predecessor and never grants successor authority");
+    g_inst.spawns[0].spawnPos={0,0,0};g_hitTraceFrame=102;
+    (void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+    Check(g_inst.spawns[0].netId<0,"scope-lost same-address successor cannot inherit or point-match an old ID");
     for(unsigned mode=0;mode<4;++mode) {
         seed();auto birth=g_localEmissionBirths.front().birth;
         ResetSpawnEmissions(); // first group birth, with no prior actor tombstone

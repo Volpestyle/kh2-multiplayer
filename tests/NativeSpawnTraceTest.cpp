@@ -1941,6 +1941,8 @@ std::array<float,4> emissionLastUpdatePoint {};
 std::array<float,4> emissionTrigger {};
 const void* emissionRecord = nullptr;
 EmissionBirth emissionLastBirth{};
+EmissionBirth emissionAbandonedBirth{};
+bool emissionLoseScope=false;
 bool emissionGenerated = false, emissionFault = false, emissionWrapperFault = false;
 void* emissionFiberRoot = nullptr;
 bool emissionFiberMode = false, emissionFiberPreserved = true;
@@ -1977,11 +1979,16 @@ bool MixedCopy(float* out,uintptr_t,std::uint64_t) {
     ++emissionCopyCalls;std::copy(emissionTrigger.begin(),emissionTrigger.end(),out);return true;
 }
 PVOID WINAPI EmissionBadFls(DWORD) { return reinterpret_cast<void*>(1); }
-void* __fastcall EmissionFixed(const void*, void*) { ++emissionCalls;if(emissionWrapperFault)RaiseException(kDeliberateException,0,0,nullptr);return emissionResult; }
+void* __fastcall EmissionFixed(const void*, void*) {
+    ++emissionCalls;if(emissionWrapperFault)RaiseException(kDeliberateException,0,0,nullptr);
+    if(emissionLoseScope)g_emissionStorage.services.get=&EmissionBadFls;
+    return emissionResult;
+}
 void* __fastcall EmissionGenerated(const void*, void*, const float*) { ++emissionCalls;if(emissionWrapperFault)RaiseException(kDeliberateException,0,0,nullptr);return emissionResult; }
 bool EmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t record,const float* point,
                     EmissionPhase phase,EmissionPermit& permit,const EmissionBirth* birth) {
     if(phase==EmissionPhase::Birth && birth)emissionLastBirth=*birth;
+    if(phase==EmissionPhase::Abandon && birth)emissionAbandonedBirth=*birth;
     if(emissionRole==2) {
         if(phase==EmissionPhase::Reserve) {
             const auto* e=emissionLedger.Reserve(key,header,record);if(!e)return false;
@@ -2148,6 +2155,18 @@ void EmissionControls(std::uint8_t* image) {
         "mixed host publishes checked helper birth without combat activation authority");
     std::memcpy(image+kh2coop::offsets::NOW,oldLocation.data(),10);emissionMixedHelper=nullptr;
     }
+    // Last emission check: Same() must reject this cell permanently, so leave
+    // no later test dependent on it. The native call itself returned normally.
+    emissionObject=objects.data()+8;put(image+OBJECT_TABLES,reinterpret_cast<uintptr_t>(objects.data()));
+    put(image+CONTROLLER_TABLE,TableEntry{1234,0,reinterpret_cast<uintptr_t>(&controller)});
+    emissionLedger.Clear();e.sequence=50;emissionLedger.Add(e);emissionRole=2;
+    emissionRecord=record;emissionResult=born.data();emissionLoseScope=true;emissionAbandonedBirth={};
+    CallEmissionUpdate(&controller,point);emissionLoseScope=false;g_emissionStorage.services.get=flsGet;
+    Check(emissionAbandonedBirth.actor==reinterpret_cast<uintptr_t>(born.data()) &&
+          emissionAbandonedBirth.key==1234 && emissionAbandonedBirth.headerId==750 &&
+          emissionAbandonedBirth.recordIndex==0 && emissionAbandonedBirth.records==1 &&
+          !emissionAbandonedBirth.available && !emissionLedger.Permit(1234,750,0,false),
+          "nonnull return after Same(update) failure passes actor/group through Abandon and spends current grant");
     g_emission=nullptr;g_replay=nullptr;g_lookup=nullptr;
 }
 }

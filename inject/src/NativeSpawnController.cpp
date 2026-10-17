@@ -1931,8 +1931,13 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
             const auto nativeError=GetLastError();
             // Only an observed normal null return is safe to retry. An unwind
             // or unqualified nonnull outcome may already have allocated a body.
+            EmissionBirth abandoned{};
+            if(returned && actor) {
+                abandoned.actor=reinterpret_cast<uintptr_t>(actor);abandoned.key=q.key;abandoned.headerId=q.headerId;
+                abandoned.recordIndex=index;abandoned.records=q.records;
+            }
             g_emission(q.key,q.headerId,index,nullptr,
-                returned && !actor ? EmissionPhase::Cancel : EmissionPhase::Abandon,permit,nullptr);
+                returned && !actor ? EmissionPhase::Cancel : EmissionPhase::Abandon,permit,abandoned.actor?&abandoned:nullptr);
             SetLastError(nativeError);
         }
     }
