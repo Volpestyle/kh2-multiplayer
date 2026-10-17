@@ -132,7 +132,10 @@ unchanged. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal
 The bounded deferral passed Quill's D14.4 review and the MSVC owned-memory
 regression. Bailey-12 ended on both peers with empty matching HP/counts, but
 failed the old replay-only oracle before egress. The receipt/oracle follow-up
-still needs native compilation and its live run.
+passed native compilation and Bailey-13 (`20261017-103923_net_hb1_bailey_1`):
+one clean-census replay, both native ended flags21/result0, empty matching
+HP/counts, and egress with no second end. Tested source `f324f9a` landed as
+`0cf47c0`; the Bailey code and regression bytes were unchanged by the rebase.
 
 The friend may complete `HB08_MS102.bar` natively after the final authenticated
 enemy death, before a mirror replay. That is valid: a diagnostic-only observer

@@ -1,11 +1,12 @@
 # Bailey and LoD route spawns (VUH-2343, VUH-2352)
 
-Bailey-05 proves native private clone construction and client emission, while
-the full fight fails enemy parity and never reaches mission end. The scoped
-Creeper candidate below still requires independent review, a Windows build and
-a passing live run. The base portable policy passed ASan/UBSan and the Windows
-build; portable tests alone cannot prove the native driver or mission completion.
-Failed observation/probe runs remain attached to the issues.
+Bailey-13 passes the full two-instance fight: real Creeper births, native pause,
+both mission ends, empty matching enemy counts/HP, and egress without a second
+end. The default-on implementation passed independent inject review and the
+Windows build/regression. VUH-2343 remains open for first-visit Borough enemy
+grounding; VUH-2352 still needs its own live LoD run. Failed observation/probe
+runs remain attached to the issues. This development fixture uses warps on PC1
+and does not accept the D15 two-PC route through real doors.
 
 ## Bailey: add the missing actor at the native player boundary
 
@@ -73,7 +74,7 @@ caller, key and form. Settled Bailey gameplay logs the clone's controller and
 retained-record roots every60 owner frames; the fixture rejects any failed
 attachment sample and retains mission start/end plus combat samples.
 
-## Bailey Creepers: scoped birth authority, pending review/live qualification
+## Bailey Creepers: scoped birth authority
 
 Bailey-05 (`20261017-043655_net_hb1_bailey_1`, source `f38dd32`) proves
 the missing clone and F1: exactly one Constructor40505B and Allocate3A7B1B,
@@ -122,8 +123,8 @@ binder, continuous observation/retirement, unchanged default stream/denylist,
 native repair headroom and native mission-end rules. The live fixture requires
 five Creeper tickets, both native ends exactly once, empty matching live enemy
 counts/HP and egress. Portable tests cannot prove the native driver or mission
-end. Independent inject review and that passing live run are required before
-landing; Bailey-05 remains a failed result, and VUH-2352 still needs its own run.
+end. Independent inject review and the Bailey-13 live run passed before landing;
+Bailey-05 remains a failed result, and VUH-2352 still needs its own run.
 
 ## LoD: admit only the observed generated waves
 
@@ -283,7 +284,7 @@ hold. After that gap the same body remains11HP but cannot regain its terminal
 binding (`death-without-continuous-binding`, selected0). Relaxing continuity or
 writing through a retained actor pointer would weaken the lifetime boundary.
 
-The candidate fix defers only `HB08_MS102.bar` successful end replay until a
+The fix defers only `HB08_MS102.bar` successful end replay until a
 fresh complete current Bailey census has no living enemies, with the mission
 pointer and scope checked on both sides. It leaves the replay one-shot pending
 so the normal client frame can apply the authenticated final death first. It
@@ -295,11 +296,11 @@ native end call once; it never kills or writes HP on an unbound body. At the cap
 a fresh complete census logs every living orphan's netId (0 if unmatched), HP,
 actor and family, or explicitly logs unavailable. The replay receipt reports
 `path=clean-census` or `path=frame-cap`. Quill passed the initial deferral's
-D14.4 review; the bounded follow-up needs review before the build. The owned-memory
+D14.4 review, including the bounded follow-up. The owned-memory
 `kh2coop_nativehit_test` reproduces death plus end in one owner frame and an
 immediate native end hold, plus an unbound orphan that forces the capped replay
-without a new lethal. Native compile and live final parity/ended flags/egress
-remain required before landing. A capped end is liveness evidence, not a pass
+without a new lethal. Native compilation and the regression passed; Bailey-13
+passed final parity/ended flags/egress. A capped end is liveness evidence, not a pass
 of the enemy parity gate.
 
 Bailey-12 (`20261017-101224_net_hb1_bailey_1`, `cae373c`) reaches both native
@@ -319,4 +320,17 @@ says so with living/HP sum -1 rather than inventing an empty sample. The
 scenario independently requires current empty actor counts and both ended
 flags, exactly one of native-local/clean-census/frame-cap, zero replays on
 native-local, a successful replay otherwise, and no second path after egress.
-Bailey-13 must verify those receipts and the remaining egress/attachment gates.
+Bailey-13 (`20261017-103923_net_hb1_bailey_1`, tested `f324f9a`, landed
+`0cf47c0`) passes all86 steps. Exactly one host `mission_complete` and one
+successful friend `path=clean-census` replay were logged; there was no
+native-local receipt, cap or orphan. Both native flags were21/result0, with
+living counts0/0 and empty matching enemy HP. All five real317 tickets were
+adopted. Native menu8/blocker1 paused both games for2s and resumed to255;
+no receipt retired across the pause. The five later friend retirements each
+follow a same-actor list removal at HP0 and a cull-pass. Attachment checks and
+egress to GoA4/26 passed, including the no-double-end check after egress.
+The native-local and cap alternatives remain covered by owned-memory MSVC
+regressions; this live run proves the clean-census path. The reviewed host and
+friend clips show resumed combat; reports/logs and completion/egress stills
+carry the later end evidence. Safety closure found no changed protected files
+or remaining owned processes, and PC1 was released at10:44CDT.
