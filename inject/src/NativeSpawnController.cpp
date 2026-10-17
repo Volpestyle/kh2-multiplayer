@@ -1906,7 +1906,11 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
                 static_cast<unsigned>(moraleWeight),fits?1U:0U,afterRead?1U:0U,usedAfter);
         }
         if(enclosed && actor && g_role()==role && g_emissionStorage.Same(update) && SameStamp(q.stamp)) {
-            const auto birth=definitionRead ? CaptureEmissionBirth(actor,q,record,before) : EmissionBirth{};
+            auto birth=definitionRead ? CaptureEmissionBirth(actor,q,record,before) : EmissionBirth{};
+            // Even refused capture identifies the successful return and its
+            // qualified group. It retires recycled IDs and fences point fallback.
+            birth.actor=reinterpret_cast<uintptr_t>(actor);birth.key=q.key;birth.headerId=q.headerId;
+            birth.recordIndex=index;birth.records=q.records;
             static unsigned unavailableBirthLogs=0;
             if(!birth.available && g_log && unavailableBirthLogs++<32) {
                 uintptr_t linkedController=0,linkedRecord=0;

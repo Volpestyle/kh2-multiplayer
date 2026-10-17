@@ -309,9 +309,26 @@ occurrences may drain authenticated deaths through the same native mission end.
 Retired tagged actors cannot fall back to point matching. Other adopted
 receipts retain their one-use behavior; the ordinary resolver is unchanged.
 
+D14.4 review found that a native allocator can recycle all roots at an address
+without an absent census frame. Every successful client wrapper return now
+retires all prior tickets at that actor before permit, refusal, cap or new-tag
+decisions. The qualified group metadata tags the new occurrence independently
+of its actor/mission/provenance proof; failed proof leaves an immediately retired
+marker, including unavailable captures. A valid new ticket cannot collide with
+the retired predecessor. At the existing bounded ticket cap, a missing group
+marker latches a fault: unticketed ordinary actors cannot point-bind until the
+existing emission/session reset. This never increases capacity or grants a new
+identity. The owned-memory regression covers same-root reuse with a valid new
+ticket, refused capture, capacity, missing mission, failed provenance and stale
+permit, including old HP/death packets. First-birth failures also stay fenced
+even when their native point exactly matches the host.
+
 Tests reproduce the one-frame loss and retain the scoped ID across adoption,
 HP updates and host death, with gap and changed-record retirement. The portable
-policy regression passes with ASan/UBSan. The owned-memory MSVC test controls
+policy regression and an exact extraction of the production return observer
+pass with ASan/UBSan. Removing predecessor retirement or restoring proof-based
+tagging makes their respective mutation controls fail. Evidence is retained in
+`build/rig/vuh2352-lifetime-offline-02/`. The owned-memory MSVC test controls
 only the native birth-provenance leaf; actual mission/scope/census, receipt
 consumer, adoption, resolver and HP/death code run unchanged. Windows validation
 and D14.4 review remain pending. The live fixture separately requires successful

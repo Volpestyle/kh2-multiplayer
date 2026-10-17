@@ -6230,6 +6230,7 @@ bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t re
             if(!EmissionPermitCurrent(permit))return false;
             return true;
         }
+        auto* const moraleTag=birth ? ObserveReturnedEmissionBirth(*birth,permit) : nullptr;
         if(!EmissionPermitCurrent(permit))return false;
         const auto* e=g_emissionLedger.Pending(key,header,record);
         if(!e || e->sequence!=permit.sequence || e->netId!=permit.netId || !g_emissionLedger.Commit(permit.sequence))return false;
@@ -6256,7 +6257,7 @@ bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t re
                 static_cast<unsigned>(g_localEmissionBirths.size()));
         }
         if(permit.netId && (!RecordFamily(birth->objectId) || bailey317) && g_resyncWriteFence==ResyncWriteFence::None &&
-           !OrdinaryLifecycleRoom() && g_localEmissionBirths.size()<SPAWN_EMISSION_CAP) {
+           !OrdinaryLifecycleRoom() && (moraleTag || g_localEmissionBirths.size()<SPAWN_EMISSION_CAP)) {
             uintptr_t moraleMission=0;
             const bool morale=routespawn::MoraleGeneratedBirth(birth->key,birth->headerId,birth->recordIndex,birth->records,
                 birth->objectId,birth->objectType) && MoraleMissionCurrent(false,&moraleMission) &&
@@ -6264,8 +6265,12 @@ bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t re
             LocalEmissionBirth ticket{};ticket.birth=*birth;ticket.permit=permit;ticket.seenFrame=g_hitTraceFrame;
             ticket.warmup={g_hitTraceFrame,g_hitTraceFrame};
             ticket.baileyMission=bailey317?baileyMission:0;ticket.baileyLease.seen=bailey317?g_hitTraceFrame:0;
+            ticket.moraleGroup=moraleTag!=nullptr;
             ticket.moraleMission=morale?moraleMission:0;ticket.moraleLease.seen=morale?g_hitTraceFrame:0;
-            g_localEmissionBirths.push_back(ticket);
+            if(moraleTag) {
+                ticket.retired=!morale;ticket.moraleLease.retired=!morale;
+                *moraleTag=ticket;
+            } else g_localEmissionBirths.push_back(ticket);
             if(g_log)g_log("[spawn-birth] ticket frame=%u netId=%u seq=%llu actor=%llX objectId=%u",g_hitTraceFrame,permit.netId,
                 static_cast<unsigned long long>(permit.sequence),static_cast<unsigned long long>(birth->actor),birth->objectId);
         }

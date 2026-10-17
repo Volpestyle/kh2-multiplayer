@@ -81,10 +81,13 @@ inline bool MoraleGeneratedMission(const std::array<std::uint8_t,10>& location,s
         result!=mr::kFailedResult && (terminal || (flags&mr::kEnded)!=mr::kEnded);
 }
 // The full current native definition is still revalidated by EmissionBirthCurrent.
+inline bool MoraleGeneratedBirth(std::uint32_t key,unsigned header,unsigned record,unsigned count) {
+    return (key==0x70345F62 && (header==978 || header==999) && record==0 && count==1) ||
+        (key==0x73345F62 && header==1007 && record<2 && count==2);
+}
 inline bool MoraleGeneratedBirth(std::uint32_t key,unsigned header,unsigned record,unsigned count,
                                  std::uint32_t objectId,std::uint32_t type) {
-    return type==4 && ((key==0x70345F62 && (header==978 || header==999) && record==0 && count==1 && objectId==302) ||
-        (key==0x73345F62 && header==1007 && record<2 && count==2 && objectId==10));
+    return MoraleGeneratedBirth(key,header,record,count) && type==4 && objectId==(header==1007?10U:302U);
 }
 // A birth's sampled native roots must be observed on continuous owner frames.
 // A failed observation consumes this occurrence; a later same address cannot revive it.

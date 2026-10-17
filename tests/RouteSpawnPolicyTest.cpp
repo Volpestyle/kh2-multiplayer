@@ -83,11 +83,15 @@ void morale() {
         MoraleGeneratedMission(MoraleLocation,"MU01_MS102.bar",true,0x15,0,true),"only adopted morale births can drain the ended mission");
     check(!MoraleGeneratedMission(MoraleLocation,"MU01_MS102.bar",true,1,2,true),"failed morale mission refuses authority");
     for(unsigned header: {978U,999U}) {
+        check(MoraleGeneratedBirth(0x70345F62,header,0,1),"group tag survives missing actor metadata");
         check(MoraleGeneratedBirth(0x70345F62,header,0,1,302,4),"exact Shadow birth metadata");
         check(!MoraleGeneratedBirth(0x70345F62,header,1,1,302,4),"extra Shadow ordinal refused");
     }
     for(unsigned record=0;record<2;++record)
         check(MoraleGeneratedBirth(0x73345F62,1007,record,2,10,4),"exact two Nightwalker birth metadata");
+    check(MoraleGeneratedBirth(0x73345F62,1007,1,2) && !MoraleGeneratedBirth(0x73345F62,1007,2,2) &&
+        !MoraleGeneratedBirth(0x70345F62,1007,0,2) && !MoraleGeneratedBirth(0x70345F62,978,0,2),
+        "group-only retirement tags keep package/count/ordinal strict");
     check(!MoraleGeneratedBirth(0x73345F62,1007,2,2,10,4) && !MoraleGeneratedBirth(0x73345F62,1007,0,1,10,4) &&
         !MoraleGeneratedBirth(0x70345F62,1007,0,2,10,4) && !MoraleGeneratedBirth(0x73345F62,1007,0,2,302,4) &&
         !MoraleGeneratedBirth(0x73345F62,1007,0,2,10,3),"ordinal/count/package/object/type negatives refuse lifetime");

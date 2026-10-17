@@ -2942,6 +2942,7 @@ void TestMoraleBirthLifetime() {
               "actual LoD receipt consumer arms only the exact mission lifetime");
     };
     seed();
+    g_localEmissionBirths.front().moraleGroup=false;
     g_localEmissionBirths.front().moraleMission=0; // reproduce the old one-use adapter boundary
     g_hitTraceFrame=101;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
     Check(g_inst.spawns[0].netId==6,"probe04 control adopts the one-use birth");
@@ -2971,7 +2972,63 @@ void TestMoraleBirthLifetime() {
     Put(enemy+0x9F0,RecordData()+64);g_hitTraceFrame=102;
     (void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
     Check(g_localEmissionBirths.front().retired && g_inst.spawns[0].netId<0,"changed LoD indexed record retires before native writes");
+    // Same address, same roots and handle, no absent census frame. Each return
+    // must end the old occurrence even when the successor cannot obtain a ticket.
+    for(unsigned mode=0;mode<6;++mode) {
+        seed();g_hitTraceFrame=101;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+        auto birth=g_localEmissionBirths.front().birth;
+        SpawnEmission emission{arrivalTarget,2,birth.key,978,0,{0,0,0,1}};emission.netId=7;
+        Check(g_emissionLedger.Add(emission),"successor receives a distinct host occurrence");
+        spawncontroller::EmissionPermit permit{};
+        Check(SpawnEmissionPolicy(birth.key,978,0,nullptr,spawncontroller::EmissionPhase::Reserve,permit,nullptr),
+              "successor reserves its own grant");
+        if(mode==1)birth.available=false;
+        if(mode==2)g_localEmissionBirths.resize(SPAWN_EMISSION_CAP);
+        if(mode==3)g_mirrorRequested=false;
+        if(mode==4)Put(enemy+0x9F0,RecordData()+64);
+        if(mode==5)++permit.hostDelivery;
+        (void)SpawnEmissionPolicy(birth.key,978,0,nullptr,spawncontroller::EmissionPhase::Birth,permit,&birth);
+        Check(g_localEmissionBirths.front().retired,"successful return retires predecessor before every admission gate");
+        if(mode==0)Check(!g_localEmissionBirths.back().retired && g_localEmissionBirths.back().permit.netId==7,
+                         "valid successor keeps its new ticket while the predecessor stays retired");
+        else if(mode!=2)Check(g_localEmissionBirths.back().moraleGroup && g_localEmissionBirths.back().retired,
+                             "refused successor retains a retired group marker");
+        g_mirrorRequested=true;Put(enemy+0x9F0,RecordData());
+        // Even a point-coincident successor cannot recover the predecessor ID.
+        g_inst.spawns[0].spawnPos={0,0,0};
+        const auto census=CaptureNativeCensus();
+        Check(MoraleBirthActor(enemy) && MoraleBirthTicketId(census.enemies.front())==(mode==0?7:0),
+              "same-address successor never inherits old ID with or without a new ticket");
+        g_hitTraceFrame=102;(void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+        Check(g_inst.spawns[0].netId!=6,"resolver never binds recycled actor to predecessor HP or death authority");
+        g_bridge.incoming.push_back(HostEnvelope(encode(EnemyHp{9,{{6,700,1000}},1}),1));
+        g_bridge.incoming.push_back(HostEnvelope(encode(EnemyDeath{9,6}),2));ReceiveWorldPackets();
+        g_applyStatDelta=MoraleTestDeath;deathCalls=0;g_hitTraceFrame=103;
+        (void)ClientFrame(CaptureNativeCensus());
+        Check(Read<int>(status)==1000 && deathCalls==0,"predecessor HP and death packets never affect same-address successor");
+    }
+    for(unsigned mode=0;mode<4;++mode) {
+        seed();auto birth=g_localEmissionBirths.front().birth;
+        ResetSpawnEmissions(); // first group birth, with no prior actor tombstone
+        SpawnEmission emission{arrivalTarget,1,birth.key,978,0,{0,0,0,1}};emission.netId=6;
+        Check(g_emissionLedger.Add(emission),"refused first group birth receives host receipt");
+        spawncontroller::EmissionPermit permit{};
+        Check(SpawnEmissionPolicy(birth.key,978,0,nullptr,spawncontroller::EmissionPhase::Reserve,permit,nullptr),
+              "refused first group birth reserves grant");
+        if(mode==0)g_mirrorRequested=false;
+        if(mode==1)Put(enemy+0x9F0,RecordData()+64);
+        if(mode==2){birth.available=false;birth.objectId=0;birth.objectType=0;}
+        if(mode==3)g_localEmissionBirths.resize(SPAWN_EMISSION_CAP);
+        (void)SpawnEmissionPolicy(birth.key,978,0,nullptr,spawncontroller::EmissionPhase::Birth,permit,&birth);
+        Check(MoraleBirthActor(enemy),"group metadata tags failed proof before capacity and object-root decisions");
+        g_mirrorRequested=true;Put(enemy+0x9F0,RecordData());g_inst.spawns[0].spawnPos={0,0,0};g_hitTraceFrame=101;
+        (void)ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration());
+        Check(g_inst.spawns[0].netId<0,"failed first group proof cannot fall back to an exact point match");
+        Check(g_localEmissionBirths.size()<=SPAWN_EMISSION_CAP,"retired group markers remain bounded");
+        if(mode==3)Check(g_moraleBirthCapacityFault,"missing tombstone at capacity fails closed until reset");
+    }
     g_mirrorRequested=false;ResetSpawnEmissions();g_lastRoomPacket.reset();Reset();
+    Check(!g_moraleBirthCapacityFault,"emission reset clears capacity fault");
 }
 
 int main() try {

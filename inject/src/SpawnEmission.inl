@@ -26,10 +26,35 @@ struct LocalEmissionBirth {
     EmissionWarmup warmup{};
     uintptr_t baileyMission{};
     routespawn::BaileyCreeperLease baileyLease{};
+    bool moraleGroup{};
     uintptr_t moraleMission{};
     routespawn::MoraleGeneratedLease moraleLease{};
 };
 std::vector<LocalEmissionBirth> g_localEmissionBirths;
+// A missing group tombstone must never enable point fallback. Exhaustion
+// disables unticketed binding until the existing emission/session reset.
+bool g_moraleBirthCapacityFault{};
+
+LocalEmissionBirth* ObserveReturnedEmissionBirth(const spawncontroller::EmissionBirth& birth,
+                                                const spawncontroller::EmissionPermit& permit) {
+    if(!birth.actor)return nullptr;
+    // A native return is a new occurrence even if every address and handle was
+    // recycled without an absent census frame. Retire before any admission test.
+    for(auto& t:g_localEmissionBirths)if(t.birth.actor==birth.actor) {
+        t.retired=true;t.baileyLease.retired=true;t.moraleLease.retired=true;
+    }
+    if(!routespawn::MoraleGeneratedBirth(birth.key,birth.headerId,birth.recordIndex,birth.records))return nullptr;
+    if(g_localEmissionBirths.size()>=SPAWN_EMISSION_CAP) {
+        if(!g_moraleBirthCapacityFault && g_log)g_log("[morale-birth] capacity-fault frame=%u actor=%llX",
+            g_hitTraceFrame,static_cast<unsigned long long>(birth.actor));
+        g_moraleBirthCapacityFault=true;
+        return nullptr;
+    }
+    LocalEmissionBirth tag{};tag.birth=birth;tag.permit=permit;tag.moraleGroup=true;
+    tag.retired=true;tag.moraleLease.retired=true;
+    g_localEmissionBirths.push_back(tag);
+    return &g_localEmissionBirths.back();
+}
 
 // Read-only scope: never refresh session state while a caller holds native rows.
 bool NativeBirthMissionCurrent(bool morale,bool terminal,uintptr_t* mission,const char** refusal) {
@@ -178,13 +203,13 @@ int LocalEmissionBirthId(const NativeEnemy& native) {
 // Generated native points differ across peers. Only these exact mission births
 // retain a continuously revalidated occurrence ID after the one-use adoption.
 bool MoraleBirthActor(uintptr_t actor) {
-    return std::any_of(g_localEmissionBirths.begin(),g_localEmissionBirths.end(),[actor](const auto& t) {
-        return t.moraleMission && t.birth.actor==actor;
+    return g_moraleBirthCapacityFault || std::any_of(g_localEmissionBirths.begin(),g_localEmissionBirths.end(),[actor](const auto& t) {
+        return t.moraleGroup && t.birth.actor==actor;
     });
 }
 int MoraleBirthTicketId(const NativeEnemy& native) {
     int id=0;
-    for(auto& t:g_localEmissionBirths)if(t.moraleMission && t.birth.actor==native.actor && !t.retired) {
+    for(auto& t:g_localEmissionBirths)if(t.moraleGroup && t.birth.actor==native.actor && !t.retired) {
         uintptr_t mission=0;
         const bool current=MoraleMissionCurrent(t.adopted,&mission) && mission==t.moraleMission &&
             EmissionPermitCurrent(t.permit) && EmissionBirthMatches(t.birth,native) &&
@@ -206,7 +231,7 @@ int MoraleBirthTicketId(const NativeEnemy& native) {
     return id;
 }
 void ObserveMoraleBirths(const NativeCensus& census) {
-    for(auto& t:g_localEmissionBirths)if(t.moraleMission && !t.retired) {
+    for(auto& t:g_localEmissionBirths)if(t.moraleGroup && !t.retired) {
         bool found=false;
         for(const auto& n:census.enemies)if(n.actor==t.birth.actor) {
             found=true;(void)MoraleBirthTicketId(n);break;
@@ -225,7 +250,7 @@ void ObserveMoraleBirths(const NativeCensus& census) {
     }
 }
 void RetireAbsentEmissionBirths(const NativeCensus& census) {
-    for(auto& t:g_localEmissionBirths)if(!t.moraleMission && !t.adopted && !t.retired) {
+    for(auto& t:g_localEmissionBirths)if(!t.moraleGroup && !t.adopted && !t.retired) {
         bool found=false;for(const auto& n:census.enemies)if(EmissionBirthMatches(t.birth,n)){found=true;break;}
         if(!found && EmissionPermitCurrent(t.permit) && g_hitTraceFrame>=t.seenFrame &&
            g_hitTraceFrame-t.seenFrame<=1 && InitializingEmissionBirth(t.birth,census,t.warmup)) {
@@ -244,7 +269,7 @@ void AdoptEmissionBirth(uintptr_t actor,int id) {
 }
 
 void ResetSpawnEmissions() {
-    g_emissionOutbox.clear(); g_emissionLedger.Clear();g_localEmissionBirths.clear();
+    g_emissionOutbox.clear(); g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false;
     g_emissionSequence = 0; g_emissionDeniedLogs = 0;
 }
 void FlushSpawnEmissions(const NativeCensus& census) {
