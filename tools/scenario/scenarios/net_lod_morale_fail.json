@@ -1,0 +1,170 @@
+{
+ "name": "net_lod_morale_fail",
+ "description": "VUH-2342: the first morale fight (08/01 programs 68, MU01_MS102) with the host's morale set to 0.5 (a test-only write to the host's gauge, nothing on the friend). The host's own script empties it and fails the mission; the friend must fail the same mission (its gauge follows to 0, and the host's failure is replayed). Clips film both.",
+ "playerDefaults": true,
+ "protect": [
+  0,
+  1
+ ],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 1,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "relay",
+   "port": 27798,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get('puppet0') or {}).get('active') for i in range(2))",
+   "timeoutMs": 30000,
+   "pollMs": 1000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 8,
+   "room": 1,
+   "door": 0,
+   "map": 68,
+   "btl": 68,
+   "evt": 0
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)[:2]==[8,1] and location(1)[:2]==[8,1]",
+   "timeoutMs": 45000
+  },
+  {
+   "do": "wait_until",
+   "expr": "mission(0) and mission(1) and mission(0)['file']==mission(1)['file']",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "confirm",
+   "times": 2,
+   "gapMs": 700
+  },
+  {
+   "do": "press",
+   "instance": 1,
+   "button": "confirm",
+   "times": 2,
+   "gapMs": 700
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[mission-mirror] client ready',1)==1 and log_count('[mission-mirror] client follow',1)>=1",
+   "timeoutMs": 10000
+  },
+  {
+   "do": "save",
+   "as": "mission_start",
+   "expr": "[mission(0), mission(1)]"
+  },
+  {
+   "do": "checkpoint",
+   "name": "1 The host's morale runs out: both games fail the mission"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['poke','--addr',str(int(peek(0x2A0FF68,'u64',0),16)+0x250+0x38),'--type','f32','--value','0.5']"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    1
+   ],
+   "seconds": 40,
+   "as": "fail_watch",
+   "sample": {
+    "expr": "[mission(0), mission(1)]",
+    "everyMs": 500
+   },
+   "clips": [
+    {
+     "instance": 0,
+     "seconds": 25,
+     "fps": 15,
+     "name": "fail_host"
+    },
+    {
+     "instance": 1,
+     "seconds": 25,
+     "fps": 15,
+     "name": "fail_friend"
+    }
+   ]
+  },
+  {
+   "do": "save",
+   "as": "mission_after",
+   "expr": "[mission(0), mission(1)]"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "fail_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "fail_friend"
+  },
+  {
+   "do": "save",
+   "as": "fail_lines",
+   "expr": "[log_count('[mission-mirror] client fail like the host',1), log_count('[mission-mirror] client sec',1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "any(s['value'][0] and s['value'][0]['result']==2 for s in saved['fail_watch_samples'] if 'value' in s)",
+   "message": "the host's mission never failed"
+  },
+  {
+   "do": "assert",
+   "expr": "any(s['value'][1] and s['value'][1]['result']==2 for s in saved['fail_watch_samples'] if 'value' in s)",
+   "message": "the friend's mission did not fail with the host's"
+  }
+ ]
+}

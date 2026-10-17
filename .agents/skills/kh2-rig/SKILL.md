@@ -14,6 +14,8 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 | Launch / list / kill games | `kh2ctl launch`, `instances`, `kill --pid N` | The only sanctioned way to start or stop KH2. Ownership is (pid, creation time) in `build/rig/owned.txt`. |
 | Screenshot | `kh2ctl capture --pid N [--out x.png]`; scenario step `capture` | In-renderer (hooks `Present`), so it works with the window in the background and contains game pixels only. |
 | **Video clip** | `kh2ctl clip --pid N --seconds S --fps 30 [--out x.mp4]`; scenario step `{"do":"clip","instance":i,"seconds":S,"name":...}` | Also in-renderer. It needs `ffmpeg` on PATH. Examples: `build/scenarios/20261002-*_net_soak_10min_1/puppet_view_1.mp4`. |
+| Film during a walk or wait | scenario `{"do":"clip",...,"background":true}` then `{"do":"clip_wait"}`; `fight` takes `clips` (several at once) and `sample: {expr, everyMs}` | VUH-2342. Collect with `clip_wait` before any capture on that instance. |
+| Mission gauges / timer | scenario expression `mission(i)` | File, flags, result, 3 gauges, 3 counters and the timer of instance i's running mission (docs/MISSION_MIRROR.md). |
 | Overlay / HUD | `kh2ctl overlay --pid N on` | It's drawn into the backbuffer, so it shows in captures. |
 | Scripted runs | `python -B tools/scenario/run.py <scenario.json>` | Steps, assertions, report and captures go to `build/scenarios/<stamp>_<name>_<n>/`. |
 | Host cutscene hold/skip | `net_host_cutscene_skip.json` | Existing opt-in empty-room EventHold path; fixture supplies host producer/client control flags. Native Start/Down/Cross skips08/0C evt1. Natural playback (~85s) needs the existing bounded menu-liveness helper while client gameplay frames pause. |

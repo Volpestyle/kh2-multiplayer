@@ -26,6 +26,7 @@
 #include "EventHoldNative.hpp"
 #include "Warp.hpp"
 #include "PartyNativePolicy.hpp"
+#include "MissionMirror.hpp"
 
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
@@ -45,6 +46,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -52,6 +54,7 @@
 #include <optional>
 #include <random>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace kh2coop {
@@ -660,6 +663,10 @@ bool ReadNativeField(uintptr_t actor,NativeField& out,bool& field) {
     if(!ReadNative(out.objentry+offsets::objentry::TYPE_FLAGS,type) ||
        !ReadNative(out.objentry+offsets::objentry::OBJECT_ID,out.value.objectId) ||
        !ReadNative(actor,out.handle) || !out.handle)return false;
+    // VUH-2342: field objects that act only on the local player run natively in every game and
+    // stay out of the roster. LoD's wind gusts (F_MU070, 08/08) are remade every few seconds and
+    // push whoever walks into them; posed from the host with no brain they never pushed the friend.
+    if(out.value.objectId==0x151)return true;
     uintptr_t region{};
     if(!ReadNative(g_exeBase+offsets::active_entity_list::HANDLE_REGION_TABLE+
           ((out.handle&0x7FFFFFFFu)>>25)*8,region) || !region || region==UINT64_MAX ||
@@ -2757,6 +2764,7 @@ bool NativeLeaveCodeCurrent() {
         *reinterpret_cast<const float*>(g_exeBase+0x623A80)==1.0f;
 }
 #include "FieldObjects.inl"
+#include "MissionMirror.inl" // VUH-2342: mission gauges, counters, timer and failure follow the host
 
 // Caller holds the SEH boundary and has checked the actor's roots.
 void NativeLeaveActor(uintptr_t actor) {
@@ -4062,6 +4070,9 @@ bool ReceiveWorldPackets() {
             } else if (type == PacketType::FieldObjects) {
                 FieldObjects fields;read(r,fields);
                 ReceiveFieldObjects(*scope,fields);
+            } else if (type == PacketType::MissionState) {
+                MissionState mission;read(r,mission);
+                ReceiveMission(*scope,mission);
             } else if (type == PacketType::EnemyMotion) {
                 // VUH-1515: pose/motion only; never HP, binding, manifest or hash state.
                 if (!g_mirrorRequested) {  // N2: a flag mismatch is visible and costs no parse
@@ -5515,6 +5526,7 @@ void OnFrameStart(std::uint32_t frame) {
         // VUH-2292: publish old leave and replacement identity before allowing
         // its native emission on friends, even when reliable delivery splits.
         PublishFieldObjects(frame,census);
+        PublishMission(frame);
         FlushSpawnEmissions(census);
         CapturePopulationBirths(census); // only the successfully announced, current incarnation
         PublishPopulationCut(census);
@@ -5523,6 +5535,7 @@ void OnFrameStart(std::uint32_t frame) {
         TickHostPartyLayout();
     } else if (g_role == Role::Client) {
         BindFieldObjects(census);
+        ApplyMission(frame);
         // Reporting only: clients never lock policy from asynchronous arrival.
         // HP stores consult the live advertised mode and the host HP sample.
         if (g_lastRoomPacket) {
@@ -6222,6 +6235,7 @@ bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t up
 }
 
 void Shutdown() {
+    ShutdownMissionMirror();
     g_hashDiagnosticStream.seal(g_hashDiagnosticSink,"native-hash-publication","shutdown");
     g_hashDiagnosticSink = {};
     InvalidateClientClaims("shutdown"); LogClientClaim("seal", "shutdown");

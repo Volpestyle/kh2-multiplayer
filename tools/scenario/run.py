@@ -295,6 +295,34 @@ class Context:
             path = self.run_dir / f"runtime_{index}.log"
             return path.read_text(errors="replace") if path.exists() else ""
 
+        def mission(index: int = 0) -> dict | None:
+            """The running mission (VUH-2342): file name, flags, 3 gauges, 3 counters
+            and the timer globals, or None without one. Layout: docs/MISSION_MIRROR.md."""
+            pid = self.inst(index).pid
+            head = kh2ctl("peek", "--rva", "0x2A0FF68:u64,0xABB860:u32,0xABB864:u32,0xABB868:u8", pid=pid)
+            sample = head["samples"][0]
+            m = int(sample["0x2A0FF68"], 16)
+            if not m:
+                return None
+            rel = m - int(head["moduleBase"], 16)
+            fields = [f"0x{rel + 4:X}:u32"] + [f"0x{rel + 0x40 + 8 * k:X}:u64" for k in range(6)] + [f"0x{rel + 0x120:X}:u32"]
+            for i in range(3):
+                g, c = rel + 0x250 + i * 0x48, rel + 0x160 + i * 0x50
+                fields += [f"0x{g + 0x18:X}:u32", f"0x{g + 0x24:X}:i32", f"0x{g + 0x38:X}:f32",
+                           f"0x{c + 0x18:X}:u32", f"0x{c + 0x24:X}:i32", f"0x{c + 0x38:X}:i32"]
+            row = kh2ctl("peek", "--rva", ",".join(fields), pid=pid)["samples"][0]
+            values = [row[f.split(":")[0]] for f in fields]
+            raw = b"".join(int(v, 16).to_bytes(8, "little") for v in values[1:7])
+            name = raw.split(b"\0")[0].decode("ascii", "replace")
+            gauges, counters = [], []
+            for i in range(3):
+                gf, gmax, gv, cf, cmax, cv = values[8 + 6 * i: 14 + 6 * i]
+                gauges.append({"flags": gf, "max": gmax, "value": round(gv, 3)})
+                counters.append({"flags": cf, "max": cmax, "value": cv})
+            return {"name": name, "file": name.rsplit("/", 1)[-1], "flags": values[0], "result": values[7], "gauges": gauges,
+                    "counters": counters, "timer": {"value": sample["0xABB860"], "state": sample["0xABB864"],
+                                                    "mode": sample["0xABB868"]}}
+
         def bridge(index: int = 0, seconds: float = 0.5) -> dict:
             """The instance's AvatarBridge: local frames/s and both puppet slots."""
             out = subprocess.run([str(AVATARCTL), "peek", "--pid", str(self.inst(index).pid),
@@ -306,7 +334,7 @@ class Context:
                 "actors": self.actors, "log_count": log_count, "dist": dist, "saved": self.saved,
                 "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
-                "location": location, "log_matches": log_matches,
+                "location": location, "log_matches": log_matches, "mission": mission,
                 "range": range, "round": round, "int": int, "str": str, "sorted": sorted, "set": set, "sum": sum,
                 "chests": lambda index=0: chest_records(self, index),
                 "exists": lambda path: (ROOT / path).exists()}
@@ -634,12 +662,33 @@ def step_fight(ctx: Context, step: dict) -> dict:
                                       check=False, timeout=180))
 
         threads.append(threading.Thread(target=film, daemon=True))
+    # {"expr", "everyMs"}: evaluate expr while the bots fight (VUH-2342: both games' mission gauges).
+    sample = step.get("sample")
+    samples: list = []
+    bots = threads[:len(indices)]
+
+    def sampler() -> None:
+        t0 = time.monotonic()
+        while any(b.is_alive() for b in bots):
+            try:
+                samples.append({"t": round(time.monotonic() - t0, 2), "value": ctx.eval(sample["expr"])})
+            except Exception as exc:  # a sample that can't be read is recorded, not fatal
+                samples.append({"t": round(time.monotonic() - t0, 2), "error": f"{type(exc).__name__}: {exc}"})
+            time.sleep(sample.get("everyMs", 1000) / 1000)
+
+    if sample:
+        threads.append(threading.Thread(target=sampler, daemon=True))
     for thread in threads:
         thread.start()
     while any(thread.is_alive() for thread in threads):
         ctx.sleep(0.5)
     name = step.get("as", "fight")
     ctx.saved[name] = {str(k): v for k, v in results.items()}
+    if sample:
+        path = ctx.run_dir / f"{name}_samples.json"
+        path.write_text(json.dumps(samples, indent=1), encoding="utf-8")
+        ctx.artifacts.append(path.name)
+        ctx.saved[f"{name}_samples"] = samples
     receipts = []
     for out, clip_result in films:
         if out.exists():
@@ -795,10 +844,30 @@ def step_capture(ctx: Context, step: dict) -> dict:
 def step_clip(ctx: Context, step: dict) -> dict:
     inst = ctx.inst(step.get("instance", 0))
     out = ctx.run_dir / f"{step.get('name', 'clip')}_{inst.index}.mp4"
-    kh2ctl("clip", "--seconds", str(step.get("seconds", 5)), "--fps", str(step.get("fps", 30)), "--out", str(out), pid=inst.pid,
-           timeout=120)
+    args = ("clip", "--seconds", str(step.get("seconds", 5)), "--fps", str(step.get("fps", 30)), "--out", str(out))
+    if step.get("background"):
+        # Film while later steps run (VUH-2342); clip_wait collects it before any capture on that instance.
+        result: dict = {}
+        thread = threading.Thread(target=lambda: result.update(kh2ctl(*args, pid=inst.pid, check=False, timeout=180)),
+                                  daemon=True)
+        thread.start()
+        ctx.saved.setdefault("_background_clips", []).append((thread, out, result))
+        return {"path": out.name, "background": True}
+    kh2ctl(*args, pid=inst.pid, timeout=120)
     ctx.artifacts.append(out.name)
     return {"path": out.name}
+
+
+def step_clip_wait(ctx: Context, step: dict) -> dict:
+    """Collect every background clip (step_clip with background) and record its receipt."""
+    receipts = []
+    for thread, out, result in ctx.saved.pop("_background_clips", []):
+        while thread.is_alive():
+            ctx.sleep(0.5)
+        if out.exists():
+            ctx.artifacts.append(out.name)
+        receipts.append({"path": out.name, "ok": result.get("ok"), "error": result.get("error")})
+    return {"clips": receipts}
 
 
 def step_avatar_stall(ctx: Context, step: dict) -> dict:
@@ -4549,7 +4618,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
-         "capture": step_capture, "clip": step_clip, "avatar_stall": step_avatar_stall,
+         "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,

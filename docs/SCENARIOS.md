@@ -1854,7 +1854,7 @@ protected actor. Protection is best effort during loads.
 | `walk_to` | `x z instance timeoutMs until as` | Steer with the current camera basis in 200ms native pulses. Record start/end displacement and peer enemy lists in JSON. Stops near the target, at `until`, or at the time budget; reaching the budget makes no cull claim. |
 | `align_courtyard_exit` | `instance as blockedExpr` | BC courtyard entrance-0 fixture only: pulse screen-left (`lx=-1`) for 250 ms at a time, recording each start/end position. Stop at `abs(x)<60` or a true `blockedExpr`, with a 6 s limit. Each unblocked pulse must reduce `abs(x)`; otherwise capture and fail with a diagnostic JSON. No host movement |
 | `press` | `button ms times gapMs` | Press a button (`player-press`; PS2 names: `cross`, `circle`, `triangle`, `square`, `start`, …) |
-| `fight` | `instances seconds reach button as clip` | Bot combat: each listed instance's own Sora walks at its nearest living enemy (camera-basis 200 ms pulses) and presses `button` (default `cross`) within `reach` units (default 250), all instances at once, until `seconds` pass or it sees no enemy. `clip: {instance, seconds, fps, name}` films the fight while it runs. Records presses, pulses, closest distance and enemy counts; asserts nothing |
+| `fight` | `instances seconds reach button as clip` | Bot combat: each listed instance's own Sora walks at its nearest living enemy (camera-basis 200 ms pulses) and presses `button` (default `cross`) within `reach` units (default 250), all instances at once, until `seconds` pass or it sees no enemy. `clip: {instance, seconds, fps, name}` films the fight while it runs (`clips` films several at once). `sample: {expr, everyMs}` evaluates `expr` while the bots fight and saves the series as `<as>_samples`. Records presses, pulses, closest distance and enemy counts; asserts nothing |
 | `checkpoint` | `name` | Opens a route segment (see "Route runs" below) |
 | `wait` | `ms` | Sleep while watching the instances |
 | `wait_until` | `expr timeoutMs pollMs` | Poll an expression until true |
@@ -1862,7 +1862,8 @@ protected actor. Protection is best effort during loads.
 | `save` | `as expr` | Store a value in `saved[...]` |
 | `protect` | `on` | Start/stop team-0 protection polling; stopping does not restore the previous team |
 | `capture` | `name` | PNG from inside the renderer; retain the actual CLI response under `receipt` alongside the relative artifact `path` |
-| `clip` | `name seconds fps` | MP4 → artifact |
+| `clip` | `name seconds fps background` | MP4 → artifact. `background: true` films while the next steps run; `clip_wait` collects every background clip (do it before a `capture` on that instance) |
+| `clip_wait` | | Waits for the background clips and records their receipts |
 | `avatar_stall` | none | Two-player `net_avatar_stall.json`: suspend the original sender runtime handle for 2 s, move its Sora 150 units in RAM, resume in `finally`; both games and viewer keep running. Six-second viewer clip and bridge samples check active/held/live states. Native `[ptrace]` logs retain per-frame hold and resume positions |
 | `crash`, `freeze` | | Runner self-tests: fault or suspend the instance |
 | `relay` | `port build content mod args` | Start `kh2coop_server` on loopback for this run; the version gate defaults to what the runtime sends |

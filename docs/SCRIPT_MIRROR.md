@@ -179,5 +179,5 @@ registries, and checks that the DLL's trap table agrees with the wire allowlist.
    `exe+0x2AE7B98`), when an enemy's script changes them.
 2. **Effects started on another actor:** `obj_effect_start_bind_other` (1/149)
    needs the other actor mapped as well.
-3. **Missions:** `mission_*` gauges and timers follow the host and are shown,
-   not owned, on clients.
+3. **Missions:** done separately as a state mirror, not a call mirror
+   (`MissionState`, [MISSION_MIRROR.md](MISSION_MIRROR.md), VUH-2342).

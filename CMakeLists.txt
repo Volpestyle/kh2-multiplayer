@@ -255,6 +255,16 @@ endif()
 add_executable(kh2coop_script_mirror_test tests/ScriptMirrorTest.cpp)
 add_executable(kh2coop_spawn_emission_test tests/SpawnEmissionTest.cpp)
 
+# VUH-2342: MissionState codec and the mission mirror's rules (inject/src/MissionMirror.hpp).
+add_executable(kh2coop_mission_mirror_test tests/MissionMirrorTest.cpp)
+target_link_libraries(kh2coop_mission_mirror_test PRIVATE kh2coop_common)
+target_include_directories(kh2coop_mission_mirror_test PRIVATE inject/src)
+if(MSVC)
+    target_compile_options(kh2coop_mission_mirror_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_mission_mirror_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 # VUH-2276: complete field roster codec, host admission and script identity retirement.
 add_executable(kh2coop_field_objects_test tests/FieldObjectsTest.cpp)
 target_link_libraries(kh2coop_field_objects_test PRIVATE kh2coop_server_core)

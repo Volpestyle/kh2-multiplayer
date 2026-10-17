@@ -224,7 +224,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
 #define RS_INNER(T) case PacketType::T: {T value;read(r,value);break;}
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
-        RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(ProgressUpdate)
+        RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(MissionState) RS_INNER(ProgressUpdate)
         RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
@@ -863,6 +863,54 @@ void read(ByteReader& r, FieldObjects& m) {
 }
 std::vector<std::uint8_t> encode(const FieldObjects& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::FieldObjects, w.data());
+}
+
+namespace {
+void checkMissionState(const MissionState& m) {
+    if (!m.location.epoch || !m.sequence) throw std::runtime_error("MissionState: bad epoch or sequence");
+    const auto end = std::find(m.file.begin(), m.file.end(), '\0');
+    if (end == m.file.end() || std::any_of(end, m.file.end(), [](char c) { return c != 0; }) ||
+        std::any_of(m.file.begin(), end, [](char c) { return c < 0x21 || c > 0x7E || c == '/' || c == '\\'; }))
+        throw std::runtime_error("MissionState: invalid file name");
+    if (!m.active && (end != m.file.begin() || m.flags || m.result))
+        throw std::runtime_error("MissionState: inactive with mission fields");
+    for (const auto& g : m.gauges)
+        if (!std::isfinite(g.gauge) || std::fabs(g.gauge) > MISSION_MAX_GAUGE || g.count)
+            throw std::runtime_error("MissionState: invalid gauge");
+    for (const auto& c : m.counters)
+        if (c.gauge != 0.0f) throw std::runtime_error("MissionState: invalid counter");
+    if (m.timerState > 2 || m.timerMode > 1) throw std::runtime_error("MissionState: invalid timer");
+    if (!validMissionEndTrap(m.endTrap) || (!m.endTrap && m.endArg) || (!m.active && m.endTrap))
+        throw std::runtime_error("MissionState: invalid end");
+}
+}
+void write(ByteWriter& w, const MissionState& m) {
+    checkMissionState(m);
+    write(w, m.location); w.writeU64(m.sequence); w.writeU32(m.hostFrame); w.writeU8(m.active ? 1 : 0);
+    for (char c : m.file) w.writeU8(static_cast<std::uint8_t>(c));
+    w.writeU32(m.flags); w.writeU32(m.result);
+    for (const auto& g : m.gauges) { w.writeU32(g.flags); w.writeU32(static_cast<std::uint32_t>(g.max)); w.writeF32(g.gauge); }
+    for (const auto& c : m.counters) { w.writeU32(c.flags); w.writeU32(static_cast<std::uint32_t>(c.max)); w.writeU32(static_cast<std::uint32_t>(c.count)); }
+    w.writeU32(m.timerState); w.writeU8(m.timerMode); w.writeU32(m.timerValue); w.writeU32(m.timerDuration);
+    w.writeU8(m.endTrap); w.writeU32(m.endArg);
+}
+void read(ByteReader& r, MissionState& m) {
+    MissionState d;
+    read(r, d.location); d.sequence = r.readU64(); d.hostFrame = r.readU32();
+    const auto active = r.readU8();
+    if (active > 1) throw std::runtime_error("MissionState: invalid active flag");
+    d.active = active != 0;
+    for (char& c : d.file) c = static_cast<char>(r.readU8());
+    d.flags = r.readU32(); d.result = r.readU32();
+    for (auto& g : d.gauges) { g.flags = r.readU32(); g.max = static_cast<std::int32_t>(r.readU32()); g.gauge = r.readF32(); }
+    for (auto& c : d.counters) { c.flags = r.readU32(); c.max = static_cast<std::int32_t>(r.readU32()); c.count = static_cast<std::int32_t>(r.readU32()); }
+    d.timerState = r.readU32(); d.timerMode = r.readU8(); d.timerValue = r.readU32(); d.timerDuration = r.readU32();
+    d.endTrap = r.readU8(); d.endArg = r.readU32();
+    checkMissionState(d);
+    m = d;
+}
+std::vector<std::uint8_t> encode(const MissionState& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::MissionState, w.data());
 }
 
 void write(ByteWriter& w, const EnemyDeath& m) {
@@ -1647,6 +1695,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("HitClaim: wrong frame length");
     if (type == PacketType::EnemyHp && (len < 14 || size != kHeaderSize + len))
         throw std::runtime_error("EnemyHp: wrong frame length");
+    if (type == PacketType::MissionState && (len != MISSION_STATE_BYTES || size != kHeaderSize + len))
+        throw std::runtime_error("MissionState: wrong frame length");
     if (type == PacketType::FieldObjects &&
         (len < FIELD_OBJECT_HEADER_BYTES || (len - FIELD_OBJECT_HEADER_BYTES) % FIELD_OBJECT_ENTRY_BYTES != 0 ||
          size != kHeaderSize + len))

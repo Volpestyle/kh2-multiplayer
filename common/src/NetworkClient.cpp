@@ -516,7 +516,7 @@ void NetworkClient::resetTransportState() {
     enemyHpSessionId_.clear();
     enemyHpHostConnectionId_ = 0;
     enemyHpSequence_ = 0;
-    enemyMotionSequence_ = 0; fieldObjectsSequence_ = 0;
+    enemyMotionSequence_ = 0; fieldObjectsSequence_ = 0; missionStateSequence_ = 0;
     enemyHpRoomEpoch_ = 0;
     desyncRequest_.reset();
     desyncDeadlineMs_ = 0;
@@ -607,7 +607,7 @@ bool NetworkClient::updateAvatarRoster(const SessionState& session) {
         enemyHpSessionId_ = session.sessionId;
         enemyHpHostConnectionId_ = connections[0];
         enemyHpSequence_ = 0;
-        enemyMotionSequence_ = 0; fieldObjectsSequence_ = 0;
+        enemyMotionSequence_ = 0; fieldObjectsSequence_ = 0; missionStateSequence_ = 0;
         enemyHpRoomEpoch_ = 0;
     }
     const bool namespaceChanged = !valid || !avatarRosterValid_ ||
@@ -819,6 +819,13 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 !hostRoom_ || !sameResyncRoom(fields.location, *hostRoom_) ||
                 fields.sequence <= fieldObjectsSequence_) return;
             fieldObjectsSequence_ = fields.sequence;
+        } else if (type == PacketType::MissionState) {
+            MissionState mission; read(reader, mission);
+            if (!admittedScope || admittedScope->kind != WorldSourceKind::Native ||
+                !avatarConnections_[0] || admittedScope->sourceConnectionId != avatarConnections_[0] ||
+                !hostRoom_ || !sameResyncRoom(mission.location, *hostRoom_) ||
+                mission.sequence <= missionStateSequence_) return;
+            missionStateSequence_ = mission.sequence;
         } else if (type == PacketType::EnemyMotion) {
             // VUH-1515: periodic host pose/motion. Current room epoch and a
             // strictly increasing sequence; never cached, never replayed.
@@ -1171,6 +1178,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 break;
             }
             case PacketType::FieldObjects:
+            case PacketType::MissionState:
             case PacketType::EnemyMotion:
                 break; // raw world delivery only (VUH-1515)
             case PacketType::ScriptCall:

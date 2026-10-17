@@ -64,6 +64,7 @@ enum class PacketType : std::uint8_t {
     PopulationCut = 48, // complete certified native occurrence state, host only
     ScriptCall = 49, // host -> relay validation -> clients, reliable, sent on change (VUH-2252)
     FieldObjects = 51, // complete host field roster, periodic and unreliable
+    MissionState = 52, // the host's running mission, periodic and unreliable (VUH-2342)
     SpawnEmission = 50, // successful host controller emission + retained trigger point
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
@@ -115,6 +116,7 @@ void write(ByteWriter& w, const EnemyManifest& m);
 void write(ByteWriter& w, const EnemyHp& m);
 void write(ByteWriter& w, const EnemyMotion& m);
 void write(ByteWriter& w, const FieldObjects& m);
+void write(ByteWriter& w, const MissionState& m);
 void write(ByteWriter& w, const EnemyDeath& m);
 void write(ByteWriter& w, const PartyLayout& m);
 void write(ByteWriter& w, const PartyReapply& m);
@@ -149,6 +151,7 @@ void read(ByteReader& r, EnemyManifest& m);
 void read(ByteReader& r, EnemyHp& m);
 void read(ByteReader& r, EnemyMotion& m);
 void read(ByteReader& r, FieldObjects& m);
+void read(ByteReader& r, MissionState& m);
 // The RoomTransition PACKET body: the generic RoomTransition fields plus the spawn-pick trailer (u8 shared,
 // u32 salt tag). Embedded RoomTransitions (activation, resync, party) keep the generic 16-byte form.
 void writeRoomTransitionPacket(ByteWriter& w, const RoomTransition& m);
@@ -238,6 +241,7 @@ std::vector<std::uint8_t> encode(const EnemyManifest& m);
 std::vector<std::uint8_t> encode(const EnemyHp& m);
 std::vector<std::uint8_t> encode(const EnemyMotion& m);
 std::vector<std::uint8_t> encode(const FieldObjects& m);
+std::vector<std::uint8_t> encode(const MissionState& m);
 std::vector<std::uint8_t> encode(const EnemyDeath& m);
 std::vector<std::uint8_t> encode(const PartyLayout& m);
 std::vector<std::uint8_t> encode(const PartyReapply& m);
@@ -271,6 +275,7 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::EnemyDeath:
         case PacketType::EnemyMotion:
         case PacketType::FieldObjects:
+        case PacketType::MissionState:
         case PacketType::ProgressUpdate:
         case PacketType::PartyLayout:
         case PacketType::PartyReapply:

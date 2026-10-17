@@ -121,7 +121,7 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
             } else {
                 if (isEphemeralWorldPacket(type)) validateActivationPacket(packet);
                 const bool periodic = type == PacketType::EnemyHp || type == PacketType::EnemyMotion ||
-                                      type == PacketType::FieldObjects ||
+                                      type == PacketType::FieldObjects || type == PacketType::MissionState ||
                                       type == PacketType::StateHash ||
                                       isEphemeralWorldPacket(type);
                 submitted = net.sendNativeWorld(packet, context, !periodic);

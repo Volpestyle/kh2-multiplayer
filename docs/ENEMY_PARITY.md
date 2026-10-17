@@ -1702,6 +1702,13 @@ roster retains at most 64 live and retired occurrences; overflow refuses the
 whole snapshot. New live occurrences outrank old tombstones at the same point;
 multiple live matches refuse binding.
 
+**Natively run fields (VUH-2342).** LoD's wind gusts `F_MU070` (object 0x151,
+08/08) are not field objects for the mirror: every game runs its own, and the
+host leaves them out of the roster (`ReadNativeField`). They are remade every few
+seconds and push whoever walks into them. Posed from the host with no brain,
+they never pushed the friend, and the host's remade gusts would have filled the
+64-row roster with tombstones. `net_lod_gusts` walks each player into the wind.
+
 `net_field_objects` checks HB04/15's six `F_EX030` chests, two `F_EX260`
 pieces and rotating `F_HB040`: friend-only pickup must leave both pieces,
 then host pickup must remove one on all three instances. Remaining type, motion

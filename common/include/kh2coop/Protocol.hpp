@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 22;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 23;
 
 // ===========================================================================
+// Protocol v23 adds MissionState (52): the host's running mission, shown on clients (VUH-2342).
 // Protocol v22 appends exact combat netId to SpawnEmission (VUH-2302 phase b).
 // Protocol v21 adds FieldObjects (51): complete periodic host field-object snapshots (VUH-2276).
 // Protocol v20 adds SpawnEmission (50): host controller records and trigger points (VUH-2302).
@@ -279,6 +280,38 @@ struct FieldObjects {
     std::uint32_t hostFrame {0};
     std::vector<FieldObjectEntry> entries; // 0..64, complete known room roster including retired occurrences
 };
+
+// VUH-2342: the host's running mission (exe+0x2A0FF68), periodic and unreliable. Clients
+// show it: a client whose own mission has the same file takes the host's gauges, counters and
+// timer, and fails when the host's mission fails. Never cached, replayed or part of resync.
+inline constexpr std::size_t MISSION_FILE_BYTES = 24;  // the file name after the last '/', NUL padded
+inline constexpr std::size_t MISSION_SLOTS = 3;         // gauges and counters per mission
+inline constexpr std::size_t MISSION_STATE_BYTES = 16 + 8 + 4 + 1 + MISSION_FILE_BYTES + 4 + 4 +
+                                                   MISSION_SLOTS * 12 * 2 + 4 + 1 + 4 + 4 + 1 + 4;
+inline constexpr float MISSION_MAX_GAUGE = 100000.0f;
+struct MissionSlot {
+    std::uint32_t flags {0};  // bit 0 in use
+    std::int32_t max {0};
+    float gauge {0.0f};       // gauges only
+    std::int32_t count {0};   // counters only
+};
+struct MissionState {
+    RoomTransition location {};
+    std::uint64_t sequence {0};
+    std::uint32_t hostFrame {0};
+    bool active {false};                       // false: no mission is running on the host
+    std::array<char, MISSION_FILE_BYTES> file {};
+    std::uint32_t flags {0};                   // mission +4 (0x14 once ended or failed)
+    std::uint32_t result {0};                  // mission +0x120 (2 = failed)
+    std::array<MissionSlot, MISSION_SLOTS> gauges {}, counters {};
+    std::uint32_t timerState {0};              // exe+0xABB864: 0 stopped, 1 starting, 2 running
+    std::uint8_t timerMode {0};                // exe+0xABB868: 1 counts down
+    std::uint32_t timerValue {0};              // exe+0xABB860, frames
+    std::uint32_t timerDuration {0};           // exe+0xABB85C, frames
+    std::uint8_t endTrap {0};                  // the table-4 trap that ended it: 3 complete, 22 end signal, 0 none
+    std::uint32_t endArg {0};                  // that trap's argument
+};
+inline constexpr bool validMissionEndTrap(std::uint8_t t) { return t == 0 || t == 3 || t == 22; }
 
 // Reliable, scoped teammate request. Relay stamps requesterSlot and forwards
 // once to targetConnectionId only. Episode is minted by the target owner,

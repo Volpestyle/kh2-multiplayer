@@ -367,7 +367,7 @@ void SessionHost::stop() {
     session_.sessionId.clear();
     lastEnemyHpSequence_ = 0;
     populationCutFloor_ = 0;
-    lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0;
+    lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0; lastMissionStateSequence_ = 0;
     room_.reset();
     clearWorldState();
     partyIntents_.clear(); partyIntentVersion_ = 0; partyIntentHost_ = 0;
@@ -622,7 +622,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     }
                     session_.sessionId = *incarnation;
                     session_.coopDifficulty = hello.coopDifficulty;
-                    lastEnemyHpSequence_ = 0;lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
+                    lastEnemyHpSequence_ = 0;lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0; lastMissionStateSequence_ = 0;lastHostSourceSerial_=0;hostSourceCutFloor_=0;lastResyncRequestId_=0;simulationActive_=false;simulationSourceSerial_=0;
                     log("New world incarnation " + session_.sessionId + " (label=" + config_.sessionId + ")");
                 }
                 ps->gameBuild = hello.gameBuild;
@@ -822,6 +822,20 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 }
                 lastFieldObjectsSequence_ = fields.sequence;
                 fieldObjects_ = std::move(fields.entries);
+                lastHostSourceSerial_ = (std::max)(lastHostSourceSerial_, admittedScope->hostSourceSerial);
+                forwardToOthers(peer, std::vector<std::uint8_t>(data, data + size), false);
+                break;
+            }
+            case PacketType::MissionState: {
+                // VUH-2342: the host's mission for the admitted room; forwarded only, never cached.
+                MissionState mission; read(reader, mission);
+                if (ps->status != PeerStatus::Verified || !fromHost(*ps) || ps->worldQuarantined ||
+                    !admittedScope || admittedScope->kind != WorldSourceKind::Native ||
+                    admittedScope->sourceConnectionId != ps->connectionId || !room_ ||
+                    !sameResyncRoom(mission.location, *room_) || mission.sequence <= lastMissionStateSequence_) {
+                    ++rejectedWorld_; return;
+                }
+                lastMissionStateSequence_ = mission.sequence;
                 lastHostSourceSerial_ = (std::max)(lastHostSourceSerial_, admittedScope->hostSourceSerial);
                 forwardToOthers(peer, std::vector<std::uint8_t>(data, data + size), false);
                 break;
@@ -1806,7 +1820,7 @@ void SessionHost::removePeer(TransportPeer* peer) {
         partyIntents_.clear(); partyIntentVersion_ = 0; partyIntentHost_ = 0; // VUH-1786: host gone
         lastEnemyHpSequence_ = 0;
         populationCutFloor_ = 0;
-        lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0;
+        lastEnemyMotionSequence_ = 0; lastFieldObjectsSequence_ = 0; lastMissionStateSequence_ = 0;
         room_.reset();
         clearWorldState();
         progress_.clear();
