@@ -575,29 +575,32 @@ void __fastcall BaileyNativeEnd(std::uint64_t* args) {
     Put(image + 0x80000 + MR::kFlags, std::uint32_t{1 | MR::kEnded});
     Put(image + offsets::OPEN_MENU, std::uint8_t{8}); // native end can immediately block the census
 }
-void TestBaileyMissionEndOrdering() {
-    const auto seed=[] {
+void TestBaileyMissionEndOrdering(bool morale=false) {
+    const auto seed=[morale] {
+        const std::uint8_t world=morale?8:4, room=morale?1:8;
+        const std::uint16_t program=morale?68:52;
+        const std::uint32_t objectId=morale?302:318;
         Reset(true);
         g_mirrorRequested = true; g_recordBindingRequested = g_recordAuthorityRequested = false;
-        g_inst.world = g_host.world = arrivalTarget.worldId = 4;
-        g_inst.room = g_host.room = arrivalTarget.roomId = 8;
+        g_inst.world = g_host.world = arrivalTarget.worldId = world;
+        g_inst.room = g_host.room = arrivalTarget.roomId = room;
         g_inst.door = arrivalTarget.door = 0;
-        g_inst.map = arrivalTarget.mapProgram = 52;
-        g_inst.btl = g_host.btl = arrivalTarget.battleProgram = 52;
+        g_inst.map = arrivalTarget.mapProgram = program;
+        g_inst.btl = g_host.btl = arrivalTarget.battleProgram = program;
         g_inst.evt = arrivalTarget.eventProgram = 0;
-        Put(image + offsets::WORLD_ID, std::uint8_t{4}); Put(image + offsets::ROOM_ID, std::uint8_t{8});
+        Put(image + offsets::WORLD_ID, world); Put(image + offsets::ROOM_ID, room);
         Put(image + offsets::NOW + 2, std::uint8_t{0});
-        Put(image + offsets::MAP_PROGRAM, std::uint16_t{52});
-        Put(image + offsets::BATTLE_PROGRAM, std::uint16_t{52});
+        Put(image + offsets::MAP_PROGRAM, program);
+        Put(image + offsets::BATTLE_PROGRAM, program);
         Put(image + offsets::EVENT_PROGRAM, std::uint16_t{0});
-        g_inst.spawns[0].objectId = g_host.enemies[1].objectId = 318;
-        g_host.enemies[1].battleProgram = 52;
-        Put(object + offsets::objentry::OBJECT_ID, std::uint32_t{318});
+        g_inst.spawns[0].objectId = g_host.enemies[1].objectId = objectId;
+        g_host.enemies[1].battleProgram = program;
+        Put(object + offsets::objentry::OBJECT_ID, objectId);
         Put(status, std::int32_t{11}); g_host.enemies[1].hp = 11;
         const auto mission = image + 0x80000;
         Put(image + MR::kMissionPtr, mission); Put(mission + MR::kFlags, std::uint32_t{1});
-        constexpr char path[] = "msn/us/HB08_MS102.bar";
-        std::memcpy(reinterpret_cast<void*>(mission + MR::kPath), path, sizeof(path));
+        const char* path=morale?"msn/us/MU01_MS102.bar":"msn/us/HB08_MS102.bar";
+        std::memcpy(reinterpret_cast<void*>(mission + MR::kPath), path, std::strlen(path)+1);
         g_missionChecked = g_missionReady = true; g_missionParked = 0;
         g_missionLocalBase = 0; g_missionReplayed = g_missionWasFollowing = false;
         g_missionEndObservation = {};
@@ -612,7 +615,7 @@ void TestBaileyMissionEndOrdering() {
         baileyEndExpectedHp = 0; baileyEndLogs.clear();
         g_hitTraceFrame = 100;
         Check(ResolveOrdinaryBindings(CaptureNativeCensus(), WorldSessionGeneration()) &&
-              g_inst.spawns[0].ordinaryBinding.bound == 1, "Bailey final Dusk earns its continuous live binding");
+              g_inst.spawns[0].ordinaryBinding.bound == 1, "scoped final Dusk/Shadow earns its continuous live binding");
     };
     seed();
     g_log = BaileyEndLog;
@@ -653,32 +656,34 @@ void TestBaileyMissionEndOrdering() {
     Put(image + offsets::OPEN_MENU, std::uint8_t{255}); ApplyMission(282);
     Check(baileyEndCalls == 1, "Bailey capped end remains a one-shot after the hold clears");
 
-    seed(); g_log = BaileyEndLog;
-    Put(status,std::int32_t{0}); Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
-    const auto nativeEndCensus = CaptureNativeCensus();
-    ObserveNativeMissionEnd(102,nativeEndCensus); ObserveNativeMissionEnd(103,nativeEndCensus);
-    Check(g_missionEndObservation.nativeLogged && g_missionEndObservation.replays == 0 && !g_missionReplayed &&
-          baileyEndCalls == 0 && std::count_if(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){
-              return line.find("path=native-local replays=0 census=complete living=0 hpSum=0")!=std::string::npos;
-          }) == 1, "native Bailey completion logs one zero-replay empty-census receipt without changing the replay gate");
-    ApplyMission(103);
-    Check(baileyEndCalls == 0 && g_missionEndObservation.replays == 0,
-          "native Bailey completion and a mirrored end never both run");
-    seed(); g_log = BaileyEndLog;
-    Put(status,std::int32_t{0}); Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
-    Put(image + offsets::OPEN_MENU,std::uint8_t{8});
-    ObserveNativeMissionEnd(104,CaptureNativeCensus());
-    Check(std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){
-              return line.find("path=native-local replays=0 census=unavailable living=-1 hpSum=-1")!=std::string::npos;
-          }) && baileyEndCalls == 0 && !g_missionReplayed,
-          "native end hold logs unavailable census explicitly without treating it as empty or mutating the end gate");
-    seed(); g_log = BaileyEndLog;
-    Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
-    g_inst.room = 26; ++load; // retained ended mission object after the room has changed
-    ObserveNativeMissionEnd(105,CaptureNativeCensus());
-    Check(!g_missionEndObservation.nativeLogged && baileyEndLogs.empty() && baileyEndCalls == 0,
-          "retained Bailey mission object after egress cannot produce a second native-local receipt");
+    if(!morale) {
+        seed(); g_log = BaileyEndLog;
+        Put(status,std::int32_t{0}); Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
+        const auto nativeEndCensus = CaptureNativeCensus();
+        ObserveNativeMissionEnd(102,nativeEndCensus); ObserveNativeMissionEnd(103,nativeEndCensus);
+        Check(g_missionEndObservation.nativeLogged && g_missionEndObservation.replays == 0 && !g_missionReplayed &&
+              baileyEndCalls == 0 && std::count_if(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){
+                  return line.find("path=native-local replays=0 census=complete living=0 hpSum=0")!=std::string::npos;
+              }) == 1, "native Bailey completion logs one zero-replay empty-census receipt without changing the replay gate");
+        ApplyMission(103);
+        Check(baileyEndCalls == 0 && g_missionEndObservation.replays == 0,
+              "native Bailey completion and a mirrored end never both run");
+        seed(); g_log = BaileyEndLog;
+        Put(status,std::int32_t{0}); Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
+        Put(image + offsets::OPEN_MENU,std::uint8_t{8});
+        ObserveNativeMissionEnd(104,CaptureNativeCensus());
+        Check(std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){
+                  return line.find("path=native-local replays=0 census=unavailable living=-1 hpSum=-1")!=std::string::npos;
+              }) && baileyEndCalls == 0 && !g_missionReplayed,
+              "native end hold logs unavailable census explicitly without treating it as empty or mutating the end gate");
+        seed(); g_log = BaileyEndLog;
+        Put(image + 0x80000 + MR::kFlags,std::uint32_t{1 | MR::kEnded});
+        g_inst.room = 26; ++load; // retained ended mission object after the room has changed
+        ObserveNativeMissionEnd(105,CaptureNativeCensus());
+        Check(!g_missionEndObservation.nativeLogged && baileyEndLogs.empty() && baileyEndCalls == 0,
+              "retained Bailey mission object after egress cannot produce a second native-local receipt");
 
+    }
     seed(); Put(status, std::int32_t{0});
     Check(MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey zero-HP native body permits end");
     Put(status, std::int32_t{11});
@@ -691,8 +696,12 @@ void TestBaileyMissionEndOrdering() {
     Check(!MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey load change cannot certify an empty roster");
     seed(); Put(status, std::int32_t{0});
     Check(!MissionEndRosterReady(ReadMission(), image + 0x81000), "Bailey changed mission pointer refuses end");
+    seed(); Put(status, std::int32_t{0});
+    g_inst.room=arrivalTarget.roomId=26; Put(image+offsets::ROOM_ID,std::uint8_t{26});
+    Check(!MissionEndRosterReady(ReadMission(),image+0x80000), "same mission outside exact room cannot certify an empty roster");
+    seed();
     auto other = ReadMission(); std::memset(other.file, 0, sizeof(other.file));
-    constexpr char otherName[] = "MU01_MS102.bar"; std::memcpy(other.file, otherName, sizeof(otherName));
+    constexpr char otherName[] = "MU01_MS101.bar"; std::memcpy(other.file, otherName, sizeof(otherName));
     Check(MissionEndRosterReady(other, 0), "other missions retain their existing end policy");
     g_mirrorRequested = false; g_missionReady = g_missionChecked = false;
 }
@@ -3367,6 +3376,7 @@ int main() try {
     Check(WorldSessionGeneration() == 102 && !g_writerRecoveryPacket.has_value(),
           "raced new-generation reset rearms through normal ordered admission");
     TestBaileyMissionEndOrdering();
+    TestBaileyMissionEndOrdering(true); // VUH-2352: ordinary Shadow death vs MU01 end hold
     TestMoraleBirthLifetime();
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);

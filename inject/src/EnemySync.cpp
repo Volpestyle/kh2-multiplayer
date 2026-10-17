@@ -75,6 +75,7 @@ std::array<uintptr_t,5> PopulationSpawnRoots(const Spawn& spawn);
 combatcausal::Target CausalTarget(const Spawn& s, const NativeEnemy& n, unsigned id);
 bool ReadOrdinaryIdentity(const NativeEnemy&,ordinarybinding::Identity&);
 bool BaileyMissionCurrent(bool terminal=false,uintptr_t* mission=nullptr,const char** refusal=nullptr);
+bool MoraleMissionCurrent(bool terminal=false,uintptr_t* mission=nullptr);
 bool BaileyCreeperAuthority(uintptr_t actor,bool terminal=false);
 bool BaileyCreeperHostMotion(uintptr_t actor);
 

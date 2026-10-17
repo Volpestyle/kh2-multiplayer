@@ -301,6 +301,25 @@ Windows build and all five targeted regressions pass; this is a failed feature
 run and the change remains unlanded.
 [Evidence and reviewed clips](https://linear.app/vuhlp/issue/VUH-2352#comment-b54f61e5-7196-4144-9569-d6268f148f6e).
 
+Live07 (`20261017-142207_net_lod_morale_spawn_probe_1`, `6285541`) adopts
+all four receipts6..9 on their exact IDs. Their host deaths apply; all four
+budget checks pass (32+8,32+8,24+15,23+15 within40). Both native ends run once.
+Final parity still fails: host[] versus friend[Shadow1]. This is the initial-wave
+`M_EX020`/object302/net3 at actor`7FF716AA5C00`, not a generated group birth.
+The friend receives its host death immediately before replaying the mission
+end at frame3594. That replay retires its continuous binding and makes the
+native census unavailable. The same roots return at frame3807, but the ordinary
+resolver correctly refuses `death-without-continuous-binding`; HP remains1.
+
+The proposed correction extends Bailey's existing bounded end deferral to
+exactly `MU01_MS102.bar` in its admitted NOW. Normal client death reconciliation
+runs before replay; only a fresh complete empty census or the existing180-frame
+cap releases the end. No new lethal or identity authority is introduced. The
+owned-memory regression repeats the actual consumer/end order with an ordinary
+Shadow, covers the cap without an HP write, and refuses incomplete census,
+paused gameplay, changed load/mission pointer or wrong room. Live07 remains a
+failed run, and the full VUH-2352 chain remains unlanded pending review and parity.
+
 The scoped lifetime fix tags only the same three generated groups in exact
 `MU01_MS102`/NOW. It retains the original mission pointer and host permit,
 revalidates complete native birth roots/handle/record bytes every owner frame,

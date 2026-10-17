@@ -127,8 +127,12 @@ zero HP. It waits at most180 owner frames (about3s at60fps), then restores the
 original native end even if an orphan persists. The cap logs every living
 orphan's safely sampled netId/HP/actor, or explicitly says the census is
 unavailable; it never grants death/HP write authority. The end receipt records
-`path=clean-census` or `path=frame-cap`. Other missions and failure replay are
-unchanged. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
+`path=clean-census` or `path=frame-cap`. VUH-2352 extends the same bounded
+ordering gate to exactly `MU01_MS102.bar` in Bamboo Grove 08/01, door0,
+map/battle68/event0. It uses the existing continuously revalidated morale
+mission scope before and after capture; the ordinary death consumer, 180-frame
+cap and failure replay stay unchanged. All other mission files retain their
+existing end policy. The extension is pending independent review and live proof. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
 The bounded deferral passed Quill's D14.4 review and the MSVC owned-memory
 regression. Bailey-12 ended on both peers with empty matching HP/counts, but
 failed the old replay-only oracle before egress. The receipt/oracle follow-up
@@ -153,7 +157,7 @@ native-local plus replay combination, including a late replay after egress.
   second with both games' gauges and the sets, shifts, ends and dropped calls,
   and `client fail like the host` / `client end like the host`.
 - Offline: `kh2coop_mission_mirror_test` covers the codec and the rules.
-- Owned native memory: `kh2coop_nativehit_test` covers the Bailey end/death
+- Owned native memory: `kh2coop_nativehit_test` covers the Bailey and MU01 end/death
   ordering, deferred one-shot retry, native ended flags and unavailable-census
   refusal without opening a game or writing a save.
 - Live: `net_lod_morale` (parity and a shared mission end) and
