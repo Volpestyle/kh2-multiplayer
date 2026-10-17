@@ -1227,13 +1227,15 @@ def step_pilot(ctx: Context, step: dict) -> dict:
 
 class ReviveGuard:
     """VUH-2344: while the host's route pilot fights, an otherwise idle friend
-    revives the host after a co-op downing. The friend walks over with stick
-    input and holds Triangle through its DLL input mailbox: no OS keys (the
-    host pilot owns window focus) and no position writes."""
+    keeps away from enemies (Axel downed it through team-0 protect in run
+    20261017-055333) and revives the host after a co-op downing. It moves only
+    with stick input and Triangle through its DLL input mailbox: no OS keys
+    (the host pilot owns window focus) and no position or HP writes."""
 
     # The revive prompt fired at 54 and 11 units in run 20261017-051854 and
     # stayed "none" at 144-150, so walk well inside that before holding.
     REACH, HOLD_MS, TIMEOUT = 50.0, 1600, 60.0
+    KEEP_AWAY = 300.0  # step away from the nearest living enemy inside this
 
     def __init__(self, ctx: Context, host: int, friend: int) -> None:
         spec = _importlib_util.spec_from_file_location("kh2coop_route_pilot", PILOT)
@@ -1242,6 +1244,7 @@ class ReviveGuard:
         self.ctx, self.host, self.friend = ctx, ctx.inst(host), ctx.inst(friend)
         self.events: list[dict] = []
         self.openError = ""
+        self.keepAwaySteps = 0
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True)
 
@@ -1251,6 +1254,31 @@ class ReviveGuard:
             return path.read_text(encoding="utf-8", errors="replace").count(needle)
         except OSError:
             return 0
+
+    def stick(self, s: dict, dx: float, dz: float, ms: int) -> None:
+        """Camera-relative stick toward world direction (dx, dz)."""
+        fx, fz = s["forward"]
+        d, f = math.hypot(dx, dz) or 1.0, math.hypot(fx, fz) or 1.0
+        dx, dz, fx, fz = dx / d, dz / d, fx / f, fz / f
+        kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.2f}", "--ly", f"{dx * fx + dz * fz:.2f}",
+               "--duration-ms", str(ms), pid=self.friend.pid, check=False)
+
+    def keep_away(self, friend) -> None:
+        try:
+            s = friend.state()
+            if not s["free"] or not s["pos"]:
+                return
+            enemies = [a["position"] for a in self.ctx.actors(self.friend.index)
+                       if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0]
+        except Exception:  # a load between samples
+            return
+        if not enemies:
+            return
+        x, z = s["pos"][0], s["pos"][2]
+        near = min(enemies, key=lambda e: math.hypot(e["x"] - x, e["z"] - z))
+        if math.hypot(near["x"] - x, near["z"] - z) < self.KEEP_AWAY:
+            self.stick(s, x - near["x"], z - near["z"], 500)
+            self.keepAwaySteps += 1
 
     def run(self) -> None:
         downs = self.count(self.host, "[downed] gate intercept")
@@ -1264,6 +1292,7 @@ class ReviveGuard:
                     continue
             now = self.count(self.host, "[downed] gate intercept")
             if now <= downs:
+                self.keep_away(friend)
                 continue
             downs = now
             returned = self.count(self.host, "[downed] revive returned")
@@ -1287,11 +1316,7 @@ class ReviveGuard:
                 dx, dz = target[0] - s["pos"][0], target[2] - s["pos"][2]
                 event["last"]["distance"] = round(math.hypot(dx, dz), 1)
                 if math.hypot(dx, dz) > self.REACH:
-                    fx, fz = s["forward"]
-                    d, f = math.hypot(dx, dz), math.hypot(fx, fz) or 1.0
-                    dx, dz, fx, fz = dx / d, dz / d, fx / f, fz / f
-                    kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.2f}", "--ly", f"{dx * fx + dz * fz:.2f}",
-                           "--duration-ms", "400", pid=self.friend.pid, check=False)
+                    self.stick(s, dx, dz, 400)
                 elif s["react"] == 0:
                     kh2ctl("player-press", "--button", "triangle", "--duration-ms", str(self.HOLD_MS),
                            pid=self.friend.pid, check=False)
@@ -1318,7 +1343,7 @@ def step_revive_guard(ctx: Context, step: dict) -> dict:
     ctx.revive_guard = None
     name = step.get("as", "revive_guard")
     ctx.saved[name] = guard.events
-    return {"events": guard.events, "openError": guard.openError}
+    return {"events": guard.events, "keepAwaySteps": guard.keepAwaySteps, "openError": guard.openError}
 
 
 def step_relay(ctx: Context, step: dict) -> dict:
