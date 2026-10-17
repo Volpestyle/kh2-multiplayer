@@ -109,6 +109,26 @@ class Game:
         code = wt.DWORD()
         return bool(k32.GetExitCodeProcess(self.handle, ctypes.byref(code))) and code.value == 259
 
+    def modules(self) -> list[str]:
+        """Loaded module paths (read-only). route-08's KH2 crashed in clr.dll, which our
+        native inject doesn't load; a snapshot shows when the CLR arrived and with what."""
+        handle = k32.OpenProcess(0x0400 | 0x0010, False, self.pid)  # QUERY_INFORMATION | VM_READ
+        if not handle:
+            return []
+        try:
+            mods = (ctypes.c_void_p * 1024)()
+            need = wt.DWORD()
+            if not psapi.EnumProcessModulesEx(handle, mods, ctypes.sizeof(mods), ctypes.byref(need), 3):
+                return []
+            names = []
+            for i in range(min(need.value // ctypes.sizeof(ctypes.c_void_p), 1024)):
+                buf = ctypes.create_unicode_buffer(520)
+                if psapi.GetModuleFileNameExW(handle, ctypes.c_void_p(mods[i]), buf, 520):
+                    names.append(buf.value)
+            return names
+        finally:
+            k32.CloseHandle(handle)
+
     def state(self) -> dict:
         now = self.rva(NOW, 4)
         s = {"world": now[0], "room": now[1], "door": now[2],
@@ -297,6 +317,8 @@ class Pilot:
         self.clips: list[threading.Thread] = []
         self.log_lock = threading.Lock()
         self.doors: list[dict] = []
+        self.module_set: frozenset[str] = frozenset()
+        self.module_at = 0.0
 
     def write(self, kind: str, **data) -> None:
         with self.log_lock:
@@ -317,6 +339,13 @@ class Pilot:
             s["lastPos"] = s["pos"]
         elif self.last:
             s["lastPos"] = self.last.get("lastPos")
+        if now - self.module_at > 60:
+            self.module_at = now
+            current = frozenset(self.game.modules())
+            if current and current != self.module_set:
+                self.write("modules", added=sorted(current - self.module_set), removed=sorted(self.module_set - current))
+                self.module_set = current
+                (self.out / "modules.json").write_text(json.dumps(sorted(current), indent=1), encoding="utf-8")
         if now - self.foe_at > 2 and s["free"]:
             self.foe_hp, self.foe_at = sum(a["hp"] for a in enemies(self.game.pid)), now
         sig = (s["world"], s["room"], s["story"], self.foe_hp)
