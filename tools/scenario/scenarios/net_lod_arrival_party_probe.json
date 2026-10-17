@@ -1,0 +1,210 @@
+{
+ "name": "net_lod_arrival_party_probe",
+ "playerDefaults": true,
+ "protect": [
+  0,
+  1
+ ],
+ "description": "VUH-2342 diagnosis (not a regression): the host warps into LoD's first-visit arrival 08/00 door 50 evt 19, skips the event and accepts Ping's forced party change while the friend is held. Records both games' LoD party row (SAVE+0x3534+4*8), resolved party members and party actors before and after.",
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "warp",
+   "instance": 1,
+   "world": 4,
+   "room": 26
+  },
+  {
+   "do": "relay",
+   "port": 27798,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get('puppet0') or {}).get('active') for i in range(2))",
+   "timeoutMs": 30000,
+   "pollMs": 1000
+  },
+  {
+   "do": "save",
+   "as": "row_before",
+   "expr": "[peek(0x9ACE04,'u32',i) for i in range(2)]"
+  },
+  {
+   "do": "checkpoint",
+   "name": "1 The host enters LoD 08/00 door 50 evt 19 (the first-visit arrival event)"
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 8,
+   "room": 0,
+   "door": 50,
+   "map": 0,
+   "btl": 0,
+   "evt": 19
+  },
+  {
+   "do": "wait",
+   "ms": 8000
+  },
+  {
+   "do": "save",
+   "as": "during_event",
+   "expr": "[location(0), location(1), [peek(0x9ACE04,'u32',i) for i in range(2)], peek('0xB65210','i32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "event_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "event_friend"
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "start",
+   "ms": 100
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "down",
+   "ms": 100
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "cross",
+   "ms": 100
+  },
+  {
+   "do": "wait_until",
+   "expr": "peek('0xB65210','i32',0)==0",
+   "timeoutMs": 20000
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "after_skip_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "after_skip_friend"
+  },
+  {
+   "do": "save",
+   "as": "after_skip",
+   "expr": "[location(0), location(1), [peek(0x9ACE04,'u32',i) for i in range(2)], peek('0x7435D0','u8',0)]"
+  },
+  {
+   "do": "checkpoint",
+   "name": "2 The host accepts Ping's forced party change"
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "confirm",
+   "times": 4,
+   "gapMs": 1500
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "menu_host"
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "confirm",
+   "times": 3,
+   "gapMs": 1500
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "after_menu_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "after_menu_friend"
+  },
+  {
+   "do": "save",
+   "as": "after_menu",
+   "expr": "[location(0), location(1), [peek(0x9ACE04,'u32',i) for i in range(2)], [[peek(0x2A25300+2*k,'u16',i) for k in range(4)] for i in range(2)], [sorted(a['name'] for a in actors(i) if a['name'][:2] in ('P_','N_') or a['name'].startswith('F_MU1')) for i in range(2)], peek('0x7435D0','u8',0), peek('0x7435D0','u8',1)]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "save",
+   "as": "settled",
+   "expr": "[location(0), location(1), [peek(0x9ACE04,'u32',i) for i in range(2)], [[peek(0x2A25300+2*k,'u16',i) for k in range(4)] for i in range(2)], [sorted(a['name'] for a in actors(i) if a['name'][:2] in ('P_','N_') or a['name'].startswith('F_MU1')) for i in range(2)]]"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "settled_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "settled_friend"
+  }
+ ]
+}

@@ -127,7 +127,7 @@
   {
    "do": "save",
    "as": "pushback",
-   "expr": "[sum(1 for a,b in zip(saved[w]['samples'],saved[w]['samples'][1:]) if b['position'][2] < a['position'][2]-15) for w in ('walk_host','walk_friend')]"
+   "expr": "[sum(1 for k in range(1,len(saved[w]['samples'])) if saved[w]['samples'][k]['position'][2] < saved[w]['samples'][k-1]['position'][2]-15) for w in ('walk_host','walk_friend')]"
   },
   {
    "do": "save",
