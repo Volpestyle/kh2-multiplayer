@@ -51,7 +51,7 @@ public:
 
     // One decoded packet. A new epoch resets the stream first. Returns false
     // (and changes nothing) for a zero/old sequence or zero epoch.
-    bool Ingest(const EnemyMotion& m, std::uint32_t localFrame) {
+    bool Ingest(const EnemyMotion& m, std::uint32_t localFrame, bool baileyCreepers = false) {
         if (!m.epoch || !m.sequence) { ++stats_.rejected; return false; }
         if (m.epoch != epoch_) Reset(m.epoch);
         if (m.sequence <= sequence_) { ++stats_.rejected; return false; }
@@ -62,7 +62,8 @@ public:
         }
         haveNewest_ = true;
         for (const auto& e : m.entries) {
-            if (!e.netId || !FamilyAllowed(e.objectId)) continue;
+            // Buffering a scoped stream grants no native actor or write rights.
+            if (!e.netId || (!FamilyAllowed(e.objectId) && !(baileyCreepers && e.objectId==kCreeperObjectId))) continue;
             if (tracks_.size() >= kMaxTracks && tracks_.find(e.netId) == tracks_.end()) {  // rev-2 N-c
                 ++stats_.trackCap;
                 continue;

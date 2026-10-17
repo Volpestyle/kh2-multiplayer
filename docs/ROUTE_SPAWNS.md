@@ -1,9 +1,11 @@
 # Bailey and LoD route spawns (VUH-2343, VUH-2352)
 
-The implementation is ready for independent review and a Windows build/live
-probe. Portable policy tests pass under ASan and UBSan; these tests do not prove
-native constructor, FLS/unwind, attachment, mission completion or live parity.
-The preceding observation runs are failures, retained on the issues.
+Bailey-05 proves native private clone construction and client emission, while
+the full fight fails enemy parity and never reaches mission end. The scoped
+Creeper candidate below still requires independent review, a Windows build and
+a passing live run. The base portable policy passed ASan/UBSan and the Windows
+build; portable tests alone cannot prove the native driver or mission completion.
+Failed observation/probe runs remain attached to the issues.
 
 ## Bailey: add the missing actor at the native player boundary
 
@@ -70,6 +72,57 @@ F1 records every Constructor/Allocate entry under the missing scope, including
 caller, key and form. Settled Bailey gameplay logs the clone's controller and
 retained-record roots every60 owner frames; the fixture rejects any failed
 attachment sample and retains mission start/end plus combat samples.
+
+## Bailey Creepers: scoped birth authority, pending review/live qualification
+
+Bailey-05 (`20261017-043655_net_hb1_bailey_1`, source `f38dd32`) proves
+the missing clone and F1: exactly one Constructor40505B and Allocate3A7B1B,
+key1/form0, on each peer, healthy private status and retained attachments.
+The fight fails enemy HP parity after75s. Mission `HB08_MS102.bar` stays active
+in all71 samples; neither native mission end was reached. Five friend Creepers317
+remain unbound at31/31 while the host has one at14/50/netId9. Header58 receipts
+were consumed, but the old `RecordFamily` gate omitted their birth tickets.
+
+The global denylist exists for observed failures: Creeper317 failed ordinary
+point binding (`no-point-match`, run20261007-220021); FieryGlobe76 had a first-point
+mismatch on all five bodies (b6-02); LanceWarrior2409 faulted on a native HB load
+even with co-op off. The old317/76 record-authority experiment is default-off and
+remains parked: its complete-population/placement qualification did not finish
+(`docs/ENEMY_RECORD_BINDING.md`). Do not remove a family-wide fence to fix Bailey.
+
+The new exception requires NOW `04/08 door0 map52 btl52 evt0`, an active native
+`HB08_MS102.bar`, a current admitted session, no transition, and the exact whole
+`b_40`/808738658 type2/header58 definition (ten records). Only ordinals0–4 are
+Creeper317; ordinals5–9 are Dusks and receive no new rights. The full44-byte
+header and640 record bytes, indexed controller/record membership, actor handle,
+objentry and status roots are checked again at use. No new wire fields are added.
+
+Only a successful native return around an authenticated one-use host emission
+can establish the client's Creeper correspondence. The receipt's original
+mission pointer, generation, epoch, connection/delivery, load/transition and
+native roots must remain current on continuous owner frames. A gap, absent body,
+changed mission/roots or session retires the occurrence; no point fallback,
+same-address recovery or new generic factory copy is allowed. Checked status
+initialization retains only the existing bounded pre-status warmup. The old
+record-authority flags and resync modes do not mix with this exception.
+
+The host publishes motion only for the exact native group; the client buffers317
+only in this mission and grants pose/brain/claim/HP/death rights only to its
+receipt-bound current body. Terminal deaths can drain the same ended mission;
+an ended mission grants no living authority. The generic population planner and
+native admission weights are unchanged: observed limit120/used118/weight9 must
+wait, never overcommit. Correctly bound original bodies need no repair allocation.
+MissionMirror keeps its native once-only end path; this change writes no mission
+result, party/member/save row, or admission budget.
+
+Tests were authored before implementation. They exercise exact-byte mutations,
+wrong mission/room/group/ordinal rejection, the production receipt ledger and
+binder, continuous observation/retirement, unchanged default stream/denylist,
+native repair headroom and native mission-end rules. The live fixture requires
+five Creeper tickets, both native ends exactly once, empty matching live enemy
+counts/HP and egress. Portable tests cannot prove the native driver or mission
+end. Independent inject review and that passing live run are required before
+landing; Bailey-05 remains a failed result, and VUH-2352 still needs its own run.
 
 ## LoD: admit only the observed generated waves
 

@@ -33,6 +33,7 @@
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
 #include "kh2coop/SpawnEmissionLedger.hpp"
+#include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/PopulationCutJson.hpp"
 #include "kh2coop/OrdinaryLifecycle.hpp"
@@ -72,6 +73,9 @@ struct NativeEnemy;
 std::array<uintptr_t,5> PopulationSpawnRoots(const Spawn& spawn);
 combatcausal::Target CausalTarget(const Spawn& s, const NativeEnemy& n, unsigned id);
 bool ReadOrdinaryIdentity(const NativeEnemy&,ordinarybinding::Identity&);
+bool BaileyMissionCurrent(bool terminal=false,uintptr_t* mission=nullptr);
+bool BaileyCreeperAuthority(uintptr_t actor,bool terminal=false);
+bool BaileyCreeperHostMotion(uintptr_t actor);
 
 constexpr std::uint32_t HP_INTERVAL_FRAMES = 6;  // ~10 Hz
 constexpr std::uint64_t HASH_INTERVAL_MS = 1000;
@@ -2143,9 +2147,10 @@ void PublishHostMotion(std::uint32_t frame, const NativeCensus& census) {
     bool truncated = false;
     for (std::size_t k = 0; k < count; ++k) {
         const Spawn& s = g_inst.spawns[(first + k) % count];
-        if (!s.present || !s.announced || s.deathSent || s.lifecycleRetired || !enemymirror::FamilyAllowed(s.objectId)) continue;
+        if (!s.present || !s.announced || s.deathSent || s.lifecycleRetired) continue;
         const auto* native = FindNativeEnemy(census, s);
         if (!native || native->hp <= 0) continue;
+        if(!enemymirror::FamilyAllowed(s.objectId) && !(s.objectId==317 && BaileyCreeperHostMotion(s.actor)))continue;
         std::uint32_t parent = 0;
         EnemyMotionEntry e;
         const auto transform = native->actor + offsets::actor::ENTITY_TRANSFORM;
@@ -4118,7 +4123,7 @@ bool ReceiveWorldPackets() {
                 EnemyMotion m;
                 read(r, m);
                 if (packet.size() != size + 3 || r.remaining() != 0 || !m.epoch || m.epoch != g_host.epoch) continue;
-                if (g_mirror.Ingest(m, g_hitTraceFrame) && !g_mirrorFirstPacketLogged) {
+                if (g_mirror.Ingest(m, g_hitTraceFrame,BaileyMissionCurrent()) && !g_mirrorFirstPacketLogged) {
                     g_mirrorFirstPacketLogged = true;
                     if (g_log) g_log("[enemy-mirror] client first-stream frame=%u epoch=%u hostFrame=%u entries=%zu",
                                      g_hitTraceFrame, m.epoch, m.hostFrame, m.entries.size());
@@ -4170,6 +4175,7 @@ bool ResyncNativeSampleCurrent(const NativeEnemy& expected) {
 // native pointer is dereferenced before finding its checked proof.
 bool RecordAuthorityCurrent(uintptr_t actor,std::uint32_t id,bool death=false) noexcept {
     if (!RecordFamily(id)) return true;
+    if(id==317 && BaileyMissionCurrent(death))return BaileyCreeperAuthority(actor,death);
     const auto found=g_recordAuthority.find(actor);
     if (!recordbinding::ScopedAuthorityAllowed(g_recordBindingRequested,g_recordAuthorityRequested,id,
                                                found!=g_recordAuthority.end())) return false;
@@ -4625,18 +4631,21 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         return false;
     };
     if (!CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
+    ObserveBaileyCreeperBirths(census);
     for (const auto& native : census.enemies) {
         const auto found = g_inst.byActor.find(native.actor);
         if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return holdAll();
         const auto& s = g_inst.spawns[found->second];
         if (!s.present || FindNativeEnemy(census, s) != &native) return holdAll();
-        if (RecordFamily(s.objectId)) continue;
+        const int baileyBirth=s.objectId==317?BaileyCreeperTicketId(native,true):0;
+        if (RecordFamily(s.objectId) && !baileyBirth) continue;
         ob::Local local;
         if (!ReadOrdinaryIdentity(native, local.identity)) return holdAll();
         local.point = {s.spawnPos.x, s.spawnPos.y, s.spawnPos.z};
         local.prior = s.ordinaryBinding;
         local.certificateRequired=certified;
-        if(!certified && g_resyncWriteFence==ResyncWriteFence::None)local.birthId=LocalEmissionBirthId(native);
+        if(!certified && g_resyncWriteFence==ResyncWriteFence::None)
+            local.birthId=baileyBirth?baileyBirth:LocalEmissionBirthId(native);
         if(certified)local.certifiedId=OrdinaryCertifiedId(census,native,ordinaryBefore);
         local.available = !(s.killed && native.hp > 0); // observed lifetime contradiction stays unmatched
         local.living = native.hp > 0;
@@ -4644,7 +4653,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         indices.push_back(found->second);
     }
     for (const auto& [id, h] : g_host.enemies) {
-        if (h.battleProgram == g_inst.btl && !RecordFamily(h.objectId))
+        if (h.battleProgram == g_inst.btl && (!RecordFamily(h.objectId) || (h.objectId==317 && BaileyMissionCurrent(true))))
             hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed,h.left});
     }
     if(certified && (!FreshRecordCatalog(census,ordinaryAfter) || !SameRecordCatalogSample(ordinaryBefore,ordinaryAfter)))return holdAll();
@@ -4844,7 +4853,7 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 }
             }
             s.killed = native.hp <= 0;
-            if (RecordFamily(s.objectId)) {
+            if (RecordFamily(s.objectId) && !(s.objectId==317 && BaileyMissionCurrent(true))) {
                 if (g_log) g_log("[record-authority] death epoch=%u frame=%u netId=%d objectId=%u actor=%llX hp=%d attempted=%u",
                     g_host.epoch,g_hitTraceFrame,s.netId,s.objectId,static_cast<unsigned long long>(s.actor),native.hp,static_cast<unsigned>(s.deathAttempted));
                 WithdrawRecordBindings("terminal-population-retired");
@@ -5741,7 +5750,8 @@ enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return Gate::None;
     const Spawn& s = g_inst.spawns[found->second];
     if (s.actor != actor || !s.present || s.killed || s.netId <= 0 || s.netId > 0xFFFF ||
-        !RecordAuthorityCurrent(s.actor,s.objectId) || !enemymirror::FamilyAllowed(s.objectId)) return Gate::None;
+        !RecordAuthorityCurrent(s.actor,s.objectId) ||
+        (!enemymirror::FamilyAllowed(s.objectId) && !(s.objectId==317 && BaileyMissionCurrent()))) return Gate::None;
     const auto host = g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
     if (host == g_host.enemies.end() || host->second.dead || host->second.removed || host->second.objectId != s.objectId) return Gate::None;
     // N5: the live status pointer must still be this binding's (closes a mid-frame reuse window).
@@ -6199,9 +6209,13 @@ bool SpawnEmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t re
             if(g_log)g_log("[spawn-birth] refused reason=returned-root-or-class netId=%u seq=%llu",permit.netId,static_cast<unsigned long long>(permit.sequence));
             return true;
         }
-        if(permit.netId && !RecordFamily(birth->objectId) && g_resyncWriteFence==ResyncWriteFence::None &&
+        uintptr_t baileyMission=0;
+        const bool bailey317=birth->objectId==317 && birth->key==key && birth->headerId==header && birth->recordIndex==record &&
+            BaileyMissionCurrent(false,&baileyMission) && spawncontroller::BaileyCreeperBirthCurrent(*birth);
+        if(permit.netId && (!RecordFamily(birth->objectId) || bailey317) && g_resyncWriteFence==ResyncWriteFence::None &&
            !OrdinaryLifecycleRoom() && g_localEmissionBirths.size()<SPAWN_EMISSION_CAP) {
-            g_localEmissionBirths.push_back({*birth,permit,g_hitTraceFrame,false,false,{g_hitTraceFrame,g_hitTraceFrame}});
+            g_localEmissionBirths.push_back({*birth,permit,g_hitTraceFrame,false,false,{g_hitTraceFrame,g_hitTraceFrame},
+                bailey317?baileyMission:0,{bailey317?g_hitTraceFrame:0}});
             if(g_log)g_log("[spawn-birth] ticket frame=%u netId=%u seq=%llu actor=%llX objectId=%u",g_hitTraceFrame,permit.netId,
                 static_cast<unsigned long long>(permit.sequence),static_cast<unsigned long long>(birth->actor),birth->objectId);
         }

@@ -31,6 +31,10 @@ struct EmissionBirth {
 };
 // Read-only root revalidation; grants no room, binding or death authority.
 bool EmissionBirthCurrent(const EmissionBirth& birth) noexcept;
+// Exact Bailey header58/group content and indexed native roots only. No mission,
+// host receipt, mirror or write authority is supplied by this read-only capture.
+bool CaptureBaileyCreeperBirth(uintptr_t actor,EmissionBirth& birth) noexcept;
+bool BaileyCreeperBirthCurrent(const EmissionBirth& birth) noexcept;
 // Reserve one exact receipt around the native call. Cancel normal null returns;
 // ambiguous outcomes spend the reservation without a ticket;
 // a successful birth spends that receipt and retains checked local provenance.

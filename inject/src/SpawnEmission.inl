@@ -24,8 +24,42 @@ struct LocalEmissionBirth {
     std::uint32_t seenFrame{};
     bool adopted{},retired{};
     EmissionWarmup warmup{};
+    uintptr_t baileyMission{};
+    routespawn::BaileyCreeperLease baileyLease{};
 };
 std::vector<LocalEmissionBirth> g_localEmissionBirths;
+
+// Read-only scope: never refresh session state while a caller holds native rows.
+bool BaileyMissionCurrent(bool terminal,uintptr_t* mission) {
+    if(mission)*mission=0;
+    namespace mr=missionmirror::rules;
+    RoomTransition location{};uintptr_t base=0;std::uint32_t flags=0,result=0;
+    char path[mr::kPathBytes]{},file[mr::kFileBytes]{};
+    const auto load=warp::LoadSerial(),transition=warp::TransitionSerial();
+    if(!g_mirrorRequested || !spawncontroller::IsDiagnosticGameThread() || !g_bridge.IsOpen() ||
+       g_recordBindingRequested || g_recordAuthorityRequested || g_resyncWriteFence!=ResyncWriteFence::None ||
+       !g_activationGeneration || g_bridge.SessionGeneration()!=g_activationGeneration ||
+       !g_orderedDeliverySerial || g_orderedDeliverySerial!=g_bridge.DeliverySerial() || !RuntimeWriterLive() ||
+       !g_inst.live || !SafeNativeGameplay() || g_seenLoad!=load || g_seenTransition!=transition ||
+       !ReadLocationChecked(location) || !ReadNative(g_exeBase+mr::kMissionPtr,base) || !base ||
+       !CopyNative(base+mr::kPath,path,sizeof(path)) || !mr::FileOf(path,sizeof(path),file) ||
+       !ReadNative(base+mr::kFlags,flags) || !ReadNative(base+mr::kResult,result))return false;
+    const std::array<std::uint8_t,10> now{location.worldId,location.roomId,location.door,0,
+        static_cast<std::uint8_t>(location.mapProgram),static_cast<std::uint8_t>(location.mapProgram>>8),
+        static_cast<std::uint8_t>(location.battleProgram),static_cast<std::uint8_t>(location.battleProgram>>8),
+        static_cast<std::uint8_t>(location.eventProgram),static_cast<std::uint8_t>(location.eventProgram>>8)};
+    uintptr_t after=0;std::uint32_t flagsAfter=0,resultAfter=0;
+    if(!routespawn::BaileyCreeperMission(now,file,true,flags,result,terminal) ||
+       !ReadNative(g_exeBase+mr::kMissionPtr,after) || after!=base ||
+       !ReadNative(base+mr::kFlags,flagsAfter) || flagsAfter!=flags ||
+       !ReadNative(base+mr::kResult,resultAfter) || resultAfter!=result ||
+       load!=warp::LoadSerial() || transition!=warp::TransitionSerial())return false;
+    if(mission)*mission=base;return true;
+}
+bool BaileyCreeperHostMotion(uintptr_t actor) {
+    spawncontroller::EmissionBirth birth{};
+    return g_role==Role::Host && BaileyMissionCurrent() && spawncontroller::CaptureBaileyCreeperBirth(actor,birth);
+}
 
 bool EmissionPermitCurrent(const spawncontroller::EmissionPermit& p) {
     RoomTransition room;
@@ -57,6 +91,52 @@ bool InitializingEmissionBirth(const spawncontroller::EmissionBirth& b,const Nat
     if(!CensusMatchesInstance(membership) || !membership.watchedActorPresent ||
        !spawncontroller::EmissionBirthCurrent(b))return false;
     warmup.seenFrame=g_hitTraceFrame;return true;
+}
+void ObserveBaileyCreeperBirths(const NativeCensus& census) {
+    for(auto& t:g_localEmissionBirths)if(t.baileyMission && !t.retired) {
+        uintptr_t mission=0;
+        bool current=BaileyMissionCurrent(t.adopted,&mission) && mission==t.baileyMission &&
+            CensusMatchesInstance(census) && EmissionPermitCurrent(t.permit);
+        bool found=false;
+        if(current)for(const auto& native:census.enemies)
+            if(EmissionBirthMatches(t.birth,native)){found=true;break;}
+        if(!found && current && !t.adopted)
+            found=InitializingEmissionBirth(t.birth,census,t.warmup);
+        current=current && found && spawncontroller::BaileyCreeperBirthCurrent(t.birth);
+        if(!t.baileyLease.Observe(g_hitTraceFrame,current)) {
+            t.retired=true;
+            if(g_log)g_log("[bailey317] retired frame=%u netId=%u seq=%llu actor=%llX",g_hitTraceFrame,t.permit.netId,
+                static_cast<unsigned long long>(t.permit.sequence),static_cast<unsigned long long>(t.birth.actor));
+        }
+    }
+}
+int BaileyCreeperTicketId(const NativeEnemy& native,bool terminal) {
+    int id=0;uintptr_t mission=0;
+    if(native.objectId!=317 || !BaileyMissionCurrent(terminal,&mission))return 0;
+    for(auto& t:g_localEmissionBirths)if(t.baileyMission && t.birth.actor==native.actor && !t.retired) {
+        const bool current=t.baileyMission==mission && EmissionPermitCurrent(t.permit) &&
+            EmissionBirthMatches(t.birth,native) && spawncontroller::BaileyCreeperBirthCurrent(t.birth);
+        if(!t.baileyLease.Observe(g_hitTraceFrame,current)) {t.retired=true;continue;}
+        if(id){t.retired=true;for(auto& other:g_localEmissionBirths)if(other.birth.actor==native.actor)other.retired=true;return 0;}
+        id=t.permit.netId;
+    }
+    return id;
+}
+bool BaileyCreeperAuthority(uintptr_t actor,bool terminal) {
+    if(g_role!=Role::Client || !BaileyMissionCurrent(terminal))return false;
+    const auto found=g_inst.byActor.find(actor);
+    if(found==g_inst.byActor.end() || found->second>=g_inst.spawns.size())return false;
+    const auto& s=g_inst.spawns[found->second];
+    if(!s.present || s.objectId!=317 || s.netId<=0 || s.netId>0xFFFF || s.ordinaryBinding.bound!=s.netId)return false;
+    const auto host=g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
+    if(host==g_host.enemies.end() || host->second.objectId!=317 || host->second.removed || host->second.dead!=terminal)return false;
+    try {
+        const auto census=CaptureNativeCensus(actor);
+        if(!CensusMatchesInstance(census) || !census.watchedActorPresent)return false;
+        const auto* native=FindNativeEnemy(census,s);ordinarybinding::Identity roots{};
+        return native && ReadOrdinaryIdentity(*native,roots) && roots==s.ordinaryBinding.identity &&
+            BaileyCreeperTicketId(*native,terminal)==s.netId;
+    } catch(...) {return false;}
 }
 int LocalEmissionBirthId(const NativeEnemy& native) {
     int result=0;

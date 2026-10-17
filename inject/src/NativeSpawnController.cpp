@@ -2416,6 +2416,30 @@ bool EmissionBirthCurrent(const EmissionBirth& birth) noexcept {
     return CaptureEmissionBirth(reinterpret_cast<void*>(birth.actor),q,reinterpret_cast<void*>(birth.record),birth.recordBytes)==birth;
 }
 
+bool CaptureBaileyCreeperBirth(uintptr_t actor,EmissionBirth& birth) noexcept {
+    birth={};uintptr_t controller=0,record=0;
+    if(!actor || !IsDiagnosticGameThread() || !ReadNative(actor+0x9E8,controller) || !ReadNative(actor+0x9F0,record))return false;
+    const auto q=Qualify(controller,QualificationUse::Emission);
+    if(q.scope!=Scope::Qualified || q.records!=10 || record<q.spawnArray ||
+       record-q.spawnArray>=640 || (record-q.spawnArray)%64)return false;
+    std::array<std::uint8_t,44> header{};std::array<std::uint8_t,640> records{};
+    const auto ordinal=static_cast<unsigned>((record-q.spawnArray)/64);
+    if(!CopyNative(q.header,header.data(),header.size()) || !CopyNative(q.spawnArray,records.data(),records.size()) ||
+       !routespawn::BaileyCreeperGroup(q.stamp.location,q.key,header,records,ordinal))return false;
+    std::array<std::uint8_t,64> bytes{};std::memcpy(bytes.data(),records.data()+ordinal*64,64);
+    birth=CaptureEmissionBirth(reinterpret_cast<void*>(actor),q,reinterpret_cast<void*>(record),bytes);
+    Controller after{};std::array<std::uint8_t,44> headerAfter{};std::array<std::uint8_t,640> recordsAfter{};
+    return birth.available && birth.objectId==317 && birth.objectType==offsets::objentry::TYPE_MOB &&
+        ReadNative(controller,after) && after.key==q.key && after.header==q.header &&
+        after.spawnArray==q.spawnArray && after.regionArray==q.spawnArray+640 &&
+        CopyNative(q.header,headerAfter.data(),headerAfter.size()) && headerAfter==header &&
+        CopyNative(q.spawnArray,recordsAfter.data(),recordsAfter.size()) && recordsAfter==records && SameStamp(q.stamp);
+}
+bool BaileyCreeperBirthCurrent(const EmissionBirth& birth) noexcept {
+    EmissionBirth current{};
+    return birth.available && CaptureBaileyCreeperBirth(birth.actor,current) && current==birth;
+}
+
 namespace {
 // One implementation is exercised over test-owned buffers in the same-TU
 // harness. Production always supplies the existing checked native read leaves.

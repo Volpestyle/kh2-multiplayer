@@ -718,7 +718,7 @@ void Drain(LogFn log) {
         if(!m.bound || !StampNow(now) || now.now!=routespawn::BaileyLocation ||
            !routespawn::MissingPartyLoadCurrent(m.stamp.load,m.stamp.transition,now.load,now.transition,warp::TransitionPending()))continue;
         const bool roots=Read(m.actor+0x9E8,controller) && Read(m.actor+0x9F0,record);
-        log("[missing-party] attachment allowed=%u roots=%u clone=%llX controller=%llX expectedController=%llX record=%llX expectedRecord=%llX load=%u transition=%u frame=%llu",
+        log("[missing-party] attachment allowed=%u roots=%u clone=%llX controller=%llX expectedController=%llX record=%llX expectedRecord=%llX load=%u transition=%u frame=%u",
             MissingPartyPuppetAllowed(m.actor)?1u:0u,roots?1u:0u,m.actor,controller,m.controller,record,
             reinterpret_cast<uintptr_t>(m.record.data()),now.load,now.transition,frame);
     }
