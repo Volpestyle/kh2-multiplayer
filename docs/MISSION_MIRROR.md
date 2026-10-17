@@ -33,7 +33,7 @@ value = start + duration − clock. Otherwise it counts up: value = clock − st
 ## Wire: `MissionState` (type 52, protocol 23)
 
 Host → relay → every client. Periodic and unreliable: every 3 frames while a
-mission runs, every 15 without one. 146 payload bytes:
+mission runs, every 15 without one. 151 payload bytes:
 
 - room tuple, sequence, host frame
 - `active`
@@ -41,10 +41,11 @@ mission runs, every 15 without one. 146 payload bytes:
 - flags and result
 - 3 gauges and 3 counters, each `{flags, max, value}`
 - timer state, mode, value and duration
+- the end trap the host's mission ran (4/3 or 4/22, 0 for none) and its argument
 
 The codec refuses a path (any `/`), a name that isn't printable ASCII, bytes
 after the terminator, a non-finite or out-of-range gauge, and an unknown timer
-state. The relay forwards it only from the verified native host, for the
+state, or an end trap other than 4/3 or 4/22. The relay forwards it only from the verified native host, for the
 admitted room, with a strictly increasing sequence. It is never cached,
 replayed or part of resync.
 
@@ -63,15 +64,28 @@ games run the same mission file and its own mission hasn't ended:
   more than 15 frames apart.
 - **Failure:** when the host's result is 2, the client calls `0x3A3800`
   (`mission_failed`) once.
+- **Other ends:** the host's hooks record which end trap ended its mission,
+  with its argument. Trap 4/3 completes it: `0x3A33C0(arg)` →
+  `0x3A41E0(M, 7 or 0x9C, arg)`, which shows the banner and fires the trigger.
+  Trap 4/22 (`0x3A37A0(arg)`) ends it and fires signal 0xF. The client replays
+  the same trap with the same argument once. After a replayed end or failure,
+  every later end or failure of that mission is dropped, so it never ends twice.
 - **Local calls dropped:** the client's own script calls that change a gauge or
-  counter, or fail the mission, are dropped while it follows. Those are the
-  table-4 traps `set_count` 5, `inc_count` 6, `set_gauge` 8, `add_gauge` 9,
-  `set_gauge_ratio` 10, `mission_failed` 11, `dec_count` 20 and `add_count` 41.
+  counter, or end the mission, are dropped while it follows. Those are the
+  table-4 traps `mission_complete` 3, `set_count` 5, `inc_count` 6,
+  `set_gauge` 8, `add_gauge` 9, `set_gauge_ratio` 10, `mission_failed` 11,
+  `dec_count` 20, the end signal 22 and `add_count` 41. The host swaps the
+  same entries; its hooks only record the end.
   Their entries are swapped once on the client, all or none. The check covers
   every entry's function, flags and stub bytes, the two setters' full bodies,
   and `mission_failed`'s head. A dropped `mission_failed` runs after the host's
   failure. A follow decision older than 250 ms counts as not following, so a
   load or room change never keeps dropping calls.
+
+**Known gap:** LoD's morale waves aren't host-gated yet. Spawnctl calls the
+08/01 room controller (headerId 1652) an unsupported native type, so each game
+spawns its later waves itself (run `20261017-021858`). The friend's extras
+can't die. That belongs to the spawn controller, not this mirror.
 
 The host's mission is what counts. The friend's own orb pickups and hits change
 nothing until the host's game sees them (as with enemy HP, the host owns the
@@ -80,9 +94,10 @@ outcome).
 ## Logs and checks
 
 - Host: `[mission-mirror] host frame=… file=… gauges=…` every 120 frames.
+- Host: `host end trap=… arg=…` when its mission ends through 4/3 or 4/22.
 - Client: `client ready`, `client follow` / `release`, a `client sec` line per
-  second with both games' gauges and the sets, shifts, fails and dropped calls,
-  and `client fail like the host`.
+  second with both games' gauges and the sets, shifts, ends and dropped calls,
+  and `client fail like the host` / `client end like the host`.
 - Offline: `kh2coop_mission_mirror_test` covers the codec and the rules.
 - Live: `net_lod_morale` (parity and a shared mission end) and
   `net_lod_morale_fail` (the host's morale empties; both fail). The runner's
