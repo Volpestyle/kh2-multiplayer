@@ -49,6 +49,8 @@ STEAM_OWNED = {"steam_autocloud.vdf"}  # written by the Steam client, not the ga
 WARP_NAME = "Local\\kh2coop_warp_{pid}"
 WARP_LIVE_FRAME = 76  # WarpChannel.liveFrame
 HANG_SECONDS = 30.0   # gameplay frames stalled this long in the field = hang
+GAME_OVER_SECONDS = 120.0  # ...unless the player is at 0 HP (Game Over waits for Continue)
+PLAYER_HP = 0x2A23598  # slot 0 HP (KH2Offsets SLOT0_BASE + 0x80)
 
 EXIT_PASS, EXIT_FAIL, EXIT_CRASH, EXIT_RIG = 0, 1, 2, 3
 
@@ -181,7 +183,18 @@ class Instance:
         if self.live_frame_seen is None or self.live_frame_seen[0] != frame:
             self.live_frame_seen = (frame, now)
         elif now - self.live_frame_seen[1] > HANG_SECONDS:
+            # Game Over also stops gameplay frames, waiting for Continue. With the
+            # player at 0 HP that is recoverable, so allow it longer (VUH-2340).
+            if now - self.live_frame_seen[1] <= GAME_OVER_SECONDS and self.game_over():
+                return
             raise InstanceDied(self.index, self.pid, f"hung (frame {frame} stalled {HANG_SECONDS:.0f}s)")
+
+    def game_over(self) -> bool:
+        try:
+            sample = kh2ctl("peek", "--rva", f"0x{PLAYER_HP:X}:u32", pid=self.pid, check=False, timeout=10)
+            return sample["samples"][0][f"0x{PLAYER_HP:X}"] == 0
+        except (KeyError, IndexError, TypeError, subprocess.TimeoutExpired):
+            return False
 
 
 # --------------------------------------------------------------------------
@@ -1055,6 +1068,41 @@ def start_process(ctx: Context, name: str, cmd: list[str], env: dict | None = No
     ctx.processes.append((name, proc, log))
     ctx.artifacts.append(f"{name}.log")
     return proc
+
+
+PILOT = ROOT / "tools" / "rig" / "route_pilot" / "pilot.py"
+
+
+def step_pilot(ctx: Context, step: dict) -> dict:
+    """VUH-2340: the route pilot plays this instance with real keyboard input,
+    either a `route` file or `teach` commands from a mailbox directory, for at
+    most `seconds`. Its key-ups are re-sent afterwards even if it was killed."""
+    inst = ctx.inst(step.get("instance", 0))
+    name = step.get("name", "pilot")
+    out = ctx.run_dir / name
+    cmd = [sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--out", str(out),
+           "--seconds", str(step.get("seconds", 900))]
+    if "route" in step:
+        cmd += ["--route", str(ROOT / step["route"]), "--from-step", str(step.get("fromStep", 0))]
+    else:
+        cmd += ["--teach", str(ROOT / step["teach"])]
+    proc = start_process(ctx, name, cmd)
+    end = time.monotonic() + float(step.get("seconds", 900)) + 120
+    try:
+        while proc.poll() is None:
+            if time.monotonic() > end:
+                raise StepFailed("pilot overran its time limit")
+            ctx.sleep(1)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        subprocess.run([sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--release-all"],
+                       capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+    if out.exists():
+        ctx.artifacts += [f"{name}/{p.name}" for p in sorted(out.iterdir())]
+    if proc.returncode != 0 and not step.get("allowStuck", False):
+        raise StepFailed(f"pilot exited {proc.returncode} (see {name}.log, {name}/pilot.jsonl)")
+    return {"exit": proc.returncode}
 
 
 def step_relay(ctx: Context, step: dict) -> dict:
@@ -4478,7 +4526,7 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
     return out
 
 
-STEPS = {"boot": step_boot, "launch": step_launch, "warp": step_warp, "input": step_input, "walk_to": step_walk_to,
+STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": step_warp, "input": step_input, "walk_to": step_walk_to,
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check,

@@ -1,0 +1,11 @@
+{
+  "name": "tt1_solo",
+  "description": "VUH-2340 solo route from FM-02 (Roxas, Day 6, Mansion Computer Room save point) to Yen Sid. Positions come from pilot door logs; extend from the last learned step.",
+  "steps": [
+    {"do": "walk", "to": [-385, -5], "tol": 60, "timeoutSec": 15, "note": "off the save point, west along the room"},
+    {"do": "walk", "to": [-250, -760], "tol": 40, "timeoutSec": 15, "note": "in front of the south-west doorway"},
+    {"do": "door", "to": [-250, -1400], "room": [2, 19], "timeoutSec": 15, "clip": 12, "name": "door-computer-to-basement-hall",
+     "note": "Computer Room 2/21 -> Basement Hall 2/19; trigger logged at (-234, -785)"},
+    {"do": "fight", "timeoutSec": 240, "clip": 30, "name": "fight-basement-dusks", "note": "Day 6 Dusk ambush; Reversal is offered"}
+  ]
+}

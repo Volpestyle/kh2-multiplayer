@@ -1847,6 +1847,7 @@ protected actor. Protection is best effort during loads.
 | Step | Fields | Does |
 |---|---|---|
 | `boot` | `timeoutSec initTimeoutMs slotMoves` | Launch + inject, mute, pick LOAD on the title menu (checked by pixel in captures), load the save list's default slot (or `slotMoves` rows from it: + down, − up; the cursor is kept as `save_list_N.png`), wait until the room is live. Menu presses go through the DLL's input collector (`player-press`), so no window focus is needed |
+| `pilot` | `route fromStep teach seconds name allowStuck instance` | VUH-2340 route pilot (`tools/rig/route_pilot/pilot.py`) plays the instance with real scan-code keyboard input to its focused window: a `route` file of data steps, or `teach` commands from a mailbox directory. Its output and clips go to `<name>/`; key-ups are re-sent even if it is killed. Exit 3 (stuck) fails the step unless `allowStuck` |
 | `launch` | `mute initTimeoutMs` | Launch + inject only (stays on the title). `initTimeoutMs` is an integer1..60000, default15000, passed to the CLI's existing hook wait. A valid returned launched PID is registered for owned cleanup before initialization failure is raised; failed initialization never advances into boot/input. Missing/malformed PIDs do not supply a cleanup target. |
 | `warp` | `world room door map btl evt` | `kh2ctl warp`; returns once the room has loaded |
 | `input` | `lx ly rx ry ms` | Hold sticks (`player-input`) |

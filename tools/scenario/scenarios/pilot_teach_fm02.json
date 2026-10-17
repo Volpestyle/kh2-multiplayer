@@ -1,0 +1,10 @@
+{
+  "name": "pilot_teach_fm02",
+  "description": "VUH-2340 route discovery: boot FM-02 (one row up from last-used slot 4), replay the learned part of the solo route, then serve route-pilot teach commands from build/vuh2338/teach for up to 12 minutes. Real keyboard input only; no warps.",
+  "steps": [
+    {"do": "boot", "slotMoves": -1},
+    {"do": "assert", "expr": "room()[0] == 2", "message": "loaded slot is not in Twilight Town"},
+    {"do": "pilot", "route": "tools/rig/route_pilot/routes/tt1_solo.json", "seconds": 600, "name": "route", "allowStuck": true},
+    {"do": "pilot", "teach": "build/vuh2338/teach", "seconds": 720, "name": "teach"}
+  ]
+}
