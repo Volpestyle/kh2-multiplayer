@@ -287,8 +287,16 @@ fresh complete current Bailey census has no living enemies, with the mission
 pointer and scope checked on both sides. It leaves the replay one-shot pending
 so the normal client frame can apply the authenticated final death first. It
 does not grant any death/HP authority, change owner-frame ordering, relax
-binding continuity, or alter other mission ends or failures. An unknown/live
-extra body or unavailable census keeps the end held. The owned-memory
+binding continuity, or alter other mission ends or failures. Deferral is capped
+at180 owner frames (about3s at60fps), reset with the local mission pointer/load/file.
+If a live orphan or unavailable census persists, the cap restores the original
+native end call once; it never kills or writes HP on an unbound body. At the cap,
+a fresh complete census logs every living orphan's netId (0 if unmatched), HP,
+actor and family, or explicitly logs unavailable. The replay receipt reports
+`path=clean-census` or `path=frame-cap`. Quill passed the initial deferral's
+D14.4 review; the bounded follow-up needs review before the build. The owned-memory
 `kh2coop_nativehit_test` reproduces death plus end in one owner frame and an
-immediate native end hold; native compile, independent review and live final
-parity/ended flags/egress remain required before landing.
+immediate native end hold, plus an unbound orphan that forces the capped replay
+without a new lethal. Native compile and live final parity/ended flags/egress
+remain required before landing. A capped end is liveness evidence, not a pass
+of the enemy parity gate.

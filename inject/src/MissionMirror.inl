@@ -24,6 +24,7 @@ std::uint32_t g_missionGeneration{};
 std::atomic<bool> g_missionFollowing{false},g_missionHostFailed{false};
 std::atomic<std::uint64_t> g_missionDropped{0},g_missionFollowMs{0};  // the last frame that confirmed following
 bool g_missionChecked{},g_missionReady{},g_missionReplayed{},g_missionWasFollowing{};
+MR::EndReplayDeferral g_missionEndDeferral;
 std::atomic<std::uint8_t> g_missionRole{0};  // 1 host, 2 client: what the hooks do
 // The host's end: which end trap ran on the current mission (base pointer + file), and its argument.
 uintptr_t g_missionHostBase{},g_missionLocalBase{};
@@ -298,8 +299,26 @@ bool MissionEndRosterReady(const MR::Mission& local, uintptr_t expectedMission) 
     return BaileyMissionCurrent(true,&after) && after==before && CensusMatchesInstance(census);
 }
 
+void LogMissionEndOrphans(std::uint32_t frame) {
+    if(!g_log)return;
+    const auto census=CaptureNativeCensus();
+    if(!CensusMatchesInstance(census)) {
+        g_log("[mission-mirror] client end cap frame=%u census=unavailable",frame);
+        return; // unavailable is not empty; never read a retained actor to fill the log
+    }
+    for(const auto& native:census.enemies)if(native.hp>0) {
+        int id=0;
+        const auto found=g_inst.byActor.find(native.actor);
+        if(found!=g_inst.byActor.end() && found->second<g_inst.spawns.size()) {
+            const auto& spawn=g_inst.spawns[found->second];
+            if(spawn.present && FindNativeEnemy(census,spawn)==&native && spawn.netId>0)id=spawn.netId;
+        }
+        g_log("[mission-mirror] client end orphan frame=%u netId=%d hp=%d actor=%llX objectId=%u",
+              frame,id,native.hp,static_cast<unsigned long long>(native.actor),native.objectId);
+    }
+}
+
 void ApplyMission(std::uint32_t frame) {
-    (void)frame;
     g_missionRole.store(2,std::memory_order_release);
     if(!g_mirrorRequested || MissionParked() || !MissionHooksReady()) { g_missionFollowing.store(false); return; }
     uintptr_t base=0;
@@ -309,6 +328,7 @@ void ApplyMission(std::uint32_t frame) {
         // A new mission here (or a retry after a reload): nothing of it has been replayed or dropped yet.
         g_missionLocalBase=base;g_missionLocalLoad=load;std::memcpy(g_missionLocalFile,local.file,MR::kFileBytes);
         g_missionReplayed=false;g_missionDroppedEnd=-1;g_missionFallbackPending=false;g_missionHostFailedSeen=false;
+        g_missionEndDeferral={};
     }
     const bool current=MissionReceiveCurrent();
     const bool following=current && MR::Follows(g_missionHost,local) && !MR::HostEndedUnknown(g_missionHost);
@@ -366,16 +386,21 @@ void ApplyMission(std::uint32_t frame) {
         // The host's mission ended this way: end ours the same way, once.
         if(!g_missionReplayed && LocalMissionEnded(false))g_missionReplayed=true;  // already ended here: guard only
         if(!g_missionReplayed) {
+            const char* path=MR::SameFile(local.file,"HB08_MS102.bar")?"clean-census":"unchanged";
             if(!MissionEndRosterReady(local,base)) {
-                if(g_log && g_missionLogs++<64)g_log("[mission-mirror] client end deferred file=%s reason=Bailey-roster-live-or-unavailable",local.file);
-                LogMissionSecond(local,true);
-                return; // do not consume the replay one-shot; normal death reconciliation runs next
+                if(!g_missionEndDeferral.Capped(frame)) {
+                    if(g_log && g_missionLogs++<64)g_log("[mission-mirror] client end deferred file=%s reason=Bailey-roster-live-or-unavailable",local.file);
+                    LogMissionSecond(local,true);
+                    return; // one-shot stays pending while normal death reconciliation runs next
+                }
+                path="frame-cap";
+                LogMissionEndOrphans(frame); // read-only; cap restores the original end call, never a new lethal
             }
             g_missionReplayed=true;
             const bool ok=MissionEnd(g_missionHooks[end].native,g_missionHost.endArg);
             ++g_missionSecond.ends;
-            if(g_log)g_log("[mission-mirror] client end like the host file=%s trap=%s arg=%u ok=%u",local.file,
-                MR::kTraps[end].name,g_missionHost.endArg,ok?1u:0u);
+            if(g_log)g_log("[mission-mirror] client end like the host file=%s trap=%s arg=%u ok=%u path=%s",local.file,
+                MR::kTraps[end].name,g_missionHost.endArg,ok?1u:0u,path);
         }
         LogMissionSecond(local,true);
         return;

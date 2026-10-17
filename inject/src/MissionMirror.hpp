@@ -76,6 +76,19 @@ inline bool Ended(const Mission& m) noexcept { return m.active && (m.flags & kEn
 // or a host without hooks): the friend can't replay it, so it stops following and keeps its own end.
 inline bool HostEndedUnknown(const Mission& host) noexcept { return Ended(host) && !Failed(host) && !host.endTrap; }
 
+// VUH-2343: give the final Bailey death at most three seconds at 60 owner
+// frames/s. A stuck orphan must not hold the native end forever. Reset this
+// alongside the local mission pointer/load/file, never from packet receipt.
+struct EndReplayDeferral {
+    static constexpr std::uint32_t kMaxFrames = 180;
+    std::uint32_t firstFrame{};
+    bool active{};
+    bool Capped(std::uint32_t frame) noexcept {
+        if(!active || frame<firstFrame) {active=true;firstFrame=frame;return false;}
+        return frame-firstFrame>=kMaxFrames;
+    }
+};
+
 // The host's mission is shown here only when both games run the same mission file and this one
 // hasn't ended. Everything below assumes Follows() was true.
 inline bool Follows(const Mission& host, const Mission& local) noexcept {

@@ -53,6 +53,13 @@ void codec() {
     check(throws([&] { decode(activeFlag); }), "active flag accepts only zero or one");
 }
 void rules() {
+    MR::EndReplayDeferral defer;
+    check(!defer.Capped(0) && !defer.Capped(0), "Bailey deferral starts at frame zero without counting repeated calls");
+    check(!defer.Capped(179) && defer.Capped(180), "Bailey orphan waits at most 180 owner frames");
+    check(defer.Capped(181), "Bailey cap remains reached until the mission resets");
+    defer = {};
+    check(!defer.Capped(900) && !defer.Capped(1079) && defer.Capped(1080), "new local mission gets a fresh full deferral budget");
+    check(!defer.Capped(10) && !defer.Capped(189) && defer.Capped(190), "rewound owner frame restarts its bounded budget");
     char file[MR::kFileBytes];
     const char path[MR::kPathBytes] = "msn/us/MU01_MS102.bar";
     check(MR::FileOf(path, sizeof(path), file) && std::strcmp(file, "MU01_MS102.bar") == 0, "file is the part after the last slash");

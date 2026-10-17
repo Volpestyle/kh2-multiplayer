@@ -123,9 +123,13 @@ in the current Bailey mission. The mission pointer/scope is checked before and
 after capture. The end remains pending while the ordinary client frame applies
 authenticated deaths through its existing continuous bindings. This prevents
 the native end hold from interrupting the last Dusk's death before it reaches
-zero HP. It does not authorize an HP/death write or change other missions or
-failure replay. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
-The new gate is pending native compilation, review and live validation.
+zero HP. It waits at most180 owner frames (about3s at60fps), then restores the
+original native end even if an orphan persists. The cap logs every living
+orphan's safely sampled netId/HP/actor, or explicitly says the census is
+unavailable; it never grants death/HP write authority. The end receipt records
+`path=clean-census` or `path=frame-cap`. Other missions and failure replay are
+unchanged. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
+The bounded follow-up is pending native compilation, review and live validation.
 
 - Host: `[mission-mirror] host frame=… file=… gauges=…` every 120 frames.
 - Host: `host end trap=… arg=…` when its mission ends through 4/3 or 4/22.

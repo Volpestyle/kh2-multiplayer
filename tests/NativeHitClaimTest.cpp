@@ -537,6 +537,13 @@ std::vector<std::uint8_t> HostEnvelope(const std::vector<std::uint8_t>& packet,
 }
 bool QueueHostWorld(const std::vector<std::uint8_t>& packet) { return g_bridge.SendToDll(HostEnvelope(packet)); }
 unsigned baileyEndCalls = 0;
+int baileyEndExpectedHp = 0;
+std::vector<std::string> baileyEndLogs;
+void BaileyEndLog(const char* format, ...) {
+    char line[1024]{}; va_list args; va_start(args,format);
+    std::vsnprintf(line,sizeof(line),format,args); va_end(args);
+    baileyEndLogs.emplace_back(line);
+}
 int __fastcall BaileyEndDeath(void* actor, int delta, int stat, int react) {
     ++deathCalls;
     Check(reinterpret_cast<uintptr_t>(actor) == enemy && delta == -11 && stat == 0 && react == 0,
@@ -546,8 +553,8 @@ int __fastcall BaileyEndDeath(void* actor, int delta, int stat, int react) {
 }
 void __fastcall BaileyNativeEnd(std::uint64_t* args) {
     ++baileyEndCalls;
-    Check(static_cast<std::uint32_t>(args[0]) == UINT32_MAX && Read<int>(status) == 0,
-          "Bailey native end runs only after the final Dusk death, preserving its argument");
+    Check(static_cast<std::uint32_t>(args[0]) == UINT32_MAX && Read<int>(status) == baileyEndExpectedHp,
+          "Bailey native end preserves its argument and expected clean/capped HP");
     Put(image + 0x80000 + MR::kFlags, std::uint32_t{1 | MR::kEnded});
     Put(image + offsets::OPEN_MENU, std::uint8_t{8}); // native end can immediately block the census
 }
@@ -584,11 +591,13 @@ void TestBaileyMissionEndOrdering() {
         g_missionLatest.location = arrivalTarget;
         g_missionHooks[MR::EndTrapIndex(3)].native = reinterpret_cast<uintptr_t>(&BaileyNativeEnd);
         g_applyStatDelta = BaileyEndDeath; baileyEndCalls = deathCalls = 0;
+        baileyEndExpectedHp = 0; baileyEndLogs.clear();
         g_hitTraceFrame = 100;
         Check(ResolveOrdinaryBindings(CaptureNativeCensus(), WorldSessionGeneration()) &&
               g_inst.spawns[0].ordinaryBinding.bound == 1, "Bailey final Dusk earns its continuous live binding");
     };
     seed();
+    g_log = BaileyEndLog;
     QueueHostWorld(encode(EnemyDeath{9, 1})); ReceiveWorldPackets();
     Check(g_host.enemies[1].dead, "Bailey final death enters through the actual authenticated consumer");
     g_hitTraceFrame = 101;
@@ -600,8 +609,28 @@ void TestBaileyMissionEndOrdering() {
     ApplyMission(101);
     Check(g_missionReplayed && baileyEndCalls == 1 && LocalMissionEnded(false),
           "Bailey end retries after zero HP and settles the native ended flags once");
+    Check(std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){return line.find("path=clean-census")!=std::string::npos;}),
+          "Bailey clean completion reports the census path rather than the cap");
     Put(image + offsets::OPEN_MENU, std::uint8_t{255}); ApplyMission(102);
     Check(baileyEndCalls == 1, "Bailey end does not replay twice after the native hold clears");
+
+    seed(); // an unmatched living body cannot be killed by the normal death path
+    g_inst.spawns[0].netId = -1; g_inst.spawns[0].ordinaryBinding.bound = 0;
+    g_log = BaileyEndLog; baileyEndExpectedHp = 11;
+    g_hitTraceFrame = 101; ApplyMission(101);
+    g_hitTraceFrame = 280; ApplyMission(280);
+    Check(!g_missionReplayed && baileyEndCalls == 0 && deathCalls == 0,
+          "unbound Bailey orphan defers without a new lethal before 180 owner frames");
+    g_hitTraceFrame = 281; ApplyMission(281);
+    Check(g_missionReplayed && baileyEndCalls == 1 && deathCalls == 0 && Read<int>(status) == 11 && LocalMissionEnded(false),
+          "Bailey orphan cap restores the original native end once without writing its HP");
+    char orphan[128]{};
+    std::snprintf(orphan,sizeof(orphan),"netId=0 hp=11 actor=%llX",static_cast<unsigned long long>(enemy));
+    Check(std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[&](const auto& line){return line.find(orphan)!=std::string::npos;}) &&
+          std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& line){return line.find("path=frame-cap")!=std::string::npos;}),
+          "Bailey cap logs the fresh orphan netId HP actor and the capped replay path");
+    Put(image + offsets::OPEN_MENU, std::uint8_t{255}); ApplyMission(282);
+    Check(baileyEndCalls == 1, "Bailey capped end remains a one-shot after the hold clears");
 
     seed(); Put(status, std::int32_t{0});
     Check(MissionEndRosterReady(ReadMission(), image + 0x80000), "Bailey zero-HP native body permits end");
