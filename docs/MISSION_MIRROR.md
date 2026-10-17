@@ -70,6 +70,12 @@ games run the same mission file and its own mission hasn't ended:
   Trap 4/16 is the boss defeat: `0x3A3440(arg)` → `0x3A41E0(M, 0x10, arg)`,
   which plays `re_deadboss`. Shan-Yu's `MU09_MS108` ends this way (run
   `20261017-070818`, where the friend's copy of him otherwise stayed alive).
+  The replay covers every mission that ends through 4/16, not only Shan-Yu:
+  each boss defeat the host's hooks record is replayed on the friend. The
+  friend's own defeat flow runs natively, so it may also grant that boss's
+  defeat rewards in the friend's RAM. That is intended for co-op, since both
+  players beat the boss. Nothing is saved here. (Reviewed by Quill,
+  `d17016d`.)
   Trap 4/22 (`0x3A37A0(arg)`) ends it and fires signal 0xF. The client replays
   the same trap with the same argument once. After a replayed end or failure,
   every later end or failure of that mission is dropped, so it never ends twice.
