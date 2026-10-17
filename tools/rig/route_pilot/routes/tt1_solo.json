@@ -18,6 +18,12 @@
     {"do": "door", "to": [-2000, -330], "room": [2, 22], "timeoutSec": 15, "note": "Basement Hall 2/19 -> Basement Corridor 2/22; trigger near (-921, -502)"},
     {"do": "walk", "to": [-755, 104], "tol": 40, "timeoutSec": 15, "note": "corridor, in front of the north door"},
     {"do": "door", "to": [-755, 1800], "room": [2, 23], "timeoutSec": 15, "settleSec": 900, "clip": 30, "name": "door-corridor-to-pod-room",
-     "note": "Basement Corridor 2/22 -> 2/23; trigger near (-752, 556). The finale runs 23 -> 9 -> 23, then a native transition stays pending while open-menu id 10 shows (route-04); not yet identified or answered"}
+     "menus": {"10": ["confirm", "SPACE", "SPACE"]},
+     "note": "Basement Corridor 2/22 -> 2/23; trigger near (-752, 556). The finale runs 23 -> 9 -> 23, then the forced party screen (camp menu 10: 'Party Members have been switched. Party In: Donald Goofy', OK highlighted; route-05). OK, then Space Space closes the Party screen and the camp menu. Nothing is saved. Sora wakes in The Woods 2/14"},
+    {"do": "wait_room", "room": [2, 14], "timeoutSec": 120, "note": "The Woods; tutorial boxes follow, the walk nudges them away"},
+    {"do": "door", "to": [-300, -4500], "room": [2, 3], "timeoutSec": 30, "clip": 20, "name": "door-woods-to-alley",
+     "note": "The Woods 2/14 -> 2/3; trigger near (-371, -3474). The Hayner/Pence/Olette scene follows and ends in the Usual Spot 2/2"},
+    {"do": "wait_room", "room": [2, 2], "timeoutSec": 240},
+    {"do": "door", "to": [1800, 82], "room": [2, 3], "timeoutSec": 20, "note": "Usual Spot 2/2 (save point: no reaction key) -> Back Alley 2/3; trigger near (369, 83). Reaction 604 is offered there"}
   ]
 }

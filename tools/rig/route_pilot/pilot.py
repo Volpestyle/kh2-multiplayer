@@ -382,10 +382,24 @@ class Pilot:
             target = tuple(step["to"])
             want = tuple(step["room"]) if kind == "door" else None
             start = self.state()
+            still = (start["pos"], time.monotonic())  # last position and when it last changed
             while not expired():
                 s = self.state()
                 if want and (s["world"], s["room"]) == want:
                     break
+                if s["pos"] and still[0] and math.dist(s["pos"], still[0]) > 15:
+                    still = (s["pos"], time.monotonic())
+                elif s["free"] and time.monotonic() - still[1] > 1.5:
+                    # A tutorial box ("Roxas's abilities passed on to Sora") blocks movement while
+                    # the state still reads free (route-05). Enter dismisses it; in the field it is
+                    # attack, never the Save reaction (Triangle).
+                    self.kb.hold(set())
+                    self.kb.tap("confirm")
+                    still = (s["pos"], time.monotonic())
+                    self.write("nudge", pos=s["pos"])
+                    continue
+                if not still[0]:
+                    still = (s["pos"], still[1])
                 if not want and s["pos"] and math.hypot(target[0] - s["pos"][0], target[1] - s["pos"][2]) \
                         <= step.get("tol", 80):
                     break
@@ -406,7 +420,7 @@ class Pilot:
                 time.sleep(0.06)
             self.kb.hold(set())
             if want:  # story scenes after a door can run for minutes (the pod room finale)
-                self.settle(True, 2.0, time.monotonic() + float(step.get("settleSec", 300)))
+                self.settle(True, 2.0, time.monotonic() + float(step.get("settleSec", 300)), step.get("menus"))
             result = {"from": start["pos"], "to": self.state()["pos"]}
         elif kind == "hold":
             self.kb.hold(set(step["keys"]))
@@ -450,10 +464,14 @@ class Pilot:
             raise ValueError(f"unknown step {kind}")
         return result
 
-    def settle(self, advance: bool = True, calm: float = 2.0, deadline: float | None = None) -> None:
-        """Wait until the room is free for `calm` seconds, pressing confirm through dialog."""
+    def settle(self, advance: bool = True, calm: float = 2.0, deadline: float | None = None,
+               menus: dict | None = None) -> None:
+        """Wait until the room is free for `calm` seconds, pressing confirm through dialog.
+        `menus` maps a known open-menu id to the keys that answer it, pressed once
+        (route-05: the TT prologue ends in the forced party screen, menu 10)."""
         deadline = deadline or time.monotonic() + 300
         free_since, menu_since = None, None
+        menus = dict(menus or {})
         while time.monotonic() < deadline:
             s = self.state()
             if s["free"]:
@@ -469,6 +487,18 @@ class Pilot:
             # after the TT prologue finale). Record it and stop for a decision.
             if s["menu"] != 0xFF and not s["event"] and s["world"] != 0xFF:
                 menu_since = menu_since or time.monotonic()
+                keys = menus.pop(str(s["menu"]), None)
+                if keys is not None and time.monotonic() - menu_since > 3:
+                    self.capture(f"menu-{s['menu']}-before")
+                    for key in keys:
+                        self.kb.tap(key)
+                        time.sleep(1.0)
+                    self.capture(f"menu-{s['menu']}-after")
+                    self.write("menu", menu=s["menu"], keys=keys)
+                    menu_since = None
+                    continue
+                if keys is not None:
+                    menus[str(s["menu"])] = keys  # not yet settled for 3 s; keep it for the next pass
                 if time.monotonic() - menu_since > 15:
                     self.capture(f"menu-{s['menu']}")
                     raise Stuck(f"waiting on unknown menu {s['menu']}")
