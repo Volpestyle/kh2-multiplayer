@@ -27,12 +27,31 @@ int main(){
     check(!BaileyCreeperMission(BaileyLocation,"HB08_MS102.bar",true,1,2,true),"failed mission grants no authority");
     for(unsigned record=0;record<10;++record)
         check(BaileyCreeperGroup(BaileyLocation,808738658,BaileyCreeperHeader,BaileyCreeperRecords,record)==(record<5),"only five authored Creepers in header58");
+    // Bailey-08 measured all five native births after 3FE320 changed +0xE
+    // from the installed 0 to 1. This is activation state, not group identity.
+    auto activation=BaileyCreeperHeader;activation[14]=1;
+    for(unsigned record=0;record<5;++record) {
+        check(BaileyCreeperGroup(BaileyLocation,808738658,activation,BaileyCreeperRecords,record),"bailey-08 activated group admits each exact Creeper ordinal");
+        check(std::strcmp(sc::DescribeBaileyCreeperGroup(BaileyLocation,808738658,activation,BaileyCreeperRecords,record).reason,"ok")==0,"activation diagnostic agrees with admission");
+    }
     for(std::size_t at=0;at<BaileyCreeperHeader.size();++at)for(unsigned bit=0;bit<8;++bit){
         auto h=BaileyCreeperHeader;h[at]^=static_cast<std::uint8_t>(1u<<bit);
+        if(at==14 && bit==0)continue; // sole observed/native-proven runtime transition
         check(!BaileyCreeperGroup(BaileyLocation,808738658,h,BaileyCreeperRecords,0),"all header mutations refuse scope");
         const auto d=sc::DescribeBaileyCreeperGroup(BaileyLocation,808738658,h,BaileyCreeperRecords,0);
         check(std::strcmp(d.reason,"group-header")==0 && d.offset==static_cast<int>(at) && d.observed==h[at] &&
               d.expected==BaileyCreeperHeader[at],"refused header reports its exact first byte without relaxing the pin");
+    }
+    for(unsigned value=2;value<=255;++value) {
+        auto h=BaileyCreeperHeader;h[14]=static_cast<std::uint8_t>(value);
+        check(!BaileyCreeperGroup(BaileyLocation,808738658,h,BaileyCreeperRecords,0),"unknown activation state fails closed");
+    }
+    check(!BaileyCreeperGroup(BaileyLocation,808738658,std::span(activation).first(43),BaileyCreeperRecords,0),"short activated header refused");
+    std::vector<std::uint8_t> extraHeader(activation.begin(),activation.end());extraHeader.push_back(0);
+    check(!BaileyCreeperGroup(BaileyLocation,808738658,extraHeader,BaileyCreeperRecords,0),"long activated header refused");
+    for(std::size_t at=0;at<activation.size();++at)if(at!=14)for(unsigned bit=0;bit<8;++bit) {
+        auto h=activation;h[at]^=static_cast<std::uint8_t>(1u<<bit);
+        check(!BaileyCreeperGroup(BaileyLocation,808738658,h,BaileyCreeperRecords,0),"every other byte stays strict on the activated header");
     }
     for(std::size_t at=0;at<BaileyCreeperRecords.size();++at)for(unsigned bit=0;bit<8;++bit){
         auto r=BaileyCreeperRecords;r[at]^=static_cast<std::uint8_t>(1u<<bit);
@@ -61,10 +80,6 @@ int main(){
         check(pending && pending->sequence==8U+i && pending->netId==observedIds[i],"exact observed receipt reserved");
         check(replay.Commit(8U+i) && !replay.Reserve(808738658,58,i),"emitted occurrence is spent even when no action ticket follows");
     }
-    auto activation=BaileyCreeperHeader;activation[14]=1;
-    const auto d=sc::DescribeBaileyCreeperGroup(BaileyLocation,808738658,activation,BaileyCreeperRecords,0);
-    check(!BaileyCreeperGroup(BaileyLocation,808738658,activation,BaileyCreeperRecords,0) && d.offset==14 &&
-          d.observed==1 && d.expected==0,"activation-byte hypothesis stays refused and identifiable; not a measured run value");
     ob::Local local{};local.identity={1,2,3,4,5,317};local.point={1000,0,0};local.available=true;local.living=true;
     ob::Host host{8,317,{0,0,0},false,false,false};
     auto held=ob::Resolve(std::vector{local},std::vector{host},{1,4,10});check(held[0].id==0,"no point fallback for separated birth");
@@ -96,8 +111,12 @@ int main(){
     std::memcpy(h.file,missionFile,sizeof(missionFile));std::memcpy(f.file,missionFile,sizeof(missionFile));h.flags=f.flags=mr::kInUse;
     check(mr::Follows(h,f)&&!mr::Ended(h)&&!mr::Ended(f),"both Bailey peers start the same native mission");
     h.flags|=mr::kEnded;check(mr::HostEndedUnknown(h),"unknown engine end never fabricates a replay trap");
-    h.endTrap=3;check(!mr::HostEndedUnknown(h)&&mr::Ended(h)&&!mr::Ended(f)&&mr::Follows(h,f),"known host end still needs replay on friend");
-    f.flags|=mr::kEnded;check(mr::Ended(h)&&mr::Ended(f)&&!mr::Follows(h,f),"both native ends observed; no second replay");
-    check(mr::DropLocalCall(static_cast<std::size_t>(mr::EndTrapIndex(3)),false,false,true),"replayed completion blocks duplicate native end");
+    // Normal HB08 event2 selects4/3; its shared dispatch also contains4/16 and4/22.
+    for(const auto trap: {3,16,22}) {
+        h.endTrap=static_cast<std::uint8_t>(trap);f.flags=mr::kInUse;
+        check(!mr::HostEndedUnknown(h)&&mr::Ended(h)&&!mr::Ended(f)&&mr::Follows(h,f),"known host end still needs replay on friend");
+        f.flags|=mr::kEnded;check(mr::Ended(h)&&mr::Ended(f)&&!mr::Follows(h,f),"both native ends observed; no second replay");
+        check(mr::DropLocalCall(static_cast<std::size_t>(mr::EndTrapIndex(h.endTrap)),false,false,true),"replayed completion blocks duplicate native end");
+    }
     std::cout<<"Bailey Creeper authority: "<<(failures?"FAIL":"PASS")<<" ("<<failures<<" failures)\n";return failures?1:0;
 }

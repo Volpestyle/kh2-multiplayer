@@ -94,8 +94,9 @@ The new exception requires NOW `04/08 door0 map52 btl52 evt0`, an active native
 `HB08_MS102.bar`, a current admitted session, no transition, and the exact whole
 `b_40`/808738658 type2/header58 definition (ten records). Only ordinals0–4 are
 Creeper317; ordinals5–9 are Dusks and receive no new rights. The full44-byte
-header and640 record bytes, indexed controller/record membership, actor handle,
-objentry and status roots are checked again at use. No new wire fields are added.
+header (with +0xE treated as bounded runtime activation) and640 record bytes,
+indexed controller/record membership, actor handle, objentry and status roots
+are checked again at use. No new wire fields are added.
 
 Only a successful native return around an authenticated one-use host emission
 can establish the client's Creeper correspondence. The receipt's original
@@ -187,12 +188,40 @@ received and emitted all five header58 Creepers but retained no317 action
 birth tickets. Native returned-root capture did not report refusal. The old
 logs cannot distinguish the mission scope from native group/root revalidation;
 they contain no live header/record bytes, so no exact sub-check is established.
-The sixteen-line, package/header-scoped `[bailey317] admission` diagnostic now
+The sixteen-line, package/header-scoped `[bailey317] admission` diagnostic
 reports the first failed mission/native check and the first differing definition
-byte, or changed birth fields. It grants no permission and leaves every pin,
-lease, denylist and default unchanged. In particular header activation byte0xE
-is still compared exactly; changing it to1 is an offline negative control,
-not a measurement from that run. The logged five receipts replay as spent in
-`BaileyCreeperAuthorityTest`; all5472 definition-bit mutations remain refused
-and report the correct byte. A new reviewed live probe is required to name the
-actual refusal before changing authority.
+byte, or changed birth fields. It grants no permission. Bailey-08
+(`20261017-073817_net_hb1_bailey_1`, `8436a98`) pins the refusal on all five
+receipts: metadata and mission pass; native comparison reports
+`group-header offset=14 observed=1 expected=0`. No317 action ticket was created,
+so the pause gate stopped the run. Neither peer has a retired line or mission
+end. Counts6/6 hide different populations/HP. The report and opening combat
+clips are on VUH-2343, with unchanged saves and owned process closure.
+
+Read-only Ghidra confirms `3FE320` loads the header from `controller+8`; its
+type2 branch writes `header[0xE]=1` when zero, then calls `3FE6F0` to emit.
+Installed header58 has0 there: this is native activation state, separate from
+group identity. `BaileyCreeperHeaderMatches` excludes **only +0xE** from the
+installed definition comparison and bounds its value to0 or1. All43 other
+header bytes, all640 ordered record bytes, exact room/package/ordinal, native
+roots and lifecycle still qualify. Full raw header equality remains in the
+native before/after bookend, so a concurrent activation change still refuses.
+The new regression fails for all five activated ordinals with the old comparator,
+then passes with the fix. Values2..255 and every other header/record bit mutation
+remain refused. Quill review and live mission end plus parity remain required
+before landing; the global denylist and defaults are unchanged.
+
+### Bailey mission-end dispatch
+
+Read-only extraction of installed `msn/us/HB08_MS102.bar` (SHA256
+`c7d844eba9e321515b4af0c73d57a61b378cb2b35ab206a1fbce3290f3cc8ca1`)
+using pinned OpenKH BDX descriptors shows normal completion at **4/3**:
+trigger10's event2 stores selector1 at L68/L71, and the mission thread dispatches
+selector1 to `syscall4,3` at L210. The common dispatcher also has selector2
+to4/16 at L225, selector3 to failure4/11, and selector4 to4/22. No decoded
+writer selects2 in this script; that branch's existence does not prove Bailey
+completes through4/16. Lio's global4/16 replay is now in the base, and the scoped
+portable test covers all three recognized end traps. The fixture still requires
+one actual host end, exactly one friend replay, ended flags on both, and empty
+matching enemy HP/counts. The next live run must report the actual trap;
+no Bailey end has yet been observed.

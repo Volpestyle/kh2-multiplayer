@@ -46,10 +46,19 @@ inline bool Bailey(const std::array<std::uint8_t,10>& location,std::uint32_t key
         Equal(header,BaileyHeader) && Equal(records,BaileyRecords);
 }
 // VUH-2343: definition admission does not supply a birth or action permission.
+// 3FE320's type2 branch sets header+0xE to1 before 3FE6F0 emits. Bailey-08
+// measured that transition: retain the raw byte in native bookends, but exclude
+// only this bounded runtime state from the installed definition comparison.
+inline bool BaileyCreeperHeaderMatches(std::span<const std::uint8_t> header) {
+    if(header.size()!=BaileyCreeperHeader.size() || header[0xE]>1)return false;
+    for(std::size_t i=0;i<header.size();++i)
+        if(i!=0xE && header[i]!=BaileyCreeperHeader[i])return false;
+    return true;
+}
 inline bool BaileyCreeperGroup(const std::array<std::uint8_t,10>& location,std::uint32_t key,
                                std::span<const std::uint8_t> header,std::span<const std::uint8_t> records,unsigned ordinal) {
     return location==BaileyLocation && key==808738658 && ordinal<5 &&
-        Equal(header,BaileyCreeperHeader) && Equal(records,BaileyCreeperRecords);
+        BaileyCreeperHeaderMatches(header) && Equal(records,BaileyCreeperRecords);
 }
 inline bool BaileyCreeperMission(const std::array<std::uint8_t,10>& location,std::string_view file,
                                  bool active,std::uint32_t flags,std::uint32_t result,bool terminal) {

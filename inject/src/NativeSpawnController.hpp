@@ -47,6 +47,7 @@ inline BaileyCreeperDiagnostic DescribeBaileyCreeperGroup(const std::array<std::
     if(key!=808738658){d.reason="group-key";return d;}
     if(ordinal>=5){d.reason="group-ordinal";return d;}
     for(unsigned i=0;i<header.size();++i)if(header[i]!=routespawn::BaileyCreeperHeader[i]) {
+        if(i==0xE && header[i]<=1)continue; // native runtime activation, not definition identity
         d.reason="group-header";d.offset=static_cast<int>(i);
         d.observed=header[i];d.expected=routespawn::BaileyCreeperHeader[i];return d;
     }
