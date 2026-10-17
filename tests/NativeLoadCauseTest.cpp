@@ -104,6 +104,24 @@ void TestBlockedNativeExitMatch() {
     w::IssueHostTransition();
     Check(warpCalls == 1 && w::g_transitionPending && !w::g_blockedExit && p::g_desiredApplied,
           "the host target issues, with progress applied, at the client's own matching blocked exit");
+
+    // Only the event checks are relaxed: every other gate still holds at a matching, current exit.
+    const auto atMatchingExit = [&](const char* label, auto perturb) {
+        Start(); auto c = Context(); auto sc = Scope();
+        w::QueueHostTransition(arrivalTarget, c, &sc, nullptr, nullptr);
+        Put(image + offsets::CUTSCENE_STATE, std::int32_t{2});
+        w::LocationPacket match {}; match.world = 5; match.room = 2; match.door = 3;
+        w::g_blockedExit = match; w::g_blockedExitLoad = w::g_loadSerial;
+        perturb();
+        w::IssueHostTransition();
+        Check(warpCalls == 0 && !p::g_desiredApplied, label);
+    };
+    atMatchingExit("an open menu still blocks issue and progress at a matching exit",
+                   [] { Put(image + offsets::OPEN_MENU, std::uint8_t{0x0A}); });
+    atMatchingExit("leaving the field still blocks issue and progress at a matching exit",
+                   [] { Put(image + offsets::IN_FIELD, std::uint8_t{0}); });
+    atMatchingExit("a pending transition still blocks issue and progress at a matching exit",
+                   [] { w::g_transitionPending = true; });
 }
 void TestRetireSupersedeAndDrift() {
     Start(); auto context = Context(); auto scope = Scope();

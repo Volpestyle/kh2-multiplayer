@@ -277,7 +277,8 @@ void IssueHostTransition() {
     if (!g_hostQueued || !g_hostGeneration ||
         enemysync::WorldSessionGeneration() != g_hostGeneration || g_transitionPending) return;
     const bool atNativeExit = BlockedExitMatchesHost();
-    if (!atNativeExit && !SafeToWarp()) return;
+    const bool safe = SafeToWarp();  // always: it also refreshes the channel's diagnostics
+    if (!atNativeExit && !safe) return;
     // Room initialization reads programs and chest flags from SAVE. Wait for
     // the complete host snapshot and apply it before starting the native load.
     if (!progresssync::ApplyAtRoomBoundary(g_hostGeneration, atNativeExit)) return;
