@@ -12,7 +12,7 @@
     {"do":"runtime","instance":0,"role":"player"},
     {"do":"runtime","instance":1,"role":"friend1"},
     {"do":"wait_until","expr":"all((bridge(i).get('puppet0') or {}).get('active') for i in range(2))","timeoutMs":30000},
-    {"do":"warp","instance":0,"world":4,"room":9,"door":0,"map":1,"btl":1,"evt":0},
+    {"do":"warp","instance":0,"world":4,"room":9,"door":2,"map":1,"btl":1,"evt":0},
     {"do":"transition_check","instances":[0,1],"target":[4,9],"as":"borough_arrival","timeoutMs":30000,"capture":true},
     {"do":"save","as":"borough_entry","expr":"[{'location':location(i),'actors':actors(i)} for i in range(2)]"},
     {"do":"assert","expr":"all(location(i)==[4,9,2,1,1,0] for i in range(2))","message":"Both peers must use the installed first ambient Borough battle program"},
