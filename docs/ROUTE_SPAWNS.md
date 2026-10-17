@@ -67,8 +67,17 @@ old quarantine claim. Pointer reuse alone never supplies that permission.
 `net_hb1_bailey.json` requires both missing-party bindings before combat, native
 Leon, private-status health, enemy HP parity, actual `HB08_MS102.bar` start/end,
 and a subsequent GoA arrival. It uses development warps and player protection.
-Its existing `04/0A` control proves clone arrival, not Shadow grounding: installed
-hb10 contains no Shadow302 spawn group. First-visit grounding remains unqualified.
+Its existing `04/0A` control proves clone arrival, not Shadow grounding. The
+retained area-title capture identifies that room as **Marketplace**, despite
+older fixtures calling it Borough; installed hb10 has no Shadow302 spawn group.
+The targeted `net_hb1_borough_grounding.json` instead uses hb09, `04/09`, ambient
+map/battle1 and event0: installed battle1 selects b_10+b_00, including nine
+Shadow302 records at several heights. It requires nonempty matching counts/HP,
+native walking, identity/position samples, both clips and egress. The final
+grounding verdict also requires identity-joined height analysis and visual
+review; an empty Marketplace arrival cannot meet it. This first-visit ambient
+check is separate from scripted HB09_MS101 at battle51 and D15 real-door play.
+First-visit grounding remains unqualified until that live evidence passes.
 F1 records every Constructor/Allocate entry under the missing scope, including
 caller, key and form. Settled Bailey gameplay logs the clone's controller and
 retained-record roots every60 owner frames; the fixture rejects any failed
