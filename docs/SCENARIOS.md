@@ -1836,9 +1836,15 @@ Never save in-game without James's explicit approval.
 ```
 
 `"instance": N` (default 0) on a step picks the instance; `boot`/`launch`
-append a new one. `"protect": [N]` keeps that instance's Sora on team 0 (no
-attack hits him) for the whole run, so combat rooms don't end in a game over.
-The protector writes team 0 to the first enumerated `P_EX100` each second.
+append a new one. `"protect": [N]` keeps that instance's own player on team 0
+(no ordinary attack hits it) for the whole run, so combat rooms don't end in a
+game over. It is a single-PC fixture aid for an unplayed stand-in friend; the
+two-PC route uses none, and reports say "stand-in friend protected". Each
+second the protector writes team 0 to the actor that instance's camera follows
+(Roxas `P_EX110` in the TT prologue, Sora later; never a remote player's clone).
+A pilot-played instance is never protected: `pilot` refuses a protected seat
+and `protect` refuses a piloted one. Scripted boss hits can still reach team 0
+(Axel, VUH-2364).
 `{"do":"protect","on":false}` only stops that polling; it does not restore
 the previous team value. An incoming-damage test must use a fresh naturally
 damageable Sora and verify its canonical identity instead of reusing a

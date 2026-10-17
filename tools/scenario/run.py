@@ -236,6 +236,8 @@ class Context:
         self.saved: dict = {}
         self.artifacts: list[str] = []
         self.protect: set[int] = set()
+        self.piloted: set[int] = set()  # instances a route pilot plays; never protected
+        self.protected_actors: dict[int, set[str]] = {}  # what protect actually covered, for the report
         self.processes: list[tuple] = []  # (name, Popen, log file) to stop at the end
         self.relay_port = "7782"
         self.player_env: dict[str, str] = {}  # scenario "playerDefaults": the package's KH2COOP_ policy
@@ -371,18 +373,38 @@ class Context:
         # Helpers go in globals: comprehensions inside an expression only see globals.
         return eval(expr, {"__builtins__": {}, **self.namespace()})  # noqa: S307 (repo-owned scenarios)
 
-    # ---- Sora protection (team 0 is in no attack's hit mask) ----
+    # ---- Stand-in friend protection (team 0 is in no attack's hit mask) ----
+    # A single-PC fixture aid only: it protects the player actor an unplayed
+    # stand-in instance controls (Roxas P_EX110 in the TT prologue, Sora later),
+    # never a pilot-driven instance. The two-PC route uses no protect.
+    def controlled_actor(self, index: int) -> dict | None:
+        """The actor the instance's camera follows (CAMERA_STRUCT+0x50), i.e. its
+        own player, never a puppet clone of a remote player."""
+        sample = kh2ctl("peek", "--rva", "0x718CB0:u32,0x718CB4:u32", pid=self.inst(index).pid,
+                        check=False, timeout=10)["samples"][0]
+        followed = sample["0x718CB0"] | sample["0x718CB4"] << 32
+        return next((a for a in self.actors(index)
+                     if int(a["address"], 16) == followed and a["name"].startswith("P_")), None)
+
     def _protect_loop(self) -> None:
         while not self._stop.wait(1.0):
-            for index in list(self.protect):
-                try:
-                    inst = self.instances[index]
-                    sora = next(a for a in self.actors(index) if a["name"] == "P_EX100")
-                    addr = int(sora["address"], 16) + 0x4DC
-                    kh2ctl("poke", "--addr", f"0x{addr:X}", "--type", "u32", "--value", "0",
-                           pid=inst.pid, check=False)
-                except Exception:  # noqa: BLE001 - best effort; loading rooms have no Sora
-                    pass
+            self.protect_once()
+
+    def protect_once(self) -> None:
+        for index in list(self.protect):
+            if index in self.piloted:
+                continue  # refused at the pilot step; never protect the playing seat
+            try:
+                inst = self.instances[index]
+                actor = self.controlled_actor(index)
+                if actor is None:
+                    continue  # loads and cutscenes have no followed player
+                addr = int(actor["address"], 16) + 0x4DC
+                kh2ctl("poke", "--addr", f"0x{addr:X}", "--type", "u32", "--value", "0",
+                       pid=inst.pid, check=False)
+                self.protected_actors.setdefault(index, set()).add(actor["name"])
+            except Exception:  # noqa: BLE001 - best effort; loading rooms have no player
+                pass
 
     def close(self) -> None:
         self._stop.set()
@@ -833,6 +855,8 @@ def step_save(ctx: Context, step: dict) -> dict:
 def step_protect(ctx: Context, step: dict) -> dict:
     index = step.get("instance", 0)
     ctx.inst(index)
+    if step.get("on", True) and index in ctx.piloted:
+        raise StepFailed(f"instance {index} is played by the route pilot; protect is for an unplayed stand-in only")
     (ctx.protect.add if step.get("on", True) else ctx.protect.discard)(index)
     return {}
 
@@ -1198,6 +1222,9 @@ def step_pilot(ctx: Context, step: dict) -> dict:
     either a `route` file or `teach` commands from a mailbox directory, for at
     most `seconds`. Its key-ups are re-sent afterwards even if it was killed."""
     inst = ctx.inst(step.get("instance", 0))
+    if inst.index in ctx.protect:
+        raise StepFailed(f"instance {inst.index} is protected; the route pilot never plays a protected seat")
+    ctx.piloted.add(inst.index)
     name = step.get("name", "pilot")
     out = ctx.run_dir / name
     cmd = [sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--out", str(out),
@@ -5024,6 +5051,9 @@ def run_scenario(path: Path, attempt: int) -> dict:
             ctx.artifacts.append(summary["path"])
         report["seconds"] = round(time.monotonic() - t0, 1)
         report["instances"] = [inst.pid for inst in ctx.instances]
+        if ctx.protect or ctx.protected_actors:
+            report["standInProtected"] = {"label": "stand-in friend protected", "instances": sorted(ctx.protect),
+                                          "actors": {str(i): sorted(n) for i, n in ctx.protected_actors.items()}}
         if total_segments:
             passed = [s["name"] for s in segments if s["status"] == "pass"]
             report["route"] = {"segments": total_segments, "entered": len(segments), "passed": len(passed),
@@ -5040,6 +5070,10 @@ def run_scenario(path: Path, attempt: int) -> dict:
 def render_md(report: dict) -> str:
     lines = [f"# {report['scenario']} (attempt {report['attempt']}): {report['status'].upper()}", "",
              f"Started {report['started']}, {report.get('seconds', '?')} s, instances {report.get('instances')}.", ""]
+    if report.get("standInProtected"):
+        protected = report["standInProtected"]
+        lines += [f"**{protected['label']}** (single-PC fixture aid, team 0): instances {protected['instances']}, "
+                  f"actors {json.dumps(protected['actors'], sort_keys=True)}. The pilot-played seat is never protected.", ""]
     if report.get("desyncCollection"):
         diagnostic = report["desyncCollection"]
         lines += [f"Automatic desync collection: **{diagnostic['collectionStatus'].upper()}** (separate from scenario step status).", ""]
