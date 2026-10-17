@@ -55,6 +55,7 @@ def summarize(values):
 
 def evaluate(host, friend):
     keys = host["shadowKeys"] & friend["shadowKeys"]
+    missing_keys = sorted(host['shadowKeys'] ^ friend['shadowKeys'])
     ordered = {key: sorted(rows) for key, rows in host["host"].items()}
     pairs = []; unavailable = []; refused = {"undriven":0,"blend":0}; latency = []
     clocks = sorted((r["qpc"], r["frame"]) for r in host["latency"] if r["role"] == "host")
@@ -103,12 +104,12 @@ def evaluate(host, friend):
         by_id[f"{key[0]}/{key[1]}"]={"matched":len(rows),"rest":len(ground),
             "maxAbsY":max((abs(r["dy"]) for r in rows),default=None),
             "maxRestAbsY":max((abs(r["dy"]) for r in ground),default=None)}
-    pose_pass = bool(by_id) and all(r["matched"]>=30 and r["maxAbsY"]<=5 for r in by_id.values())
-    rest_pass = bool(by_id) and all(r["rest"]>=20 and r["maxRestAbsY"]<=2 for r in by_id.values())
+    pose_pass = bool(by_id) and not missing_keys and all(r["matched"]>=30 and r["maxAbsY"]<=5 for r in by_id.values())
+    rest_pass = bool(by_id) and not missing_keys and all(r["rest"]>=20 and r["maxRestAbsY"]<=2 for r in by_id.values())
     ls = {k:summarize([r[k] for r in latency]) for k in ("freshnessFrames","bufferFrames","totalFrames")}
     extra = ls['totalFrames'].get('median',6)-6 if latency else None
     latency_status = 'UNAVAILABLE' if extra is None else 'OPEN_EXTRA_DELAY' if extra>1 else 'NO_EXTRA_DELAY'
-    return {"posePass":pose_pass,"groundRestPass":rest_pass,"byNetId":by_id,"unavailable":unavailable,
+    return {"posePass":pose_pass,"groundRestPass":rest_pass,"byNetId":by_id,"missingKeys":missing_keys,"unavailable":unavailable,
         "refused":refused,"pairs":pairs,"latency":{"configuredDelay":6,"components":ls,"extraMedianFrames":extra,"status":latency_status,
             "extraDelayFinding":"OPEN: quantify observed total minus configured6 separately; it never changes grounding tolerances",
             "samples":latency,"scope":"same-PC QPC only; freshness includes publish/pump/transport; buffer includes cursor hysteresis"},
@@ -130,6 +131,8 @@ def controls():
     assert not evaluate(parse(h),parse(c.replace('driven=1','driven=0')))["posePass"]
     assert not evaluate(parse(h),parse(c.replace('blend=0','blend=1')))["posePass"]
     assert not evaluate(parse(h),parse(c.replace('epoch=2','epoch=1')))["posePass"]
+    unpaired=parse(h);unpaired['shadowKeys'].add((2,3))
+    assert not evaluate(unpaired,parse(c))['posePass']
     assert not evaluate(parse(h),parse(''))["posePass"]
     assert not evaluate(parse(h.replace('hostFrame=1','hostFrame=9')),parse(c))["posePass"]
     # Perfectly matching airborne motion cannot stand in for a rest window.
@@ -139,7 +142,7 @@ def controls():
     for row in moving_c['client']:row['position'][1]=-100-row['hostFrame']
     airborne=evaluate(moving_h,moving_c)
     assert airborne['posePass'] and not airborne['groundRestPass']
-    print(json.dumps({"controls":"PASS","cases":["matched-floor","extra5-explicit","offset20","undriven","blended","wrong-epoch","empty","missing-brackets","airborne-not-rest"]}))
+    print(json.dumps({"controls":"PASS","cases":["matched-floor","extra5-explicit","offset20","undriven","blended","wrong-epoch","missing-actor","empty","missing-brackets","airborne-not-rest"]}))
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--host',type=Path);ap.add_argument('--friend',type=Path)
