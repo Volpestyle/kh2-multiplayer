@@ -752,6 +752,10 @@ def run_route(pilot: Pilot, route: dict, first: int) -> int:
     while i < len(steps):
         step = steps[i]
         pilot.write("step", index=i, step=step)
+        if step["do"] == "stop":  # a parked route tail: the steps after it are kept, not run
+            pilot.write("stopped", index=i, reason=step.get("note", ""))
+            print(json.dumps({"ok": True, "steps": i - first, "retries": retries, "stoppedAt": i}))
+            return 0
         t0 = time.monotonic()
         try:
             result = pilot.run_step(step)

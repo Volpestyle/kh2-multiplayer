@@ -46,6 +46,7 @@
     {"do": "walk", "to": [300, 2200], "tol": 120, "timeoutSec": 10},
     {"do": "walk", "to": [371, 3300], "tol": 100, "timeoutSec": 10},
     {"do": "walk", "to": [483, 3660], "tol": 80, "timeoutSec": 10, "note": "the street's north end, by the shuttered garage"},
+    {"do": "stop", "note": "Parked short of 2/8 (VUH-2340): KH2 crashed in clr.dll in the forced battle there in route-08 and route-09, with A-Volute Nahimic .NET modules injected. Remove this step once that is resolved; the door and fight below are ready"},
     {"do": "door", "to": [1700, 3600], "room": [2, 8], "timeoutSec": 10, "clip": 25, "name": "door-heights-to-plaza",
      "note": "Station Heights 2/6 -> 2/8, east from the north end; trigger near (695, 3578) (route-09; approaching from the south misses it). An event, then a forced battle (status 2)"},
     {"do": "fight", "timeoutSec": 300, "clip": 30, "name": "fight-station-plaza", "retryFrom": 0,
