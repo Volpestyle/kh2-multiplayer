@@ -1,0 +1,254 @@
+{
+  "name": "net_lod_morale_spawn_probe",
+  "description": "VUH-2352 diagnostic on protocol23 player defaults: reuse the landed MU01_MS102 morale run, retain exact late-wave generated-wrapper receipts from the scoped read-only observer, then require enemy parity. No spawn/controller admission, point, mission or save logic is changed. This is development with two local instances and a host warp; it is not D15 native-door acceptance.",
+  "playerDefaults": true,
+  "protect": [
+    0,
+    1
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay",
+      "port": 27803,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all((bridge(i).get('puppet0') or {}).get('active') for i in range(2))",
+      "timeoutMs": 30000,
+      "pollMs": 1000
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 8,
+      "room": 1,
+      "door": 0,
+      "map": 68,
+      "btl": 68,
+      "evt": 0
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)[:2]==[8,1] and location(1)[:2]==[8,1]",
+      "timeoutMs": 45000
+    },
+    {
+      "do": "wait_until",
+      "expr": "mission(0) and mission(1) and mission(0)['file']==mission(1)['file']",
+      "timeoutMs": 20000
+    },
+    {
+      "do": "wait",
+      "ms": 2500
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "confirm",
+      "times": 2,
+      "gapMs": 700
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "confirm",
+      "times": 2,
+      "gapMs": 700
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[mission-mirror] client ready',1)==1 and log_count('[mission-mirror] client follow',1)>=1",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "save",
+      "as": "mission_start",
+      "expr": "[mission(0), mission(1)]"
+    },
+    {
+      "do": "checkpoint",
+      "name": "1 Morale fight MU01_MS102: the friend shows the host's gauge"
+    },
+    {
+      "do": "fight",
+      "instances": [
+        0,
+        1
+      ],
+      "seconds": 60,
+      "as": "fight1",
+      "sample": {
+        "expr": "[mission(0), mission(1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 12,
+          "fps": 15,
+          "name": "morale_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 12,
+          "fps": 15,
+          "name": "morale_friend"
+        }
+      ]
+    },
+    {
+      "do": "save",
+      "as": "fight1_samples_pairs",
+      "expr": "[[round(p[0]['gauges'][0]['value'],2), round(p[1]['gauges'][0]['value'],2)] for p in [s['value'] for s in saved['fight1_samples'] if 'value' in s and s['value'][0] and s['value'][1] and s['value'][0]['file']==s['value'][1]['file'] and not (s['value'][1]['flags'] & 0x14)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['fight1_samples_pairs'])>=10",
+      "message": "too few samples with the same mission on both games"
+    },
+    {
+      "do": "assert",
+      "expr": "sum(1 for h,f in saved['fight1_samples_pairs'] if abs(h-f)<=1.0)>=0.9*len(saved['fight1_samples_pairs'])",
+      "message": "the friend's gauge did not follow the host's (more than 10% of samples off by over 1.0)"
+    },
+    {
+      "do": "save",
+      "as": "host_gauge_values",
+      "expr": "sorted(set(h for h,f in saved['fight1_samples_pairs']))"
+    },
+    {
+      "do": "checkpoint",
+      "name": "2 The mission ends the same way on both"
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "seconds": 3,
+      "fps": 12,
+      "name": "morale_later_wave_friend"
+    },
+    {
+      "do": "fight",
+      "instances": [
+        0
+      ],
+      "seconds": 60,
+      "as": "fight2",
+      "sample": {
+        "expr": "[mission(0), mission(1)]",
+        "everyMs": 1000
+      }
+    },
+    {
+      "do": "wait_until",
+      "expr": "(not mission(0) or (mission(0)['flags'] & 0x14)==0x14)",
+      "timeoutMs": 30000,
+      "pollMs": 1000
+    },
+    {
+      "do": "wait",
+      "ms": 4000
+    },
+    {
+      "do": "save",
+      "as": "mission_end",
+      "expr": "[mission(0), mission(1), location(0), location(1)]"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "end_host"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "end_friend"
+    },
+    {
+      "do": "assert",
+      "expr": "not (saved['mission_end'][0] and saved['mission_end'][0]['result']==2) and not (saved['mission_end'][1] and saved['mission_end'][1]['result']==2)",
+      "message": "a mission failed during the success run"
+    },
+    {
+      "do": "assert",
+      "expr": "(not saved['mission_end'][1]) or (saved['mission_end'][1]['flags'] & 0x14)==0x14 or saved['mission_end'][1]['file']!=saved['mission_start'][1]['file']",
+      "message": "the friend's mission did not end with the host's"
+    },
+    {
+      "do": "save",
+      "as": "mirror_counts",
+      "expr": "[log_count('[mission-mirror] host frame',0), log_count('[mission-mirror] client sec following=1',1), log_count('[mission-mirror] client-refused',1), log_count('[mission-mirror] host end trap',0), log_count('[mission-mirror] client end like the host',1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['mirror_counts'][2]==0",
+      "message": "the mission mirror refused a pin on the friend"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['mirror_counts'][3]>=1 and saved['mirror_counts'][4]>=1",
+      "message": "the host's end was not replayed on the friend"
+    },
+    {
+      "do": "save",
+      "as": "enemies_end",
+      "expr": "[enemy_hps(0), enemy_hps(1)]"
+    },
+    {
+      "do": "save",
+      "as": "late_wave_actors",
+      "expr": "[actors(i) for i in range(2)]"
+    },
+    {
+      "do": "save",
+      "as": "late_wave_observer_counts",
+      "expr": "[log_count('[morale-wave-spawn] observation-only=1 after=1',i) for i in range(2)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(n>0 for n in saved['late_wave_observer_counts'])",
+      "message": "Both roles must reach an observed late-wave native wrapper; otherwise this probe did not qualify its target"
+    },
+    {
+      "do": "assert",
+      "expr": "enemy_hps(0)==enemy_hps(1)",
+      "message": "Friend-only or missing later-wave enemies remain; inspect exact native generated-wrapper records and host identities"
+    }
+  ]
+}

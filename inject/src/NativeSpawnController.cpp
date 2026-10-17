@@ -1702,6 +1702,50 @@ void ObserveBaileyPlayer(const void* record, void* controller, TraceWrapper wrap
         Field<std::uint16_t>(header.data(), 4), native.spawnArray == reinterpret_cast<uintptr_t>(record) ? 1u : 0u, recordHex);
 }
 
+// VUH-2352: observe only the installed MU01_MS102 late-wave definitions.
+// Unsupported map/NPC controllers retain their existing native behavior.
+bool ObserveMoraleWave(const void* record, void* controller, const float* point,
+                       TraceWrapper wrapper, uintptr_t caller, const Qualification& q,
+                       unsigned role, const EmissionUpdate* update, void* actor, bool after) {
+    if (!g_log) return false;
+    std::array<std::uint8_t,10> now {};
+    constexpr std::array<std::uint8_t,10> morale {8,1,0,0,68,0,68,0,0,0};
+    Controller native {};
+    std::array<std::uint8_t,0x2C> header {};
+    std::array<std::uint8_t,64> bytes {};
+    if (!CopyNative(g_exeBase+offsets::NOW,now.data(),now.size()) || now!=morale ||
+        !ReadNative(reinterpret_cast<uintptr_t>(controller),native) ||
+        !CopyNative(native.header,header.data(),header.size()) ||
+        !CopyNative(reinterpret_cast<uintptr_t>(record),bytes.data(),bytes.size())) return false;
+    const auto id=Field<std::uint16_t>(header.data(),2);
+    if (!((native.key==0x70345F62 && (id==978 || id==999)) || // b_4p
+          (native.key==0x73345F62 && id==1007)) ||          // b_4s
+        bytes[0x1C]!=2 || bytes[0x1D]!=1) return false;
+    static std::atomic<unsigned> entries {0};
+    if (!after && entries.fetch_add(1,std::memory_order_relaxed)>=64) return false;
+    std::array<float,4> generated {};
+    const bool pointRead=wrapper==TraceWrapper::Generated &&
+        CopyNative(reinterpret_cast<uintptr_t>(point),generated.data(),sizeof(generated));
+    uintptr_t attachedController=0,attachedRecord=0;
+    const bool attached=after && actor &&
+        ReadNative(reinterpret_cast<uintptr_t>(actor)+0x9E8,attachedController) &&
+        ReadNative(reinterpret_cast<uintptr_t>(actor)+0x9F0,attachedRecord);
+    const auto address=reinterpret_cast<uintptr_t>(record);
+    const bool indexed=address>=native.spawnArray && (address-native.spawnArray)%64==0 &&
+        (address-native.spawnArray)/64<Field<std::uint16_t>(header.data(),4);
+    g_log("[morale-wave-spawn] observation-only=1 after=%u role=%u ownerThread=%u caller=%llX wrapper=%s transition=%u load=%u key=%u header=%u type=%u records=%u index=%d objectId=%u mode=%u positionMode=%u qualified=%u reason=%s enclosed=%u pointRead=%u point=(%.3f,%.3f,%.3f,%.3f) actor=%llX attached=%u controller=%llX record=%llX",
+        after?1u:0u,role,IsDiagnosticGameThread()?1u:0u,static_cast<unsigned long long>(caller-g_exeBase),
+        wrapper==TraceWrapper::Generated?"generated":"fixed",warp::TransitionSerial(),warp::LoadSerial(),
+        native.key,id,header[0],Field<std::uint16_t>(header.data(),4),
+        indexed?static_cast<int>((address-native.spawnArray)/64):-1,Field<std::uint32_t>(bytes.data(),0),
+        bytes[0x1C],bytes[0x1D],q.scope==Scope::Qualified?1u:0u,q.reason,
+        update && update->available && update->controller==reinterpret_cast<uintptr_t>(controller)?1u:0u,
+        pointRead?1u:0u,generated[0],generated[1],generated[2],generated[3],
+        reinterpret_cast<unsigned long long>(actor),attached?1u:0u,
+        static_cast<unsigned long long>(attachedController),static_cast<unsigned long long>(attachedRecord));
+    return true;
+}
+
 void* PolicyWrapper(const void* record, void* controller, const float* point, TraceWrapper wrapper, uintptr_t caller) {
     const auto entryError = GetLastError();
     ObserveBaileyPlayer(record, controller, wrapper, caller);
@@ -1718,6 +1762,7 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
         if (qualified) index = static_cast<std::uint16_t>((address - q.spawnArray) / 0x40);
     }
     const auto* update = g_emission ? g_emissionStorage.Current() : nullptr;
+    const bool observeMorale = ObserveMoraleWave(record,controller,point,wrapper,caller,q,role,update,nullptr,false);
     if (qualified && role == 2 && !update) { SetLastError(entryError); return nullptr; }
     const bool enclosed = qualified && update && update->available && update->controller == reinterpret_cast<uintptr_t>(controller);
     if (qualified && !enclosed && g_log) {
@@ -1739,6 +1784,7 @@ void* PolicyWrapper(const void* record, void* controller, const float* point, Tr
             wrapper==TraceWrapper::Fixed ? CallOriginalWrapper(record,controller) : CallOriginalGenerated(record,controller,point);
         returned=true;
         const auto nativeError=GetLastError();
+        if (observeMorale) ObserveMoraleWave(record,controller,point,wrapper,caller,q,role,update,actor,true);
         if(enclosed && actor && g_role()==role && g_emissionStorage.Same(update) && SameStamp(q.stamp)) {
             const auto birth=definitionRead ? CaptureEmissionBirth(actor,q,record,before) : EmissionBirth{};
             static unsigned unavailableBirthLogs=0;
