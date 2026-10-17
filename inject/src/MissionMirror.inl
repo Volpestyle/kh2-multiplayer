@@ -31,6 +31,14 @@ std::uint32_t g_missionHostLoad{},g_missionLocalLoad{};  // warp::LoadSerial(): 
 // Client: the mission's own end this game dropped while following, run natively if the host's end never comes.
 int g_missionDroppedEnd=-1;
 std::uint32_t g_missionDroppedArg{};
+bool g_missionFallbackPending{},g_missionHostFailedSeen{};  // this mission: a release awaits the host's outcome; the host was seen failed
+// This game's mission, read again right before a replay: the setters above may have let its own script end it.
+bool LocalMissionEnded(bool failedOnly) {
+    uintptr_t base=0;std::uint32_t flags=0,result=0;
+    if(!ReadNative(g_exeBase+MR::kMissionPtr,base) || !base || !ReadNative(base+MR::kFlags,flags) ||
+       !ReadNative(base+MR::kResult,result))return true;  // unreadable: never call into it
+    return failedOnly ? result==MR::kFailedResult : (flags&MR::kEnded)==MR::kEnded;
+}
 char g_missionHostFile[MR::kFileBytes]{},g_missionLocalFile[MR::kFileBytes]{};
 std::uint8_t g_missionHostEndTrap{};
 std::uint32_t g_missionHostEndArg{};
@@ -284,7 +292,7 @@ void ApplyMission(std::uint32_t frame) {
     if(base!=g_missionLocalBase || load!=g_missionLocalLoad || std::strncmp(local.file,g_missionLocalFile,MR::kFileBytes)) {
         // A new mission here (or a retry after a reload): nothing of it has been replayed or dropped yet.
         g_missionLocalBase=base;g_missionLocalLoad=load;std::memcpy(g_missionLocalFile,local.file,MR::kFileBytes);
-        g_missionReplayed=false;g_missionDroppedEnd=-1;
+        g_missionReplayed=false;g_missionDroppedEnd=-1;g_missionFallbackPending=false;g_missionHostFailedSeen=false;
     }
     const bool current=MissionReceiveCurrent();
     const bool following=current && MR::Follows(g_missionHost,local) && !MR::HostEndedUnknown(g_missionHost);
@@ -295,14 +303,19 @@ void ApplyMission(std::uint32_t frame) {
     if(following!=g_missionWasFollowing && g_log)
         g_log("[mission-mirror] client %s file=%s host=%s",following?"follow":"release",local.active?local.file:"-",
             g_missionHost.active?g_missionHost.file:"-");
-    const bool released=g_missionWasFollowing && !following;
+    if(current && MR::Failed(g_missionHost) && MR::SameFile(g_missionHost.file,local.file))g_missionHostFailedSeen=true;
+    if(g_missionWasFollowing && !following && g_missionDroppedEnd>=0 && !g_missionReplayed)g_missionFallbackPending=true;
+    if(following)g_missionFallbackPending=false;
     g_missionWasFollowing=following;
     if(!following) {
         // The host's mission is over (or gone) but its end can't be replayed, and this game had ended its own:
         // end it as its own script did. A stale packet alone never does this (the host may still be fighting).
         const bool hostDone=current && (MR::HostEndedUnknown(g_missionHost) || !g_missionHost.active ||
                                         !MR::SameFile(g_missionHost.file,local.file));
-        if(released && hostDone && g_missionDroppedEnd>=0 && !g_missionReplayed && local.active && !MR::Ended(local)) {
+        // Checked on every fresh frame after the release, not only the first: packets may be lost meanwhile.
+        if(g_missionFallbackPending && hostDone && !g_missionHostFailedSeen && g_missionDroppedEnd>=0 &&
+           !g_missionReplayed && local.active && !MR::Ended(local) && !LocalMissionEnded(false)) {
+            g_missionFallbackPending=false;
             g_missionReplayed=true;
             const bool ok=MissionEnd(g_missionHooks[g_missionDroppedEnd].native,g_missionDroppedArg);
             ++g_missionSecond.ends;
@@ -322,7 +335,9 @@ void ApplyMission(std::uint32_t frame) {
         }
     }
     if(MR::Failed(g_missionHost)) {
-        if(!g_missionReplayed && !MR::Failed(local)) {
+        if(!g_missionReplayed && (MR::Failed(local) || LocalMissionEnded(true)))
+            g_missionReplayed=true;  // its own script failed it (the gauge reached 0 here too): guard later calls
+        if(!g_missionReplayed) {
             g_missionReplayed=true;
             const bool ok=MissionCall(g_exeBase+MR::kFailRva,2,0,0,0);
             ++g_missionSecond.ends;
@@ -333,6 +348,7 @@ void ApplyMission(std::uint32_t frame) {
     }
     if(const int end=MR::EndTrapIndex(g_missionHost.endTrap);end>=0) {
         // The host's mission ended this way: end ours the same way, once.
+        if(!g_missionReplayed && LocalMissionEnded(false))g_missionReplayed=true;  // already ended here: guard only
         if(!g_missionReplayed) {
             g_missionReplayed=true;
             const bool ok=MissionEnd(g_missionHooks[end].native,g_missionHost.endArg);
