@@ -51,7 +51,7 @@ WARP_LIVE_FRAME = 76  # WarpChannel.liveFrame
 HANG_SECONDS = 30.0   # gameplay frames stalled this long in the field = hang
 EXCUSED_STALL_SECONDS = 300.0  # ...unless a load, event, movie or Game Over explains it (see stall_excused)
 STALL_READS = {"hp": "0x2A23598:u32", "inField": "0x9BA8D0:u8", "world": "0x717008:u8",
-               "cutscene": "0xB65210:u32", "event": "0x2A11478:u32"}  # KH2Offsets.hpp
+               "cutscene": "0xB65210:u32", "event": "0x2A11478:u32", "menu": "0x7435D0:u8"}  # KH2Offsets.hpp
 
 EXIT_PASS, EXIT_FAIL, EXIT_CRASH, EXIT_RIG = 0, 1, 2, 3
 
@@ -158,6 +158,7 @@ class Instance:
     def __init__(self, index: int, pid: int) -> None:
         self.index, self.pid = index, pid
         self.inject_log: Path | None = None  # exact registration from our launch result
+        self.stall_seen: dict | None = None  # last values logged by stall_excused
         self.live_frame_seen: tuple[int, float] | None = None  # (frame, when it last changed)
         self.in_field = False
         self.expect_exit = False
@@ -192,14 +193,36 @@ class Instance:
             raise InstanceDied(self.index, self.pid, f"hung (frame {frame} stalled {HANG_SECONDS:.0f}s)")
 
     def stall_excused(self) -> bool:
-        """Player at 0 HP, a room load (out of the field or world 0xFF), or an
-        active event/cutscene."""
+        """Player at 0 HP, a room load (out of the field or world 0xFF), an
+        active event/cutscene or open menu, or a native transition the inject
+        holds pending. The TT prologue finale's hand-off stalls with only the
+        last one: IN_FIELD 1, no event, "Puppets suspended" (route-02/03)."""
         try:
             sample = kh2ctl("peek", "--rva", ",".join(STALL_READS.values()), pid=self.pid, check=False, timeout=10)
             v = {k: sample["samples"][0][spec.split(":")[0]] for k, spec in STALL_READS.items()}
         except (KeyError, IndexError, TypeError, subprocess.TimeoutExpired):
+            v = {}
+        v["transitionPending"] = self.transition_pending()
+        if self.stall_seen != v:
+            self.stall_seen = v
+            print(f"[stall] instance {self.index} pid {self.pid} {json.dumps(v)}", flush=True)
+        if v["transitionPending"]:
+            return True
+        return "hp" in v and (v["hp"] == 0 or v["inField"] == 0 or v["world"] == 0xFF or
+                              v["cutscene"] != 0 or v["event"] != 0 or v["menu"] != 0xFF)
+
+    def transition_pending(self) -> bool:
+        """The inject logs "Puppets suspended" when its warp layer sees a native
+        transition request and "Puppets resumed" once that load completes."""
+        path = self.inject_log or LOGS / f"kh2coop_inject_{self.pid}.log"
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - 16384))
+                tail = fh.read()
+        except OSError:
             return False
-        return v["hp"] == 0 or v["inField"] == 0 or v["world"] == 0xFF or v["cutscene"] != 0 or v["event"] != 0
+        return tail.rfind(b"Puppets suspended") > tail.rfind(b"Puppets resumed")
 
 
 # --------------------------------------------------------------------------
