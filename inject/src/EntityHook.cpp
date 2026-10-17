@@ -3739,6 +3739,7 @@ bool Initialize(uintptr_t exeBase) {
     // install its safety hooks before spawncontroller detours that wrapper for
     // default-on emission policy. Its selection stays disarmed until a live
     // game-thread stamp and an owned party layout qualify at construction time.
+    // VUH-1519: partynative registers its observer on the playerkit resolver hook.
     const bool partyNativeOk = partynative::Install(exeBase, &Log);
     playerkit::Install(exeBase, &Log); // guard configuration must precede privatestatus
     (void)partyNativeOk; // readiness is confirmed below after neutral input installs

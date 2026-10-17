@@ -99,6 +99,12 @@ original-byte check intact and install private status first. Spawn-controller
 entry checks do not overlap the private-status detour sites; its factory-call
 checks cover call sites rather than the hooked factory entry.
 
+The ordering regression must exercise qualified client spawn emission while
+the automatic raw566/private-clone path is armed. The VUH-2343 development
+fixture uses BC courtyard `05/06`, map1/btl1/evt0, and checks distinct clone/local
+status bindings, current-epoch host/client emission joins and native actor/HP
+parity. Keep that live result separate from the Bailey missing-spawn result.
+
 ## Evidence
 
 - **Live, 2026-10-06** (run `20261006-222637`, two games, local relay, one GoA
