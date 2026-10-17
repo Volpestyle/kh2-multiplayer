@@ -237,6 +237,24 @@
    "ms": 4000
   },
   {
+   "do": "press",
+   "instance": 0,
+   "button": "confirm",
+   "times": 2,
+   "gapMs": 700
+  },
+  {
+   "do": "press",
+   "instance": 1,
+   "button": "confirm",
+   "times": 2,
+   "gapMs": 700
+  },
+  {
+   "do": "wait",
+   "ms": 1500
+  },
+  {
    "do": "save",
    "as": "moved_from",
    "expr": "pos('P_EX100',1)"
