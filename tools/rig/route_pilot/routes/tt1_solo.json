@@ -31,6 +31,24 @@
     {"do": "walk", "to": [500, 600], "tol": 80, "timeoutSec": 10, "note": "Sandlot, toward its top-right exit"},
     {"do": "walk", "to": [1160, 1351], "tol": 60, "timeoutSec": 10},
     {"do": "door", "to": [2600, 1500], "room": [2, 7], "timeoutSec": 10,
-     "note": "Sandlot top-right exit -> 2/7 (entrance 1) near (2052, 1502), a large street hub. Which 2/7 exit leads to the station is not yet known (route-07)"}
+     "note": "Sandlot top-right exit -> 2/7 (entrance 1) near (2052, 1502), a large street hub. 2/7 is Market Street: Tram Common (route-08)"},
+    {"do": "walk", "to": [2820, -1241], "tol": 80, "timeoutSec": 10, "note": "Tram Common: up the street from the Sandlot entrance"},
+    {"do": "walk", "to": [3280, -380], "tol": 100, "timeoutSec": 10},
+    {"do": "walk", "to": [3400, 1550], "tol": 100, "timeoutSec": 10, "note": "north end (shuttered doors), then west under the bridge"},
+    {"do": "walk", "to": [1860, 1400], "tol": 100, "timeoutSec": 10},
+    {"do": "walk", "to": [840, 880], "tol": 100, "timeoutSec": 10},
+    {"do": "walk", "to": [-1390, -20], "tol": 100, "timeoutSec": 12, "note": "the central square (candy shop)"},
+    {"do": "walk", "to": [-3045, -1287], "tol": 100, "timeoutSec": 12},
+    {"do": "walk", "to": [-4096, -1882], "tol": 100, "timeoutSec": 10},
+    {"do": "door", "to": [-4800, -1300], "room": [2, 6], "timeoutSec": 10,
+     "note": "Tram Common 2/7 -> Market Street: Station Heights 2/6 (label shown), trigger near (-4440, -1579)"},
+    {"do": "walk", "to": [-745, 14], "tol": 100, "timeoutSec": 12, "note": "Station Heights: from the entrance (2200,-1200) across to the uphill street; avoid the raised corner nook near (-747, 1105)"},
+    {"do": "walk", "to": [300, 2200], "tol": 120, "timeoutSec": 10},
+    {"do": "walk", "to": [371, 3300], "tol": 100, "timeoutSec": 10},
+    {"do": "door", "to": [1300, 3100], "room": [2, 8], "timeoutSec": 10, "clip": 25, "name": "door-heights-to-plaza",
+     "note": "Station Heights 2/6 -> 2/8 (unvisited '???'), trigger to the +x side near (633, 3123). An event, then a forced battle (status 2)"},
+    {"do": "fight", "timeoutSec": 300, "clip": 30, "name": "fight-station-plaza", "retryFrom": 0,
+     "heal": {"below": 0.5, "keys": ["DOWN", "DOWN", "confirm", "confirm", "confirm", "UP", "UP"], "max": 3},
+     "note": "2/8 forced battle after the event (route-08 teach: HP 24 -> 7, then KH2 crashed in clr.dll, not in our code; outcome unknown)"}
   ]
 }
