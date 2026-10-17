@@ -27,7 +27,7 @@
 #include "Warp.hpp"
 #include "PartyNativePolicy.hpp"
 #include "MissionMirror.hpp"
-#include "PlayerKit.hpp"
+#include "PartyRow.hpp"
 
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
@@ -1766,39 +1766,27 @@ void FlushActivationResponses() {
     }
 }
 
-// VUH-2342: world party rows (SAVE+0x3534+4*world) the host's story owns. TT, HB and BC rows belong to
-// the two-player clone (playerkit::UpdateBcClone), which rewrites them on every machine itself.
-constexpr std::uintptr_t kSaveRva = 0x9A98B0, kPartyRows = 0x3534;
-constexpr std::uint16_t kPartyRowWorlds = 19;
-constexpr std::uint32_t kSaveMagic = 0x4A32484B;  // "KH2J" at the save body's start
-// Each member byte is a party entry id: 0x00 the playable character .. 0x12 empty.
-bool PartyRowBytesValid(std::uint32_t row) {
-    for (unsigned k = 0; k < 4; ++k) if (((row >> (8 * k)) & 0xFF) > 0x12) return false;
-    return true;
-}
-bool StoryPartyRowWorld(std::uint16_t world) {
-    if (world >= kPartyRowWorlds) return false;
-    for (const auto clone : playerkit::AUTO_CLONE_WORLDS) if (world == clone) return false;
-    return true;
-}
+namespace PR = partyrow;
 // The friend takes the host's row before its own load of that world, so a party the host's story
 // changed (Ping joining in LoD) is the one its next room builds. Save RAM only; never saved here.
 void ApplyHostPartyRow(const RoomTransition& t) {
-    if (!t.partyRowValid || !StoryPartyRowWorld(t.worldId) || !PartyRowBytesValid(t.partyRow)) return;
+    if (!t.partyRowValid || !PR::StoryWorld(t.worldId) || !PR::CompanionBytesValid(t.partyRow)) return;
     std::uint32_t magic = 0;
-    if (!ReadNative(g_exeBase + kSaveRva, magic) || magic != kSaveMagic) return;  // no loaded save body
-    auto* row = reinterpret_cast<volatile LONG*>(g_exeBase + kSaveRva + kPartyRows + 4u * t.worldId);
+    if (!ReadNative(g_exeBase + PR::kSaveRva, magic) || magic != PR::kSaveMagic) return;  // no loaded save body
+    auto* row = reinterpret_cast<volatile LONG*>(g_exeBase + PR::kSaveRva + PR::kPartyRows + 4u * t.worldId);
     std::uint32_t before = 0;
-    if (!ReadNative(reinterpret_cast<uintptr_t>(row), before) || before == t.partyRow) return;
+    if (!ReadNative(reinterpret_cast<uintptr_t>(row), before)) return;
+    const std::uint32_t merged = PR::Merge(before, t.partyRow);
+    if (merged == before) return;
     bool written = false;
     __try {
-        written = static_cast<std::uint32_t>(InterlockedCompareExchange(row, static_cast<LONG>(t.partyRow),
+        written = static_cast<std::uint32_t>(InterlockedCompareExchange(row, static_cast<LONG>(merged),
                                                                         static_cast<LONG>(before))) == before;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         written = false;
     }
-    if (g_log) g_log("[party-row] client world=%u local=%08X host=%08X %s epoch=%u", t.worldId, before, t.partyRow,
-                     written ? "applied" : "raced", t.epoch);
+    if (g_log) g_log("[party-row] client world=%u local=%08X host=%08X now=%08X %s epoch=%u", t.worldId, before,
+                     t.partyRow, merged, written ? "applied" : "raced", t.epoch);
 }
 
 void QueueHostBeginInstance(const RoomTransition& location) {
@@ -1816,9 +1804,9 @@ void QueueHostBeginInstance(const RoomTransition& location) {
     g_pendingHostRoom.difficultyPlayers = static_cast<std::uint8_t>(g_inst.difficulty.players);
     g_pendingHostRoom.partyRowValid = 0; g_pendingHostRoom.partyRow = 0;
     std::uint32_t saveMagic = 0;
-    if (StoryPartyRowWorld(location.worldId) && ReadNative(g_exeBase + kSaveRva, saveMagic) && saveMagic == kSaveMagic &&
-        ReadNative(g_exeBase + kSaveRva + kPartyRows + 4u * location.worldId, g_pendingHostRoom.partyRow) &&
-        PartyRowBytesValid(g_pendingHostRoom.partyRow))
+    if (PR::StoryWorld(location.worldId) && ReadNative(g_exeBase + PR::kSaveRva, saveMagic) && saveMagic == PR::kSaveMagic &&
+        ReadNative(g_exeBase + PR::kSaveRva + PR::kPartyRows + 4u * location.worldId, g_pendingHostRoom.partyRow) &&
+        PR::CompanionBytesValid(g_pendingHostRoom.partyRow))
         g_pendingHostRoom.partyRowValid = 1;
     else g_pendingHostRoom.partyRow = 0;
     g_pendingHostRoomContext = {};
@@ -3979,13 +3967,15 @@ bool ReceiveWorldPackets() {
                 // old/replayed epoch roll back authority. Epoch zero is unset.
                 const auto advance = t.epoch - g_host.epoch;
                 if (t.epoch != 0 && (g_host.epoch == 0 || (advance != 0 && advance < 0x80000000u))) {
-                    ApplyHostPartyRow(t);  // before the load this transition queues reads the row
                     ProducerWorldContext loadContext;
                     const bool loadContextAvailable = CaptureWorldContext(loadContext);
                     if (!loadContextAvailable || !warp::QueueHostTransition(t, loadContext, &*scope, nullptr, nullptr)) {
                         if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
                         continue;
                     }
+                    // Only an accepted transition touches save RAM. Queueing issues the load on a later
+                    // frame, so the row is in place before the resolver reads it.
+                    ApplyHostPartyRow(t);
                     ResetOrdinaryLifecycle(); // retire old history before this batch can carry the new cut
                     g_emissionLedger.Clear();g_localEmissionBirths.clear(); g_emissionDeniedLogs = 0;
                     ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority

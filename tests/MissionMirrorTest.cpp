@@ -1,6 +1,7 @@
 // VUH-2342: MissionState codec and the mission mirror's pure rules (inject/src/MissionMirror.hpp).
 #include "kh2coop/Codec.hpp"
 #include "MissionMirror.hpp"
+#include "PartyRow.hpp"
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -109,10 +110,22 @@ void rules() {
     check(std::strcmp(MR::kTraps[MR::kFailedTrap].name, "mission_failed") == 0 && MR::kTraps[MR::kFailedTrap].index == 11,
           "kFailedTrap names trap 4/11");
 }
+void partyRows() {
+    namespace PR = kh2coop::inject::partyrow;
+    check(PR::StoryWorld(8) && PR::StoryWorld(0x0D) && !PR::StoryWorld(2) && !PR::StoryWorld(4) && !PR::StoryWorld(5) &&
+          !PR::StoryWorld(19), "story rows: LoD and other worlds; never the clone's TT/HB/BC or past the table");
+    check(PR::CompanionBytesValid(0x03020100u) && PR::CompanionBytesValid(0x12121200u) && PR::CompanionBytesValid(0x12030100u),
+          "companions Donald, Goofy, the world character and empty are accepted");
+    check(!PR::CompanionBytesValid(0x12020000u), "the clone selector 0 in a companion seat is refused");
+    check(!PR::CompanionBytesValid(0x12040100u) && !PR::CompanionBytesValid(0x13020100u), "forms and out-of-range ids are refused");
+    check(PR::Merge(0x1212125Au, 0x03020100u) == 0x0302015Au, "the friend keeps its own player byte, takes the host's companions");
+    check(PR::Merge(0x12121200u, 0x12020100u) == 0x12020100u, "Sora-only LoD row takes the host's Donald and Goofy");
+}
 }  // namespace
 int main() {
     codec();
     rules();
+    partyRows();
     std::cout << (errors ? "FAILED" : "ALL PASSED") << '\n';
     return errors ? 1 : 0;
 }

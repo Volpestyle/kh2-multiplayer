@@ -710,9 +710,20 @@ world are skipped:
   (`playerkit::UpdateBcClone`) rewrites those rows itself.
 - Worlds 19 and up.
 
-Both sides write only into a loaded save body (`KH2J` at its start). Every
-member byte must be `0x12` (empty) or below; the codec refuses anything else.
-Nothing is saved. The friend logs `[party-row] client world=… local=… host=…`.
+Only the three companion bytes follow the host. Each machine keeps its own
+player byte, and every companion byte must be Donald `01`, Goofy `02`, the
+world's character `03` (Ping in LoD) or empty `12`. These are MEMT member
+indices (OpenKH `Memt.cs`); forms, Mickey and the clone selector `00` are
+refused. The codec refuses any byte above `0x12`. Both sides touch only a
+loaded save body (`KH2J` at its start). The friend writes the row only after
+it has accepted the transition, and logs `[party-row] client world=… local=…
+host=… now=…`.
+
+**Persistence.** Nothing here saves the game. But the row lives in the save
+body, so a friend that saves later writes the host's companions into its own
+save (the story party the host played). Neither progress sync nor the state
+hash covers party rows, so a mismatch is never reported or repaired between
+transitions.
 
 **Gap:** the friend has already built the room in which the host's story
 changed the party, and it builds the new members only at its next load. Making
