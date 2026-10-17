@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 23;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 24;
 
 // ===========================================================================
+// Protocol v24 appends the host's story party row for the target world to the RoomTransition packet (VUH-2342).
 // Protocol v23 adds MissionState (52): the host's running mission, shown on clients (VUH-2342).
 // Protocol v22 appends exact combat netId to SpawnEmission (VUH-2302 phase b).
 // Protocol v21 adds FieldObjects (51): complete periodic host field-object snapshots (VUH-2276).
@@ -139,6 +140,11 @@ struct RoomTransition {
     std::uint32_t spawnPickSaltTag {0};
     // Packet-only: host roster count locked for this native room, including late joins.
     std::uint8_t difficultyPlayers {1};
+    // Packet-only (VUH-2342): the host's world party row (SAVE+0x3534+4*world: player, friend1, friend2,
+    // world ally) for this room's world, when the host owns that world's row story-wise. A friend writes it
+    // before its own load, so a story-forced party change (LoD's Ping) reaches its next room.
+    std::uint8_t partyRowValid {0};
+    std::uint32_t partyRow {0};
 };
 
 // One successful native wrapper return, not permission to run a controller's

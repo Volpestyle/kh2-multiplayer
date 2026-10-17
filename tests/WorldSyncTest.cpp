@@ -589,9 +589,20 @@ void testWorldCacheEpoch() {
         ByteReader r(body, n);
         RoomTransition back;
         readRoomTransitionPacket(r, back);
-        check(header && n == 16 + 6 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
-                  back.spawnPickSaltTag == 0x01020304u && back.difficultyPlayers == 1,
-              "RoomTransition packet: 16 generic bytes + shared/salt/count trailer");
+        check(header && n == 16 + 6 + 5 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
+                  back.spawnPickSaltTag == 0x01020304u && back.difficultyPlayers == 1 && !back.partyRowValid,
+              "RoomTransition packet: 16 generic bytes + shared/salt/count/party-row trailer");
+        RoomTransition party = shared; party.partyRowValid = 1; party.partyRow = 0x12020100u;
+        const auto partyFrame = encode(party);
+        decodePacketHeader(partyFrame.data(), partyFrame.size(), body, n);
+        ByteReader pr(body, n); RoomTransition partyBack; readRoomTransitionPacket(pr, partyBack);
+        check(partyBack.partyRowValid == 1 && partyBack.partyRow == 0x12020100u,
+              "VUH-2342: the host's story party row round-trips in the RoomTransition trailer");
+        auto badRow = partyFrame; badRow[3 + 16 + 6] = 2;  // the valid flag
+        bool refused = false;
+        try { decodePacketHeader(badRow.data(), badRow.size(), body, n); ByteReader br(body, n); RoomTransition x; readRoomTransitionPacket(br, x); }
+        catch (const std::exception&) { refused = true; }
+        check(refused, "VUH-2342: a party-row flag other than 0/1 is refused");
         ByteWriter generic;
         write(generic, shared);
         check(generic.data().size() == 16, "embedded RoomTransition (activation/resync/party) stays 16 bytes");

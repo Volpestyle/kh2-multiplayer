@@ -1309,6 +1309,8 @@ void writeRoomTransitionPacket(ByteWriter& w, const RoomTransition& m) {
     w.writeU8(m.spawnPickShared);
     w.writeU32(m.spawnPickSaltTag);
     w.writeU8(m.difficultyPlayers);
+    w.writeU8(m.partyRowValid);
+    w.writeU32(m.partyRow);
 }
 
 void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
@@ -1319,6 +1321,10 @@ void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
     m.difficultyPlayers = r.readU8();
     if (m.difficultyPlayers < 1 || m.difficultyPlayers > 3)
         throw std::runtime_error("RoomTransition: invalid difficulty player count");
+    m.partyRowValid = r.readU8();
+    m.partyRow = r.readU32();
+    if (m.partyRowValid > 1 || (!m.partyRowValid && m.partyRow))
+        throw std::runtime_error("RoomTransition: invalid party row");
 }
 
 void read(ByteReader& r, TransitionAck& m) {

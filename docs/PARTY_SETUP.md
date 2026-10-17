@@ -687,3 +687,33 @@ using a fresh isolated current-main build and serial CTest suite.
 **Mandatory Limit admission (offline implementation, pending product review).** Co-op initialization requires both native Limit restriction hooks and the verified command lookup before input/entity hooks or the bridge are opened. Failed or partial installation permanently refuses admission in that process; callbacks and originals remain mapped if rollback cannot remove a native patch. This closes the installation gap only: cached Limit execution, active-Limit completion and retained-party lifetime semantics remain unqualified. Existing successful-install restrictions are unchanged.
 
 **Save-point menus remain unqualified.** Entry/Cancel can invoke native object/script callbacks before the runtime-event decision. A concrete room/action issuer and a safe refusal/Cancel contract have not been established; shop refusal does not cover this path. No save-point opening, in-game save or SAVE exclusion is qualified by the menu work. See the retained audit-savepoint-ingress-3a6ce68.md packet receipt.
+
+## Story party rows follow the host (VUH-2342, protocol 24)
+
+The world party table `SAVE+0x3534 + 4*world` (`player, friend1, friend2, world
+ally`; `0x12` is empty) is per save, and progress sync leaves it alone. A
+story-forced party change therefore happened only in the host's game. The case
+that showed it is Ping joining in LoD's first visit: the forced party menu runs
+while the friend is held. Run `20261017-024539` (VUH-2341, unwarped) shows the
+outcome. The friend loaded Bamboo Grove 08/00 with no companions at all,
+because its LoD row was still the save's `0x12121200` (Sora only). The host had
+Donald and Ping. Probe `20261017-040248` read the same Sora-only row in both
+games before the menu.
+
+The host now stamps its row for the room's world onto the `RoomTransition`
+packet trailer (`partyRowValid`, `partyRow`). The stamp is taken when the host
+announces the room. A friend writes that row into its own save RAM just before
+it queues the load, so the room it builds uses the host's party. Two kinds of
+world are skipped:
+
+- TT, HB and BC (2, 4, 5): every machine's two-player clone
+  (`playerkit::UpdateBcClone`) rewrites those rows itself.
+- Worlds 19 and up.
+
+Nothing is saved. The friend logs `[party-row] client world=… local=… host=…`.
+
+**Gap:** the friend has already built the room in which the host's story
+changed the party, and it builds the new members only at its next load. Making
+them appear in that same room needs the friend to construct party members in
+place (the party-swap member build). That is the friend-spawn path, specified
+for its owner rather than done here.
