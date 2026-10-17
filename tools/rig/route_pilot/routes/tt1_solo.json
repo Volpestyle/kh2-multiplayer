@@ -45,10 +45,11 @@
     {"do": "walk", "to": [-745, 14], "tol": 100, "timeoutSec": 12, "note": "Station Heights: from the entrance (2200,-1200) across to the uphill street; avoid the raised corner nook near (-747, 1105)"},
     {"do": "walk", "to": [300, 2200], "tol": 120, "timeoutSec": 10},
     {"do": "walk", "to": [371, 3300], "tol": 100, "timeoutSec": 10},
-    {"do": "door", "to": [1300, 3100], "room": [2, 8], "timeoutSec": 10, "clip": 25, "name": "door-heights-to-plaza",
-     "note": "Station Heights 2/6 -> 2/8 (unvisited '???'), trigger to the +x side near (633, 3123). An event, then a forced battle (status 2)"},
+    {"do": "walk", "to": [483, 3660], "tol": 80, "timeoutSec": 10, "note": "the street's north end, by the shuttered garage"},
+    {"do": "door", "to": [1700, 3600], "room": [2, 8], "timeoutSec": 10, "clip": 25, "name": "door-heights-to-plaza",
+     "note": "Station Heights 2/6 -> 2/8, east from the north end; trigger near (695, 3578) (route-09; approaching from the south misses it). An event, then a forced battle (status 2)"},
     {"do": "fight", "timeoutSec": 300, "clip": 30, "name": "fight-station-plaza", "retryFrom": 0,
      "heal": {"below": 0.5, "keys": ["DOWN", "DOWN", "confirm", "confirm", "confirm", "UP", "UP"], "max": 3},
-     "note": "2/8 forced battle after the event (route-08 teach: HP 24 -> 7, then KH2 crashed in clr.dll, not in our code; outcome unknown)"}
+     "note": "2/8 forced battle after the event. KH2 crashed in clr.dll in this battle in route-08 and route-09; the .NET runtime comes from injected A-Volute Nahimic audio modules (modules.json), not our inject. Outcome unknown until that is resolved"}
   ]
 }
