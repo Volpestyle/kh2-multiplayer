@@ -756,6 +756,25 @@ def step_protect(ctx: Context, step: dict) -> dict:
     return {}
 
 
+def step_coop_verdict(ctx: Context, step: dict) -> dict:
+    """VUH-2344: co-op verdict from this run's host, friend and relay logs so far
+    (tools/scenario/coop_verdict.py). Fails the step unless `require` is false."""
+    host = step.get("host", 0)
+    friends = step.get("friends", [i for i in range(len(ctx.instances)) if i != host])
+    text = lambda path: path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    log = lambda i: text(LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log")
+    result = _coop_verdict.verdict(log(host), {f"friend{i}": log(i) for i in friends},
+                                   text(ctx.run_dir / "relay.log"))
+    name = step.get("as", "coop_verdict")
+    path = ctx.run_dir / f"{name}.json"
+    path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    ctx.artifacts.append(path.name)
+    ctx.saved[name] = result
+    if step.get("require", True) and not result["pass"]:
+        raise StepFailed(f"co-op verdict: {result['problems']}")
+    return {"pass": result["pass"], "rooms": len(result["host"]["rooms"]), "problems": result["problems"]}
+
+
 def step_hang_check(ctx: Context, step: dict) -> dict:
     """Turns an instance's stalled-frame hang check off or on, for screens that may
     stop the field frame counter, such as the World Map (VUH-2341)."""
@@ -4529,7 +4548,7 @@ def puppet_error(rec: Recorder, owner: int, viewer: int, window: float = 0.5) ->
 STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": step_warp, "input": step_input, "walk_to": step_walk_to,
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
-         "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check,
+         "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
          "capture": step_capture, "clip": step_clip, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,
@@ -4550,6 +4569,11 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
 # Saved-log forced-resync evidence is isolated from the live collector. Load by
 # this file's fixed sibling path so both script and importlib test entry work.
 import importlib.util as _importlib_util
+_coop_verdict_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_coop_verdict", Path(__file__).with_name("coop_verdict.py"))
+_coop_verdict = _importlib_util.module_from_spec(_coop_verdict_spec)
+_coop_verdict_spec.loader.exec_module(_coop_verdict)
+
 _resync_spec = _importlib_util.spec_from_file_location(
     "kh2coop_resync_evidence", Path(__file__).with_name("resync_evidence.py"))
 _resync_evidence = _importlib_util.module_from_spec(_resync_spec)

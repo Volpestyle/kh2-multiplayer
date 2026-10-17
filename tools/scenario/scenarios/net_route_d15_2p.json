@@ -1,0 +1,23 @@
+{
+  "name": "net_route_d15_2p",
+  "description": "VUH-2344 one-PC stand-in for the D15 two-PC route. Host and friend both load FM-02 (Roxas, Day 6) with the player package's shipped defaults on an ENet loopback relay. The route pilot (VUH-2340) plays the host with real keyboard input, one route file per checkpoint; the friend gets no input, only follows, and is protected (team 0) because nobody plays it. After each segment, coop_verdict checks that every host room was followed to the same location and every progress version applied with the same hash, then a short friend clip is taken. Planned segments, added once their route files exist: tt1_solo (Roxas Day 6 -> Sora -> Yen Sid), hb1, worldmap_lod1 (World Map -> Asteroid Sweep -> LoD, tools/rig/route_pilot/routes/worldmap_lod1.json). Hang checks are off: a held friend's paused menu and the World Map stop field frames, and the pilot's stuck detector covers soft locks. Needs the pilot step and pilot.py from VUH-2340.",
+  "playerDefaults": true,
+  "protect": [1],
+  "steps": [
+    {"do": "boot", "instance": 0, "slotMoves": -1, "initTimeoutMs": 60000},
+    {"do": "boot", "instance": 1, "slotMoves": -1, "initTimeoutMs": 60000},
+    {"do": "assert", "expr": "room(0)[0] == 2 and room(1)[0] == 2", "message": "FM-02 did not load in Twilight Town on both instances"},
+    {"do": "relay", "port": 27798, "args": ["--bind", "127.0.0.1"]},
+    {"do": "runtime", "instance": 0, "role": "player"},
+    {"do": "runtime", "instance": 1, "role": "friend1"},
+    {"do": "transition_check", "instances": [0, 1], "as": "joined", "capture": true},
+    {"do": "hang_check", "instance": 0, "on": false},
+    {"do": "hang_check", "instance": 1, "on": false},
+
+    {"do": "checkpoint", "name": "tt1"},
+    {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/tt1_solo.json", "seconds": 1500, "name": "pilot_tt1", "allowStuck": true},
+    {"do": "coop_verdict", "as": "verdict_tt1"},
+    {"do": "capture", "instance": 0, "name": "tt1_end_host"},
+    {"do": "clip", "instance": 1, "seconds": 10, "fps": 15, "name": "tt1_end_friend"}
+  ]
+}
