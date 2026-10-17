@@ -1769,10 +1769,12 @@ bool ObserveMoraleWave(const void* record, void* controller, const float* point,
     else if (id==999) { pinnedHeader=routespawn::MoraleHeader999; pinnedRecords=routespawn::MoraleRecords999; }
     else { pinnedHeader=routespawn::MoraleHeader1007; pinnedRecords=routespawn::MoraleRecords1007; }
     unsigned headerDiffs=0, recordDiffs=0;
+    std::uint64_t headerDiffMask=0, recordDiffMask=0;
     int firstHeaderDiff=-1, firstRecordDiff=-1;
     unsigned headerExpected=0, headerObserved=0, recordExpected=0, recordObserved=0;
     for (std::size_t offset=0; offset<header.size(); ++offset) {
         if (header[offset]==pinnedHeader[offset]) continue;
+        headerDiffMask |= std::uint64_t{1} << offset;
         if (!headerDiffs++) {
             firstHeaderDiff=static_cast<int>(offset);
             headerExpected=pinnedHeader[offset]; headerObserved=header[offset];
@@ -1783,16 +1785,18 @@ bool ObserveMoraleWave(const void* record, void* controller, const float* point,
         const auto pinnedRecord=pinnedRecords.subspan(ordinal*64,64);
         for (std::size_t offset=0; offset<bytes.size(); ++offset) {
             if (bytes[offset]==pinnedRecord[offset]) continue;
+            recordDiffMask |= std::uint64_t{1} << offset;
             if (!recordDiffs++) {
                 firstRecordDiff=static_cast<int>(offset);
                 recordExpected=pinnedRecord[offset]; recordObserved=bytes[offset];
             }
         }
     } else { recordDiffs=65; firstRecordDiff=-2; }
-    g_log("[morale-wave-pin] after=%u role=%u key=%u header=%u index=%d headerDiffs=%u firstHeaderDiff=%d headerExpected=%u headerObserved=%u recordDiffs=%u firstRecordDiff=%d recordExpected=%u recordObserved=%u",
+    g_log("[morale-wave-pin] after=%u role=%u key=%u header=%u index=%d headerDiffs=%u firstHeaderDiff=%d headerExpected=%u headerObserved=%u recordDiffs=%u firstRecordDiff=%d recordExpected=%u recordObserved=%u headerDiffMask=%016llX recordDiffMask=%016llX",
         after?1u:0u,role,native.key,id,indexed?static_cast<int>(ordinal):-1,
         headerDiffs,firstHeaderDiff,headerExpected,headerObserved,
-        recordDiffs,firstRecordDiff,recordExpected,recordObserved);
+        recordDiffs,firstRecordDiff,recordExpected,recordObserved,
+        static_cast<unsigned long long>(headerDiffMask),static_cast<unsigned long long>(recordDiffMask));
     return true;
 }
 

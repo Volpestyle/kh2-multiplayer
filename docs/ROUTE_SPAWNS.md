@@ -266,7 +266,10 @@ the native `3FE320` type2 branch sets it to1 before the emitter. This remains
 an inference until a live pin comparison is captured. The next diagnostic adds
 `[morale-wave-pin]` difference counts and first expected/observed bytes for the
 header and current record, using only the observer's already-copied data and
-existing entry/return log budgets. Admission predicates and order are unchanged;
+existing entry/return log budgets. The 64-bit `headerDiffMask` (44 used bits)
+and `recordDiffMask` (64 bits) set bit N for every differing byte offset N;
+an invalid record ordinal retains the explicit count65/first-offset-2 sentinel.
+Admission predicates and order are unchanged;
 no exception is broadened. Windows compilation and that diagnostic run are pending.
 
 ## Provenance and checks
