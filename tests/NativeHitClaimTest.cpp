@@ -123,6 +123,7 @@ void LeaveFieldCallback() noexcept {}
 // only its namespace differs. No hook installation or named mapping is used.
 namespace kh2coop::inject::recoverywarp {
 using LogFn = kh2coop::inject::warp::LogFn;
+using kh2coop::inject::warp::TravelWorld;  // VUH-2341's header constexpr, outside the renamed namespace
 RoomTransition ReadLocation();
 bool TransitionPending();
 bool QueueHostTransition(const RoomTransition&, const ProducerWorldContext&, const WorldScope*, const ResyncBegin*, const ResyncTarget*);
@@ -176,6 +177,7 @@ bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept {
            enemysync::SameLocation(location, arrivalTarget);
 }
 bool TransitionPending() { return productionWorldMode ? recoverywarp::TransitionPending() : pendingTransition; }
+bool HostTravelling() { return productionWorldMode && recoverywarp::HostTravelling(); }  // VUH-2341 World Map
 std::uint32_t TransitionSerial() { return productionWorldMode ? recoverywarp::TransitionSerial() : transition; }
 std::uint32_t LoadSerial() { return productionWorldMode ? recoverywarp::LoadSerial() : load; }
 RoomTransition ReadLocation() {
