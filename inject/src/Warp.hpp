@@ -53,6 +53,9 @@ void SetTransitionObserver(void (*observer)());
 constexpr std::uint16_t WORLD_MAP = 0x0F;
 constexpr bool TravelWorld(std::uint16_t world) { return world == WORLD_MAP; }
 bool HostTravelling();
+// VUH-2356: a client whose own event exit was blocked and is waiting for the
+// host's next room (no load pending). Any thread; refreshed each game frame.
+bool WaitingAtBlockedExit();
 std::uint32_t TransitionSerial();
 std::uint32_t LoadSerial();
 RoomTransition ReadLocation();

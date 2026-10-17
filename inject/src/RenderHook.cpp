@@ -21,6 +21,7 @@
 #include "RenderHook.hpp"
 #include "EnemySync.hpp"
 #include "EventHoldNativeInput.hpp"
+#include "Warp.hpp"
 
 #include "kh2coop/CaptureChannel.hpp"
 #include "CoopHudMailbox.hpp"
@@ -842,9 +843,10 @@ void RefreshOverlayText(DXGI_FORMAT format) {
     FillRect(g_overlayDc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
     SetTextColor(g_overlayDc, RGB(255, 255, 255));
     TextOutW(g_overlayDc, 8, 5, text, static_cast<int>(wcslen(text)));
-    if (eventholdnative::HoldingInput()) {
+    if (eventholdnative::HoldingInput() || warp::WaitingAtBlockedExit()) {
         SetTextColor(g_overlayDc, RGB(255, 210, 90));
-        // Events and World Map travel (VUH-2341) share this hold.
+        // Events, World Map travel (VUH-2341) and a friend left at its own
+        // blocked exit while the host is in rooms it doesn't publish (VUH-2356).
         constexpr wchar_t waiting[] = L"Waiting for host...";
         TextOutW(g_overlayDc, 8, 39, waiting, static_cast<int>(std::size(waiting) - 1));
     } else DrawCoopHudRows();
@@ -1066,7 +1068,8 @@ void OnPresent(IDXGISwapChain* swapChain) {
             g_job.issued < g_job.frameCount) {
             captureFrame = (g_presentIndex - g_job.startPresent) % g_job.interval == 0;
         }
-        const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput();
+        const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput() ||
+                                 warp::WaitingAtBlockedExit();
         if (drawOverlay || captureFrame) SubmitFrameWork(drawOverlay, captureFrame);
     }
 

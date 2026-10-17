@@ -123,6 +123,23 @@ void TestBlockedNativeExitMatch() {
     atMatchingExit("a pending transition still blocks issue and progress at a matching exit",
                    [] { w::g_transitionPending = true; });
 }
+// VUH-2356: the "Waiting for host..." indicator at a client's own blocked exit.
+void TestWaitingAtBlockedExit() {
+    Start(); w::g_blockedExit.reset(); w::RefreshWaitingAtExit();
+    Check(!w::WaitingAtBlockedExit(), "no blocked exit: not waiting");
+    w::LocationPacket exit {}; exit.world = 2; exit.room = 0x13;
+    w::g_blockedExit = exit; w::g_blockedExitLoad = w::g_loadSerial; w::RefreshWaitingAtExit();
+    Check(!w::WaitingAtBlockedExit(), "a free client that bumped a door the host didn't take keeps playing");
+    Put(image + offsets::CUTSCENE_STATE, std::int32_t{2}); w::RefreshWaitingAtExit();
+    Check(w::WaitingAtBlockedExit(), "a client whose own event is at a blocked exit waits for the host");
+    w::g_transitionPending = true; w::RefreshWaitingAtExit();
+    Check(!w::WaitingAtBlockedExit(), "a pending load is not waiting at the exit");
+    w::g_transitionPending = false; w::CompleteLoad();
+    Check(!w::WaitingAtBlockedExit() && !w::g_blockedExit, "the next completed load ends the wait");
+    w::g_blockedExit = exit; w::g_blockedExitLoad = w::g_loadSerial; w::RefreshWaitingAtExit();
+    w::SetClientAuthority(false);
+    Check(!w::WaitingAtBlockedExit(), "losing client authority ends the wait");
+}
 void TestRetireSupersedeAndDrift() {
     Start(); auto context = Context(); auto scope = Scope();
     w::QueueHostTransition(arrivalTarget, context, &scope, nullptr, nullptr);
@@ -238,7 +255,7 @@ int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr,0x3000000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if (!image) return 2;
-    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal();
+    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestWaitingAtBlockedExit(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal();
     Check(hookCalls == 0, "no hook installation occurs in owned-memory controls");
     VirtualFree(reinterpret_cast<void*>(image),0,MEM_RELEASE);
     std::cout << "ERRORS=" << errors << '\n';

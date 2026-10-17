@@ -27,6 +27,7 @@
 #include <Windows.h>
 #include <MinHook.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -91,6 +92,8 @@ bool g_travelRequested = false;
 // VUH-2344: the client's last blocked native exit, valid until the next load.
 std::optional<LocationPacket> g_blockedExit;
 std::uint32_t g_blockedExitLoad = 0;
+std::atomic<bool> g_waitingAtExit {false};
+void RefreshWaitingAtExit();
 RoomTransition g_hostTarget {};
 bool g_hostQueued = false;
 bool g_hostIssued = false;
@@ -206,6 +209,14 @@ bool SafeToWarp() {
     }
 }
 
+// Waiting only while the client can't act (its event, a fade): a free client
+// that bumped a door the host didn't take keeps playing without the notice.
+void RefreshWaitingAtExit() {
+    g_waitingAtExit.store(g_channel && g_clientAuthority && g_blockedExit.has_value() &&
+                          g_blockedExitLoad == g_loadSerial && !g_transitionPending && !SafeToWarp(),
+                          std::memory_order_release);
+}
+
 void BeginTransition() {
     ++g_transitionSerial;
     g_transitionPending = true;
@@ -218,6 +229,7 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
         ++g_blockedNativeExits;
         g_blockedExit = *to;
         g_blockedExitLoad = g_loadSerial;
+        RefreshWaitingAtExit();  // entity frames may not run during the event's exit fade
         if (g_log) g_log("[warp] client native exit blocked count=%u target=%02X/%02X door=%u map=%u btl=%u evt=%u",
                          g_blockedNativeExits, to->world, to->room, to->door, to->map,
                          to->battle, to->event);
@@ -241,6 +253,7 @@ void CompleteLoad() {
         g_loadSerial == g_hostCause.loadBefore + 1;
     g_transitionPending = false;
     g_blockedExit.reset();
+    RefreshWaitingAtExit();
     const auto location = ReadLocation();
     auto expected = g_hostCause.room; expected.epoch = location.epoch;
     LogLoadCause("load", hostIssued && SameLoadRoom(expected, location));
@@ -305,6 +318,7 @@ void IssueHostTransition() {
     if (g_log) g_log("[warp] client issued epoch=%u transition=%u%s", issuedEpoch, issuedTransition,
                      atNativeExit ? " at its own blocked native exit" : "");
     g_blockedExit.reset();
+    RefreshWaitingAtExit();
 }
 
 void HandOver(std::uint32_t frame) {
@@ -420,6 +434,7 @@ void OnFrameStart(std::uint32_t frame, uintptr_t listHead) {
     InterlockedExchange64(&g_channel->liveActor, static_cast<long long>(listHead));
     SealLoadCause(frame);
     if (g_ready && g_clientAuthority) IssueHostTransition();
+    RefreshWaitingAtExit();
     if (g_channel->requestSeq == g_channel->doneSeq) {
         g_channel->gateWaitFrames = 0;
         return;
@@ -429,6 +444,7 @@ void OnFrameStart(std::uint32_t frame, uintptr_t listHead) {
 
 void SetClientAuthority(bool enabled) {
     g_clientAuthority = enabled;
+    RefreshWaitingAtExit();
     if (!enabled) {
         if (g_hostQueued || g_hostIssued) LogLoadCause("retire", LoadCauseCurrent(g_hostCause));
         g_hostCause = {};
@@ -527,6 +543,8 @@ bool LoadPending() {
 }
 
 void SetTransitionObserver(void (*observer)()) { g_transitionObserver = observer; }
+
+bool WaitingAtBlockedExit() { return g_waitingAtExit.load(std::memory_order_acquire); }
 
 bool HostTravelling() {
     return g_travelRequested || TravelWorld(ReadExe<std::uint8_t>(offsets::WORLD_ID));
