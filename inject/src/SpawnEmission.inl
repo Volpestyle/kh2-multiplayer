@@ -49,7 +49,10 @@ bool BaileyMissionCurrent(bool terminal,uintptr_t* mission,const char** refusal)
        !check(base!=0,"mission-null") || !check(CopyNative(base+mr::kPath,path,sizeof(path)),"path-read") ||
        !check(mr::FileOf(path,sizeof(path),file),"file") || !check(ReadNative(base+mr::kFlags,flags),"flags-read") ||
        !check(ReadNative(base+mr::kResult,result),"result-read"))return false;
-    const std::array<std::uint8_t,10> now{location.worldId,location.roomId,location.door,0,
+    // ReadLocationChecked reads these three fields as native bytes, then widens
+    // them into RoomTransition; restore that width explicitly for the NOW pin.
+    const std::array<std::uint8_t,10> now{static_cast<std::uint8_t>(location.worldId),
+        static_cast<std::uint8_t>(location.roomId),static_cast<std::uint8_t>(location.door),0,
         static_cast<std::uint8_t>(location.mapProgram),static_cast<std::uint8_t>(location.mapProgram>>8),
         static_cast<std::uint8_t>(location.battleProgram),static_cast<std::uint8_t>(location.battleProgram>>8),
         static_cast<std::uint8_t>(location.eventProgram),static_cast<std::uint8_t>(location.eventProgram>>8)};
