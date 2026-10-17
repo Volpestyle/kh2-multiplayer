@@ -3,8 +3,9 @@
 Bailey-13 passes the full two-instance fight: real Creeper births, native pause,
 both mission ends, empty matching enemy counts/HP, and egress without a second
 end. The default-on implementation passed independent inject review and the
-Windows build/regression. VUH-2343 remains open for first-visit Borough enemy
-grounding; VUH-2352 still needs its own live LoD run. Failed observation/probe
+Windows build/regression. Borough-04 also proves first-visit enemy grounding;
+extra playback latency remains a separate follow-up. VUH-2352 still needs its
+own live LoD run. Failed observation/probe
 runs remain attached to the issues. This development fixture uses warps on PC1
 and does not accept the D15 two-PC route through real doors.
 
@@ -77,7 +78,7 @@ native walking, identity/position samples, both clips and egress. The final
 grounding verdict also requires identity-joined height analysis and visual
 review; an empty Marketplace arrival cannot meet it. This first-visit ambient
 check is separate from scripted HB09_MS101 at battle51 and D15 real-door play.
-First-visit grounding remains unqualified until that live evidence passes.
+First-visit grounding is proven by the matched-frame Borough-04 run below.
 
 ### Borough height observation and proposed measurement fix
 
@@ -127,6 +128,35 @@ Borough-02 changed only the expected entrance while still requesting0. Both
 remain failed setup evidence. Borough-03's preflight executes the real warp
 argument builder with a stubbed CLI and verifies entrance2 against the oracle.
 All three protected-file/process closures passed; PC1 was released after each.
+
+### Borough matched-frame qualification
+
+Borough-04 (`20261017-113422_net_hb1_borough_grounding_1`, tested `7f55b23`)
+passes all25 scenario steps, nonempty enemy count/HP parity and GoA egress.
+Both full180-frame clips show native ground/burrow poses, knockbacks and returns
+without sustained friend-only hover/sink. The offline matched-frame gates pass:
+
+| Shadow netId | Matched observations | Strict rest observations | Max matched absY | Max rest absY |
+|---|---:|---:|---:|---:|
+| 1 | 1580 | 322 | 0.067 | 0 |
+| 2 | 1556 | 329 | 1.1 | 0 |
+| 3 | 1556 | 196 | 1.2 | 0 |
+| 4 | 1556 | 268 | 0.8 | 0 |
+
+No identity or publication bracket is missing.380 undriven and28 blended
+observations grant no evidence. The gates retain the5u overall and2u ground-rest
+bounds, with twelve contiguous stable host frames for each rest window. Ten
+offline controls include missing actors and perfectly matching airborne poses
+that still fail the independent rest gate. No gameplay/Y/gravity change was
+needed; the same previously built native binaries ran both observations.
+
+The same-PC QPC result stays separate:6108 joined observations, median state
+freshness4.723frames and cursor buffering7frames; total median11.717frames
+(range10.402-11.868), versus configured cursor delay6. Median component values
+need not add exactly to the median total. Freshness includes publication,
+pump/transport and phase; buffering includes cursor hysteresis. The remaining
+extra5.717frames is an explicit latency follow-up, not a relaxed grounding gate.
+Protected files and owned-process closure passed; PC1 released11:36:57CDT.
 
 F1 records every Constructor/Allocate entry under the missing scope, including
 caller, key and form. Settled Bailey gameplay logs the clone's controller and
