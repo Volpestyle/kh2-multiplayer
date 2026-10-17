@@ -114,7 +114,7 @@
       "seconds": 60,
       "as": "fight1",
       "sample": {
-        "expr": "[mission(0), mission(1)]",
+        "expr": "[mission(0), mission(1), enemy_hps(0), enemy_hps(1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -171,7 +171,7 @@
       "seconds": 60,
       "as": "fight2",
       "sample": {
-        "expr": "[mission(0), mission(1)]",
+        "expr": "[mission(0), mission(1), enemy_hps(0), enemy_hps(1)]",
         "everyMs": 1000
       }
     },
