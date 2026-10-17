@@ -41,11 +41,11 @@ mission runs, every 15 without one. 151 payload bytes:
 - flags and result
 - 3 gauges and 3 counters, each `{flags, max, value}`
 - timer state, mode, value and duration
-- the end trap the host's mission ran (4/3, 4/16 or 4/22, 0 for none) and its argument
+- the end trap the host's mission ran (4/3 or 4/22, 0 for none) and its argument
 
 The codec refuses a path (any `/`), a name that isn't printable ASCII, bytes
 after the terminator, a non-finite or out-of-range gauge, and an unknown timer
-state, or an end trap other than 4/3, 4/16 or 4/22. The relay forwards it only from the verified native host, for the
+state, or an end trap other than 4/3 or 4/22. The relay forwards it only from the verified native host, for the
 admitted room, with a strictly increasing sequence. It is never cached,
 replayed or part of resync.
 
@@ -67,15 +67,15 @@ games run the same mission file and its own mission hasn't ended:
 - **Other ends:** the host's hooks record which end trap ended its mission,
   with its argument. Trap 4/3 completes it: `0x3A33C0(arg)` →
   `0x3A41E0(M, 7 or 0x9C, arg)`, which shows the banner and fires the trigger.
-  Trap 4/16 is the boss defeat: `0x3A3440(arg)` → `0x3A41E0(M, 0x10, arg)`,
-  which plays `re_deadboss`. Shan-Yu's `MU09_MS108` ends this way (run
-  `20261017-070818`, where the friend's copy of him otherwise stayed alive).
-  The replay covers every mission that ends through 4/16, not only Shan-Yu:
-  each boss defeat the host's hooks record is replayed on the friend. The
-  friend's own defeat flow runs natively, so it may also grant that boss's
-  defeat rewards in the friend's RAM. That is intended for co-op, since both
-  players beat the boss. Nothing is saved here. (Reviewed by Quill,
-  `d17016d`.)
+  Trap 4/16, the boss defeat (`0x3A3440(arg)` → `0x3A41E0(M, 0x10, arg)`,
+  `re_deadboss`), is deliberately **not** replayed. The friend's copy of the
+  boss has no brain, so a replayed defeat flow never finishes: run
+  `20261017-074315` left the friend on a white loading screen for over 100 s.
+  When the host's mission ends that way, the friend sees an end it can't
+  replay and releases the mission. Its copy of the boss stays until it follows
+  the host to the next room (`20261017-070818`: Shan-Yu at 221 HP; native
+  lethal damage can't finish him). The 4/16 replay landed briefly in
+  `d17016d` and was taken out.
   Trap 4/22 (`0x3A37A0(arg)`) ends it and fires signal 0xF. The client replays
   the same trap with the same argument once. After a replayed end or failure,
   every later end or failure of that mission is dropped, so it never ends twice.
@@ -94,7 +94,7 @@ games run the same mission file and its own mission hasn't ended:
   its own calls.
 - **Local calls dropped:** the client's own script calls that change a gauge or
   counter, or end the mission, are dropped while it follows. Those are the
-  table-4 traps `mission_complete` 3, `set_count` 5, `inc_count` 6, the boss defeat 16,
+  table-4 traps `mission_complete` 3, `set_count` 5, `inc_count` 6,
   `set_gauge` 8, `add_gauge` 9, `set_gauge_ratio` 10, `mission_failed` 11,
   `dec_count` 20, the end signal 22 and `add_count` 41. The host swaps the
   same entries; its hooks only record the end.

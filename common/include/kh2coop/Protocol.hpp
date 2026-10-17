@@ -314,10 +314,10 @@ struct MissionState {
     std::uint8_t timerMode {0};                // exe+0xABB868: 1 counts down
     std::uint32_t timerValue {0};              // exe+0xABB860, frames
     std::uint32_t timerDuration {0};           // exe+0xABB85C, frames
-    std::uint8_t endTrap {0};                  // the table-4 trap that ended it: 3 complete, 16 boss defeat, 22 end signal, 0 none
+    std::uint8_t endTrap {0};                  // the table-4 trap that ended it: 3 complete, 22 end signal, 0 none
     std::uint32_t endArg {0};                  // that trap's argument
 };
-inline constexpr bool validMissionEndTrap(std::uint8_t t) { return t == 0 || t == 3 || t == 16 || t == 22; }
+inline constexpr bool validMissionEndTrap(std::uint8_t t) { return t == 0 || t == 3 || t == 22; }
 
 // Reliable, scoped teammate request. Relay stamps requesterSlot and forwards
 // once to targetConnectionId only. Episode is minted by the target owner,
