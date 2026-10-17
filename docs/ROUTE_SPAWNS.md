@@ -226,3 +226,24 @@ the shared script's4/16 branch grants no mirrored completion. The fixture still 
 one actual host end, exactly one friend replay, ended flags on both, and empty
 matching enemy HP/counts. The next live run must report the actual trap;
 no Bailey end has yet been observed.
+
+### Bailey native pause check
+
+Bailey-09 (`20261017-080636_net_hb1_bailey_1`, main `54f2b94`) passed all five
+friend317 admissions and adopted all five exact host netIds. The Windows build
+and all three native tests passed. It stopped at the fixture's menu10-only pause
+check after Start, before resuming combat; there were no retired lines or mission
+ends. Latest separate native samples agree on seven living IDs/HP (five317 at50,
+two310 at80), but final parity/end acceptance was not reached.
+
+Read-only native pause dispatch explains why10 is too narrow: `1572B0` checks
+pause blockers `ABB878`, a live room and the Start edge, then `3AD540` chooses
+the active battle context. With that context, `2E4C20` requests menu8 through
+`2E4950(8)`. Existing `EventHoldInputState` already accepts combat8 and field10.
+Those are conditional native paths; Bailey-09 retained no post-Start menu bytes,
+so its actual menu remains unmeasured. No pause blocker is cleared or bypassed.
+The fixture now accepts only8/10, retains post-Start menu/freeze/blocker samples
+and attempted-pause screenshots before its assertion, then records a verified
+paused state before the two-second hold. Resume still requires255. A new run
+must prove the actual pause and report every317 retirement, both native ends
+and enemy count/HP parity.
