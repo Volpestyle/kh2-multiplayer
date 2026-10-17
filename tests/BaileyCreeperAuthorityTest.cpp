@@ -111,8 +111,9 @@ int main(){
     std::memcpy(h.file,missionFile,sizeof(missionFile));std::memcpy(f.file,missionFile,sizeof(missionFile));h.flags=f.flags=mr::kInUse;
     check(mr::Follows(h,f)&&!mr::Ended(h)&&!mr::Ended(f),"both Bailey peers start the same native mission");
     h.flags|=mr::kEnded;check(mr::HostEndedUnknown(h),"unknown engine end never fabricates a replay trap");
-    // Normal HB08 event2 selects4/3; its shared dispatch also contains4/16 and4/22.
-    for(const auto trap: {3,16,22}) {
+    // Normal HB08 event2 selects4/3. Only4/3 and4/22 are replayable;
+    // 4/16 also grants local rewards and remains outside the mirror allowlist.
+    for(const auto trap: {3,22}) {
         h.endTrap=static_cast<std::uint8_t>(trap);f.flags=mr::kInUse;
         check(!mr::HostEndedUnknown(h)&&mr::Ended(h)&&!mr::Ended(f)&&mr::Follows(h,f),"known host end still needs replay on friend");
         f.flags|=mr::kEnded;check(mr::Ended(h)&&mr::Ended(f)&&!mr::Follows(h,f),"both native ends observed; no second replay");

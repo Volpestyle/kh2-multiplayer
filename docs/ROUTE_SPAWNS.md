@@ -220,8 +220,9 @@ trigger10's event2 stores selector1 at L68/L71, and the mission thread dispatche
 selector1 to `syscall4,3` at L210. The common dispatcher also has selector2
 to4/16 at L225, selector3 to failure4/11, and selector4 to4/22. No decoded
 writer selects2 in this script; that branch's existence does not prove Bailey
-completes through4/16. Lio's global4/16 replay is now in the base, and the scoped
-portable test covers all three recognized end traps. The fixture still requires
+completes through4/16. Main `ae0a918` reverted global4/16 replay because it grants
+local rewards. The scoped portable test covers only replayable traps3 and22;
+the shared script's4/16 branch grants no mirrored completion. The fixture still requires
 one actual host end, exactly one friend replay, ended flags on both, and empty
 matching enemy HP/counts. The next live run must report the actual trap;
 no Bailey end has yet been observed.
