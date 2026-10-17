@@ -4952,6 +4952,8 @@ def validate_scenario(scenario: dict) -> None:
             raise ValueError(f"{prefix}: unknown or missing do")
         kind = step["do"]
         for key in required.get(kind, ()):
+            if kind == "walk_to" and key in ("x", "z") and "targetExpr" in step:
+                continue  # a moving target (VUH-2342)
             if key not in step:
                 raise ValueError(f"{prefix} ({kind}): missing {key}")
         if kind in ("boot", "launch"):
