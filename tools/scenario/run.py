@@ -551,6 +551,14 @@ def step_boot(ctx: Context, step: dict) -> dict:
     timeout = float(step.get("timeoutSec", 120))
     wait_for(ctx, lambda: title_rows(ctx, inst, shot)["new"], "title menu", timeout)
     ctx.sleep(1)
+    if step.get("newGame"):
+        # VUH-2338: NEW GAME (highlighted on a clean boot); the scenario captures the menus after it.
+        if not title_rows(ctx, inst, shot)["new"]:
+            raise StepFailed("NEW GAME not highlighted")
+        press(inst, "cross")
+        ctx.sleep(2)
+        shot.unlink(missing_ok=True)
+        return result
     for _ in range(5):
         if title_rows(ctx, inst, shot)["load"]:
             break
