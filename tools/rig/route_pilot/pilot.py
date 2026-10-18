@@ -1,14 +1,19 @@
-"""Route pilot (VUH-2340): plays one seat with real OS keyboard input.
+"""Route pilot (VUH-2340): plays one seat from its key map.
 
-It reads the owned game's state (read-only) and sends scan-code key events
-with SendInput to that game's focused window, so the route is played through
-native doors and events. Nothing here warps, teleports or writes memory.
+It reads the owned game's state (read-only) and plays through native doors and
+events. By default (`--input pad`) the keys become slot-0 pad state in the
+inject's existing input mailbox, so the game never takes focus from the desktop.
+`--input keys` sends real scan-code keys with SendInput instead, which brings
+the game to the foreground before each key: use it only when nobody is using
+the PC and the real-keyboard proof is wanted. Nothing here warps, teleports or
+writes game memory.
 
 Modes (run from the Session-1 desk bridge, normally through the scenario
 runner's `pilot` step, which owns the game and cleans up):
   --route R.json   play data-driven route steps; the stuck detector stops it
   --teach DIR      execute command files dropped in DIR (route discovery)
-  --release-all    send key-up for every pilot key and exit
+  --release-all    clear the pad mailbox and send key-up for every pilot key, then exit
+  --input pad|keys background mailbox pad (default) or real foreground keyboard
 
 Every door crossing is logged with the last position in the old room, which
 is where that room's door trigger is: route waypoints come from those logs.
@@ -257,6 +262,101 @@ class Keyboard:
                 pass
 
 
+# Background input (VUH-2340): the same pilot keys as raw slot-0 pad state, written to the
+# inject's existing input mailbox (common/include/kh2coop/InputMailbox.hpp), the channel
+# `kh2ctl player-input` uses. It needs no window focus, so the game never takes the foreground.
+# Raw bits are the PS2 order kh2ctl uses; sticks are (axis, value) with +y forward, +x right.
+PAD = {"W": ("ly", 1.0), "S": ("ly", -1.0), "A": ("lx", -1.0), "D": ("lx", 1.0),
+       "ENTER": 0x4000, "SPACE": 0x2000, "F": 0x1000, "SQUARE": 0x8000, "R": 0x0800, "E": 0x0200,
+       "C": 0x0100, "SHIFT": 0x0400, "X": 0x0002, "N": 0x0001, "3": 0x0001, "M": 0x0008, "4": 0x0008,
+       "ESCAPE": 0x0008, "UP": 0x0010, "RIGHT": 0x0020, "DOWN": 0x0040, "LEFT": 0x0080}
+MAILBOX_MAGIC, MAILBOX_VERSION, MAILBOX_SIZE = 0x4332484B, 1, 256  # header 64 + three 64-byte slots
+SLOT0 = 64  # seq u32, lx ly rx ry f32, buttons u32, raw u16, reserved u16, actor u32, target u32, time u64 @40
+
+
+class PadInput:
+    """Pilot keys as slot-0 mailbox pad state: same interface as Keyboard, never takes focus."""
+
+    unfocused_since = None
+
+    def __init__(self, game: Game, keys: dict) -> None:
+        self.game, self.keys, self.held = game, keys, set()
+        k32.CreateFileMappingW.restype = wt.HANDLE
+        k32.CreateFileMappingW.argtypes = [wt.HANDLE, ctypes.c_void_p, wt.DWORD, wt.DWORD, wt.DWORD, wt.LPCWSTR]
+        k32.MapViewOfFile.restype = ctypes.c_void_p
+        k32.MapViewOfFile.argtypes = [wt.HANDLE, wt.DWORD, wt.DWORD, wt.DWORD, ctypes.c_size_t]
+        self.mapping = k32.CreateFileMappingW(wt.HANDLE(-1), None, 0x04, 0, MAILBOX_SIZE,
+                                              f"Local\\kh2coop_input_{game.pid}")
+        created = ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
+        self.view = k32.MapViewOfFile(self.mapping, 0xF001F, 0, 0, MAILBOX_SIZE) if self.mapping else None
+        if not self.view:
+            raise OSError(f"input mailbox for pid {game.pid} unavailable")
+        magic, version, writer = struct.unpack("<III", ctypes.string_at(self.view, 12))
+        if created:
+            ctypes.memset(self.view, 0, MAILBOX_SIZE)
+            ctypes.memmove(self.view, struct.pack("<IIII", MAILBOX_MAGIC, MAILBOX_VERSION, k32.GetCurrentProcessId(), 0), 16)
+        elif (magic, version) != (MAILBOX_MAGIC, MAILBOX_VERSION):
+            raise OSError(f"input mailbox for pid {game.pid} has magic {magic:#x} version {version}")
+        elif not alive(writer):
+            # The inject drops a mailbox whose writer has exited (a finished kh2ctl pulse);
+            # a live writer such as the co-op runtime keeps its ownership.
+            ctypes.memmove(self.view + 8, struct.pack("<I", k32.GetCurrentProcessId()), 4)
+
+    def pad(self, names: set[str]) -> tuple[float, float, int]:
+        lx = ly = 0.0
+        raw = 0
+        for name in names:
+            entry = PAD.get(name)
+            if entry is None:
+                raise ValueError(f"key {name} has no pad mapping")
+            if isinstance(entry, tuple):
+                if entry[0] == "lx":
+                    lx += entry[1]
+                else:
+                    ly += entry[1]
+            else:
+                raw |= entry
+        norm = math.hypot(lx, ly)
+        return (lx / norm, ly / norm, raw) if norm > 1 else (lx, ly, raw)
+
+    def write(self, names: set[str]) -> None:
+        lx, ly, raw = self.pad(names)
+        seq = struct.unpack("<I", ctypes.string_at(self.view + SLOT0, 4))[0]
+        ctypes.memmove(self.view + SLOT0, struct.pack("<I", seq + 1), 4)
+        payload = struct.pack("<ffffIHHII4xQ", lx, ly, 0.0, 0.0, 0, raw, 0, 0, 0, int(time.time() * 1000))
+        ctypes.memmove(self.view + SLOT0 + 4, payload, len(payload))
+        ctypes.memmove(self.view + SLOT0, struct.pack("<I", seq + 2), 4)
+
+    def focused(self) -> bool:
+        return True
+
+    def hold(self, actions: set[str]) -> None:
+        """Hold exactly these actions; the inject keeps the last frame until the next one."""
+        want = {self.keys.get(a, a).upper() for a in actions}
+        if want != self.held:
+            self.write(want)
+            self.held = want
+
+    def tap(self, action: str, ms: int = 90) -> bool:
+        self.hold({action})
+        time.sleep(ms / 1000)
+        self.hold(set())
+        return True
+
+    def release(self) -> None:
+        self.write(set())
+        self.held = set()
+
+    release_all = release
+
+
+def alive(pid: int) -> bool:
+    handle = k32.OpenProcess(0x00100000, False, pid) if pid else None  # SYNCHRONIZE
+    if handle:
+        k32.CloseHandle(handle)
+    return bool(handle)
+
+
 def kh2ctl(*args: str, timeout: float = 60) -> dict:
     out = subprocess.run([str(KH2CTL), *args], capture_output=True, text=True, timeout=timeout,
                          creationflags=subprocess.CREATE_NO_WINDOW)
@@ -304,9 +404,9 @@ class Retry(Exception):
 
 
 class Pilot:
-    def __init__(self, game: Game, out: Path, keys: dict) -> None:
+    def __init__(self, game: Game, out: Path, keys: dict, mode: str = "pad") -> None:
         self.game, self.out = game, out
-        self.kb = Keyboard(game, keys)
+        self.kb = PadInput(game, keys) if mode == "pad" else Keyboard(game, keys)
         self.log = open(out / "pilot.jsonl", "a", encoding="utf-8")  # noqa: SIM115
         self.last: dict | None = None
         self.mark: tuple | None = None
@@ -869,18 +969,23 @@ def main() -> int:
     ap.add_argument("--teach", type=Path)
     ap.add_argument("--seconds", type=float, default=900)
     ap.add_argument("--release-all", action="store_true")
+    ap.add_argument("--input", choices=("pad", "keys"), default="pad")
     args = ap.parse_args()
     game = Game(args.pid)
     route = json.loads(args.route.read_text(encoding="utf-8")) if args.route else {}
     keys = {**KEYS, **route.get("keys", {})}
     if args.release_all:
+        try:
+            PadInput(game, keys).release_all()
+        except OSError:
+            pass
         Keyboard(game, keys).release_all()
         return 0
     if not owned(args.pid):
         print(json.dumps({"ok": False, "error": f"pid {args.pid} is not a rig-owned game"}))
         return 2
     args.out.mkdir(parents=True, exist_ok=True)
-    pilot = Pilot(game, args.out, keys)
+    pilot = Pilot(game, args.out, keys, args.input)
     try:
         if args.route:
             return run_route(pilot, route, args.from_step)

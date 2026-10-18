@@ -1243,7 +1243,7 @@ def step_pilot(ctx: Context, step: dict) -> dict:
     name = step.get("name", "pilot")
     out = ctx.run_dir / name
     cmd = [sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--out", str(out),
-           "--seconds", str(step.get("seconds", 900))]
+           "--seconds", str(step.get("seconds", 900)), "--input", step.get("input", "pad")]
     if "route" in step:
         cmd += ["--route", str(ROOT / step["route"]), "--from-step", str(step.get("fromStep", 0))]
     else:
