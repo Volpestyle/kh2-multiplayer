@@ -318,7 +318,17 @@ cap releases the end. No new lethal or identity authority is introduced. The
 owned-memory regression repeats the actual consumer/end order with an ordinary
 Shadow, covers the cap without an HP write, and refuses incomplete census,
 paused gameplay, changed load/mission pointer or wrong room. Live07 remains a
-failed run, and the full VUH-2352 chain remains unlanded pending review and parity.
+failed run.
+
+Live08 (`20261017-230906_net_lod_morale_spawn_probe_1`, `c74a3bf`) passes after
+independent D14.4 review of `b18d771` and `c74a3bf`, a fresh MSVC build and all
+five targeted regressions. Receipts6..9 are adopted on their exact IDs with
+fitting budgets, and all nine host deaths (net1..9) apply on the friend with no
+refusal. The last death (net6) arrives as the host ends; the friend logs
+`client end deferred ... scoped-roster-live-or-unavailable`, applies the death,
+then replays the end once with `path=clean-census`. Final living enemies are
+host[] and friend[]. This is a two-instance PC1 development run with warps, not
+D15 door acceptance.
 
 The scoped lifetime fix tags only the same three generated groups in exact
 `MU01_MS102`/NOW. It retains the original mission pointer and host permit,
@@ -353,8 +363,8 @@ pass with ASan/UBSan. Removing predecessor retirement or restoring proof-based
 tagging makes their respective mutation controls fail. Evidence is retained in
 `build/rig/vuh2352-lifetime-offline-02/`. The owned-memory MSVC test controls
 only the native birth-provenance leaf; actual mission/scope/census, receipt
-consumer, adoption, resolver and HP/death code run unchanged. Windows validation
-and D14.4 review remain pending. The live fixture separately requires successful
+consumer, adoption, resolver and HP/death code run unchanged. It passed D14.4 review,
+Windows validation and Live08 (below). The live fixture separately requires successful
 budget receipts for all four friend births, including1007/record1, with fresh
 finite native headroom and expected weights8/15. Used39/limit40 in live04
 suggests orphan occupancy blocked weight15; that causal link remains unproven.

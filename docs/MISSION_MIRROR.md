@@ -132,7 +132,7 @@ ordering gate to exactly `MU01_MS102.bar` in Bamboo Grove 08/01, door0,
 map/battle68/event0. It uses the existing continuously revalidated morale
 mission scope before and after capture; the ordinary death consumer, 180-frame
 cap and failure replay stay unchanged. All other mission files retain their
-existing end policy. The extension is pending independent review and live proof. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
+existing end policy. The extension passed D14.4 review and LoD Live08, ending with `path=clean-census` after the final death applied. See [the observed end/death ordering](ROUTE_SPAWNS.md#bailey-terminal-death-across-the-end-hold).
 The bounded deferral passed Quill's D14.4 review and the MSVC owned-memory
 regression. Bailey-12 ended on both peers with empty matching HP/counts, but
 failed the old replay-only oracle before egress. The receipt/oracle follow-up
