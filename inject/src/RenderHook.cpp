@@ -25,6 +25,7 @@
 
 #include "kh2coop/CaptureChannel.hpp"
 #include "CoopHudMailbox.hpp"
+#include "HostCrown.hpp"
 
 #include <Windows.h>
 #include <d3d11.h>
@@ -37,6 +38,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <deque>
@@ -125,6 +127,9 @@ struct FrameContext {
     ID3D12GraphicsCommandList* list = nullptr;
     ID3D12Resource* upload = nullptr;    // overlay pixels, persistently mapped
     std::uint8_t* uploadPtr = nullptr;
+    ID3D12Resource* crownUpload = nullptr;  // VUH-2415: two solid crown colour blocks
+    std::uint8_t* crownPtr = nullptr;
+    DXGI_FORMAT crownFormat = DXGI_FORMAT_UNKNOWN;
     ID3D12Resource* readback = nullptr;  // backbuffer copy
     UINT64 readbackSize = 0;
     UINT64 fenceValue = 0;
@@ -167,6 +172,11 @@ UINT64 g_fpsWindowPresents = 0;
 unsigned g_fps = 0;
 bool g_disabled = false;
 bool g_renderDiagnostics = false;
+bool g_crownEnabled = true;  // VUH-2415: KH2COOP_HOST_CROWN=0 turns the host crown off
+float g_crownFov = crown::DefaultFovYDegrees;
+float g_crownHead = crown::DefaultHeadHeight;
+constexpr UINT kCrownPitch = (2 * crown::Block * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) &
+                             ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
 bool g_overlayDiagnosticsLogged[16] {};
 std::atomic<ID3D12CommandQueue*> g_diagnosticQueues[16] {};
 std::atomic<unsigned> g_diagnosticPresentEntries {0};
@@ -425,6 +435,7 @@ void ReleaseRing() {
         if (ctx.list) ctx.list->Release();
         if (ctx.allocator) ctx.allocator->Release();
         if (ctx.upload) ctx.upload->Release();
+        if (ctx.crownUpload) ctx.crownUpload->Release();
         if (ctx.readback) ctx.readback->Release();
         ctx = FrameContext {};
     }
@@ -531,6 +542,13 @@ bool PrepareSwapChain(IDXGISwapChain* swapChain) {
         if (!ctx.upload ||
             FAILED(ctx.upload->Map(0, &none, reinterpret_cast<void**>(&ctx.uploadPtr)))) {
             if (g_log) g_log("  Render: overlay upload buffer creation failed");
+            return false;
+        }
+        ctx.crownUpload = CreateBuffer(D3D12_HEAP_TYPE_UPLOAD, static_cast<UINT64>(kCrownPitch) * crown::Block,
+                                       D3D12_RESOURCE_STATE_GENERIC_READ);
+        if (!ctx.crownUpload ||
+            FAILED(ctx.crownUpload->Map(0, &none, reinterpret_cast<void**>(&ctx.crownPtr)))) {
+            if (g_log) g_log("  Render: crown upload buffer creation failed");
             return false;
         }
     }
@@ -871,8 +889,26 @@ void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource,
     list->ResourceBarrier(1, &barrier);
 }
 
-// Records and submits this present's work: overlay and/or capture copy.
-void SubmitFrameWork(bool drawOverlay, bool captureFrame) {
+// VUH-2415: fill this ring entry's gold and shade blocks in the backbuffer format.
+// Called only after the entry's fence completed, so the GPU is not reading it.
+void FillCrownColors(FrameContext& ctx, DXGI_FORMAT format) {
+    if (ctx.crownFormat == format) return;
+    std::vector<std::uint8_t> row(static_cast<size_t>(2 * crown::Block) * 4);
+    for (int x = 0; x < 2 * crown::Block; ++x) {
+        const bool gold = x < crown::Block;
+        row[x * 4 + 0] = 40;                 // B
+        row[x * 4 + 1] = gold ? 200 : 30;    // G
+        row[x * 4 + 2] = gold ? 255 : 170;   // R
+        row[x * 4 + 3] = 255;
+    }
+    ConvertFromBgra(row, format);
+    for (int y = 0; y < crown::Block; ++y)
+        std::memcpy(ctx.crownPtr + static_cast<size_t>(y) * kCrownPitch, row.data(), row.size());
+    ctx.crownFormat = format;
+}
+
+// Records and submits this present's work: overlay, host crown and/or capture copy.
+void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
     if (g_gpuFailed) {
         if (captureFrame) FailJob(CaptureStatus::GpuError, L"renderer GPU work failed; restart required");
         return;
@@ -1008,6 +1044,38 @@ void SubmitFrameWork(bool drawOverlay, bool captureFrame) {
         ctx.list->CopyTextureRegion(&dst, kOverlayMargin, kOverlayMargin, 0, &src, nullptr);
     }
 
+    if (drawCrown) {
+        // Before the capture copy, so screenshots and clips show what the player sees.
+        const auto shape = crown::ForHost(g_renderHud.cameraEye, g_renderHud.cameraLook, g_renderHud.crownHost,
+                                          g_crownFov, g_crownHead, static_cast<int>(bbDesc.Width),
+                                          static_cast<int>(bbDesc.Height));
+        if (shape.count) {
+            FillCrownColors(ctx, bbDesc.Format);
+            if (state != D3D12_RESOURCE_STATE_COPY_DEST) {
+                Transition(ctx.list, backbuffer, state, D3D12_RESOURCE_STATE_COPY_DEST);
+                state = D3D12_RESOURCE_STATE_COPY_DEST;
+            }
+            D3D12_TEXTURE_COPY_LOCATION dst {};
+            dst.pResource = backbuffer;
+            dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dst.SubresourceIndex = 0;
+            D3D12_TEXTURE_COPY_LOCATION src {};
+            src.pResource = ctx.crownUpload;
+            src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            src.PlacedFootprint.Footprint.Format = bbDesc.Format;
+            src.PlacedFootprint.Footprint.Width = 2 * crown::Block;
+            src.PlacedFootprint.Footprint.Height = crown::Block;
+            src.PlacedFootprint.Footprint.Depth = 1;
+            src.PlacedFootprint.Footprint.RowPitch = kCrownPitch;
+            for (std::size_t i = 0; i < shape.count; ++i) {
+                const auto& r = shape.rects[i];  // clipped to the backbuffer, at most Block square
+                const UINT left = r.color == crown::Shade ? crown::Block : 0;
+                const D3D12_BOX box {left, 0, left + static_cast<UINT>(r.w), static_cast<UINT>(r.h), 0, 1};
+                ctx.list->CopyTextureRegion(&dst, static_cast<UINT>(r.x), static_cast<UINT>(r.y), 0, &src, &box);
+            }
+        }
+    }
+
     if (captureFrame) {
         Transition(ctx.list, backbuffer, state, D3D12_RESOURCE_STATE_COPY_SOURCE);
         state = D3D12_RESOURCE_STATE_COPY_SOURCE;
@@ -1070,7 +1138,8 @@ void OnPresent(IDXGISwapChain* swapChain) {
         }
         const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput() ||
                                  warp::WaitingAtBlockedExit();
-        if (drawOverlay || captureFrame) SubmitFrameWork(drawOverlay, captureFrame);
+        const bool drawCrown = g_crownEnabled && g_renderHud.crownCurrent;
+        if (drawOverlay || drawCrown || captureFrame) SubmitFrameWork(drawOverlay, drawCrown, captureFrame);
     }
 
     if (g_job.active) {
@@ -1289,6 +1358,19 @@ bool Install(uintptr_t exeBase, LogFn log) {
     char diagnostic[8] {};
     g_renderDiagnostics = GetEnvironmentVariableA("KH2COOP_RENDER_DIAGNOSTICS", diagnostic,
                                                    sizeof(diagnostic)) == 1 && diagnostic[0] == '1';
+    char crownValue[16] {};
+    g_crownEnabled = !(GetEnvironmentVariableA("KH2COOP_HOST_CROWN", crownValue, sizeof(crownValue)) == 1 &&
+                       crownValue[0] == '0');
+    if (GetEnvironmentVariableA("KH2COOP_CROWN_FOV", crownValue, sizeof(crownValue)) > 0) {
+        const float fov = static_cast<float>(std::atof(crownValue));
+        if (fov > 10.0f && fov < 120.0f) g_crownFov = fov;
+    }
+    if (GetEnvironmentVariableA("KH2COOP_CROWN_HEAD", crownValue, sizeof(crownValue)) > 0) {
+        const float head = static_cast<float>(std::atof(crownValue));
+        if (head > 0.0f && head < 1000.0f) g_crownHead = head;
+    }
+    if (g_log) g_log("  Render: host crown %s fov=%.1f head=%.0f", g_crownEnabled ? "on" : "off",
+                     g_crownFov, g_crownHead);
 
     if (!CreateChannel()) {
         if (g_log) g_log("  Render: capture channel creation failed (%lu)", GetLastError());

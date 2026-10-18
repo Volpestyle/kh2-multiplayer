@@ -1105,6 +1105,19 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     input.before = before;
     input.localAvailable = true;
     input.gameplayCurrent = !g_puppetsSuspended && !warp::TransitionPending();
+    // VUH-2415 crown: read-only field/menu/event gates and this frame's camera.
+    input.fieldClear = *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::IN_FIELD) != 0 &&
+        *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::OPEN_MENU) == 0xFF &&
+        *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
+        *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) == 0;
+    const auto* camera = reinterpret_cast<const float*>(g_exeBase + offsets::CAMERA_STRUCT);
+    input.cameraLook = {camera[offsets::camera::SMOOTH_LOOKAT / 4], camera[offsets::camera::SMOOTH_LOOKAT / 4 + 1],
+                        camera[offsets::camera::SMOOTH_LOOKAT / 4 + 2]};
+    input.cameraEye = {camera[offsets::camera::EYE_POS / 4], camera[offsets::camera::EYE_POS / 4 + 1],
+                       camera[offsets::camera::EYE_POS / 4 + 2]};
+    input.cameraValid = std::isfinite(input.cameraEye.x) && std::isfinite(input.cameraEye.y) &&
+        std::isfinite(input.cameraEye.z) && std::isfinite(input.cameraLook.x) &&
+        std::isfinite(input.cameraLook.y) && std::isfinite(input.cameraLook.z);
     input.local = local;
     (void)g_avatarBridge.TryReadRosterNames(input.names);
     for (int i = 0; i < 2; ++i) {

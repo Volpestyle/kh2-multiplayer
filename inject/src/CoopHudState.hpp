@@ -35,6 +35,10 @@ struct Snapshot {
     std::uint8_t promptKind {};
     std::uint8_t promptSlot {255};
     std::uint16_t promptProgress {}; // 0..1000 of the Triangle hold
+    // VUH-2415 host crown: the host's (slot 0) feet and this frame's camera, set only
+    // in network co-op field play with no event, cutscene or open menu.
+    bool crownCurrent {};
+    Vec3 crownHost {}, cameraEye {}, cameraLook {};
 };
 static_assert(std::is_trivially_copyable_v<Snapshot> && std::is_standard_layout_v<Snapshot>);
 
@@ -46,6 +50,8 @@ struct Remote {
 struct Input {
     PuppetAuthority before {}, after {};
     bool localAvailable {}, gameplayCurrent {};
+    bool fieldClear {}, cameraValid {};  // VUH-2415: field live, no menu/event; camera read
+    Vec3 cameraEye {}, cameraLook {};
     AvatarState local {};
     hudnames::Roster names {};
     std::array<Remote, 2> remote {};
@@ -95,6 +101,9 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
     auto& local = out.members[out.localSlot];
     local.state = RowState::Available;
     SetHp(local, in.local); // captureAvatar.ownerSlot defaults to 0: do not use it here.
+    const bool crownScope = in.fieldClear && in.cameraValid;
+    if (crownScope) { out.cameraEye = in.cameraEye; out.cameraLook = in.cameraLook; }
+    if (crownScope && out.localSlot == 0) { out.crownCurrent = true; out.crownHost = in.local.position; }
     for (int i = 0; i < 2; ++i) {
         const auto& remote = in.remote[static_cast<std::size_t>(i)];
         const auto& avatar = remote.avatar;
@@ -105,6 +114,7 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
         auto& row = out.members[slot]; // Provenance validator bounded and mapped slot above.
         row.state = RowState::Available;
         SetHp(row, avatar);
+        if (crownScope && slot == 0) { out.crownCurrent = true; out.crownHost = avatar.position; }
     }
     return out;
 }
