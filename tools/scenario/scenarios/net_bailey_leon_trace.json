@@ -1,0 +1,111 @@
+{
+ "name": "net_bailey_leon_trace",
+ "description": "VUH-2421: two local player-default instances in the HB1 Bailey (4/8 map 52) with Leon, KH2COOP_TRACE_HITS=1 on both games; both bots fight for 28 s, filmed from both views, to see whether Sora's attacks knock Leon back and through which hit path.",
+ "playerDefaults": true,
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_TRACE_HITS": "1"
+   }
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_TRACE_HITS": "1"
+   }
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 26,
+   "evt": 0
+  },
+  {
+   "do": "warp",
+   "instance": 1,
+   "world": 4,
+   "room": 26,
+   "evt": 0
+  },
+  {
+   "do": "relay",
+   "port": 27803,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "all((bridge(i).get('puppet0') or {}).get('active') for i in range(2))",
+   "timeoutMs": 30000
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 4,
+   "room": 8,
+   "door": 0,
+   "map": 52,
+   "btl": 52,
+   "evt": 0
+  },
+  {
+   "do": "wait_until",
+   "expr": "all(location(i)==[4,8,0,52,52,0] and any(a['name']=='P_EX100' for a in actors(i)) for i in range(2))",
+   "timeoutMs": 40000
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "save",
+   "as": "leon_start",
+   "expr": "[(i, [(a['name'], a.get('hp'), a['position']) for a in actors(i) if a['name'].startswith('N_HB530')]) for i in range(2)]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1
+   ],
+   "seconds": 28,
+   "clips": [
+    {
+     "instance": 0,
+     "seconds": 28,
+     "fps": 30,
+     "name": "bailey_host"
+    },
+    {
+     "instance": 1,
+     "seconds": 28,
+     "fps": 30,
+     "name": "bailey_friend"
+    }
+   ]
+  },
+  {
+   "do": "save",
+   "as": "leon_end",
+   "expr": "[(i, [(a['name'], a.get('hp'), a['position']) for a in actors(i) if a['name'].startswith('N_HB530')]) for i in range(2)]"
+  }
+ ]
+}

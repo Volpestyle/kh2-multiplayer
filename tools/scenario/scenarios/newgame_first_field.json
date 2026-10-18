@@ -1,0 +1,1205 @@
+{
+ "name": "newgame_first_field",
+ "description": "VUH-2338 on PC1: clean boot, NEW GAME, Standard Mode (default row), vibration ON (default row), Begin with these settings: Yes (default row), then Cross only while the field gate is closed (story dialogs), never in a live field, until the first live field frame (no menu, cutscene or event); records location, gates, progress snapshot and actors there and 3 s later with input still held. Never saves; DLL save guard on.",
+ "steps": [
+  {
+   "do": "boot",
+   "newGame": true,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "wait",
+   "ms": 8000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng1_game_mode"
+  },
+  {
+   "do": "save",
+   "as": "ng1_game_mode_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng1_game_mode_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "cross",
+   "ms": 150
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng2_vibration"
+  },
+  {
+   "do": "save",
+   "as": "ng2_vibration_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng2_vibration_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "cross",
+   "ms": 150
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng3_confirm"
+  },
+  {
+   "do": "save",
+   "as": "ng3_confirm_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng3_confirm_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "press",
+   "instance": 0,
+   "button": "cross",
+   "ms": 150
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng4_opening"
+  },
+  {
+   "do": "save",
+   "as": "ng4_opening_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng4_opening_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)[1] == 2",
+   "timeoutMs": 420000,
+   "pollMs": 1000
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "uss0"
+  },
+  {
+   "do": "save",
+   "as": "uss0_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "uss0_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "uss1"
+  },
+  {
+   "do": "save",
+   "as": "uss1_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "uss1_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "uss2"
+  },
+  {
+   "do": "save",
+   "as": "uss2_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "uss2_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "uss3"
+  },
+  {
+   "do": "save",
+   "as": "uss3_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "uss3_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "uss4"
+  },
+  {
+   "do": "save",
+   "as": "uss4_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "uss4_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "wait",
+   "ms": 5000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "uss5"
+  },
+  {
+   "do": "save",
+   "as": "uss5_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "uss5_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev00"
+  },
+  {
+   "do": "save",
+   "as": "ev00_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev00_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev01"
+  },
+  {
+   "do": "save",
+   "as": "ev01_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev01_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev02"
+  },
+  {
+   "do": "save",
+   "as": "ev02_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev02_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev03"
+  },
+  {
+   "do": "save",
+   "as": "ev03_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev03_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev04"
+  },
+  {
+   "do": "save",
+   "as": "ev04_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev04_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev05"
+  },
+  {
+   "do": "save",
+   "as": "ev05_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev05_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev06"
+  },
+  {
+   "do": "save",
+   "as": "ev06_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev06_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev07"
+  },
+  {
+   "do": "save",
+   "as": "ev07_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev07_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev08"
+  },
+  {
+   "do": "save",
+   "as": "ev08_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev08_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev09"
+  },
+  {
+   "do": "save",
+   "as": "ev09_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev09_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev10"
+  },
+  {
+   "do": "save",
+   "as": "ev10_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev10_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev11"
+  },
+  {
+   "do": "save",
+   "as": "ev11_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev11_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev12"
+  },
+  {
+   "do": "save",
+   "as": "ev12_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev12_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev13"
+  },
+  {
+   "do": "save",
+   "as": "ev13_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev13_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev14"
+  },
+  {
+   "do": "save",
+   "as": "ev14_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev14_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev15"
+  },
+  {
+   "do": "save",
+   "as": "ev15_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev15_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev16"
+  },
+  {
+   "do": "save",
+   "as": "ev16_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev16_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev17"
+  },
+  {
+   "do": "save",
+   "as": "ev17_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev17_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0",
+   "timeoutMs": 120000,
+   "pollMs": 250
+  },
+  {
+   "do": "save",
+   "as": "first_field_t",
+   "expr": "location(0)"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng5_first_field"
+  },
+  {
+   "do": "save",
+   "as": "ng5_first_field_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng5_first_field_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0
+   ],
+   "as": "first_field_progress"
+  },
+  {
+   "do": "save",
+   "as": "first_field_actors",
+   "expr": "[(a['name'], a.get('objectId'), a.get('hp'), a['position']) for a in actors(0)][:16]"
+  },
+  {
+   "do": "save",
+   "as": "first_field_room",
+   "expr": "room(0)"
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng6_held_3s"
+  },
+  {
+   "do": "save",
+   "as": "ng6_held_3s_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng6_held_3s_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  }
+ ]
+}
