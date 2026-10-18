@@ -27,6 +27,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ng1_game_mode_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "press",
    "instance": 0,
    "button": "cross",
@@ -50,6 +55,11 @@
    "do": "save",
    "as": "ng2_vibration_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ng2_vibration_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "press",
@@ -77,6 +87,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ng3_confirm_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "press",
    "instance": 0,
    "button": "cross",
@@ -102,9 +117,494 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ng4_opening_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op00"
+  },
+  {
+   "do": "save",
+   "as": "op00_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op00_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op00_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op01"
+  },
+  {
+   "do": "save",
+   "as": "op01_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op01_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op01_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op02"
+  },
+  {
+   "do": "save",
+   "as": "op02_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op02_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op02_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op03"
+  },
+  {
+   "do": "save",
+   "as": "op03_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op03_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op03_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op04"
+  },
+  {
+   "do": "save",
+   "as": "op04_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op04_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op04_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op05"
+  },
+  {
+   "do": "save",
+   "as": "op05_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op05_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op05_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op06"
+  },
+  {
+   "do": "save",
+   "as": "op06_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op06_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op06_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op07"
+  },
+  {
+   "do": "save",
+   "as": "op07_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op07_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op07_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op08"
+  },
+  {
+   "do": "save",
+   "as": "op08_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op08_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op08_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op09"
+  },
+  {
+   "do": "save",
+   "as": "op09_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op09_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op09_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op10"
+  },
+  {
+   "do": "save",
+   "as": "op10_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op10_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op10_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op11"
+  },
+  {
+   "do": "save",
+   "as": "op11_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op11_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op11_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op12"
+  },
+  {
+   "do": "save",
+   "as": "op12_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op12_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op12_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op13"
+  },
+  {
+   "do": "save",
+   "as": "op13_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op13_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op13_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op14"
+  },
+  {
+   "do": "save",
+   "as": "op14_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op14_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op14_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op15"
+  },
+  {
+   "do": "save",
+   "as": "op15_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op15_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op15_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op16"
+  },
+  {
+   "do": "save",
+   "as": "op16_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op16_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op16_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op17"
+  },
+  {
+   "do": "save",
+   "as": "op17_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op17_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op17_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op18"
+  },
+  {
+   "do": "save",
+   "as": "op18_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op18_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op18_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "op19"
+  },
+  {
+   "do": "save",
+   "as": "op19_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "op19_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "op19_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "wait_until",
    "expr": "location(0)[1] == 2",
-   "timeoutMs": 420000,
+   "timeoutMs": 240000,
    "pollMs": 1000
   },
   {
@@ -127,6 +627,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "uss0_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "wait",
    "ms": 5000
   },
@@ -144,6 +649,11 @@
    "do": "save",
    "as": "uss1_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "uss1_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "wait",
@@ -165,6 +675,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "uss2_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "wait",
    "ms": 5000
   },
@@ -182,6 +697,11 @@
    "do": "save",
    "as": "uss3_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "uss3_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "wait",
@@ -203,6 +723,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "uss4_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "wait",
    "ms": 5000
   },
@@ -220,6 +745,11 @@
    "do": "save",
    "as": "uss5_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "uss5_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -273,6 +803,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev00_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -322,6 +857,11 @@
    "do": "save",
    "as": "ev01_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev01_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -375,6 +915,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev02_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -424,6 +969,11 @@
    "do": "save",
    "as": "ev03_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev03_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -477,6 +1027,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev04_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -526,6 +1081,11 @@
    "do": "save",
    "as": "ev05_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev05_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -579,6 +1139,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev06_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -628,6 +1193,11 @@
    "do": "save",
    "as": "ev07_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev07_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -681,6 +1251,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev08_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -730,6 +1305,11 @@
    "do": "save",
    "as": "ev09_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev09_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -783,6 +1363,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev10_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -832,6 +1417,11 @@
    "do": "save",
    "as": "ev11_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev11_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -885,6 +1475,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev12_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -934,6 +1529,11 @@
    "do": "save",
    "as": "ev13_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev13_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -987,6 +1587,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev14_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -1036,6 +1641,11 @@
    "do": "save",
    "as": "ev15_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev15_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "kh2ctl",
@@ -1089,6 +1699,11 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev16_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
@@ -1140,6 +1755,683 @@
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
   },
   {
+   "do": "save",
+   "as": "ev17_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev18"
+  },
+  {
+   "do": "save",
+   "as": "ev18_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev18_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev18_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev19"
+  },
+  {
+   "do": "save",
+   "as": "ev19_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev19_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev19_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev20"
+  },
+  {
+   "do": "save",
+   "as": "ev20_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev20_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev20_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev21"
+  },
+  {
+   "do": "save",
+   "as": "ev21_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev21_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev21_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev22"
+  },
+  {
+   "do": "save",
+   "as": "ev22_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev22_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev22_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev23"
+  },
+  {
+   "do": "save",
+   "as": "ev23_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev23_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev23_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev24"
+  },
+  {
+   "do": "save",
+   "as": "ev24_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev24_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev24_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev25"
+  },
+  {
+   "do": "save",
+   "as": "ev25_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev25_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev25_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev26"
+  },
+  {
+   "do": "save",
+   "as": "ev26_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev26_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev26_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev27"
+  },
+  {
+   "do": "save",
+   "as": "ev27_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev27_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev27_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev28"
+  },
+  {
+   "do": "save",
+   "as": "ev28_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev28_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev28_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['peek', '--rva', '0x9BA8D0:u8'] if (peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0) else ['player-press', '--button', 'cross', '--duration-ms', '150']"
+  },
+  {
+   "do": "wait",
+   "ms": 2500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev29"
+  },
+  {
+   "do": "save",
+   "as": "ev29_loc",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev29_gates",
+   "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ev29_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
    "do": "wait_until",
    "expr": "peek('0x9BA8D0','u8') != 0 and peek('0x7435D0','u8') == 255 and peek('0xB65210','i32') == 0 and peek('0x2A11478','u32') == 0 and peek('0x2A1147C','u32') == 0",
    "timeoutMs": 120000,
@@ -1164,6 +2456,11 @@
    "do": "save",
    "as": "ng5_first_field_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ng5_first_field_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
   },
   {
    "do": "progress_snapshot",
@@ -1200,6 +2497,18 @@
    "do": "save",
    "as": "ng6_held_3s_gates",
    "expr": "[peek('0x9BA8D0','u8'), peek('0x7435D0','u8'), peek('0xB65210','i32'), peek('0x2A11478','u32'), peek('0x2A1147C','u32')]"
+  },
+  {
+   "do": "save",
+   "as": "ng6_held_3s_stall",
+   "expr": "[peek('0xABB878','u32'), ([m['f'] for m in log_matches(r'\\[crown\\] frame=(?P<f>\\d+)')] or ['-'])[-1]]"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 5,
+   "fps": 30,
+   "name": "ng7_first_field_held"
   }
  ]
 }
