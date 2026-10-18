@@ -17,8 +17,10 @@ namespace kh2coop::inject::crown {
 // Side of each solid colour block in the upload buffer; every rect fits in one.
 inline constexpr int Block = 64;
 inline constexpr std::size_t MaxRects = 6;
-inline constexpr float DefaultFovYDegrees = 45.0f;  // KH2's projection is not located; calibrated live
-inline constexpr float DefaultHeadHeight = 180.0f;  // world units above the avatar's feet
+// KH2's projection matrix is not located. Live crown-02 (4/26): the look-at, about 170 units above
+// the feet, sat 300 px above them at depth ~419 on 1080 lines, so tan(fov/2) ~= 0.73.
+inline constexpr float DefaultFovYDegrees = 70.0f;
+inline constexpr float DefaultHeadHeight = 195.0f;  // world units above the feet: just over Sora's head
 inline constexpr float NearPlane = 10.0f;
 
 enum Color : std::uint8_t { Gold = 0, Shade = 1 };
@@ -83,6 +85,12 @@ inline bool Clip(Rect& r, int width, int height) noexcept {
     if (x1 <= x0 || y1 <= y0) return false;
     r = {x0, y0, x1 - x0, y1 - y0, r.color};
     return true;
+}
+
+// Source box for a rect's colour block, in D3D12_BOX order {left, top, front, right, bottom, back}.
+inline std::array<unsigned, 6> SourceBox(const Rect& r) noexcept {
+    const unsigned left = r.color == Shade ? static_cast<unsigned>(Block) : 0u;
+    return {left, 0u, 0u, left + static_cast<unsigned>(r.w), static_cast<unsigned>(r.h), 1u};
 }
 
 // A small crown whose band's bottom centre sits at (cx, bottom). Scales with the

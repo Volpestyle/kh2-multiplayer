@@ -1076,8 +1076,8 @@ void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
             src.PlacedFootprint.Footprint.RowPitch = kCrownPitch;
             for (std::size_t i = 0; i < shape.count; ++i) {
                 const auto& r = shape.rects[i];  // clipped to the backbuffer, at most Block square
-                const UINT left = r.color == crown::Shade ? crown::Block : 0;
-                const D3D12_BOX box {left, 0, left + static_cast<UINT>(r.w), static_cast<UINT>(r.h), 0, 1};
+                const auto b = crown::SourceBox(r);
+                const D3D12_BOX box {b[0], b[1], b[2], b[3], b[4], b[5]};
                 ctx.list->CopyTextureRegion(&dst, static_cast<UINT>(r.x), static_cast<UINT>(r.y), 0, &src, &box);
             }
         }

@@ -69,6 +69,11 @@ void Shapes() {
     Check(shape.count > 0 && Inside(shape, 1920, 1080), "host feet project to a crown above the head");
     shape = crown::ForHost(kEye, kLook, {0.0f, 0.0f, -2000.0f}, 45.0f, 180.0f, 1920, 1080);
     Check(shape.count == 0, "host behind the camera has no crown");
+    // crown-01 drew nothing: the box was built as {left, top, right, bottom, ...} (empty).
+    const auto gold = crown::SourceBox({100, 100, 28, 7, crown::Gold});
+    const auto shade = crown::SourceBox({100, 100, 4, 3, crown::Shade});
+    Check(gold == std::array<unsigned, 6> {0, 0, 0, 28, 7, 1} &&
+          shade == std::array<unsigned, 6> {64, 0, 0, 68, 3, 1}, "source box is in D3D12_BOX order and non-empty");
 }
 
 hud::Input Fixture(std::uint8_t localSlot) {
