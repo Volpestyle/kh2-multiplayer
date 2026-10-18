@@ -247,23 +247,43 @@ int main() {
     Tick(2100);
     CHECK("puppet tick: stats line names puppetRefused", Has("puppetRefused=4"));
 
-    // ---- VUH-2421: the host's friendly fire off refuses every ally player pair, whatever the installed mode
+    // ---- VUH-2421: the host's friendly fire off refuses a driven puppet's hit (a companion-kit puppet too) and every
+    // ally player pair, in every hooked mode; enemy hits and heals stay native. On leaves each mode as it was.
     g_nativeAnswer = 0x1234501;
-    SetFriendlyFire(false);
-    CHECK("friendly fire off: logged once", Has("[allyhit] friendly fire off (host setting)"));
-    CHECK("friendly fire off: undriven clone -> local refused", HookedCanHit(Attack(100, 2, 0, 1800, 0), g_local) == 0x1234500);
-    CHECK("friendly fire off: local -> clone refused", HookedCanHit(Attack(101, 1, 0, 1801, 1), g_clone) == 0x1234500);
-    CHECK("friendly fire off: enemy -> local native", HookedCanHit(Attack(102, 4, 0, 1802, 2), g_local) == 0x1234501);
-    CHECK("friendly fire off: local -> enemy native", HookedCanHit(Attack(103, 1, 0, 1803, 1), g_enemy) == 0x1234501);
-    CHECK("friendly fire off: heal (kind 5) between players kept", HookedCanHit(Attack(104, 2, 5, 1804, 0), g_local) == 0x1234501);
-    CHECK("friendly fire off: the installed mode is unchanged", CurrentMode() == Mode::Puppet);
-    g_drivenActors[1] = g_companion;
-    CHECK("friendly fire off: a driven companion-kit puppet -> local still refused",
-          HookedCanHit(Attack(106, 6, 0, 1806, 0), g_local) == 0x1234500);
-    g_drivenActors[1] = 0;
-    SetFriendlyFire(true);
-    CHECK("friendly fire on: back to puppet mode (undriven clone -> local native)",
-          HookedCanHit(Attack(105, 2, 0, 1805, 0), g_local) == 0x1234501 && Has("[allyhit] friendly fire on (host setting)"));
+    const char* hooked[] {nullptr, "1", "trace"};
+    for (unsigned k = 0; k < 3; ++k) {
+        SetEnvironmentVariableA("KH2COOP_ALLY_HIT", hooked[k]);
+        const std::string m = std::string("friendly fire off, ") + (hooked[k] ? hooked[k] : "puppet") + ": ";
+        const auto name = [&](const char* what) { static std::string s; s = m + what; return s.c_str(); };
+        const std::uint16_t id = static_cast<std::uint16_t>(1800 + 20 * k);
+        const unsigned slot = 100 + 20 * k;
+        CHECK(name("installs with the mode unchanged"), Install(g_image, &Log, &Resolve, &Frame, &Driven) &&
+              CurrentMode() == (k == 0 ? Mode::Puppet : k == 1 ? Mode::CoOp : Mode::Trace));
+        g_drivenActors[0] = 0; g_drivenActors[1] = g_companion;
+        SetFriendlyFire(false);
+        CHECK(name("logged"), Has("[allyhit] friendly fire off (host setting)"));
+        CHECK(name("driven companion-kit puppet -> local refused"), HookedCanHit(Attack(slot, 6, 0, id, 0), g_local) == 0x1234500);
+        CHECK(name("driven companion-sourced projectile -> local refused"),
+              HookedCanHit(Attack(slot + 1, 5, 0, id + 1, 0, 6), g_local) == 0x1234500);
+        CHECK(name("driven companion -> Goofy (team 1) refused"), HookedCanHit(Attack(slot + 2, 6, 0, id + 2, 0), goofy) == 0x1234500);
+        CHECK(name("undriven clone -> local refused"), HookedCanHit(Attack(slot + 3, 2, 0, id + 3, 0), g_local) == 0x1234500);
+        CHECK(name("clone-sourced projectile -> local refused"), HookedCanHit(Attack(slot + 4, 5, 0, id + 4, 0, 2), g_local) == 0x1234500);
+        CHECK(name("local -> clone refused"), HookedCanHit(Attack(slot + 5, 1, 0, id + 5, 1), g_clone) == 0x1234500);
+        CHECK(name("enemy -> local native"), HookedCanHit(Attack(slot + 6, 4, 0, id + 6, 2), g_local) == 0x1234501);
+        CHECK(name("enemy-sourced projectile -> local native"), HookedCanHit(Attack(slot + 7, 5, 0, id + 7, 0, 4), g_local) == 0x1234501);
+        CHECK(name("local -> enemy native"), HookedCanHit(Attack(slot + 8, 1, 0, id + 8, 1), g_enemy) == 0x1234501);
+        CHECK(name("driven companion -> enemy native"), HookedCanHit(Attack(slot + 9, 6, 0, id + 9, 0), g_enemy) == 0x1234501);
+        CHECK(name("driven companion heal (kind 5) -> local native"), HookedCanHit(Attack(slot + 10, 6, 5, id + 10, 0), g_local) == 0x1234501);
+        CHECK(name("clone heal (kind 6) -> local native"), HookedCanHit(Attack(slot + 11, 2, 6, id + 11, 0), g_local) == 0x1234501);
+        SetFriendlyFire(true);
+        CHECK(name("on again: logged"), Has("[allyhit] friendly fire on (host setting)"));
+        CHECK(name("on again: companion -> local as the mode decides (puppet refuses, coop/trace native)"),
+              HookedCanHit(Attack(slot + 12, 6, 0, id + 12, 0), g_local) == (k == 0 ? 0x1234500 : 0x1234501));
+        CHECK(name("on again: undriven clone -> local as the mode decides (coop refuses)"),
+              HookedCanHit(Attack(slot + 13, 2, 0, id + 13, 0), g_local) == (k == 1 ? 0x1234500 : 0x1234501));
+        g_drivenActors[1] = 0;
+    }
+    SetEnvironmentVariableA("KH2COOP_ALLY_HIT", nullptr);
 
     std::printf("allyhit: %d passed, %d failed\n", g_pass, g_fail);
     if (g_fail) std::printf("--- log ---\n%s", g_logged.c_str());
