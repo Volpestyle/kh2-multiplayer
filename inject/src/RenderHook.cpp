@@ -174,7 +174,10 @@ bool g_disabled = false;
 bool g_renderDiagnostics = false;
 bool g_crownEnabled = true;  // VUH-2415: KH2COOP_HOST_CROWN=0 turns the host crown off
 float g_crownFov = crown::DefaultFovYDegrees;
-float g_crownHead = crown::DefaultHeadHeight;
+float g_crownHead = 0.0f;  // VUH-2455: 0 sizes the head by camera distance; KH2COOP_CROWN_HEAD fixes it
+float CrownHead(const Vec3& eye, const Vec3& look) {
+    return g_crownHead > 0.0f ? g_crownHead : crown::HeadHeight(eye, look);
+}
 constexpr UINT kCrownPitch = (2 * crown::Block * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) &
                              ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
 bool g_overlayDiagnosticsLogged[16] {};
@@ -1048,15 +1051,16 @@ void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
 
     if (drawCrown) {
         // Before the capture copy, so screenshots and clips show what the player sees.
+        const float head = CrownHead(g_renderHud.cameraEye, g_renderHud.cameraLook);
         const auto shape = crown::ForHost(g_renderHud.cameraEye, g_renderHud.cameraLook, g_renderHud.crownHost,
-                                          g_crownFov, g_crownHead, static_cast<int>(bbDesc.Width),
+                                          g_crownFov, head, static_cast<int>(bbDesc.Width),
                                           static_cast<int>(bbDesc.Height));
         if (g_log && g_presentIndex % 600 == 0) {
             const auto at = crown::Project(g_renderHud.cameraEye, g_renderHud.cameraLook,
-                {g_renderHud.crownHost.x, g_renderHud.crownHost.y - g_crownHead, g_renderHud.crownHost.z},
+                {g_renderHud.crownHost.x, g_renderHud.crownHost.y - head, g_renderHud.crownHost.z},
                 g_crownFov, static_cast<int>(bbDesc.Width), static_cast<int>(bbDesc.Height));
-            g_log("[crown] present=%llu visible=%d at=(%.0f,%.0f) rects=%zu",
-                  static_cast<unsigned long long>(g_presentIndex), at.visible, at.x, at.y, shape.count);
+            g_log("[crown] present=%llu visible=%d at=(%.0f,%.0f) head=%.0f rects=%zu",
+                  static_cast<unsigned long long>(g_presentIndex), at.visible, at.x, at.y, head, shape.count);
         }
         if (shape.count) {
             FillCrownColors(ctx, bbDesc.Format);
@@ -1159,7 +1163,8 @@ void OnPresent(IDXGISwapChain* swapChain) {
             DXGI_SWAP_CHAIN_DESC1 desc {};
             drawCrown = SUCCEEDED(g_swapChain3->GetDesc1(&desc)) &&
                 crown::ForHost(g_renderHud.cameraEye, g_renderHud.cameraLook, g_renderHud.crownHost, g_crownFov,
-                               g_crownHead, static_cast<int>(desc.Width), static_cast<int>(desc.Height)).count > 0;
+                               CrownHead(g_renderHud.cameraEye, g_renderHud.cameraLook), static_cast<int>(desc.Width),
+                               static_cast<int>(desc.Height)).count > 0;
         }
         if (drawOverlay || drawCrown || captureFrame) SubmitFrameWork(drawOverlay, drawCrown, captureFrame);
     }
@@ -1391,8 +1396,8 @@ bool Install(uintptr_t exeBase, LogFn log) {
         const float head = static_cast<float>(std::atof(crownValue));
         if (head > 0.0f && head < 1000.0f) g_crownHead = head;
     }
-    if (g_log) g_log("  Render: host crown %s fov=%.1f head=%.0f", g_crownEnabled ? "on" : "off",
-                     g_crownFov, g_crownHead);
+    if (g_log) g_log("  Render: host crown %s fov=%.1f head=%.0f (0: by camera distance)",
+                     g_crownEnabled ? "on" : "off", g_crownFov, g_crownHead);
 
     if (!CreateChannel()) {
         if (g_log) g_log("  Render: capture channel creation failed (%lu)", GetLastError());

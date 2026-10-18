@@ -12,6 +12,9 @@
 namespace kh2coop::inject::hud {
 
 inline constexpr std::uint64_t FreshMs = 1000;
+// VUH-2455: game frames the crown gate must stay clear before the crown shows. The BC 05/0B
+// intro drew it on one close-up, so a gate that reads clear between event shots must not.
+inline constexpr std::uint32_t CrownSettleFrames = 15;
 inline constexpr int Width = 820, Height = 130, TrackWidth = 220;
 // The HP column (RenderHook DrawCoopHudRows, x 440..568) fits 10 cells of the
 // 22-px Consolas overlay font (~12 px each); longer text is ellipsized.
@@ -51,6 +54,13 @@ struct Input {
     PuppetAuthority before {}, after {};
     bool localAvailable {}, gameplayCurrent {};
     bool fieldClear {}, cameraValid {};  // VUH-2415: field live, no menu/event; camera read
+    bool cameraFollowsLocal {};          // VUH-2455: camera +0x50 is the local Sora actor
+    std::uint32_t clearFrames {};        // consecutive frames with fieldClear and cameraFollowsLocal
+    struct {                             // raw field gates, for the gate-transition log
+        std::uint8_t inField {}, openMenu {};
+        std::int32_t cutsceneState {};
+        bool eventActive {};
+    } gates {};
     Vec3 cameraEye {}, cameraLook {};
     AvatarState local {};
     hudnames::Roster names {};
@@ -101,7 +111,8 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
     auto& local = out.members[out.localSlot];
     local.state = RowState::Available;
     SetHp(local, in.local); // captureAvatar.ownerSlot defaults to 0: do not use it here.
-    const bool crownScope = in.fieldClear && in.cameraValid;
+    const bool crownScope = in.fieldClear && in.cameraValid && in.cameraFollowsLocal &&
+        in.clearFrames >= CrownSettleFrames;
     if (crownScope) { out.cameraEye = in.cameraEye; out.cameraLook = in.cameraLook; }
     if (crownScope && out.localSlot == 0) { out.crownCurrent = true; out.crownHost = in.local.position; }
     for (int i = 0; i < 2; ++i) {

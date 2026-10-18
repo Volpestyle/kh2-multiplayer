@@ -21,6 +21,11 @@ inline constexpr std::size_t MaxRects = 6;
 // the feet, sat 300 px above them at depth ~419 on 1080 lines, so tan(fov/2) ~= 0.73.
 inline constexpr float DefaultFovYDegrees = 70.0f;
 inline constexpr float DefaultHeadHeight = 185.0f;  // world units above the feet: just over Sora's head (crown-03)
+// VUH-2455, run 20261018-004712: at the 4/26 field camera (eye 334 units from the look-at) 185 sat
+// ~35 px over Sora's hair; at the farther BC 05/0B fight camera (428) it sat ~80 px over, and 158
+// puts it ~33 px over at this FOV. Empirical by eye-to-look distance, not a recovered camera matrix.
+inline constexpr float NearCameraDistance = 334.0f, FarCameraDistance = 428.0f;
+inline constexpr float FarHeadHeight = 158.0f;
 inline constexpr float NearPlane = 10.0f;
 
 enum Color : std::uint8_t { Gold = 0, Shade = 1 };
@@ -41,6 +46,15 @@ inline Vec3 Sub(const Vec3& a, const Vec3& b) noexcept { return {a.x - b.x, a.y 
 inline float Dot(const Vec3& a, const Vec3& b) noexcept { return a.x * b.x + a.y * b.y + a.z * b.z; }
 inline Vec3 Cross(const Vec3& a, const Vec3& b) noexcept {
     return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+// Head height for this camera: DefaultHeadHeight up close, FarHeadHeight far out, linear between.
+inline float HeadHeight(const Vec3& eye, const Vec3& look) noexcept {
+    const Vec3 d = Sub(look, eye);
+    const float distance = std::sqrt(Dot(d, d));
+    if (!std::isfinite(distance) || distance <= NearCameraDistance) return DefaultHeadHeight;
+    if (distance >= FarCameraDistance) return FarHeadHeight;
+    const float t = (distance - NearCameraDistance) / (FarCameraDistance - NearCameraDistance);
+    return DefaultHeadHeight + t * (FarHeadHeight - DefaultHeadHeight);
 }
 inline bool Normalize(Vec3& v) noexcept {
     const float length = std::sqrt(Dot(v, v));
