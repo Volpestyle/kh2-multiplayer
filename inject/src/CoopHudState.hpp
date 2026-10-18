@@ -15,6 +15,9 @@ inline constexpr std::uint64_t FreshMs = 1000;
 // VUH-2455: game frames the crown gate must stay clear before the crown shows. The BC 05/0B
 // intro drew it on one close-up, so a gate that reads clear between event shots must not.
 inline constexpr std::uint32_t CrownSettleFrames = 15;
+// VUH-2455 live (33885e38): after the BC 05/0B event the battle-start close-ups (~2.5 s) read as field
+// with the camera still on the local Sora, so a gate that last closed for an event or cutscene waits 4 s.
+inline constexpr std::uint32_t CrownEventSettleFrames = 240;
 inline constexpr int Width = 820, Height = 130, TrackWidth = 220;
 // The HP column (RenderHook DrawCoopHudRows, x 440..568) fits 10 cells of the
 // 22-px Consolas overlay font (~12 px each); longer text is ellipsized.
@@ -56,6 +59,7 @@ struct Input {
     bool fieldClear {}, cameraValid {};  // VUH-2415: field live, no menu/event; camera read
     bool cameraFollowsLocal {};          // VUH-2455: camera +0x50 is the local Sora actor
     std::uint32_t clearFrames {};        // consecutive frames with fieldClear and cameraFollowsLocal
+    bool afterEvent {};                  // the gate last closed for an event or cutscene
     struct {                             // raw field gates, for the gate-transition log
         std::uint8_t inField {}, openMenu {};
         std::int32_t cutsceneState {};
@@ -112,7 +116,7 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
     local.state = RowState::Available;
     SetHp(local, in.local); // captureAvatar.ownerSlot defaults to 0: do not use it here.
     const bool crownScope = in.fieldClear && in.cameraValid && in.cameraFollowsLocal &&
-        in.clearFrames >= CrownSettleFrames;
+        in.clearFrames >= (in.afterEvent ? CrownEventSettleFrames : CrownSettleFrames);
     if (crownScope) { out.cameraEye = in.cameraEye; out.cameraLook = in.cameraLook; }
     if (crownScope && out.localSlot == 0) { out.crownCurrent = true; out.crownHost = in.local.position; }
     for (int i = 0; i < 2; ++i) {

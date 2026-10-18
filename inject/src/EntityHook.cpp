@@ -1102,6 +1102,7 @@ static void PublishLocalForTransition() {
 }
 
 static std::uint32_t g_crownClearFrames = 0;  // VUH-2455: settle count for the crown gate
+static bool g_crownAfterEvent = false;          // the gate last closed for an event or cutscene
 static int g_crownGateLogged = -1;              // last logged gate bits
 
 static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& before) {
@@ -1110,9 +1111,12 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     input.localAvailable = true;
     input.gameplayCurrent = !g_puppetsSuspended && !warp::TransitionPending();
     (void)crown::ReadInputs(g_exeBase, g_soraActor, input);  // VUH-2415: a faulting read only hides the crown
-    g_crownClearFrames = input.fieldClear && input.cameraFollowsLocal
-        ? (std::min)(g_crownClearFrames + 1, hud::CrownSettleFrames) : 0;
+    const bool clear = input.fieldClear && input.cameraFollowsLocal;
+    if (!clear && (input.gates.eventActive || input.gates.cutsceneState != 0)) g_crownAfterEvent = true;
+    g_crownClearFrames = clear ? (std::min)(g_crownClearFrames + 1, hud::CrownEventSettleFrames) : 0;
+    if (g_crownClearFrames >= hud::CrownEventSettleFrames) g_crownAfterEvent = false;
     input.clearFrames = g_crownClearFrames;
+    input.afterEvent = g_crownAfterEvent;
     input.local = local;
     (void)g_avatarBridge.TryReadRosterNames(input.names);
     for (int i = 0; i < 2; ++i) {
@@ -1125,13 +1129,14 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     auto snapshot = hud::Project(input, GetTickCount64(), g_frameCounter);
     // VUH-2455: every crown gate transition, with the raw gates, to place any event-shot leak.
     const int gateBits = (input.fieldClear ? 1 : 0) | (input.cameraFollowsLocal ? 2 : 0) |
-        (input.cameraValid ? 4 : 0) | (snapshot.crownCurrent ? 8 : 0);
+        (input.cameraValid ? 4 : 0) | (snapshot.crownCurrent ? 8 : 0) | (input.afterEvent ? 16 : 0);
     if (gateBits != g_crownGateLogged) {
         g_crownGateLogged = gateBits;
         Log("[crown-gate] frame=%u net=%d field=%d inField=%u menu=0x%02X cutscene=%d event=%d "
-            "follows=%d camera=%d current=%d", g_frameCounter, snapshot.networkCurrent, input.fieldClear,
-            input.gates.inField, input.gates.openMenu, input.gates.cutsceneState, input.gates.eventActive,
-            input.cameraFollowsLocal, input.cameraValid, snapshot.crownCurrent);
+            "follows=%d camera=%d afterEvent=%d current=%d", g_frameCounter, snapshot.networkCurrent,
+            input.fieldClear, input.gates.inField, input.gates.openMenu, input.gates.cutsceneState,
+            input.gates.eventActive, input.cameraFollowsLocal, input.cameraValid, input.afterEvent,
+            snapshot.crownCurrent);
     }
     if (g_frameCounter % 600 == 0) {  // VUH-2415: crown gate receipt, about every 10 s
         Log("[crown] frame=%u net=%d slot=%u field=%d camera=%d current=%d host=(%.0f,%.0f,%.0f) "
