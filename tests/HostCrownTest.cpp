@@ -196,6 +196,15 @@ void Gate() {
     in = Fixture(1);
     in.clearFrames = hud::CrownSettleFrames - 1;
     Check(!hud::Project(in, 100, 1).crownCurrent, "a gate clear for fewer than the settle frames hides the crown");
+    // VUH-2455 live: the BC battle-start close-ups follow the event with the gate clear.
+    in = Fixture(1);
+    in.afterEvent = true;
+    in.clearFrames = hud::CrownSettleFrames;
+    Check(!hud::Project(in, 100, 1).crownCurrent, "after an event the ordinary settle is not enough");
+    in.clearFrames = hud::CrownEventSettleFrames - 1;
+    Check(!hud::Project(in, 100, 1).crownCurrent, "after an event the crown waits the whole event settle");
+    in.clearFrames = hud::CrownEventSettleFrames;
+    Check(hud::Project(in, 100, 1).crownCurrent, "after the event settle the crown shows");
     in = Fixture(1);
     for (auto& remote : in.remote) if (static_cast<int>(remote.avatar.ownerSlot) == 0) remote.active = false;
     Check(!hud::Project(in, 100, 1).crownCurrent, "inactive host puppet has no crown");
