@@ -1100,24 +1100,35 @@ static void PublishLocalForTransition() {
     if (const auto flagged = g_localAvatar.OnTransition(g_frameCounter)) g_avatarBridge.PublishLocal(*flagged);
 }
 
+// VUH-2415 crown: read-only field/menu/event gates and this frame's camera, in their
+// own SEH frame (no C++ objects): a fault only leaves the crown hidden and never skips
+// the avatar/HUD publish around it.
+static void ReadCrownInputs(hud::Input& input) {
+    input.fieldClear = input.cameraValid = false;
+    __try {
+        const bool field = *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::IN_FIELD) != 0 &&
+            *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::OPEN_MENU) == 0xFF &&
+            *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
+            *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) == 0;
+        const auto* camera = reinterpret_cast<const float*>(g_exeBase + offsets::CAMERA_STRUCT);
+        constexpr std::size_t look = offsets::camera::SMOOTH_LOOKAT / 4, eye = offsets::camera::EYE_POS / 4;
+        input.cameraLook = {camera[look], camera[look + 1], camera[look + 2]};
+        input.cameraEye = {camera[eye], camera[eye + 1], camera[eye + 2]};
+        input.cameraValid = std::isfinite(input.cameraEye.x) && std::isfinite(input.cameraEye.y) &&
+            std::isfinite(input.cameraEye.z) && std::isfinite(input.cameraLook.x) &&
+            std::isfinite(input.cameraLook.y) && std::isfinite(input.cameraLook.z);
+        input.fieldClear = field;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        input.fieldClear = input.cameraValid = false;
+    }
+}
+
 static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& before) {
     hud::Input input;
     input.before = before;
     input.localAvailable = true;
     input.gameplayCurrent = !g_puppetsSuspended && !warp::TransitionPending();
-    // VUH-2415 crown: read-only field/menu/event gates and this frame's camera.
-    input.fieldClear = *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::IN_FIELD) != 0 &&
-        *reinterpret_cast<const std::uint8_t*>(g_exeBase + offsets::OPEN_MENU) == 0xFF &&
-        *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
-        *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) == 0;
-    const auto* camera = reinterpret_cast<const float*>(g_exeBase + offsets::CAMERA_STRUCT);
-    input.cameraLook = {camera[offsets::camera::SMOOTH_LOOKAT / 4], camera[offsets::camera::SMOOTH_LOOKAT / 4 + 1],
-                        camera[offsets::camera::SMOOTH_LOOKAT / 4 + 2]};
-    input.cameraEye = {camera[offsets::camera::EYE_POS / 4], camera[offsets::camera::EYE_POS / 4 + 1],
-                       camera[offsets::camera::EYE_POS / 4 + 2]};
-    input.cameraValid = std::isfinite(input.cameraEye.x) && std::isfinite(input.cameraEye.y) &&
-        std::isfinite(input.cameraEye.z) && std::isfinite(input.cameraLook.x) &&
-        std::isfinite(input.cameraLook.y) && std::isfinite(input.cameraLook.z);
+    ReadCrownInputs(input);  // VUH-2415: isolated, so a fault drops only the crown
     input.local = local;
     (void)g_avatarBridge.TryReadRosterNames(input.names);
     for (int i = 0; i < 2; ++i) {

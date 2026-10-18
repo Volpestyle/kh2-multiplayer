@@ -920,6 +920,8 @@ void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
     UINT64 completed = 0;
     if (!ReadFenceCompleted(completed)) return;
     if (ctx.fenceValue > completed) {
+        // VUH-2415: a crown-only frame never blocks Present on the GPU; skip the crown instead.
+        if (!drawOverlay && !captureFrame) return;
         // The GPU is more than kRing presents behind; wait briefly.
         if (!CheckGpuCall("SetEventOnCompletion", g_fence->SetEventOnCompletion(ctx.fenceValue, g_fenceEvent))) return;
         const DWORD wait = WaitForSingleObject(g_fenceEvent, 100);

@@ -20,7 +20,7 @@ inline constexpr std::size_t MaxRects = 6;
 // KH2's projection matrix is not located. Live crown-02 (4/26): the look-at, about 170 units above
 // the feet, sat 300 px above them at depth ~419 on 1080 lines, so tan(fov/2) ~= 0.73.
 inline constexpr float DefaultFovYDegrees = 70.0f;
-inline constexpr float DefaultHeadHeight = 195.0f;  // world units above the feet: just over Sora's head
+inline constexpr float DefaultHeadHeight = 185.0f;  // world units above the feet: just over Sora's head (crown-03)
 inline constexpr float NearPlane = 10.0f;
 
 enum Color : std::uint8_t { Gold = 0, Shade = 1 };
