@@ -14,22 +14,37 @@
 > 3-player playable co-op (James playtests), then PvP, then a hosted
 > "Minecraft server" mode.
 
+## Product principle: character-agnostic co-op
+
+James, 2026-10-18: “that is my goal overall, like any set of character should
+work, not just sora and sora2”. **Any combination of playable characters for
+the host and friends is the target, from the opening scene.** Roxas+Roxas and
+Sora+Sora are first steps, not the shape of the feature. Character identity is a
+per-player choice; world/story authority belongs to a connection, not to Sora or
+Roxas. Shared combat, progress, camera, downed/revive and transitions must use
+that ownership contract. A slice limited to one body or story role states its
+technical reason, scope and exit criterion; it must not make that limit a
+general multiplayer rule.
+
 ## Goal
 
 Two or three players, each on their own PC with their own copy of KH2FM (Steam
 Global), play together online: same rooms, same enemies, same story beats, each
-with their own camera and full controls, starting at the first controllable
-frame of the Roxas prologue. Each player chooses from the qualified playable
-cast: Sora/Roxas first, the full Sora–Roxas–Riku trio next, then party and world
-allies. Duplicate choices, including two Roxases, are supported. See the
-[D16 design](#prologue-co-op-and-playable-cast-vuh-2450) below.
+with their own camera and full controls, joining before the opening scene of
+the Roxas prologue. Qualify Roxas+Roxas, then a Roxas host with Sora and
+party-member friends, then the full keyblade trio/world cast. A later optional
+phase replaces the host's story Roxas too, such as Donald+Goofy. Every qualified
+profile uses the same selection/ownership contract; duplicate choices work. See
+the [D16 design](#prologue-co-op-and-playable-cast-vuh-2450) below.
 
 ## Prologue co-op and playable cast (VUH-2450)
 
 **Design, 2026-10-18; source baseline main `33885e3`.** James requires multiplayer
-from the beginning (two Roxases in Twilight Town) and independent choice from
-our playable cast. Those requirements amend D15's starting point and bring the
-first roster slice onto the route critical path. The implementation policies
+from the beginning and any playable friend in Twilight Town: “two roxas's,
+roxas and sora, roxas and goofy, doland, riku, etc. anyone we can make playable
+that early lol”. His optional stretch is replacing the host's Roxas as well,
+including Donald+Goofy. Those requirements amend D15's starting point and bring
+the first roster slice onto the route critical path. The implementation policies
 below are proposed for lead review; this design does not claim new live proof.
 No PC was accessed for this design.
 
@@ -38,10 +53,13 @@ No PC was accessed for this design.
 The milestone [VUH-2337](https://linear.app/vuhlp/issue/VUH-2337) becomes
 **New Game / Roxas Days 1–6 → Sora's TT first visit → Yen Sid → HB 1 → world
 map/Gummi → LoD 1 → Shan-Yu**, in one two-PC session through native doors and
-story transitions. Both players join before the opening is released. Opening
-movies remain native presentation; the first controllable frame already has
-two admitted human seats and the first playable field shows two Roxases by
-default. Joining after Sora wakes, a solo prologue, or a decorative second actor
+story transitions. Both players join before the opening is released. Profiles
+are chosen and acknowledged **before the first scene**, including
+the friend's chosen identity in the first engine-driven scene and first field.
+Roxas+Roxas is the first qualification, Roxas+Sora the next; each admitted party
+profile must meet the same opening contract. Prerendered movies retain their
+original footage. Joining after Sora wakes, a solo prologue, or a decorative
+second actor
 does not meet this gate. Each player must move, fight and take damage.
 
 [VUH-2338](https://linear.app/vuhlp/issue/VUH-2338) owns the new starting inputs.
@@ -55,7 +73,7 @@ capture and slot inventory as valid evidence for those unchanged inputs.
 
 For opening acceptance use **New Game on both accounts**, with the same native
 difficulty and host-owned opening choices. Connect/select/readiness must be
-available before the first field initialization: latch the roster and party
+available before the opening scene initializes: latch the roster and party
 intent before construction, then release input only after both first-field
 arrivals and actor/status bindings are acknowledged. Do not wait for an avatar
 pose to discover the selected kit; the old remote-kit mode needs a second load
@@ -99,16 +117,26 @@ following its AI is insufficient. Choose from qualified profiles before New
 Game/join; each seat may choose the same character. Missing or incompatible
 profiles refuse readiness with a reason, never silently substitute Sora.
 
-| Delivery slice | Selectable cast and admission |
+| Profile / phase | Prologue feasibility, first delivery and remaining gate |
 |---|---|
-| Opening pair | Sora and single-keyblade Roxas once their prologue paths pass; default Roxas/Roxas. Preserve Sora colors as cosmetic variants. This is the minimum route slice, not completion of the trio. |
-| Keyblade trio | Add **full Riku** under VUH-1513: Riku's own attacks and movement, not a Roxas reskin. VUH-2468 first tries native party-Riku input, per James's Oct-11 decision; study runtime changes next if needed, author missing behavior as fallback. No additional player mod install or shipped game/mod-author assets. |
-| Party members | VUH-1514 resumes with Donald, then Goofy. Its four earlier probes failed in setup before any attack; friend-control movement/camera is already documented in `docs/HANDOFF_FRIEND_CONTROL.md`. Prove one input-driven attack before generalizing. Add world allies individually after the common controls work. |
-| Other vanilla kits / later exploration | Mickey retains his limited qualification; admit him to this route only after his own capability/door/downed checks. Dual-wield Roxas is an encounter form first. Enemies/NPC possession is exploratory, not a promise that every rendered character is selectable. |
+| Roxas friend | Fastest: reuse VUH-1513's native player/remote kit. Qualify TT's normally solo layout, opening scene, status, doors and commands; existing world-4 proof is insufficient. VUH-2464 starts with Roxas+Roxas. |
+| Sora friend | Next: native player-class body and existing Sora puppet. Feed Sora's selected profile into the same opening layout and actor-owner routing; do not force a prologue friend to inherit the host's Roxas selector. Qualify Roxas+Sora through the first scene/tutorial and door under VUH-1512. No story unlock is required by design. |
+| Donald, then Goofy friend | Plausible, unproved: both exist in installed game data, but neither is a player-class kit or a qualified human profile. VUH-1514 first proves native friend-actor input/attack, then opening placement, camera/HUD, HP, actions, downed and doors. They need not wait for full Riku or the long route gate. A missing TT party slot is an actor-layout problem, not a story-unlock restriction. |
+| Riku friend / full keyblade trio | VUH-2468 tries native party-Riku input first, then VUH-1513 builds full Riku if needed. Own attacks and movement, not a Roxas reskin. Use Donald's controller/actor findings if ready; Riku does not block the first few profiles. No extra player mod install or shipped game/mod-author assets. |
+| World allies / Mickey / dual-wield | Add allies one at a time with their assets, weapon and action dependencies checked in TT. Mickey keeps his bounded party-kit qualification until opening/downed/door checks pass. Dual-wield Roxas is an encounter form first. A character appearing in the game does not establish early playability. |
+| Optional host replacement | VUH-2469 investigates host Sora/Riku/Donald/Goofy and arbitrary pairs, including Donald+Goofy. The first delivery keeps native story Roxas on the host because its triggers, tutorial roles and event paths are not separated yet. This is a temporary implementation boundary, not a Sora/Roxas-only product rule. |
 
-Character selection (VUH-1512) carries a stable profile ID, variant, capabilities
-and revision in the pre-load roster/party intent. Reuse the current kit table and
-streamed `AvatarState.character`; extend/version the protocol when its 3-bit plan
+Do not impose a general “only Roxas may be a friend” restriction. Qualify is each profile's assets/actions and the room's solo/story layout. No
+new profile is claimed live-ready today. Expose only passed profiles in VUH-1512,
+with specific unavailable reasons and the linked qualification issue. All become
+selectable from the opening once admitted; “party phase” does not mean “wait
+until Donald joins the story.” Enemy/NPC possession remains exploratory.
+
+Character selection (VUH-1512) carries a stable profile ID, variant, controller
+kind (native player or driven friend), capabilities and revision in the pre-scene
+roster/party intent. Human/AI ownership is separate from the character body: a
+Donald selected by a human is not an AI companion. Reuse the current kit table
+and streamed `AvatarState.character`; extend/version the protocol when its 3-bit plan
 codes are exhausted (7 is reserved), rather than aliasing a new ally onto a kit.
 Accept all choices before construction and apply the same per-seat identity on
 every receiver. Mid-fight changes are out of scope; changes between sessions
@@ -116,25 +144,74 @@ need no reinstall. Reconnect restores the selected profile at the next safe
 host-led admission, with old actor bindings retired.
 
 Choice is a session preference, separate from the story's canonical actor.
-Default new sessions choose Roxas; an explicitly selected Roxas stays Roxas when
-the story reaches Sora, and Sora/Riku choices likewise persist. Native movies
-may show story Roxas/Sora. When a script must control the canonical hero or a
-special form, use an explicit, bounded scripted role; restore the selected kit
-before field input returns. Do not replace high-poly event members or transplant
-the chosen kit into a movie. Tutorials with Struggle bats and the Day-6 dual-wield
-handoff need an observed capability mapping, not a blanket “kits cannot use
-menus.” Enable real supported items/actions and disable unsupported magic,
-Drive, Summon and Limit commands with a clear reason (VUH-1509). Roxas has no
-vanilla spell motions: replace VUH-1513's universal “one spell” criterion with
-profile-specific native actions, not invented magic.
+Explicit selections persist through Sora's morning. For the core delivery the
+host performs the native Roxas story role and the friend is any admitted
+profile. The opening scene must preserve the selected friend's representation
+as an added scene actor at a checked placement, using that character's own
+supported pose; never feed Roxas's event animation to Donald/Goofy. Keep native
+high-poly story actors/cameras where scripts require them. VUH-2359 must report
+any scene/program where the added actor cannot be shown; that profile/context
+stays unavailable for opening qualification until resolved. A waiting overlay
+alone does not satisfy the selected-friend opening-scene check. Later movies
+may use the explicit event hold policy below; prerendered footage is unchanged.
+
+Tutorials with Struggle bats and the Day-6 dual-wield handoff need an observed
+capability mapping. The host's story Roxas handles single-owner Struggle scoring
+and mandatory story actions in the core phase; friends keep their chosen bodies,
+with a labelled observation role only for genuinely solo activities. Dusk fights
+and bosses keep both humans active: map a supported native friend action to its
+RC role or leave that profile/context unqualified. Enable supported items/actions
+and guard unsupported magic, Drive, Summon and Limit commands (VUH-1509). Roxas
+has no vanilla spell motions; Donald needs his own magic/action dispatch and
+Goofy his own attack/defense controls. A blanket player moveset or Sora command
+menu is not the interface for every profile.
+
+### Optional later phase: replace the host's story Roxas
+
+James's stretch, “if possible”: Donald and Goofy play early Twilight Town.
+**Plausible, substantially less proved than a selectable friend.** Reuse a
+qualified friend's controller adapter, then separate the host's controlled actor
+from the canonical story role. Native scripts may read the player pointer for
+position triggers, scoring, weapon state, event binding and mission completion;
+a model replacement alone cannot satisfy those readers. VUH-2469 owns this
+assessment and does not block VUH-2344/2337's core two-player route.
+
+Try one native door/event first, then inventory Struggle bat/scoring, Dusk
+Reversal and Twilight Thorn's RCs, and Axel's required dual-wield phase. A
+character-compatible action may replace a gameplay mechanic only when its
+completion signal is proved. Where the script truly requires story Roxas, retain
+a scoped native role/anchor or use a clearly announced temporary role, then
+restore the selected host body. Do not silently switch back for the whole fight
+or let an invisible anchor fight/collect rewards. If that separation cannot be
+made safely, keep the exact host profile/context unavailable with its blocker.
+
+Risks include native canonical-player reads, unavailable event/weapon/RC motions,
+companion menu/status/save assumptions, duplicate damage/rewards and retry state.
+The acceptance is a Donald-host/Goofy-friend pair selected before the opening,
+shown in the first engine scene, with independent controls/combat/HP/cameras,
+one Struggle/tutorial and Dusk case, a native door/event/skip, and identity
+restored at Sora's morning. Record remaining whole-prologue blockers honestly;
+one clip is not full arbitrary-pair qualification.
 
 ### Prologue party and combat
 
 Start with two humans and no AI companion in the normally solo prologue. Extend
 the existing per-seat party plan with a checked **prologue layout**: build the
-remote player-class clone first and the canonical local last, neutralize clone
-input/AI, and allocate private remote status. Reuse VUH-1519's binding and restore
-rules. GoA's sparse-row proof in `docs/PARTY_SETUP.md` does not qualify arbitrary
+remote player-class clone first and the canonical local last for the first
+Roxas/Sora slice; this construction order comes from the player-class constructor
+writing the canonical pointer. Neutralize clone input/AI and allocate private
+remote status. A driven Donald/Goofy profile instead uses a friend-class actor
+adapter; never mark a friend descriptor player-class to pass the kit gate.
+Reuse VUH-1519's binding and restore
+rules. VUH-1514 must route local input, camera, HUD, health and the avatar stream
+from the actual controlled friend actor; `g_soraActor` is not a universal human
+identity. If the friend's game still needs a canonical Roxas for native scripts,
+keep it as a scoped story anchor with no second input, hits, rewards or network
+seat. Existing F5 movement/camera is a starting point, not this complete split.
+The present kit fields in `common/include/kh2coop/PartyLayout.hpp` and
+`inject/src/PartyNativePolicy.hpp` admit player-class profiles only; extend their
+typed controller/actor contract for human friend-class profiles instead of
+reusing an AI-Donald seat. GoA's sparse-row proof in `docs/PARTY_SETUP.md` does not qualify arbitrary
 TT programs. Preserve script-owned story actors, weapon tutorials and menu
 consumers; qualify the actual room/map/battle/event programs. If construction
 fails, hold admission with the reason rather than let gameplay begin solo.
@@ -195,7 +272,7 @@ humans Downed → host Retry → new room epoch**. Intercept admitted lethal dam
 before native death, retain engine HP 1 and keep the native dead bit clear.
 Publish logical HP 0/downed to the stream and HUD using the existing episode
 contract. Separately suppress actions, incoming damage and enemy targeting;
-use a qualified Roxas collapse/held pose. Clearing the dead bit after death is
+use the selected profile's qualified collapse/held pose (Roxas first). Clearing the dead bit after death is
 not enough: death can also disable movement and change action state. Audit all
 lethal paths admitted to the route, including scripted hazards. Mission failure
 remains a host-owned failure, not an individual revive event.
@@ -231,7 +308,7 @@ revive rejection and forced story handoff are separate cases.
 
 | Concern | Authority and behavior |
 |---|---|
-| Field camera, lock-on and local input | Each player's own canonical actor, even when both are Roxas. Never synchronize free camera orientation or borrow the other player's camera for ordinary play. |
+| Field camera, lock-on and local input | Each player's actual controlled actor (player-class or driven friend), independent of the native story actor. Never synchronize free camera orientation or borrow the other player's camera for ordinary play. |
 | Enemies, hazards, RC arbitration, story choices and doors | Host world authority; hits/actions route to the affected player owner. A friend cannot advance its own tutorial or story flags. |
 | Cutscene start/end/skip and scripted camera | Host decides the sequence. Native event actors/cameras own movie shots; gameplay puppets/overlays must yield. Only the host's skip advances shared progress. |
 | Friend presentation | Reuse EventHold/overlay and post-event resync first. When event-only rooms are supported, play the host-selected scene locally with its native camera; no separate friend story progression. A held friend sees a clear wait state, not a controllable wrong scene. |
@@ -249,8 +326,10 @@ chosen actor after Axel and the Sora-morning handoff.
 ### Ordered build issues and acceptance
 
 All new slices are Backlog until this plan is reviewed; the lead schedules them
-within D14's six-started limit. The two-Roxas route comes first; Riku/party work
-expands the selectable cast without holding the opening pair hostage.
+within D14's six-started limit. The two-Roxas proof comes first; Roxas+Sora
+follows immediately, then Donald/Goofy before the full-Riku fallback.
+The shared contract is character-agnostic; host story-body replacement is optional
+and cannot delay the core route.
 
 1. **VUH-2338 — opening inputs.** New Game reaches the first Roxas control point
    on both accounts through native menus; retain FM-02 as rehearsal only. Record
@@ -258,44 +337,54 @@ expands the selectable cast without holding the opening pair hostage.
    unchanged protected hashes. No protected-folder writes or in-game save.
 2. **[VUH-2464](https://linear.app/vuhlp/issue/VUH-2464) — first-frame party.**
    Depends on opening inputs. Pre-load readiness produces two independently
-   controlled Roxases with private status before input is released; first door
+   controlled Roxases with private status from the opening scene; this is its
+   bounded native-player construction proof, not a fixed two-Roxas API. First door
    and same-room event reload preserve both, without a second-load workaround.
 3. **VUH-1512 — per-seat selector.** Depends on VUH-2464 for prologue proof.
-   Independently select Sora/Roxas and colors, duplicates allowed; all machines
-   agree before load, mismatch refuses, and reconnect restores identity without
-   reinstall. Future qualified profiles join the same selector.
-4. **[VUH-2465](https://linear.app/vuhlp/issue/VUH-2465) + VUH-2266 — downed/retry.**
+   A Roxas host selects a Roxas or Sora friend for the first scene, tutorial and
+   door; duplicates/colors work. Controller kind/identity are agreed before the
+   scene, mismatch refuses, and reconnect restores identity without reinstall.
+   Admit Donald/Goofy through step 4, not a separate late-game selector.
+4. **VUH-1514 — early party-member profiles.** After the two native-player
+   examples, prove Donald's input-triggered hit, then Goofy's. Each must appear
+   as the selected friend in the opening scene, with its own controls, camera,
+   HUD/private HP, native supported actions, a Dusk fight, downed/revive and a
+   native door/event recovery. The controller/actor split is shared with Riku;
+   no dependency on full Riku or completion of the long route. A failed profile
+   stays unavailable with its exact reason; the two-native-player core proceeds.
+5. **[VUH-2465](https://linear.app/vuhlp/issue/VUH-2465) + VUH-2266 — downed/retry.**
    Depends on VUH-2464. Host-down and friend-down each permit later waves;
    Triangle revives restore movement/damage correctly. Both-down native retry
    resets one checkpoint on both peers; old requests and actors cannot apply.
-5. **[VUH-2466](https://linear.app/vuhlp/issue/VUH-2466) — tutorial/Dusk combat.**
+6. **[VUH-2466](https://linear.app/vuhlp/issue/VUH-2466) — tutorial/Dusk combat.**
    Depends on VUH-2464/2465. Deliver the Day 1–6 encounter checklist and paired
    combat evidence for early tutorials and every Mansion wave, including the
    downed cases. Both players contribute hits and receive enemy hits; one clear.
-6. **[VUH-2467](https://linear.app/vuhlp/issue/VUH-2467) — Axel I/II.** Depends on
+7. **[VUH-2467](https://linear.app/vuhlp/issue/VUH-2467) — Axel I/II.** Depends on
    VUH-2464/2465; reuse VUH-2418 routing. Both fight and are targetable, both
    default Roxases dual-wield in Day 6, hazards/RCs and one victory agree, and
    revive/retry plus the story handoff recover. Audio clips from both seats.
-7. **VUH-2356 + VUH-2359 — event continuity.** Can proceed alongside combat.
+8. **VUH-2356 + VUH-2359 — event continuity.** Can proceed alongside combat.
    No independent client progress/blocked-exit divergence; the complete
    post-Axel scene chain follows the host or uses an explicit bounded hold.
    Cameras and both selected profiles return correctly on Sora's morning.
-8. **VUH-2344 → VUH-2337 — real route gate.** After 1–7 and existing PC/pilot
-   prerequisites, two active drivers start before Day 1 and play the prologue
+9. **VUH-2344 → VUH-2337 — real route gate.** After core steps 1–3 and 5–8
+   and existing PC/pilot prerequisites, two active drivers start before Day 1
+   and play the prologue
    through Yen Sid, then continue the existing HB/LoD route to Shan-Yu. No
    warps/protect-team idle friend; logs from both PCs, prologue/world clips from
    both seats, enemy HP/count parity, world-exit flags and unchanged saves.
    A Day-6/one-PC rehearsal does not satisfy this gate.
-9. **[VUH-2468](https://linear.app/vuhlp/issue/VUH-2468) → VUH-1513 — finish the
-   keyblade trio.** First show a real input-triggered native Riku attack and a
-   per-action go/no-go, then build the chosen full-Riku route. A mixed
-   Sora/Roxas/Riku session shows correct local/remote characters, their native
-   action capabilities and safe doors/event recovery; no extra player install.
-10. **VUH-1514 — party-member expansion.** Prove Donald's attack and HP under
-    direct input, then a networked local/remote profile with camera/lock-on,
-    supported actions, downed/revive and one native door. Repeat for Goofy and
-    one world ally before advertising that profile. Record a go/no-go per
-    family; possession stays exploratory.
+10. **[VUH-2468](https://linear.app/vuhlp/issue/VUH-2468) → VUH-1513 — finish the
+    keyblade trio.** First show a real input-triggered native Riku attack and a
+    per-action go/no-go, then build the chosen full-Riku route. A mixed
+    Sora/Roxas/Riku session shows correct local/remote characters, their native
+    action capabilities and safe doors/event recovery; no extra player install.
+11. **[VUH-2469](https://linear.app/vuhlp/issue/VUH-2469) — optional host
+    replacement.** After early friend adapters, assess and show Donald+Goofy
+    under the explicit story-role/trigger/Struggle/Dusk criteria above. No core
+    gate dependency. World allies then reuse the same profile admission; each
+    records its asset/action/context limits before appearing in the selector.
 
 Every implementation slice attaches its passing report and captures/clips to its
 own issue; DLL/memory-write/save-adjacent changes retain the required independent
@@ -1601,10 +1690,12 @@ Format: decision — why (rejected alternative).
 
 - **D16. Multiplayer from the beginning; choose the playable cast** (James,
   2026-10-18; [VUH-2450](https://linear.app/vuhlp/issue/VUH-2450)). D15's route
-  begins before the first controllable Roxas-prologue frame, with two active
+  begins before the opening engine scene, with two active
   players, default Roxas/Roxas, then continues through its existing TT/HB/LoD
   endpoint. Each player chooses a qualified character independently, duplicates
-  allowed: Sora/Roxas first, full Riku next, then party/world allies. Existing
+  allowed. Qualify Roxas+Roxas then Roxas+Sora, early Donald/Goofy friends, and
+  full Riku/world profiles. Optional later host replacement targets arbitrary
+  pairs such as Donald+Goofy; it does not block the core prologue. Existing
   VUH-1513 Roxas proof is reused. Implementation proposals, starting inputs,
   death/spawn policy and ordered acceptance slices are in
   [Prologue co-op and playable cast](#prologue-co-op-and-playable-cast-vuh-2450);
@@ -1840,8 +1931,11 @@ loaded, get several instances into a known room, act, look, and judge.
 The [D16 roster design](#prologue-co-op-and-playable-cast-vuh-2450) brings the
 Sora/Roxas selection slice before the route gate. VUH-1513 already proved native
 Roxas local/remote kits in world 4; reuse them. Full Riku follows the owner-chosen
-friend-control spike before a custom kit fallback. VUH-1514 then expands Donald,
-Goofy and world allies individually. A qualified selectable profile includes
+friend-control spike before a custom kit fallback. VUH-1514 brings Donald/Goofy
+friends into the opening ahead of that fallback, then world allies individually.
+VUH-2469 optionally replaces the host story body. All phases serve arbitrary
+host/friend combinations, as stated in the product principle. A qualified
+selectable profile includes
 actual controls/combat, local/remote status, camera and downed/door/event support;
 rendering a character does not qualify it. Enemy/NPC possession remains exploratory.
 
@@ -1885,7 +1979,7 @@ Each phase is a Linear milestone. A gate is the evidence that closes it.
 | **P2 Shared world** | 20 host-led transitions across at least 5 rooms with 3 instances and no divergence. One cutscene hold and resume. A late joiner lands in the host's room. |
 | **P3 Shared combat** | Three players clear a mob encounter and one boss — the same enemies on every screen — with matching enemy HP and deaths on every machine, no double damage, working downed/revive and no game over. James playtests. If mirrored AI (step 2) stalls, James decides whether to re-scope the gate to step 1. |
 | **P4 Playable sessions** | A 2-hour remote session through one world with friends, installed from the package, with reconnect working and at most one manual resync. |
-| **P5 Roster** | D16 moves Sora/Roxas selection before the route gate. Then each player can choose the full keyblade trio with correct local/remote native actions, and one non-keyblade profile meets the same controls, camera, downed and native-door contract. |
+| **P5 Roster** | Character-agnostic combinations are the target. D16 starts Roxas+Roxas → Roxas+Sora → early Donald/Goofy friends, then full Riku/world profiles. Each needs controls, camera, downed and native-door/event qualification; optional host swaps pursue Donald+Goofy without blocking the core route. |
 
 Issues, with dependencies and acceptance criteria, live in Linear:
 
@@ -1896,7 +1990,7 @@ Issues, with dependencies and acceptance criteria, live in Linear:
 | P2 | VUH-1495 join flow → VUH-1496 host-led transitions → VUH-1498 cutscene hold; VUH-1497 progress sync |
 | P3 | VUH-1499 spawn spike, VUH-1501 damage pipeline → VUH-1502 shared HP and deaths (step 1) → VUH-1503 hit authority; VUH-1500 enemy puppet spike → VUH-1515 mirrored enemy AI (step 2) → VUH-1505 projectiles; VUH-1504 downed/revive → VUH-1506 gate |
 | P4 | VUH-1507 HUD, VUH-1508 reconnect/resync, VUH-1509 feature policy, VUH-1510 package → VUH-1511 gate |
-| P5 | VUH-2464 prologue kits → VUH-1512 selector; VUH-2468 Riku input spike → VUH-1513 full trio; VUH-1514 party/world profiles. Ordered route slices are in D16. |
+| P5 | VUH-2464 prologue kits → VUH-1512 selector; VUH-1514 early party profiles; VUH-2468 Riku input spike → VUH-1513 full trio; VUH-2469 optional host replacement. Ordered route slices are in D16. |
 
 Critical path: VUH-1482 → 1483 → 1484 → 1492 → 1495 → 1496, with VUH-1489 (the actor-model spike) gating the puppet work. The RE-heavy combat spikes (VUH-1499, 1500, 1501) can start as soon as the rig and probes exist, in parallel with P1–P2.
 
