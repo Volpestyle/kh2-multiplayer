@@ -1395,6 +1395,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
         admittedHudNames = {};
         worldBridge.SetCoopDifficulty(kh2coop::CoopDifficulty::Off);
+        worldBridge.SetFriendlyFire(true);
         admittedHudNameSession.clear();
         closeMailbox();
         worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
@@ -1434,6 +1435,7 @@ int main(int argc, char* argv[]) {
             if (!netClient || !netClient->isConnected()) return;
 #ifdef _WIN32
             worldBridge.SetCoopDifficulty(netClient->ready() ? ss.coopDifficulty : kh2coop::CoopDifficulty::Off);
+            worldBridge.SetFriendlyFire(netClient->ready() ? ss.friendlyFire : true);
 #endif
             if (!netClient->ready()) {
                 if (resumePin) membershipInvalidated = true;
@@ -1800,6 +1802,9 @@ int main(int argc, char* argv[]) {
             kh2coop::PROTOCOL_VERSION, std::string{}, std::move(steamTransports.client));
         const char* coopDifficulty = std::getenv("KH2COOP_COOP_DIFFICULTY");
         netClient->setCoopDifficulty(kh2coop::ParseDifficulty(coopDifficulty ? coopDifficulty : "off"));
+        // VUH-2421: host friendly fire, on unless KH2COOP_FRIENDLY_FIRE=0.
+        const char* friendlyFire = std::getenv("KH2COOP_FRIENDLY_FIRE");
+        netClient->setFriendlyFire(!friendlyFire || std::string_view(friendlyFire) != "0");
         if (causalDiagnosticsEnabled) {
             netClient->sealRequestDiagnostics("begin");
             netClient->sealWorldAdmissionDiagnostics("begin");

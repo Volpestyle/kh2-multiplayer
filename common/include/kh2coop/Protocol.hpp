@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 24;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 25;
 
 // ===========================================================================
+// Protocol v25 adds host friendly fire to ClientHello/SessionState (VUH-2421).
 // Protocol v24 appends the host's story party row for the target world to the RoomTransition packet (VUH-2342).
 // Protocol v23 adds MissionState (52): the host's running mission, shown on clients (VUH-2342).
 // Protocol v22 appends exact combat netId to SpawnEmission (VUH-2302 phase b).
@@ -54,6 +55,7 @@ struct SessionState {
     RoomState room {};
     std::vector<SessionActor> actors;
     CoopDifficulty coopDifficulty{CoopDifficulty::Off};
+    bool friendlyFire {true}; // VUH-2421: the admitted host's setting; off refuses player-to-player hits
 };
 
 struct ActorSnapshot {
@@ -520,6 +522,7 @@ struct ClientHello {
     /// 0xFF = no preference (server assigns next free slot).
     std::uint8_t requestedSlot {0xFF};
     CoopDifficulty coopDifficulty{CoopDifficulty::Off}; // only the admitted host's request is used
+    bool friendlyFire {true}; // v25; only the admitted host's request is used
 };
 
 /// Realm seed — derived from a KH2 save file import.

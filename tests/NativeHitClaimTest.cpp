@@ -62,6 +62,7 @@ public:
     PuppetAuthorityMode GetPuppetAuthorityMode() const { return puppetMode; }
     CoopDifficulty coopDifficulty = CoopDifficulty::Off; // VUH-2194 room scaling: off unless a test sets it
     CoopDifficulty GetCoopDifficulty() const { return coopDifficulty; }
+    bool GetFriendlyFire() const { return true; } // VUH-2421: host default
     std::uint64_t spawnPickSalt = 0; // VUH-1515 spawn picks: none unless a test sets it
     std::uint64_t SpawnPickSalt() const { return spawnPickSalt; }
     std::uint64_t ConnectionId(std::uint8_t index) const {

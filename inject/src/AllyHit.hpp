@@ -43,6 +43,9 @@ bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame
 void Tick(std::uint32_t frame);
 Mode CurrentMode();
 Stats GetStats();
+// Owner thread, once per frame (VUH-2421): the host's friendly fire. Off refuses every ally player pair
+// as CoOp mode does, whatever the installed mode; KH2COOP_ALLY_HIT=0 installs no hook, so it can't apply.
+void SetFriendlyFire(bool on);
 #ifdef KH2COOP_ALLYHIT_TESTING
 using CanHitFn = std::uint64_t(__fastcall*)(std::uintptr_t attack, std::uintptr_t victim);
 std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t victim);

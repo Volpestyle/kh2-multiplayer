@@ -5999,6 +5999,8 @@ bool CaptureDamageContext(nativehittrace::Context& context,
     return true;
 }
 
+bool FriendlyFire() noexcept { return g_bridge.GetFriendlyFire(); }
+
 PuppetAuthority CapturePuppetAuthority() noexcept {
     PuppetAuthority out {};
     if (!spawncontroller::IsDiagnosticGameThread() || !nativehittrace::IsOwnerThread() ||

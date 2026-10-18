@@ -15,7 +15,8 @@
 // toDll records retain exact scoped envelopes or local transaction/reset records.
 // Either side may open first; the first opener formats the rings.
 // Header words: [0] magic, [1] version, [2] the runtime's session slot in low8
-// bits and advertised co-op difficulty in bits8..15 (zero is Off).
+// bits, advertised co-op difficulty in bits8..15 (zero is Off) and bit16 set
+// when the host turned friendly fire off (zero is on, the default).
 // (0 = Player = host, 1/2 = clients, 0xFF = not known yet; VUH-1502),
 // [3] round trip ms and [4] loss per-mille for the overlay (VUH-1493;
 // WORLD_NET_UNKNOWN until the runtime is connected).
@@ -257,6 +258,17 @@ public:
         auto* word = reinterpret_cast<volatile LONG*>(view_ + 8);
         const LONG current = InterlockedCompareExchange(word, 0, 0);
         InterlockedExchange(word, (current & ~0xFF00L) | (static_cast<LONG>(mode) << 8));
+    }
+    // VUH-2421: the host's friendly fire, advertised in SessionState.
+    void SetFriendlyFire(bool on) {
+        if (!view_) return;
+        auto* word = reinterpret_cast<volatile LONG*>(view_ + 8);
+        const LONG current = InterlockedCompareExchange(word, 0, 0);
+        InterlockedExchange(word, on ? (current & ~0x10000L) : (current | 0x10000L));
+    }
+    [[nodiscard]] bool GetFriendlyFire() const {
+        if (!view_) return true;
+        return (InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 8), 0, 0) & 0x10000L) == 0;
     }
     [[nodiscard]] CoopDifficulty GetCoopDifficulty() const {
         if (!view_) return CoopDifficulty::Off;

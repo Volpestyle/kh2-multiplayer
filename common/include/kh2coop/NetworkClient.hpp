@@ -119,6 +119,9 @@ public:
     void setCoopDifficulty(CoopDifficulty mode) noexcept {
         if (!attemptActive_ && ValidDifficulty(mode)) requestedDifficulty_ = mode;
     }
+    void setFriendlyFire(bool on) noexcept {
+        if (!attemptActive_) requestedFriendlyFire_ = on;
+    }
 
     // Pump ENet events. Call once per frame.
     void tick(std::uint32_t timeoutMs = 0);
@@ -285,6 +288,7 @@ private:
     std::string peerName_;
     std::optional<SlotType> requestedSlot_;
     CoopDifficulty requestedDifficulty_{CoopDifficulty::Off};
+    bool requestedFriendlyFire_{true};
     RuntimeMode requestedMode_{RuntimeMode::CampaignCoop};
     std::uint16_t protocolVersion_{PROTOCOL_VERSION};
     ClientCallbacks callbacks_;

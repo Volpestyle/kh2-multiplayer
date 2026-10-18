@@ -702,6 +702,7 @@ void NetworkClient::onConnect() {
     hello.peerName = peerName_.empty() ? peerId_ : peerName_;
     hello.requestedMode = requestedMode_;
     hello.coopDifficulty = requestedDifficulty_;
+    hello.friendlyFire = requestedFriendlyFire_;
     hello.requestedSlot = resumePin_ ? static_cast<std::uint8_t>(resumePin_->localSlot) : requestedSlot_.has_value()
                               ? static_cast<std::uint8_t>(*requestedSlot_)
                               : 0xFF;

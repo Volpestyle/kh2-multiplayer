@@ -629,6 +629,7 @@ void write(ByteWriter& w, const SessionState& ss) {
         write(w, a);
     }
     w.writeU8(static_cast<std::uint8_t>(ss.coopDifficulty));
+    w.writeU8(ss.friendlyFire ? 1 : 0);
 }
 
 void write(ByteWriter& w, const ActorSnapshot& as) {
@@ -662,6 +663,7 @@ void write(ByteWriter& w, const ClientHello& ch) {
     w.writeU8(static_cast<std::uint8_t>(ch.requestedMode));
     w.writeU8(ch.requestedSlot);
     if (ch.protocolVersion >= 18) w.writeU8(static_cast<std::uint8_t>(ch.coopDifficulty));
+    if (ch.protocolVersion >= 25) w.writeU8(ch.friendlyFire ? 1 : 0);
 }
 
 void write(ByteWriter& w, const AvatarState& a) {
@@ -1225,6 +1227,9 @@ void read(ByteReader& r, SessionState& ss) {
     }
     ss.coopDifficulty = static_cast<CoopDifficulty>(r.readU8());
     if (!ValidDifficulty(ss.coopDifficulty)) throw std::runtime_error("SessionState: invalid co-op difficulty");
+    const auto friendlyFire = r.readU8();
+    if (friendlyFire > 1) throw std::runtime_error("SessionState: invalid friendly fire");
+    ss.friendlyFire = friendlyFire != 0;
 }
 
 void read(ByteReader& r, ActorSnapshot& as) {
@@ -1261,6 +1266,9 @@ void read(ByteReader& r, ClientHello& ch) {
     // return an explicit rejection; v17 has no difficulty byte.
     ch.coopDifficulty = ch.protocolVersion >= 18 ? static_cast<CoopDifficulty>(r.readU8()) : CoopDifficulty::Off;
     if (!ValidDifficulty(ch.coopDifficulty)) throw std::runtime_error("ClientHello: invalid co-op difficulty");
+    const auto friendlyFire = ch.protocolVersion >= 25 ? r.readU8() : std::uint8_t{1};
+    if (friendlyFire > 1) throw std::runtime_error("ClientHello: invalid friendly fire");
+    ch.friendlyFire = friendlyFire != 0;
 }
 
 void read(ByteReader& r, AvatarState& a) {

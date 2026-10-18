@@ -76,6 +76,21 @@ void codec() {
     try { decodePacketHeader(bytes.data(),bytes.size(),payload,size); ByteReader bad(payload,size); read(bad,advertised); }
     catch (const std::exception&) { refused=true; }
     check(refused, "invalid advertised mode refused");
+    // VUH-2421: host friendly fire in the hello and the advertised session.
+    hello.protocolVersion = PROTOCOL_VERSION; hello.friendlyFire = false; bytes = encode(hello);
+    decodePacketHeader(bytes.data(), bytes.size(), payload, size); ByteReader fh(payload, size); read(fh, decoded);
+    check(fh.atEnd() && !decoded.friendlyFire, "host friendly fire off handshake roundtrip");
+    hello.protocolVersion = 24; bytes = encode(hello);
+    decodePacketHeader(bytes.data(), bytes.size(), payload, size); ByteReader v24(payload, size); read(v24, decoded);
+    check(v24.atEnd() && decoded.protocolVersion == 24 && decoded.friendlyFire,
+          "v24 hello has no friendly fire byte and reaches the protocol rejection gate");
+    state.friendlyFire = false; bytes = encode(state);
+    decodePacketHeader(bytes.data(), bytes.size(), payload, size); ByteReader fs(payload, size); read(fs, advertised);
+    check(fs.atEnd() && !advertised.friendlyFire, "advertised friendly fire off roundtrip");
+    bytes.back() = 2; refused = false;
+    try { decodePacketHeader(bytes.data(), bytes.size(), payload, size); ByteReader bad(payload, size); read(bad, advertised); }
+    catch (const std::exception&) { refused = true; }
+    check(refused, "invalid advertised friendly fire refused");
     RoomTransition transition; transition.difficultyPlayers = 2;
     bytes = encode(transition);
     decodePacketHeader(bytes.data(), bytes.size(), payload, size);
@@ -83,10 +98,10 @@ void codec() {
     check(tr.atEnd() && received.difficultyPlayers == 2,
           "room packet retains host's locked player count for late peers");
 }
-struct Seen { CoopDifficulty mode{CoopDifficulty::Off}; EnemyHealth hp{}; unsigned deaths{}, players{1}; };
+struct Seen { CoopDifficulty mode{CoopDifficulty::Off}; EnemyHealth hp{}; unsigned deaths{}, players{1}; bool friendlyFire{true}; };
 ClientCallbacks callbacks(Seen& seen) {
     ClientCallbacks cb;
-    cb.onSessionState=[&](const SessionState& state){seen.mode=state.coopDifficulty;};
+    cb.onSessionState=[&](const SessionState& state){seen.mode=state.coopDifficulty;seen.friendlyFire=state.friendlyFire;};
     cb.onRoomTransition=[&](const RoomTransition& room){seen.players=room.difficultyPlayers;};
     cb.onEnemyHp=[&](const EnemyHp& health){for(const auto& e:health.entries)if(e.netId==1)seen.hp={e.hp,e.maxHp};};
     cb.onEnemyDeath=[&](const EnemyDeath& death){if(death.netId==1)++seen.deaths;};
@@ -101,6 +116,7 @@ void relay() {
     NetworkClient friend1("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"difficulty-friend",SlotType::Friend1,callbacks(fs),RuntimeMode::CampaignCoop,cfg.contentHash);
     NetworkClient late("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"difficulty-late",SlotType::Friend2,callbacks(ls),RuntimeMode::CampaignCoop,cfg.contentHash);
     host.setCoopDifficulty(CoopDifficulty::Normal); friend1.setCoopDifficulty(CoopDifficulty::Hard); late.setCoopDifficulty(CoopDifficulty::Hard);
+    host.setFriendlyFire(false); friend1.setFriendlyFire(true); late.setFriendlyFire(true);
     auto wait=[&](const std::function<bool()>& done){
         const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(3);
         while(!done() && std::chrono::steady_clock::now()<until){server.tick(0);for(auto* c:{&host,&friend1,&late}){c->tick(0);c->sendHeartbeat();}std::this_thread::sleep_for(std::chrono::milliseconds(1));}
@@ -109,6 +125,7 @@ void relay() {
     host.connect(); friend1.connect();
     const bool ready=wait([&]{return host.worldReady() && friend1.worldReady();});
     check(ready && hs.mode==CoopDifficulty::Normal && fs.mode==CoopDifficulty::Normal,"only host setting controls advertised mode"); if(!ready)return;
+    check(!hs.friendlyFire && !fs.friendlyFire, "only the host's friendly fire is advertised, to host and friend");
     RoomTransition room{1,5,6,0,1,2,0}; room.difficultyPlayers=2;
     host.sendRoomTransition(room);
     EnemyManifest manifest; manifest.epoch=1; manifest.replace=true; EnemyManifestEntry entry;
@@ -119,6 +136,7 @@ void relay() {
     check(wait([&]{return late.worldReady() && ls.hp.hp==63 && ls.hp.maxHp==63;}) && ls.mode==CoopDifficulty::Normal &&
           fs.players==2 && ls.players==2 && HealthFactor(ls.mode,ls.players,false)==1600,
           "late third player receives host mode and existing two-player room HP");
+    check(!ls.friendlyFire, "late third player receives the host's friendly fire");
     host.sendEnemyDeath(EnemyDeath{1,1});
     check(wait([&]{return fs.deaths==1 && ls.deaths==1;}),"scaled enemy death agrees on both peers through existing path");
 }
