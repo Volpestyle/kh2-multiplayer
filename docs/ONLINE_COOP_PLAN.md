@@ -59,8 +59,7 @@ the friend's chosen identity in the first engine-driven scene and first field.
 Roxas+Roxas is the first qualification, Roxas+Sora the next; each admitted party
 profile must meet the same opening contract. Prerendered movies retain their
 original footage. Joining after Sora wakes, a solo prologue, or a decorative
-second actor
-does not meet this gate. Each player must move, fight and take damage.
+second actor does not meet this gate. Each player must move, fight and take damage.
 
 [VUH-2338](https://linear.app/vuhlp/issue/VUH-2338) owns the new starting inputs.
 Its read-only inventory found `FM-00` at Day 3, `FM-01` at Day 6 start and
@@ -126,7 +125,8 @@ profiles refuse readiness with a reason, never silently substitute Sora.
 | World allies / Mickey / dual-wield | Add allies one at a time with their assets, weapon and action dependencies checked in TT. Mickey keeps his bounded party-kit qualification until opening/downed/door checks pass. Dual-wield Roxas is an encounter form first. A character appearing in the game does not establish early playability. |
 | Optional host replacement | VUH-2469 investigates host Sora/Riku/Donald/Goofy and arbitrary pairs, including Donald+Goofy. The first delivery keeps native story Roxas on the host because its triggers, tutorial roles and event paths are not separated yet. This is a temporary implementation boundary, not a Sora/Roxas-only product rule. |
 
-Do not impose a general “only Roxas may be a friend” restriction. Qualify is each profile's assets/actions and the room's solo/story layout. No
+Do not impose a general “only Roxas may be a friend” restriction. Qualify each
+profile's assets/actions and the room's solo/story layout. No
 new profile is claimed live-ready today. Expose only passed profiles in VUH-1512,
 with specific unavailable reasons and the linked qualification issue. All become
 selectable from the opening once admitted; “party phase” does not mean “wait
@@ -136,8 +136,8 @@ Character selection (VUH-1512) carries a stable profile ID, variant, controller
 kind (native player or driven friend), capabilities and revision in the pre-scene
 roster/party intent. Human/AI ownership is separate from the character body: a
 Donald selected by a human is not an AI companion. Reuse the current kit table
-and streamed `AvatarState.character`; extend/version the protocol when its 3-bit plan
-codes are exhausted (7 is reserved), rather than aliasing a new ally onto a kit.
+and streamed `AvatarState.character`; extend/version the protocol when its
+3-bit plan codes are exhausted (7 is reserved), rather than aliasing a new ally onto a kit.
 Accept all choices before construction and apply the same per-seat identity on
 every receiver. Mid-fight changes are out of scope; changes between sessions
 need no reinstall. Reconnect restores the selected profile at the next safe
@@ -370,8 +370,8 @@ and cannot delay the core route.
    Cameras and both selected profiles return correctly on Sora's morning.
 9. **VUH-2344 → VUH-2337 — real route gate.** After core steps 1–3 and 5–8
    and existing PC/pilot prerequisites, two active drivers start before Day 1
-   and play the prologue
-   through Yen Sid, then continue the existing HB/LoD route to Shan-Yu. No
+   and play the prologue through Yen Sid, then continue the existing HB/LoD
+   route to Shan-Yu. No
    warps/protect-team idle friend; logs from both PCs, prologue/world clips from
    both seats, enemy HP/count parity, world-exit flags and unchanged saves.
    A Day-6/one-PC rehearsal does not satisfy this gate.
