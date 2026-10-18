@@ -1049,6 +1049,13 @@ void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
         const auto shape = crown::ForHost(g_renderHud.cameraEye, g_renderHud.cameraLook, g_renderHud.crownHost,
                                           g_crownFov, g_crownHead, static_cast<int>(bbDesc.Width),
                                           static_cast<int>(bbDesc.Height));
+        if (g_log && g_presentIndex % 600 == 0) {
+            const auto at = crown::Project(g_renderHud.cameraEye, g_renderHud.cameraLook,
+                {g_renderHud.crownHost.x, g_renderHud.crownHost.y - g_crownHead, g_renderHud.crownHost.z},
+                g_crownFov, static_cast<int>(bbDesc.Width), static_cast<int>(bbDesc.Height));
+            g_log("[crown] present=%llu visible=%d at=(%.0f,%.0f) rects=%zu",
+                  static_cast<unsigned long long>(g_presentIndex), at.visible, at.x, at.y, shape.count);
+        }
         if (shape.count) {
             FillCrownColors(ctx, bbDesc.Format);
             if (state != D3D12_RESOURCE_STATE_COPY_DEST) {

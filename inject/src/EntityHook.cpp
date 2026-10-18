@@ -1128,6 +1128,13 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     }
     input.after = enemysync::CapturePuppetAuthority();
     auto snapshot = hud::Project(input, GetTickCount64(), g_frameCounter);
+    if (g_frameCounter % 600 == 0) {  // VUH-2415: crown gate receipt, about every 10 s
+        Log("[crown] frame=%u net=%d slot=%u field=%d camera=%d current=%d host=(%.0f,%.0f,%.0f) "
+            "eye=(%.0f,%.0f,%.0f) look=(%.0f,%.0f,%.0f)", g_frameCounter, snapshot.networkCurrent,
+            snapshot.localSlot, input.fieldClear, input.cameraValid, snapshot.crownCurrent,
+            snapshot.crownHost.x, snapshot.crownHost.y, snapshot.crownHost.z, input.cameraEye.x,
+            input.cameraEye.y, input.cameraEye.z, input.cameraLook.x, input.cameraLook.y, input.cameraLook.z);
+    }
     downedspike::PromptHud(snapshot.promptKind, snapshot.promptSlot, snapshot.promptProgress);
     render::PublishCoopHud(snapshot);
 }
