@@ -599,7 +599,7 @@ if(WIN32)
 
     # VUH-2415 host crown: camera projection, clipped crown rectangles and the snapshot gate.
     add_executable(kh2coop_host_crown_test tests/HostCrownTest.cpp)
-    target_include_directories(kh2coop_host_crown_test PRIVATE inject/src common/include)
+    target_include_directories(kh2coop_host_crown_test PRIVATE inject/src common/include runtime/include)
     target_compile_definitions(kh2coop_host_crown_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     if(MSVC)
         target_compile_options(kh2coop_host_crown_test PRIVATE /W4 /WX)

@@ -1078,8 +1078,14 @@ void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
             src.PlacedFootprint.Footprint.RowPitch = kCrownPitch;
             for (std::size_t i = 0; i < shape.count; ++i) {
                 const auto& r = shape.rects[i];  // clipped to the backbuffer, at most Block square
-                const auto b = crown::SourceBox(r);
-                const D3D12_BOX box {b[0], b[1], b[2], b[3], b[4], b[5]};
+                const auto source = crown::SourceBox(r);
+                D3D12_BOX box {};
+                box.left = source.left;
+                box.top = source.top;
+                box.front = source.front;
+                box.right = source.right;
+                box.bottom = source.bottom;
+                box.back = source.back;
                 ctx.list->CopyTextureRegion(&dst, static_cast<UINT>(r.x), static_cast<UINT>(r.y), 0, &src, &box);
             }
         }
@@ -1147,7 +1153,14 @@ void OnPresent(IDXGISwapChain* swapChain) {
         }
         const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput() ||
                                  warp::WaitingAtBlockedExit();
-        const bool drawCrown = g_crownEnabled && g_renderHud.crownCurrent;
+        // VUH-2415: decide visibility before touching the ring, so a hidden crown submits nothing.
+        bool drawCrown = false;
+        if (g_crownEnabled && g_renderHud.crownCurrent) {
+            DXGI_SWAP_CHAIN_DESC1 desc {};
+            drawCrown = SUCCEEDED(g_swapChain3->GetDesc1(&desc)) &&
+                crown::ForHost(g_renderHud.cameraEye, g_renderHud.cameraLook, g_renderHud.crownHost, g_crownFov,
+                               g_crownHead, static_cast<int>(desc.Width), static_cast<int>(desc.Height)).count > 0;
+        }
         if (drawOverlay || drawCrown || captureFrame) SubmitFrameWork(drawOverlay, drawCrown, captureFrame);
     }
 

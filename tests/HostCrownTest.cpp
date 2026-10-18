@@ -1,10 +1,12 @@
 // VUH-2415 host crown: projection, crown rectangles and the snapshot gate. No game.
 #include "CoopHudState.hpp"
+#include "CrownInputs.hpp"
 #include "HostCrown.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 using namespace kh2coop;
 using namespace kh2coop::inject;
@@ -72,8 +74,51 @@ void Shapes() {
     // crown-01 drew nothing: the box was built as {left, top, right, bottom, ...} (empty).
     const auto gold = crown::SourceBox({100, 100, 28, 7, crown::Gold});
     const auto shade = crown::SourceBox({100, 100, 4, 3, crown::Shade});
-    Check(gold == std::array<unsigned, 6> {0, 0, 0, 28, 7, 1} &&
-          shade == std::array<unsigned, 6> {64, 0, 0, 68, 3, 1}, "source box is in D3D12_BOX order and non-empty");
+    Check(gold.left == 0 && gold.right == 28 && gold.top == 0 && gold.bottom == 7 && gold.front == 0 &&
+          gold.back == 1, "gold source box: named D3D12 fields, non-empty, one slice deep");
+    Check(shade.left == 64 && shade.right == 68 && shade.top == 0 && shade.bottom == 3 && shade.front == 0 &&
+          shade.back == 1, "shade source box selects the second colour block");
+    shape = crown::Crown(960.0f, 500.0f, 3840, 2160);
+    bool boxesFit = shape.count > 0;
+    for (std::size_t i = 0; i < shape.count; ++i) {
+        const auto b = crown::SourceBox(shape.rects[i]);
+        boxesFit = boxesFit && b.right > b.left && b.bottom > b.top && b.back > b.front &&
+            b.right <= 2u * crown::Block && b.bottom <= static_cast<unsigned>(crown::Block);
+    }
+    Check(boxesFit, "every crown rect's source box is non-empty and inside the colour blocks");
+}
+
+// The isolated reader over owned memory laid out like the game image, and over
+// reserved-but-uncommitted memory, where every read faults.
+void Reader() {
+    const std::size_t span = offsets::EVENT_CONTEXT + 0x1000;
+    auto* image = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, span, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    Check(image != nullptr, "test image allocated");
+    if (!image) return;
+    const auto base = reinterpret_cast<std::uintptr_t>(image);
+    image[offsets::IN_FIELD] = 1;
+    image[offsets::OPEN_MENU] = 0xFF;
+    auto* camera = reinterpret_cast<float*>(image + offsets::CAMERA_STRUCT);
+    const float look[3] {1.0f, -2.0f, 3.0f}, eye[3] {4.0f, -5.0f, 6.0f};
+    std::memcpy(camera + offsets::camera::SMOOTH_LOOKAT / 4, look, sizeof(look));
+    std::memcpy(camera + offsets::camera::EYE_POS / 4, eye, sizeof(eye));
+    hud::Input in;
+    Check(crown::ReadInputs(base, in) && in.fieldClear && in.cameraValid && in.cameraLook.y == -2.0f &&
+          in.cameraEye.z == 6.0f, "reader takes field gates and camera from the image");
+    image[offsets::OPEN_MENU] = 3;
+    Check(crown::ReadInputs(base, in) && !in.fieldClear && in.cameraValid, "an open menu clears the field gate");
+    image[offsets::OPEN_MENU] = 0xFF;
+    camera[offsets::camera::EYE_POS / 4] = std::nanf("");
+    Check(crown::ReadInputs(base, in) && in.fieldClear && !in.cameraValid, "a non-finite camera is not valid");
+    VirtualFree(image, 0, MEM_RELEASE);
+
+    auto* reserved = VirtualAlloc(nullptr, span, MEM_RESERVE, PAGE_NOACCESS);
+    Check(reserved != nullptr, "reserved test range allocated");
+    if (!reserved) return;
+    in.fieldClear = in.cameraValid = true;
+    const bool read = crown::ReadInputs(reinterpret_cast<std::uintptr_t>(reserved), in);
+    Check(!read && !in.fieldClear && !in.cameraValid, "a faulting read returns normally with the crown hidden");
+    VirtualFree(reserved, 0, MEM_RELEASE);
 }
 
 hud::Input Fixture(std::uint8_t localSlot) {
@@ -136,6 +181,7 @@ void Gate() {
 int main() {
     Projection();
     Shapes();
+    Reader();
     Gate();
     std::printf("Host crown: %s (%d checks, %d failures)\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;

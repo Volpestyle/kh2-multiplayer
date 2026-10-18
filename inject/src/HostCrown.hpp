@@ -87,10 +87,20 @@ inline bool Clip(Rect& r, int width, int height) noexcept {
     return true;
 }
 
-// Source box for a rect's colour block, in D3D12_BOX order {left, top, front, right, bottom, back}.
-inline std::array<unsigned, 6> SourceBox(const Rect& r) noexcept {
-    const unsigned left = r.color == Shade ? static_cast<unsigned>(Block) : 0u;
-    return {left, 0u, 0u, left + static_cast<unsigned>(r.w), static_cast<unsigned>(r.h), 1u};
+// Source box for a rect's colour block. Same fields as D3D12_BOX; the Present hook
+// copies them by name, never by position (crown-01 drew nothing with a positional box).
+struct Box {
+    unsigned left {}, top {}, front {}, right {}, bottom {}, back {};
+};
+inline Box SourceBox(const Rect& r) noexcept {
+    Box box;
+    box.left = r.color == Shade ? static_cast<unsigned>(Block) : 0u;
+    box.right = box.left + static_cast<unsigned>(r.w);
+    box.top = 0u;
+    box.bottom = static_cast<unsigned>(r.h);
+    box.front = 0u;
+    box.back = 1u;
+    return box;
 }
 
 // A small crown whose band's bottom centre sits at (cx, bottom). Scales with the
