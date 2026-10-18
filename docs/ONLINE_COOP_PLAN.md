@@ -79,6 +79,20 @@ pose to discover the selected kit; the old remote-kit mode needs a second load
 and cannot satisfy first-frame admission. If title-time networking is not yet
 available, adding it is part of VUH-2464, not permission to play Day 1 alone.
 
+**Opening fixture (PC1, run `20261018-141748`).** `tools/scenario/scenarios/newgame_first_field.json`
+(from its `.gen.py`) is the VUH-2464 opening: clean boot, NEW GAME,
+Standard / vibration ON / Yes (the default rows; the first menu ignores input
+for about 7 s), then Cross only while the field gate is closed. No save is
+loaded or written. The opening is deterministic by inject game frame:
+2/1 evt 52 (movie, from frame 1) → 2/1 evt 56 (TT title, 11,987) → 2/2 evt 63
+(Usual Spot, voiced, 13,474) → 2/7 evt 106 (19,205) → **first control at 2/7
+evt 95, Market Street: Tram Common, frame 19,568**: Roxas (`P_EX110`, 20 HP)
+at (−2290, 0, −1616) with the native move/jump tutorial box and his HUD. The
+field gate also opens for single frames between event loads (11,986, 13,473,
+19,204); those aren't control. Movies run near 30 game frames/s, so the first
+control frame comes about 10 minutes after Yes. The run's `first_field_progress.json`
+holds the story, program and personal ranges at that point.
+
 Prefer New Game over fabricating a save. If an opening fixture is later needed
 for speed, make it from a legitimately obtained copy in an isolated rig fixture
 location with explicit provenance and an approved load path. No edits to either
