@@ -456,6 +456,11 @@ int main() {
     hostRuntimeSide.SetLocalSlot(0);
     check(hostDll.GetCoopDifficulty() == CoopDifficulty::Hard && hostDll.LocalSlot() == 0,
           "advertised difficulty and slot share control word without overwriting each other");
+    hostRuntimeSide.SetFriendlyFire(false);
+    check(!hostDll.GetFriendlyFire() && hostDll.GetCoopDifficulty() == CoopDifficulty::Hard && hostDll.LocalSlot() == 0,
+          "friendly fire shares the control word without overwriting slot or difficulty");
+    hostRuntimeSide.SetFriendlyFire(true);
+    check(hostDll.GetFriendlyFire() && hostDll.GetCoopDifficulty() == CoopDifficulty::Hard, "friendly fire back on");
     hostRuntimeSide.SetCoopDifficulty(CoopDifficulty::Off);
     check(hostDll.LocalSlot() == 0 && clientDll.LocalSlot() == 1,
           "DLL side reads the slot the runtime set");

@@ -117,7 +117,8 @@ int main() {
     Put(g_image + RVA_NATIVE_PLAYER, g_local);
     TestSetOriginal(&Native);
 
-    CHECK("0: off, no hook, no log", InstallMode("0") && g_logged.empty() && CurrentMode() == Mode::Off);
+    CHECK("0: off, no hook, says friendly fire has no effect", InstallMode("0") && Has("friendly fire setting has no effect") &&
+          CurrentMode() == Mode::Off);
     SetEnvironmentVariableA("KH2COOP_ALLY_HIT", nullptr);
     CHECK("unset without a driven-puppet source refuses (native)",
           !Install(g_image, &Log, &Resolve, &Frame) && Has("no driven-puppet source") && CurrentMode() == Mode::Off);
@@ -245,6 +246,24 @@ int main() {
     CHECK("puppet stats: refusals counted", p1.puppetRefused == 4 && p1.refused - p0.refused == 4 && p1.faults == 0);
     Tick(2100);
     CHECK("puppet tick: stats line names puppetRefused", Has("puppetRefused=4"));
+
+    // ---- VUH-2421: the host's friendly fire off refuses every ally player pair, whatever the installed mode
+    g_nativeAnswer = 0x1234501;
+    SetFriendlyFire(false);
+    CHECK("friendly fire off: logged once", Has("[allyhit] friendly fire off (host setting)"));
+    CHECK("friendly fire off: undriven clone -> local refused", HookedCanHit(Attack(100, 2, 0, 1800, 0), g_local) == 0x1234500);
+    CHECK("friendly fire off: local -> clone refused", HookedCanHit(Attack(101, 1, 0, 1801, 1), g_clone) == 0x1234500);
+    CHECK("friendly fire off: enemy -> local native", HookedCanHit(Attack(102, 4, 0, 1802, 2), g_local) == 0x1234501);
+    CHECK("friendly fire off: local -> enemy native", HookedCanHit(Attack(103, 1, 0, 1803, 1), g_enemy) == 0x1234501);
+    CHECK("friendly fire off: heal (kind 5) between players kept", HookedCanHit(Attack(104, 2, 5, 1804, 0), g_local) == 0x1234501);
+    CHECK("friendly fire off: the installed mode is unchanged", CurrentMode() == Mode::Puppet);
+    g_drivenActors[1] = g_companion;
+    CHECK("friendly fire off: a driven companion-kit puppet -> local still refused",
+          HookedCanHit(Attack(106, 6, 0, 1806, 0), g_local) == 0x1234500);
+    g_drivenActors[1] = 0;
+    SetFriendlyFire(true);
+    CHECK("friendly fire on: back to puppet mode (undriven clone -> local native)",
+          HookedCanHit(Attack(105, 2, 0, 1805, 0), g_local) == 0x1234501 && Has("[allyhit] friendly fire on (host setting)"));
 
     std::printf("allyhit: %d passed, %d failed\n", g_pass, g_fail);
     if (g_fail) std::printf("--- log ---\n%s", g_logged.c_str());

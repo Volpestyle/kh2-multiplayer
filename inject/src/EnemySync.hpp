@@ -84,6 +84,8 @@ bool DropLocalEnemyDamage(uintptr_t victim);
 // `actor` is a bound, living, mirrored host enemy on this client whose
 // stream is fresh; `out` is the host pose/motion at the render cursor.
 bool MirrorRequested() noexcept;
+// VUH-2421: the host's friendly fire as the runtime advertised it (on without a session).
+bool FriendlyFire() noexcept;
 // Gate for one actor this frame (EnemyMirror.inl PreUpdate). Fills out.netId
 // for Bound and Drive, the full pose for Drive only.
 // Freshness uses EnemySync's own frame clock, the one that stamps arrivals (not

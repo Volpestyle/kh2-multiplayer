@@ -58,6 +58,17 @@ hooks, about 2 s from launch to injection.
 Loading a save is still manual or step-by-step `tap-key`; `boot-load-save` is
 known broken (see `KH2_CONTROL_CLI.md`).
 
+## Friendly fire (VUH-2421)
+
+Set `KH2COOP_FRIENDLY_FIRE=0` on the **host runtime** to turn friendly fire
+off; unset or any other value keeps it on (the default). The relay advertises
+the admitted host's setting to every peer at session start, and a friend's
+environment cannot override it (protocol v25). Off refuses every
+player-to-player hit at the native hit check (3D2060), so there's no damage,
+reaction or knockback; enemy hits are unchanged. On keeps today's behaviour.
+`KH2COOP_ALLY_HIT=0` installs no hit hook, so the setting has no effect there.
+A change applies when the host next connects.
+
 ## Co-op enemy health (VUH-2194)
 
 Set `KH2COOP_COOP_DIFFICULTY=off|normal|hard` on the **host runtime**.

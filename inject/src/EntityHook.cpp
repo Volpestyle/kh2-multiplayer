@@ -3241,6 +3241,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 scriptmirror::OnFrameStart(); // VUH-2252: host flush / client held calls, after enemysync
                 ProcessHitRequest();
                 BeginHandleFrame();
+                allyhit::SetFriendlyFire(enemysync::FriendlyFire()); // VUH-2421: host setting, synced
                 allyhit::Tick(g_frameCounter); // stats line (silent when off or unchanged)
             }
         }

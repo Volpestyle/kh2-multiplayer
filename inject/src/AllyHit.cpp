@@ -19,6 +19,7 @@ ResolveFn g_resolve = nullptr;
 FrameFn g_frame = nullptr;
 DrivenFn g_driven = nullptr;
 std::atomic<std::uint8_t> g_mode{static_cast<std::uint8_t>(Mode::Off)};
+std::atomic<bool> g_friendlyFire{true};
 std::atomic<std::uint64_t> g_calls{}, g_pairs{}, g_allowed{}, g_refused{}, g_kindKept{}, g_faults{}, g_viaSource{};
 std::atomic<std::uint64_t> g_puppetRefused{};
 std::atomic<unsigned> g_traced{}, g_tracedZero{};
@@ -127,9 +128,16 @@ std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::ui
 
 std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t victim) {
     const std::uint64_t native = g_original(attack, victim);
-    const auto mode = static_cast<Mode>(g_mode.load(std::memory_order_acquire));
+    auto mode = static_cast<Mode>(g_mode.load(std::memory_order_acquire));
     if (mode == Mode::Off) return native;
-    if (mode == Mode::Puppet) return PuppetCanHit(attack, victim, native);
+    // VUH-2421: host friendly fire off refuses what either rule refuses: a driven puppet's hit (including a
+    // companion-kit puppet, which CoOp's player-class test misses) and every player-class pair.
+    const bool friendlyFireOff = !g_friendlyFire.load(std::memory_order_acquire);
+    if (mode == Mode::Puppet) {
+        const std::uint64_t puppet = PuppetCanHit(attack, victim, native);
+        if (!friendlyFireOff || puppet != native) return puppet;
+    }
+    if (friendlyFireOff) mode = Mode::CoOp;
     g_calls.fetch_add(1, std::memory_order_relaxed);
     const std::uintptr_t player = Player();
     ActorFacts v {};
@@ -181,6 +189,10 @@ void Tick(std::uint32_t frame) {
 }
 
 Mode CurrentMode() { return static_cast<Mode>(g_mode.load(std::memory_order_acquire)); }
+void SetFriendlyFire(bool on) {
+    if (g_friendlyFire.exchange(on, std::memory_order_acq_rel) == on || !g_log) return;
+    g_log("[allyhit] friendly fire %s (host setting)", on ? "on" : "off");
+}
 Stats GetStats() {
     Stats s;
     s.calls = g_calls.load(); s.playerPairs = g_pairs.load(); s.nativeAllowed = g_allowed.load();
@@ -203,7 +215,10 @@ bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame
         if (log) log("[allyhit] REFUSED: KH2COOP_ALLY_HIT must be 0, 1 or trace; not hooked");
         return false;
     }
-    if (mode == Mode::Off) return true;
+    if (mode == Mode::Off) {
+        if (log) log("[allyhit] off (KH2COOP_ALLY_HIT=0): not hooked; the host's friendly fire setting has no effect");
+        return true;
+    }
     g_base = exeBase; g_log = log; g_resolve = resolve; g_frame = frame; g_driven = driven;
     if (mode == Mode::Puppet && !driven) {
         if (log) log("[allyhit] REFUSED: puppet mode has no driven-puppet source; not hooked");
