@@ -54,7 +54,8 @@ MOVE_EPSILON = 50.0
 # R = R1, E = R2, C = L2, Shift = L1, Q = nothing. Escape = Start is unverified.
 # A route's "keys" overrides these.
 KEYS = {"up": "W", "down": "S", "left": "A", "right": "D", "confirm": "ENTER",
-        "attack": "ENTER", "react": "F", "jump": "SPACE", "lockon": "R", "start": "ESCAPE"}
+        "attack": "ENTER", "react": "F", "jump": "SPACE", "lockon": "R", "start": "ESCAPE",
+        "guard": "SQUARE"}  # no keyboard key produces Square: guard is pad input only
 VK = {"ENTER": 0x0D, "ESCAPE": 0x1B, "SPACE": 0x20, "SHIFT": 0x10, "UP": 0x26, "DOWN": 0x28,
       "LEFT": 0x25, "RIGHT": 0x27, "TAB": 0x09, "BACKSPACE": 0x08}
 EXTENDED = {"UP", "DOWN", "LEFT", "RIGHT"}
@@ -399,6 +400,16 @@ class Stuck(Exception):
     pass
 
 
+def heal_due(hp: int, max_hp: int, heal: dict | None, used: int, missed: int, ready_at: float, now: float,
+             drop: int = 0) -> bool:
+    """Use a Potion now? `drop` is the HP lost in the last 2 s: half of a combo already
+    landing counts against the threshold, so the heal starts before it finishes. Only
+    Potions that went through count toward `max`; menu misses have their own cap."""
+    if not heal or hp <= 0 or used >= heal.get("max", 3) or missed >= heal.get("missMax", 4) or now < ready_at:
+        return False
+    return hp - drop * float(heal.get("lead", 0.5)) < heal.get("below", 0.5) * max(max_hp, 1)
+
+
 class Retry(Exception):
     """Game Over → Continue reloaded another room: replay from the step that leads back."""
 
@@ -667,7 +678,9 @@ class Pilot:
 
         In battle it takes any offered reaction except Save (Reversal, a revive),
         at most every `reactGapSec` unless HP is falling. `heal` runs a menu key
-        sequence (a Potion) below its threshold, checked between swings too.
+        sequence (a Potion) below its threshold (`heal_due`), checked between swings
+        too; a press that uses no Potion retries after 1 s without spending one.
+        With pad input it guards (Square) when a swing burst is answered with damage.
         When recent damage says Roxas is pinned (`pinnedDrop` of max HP lost in
         2 s), it runs from the nearby enemies with a jump, trying the sides when
         a wall stops it. At 0 HP, Game Over (menu 8) gets Continue, the native
@@ -676,7 +689,8 @@ class Pilot:
         reach, low = float(step.get("reach", 220)), float(step.get("lowHp", 0.35))
         stats = {"enemiesStart": None, "swings": 0, "reactions": {}, "minHp": None, "deaths": 0, "evades": 0,
                  "escapes": 0, "downed": 0, "heals": 0}
-        calm_since, locked, healed, reacted, window_tries = None, False, 0.0, 0.0, 0
+        calm_since, locked, heal_ready, reacted, window_tries = None, False, 0.0, 0.0, 0
+        guard = step.get("guard", "guard" if isinstance(self.kb, PadInput) else None)
         recent: list[tuple[float, int]] = []  # (time, hp) samples for the damage window
         first = self.state()
         room = (first["world"], first["room"])
@@ -690,8 +704,10 @@ class Pilot:
             return max(window) - s["hp"] >= share * max(s["maxHp"], 1)
 
         def want_heal(s: dict) -> bool:
-            return bool(heal) and 0 < s["hp"] < heal.get("below", 0.5) * max(s["maxHp"], 1) \
-                and stats["heals"] < heal.get("max", 3) and time.monotonic() > healed + 3
+            now = time.monotonic()
+            window = [hp for at, hp in recent if now - at <= 2.0]
+            return heal_due(s["hp"], s["maxHp"], heal, stats["heals"], stats.get("healMisses", 0), heal_ready, now,
+                            max(window, default=s["hp"]) - s["hp"])
 
         def heal_window(s: dict, foes: list[dict]) -> bool:
             # Menu presses during hit-stun don't use the Potion (route-02: 6 of 9, route-04: 0 of 3).
@@ -781,8 +797,6 @@ class Pilot:
                 continue
             if want_heal(s):
                 window_tries = 0
-                stats["heals"] += 1
-                healed = time.monotonic()
                 self.kb.hold(set())
                 for action in heal["keys"]:
                     self.kb.tap(action)
@@ -790,7 +804,11 @@ class Pilot:
                 time.sleep(1.5)
                 after = self.state()["hp"]
                 self.write("heal", hp=s["hp"], after=after)
-                if after <= s["hp"]:
+                if after > s["hp"]:
+                    stats["heals"] += 1
+                    heal_ready = time.monotonic() + 3
+                else:
+                    heal_ready = time.monotonic() + 1  # a miss retries sooner and spends no Potion
                     # No Potion went through; back out of any submenu so later presses start clean.
                     stats["healMisses"] = stats.get("healMisses", 0) + 1
                     for action in heal.get("reset", ["SPACE", "SPACE"]):
@@ -823,8 +841,10 @@ class Pilot:
                     if now["hp"] <= 0 or want_heal(now) or hurting(now, float(step.get("pinnedDrop", 0.3))) or \
                             (now["react"] and now["battle"] and now["react"] not in SAVE_REACTIONS):
                         break
-                if step.get("guard"):  # e.g. "MOUSE_RIGHT" once calibrated: block the counter
-                    self.kb.tap(step["guard"], 300)
+                # Block the counter when the burst was answered with damage and an enemy is in reach.
+                if guard and gap < reach and hurting(self.state(), 0.05):
+                    stats["guards"] = stats.get("guards", 0) + 1
+                    self.kb.tap(guard, 300)
         raise Stuck("fight did not clear")
 
     def escape(self, s: dict, near: list[dict]) -> None:
