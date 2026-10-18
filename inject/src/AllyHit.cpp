@@ -132,8 +132,9 @@ std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t vict
     if (mode == Mode::Off) return native;
     // VUH-2421: host friendly fire off refuses what either rule refuses: a driven puppet's hit (including a
     // companion-kit puppet, which CoOp's player-class test misses) and every player-class pair.
+    // In every hooked mode (D14.4 review): CoOp/Trace alone classify a companion-kit attacker as Other.
     const bool friendlyFireOff = !g_friendlyFire.load(std::memory_order_acquire);
-    if (mode == Mode::Puppet) {
+    if (mode == Mode::Puppet || friendlyFireOff) {
         const std::uint64_t puppet = PuppetCanHit(attack, victim, native);
         if (!friendlyFireOff || puppet != native) return puppet;
     }
