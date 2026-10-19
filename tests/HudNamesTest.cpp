@@ -2,6 +2,7 @@
 #include "CoopHudMailbox.hpp"
 #include "kh2coop/AvatarBridge.hpp"
 #include <atomic>
+#include <chrono>
 #include <climits>
 #include <cstdio>
 #include <cwchar>
@@ -156,8 +157,9 @@ void SlotAndConcurrency() {
     InterlockedExchange64(&slot.sequence, (std::numeric_limits<LONG64>::max)() - 1);
     Check(!slot.TryWrite(valid), "sequence exhaustion refuses without wrap");
     hudnames::Slot concurrent;
-    std::atomic<bool> done {false}; std::atomic<unsigned> reads {0}, mismatches {0};
+    std::atomic<bool> done {false}, started {false}; std::atomic<unsigned> reads {0}, mismatches {0};
     std::thread reader([&] {
+        started = true;
         do {
             hudnames::Roster r;
             if (concurrent.TryRead(r)) {
@@ -168,14 +170,22 @@ void SlotAndConcurrency() {
             }
         } while (!done.load());
     });
-    for (std::uint32_t i = 100; i < 50100; ++i) {
+    // VUH-2485: the writer could finish all 50000 publications before the reader thread was even
+    // scheduled (successfulReads=0 in ~1.7% of runs, never a mismatch). Start writing only once
+    // the reader runs, yield now and then, and keep publishing until it has overlapped 1000
+    // successful reads (bounded by 10 s), so the check always exercises concurrent copies.
+    while (!started.load()) std::this_thread::yield();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    std::uint32_t i = 100;
+    for (; i < 50100 || (reads.load() < 1000 && std::chrono::steady_clock::now() < deadline); ++i) {
         auto r = valid; r.connections = {i, i + 1u, i + 2u}; r.generation = i; r.sampledAtMs = i;
         r.names[0] = hudnames::Sanitize(i & 1 ? "Alpha" : "Beta");
         if (!concurrent.TryWrite(r)) ++mismatches;
+        if ((i & 63) == 0) std::this_thread::yield();
     }
     done = true; reader.join();
-    std::printf("concurrent publications=50000 successfulReads=%u mismatches=%u\n", reads.load(), mismatches.load());
-    Check(reads > 0 && mismatches == 0, "concurrent atomic payload copies cannot mix names/binding");
+    std::printf("concurrent publications=%u successfulReads=%u mismatches=%u\n", i - 100, reads.load(), mismatches.load());
+    Check(reads >= 1000 && mismatches == 0, "concurrent atomic payload copies cannot mix names/binding");
     Check(concurrent.TryWrite({}) && concurrent.TryRead(out) && !hudnames::Valid(out),
           "explicit reset retires names with empty publication");
     Check(AVATAR_BRIDGE_VERSION == 4 && sizeof(hudnames::Roster) == 112 && sizeof(hudnames::Slot) == 128 &&
