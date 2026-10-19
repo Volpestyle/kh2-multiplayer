@@ -25,6 +25,9 @@ namespace capture {
     constexpr std::uint64_t ACTOR_MOTION_TIME = 0x19C; // float
     // Physics inputs read by EntityPositionPhysics (pointer_map_v1.md).
     constexpr std::uint64_t ACTOR_VELOCITY  = 0xB98;  // 3 floats
+    // The actor's status record (HP +0, max HP +4), a record of the status pool in the image.
+    constexpr std::uint64_t ACTOR_STATUS    = 0x5C0;
+    constexpr std::uint64_t IMAGE_SPAN      = 0x3000000;
 } // namespace capture
 
 // `Reader` must provide: template <class T> T read(std::uint64_t address) const.
@@ -39,6 +42,17 @@ AvatarState captureAvatar(const Reader& mem, std::uint64_t exeBase, std::uint64_
     a.roomId = mem.template read<std::uint8_t>(exeBase + o::ROOM_ID);
     a.hp = mem.template read<std::int32_t>(exeBase + o::slot0::HP);
     a.maxHp = mem.template read<std::int32_t>(exeBase + o::slot0::MAX_HP);
+    // VUH-2482: the player's own status record. The fixed slot-0 record is the player's only while no
+    // private clone was built before it; the prologue builds the remote's clone first, which takes that
+    // record, so the slot-0 HP there is the clone's. Normally the two are the same record.
+    if (actor != 0) {
+        const auto status = mem.template read<std::uint64_t>(actor + capture::ACTOR_STATUS);
+        if (status >= exeBase && status < exeBase + capture::IMAGE_SPAN) {
+            const auto hp = mem.template read<std::int32_t>(status);
+            const auto maxHp = mem.template read<std::int32_t>(status + 4);
+            if (maxHp > 0 && hp >= 0 && hp <= maxHp) { a.hp = hp; a.maxHp = maxHp; }
+        }
+    }
     if (inEvent) a.flags |= AvatarInCutscene;
     if (downed) a.flags |= AvatarDowned;
     if (actor == 0) {

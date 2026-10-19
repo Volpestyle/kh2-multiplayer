@@ -807,6 +807,20 @@ story Roxas), puppets drive only a bound missing-party clone and the unit
 slot's friend pointers are ignored: events build their own player-class Roxas
 actors, and driving one took the host down (run `20261018-175014`).
 
+**Clone HP (VUH-2482).** A clone's fresh private record is initialized by the game from this seat's
+SAVE (`3C03F0` binds SAVE data for key 14), so a rebuilt clone used to show the *local* player's HP
+(run `20261018-195224`: after the Armor Shop reload both clones read 19, while the host was at 20).
+Each frame the puppet driver drives the clone, it now writes the owner's streamed HP and max HP (the
+avatar pose the HUD reads) into that clone's own private record if they differ, through
+`privatestatus::MirrorMissingPartyHp`: game thread only, the bound clone's owned record only (never
+the local player's), commits still vetoed, so neither SAVE changes. A local hit on the clone is not
+authoritative and is replaced by the owner's HP on the next frame. HP 0 is never written (the
+clone's binding requires HP above 0); downed belongs to VUH-2465. Each change logs
+`[clone-hp] ... hp=H/M result=1`. The streamed HP itself is read from the player's own status
+record (`actor+0x5C0`), not the fixed slot-0 record `0x2A23598`: the clone is built first and takes
+that record, so the old capture streamed each seat's clone HP as its own (with the mirror, the two
+seats swapped values every few frames in the first run). Normally both are the same record.
+
 **Limits.** Sixteen retained missing-party records per process (the Bailey
 budget), so a long prologue session runs out; Roxas+Roxas only; the selected
 friend is not represented in the opening's engine scenes (the friend skips

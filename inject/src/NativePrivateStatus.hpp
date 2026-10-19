@@ -30,5 +30,8 @@ bool MissingPartyKitScope();
 // VUH-2464: `actor` is a bound missing-party clone that is still current (MissingPartyPuppetAllowed
 // for a known entry). Unknown actors are false here, unlike MissingPartyPuppetAllowed.
 bool MissingPartyClone(std::uintptr_t actor);
+// VUH-2482: shows the owner's streamed HP on a bound missing-party clone by writing its own private
+// status record only (game thread, hp 1..maxHp). 1 written, 0 already equal, negative refused.
+int MirrorMissingPartyHp(std::uintptr_t actor, std::int32_t hp, std::int32_t maxHp);
 
 }

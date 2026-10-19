@@ -735,6 +735,25 @@ bool MissingPartyClone(uintptr_t actor) {
         if(g_missing[i-1].actor==actor)return g_missing[i-1].bound && MissingPartyPuppetAllowed(actor);
     return false;
 }
+// VUH-2482: writes only this bound clone's own private status record (HP at +0, max HP at +4), on the
+// game thread. Commits of that record stay vetoed, so neither SAVE changes. hp must be 1..maxHp: a 0-HP
+// record would fail the clone's own binding check (PlayerActor), and downed is VUH-2465's.
+int MirrorMissingPartyHp(uintptr_t actor,std::int32_t hp,std::int32_t maxHp) {
+    if(!actor || hp<1 || maxHp<hp || maxHp>9999)return -1;
+    if(!spawncontroller::IsDiagnosticGameThread() || !MissingPartyClone(actor))return -2;
+    const DWORD error=GetLastError();int result=-3;
+    for(unsigned i=g_missingBudget.count;i>0;--i) {
+        const auto& m=g_missing[i-1];if(m.actor!=actor)continue;
+        uintptr_t status=0;std::int32_t now[2]{};
+        if(!Read(actor+0x5C0,status) || status!=m.status || !Owned(status) || OwnedSerial(status)!=m.serial ||
+           status==m.localStatus || !Read(status,now))break;
+        if(now[0]==hp && now[1]==maxHp){result=0;break;}
+        __try{*reinterpret_cast<volatile std::int32_t*>(status+4)=maxHp;*reinterpret_cast<volatile std::int32_t*>(status)=hp;result=1;}
+        __except(EXCEPTION_EXECUTE_HANDLER){result=-4;}
+        break;
+    }
+    SetLastError(error);return result;
+}
 void StopNewAllocations(){g_ready=false;}
 bool RetainsMinHookResources(){return g_retained.load();}
 bool Ready(){return g_ready.load();}

@@ -83,6 +83,7 @@ Each reason disarms selection, and `Ready()` then turns party-native off for lat
 | `3C05EB` shared lookup | No-call gateway skips the owned private slot | Ordinary lookup and refcount |
 | `3C2120` commit | Veto only for the currently owned private slot | Ordinary commits |
 | `3C0830` final free | Clears ownership before the native free-count increment | Native free/refcount order |
+| Owned missing-party clone record (VUH-2482) | `MirrorMissingPartyHp` writes the owner's streamed HP/max HP (+0/+4), game thread, HP 1..max | The local player's record, SAVE (commits still vetoed) |
 
 It adds no native pool-key, free-list or refcount write. Module, hooks, fiber
 storage, gateways and unwind data are retained until process exit. After

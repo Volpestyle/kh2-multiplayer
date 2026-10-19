@@ -2712,6 +2712,19 @@ static void PollPositionFaultIdle() {
     __try { PollPositionFaultIdleCpp(); }
     __except (EXCEPTION_EXECUTE_HANDLER) { g_positionFault.Cancel(); }
 }
+// VUH-2482: a prologue clone shows its owner's streamed HP (the avatar pose the HUD reads), so a rebuilt
+// clone never keeps the HP its private record took from this seat's SAVE. Only the clone's own private
+// record is written (NativePrivateStatus), never 0, and only when it differs; a receipt per change.
+static unsigned g_cloneHpReceipts = 0;
+static void MirrorCloneHp(int index, uintptr_t actor, const AvatarState& pose) {
+    if (!prologueparty::PrologueScope() || pose.maxHp <= 0 || pose.hp < 1 || pose.hp > pose.maxHp) return;
+    const int result = privatestatus::MirrorMissingPartyHp(actor, pose.hp, pose.maxHp);
+    if (result != 0 && g_cloneHpReceipts < 256) {
+        ++g_cloneHpReceipts;
+        Log("[clone-hp] frame=%u puppet=%d owner=%u clone=%llX hp=%d/%d result=%d", g_frameCounter, index,
+            static_cast<unsigned>(pose.ownerSlot), static_cast<unsigned long long>(actor), pose.hp, pose.maxHp, result);
+    }
+}
 static void ApplyPuppetTransform(void* actorObj, int index) {
     if (!IsPuppetActive(index) || PuppetTarget(index) != reinterpret_cast<uintptr_t>(actorObj)) return;
     BindPuppetDrive(index, reinterpret_cast<uintptr_t>(actorObj));
@@ -2746,6 +2759,7 @@ static void ApplyPuppetTransform(void* actorObj, int index) {
     // puppet until our write.
     std::memset(reinterpret_cast<void*>(actor + ACTOR_CARRIED_DISPLACEMENT), 0, 3 * sizeof(float));
     std::memset(reinterpret_cast<void*>(actor + ACTOR_ACCEL_BLOCK), 0, ACTOR_ACCEL_BLOCK_BYTES);
+    MirrorCloneHp(index, actor, pose);
     if (!IsPlayerClassActor(actor)) {
         // Companion follow timer; not a known field on player-class actors.
         *reinterpret_cast<float*>(actor + ACTOR_FOLLOW_TIMER) = DISABLE_FOLLOW_TIMER;

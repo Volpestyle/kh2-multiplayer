@@ -464,6 +464,21 @@ void testAvatarCapture() {
     const auto event = captureAvatar(m, exe, actor, true, true);
     check((event.flags & AvatarInCutscene) && (event.flags & AvatarDowned),
           "caller's event/downed state becomes flags");
+
+    // VUH-2482: the player's own status record wins over the fixed slot-0 record (the prologue's
+    // remote clone takes slot 0 when it is built first).
+    const std::uint64_t own = exe + 0x2A24000;
+    m.put<std::uint64_t>(actor + capture::ACTOR_STATUS, own);
+    m.put<std::int32_t>(own, 19);
+    m.put<std::int32_t>(own + 4, 20);
+    const auto ownHp = captureAvatar(m, exe, actor, false, false);
+    check(ownHp.hp == 19 && ownHp.maxHp == 20, "HP comes from the actor's own status record");
+    check(captureAvatar(m, exe, 0, false, false).hp == 87, "no actor keeps the slot-0 HP");
+    m.put<std::int32_t>(own, 21);
+    check(captureAvatar(m, exe, actor, false, false).hp == 87, "an implausible own record falls back to slot 0");
+    m.put<std::int32_t>(own, 19);
+    m.put<std::uint64_t>(actor + capture::ACTOR_STATUS, 0x7FF600002000ULL);
+    check(captureAvatar(m, exe, actor, false, false).hp == 87, "a status pointer outside the image falls back to slot 0");
 }
 
 // ---------------------------------------------------------------------------
