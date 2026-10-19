@@ -3233,3 +3233,26 @@ The report keeps the sampled populations and successful hit counts, including
 partial results on timeout. The following20s all-peer empty check is unchanged:
 the cleanup never hits friend actors, so retained friend enemies still fail.
 Game emission, admission, HP and controller qualification are unchanged.
+
+### Prologue party: two Roxases from New Game (VUH-2464)
+
+`net_prologue_party.json` (from its `.gen.py`) is the PC1 two-instance proof of
+the prologue layout (`PARTY_SETUP.md`, "Prologue layout"). Relay and runtimes
+connect at the title; both games run NEW GAME on the default rows; the host
+plays the opening and the friend follows the host's first field from its own
+blocked opening exit. It requires: both seats declared and acknowledged Roxas
+during the opening; both at Tram Common evt95 and released there
+(`[prologue] control released`); per-seat Roxas census and clips; owner-only
+movement through the route pilot (`routes/prologue_move.json`) filmed from the
+other seat; one `kh2ctl hit damage` per seat with both SAVE ranges compared;
+and the Armor Shop event's same-room reload to evt97 (`routes/prologue_armor_shop.json`),
+released on both. `net_prologue_party_refusal.json` reruns the opening with the
+friend on `KH2COOP_PROFILE=0x54` and asserts that both seats hold at evt95 with
+`unqualified-profile`, with one Roxas each, no clone or Sora stand-in, and no
+movement or release.
+
+The fixtures need two KH2 instances in Session 1 (desk bridge) and about 20
+minutes; the 2/1 evt56 opening stall (VUH-2338) can still cost an attempt.
+The `hit damage` hit is synthetic native damage on a chosen actor, not an
+enemy attack. A single held stick does not move Roxas while Tram Common's
+tutorial box is up, which is why movement goes through the pilot's walk.

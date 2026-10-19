@@ -730,3 +730,75 @@ changed the party, and it builds the new members only at its next load. Making
 them appear in that same room needs the friend to construct party members in
 place (the party-swap member build). That is the friend-spawn path, specified
 for its owner rather than done here.
+
+## Prologue layout: two Roxases from the first field (VUH-2464)
+
+The Roxas prologue is solo by design: TT's party row is `00/12/12/12` and the
+resolver gives `[Roxas 0x5A, Donald, Goofy, 0x819]` (probe `20261018-165208`),
+so no friend seat exists for a member write. The prologue layout therefore adds
+the missing seat at the native player boundary instead of changing any row,
+member or MEMT: it is VUH-2343's Bailey ingress generalized to a checked site
+table (`routespawn::MissingPartySites`, `docs/ROUTE_SPAWNS.md`). At a prologue
+site the fixed wrapper's caller `3FF727` is about to build the authored
+`raw566`; the DLL first builds a direct copy of that record with the remote
+seat's profile (Roxas 90, key 14, form 0) as a private clone, then lets the
+authored call build the native story Roxas, which takes the canonical pointer.
+Remote first, canonical local last; no SAVE row, member table or script
+actor is touched.
+
+**Seats and profiles (protocol 26, `SeatState` 53).** Every seat's DLL
+declares its profile (`KH2COOP_PROFILE`, default Roxas `0x5A`) as soon as its
+runtime is admitted, which is during the New Game opening: the DLL is armed
+from the first opening frame. The relay admits a report only for the verified
+roster, stamps the owner slot and echoes it to every seat, the author included.
+A seat acknowledges once it holds every connected seat's profile; the pure
+policy is `common/include/kh2coop/PrologueSeats.hpp`. Only Roxas is admitted
+to the prologue layout in this slice; a Sora friend refuses as
+`unqualified-profile` until VUH-1512 qualifies it.
+
+**Construction and admission.** The clone is built only with an agreed,
+acknowledged two-seat vector and the existing two-player private-status and
+neutral-input prerequisites. Each seat then reports `Bound` at its exact
+location. In a prologue field every local input is held (buttons and sticks
+neutral, mailbox automation consumed) until the profiles agree, this seat's
+own construction still stands, and every other seat reported `Bound` at the
+same world/room/event program. Reasons are logged as `[prologue] hold
+reason=...`: `solo`, `too-many-seats`, `missing-profile`,
+`unqualified-profile`, `not-acknowledged`, `local-unbound` (including a
+refused or faulted construction) and `remote-unbound`. A refused construction
+never falls back to a Sora stand-in, a second load or a warp: the authored
+local still builds and the seat stays held.
+
+**Friend arrival.** A friend admitted at the title runs into its own opening
+exits before the host has announced any room, and client authority blocks
+them (the movie room's exit to 2/1 evt56). When the host announces its first
+field and that target is a checked prologue site, the friend issues it from
+that blocked exit (`warp::BlockedExitToPrologueSite`), with the host's
+progress applied first, as VUH-2344 does for a matching exit. It does not see
+the Usual Spot or title scenes; it lands in the first field and builds the
+host's clone there.
+
+**Sites.** Market Street: Tram Common, each group raw566 plus the absent
+raw567/568: `tt07-95` (`TT07_MS101`, package `b_40`, group 88), and its two
+same-room event reloads `tt07-97` (event 104, `TT07_MS103`, `b_42` group 132)
+and `tt07-99` (event 106, `TT07_MS105`, `b_44` group 176). Both seats logged
+byte-identical receipts for all three. Further prologue fields are added one
+pinned group at a time from the observation-only `[prologue-player-spawn]`
+receipt; an unpinned prologue field stays native solo and unheld.
+
+**Events.** A host event tears down the field actors, the clone included, and
+the friend holds with reason `remote-unbound` until the post-event reload
+rebuilds both seats. While the prologue scope holds (TT, native member 0 is
+story Roxas), puppets drive only a bound missing-party clone and the unit
+slot's friend pointers are ignored: events build their own player-class Roxas
+actors, and driving one took the host down (run `20261018-175014`).
+
+**Limits.** Sixteen retained missing-party records per process (the Bailey
+budget), so a long prologue session runs out; Roxas+Roxas only; the selected
+friend is not represented in the opening's engine scenes (the friend skips
+them); the prologue's first room change (event 108 to the Sandlot) and its
+first walk-through door are not pinned or run yet; combat, downed and
+dual-wield belong to VUH-2465/2466/2467. The clone's fresh private record is
+status pool index 79, the address older tools call "unit slot 0 HP"
+(`0x2A23598`), so a reader of that fixed address sees the clone; the route
+pilot's HP reads do.

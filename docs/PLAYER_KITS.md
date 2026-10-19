@@ -34,6 +34,10 @@ non-Roxas roster as Sora (`PlayerKit.cpp`), which fails safe.
   - Mickey is 11 (OpenKH `Objentry.Form.Default`, the non-Sora characters' base form, not a drive form).
   - Dual-wield Roxas is 10 (`RoxasDualWield`).
   - The factory passes the same byte as the constructor's form argument (`3DF930` case 0 and its raw566 path), and the constructor passes it on to the status allocator (`3C0620` from `3A7B1B`). Promotion, selection and allocation therefore require the argument to equal the descriptor's byte, not 0. Mickey trial-2 (run 20261007-112653) failed on exactly this: his form-11 build was never promoted (bindFault 15).
+- **Prologue (VUH-2464):** the Roxas prologue builds no kit through member writes. Its first field
+  adds the remote seat's Roxas as a private missing-party clone before the native story Roxas
+  (`PARTY_SETUP.md`, "Prologue layout"). `kh2coop/PrologueSeats.hpp` admits only Roxas to that
+  layout; the solo `KH2COOP_PLAYER_KIT` world-4 gate and the TT/HB/BC Sora clone guard are unchanged.
 - **Qualification:** a row is qualified only by its own live fixture. Ledger:
   - Sora `0x54`: native.
   - Roxas `0x5A`: solo `20261006-233415`, party kits `20261007-090953`.

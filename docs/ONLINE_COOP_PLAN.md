@@ -354,6 +354,16 @@ and cannot delay the core route.
    controlled Roxases with private status from the opening scene; this is its
    bounded native-player construction proof, not a fixed two-Roxas API. First door
    and same-room event reload preserve both, without a second-load workaround.
+   **Status 2026-10-18 (PC1, two instances):** seats declare and acknowledge
+   profiles in SeatState (protocol 26) during the opening; Tram Common evt95/97/99
+   are checked missing-party sites (`PARTY_SETUP.md`, "Prologue layout"); the
+   friend follows the first field from its blocked opening exit and skips the
+   opening's engine scenes. Runs `20261018-191728` and `20261018-195224` (two
+   Roxases at first control and after the Armor Shop reload; owner-only movement;
+   one synthetic hit per seat with both SAVE ranges unchanged) and
+   `20261018-193629` (an unqualified Sora profile holds both seats) passed. Open: the first room change and walk-through door
+   (Sandlot) are not pinned, the friend is not shown in the opening scenes, and
+   the two-PC clip waits for bld.
 3. **VUH-1512 — per-seat selector.** Depends on VUH-2464 for prologue proof.
    A Roxas host selects a Roxas or Sora friend for the first scene, tutorial and
    door; duplicates/colors work. Controller kind/identity are agreed before the

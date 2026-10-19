@@ -19,6 +19,16 @@ at `3FF71B` are pinned; private-status initialization already verifies the compl
 fixed wrapper, factory, player factory, Sora derived/base constructor and status safety bodies on Steam
 `9002b2de`. Header, records and controller roots are sampled again before entry.
 
+**Site table (VUH-2464).** The same ingress now serves every entry of
+`routespawn::MissingPartySites`: exact NOW, package key, caller `3FF727`, header
+and complete group (record count from header +4), with the authored raw566
+first. Bailey keeps its direct Sora 84 clone and Sora local. The Roxas
+prologue's `tt07-95` (Tram Common, `b_40` group 88, three records) builds the
+remote seat's agreed profile (Roxas 90, key 14) before the native story Roxas;
+see `PARTY_SETUP.md`, "Prologue layout". Selection, the factory's enclosing
+object, binding and puppet admission all use the site's clone and local keys,
+and the fatal base-allocation contract covers key 1 and key 14 at form 0.
+
 The extra call requires the shipped two-player TARGET_ALL/MIRROR prerequisites,
 ready private status and neutral input, a live admitted two-player session,
 normal resolved Sora84/form0, no event/cutscene, native admission headroom and a
