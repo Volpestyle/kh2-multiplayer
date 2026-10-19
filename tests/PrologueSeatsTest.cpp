@@ -9,6 +9,7 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <vector>
 using namespace kh2coop;
@@ -133,10 +134,26 @@ void site() {
     check(reloadBits, "every changed reload record bit refuses its site");
     check(MissingPartySiteAt(TramCommon97Location) == tram97 && MissingPartySiteAt(TramCommon99Location) == tram99 &&
           !MissingPartySiteAt({2, 7, 0, 0, 0x62, 0, 0x62, 0, 0x62, 0}), "site lookup by NOW is exact");
+    // The first room change (event 108 to the Sandlot) reuses b_40's key with its own group.
+    const auto* sandlot = MissingPartySiteFor(Sandlot76Location, 808738658, 0x3FF727, Sandlot76Header, Sandlot76Records);
+    check(sandlot && sandlot->prologue && sandlot->localObject == 90 && sandlot->localKey == 14 &&
+          MissingPartySiteAt(Sandlot76Location) == sandlot,
+          "the Sandlot evt76 (b_40 group49) is a checked prologue site");
+    check(!MissingPartySiteFor(Sandlot76Location, 808738658, 0x3FF727, TramCommon95Header, TramCommon95Records) &&
+          !MissingPartySiteFor(TramCommon95Location, 808738658, 0x3FF727, Sandlot76Header, Sandlot76Records),
+          "the same package key never admits the other room's group");
+    bool sandlotBits = true;
+    for (std::size_t i = 0; i < Sandlot76Records.size(); ++i) {
+        auto r = Sandlot76Records; r[i] ^= 1;
+        sandlotBits = sandlotBits && !MissingPartySiteFor(Sandlot76Location, 808738658, 0x3FF727, Sandlot76Header, r);
+    }
+    check(sandlotBits, "every changed Sandlot record bit refuses its site");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && !prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&
           !prologue::ProfileQualified(0x323), "only Roxas is admitted to the prologue layout in this slice");
+    check(std::string_view(prologue::HoldName(prologue::Hold::Unpinned)) == "unpinned-field" &&
+          std::string_view(prologue::HoldName(prologue::Hold::RemoteUnbound)) == "remote-unbound", "every hold has its logged reason");
 }
 
 void network() {

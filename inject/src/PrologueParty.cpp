@@ -40,6 +40,8 @@ std::atomic<std::uint64_t> g_holdNowLow {0};
 std::atomic<std::uint16_t> g_holdNowHigh {0};
 Hold g_loggedHold = Hold::None;
 std::array<std::uint8_t, 10> g_loggedAt {};
+std::array<std::uint8_t, 10> g_unpinnedAt {};
+bool g_released = false;   // this seat has been released at a site once
 constexpr std::uint64_t ECHO_RETRY_MS = 2000;
 constexpr unsigned MAX_RESENDS = 15;
 
@@ -128,19 +130,36 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
     // The hold for this frame (published for the input collector).
     Hold hold = Hold::None;
     const auto* site = nowRead ? PrologueSite(now) : nullptr;
-    const bool decided = generation && site && FieldOpen();
+    const bool fieldOpen = nowRead && FieldOpen();
+    const bool decided = generation && site && fieldOpen;
+    // An open prologue field with no checked site (the last frame of an event program or opening scene
+    // reads as one while its load is already pending, which is not playable). Before this seat's first
+    // release it is held too, so a session that starts at an unpinned field never plays it solo. The
+    // friend's blocked opening exit is not one: it has no player actor and member 0 is still Sora.
+    const bool unpinned = generation && !site && fieldOpen && !warp::TransitionPending() && PrologueScope();
+    const bool early = unpinned && !g_released;
     if (decided) hold = prologue::Release(g_seats, LocationOf(now), LocalBoundHere(now));
+    else if (early) hold = Hold::Unpinned;
     Publish(hold, now);
+    if (decided && hold == Hold::None) g_released = true;
     // One line per decision at each prologue field location (a seat that arrives after its peer bound
     // is released at its first field frame), and one when a hold ends by leaving the field.
-    if (g_log && decided && (hold != g_loggedHold || now != g_loggedAt)) {
+    if (g_log && (decided || early) && (hold != g_loggedHold || now != g_loggedAt)) {
         g_log("[prologue] %s at=%02X/%02X evt=%u site=%s localBound=%u", hold == Hold::None ? "control released" : "hold",
-              now[0], now[1], LocationOf(now).evt, site->name, LocalBoundHere(now) ? 1u : 0u);
+              now[0], now[1], LocationOf(now).evt, site ? site->name : "none", LocalBoundHere(now) ? 1u : 0u);
         if (hold != Hold::None) g_log("[prologue] hold reason=%s", prologue::HoldName(hold));
         g_loggedHold = hold; g_loggedAt = now;
-    } else if (g_log && !decided && g_loggedHold != Hold::None) {
+    } else if (g_log && !decided && !early && g_loggedHold != Hold::None) {
         g_log("[prologue] hold ended without release: left the prologue field at=%02X/%02X evt=%u", now[0], now[1], LocationOf(now).evt);
         g_loggedHold = Hold::None;
+    }
+    // After the first release an unpinned field plays native solo and unheld; only this line marks one
+    // (leaving a site for an event program also ends a hold).
+    if (decided) {
+        g_unpinnedAt = {};
+    } else if (g_log && unpinned && !early && now != g_unpinnedAt) {
+        g_log("[prologue] unpinned field at=%02X/%02X evt=%u: native solo, unheld", now[0], now[1], LocationOf(now).evt);
+        g_unpinnedAt = now;
     }
     if (!generation || localSlot > 2 || !g_localProfile) return false;
     // This seat's report: acknowledged once the roster's profile vector is complete; bound at a

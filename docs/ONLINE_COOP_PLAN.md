@@ -361,9 +361,14 @@ and cannot delay the core route.
    opening's engine scenes. Runs `20261018-191728` and `20261018-195224` (two
    Roxases at first control and after the Armor Shop reload; owner-only movement;
    one synthetic hit per seat with both SAVE ranges unchanged) and
-   `20261018-193629` (an unqualified Sora profile holds both seats) passed. Open: the first room change and walk-through door
-   (Sandlot) are not pinned, the friend is not shown in the opening scenes, and
-   the two-PC clip waits for bld.
+   `20261018-193629` (an unqualified Sora profile holds both seats) passed. The
+   first room change (the Day 1 cat lock-on, event 108, to the Sandlot `tt04-76`)
+   keeps both seats: unskipped run `20261018-215915` and skipped run
+   `20261018-222415` rebuilt two Roxases on each seat there, held the host until
+   the friend bound, moved only the owner's Roxas, and logged no unpinned solo
+   field. Open: the Day 1 walk-through doors after the Sandlot are not pinned,
+   the friend in the opening scenes moved to VUH-2359, and the two-PC clip waits
+   for bld.
 3. **VUH-1512 — per-seat selector.** Depends on VUH-2464 for prologue proof.
    A Roxas host selects a Roxas or Sora friend for the first scene, tutorial and
    door; duplicates/colors work. Controller kind/identity are agreed before the

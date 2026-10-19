@@ -33,6 +33,7 @@ enum class Hold : std::uint8_t {
     NotAcknowledged,   // a seat has not acknowledged this roster's profiles
     LocalUnbound,      // this seat's construction here did not bind (or has not run)
     RemoteUnbound,     // the other seat has not reported its first-field binding here
+    Unpinned,          // an open prologue field with no checked site, before this seat's first release
 };
 inline const char* HoldName(Hold h) {
     switch (h) {
@@ -45,6 +46,7 @@ inline const char* HoldName(Hold h) {
     case Hold::NotAcknowledged: return "not-acknowledged";
     case Hold::LocalUnbound: return "local-unbound";
     case Hold::RemoteUnbound: return "remote-unbound";
+    case Hold::Unpinned: return "unpinned-field";
     }
     return "?";
 }

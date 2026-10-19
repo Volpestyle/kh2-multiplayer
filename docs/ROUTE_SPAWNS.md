@@ -23,7 +23,8 @@ fixed wrapper, factory, player factory, Sora derived/base constructor and status
 `routespawn::MissingPartySites`: exact NOW, package key, caller `3FF727`, header
 and complete group (record count from header +4), with the authored raw566
 first. Bailey keeps its direct Sora 84 clone and Sora local. The Roxas
-prologue's `tt07-95` (Tram Common, `b_40` group 88, three records) builds the
+prologue's sites (Tram Common `tt07-95`/`97`/`99` and the Sandlot `tt04-76`,
+each three records; table in `PARTY_SETUP.md`) build the
 remote seat's agreed profile (Roxas 90, key 14) before the native story Roxas;
 see `PARTY_SETUP.md`, "Prologue layout". Selection, the factory's enclosing
 object, binding and puppet admission all use the site's clone and local keys,

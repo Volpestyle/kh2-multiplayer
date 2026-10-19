@@ -1,0 +1,1 @@
+{"name": "prologue_sandlot_move", "retries": 0, "description": "VUH-2464 owner-only movement check (either seat) in the Sandlot evt76 after the cat event: run about 300 units from the arrival point [-656, 650].", "steps": [{"do": "walk", "to": [-356, 650], "tol": 80, "timeoutSec": 12, "advance": false}]}

@@ -765,7 +765,8 @@ own construction still stands, and every other seat reported `Bound` at the
 same world/room/event program. Reasons are logged as `[prologue] hold
 reason=...`: `solo`, `too-many-seats`, `missing-profile`,
 `unqualified-profile`, `not-acknowledged`, `local-unbound` (including a
-refused or faulted construction) and `remote-unbound`. A refused construction
+refused or faulted construction), `remote-unbound` and `unpinned-field` (see
+Sites). A refused construction
 never falls back to a Sora stand-in, a second load or a warp: the authored
 local still builds and the seat stays held.
 
@@ -782,9 +783,22 @@ host's clone there.
 raw567/568: `tt07-95` (`TT07_MS101`, package `b_40`, group 88), and its two
 same-room event reloads `tt07-97` (event 104, `TT07_MS103`, `b_42` group 132)
 and `tt07-99` (event 106, `TT07_MS105`, `b_44` group 176). Both seats logged
-byte-identical receipts for all three. Further prologue fields are added one
+byte-identical receipts for all three. The first room change, the cat lock-on
+tutorial (event 108), loads the Sandlot as `tt04-76` (`b_40` group 49, the
+same raw566 plus absent raw567/568 shape); the host takes it natively and the
+friend follows the host's announced room. Further prologue fields are added one
 pinned group at a time from the observation-only `[prologue-player-spawn]`
-receipt; an unpinned prologue field stays native solo and unheld.
+receipt. An open prologue field with no site is held with reason
+`unpinned-field` until the seat's first release, so a session that starts at
+an unpinned field never plays it solo (the friend's blocked opening exit is
+outside the scope: it has no player actor, and member 0 is still Sora until
+the first field). After the first release an unpinned field plays native solo
+and unheld and is logged once as `[prologue] unpinned field` (the Sandlot in run
+`20261018-204359`, before it was pinned), which the fixture asserts never
+happens. The last frame of an event program or opening scene reads as an open
+field while its load is already pending; it is not playable and counts for
+neither. `hold ended without release` only means a held seat left the field,
+which every host event does.
 
 **Events.** A host event tears down the field actors, the clone included, and
 the friend holds with reason `remote-unbound` until the post-event reload
@@ -796,8 +810,8 @@ actors, and driving one took the host down (run `20261018-175014`).
 **Limits.** Sixteen retained missing-party records per process (the Bailey
 budget), so a long prologue session runs out; Roxas+Roxas only; the selected
 friend is not represented in the opening's engine scenes (the friend skips
-them); the prologue's first room change (event 108 to the Sandlot) and its
-first walk-through door are not pinned or run yet; combat, downed and
+them); the Sandlot is the last pinned field, so the Day 1 walk-through doors
+after it are not pinned or run yet; combat, downed and
 dual-wield belong to VUH-2465/2466/2467. The clone's fresh private record is
 status pool index 79, the address older tools call "unit slot 0 HP"
 (`0x2A23598`), so a reader of that fixed address sees the clone; the route

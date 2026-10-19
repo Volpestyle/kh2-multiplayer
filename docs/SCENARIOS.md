@@ -3245,14 +3245,24 @@ during the opening; both at Tram Common evt95 and released there
 (`[prologue] control released`); per-seat Roxas census and clips; owner-only
 movement through the route pilot (`routes/prologue_move.json`) filmed from the
 other seat; one `kh2ctl hit damage` per seat with both SAVE ranges compared;
-and the Armor Shop event's same-room reload to evt97 (`routes/prologue_armor_shop.json`),
-released on both. `net_prologue_party_refusal.json` reruns the opening with the
+the Armor Shop event's same-room reload to evt97 (`routes/prologue_armor_shop.json`),
+released on both; then the Day 1 lock-on tutorial: the Accessory Shop talk
+(`routes/prologue_accessory_shop.json` and a Triangle press on reaction 31;
+event 106 reloads the room as evt99) and the cat lock-on
+(`routes/prologue_cat.json`; event 108 is the first room change, to the
+Sandlot evt76). At the Sandlot it asserts two Roxases on each seat and no
+`[prologue] unpinned field` line anywhere in the run, then repeats the
+owner-only movement check (`routes/prologue_sandlot_move.json`).
+`net_prologue_party_skip.json` is the same run with the opening and event
+cutscenes skipped natively (Start, Down, Cross, only while that seat's field
+gate is closed); it is for development, and the unskipped fixture stays the
+acceptance evidence for the engine-driven scenes. `net_prologue_party_refusal.json` reruns the opening with the
 friend on `KH2COOP_PROFILE=0x54` and asserts that both seats hold at evt95 with
 `unqualified-profile`, with one Roxas each, no clone or Sora stand-in, and no
 movement or release.
 
-The fixtures need two KH2 instances in Session 1 (desk bridge) and about 20
-minutes; the 2/1 evt56 opening stall (VUH-2338) can still cost an attempt.
+The fixtures need two KH2 instances in Session 1 (desk bridge): about 20
+minutes skipped, longer unskipped; the 2/1 evt56 opening stall (VUH-2338) can still cost an attempt.
 The `hit damage` hit is synthetic native damage on a chosen actor, not an
 enemy attack. A single held stick does not move Roxas while Tram Common's
 tutorial box is up, which is why movement goes through the pilot's walk.
