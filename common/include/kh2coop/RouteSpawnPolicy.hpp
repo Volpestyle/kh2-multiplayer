@@ -125,9 +125,55 @@ inline bool SameConstructionStack(std::uint32_t ownerThread,std::uintptr_t owner
 inline bool NewPrivateBirth(std::uint64_t previous,std::uint64_t observed,bool owned,bool ready) {
     return previous && observed && previous!=observed && owned && ready;
 }
-// Only this observed base-constructor allocation has the fatal fallback contract.
+// VUH-2464: the Roxas prologue's first field, NOW 02/07 evt95 (TT07_MS101). Package b_40,
+// group88 holds the player record raw566 and the two absent friend seats raw567/568 (row
+// 00/12/12/12 leaves them unbuilt). Probe 20261018-165208, receipt [prologue-player-spawn].
+inline constexpr std::array<std::uint8_t,10> TramCommon95Location{2,7,0,0,0x5F,0,0x5F,0,0x5F,0};
+inline constexpr auto TramCommon95Header=Bytes("0100580003000000000000000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr auto TramCommon95Records=Bytes("3602000075190fc5000000801f09cac4000000001bd63b3f0000000000000d000000000000000000000000000000000000000000000000000000000000000000370200009ca40ec500000080aa61b8c4000000001bd63b3f0000000000000e000000000000000000000000000000000000000000000000000000000000000000380200002bed17c5000000806d1fc9c4000000001bd63b3f0000000000000f000000000000000000000000000000000000000000000000000000000000000000");
+// A checked missing-party site: the exact NOW, package, fixed-wrapper caller, header and complete
+// group whose first record is the authored raw566. The added clone copies that record with only its
+// objectId changed; the authored call still builds the canonical local (`localObject`, status key
+// `localKey`). `prologue` sites take the clone from the remote seat's latched profile; Bailey keeps Sora.
+struct MissingPartySite {
+    std::array<std::uint8_t,10> location;
+    std::uint32_t key;
+    std::span<const std::uint8_t> header,records;
+    std::uint16_t localObject,localKey;
+    bool prologue;
+    const char* name;
+};
+// The same-room event reloads that follow: event 104 (Armor Shop) reloads tt07 as evt97 (TT07_MS103,
+// b_42 group132), event 106 (Accessory Shop) as evt99 (TT07_MS105, b_44 group176). Both seats logged
+// identical receipts after native and host-led loads (run 20261018-185319).
+inline constexpr std::array<std::uint8_t,10> TramCommon97Location{2,7,0,0,0x61,0,0x61,0,0x61,0};
+inline constexpr auto TramCommon97Header=Bytes("0100840003000000000000000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr auto TramCommon97Records=Bytes("360200007b360ec502000036ac80b8c4000000002f2916c0000000000000130000000000000000000000000000000000000000000000000000000000000000003702000000200ec502000036ec2dcac4000000002f2916c00000000000001400000000000000000000000000000000000000000000000000000000000000000038020000d75f05c502000036be53b8c4000000002f2916c000000000000015000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr std::array<std::uint8_t,10> TramCommon99Location{2,7,0,0,0x63,0,0x63,0,0x63,0};
+inline constexpr auto TramCommon99Header=Bytes("0100b00003000000000000000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr auto TramCommon99Records=Bytes("36020000e5c845c525bd73b8121512c500000000d0c2aa3d0000000000001900000000000000000000000000000000000000000000000000000000000000000037020000b21340c542fa80b860550bc500000000d0c2aa3d0000000000001a0000000000000000000000000000000000000000000000000000000000000000003802000093884cc506b684b8e35f0cc500000000d0c2aa3d0000000000001b000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr MissingPartySite MissingPartySites[]{
+    {BaileyLocation,808738658,BaileyHeader,BaileyRecords,84,1,false,"hb08-bailey"},
+    {TramCommon95Location,808738658,TramCommon95Header,TramCommon95Records,90,14,true,"tt07-95"},
+    {TramCommon97Location,842293090,TramCommon97Header,TramCommon97Records,90,14,true,"tt07-97"},
+    {TramCommon99Location,875847522,TramCommon99Header,TramCommon99Records,90,14,true,"tt07-99"},
+};
+// Header +4 is the group's record count; every record of the group is pinned.
+inline const MissingPartySite* MissingPartySiteFor(const std::array<std::uint8_t,10>& location,std::uint32_t key,
+        std::uintptr_t caller,std::span<const std::uint8_t> header,std::span<const std::uint8_t> records) {
+    if(caller!=0x3FF727)return nullptr;
+    for(const auto& site:MissingPartySites)
+        if(site.location==location && site.key==key && Equal(header,site.header) && Equal(records,site.records))return &site;
+    return nullptr;
+}
+inline const MissingPartySite* MissingPartySiteAt(const std::array<std::uint8_t,10>& location) {
+    for(const auto& site:MissingPartySites)if(site.location==location)return &site;
+    return nullptr;
+}
+// Only this observed base-constructor allocation has the fatal fallback contract: Sora (key1) and,
+// for the prologue's Roxas (key14, the same player-class base constructor), form0 only.
 inline bool MissingPartyAbort(std::uintptr_t caller,int key,int form) {
-    return caller==0x3A7B1B && key==1 && form==0;
+    return caller==0x3A7B1B && (key==1 || key==14) && form==0;
 }
 struct MissingPartyBinding {
     std::uintptr_t clone{},local{},cloneStatus{},localStatus{},canonical{};

@@ -55,6 +55,7 @@ add_library(kh2coop_inject SHARED
     src/Warp.cpp
     src/PlayerKit.cpp
     src/PartyNative.cpp
+    src/PrologueParty.cpp
     src/PartyEmptySeat.cpp
     src/PartyEmptyPackage.cpp
     src/SaveGuard.cpp

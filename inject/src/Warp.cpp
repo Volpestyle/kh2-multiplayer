@@ -22,11 +22,13 @@
 
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/Protocol.hpp"
+#include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/WarpChannel.hpp"
 
 #include <Windows.h>
 #include <MinHook.h>
 
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -286,10 +288,26 @@ bool BlockedExitMatchesHost() {
            g_blockedExit->door == g_hostTarget.door;
 }
 
+// VUH-2464: a client that joined at the title runs into its own opening exits (the movie room,
+// the title and Usual Spot scenes) before the host has announced any room; the host's first
+// announced room is the prologue's first field, which no client exit ever names. Only when the
+// queued target is a checked prologue site may it issue from the client's own blocked exit at this
+// load, as the matching-exit case does. A free client still waits for the safe field gate.
+bool BlockedExitToPrologueSite() {
+    if (!g_blockedExit || g_blockedExitLoad != g_loadSerial || g_hostTarget.door > 0xFF) return false;
+    const auto lo = [](std::uint16_t v) { return static_cast<std::uint8_t>(v & 0xFF); };
+    const auto hi = [](std::uint16_t v) { return static_cast<std::uint8_t>(v >> 8); };
+    const std::array<std::uint8_t, 10> now {static_cast<std::uint8_t>(g_hostTarget.worldId), static_cast<std::uint8_t>(g_hostTarget.roomId),
+        static_cast<std::uint8_t>(g_hostTarget.door), 0, lo(g_hostTarget.mapProgram), hi(g_hostTarget.mapProgram),
+        lo(g_hostTarget.battleProgram), hi(g_hostTarget.battleProgram), lo(g_hostTarget.eventProgram), hi(g_hostTarget.eventProgram)};
+    const auto* site = routespawn::MissingPartySiteAt(now);
+    return site && site->prologue;
+}
+
 void IssueHostTransition() {
     if (!g_hostQueued || !g_hostGeneration ||
         enemysync::WorldSessionGeneration() != g_hostGeneration || g_transitionPending) return;
-    const bool atNativeExit = BlockedExitMatchesHost();
+    const bool atNativeExit = BlockedExitMatchesHost() || BlockedExitToPrologueSite();
     const bool safe = SafeToWarp();  // always: it also refreshes the channel's diagnostics
     if (!atNativeExit && !safe) return;
     // Room initialization reads programs and chest flags from SAVE. Wait for

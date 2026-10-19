@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 25;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 26;
 
 // ===========================================================================
+// Protocol v26 adds SeatState (53): each seat's selected profile and prologue readiness (VUH-2464).
 // Protocol v25 adds host friendly fire to ClientHello/SessionState (VUH-2421).
 // Protocol v24 appends the host's story party row for the target world to the RoomTransition packet (VUH-2342).
 // Protocol v23 adds MissionState (52): the host's running mission, shown on clients (VUH-2342).
@@ -333,6 +334,26 @@ struct ReviveRequest {
     std::uint8_t requesterSlot{0xFF};
     std::uint8_t targetSlot{0xFF};
 };
+// VUH-2464: reliable, scoped seat declaration from ANY seat's DLL. The relay admits it only for the
+// verified roster, stamps ownerSlot and broadcasts it to every verified peer, the author included (that
+// copy is its echo). `profile` is the seat's selected player profile (an objentry kit id). `latched`
+// is the profile vector this seat has received for `roster` (its acknowledgement); `phase` says how
+// far this seat got: 0 declared, 1 acknowledged, 2 first-field bound at world/room/evt (both gameplay
+// actors and private status of the prologue layout). seq is strictly increasing per author process.
+// Wire order is field order: 45 payload bytes.
+enum class SeatPhase : std::uint8_t { Declared = 0, Acknowledged = 1, Bound = 2 };
+struct SeatState {
+    std::array<std::uint64_t,3> roster{};
+    std::uint32_t seq{0};
+    std::uint16_t profile{0};
+    std::array<std::uint16_t,3> latched{};
+    std::uint16_t worldId{0}, roomId{0}, eventProgram{0};
+    SeatPhase phase{SeatPhase::Declared};
+    std::uint8_t ownerSlot{0xFF};
+    std::uint8_t reserved{0};
+};
+inline constexpr bool validSeatPhase(SeatPhase p) { return static_cast<std::uint8_t>(p) <= 2; }
+
 // Reliable, scoped host report (VUH-1515): an enemy on the host hit the
 // host-side native clone of targetSlot's player. The relay validates it
 // against the admitted room, roster, arrival and current EnemyManifest and

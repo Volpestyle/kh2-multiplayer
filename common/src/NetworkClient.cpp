@@ -873,6 +873,14 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                !sameResyncRoom(m.location,*hostRoom_) || m.afterVersion<partyVersion_)return;
             partyVersion_=m.afterVersion;partyLayout_.reset();reader=ByteReader(payload,payloadSize);
         }
+        if(type==PacketType::SeatState) {
+            // VUH-2464: any roster seat, room-independent; the relay stamped ownerSlot from the author.
+            SeatState m;read(reader,m);
+            std::array<std::uint64_t,3> roster{avatarConnections_[0],avatarConnections_[1],avatarConnections_[2]};
+            if(!reader.atEnd() || !admittedScope || admittedScope->kind!=WorldSourceKind::Native || m.ownerSlot>2 ||
+               m.roster!=roster || admittedScope->sourceConnectionId!=roster[m.ownerSlot])return;
+            reader=ByteReader(payload,payloadSize);
+        }
         if (type == PacketType::ReviveRequest) {
             ReviveRequest revive; read(reader, revive);
             const auto now = localTimeMs();
@@ -1198,6 +1206,8 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 if (callbacks_.onReviveRequest) callbacks_.onReviveRequest(m);
                 break;
             }
+            case PacketType::SeatState:
+                break; // raw world delivery only (VUH-2464)
             case PacketType::RemoteHit: {
                 RemoteHit m; read(reader,m);
                 if (callbacks_.onRemoteHit) callbacks_.onRemoteHit(m);

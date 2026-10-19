@@ -225,7 +225,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(MissionState) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -988,6 +988,32 @@ std::vector<std::uint8_t> encode(const ReviveRequest& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::ReviveRequest, w.data());
 }
 
+// VUH-2464: 45 payload bytes, field order. The codec refuses an invalid phase or slot.
+void write(ByteWriter& w, const SeatState& m) {
+    if (!validSeatPhase(m.phase) || (m.ownerSlot > 2 && m.ownerSlot != 0xFF) || m.reserved)
+        throw std::runtime_error("SeatState: invalid phase or slot");
+    for (auto id : m.roster) w.writeU64(id);
+    w.writeU32(m.seq); w.writeU16(m.profile);
+    for (auto kit : m.latched) w.writeU16(kit);
+    w.writeU16(m.worldId); w.writeU16(m.roomId); w.writeU16(m.eventProgram);
+    w.writeU8(static_cast<std::uint8_t>(m.phase)); w.writeU8(m.ownerSlot); w.writeU8(m.reserved);
+}
+void read(ByteReader& r, SeatState& out) {
+    if (r.remaining() != 45) throw std::runtime_error("SeatState: wrong payload length");
+    SeatState m;
+    for (auto& id : m.roster) id = r.readU64();
+    m.seq = r.readU32(); m.profile = r.readU16();
+    for (auto& kit : m.latched) kit = r.readU16();
+    m.worldId = r.readU16(); m.roomId = r.readU16(); m.eventProgram = r.readU16();
+    m.phase = static_cast<SeatPhase>(r.readU8()); m.ownerSlot = r.readU8(); m.reserved = r.readU8();
+    if (!validSeatPhase(m.phase) || (m.ownerSlot > 2 && m.ownerSlot != 0xFF) || m.reserved)
+        throw std::runtime_error("SeatState: invalid phase or slot");
+    out = m;
+}
+std::vector<std::uint8_t> encode(const SeatState& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::SeatState, w.data());
+}
+
 void write(ByteWriter& w, const RemoteHit& m) {
     write(w, m.location);
     w.writeU64(m.seq); w.writeU64(m.hostConnectionId); w.writeU64(m.targetConnectionId);
@@ -1697,6 +1723,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("Party: wrong frame length");
     if (type == PacketType::ReviveRequest && (len != 50 || size != kHeaderSize + len))
         throw std::runtime_error("ReviveRequest: wrong frame length");
+    if (type == PacketType::SeatState && (len != 45 || size != kHeaderSize + len))
+        throw std::runtime_error("SeatState: wrong frame length");
     if (type == PacketType::RemoteHit && (len != REMOTE_HIT_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("RemoteHit: wrong frame length");
     if (type == PacketType::TargetAuthority && (len != TARGET_AUTHORITY_PAYLOAD_SIZE || size != kHeaderSize + len))

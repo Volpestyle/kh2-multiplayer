@@ -36,6 +36,7 @@ struct PeerState {
     std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
 
     std::uint64_t lastReviveSeq{0}, revivedEpisode{0};
+    std::uint32_t lastSeatSeq{0}; // VUH-2464 SeatState: strictly increasing per verified connection
     std::uint64_t lastRemoteHitSeq{0}; // VUH-1515 host-minted RemoteHit, connection-wide
     std::uint64_t lastTargetAuthoritySeq{0}; // VUH-1515 host-minted TargetAuthority, connection-wide
     std::uint64_t lastScriptCallSeq{0}; // VUH-2252 host-minted ScriptCall, connection-wide

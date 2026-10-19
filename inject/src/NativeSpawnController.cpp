@@ -2,6 +2,8 @@
 #include "NativeResourceTrace.hpp"
 #include "NativePrivateStatus.hpp"
 #include "PlayerKit.hpp"
+#include "PrologueParty.hpp"
+#include "kh2coop/PlayerKits.hpp"
 #include "NativeTraceFiber.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
@@ -1802,56 +1804,123 @@ bool ObserveMoraleWave(const void* record, void* controller, const float* point,
 
 // VUH-2343: exact native load-time ingress only. The original raw566 call is
 // delegated once by SpawnMissingParty; no frame-loop creation or party-row write.
-bool BaileyMissingParty(const void* record,void* controller,TraceWrapper wrapper,uintptr_t caller,void*& result) {
+// VUH-2464: the same ingress at every checked MissingPartySite (Bailey; the Roxas prologue layout).
+bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper,uintptr_t caller,void*& result) {
     const auto error=GetLastError();
     if(wrapper!=TraceWrapper::Fixed || caller!=g_exeBase+0x3FF727 || !IsDiagnosticGameThread())return false;
     Stamp stamp{};Controller native{};
     std::array<std::uint8_t,44> header{};
     std::array<std::uint8_t,256> records{};
     std::array<std::uint8_t,routespawn::BaileyCaller.size()> call{};
-    if(!ReadStamp(stamp) || stamp.location!=routespawn::BaileyLocation ||
-       !ReadNative(reinterpret_cast<uintptr_t>(controller),native) ||
-       native.spawnArray!=native.header+44 || native.regionArray!=native.spawnArray+records.size() ||
+    if(!ReadStamp(stamp) || !routespawn::MissingPartySiteAt(stamp.location) ||
+       !ReadNative(reinterpret_cast<uintptr_t>(controller),native) || native.spawnArray!=native.header+44 ||
        reinterpret_cast<uintptr_t>(record)!=native.spawnArray ||
-       !CopyNative(native.header,header.data(),header.size()) ||
-       !CopyNative(native.spawnArray,records.data(),records.size()) ||
-       !routespawn::Bailey(stamp.location,native.key,caller-g_exeBase,header,records) ||
-       !CopyNative(g_exeBase+0x3FF71B,call.data(),call.size()) || call!=routespawn::BaileyCaller)return false;
-    // The direct84 factory resolves the same normal Sora as the authored raw566.
+       !CopyNative(native.header,header.data(),header.size()))return false;
+    const std::size_t count=Field<std::uint16_t>(header.data(),4);
+    if(!count || count>records.size()/64 || native.regionArray!=native.spawnArray+count*64 ||
+       !CopyNative(native.spawnArray,records.data(),count*64))return false;
+    const auto groupBytes=std::span<const std::uint8_t>(records.data(),count*64);
+    const auto* site=routespawn::MissingPartySiteFor(stamp.location,native.key,caller-g_exeBase,header,groupBytes);
+    if(!site || !CopyNative(g_exeBase+0x3FF71B,call.data(),call.size()) || call!=routespawn::BaileyCaller)return false;
+    // The clone's direct object: Bailey keeps normal Sora; a prologue site takes the one remote seat's
+    // latched, prologue-qualified profile. Without one the authored local load stays solo and admission holds.
+    std::uint16_t cloneObject=84;
+    const char* profileReason="sora";
+    if(site->prologue && !prologueparty::CloneProfile(cloneObject,profileReason)) {
+        if(g_log)g_log("[missing-party] site=%s refused profile reason=%s",site->name,profileReason);
+        prologueparty::NoteConstruction(site->location,false,profileReason);
+        return false;
+    }
+    const int cloneKey=kh2coop::kitStatusKey(cloneObject);
+    const auto* kit=kh2coop::qualifiedKit(cloneObject);
+    // The direct factory resolves the same normal player-class body as an authored member.
     // Keep headroom for BOTH native births; each still performs native admission.
     uintptr_t object=0,event=0;std::int32_t cutscene=0;
     std::uint16_t member0=0,statusKey=0;std::uint8_t type=255,cost=0,form=255,drive=255;
     float limit=0,used=0;std::array<char,8> name{};
-    const bool ready=privatestatus::Ready() && playerkit::MissingPartyReady() &&
+    const bool ready=kit && cloneKey && privatestatus::Ready() && playerkit::MissingPartyReady() &&
         ReadNative(g_exeBase+0x2A11478,event) && !event && ReadNative(g_exeBase+0xB65210,cutscene) && !cutscene &&
-        ReadNative(g_exeBase+playerkit::RVA_RESOLVED_MEMBERS,member0) && member0==84 &&
-        ReadNative(g_exeBase+0x9ACDD4,drive) && drive==0 && LookupNative(84,object) && object &&
-        ReadNative(object+4,type) && type==0 && ReadNative(object+0x4C,statusKey) && statusKey==1 &&
-        ReadNative(object+0x57,form) && form==0 && CopyNative(object+8,name.data(),name.size()) &&
-        std::memcmp(name.data(),"P_EX100",8)==0 && ReadNative(object+0x54,cost) &&
+        ReadNative(g_exeBase+playerkit::RVA_RESOLVED_MEMBERS,member0) && member0==site->localObject &&
+        ReadNative(g_exeBase+0x9ACDD4,drive) && drive==0 && LookupNative(cloneObject,object) && object &&
+        ReadNative(object+4,type) && type==0 && ReadNative(object+0x4C,statusKey) && statusKey==cloneKey &&
+        ReadNative(object+0x57,form) && form==kit->form && form==0 &&
+        CopyNative(object+8,name.data(),name.size()) && kh2coop::kitNameIs(*kit,name.data(),name.size()) &&
+        ReadNative(object+0x54,cost) &&
         ReadNative(g_exeBase+ADMISSION_LIMIT_RVA,limit) && ReadNative(g_exeBase+ADMISSION_USED_RVA,used) &&
         std::isfinite(limit) && std::isfinite(used) && limit-used>=2.0f*cost && SameStamp(stamp);
     if(!ready) {
-        if(g_log)g_log("[missing-party] refused prerequisites event=%llX cutscene=%d member0=%u privateReady=%u",event,cutscene,member0,privatestatus::Ready()?1u:0u);
+        if(g_log)g_log("[missing-party] site=%s refused prerequisites event=%llX cutscene=%d member0=%u clone=%u privateReady=%u",
+            site->name,event,cutscene,member0,cloneObject,privatestatus::Ready()?1u:0u);
+        if(site->prologue)prologueparty::NoteConstruction(site->location,false,"prerequisites");
         return false;
     }
     Controller finalController{};std::array<std::uint8_t,44> finalHeader{};std::array<std::uint8_t,256> finalRecords{};
     if(!ReadNative(reinterpret_cast<uintptr_t>(controller),finalController) || finalController.key!=native.key ||
        finalController.header!=native.header || finalController.spawnArray!=native.spawnArray || finalController.regionArray!=native.regionArray ||
        !CopyNative(native.header,finalHeader.data(),finalHeader.size()) || finalHeader!=header ||
-       !CopyNative(native.spawnArray,finalRecords.data(),finalRecords.size()) || finalRecords!=records || !SameStamp(stamp))return false;
+       !CopyNative(native.spawnArray,finalRecords.data(),count*64) || finalRecords!=records || !SameStamp(stamp))return false;
     SetLastError(error);
-    result=privatestatus::SpawnMissingParty(record,controller,g_originalWrapper,g_log);
+    bool bound=false;uintptr_t clone=0;
+    result=privatestatus::SpawnMissingParty(record,controller,g_originalWrapper,g_log,*site,cloneObject,&bound,&clone);
+    if(site->prologue) {
+        const auto nativeError=GetLastError();
+        prologueparty::NoteConstruction(site->location,bound,bound?"bound":"unbound",clone);
+        SetLastError(nativeError);
+    }
     return true;
+}
+
+// VUH-2464: read-only receipt for every TT (world 2) raw566 player ingress: the
+// caller, its call bytes, NOW and the whole spawn group. It grants nothing.
+void ObserveProloguePlayer(const void* record, void* controller, TraceWrapper wrapper, uintptr_t caller) {
+    if (!g_log || wrapper != TraceWrapper::Fixed) return;
+    std::array<std::uint8_t, 10> now {};
+    std::array<std::uint8_t, 64> bytes {};
+    if (!CopyNative(g_exeBase + offsets::NOW, now.data(), now.size()) || now[0] != 2 ||
+        !CopyNative(reinterpret_cast<uintptr_t>(record), bytes.data(), bytes.size()) ||
+        Field<std::uint32_t>(bytes.data(), 0) != 566) return;
+    static std::atomic<unsigned> lines {0};
+    if (lines.fetch_add(1, std::memory_order_relaxed) >= 48) return;
+    Controller native {};
+    std::array<std::uint8_t, 0x2C> header {};
+    std::array<std::uint8_t, 16> call {};
+    std::array<std::uint8_t, 256> group {};
+    const bool read = ReadNative(reinterpret_cast<uintptr_t>(controller), native) &&
+        CopyNative(native.header, header.data(), header.size());
+    const unsigned count = read ? Field<std::uint16_t>(header.data(), 4) : 0;
+    const unsigned shown = count < 4 ? count : 4;
+    const bool groupRead = read && shown && CopyNative(native.spawnArray, group.data(), shown * 64u);
+    const bool callRead = CopyNative(caller - 0xC, call.data(), call.size());
+    constexpr char hex[] = "0123456789ABCDEF";
+    const auto toHex = [&](const std::uint8_t* p, std::size_t n, char* out) {
+        for (std::size_t i = 0; i < n; ++i) { out[2*i] = hex[p[i] >> 4]; out[2*i+1] = hex[p[i] & 15]; }
+        out[2*n] = 0;
+    };
+    char nowHex[21] {}, headerHex[89] {}, callHex[33] {}, groupHex[513] {};
+    toHex(now.data(), now.size(), nowHex);
+    toHex(header.data(), read ? header.size() : 0, headerHex);
+    toHex(call.data(), callRead ? call.size() : 0, callHex);
+    toHex(group.data(), groupRead ? shown * 64u : 0, groupHex);
+    uintptr_t canonical = 0; std::uint16_t members[4] {};
+    ReadNative(g_exeBase + 0x2A105D0, canonical);
+    CopyNative(g_exeBase + 0x2A25300, members, sizeof(members));
+    g_log("[prologue-player-spawn] observation-only=1 tid=%u ownerThread=%u caller=%llX callBytes=%s now=%s transition=%u load=%u controller=%llX record=%llX key=%u headerId=%u type=%u records=%u index=%lld members=%X/%X/%X/%X canonical=%llX header=%s group=%s",
+        GetCurrentThreadId(), IsDiagnosticGameThread() ? 1u : 0u,
+        static_cast<unsigned long long>(caller - g_exeBase), callHex, nowHex, warp::TransitionSerial(), warp::LoadSerial(),
+        reinterpret_cast<unsigned long long>(controller), reinterpret_cast<unsigned long long>(record),
+        native.key, Field<std::uint16_t>(header.data(), 2), header[0], count,
+        read ? static_cast<long long>(reinterpret_cast<uintptr_t>(record) - native.spawnArray) / 64 : -1LL,
+        members[0], members[1], members[2], members[3], static_cast<unsigned long long>(canonical), headerHex, groupHex);
 }
 
 void* PolicyWrapper(const void* record, void* controller, const float* point, TraceWrapper wrapper, uintptr_t caller) {
     const auto entryError = GetLastError();
     ObserveBaileyPlayer(record, controller, wrapper, caller);
+    ObserveProloguePlayer(record, controller, wrapper, caller);
     void* missingResult=nullptr;
     // Preserve the caller's error before either native call or a refused qualification.
     SetLastError(entryError);
-    if(BaileyMissingParty(record,controller,wrapper,caller,missingResult))return missingResult;
+    if(MissingPartyAtSite(record,controller,wrapper,caller,missingResult))return missingResult;
     const auto role = g_emission && IsDiagnosticGameThread() && g_role ? g_role() : 0;
     Qualification q;
     bool qualified = false;

@@ -961,6 +961,25 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::SeatState: {
+                // VUH-2464: any verified seat declares its profile/readiness for the current roster;
+                // the relay stamps the owner slot and echoes it to every verified peer, the author included.
+                SeatState seat; read(reader,seat);
+                std::array<std::uint64_t,3> roster{};
+                for(const auto& p:peers_)if(p.status==PeerStatus::Verified)roster[static_cast<std::uint8_t>(p.assignedSlot)]=p.connectionId;
+                if(!reader.atEnd() || ps->status!=PeerStatus::Verified || ps->worldQuarantined || !admittedScope ||
+                   seat.roster!=roster || !seat.seq || seat.seq<=ps->lastSeatSeq || seat.ownerSlot!=0xFF){++rejectedWorld_;return;}
+                ps->lastSeatSeq=seat.seq;
+                seat.ownerSlot=static_cast<std::uint8_t>(ps->assignedSlot);
+                if(fromHost(*ps))lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,admittedScope->hostSourceSerial);
+                broadcastToVerified(encode(seat),true);
+                static unsigned seatLogs=0;
+                if(seatLogs<64){++seatLogs;log("SeatState owner="+std::to_string(seat.ownerSlot)+" seq="+std::to_string(seat.seq)+
+                    " phase="+std::to_string(static_cast<unsigned>(seat.phase))+" profile="+std::to_string(seat.profile)+
+                    " location="+std::to_string(seat.worldId)+"/"+std::to_string(seat.roomId)+"/"+std::to_string(seat.eventProgram));}
+                break;
+            }
+
             case PacketType::ReviveRequest: {
                 ReviveRequest request; read(reader,request);
                 // VUH-1504 hop log (diagnostic only, bounded per process): every refusal names its reason.

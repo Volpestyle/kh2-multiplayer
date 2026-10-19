@@ -26,6 +26,7 @@
 #include "EventHoldNative.hpp"
 #include "Warp.hpp"
 #include "PartyNativePolicy.hpp"
+#include "PrologueParty.hpp"
 #include "MissionMirror.hpp"
 #include "PartyRow.hpp"
 #include "BossLeave.hpp"
@@ -3716,6 +3717,17 @@ std::array<std::uint64_t, 3> PartyRoster() {
     return {g_bridge.ConnectionId(0), g_bridge.ConnectionId(1), g_bridge.ConnectionId(2)};
 }
 
+// VUH-2464: any roster seat's SeatState, the author's own echo included. The relay stamped
+// ownerSlot from the verified author; the scope must come from that same roster connection.
+void ReceiveSeatState(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {
+    ByteReader r(payload, size);
+    SeatState m;
+    read(r, m);
+    if (!r.atEnd() || m.ownerSlot > 2 || scope.sourceConnectionId != g_bridge.ConnectionId(m.ownerSlot) ||
+        m.roster != PartyRoster()) return;
+    prologueparty::Receive(m);
+}
+
 // VUH-1519 (KH2COOP_PARTY_NATIVE=1 only). PartyLayout: host-authored Native scope from the
 // host connection; a client applies it, and the host adopts only the relay's echo of its
 // own layout. PartyReapply: relay-authored only.
@@ -3827,6 +3839,7 @@ bool ReceiveWorldPackets() {
                     ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectFraming);continue;
                 }
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
+                if (type == PacketType::SeatState) { ReceiveSeatState(*scope, payload, size); continue; }
                 if (partynative::Requested() && (type == PacketType::PartyLayout || type == PacketType::PartyReapply ||
                                                   type == PacketType::PartyIntent)) {
                     ReceivePartyPacket(*scope, type, payload, size); // VUH-1519: before the role branches (host echo)
@@ -5422,7 +5435,11 @@ void OnFrameStart(std::uint32_t frame) {
     spawncontroller::RegisterDiagnosticGameThread();
     nativehittrace::RegisterOwnerThread();
     g_hitTraceFrame = frame;
-    if (!g_bridge.IsOpen()) { partynative::Observe(0, {}, 0xFF, false); DrainPendingSpawnTrace(false); return; }
+    SeatState retiredSeat; // VUH-2464: no session, no prologue hold (generation 0 forgets every seat)
+    if (!g_bridge.IsOpen()) {
+        partynative::Observe(0, {}, 0xFF, false); (void)prologueparty::Tick(0, {}, 0xFF, GetTickCount64(), retiredSeat);
+        DrainPendingSpawnTrace(false); return;
+    }
     if (!RuntimeWriterLive()) {
         if (!g_writerRetired) {
             const auto writer = g_bridge.RuntimeWriter();
@@ -5434,6 +5451,7 @@ void OnFrameStart(std::uint32_t frame) {
             g_writerRetired = true;
         }
         partynative::Observe(0, {}, WORLD_SLOT_UNKNOWN, false);
+        (void)prologueparty::Tick(0, {}, WORLD_SLOT_UNKNOWN, GetTickCount64(), retiredSeat);
         // Sole consumer drains, discarding stale work without changing producer headers.
         std::vector<std::uint8_t> discarded;
         for (unsigned i = 0; i < 256; ++i) {
@@ -5466,6 +5484,14 @@ void OnFrameStart(std::uint32_t frame) {
     if (partynative::Requested()) // VUH-1519, default off
         partynative::Observe(WorldSessionGeneration(), PartyRoster(), g_bridge.LocalSlot(), true);
     TickNativeResync(frame);
+    { // VUH-2464: declare/acknowledge this seat's profile and publish the prologue hold
+        SeatState seat;
+        const auto nowMs = GetTickCount64();
+        if (prologueparty::Tick(WorldSessionGeneration(), PartyRoster(), g_bridge.LocalSlot(), nowMs, seat)) {
+            ProducerWorldContext context;
+            if (CaptureWorldContext(context) && SendCapturedWorld(encode(seat), context)) prologueparty::NoteSent(seat, nowMs);
+        }
+    }
     if (g_role == Role::Client) {
         (void)EnsureClientClaimScope();
         if (frame % 120 == 0) LogClientClaim("seal", "frame-interval");

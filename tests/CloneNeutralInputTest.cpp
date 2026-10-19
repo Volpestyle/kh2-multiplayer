@@ -55,6 +55,10 @@ namespace partynative {
 static bool g_kits = false;
 static bool KitsActive() { return g_kits; }
 }  // namespace partynative
+namespace privatestatus {
+static bool g_missingKits = false; // VUH-2464 prologue kit scope
+static bool MissingPartyKitScope() { return g_missingKits; }
+}  // namespace privatestatus
 #include "CloneNeutralInput.inl"
 }  // namespace inject
 }  // namespace kh2coop
@@ -211,6 +215,13 @@ static int Run(bool on) {
             CHECK(Q(roxasClone + 0xDB8) == neutral && cloneneutral::g_stats->neutralized == 3);
             CHECK(Q(otherPlayer + 0xDB8) == entry0);   // id 85 with P_EX110: still never a clone
             partynative::g_kits = false;
+            // VUH-2464: the prologue layout's Roxas clone is neutralized under the TT kit scope alone.
+            const uintptr_t prologueClone = actor(10, roxas, entry0);
+            cloneneutral::Gate(prologueClone);
+            CHECK(Q(prologueClone + 0xDB8) == entry0 && cloneneutral::g_stats->neutralized == 3);
+            privatestatus::g_missingKits = true; cloneneutral::Gate(prologueClone);
+            CHECK(Q(prologueClone + 0xDB8) == neutral && cloneneutral::g_stats->neutralized == 4);
+            privatestatus::g_missingKits = false;
         }
         std::uint8_t zero[0x40] {};
         CHECK(std::memcmp(cloneneutral::g_neutral, zero, 0x40) == 0);

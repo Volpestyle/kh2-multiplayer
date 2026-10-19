@@ -123,6 +123,32 @@ void TestBlockedNativeExitMatch() {
     atMatchingExit("a pending transition still blocks issue and progress at a matching exit",
                    [] { w::g_transitionPending = true; });
 }
+// VUH-2464: a title-time client blocked at its own opening exit follows the host's first prologue field.
+void TestBlockedExitToPrologueSite() {
+    Start(); auto context = Context(); auto scope = Scope();
+    kh2coop::RoomTransition tram {};
+    tram.epoch = 1; tram.worldId = 2; tram.roomId = 7; tram.door = 0;
+    tram.mapProgram = tram.battleProgram = tram.eventProgram = 95;
+    w::QueueHostTransition(tram, context, &scope, nullptr, nullptr);
+    Put(image + offsets::CUTSCENE_STATE, std::int32_t{2}); // the client's opening event is still active
+    w::LocationPacket movieExit {}; movieExit.world = 2; movieExit.room = 1; movieExit.map = movieExit.battle = movieExit.event = 56;
+    w::g_blockedExit = movieExit; w::g_blockedExitLoad = w::g_loadSerial - 1;
+    w::IssueHostTransition();
+    Check(warpCalls == 0 && w::g_hostQueued, "a stale opening exit does not issue the prologue target");
+    w::g_blockedExitLoad = w::g_loadSerial;
+    w::IssueHostTransition();
+    Check(warpCalls == 1 && w::g_transitionPending && !w::g_blockedExit && p::g_desiredApplied,
+          "the prologue's first field issues, with progress applied, at the client's own opening exit");
+
+    Start(); context = Context(); scope = Scope();
+    tram.eventProgram = 96; // not a checked prologue site
+    w::QueueHostTransition(tram, context, &scope, nullptr, nullptr);
+    Put(image + offsets::CUTSCENE_STATE, std::int32_t{2});
+    w::g_blockedExit = movieExit; w::g_blockedExitLoad = w::g_loadSerial;
+    w::IssueHostTransition();
+    Check(warpCalls == 0 && w::g_hostQueued, "an unpinned target still waits for the safe field gate");
+}
+
 // VUH-2356: the "Waiting for host..." indicator at a client's own blocked exit.
 void TestWaitingAtBlockedExit() {
     Start(); w::g_blockedExit.reset(); w::RefreshWaitingAtExit();
@@ -255,7 +281,7 @@ int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr,0x3000000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if (!image) return 2;
-    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestWaitingAtBlockedExit(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal();
+    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestBlockedExitToPrologueSite(); TestWaitingAtBlockedExit(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal();
     Check(hookCalls == 0, "no hook installation occurs in owned-memory controls");
     VirtualFree(reinterpret_cast<void*>(image),0,MEM_RELEASE);
     std::cout << "ERRORS=" << errors << '\n';

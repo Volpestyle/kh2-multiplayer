@@ -42,6 +42,7 @@
 #include "NativeLifecycleTrace.hpp"
 #include "NativeLifetimeTrace.hpp"
 #include "NativePrivateStatus.hpp"
+#include "PrologueParty.hpp"
 #include "NativeHitTrace.hpp"
 #include "CombatCausalTrace.hpp"
 #include "DamagePolicy.hpp"
@@ -1173,6 +1174,9 @@ static void BeginCloneFrame() {
 
 static void NoteActorForClones(uintptr_t actor) {
     if (warp::TransitionPending() || !privatestatus::MissingPartyPuppetAllowed(actor)) return;
+    // VUH-2464: in the Roxas prologue only a bound missing-party clone counts; its events build
+    // their own player-class Roxas actors (live 20261018-175014 drove one and the game exited).
+    if (prologueparty::PrologueScope() && !privatestatus::MissingPartyClone(actor)) return;
     if (actor != g_soraActor && g_cloneCountNow < 2 && IsPlayerClassActor(actor)) {
         if (playerkit::BlocksNativeSoraPuppets()) {
             playerkit::NoteRefusedClone(actor); // never collected; PuppetTarget refuses it live
@@ -1192,6 +1196,12 @@ static std::uint32_t PlayerClassObjectId(uintptr_t actor) {
 // The actor puppet i drives: Sora clones when the room has any, otherwise
 // the friend-slot actors (Donald/Goofy).
 static uintptr_t PuppetTarget(int index) {
+    // VUH-2464: the Roxas prologue has no party seats; never fall back to the unit slot's friend
+    // pointers there. The one remote (puppet 0 on either seat) drives only its bound clone.
+    if (prologueparty::PrologueScope()) {
+        const uintptr_t clone = index == 0 ? g_clones[0] : 0;
+        return clone && privatestatus::MissingPartyClone(clone) ? clone : 0;
+    }
     // A party plan applied: puppets drive clones only, never a native friend. Two players (one clone): the one
     // present remote's puppet drives the clone and native Goofy keeps his own AI.
     const unsigned planned = partynative::AppliedClones();
@@ -1627,6 +1637,8 @@ static void RefreshFriendPointers() {
 
     g_friend1Actor = valid(f1, g_exeBase) ? f1 : 0;
     g_friend2Actor = valid(f2, g_exeBase) ? f2 : 0;
+    // VUH-2464: the Roxas prologue has no party; its unit slot holds no companion of ours.
+    if (prologueparty::PrologueScope()) g_friend1Actor = g_friend2Actor = 0;
 }
 
 // ============================================================================
@@ -3086,6 +3098,11 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
                 g_primaryMailboxPad = {};
                 g_primaryRawButtons = 0;
             }
+            // VUH-2464: a prologue field holds all local control until both seats bound here.
+            if (prologueparty::HoldInput(inputStruct)) {
+                g_primaryMailboxPad = {};
+                g_primaryRawButtons = 0;
+            }
             // VUH-1504 revive prompt: raw slot-0 buttons after the mailbox/event-hold apply.
             downedspike::PromptInput(inputStruct);
             downedspectate::Input(inputStruct);
@@ -3773,6 +3790,7 @@ bool Initialize(uintptr_t exeBase) {
     // VUH-1519: partynative registers its observer on the playerkit resolver hook.
     const bool partyNativeOk = partynative::Install(exeBase, &Log);
     playerkit::Install(exeBase, &Log); // guard configuration must precede privatestatus
+    prologueparty::Install(exeBase, &Log); // VUH-2464: seats/hold; the clone rides the missing-party ingress
     (void)partyNativeOk; // readiness is confirmed below after neutral input installs
     if (!privatestatus::Initialize(exeBase))
         Log(playerkit::BlocksNativeSoraPuppets()

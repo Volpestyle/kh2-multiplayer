@@ -83,6 +83,10 @@ struct MissingParty {
     uintptr_t controller{},actor{},status{},local{},localStatus{};
     std::uint64_t serial{};
     std::atomic<FiberContext*> construction{};
+    // VUH-2464: the direct clone object and both status keys (Bailey: Sora 84/1/1; prologue: the
+    // remote profile's object/key and the native story Roxas key 14 for the local).
+    std::uint32_t cloneObject{84};
+    int cloneKey{1},localKey{1};
     bool bound{};
 };
 std::array<MissingParty,routespawn::MissingPartyBudget::Capacity> g_missing{};
@@ -196,7 +200,11 @@ bool PartyProfile(Stamp& s) {
 // Vanilla player-class descriptor with its status key, from the reviewed kit table (PlayerKits.hpp):
 // Sora (84, key 1) always; any other qualified kit (Roxas 90/key 14) only while the remote kit member
 // or party kits are active. key==0 means "not a selectable clone descriptor".
-bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::KitsActive();}
+// VUH-2464: a prologue site admitted a non-Sora clone or local. Scoped to TT (world 2), where every
+// prologue site lives, so later worlds keep their Sora-only descriptor rule.
+std::atomic<bool> g_missingKits{};
+bool MissingKitScope() {std::uint8_t world=0xFF;return g_missingKits.load() && Read(g_base+0x717008,world) && world==2;}
+bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::KitsActive() || MissingKitScope();}
 int KeyForKit(std::uint16_t kit) {return kh2coop::kitStatusKey(kit);} // the reviewed kit table
 // Party kits: the clones' key multiset equals the keys of the kits the observer wrote.
 bool PartyKeysMatch(const std::array<int,2>& keys,unsigned count) {
@@ -281,7 +289,10 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
         const bool unbound=g_party.claimed!=0;const bool canonical=unbound && CanonicalIsClaimed();
         g_party={};if(unbound)BindFault(canonical?15:11);
     }
-    auto* enclosing=ordinary && id==84 ? Current(anchor) : nullptr;
+    // VUH-2464: a missing-party scope selects exactly its own direct clone object (Sora 84, or the
+    // prologue's remote profile); any other construction inside it stays ordinary.
+    auto* enclosing=ordinary && id<=0xFFFF && kh2coop::qualifiedKit(static_cast<std::uint16_t>(id)) ? Current(anchor) : nullptr;
+    if(enclosing && enclosing->missingSlot && g_missing[enclosing->missingSlot-1].cloneObject!=id)enclosing=nullptr;
     if(enclosing && enclosing->missingSlot) {
         if(enclosing->factoryId!=0 || !enclosing->selected || enclosing->constructor || enclosing->used ||
            !g_ready.load() || !StampNow(stamp) || !Same(stamp,enclosing->stamp)) {
@@ -619,17 +630,23 @@ bool Initialize(uintptr_t base) {
 }
 // This scope encloses the entire wrapper, including native handler attachment. No saved
 // caller stack pointers escape; native exceptions propagate through the finally unchanged.
-void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper spawn,LogFn log) {
+void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper spawn,LogFn log,
+                        const routespawn::MissingPartySite& site,std::uint16_t cloneObject,
+                        bool* bound,std::uintptr_t* clone) {
     const DWORD error=GetLastError();
+    if(bound)*bound=false;
+    if(clone)*clone=0;
     g_missingLog.store(log);
     if(!spawn){Fault();SetLastError(error);return nullptr;}
     Stamp stamp{},entrance{}; ProducerWorldContext context{};
     std::array<std::uint8_t,64> original{};
-    const bool admitted=spawn && g_bcAutomatic && g_ready.load() && playerkit::MissingPartyReady() &&
-        StampNow(stamp) && stamp.now==routespawn::BaileyLocation && stamp.load && stamp.load!=UINT32_MAX &&
+    const int cloneKey=KeyForKit(cloneObject),localKey=site.localKey;
+    const bool kitsAdmitted=cloneObject==84 || (site.prologue && cloneKey);
+    const bool admitted=spawn && g_bcAutomatic && g_ready.load() && playerkit::MissingPartyReady() && kitsAdmitted &&
+        StampNow(stamp) && stamp.now==site.location && stamp.load && stamp.load!=UINT32_MAX &&
         warp::TransitionPending() &&
         Read(reinterpret_cast<uintptr_t>(nativeRecord),original) &&
-        routespawn::Equal(original,std::span<const std::uint8_t>(routespawn::BaileyRecords.data(),64)) &&
+        routespawn::Equal(original,site.records.first(64)) &&
         HasFreeRecord() && enemysync::CaptureWorldContext(context) && enemysync::WorldContextCurrent(context) &&
         StampNow(entrance) && Same(stamp,entrance) && g_ready.load() && warp::TransitionPending();
     if(!admitted || !g_missingBudget.Claim(stamp.load+1)) {
@@ -639,7 +656,9 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
     auto& missing=g_missing[g_missingBudget.count-1];
     missing.stamp=stamp;missing.context=context;missing.controller=reinterpret_cast<uintptr_t>(controller);
     missing.record=original;
-    const std::uint32_t sora=84;std::memcpy(missing.record.data(),&sora,sizeof(sora));
+    missing.cloneObject=cloneObject;missing.cloneKey=cloneKey;missing.localKey=localKey;
+    if(site.prologue)g_missingKits=true; // before construction: the Roxas descriptors become selectable in TT
+    const std::uint32_t direct=cloneObject;std::memcpy(missing.record.data(),&direct,sizeof(direct));
     Selection selection{};selection.selected=true;selection.stamp=stamp;
     selection.serial=g_serial.fetch_add(1)+1;selection.missingSlot=g_missingBudget.count;missing.serial=selection.serial;
     const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
@@ -668,8 +687,8 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
     const auto nativeError=GetLastError();
     uintptr_t cloneStatus=0,localStatus=0,canonical=0,cloneController=0,cloneRecord=0,localController=0,localRecord=0;
     Stamp after{};std::array<std::uint8_t,64> check{};
-    const bool cloneValid=added && missing.actor==reinterpret_cast<uintptr_t>(added) && SoraActor(missing.actor,cloneStatus);
-    const bool localValid=local && SoraActor(reinterpret_cast<uintptr_t>(local),localStatus);
+    const bool cloneValid=added && missing.actor==reinterpret_cast<uintptr_t>(added) && PlayerActor(missing.actor,cloneStatus,cloneKey);
+    const bool localValid=local && PlayerActor(reinterpret_cast<uintptr_t>(local),localStatus,localKey);
     const bool cloneAttached=cloneValid && Read(missing.actor+0x9E8,cloneController) && cloneController==missing.controller &&
         Read(missing.actor+0x9F0,cloneRecord) && cloneRecord==reinterpret_cast<uintptr_t>(missing.record.data());
     const bool localAttached=localValid && Read(reinterpret_cast<uintptr_t>(local)+0x9E8,localController) && localController==missing.controller &&
@@ -680,11 +699,13 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
     routespawn::MissingPartyBinding binding{missing.actor,reinterpret_cast<uintptr_t>(local),cloneStatus,localStatus,canonical,
         cloneValid && Owned(cloneStatus) && OwnedSerial(cloneStatus)==missing.serial,localValid && Owned(localStatus),cloneAttached,localAttached,current};
     missing.bound=routespawn::Bound(binding);
+    if(bound)*bound=missing.bound;
+    if(clone)*clone=missing.actor;
     missing.status=cloneStatus;missing.local=binding.local;missing.localStatus=localStatus;
     if(!missing.bound)BindFault(17);
     else {Selection b{};b.serial=selection.serial;b.actor=missing.actor;b.status=cloneStatus;b.local=binding.local;b.localStatus=localStatus;Publish(3,b);}
-    if(log)log("[missing-party] born bound=%u clone=%llX local=%llX status=%llX localStatus=%llX controller=%llX record=%llX load=%u transition=%u generation=%u retained=%u",
-        missing.bound?1u:0u,missing.actor,binding.local,cloneStatus,localStatus,missing.controller,
+    if(log)log("[missing-party] born site=%s bound=%u clone=%llX cloneObject=%u cloneKey=%d local=%llX localKey=%d status=%llX localStatus=%llX controller=%llX record=%llX load=%u transition=%u generation=%u retained=%u",
+        site.name,missing.bound?1u:0u,missing.actor,cloneObject,cloneKey,binding.local,localKey,cloneStatus,localStatus,missing.controller,
         reinterpret_cast<uintptr_t>(missing.record.data()),stamp.load,stamp.transition,context.generation,g_missingBudget.count);
     SetLastError(nativeError);return local;
 }
@@ -693,19 +714,26 @@ bool MissingPartyPuppetAllowed(uintptr_t actor) {
     for(unsigned i=g_missingBudget.count;i>0;--i) {
         const auto& m=g_missing[i-1];if(m.actor!=actor)continue;
         Stamp now{};uintptr_t status=0,canonical=0,localStatus=0,controller=0,record=0;
-        const bool player=SoraActor(actor,status);
+        const bool player=PlayerActor(actor,status,m.cloneKey);
         if(player && routespawn::NewPrivateBirth(m.serial,OwnedSerial(status),Owned(status),g_ready.load()))continue;
         allowed=m.bound && g_ready.load() && StampNow(now) && now.now==m.stamp.now &&
             routespawn::MissingPartyLoadCurrent(m.stamp.load,m.stamp.transition,now.load,now.transition,warp::TransitionPending()) &&
             playerkit::MissingPartyReady() && enemysync::WorldContextCurrent(m.context) &&
             player && status==m.status && Owned(status) && OwnedSerial(status)==m.serial &&
-            SoraActor(m.local,localStatus) && localStatus==m.localStatus && !Owned(localStatus) &&
+            PlayerActor(m.local,localStatus,m.localKey) && localStatus==m.localStatus && !Owned(localStatus) &&
             Read(g_base+PlayerRva,canonical) && canonical==m.local &&
             Read(actor+0x9E8,controller) && controller==m.controller &&
             Read(actor+0x9F0,record) && record==reinterpret_cast<uintptr_t>(m.record.data());
         break;
     }
     SetLastError(error);return allowed;
+}
+bool MissingPartyKitScope(){return MissingKitScope();}
+bool MissingPartyClone(uintptr_t actor) {
+    if(!actor)return false;
+    for(unsigned i=g_missingBudget.count;i>0;--i)
+        if(g_missing[i-1].actor==actor)return g_missing[i-1].bound && MissingPartyPuppetAllowed(actor);
+    return false;
 }
 void StopNewAllocations(){g_ready=false;}
 bool RetainsMinHookResources(){return g_retained.load();}
@@ -715,7 +743,7 @@ void Drain(LogFn log) {
     const DWORD error=GetLastError();const auto frame=g_ownerFrames.fetch_add(1);
     if(frame%60==0)for(unsigned i=0;i<g_missingBudget.count;++i) {
         const auto& m=g_missing[i];Stamp now{};uintptr_t controller=0,record=0;
-        if(!m.bound || !StampNow(now) || now.now!=routespawn::BaileyLocation ||
+        if(!m.bound || !StampNow(now) || now.now!=m.stamp.now ||
            !routespawn::MissingPartyLoadCurrent(m.stamp.load,m.stamp.transition,now.load,now.transition,warp::TransitionPending()))continue;
         const bool roots=Read(m.actor+0x9E8,controller) && Read(m.actor+0x9F0,record);
         log("[missing-party] attachment allowed=%u roots=%u clone=%llX controller=%llX expectedController=%llX record=%llX expectedRecord=%llX load=%u transition=%u frame=%u",
