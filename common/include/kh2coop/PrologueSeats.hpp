@@ -148,4 +148,31 @@ inline Hold Release(const Seats& s, const Location& here, bool localBound) {
     return Hold::None;
 }
 
+// VUH-2486: a session that starts at an open prologue field with no checked site (a mid-prologue
+// save, such as the Day 6 basement) has no two-player layout to bind, so the Unpinned hold would never
+// end. It holds for UnpinnedGraceMs of continuous open field at one location (a transient, such as the
+// last frame of an event program whose load is pending, ends sooner), then releases this seat into
+// native play, as every unpinned field plays after a first release, and says so on screen.
+inline constexpr std::uint64_t UnpinnedGraceMs = 3000;
+inline constexpr std::uint64_t UnpinnedNoticeMs = 15000;
+class UnpinnedStart {
+public:
+    enum class Step { Hold, Released, Played };
+    // unpinned: this frame is an open prologue field with no checked site before the first release.
+    Step Tick(bool unpinned, const std::array<std::uint8_t, 10>& now, std::uint64_t nowMs) noexcept {
+        if (released_) return Step::Played;
+        if (!unpinned) { sinceMs_ = 0; return Step::Played; }
+        if (!sinceMs_ || now != at_) { sinceMs_ = nowMs ? nowMs : 1; at_ = now; return Step::Hold; }
+        if (nowMs - sinceMs_ < UnpinnedGraceMs) return Step::Hold;
+        released_ = true; releasedMs_ = nowMs;
+        return Step::Released;
+    }
+    bool Released() const noexcept { return released_; }
+    bool NoticeVisible(std::uint64_t nowMs) const noexcept { return released_ && nowMs - releasedMs_ < UnpinnedNoticeMs; }
+private:
+    std::uint64_t sinceMs_ = 0, releasedMs_ = 0;
+    std::array<std::uint8_t, 10> at_ {};
+    bool released_ = false;
+};
+
 } // namespace kh2coop::prologue

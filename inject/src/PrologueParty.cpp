@@ -42,6 +42,8 @@ Hold g_loggedHold = Hold::None;
 std::array<std::uint8_t, 10> g_loggedAt {};
 std::array<std::uint8_t, 10> g_unpinnedAt {};
 bool g_released = false;   // this seat has been released at a site once
+prologue::UnpinnedStart g_unpinnedStart;  // VUH-2486
+std::atomic<std::uint8_t> g_notice {0};
 constexpr std::uint64_t ECHO_RETRY_MS = 2000;
 constexpr unsigned MAX_RESENDS = 15;
 
@@ -134,10 +136,22 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
     const bool decided = generation && site && fieldOpen;
     // An open prologue field with no checked site (the last frame of an event program or opening scene
     // reads as one while its load is already pending, which is not playable). Before this seat's first
-    // release it is held too, so a session that starts at an unpinned field never plays it solo. The
-    // friend's blocked opening exit is not one: it has no player actor and member 0 is still Sora.
+    // release it is held too, so that transient is never played solo. The friend's blocked opening exit
+    // is not one: it has no player actor and member 0 is still Sora. VUH-2486: a session that starts at
+    // such a field (a mid-prologue save) has no layout to bind there, so the hold is bounded
+    // (prologue::UnpinnedStart) and then this seat plays native solo, with a note on screen.
     const bool unpinned = generation && !site && fieldOpen && !warp::TransitionPending() && PrologueScope();
-    const bool early = unpinned && !g_released;
+    const auto start = g_unpinnedStart.Tick(unpinned && !g_released, now, nowMs);
+    const bool early = start == prologue::UnpinnedStart::Step::Hold;
+    if (start == prologue::UnpinnedStart::Step::Released && g_log)
+        g_log("[prologue] unpinned start at=%02X/%02X evt=%u: no checked two-player site here; released after %llu ms, "
+              "native solo until a checked site", now[0], now[1], LocationOf(now).evt,
+              static_cast<unsigned long long>(prologue::UnpinnedGraceMs));
+    if (start == prologue::UnpinnedStart::Step::Released) g_loggedHold = Hold::None;  // released, not left
+    g_notice.store(static_cast<std::uint8_t>(early ? UnpinnedNotice::Holding
+                                             : g_unpinnedStart.NoticeVisible(nowMs) ? UnpinnedNotice::PlayingSolo
+                                                                                     : UnpinnedNotice::None),
+                   std::memory_order_release);
     if (decided) hold = prologue::Release(g_seats, LocationOf(now), LocalBoundHere(now));
     else if (early) hold = Hold::Unpinned;
     Publish(hold, now);
@@ -232,6 +246,7 @@ bool HoldInput(void* inputStruct) {
 }
 
 std::uint8_t PublishedHold() { return g_hold.load(std::memory_order_acquire); }
+UnpinnedNotice Notice() { return static_cast<UnpinnedNotice>(g_notice.load(std::memory_order_acquire)); }
 
 bool PrologueScope() {
     std::uint8_t world = 0xFF; std::uint16_t member0 = 0;

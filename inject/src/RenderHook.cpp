@@ -22,6 +22,7 @@
 #include "EnemySync.hpp"
 #include "EventHoldNativeInput.hpp"
 #include "Warp.hpp"
+#include "PrologueParty.hpp"
 
 #include "kh2coop/CaptureChannel.hpp"
 #include "CoopHudMailbox.hpp"
@@ -902,6 +903,14 @@ void RefreshOverlayText(DXGI_FORMAT format) {
         // blocked exit while the host is in rooms it doesn't publish (VUH-2356).
         constexpr wchar_t waiting[] = L"Waiting for host...";
         TextOutW(g_overlayDc, 8, 39, waiting, static_cast<int>(std::size(waiting) - 1));
+    } else if (const auto notice = prologueparty::Notice(); notice != prologueparty::UnpinnedNotice::None) {
+        // VUH-2486: a session started at a mid-prologue save with no two-player layout.
+        SetTextColor(g_overlayDc, RGB(255, 210, 90));
+        constexpr wchar_t reason[] = L"Co-op: no two-player layout at this save point";
+        const wchar_t* next = notice == prologueparty::UnpinnedNotice::Holding
+            ? L"Starting solo in a moment..." : L"Playing solo until a supported prologue field";
+        TextOutW(g_overlayDc, 8, 39, reason, static_cast<int>(std::size(reason) - 1));
+        TextOutW(g_overlayDc, 8, 70, next, static_cast<int>(wcslen(next)));
     } else DrawCoopHudRows();
     GdiFlush();
 
@@ -1407,7 +1416,8 @@ void OnPresent(IDXGISwapChain* swapChain) {
             captureFrame = (g_presentIndex - g_job.startPresent) % g_job.interval == 0;
         }
         const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput() ||
-                                 warp::WaitingAtBlockedExit();
+                                 warp::WaitingAtBlockedExit() ||
+                                 prologueparty::Notice() != prologueparty::UnpinnedNotice::None;
         // VUH-2415: decide visibility before touching the ring, so a hidden crown submits nothing.
         bool drawCrown = false;
         g_crownClipCount = 0;

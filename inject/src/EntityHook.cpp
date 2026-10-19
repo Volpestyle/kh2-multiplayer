@@ -1103,6 +1103,7 @@ static void PublishLocalForTransition() {
     if (const auto flagged = g_localAvatar.OnTransition(g_frameCounter)) g_avatarBridge.PublishLocal(*flagged);
 }
 
+static uintptr_t PuppetTarget(int index);
 static std::uint32_t g_crownClearFrames = 0;  // VUH-2455: settle count for the crown gate
 static bool g_crownAfterEvent = false;          // the gate last closed for an event or cutscene
 static int g_crownGateLogged = -1;              // last logged gate bits
@@ -1124,6 +1125,7 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     for (int i = 0; i < 2; ++i) {
         auto& remote = input.remote[static_cast<std::size_t>(i)];
         remote.active = IsPuppetActive(i);
+        remote.body = PuppetTarget(i) != 0;
         remote.provenance = g_puppets[i].pose.provenance;
         remote.avatar = g_puppets[i].pose.pose;
     }

@@ -49,6 +49,25 @@ void codec() {
     check(threw, "trailing frame byte refused");
 }
 
+// VUH-2486: an unchecked prologue field before the first release holds only for a bounded,
+// continuous stay at one location, then plays native solo with a note, once.
+void unpinned() {
+    using U = prologue::UnpinnedStart;
+    const std::array<std::uint8_t, 10> basement {2, 0x15, 0, 0, 0, 0, 0, 0, 0, 0}, other {2, 0x13, 0, 0, 0, 0, 0, 0, 0, 0};
+    U u;
+    check(u.Tick(false, basement, 1000) == U::Step::Played && !u.Released(), "not unpinned: nothing held");
+    check(u.Tick(true, basement, 1000) == U::Step::Hold, "an unchecked field holds at first");
+    check(u.Tick(true, basement, 1000 + prologue::UnpinnedGraceMs - 1) == U::Step::Hold, "held until the grace ends");
+    check(u.Tick(true, other, 1000 + prologue::UnpinnedGraceMs) == U::Step::Hold, "a new location restarts the wait");
+    check(u.Tick(false, other, 5000) == U::Step::Played && u.Tick(true, other, 5001) == U::Step::Hold,
+          "a transient (left before the grace) restarts the wait");
+    check(u.Tick(true, other, 5001 + prologue::UnpinnedGraceMs) == U::Step::Released && u.Released(),
+          "a continuous stay releases once");
+    check(u.NoticeVisible(5001 + prologue::UnpinnedGraceMs) &&
+          !u.NoticeVisible(5001 + prologue::UnpinnedGraceMs + prologue::UnpinnedNoticeMs), "the note shows for a while");
+    check(u.Tick(true, basement, 99999) == U::Step::Played, "never held again after the release");
+}
+
 void policy() {
     using prologue::Hold;
     const std::array<std::uint64_t, 3> two{11, 12, 0};
@@ -195,4 +214,4 @@ void network() {
     server.stop();
 }
 } // namespace
-int main() { if (enet_initialize()) return 2; codec(); policy(); site(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }
+int main() { if (enet_initialize()) return 2; codec(); unpinned(); policy(); site(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }

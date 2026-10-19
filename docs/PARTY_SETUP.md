@@ -788,11 +788,26 @@ tutorial (event 108), loads the Sandlot as `tt04-76` (`b_40` group 49, the
 same raw566 plus absent raw567/568 shape); the host takes it natively and the
 friend follows the host's announced room. Further prologue fields are added one
 pinned group at a time from the observation-only `[prologue-player-spawn]`
-receipt. An open prologue field with no site is held with reason
-`unpinned-field` until the seat's first release, so a session that starts at
-an unpinned field never plays it solo (the friend's blocked opening exit is
-outside the scope: it has no player actor, and member 0 is still Sora until
-the first field). After the first release an unpinned field plays native solo
+receipt. Before the seat's first release, an open prologue field with no site
+is held with reason `unpinned-field`. The friend's blocked opening exit is
+outside this scope: it has no player actor, and member 0 is still Sora until
+the first field.
+
+VUH-2486 bounds that hold, because a session that starts from a mid-prologue
+save at such a field has no layout to bind there and used to hold forever:
+- After 3 s of continuous open field at one location
+  (`prologue::UnpinnedStart`), the seat is released into native solo play.
+  The log says `[prologue] unpinned start ... released after 3000 ms`.
+- The overlay shows "Co-op: no two-player layout at this save point" while it
+  waits, then "Playing solo until a supported prologue field" for 15 s.
+- A remote host with no clone has no body, so the friend draws no crown for
+  it.
+- New Game reaches its first checked site without ever entering this hold, so
+  it is unchanged (run `20261019-101343`).
+- Run `20261019-101137` (FM-02 Day 6 Computer Room, seats on) shows both seats
+  released after 3 s with the note, and both walk off the save point.
+
+After the first release an unpinned field plays native solo
 and unheld and is logged once as `[prologue] unpinned field` (the Sandlot in run
 `20261018-204359`, before it was pinned), which the fixture asserts never
 happens. The last frame of an event program or opening scene reads as an open
@@ -860,9 +875,8 @@ Limits:
   its blocked exit until the host's next room arrives.
 - The basement proof warped the host into the scene, because the route pilot cannot win the Dusk
   fight before Axel.
-- A session that starts at a prologue field with no checked site (FM-02, Day 6 basement) holds input
-  before its first release (`hold reason=unpinned-field`). The scene proof turned the prologue seats
-  off for that reason.
+- The scene proof turned the prologue seats off: before VUH-2486, a session started at FM-02 held
+  input indefinitely at its unchecked field.
 
 **Clone HP (VUH-2482).** A clone's fresh private record is initialized by the game from this seat's
 SAVE (`3C03F0` binds SAVE data for key 14), so a rebuilt clone used to show the *local* player's HP

@@ -44,5 +44,8 @@ bool PrologueScope();
 bool HoldInput(void* inputStruct);
 // Diagnostics/fixtures: the current published hold (0 = released or not applicable).
 std::uint8_t PublishedHold();
+// VUH-2486, any thread: the on-screen note for a session that started at an unchecked prologue field.
+enum class UnpinnedNotice : std::uint8_t { None, Holding, PlayingSolo };
+UnpinnedNotice Notice();
 
 } // namespace kh2coop::inject::prologueparty

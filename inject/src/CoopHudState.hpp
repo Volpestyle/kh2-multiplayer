@@ -57,6 +57,9 @@ static_assert(std::is_trivially_copyable_v<Snapshot> && std::is_standard_layout_
 
 struct Remote {
     bool active {}; // Copied IsPuppetActive result, including DLL frame freshness.
+    // VUH-2486: the puppet drives a visible actor here. A remote host without one (an unchecked
+    // prologue field has no clone) has no head to crown, so its crown is not drawn at all.
+    bool body {true};
     PuppetProvenance provenance {};
     AvatarState avatar {};
 };
@@ -136,7 +139,7 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
         auto& row = out.members[slot]; // Provenance validator bounded and mapped slot above.
         row.state = RowState::Available;
         SetHp(row, avatar);
-        if (crownScope && slot == 0) {
+        if (crownScope && slot == 0 && remote.body) {
             out.crownCurrent = true;
             out.crownHost = avatar.position;
             out.crownSource = static_cast<std::int8_t>(1 + i);

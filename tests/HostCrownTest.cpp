@@ -211,6 +211,12 @@ void Gate() {
     in = Fixture(1);
     for (auto& remote : in.remote) if (static_cast<int>(remote.avatar.ownerSlot) == 0) remote.avatar.roomId = 27;
     Check(!hud::Project(in, 100, 1).crownCurrent, "host in another room has no crown");
+    // VUH-2486: an unchecked prologue field has no clone, so the streamed host has no body to crown.
+    in = Fixture(1);
+    for (auto& remote : in.remote) if (static_cast<int>(remote.avatar.ownerSlot) == 0) remote.body = false;
+    snap = hud::Project(in, 100, 1);
+    Check(!snap.crownCurrent && snap.members[0].state == hud::RowState::Available,
+          "a host puppet without a body keeps its row but has no crown");
     in = Fixture(1);
     for (auto& remote : in.remote) if (static_cast<int>(remote.avatar.ownerSlot) == 0) remote.avatar.flags = AvatarInCutscene;
     Check(!hud::Project(in, 100, 1).crownCurrent, "host in a cutscene has no crown");
