@@ -133,8 +133,16 @@ struct SpikeState {
     uint32_t downedFrames = 0, actionLost = 0, deadFlagLost = 0, controllerOn = 0, statCalls = 0;
     int32_t hpChanges = 0, reviveTarget = 0, reviveHpAfter = 0;
     uint32_t reviveGuardUsed = 0, lastGateMode = 0, lastPassReason = 0;
+    // VUH-2465 logical downing (see LogicalScope): engine HP 1, dead bit clear.
+    bool logical = false, reviving = false, resolvePending = false, fullPartyDown = false;
+    uint32_t allDownFrames = 0, pinWrites = 0, fullPartyLoad = 0;
+    float downedPos[3] {};
+    uint32_t logicalSkips = 0, healsUndone = 0, motionRequests = 0, motionFrame = 0;
 };
 static SpikeState g_down;
+// Read by the input collector and the 3D2060 hit check (game thread; atomics for the record).
+static std::atomic<bool> g_logicalHeld {false};
+static std::atomic<uintptr_t> g_logicalActor {0};
 
 // P3 network contract state (docs/DOWNED_REVIVE.md); see PublishLocalDownedState.
 struct NetState {
@@ -160,6 +168,24 @@ static PromptRuntime g_prompt;
 static std::atomic<bool> g_promptTriangle {false};
 
 static bool GraceActive() { return g_down.graceActor != 0 && g_down.invulnTimer > 0.0f; }
+
+// VUH-2465: Roxas (any P_EX110 model, including dual-wield Roxas in the Axel fights) is downed logically,
+// never natively. The native dead
+// bit (actor+0x9B8 bit 2) stops the room's spawn evaluation, so later waves would never come while a
+// player is held natively dead. The lethal stat delta is clamped to leave engine HP 1 with the dead
+// bit clear; the episode contract publishes the player as downed with HP 0. While downed the player
+// takes no stat change (StatDelta), no hit (3D2060 via AllyHit, and the native ignore-hit timer kept
+// up), and no input (HoldInput). Sora keeps the native held-death path above.
+// The local player's own model, not the party row: the Axel fight's dual-wield Roxas is another member
+// (run 20261019-145329: the prologue-scope test missed it and Axel's hit took the native death).
+static bool LogicalScope(uintptr_t objentry) {
+    char name[8] {};
+    __try { std::memcpy(name, reinterpret_cast<const void*>(objentry + 8), 7); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return std::memcmp(name, "P_EX110", 7) == 0;
+}
+static bool LogicallyDowned() { return g_down.state == State::Downed && g_down.logical; }
+static uintptr_t LogicalDownedActor() { return g_logicalActor.load(std::memory_order_acquire); }
 
 static bool Matches(uintptr_t exeBase, uint64_t rva, const uint8_t* bytes, size_t n) {
     __try {
@@ -323,7 +349,14 @@ static void Publish(const Snap& s) {
 // ---------------------------------------------------------------------------
 // Game-over request detours (game thread when they matter)
 // ---------------------------------------------------------------------------
+static void BeginDowned(uintptr_t actor, int hp, uint32_t mode);
+
 static bool Intercept(uintptr_t actor, uint32_t mode) {
+    if (g_down.fullPartyDown) {
+        // VUH-2465: every player is down; the host's own game over and Continue are the retry.
+        Log("[downed] gate pass mode=%u full party down: native game over frame=%u", mode, g_frameCounter);
+        return false;
+    }
     GateFacts f {};
     f.enabled = !g_down.control && g_down.state != State::Off && g_down.state != State::Refused;
     f.ownerThread = OwnerThread();
@@ -349,6 +382,19 @@ static bool Intercept(uintptr_t actor, uint32_t mode) {
     int hp = -1;
     uintptr_t status = 0;
     if (ReadHitTrace(actor + 0x5C0, status) && status) ReadHitTrace(status, hp);
+    BeginDowned(actor, hp, mode);
+    if (g_down.gateLogs < 16) {
+        ++g_down.gateLogs;
+        Log("[downed] gate intercept mode=%u episode=%llX actor=%llX hp=%d flags9B8=0x%X room=%u/%u/%u/%u/%u/%u frame=%u",
+            mode, static_cast<unsigned long long>(g_down.episode), static_cast<unsigned long long>(actor), hp, flags,
+            g_down.downedRoom.world, g_down.downedRoom.room, g_down.downedRoom.door, g_down.downedRoom.map,
+            g_down.downedRoom.battle, g_down.downedRoom.event, g_frameCounter);
+    }
+    return true;
+}
+
+// One new downing: a fresh episode and cleared per-episode counters (both paths).
+static void BeginDowned(uintptr_t actor, int hp, uint32_t mode) {
     g_down.state = State::Downed;
     g_down.downedActor = actor;
     g_down.downedHp = hp;
@@ -366,16 +412,14 @@ static bool Intercept(uintptr_t actor, uint32_t mode) {
     g_down.lastPosValid = false;
     g_down.downedFrames = g_down.actionLost = g_down.deadFlagLost = g_down.controllerOn = g_down.statCalls = 0;
     g_down.hpChanges = 0;
+    g_down.logicalSkips = g_down.healsUndone = g_down.motionRequests = g_down.pinWrites = 0;
+    {
+        const uintptr_t pos = actor + offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X;
+        for (int k = 0; k < 3; ++k) ReadHitTrace(pos + 4 * k, g_down.downedPos[k]);
+    }
+    g_down.motionFrame = g_frameCounter;
     g_down.lastGateMode = mode;
     ++g_down.gateCount;
-    if (g_down.gateLogs < 16) {
-        ++g_down.gateLogs;
-        Log("[downed] gate intercept mode=%u episode=%llX actor=%llX hp=%d flags9B8=0x%X room=%u/%u/%u/%u/%u/%u frame=%u",
-            mode, static_cast<unsigned long long>(g_down.episode), static_cast<unsigned long long>(actor), hp, flags,
-            g_down.downedRoom.world, g_down.downedRoom.room, g_down.downedRoom.door, g_down.downedRoom.map,
-            g_down.downedRoom.battle, g_down.downedRoom.event, g_frameCounter);
-    }
-    return true;
 }
 
 static uintptr_t __fastcall GameOverRequest0(uintptr_t actor) {
@@ -440,9 +484,60 @@ static bool AttackerIsEnemy(void* atk, uintptr_t self, uintptr_t* attackerOut, u
 // ---------------------------------------------------------------------------
 // HookedApplyStatDelta, first statement. Rewrites only the guarded revive heal.
 // ---------------------------------------------------------------------------
-static int StatDelta(void* actorPtr, int delta, int idx) {
+// `skip`: apply nothing and return `skipResult` (the unchanged stat) instead of calling the native body.
+static int StatDelta(void* actorPtr, int delta, int idx, bool& skip, int& skipResult) {
+    skip = false;
     if (!g_down.requested || !OwnerThread()) return delta;
     const auto actor = reinterpret_cast<uintptr_t>(actorPtr);
+    if (g_down.reviving && actor == g_down.downedActor) return delta; // the logical revive heal itself
+    if (LogicallyDowned() && actor == g_down.downedActor) {
+        // No HP change of any kind while logically downed: damage, a party Cure or an item are not
+        // revives, and HP must stay 1 so the native death never runs.
+        ++g_down.statCalls;
+        if (idx == 0) {
+            uintptr_t status = 0;
+            int hp = 1;
+            if (ReadHitTrace(actor + 0x5C0, status) && status) ReadHitTrace(status, hp);
+            skip = true; skipResult = hp;
+            ++g_down.logicalSkips;
+        }
+        return delta;
+    }
+    if (!g_down.control && g_down.state == State::Ready && idx == 0 && delta < 0 && !g_down.guard.active &&
+        actor == g_soraActor) {
+        const Snap s = Capture(actor);
+        if (!s.status || s.hp + delta > 0 || !s.objentry || !LogicalScope(s.objentry)) return delta; // not lethal, or not Roxas
+        // The local player (the native player pointer), with or without an event or another actor at the
+        // head of the entity list: a lethal hit that slips through here becomes the native death this
+        // path exists to avoid (run 20261019-140845: the friend died natively in the Basement Hall).
+        uintptr_t player = 0;
+        const bool local = actor == g_soraActor && ReadHitTrace(g_exeBase + RVA_PLAYER, player) && player == actor;
+        if (!local || s.hp <= 0 || s.maxHp <= 0 || (s.flags & 4U) || s.task != 0) {
+            if (local && g_down.passLogs < 16) {
+                ++g_down.passLogs;
+                Log("[downed] logical intercept skipped hp=%d/%d flags9B8=0x%X task=%llX frame=%u", s.hp, s.maxHp, s.flags,
+                    static_cast<unsigned long long>(s.task), g_frameCounter);
+            }
+            return delta;
+        }
+        BeginDowned(actor, 0, 4);
+        g_down.logical = true;
+        g_logicalActor.store(actor, std::memory_order_release);
+        if (g_down.gateLogs < 16) {
+            ++g_down.gateLogs;
+            Log("[downed] gate intercept mode=4 logical=1 episode=%llX actor=%llX hp=%d delta=%d -> engine hp 1, dead bit clear room=%u/%u/%u/%u/%u/%u frame=%u",
+                static_cast<unsigned long long>(g_down.episode), static_cast<unsigned long long>(actor), s.hp, delta,
+                g_down.downedRoom.world, g_down.downedRoom.room, g_down.downedRoom.door, g_down.downedRoom.map,
+                g_down.downedRoom.battle, g_down.downedRoom.event, g_frameCounter);
+        }
+        if (g_down.setMotion) {
+            bool fault = false;
+            __try { g_down.setMotion(actor + 0x158, kDownedMotion, 0.0f, 0.0f); } __except (EXCEPTION_EXECUTE_HANDLER) { fault = true; }
+            if (fault) Log("[downed] logical downed motion fault");
+        }
+        if (s.hp == 1) { skip = true; skipResult = 1; return delta; }
+        return 1 - s.hp;
+    }
     Guard& g = g_down.guard;
     if (g.active && !g.used && actor == g.actor) {
         uintptr_t status = 0;
@@ -504,6 +599,53 @@ static Result Kill(const Snap& s) {
 // SessionHost's room/range/sequence checks don't replace these fresh native
 // owner checks: owner thread, canonical local player, still downed in the same
 // episode, native dead flag, no game-over task, outside events, pointers live.
+// VUH-2465: revive a logically downed player through the native stat funnel: heal to 25% of max
+// (at least 1), the game's ignore-hit grace and an idle stand-up motion. No dead bit to clear.
+static Result ReviveLogical(uint64_t episode, const Snap& s) {
+    if (!s.status || s.maxHp <= 0 || s.hp <= 0 || (s.flags & 4U) || s.task != 0) return Result::Unsafe;
+    const int target = ReviveTarget(s.maxHp);
+    g_down.reviveTarget = target;
+    ++g_down.reviveCount;
+    Log("[downed] revive episode=%llX actor=%llX hp=%d/%d target=%d logical=1 frame=%u",
+        static_cast<unsigned long long>(episode), static_cast<unsigned long long>(s.actor), s.hp, s.maxHp, target,
+        g_frameCounter);
+    ReleaseDownedSpectate();
+    const auto apply = reinterpret_cast<PFN_ApplyStatDelta>(g_exeBase + RVA_APPLY_STAT);
+    bool fault = false;
+    g_down.reviving = true;
+    __try {
+        if (target > s.hp) (void)apply(reinterpret_cast<void*>(s.actor), target - s.hp, 0, 0);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { fault = true; }
+    g_down.reviving = false;
+    const Snap after = Capture(s.actor);
+    g_down.reviveHpAfter = after.hp;
+    const bool ok = !fault && after.hp == target && !(after.flags & 4U);
+    if (ok) {
+        g_down.state = State::Ready;
+        g_down.logical = false;
+        g_down.downedActor = 0;
+        g_logicalActor.store(0, std::memory_order_release);
+        g_logicalHeld.store(false, std::memory_order_release);
+    }
+    Log("[downed] revive returned hp=%d/%d flags9B8=0x%X logical=1 fault=%u state=%u", after.hp, after.maxHp, after.flags,
+        fault ? 1u : 0u, static_cast<unsigned>(g_down.state));
+    if (!ok) return fault ? Result::Fault : Result::Incomplete;
+    if (g_down.setInvuln) {
+        bool graceFault = false;
+        __try { g_down.setInvuln(s.actor, kReviveGraceFrames); } __except (EXCEPTION_EXECUTE_HANDLER) { graceFault = true; }
+        g_down.graceActor = graceFault ? 0 : s.actor;
+        g_down.graceLastHp = after.hp;
+        g_down.graceHits = g_down.graceEnemyHits = g_down.graceHpDrops = 0;
+        Log("[downed] revive grace frames=%.0f fault=%u", kReviveGraceFrames, graceFault ? 1u : 0u);
+    }
+    if (g_down.setMotion) {
+        bool motionFault = false;
+        __try { g_down.setMotion(s.actor + 0x158, kStandMotion, 0.0f, 0.0f); } __except (EXCEPTION_EXECUTE_HANDLER) { motionFault = true; }
+        Log("[downed] revive stand motion requested=%d fault=%u", kStandMotion, motionFault ? 1u : 0u);
+    }
+    return Result::Ok;
+}
+
 static Result TryRevive(uint64_t episode) {
     if (!g_down.requested || g_down.control || !g_down.revive) return Result::Off;
     if (!OwnerThread()) return Result::NotReady;
@@ -512,6 +654,7 @@ static Result TryRevive(uint64_t episode) {
     const Snap s = Capture(g_soraActor);
     if (!s.canonical || s.actor != g_down.downedActor) return Result::NotCanonical;
     if (s.inEvent) return Result::InEvent;
+    if (g_down.logical) return ReviveLogical(episode, s);
     if (!(s.flags & 4U) || !s.ctrl || !s.aux || !s.status || s.maxHp <= 0 || s.task != 0) return Result::Unsafe;
     const int target = ReviveTarget(s.maxHp);
     g_down.reviveTarget = target;
@@ -618,7 +761,8 @@ static int ApplyReviveRequest(uint64_t episode, uint8_t requesterSlot, uint64_t 
     else ++g_net.nativeRefused;
     if (r != Result::Ok) {
         uint32_t flags = 0;
-        const bool dead = g_down.downedActor && ReadHitTrace(g_down.downedActor + 0x9B8, flags) && (flags & 4U);
+        const bool dead = g_down.logical ||
+            (g_down.downedActor && ReadHitTrace(g_down.downedActor + 0x9B8, flags) && (flags & 4U));
         if (ShouldRemint(g_down.state == State::Downed, dead, g_down.episodeFrames, true)) RemintEpisode("native-refusal");
     }
     Log("[downed] revive-request native requester=%u seq=%llu episode=%llX result=%d",
@@ -666,7 +810,7 @@ static void PromptTick(const Snap& s) {
     reviveprompt::Facts f {};
     f.enabled = !g_down.control && g_down.state == State::Ready;
     f.localCanonical = s.canonical;
-    f.localDowned = (s.flags & 4U) != 0;
+    f.localDowned = (s.flags & 4U) != 0 || LogicallyDowned();
     f.inEvent = s.inEvent;
     uint8_t menu = 0xFF;
     f.menuOpen = !ReadHitTrace(g_exeBase + offsets::OPEN_MENU, menu) || menu != 0xFF;
@@ -731,6 +875,35 @@ static void PromptTick(const Snap& s) {
     }
 }
 
+// HookedPerEntityUpdate, after the local player's own update: a logically downed body stays where it
+// went down. Enemies that still target it (no clone to retarget to) shove it with their refused attacks
+// (run 20261019-133539: about 6,000 units in 90 s), which also keeps a reviver from reaching it.
+static void PinDowned(uintptr_t actor) {
+    if (!LogicallyDowned() || actor != g_down.downedActor || !OwnerThread()) return;
+    const uintptr_t pos = actor + offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X;
+    __try {
+        auto* p = reinterpret_cast<float*>(pos);
+        const float dx = p[0] - g_down.downedPos[0], dy = p[1] - g_down.downedPos[1], dz = p[2] - g_down.downedPos[2];
+        if (dx * dx + dy * dy + dz * dz > 4.0f) {
+            p[0] = g_down.downedPos[0]; p[1] = g_down.downedPos[1]; p[2] = g_down.downedPos[2];
+            ++g_down.pinWrites;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+// HookedInputCollector, last: a logically downed player has no input (VUH-2465). Neutral sticks,
+// no buttons; true when it held this callback's input.
+static bool HoldInput(void* inputStruct) {
+    if (!g_logicalHeld.load(std::memory_order_acquire) || !inputStruct) return false;
+    __try {
+        auto* raw = reinterpret_cast<uint8_t*>(inputStruct) + offsets::input::RAW_SLOT0;
+        *reinterpret_cast<uint16_t*>(raw + offsets::input::BUTTONS) = 0;
+        raw[offsets::input::LSTICK_X] = raw[offsets::input::LSTICK_Y] = 128;
+        raw[offsets::input::RSTICK_X] = raw[offsets::input::RSTICK_Y] = 128;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 // EntityHook PublishCoopHud: the HUD fields for this frame's prompt.
 static void PromptHud(uint8_t& kind, uint8_t& slot, uint16_t& progress) {
     kind = 0; slot = 255; progress = 0;
@@ -762,7 +935,19 @@ static void Tick(uintptr_t head) {
         else if (!(s.room == g_down.downedRoom)) lost = HoldLost::Room;
         else if (s.handle0 != g_down.downedHandle0) lost = HoldLost::Handle;
         else if (s.objentry != g_down.downedObjentry) lost = HoldLost::Objentry;
-        if (lost != HoldLost::None) {
+        if (lost != HoldLost::None && g_down.logical) {
+            // VUH-2465: a forced transition (a host-led load or a story event's room change) ends a
+            // logical downing. The old actor and episode retire (a late request finds no Downed state),
+            // and the player is resolved at 25% on the first settled field frame of the new actor.
+            g_down.state = State::Ready;
+            g_down.logical = false;
+            g_down.downedActor = 0;
+            g_down.resolvePending = true;
+            g_logicalActor.store(0, std::memory_order_release);
+            g_logicalHeld.store(false, std::memory_order_release);
+            Log("[downed] logical hold ended reason=%u episode=%llX retired; resolving at %d%% on the next field frame",
+                static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode), kRevivePercent);
+        } else if (lost != HoldLost::None) {
             // Terminal: Sora may still be natively dead with no game over; the
             // owned process must be closed by the runner (kh2ctl).
             g_down.state = State::Refused;
@@ -774,7 +959,56 @@ static void Tick(uintptr_t head) {
         } else {
             ++g_down.downedFrames;
             ++g_down.episodeFrames;
-            if (ShouldRemint(true, (s.flags & 4U) != 0, g_down.episodeFrames, false)) RemintEpisode("no-accepted-request");
+            if (ShouldRemint(true, (s.flags & 4U) != 0 || g_down.logical, g_down.episodeFrames, false)) RemintEpisode("no-accepted-request");
+            if (g_down.logical && g_down.setInvuln) {
+                // The game's own ignore-hit timer (0x3D65A0 skips non-heal hits while +0xD70 > 0), kept up.
+                __try { g_down.setInvuln(s.actor, 30.0f); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            }
+            if (g_down.logical && enemysync::ActivationRole() == 1) {
+                // VUH-2465 (VUH-2266): the host is down and so is every teammate whose fresh pose is in this
+                // room. One second of that and the host lets its own native death run: the game's game
+                // over and Continue retry the room from its checkpoint (no save load or write), and the
+                // friends follow that host-led reload, which resolves their downing.
+                bool any = false, all = true;
+                for (const auto& d : g_puppets) {
+                    const auto& a = d.pose.pose;
+                    if (!d.have || g_frameCounter - d.poseFrame > 30 || a.worldId != s.room.world || a.roomId != s.room.room) continue;
+                    any = true;
+                    if (!(a.flags & kh2coop::AvatarDowned)) all = false;
+                }
+                g_down.allDownFrames = any && all ? g_down.allDownFrames + 1 : 0;
+                if (g_down.allDownFrames >= 60 && g_origApplyStatDelta) {
+                    Log("[downed] full party down episode=%llX: the host takes the native game over (Continue retries the room)",
+                        static_cast<unsigned long long>(g_down.episode));
+                    g_down.fullPartyDown = true;
+                    g_down.fullPartyLoad = warp::LoadSerial();
+                    g_down.state = State::Ready;
+                    g_down.logical = false;
+                    g_down.downedActor = 0;
+                    g_down.allDownFrames = 0;
+                    g_logicalActor.store(0, std::memory_order_release);
+                    g_logicalHeld.store(false, std::memory_order_release);
+                    __try { (void)g_origApplyStatDelta(reinterpret_cast<void*>(s.actor), -s.hp, 0, 0); }
+                    __except (EXCEPTION_EXECUTE_HANDLER) { Log("[downed] full party down: native death FAULT"); }
+                }
+            }
+            if (g_down.logical && s.hp > 1) {
+                // An HP orb heals outside the 3D2EB0 funnel (run 20261019-131234: 1 -> 3 with no stat call).
+                // Not a revive: put it back to 1 through the funnel itself.
+                const auto apply = reinterpret_cast<PFN_ApplyStatDelta>(g_exeBase + RVA_APPLY_STAT);
+                g_down.reviving = true;
+                __try { (void)apply(reinterpret_cast<void*>(s.actor), 1 - s.hp, 0, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                g_down.reviving = false;
+                ++g_down.healsUndone;
+            }
+            if (g_down.logical && g_down.setMotion && s.motionId != static_cast<uint32_t>(kDownedMotion) &&
+                g_frameCounter - g_down.motionFrame >= 30) {
+                // A hit reaction or knockback that was running at the downing replaces the downed motion
+                // when it ends; ask for it again (at most twice a second).
+                g_down.motionFrame = g_frameCounter;
+                ++g_down.motionRequests;
+                __try { g_down.setMotion(s.actor + 0x158, kDownedMotion, 0.0f, 0.0f); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            }
             if (!s.deadAction) ++g_down.actionLost;
             if (!(s.flags & 4U)) ++g_down.deadFlagLost;
             if (!s.controllerOff) ++g_down.controllerOn;
@@ -792,12 +1026,33 @@ static void Tick(uintptr_t head) {
             for (int k = 0; k < 3; ++k) g_down.lastPos[k] = s.pos[k];
             g_down.lastPosValid = true;
             if (g_down.downedFrames % 60 == 0)
-                Log("[downed] hold frames=%u hp=%d deadAction=%u flagLost=%u actionLost=%u ctrlOn=%u statCalls=%u hits=%u enemyHits=%u drift in/no=%.2f/%.2f frames in/no=%u/%u motion=%u task=%llX",
-                    g_down.downedFrames, s.hp, s.deadAction ? 1u : 0u, g_down.deadFlagLost, g_down.actionLost,
+                Log("[downed] hold logical=%u skips=%u healsUndone=%u motionRequests=%u pins=%u hitsRefused=%u frames=%u hp=%d deadAction=%u flagLost=%u actionLost=%u ctrlOn=%u statCalls=%u hits=%u enemyHits=%u drift in/no=%.2f/%.2f frames in/no=%u/%u motion=%u task=%llX",
+                    g_down.logical ? 1u : 0u, g_down.logicalSkips, g_down.healsUndone, g_down.motionRequests, g_down.pinWrites,
+                    static_cast<unsigned>(allyhit::DownedRefusals()), g_down.downedFrames, s.hp, s.deadAction ? 1u : 0u, g_down.deadFlagLost, g_down.actionLost,
                     g_down.controllerOn, g_down.statCalls, g_down.hitAttempts, g_down.enemyHits,
                     g_down.driftInput, g_down.driftNoInput, g_down.inputFrames, g_down.noInputFrames, s.motionId, static_cast<unsigned long long>(s.task));
         }
     }
+    if (g_down.resolvePending && g_down.state == State::Ready && s.canonical && !s.inEvent && s.status &&
+        s.hp > 0 && s.maxHp > 0 && !(s.flags & 4U) && !warp::TransitionPending()) {
+        g_down.resolvePending = false;
+        const int target = ReviveTarget(s.maxHp);
+        if (s.hp < target) {
+            const auto apply = reinterpret_cast<PFN_ApplyStatDelta>(g_exeBase + RVA_APPLY_STAT);
+            __try { (void)apply(reinterpret_cast<void*>(s.actor), target - s.hp, 0, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        int hp = -1;
+        ReadHitTrace(s.status, hp);
+        Log("[downed] logical resolve after transition actor=%llX hp=%d -> %d target=%d", static_cast<unsigned long long>(s.actor),
+            s.hp, hp, target);
+    }
+    if (g_down.fullPartyDown && warp::LoadSerial() != g_down.fullPartyLoad && s.canonical && !s.inEvent && s.status &&
+        s.hp > 0 && !(s.flags & 4U) && s.task == 0 && !warp::TransitionPending()) {
+        g_down.fullPartyDown = false;
+        Log("[downed] full party retry done: alive in field hp=%d/%d actor=%llX", s.hp, s.maxHp,
+            static_cast<unsigned long long>(s.actor));
+    }
+    g_logicalHeld.store(LogicallyDowned(), std::memory_order_release);
     PublishLocalDownedState(PublishFor(g_down.state, s.actor != 0 && (s.flags & 4U) != 0), g_down.episode);
     PromptTick(s);
     Channel* c = g_down.ch;

@@ -569,7 +569,10 @@ static void ReleaseDownedSpectate();
 #include "DownedSpike.inl"
 
 static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
-    delta = downedspike::StatDelta(actor, delta, idx);
+    bool downedSkip = false;
+    int downedValue = 0;
+    delta = downedspike::StatDelta(actor, delta, idx, downedSkip, downedValue);
+    if (downedSkip) return downedValue; // VUH-2465: a logically downed player's HP does not change
     using namespace nativehittrace;
     if (!CanCaptureChild()) return ApplyStatDeltaBody(actor, delta, idx, reactFlag);
     const auto address = reinterpret_cast<uintptr_t>(actor);
@@ -3133,6 +3136,11 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
             // VUH-1504 revive prompt: raw slot-0 buttons after the mailbox/event-hold apply.
             downedspike::PromptInput(inputStruct);
             downedspectate::Input(inputStruct);
+            // VUH-2465: a logically downed player has no input of its own.
+            if (downedspike::HoldInput(inputStruct)) {
+                g_primaryMailboxPad = {};
+                g_primaryRawButtons = 0;
+            }
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             if (control) eventholdnative::AbortInput();
             Log("EXCEPTION in HookedInputCollector post-call");
@@ -3416,6 +3424,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         // Local avatar for the runtime (VUH-1490): Sora's state after his own
         // update this frame. seq carries the DLL's game-frame counter so a
         // recording shows dropped frames; the runtime restamps it to send.
+        downedspike::PinDowned(reinterpret_cast<uintptr_t>(actorObj)); // VUH-2465
         if (reinterpret_cast<uintptr_t>(actorObj) == g_soraActor && g_avatarBridge.IsOpen()) {
             const bool inEvent =
                 *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) != 0 ||
@@ -3429,6 +3438,8 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             if (playerkit::KitRequested()) avatar.character = playerkit::StreamRoster(g_soraActor); // party kits: chosen kit
             // VUH-1787: an own room load stops this stream; flag it so peers hide, not hold.
             avatar = g_localAvatar.Captured(avatar, warp::LoadPending());
+            // VUH-2465: logically downed is HP 0 to every peer and HUD (the engine keeps HP 1).
+            if (downedspike::LogicalDownedActor() == g_soraActor && g_soraActor) avatar.hp = 0;
             g_avatarBridge.PublishLocal(avatar);
             PublishCoopHud(avatar, hudAuthority);
         }
@@ -3849,6 +3860,18 @@ bool Initialize(uintptr_t exeBase) {
     // and only while its actor is still a current puppet target: a cached clone or friend pointer
     // (already captured values; no game-memory reads).
     eventstartmirror::Install(exeBase, &Log); // VUH-2359: in-field events, with the event hold
+    allyhit::SetDownedVictim([]() -> std::uintptr_t { return downedspike::LogicalDownedActor(); }); // VUH-2465
+    // VUH-2465: an ordinary door waits while a teammate's fresh pose in this room says downed.
+    warp::SetDoorHold([]() -> bool {
+        std::uint8_t world = 0xFF, room = 0xFF;
+        if (!ReadHitTrace(g_exeBase + offsets::WORLD_ID, world) || !ReadHitTrace(g_exeBase + offsets::ROOM_ID, room)) return false;
+        for (int i = 0; i < 2; ++i) {
+            const auto& pose = g_puppets[i].pose.pose;
+            if (IsPuppetActive(i) && (pose.flags & kh2coop::AvatarDowned) && pose.worldId == world && pose.roomId == room)
+                return true;
+        }
+        return false;
+    });
     allyhit::Install(exeBase, &Log, g_resolveHandle, []() -> uint32_t { return g_frameCounter; },
                      [](std::uintptr_t (&out)[2]) -> unsigned {
                          unsigned n = 0;

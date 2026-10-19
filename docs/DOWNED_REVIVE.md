@@ -188,6 +188,66 @@ round, whose paths it does not exercise.
   three players and Steam cross-account are not.
 - The hooks stay installed as pass-throughs until process exit.
 
+## Logical downing in the prologue (VUH-2465)
+
+Roxas (any `P_EX110` model, so dual-wield Roxas in the Axel fights too, read from the local player's
+own objentry) is never held natively dead. The
+native dead bit (`actor+0x9B8` bit 2) stops the room's spawn evaluation, so a later wave would never
+come while either player is down. Sora keeps the held-death path above.
+
+How it works (all in `DownedSpike.inl`, behind `KH2COOP_DOWNED_SPIKE=1`):
+- **Intercept before death.** In the `0x3D2EB0` funnel (`StatDelta`), a lethal stat-0 delta on the
+  local player (the native player pointer, in or out of an event) is clamped to leave **engine HP 1**.
+  The death handler never runs, and the dead bit stays clear. A new episode starts and the player plays
+  the death motion `0x36`. The log reads `[downed] gate intercept mode=4 logical=1 ...`.
+- **While downed.**
+  - No stat-0 change lands: damage, a Cure or an item is skipped.
+  - An HP orb, which heals outside the funnel, is put back to 1 through the funnel.
+  - Every hit is refused at `3D2060` (AllyHit, counted as `hitsRefused`), and the game's ignore-hit
+    timer is kept up.
+  - Input is neutral, and the body is pinned where it went down, because enemies that still target it
+    shove it.
+  - The host's target search no longer offers a downed local player. Enemies retarget to a living
+    teammate's clone where one exists.
+  - The stream and HUD carry HP 0 with the existing episode contract, so SessionHost's HP-zero revive
+    check holds.
+- **Revive.** An admitted request heals through the funnel to 25% of max (at least 1), sets the
+  120-frame grace and requests the idle motion. Range, freshness, epoch, connection, consume-once and
+  episode guards are unchanged.
+- **Doors.** An ordinary host door (field play: no event, cutscene or game-over task) is not taken
+  while a fresh teammate pose in the room is downed. The overlay reads "A teammate is down: revive
+  them before leaving".
+- **Forced transitions.** A forced transition (a host-led load or a story event's room change) ends
+  the downing. The old actor and episode retire, so a late request finds nothing to revive, and the
+  player is resolved at 25% on the first settled field frame.
+- **Full-party down.** On the host, once every fresh teammate pose in the room has been downed for one
+  second, the host lets its own native death run (the game-over gate passes it). The game's game over
+  and **Continue** retry the room from the checkpoint, with no save loaded or written. Friends follow
+  that host-led reload, which resolves their downing.
+
+PC1 loopback evidence: run `20261019-151151` passes as a whole (FM-02, Day 6 Computer Room, Basement
+Hall and Axel's room; real lethal hits through `kh2ctl hit damage` and enemy hits; native kills stand
+in for combat):
+- **Computer Room revive:** the friend is downed and the host revives it with the Triangle prompt in
+  2.6 s. The friend comes back at 5/22, moves and takes 1 damage (5 -> 4).
+- **Friend down:** wave 1 finishes, and wave 2 (two Dusks 309) spawns on both peers.
+- **Full party:** the host is downed too and takes the native game over. Continue retries at the
+  Computer Room checkpoint with both at 22/22, and the retried hall spawns wave 1 again on both.
+- **Host down:** wave 2 spawns on both while the host holds HP 1, and every wave finishes on the host.
+  The post-fight story transition resolves the downing.
+- **No native death anywhere:** across the run there were 3 logical downings on the host and 4 on the
+  friend, including dual-wield Roxas in Axel's room, and no native held death (`gate intercept
+  mode=0`) on either seat. `coop_verdict` passes over 7 rooms.
+
+Limits:
+- Enemies retarget away from a downed player only to a teammate's clone. An unchecked field such as
+  FM-02 has none, so the Dusks keep attacking the pinned body (about 7,000 hits refused in one hold).
+- The native kills replace the players' own attacks in these proofs.
+- When the last Dusk of the hall dies, the fight-end event can close the room before its death is
+  published, which leaves a friend's mirror alive (run `20261019-150147`). This is an enemy-sync race,
+  not a downed-state one.
+- The two-PC check rides on the VUH-2464 firewall run.
+
 ## Downed spectator candidate (VUH-1819; pending live qualification)
 
 `KH2COOP_DOWNED_SPECTATE=1` is default off and depends on the installed

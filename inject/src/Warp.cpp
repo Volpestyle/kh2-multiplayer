@@ -90,6 +90,9 @@ void (*g_transitionObserver)() = nullptr;
 std::uint32_t g_transitionSerial = 0;
 std::uint32_t g_loadSerial = 0;
 std::uint32_t g_blockedNativeExits = 0;
+bool (*g_doorHold)() = nullptr;
+std::uint32_t g_heldDoors = 0;
+std::atomic<std::uint64_t> g_doorHeldAtMs {0};
 bool g_travelRequested = false;
 // VUH-2344: the client's last blocked native exit, valid until the next load.
 std::optional<LocationPacket> g_blockedExit;
@@ -225,6 +228,18 @@ void BeginTransition() {
     if (g_transitionObserver) g_transitionObserver();
 }
 
+// An ordinary door: the request comes from field play, not from an event, a cutscene or the game
+// over's Continue (its retry is a room request too, run 20261019-142129).
+constexpr std::uintptr_t RVA_GAMEOVER_TASK = 0x2AE8050;
+bool FieldDoor() {
+    __try {
+        return ReadExe<std::uint8_t>(offsets::IN_FIELD) != 0 &&
+               *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
+               *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) == 0 &&
+               *reinterpret_cast<const uintptr_t*>(g_exeBase + RVA_GAMEOVER_TASK) == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t fade,
                                         int mode, std::uint8_t flag, int extra) {
     if (enemysync::HasClientAuthority()) {
@@ -235,6 +250,14 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
         if (g_log) g_log("[warp] client native exit blocked count=%u target=%02X/%02X door=%u map=%u btl=%u evt=%u",
                          g_blockedNativeExits, to->world, to->room, to->door, to->map,
                          to->battle, to->event);
+        return;
+    }
+    if (g_doorHold && FieldDoor() && g_doorHold()) {
+        ++g_heldDoors;
+        g_doorHeldAtMs.store(GetTickCount64(), std::memory_order_release);
+        if (g_log && (g_heldDoors <= 8 || g_heldDoors % 60 == 0))
+            g_log("[warp] door held: a teammate is downed here count=%u target=%02X/%02X door=%u", g_heldDoors,
+                  to->world, to->room, to->door);
         return;
     }
     BeginTransition();
@@ -563,6 +586,11 @@ bool LoadPending() {
 void SetTransitionObserver(void (*observer)()) { g_transitionObserver = observer; }
 
 bool WaitingAtBlockedExit() { return g_waitingAtExit.load(std::memory_order_acquire); }
+void SetDoorHold(bool (*fn)()) { g_doorHold = fn; }
+bool DoorHeldRecently() {
+    const auto at = g_doorHeldAtMs.load(std::memory_order_acquire);
+    return at && GetTickCount64() - at < 3000;
+}
 
 bool HostTravelling() {
     return g_travelRequested || TravelWorld(ReadExe<std::uint8_t>(offsets::WORLD_ID));

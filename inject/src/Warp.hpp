@@ -56,6 +56,12 @@ bool HostTravelling();
 // VUH-2356: a client whose own event exit was blocked and is waiting for the
 // host's next room (no load pending). Any thread; refreshed each game frame.
 bool WaitingAtBlockedExit();
+// VUH-2465: true while a teammate is downed in this room. An ordinary field door (no event or
+// cutscene) is then not taken: the departure waits for the revive. Story transitions still run.
+using DoorHoldFn = bool (*)();
+void SetDoorHold(DoorHoldFn fn);
+// A door was held in the last few seconds (the overlay says why). Any thread.
+bool DoorHeldRecently();
 std::uint32_t TransitionSerial();
 std::uint32_t LoadSerial();
 RoomTransition ReadLocation();

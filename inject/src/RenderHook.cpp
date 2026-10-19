@@ -903,6 +903,11 @@ void RefreshOverlayText(DXGI_FORMAT format) {
         // blocked exit while the host is in rooms it doesn't publish (VUH-2356).
         constexpr wchar_t waiting[] = L"Waiting for host...";
         TextOutW(g_overlayDc, 8, 39, waiting, static_cast<int>(std::size(waiting) - 1));
+    } else if (warp::DoorHeldRecently()) {
+        // VUH-2465: an ordinary door is not taken while a teammate is downed in this room.
+        SetTextColor(g_overlayDc, RGB(255, 210, 90));
+        constexpr wchar_t held[] = L"A teammate is down: revive them before leaving";
+        TextOutW(g_overlayDc, 8, 39, held, static_cast<int>(std::size(held) - 1));
     } else if (const auto notice = prologueparty::Notice(); notice != prologueparty::UnpinnedNotice::None) {
         // VUH-2486: a session started at a mid-prologue save with no two-player layout.
         SetTextColor(g_overlayDc, RGB(255, 210, 90));
@@ -1417,7 +1422,8 @@ void OnPresent(IDXGISwapChain* swapChain) {
         }
         const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput() ||
                                  warp::WaitingAtBlockedExit() ||
-                                 prologueparty::Notice() != prologueparty::UnpinnedNotice::None;
+                                 prologueparty::Notice() != prologueparty::UnpinnedNotice::None ||
+                                 warp::DoorHeldRecently();
         // VUH-2415: decide visibility before touching the ring, so a hidden crown submits nothing.
         bool drawCrown = false;
         g_crownClipCount = 0;

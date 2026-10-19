@@ -18,6 +18,8 @@ LogFn g_log = nullptr;
 ResolveFn g_resolve = nullptr;
 FrameFn g_frame = nullptr;
 DrivenFn g_driven = nullptr;
+std::atomic<DownedFn> g_downed {nullptr};
+std::atomic<std::uint64_t> g_downedRefusals {0};
 std::atomic<std::uint8_t> g_mode{static_cast<std::uint8_t>(Mode::Off)};
 std::atomic<bool> g_friendlyFire{true};
 std::atomic<std::uint64_t> g_calls{}, g_pairs{}, g_allowed{}, g_refused{}, g_kindKept{}, g_faults{}, g_viaSource{};
@@ -128,6 +130,10 @@ std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::ui
 
 std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t victim) {
     const std::uint64_t native = g_original(attack, victim);
+    if (const auto downed = g_downed.load(std::memory_order_acquire); downed && victim && victim == downed()) {
+        if (native & 0xFF) g_downedRefusals.fetch_add(1, std::memory_order_relaxed);
+        return native & ~std::uint64_t {0xFF}; // VUH-2465: nothing hits a logically downed player
+    }
     auto mode = static_cast<Mode>(g_mode.load(std::memory_order_acquire));
     if (mode == Mode::Off) return native;
     // VUH-2421: host friendly fire off refuses what either rule refuses: a driven puppet's hit (including a
@@ -205,6 +211,9 @@ Stats GetStats() {
 #ifdef KH2COOP_ALLYHIT_TESTING
 void TestSetOriginal(CanHitFn original) { g_original = original; }
 #endif
+
+void SetDownedVictim(DownedFn downed) { g_downed.store(downed, std::memory_order_release); }
+std::uint64_t DownedRefusals() { return g_downedRefusals.load(std::memory_order_relaxed); }
 
 bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame, DrivenFn driven) {
     char text[8] {};

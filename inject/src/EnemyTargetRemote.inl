@@ -336,7 +336,8 @@ static void RefreshCandidates() {
     const bool canonical = Canonical(player);
     if (canonical && !ReadHitTrace(player + OFF_STATUS, soraStatus)) soraStatus = 0;  // compared even when downed
     uintptr_t liveStatus = 0;
-    if (canonical && ReadLive(player, liveStatus) && ReadXZ(player, x, z)) {
+    // VUH-2465: a logically downed player (engine HP 1, dead bit clear) is no target either.
+    if (canonical && !downedspike::LogicallyDowned() && ReadLive(player, liveStatus) && ReadXZ(player, x, z)) {
         g.candidates[0] = {true, x, z};
         g.candidateActor[0] = player;
         g.ownerSlot[0] = 0;

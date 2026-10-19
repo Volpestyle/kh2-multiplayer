@@ -39,6 +39,10 @@ struct Stats {
 // Reads KH2COOP_ALLY_HIT; Off: no hook, no reads. Returns false only on a refused install (then native).
 // Puppet mode (the default) also needs `driven`.
 bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame, DrivenFn driven = nullptr);
+// VUH-2465: the logically downed local player (0 = none). Any hit on it is refused at 3D2060.
+using DownedFn = std::uintptr_t (*)();
+void SetDownedVictim(DownedFn downed);
+std::uint64_t DownedRefusals();
 // Owner thread, once per frame: a stats line every 600 frames while anything changed.
 void Tick(std::uint32_t frame);
 Mode CurrentMode();

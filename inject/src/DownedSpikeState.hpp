@@ -120,6 +120,9 @@ constexpr std::uint32_t kEpisodeRemintFrames = 1800;
 // After a successful revive the player is set to idle (motion 0) through the
 // native motion setter 0x3C86A0, the same call the death path uses for 0x36.
 constexpr std::int32_t kStandMotion = 0;
+// VUH-2465: a logically downed player plays the death motion (the one 0x405A00 requests) without the
+// death itself.
+constexpr std::int32_t kDownedMotion = 0x36;
 constexpr bool ShouldRemint(bool downed, bool deadFlag, std::uint32_t episodeFrames, bool refusedNow) noexcept {
     return downed && deadFlag && (refusedNow || episodeFrames >= kEpisodeRemintFrames);
 }
