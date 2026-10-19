@@ -263,9 +263,15 @@ crownprop::Matrix Translation(float x, float y, float z) {
 void Clip() {
     const char sora[32] = "P_EX100";
     const char roxas[32] = "P_EX110";
-    const char other[32] = "P_EX100_BTLF";
+    const char valor[32] = "P_EX100_BTLF";
+    const char haloweenAnti[32] = "P_EX100_NM_HTLF";
+    const char dualWield[32] = "P_EX110_BTLF";
+    const char mickey[32] = "P_EX200";
+    const char prefix[32] = "P_EX100_B";
     Check(crownprop::FindCharacter(sora)->headBone == 140 && crownprop::FindCharacter(roxas)->headBone == 113 &&
-          !crownprop::FindCharacter(other), "characters by exact model name");
+          crownprop::FindCharacter(valor)->headBone == 140 && crownprop::FindCharacter(haloweenAnti)->headBone == 140 &&
+          crownprop::FindCharacter(dualWield)->headBone == 113, "Sora's forms and skins and both Roxases have rows");
+    Check(!crownprop::FindCharacter(mickey) && !crownprop::FindCharacter(prefix), "other models match no row (marker)");
 
     // HeadWorld negates the bone's Y and Z columns, then applies the actor.
     const auto head = crownprop::HeadWorld(Translation(1, 2, 3), Translation(100, 0, 0));
@@ -311,7 +317,7 @@ void HostHead() {
     std::memcpy(objentry.data() + crownprop::ObjentryName, "P_EX110", 8);
     const auto base = reinterpret_cast<std::uintptr_t>(image);
     hud::Snapshot snap;
-    Check(crown::ReadHostHead(base, a, snap) && snap.crownHeadValid && snap.crownCharacter == 1 &&
+    Check(crown::ReadHostHead(base, a, snap) && snap.crownHeadValid && crownprop::Characters[snap.crownCharacter].model == "P_EX110" &&
           snap.crownHead[12] == 500 && snap.crownHead[13] == -141 && snap.crownViewProj[11] == 1,
           "Roxas's head bone 113 is read and placed above his feet (+Y down)");
     std::memcpy(objentry.data() + crownprop::ObjentryName, "B_EX100", 8);

@@ -49,20 +49,46 @@ turns both off.
 
 ## Characters
 
-The crown is authored in Sora's head-bone space. `crownprop::Characters` maps a gameplay model to
-its head bone and an offset in that bone's space:
+The crown is authored in Sora's head-bone space. `crownprop::Characters` maps a gameplay model
+(objentry name) to its head bone and an offset in that bone's space. A row is added only when the
+model's own skeleton puts that bone at exactly Sora's bind head frame (0, 141.2, -3.7, same axes),
+checked from the installed models, and an offline render of the model in bind pose shows the crown
+sitting on its head:
 
-| Model | Character | Head bone | Offset |
+| Models | Head bone | Offset | Notes |
 |---|---|---|---|
-| `P_EX100` | Sora | 140 | 0 |
-| `P_EX110` | Roxas | 113 | 0: Roxas's head bone has Sora's exact bind frame, and live it sits on his hair |
+| `P_EX100` (Sora) | 140 | 0 | the crown's own model; live on PC1 |
+| `P_EX100_BTLF/_MAGF/_TRIF/_ULTF/_HTLF/_KH1F` (Valor, Wisdom, Master, Final, Anti, Limit) | 140 | 0 | each form model carries this crown group itself |
+| `P_EX100_NM/_TR/_WI/_XM` and their six forms each | 140 | 0 | Halloween Town, Space Paranoids, Timeless River, Christmas Town; clears the helmet and hood |
+| `P_EX110` (Roxas), `P_EX110_BTLF` (dual-wield Roxas) | 113 | 0 | Roxas live on PC1 |
 
-Other models (forms, world skins, the rest of the cast) keep the painted marker until they get a row.
+Everything else keeps the painted marker. Mickey (`P_EX200`, `P_EX220`) has a different, much
+smaller head frame (bone 82/115 at 56.7 units) and would need a tuned transform and scale; he is
+playable only as a party kit, so no row until that is verified live. Donald and Goofy are never the
+host's gameplay model, and the Lion King form (`P_LK100`) has no row.
+
+## Events and close-ups
+
+In close-ups the game may hide the gameplay model and play a separate event model. The crown never
+follows either model there: it is drawn only while the VUH-2455 gate is open (network co-op field
+play, no event context, no cutscene, no menu, camera on the local player's actor), and after an event
+or cutscene it waits 4 s of open gate before it shows again. So the whole event, including its
+close-ups and the hand-back, is crown-free on every screen.
+
+## Depth and the HUD
+
+Not done. A depth test against the game's scene depth would hide the crown behind scenery, but it
+would not stop it drawing over the HUD: the HUD is drawn after the 3D pass and writes no depth. That
+needs the crown recorded before the game's HUD command list, which means locating the game's
+3D/HUD split in its D3D12 submission: more RE than this polish warrants.
 
 ## Limits
 
 - Drawn over the finished frame without the game's depth buffer: the crown is not hidden by scenery
-  or a character in front of the head, and it draws over the HUD. The painted marker had the same.
+  or a character in front of the head, and it draws over the HUD (see above). The painted marker had
+  the same.
+- A host Sora who holds Proofs also shows the game's own crown at the same spot; ours is drawn over
+  it, so he wears gold whatever his own colour.
 - On a friend's screen in the Roxas days without the prologue party (for example FM-02), the host has
   no model there, so the friend sees the marker.
 - `0x713540` and `0xAD6CF0` are build-specific. A changed build fails the key-table hash (marker) but
@@ -76,3 +102,10 @@ Other models (forms, world skins, the rest of the cast) keep the painted marker 
 - Live, PC1, FM-02 host and friend on loopback (2026-10-19, `crown_pair` scratch fixture, PASS):
   `[crown] present=... mesh=1 character=1 vertices=144` on the host, the gold crown on Roxas's head
   while he walks, no input beyond the pad mailbox, no save; protected saves unchanged.
+- Live, PC1, the unskipped prologue party (Roxas + Roxas, `net_prologue_party` cut after event 97 with
+  host clips, 2026-10-19): through the Armor Shop event 104 the host's crown is absent in every shot,
+  including the medium shots of Roxas; the gate closed at its start and reopened after control came
+  back at event 97, when the host's Roxas wears it again and the friend's clone does not.
+- Live, PC1, slot 4 (Sora, LV 8, Beast's Castle) host + friend: `mesh=1 character=0`, the crown on
+  Sora, including a gameplay camera right behind his head. Valor Form could not be triggered from the
+  command menu there, so the form rows are verified from game data and offline renders only.
