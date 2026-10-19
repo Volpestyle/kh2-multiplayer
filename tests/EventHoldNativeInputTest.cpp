@@ -1,5 +1,6 @@
 #include "EventHoldNative.hpp"
 #include "EventHoldInputState.hpp"
+#include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include <cstdio>
 #include <cstring>
@@ -48,7 +49,20 @@ int main(int argc,char** argv){
   c.Wake();auto close=cstep(8,1005);check(close.start,"wake presses Start to close the combat pause");
   cstep(8,1006);cstep(255,1007);check(c.Current()==S::Phase::OwnerWait,"combat pause closed, waiting on owner");
   S d;check(d.Acquire(ok),"menu-change acquire");at=ok;at.menu=255;at.now=1001;d.Tick(at);at.now=1002;d.Tick(at);
-  at.menu=8;at.now=1003;d.Tick(at);at.menu=10;at.now=1004;check(d.Tick(at).failed,"a different menu replacing the owned pause still fails");}
+  at.menu=8;at.now=1003;d.Tick(at);at.menu=10;at.now=1004;check(d.Tick(at).failed,"a different menu replacing the owned pause still fails");
+  // VUH-2359: a transition into a qualified scene closes the pause, then gives input back at once
+  // (no owner release): the friend plays the host's scene and advances its own dialog.
+  S f;check(f.Acquire(ok),"scene acquire");at=ok;
+  auto fstep=[&](unsigned menuNow,std::uint64_t now){at.menu=menuNow;at.now=now;return f.Tick(at);};
+  fstep(255,1001);fstep(255,1002);fstep(10,1003);check(f.Current()==S::Phase::Paused,"scene hold paused");
+  f.FollowScene();check(fstep(10,1004).start,"following a scene presses Start to close the pause");
+  fstep(10,1005);fstep(255,1006);check(f.Current()==S::Phase::OwnerWait,"pause closed");
+  auto back=fstep(255,1007);check(back.released&&!back.timedOut&&!f.Holding(),"scene follow returns input without the owner's release");
+  check(kh2coop::eventscenes::Qualified(2,7,0,0,0,3)&&kh2coop::eventscenes::Qualified(2,4,0,81,81,81)&&
+        kh2coop::eventscenes::Qualified(18,3,0,83,83,83)&&kh2coop::eventscenes::Qualified(2,19,0,136,136,136)&&
+        !kh2coop::eventscenes::Qualified(2,19,50,1,0,2)&&!kh2coop::eventscenes::Qualified(2,13,0,135,135,135)&&
+        !kh2coop::eventscenes::Qualified(2,7,0,97,97,97)&&!kh2coop::eventscenes::Qualified(2,7,1,0,0,3),
+        "qualified scenes are exact prologue event-only locations");}
  if(mode=="off"){fresh();check(!n::Enabled()&&!n::ApplyInput(data)&&buttons()==0x4d4d,"default off leaves fresh physical untouched");}
  else{
  e::Channel runtime;check(runtime.Open(GetCurrentProcessId()),"independent runtime view opened");

@@ -818,6 +818,30 @@ running after it in the input hook, would have zeroed its Start press. The chann
 game thread instead of aborting, and the prologue hold stands aside while the event hold owns input.
 Unskipped, the Armor Shop event holds the friend for about 78 s.
 
+**Host-selected native scenes (VUH-2359).** Some host events load an event-only location (an event
+program that never reaches field play). The ones on the routes we play are listed in
+`common/include/kh2coop/EventScenes.hpp`. The host announces such a scene from its load, without
+waiting for field play or a progress sample. A held friend that receives the transition loads the same
+location natively and plays the scene with its own camera and dialog. Its hold ends once the pause has
+closed, and it then follows the host's next room from the scene's exit as usual (client authority still
+blocks the friend's own exits). Anything not in the table keeps the event hold.
+
+Proofs on PC1 loopback:
+- Run `20261019-072427`: in the prologue, the friend plays the Armor Shop's event-only tail
+  (02/07 evt3).
+- Run `20261019-082117`: the whole TT basement post-Axel chain, 02/13 135 -> TWTNW 83 -> 02/13 136
+  -> field 02/13 door 50 (hex rooms, as logged). Both seats ended at the same field location. The
+  friend no longer waits about 48 s at its blocked exit.
+
+Limits:
+- The Armor Shop's main event (about 70 s) runs inside the field room 02/07 evt95. It has no location
+  to load, so the friend still holds for it. Mirroring it would need the event start itself mirrored.
+- The basement proof warped the host into the scene, because the route pilot cannot win the Dusk
+  fight before Axel.
+- A session that starts at a prologue field with no checked site (FM-02, Day 6 basement) holds input
+  before its first release (`hold reason=unpinned-field`). The scene proof turned the prologue seats
+  off for that reason.
+
 **Clone HP (VUH-2482).** A clone's fresh private record is initialized by the game from this seat's
 SAVE (`3C03F0` binds SAVE data for key 14), so a rebuilt clone used to show the *local* player's HP
 (run `20261018-195224`: after the Armor Shop reload both clones read 19, while the host was at 20).

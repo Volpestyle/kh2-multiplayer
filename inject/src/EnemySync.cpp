@@ -31,6 +31,7 @@
 #include "PartyRow.hpp"
 #include "BossLeave.hpp"
 
+#include "kh2coop/EventScenes.hpp"
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
@@ -1921,7 +1922,11 @@ bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
 
 bool HostBeginInstance() {
     if (!g_hostBeginPending) return g_epoch != 0;
-    if (!SafeNativeGameplay() || !progresssync::HostReady()) return false;
+    // VUH-2359: a qualified event-only scene never reaches field play, and progress is sampled only
+    // there, so it is announced from its load without either. The friend plays it on its own progress
+    // (equal to the host's up to this event); the host's full progress still precedes the next room.
+    const auto* scene = eventscenes::Qualified(g_pendingHostRoom);
+    if (!scene && (!SafeNativeGameplay() || !progresssync::HostReady())) return false;
     // Keep the exact room and candidate epoch across ring-pressure retries.
     // Progress Tick ran first, so its complete snapshot precedes this packet.
     if (!SendCapturedWorld(encode(g_pendingHostRoom), g_pendingHostRoomContext)) return false;
@@ -1933,6 +1938,8 @@ bool HostBeginInstance() {
     if (g_log) g_log("[enemysync] host arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
                      t.epoch, t.worldId, t.roomId, t.door, t.mapProgram,
                      t.battleProgram, t.eventProgram);
+    if (scene && g_log) g_log("[event-scene] host published scene=%.*s epoch=%u", static_cast<int>(scene->name.size()),
+                              scene->name.data(), t.epoch);
     return true;
 }
 
@@ -5584,6 +5591,10 @@ void OnFrameStart(std::uint32_t frame) {
         }
         RequestActivation();
     }
+    // VUH-2359: a qualified scene's census never completes (no field play), so announce it here,
+    // after progress and the room instance and before the census gate.
+    if (g_role == Role::Host && g_hostBeginPending && !warp::TransitionPending() &&
+        eventscenes::Qualified(g_pendingHostRoom)) (void)HostBeginInstance();
     if (!g_inst.live) { DrainPendingSpawnTrace(false); return; }
     auto census = CaptureNativeCensus();
     ObserveNativeMissionEnd(frame,census); // read-only end receipt, including native end holds

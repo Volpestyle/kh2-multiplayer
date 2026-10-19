@@ -38,11 +38,15 @@ public:
         releaseDeadline_ = 0;
         owned_ = false;
         wake_ = false;
+        follow_ = false;
         press_ = true;
         return true;
     }
     // A successor transition wakes world servicing, but does not release input.
     void Wake() noexcept { wake_ = true; }
+    // VUH-2359: a successor transition into a qualified scene also closes the pause, then gives input
+    // back as soon as it has closed: the friend plays the host's scene and advances its own dialog.
+    void FollowScene() noexcept { wake_ = true; follow_ = true; }
     void ReleaseReceived(std::uint64_t now) noexcept { releaseDeadline_ = now + ReleaseTimeoutMs; }
     // A new host event supersedes a hold whose pause has already closed and
     // that is only waiting on the owner's convergence.
@@ -85,6 +89,10 @@ public:
             return {true, false, false, false};
         case Phase::OwnerWait:
             if (s.menu != 255) { Fail(); break; }
+            if (follow_) {
+                phase_ = Phase::Complete;
+                return {true, false, false, true};
+            }
             if (s.ownerReleased) phase_ = Phase::ReleaseBoundary;
             else if (releaseDeadline_ && s.now >= releaseDeadline_) {
                 phase_ = Phase::Complete;
@@ -102,7 +110,7 @@ public:
 private:
     Phase phase_ = Phase::Idle;
     std::uint64_t deadline_ = 0, releaseDeadline_ = 0;
-    bool owned_ = false, wake_ = false, press_ = false;
+    bool owned_ = false, wake_ = false, follow_ = false, press_ = false;
     unsigned pauseMenu_ = 10;
 };
 } // namespace kh2coop::inject::eventholdnative

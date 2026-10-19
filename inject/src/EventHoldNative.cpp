@@ -1,6 +1,7 @@
 #include "EventHoldNative.hpp"
 #include "EventHoldInputState.hpp"
 #include "NativeSpawnController.hpp"
+#include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include <atomic>
 #include <array>
@@ -185,7 +186,18 @@ bool ApplyInput(void* inputStruct) {
             // events they service the world without opening/closing a pause.
             // A release with no hold (a skipped one) has nothing to give back.
             if (input.Holding()) {
-                input.Wake();
+                // VUH-2359: into a qualified scene the friend follows the host natively, so the hold
+                // ends once its pause has closed instead of waiting for the host's release.
+                const bool scene = command.kind == eventhold::Kind::Transition &&
+                    eventscenes::Qualified(command.world, command.room, command.door, command.map, command.battle,
+                                           command.eventProgram);
+                if (scene) {
+                    input.FollowScene();
+                    if (log) log("[event-scene] client follows the host's scene epoch=%u at=%02X/%02X evt=%u",
+                                 command.epoch, command.world, command.room, command.eventProgram);
+                } else {
+                    input.Wake();
+                }
                 if (command.kind == eventhold::Kind::Release) { release = command; input.ReleaseReceived(native.value.now); }
             }
         }
