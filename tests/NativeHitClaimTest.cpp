@@ -710,6 +710,21 @@ void TestBaileyMissionEndOrdering(bool morale=false) {
     auto other = ReadMission(); std::memset(other.file, 0, sizeof(other.file));
     constexpr char otherName[] = "MU01_MS101.bar"; std::memcpy(other.file, otherName, sizeof(otherName));
     Check(MissionEndRosterReady(other, 0), "other missions retain their existing end policy");
+    // VUH-2497: the prologue's Basement Hall Dusk waves (TT19_MS602) wait the same way.
+    const auto prologue=[&](std::int32_t hp) {
+        seed(); Put(status, hp);
+        g_inst.world=arrivalTarget.worldId=2; Put(image+offsets::WORLD_ID,std::uint8_t{2});
+        constexpr char tt19[]="msn/us/TT19_MS602.bar";
+        std::memcpy(reinterpret_cast<void*>(image + 0x80000 + MR::kPath), tt19, sizeof(tt19));
+    };
+    prologue(0);
+    Check(MissionEndRosterReady(ReadMission(), image + 0x80000), "prologue Dusk mission: empty roster permits end");
+    prologue(11);
+    Check(!MissionEndRosterReady(ReadMission(), image + 0x80000), "prologue Dusk mission defers while its last Dusk lives");
+    prologue(0);
+    Check(!MissionEndRosterReady(ReadMission(), image + 0x81000), "prologue Dusk mission changed pointer refuses end");
+    prologue(11); g_inst.world=4;
+    Check(MissionEndRosterReady(ReadMission(), image + 0x80000), "TT19 outside the prologue world keeps its end policy");
     g_mirrorRequested = false; g_missionReady = g_missionChecked = false;
 }
 
@@ -786,10 +801,14 @@ void TestWorldRetirement() {
     Check(ClientFrame(CaptureNativeCensus()) && Read<int>(status) == 100,
           "current-generation client HP application remains enabled");
     // 8f6a386: an ordinary host tombstone applies only to a body with a
-    // continuous living binding from the immediately preceding frame.
-    ResetWorld(); g_hitTraceFrame = 40; g_host.enemies[1].dead = true;
-    Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 0 && Read<int>(status) == 1000,
+    // continuous living binding from the immediately preceding frame...
+    ResetWorld(); g_hitTraceFrame = 40; g_host.enemies[1].dead = true; Put(status, std::int32_t {999});
+    Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 0 && Read<int>(status) == 999,
           "current-generation death without an established binding is held");
+    // ...or (VUH-2497) to an unharmed body on this instance's first sample of it.
+    ResetWorld(); g_hitTraceFrame = 40; g_host.enemies[1].dead = true;
+    Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 1 && Read<int>(status) == 0,
+          "unseen unharmed body takes its host death on first sight");
     ResetWorld(); g_hitTraceFrame = 40; g_host.enemies[1].hp = 1000;
     Check(ClientFrame(CaptureNativeCensus()) && deathCalls == 0 && Read<int>(status) == 1000,
           "current-generation live frame establishes a continuous ordinary binding");

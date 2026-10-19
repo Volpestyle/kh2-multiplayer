@@ -38,6 +38,7 @@ struct Local {
     bool certificateRequired{};
     int certifiedId{};
     int birthId{}; // one-use receipt + fresh native birth proof supplied by owner adapter
+    bool unharmed{}; // native HP at its maximum in this sample
 };
 struct Host {
     int id{};
@@ -46,8 +47,9 @@ struct Host {
     bool dead{};
     bool removed{};
     bool left{}; // host disappeared alive: finish the established body's leave before a refill
+    bool claimed{}; // some local body of this instance has already carried this ID
 };
-enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath, Retired, Relabel };
+enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath, Retired, Relabel, UnseenDeath };
 inline const char* Name(Reason r) noexcept {
     switch (r) {
     case Reason::Retired: return "authenticated-membership-retired";
@@ -59,6 +61,7 @@ inline const char* Name(Reason r) noexcept {
     case Reason::Conflict: return "nonunique-live-id";
     case Reason::Live: return "newest-live-point";
     case Reason::BoundDeath: return "established-death";
+    case Reason::UnseenDeath: return "death-before-first-sighting";
     }
     return "unknown";
 }
@@ -135,12 +138,20 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         }
         const bool exactBirth=l.birthId==best->id && !l.prior.bound && !l.prior.highWater && !l.prior.terminal &&
             !l.certificateRequired && l.identity.controller && l.identity.record;
-        if (best->dead && !exactBirth && (l.prior.bound != best->id || !Continuous(l,now))) {
+        // VUH-2497: the host can kill a wave while this game's census is held (the friend is still in
+        // the room's entry event). The body's first sample then already names a dead ID. It is the
+        // occurrence that ID was announced for only when nothing here ever saw it before: never
+        // sampled, unharmed, no ticket, and no earlier local body of this instance carried the ID (a
+        // local refill at the same point after a bound death stays refused until its own ID comes).
+        const bool unseen=best->dead && !best->left && !best->claimed && l.living && l.unharmed && !l.birthId &&
+            !l.certificateRequired && l.identity.controller && l.identity.record &&
+            !l.prior.bound && !l.prior.highWater && !l.prior.terminal && !l.prior.scope.generation;
+        if (best->dead && !exactBirth && !unseen && (l.prior.bound != best->id || !Continuous(l,now))) {
             d.reason = Reason::UnestablishedDeath;
             continue;
         }
         d.id = best->id;
-        d.reason = best->dead ? Reason::BoundDeath : Reason::Live;
+        d.reason = !best->dead ? Reason::Live : unseen && !exactBirth ? Reason::UnseenDeath : Reason::BoundDeath;
     }
     // Compare candidates before committing ANY choice. Even a claimant held by
     // the death gate conflicts with another live body's proposed same host ID.

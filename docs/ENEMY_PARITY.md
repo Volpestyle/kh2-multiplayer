@@ -1257,6 +1257,18 @@ runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1Ã¢â‚¬â€œ2
     records a kill at the hooked `0x3D2EB0` funnel (an announced enemy brought to 0). The first census
     that finds it gone publishes a real death (`left=0`) at once, not a leave or nothing. Debug kills
     through `kh2ctl hit kill` bypass the hook; `hit damage` takes the real path.
+  - VUH-2497: the friend's census is held while it plays the room's own events, so its binder can
+    meet a Dusk only after the host has killed it (runs `154343`, `160928`, `160418`). Two shapes:
+    - First sight after the death: the host cleared wave 1 while the friend was still in the hall's
+      entry event. The resolver refused the dead ID (`death-without-continuous-binding`), the Dusk
+      stayed alive and unmatched, and the friend's wave 2 never came. A body that this instance never
+      sampled before, at full HP, with no ticket, whose point's newest host ID is dead (not left) and
+      was never carried by an earlier local body, now takes that ID (`death-before-first-sighting`)
+      and the normal guarded lethal applies it. A local refill after a bound death, a hurt body, a
+      gap after the first sample and two claimants of one ID all still refuse.
+    - Death just before the fight-end event: replaying the host's `TT19_MS602` end started the
+      friend's event before its census applied the last death, and the binding didn't survive the
+      gap. That end now waits for a clean census like `HB08`/`MU01` (180-frame cap).
 - **Host despawns.** Some enemies leave the list alive: the courtyard
   Shadow on its ledge spawn point, host only; and Dusks (M_EX900), which
   vanish and reappear as new actors.

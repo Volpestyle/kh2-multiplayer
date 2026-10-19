@@ -142,6 +142,48 @@ void OrdinaryLifecycleControls() {
     check("fresh body exact certificate allows replacement",go(l,{{6,302,{9,9,9},false}}).id==6);
     l.certifiedId=0;check("missing birth certificate refuses",go(l,{{6,302,{1,2,3},false}}).id==0);
 }
+// VUH-2497 (run 20261019-160928): the host killed Basement Hall's first Dusks while the friend's census
+// was held in the entry event; its first sample of each body already named a dead ID.
+void OrdinaryUnseenDeathControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const std::array<float,3> point{-400,0,-550};
+    ob::Local fresh{{0x7FF627459AA0ULL,0x7FF62793A518ULL,0x7FF627933320ULL,0x7FF6279F8188ULL,0x7FF6278FC420ULL,318},
+                    point,{},true,true};
+    fresh.unharmed=true;
+    const ob::Host dead{1,318,point,true};
+    auto go=[](const ob::Local& l,std::vector<ob::Host> hs,ob::Scope now=ob::Scope{2,3,1554}) {
+        return ob::Resolve(std::array{l},hs,now)[0];
+    };
+    const auto first=go(fresh,{dead});
+    check("unseen fresh body takes its dead ID",first.id==1 && first.reason==ob::Reason::UnseenDeath);
+    auto next=fresh;next.prior=first.next;
+    const auto held=go(next,{dead},{2,3,1555});
+    check("the next frame continues as an established death",held.id==1 && held.reason==ob::Reason::BoundDeath);
+    check("a gap after first sighting still refuses",go(next,{dead},{2,3,1556}).id==0);
+    for(int mode=0;mode<11;++mode) {
+        auto l=fresh;auto h=dead;
+        switch(mode) {
+        case 0:l.unharmed=false;break;              // hurt here: something already saw it
+        case 1:l.living=false;break;
+        case 2:l.prior.scope={2,3,1500};break;      // sampled before, even unbound
+        case 3:l.prior.highWater=1;break;
+        case 4:h.claimed=true;break;                // a local refill after a bound death
+        case 5:h.left=true;break;                   // the host's body left alive
+        case 6:l.identity.controller=0;break;
+        case 7:l.identity.record=0;break;
+        case 8:l.birthId=2;break;                   // a ticket decides, not this rule
+        case 9:l.certificateRequired=true;l.certifiedId=1;break;
+        case 10:l.prior.terminal=true;break;
+        }
+        check("unseen death refused "+std::to_string(mode),go(l,{h}).id==0);
+    }
+    auto live=dead;live.id=5;live.dead=false;
+    check("a newer live ID at the point wins",go(fresh,{dead,live}).id==5);
+    auto other=fresh;other.identity.actor+=0x100;other.identity.status+=0x100;
+    const auto pair=ob::Resolve(std::array{fresh,other},std::array{dead},ob::Scope{2,3,1554});
+    check("two unseen claimants of one dead ID both hold",!pair[0].id && !pair[1].id && pair[0].conflict);
+}
+
 void OrdinaryRefillControls() {
     namespace ob=kh2coop::inject::ordinarybinding;
     ob::Local local{{100,200,300,400,500,2403},{1,2,3},{},true,true};
@@ -234,6 +276,7 @@ void SplitRefillDeliveryControls() {
 #endif
 
 int main(int argc,char** argv) {
+    OrdinaryUnseenDeathControls();
     OrdinaryRefillControls();
     OrdinaryBirthControls();
 #ifndef RECORD_PURE_ONLY

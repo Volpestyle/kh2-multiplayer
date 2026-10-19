@@ -4702,12 +4702,15 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         if(certified)local.certifiedId=OrdinaryCertifiedId(census,native,ordinaryBefore);
         local.available = !(s.killed && native.hp > 0) && (!MoraleBirthActor(native.actor) || local.birthId>0);
         local.living = native.hp > 0;
+        local.unharmed = native.maxHp > 0 && native.hp >= native.maxHp;
         locals.push_back(local);
         indices.push_back(found->second);
     }
     for (const auto& [id, h] : g_host.enemies) {
         if (h.battleProgram == g_inst.btl && (!RecordFamily(h.objectId) || (h.objectId==317 && BaileyMissionCurrent(true))))
-            hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed,h.left});
+            hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed,h.left,
+                             std::any_of(g_inst.spawns.begin(),g_inst.spawns.end(),
+                                         [id](const Spawn& s){return s.ordinaryBinding.highWater==int(id);})});
     }
     if(certified && (!FreshRecordCatalog(census,ordinaryAfter) || !SameRecordCatalogSample(ordinaryBefore,ordinaryAfter)))return holdAll();
     if(!certified && g_resyncWriteFence==ResyncWriteFence::None)RetireAbsentEmissionBirths(census);

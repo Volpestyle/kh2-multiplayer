@@ -302,10 +302,20 @@ void LogMissionSecond(const MR::Mission& local,bool following) {
 // guarded native lethal before replaying the end on a later owner frame.
 // This grants no death/write authority and never treats an unreadable roster
 // as empty. Other missions and the failure path keep their existing policy.
+// VUH-2497: the prologue's Basement Hall Dusk waves (TT19_MS602) end the same way; their
+// fight-end event held the friend's census before it applied the last death.
+bool PrologueDuskMission(const MR::Mission& local) {
+    return g_inst.world==2 && MR::SameFile(local.file,"TT19_MS602.bar");
+}
 bool MissionEndRosterReady(const MR::Mission& local, uintptr_t expectedMission) {
     const bool morale=MR::SameFile(local.file,"MU01_MS102.bar");
-    if(!morale && !MR::SameFile(local.file,"HB08_MS102.bar"))return true;
-    const auto current=[morale](uintptr_t* mission) {
+    const bool prologue=PrologueDuskMission(local);
+    if(!morale && !prologue && !MR::SameFile(local.file,"HB08_MS102.bar"))return true;
+    const auto current=[morale,prologue,&local](uintptr_t* mission) {
+        if(prologue) {
+            const auto now=ReadMission(mission);
+            return now.active && MR::SameFile(now.file,local.file);
+        }
         return morale?MoraleMissionCurrent(true,mission):BaileyMissionCurrent(true,mission);
     };
     uintptr_t before=0,after=0;
@@ -429,7 +439,8 @@ void ApplyMission(std::uint32_t frame) {
         // The host's mission ended this way: end ours the same way, once.
         if(!g_missionReplayed && LocalMissionEnded(false))g_missionReplayed=true;  // already ended here: guard only
         if(!g_missionReplayed) {
-            const char* path=(MR::SameFile(local.file,"HB08_MS102.bar") || MR::SameFile(local.file,"MU01_MS102.bar"))?"clean-census":"unchanged";
+            const char* path=(MR::SameFile(local.file,"HB08_MS102.bar") || MR::SameFile(local.file,"MU01_MS102.bar") ||
+                              PrologueDuskMission(local))?"clean-census":"unchanged";
             if(!MissionEndRosterReady(local,base)) {
                 if(!g_missionEndDeferral.Capped(frame)) {
                     if(g_log && g_missionLogs++<64)g_log("[mission-mirror] client end deferred file=%s reason=scoped-roster-live-or-unavailable",local.file);
