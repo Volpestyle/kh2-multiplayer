@@ -245,3 +245,180 @@ Path(__file__).with_name("net_prologue_party_refusal.json").write_text(json.dump
                     "which the prologue layout does not admit. Both seats must hold at Tram Common evt95 with reason "
                     "unqualified-profile, build no clone or Sora stand-in, and not move under input. Never saves.",
      "playerDefaults": True, "steps": refusal}, indent=1), encoding="utf-8")
+
+
+# Two PCs (VUH-2464 acceptance): the host on PC1 runs the relay on its Tailscale address and plays the
+# route with cutscenes skipped; the friend on PC2 (bld) runs its own runner as instance 0 and follows.
+# Neither runner sees the other game: each paces itself on its own copy of the other Roxas (the clone)
+# and its own prologue log. Owner-only movement and one host-side hit on its friend copy are filmed
+# from both seats. The friend's runner runs in PC2's sealed lane packet.
+PC1_TAILSCALE, PAIR_PORT = "100.108.214.60", 27802
+
+
+def clone_pos(i):
+    return (f"[(a['position']['x'], a['position']['y'], a['position']['z']) for a in actors({i}) "
+            f"if a['name'] == 'P_EX110' and int(a['address'], 16) != int({canon(i)}, 16)]")
+
+
+def mark_clone(tag, i=0):
+    return [{"do": "save", "as": f"{tag}_cpos", "expr": f"{clone_pos(i)}[0]"}]
+
+
+def clone_moved(tag, i=0):
+    # Owner moves are 300+ units (the Sandlot route about 300); an idle seat drifts at most ~70 (collision push).
+    return f"len({clone_pos(i)}) == 1 and dist({clone_pos(i)}[0], saved['{tag}_cpos']) > 150"
+
+
+def own_hp(tag):
+    return f"[r[1] for r in saved['{tag}_roxas'] if int(r[0], 16) == int(saved['{tag}_canonical'], 16)]"
+
+
+def one(tag, i=0, capture=True):
+    out = [{"do": "capture", "instance": i, "name": tag}] if capture else []
+    return out + [{"do": "save", "as": f"{tag}_loc", "expr": f"location({i})"},
+                  {"do": "save", "as": f"{tag}_roxas", "expr": roxas(i)},
+                  {"do": "save", "as": f"{tag}_canonical", "expr": canon(i)}]
+
+
+def own_advance(expr, rounds, tag, guard=""):
+    """advance_until(skip=True) for a runner that owns one seat (instance 0)."""
+    out = []
+    for n in range(rounds):
+        in_scene = f"(peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0{guard})"
+        out += [{"do": "kh2ctl", "instance": 0, "argsExpr":
+                 f"['player-press', '--button', 'start', '--duration-ms', '100'] if ({gate_closed(0)} "
+                 f"and peek('0xB65210','i32',0) != 0 and not ({expr}){guard}) else ['peek', '--rva', '0x9BA8D0:u8']"},
+                {"do": "wait", "ms": 700},
+                {"do": "kh2ctl", "instance": 0, "argsExpr":
+                 f"['player-press', '--button', 'down', '--duration-ms', '100'] if {in_scene} else ['peek', '--rva', '0x9BA8D0:u8']"},
+                {"do": "wait", "ms": 300},
+                {"do": "kh2ctl", "instance": 0, "argsExpr":
+                 f"['player-press', '--button', 'cross', '--duration-ms', '100'] if {in_scene} else ['peek', '--rva', '0x9BA8D0:u8']"},
+                {"do": "wait", "ms": 300},
+                {"do": "kh2ctl", "instance": 0, "argsExpr":
+                 f"['player-press', '--button', 'cross', '--duration-ms', '150'] if ({gate_closed(0)} "
+                 f"and not ({expr}){guard}) else ['peek', '--rva', '0x9BA8D0:u8']"},
+                {"do": "wait", "ms": 1200}]
+        if n % 8 == 7:
+            out += one(f"{tag}{n // 8:02d}", capture=(n % 32 == 31))
+    return out
+
+
+def own_released(room, evt):
+    return f"log_count('[prologue] control released at=02/{room:02X} evt={evt}', 0) > 0"
+
+
+def pair_opening(server_steps, other):
+    """Connect, take New Game's three menus, then wait for the other seat's own report: seats declare
+    only once the opening's first room loads, and each seat also logs its own echo."""
+    steps = server_steps + [{"do": "hang_check", "instance": 0, "on": False}, {"do": "wait", "ms": 8000}]
+    for tag in ("ng1", "ng2", "ng3"):
+        steps += [{"do": "press", "instance": 0, "button": "cross", "ms": 150}, {"do": "wait", "ms": 4000},
+                  {"do": "capture", "instance": 0, "name": tag}]
+    return steps + [
+        {"do": "wait_until", "expr": f"log_count('[prologue] seat accepted owner={other}', 0) > 0", "timeoutMs": 900000, "pollMs": 2000},
+        {"do": "save", "as": "seats_opening", "expr": lines("\\[prologue\\] seat accepted", 0, 6)}]
+
+
+def stop(loc, room, evt):
+    return [{"do": "wait_until", "expr": f"location(0) == {loc}", "timeoutMs": 900000, "pollMs": 1000},
+            {"do": "wait_until", "expr": own_released(room, evt), "timeoutMs": 300000, "pollMs": 1000},
+            {"do": "wait", "ms": 2000}]
+
+
+def two_roxases(tag):
+    return {"do": "assert", "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 2 and "
+                                    "log_count('[prologue] unpinned field', 0) == 0",
+            "message": f"{tag}: this seat lacks the other Roxas, or a prologue field played unheld"}
+
+
+def host_pair():
+    steps = pair_opening([
+        {"do": "relay", "port": PAIR_PORT, "args": ["--bind", PC1_TAILSCALE]},
+        {"do": "boot", "newGame": True, "initTimeoutMs": 60000},
+        {"do": "runtime", "instance": 0, "role": "player", "server": PC1_TAILSCALE, "peerId": "peer0"}], other=1)
+    steps += own_advance("location(0) == [2, 7, 0, 95, 95, 95]", 50, "ev")
+    steps += stop([2, 7, 0, 95, 95, 95], 7, 95) + one("first_control") + [two_roxases("first control")] + mark_clone("first_control") + [
+        {"do": "save", "as": "first_control_log", "expr": lines("\\[(?:prologue|missing-party\\] born)", 0)},
+        # The friend films from its release; give its clip a head start, then move.
+        {"do": "wait", "ms": 6000},
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_move.json", "seconds": 60, "name": "host_move", "allowStuck": True},
+        {"do": "wait", "ms": 1000}] + one("after_host_move", capture=False) + [
+        {"do": "clip", "instance": 0, "seconds": 25, "fps": 30, "name": "host_view_friend_moves", "background": True},
+        {"do": "wait_until", "expr": clone_moved("first_control"), "timeoutMs": 180000, "pollMs": 1000},
+        {"do": "clip_wait"}, {"do": "wait", "ms": 1000}] + one("after_friend_move", capture=False) + [
+        # One synthetic native hit on this seat's copy of the friend; the friend's runner checks its own HP and SAVE.
+        {"do": "progress_snapshot", "instances": [0], "as": "save_before_damage"},
+        {"do": "kh2ctl", "instance": 0, "argsExpr": f"['hit', 'damage', '--victim', {clone_addr(0)}, '--amount', '1']"},
+        {"do": "wait", "ms": 1500}] + one("after_clone_damage", capture=False) + [
+        {"do": "progress_snapshot", "instances": [0], "as": "save_after_damage", "compare": "save_before_damage"},
+        # Leave the friend time to read its own HP before the route moves on.
+        {"do": "wait", "ms": 20000},
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_armor_shop.json", "seconds": 60, "name": "host_armor_shop", "allowStuck": True}]
+    steps += own_advance("location(0) == [2, 7, 0, 97, 97, 97]", 40, "rl")
+    steps += stop([2, 7, 0, 97, 97, 97], 7, 97) + one("reload97") + [two_roxases("evt97"),
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_accessory_shop.json", "seconds": 60, "name": "host_accessory_shop", "allowStuck": True}]
+    for _ in range(4):
+        steps += [{"do": "kh2ctl", "instance": 0, "argsExpr":
+                   f"['player-press', '--button', 'triangle', '--duration-ms', '120'] if (location(0) == [2, 7, 0, 97, 97, 97] "
+                   f"and {field(0)} and peek('0x2A11162','u16',0) == 31) else ['peek', '--rva', '0x9BA8D0:u8']"},
+                  {"do": "wait", "ms": 2000}]
+    steps += own_advance("location(0) == [2, 7, 0, 99, 99, 99]", 40, "as")
+    steps += stop([2, 7, 0, 99, 99, 99], 7, 99) + one("reload99") + [two_roxases("evt99"),
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_cat.json", "seconds": 90, "name": "host_cat", "allowStuck": True}]
+    steps += own_advance("location(0) == [2, 4, 0, 76, 76, 76]", 60, "ct")
+    steps += stop([2, 4, 0, 76, 76, 76], 4, 76) + one("sandlot") + [two_roxases("Sandlot")] + mark_clone("sandlot") + [
+        {"do": "save", "as": "sandlot_log", "expr": lines("\\[(?:prologue|missing-party\\] born)", 0)},
+        {"do": "wait", "ms": 6000},
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_sandlot_move.json", "seconds": 60, "name": "sandlot_host_move", "allowStuck": True},
+        {"do": "wait", "ms": 1000}] + one("sandlot_after_host_move", capture=False) + [
+        {"do": "clip", "instance": 0, "seconds": 25, "fps": 30, "name": "sandlot_host_view_friend_moves", "background": True},
+        {"do": "wait_until", "expr": clone_moved("sandlot"), "timeoutMs": 180000, "pollMs": 1000},
+        {"do": "clip_wait"}, {"do": "wait", "ms": 1000}] + one("sandlot_after_friend_move", capture=False) + [
+        {"do": "wait", "ms": 20000}]  # the friend's runner finishes its own checks before the relay stops
+    return steps
+
+
+def friend_pair():
+    blocked = "log_count('client native exit blocked', 0) > 0"
+    steps = pair_opening([
+        {"do": "boot", "newGame": True, "initTimeoutMs": 60000},
+        {"do": "runtime", "instance": 0, "role": "friend1", "server": PC1_TAILSCALE, "port": PAIR_PORT, "peerId": "peer1",
+         "timeoutMs": 600000}], other=0)
+    # Skip only this seat's own opening, until client authority blocks its first exit.
+    steps += own_advance(blocked, 50, "ev", guard=f" and not ({blocked})")
+    steps += stop([2, 7, 0, 95, 95, 95], 7, 95) + one("first_control") + [two_roxases("first control")] + mark_clone("first_control") + [
+        {"do": "save", "as": "first_control_log", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 0)},
+        {"do": "clip", "instance": 0, "seconds": 25, "fps": 30, "name": "friend_view_host_moves", "background": True},
+        {"do": "wait_until", "expr": clone_moved("first_control"), "timeoutMs": 180000, "pollMs": 1000},
+        # The host starts filming when its own move ends: move a few seconds in, inside its clip.
+        {"do": "wait", "ms": 4000}] + one("after_host_move", capture=False) + [
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_move.json", "seconds": 60, "name": "friend_move", "allowStuck": True},
+        {"do": "clip_wait"}, {"do": "wait", "ms": 1000}] + one("after_friend_move", capture=False) + mark_clone("after_friend_move") + [
+        {"do": "progress_snapshot", "instances": [0], "as": "save_before_damage"},
+        # The host hits its copy of this seat once it has seen this move, then waits 20 s and walks on:
+        # read this seat's own HP and SAVE after the host has moved again, so the hit has certainly landed.
+        {"do": "wait_until", "expr": clone_moved("after_friend_move"), "timeoutMs": 240000, "pollMs": 1000}] + one("after_host_hit", capture=False) + [
+        {"do": "progress_snapshot", "instances": [0], "as": "save_after_damage", "compare": "save_before_damage"},
+        {"do": "assert", "expr": f"{own_hp('after_host_hit')} == {own_hp('after_friend_move')}",
+         "message": "the host's hit on its copy of this seat changed this seat's own HP"}]
+    for loc, room, evt, tag in (([2, 7, 0, 97, 97, 97], 7, 97, "reload97"), ([2, 7, 0, 99, 99, 99], 7, 99, "reload99")):
+        steps += stop(loc, room, evt) + one(tag) + [two_roxases(f"evt{evt}")]
+    steps += stop([2, 4, 0, 76, 76, 76], 4, 76) + one("sandlot") + [two_roxases("Sandlot")] + mark_clone("sandlot") + [
+        {"do": "save", "as": "sandlot_log", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 0)},
+        {"do": "clip", "instance": 0, "seconds": 25, "fps": 30, "name": "sandlot_friend_view_host_moves", "background": True},
+        {"do": "wait_until", "expr": clone_moved("sandlot"), "timeoutMs": 180000, "pollMs": 1000},
+        {"do": "wait", "ms": 4000}] + one("sandlot_after_host_move", capture=False) + [
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_sandlot_move.json", "seconds": 60, "name": "sandlot_friend_move", "allowStuck": True},
+        {"do": "clip_wait"}, {"do": "wait", "ms": 1000}] + one("sandlot_after_friend_move", capture=False)
+    return steps
+
+
+for role, steps, text in (("host", host_pair(), "PC1 host: relay on its Tailscale address, New Game, cutscenes skipped natively, "
+                                                 "the route to the Sandlot; films the friend's moves and hits its copy of the friend once."),
+                          ("friend", friend_pair(), "PC2 friend (bld, run from its sealed lane packet): New Game, its own opening "
+                                                     "skipped until client authority blocks its exit, then follows the host to the "
+                                                     "Sandlot; films the host's moves, moves when the host is filming, checks its own HP and SAVE.")):
+    Path(__file__).with_name(f"net_prologue_party_pc2_{role}.json").write_text(json.dumps(
+        {"name": f"net_prologue_party_pc2_{role}", "description": f"VUH-2464 two-PC acceptance. {text} Never saves.",
+         "playerDefaults": True, "steps": steps}, indent=1), encoding="utf-8")

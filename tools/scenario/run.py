@@ -1266,7 +1266,8 @@ def step_pilot(ctx: Context, step: dict) -> dict:
     finally:
         if proc.poll() is None:
             proc.kill()
-        subprocess.run([sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--release-all"],
+        subprocess.run([sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--release-all",
+                        "--input", step.get("input", "pad")],
                        capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
     if out.exists():
         ctx.artifacts += [f"{name}/{p.name}" for p in sorted(out.iterdir())]

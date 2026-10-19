@@ -12,7 +12,7 @@ Modes (run from the Session-1 desk bridge, normally through the scenario
 runner's `pilot` step, which owns the game and cleans up):
   --route R.json   play data-driven route steps; the stuck detector stops it
   --teach DIR      execute command files dropped in DIR (route discovery)
-  --release-all    clear the pad mailbox and send key-up for every pilot key, then exit
+  --release-all    clear the pad mailbox (and, with --input keys, send key-up for every pilot key), then exit
   --input pad|keys background mailbox pad (default) or real foreground keyboard
 
 Every door crossing is logged with the last position in the old room, which
@@ -26,6 +26,7 @@ import ctypes.wintypes as wt
 import hashlib
 import json
 import math
+import os
 import struct
 import subprocess
 import sys
@@ -35,6 +36,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 KH2CTL = ROOT / "build" / "tools" / "kh2ctl" / "Release" / "kh2ctl.exe"
+# A sealed lane packet (PC2) has no checkout CLI: it names its packaged diagnostic CLI, which runs
+# from its package root (the parent of bin/).
+PACKAGED_KH2CTL = os.environ.get("KH2_PILOT_KH2CTL")
 
 # exe-relative addresses (runtime/include/kh2coop/KH2Offsets.hpp)
 NOW, IN_FIELD, OPEN_MENU = 0x717008, 0x9BA8D0, 0x7435D0
@@ -359,8 +363,9 @@ def alive(pid: int) -> bool:
 
 
 def kh2ctl(*args: str, timeout: float = 60) -> dict:
-    out = subprocess.run([str(KH2CTL), *args], capture_output=True, text=True, timeout=timeout,
-                         creationflags=subprocess.CREATE_NO_WINDOW)
+    cli = Path(PACKAGED_KH2CTL) if PACKAGED_KH2CTL else KH2CTL
+    out = subprocess.run([str(cli), *args], capture_output=True, text=True, timeout=timeout,
+                         cwd=cli.parents[1] if PACKAGED_KH2CTL else None, creationflags=subprocess.CREATE_NO_WINDOW)
     try:
         return json.loads(out.stdout.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError):
@@ -999,7 +1004,10 @@ def main() -> int:
             PadInput(game, keys).release_all()
         except OSError:
             pass
-        Keyboard(game, keys).release_all()
+        # Pad mode never touched the OS keyboard, so it sends no key-ups either: a synthetic key-up
+        # resets the PC's idle timer and wakes its monitor even with the game in the background.
+        if args.input == "keys":
+            Keyboard(game, keys).release_all()
         return 0
     if not owned(args.pid):
         print(json.dumps({"ok": False, "error": f"pid {args.pid} is not a rig-owned game"}))

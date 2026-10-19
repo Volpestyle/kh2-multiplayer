@@ -3261,6 +3261,17 @@ friend on `KH2COOP_PROFILE=0x54` and asserts that both seats hold at evt95 with
 `unqualified-profile`, with one Roxas each, no clone or Sora stand-in, and no
 movement or release.
 
+`net_prologue_party_pc2_host.json` and `net_prologue_party_pc2_friend.json` are
+the two-PC acceptance run: the host on PC1 runs the relay on its Tailscale
+address and the skipped route to the Sandlot; the friend runs on PC2 from a
+sealed lane packet (`tools/rig/pc2_lane/`). Neither runner sees the other game:
+each paces itself on its own copy of the other Roxas (moved more than 150 units)
+and on its own `[prologue]` log, films the other seat moving, and the friend
+reads its own HP and SAVE after the host has hit its copy of the friend.
+Explicit peer ids keep the two runtimes distinct (each runner's game is instance
+0). A PC1 rehearsal of both together (`lane.py --rehearsal`) passed before any
+PC2 attempt.
+
 The fixtures need two KH2 instances in Session 1 (desk bridge): about 20
 minutes skipped, longer unskipped; the 2/1 evt56 opening stall (VUH-2338) can still cost an attempt.
 The `hit damage` hit is synthetic native damage on a chosen actor, not an
