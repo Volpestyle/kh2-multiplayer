@@ -560,51 +560,56 @@ inline bool DdsSprite(std::span<const std::uint8_t> dds, int index, int count, s
 // bind head frame (0, 141.2, -3.7, same axes): Sora's drive forms (Valor, Wisdom, Master, Final,
 // Anti, Limit) and his Halloween Town, Space Paranoids, Timeless River and Christmas Town skins
 // and their forms on bone 140 (the forms carry this crown group themselves), Roxas and
-// dual-wield Roxas on bone 113. So every offset is zero. Other models (Mickey P_EX200 has a
-// different, smaller head frame) keep the painted marker until a row is verified.
+// dual-wield Roxas on bone 113, so every row shares one offset. Placed natively the crown sits a few
+// units above the hair; James asked for it lower (2026-10-19), so every row moves it 4.5 units down the
+// head bone's X (the head's up axis: the crown spans X 18.9-33.0 in that space), where the band meets
+// the hair from the front, back and side (offline bind-pose sheet and in-game stills on VUH-2480).
+// Other models (Mickey P_EX200 has a different, smaller head frame) keep the painted marker until a
+// row is verified.
+inline constexpr float kCrownDrop = -4.5f;
 struct Character {
     std::string_view model;
     std::uint16_t headBone;
     float dx, dy, dz;
 };
 inline constexpr std::array<Character, 37> Characters {{
-    {"P_EX100", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_BTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_MAGF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TRIF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_ULTF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_HTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_KH1F", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_NM", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_NM_BTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_NM_MAGF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_NM_TRIF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_NM_ULTF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_NM_HTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_NM_KH1F", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TR", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TR_BTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TR_MAGF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TR_TRIF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TR_ULTF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TR_HTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_TR_KH1F", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_WI", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_WI_BTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_WI_MAGF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_WI_TRIF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_WI_ULTF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_WI_HTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_WI_KH1F", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_XM", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_XM_BTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_XM_MAGF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_XM_TRIF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_XM_ULTF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_XM_HTLF", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX100_XM_KH1F", 140, 0.0f, 0.0f, 0.0f},
-    {"P_EX110", 113, 0.0f, 0.0f, 0.0f},
-    {"P_EX110_BTLF", 113, 0.0f, 0.0f, 0.0f},
+    {"P_EX100", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_NM", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_NM_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_NM_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_NM_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_NM_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_NM_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_NM_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TR", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TR_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TR_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TR_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TR_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TR_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_TR_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_WI", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_WI_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_WI_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_WI_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_WI_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_WI_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_WI_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_XM", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_XM_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_XM_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_XM_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_XM_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_XM_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100_XM_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX110", 113, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX110_BTLF", 113, kCrownDrop, 0.0f, 0.0f},
 }};
 inline const Character* FindCharacter(std::span<const char> name) noexcept {
     const auto end = std::find(name.begin(), name.end(), '\0');

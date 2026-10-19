@@ -53,14 +53,17 @@ The crown is authored in Sora's head-bone space. `crownprop::Characters` maps a 
 (objentry name) to its head bone and an offset in that bone's space. A row is added only when the
 model's own skeleton puts that bone at exactly Sora's bind head frame (0, 141.2, -3.7, same axes),
 checked from the installed models, and an offline render of the model in bind pose shows the crown
-sitting on its head:
+sitting on its head. Every row drops the crown 4.5 units along the head bone's X (its up
+axis), `kCrownDrop`: placed natively it floated a few units above the hair, and James asked for it
+lower (2026-10-19). The value comes from bind-pose renders and in-game stills of Roxas and Sora
+from behind, in front and to the side:
 
 | Models | Head bone | Offset | Notes |
 |---|---|---|---|
-| `P_EX100` (Sora) | 140 | 0 | the crown's own model; live on PC1 |
-| `P_EX100_BTLF/_MAGF/_TRIF/_ULTF/_HTLF/_KH1F` (Valor, Wisdom, Master, Final, Anti, Limit) | 140 | 0 | each form model carries this crown group itself |
-| `P_EX100_NM/_TR/_WI/_XM` and their six forms each | 140 | 0 | Halloween Town, Space Paranoids, Timeless River, Christmas Town; clears the helmet and hood |
-| `P_EX110` (Roxas), `P_EX110_BTLF` (dual-wield Roxas) | 113 | 0 | Roxas live on PC1 |
+| `P_EX100` (Sora) | 140 | -4.5 X | the crown's own model; live on PC1 |
+| `P_EX100_BTLF/_MAGF/_TRIF/_ULTF/_HTLF/_KH1F` (Valor, Wisdom, Master, Final, Anti, Limit) | 140 | -4.5 X | each form model carries this crown group itself |
+| `P_EX100_NM/_TR/_WI/_XM` and their six forms each | 140 | -4.5 X | Halloween Town, Space Paranoids, Timeless River, Christmas Town; clears the helmet and hood |
+| `P_EX110` (Roxas), `P_EX110_BTLF` (dual-wield Roxas) | 113 | -4.5 X | Roxas live on PC1 |
 
 Everything else keeps the painted marker. Mickey (`P_EX200`, `P_EX220`) has a different, much
 smaller head frame (bone 82/115 at 56.7 units) and would need a tuned transform and scale; he is

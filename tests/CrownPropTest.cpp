@@ -272,6 +272,9 @@ void Clip() {
           crownprop::FindCharacter(valor)->headBone == 140 && crownprop::FindCharacter(haloweenAnti)->headBone == 140 &&
           crownprop::FindCharacter(dualWield)->headBone == 113, "Sora's forms and skins and both Roxases have rows");
     Check(!crownprop::FindCharacter(mickey) && !crownprop::FindCharacter(prefix), "other models match no row (marker)");
+    bool lowered = crownprop::kCrownDrop < 0.0f;
+    for (const auto& c : crownprop::Characters) lowered = lowered && c.dx == crownprop::kCrownDrop && c.dy == 0.0f && c.dz == 0.0f;
+    Check(lowered, "every row sits the crown down on the hair by the same drop (James, VUH-2480)");
 
     // HeadWorld negates the bone's Y and Z columns, then applies the actor.
     const auto head = crownprop::HeadWorld(Translation(1, 2, 3), Translation(100, 0, 0));
