@@ -45,6 +45,13 @@ struct Snapshot {
     // in network co-op field play with no event, cutscene or open menu.
     bool crownCurrent {};
     Vec3 crownHost {}, cameraEye {}, cameraLook {};
+    // VUH-2480: who wears it (0 local, 1 + remote index, -1 none) and, when the game thread read
+    // them, that actor's head-bone world matrix, this frame's view-projection and its row in
+    // crownprop::Characters. Without them the painted marker stands in.
+    std::int8_t crownSource {-1};
+    bool crownHeadValid {};
+    std::uint8_t crownCharacter {};
+    std::array<float, 16> crownHead {}, crownViewProj {};
 };
 static_assert(std::is_trivially_copyable_v<Snapshot> && std::is_standard_layout_v<Snapshot>);
 
@@ -118,7 +125,7 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
     const bool crownScope = in.fieldClear && in.cameraValid && in.cameraFollowsLocal &&
         in.clearFrames >= (in.afterEvent ? CrownEventSettleFrames : CrownSettleFrames);
     if (crownScope) { out.cameraEye = in.cameraEye; out.cameraLook = in.cameraLook; }
-    if (crownScope && out.localSlot == 0) { out.crownCurrent = true; out.crownHost = in.local.position; }
+    if (crownScope && out.localSlot == 0) { out.crownCurrent = true; out.crownHost = in.local.position; out.crownSource = 0; }
     for (int i = 0; i < 2; ++i) {
         const auto& remote = in.remote[static_cast<std::size_t>(i)];
         const auto& avatar = remote.avatar;
@@ -129,7 +136,11 @@ inline Snapshot Project(const Input& in, std::uint64_t nowMs, std::uint32_t fram
         auto& row = out.members[slot]; // Provenance validator bounded and mapped slot above.
         row.state = RowState::Available;
         SetHp(row, avatar);
-        if (crownScope && slot == 0) { out.crownCurrent = true; out.crownHost = avatar.position; }
+        if (crownScope && slot == 0) {
+            out.crownCurrent = true;
+            out.crownHost = avatar.position;
+            out.crownSource = static_cast<std::int8_t>(1 + i);
+        }
     }
     return out;
 }

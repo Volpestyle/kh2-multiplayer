@@ -51,6 +51,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/DllMain.cpp` | 217 | DLL entry point, Panacea plugin exports, standalone init thread |
 | `src/PatternScan.hpp` | 126 | AOB pattern scanner for finding functions in the .text section |
 | `src/RenderHook.cpp` | | D3D12 capture (screenshots/clips) and debug overlay |
+| `src/CrownAsset.cpp` | | VUH-2480: loads KH2FM's crown mesh and gold sprite from the player's install on a background thread (`docs/HOST_CROWN.md`) |
 | `src/Warp.cpp` | | Room warp requests via the game's transition function |
 | `src/PlayerKit.cpp` | | VUH-1513 default-off (`KH2COOP_PLAYER_KIT=0x5A`) player kit: post-hook on the MEMT resolver `3E2EB0` sets resolved member 0 to Roxas in world 4; blocks native-Sora clone puppets while set (docs/PLAYER_KITS.md) |
 | `src/SaveGuard.cpp` | ~520 | Redirects write opens under the KH2 save folder to a sandbox, denies deletes/moves/copies (installed first at init) |
@@ -68,6 +69,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/NativePrivateStatus.cpp` (+ `Pins.hpp`, `Scope.inc`) | | VUH-1489 default-off (`KH2COOP_NATIVE_SORA_PRIVATE_STATUS=1`) private native status record for the GoA Friend1 native Sora on Steam `9002b2de`; byte-pinned pool/lookup/commit/free hooks, no native pool writes (docs/NATIVE_PRIVATE_STATUS.md) |
 | `../common/include/kh2coop/MissionFlags.hpp` | | Native mission flag/result constants shared by mission and route admission rules |
 | `../common/include/kh2coop/RouteSpawnPolicy.hpp` | | Exact Bailey missing-party and LoD generated-wave definitions, retained-record/load/binding policy; `docs/ROUTE_SPAWNS.md` |
+| `../common/include/kh2coop/CrownProp.hpp` | | Pure crown prop: zlib inflate, OpenKH EGS package, MDLX group/VIF decode, DDS sprite, character table, clip triangles; `docs/HOST_CROWN.md` |
 | `src/DownedSpike.inl`, `src/DownedSpikeState.hpp` | | VUH-1504 downed/revive owner side behind `KH2COOP_DOWNED_SPIKE=1`: game-over request gate, held downed episodes, LocalDownedState publication, native revive at 25% HP with grace and stand-up; test channel only with `_FIXTURE=1` (docs/DOWNED_REVIVE.md) |
 | `src/PuppetHold.hpp` | | VUH-1787 pure DLL rules: flag the local avatar `AvatarInCutscene` on the own transition request and while a load is pending (no door ghost); a held puppet idles after `kHeldIdleFrames` unless downed and stops snapping its motion clock |
 | `src/RevivePrompt.hpp` | | VUH-1504 player-facing revive trigger behind `KH2COOP_REVIVE_PROMPT=1`: pure Triangle-hold rules (range, cancels, one request per episode); drawn in the co-op HUD row (docs/DOWNED_REVIVE.md) |

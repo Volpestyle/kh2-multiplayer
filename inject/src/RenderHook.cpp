@@ -26,10 +26,12 @@
 #include "kh2coop/CaptureChannel.hpp"
 #include "CoopHudMailbox.hpp"
 #include "HostCrown.hpp"
+#include "CrownAsset.hpp"
 
 #include <Windows.h>
 #include <d3d11.h>
 #include <d3d12.h>
+#include <d3dcompiler.h>
 #include <dxgi1_4.h>
 #include <wincodec.h>
 
@@ -130,6 +132,8 @@ struct FrameContext {
     ID3D12Resource* crownUpload = nullptr;  // VUH-2415: two solid crown colour blocks
     std::uint8_t* crownPtr = nullptr;
     DXGI_FORMAT crownFormat = DXGI_FORMAT_UNKNOWN;
+    ID3D12Resource* crownVertices = nullptr;  // VUH-2480: this present's crown triangles, persistently mapped
+    crownprop::ClipVertex* crownVertexPtr = nullptr;
     ID3D12Resource* readback = nullptr;  // backbuffer copy
     UINT64 readbackSize = 0;
     UINT64 fenceValue = 0;
@@ -180,6 +184,26 @@ float CrownHead(const Vec3& eye, const Vec3& look) {
 }
 constexpr UINT kCrownPitch = (2 * crown::Block * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) &
                              ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+// VUH-2480: the real crown (CrownAsset), drawn as textured triangles over the finished frame.
+// Device objects are built on first use; any failure keeps the painted marker for the session.
+constexpr std::size_t kCrownMaxVertices = 3 * 64;
+struct CrownMesh {
+    std::vector<std::uint8_t> vs, ps;
+    ID3D12RootSignature* root = nullptr;
+    ID3D12PipelineState* pso = nullptr;
+    DXGI_FORMAT psoFormat = DXGI_FORMAT_UNKNOWN;
+    ID3D12DescriptorHeap* rtvHeap = nullptr;
+    ID3D12DescriptorHeap* srvHeap = nullptr;
+    ID3D12Resource* texture = nullptr;
+    ID3D12Resource* textureUpload = nullptr;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT textureFootprint {};
+    bool textureRecorded = false;
+    bool failed = false;
+};
+CrownMesh g_crownMesh;
+crownprop::ClipVertex g_crownClip[kCrownMaxVertices] {};
+std::size_t g_crownClipCount = 0;  // this present's mesh vertices (0: painted marker or nothing)
+void ReleaseCrownMesh();
 bool g_overlayDiagnosticsLogged[16] {};
 std::atomic<ID3D12CommandQueue*> g_diagnosticQueues[16] {};
 std::atomic<unsigned> g_diagnosticPresentEntries {0};
@@ -439,6 +463,7 @@ void ReleaseRing() {
         if (ctx.allocator) ctx.allocator->Release();
         if (ctx.upload) ctx.upload->Release();
         if (ctx.crownUpload) ctx.crownUpload->Release();
+        if (ctx.crownVertices) ctx.crownVertices->Release();
         if (ctx.readback) ctx.readback->Release();
         ctx = FrameContext {};
     }
@@ -500,6 +525,7 @@ bool PrepareSwapChain(IDXGISwapChain* swapChain) {
 
     if (device != g_device) {
         ReleaseRing();
+        ReleaseCrownMesh();
         if (g_fence) { g_fence->Release(); g_fence = nullptr; }
         if (g_device) g_device->Release();
         g_device = device;
@@ -553,6 +579,12 @@ bool PrepareSwapChain(IDXGISwapChain* swapChain) {
             FAILED(ctx.crownUpload->Map(0, &none, reinterpret_cast<void**>(&ctx.crownPtr)))) {
             if (g_log) g_log("  Render: crown upload buffer creation failed");
             return false;
+        }
+        ctx.crownVertices = CreateBuffer(D3D12_HEAP_TYPE_UPLOAD, sizeof(g_crownClip), D3D12_RESOURCE_STATE_GENERIC_READ);
+        if (!ctx.crownVertices ||
+            FAILED(ctx.crownVertices->Map(0, &none, reinterpret_cast<void**>(&ctx.crownVertexPtr)))) {
+            ctx.crownVertexPtr = nullptr;  // the painted marker stands in
+            if (g_log) g_log("  Render: crown vertex buffer creation failed");
         }
     }
 
@@ -892,6 +924,217 @@ void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource,
     list->ResourceBarrier(1, &barrier);
 }
 
+// ---- VUH-2480 crown mesh ------------------------------------------------------------------------
+void ReleaseCrownMesh() {
+    auto release = [](auto*& p) { if (p) { p->Release(); p = nullptr; } };
+    release(g_crownMesh.pso);
+    release(g_crownMesh.root);
+    release(g_crownMesh.rtvHeap);
+    release(g_crownMesh.srvHeap);
+    release(g_crownMesh.texture);
+    release(g_crownMesh.textureUpload);
+    g_crownMesh.psoFormat = DXGI_FORMAT_UNKNOWN;
+    g_crownMesh.textureRecorded = false;
+}
+
+bool FailCrownMesh(const char* step, HRESULT hr) {
+    g_crownMesh.failed = true;
+    if (g_log) g_log("[crown] mesh unavailable at %s (%08lX); painted marker stays", step, hr);
+    return false;
+}
+
+constexpr char kCrownShader[] = R"(
+struct V { float4 pos : POSITION; float2 uv : TEXCOORD0; };
+struct P { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
+Texture2D crownTexture : register(t0);
+SamplerState crownSampler : register(s0);
+P VS(V v) { P p; p.pos = v.pos; p.uv = v.uv; return p; }
+float4 PS(P p) : SV_Target {
+    float4 c = crownTexture.Sample(crownSampler, p.uv);
+    clip(c.a - 0.02);
+    return c;
+}
+)";
+
+bool CompileCrownShaders() {
+    using CompileFn = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, LPCSTR,
+                                       LPCSTR, UINT, UINT, ID3DBlob**, ID3DBlob**);
+    HMODULE compiler = LoadLibraryW(L"d3dcompiler_47.dll");
+    const auto compile = compiler ? reinterpret_cast<CompileFn>(GetProcAddress(compiler, "D3DCompile")) : nullptr;
+    if (!compile) return FailCrownMesh("d3dcompiler_47", E_NOINTERFACE);
+    for (int stage = 0; stage < 2; ++stage) {
+        ID3DBlob* code = nullptr;
+        ID3DBlob* errors = nullptr;
+        const HRESULT hr = compile(kCrownShader, sizeof(kCrownShader) - 1, "crown", nullptr, nullptr,
+                                   stage ? "PS" : "VS", stage ? "ps_5_0" : "vs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0,
+                                   &code, &errors);
+        if (errors) errors->Release();
+        if (FAILED(hr) || !code) return FailCrownMesh(stage ? "pixel shader" : "vertex shader", hr);
+        auto& out = stage ? g_crownMesh.ps : g_crownMesh.vs;
+        const auto* bytes = static_cast<const std::uint8_t*>(code->GetBufferPointer());
+        out.assign(bytes, bytes + code->GetBufferSize());
+        code->Release();
+    }
+    return true;
+}
+
+// Builds what this backbuffer format needs; the texture copy is recorded on the first draw.
+bool EnsureCrownMesh(DXGI_FORMAT format, const crownasset::Loaded& asset) {
+    if (g_crownMesh.failed) return false;
+    auto& m = g_crownMesh;
+    if (!m.root) {
+        if (m.vs.empty() && !CompileCrownShaders()) return false;
+        D3D12_DESCRIPTOR_RANGE range {};
+        range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        range.NumDescriptors = 1;
+        D3D12_ROOT_PARAMETER param {};
+        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        param.DescriptorTable.NumDescriptorRanges = 1;
+        param.DescriptorTable.pDescriptorRanges = &range;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_STATIC_SAMPLER_DESC sampler {};
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_ROOT_SIGNATURE_DESC desc {};
+        desc.NumParameters = 1;
+        desc.pParameters = &param;
+        desc.NumStaticSamplers = 1;
+        desc.pStaticSamplers = &sampler;
+        desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+        ID3DBlob* blob = nullptr;
+        ID3DBlob* errors = nullptr;
+        HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors);
+        if (errors) errors->Release();
+        if (FAILED(hr) || !blob) return FailCrownMesh("root signature", hr);
+        hr = g_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m.root));
+        blob->Release();
+        if (FAILED(hr)) return FailCrownMesh("CreateRootSignature", hr);
+
+        D3D12_DESCRIPTOR_HEAP_DESC heap {};
+        heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        heap.NumDescriptors = 1;
+        if (FAILED(hr = g_device->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&m.rtvHeap)))) return FailCrownMesh("rtv heap", hr);
+        heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        if (FAILED(hr = g_device->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&m.srvHeap)))) return FailCrownMesh("srv heap", hr);
+
+        D3D12_RESOURCE_DESC tex {};
+        tex.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        tex.Width = static_cast<UINT64>(asset.side);
+        tex.Height = static_cast<UINT>(asset.side);
+        tex.DepthOrArraySize = 1;
+        tex.MipLevels = 1;
+        tex.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        tex.SampleDesc.Count = 1;
+        D3D12_HEAP_PROPERTIES defaultHeap {};
+        defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+        if (FAILED(hr = g_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &tex,
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m.texture)))) return FailCrownMesh("texture", hr);
+        UINT64 total = 0;
+        g_device->GetCopyableFootprints(&tex, 0, 1, 0, &m.textureFootprint, nullptr, nullptr, &total);
+        m.textureUpload = CreateBuffer(D3D12_HEAP_TYPE_UPLOAD, total, D3D12_RESOURCE_STATE_GENERIC_READ);
+        std::uint8_t* mapped = nullptr;
+        D3D12_RANGE none {0, 0};
+        if (!m.textureUpload) return FailCrownMesh("texture upload", E_OUTOFMEMORY);
+        if (FAILED(hr = m.textureUpload->Map(0, &none, reinterpret_cast<void**>(&mapped))))
+            return FailCrownMesh("texture upload map", hr);
+        const std::size_t row = static_cast<std::size_t>(asset.side) * 4;
+        for (int y = 0; y < asset.side; ++y)
+            std::memcpy(mapped + m.textureFootprint.Offset + static_cast<std::size_t>(y) * m.textureFootprint.Footprint.RowPitch,
+                        asset.rgba.data() + static_cast<std::size_t>(y) * row, row);
+        m.textureUpload->Unmap(0, nullptr);
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv {};
+        srv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv.Texture2D.MipLevels = 1;
+        g_device->CreateShaderResourceView(m.texture, &srv, m.srvHeap->GetCPUDescriptorHandleForHeapStart());
+    }
+    if (!m.pso || m.psoFormat != format) {
+        if (m.pso) { m.pso->Release(); m.pso = nullptr; }
+        const D3D12_INPUT_ELEMENT_DESC layout[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC pso {};
+        pso.pRootSignature = m.root;
+        pso.VS = {m.vs.data(), m.vs.size()};
+        pso.PS = {m.ps.data(), m.ps.size()};
+        auto& blend = pso.BlendState.RenderTarget[0];
+        blend.BlendEnable = TRUE;
+        blend.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+        blend.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+        blend.BlendOp = D3D12_BLEND_OP_ADD;
+        blend.SrcBlendAlpha = D3D12_BLEND_ZERO;
+        blend.DestBlendAlpha = D3D12_BLEND_ONE;
+        blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        blend.LogicOp = D3D12_LOGIC_OP_NOOP;
+        blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN |
+                                      D3D12_COLOR_WRITE_ENABLE_BLUE;
+        pso.SampleMask = UINT_MAX;
+        pso.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+        pso.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;  // the strip carries both windings itself
+        pso.RasterizerState.DepthClipEnable = TRUE;
+        pso.InputLayout = {layout, 2};
+        pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        pso.NumRenderTargets = 1;
+        pso.RTVFormats[0] = format;
+        pso.SampleDesc.Count = 1;
+        const HRESULT hr = g_device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m.pso));
+        if (FAILED(hr)) return FailCrownMesh("pipeline", hr);
+        m.psoFormat = format;
+    }
+    return true;
+}
+
+// Records the crown triangles (g_crownClip) into this present's list, over the finished frame.
+bool DrawCrownMesh(FrameContext& ctx, ID3D12Resource* backbuffer, const D3D12_RESOURCE_DESC& bbDesc,
+                   D3D12_RESOURCE_STATES& state, const crownasset::Loaded& asset) {
+    if (!ctx.crownVertexPtr || !g_crownClipCount || !EnsureCrownMesh(bbDesc.Format, asset)) return false;
+    auto& m = g_crownMesh;
+    std::memcpy(ctx.crownVertexPtr, g_crownClip, g_crownClipCount * sizeof(crownprop::ClipVertex));
+    if (!m.textureRecorded) {
+        D3D12_TEXTURE_COPY_LOCATION dst {};
+        dst.pResource = m.texture;
+        dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        D3D12_TEXTURE_COPY_LOCATION src {};
+        src.pResource = m.textureUpload;
+        src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        src.PlacedFootprint = m.textureFootprint;
+        ctx.list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        Transition(ctx.list, m.texture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        m.textureRecorded = true;
+    }
+    if (state != D3D12_RESOURCE_STATE_RENDER_TARGET) {
+        Transition(ctx.list, backbuffer, state, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    }
+    D3D12_RENDER_TARGET_VIEW_DESC rtv {};
+    rtv.Format = bbDesc.Format;
+    rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    const auto target = m.rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    g_device->CreateRenderTargetView(backbuffer, &rtv, target);
+    ctx.list->OMSetRenderTargets(1, &target, FALSE, nullptr);
+    const D3D12_VIEWPORT viewport {0.0f, 0.0f, static_cast<float>(bbDesc.Width), static_cast<float>(bbDesc.Height), 0.0f, 1.0f};
+    const D3D12_RECT scissor {0, 0, static_cast<LONG>(bbDesc.Width), static_cast<LONG>(bbDesc.Height)};
+    ctx.list->RSSetViewports(1, &viewport);
+    ctx.list->RSSetScissorRects(1, &scissor);
+    ctx.list->SetGraphicsRootSignature(m.root);
+    ctx.list->SetDescriptorHeaps(1, &m.srvHeap);
+    ctx.list->SetGraphicsRootDescriptorTable(0, m.srvHeap->GetGPUDescriptorHandleForHeapStart());
+    ctx.list->SetPipelineState(m.pso);
+    ctx.list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    D3D12_VERTEX_BUFFER_VIEW view {};
+    view.BufferLocation = ctx.crownVertices->GetGPUVirtualAddress();
+    view.SizeInBytes = static_cast<UINT>(g_crownClipCount * sizeof(crownprop::ClipVertex));
+    view.StrideInBytes = sizeof(crownprop::ClipVertex);
+    ctx.list->IASetVertexBuffers(0, 1, &view);
+    ctx.list->DrawInstanced(static_cast<UINT>(g_crownClipCount), 1, 0, 0);
+    return true;
+}
+
 // VUH-2415: fill this ring entry's gold and shade blocks in the backbuffer format.
 // Called only after the entry's fence completed, so the GPU is not reading it.
 void FillCrownColors(FrameContext& ctx, DXGI_FORMAT format) {
@@ -1049,7 +1292,15 @@ void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
         ctx.list->CopyTextureRegion(&dst, kOverlayMargin, kOverlayMargin, 0, &src, nullptr);
     }
 
-    if (drawCrown) {
+    // VUH-2480: the real crown when OnPresent built its triangles; the painted marker otherwise.
+    const auto* crownAsset = crownasset::Ready();
+    if (drawCrown && g_crownClipCount && crownAsset) {
+        // Before the capture copy, so screenshots and clips show what the player sees.
+        const bool drawn = DrawCrownMesh(ctx, backbuffer, bbDesc, state, *crownAsset);
+        if (g_log && g_presentIndex % 600 == 0)
+            g_log("[crown] present=%llu mesh=%d character=%u vertices=%zu", static_cast<unsigned long long>(g_presentIndex),
+                  drawn, g_renderHud.crownCharacter, g_crownClipCount);
+    } else if (drawCrown) {
         // Before the capture copy, so screenshots and clips show what the player sees.
         const float head = CrownHead(g_renderHud.cameraEye, g_renderHud.cameraLook);
         const auto shape = crown::ForHost(g_renderHud.cameraEye, g_renderHud.cameraLook, g_renderHud.crownHost,
@@ -1159,7 +1410,15 @@ void OnPresent(IDXGISwapChain* swapChain) {
                                  warp::WaitingAtBlockedExit();
         // VUH-2415: decide visibility before touching the ring, so a hidden crown submits nothing.
         bool drawCrown = false;
-        if (g_crownEnabled && g_renderHud.crownCurrent) {
+        g_crownClipCount = 0;
+        const auto* crownAsset = crownasset::Ready();
+        if (g_crownEnabled && g_renderHud.crownCurrent && g_renderHud.crownHeadValid && crownAsset &&
+            !g_crownMesh.failed && g_renderHud.crownCharacter < crownprop::Characters.size()) {
+            // VUH-2480: the real crown on the head bone; none at all when it is behind the camera.
+            g_crownClipCount = crownprop::ClipTriangles(crownAsset->prop, crownprop::Characters[g_renderHud.crownCharacter],
+                                                        g_renderHud.crownHead, g_renderHud.crownViewProj, g_crownClip);
+            drawCrown = g_crownClipCount > 0;
+        } else if (g_crownEnabled && g_renderHud.crownCurrent) {
             DXGI_SWAP_CHAIN_DESC1 desc {};
             drawCrown = SUCCEEDED(g_swapChain3->GetDesc1(&desc)) &&
                 crown::ForHost(g_renderHud.cameraEye, g_renderHud.cameraLook, g_renderHud.crownHost, g_crownFov,
@@ -1398,6 +1657,7 @@ bool Install(uintptr_t exeBase, LogFn log) {
     }
     if (g_log) g_log("  Render: host crown %s fov=%.1f head=%.0f (0: by camera distance)",
                      g_crownEnabled ? "on" : "off", g_crownFov, g_crownHead);
+    if (g_crownEnabled) crownasset::Start(exeBase, log);  // VUH-2480: the real crown, from this install
 
     if (!CreateChannel()) {
         if (g_log) g_log("  Render: capture channel creation failed (%lu)", GetLastError());

@@ -1128,6 +1128,12 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     }
     input.after = enemysync::CapturePuppetAuthority();
     auto snapshot = hud::Project(input, GetTickCount64(), g_frameCounter);
+    // VUH-2480: the crowned actor's head bone for the real crown; the painted marker stands in without it.
+    if (snapshot.crownCurrent) {
+        const std::uintptr_t wearer = snapshot.crownSource == 0 ? g_soraActor
+            : snapshot.crownSource > 0 ? g_puppets[snapshot.crownSource - 1].actor : 0;
+        (void)crown::ReadHostHead(g_exeBase, wearer, snapshot);
+    }
     // VUH-2455: every crown gate transition, with the raw gates, to place any event-shot leak.
     const int gateBits = (input.fieldClear ? 1 : 0) | (input.cameraFollowsLocal ? 2 : 0) |
         (input.cameraValid ? 4 : 0) | (snapshot.crownCurrent ? 8 : 0) | (input.afterEvent ? 16 : 0);
@@ -1140,9 +1146,10 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
             snapshot.crownCurrent);
     }
     if (g_frameCounter % 600 == 0) {  // VUH-2415: crown gate receipt, about every 10 s
-        Log("[crown] frame=%u net=%d slot=%u field=%d camera=%d current=%d host=(%.0f,%.0f,%.0f) "
-            "eye=(%.0f,%.0f,%.0f) look=(%.0f,%.0f,%.0f)", g_frameCounter, snapshot.networkCurrent,
-            snapshot.localSlot, input.fieldClear, input.cameraValid, snapshot.crownCurrent,
+        Log("[crown] frame=%u net=%d slot=%u field=%d camera=%d current=%d source=%d head=%d char=%u "
+            "host=(%.0f,%.0f,%.0f) eye=(%.0f,%.0f,%.0f) look=(%.0f,%.0f,%.0f)", g_frameCounter, snapshot.networkCurrent,
+            snapshot.localSlot, input.fieldClear, input.cameraValid, snapshot.crownCurrent, snapshot.crownSource,
+            snapshot.crownHeadValid, snapshot.crownCharacter,
             snapshot.crownHost.x, snapshot.crownHost.y, snapshot.crownHost.z, input.cameraEye.x,
             input.cameraEye.y, input.cameraEye.z, input.cameraLook.x, input.cameraLook.y, input.cameraLook.z);
     }
