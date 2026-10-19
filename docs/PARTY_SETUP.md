@@ -788,7 +788,13 @@ tutorial (event 108), loads the Sandlot as `tt04-76` (`b_40` group 49, the
 same raw566 plus absent raw567/568 shape); the host takes it natively and the
 friend follows the host's announced room. Further prologue fields are added one
 pinned group at a time from the observation-only `[prologue-player-spawn]`
-receipt. Before the seat's first release, an open prologue field with no site
+receipt. VUH-2466 adds encounter sites the same way, starting with the Day-6
+Mansion Dusk ambush `tt19-134` (Basement Hall evt134, `TT19_MS602`, `b_40`
+group 50, 74 byte-identical receipts from both seats). A session that arrives
+there, from New Game or a save such as FM-02, builds both Roxases at the fight
+and releases both seats together: in run `20261019-171352` the host held
+(`remote-unbound`) until the friend bound. The encounter checklist is
+`docs/PROLOGUE_ENCOUNTERS.md`. Before the seat's first release, an open prologue field with no site
 is held with reason `unpinned-field`. The friend's blocked opening exit is
 outside this scope: it has no player actor, and member 0 is still Sora until
 the first field.

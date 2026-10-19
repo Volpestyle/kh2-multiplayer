@@ -675,7 +675,10 @@ def step_fight(ctx: Context, step: dict) -> dict:
         try:
             while time.monotonic() < end and not stop.is_set():
                 actors = ctx.actors(index)
-                me = next((a for a in actors if a["name"] == "P_EX100"), None)
+                # The game's canonical player: in the prologue both Roxases are P_EX110 (VUH-2466).
+                player = kh2ctl("peek", "--rva", "0x2A105D0:u64", pid=pid)["samples"][0]["0x2A105D0"]
+                me = next((a for a in actors if int(a["address"], 16) == int(str(player), 0)), None) or \
+                    next((a for a in actors if a["name"] == "P_EX100"), None)
                 foes = [a for a in actors if a.get("objectType") in (3, 4) and not a["name"].startswith("F_")
                         and a.get("hp", -1) > 0]
                 if out["enemiesStart"] is None:

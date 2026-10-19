@@ -167,6 +167,22 @@ void site() {
         sandlotBits = sandlotBits && !MissingPartySiteFor(Sandlot76Location, 808738658, 0x3FF727, Sandlot76Header, r);
     }
     check(sandlotBits, "every changed Sandlot record bit refuses its site");
+    // VUH-2466: the Mansion Dusk ambush in the Basement Hall (b_40 group50).
+    const auto* hall = MissingPartySiteFor(BasementHall134Location, 808738658, 0x3FF727, BasementHall134Header,
+                                           BasementHall134Records);
+    check(hall && hall->prologue && hall->localObject == 90 && hall->localKey == 14 &&
+          MissingPartySiteAt(BasementHall134Location) == hall && std::string_view(hall->name) == "tt19-134",
+          "the Basement Hall evt134 (b_40 group50) is a checked prologue site");
+    check(!MissingPartySiteFor(BasementHall134Location, 808738658, 0x3FF727, Sandlot76Header, Sandlot76Records) &&
+          !MissingPartySiteFor(Sandlot76Location, 808738658, 0x3FF727, BasementHall134Header, BasementHall134Records) &&
+          !MissingPartySiteAt({2, 0x13, 0, 0, 0, 0, 0, 0, 3, 0}),
+          "the hall's site needs its own group and battle program");
+    bool hallBits = true;
+    for (std::size_t i = 0; i < BasementHall134Records.size(); ++i) {
+        auto r = BasementHall134Records; r[i] ^= 1;
+        hallBits = hallBits && !MissingPartySiteFor(BasementHall134Location, 808738658, 0x3FF727, BasementHall134Header, r);
+    }
+    check(hallBits, "every changed hall record bit refuses its site");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && !prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&

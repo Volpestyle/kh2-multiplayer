@@ -74,18 +74,23 @@ def advance_until(expr, rounds, tag, skip=False):
     Without `skip`, Cross advances dialog only while the gate is closed and no menu is open (the full,
     unskipped playback that acceptance keeps). With `skip` (development runs, James 2026-10-19), a seat
     first pauses and picks Skip Scene (Start, Down, Cross, the native event skip of net_host_cutscene_skip)
-    while its cutscene runs. The friend skips only its own opening, before its first exit is blocked; after
-    that it follows the host and must not hold a menu open.
+    while its cutscene runs. The friend skips its own opening, before its first exit is blocked, and after
+    that only a native event of its own (VUH-2359 plays the host's scenes and in-field events natively on
+    the friend, with their dialog); the host's pause hold is no event, and it must not hold a menu open.
     """
     out = []
     for n in range(rounds):
         for i in (0, 1):
+            # Skipping, each seat advances until it is there itself: since VUH-2359 the friend plays the
+            # host's events natively, so it can still be in one after the host skipped ahead.
+            mine = expr.replace("location(0)", f"location({i})") if skip else expr
             if skip:
-                own = " and log_count('client native exit blocked', 1) == 0" if i == 1 else ""
+                own = (" and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)"
+                       if i == 1 else "")
                 menu_in_scene = f"(peek('0x7435D0','u8',{i}) != 255 and peek('0xB65210','i32',{i}) != 0{own})"
                 out += [{"do": "kh2ctl", "instance": i, "argsExpr":
                          f"['player-press', '--button', 'start', '--duration-ms', '100'] if ({gate_closed(i)} "
-                         f"and peek('0xB65210','i32',{i}) != 0 and not ({expr}){own}) else ['peek', '--rva', '0x9BA8D0:u8']"},
+                         f"and peek('0xB65210','i32',{i}) != 0 and not ({mine}){own}) else ['peek', '--rva', '0x9BA8D0:u8']"},
                         {"do": "wait", "ms": 700},
                         {"do": "kh2ctl", "instance": i, "argsExpr":
                          f"['player-press', '--button', 'down', '--duration-ms', '100'] if {menu_in_scene} else ['peek', '--rva', '0x9BA8D0:u8']"},
@@ -95,7 +100,7 @@ def advance_until(expr, rounds, tag, skip=False):
                         {"do": "wait", "ms": 300}]
             out.append({"do": "kh2ctl", "instance": i, "argsExpr":
                         f"['player-press', '--button', 'cross', '--duration-ms', '150'] if ({gate_closed(i)} "
-                        f"and not ({expr})) else ['peek', '--rva', '0x9BA8D0:u8']"})
+                        f"and not ({mine})) else ['peek', '--rva', '0x9BA8D0:u8']"})
         out.append({"do": "wait", "ms": 1200 if skip else 2500})
         if n % 8 == 7:
             out += snap(f"{tag}{n // 8:02d}", capture=(n % 32 == 31))
