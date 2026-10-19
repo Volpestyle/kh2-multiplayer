@@ -48,6 +48,7 @@
 #include "DamagePolicy.hpp"
 #include "EnemyTargetRemote.hpp" // VUH-1515 (default off)
 #include "ScriptMirror.hpp" // VUH-2252: rules for ScriptMirror.inl
+#include "EventStartMirror.hpp"
 #include "AllyHit.hpp" // ally player-to-player hits (default off)
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/InputMailbox.hpp"
@@ -3845,6 +3846,7 @@ bool Initialize(uintptr_t exeBase) {
     // A driver is "driven" from BindPuppetDrive until its release restores the team (applied cleared),
     // and only while its actor is still a current puppet target: a cached clone or friend pointer
     // (already captured values; no game-memory reads).
+    eventstartmirror::Install(exeBase, &Log); // VUH-2359: in-field events, with the event hold
     allyhit::Install(exeBase, &Log, g_resolveHandle, []() -> uint32_t { return g_frameCounter; },
                      [](std::uintptr_t (&out)[2]) -> unsigned {
                          unsigned n = 0;

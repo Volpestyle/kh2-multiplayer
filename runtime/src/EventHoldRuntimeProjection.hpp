@@ -68,6 +68,11 @@ public:
                 EventHold hold {}; read(reader, hold);
                 command.kind = hold.active ? Kind::Acquire : Kind::Release;
                 command.epoch = hold.epoch; command.eventProgram = hold.eventProgram;
+                if (hold.start) {
+                    command.startWorld = hold.start->worldId; command.startRoom = hold.start->roomId;
+                    command.startId = hold.start->id; command.startFlags = hold.start->flags;
+                    command.startParams = hold.start->params;
+                }
             } else {
                 RoomTransition room {}; readRoomTransitionPacket(reader, room);
                 command.kind = Kind::Transition; command.epoch = room.epoch;

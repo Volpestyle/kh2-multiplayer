@@ -32,6 +32,7 @@
 #include "BossLeave.hpp"
 
 #include "kh2coop/EventScenes.hpp"
+#include "EventStartMirror.hpp"
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
@@ -1910,6 +1911,11 @@ bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
     if (!CaptureWorldContext(captured) || !ReadHostEventObservation(after) ||
         !SameHostEventObservation(before, after) || !WorldContextCurrent(captured)) return true;
     publication.pending = EventHold {g_epoch, active, before.location.eventProgram};
+    // VUH-2359: a checked in-field event start travels with its Acquire (EventStartMirror.hpp).
+    if (EventStart start; active && !travel && eventstartmirror::StartFor(before.context, start)) {
+        publication.pending->start = start;
+        if (g_log) g_log("[event-mirror] host publishes start id=%X flags=%X epoch=%u", start.id, start.flags, g_epoch);
+    }
     publication.context = captured;
     publication.retryDeadlineMs = GetTickCount64() + 3000;
     if (g_log) g_log("[event-hold] observed active=%u travel=%u epoch=%u state=%d context=%llX evt=%u frame=%u tid=%lu generation=%u delivery=%llu source=%llu releaseAfterRoom=%u",
@@ -3626,7 +3632,8 @@ bool EventControlScopeCurrent(const eventhold::Scope& scope) {
         scope.targetDelivery == g_bridge.DeliverySerial();
 }
 void ObserveEventControl(const WorldScope& source, eventhold::Kind kind, std::uint32_t epoch,
-                         const RoomTransition* room, std::uint16_t eventProgram) {
+                         const RoomTransition* room, std::uint16_t eventProgram,
+                         const EventStart* start = nullptr) {
     if (!eventholdnative::Enabled() || CurrentRole() != Role::Client || source.sessionId.size() != 32) return;
     eventhold::Scope scope {};
     std::memcpy(scope.session, source.sessionId.data(), sizeof(scope.session));
@@ -3639,7 +3646,7 @@ void ObserveEventControl(const WorldScope& source, eventhold::Kind kind, std::ui
     }
     g_eventControlScope = scope;
     if (room) g_eventControlRoom = *room;
-    eventholdnative::Observe(scope, kind, source.hostSourceSerial, epoch, room, eventProgram);
+    eventholdnative::Observe(scope, kind, source.hostSourceSerial, epoch, room, eventProgram, start);
 }
 void AckEventControl() {
     if (!eventholdnative::Enabled() || g_role != Role::Client || !EventControlScopeCurrent(g_eventControlScope)) return;
@@ -3980,7 +3987,7 @@ bool ReceiveWorldPackets() {
                             hold.active != g_nativeResync->snapshot.hold.active ||
                             hold.eventProgram != g_nativeResync->snapshot.hold.eventProgram);
                     else ObserveEventControl(*scope, hold.active ? eventhold::Kind::Acquire : eventhold::Kind::Release,
-                                             hold.epoch, nullptr, hold.eventProgram);
+                                             hold.epoch, nullptr, hold.eventProgram, hold.start ? &*hold.start : nullptr);
                 }
                 continue;
             }

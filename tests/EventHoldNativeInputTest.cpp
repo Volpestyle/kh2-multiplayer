@@ -2,11 +2,17 @@
 #include "EventHoldInputState.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
 bool gameThreadKnown=true;
 namespace kh2coop::inject::spawncontroller { bool IsDiagnosticGameThread(){return gameThreadKnown;} bool DiagnosticGameThreadKnown(){return gameThreadKnown;} }
+// VUH-2359: the native start itself is game memory; the stub records the replay and answers it.
+bool replayStarts=true;unsigned replays=0;kh2coop::EventStart replayed{};std::uint16_t replayedProgram=0;
+namespace kh2coop::inject::eventstartmirror {
+bool Replay(const EventStart& s,std::uint16_t program) noexcept {++replays;replayed=s;replayedProgram=program;return replayStarts;}
+}
 namespace n=kh2coop::inject::eventholdnative;
 namespace e=kh2coop::eventhold;
 using namespace kh2coop;
@@ -58,6 +64,10 @@ int main(int argc,char** argv){
   f.FollowScene();check(fstep(10,1004).start,"following a scene presses Start to close the pause");
   fstep(10,1005);fstep(255,1006);check(f.Current()==S::Phase::OwnerWait,"pause closed");
   auto back=fstep(255,1007);check(back.released&&!back.timedOut&&!f.Holding(),"scene follow returns input without the owner's release");
+  const std::array<std::uint32_t,9> armor{1,0x702,0xFFFFFFFF,0xFFFF,1,0xFFFFFFFF,3,0,0};auto other=armor;other[6]=4;
+  check(kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,9,armor)&&!kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,9,other)&&
+        !kh2coop::eventscenes::QualifiedStart(2,7,97,0x343031,9,armor)&&!kh2coop::eventscenes::QualifiedStart(2,7,95,0x353031,9,armor)&&
+        !kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,2,armor),"only the observed in-field start, exactly, qualifies");
   check(kh2coop::eventscenes::Qualified(2,7,0,0,0,3)&&kh2coop::eventscenes::Qualified(2,4,0,81,81,81)&&
         kh2coop::eventscenes::Qualified(18,3,0,83,83,83)&&kh2coop::eventscenes::Qualified(2,19,0,136,136,136)&&
         !kh2coop::eventscenes::Qualified(2,19,50,1,0,2)&&!kh2coop::eventscenes::Qualified(2,13,0,135,135,135)&&
@@ -110,6 +120,20 @@ int main(int argc,char** argv){
  n::Observe(scope,e::Kind::Acquire,16,3,nullptr,1);n::Observe(scope,e::Kind::Release,18,3,nullptr,22);
  n::OwnerAck(scope,3,true,true);tick();tick();tick();
  check(!n::HoldingInput()&&buttons()==0x4d4d,"second event releases only after fresh convergence and boundary");
+ // VUH-2359: an acquire carrying the host's in-field start plays it natively instead of the pause:
+ // no Start press, no hold, the exact arguments replayed. A refused replay keeps the ordinary hold.
+ acquire.hostSourceSerial=20;acquire.epoch=3;acquire.eventProgram=95;acquire.startWorld=2;acquire.startRoom=7;
+ acquire.startId=0x343031;acquire.startFlags=9;acquire.startParams={1,0x702,0xFFFFFFFF,0xFFFF,1,0xFFFFFFFF,3,0,0};
+ check(runtime.Publish(acquire,GetTickCount64()),"in-field event acquire published");tick();
+ check(replays==1&&replayed.id==0x343031&&replayed.flags==9&&replayed.worldId==2&&replayed.roomId==7&&replayedProgram==95&&
+       replayed.params==acquire.startParams,"the host's start is replayed with its exact arguments");
+ check(!n::HoldingInput()&&buttons()==0x4d4d&&runtime.Reason()==e::Abort::None,"a replayed in-field event takes no hold and no Start");
+ release.hostSourceSerial=21;release.epoch=3;
+ check(runtime.Publish(release,GetTickCount64()),"the host's release after a replayed event published");tick();
+ check(!n::HoldingInput()&&buttons()==0x4d4d,"a release after a replayed event has nothing to give back");
+ replayStarts=false;acquire.hostSourceSerial=22;
+ check(runtime.Publish(acquire,GetTickCount64()),"second in-field acquire published");tick();
+ check(replays==2&&buttons()==8&&n::HoldingInput(),"a refused replay falls back to the owned pause");
  }
  }
  }

@@ -833,9 +833,31 @@ Proofs on PC1 loopback:
   -> field 02/13 door 50 (hex rooms, as logged). Both seats ended at the same field location. The
   friend no longer waits about 48 s at its blocked exit.
 
+**In-field events (VUH-2359, protocol 27).** Some host events start inside a field room, with no
+location to load. The Armor Shop event (about 70 s) at 02/07 evt95 is one: a field script calls the
+native start `FUN_1403AC350(id "104", flags 9, params)`, and the params name where the game goes
+afterwards (02/07 evt3, the scene above).
+
+How the friend plays it:
+- `EventStartMirror` hooks that start on both seats. The host records each start that matches a row
+  of `InFieldEvents` in `EventScenes.hpp` exactly, taken in open field.
+- The event-hold Acquire for the context that start installed carries its arguments
+  (`EventHold.start`; the control command has the same fields).
+- A friend converged in the host's room and safe to pause calls the same native start with the same
+  arguments, instead of opening the pause. It plays the event with its own camera and dialog.
+- At the event's end the friend's own exit is blocked, and it takes the host's next rooms (the scene,
+  then evt97). Every progress version the host sends is applied on arrival.
+- Anything else, or a refused replay, keeps the pause hold.
+
+Proof: run `20261019-090818` (PC1 loopback, unskipped prologue). The friend played the whole Armor
+Shop event and both seats got control at 02/07 evt97 with both Roxases. `coop_verdict` passed, and
+the saves were unchanged.
+
 Limits:
-- The Armor Shop's main event (about 70 s) runs inside the field room 02/07 evt95. It has no location
-  to load, so the friend still holds for it. Mirroring it would need the event start itself mirrored.
+- Only the Armor Shop start is a checked in-field row so far. Other in-field events keep the hold
+  until a host start for them is observed and added.
+- Each seat advances its own dialog, so the seats finish at different times. The faster one waits at
+  its blocked exit until the host's next room arrives.
 - The basement proof warped the host into the scene, because the route pilot cannot win the Dusk
   fight before Axel.
 - A session that starts at a prologue field with no checked site (FM-02, Day 6 basement) holds input

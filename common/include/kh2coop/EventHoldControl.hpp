@@ -15,7 +15,7 @@
 #include <type_traits>
 
 namespace kh2coop::eventhold {
-inline constexpr std::uint32_t Version = 1;
+inline constexpr std::uint32_t Version = 2; // 2: Command carries the host's in-field event start
 inline constexpr std::uint32_t Capacity = 32;
 inline constexpr std::size_t SourceCapacity = 128;
 inline constexpr std::uint64_t HeartbeatTimeoutMs = 1500;
@@ -44,6 +44,10 @@ struct Command {
     Kind kind {Kind::Reset};
     std::uint32_t epoch {};
     std::uint16_t world {}, room {}, door {}, map {}, battle {}, eventProgram {};
+    // VUH-2359: an Acquire's in-field event start (startId 0: none); world/room of the start.
+    std::uint16_t startWorld {}, startRoom {};
+    std::uint32_t startId {}, startFlags {};
+    std::array<std::uint32_t, 9> startParams {};
     bool operator==(const Command&) const = default;
 };
 struct Ack {
@@ -53,7 +57,7 @@ struct Ack {
 };
 static_assert(std::is_trivially_copyable_v<Command> && std::is_standard_layout_v<Command>);
 static_assert(std::is_trivially_copyable_v<Ack> && sizeof(Ack) % 8 == 0);
-static_assert(sizeof(Scope) == 72 && sizeof(Command) == 112 && sizeof(Ack) == 96,
+static_assert(sizeof(Scope) == 72 && sizeof(Command) == 160 && sizeof(Ack) == 96,
               "versioned Windows control ABI changed");
 
 class Channel {

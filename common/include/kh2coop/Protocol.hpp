@@ -11,7 +11,7 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 26;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 27;
 
 // ===========================================================================
 // Protocol v26 adds SeatState (53): each seat's selected profile and prologue readiness (VUH-2464).
@@ -188,11 +188,24 @@ struct TransitionAck {
     bool arrived {false};            // false = load failed / diverged
 };
 
-// Host entered (active) or left a cutscene/event; clients hold meanwhile.
+// VUH-2359: the arguments of the host's native in-field event start (FUN_1403AC350), in the field
+// location it started from. Only checked rows are published (EventScenes.hpp InFieldEvents).
+struct EventStart {
+    std::uint16_t worldId {0};
+    std::uint16_t roomId {0};
+    std::uint32_t id {0};       // the event's three-character name, little-endian ("104" = 0x343031)
+    std::uint8_t flags {0};
+    std::array<std::uint32_t, 9> params {};
+    bool operator==(const EventStart&) const = default;
+};
+
+// Host entered (active) or left a cutscene/event; clients hold meanwhile. An active hold may carry
+// the host's in-field event start: a friend in the same field location plays it natively instead.
 struct EventHold {
     std::uint32_t epoch {0};
     bool active {false};
     std::uint16_t eventProgram {0};
+    std::optional<EventStart> start {};
 };
 
 // Deterministic enemy identity (plan D5): room + battle program + spawn

@@ -1,6 +1,7 @@
 #include "EventHoldNative.hpp"
 #include "EventHoldInputState.hpp"
 #include "NativeSpawnController.hpp"
+#include "EventStartMirror.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include <atomic>
@@ -102,7 +103,8 @@ void RetireOwner() noexcept {
     ownerScope = {}; consumedCount = 0; ownerOrdinal = 0;
 }
 void Observe(const eventhold::Scope& scope, eventhold::Kind kind, std::uint64_t source,
-             std::uint32_t epoch, const RoomTransition* room, std::uint16_t eventProgram) {
+             std::uint32_t epoch, const RoomTransition* room, std::uint16_t eventProgram,
+             const EventStart* start) {
     if (!Enabled() || !eventhold::ValidScope(scope) || !source || !epoch) return;
     if (eventhold::ValidScope(ownerScope) && ownerScope != scope) { RetireOwner(); return; }
     ownerScope = scope;
@@ -111,6 +113,10 @@ void Observe(const eventhold::Scope& scope, eventhold::Kind kind, std::uint64_t 
     if (room) {
         fact.world = room->worldId; fact.room = room->roomId; fact.door = room->door;
         fact.map = room->mapProgram; fact.battle = room->battleProgram;
+    }
+    if (start) {
+        fact.startWorld = start->worldId; fact.startRoom = start->roomId; fact.startId = start->id;
+        fact.startFlags = start->flags; fact.startParams = start->params;
     }
     for (std::size_t i = 0; i < consumedCount; ++i) if (SameFact(consumed[i], fact)) return;
     if (consumedCount == consumed.size()) { channel.Invalidate(eventhold::Abort::Overflow); return; }
@@ -177,7 +183,16 @@ bool ApplyInput(void* inputStruct) {
             eventhold::Ack ack {};
             const bool hostRoom = channel.ReadAck(ack) && ack.scope == command.scope && ack.epoch == command.epoch &&
                 ack.flags == (eventhold::SafeConverged | eventhold::LiveEligible);
-            if ((!hostRoom || !input.Acquire(native.value)) && log)
+            // VUH-2359: the host's checked in-field event plays natively here instead of the pause; the
+            // friend leaves it like a scene (its own exit blocked, the host's next room taken).
+            EventStart start {};
+            start.worldId = command.startWorld; start.roomId = command.startRoom; start.id = command.startId;
+            start.flags = static_cast<std::uint8_t>(command.startFlags); start.params = command.startParams;
+            const bool mirrored = hostRoom && command.startId && command.startFlags <= 0xFF && !input.Holding() &&
+                native.value.healthy && native.value.safeToPause && eventstartmirror::Replay(start, command.eventProgram);
+            if (mirrored) {
+                if (log) log("[event-mirror] client plays the host's in-field event epoch=%u id=%X", command.epoch, command.startId);
+            } else if ((!hostRoom || !input.Acquire(native.value)) && log)
                 log("[event-control] hold skipped epoch=%u hostRoom=%u ackEpoch=%u ackFlags=%u menu=%u safe=%u holding=%u",
                     command.epoch, hostRoom ? 1u : 0u, ack.epoch, ack.flags, native.value.menu,
                     native.value.safeToPause ? 1u : 0u, input.Holding() ? 1u : 0u);

@@ -42,4 +42,30 @@ inline const Scene* Qualified(const RoomTransition& t) noexcept {
     return Qualified(t.worldId, t.roomId, t.door, t.mapProgram, t.battleProgram, t.eventProgram);
 }
 
+// In-field events: a host event that starts inside a field room (no location to load) through the
+// native start FUN_1403AC350(id, flags, params). The host publishes the exact arguments with its event
+// hold, and a friend standing in the same field location starts the same event natively, then follows
+// the host out of it as from a scene. Each row is an observed host start, matched exactly (run
+// 20261019-083939: the Armor Shop event, about 70 s, which then loads tt07-armor-shop above); anything
+// else keeps the event hold.
+struct InFieldEvent {
+    std::uint16_t world, room, eventProgram;
+    std::uint32_t id;
+    std::uint8_t flags;
+    std::array<std::uint32_t, 9> params;
+    std::string_view name;
+};
+inline constexpr std::array<InFieldEvent, 1> InFieldEvents {{
+    {2, 7, 95, 0x343031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-armor-shop-104"},
+}};
+inline const InFieldEvent* QualifiedStart(std::uint16_t world, std::uint16_t room, std::uint16_t eventProgram,
+                                          std::uint32_t id, std::uint8_t flags,
+                                          const std::array<std::uint32_t, 9>& params) noexcept {
+    for (const auto& e : InFieldEvents)
+        if (e.world == world && e.room == room && e.eventProgram == eventProgram && e.id == id && e.flags == flags &&
+            e.params == params)
+            return &e;
+    return nullptr;
+}
+
 }  // namespace kh2coop::eventscenes

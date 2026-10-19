@@ -18,6 +18,8 @@ namespace kh2coop {
 
 namespace {
 void rsRequire(bool value) { if (!value) throw std::runtime_error("resync: invalid bounded record"); }
+// A snapshot carries only the hold's state, never an in-field event start (VUH-2359).
+void rsHold(ByteWriter& w, const EventHold& h) { rsRequire(!h.start); w.writeU32(h.epoch); w.writeBool(h.active); w.writeU16(h.eventProgram); }
 void rsEnd(ByteReader& r) { rsRequire(r.atEnd()); }
 void rsSession(const std::string& s) {
     rsRequire(s.size()==32 && std::all_of(s.begin(),s.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');}));
@@ -254,7 +256,7 @@ ResyncDigest resyncNativeFingerprint(const ResyncSnapshot& m) {
     for (const char byte : domain) w.writeU8(static_cast<std::uint8_t>(byte)); // includes NUL
     const bool witness = m.coverageMask == ResyncNativeComplete;
     w.writeU8(witness ? 1 : 0); // explicit even for the synthetic 127 path
-    write(w, m.room); write(w, m.hold);
+    write(w, m.room); rsHold(w, m.hold);
     const auto progress = rsProgress(m.progress);
     for (const auto& [offset, byte] : progress) { w.writeU32(offset); w.writeU8(byte); }
     w.writeU32(m.livingCount); w.writeU32(m.deadCount);
@@ -286,7 +288,7 @@ ResyncDigest resyncNativeFingerprint(const ResyncSnapshot& m) {
 void write(ByteWriter& w, const ResyncSnapshot& m) {
     rsSnapshotValid(m); rsRequire(m.nativeFingerprint == resyncNativeFingerprint(m));
     const auto start = w.size();
-    write(w,m.room);write(w,m.hold);write(w,m.progress);w.writeU64(m.hpSequence);
+    write(w,m.room);rsHold(w,m.hold);write(w,m.progress);w.writeU64(m.hpSequence);
     w.writeU16(static_cast<std::uint16_t>(m.enemies.size()));for(const auto& e:m.enemies)rsEnemy(w,e);
     w.writeU32(m.livingCount);w.writeU32(m.deadCount);w.writeU32(m.coverageMask);w.writeU32(m.generation);
     w.writeU32(m.transitionSerial);w.writeU32(m.loadSerial);w.writeU64(m.captureFrameBefore);w.writeU64(m.captureFrameAfter);
@@ -731,9 +733,17 @@ void write(ByteWriter& w, const HostActivationPoint& m) {
 }
 
 void write(ByteWriter& w, const EventHold& m) {
+    if (m.start && (!m.active || !m.start->id)) throw std::runtime_error("EventHold start without an active event");
     w.writeU32(m.epoch);
     w.writeBool(m.active);
     w.writeU16(m.eventProgram);
+    w.writeBool(m.start.has_value());
+    if (!m.start) return;
+    w.writeU16(m.start->worldId);
+    w.writeU16(m.start->roomId);
+    w.writeU32(m.start->id);
+    w.writeU8(m.start->flags);
+    for (const auto p : m.start->params) w.writeU32(p);
 }
 
 void write(ByteWriter& w, const EnemyManifest& m) {
@@ -1389,6 +1399,16 @@ void read(ByteReader& r, EventHold& m) {
     m.epoch = r.readU32();
     m.active = r.readBool();
     m.eventProgram = r.readU16();
+    m.start.reset();
+    if (!r.readBool()) return;
+    EventStart s;
+    s.worldId = r.readU16();
+    s.roomId = r.readU16();
+    s.id = r.readU32();
+    s.flags = r.readU8();
+    for (auto& p : s.params) p = r.readU32();
+    if (!m.active || !s.id) throw std::runtime_error("EventHold start without an active event");
+    m.start = s;
 }
 
 void read(ByteReader& r, EnemyManifest& m) {

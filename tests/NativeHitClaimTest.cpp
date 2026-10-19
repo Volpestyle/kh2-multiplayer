@@ -197,6 +197,10 @@ RoomTransition ReadLocation() {
 std::uint32_t HostIssuedLoadEpoch(const RoomTransition&) { return 0; }
 void HostTargetSpawnPick(std::uint8_t& shared, std::uint32_t& saltTag) { shared = 0; saltTag = 0; }  // VUH-1515 spawn picks: no host-issued load here
 }
+namespace kh2coop::inject::eventstartmirror {
+bool StartFor(std::uintptr_t, EventStart&) noexcept { return false; }
+bool Replay(const EventStart&, std::uint16_t) noexcept { return false; }
+}
 namespace kh2coop::inject::lifecycletrace {
 bool PopEvent(Event&) { return false; }
 Stats GetStats() { return {}; }

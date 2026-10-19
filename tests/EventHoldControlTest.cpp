@@ -61,6 +61,25 @@ int main() try {
         Ack ack {}; require(f.input.ReadAck(ack) && !(ack.flags&SafeConverged),"release transport cannot mint convergence");
         require(f.owner.PublishAck({f.s,4,12,2,SafeConverged}),"later actual convergence ACK");
     });
+    test("an acquire carries the host's in-field event start exactly", [] {
+        // VUH-2359: wire round trip, projection into the input command, and the codec's refusals.
+        EventStart start {2, 7, 0x343031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}};
+        EventHold held {1, true, 95, start};
+        const auto bytes = encode(held);
+        const std::uint8_t* payload = nullptr; std::size_t size = 0;
+        require(decodePacketHeader(bytes.data(), bytes.size(), payload, size) == PacketType::EventHold, "header");
+        ByteReader reader(payload, size); EventHold back {}; read(reader, back);
+        require(reader.atEnd() && back.start && *back.start == start && back.eventProgram == 95, "start round trip");
+        bool refused = false;
+        try { (void)encode(EventHold {1, false, 95, start}); } catch (const std::exception&) { refused = true; }
+        require(refused, "a release cannot carry a start");
+        Fixture f; f.arm();
+        require(f.projection.Admit(envelope(f.s, 8, bytes), f.s, true, f.now) == Admission::Published, "published");
+        const auto c = f.pop();
+        require(c.kind == Kind::Acquire && c.eventProgram == 95 && c.startWorld == 2 && c.startRoom == 7 &&
+            c.startId == 0x343031 && c.startFlags == 9 && c.startParams == start.params, "command carries the start");
+        require(f.hold(false, 1, 9) == Admission::Published && f.pop().startId == 0, "a release carries none");
+    });
     test("acquire and release cannot overwrite", [] {
         Fixture f; f.arm(); require(f.hold(true,1,8)==Admission::Published && f.hold(false,1,9)==Admission::Published,"back-to-back publication");
         require(f.pop().kind==Kind::Acquire && f.pop().kind==Kind::Release,"both remain FIFO");

@@ -54,7 +54,7 @@ ResyncSnapshot fixture() {
 // Frozen pre-trailer layout, independently written so absence is byte-compatible.
 std::vector<std::uint8_t> legacyBytes(const ResyncSnapshot& s) {
     ByteWriter w;
-    write(w, s.room); write(w, s.hold); write(w, s.progress); w.writeU64(s.hpSequence);
+    write(w, s.room); w.writeU32(s.hold.epoch); w.writeBool(s.hold.active); w.writeU16(s.hold.eventProgram); write(w, s.progress); w.writeU64(s.hpSequence);
     w.writeU16(static_cast<std::uint16_t>(s.enemies.size()));
     for (const auto& e : s.enemies) {
         w.writeU16(e.identity.netId); w.writeU16(e.identity.battleProgram); w.writeU16(e.identity.spawnIndex);
