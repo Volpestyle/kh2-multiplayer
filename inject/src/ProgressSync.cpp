@@ -390,6 +390,11 @@ bool ReadHash(std::uint32_t& hash) {
     if (!SafeGameplay() || g_personalFailure || g_role == Role::Off ||
         (g_role == Role::Host && !HostReady()) ||
         (g_role == Role::Client && !g_clientFull)) return false;
+    // VUH-2356: a client held at its own blocked exit carries the story flags its own copy of the
+    // host's event wrote (the Axel defeat sets 1CE1 bits 0x10/0x20 and 1CE9 bits 0x90 there before the
+    // host publishes them). That is presentation, not progress: it publishes no hash until the host's
+    // room and progress replace it at the next boundary.
+    if (g_role == Role::Client && warp::WaitingAtBlockedExit()) return false;
     Save live {};
     if (!ReadSave(live)) return false;
     if (g_role == Role::Client && !g_desiredApplied) {

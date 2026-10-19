@@ -37,6 +37,13 @@ int main(){
     Check(field(rows[0],"enemiesHash")==std::to_string(hashAppliedEnemies({{1,309,1000}}))&&field(rows[0],"connection")=="101"&&field(rows[0],"contextCurrent")=="1"&&field(rows[0],"generation")=="1"&&field(rows[0],"delivery")=="1","actual publisher receipt matches decoded H and current bridge context");
     Check(field(rows[0],"world")=="5"&&field(rows[0],"room")=="2"&&field(rows[0],"door")=="3"&&field(rows[0],"map")=="4"&&field(rows[0],"battle")=="6"&&field(rows[0],"event")=="8"&&field(rows[0],"load")=="11"&&field(rows[0],"transition")=="7","full native tuple and lifecycle captured from actual census");
     Check(field(rows[0],"hostSource")=="0"&&g_bridge.outgoingContexts.back().hostSourceSerial==0,"client actual enqueue source serial is zero, not invented publication identity");
+    // VUH-2356: a client held at its own blocked exit carries its own event's story writes; it
+    // publishes no hash until the host's next room replaces them.
+    start();waitingAtExit=true;publish();waitingAtExit=false;
+    Check(g_bridge.outgoing.empty(),"a client waiting at its own blocked exit publishes no hash");
+    start();Reset(false);waitingAtExit=true;SetHashDiagnosticSink(sink);publish();waitingAtExit=false;
+    Check(HasNativeSummary(hashAppliedEnemies({{1,309,1000}}), 1, 1),
+          "the host is never withheld for that client-only wait");
     start();Reset(false);SetHashDiagnosticSink(sink);publish();
     Check(HasNativeSummary(hashAppliedEnemies({{1,309,1000}}), 1, 1),
           "actual host publisher encodes the same complete native summary");

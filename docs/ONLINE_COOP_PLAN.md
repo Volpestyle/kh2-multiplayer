@@ -337,6 +337,30 @@ and party before input release. Matching final flags does not establish that
 mid-scene ownership was safe. Native free/fight cameras must still follow each
 chosen actor after Axel and the Sora-morning handoff.
 
+VUH-2356 outcome (2026-10-19). The SAVE diff of both seats in Axel's room (02/14) names the flags:
+- The host's own Axel defeat event sets story `SAVE+0x1CE1` bit `0x10` and `SAVE+0x1CE9` bits
+  `0x80|0x10` (later also `1CE1` `0x20`).
+- The friend's copy of the event sets `1CE1` bit `0x10` seconds later. It does not set `1CE9` until
+  the host's progress reaches it (run `20261019-124340`, `progress_snapshot` before and after a
+  native Axel kill).
+- The host only publishes these at the field after the post-Axel chain (v6).
+- In the original run (`20261017-035405`), the friend reported its own event's state (`53CE558E`)
+  for 48 s while it waited at its blocked exit to the unpublished 02/13 135 scene. That wait was
+  both the desync and the white screen.
+
+Decision: the friend's copy runs, as native presentation (VUH-2359 publishes the scene chain, so the
+friend's exit matches the host's at once). Its story writes are never committed:
+- A client waiting at its own blocked exit publishes no progress hash
+  (`progresssync::ReadHash`).
+- The host's progress replaces the client's state at the next room boundary, as before.
+
+Rerun `20261019-125518` (`d15_basement_kills`: pad pilot plus native kills in place of focus and
+keyboard fights) shows:
+- no relay desync;
+- every friend progress hash equal to a host version;
+- four blocked exits, all the host's announced rooms and taken at once;
+- `coop_verdict` passes.
+
 ### Ordered build issues and acceptance
 
 All new slices are Backlog until this plan is reviewed; the lead schedules them

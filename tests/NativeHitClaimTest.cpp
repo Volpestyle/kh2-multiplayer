@@ -144,7 +144,7 @@ bool QueueHostTransition(const RoomTransition&, const ProducerWorldContext&, con
 namespace {
 int errors = 0;
 std::uint32_t transition = 7, load = 11;
-bool pendingTransition = false, arrived = true, productionWorldMode = false;
+bool pendingTransition = false, arrived = true, productionWorldMode = false, waitingAtExit = false;
 unsigned mutableArrivalCalls = 0;
 kh2coop::RoomTransition arrivalTarget {};
 uintptr_t image = 0, player = 0, enemy = 0, object = 0, status = 0;
@@ -186,6 +186,7 @@ bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept {
            enemysync::SameLocation(location, arrivalTarget);
 }
 bool TransitionPending() { return productionWorldMode ? recoverywarp::TransitionPending() : pendingTransition; }
+bool WaitingAtBlockedExit() { return productionWorldMode ? recoverywarp::WaitingAtBlockedExit() : waitingAtExit; }
 bool HostTravelling() { return productionWorldMode && recoverywarp::HostTravelling(); }  // VUH-2341 World Map
 std::uint32_t TransitionSerial() { return productionWorldMode ? recoverywarp::TransitionSerial() : transition; }
 std::uint32_t LoadSerial() { return productionWorldMode ? recoverywarp::LoadSerial() : load; }
