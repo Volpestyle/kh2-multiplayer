@@ -574,7 +574,11 @@ static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int 
     delta = downedspike::StatDelta(actor, delta, idx, downedSkip, downedValue);
     if (downedSkip) return downedValue; // VUH-2465: a logically downed player's HP does not change
     using namespace nativehittrace;
-    if (!CanCaptureChild()) return ApplyStatDeltaBody(actor, delta, idx, reactFlag);
+    if (!CanCaptureChild()) {
+        const int value = ApplyStatDeltaBody(actor, delta, idx, reactFlag);
+        if (idx == 0) enemysync::NoteNativeEnemyHp(reinterpret_cast<uintptr_t>(actor), value); // VUH-2495
+        return value;
+    }
     const auto address = reinterpret_cast<uintptr_t>(actor);
     uintptr_t callerRva = 0;
     const bool callerAvailable = HitTraceCaller(reinterpret_cast<uintptr_t>(_ReturnAddress()), callerRva);
@@ -592,6 +596,7 @@ static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int 
         EndStat(token, normal && !AbnormalTermination(), result,
                 normal && !AbnormalTermination() ? &after : nullptr);
     }
+    if (idx == 0) enemysync::NoteNativeEnemyHp(address, result); // VUH-2495
     return result;
 }
 

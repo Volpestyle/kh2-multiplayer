@@ -1250,6 +1250,13 @@ runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1Ã¢â‚¬â€œ2
   - New enemies go out as `EnemyManifest` (netId = spawn index + 1).
   - `EnemyHp` goes out about every 6 frames.
   - `EnemyDeath` is sent once per netId, when HP first reaches 0.
+  - VUH-2495: the census that sees HP 0 runs only in open field play. When the killing hit lands on the
+    frame a fight-end event starts, the census next sees the enemy already gone from the list, with its
+    last HP still positive, and the room can end within the 3 s despawn grace, so the death was never
+    sent (run `20261019-150147`: the hall's last Dusk stayed alive on the friend). The host now also
+    records a kill at the hooked `0x3D2EB0` funnel (an announced enemy brought to 0). The first census
+    that finds it gone publishes a real death (`left=0`) at once, not a leave or nothing. Debug kills
+    through `kh2ctl hit kill` bypass the hook; `hit damage` takes the real path.
 - **Host despawns.** Some enemies leave the list alive: the courtyard
   Shadow on its ledge spawn point, host only; and Dusks (M_EX900), which
   vanish and reappear as new actors.

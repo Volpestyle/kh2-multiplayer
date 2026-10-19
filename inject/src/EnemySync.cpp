@@ -6186,6 +6186,17 @@ bool SendCapturedWorld(const std::vector<std::uint8_t>& packet, const ProducerWo
     return true;
 }
 
+void NoteNativeEnemyHp(uintptr_t actor, int hp) noexcept {
+    if (hp > 0 || g_role != Role::Host || !g_inst.live || !actor) return;
+    const auto found = g_inst.byActor.find(actor);
+    if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return;
+    auto& s = g_inst.spawns[found->second];
+    if (s.actor != actor || !s.announced || s.deathSent || s.lifecycleRetired || s.lastHp <= 0) return;
+    s.lastHp = 0;
+    SYNC_LOG("[enemysync] host native kill netId=%u objectId=%u epoch=%u: recorded at the funnel", s.spawnIndex + 1,
+             s.objectId, g_epoch);
+}
+
 std::uint8_t ActivationRole() {
     CheckActivationGeneration();
     return static_cast<std::uint8_t>(CurrentRole());
