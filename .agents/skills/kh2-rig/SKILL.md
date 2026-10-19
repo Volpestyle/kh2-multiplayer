@@ -71,6 +71,9 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 - **Relay lifetime** is about 12 minutes (720 s). Don't explore routes on the relay clock; work routes out offline first.
 - **MP4s can't be decoded until finalized** (the `moov` atom). Stop a short sample before checking it.
 - **Clip-helper cleanup:** if a runner-owned `kh2ctl clip` is terminated during encoding, its ffmpeg child can survive. At closure, query children by the retained helper PID, creation time and clip command; stop only verified owned children and confirm their exit. Never kill every ffmpeg process.
+- **A first-chance AV can kill the game even inside `__try`:** the game process has the CLR loaded and its vectored handler can recurse to a stack overflow (WER `clr.dll+0x5F8BC0`). Full dumps land in `build/wer-dumps/` (WER LocalDumps); the original exception is an `EXCEPTION_RECORD` on the faulting stack (see `docs/LESSONS_LEARNED.md`, 2026-10-18). Validate pointers before reading them on per-frame paths.
+- **Pilot HP in a prologue party:** `pilot.py` reads HP at the fixed `SLOT0_HP` address (status pool index 79). With the VUH-2464 prologue layout that record belongs to the remote seat's clone, so the pilot's heal and Game Over checks would follow the clone.
+- **Tutorial boxes block movement and reactions** until Cross dismisses them (Tram Common's move/jump box, the reaction-command box). A scripted `kh2ctl player-move` there moves nothing; the pilot's `press confirm` then `hold W` works.
 - **Clip timing:** `kh2ctl clip` and the scenario `clip` step block while recording and encoding. To film an action, start the canonical clip command as a runner-owned helper before that action, and collect it before any screenshot on the same instance. Each clip is limited to30 seconds. Check finalized early frames for real game motion; retain the reported before/during capture frame rates.
 
 ## Safety (unchanged rules, so you don't re-derive them)

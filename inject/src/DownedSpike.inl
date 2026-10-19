@@ -218,13 +218,22 @@ static Snap Capture(uintptr_t actor) {
     ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, s.objentry);
     ReadHitTrace(actor + 0xDC0, s.ctrl);
     ReadHitTrace(actor + 0xDD0, s.aux);
-    if (ReadHitTrace(actor + 0x5C0, s.status) && s.status) {
+    // VUH-2464: follow pointers only from a player-class head. An event's list head is not one: its
+    // +0x5C0 held float data (0xBF365525) at the Tram Common Armor Shop event, and the guarded read's
+    // first-chance AV took the game down through the CLR's vectored handler (runs 175014, 182550).
+    std::uint8_t type = 0xFF;
+    const bool player = s.objentry > g_exeBase && s.objentry < g_exeBase + 0x3000000 &&
+        ReadHitTrace(s.objentry + offsets::objentry::TYPE_FLAGS, type) && type == 0;
+    constexpr uintptr_t STATUS_POOL = 0x2A17290, STATUS_STRIDE = 0x278, STATUS_RECORDS = 80;
+    if (player && ReadHitTrace(actor + 0x5C0, s.status) && s.status >= g_exeBase + STATUS_POOL &&
+        s.status < g_exeBase + STATUS_POOL + STATUS_STRIDE * STATUS_RECORDS &&
+        (s.status - g_exeBase - STATUS_POOL) % STATUS_STRIDE == 0) {
         ReadHitTrace(s.status, s.hp);
         ReadHitTrace(s.status + 4, s.maxHp);
-    }
+    } else s.status = 0;
     uint32_t c24 = 0;
-    s.controllerOff = s.ctrl && ReadHitTrace(s.ctrl + 0x24, c24) && (c24 & 1U) != 0;
-    s.deadAction = ResolveIsDeadAction(actor);
+    s.controllerOff = player && s.ctrl && ReadHitTrace(s.ctrl + 0x24, c24) && (c24 & 1U) != 0;
+    s.deadAction = player && ResolveIsDeadAction(actor);
     return s;
 }
 

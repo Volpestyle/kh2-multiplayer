@@ -102,6 +102,13 @@ The native producer, consumer and requester described above exist in
 in `inject/src/EnemySync.cpp`. The names say "spike" because the live evidence
 was gathered under them; they are the feature, not throwaway code.
 
+`Tick` snapshots the entity-list head every frame. It follows the status,
+controller and dead-action pointers only when the head's objentry is
+player-class and the status pointer is an exact record of the native status
+pool (VUH-2464): during an event the head is another actor whose `+0x5C0` holds
+data, and a guarded read of it still killed the game through the in-process
+CLR (`docs/LESSONS_LEARNED.md`, 2026-10-18).
+
 **Feature flag: `KH2COOP_DOWNED_SPIKE=1`.** On in the player package
 (`tools/launcher/friend_package.py`, VUH-2269); off for direct developer
 launches. Unless the variable is

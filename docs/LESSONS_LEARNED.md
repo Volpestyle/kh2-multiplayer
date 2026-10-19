@@ -299,3 +299,25 @@ Main PollPuppetPoses used to zero canonical Sora Drive status2A23748/49 whenever
 Empty-seat run20261008-011955 failed capture because the host crashed entering pause, not because its capture timeout was too short. A zero-byte rig dump concealed the original exception behind CLR recursion during in-process MiniDumpWriteDump; the retained WER dump recovered the native null descriptor read. Inspect the original exception below crash-handler frames before assigning the final WER module as the cause.
 
 Native menu entries compact away zero members but retain their original row seat. Callers of a row-seat API must translate through that saved field; auditing the callee alone misses dense-index assumptions in callers. Native companion-history loops also assume every compact entry after the first is an AI companion: Sora/Roxas can derive negative companion bitset indices even with a trailing empty seat. Keep player history separate, preserve the native zero-key skip, and scope any translation to proven callers and physically owned layouts. A passing native OFF menu does not prove sparse-party menu safety. The bounded pause/first-Items fix does not qualify Party/change or deeper Items navigation.
+
+## A guarded read can still kill KH2: the in-process CLR (2026-10-18)
+
+KH2 runs with the .NET CLR loaded in-process on PC1 (`clr.dll`, `mscoreei.dll`
+in the pilot's `modules.json`), and the CLR's vectored exception handler runs
+before our frame handlers. Two VUH-2464 runs (`20261018-175014`,
+`20261018-182550`) exited at the same Tram Common event with WER bucket
+`clr.dll+0x5F8BC0`, a stack overflow inside recursive CLR exception dispatch.
+The full WER dumps (`LocalDumps` writes them to `build/wer-dumps/`) held the
+original exception under that recursion: a 4-byte `memcpy` AV on `0xBF365525`
+in `downedspike::Capture`'s SEH-guarded read of the list head's `+0x5C0`
+status pointer. During an event the list head is not a player-class actor, and
+that field holds float data. The `__except` would have returned false; the
+first-chance AV never reached it.
+
+So `__try` is not enough on per-frame paths: validate a pointer before following
+it (objentry type, the status pool's exact record range) rather than letting a
+guarded read fault. To find the real fault without a debugger, parse the dump
+with Python `minidump`, search the faulting thread's stack for an
+`EXCEPTION_RECORD`, read the CONTEXT 0x4F0 bytes below it, and map DLL return
+addresses through `.pdata` and their string references (the release DLL has no
+PDB).
