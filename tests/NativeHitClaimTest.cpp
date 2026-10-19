@@ -200,6 +200,7 @@ void HostTargetSpawnPick(std::uint8_t& shared, std::uint32_t& saltTag) { shared 
 namespace kh2coop::inject::eventstartmirror {
 bool StartFor(std::uintptr_t, EventStart&) noexcept { return false; }
 bool Replay(const EventStart&, std::uint16_t) noexcept { return false; }
+void LogOrigin(std::uintptr_t, std::uint32_t) noexcept {}
 }
 namespace kh2coop::inject::lifecycletrace {
 bool PopEvent(Event&) { return false; }

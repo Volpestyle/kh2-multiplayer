@@ -1843,6 +1843,8 @@ void QueueHostBeginInstance(const RoomTransition& location) {
     }
 }
 
+RoomTransition g_hostAnnouncedRoom {};  // the last room HostBeginInstance published
+
 struct HostEventObservation {
     std::int32_t state = 0;
     uintptr_t context = 0;
@@ -1906,12 +1908,18 @@ bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
     const bool active = (before.state >= 2 && before.state <= 4) || before.context != 0 || travel;
     const bool idle = before.state == 0 && before.context == 0 && !travel;
     if ((!active && !idle) || active == publication.activePublished) return true;
+    // VUH-2487: an event that starts with a checked scene's own load (tt13-basement-entry) is announced
+    // as that scene first, so its hold carries the scene's epoch and a friend already loading the
+    // scene is not paused on the way.
+    if (active && !travel && eventscenes::Qualified(before.location) &&
+        !SameLocation(g_hostAnnouncedRoom, before.location)) return true;
     if (!active && (!allowRelease || !SafeNativeGameplay() || g_hostBeginPending || !g_inst.live)) return true;
     ProducerWorldContext captured;
     if (!CaptureWorldContext(captured) || !ReadHostEventObservation(after) ||
         !SameHostEventObservation(before, after) || !WorldContextCurrent(captured)) return true;
     publication.pending = EventHold {g_epoch, active, before.location.eventProgram};
     // VUH-2359: a checked in-field event start travels with its Acquire (EventStartMirror.hpp).
+    if (active && !travel) eventstartmirror::LogOrigin(before.context, g_epoch);
     if (EventStart start; active && !travel && eventstartmirror::StartFor(before.context, start)) {
         publication.pending->start = start;
         if (g_log) g_log("[event-mirror] host publishes start id=%X flags=%X epoch=%u", start.id, start.flags, g_epoch);
@@ -1939,6 +1947,7 @@ bool HostBeginInstance() {
     const RoomTransition& t = g_pendingHostRoom;
     ClearPendingHits(); // claims captured for the previous epoch never migrate
     g_epoch = t.epoch;
+    g_hostAnnouncedRoom = t;
     g_hostEventPublication.admittedRoom = g_pendingHostRoomContext;
     g_hostBeginPending = false;
     if (g_log) g_log("[enemysync] host arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",

@@ -3,6 +3,7 @@
 #include "NativePrivateStatus.hpp"
 #include "PlayerKit.hpp"
 #include "Warp.hpp"
+#include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/PrologueSeats.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
@@ -140,7 +141,12 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
     // is not one: it has no player actor and member 0 is still Sora. VUH-2486: a session that starts at
     // such a field (a mid-prologue save) has no layout to bind there, so the hold is bounded
     // (prologue::UnpinnedStart) and then this seat plays native solo, with a note on screen.
-    const bool unpinned = generation && !site && fieldOpen && !warp::TransitionPending() && PrologueScope();
+    // VUH-2487: a checked event-only scene location (EventScenes.hpp) reads as an open field for a frame
+    // before its event starts; a friend that follows the host's scene loads it too. It is never a field.
+    const bool scene = nowRead && eventscenes::Qualified(now[0], now[1], now[2], static_cast<std::uint16_t>(now[4] | (now[5] << 8)),
+                                                         static_cast<std::uint16_t>(now[6] | (now[7] << 8)),
+                                                         LocationOf(now).evt);
+    const bool unpinned = generation && !site && !scene && fieldOpen && !warp::TransitionPending() && PrologueScope();
     const auto start = g_unpinnedStart.Tick(unpinned && !g_released, now, nowMs);
     const bool early = start == prologue::UnpinnedStart::Step::Hold;
     if (start == prologue::UnpinnedStart::Step::Released && g_log)

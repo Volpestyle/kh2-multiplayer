@@ -22,13 +22,16 @@ struct Scene {
     std::uint16_t world, room, door, map, battle, event;
     std::string_view name;
 };
-inline constexpr std::array<Scene, 6> Scenes {{
+inline constexpr std::array<Scene, 7> Scenes {{
     {2, 7, 0, 0, 0, 3, "tt07-armor-shop"},           // event 104: Tram Common evt95 -> evt97
     {2, 7, 0, 0, 0, 4, "tt07-accessory-shop"},       // event 106: evt97 -> evt99
     {2, 4, 0, 81, 81, 81, "tt04-cat-lock-on"},       // event 108: Tram Common evt99 -> Sandlot evt76
     {2, 19, 0, 135, 135, 135, "tt13-after-axel"},    // basement hall 0x13: after the Axel fight (0x14, 137)
     {18, 3, 0, 83, 83, 83, "twtnw03-after-axel"},    // The World That Never Was (0x12) scene
     {2, 19, 0, 136, 136, 136, "tt13-after-twtnw"},   // back to the hall, then field 0x13 door 50
+    // VUH-2487, run 20261019-113001: entering the hall from the Computer Room loads it with event
+    // program 1, whose load starts event "612" (about 8 s), then the hall's Dusk fight at 134.
+    {2, 19, 0, 3, 0, 1, "tt13-basement-entry"},
 }};
 
 inline const Scene* Qualified(std::uint16_t world, std::uint16_t room, std::uint16_t door, std::uint16_t map,
@@ -46,8 +49,9 @@ inline const Scene* Qualified(const RoomTransition& t) noexcept {
 // native start FUN_1403AC350(id, flags, params). The host publishes the exact arguments with its event
 // hold, and a friend standing in the same field location starts the same event natively, then follows
 // the host out of it as from a scene. Each row is an observed host start, matched exactly (run
-// 20261019-083939: the Armor Shop event, about 70 s, which then loads tt07-armor-shop above); anything
-// else keeps the event hold.
+// 20261019-083939: the Armor Shop event, about 70 s, which then loads tt07-armor-shop above; run
+// 20261019-103812, VUH-2487: the Accessory Shop event, about 41 s, and the cat lock-on event, about
+// 93 s, the only other in-field starts of the prologue); anything else keeps the event hold.
 struct InFieldEvent {
     std::uint16_t world, room, eventProgram;
     std::uint32_t id;
@@ -55,8 +59,10 @@ struct InFieldEvent {
     std::array<std::uint32_t, 9> params;
     std::string_view name;
 };
-inline constexpr std::array<InFieldEvent, 1> InFieldEvents {{
+inline constexpr std::array<InFieldEvent, 3> InFieldEvents {{
     {2, 7, 95, 0x343031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-armor-shop-104"},
+    {2, 7, 97, 0x363031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-accessory-shop-106"},
+    {2, 7, 99, 0x383031, 9, {2, 0x402, 0x510051, 0x51, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-cat-lock-on-108"},
 }};
 inline const InFieldEvent* QualifiedStart(std::uint16_t world, std::uint16_t room, std::uint16_t eventProgram,
                                           std::uint32_t id, std::uint8_t flags,

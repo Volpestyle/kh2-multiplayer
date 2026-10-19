@@ -10,17 +10,28 @@
 namespace kh2coop::inject::eventstartmirror {
 namespace {
 using StartFn = void(__fastcall*)(std::uint32_t id, std::uint8_t flags, std::uint32_t* params);
+using InstallFn = void(__fastcall*)(std::uint32_t* context);
 constexpr std::uintptr_t RVA_EVENT_START = 0x3AC350;
+// VUH-2487: the other event builders (entity, trigger and named events) build a context and hand it
+// to 3AD2D0; its caller names the builder. Observation only, for the host's event-origin line.
+constexpr std::uintptr_t RVA_EVENT_INSTALL = 0x3AD2D0;
+// 3AD2D0 prologue: mov [rsp+8],rbx; mov [rsp+10h],rsi; push rdi; sub rsp,40h
+constexpr std::uint8_t kInstallBytes[15] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10,
+                                            0x57, 0x48, 0x83, 0xEC, 0x40};
 // 3AC350 prologue: mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi
 constexpr std::uint8_t kStartBytes[15] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10,
                                           0x48, 0x89, 0x74, 0x24, 0x18};
 std::uintptr_t g_base = 0;
 LogFn g_log = nullptr;
 StartFn g_original = nullptr;
+InstallFn g_installOriginal = nullptr;
 std::atomic<bool> g_installed {false};
 // Game thread only (the native start and the host producer both run there).
 std::uintptr_t g_context = 0;
 EventStart g_start {};
+bool g_checked = false;
+std::uint16_t g_startProgram = 0;
+std::uintptr_t g_installContext = 0, g_installCaller = 0;
 bool g_replaying = false;
 
 struct Field {
@@ -53,15 +64,28 @@ bool CopyParams(const std::uint32_t* params, std::array<std::uint32_t, 9>& out) 
 void __fastcall HookedStart(std::uint32_t id, std::uint8_t flags, std::uint32_t* params) {
     Field before {};
     EventStart s {};
-    const bool checked = !g_replaying && ReadField(before) && Open(before) && params && CopyParams(params, s.params) &&
+    // Every start taken in open field is recorded with its arguments (the trace each checked row
+    // comes from, VUH-2487); only a checked one is ever published.
+    const bool open = !g_replaying && ReadField(before) && Open(before) && params && CopyParams(params, s.params);
+    const bool checked = open &&
         eventscenes::QualifiedStart(before.now[0], before.now[1], EventProgram(before), id, flags, s.params);
     g_original(id, flags, params);
-    if (!checked) return;
+    if (!open) return;
     s.worldId = before.now[0]; s.roomId = before.now[1]; s.id = id; s.flags = flags;
     g_context = ReadContext();
     g_start = s;
-    if (g_log) g_log("[event-mirror] native start id=%X flags=%X at=%02X/%02X evt=%u context=%llX", id, flags,
-                     s.worldId, s.roomId, EventProgram(before), static_cast<unsigned long long>(g_context));
+    g_checked = checked;
+    g_startProgram = EventProgram(before);
+    if (g_log) g_log("[event-mirror] native start id=%X flags=%X at=%02X/%02X evt=%u checked=%u context=%llX "
+                     "params=%X,%X,%X,%X,%X,%X,%X,%X,%X", id, flags, s.worldId, s.roomId, g_startProgram,
+                     checked ? 1u : 0u, static_cast<unsigned long long>(g_context), s.params[0], s.params[1],
+                     s.params[2], s.params[3], s.params[4], s.params[5], s.params[6], s.params[7], s.params[8]);
+}
+
+void __fastcall HookedInstall(std::uint32_t* context) {
+    g_installContext = reinterpret_cast<std::uintptr_t>(context);
+    g_installCaller = reinterpret_cast<std::uintptr_t>(_ReturnAddress()) - g_base;
+    g_installOriginal(context);
 }
 }  // namespace
 
@@ -84,12 +108,31 @@ void Install(std::uintptr_t exeBase, LogFn log) {
     }
     g_installed.store(true, std::memory_order_release);
     if (log) log("[event-mirror] installed rows=%zu", eventscenes::InFieldEvents.size());
+    if (!host) return;
+    // Host only, observation: which builder installed an event that has no recorded start.
+    auto* install = reinterpret_cast<void*>(exeBase + RVA_EVENT_INSTALL);
+    st = std::memcmp(install, kInstallBytes, sizeof(kInstallBytes)) == 0 ? MH_OK : MH_ERROR_UNSUPPORTED_FUNCTION;
+    if (st == MH_OK) st = MH_CreateHook(install, reinterpret_cast<void*>(&HookedInstall), reinterpret_cast<void**>(&g_installOriginal));
+    if (st == MH_OK) st = MH_EnableHook(install);
+    if (st != MH_OK && log) log("[event-mirror] origin trace off: 3AD2D0 hook %d (%s)", st, MH_StatusToString(st));
 }
 
 bool Installed() noexcept { return g_installed.load(std::memory_order_acquire); }
 
+void LogOrigin(std::uintptr_t context, std::uint32_t epoch) noexcept {
+    if (!g_log || !context) return;
+    if (context == g_context)
+        g_log("[event-mirror] host event epoch=%u origin=start id=%X flags=%X at=%02X/%02X evt=%u checked=%u", epoch,
+              g_start.id, g_start.flags, g_start.worldId, g_start.roomId, g_startProgram, g_checked ? 1u : 0u);
+    else if (context == g_installContext)
+        g_log("[event-mirror] host event epoch=%u origin=install caller=%llX", epoch,
+              static_cast<unsigned long long>(g_installCaller));
+    else
+        g_log("[event-mirror] host event epoch=%u origin=unknown context=%llX", epoch, static_cast<unsigned long long>(context));
+}
+
 bool StartFor(std::uintptr_t context, EventStart& out) noexcept {
-    if (!Installed() || !context || context != g_context) return false;
+    if (!Installed() || !context || context != g_context || !g_checked) return false;
     out = g_start;
     return true;
 }

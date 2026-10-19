@@ -67,7 +67,12 @@ int main(int argc,char** argv){
   const std::array<std::uint32_t,9> armor{1,0x702,0xFFFFFFFF,0xFFFF,1,0xFFFFFFFF,3,0,0};auto other=armor;other[6]=4;
   check(kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,9,armor)&&!kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,9,other)&&
         !kh2coop::eventscenes::QualifiedStart(2,7,97,0x343031,9,armor)&&!kh2coop::eventscenes::QualifiedStart(2,7,95,0x353031,9,armor)&&
-        !kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,2,armor),"only the observed in-field start, exactly, qualifies");
+        !kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,2,armor)&&
+        kh2coop::eventscenes::QualifiedStart(2,7,97,0x363031,9,armor)&&!kh2coop::eventscenes::QualifiedStart(2,7,99,0x363031,9,armor)&&
+        kh2coop::eventscenes::QualifiedStart(2,7,99,0x383031,9,{2,0x402,0x510051,0x51,1,0xFFFFFFFF,3,0,0})&&
+        !kh2coop::eventscenes::QualifiedStart(2,7,99,0x383031,9,armor),"only the observed in-field starts, exactly, qualify");
+  check(kh2coop::eventscenes::Qualified(2,19,0,3,0,1)&&!kh2coop::eventscenes::Qualified(2,19,0,3,0,2)&&
+        !kh2coop::eventscenes::Qualified(2,19,1,3,0,1),"the basement entry scene is checked exactly");
   check(kh2coop::eventscenes::Qualified(2,7,0,0,0,3)&&kh2coop::eventscenes::Qualified(2,4,0,81,81,81)&&
         kh2coop::eventscenes::Qualified(18,3,0,83,83,83)&&kh2coop::eventscenes::Qualified(2,19,0,136,136,136)&&
         !kh2coop::eventscenes::Qualified(2,19,50,1,0,2)&&!kh2coop::eventscenes::Qualified(2,13,0,135,135,135)&&

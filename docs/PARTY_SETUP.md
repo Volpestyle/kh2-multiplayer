@@ -868,9 +868,41 @@ Proof: run `20261019-090818` (PC1 loopback, unskipped prologue). The friend play
 Shop event and both seats got control at 02/07 evt97 with both Roxases. `coop_verdict` passed, and
 the saves were unchanged.
 
+**More rows (VUH-2487).** The host logs every event start it sees in open field, as
+`[event-mirror] native start id=... checked=0|1 params=...`. For every event hold it also logs one
+`[event-mirror] host event ... origin=...` line, naming the checked start, the other builder that
+installed it (`origin=install caller=<RVA>`), or `unknown`. Rows come only from those lines.
+
+Measured holds on the unskipped prologue (host frames, run `20261019-103812`). All three are started
+by `FUN_1403AC350` in open field:
+
+| Host field | Event | Hold | Row |
+|---|---|---|---|
+| 02/07 evt95 | "104", Armor Shop | 69.4 s | `tt07-armor-shop-104` (VUH-2359) |
+| 02/07 evt97 | "106", Accessory Shop | 41.1 s | `tt07-accessory-shop-106` |
+| 02/07 evt99 | "108", cat lock-on | 92.6 s | `tt07-cat-lock-on-108` |
+
+With the rows, the friend plays all three natively and reaches the Sandlot with both Roxases. The
+committed fixture passes (run `20261019-110448`).
+
+One fix came with this: since VUH-2359 a friend loads the checked scene locations itself, and each
+reads as an open field for a frame before its event starts. Those frames were logged as
+`unpinned field`, which the fixture forbids, so a checked scene location never counts as an unpinned
+field now.
+
+The TT basement (Day 6) holds, from the older D15 route logs:
+- The 8 s hold at the Computer Room exit is event "612". It starts with the load of the hall at
+  02/13 door 0 map 3 btl 0 evt 1, so it is a scene row (`tt13-basement-entry`), not an in-field row.
+  The host announces that scene before its event hold, so the friend loads and plays it without
+  pausing on the way.
+- The holds after the hall's Dusk fight (4.5 s, 23.6 s, five 3.3 s holds in the Axel fight, 9.6 s)
+  are untraced. The route pilot cannot win the Dusk fight, so they keep the hold.
+- The TT and HB route scenarios on file warp into battles (event program 32767) and meet no in-field
+  story events.
+
 Limits:
-- Only the Armor Shop start is a checked in-field row so far. Other in-field events keep the hold
-  until a host start for them is observed and added.
+- In-field rows exist only for the three prologue starts. Other in-field events keep the hold until a
+  host start for them is traced and added.
 - Each seat advances its own dialog, so the seats finish at different times. The faster one waits at
   its blocked exit until the host's next room arrives.
 - The basement proof warped the host into the scene, because the route pilot cannot win the Dusk

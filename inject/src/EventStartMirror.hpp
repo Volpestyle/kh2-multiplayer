@@ -16,6 +16,8 @@ void Install(std::uintptr_t exeBase, LogFn log);
 bool Installed() noexcept;
 // Host, game thread: the checked start that installed `context`, if that is the current one.
 bool StartFor(std::uintptr_t context, EventStart& out) noexcept;
+// Host, game thread: one line naming how the event that installed `context` started (VUH-2487).
+void LogOrigin(std::uintptr_t context, std::uint32_t epoch) noexcept;
 // Friend, game thread (the input callback): starts the host's event if it qualifies and this seat is
 // in the same open field location (in field, no menu, cutscene or event). False leaves the game as it
 // was; the caller keeps the event hold.
