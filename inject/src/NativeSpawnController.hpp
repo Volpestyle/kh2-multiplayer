@@ -474,6 +474,8 @@ struct TraceStats {
 // replace that thread, and diagnostic callbacks must first check affinity.
 void RegisterDiagnosticGameThread();
 bool IsDiagnosticGameThread();
+// VUH-2359: false until the first actor-update frame registers the game thread (title/opening).
+bool DiagnosticGameThreadKnown();
 bool CaptureDiagnosticStamp(uintptr_t exeBase, TraceStamp& out);
 TraceState CaptureDiagnosticState(uintptr_t exeBase, uintptr_t controller);
 

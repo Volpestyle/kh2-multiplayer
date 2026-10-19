@@ -78,6 +78,10 @@ void Disable() noexcept {
 }
 bool EnterInput() noexcept {
     if (!Enabled()) return false;
+    // VUH-2359: a New Game session binds the channel during the title/opening, before any actor
+    // update has registered the game thread. That is not a foreign caller: take no input control
+    // yet rather than aborting the channel for the whole session (prologue friends never paused).
+    if (!spawncontroller::DiagnosticGameThreadKnown()) return false;
     if (!spawncontroller::IsDiagnosticGameThread()) {
         eventhold::Scope bound {};
         if (channel.BoundScope(bound)) channel.Invalidate(eventhold::Abort::Unsupported);

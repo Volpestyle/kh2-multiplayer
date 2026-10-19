@@ -3113,14 +3113,17 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
         __try {
             const bool held = control && eventholdnative::HoldingInput();
             if (PollMailbox() && !held) ApplyPrimaryMailboxInput(inputStruct);
-            if (control && eventholdnative::ApplyInput(inputStruct)) {
+            const bool eventHeld = control && eventholdnative::ApplyInput(inputStruct);
+            if (eventHeld) {
                 // Consume held automation, retaining friends' independent input.
                 // The original collector supplies fresh physical input every call.
                 g_primaryMailboxPad = {};
                 g_primaryRawButtons = 0;
             }
             // VUH-2464: a prologue field holds all local control until both seats bound here.
-            if (prologueparty::HoldInput(inputStruct)) {
+            // VUH-2359: not while the host's event hold owns the input: it already neutralizes it,
+            // and zeroing here would erase the Start press that opens its pause.
+            if (!eventHeld && prologueparty::HoldInput(inputStruct)) {
                 g_primaryMailboxPad = {};
                 g_primaryRawButtons = 0;
             }

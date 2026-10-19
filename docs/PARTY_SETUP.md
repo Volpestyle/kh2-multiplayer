@@ -807,6 +807,17 @@ story Roxas), puppets drive only a bound missing-party clone and the unit
 slot's friend pointers are ignored: events build their own player-class Roxas
 actors, and driving one took the host down (run `20261018-175014`).
 
+**Friend presentation during host events (VUH-2359).** The host's event-hold producer publishes
+`active` when its event starts and `release` once it is back in field at the reload, and the friend's
+native event hold pauses the friend (Pause menu plus the "Waiting for host event..." overlay) for
+exactly that span, then follows the host's reload. Two defects kept it off in the prologue: the
+friend's runtime binds the control channel during the New Game title/opening, before any actor
+update has registered the game thread, and the input hook treated that as a foreign caller and
+aborted the channel for the session (`[eventhold-control] aborted reason=8`); and the prologue hold,
+running after it in the input hook, would have zeroed its Start press. The channel now waits for the
+game thread instead of aborting, and the prologue hold stands aside while the event hold owns input.
+Unskipped, the Armor Shop event holds the friend for about 78 s.
+
 **Clone HP (VUH-2482).** A clone's fresh private record is initialized by the game from this seat's
 SAVE (`3C03F0` binds SAVE data for key 14), so a rebuilt clone used to show the *local* player's HP
 (run `20261018-195224`: after the Armor Shop reload both clones read 19, while the host was at 20).

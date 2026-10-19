@@ -3255,6 +3255,8 @@ bool IsDiagnosticGameThread() {
     return registered != 0 && registered == GetCurrentThreadId();
 }
 
+bool DiagnosticGameThreadKnown() { return g_diagnosticGameThread.load() != 0; }
+
 bool CaptureDiagnosticStamp(uintptr_t exeBase, TraceStamp& out) {
     out = {};
     if (!ReadableRange(exeBase, offsets::NOW + out.location.size())) return false;

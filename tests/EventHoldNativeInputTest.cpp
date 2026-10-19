@@ -4,7 +4,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string_view>
-namespace kh2coop::inject::spawncontroller { bool IsDiagnosticGameThread(){return true;} }
+bool gameThreadKnown=true;
+namespace kh2coop::inject::spawncontroller { bool IsDiagnosticGameThread(){return gameThreadKnown;} bool DiagnosticGameThreadKnown(){return gameThreadKnown;} }
 namespace n=kh2coop::inject::eventholdnative;
 namespace e=kh2coop::eventhold;
 using namespace kh2coop;
@@ -53,6 +54,11 @@ int main(int argc,char** argv){
  e::Channel runtime;check(runtime.Open(GetCurrentProcessId()),"independent runtime view opened");
  e::Scope scope{};std::memcpy(scope.session,"0123456789abcdef0123456789abcdef",32);scope.generation=2;scope.slot=1;scope.hostConnection=1;scope.selfConnection=2;scope.hostDelivery=1;scope.targetDelivery=1;
  check(runtime.Bind(scope,GetTickCount64()),"runtime binding");
+ // VUH-2359: a New Game binds during the title/opening, before any actor update registers the game
+ // thread. The input hook takes no control then, and must not abort the channel for the session.
+ gameThreadKnown=false;
+ check(!n::EnterInput()&&runtime.Reason()==e::Abort::None,"no registered game thread yet: no control, channel kept");
+ gameThreadKnown=true;
  RoomTransition room{};room.epoch=1;room.worldId=4;room.roomId=26;
  n::Observe(scope,e::Kind::Transition,3,1,&room,0);n::OwnerAck(scope,1,true,true);
  check(runtime.Arm(GetTickCount64()),"test owner baseline arm");tick();
