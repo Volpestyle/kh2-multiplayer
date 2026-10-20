@@ -1810,7 +1810,8 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
     if(wrapper!=TraceWrapper::Fixed || caller!=g_exeBase+0x3FF727 || !IsDiagnosticGameThread())return false;
     Stamp stamp{};Controller native{};
     std::array<std::uint8_t,44> header{};
-    std::array<std::uint8_t,256> records{};
+    // VUH-2572: up to 32 records (Back Alley evt4 has 18), every one pinned.
+    std::array<std::uint8_t,32*64> records{};
     std::array<std::uint8_t,routespawn::BaileyCaller.size()> call{};
     if(!ReadStamp(stamp) || !routespawn::MissingPartySiteAt(stamp.location))return false;
     // VUH-2570: at a checked location, say which shape check refused the group (bounded).
@@ -1874,7 +1875,7 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
         if(site->prologue)prologueparty::NoteConstruction(site->location,false,"prerequisites");
         return false;
     }
-    Controller finalController{};std::array<std::uint8_t,44> finalHeader{};std::array<std::uint8_t,256> finalRecords{};
+    Controller finalController{};std::array<std::uint8_t,44> finalHeader{};std::array<std::uint8_t,32*64> finalRecords{};
     if(!ReadNative(reinterpret_cast<uintptr_t>(controller),finalController) || finalController.key!=native.key ||
        finalController.header!=native.header || finalController.spawnArray!=native.spawnArray || finalController.regionArray!=native.regionArray ||
        !CopyNative(native.header,finalHeader.data(),finalHeader.size()) || finalHeader!=header ||
@@ -1905,11 +1906,11 @@ void ObserveProloguePlayer(const void* record, void* controller, TraceWrapper wr
     Controller native {};
     std::array<std::uint8_t, 0x2C> header {};
     std::array<std::uint8_t, 16> call {};
-    std::array<std::uint8_t, 256> group {};
+    std::array<std::uint8_t, 32 * 64> group {};
     const bool read = ReadNative(reinterpret_cast<uintptr_t>(controller), native) &&
         CopyNative(native.header, header.data(), header.size());
     const unsigned count = read ? Field<std::uint16_t>(header.data(), 4) : 0;
-    const unsigned shown = count < 4 ? count : 4;
+    const unsigned shown = count < 32 ? count : 32;  // the whole group a site would pin (VUH-2572)
     const bool groupRead = read && shown && CopyNative(native.spawnArray, group.data(), shown * 64u);
     const bool callRead = CopyNative(caller - 0xC, call.data(), call.size());
     constexpr char hex[] = "0123456789ABCDEF";
@@ -1917,7 +1918,7 @@ void ObserveProloguePlayer(const void* record, void* controller, TraceWrapper wr
         for (std::size_t i = 0; i < n; ++i) { out[2*i] = hex[p[i] >> 4]; out[2*i+1] = hex[p[i] & 15]; }
         out[2*n] = 0;
     };
-    char nowHex[21] {}, headerHex[89] {}, callHex[33] {}, groupHex[513] {};
+    char nowHex[21] {}, headerHex[89] {}, callHex[33] {}, groupHex[32 * 64 * 2 + 1] {};
     toHex(now.data(), now.size(), nowHex);
     toHex(header.data(), read ? header.size() : 0, headerHex);
     toHex(call.data(), callRead ? call.size() : 0, callHex);

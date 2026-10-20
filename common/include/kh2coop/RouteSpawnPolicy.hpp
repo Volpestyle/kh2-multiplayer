@@ -183,6 +183,13 @@ inline constexpr auto Sandlot78Records=Bytes("36020000de6b0dc200000080de6b0d4200
 inline constexpr std::array<std::uint8_t,10> Calling33Location{2,0x21,0,0,0,0,1,0,0,0};
 inline constexpr auto Calling33Header=Bytes("0100170001000000000000000000000000000000000000000000000021000000000000000000000000000000");
 inline constexpr auto Calling33Records=Bytes("360200000080fc4400007a440000204300000000368da7bf00000000010001000000000000000000000000000000000000000000000000000000000000000000");
+// VUH-2572: the Old Mansion's front on Day 1, evt1 (raw566 plus the absent raw567/568, headerId 40). Both
+// seats logged byte-identical receipts (run 20261020-155646). The Woods before it (door 50, evt22) is not
+// pinned: its walk-in entrance resets both players to the tunnel mouth when the clone is built there
+// (runs 20261020-171912, -184451; docs/PARTY_SETUP.md).
+inline constexpr std::array<std::uint8_t,10> Mansion14Location{2,0x0E,0,0,1,0,0,0,1,0};
+inline constexpr auto Mansion14Header=Bytes("010028000300000000000000000000000000000000000000000000000e000000000000000000000000000000");
+inline constexpr auto Mansion14Records=Bytes("36020000a7a8dcc397c11fb829ec44c5000000004ee43d400000000001000100000000000000000000000000000000000000000000000000000000000000000037020000724a0bc42025f9b700fe49c5000000004ee43d400000000001000200000000000000000000000000000000000000000000000000000000000000000038020000ce19b4c338cfafb7ae294cc5000000004ee43d4000000000010003000000000000000000000000000000000000000000000000000000000000000000");
 inline constexpr MissingPartySite MissingPartySites[]{
     {BaileyLocation,808738658,BaileyHeader,BaileyRecords,84,1,false,"hb08-bailey"},
     {TramCommon95Location,808738658,TramCommon95Header,TramCommon95Records,90,14,true,"tt07-95"},
@@ -194,6 +201,7 @@ inline constexpr MissingPartySite MissingPartySites[]{
     {Sandlot77Location,825515874,Sandlot77Header,Sandlot77Records,90,14,true,"tt04-77"},
     {Sandlot78Location,842293090,Sandlot78Header,Sandlot78Records,90,14,true,"tt04-78"},
     {Calling33Location,808476525,Calling33Header,Calling33Records,90,14,true,"tt33-calling"},
+    {Mansion14Location,808476525,Mansion14Header,Mansion14Records,90,14,true,"tt14-1"},
 };
 // Header +4 is the group's record count; every record of the group is pinned.
 inline const MissingPartySite* MissingPartySiteFor(const std::array<std::uint8_t,10>& location,std::uint32_t key,

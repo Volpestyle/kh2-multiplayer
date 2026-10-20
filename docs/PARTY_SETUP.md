@@ -852,10 +852,24 @@ released together, each drew the other along the whole path, and both logged the
 Pinned receipt literals may be written in either hex case: `Bytes()` read only lowercase, so the first
 pin of this site (copied from an uppercase log) never matched and the bounded
 `[missing-party] site shape refused reason=...` line now names the failing check at a checked location.
-Other fields seen unpinned in logs so far (2026-10-20), so solo for both seats: the Usual Spot
-(`02/02` evt0), Back Alley evt4, Tram Common free roam (`02/07` evt3 and evt4), the Woods (`02/0D`
-evt22), the Old Mansion (`02/0E` evt1), Basement Hall evt2 (`02/13`), the Computer Room (`02/15`
-evt0), the Station of Serenity (`02/20` evt2) and `02/22` evt157. Each needs its own pinned receipt. The friend's blocked opening exit is
+VUH-2572 pins the rest one room at a time:
+- The Old Mansion's front on Day 1 (`02/0E` evt1) is `tt14-1`. In run `20261020-184958` (FM-01 with a
+  host warp) both seats bound and released together, and the friend's screen followed the host's
+  Roxas across the yard.
+- The Woods (`02/0D` door 50 evt22) is not pinned. Its entrance is a walk-in from the Back Alley's
+  hole: the game walks Roxas from the tunnel mouth (about x -2760) to the raw566 point (x -1973).
+  With the clone built there, both players were walking in at the release, then both snapped back
+  to the tunnel mouth and ignored input for about 40 s (runs `20261020-171912`, `-184451`). Not
+  understood yet; the receipt is identical on both seats, so it can be pinned once that is fixed.
+- Back Alley evt4 (`02/03` door 52, 18 records) and Basement Hall evt2 (`02/13` door 50, 6 records)
+  are bigger than the old 4-record limit of the site check and the receipt log; both now take 32
+  records, and the full receipts are still to be captured.
+- The Usual Spot (`02/02` evt0), the Computer Room (`02/15` evt0) and the Station of Serenity (`02/20`
+  evt2) were only reached by loading a save there. A load from a save is not a transition, so the
+  ingress never runs: a session that starts there stays solo until the next checked site.
+- `02/22` evt157 is the Twilight Thorn fight (VUH-2569).
+- Tram Common free roam (`02/07` evt3/evt4) is not a new load: the event program changes inside the
+  evt95 load, so the clone built there stays, but whether it keeps following is not yet checked live. The friend's blocked opening exit is
 outside this scope: it has no player actor, and member 0 is still Sora until
 the first field.
 

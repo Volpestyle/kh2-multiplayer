@@ -306,6 +306,13 @@ void site() {
           Calling33Records[6] == 0xFC && Calling33Records[7] == 0x44 && Calling33Header[2] == 0x17 &&
           Bytes("AbF0")[0] == 0xAB && Bytes("AbF0")[1] == 0xF0,
           "pinned receipt bytes parse as logged, upper or lower case hex");
+    const auto* mansion = MissingPartySiteFor(Mansion14Location, 808476525, 0x3FF727, Mansion14Header, Mansion14Records);
+    auto mansionOtherProgram = Mansion14Location; mansionOtherProgram[8] = 0;
+    check(mansion && mansion->prologue && std::string_view(mansion->name) == "tt14-1" &&
+          MissingPartySiteAt(Mansion14Location) == mansion && !MissingPartySiteAt(mansionOtherProgram) &&
+          Mansion14Header[2] == 40 && Mansion14Records.size() == 3 * 64 &&
+          !MissingPartySiteAt(std::array<std::uint8_t, 10>{2, 0x0D, 0x32, 0, 1, 0, 1, 0, 0x16, 0}),
+          "the Day 1 Old Mansion front (evt1) is a checked prologue site; the Woods walk-in is not (VUH-2572)");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&
