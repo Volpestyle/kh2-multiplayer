@@ -72,9 +72,24 @@ exit, including a manual `OnShutdown` / `FreeLibrary` request.
 
 ## Verification
 
-Pending. `kh2coop_native_party_hud_test` exercises the production adapter over
-owned memory, codec refusals, freshness, three-seat mapping, NPC preservation,
-damage/MP, downed/revive, room loads, reconnect and shutdown. Existing
-`kh2coop_prologue_seats_test` covers relay authorship and roster stamping;
-`kh2coop_avatar_test` checks owner-record MP capture. Record actual build,
-review and live results here before landing.
+PASS on the `c59045a` integration, product revision `80bc7f2`:
+
+- Release build and all 199 CTest targets passed; all 45 native-HUD adapter
+  checks also passed under Windows AddressSanitizer.
+- Independent inject source review: ADOPT, including portrait fitting,
+  owner-record reads, NPC exclusions and shutdown restoration.
+- `20261020-175813_net_native_party_hud_1`: all five segments and every step
+  passed. Owner/view reads matched guest HP 69 and MP 3, then MP 0. The host's
+  native test hit changed HP 80 to 73; real Fire consumed MP 10 to 0 and the
+  guest HUD matched. Natural host recharge and RAM guest refill reached both
+  HUDs. A same-room reload bound fresh views. Inspected captures show fitted
+  portraits and owner tints; the pre-load host gauge preserves Goofy.
+- Closure: four protected saves, 801 source files, 14 game-root files and 527
+  asset files unchanged; all pinned inputs unchanged; no owned games or relay
+  left running. The adapter does not write real actor/status/SAVE data; the
+  fixture's RAM controls are explicitly identified in the clip and report.
+
+[Evidence and method](testing/vuh2568-native-party-hud/README.md) records the
+approved loopback scope, retained reports and remaining two-PC acceptance.
+Three-seat mapping, downed/revive, freshness, reconnect, NPC preservation and
+shutdown are unit controls; this live run covers two Sora profiles on one PC.
