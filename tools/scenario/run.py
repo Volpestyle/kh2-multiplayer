@@ -1261,6 +1261,14 @@ def step_pilot(ctx: Context, step: dict) -> dict:
         cmd += ["--teach", str(ROOT / step["teach"])]
     proc = start_process(ctx, name, cmd)
     end = time.monotonic() + float(step.get("seconds", 900)) + 120
+    if step.get("background"):
+        # VUH-2466: two seats walk and fight a path at once; pilot_wait collects it.
+        ctx.saved.setdefault("_background_pilots", []).append((proc, end, inst, step, name, out))
+        return {"background": True}
+    return finish_pilot(ctx, proc, end, inst, step, name, out)
+
+
+def finish_pilot(ctx: Context, proc, end: float, inst, step: dict, name: str, out: Path) -> dict:
     try:
         while proc.poll() is None:
             if time.monotonic() > end:
@@ -1277,6 +1285,19 @@ def step_pilot(ctx: Context, step: dict) -> dict:
     if proc.returncode != 0 and not step.get("allowStuck", False):
         raise StepFailed(f"pilot exited {proc.returncode} (see {name}.log, {name}/pilot.jsonl)")
     return {"exit": proc.returncode}
+
+
+def step_pilot_wait(ctx: Context, step: dict) -> dict:
+    """Collect every background pilot (step_pilot with background), in start order."""
+    results, failure = {}, None
+    for proc, end, inst, pstep, name, out in ctx.saved.pop("_background_pilots", []):
+        try:
+            results[name] = finish_pilot(ctx, proc, end, inst, pstep, name, out)
+        except StepFailed as error:  # still collect (and release) the others first
+            results[name], failure = {"error": str(error)}, failure or error
+    if failure:
+        raise failure
+    return results
 
 
 class ReviveGuard:
@@ -4828,7 +4849,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
          "revive_guard": step_revive_guard,
-         "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "avatar_stall": step_avatar_stall,
+         "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "record": step_record,
