@@ -167,6 +167,26 @@ class Safety(unittest.TestCase):
         with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME), self.assertRaisesRegex(ValueError,'If the game is still open'):
             o.launch('unused',self.root/'run')
         self.assertTrue(o.unresolved_launch);self.assertEqual(o.handle,'retained')
+    def test_character_choice_reaches_only_the_launch(self):
+        # VUH-1512: the chosen body goes to the game launch only, as KH2COOP_PROFILE; nothing else is accepted.
+        seen=[]
+        def command(root,cli,args,**kw):
+            seen.append((args[0],kw.get('profile')));return self.command(root,cli,args,**kw)
+        o=self.owner(command)
+        with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME):
+            o.launch('unused',self.root/'run',character='Sora')
+        self.assertEqual(seen[0],('launch',0x54))
+        request=json.loads((self.root/'run'/'launch-request.json').read_text())
+        self.assertEqual((request['character'],request['profile']),('Sora','0x54'))
+        self.assertEqual(f.child_environment(self.root,profile=0x54)['KH2COOP_PROFILE'],'0x54')
+        with patch.dict(os.environ,{'KH2COOP_PROFILE':'0x5B'}):
+            self.assertNotIn('KH2COOP_PROFILE',f.child_environment(self.root))
+        with self.assertRaisesRegex(ValueError,'Roxas or Sora'):f.child_environment(self.root,profile=0x5B)
+        with self.assertRaisesRegex(ValueError,'only for an owned game launch'):
+            f.canonical(self.root,'cli',['instances'],timeout=1,profile=0x54)
+        o2=self.owner()
+        with patch.object(f,'verify_game',return_value=self.root.parent/f.GAME_NAME), self.assertRaisesRegex(ValueError,'Roxas or Sora'):
+            o2.launch('unused',self.root/'run2',character='Mickey')
     def test_child_env_only_and_no_test_switches(self):
         with patch.dict(os.environ,{'KH2COOP_SAVEGUARD_TEST_DIR':'bad','SteamAppId':'other'}):
             env=f.child_environment(self.root)

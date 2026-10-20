@@ -3257,10 +3257,14 @@ owner-only movement check (`routes/prologue_sandlot_move.json`).
 `net_prologue_party_skip.json` is the same run with the opening and event
 cutscenes skipped natively (Start, Down, Cross, only while that seat's field
 gate is closed); it is for development, and the unskipped fixture stays the
-acceptance evidence for the engine-driven scenes. `net_prologue_party_refusal.json` reruns the opening with the
-friend on `KH2COOP_PROFILE=0x54` and asserts that both seats hold at evt95 with
-`unqualified-profile`, with one Roxas each, no clone or Sora stand-in, and no
-movement or release.
+acceptance evidence for the engine-driven scenes. `net_prologue_party_sora.json` and
+`net_prologue_party_sora_skip.json` (VUH-1512) are the same checks with the friend on
+`KH2COOP_PROFILE=0x54`: each seat expects the host's Roxas and the friend's Sora, one of
+them local and the other a clone. `net_prologue_party_refusal.json` (and its skipped
+`_refusal_skip`) reruns the opening with the friend on `KH2COOP_PROFILE=0x5B` (Mickey)
+and asserts that both seats hold at evt95 with `unqualified-profile` and log
+`profile 0x5B refused: Mickey`, with one Roxas each, no clone or Sora stand-in, and
+no movement or release; it films both screens, which carry the overlay's reason.
 
 `net_prologue_party_pc2_host.json` and `net_prologue_party_pc2_friend.json` are
 the two-PC acceptance run: the host on PC1 runs the relay on its Tailscale

@@ -14,13 +14,32 @@
 
 namespace kh2coop::prologue {
 
-// Roxas+Roxas is this slice's first bounded proof: only Roxas is admitted to the
-// prologue layout. Every other profile refuses with a reason until it has its own
-// fixture (VUH-1512 Sora, VUH-1514 Donald/Goofy).
+// The prologue layout admits the two native player-class bodies: Roxas (VUH-2464, the default) and Sora
+// (VUH-1512). A seat that chose Sora is built as Sora at every checked site on every screen, while the
+// host keeps the story Roxas role. Every other profile refuses with a reason until it has its own fixture
+// (VUH-1514 Donald/Goofy, VUH-1513 Riku); it is never replaced by another body.
 inline constexpr std::uint16_t DEFAULT_PROFILE = 0x5A;
 inline bool ProfileQualified(std::uint16_t profile) {
     const auto* kit = qualifiedKit(profile);
-    return kit && kit->member == 0x5A;
+    return kit && (kit->member == 0x5A || kit->member == KIT_SORA);
+}
+// Why a declared profile cannot join the prologue layout; nullptr when it can.
+inline const char* ProfileRefusal(std::uint16_t profile) {
+    if (ProfileQualified(profile)) return nullptr;
+    switch (profile) {
+    case 0x5B: return "Mickey is qualified as a party kit only, not for the prologue layout (VUH-1512)";
+    case 0x323: return "dual-wield Roxas is an encounter form, not a selectable profile (VUH-1509)";
+    default: break;
+    }
+    return "not a playable profile of this build (Donald/Goofy: VUH-1514, Riku: VUH-1513)";
+}
+// The refused character as the on-screen note names it.
+inline const char* ProfileDisplayName(std::uint16_t profile) {
+    switch (profile) {
+    case 0x5B: return "Mickey";
+    case 0x323: return "Dual-wield Roxas";
+    default: return "This character";
+    }
 }
 
 enum class Hold : std::uint8_t {
@@ -121,6 +140,23 @@ inline Hold Agreement(const Seats& s) {
     for (std::size_t i = 0; i < 3; ++i)
         if (s.roster[i] && (s.seat[i].phase == SeatPhase::Declared || s.seat[i].latched != v)) return Hold::NotAcknowledged;
     return Hold::None;
+}
+
+// VUH-1512: the first connected seat's declared profile the layout refuses (0 when none), for the on-screen note.
+inline std::uint16_t RefusedProfile(const Seats& s) {
+    std::array<std::uint16_t, 3> v {};
+    if (!Vector(s, v)) return 0;
+    for (std::size_t i = 0; i < 3; ++i) if (s.roster[i] && !ProfileQualified(v[i])) return v[i];
+    return 0;
+}
+
+// This seat's own agreed profile: the body its local player takes at a prologue site.
+inline bool LocalProfile(const Seats& s, std::uint16_t& profile, Hold& reason) {
+    profile = 0;
+    reason = Agreement(s);
+    if (reason != Hold::None) return false;
+    profile = s.seat[s.localSlot].profile;
+    return true;
 }
 
 // The one remote seat's profile for the clone this seat builds.

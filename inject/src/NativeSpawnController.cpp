@@ -1831,6 +1831,14 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
         prologueparty::NoteConstruction(site->location,false,profileReason);
         return false;
     }
+    // VUH-1512: this seat's own local at a prologue site is its agreed body (ResolveLocal made it member 0),
+    // not necessarily the authored Roxas; the binding expects that body's object and status key.
+    routespawn::MissingPartySite seatSite=*site;
+    if(site->prologue && !prologueparty::LocalBody(seatSite.localObject,seatSite.localKey)) {
+        if(g_log)g_log("[missing-party] site=%s refused local body (no agreed profile)",site->name);
+        prologueparty::NoteConstruction(site->location,false,"local-body");
+        return false;
+    }
     const int cloneKey=kh2coop::kitStatusKey(cloneObject);
     const auto* kit=kh2coop::qualifiedKit(cloneObject);
     // The direct factory resolves the same normal player-class body as an authored member.
@@ -1840,7 +1848,7 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
     float limit=0,used=0;std::array<char,8> name{};
     const bool ready=kit && cloneKey && privatestatus::Ready() && playerkit::MissingPartyReady() &&
         ReadNative(g_exeBase+0x2A11478,event) && !event && ReadNative(g_exeBase+0xB65210,cutscene) && !cutscene &&
-        ReadNative(g_exeBase+playerkit::RVA_RESOLVED_MEMBERS,member0) && member0==site->localObject &&
+        ReadNative(g_exeBase+playerkit::RVA_RESOLVED_MEMBERS,member0) && member0==seatSite.localObject &&
         ReadNative(g_exeBase+0x9ACDD4,drive) && drive==0 && LookupNative(cloneObject,object) && object &&
         ReadNative(object+4,type) && type==0 && ReadNative(object+0x4C,statusKey) && statusKey==cloneKey &&
         ReadNative(object+0x57,form) && form==kit->form && form==0 &&
@@ -1849,8 +1857,8 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
         ReadNative(g_exeBase+ADMISSION_LIMIT_RVA,limit) && ReadNative(g_exeBase+ADMISSION_USED_RVA,used) &&
         std::isfinite(limit) && std::isfinite(used) && limit-used>=2.0f*cost && SameStamp(stamp);
     if(!ready) {
-        if(g_log)g_log("[missing-party] site=%s refused prerequisites event=%llX cutscene=%d member0=%u clone=%u privateReady=%u",
-            site->name,event,cutscene,member0,cloneObject,privatestatus::Ready()?1u:0u);
+        if(g_log)g_log("[missing-party] site=%s refused prerequisites event=%llX cutscene=%d member0=%u local=%u clone=%u privateReady=%u",
+            site->name,event,cutscene,member0,seatSite.localObject,cloneObject,privatestatus::Ready()?1u:0u);
         if(site->prologue)prologueparty::NoteConstruction(site->location,false,"prerequisites");
         return false;
     }
@@ -1861,7 +1869,7 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
        !CopyNative(native.spawnArray,finalRecords.data(),count*64) || finalRecords!=records || !SameStamp(stamp))return false;
     SetLastError(error);
     bool bound=false;uintptr_t clone=0;
-    result=privatestatus::SpawnMissingParty(record,controller,g_originalWrapper,g_log,*site,cloneObject,&bound,&clone);
+    result=privatestatus::SpawnMissingParty(record,controller,g_originalWrapper,g_log,seatSite,cloneObject,&bound,&clone);
     if(site->prologue) {
         const auto nativeError=GetLastError();
         prologueparty::NoteConstruction(site->location,bound,bound?"bound":"unbound",clone);

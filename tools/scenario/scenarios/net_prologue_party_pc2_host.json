@@ -384,7 +384,7 @@
   {
    "do": "save",
    "as": "ev00_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -687,7 +687,7 @@
   {
    "do": "save",
    "as": "ev01_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -990,7 +990,7 @@
   {
    "do": "save",
    "as": "ev02_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -1298,7 +1298,7 @@
   {
    "do": "save",
    "as": "ev03_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -1601,7 +1601,7 @@
   {
    "do": "save",
    "as": "ev04_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -1904,7 +1904,7 @@
   {
    "do": "save",
    "as": "ev05_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2012,7 +2012,7 @@
   {
    "do": "save",
    "as": "first_control_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2065,7 +2065,7 @@
   {
    "do": "save",
    "as": "after_host_move_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2101,7 +2101,7 @@
   {
    "do": "save",
    "as": "after_friend_move_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2147,7 +2147,7 @@
   {
    "do": "save",
    "as": "after_clone_damage_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2470,7 +2470,7 @@
   {
    "do": "save",
    "as": "rl00_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2773,7 +2773,7 @@
   {
    "do": "save",
    "as": "rl01_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3076,7 +3076,7 @@
   {
    "do": "save",
    "as": "rl02_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3384,7 +3384,7 @@
   {
    "do": "save",
    "as": "rl03_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3687,7 +3687,7 @@
   {
    "do": "save",
    "as": "rl04_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3723,7 +3723,7 @@
   {
    "do": "save",
    "as": "reload97_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -4082,7 +4082,7 @@
   {
    "do": "save",
    "as": "as00_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -4385,7 +4385,7 @@
   {
    "do": "save",
    "as": "as01_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -4688,7 +4688,7 @@
   {
    "do": "save",
    "as": "as02_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -4996,7 +4996,7 @@
   {
    "do": "save",
    "as": "as03_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5299,7 +5299,7 @@
   {
    "do": "save",
    "as": "as04_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5335,7 +5335,7 @@
   {
    "do": "save",
    "as": "reload99_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5658,7 +5658,7 @@
   {
    "do": "save",
    "as": "ct00_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5961,7 +5961,7 @@
   {
    "do": "save",
    "as": "ct01_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -6264,7 +6264,7 @@
   {
    "do": "save",
    "as": "ct02_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -6572,7 +6572,7 @@
   {
    "do": "save",
    "as": "ct03_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -6875,7 +6875,7 @@
   {
    "do": "save",
    "as": "ct04_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -7178,7 +7178,7 @@
   {
    "do": "save",
    "as": "ct05_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -7481,7 +7481,7 @@
   {
    "do": "save",
    "as": "ct06_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -7661,7 +7661,7 @@
   {
    "do": "save",
    "as": "sandlot_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -7707,7 +7707,7 @@
   {
    "do": "save",
    "as": "sandlot_after_host_move_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -7743,7 +7743,7 @@
   {
    "do": "save",
    "as": "sandlot_after_friend_move_roxas",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",

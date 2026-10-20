@@ -2984,7 +2984,7 @@
   {
    "do": "save",
    "as": "first_control_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2994,7 +2994,7 @@
   {
    "do": "save",
    "as": "first_control_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3020,6 +3020,11 @@
    "do": "save",
    "as": "first_control_log1",
    "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[(?:prologue|missing-party\\] born|warp\\] client)[^\\n]*)', 1)][-40:]"
+  },
+  {
+   "do": "assert",
+   "expr": "sorted(a['name'] for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX110', 'P_EX110'] and sorted(a['name'] for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX110', 'P_EX110']",
+   "message": "first control: a seat lacks the host's Roxas or the friend's chosen body"
   },
   {
    "do": "clip",
@@ -3054,7 +3059,7 @@
   {
    "do": "save",
    "as": "after_host_move_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3064,7 +3069,7 @@
   {
    "do": "save",
    "as": "after_host_move_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3097,7 +3102,7 @@
   {
    "do": "save",
    "as": "after_friend_move_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3107,7 +3112,7 @@
   {
    "do": "save",
    "as": "after_friend_move_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3134,7 +3139,7 @@
   {
    "do": "save",
    "as": "after_clone_damage_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3144,7 +3149,7 @@
   {
    "do": "save",
    "as": "after_clone_damage_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3163,7 +3168,7 @@
   {
    "do": "save",
    "as": "after_friend_damage_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3173,7 +3178,7 @@
   {
    "do": "save",
    "as": "after_friend_damage_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3916,7 +3921,7 @@
   {
    "do": "save",
    "as": "reload97_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3926,7 +3931,7 @@
   {
    "do": "save",
    "as": "reload97_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -4720,7 +4725,7 @@
   {
    "do": "save",
    "as": "reload99_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -4730,7 +4735,7 @@
   {
    "do": "save",
    "as": "reload99_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5784,7 +5789,7 @@
   {
    "do": "save",
    "as": "sandlot_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5794,7 +5799,7 @@
   {
    "do": "save",
    "as": "sandlot_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5823,8 +5828,8 @@
   },
   {
    "do": "assert",
-   "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 2 and len([a for a in actors(1) if a['name'] == 'P_EX110']) == 2 and log_count('[prologue] unpinned field', 0) == 0 and log_count('[prologue] unpinned field', 1) == 0",
-   "message": "a seat reached the Sandlot without both Roxases, or a prologue field was left unheld"
+   "expr": "sorted(a['name'] for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX110', 'P_EX110'] and sorted(a['name'] for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX110', 'P_EX110'] and log_count('[prologue] unpinned field', 0) == 0 and log_count('[prologue] unpinned field', 1) == 0",
+   "message": "a seat reached the Sandlot without both chosen bodies, or a prologue field was left unheld"
   },
   {
    "do": "clip",
@@ -5866,7 +5871,7 @@
   {
    "do": "save",
    "as": "sandlot_after_host_move_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5876,7 +5881,7 @@
   {
    "do": "save",
    "as": "sandlot_after_host_move_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5909,7 +5914,7 @@
   {
    "do": "save",
    "as": "sandlot_after_friend_move_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -5919,7 +5924,7 @@
   {
    "do": "save",
    "as": "sandlot_after_friend_move_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",

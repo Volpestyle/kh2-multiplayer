@@ -31,12 +31,19 @@ void Receive(const SeatState& m);
 // Missing-party ingress at a prologue site (load time, game thread): the clone's object, or false
 // with a hold reason when the roster's profiles are not agreed.
 bool CloneProfile(std::uint16_t& object, const char*& reason);
+// VUH-1512: the body this seat's own local player takes at a prologue site (its agreed profile and that
+// kit's status key), or false before agreement.
+bool LocalBody(std::uint16_t& object, std::uint16_t& statusKey);
+// VUH-1512, member resolver post-hook (the area load's loading thread): at a checked prologue site, a seat
+// whose agreed profile is not the story Roxas gets that body as resolved member 0, so the authored player
+// record builds it. Scripted events and every other load keep the native member.
+void ResolveLocal(std::uintptr_t resolvedMembers);
 // The construction outcome at `location` for this load: bound clone/local, or a refusal reason.
 void NoteConstruction(const std::array<std::uint8_t, 10>& location, bool bound, const char* reason,
                       std::uintptr_t clone = 0);
 
 // Any thread: the Roxas prologue is live here (seats requested, NOW in TT and the resolved member 0
-// is native story Roxas). Puppets then drive only bound missing-party clones: the prologue has no
+// is native story Roxas, or this seat's chosen body that ResolveLocal set for this location). Puppets then drive only bound missing-party clones: the prologue has no
 // party, and its events build their own player-class Roxas actors that must never be driven.
 bool PrologueScope();
 // Input collector (any thread): neutralize slot-0 raw input while the published hold applies.
@@ -47,5 +54,8 @@ std::uint8_t PublishedHold();
 // VUH-2486, any thread: the on-screen note for a session that started at an unchecked prologue field.
 enum class UnpinnedNotice : std::uint8_t { None, Holding, PlayingSolo };
 UnpinnedNotice Notice();
+// VUH-1512, any thread: the declared profile this seat's prologue hold refuses (0 when none), for the
+// on-screen note while both seats hold at a checked site.
+std::uint16_t RefusedProfile();
 
 } // namespace kh2coop::inject::prologueparty

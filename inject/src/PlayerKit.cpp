@@ -1,5 +1,6 @@
 // PlayerKit — see PlayerKit.hpp (VUH-1513 step 2).
 #include "PlayerKit.hpp"
+#include "PrologueParty.hpp"
 #include "kh2coop/PlayerKits.hpp"
 
 #include <Windows.h>
@@ -237,6 +238,8 @@ void HookedResolveMembers() {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ++g_stats.faults;
     }
+    // VUH-1512: a seat that chose another body takes it at a checked prologue site (own SEH and log).
+    prologueparty::ResolveLocal(g_base + RVA_RESOLVED_MEMBERS);
     // Logged outside the SEH scope so a CRT fault can't strand the FILE lock.
     if (ok && g_log && g_kit != 0)
         g_log("[playerkit] load world=%u room=%u evt=%u eventCtx=%d cutscene=%d native0=0x%X kit=0x%X result=%s",

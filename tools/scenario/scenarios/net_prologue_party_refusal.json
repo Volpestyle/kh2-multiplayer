@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_party_refusal",
- "description": "VUH-2464 refusal on PC1: as net_prologue_party, but the friend selects Sora (KH2COOP_PROFILE=0x54), which the prologue layout does not admit. Both seats must hold at Tram Common evt95 with reason unqualified-profile, build no clone or Sora stand-in, and not move under input. Never saves.",
+ "description": "VUH-2464/VUH-1512 refusal on PC1: as net_prologue_party, but the friend selects Mickey (KH2COOP_PROFILE=0x5B), which the prologue layout does not admit. Both seats must hold at Tram Common evt95 with reason unqualified-profile, say why in the log and on screen, build no clone or stand-in body, and not move under input. Never saves.",
  "playerDefaults": true,
  "steps": [
   {
@@ -13,7 +13,7 @@
    "newGame": true,
    "initTimeoutMs": 60000,
    "env": {
-    "KH2COOP_PROFILE": "0x54"
+    "KH2COOP_PROFILE": "0x5B"
    }
   },
   {
@@ -2987,7 +2987,7 @@
   {
    "do": "save",
    "as": "held_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -2997,7 +2997,7 @@
   {
    "do": "save",
    "as": "held_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3026,8 +3026,16 @@
   },
   {
    "do": "assert",
-   "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 1 and len([a for a in actors(1) if a['name'] == 'P_EX110']) == 1 and not [a for a in actors(0) + actors(1) if a['name'] == 'P_EX100']",
-   "message": "a refused profile built a clone or a Sora stand-in"
+   "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 1 and len([a for a in actors(1) if a['name'] == 'P_EX110']) == 1 and not [a for a in actors(0) + actors(1) if a['name'] in ('P_EX100', 'P_EX200')] and log_count('profile 0x5B refused: Mickey', 0) > 0 and log_count('profile 0x5B refused: Mickey', 1) > 0",
+   "message": "a refused profile built a clone or a stand-in body, or a seat did not say why"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 8,
+   "fps": 30,
+   "name": "held_friend",
+   "background": true
   },
   {
    "do": "pilot",
@@ -3038,13 +3046,16 @@
    "allowStuck": true
   },
   {
+   "do": "clip_wait"
+  },
+  {
    "do": "wait",
    "ms": 1000
   },
   {
    "do": "save",
    "as": "after_try_move_roxas0",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",
@@ -3054,7 +3065,7 @@
   {
    "do": "save",
    "as": "after_try_move_roxas1",
-   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] == 'P_EX110']"
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
   },
   {
    "do": "save",

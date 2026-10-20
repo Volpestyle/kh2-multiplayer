@@ -25,6 +25,7 @@
 #include "PrologueParty.hpp"
 
 #include "kh2coop/CaptureChannel.hpp"
+#include "kh2coop/PrologueSeats.hpp"
 #include "CoopHudMailbox.hpp"
 #include "HostCrown.hpp"
 #include "CrownAsset.hpp"
@@ -941,6 +942,14 @@ void RefreshOverlayText(DXGI_FORMAT format) {
         SetTextColor(g_overlayDc, RGB(255, 210, 90));
         constexpr wchar_t held[] = L"A teammate is down: revive them before leaving";
         TextOutW(g_overlayDc, 8, 39, held, static_cast<int>(std::size(held) - 1));
+    } else if (const auto refused = prologueparty::RefusedProfile()) {
+        // VUH-1512: a declared character the prologue layout refuses holds both seats; say why.
+        SetTextColor(g_overlayDc, RGB(255, 210, 90));
+        wchar_t reason[96];
+        swprintf_s(reason, L"Co-op: %hs can't play the prologue yet", kh2coop::prologue::ProfileDisplayName(refused));
+        constexpr wchar_t next[] = L"Both players wait. Relaunch as Roxas or Sora.";
+        TextOutW(g_overlayDc, 8, 39, reason, static_cast<int>(wcslen(reason)));
+        TextOutW(g_overlayDc, 8, 70, next, static_cast<int>(std::size(next) - 1));
     } else if (const auto notice = prologueparty::Notice(); notice != prologueparty::UnpinnedNotice::None) {
         // VUH-2486: a session started at a mid-prologue save with no two-player layout.
         SetTextColor(g_overlayDc, RGB(255, 210, 90));
@@ -1456,6 +1465,7 @@ void OnPresent(IDXGISwapChain* swapChain) {
         const bool drawOverlay = g_channel->overlay != 0 || eventholdnative::HoldingInput() ||
                                  warp::WaitingAtBlockedExit() ||
                                  prologueparty::Notice() != prologueparty::UnpinnedNotice::None ||
+                                 prologueparty::RefusedProfile() != 0 ||
                                  warp::DoorHeldRecently();
         // VUH-2415: decide visibility before touching the ring, so a hidden crown submits nothing.
         bool drawCrown = false;

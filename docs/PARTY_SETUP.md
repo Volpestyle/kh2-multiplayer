@@ -752,9 +752,10 @@ runtime is admitted, which is during the New Game opening: the DLL is armed
 from the first opening frame. The relay admits a report only for the verified
 roster, stamps the owner slot and echoes it to every seat, the author included.
 A seat acknowledges once it holds every connected seat's profile; the pure
-policy is `common/include/kh2coop/PrologueSeats.hpp`. Only Roxas is admitted
-to the prologue layout in this slice; a Sora friend refuses as
-`unqualified-profile` until VUH-1512 qualifies it.
+policy is `common/include/kh2coop/PrologueSeats.hpp`. Roxas (`0x5A`) and,
+since VUH-1512, Sora (`0x54`) are admitted to the prologue layout; any other
+declared profile (Mickey's party kit, dual-wield Roxas, Donald, Goofy, Riku)
+refuses as `unqualified-profile` with its reason and linked issue.
 
 **Construction and admission.** The clone is built only with an agreed,
 acknowledged two-seat vector and the existing two-player private-status and
@@ -820,6 +821,39 @@ happens. The last frame of an event program or opening scene reads as an open
 field while its load is already pending; it is not playable and counts for
 neither. `hold ended without release` only means a held seat left the field,
 which every host event does.
+
+**Roxas host, Sora friend (VUH-1512).** The friend picks its character in the
+launcher before New Game (Character: Roxas or Sora); the launcher passes it to
+that one launch as `KH2COOP_PROFILE`. The host keeps native story Roxas
+(VUH-2469 owns host replacement). Three changes make the second body real on
+both seats, and none writes a party row, member table or save:
+
+* *Local body.* At a checked site the member resolver's post-hook
+  (`PlayerKit`, `3E2EB0`) replaces resolved member 0 (story Roxas) with this
+  seat's agreed profile, so the authored `raw566` builds the friend's own Sora
+  natively (Sora's status key 1) in the same load. Outside checked sites, and
+  on a seat whose agreed profile is Roxas, member 0 is left alone.
+* *Other body's files.* The loader registers the player placeholder 566 from
+  member 0 and the friend placeholders 567/568 through the party row, which is
+  empty in the prologue, so each seat loads only its own body's files. A clone
+  of the other body then faulted in its construction (`FUN_1403E6120` ->
+  `FUN_14039CC40`, a null file entry). A MinHook on the object registration
+  (`3E0460`, bytes checked against build 9002b2de) queues the other seat's body
+  through the loader's own file queue (`3E0660`, friend kind 5) right after
+  566 registers at a checked site: `[prologue] other body 0x54 files queued`.
+  Mismatched bytes or a failed hook turn the prologue seats off with a
+  `REFUSED` line.
+* *Clone.* The missing-party ingress builds the clone from the remote seat's
+  profile as before; it is Sora on the host and Roxas on the friend.
+
+A refused profile holds both seats at the first site, logs
+`[prologue] seat N profile 0x5B refused: <reason>; both seats hold`, and
+shows the reason on both screens through the co-op overlay ("Co-op: Mickey
+can't play the prologue yet"). It never builds a Sora or any other stand-in.
+Evidence: skipped run `20261020-013141` and unskipped run `20261020-020857`
+(Roxas host, Sora friend, one load per site on each seat through evt95, both
+reloads and the Sandlot door, both seats moving and taking damage), refusal run
+`20261020-015253` (Mickey).
 
 **Events.** A host event tears down the field actors, the clone included, and
 the friend holds with reason `remote-unbound` until the post-event reload

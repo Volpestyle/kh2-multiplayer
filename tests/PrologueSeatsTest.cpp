@@ -82,10 +82,13 @@ void policy() {
     check(!prologue::Accept(s, seat({11, 99, 0}, 2, 0x5A, {}, SeatPhase::Declared, 1)), "another roster refused");
     check(!prologue::Accept(s, seat(two, 2, 0x5A, {}, SeatPhase::Declared, 2)), "an empty slot cannot report");
     check(prologue::Agreement(s) == Hold::MissingProfile, "one seat still undeclared");
-    check(prologue::Accept(s, seat(two, 1, 0x54, {}, SeatPhase::Declared, 1)) && prologue::Agreement(s) == Hold::UnqualifiedProfile,
-          "a Sora friend is not admitted to the prologue layout yet (VUH-1512)");
+    check(prologue::Accept(s, seat(two, 1, 0x5B, {}, SeatPhase::Declared, 1)) && prologue::Agreement(s) == Hold::UnqualifiedProfile,
+          "a Mickey friend is not admitted to the prologue layout: both seats hold");
+    check(prologue::RefusedProfile(s) == 0x5B && std::string_view(prologue::ProfileDisplayName(0x5B)) == "Mickey",
+          "the on-screen note names the refused Mickey");
     check(prologue::Accept(s, seat(two, 2, 0x5A, {}, SeatPhase::Declared, 1)) && prologue::Agreement(s) == Hold::NotAcknowledged,
           "declared Roxas/Roxas still needs both acknowledgements");
+    check(prologue::RefusedProfile(s) == 0, "no note once every declared profile is admitted");
     std::array<std::uint16_t, 3> v{};
     check(prologue::Vector(s, v) && v == std::array<std::uint16_t, 3>{0x5A, 0x5A, 0}, "profile vector");
     std::uint16_t profile = 0; Hold why = Hold::None;
@@ -106,6 +109,22 @@ void policy() {
     check(prologue::Release(s, tram, true) == Hold::None, "released when both seats bound at the same location");
     check(prologue::Release(s, tram97, true) == Hold::RemoteUnbound, "the next same-room reload holds again until rebound");
     check(prologue::Rebase(s, 5, two, 0) && prologue::Agreement(s) == Hold::MissingProfile, "a new session generation forgets every seat");
+    // VUH-1512: a Roxas host and a Sora friend, from each seat's view.
+    const std::array<std::uint16_t, 3> rs{0x5A, 0x54, 0};
+    for (std::uint8_t local = 0; local < 2; ++local) {
+        prologue::Seats p;
+        prologue::Rebase(p, 7, two, local);
+        prologue::Accept(p, seat(two, 1, 0x5A, rs, SeatPhase::Acknowledged, 0));
+        prologue::Accept(p, seat(two, 1, 0x54, rs, SeatPhase::Acknowledged, 1));
+        std::uint16_t mine = 0, theirs = 0; Hold a = Hold::None, b = Hold::None;
+        check(prologue::Agreement(p) == Hold::None && prologue::LocalProfile(p, mine, a) && prologue::RemoteProfile(p, theirs, b) &&
+              mine == rs[local] && theirs == rs[1 - local],
+              local ? "the Sora friend builds itself as Sora and the host as Roxas" : "the Roxas host builds the friend's clone as Sora");
+    }
+    prologue::Seats q;
+    prologue::Rebase(q, 8, two, 1);
+    std::uint16_t none = 1; Hold held = Hold::None;
+    check(!prologue::LocalProfile(q, none, held) && none == 0 && held == Hold::MissingProfile, "no local body before agreement");
 }
 
 void site() {
@@ -185,8 +204,11 @@ void site() {
     check(hallBits, "every changed hall record bit refuses its site");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
-    check(prologue::ProfileQualified(0x5A) && !prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&
-          !prologue::ProfileQualified(0x323), "only Roxas is admitted to the prologue layout in this slice");
+    check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&
+          !prologue::ProfileQualified(0x323) && !prologue::ProfileQualified(0x1234),
+          "VUH-1512: Roxas and Sora are admitted to the prologue layout, nothing else");
+    check(!prologue::ProfileRefusal(0x54) && !prologue::ProfileRefusal(0x5A) && prologue::ProfileRefusal(0x5B) &&
+          prologue::ProfileRefusal(0x323) && prologue::ProfileRefusal(0x1234), "every refused profile has a reason");
     check(std::string_view(prologue::HoldName(prologue::Hold::Unpinned)) == "unpinned-field" &&
           std::string_view(prologue::HoldName(prologue::Hold::RemoteUnbound)) == "remote-unbound", "every hold has its logged reason");
 }

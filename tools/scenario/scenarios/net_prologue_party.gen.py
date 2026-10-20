@@ -29,13 +29,27 @@ def canon(i):
     return f"peek('0x2A105D0','u64',{i})"
 
 
+# VUH-1512: the prologue's player bodies by profile (KH2COOP_PROFILE); the host keeps the story Roxas.
+BODIES = {"0x5A": "P_EX110", "0x54": "P_EX100"}
+
+
 def roxas(i):
-    return f"[(a['address'], a.get('hp'), a['position']) for a in actors({i}) if a['name'] == 'P_EX110']"
+    # Every player body on this seat (Roxas and, for a Sora friend, Sora); the key names keep "roxas" and
+    # the (address, hp, position) shape that own_hp reads.
+    return (f"[(a['address'], a.get('hp'), a['position']) for a in actors({i}) "
+            f"if a['name'] in ('P_EX110', 'P_EX100')]")
 
 
-def clone_addr(i):
-    return (f"[a['address'] for a in actors({i}) if a['name'] == 'P_EX110' and "
+def clone_addr(i, body="P_EX110"):
+    return (f"[a['address'] for a in actors({i}) if a['name'] == '{body}' and "
             f"int(a['address'], 16) != int({canon(i)}, 16)][0]")
+
+
+def bodies(friend):
+    """Each seat holds the host's Roxas and the friend's chosen body, local or clone, and nothing else."""
+    want = sorted(["P_EX110", BODIES[friend]])
+    return " and ".join(f"sorted(a['name'] for a in actors({i}) if a['name'] in ('P_EX110', 'P_EX100')) == {want}"
+                        for i in (0, 1))
 
 
 def lines(pattern, i, last=40):
@@ -109,8 +123,11 @@ def advance_until(expr, rounds, tag, skip=False):
 
 released = ("log_count('[prologue] control released at=02/{room:02X} evt={evt}', 0) > 0 and "
             "log_count('[prologue] control released at=02/{room:02X} evt={evt}', 1) > 0")
-def build(skip):
-    steps = [{"do": "boot", "newGame": True, "initTimeoutMs": 60000}, {"do": "boot", "newGame": True, "initTimeoutMs": 60000},
+def build(skip, friend="0x5A"):
+    friend_boot = {"do": "boot", "newGame": True, "initTimeoutMs": 60000}
+    if friend != "0x5A":
+        friend_boot["env"] = {"KH2COOP_PROFILE": friend}  # VUH-1512: chosen before New Game
+    steps = [{"do": "boot", "newGame": True, "initTimeoutMs": 60000}, friend_boot,
              {"do": "relay", "port": 27802, "args": ["--bind", "127.0.0.1"]},
              {"do": "runtime", "instance": 0, "role": "player"}, {"do": "runtime", "instance": 1, "role": "friend1"},
              {"do": "hang_check", "instance": 0, "on": False}, {"do": "hang_check", "instance": 1, "on": False},
@@ -138,6 +155,7 @@ def build(skip):
         {"do": "save", "as": "first_control_actors1", "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(1)]"},
         {"do": "save", "as": "first_control_log0", "expr": lines("\\[(?:prologue|missing-party\\] born)", 0)},
         {"do": "save", "as": "first_control_log1", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 1)},
+        {"do": "assert", "expr": bodies(friend), "message": "first control: a seat lacks the host's Roxas or the friend's chosen body"},
         {"do": "clip", "instance": 1, "seconds": 4, "fps": 30, "name": "first_control_friend"},
         # Owner-only input, each seat filmed from the other.
         {"do": "clip", "instance": 1, "seconds": 8, "fps": 30, "name": "friend_view_host_moves", "background": True},
@@ -149,7 +167,7 @@ def build(skip):
         # One synthetic native hit per seat (kh2ctl hit damage): the host's private clone of the friend,
         # then the friend's own Roxas. The other seat's HP and both SAVE ranges must not change.
         {"do": "progress_snapshot", "instances": [0, 1], "as": "save_before_damage"},
-        {"do": "kh2ctl", "instance": 0, "argsExpr": f"['hit', 'damage', '--victim', {clone_addr(0)}, '--amount', '1']"},
+        {"do": "kh2ctl", "instance": 0, "argsExpr": f"['hit', 'damage', '--victim', {clone_addr(0, BODIES[friend])}, '--amount', '1']"},
         {"do": "wait", "ms": 1500}] + census("after_clone_damage") + [
         {"do": "kh2ctl", "instance": 1, "argsExpr": f"['hit', 'damage', '--victim', {canon(1)}, '--amount', '1']"},
         {"do": "wait", "ms": 1500}] + census("after_friend_damage") + [
@@ -190,13 +208,11 @@ def build(skip):
         {"do": "save", "as": "sandlot_actors1", "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(1)]"},
         {"do": "save", "as": "sandlot_log0", "expr": lines("\\[(?:prologue|missing-party\\] born)", 0)},
         {"do": "save", "as": "sandlot_log1", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 1)},
-        # Both seats rebuilt at the new room: two Roxases each, and no open prologue field anywhere in the
-        # run played native solo and unheld (the DLL logs each one as an unpinned field).
-        {"do": "assert", "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 2 and "
-                                 "len([a for a in actors(1) if a['name'] == 'P_EX110']) == 2 and "
-                                 "log_count('[prologue] unpinned field', 0) == 0 and "
+        # Both seats rebuilt at the new room with the same bodies, and no open prologue field anywhere in
+        # the run played native solo and unheld (the DLL logs each one as an unpinned field).
+        {"do": "assert", "expr": bodies(friend) + " and log_count('[prologue] unpinned field', 0) == 0 and "
                                  "log_count('[prologue] unpinned field', 1) == 0",
-         "message": "a seat reached the Sandlot without both Roxases, or a prologue field was left unheld"},
+         "message": "a seat reached the Sandlot without both chosen bodies, or a prologue field was left unheld"},
         {"do": "clip", "instance": 0, "seconds": 5, "fps": 30, "name": "sandlot_host"},
         {"do": "clip", "instance": 1, "seconds": 5, "fps": 30, "name": "sandlot_friend"},
         {"do": "clip", "instance": 1, "seconds": 8, "fps": 30, "name": "sandlot_friend_view_host_moves", "background": True},
@@ -221,35 +237,54 @@ Path(__file__).with_name("net_prologue_party_skip.json").write_text(json.dumps(
          description=scenario["description"] + " Development variant: cutscenes skipped natively (Start, Down, Cross)."),
     indent=1), encoding="utf-8")
 
-# Refusal: the friend selects Sora, which the prologue layout does not admit yet (VUH-1512). Both seats
-# must hold at the first field with that reason: no clone, no Sora stand-in, no second load, no control.
+# VUH-1512: a Roxas host and a Sora friend, chosen before New Game, through the same checks.
+for name, skipped in (("net_prologue_party_sora", False), ("net_prologue_party_sora_skip", True)):
+    Path(__file__).with_name(name + ".json").write_text(json.dumps(
+        dict(scenario, name=name, steps=build(skipped, friend="0x54"),
+             description=scenario["description"].replace("two Roxases", "a Roxas host and a Sora friend") +
+             " VUH-1512: the friend chose Sora before New Game (KH2COOP_PROFILE=0x54); every check expects the host's "
+             "Roxas and the friend's Sora on both seats." + (" Development variant: cutscenes skipped natively." if skipped else "")),
+        indent=1), encoding="utf-8")
+
+# Refusal: the friend selects Mickey, which the prologue layout does not admit (VUH-1512). Both seats
+# must hold at the first field with that reason: no clone, no stand-in body, no second load, no control.
 both_at_95 = "location(0) == [2, 7, 0, 95, 95, 95] and location(1) == [2, 7, 0, 95, 95, 95]"
-opening = steps[:next(n for n, st in enumerate(steps) if st.get("expr") == both_at_95)]
-opening[1] = dict(opening[1], env={"KH2COOP_PROFILE": "0x54"})  # the friend's boot
-refusal = opening + [
-    {"do": "wait_until", "expr": both_at_95, "timeoutMs": 240000, "pollMs": 1000},
-    {"do": "wait_until", "expr": "log_count('[prologue] hold reason=unqualified-profile', 0) > 0 and "
-                                 "log_count('[prologue] hold reason=unqualified-profile', 1) > 0", "timeoutMs": 120000, "pollMs": 1000},
-    {"do": "wait", "ms": 3000}] + snap("held") + census("held") + [
-    {"do": "save", "as": "held_actors0", "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(0)]"},
-    {"do": "save", "as": "held_actors1", "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(1)]"},
-    {"do": "save", "as": "held_log0", "expr": lines("\\[(?:prologue|missing-party)\\]", 0)},
-    {"do": "save", "as": "held_log1", "expr": lines("\\[(?:prologue|missing-party|warp)\\]", 1)},
-    {"do": "assert", "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 1 and "
-                             "len([a for a in actors(1) if a['name'] == 'P_EX110']) == 1 and "
-                             "not [a for a in actors(0) + actors(1) if a['name'] == 'P_EX100']",
-     "message": "a refused profile built a clone or a Sora stand-in"},
-    {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_move.json", "seconds": 60, "name": "host_try_move", "allowStuck": True},
-    {"do": "wait", "ms": 1000}] + census("after_try_move") + [
-    {"do": "assert", "expr": "saved['held_roxas0'] == saved['after_try_move_roxas0'] and log_count('[prologue] control released', 0) == 0",
-     "message": "the held host moved or was released"},
-    {"do": "clip", "instance": 0, "seconds": 4, "fps": 30, "name": "held_host"}]
-Path(__file__).with_name("net_prologue_party_refusal.json").write_text(json.dumps(
-    {"name": "net_prologue_party_refusal",
-     "description": "VUH-2464 refusal on PC1: as net_prologue_party, but the friend selects Sora (KH2COOP_PROFILE=0x54), "
-                    "which the prologue layout does not admit. Both seats must hold at Tram Common evt95 with reason "
-                    "unqualified-profile, build no clone or Sora stand-in, and not move under input. Never saves.",
-     "playerDefaults": True, "steps": refusal}, indent=1), encoding="utf-8")
+
+
+def refusal(base):
+    opening = base[:next(n for n, st in enumerate(base) if st.get("expr") == both_at_95)]
+    opening[1] = dict(opening[1], env={"KH2COOP_PROFILE": "0x5B"})  # the friend's boot
+    return opening + [
+        {"do": "wait_until", "expr": both_at_95, "timeoutMs": 240000, "pollMs": 1000},
+        {"do": "wait_until", "expr": "log_count('[prologue] hold reason=unqualified-profile', 0) > 0 and "
+                                     "log_count('[prologue] hold reason=unqualified-profile', 1) > 0", "timeoutMs": 120000, "pollMs": 1000},
+        {"do": "wait", "ms": 3000}] + snap("held") + census("held") + [
+        {"do": "save", "as": "held_actors0", "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(0)]"},
+        {"do": "save", "as": "held_actors1", "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(1)]"},
+        {"do": "save", "as": "held_log0", "expr": lines("\[(?:prologue|missing-party)\]", 0)},
+        {"do": "save", "as": "held_log1", "expr": lines("\[(?:prologue|missing-party|warp)\]", 1)},
+        {"do": "assert", "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 1 and "
+                                 "len([a for a in actors(1) if a['name'] == 'P_EX110']) == 1 and "
+                                 "not [a for a in actors(0) + actors(1) if a['name'] in ('P_EX100', 'P_EX200')] and "
+                                 "log_count('profile 0x5B refused: Mickey', 0) > 0 and log_count('profile 0x5B refused: Mickey', 1) > 0",
+         "message": "a refused profile built a clone or a stand-in body, or a seat did not say why"},
+        # Both screens carry the reason (the overlay note "Co-op: Mickey can't play the prologue yet").
+        {"do": "clip", "instance": 1, "seconds": 8, "fps": 30, "name": "held_friend", "background": True},
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_move.json", "seconds": 60, "name": "host_try_move", "allowStuck": True},
+        {"do": "clip_wait"}, {"do": "wait", "ms": 1000}] + census("after_try_move") + [
+        {"do": "assert", "expr": "saved['held_roxas0'] == saved['after_try_move_roxas0'] and log_count('[prologue] control released', 0) == 0",
+         "message": "the held host moved or was released"},
+        {"do": "clip", "instance": 0, "seconds": 4, "fps": 30, "name": "held_host"}]
+
+
+for name, skipped in (("net_prologue_party_refusal", False), ("net_prologue_party_refusal_skip", True)):
+    Path(__file__).with_name(name + ".json").write_text(json.dumps(
+        {"name": name,
+         "description": "VUH-2464/VUH-1512 refusal on PC1: as net_prologue_party, but the friend selects Mickey (KH2COOP_PROFILE=0x5B), "
+                        "which the prologue layout does not admit. Both seats must hold at Tram Common evt95 with reason "
+                        "unqualified-profile, say why in the log and on screen, build no clone or stand-in body, and not move "
+                        "under input. Never saves." + (" Development variant: cutscenes skipped natively." if skipped else ""),
+         "playerDefaults": True, "steps": refusal(build(skipped))}, indent=1), encoding="utf-8")
 
 
 # Two PCs (VUH-2464 acceptance): the host on PC1 runs the relay on its Tailscale address and plays the

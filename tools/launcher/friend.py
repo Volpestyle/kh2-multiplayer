@@ -12,7 +12,7 @@ import uuid
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from friend_package import GameOwner, verify_package
+from friend_package import GameOwner, PROFILES, verify_package
 from launcher import Session, require_idle_rig
 from plan import ROOT, LOCAL, Options, make_plan
 from steam_flow import invitation, confirm_account, RuntimeStatus
@@ -117,6 +117,11 @@ def make_view(tk, ttk, browse):
     ttk.Button(frame,text='Browse…',command=browse).grid(row=3,column=2,sticky='e')
     play_as=ttk.Combobox(frame,textvariable=values['mode'],values=('host','join'),state='readonly')
     field(4,'Play as',play_as)
+    # VUH-1512: chosen before Start game; the game declares it to every seat before the first scene.
+    values['character']=tk.StringVar(value='Roxas')
+    character=ttk.Combobox(frame,textvariable=values['character'],values=tuple(PROFILES),state='readonly')
+    ttk.Label(frame,text='Character').grid(row=4,column=2,sticky='e',padx=(0,170))
+    character.grid(row=4,column=2,sticky='e')
     steam = SteamFields(frame, tk, ttk, values['mode'])
     steam.frame.grid(row=5,columnspan=3,sticky='ew',pady=4)
     enet_widgets=(*field(6,'Relay address from your host',ttk.Entry(frame,textvariable=values['endpoint'])),
@@ -144,7 +149,7 @@ def make_view(tk, ttk, browse):
     actions['hud'].configure(state='disabled')
     from types import SimpleNamespace
     return SimpleNamespace(app=app,frame=frame,values=values,relay=relay,loaded=loaded,
-                           status=status,actions=actions,steam=steam,play_as=play_as)
+                           status=status,actions=actions,steam=steam,play_as=play_as,character=character)
 
 
 
@@ -196,12 +201,13 @@ def main():
         directory=values['game'].get()
         transport=steam.transport()
         appid_consent=steam.appid_consent.get()
+        character=values['character'].get()
         steam.identity.set('')
         steam.note.set('Waiting for the owned game broker receipt.')
         def action():
             require_idle_rig(win)
-            r=owner.launch(directory,fresh_dir(),transport=transport,appid_consent=appid_consent)
-            return f'Game {r["processId"]} prepared with save protection. Load your save, confirm your Steam account, then Start hosting or Join.'
+            r=owner.launch(directory,fresh_dir(),transport=transport,appid_consent=appid_consent,character=character)
+            return f'Game {r["processId"]} prepared with save protection, playing as {character}. Load your save, confirm your Steam account, then Start hosting or Join.'
         run_work(action,'Checking the exact game build and starting KH2…')
     def connect():
         nonlocal session,log_offset,log_fragment,roster,last_rtt,rtt_at,connection_line,runtime_status,broker_offset,broker_fragment
@@ -310,6 +316,8 @@ def main():
         steam.hosting=active and roster and runtime_status.hosting and runtime_status.listener and not runtime_status.terminal
         steam.set_locked(busy or closing or active)
         view.play_as.configure(state='disabled' if busy or closing or active else 'readonly')
+        # The character is fixed for the owned game's whole run: changing it means closing and starting again.
+        view.character.configure(state='disabled' if busy or closing or active or owner.ready else 'readonly')
         view.actions['connect'].configure(text='Start hosting' if values['mode'].get() == 'host' else 'Join')
         if not busy and not closing and owner.ready and owner.transport == 'steam':
             try:

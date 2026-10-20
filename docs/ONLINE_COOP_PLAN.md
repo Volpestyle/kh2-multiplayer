@@ -398,6 +398,13 @@ and cannot delay the core route.
    door; duplicates/colors work. Controller kind/identity are agreed before the
    scene, mismatch refuses, and reconnect restores identity without reinstall.
    Admit Donald/Goofy through step 4, not a separate late-game selector.
+   Status 2026-10-20: the friend's launcher picks Roxas or Sora before New Game.
+   A Roxas host and Sora friend build both bodies natively on both seats, with
+   no second load, through the first field, both reloads and the Sandlot door.
+   A refused profile holds both seats and shows its reason on screen
+   (`docs/PARTY_SETUP.md`, "Roxas host, Sora friend"). Open: the opening
+   scenes' friend representation (VUH-2359), reconnect restore, and the
+   two-PC clip, which waits for bld.
 4. **VUH-1514 — early party-member profiles.** After the two native-player
    examples, prove Donald's input-triggered hit, then Goofy's. Each must appear
    as the selected friend in the opening scene, with its own controls, camera,

@@ -77,7 +77,13 @@ SHIPPED_DEFAULTS = {
 }
 
 
-def child_environment(root, *, steam_broker=False):
+# VUH-1512: the characters a player can choose before starting the game, as the DLL's
+# KH2COOP_PROFILE (kh2coop/PrologueSeats.hpp ProfileQualified). Only admitted profiles are offered;
+# the game refuses any other with a reason and never substitutes another body.
+PROFILES = {'Roxas': 0x5A, 'Sora': 0x54}
+
+
+def child_environment(root, *, steam_broker=False, profile=None):
     # One player policy for game and runtime children. Developer diagnostics and
     # write-policy switches stay excluded; explicit disables of shipped features
     # survive the package launcher and have priority over these defaults.
@@ -91,6 +97,10 @@ def child_environment(root, *, steam_broker=False):
         raise ValueError('Steam broker opt-in must be explicit.')
     if steam_broker:
         env['KH2COOP_STEAM_BROKER'] = '1'
+    if profile is not None:
+        if profile not in PROFILES.values():
+            raise ValueError('Choose Roxas or Sora.')
+        env['KH2COOP_PROFILE'] = hex(profile)
     env['KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL'] = '0'
     env['SteamAppId'] = env['SteamGameId'] = '2552430'
     return env
@@ -102,10 +112,10 @@ class CanonicalFailure(ValueError):
         self.receipt = receipt
 
 
-def canonical(root, cli, args, *, timeout, run=subprocess.run, steam_broker=False):
-    if steam_broker and (not args or args[0] != 'launch'):
-        raise ValueError('Steam broker opt-in is only for an owned game launch.')
-    result = run([str(cli), *args], cwd=str(root), env=child_environment(root, steam_broker=steam_broker),
+def canonical(root, cli, args, *, timeout, run=subprocess.run, steam_broker=False, profile=None):
+    if (steam_broker or profile is not None) and (not args or args[0] != 'launch'):
+        raise ValueError('Steam broker and character choices are only for an owned game launch.')
+    result = run([str(cli), *args], cwd=str(root), env=child_environment(root, steam_broker=steam_broker, profile=profile),
                  stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding='utf-8',
                  errors='replace', timeout=timeout, shell=False,
                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -154,9 +164,11 @@ class GameOwner:
     def product(self, name):
         return self.root / self.manifest['products'][name]
 
-    def launch(self, game_dir, receipt_dir, *, transport='enet', appid_consent=False):
+    def launch(self, game_dir, receipt_dir, *, transport='enet', appid_consent=False, character='Roxas'):
         if transport not in ('enet', 'steam'):
             raise ValueError('Choose ENet / relay or Steam (beta).')
+        if character not in PROFILES:
+            raise ValueError('Choose Roxas or Sora.')
         if self.unresolved_launch:
             raise ValueError('A previous start has no verified completion. Use Exit & close game before reopening the launcher; do not start another copy. If the game is still open, exit it normally; do not save.')
         if self.handle and self.win.alive(self.handle):
@@ -175,11 +187,13 @@ class GameOwner:
         self.steam_identity = ''
         (receipt_dir / 'launch-request.json').write_text(json.dumps({'argv':argv,'gameSHA256':SUPPORTED_GAME,
             'startedNs':time.perf_counter_ns(), 'startedWallNs':self.launch_wall_ns,
-            'transport':transport, 'steamBroker':transport == 'steam', 'steamAppIdFile':appid}, indent=2), encoding='utf-8')
+            'transport':transport, 'steamBroker':transport == 'steam', 'steamAppIdFile':appid,
+            'character':character, 'profile':hex(PROFILES[character])}, indent=2), encoding='utf-8')
         self.unresolved_launch = True
         launch_failure = None
         try:
             opt_in = {'steam_broker':True} if transport == 'steam' else {}
+            opt_in['profile'] = PROFILES[character]
             receipt = self.command(self.root, self.product('cli'), argv, timeout=105, **opt_in)
         except Exception as error:
             (receipt_dir / 'launch-error.json').write_text(json.dumps({'error':str(error),

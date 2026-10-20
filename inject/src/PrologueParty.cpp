@@ -8,6 +8,8 @@
 #include "kh2coop/PrologueSeats.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
 
+#include "MinHook.h"
+
 #include <Windows.h>
 #include <atomic>
 #include <cstdlib>
@@ -45,6 +47,29 @@ std::array<std::uint8_t, 10> g_unpinnedAt {};
 bool g_released = false;   // this seat has been released at a site once
 prologue::UnpinnedStart g_unpinnedStart;  // VUH-2486
 std::atomic<std::uint8_t> g_notice {0};
+// VUH-1512: the NOW of the load whose member 0 ResolveLocal replaced (all 0xFF: none).
+std::atomic<std::uint64_t> g_bodyAtLow {~0ull};
+std::atomic<std::uint16_t> g_bodyAtHigh {0xFFFF};
+std::uint16_t g_refusalLogged = 0;
+std::atomic<std::uint16_t> g_refused {0};
+// VUH-1512: the area loader's object registration (FUN_1403E0460(object, priority, kind)) and its file
+// queue (FUN_1403E0660(object, priority, kind, childKind)), build 9002b2de. The loader registers the player
+// placeholder 566 from member 0 and the friend seats 567/568 through the party row, which is 00/12/12/12
+// in the prologue, so only the local body's files are loaded. A clone of another body then finds no
+// files: its construction (FUN_1403E6120 -> FUN_14039CC40) writes through a null file entry. Right after
+// 566 is registered at a checked prologue site, the other seat's body is queued with the friend kind (5)
+// the loader uses for seat 567. Calling FUN_1403E0660 directly keeps FUN_1403E0460's player-override
+// global (set for a type-0 object) untouched.
+constexpr std::uintptr_t RVA_REGISTER_OBJECT = 0x3E0460, RVA_QUEUE_OBJECT = 0x3E0660;
+constexpr std::uint8_t kRegisterBytes[] = {0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48,
+                                           0x83, 0xEC, 0x20, 0x8B, 0xC1, 0x41, 0x8B, 0xF8, 0x8B, 0xF2, 0x8B, 0xD9};
+constexpr std::uint8_t kQueueBytes[] = {0x40, 0x53, 0x55, 0x57, 0x41, 0x55, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x30};
+constexpr std::uint32_t PLAYER_PLACEHOLDER = 0x236;
+constexpr int FRIEND_KIND = 5;
+using RegisterFn = void(__fastcall*)(std::uint64_t, std::uint64_t, int);
+using QueueFn = void(__fastcall*)(std::uint64_t, int, int, int);
+RegisterFn g_register = nullptr;
+QueueFn g_queue = nullptr;
 constexpr std::uint64_t ECHO_RETRY_MS = 2000;
 constexpr unsigned MAX_RESENDS = 15;
 
@@ -89,6 +114,22 @@ void Publish(Hold hold, const std::array<std::uint8_t, 10>& now) {
     g_holdNowHigh.store(high, std::memory_order_relaxed);
     g_hold.store(static_cast<std::uint8_t>(hold), std::memory_order_release);
 }
+// The other seat's body when it differs from this seat's own, at a checked prologue site (loading thread).
+bool OtherBody(std::uint16_t& other, std::array<std::uint8_t, 10>& now);
+bool Queue(std::uint16_t object) {
+    __try { g_queue(object, -1, FRIEND_KIND, -1); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void __fastcall HookedRegister(std::uint64_t object, std::uint64_t priority, int kind) {
+    g_register(object, priority, kind);
+    if (static_cast<std::uint32_t>(object) != PLAYER_PLACEHOLDER) return;
+    std::uint16_t other = 0;
+    std::array<std::uint8_t, 10> now {};
+    if (!OtherBody(other, now)) return;
+    const bool queued = Queue(other);
+    if (g_log) g_log("[prologue] other body 0x%X files %s at=%02X/%02X evt=%u (kind %d)", other,
+                     queued ? "queued" : "FAULTED", now[0], now[1], static_cast<unsigned>(now[8] | (now[9] << 8)), FRIEND_KIND);
+}
 bool ParseProfile(std::uint16_t& out) {
     char text[16] {};
     const DWORD n = GetEnvironmentVariableA("KH2COOP_PROFILE", text, sizeof(text));
@@ -113,9 +154,26 @@ void Install(std::uintptr_t exeBase, LogFn log) {
         return;
     }
     if (!ParseProfile(g_localProfile)) g_localProfile = 0;
-    if (log) log("[prologue] seats on: profile=0x%X%s; Roxas+Roxas layout at %u checked site(s)", g_localProfile,
-                 g_localProfile ? (prologue::ProfileQualified(g_localProfile) ? "" : " (not prologue-qualified)") : " (KH2COOP_PROFILE unreadable: undeclared)",
-                 static_cast<unsigned>(std::size(routespawn::MissingPartySites) - 1));
+    // VUH-1512: the file preload for a clone whose body differs from the local one (Roxas + Sora).
+    const auto* reg = reinterpret_cast<const void*>(exeBase + RVA_REGISTER_OBJECT);
+    const auto* queue = reinterpret_cast<const void*>(exeBase + RVA_QUEUE_OBJECT);
+    if (std::memcmp(reg, kRegisterBytes, sizeof(kRegisterBytes)) || std::memcmp(queue, kQueueBytes, sizeof(kQueueBytes))) {
+        if (log) log("[prologue] REFUSED: object registration bytes differ from 9002b2de; prologue seats off");
+        g_requested = false;
+        return;
+    }
+    g_queue = reinterpret_cast<QueueFn>(exeBase + RVA_QUEUE_OBJECT);
+    MH_STATUS st = MH_CreateHook(const_cast<void*>(reg), reinterpret_cast<void*>(&HookedRegister), reinterpret_cast<void**>(&g_register));
+    if (st == MH_OK) st = MH_EnableHook(const_cast<void*>(reg));
+    if (st != MH_OK) {
+        if (log) log("[prologue] REFUSED: object registration hook failed %d (%s); prologue seats off", st, MH_StatusToString(st));
+        g_requested = false;
+        return;
+    }
+    const char* refusal = g_localProfile ? prologue::ProfileRefusal(g_localProfile) : nullptr;
+    if (log) log("[prologue] seats on: profile=0x%X%s%s; two-player layout (Roxas/Sora) at %u checked site(s)", g_localProfile,
+                 g_localProfile ? (refusal ? " refused: " : "") : " (KH2COOP_PROFILE unreadable: undeclared)",
+                 refusal ? refusal : "", static_cast<unsigned>(std::size(routespawn::MissingPartySites) - 1));
 }
 
 bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot,
@@ -160,6 +218,8 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
                    std::memory_order_release);
     if (decided) hold = prologue::Release(g_seats, LocationOf(now), LocalBoundHere(now));
     else if (early) hold = Hold::Unpinned;
+    g_refused.store(decided && hold == Hold::UnqualifiedProfile ? prologue::RefusedProfile(g_seats) : 0,
+                    std::memory_order_release);
     Publish(hold, now);
     if (decided && hold == Hold::None) g_released = true;
     // One line per decision at each prologue field location (a seat that arrives after its peer bound
@@ -216,6 +276,11 @@ void Receive(const SeatState& m) {
                      accepted ? "accepted" : "ignored", m.ownerSlot, m.seq, static_cast<unsigned>(m.phase), m.profile,
                      m.latched[0], m.latched[1], m.latched[2], m.worldId, m.roomId, m.eventProgram,
                      prologue::HoldName(prologue::Agreement(g_seats)));
+    // VUH-1512: say once per profile why the layout cannot use it; that seat is never given another body.
+    if (const char* refusal = accepted ? prologue::ProfileRefusal(m.profile) : nullptr; refusal && g_refusalLogged != m.profile) {
+        g_refusalLogged = m.profile;
+        if (g_log) g_log("[prologue] seat %u profile 0x%X refused: %s; both seats hold", m.ownerSlot, m.profile, refusal);
+    }
 }
 
 bool CloneProfile(std::uint16_t& object, const char*& reason) {
@@ -225,6 +290,48 @@ bool CloneProfile(std::uint16_t& object, const char*& reason) {
     if (!prologue::RemoteProfile(g_seats, object, hold)) { reason = prologue::HoldName(hold); return false; }
     reason = "agreed";
     return true;
+}
+
+bool LocalBody(std::uint16_t& object, std::uint16_t& statusKey) {
+    object = 0; statusKey = 0;
+    Hold hold = Hold::None;
+    if (!g_requested || !prologue::LocalProfile(g_seats, object, hold)) { object = 0; return false; }
+    const int key = kitStatusKey(object);
+    if (key <= 0) { object = 0; return false; }
+    statusKey = static_cast<std::uint16_t>(key);
+    return true;
+}
+
+namespace {
+bool OtherBody(std::uint16_t& other, std::array<std::uint8_t, 10>& now) {
+    other = 0;
+    if (!g_requested || !ReadNow(now) || !PrologueSite(now)) return false;
+    std::uint16_t local = 0, key = 0, remote = 0;
+    const char* reason = nullptr;
+    if (!LocalBody(local, key) || !CloneProfile(remote, reason) || remote == local) return false;
+    other = remote;
+    return true;
+}
+} // namespace
+
+void ResolveLocal(std::uintptr_t resolvedMembers) {
+    if (!g_requested || !resolvedMembers) return;
+    std::array<std::uint8_t, 10> now {};
+    if (!ReadNow(now) || !PrologueSite(now)) return;
+    std::uint16_t body = 0, key = 0;
+    if (!LocalBody(body, key) || body == prologue::DEFAULT_PROFILE) return;
+    bool replaced = false;
+    __try {
+        auto* member0 = reinterpret_cast<std::uint16_t*>(resolvedMembers);
+        if (*member0 == prologue::DEFAULT_PROFILE) { *member0 = body; replaced = true; }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+    if (!replaced) return;
+    std::uint64_t low = 0; std::uint16_t high = 0;
+    std::memcpy(&low, now.data(), 8); std::memcpy(&high, now.data() + 8, 2);
+    g_bodyAtHigh.store(high, std::memory_order_relaxed);
+    g_bodyAtLow.store(low, std::memory_order_release);
+    if (g_log) g_log("[prologue] local body at=%02X/%02X evt=%u: member 0 Roxas -> chosen 0x%X (status key %u)",
+                     now[0], now[1], LocationOf(now).evt, body, key);
 }
 
 void NoteConstruction(const std::array<std::uint8_t, 10>& location, bool bound, const char* reason, std::uintptr_t clone) {
@@ -253,11 +360,19 @@ bool HoldInput(void* inputStruct) {
 
 std::uint8_t PublishedHold() { return g_hold.load(std::memory_order_acquire); }
 UnpinnedNotice Notice() { return static_cast<UnpinnedNotice>(g_notice.load(std::memory_order_acquire)); }
+std::uint16_t RefusedProfile() { return g_refused.load(std::memory_order_acquire); }
 
 bool PrologueScope() {
     std::uint8_t world = 0xFF; std::uint16_t member0 = 0;
-    return g_requested && g_base && Read(offsets::WORLD_ID, world) && world == 2 &&
-        Read(playerkit::RVA_RESOLVED_MEMBERS, member0) && member0 == prologue::DEFAULT_PROFILE;
+    if (!g_requested || !g_base || !Read(offsets::WORLD_ID, world) || world != 2 ||
+        !Read(playerkit::RVA_RESOLVED_MEMBERS, member0)) return false;
+    if (member0 == prologue::DEFAULT_PROFILE) return true;
+    // VUH-1512: this seat's chosen body, set by ResolveLocal for the load at this exact NOW.
+    std::array<std::uint8_t, 10> now {};
+    std::uint64_t low = 0; std::uint16_t high = 0;
+    if (member0 != g_localProfile || !ReadNow(now)) return false;
+    std::memcpy(&low, now.data(), 8); std::memcpy(&high, now.data() + 8, 2);
+    return g_bodyAtLow.load(std::memory_order_acquire) == low && g_bodyAtHigh.load(std::memory_order_relaxed) == high;
 }
 
 } // namespace kh2coop::inject::prologueparty
