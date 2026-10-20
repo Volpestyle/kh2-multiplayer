@@ -27,6 +27,7 @@
 #include "Warp.hpp"
 #include "PartyNativePolicy.hpp"
 #include "PrologueParty.hpp"
+#include "NativePartyHud.hpp"
 #include "MissionMirror.hpp"
 #include "PartyRow.hpp"
 #include "BossLeave.hpp"
@@ -3749,6 +3750,8 @@ void ReceiveSeatState(const WorldScope& scope, const std::uint8_t* payload, std:
     read(r, m);
     if (!r.atEnd() || m.ownerSlot > 2 || scope.sourceConnectionId != g_bridge.ConnectionId(m.ownerSlot) ||
         m.roster != PartyRoster()) return;
+    nativehud::Session(WorldSessionGeneration(), PartyRoster(), g_bridge.LocalSlot());
+    nativehud::Receive(m);
     prologueparty::Receive(m);
 }
 

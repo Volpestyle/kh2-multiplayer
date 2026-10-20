@@ -1000,23 +1000,29 @@ std::vector<std::uint8_t> encode(const ReviveRequest& m) {
 
 // VUH-2464: 45 payload bytes, field order. The codec refuses an invalid phase or slot.
 void write(ByteWriter& w, const SeatState& m) {
-    if (!validSeatPhase(m.phase) || (m.ownerSlot > 2 && m.ownerSlot != 0xFF) || m.reserved)
+    if (!validSeatPhase(m.phase) || (m.ownerSlot > 2 && m.ownerSlot != 0xFF) || m.reserved || !validSeatVitals(m.vitals))
         throw std::runtime_error("SeatState: invalid phase or slot");
     for (auto id : m.roster) w.writeU64(id);
     w.writeU32(m.seq); w.writeU16(m.profile);
     for (auto kit : m.latched) w.writeU16(kit);
     w.writeU16(m.worldId); w.writeU16(m.roomId); w.writeU16(m.eventProgram);
     w.writeU8(static_cast<std::uint8_t>(m.phase)); w.writeU8(m.ownerSlot); w.writeU8(m.reserved);
+    const auto& v = m.vitals;
+    w.writeI32(v.hp); w.writeI32(v.maxHp); w.writeI32(v.mp); w.writeI32(v.maxMp);
+    w.writeF32(v.charge); w.writeF32(v.chargeMax); w.writeU16(v.objectId); w.writeU8(v.flags);
 }
 void read(ByteReader& r, SeatState& out) {
-    if (r.remaining() != 45) throw std::runtime_error("SeatState: wrong payload length");
+    if (r.remaining() != SEAT_STATE_BYTES) throw std::runtime_error("SeatState: wrong payload length");
     SeatState m;
     for (auto& id : m.roster) id = r.readU64();
     m.seq = r.readU32(); m.profile = r.readU16();
     for (auto& kit : m.latched) kit = r.readU16();
     m.worldId = r.readU16(); m.roomId = r.readU16(); m.eventProgram = r.readU16();
     m.phase = static_cast<SeatPhase>(r.readU8()); m.ownerSlot = r.readU8(); m.reserved = r.readU8();
-    if (!validSeatPhase(m.phase) || (m.ownerSlot > 2 && m.ownerSlot != 0xFF) || m.reserved)
+    auto& v = m.vitals;
+    v.hp = r.readI32(); v.maxHp = r.readI32(); v.mp = r.readI32(); v.maxMp = r.readI32();
+    v.charge = r.readF32(); v.chargeMax = r.readF32(); v.objectId = r.readU16(); v.flags = r.readU8();
+    if (!validSeatPhase(m.phase) || (m.ownerSlot > 2 && m.ownerSlot != 0xFF) || m.reserved || !validSeatVitals(m.vitals))
         throw std::runtime_error("SeatState: invalid phase or slot");
     out = m;
 }
@@ -1764,7 +1770,7 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("Party: wrong frame length");
     if (type == PacketType::ReviveRequest && (len != 50 || size != kHeaderSize + len))
         throw std::runtime_error("ReviveRequest: wrong frame length");
-    if (type == PacketType::SeatState && (len != 45 || size != kHeaderSize + len))
+    if (type == PacketType::SeatState && (len != SEAT_STATE_BYTES || size != kHeaderSize + len))
         throw std::runtime_error("SeatState: wrong frame length");
     if (type == PacketType::StageEnd && (len != STAGE_END_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("StageEnd: wrong frame length");

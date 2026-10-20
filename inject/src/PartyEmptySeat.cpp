@@ -1,4 +1,5 @@
 #include "PartyEmptySeat.hpp"
+#include "NativePartyHud.hpp"
 #include "LimitAdmission.hpp"
 #include "PlayerKit.hpp"
 #include <Windows.h>
@@ -489,6 +490,7 @@ bool DisableOtherHooks() {
             if (MH_QueueEnableHook(reinterpret_cast<void*>(g_base + site)) != MH_OK) return false;
     }
     if (!limitadmission::QueuePreserveHeld()) return false;
+    if (!nativehud::QueuePreserveRestoration()) return false;
     return MH_ApplyQueued() == MH_OK;
 }
 }

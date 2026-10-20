@@ -285,9 +285,12 @@ class Context:
             return next(v for k, v in sample.items() if k != "t")
 
         def peek_at(address: int | str, kind: str = "u32", index: int = 0):
-            """An absolute address inside the module image, such as an actor field (VUH-1512)."""
+            """An absolute address, including native HUD heap objects and DLL-owned display views."""
             base = int(kh2ctl("peek", "--rva", "0x0:u8", pid=self.inst(index).pid)["moduleBase"], 16)
-            return peek((int(address, 16) if isinstance(address, str) else address) - base, kind, index)
+            # kh2ctl adds an unsigned 64-bit RVA to the module base. Format a wrapped value,
+            # not Python's invalid "0x-..." spelling when a heap allocation lies below the image.
+            rva = ((int(address, 16) if isinstance(address, str) else address) - base) & 0xFFFFFFFFFFFFFFFF
+            return peek(rva, kind, index)
 
         def pos(name: str = "P_EX100", index: int = 0):
             p = self.actor(name, index)["position"]

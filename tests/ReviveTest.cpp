@@ -79,7 +79,7 @@ void remoteHitUnitChecks(){
      check(refused,"remote hit reader refuses wrong payload length");}
     check(isWorldPacket(PacketType::RemoteHit) && isScopedWorldPacket(PacketType::RemoteHit) && !isMaterialWorldPacket(PacketType::RemoteHit) &&
           validateScopedWorldPacket(bytes)==PacketType::RemoteHit,"remote hit is a scoped, non-material world packet");
-    check(PROTOCOL_VERSION==28,"protocol28 retains RemoteHit");
+    check(PROTOCOL_VERSION==29,"protocol29 retains RemoteHit");
 }
 void remoteHitEnetChecks(){
     SessionConfig config;config.bindAddress="127.0.0.1";config.port=29876;

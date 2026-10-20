@@ -43,6 +43,7 @@
 #include "NativeLifetimeTrace.hpp"
 #include "NativePrivateStatus.hpp"
 #include "PrologueParty.hpp"
+#include "NativePartyHud.hpp"
 #include "NativeHitTrace.hpp"
 #include "CombatCausalTrace.hpp"
 #include "DamagePolicy.hpp"
@@ -1188,6 +1189,17 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
         remote.avatar = g_puppets[i].pose.pose;
     }
     input.after = enemysync::CapturePuppetAuthority();
+    std::array<std::uintptr_t, 3> hudBodies{};
+    if (hud::SameAuthority(input.before, input.after) && hud::ValidAuthority(input.after)) {
+        for (int i = 0; i < 2; ++i) {
+            const auto& remote = input.remote[static_cast<std::size_t>(i)];
+            const auto owner = static_cast<std::uint8_t>(remote.avatar.ownerSlot);
+            if (remote.active && remote.body && ValidPuppetProvenance(remote.provenance, owner, i, input.after))
+                hudBodies[owner] = PuppetTarget(i);
+        }
+    }
+    nativehud::Observe(local, g_soraActor, input.after, hudBodies,
+        nativehud::HumanTargets(input.after, {PuppetTarget(0), PuppetTarget(1)}));
     auto snapshot = hud::Project(input, GetTickCount64(), g_frameCounter);
     // VUH-2480: the crowned actor's head bone for the real crown; the painted marker stands in without it.
     std::uintptr_t wearer = 0;
@@ -3561,6 +3573,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
 // ============================================================================
 
 static void UninitializeMinHookUnlessRetained() {
+    if (nativehud::RetainsMinHookResources()) return;
     if (limitadmission::RetainsMinHookResources()) {
         Log("[limit-admission] callback originals retained until process exit");
         return;
@@ -3898,6 +3911,7 @@ bool Initialize(uintptr_t exeBase) {
     const bool partyNativeOk = partynative::Install(exeBase, &Log);
     playerkit::Install(exeBase, &Log); // guard configuration must precede privatestatus
     prologueparty::Install(exeBase, &Log); // VUH-2464: seats/hold; the clone rides the missing-party ingress
+    nativehud::Install(exeBase, &Log);
     (void)partyNativeOk; // readiness is confirmed below after neutral input installs
     if (!privatestatus::Initialize(exeBase))
         Log(playerkit::BlocksNativeSoraPuppets()
@@ -3995,6 +4009,7 @@ bool Initialize(uintptr_t exeBase) {
 }
 
 void Shutdown() {
+    nativehud::Retire();
     // Drain spectate before clearing ANY restoration/lifetime authority.
     if (!downedspectate::Shutdown()) return;
     if (!enemymirror::ShutdownFields()) return;

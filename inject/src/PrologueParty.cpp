@@ -1,5 +1,7 @@
 // PrologueParty — see PrologueParty.hpp (VUH-2464).
 #include "PrologueParty.hpp"
+#include "NativePartyHud.hpp"
+#include "NativePartyHudState.hpp"
 #include "NativePrivateStatus.hpp"
 #include "PlayerKit.hpp"
 #include "Warp.hpp"
@@ -160,10 +162,24 @@ bool ParseProfile(std::uint16_t& out) {
     out = static_cast<std::uint16_t>(v);
     return true;
 }
+bool Emit(SeatState m, std::uint64_t nowMs, SeatState& out) {
+    nativehud::Fill(m, nowMs);
+    const bool changed = !g_sentAny || m.roster != g_sent.roster || m.profile != g_sent.profile || m.latched != g_sent.latched ||
+        m.phase != g_sent.phase || m.worldId != g_sent.worldId || m.roomId != g_sent.roomId || m.eventProgram != g_sent.eventProgram;
+    const bool retry = !changed && !g_echoed && nowMs - g_sentMs >= ECHO_RETRY_MS && g_resends < MAX_RESENDS;
+    const bool vitals = nowMs - g_sentMs >= nativehud::RefreshMs &&
+        (m.vitals != g_sent.vitals || ((m.vitals.flags & SeatVitals::Available) && nowMs - g_sentMs >= nativehud::HeartbeatMs));
+    if (!changed && !retry && !vitals) return false;
+    if (retry) ++g_resends; else g_resends = 0;
+    m.seq = ++g_seq;
+    out = m;
+    return true;
+}
 } // namespace
 
 void Install(std::uintptr_t exeBase, LogFn log) {
     g_base = exeBase; g_log = log;
+    if (!ParseProfile(g_localProfile)) g_localProfile = 0;
     char off[2] {};
     const bool optOut = GetEnvironmentVariableA("KH2COOP_PROLOGUE_PARTY", off, sizeof(off)) == 1 && off[0] == '0';
     // The clone needs the shipped two-player private-status dependency (TARGET_ALL + MIRROR).
@@ -197,13 +213,18 @@ void Install(std::uintptr_t exeBase, LogFn log) {
 
 bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, std::uint8_t localSlot,
           std::uint64_t nowMs, SeatState& out) {
-    if (!g_requested) return false;
+    nativehud::Session(generation, roster, localSlot);
     if (prologue::Rebase(g_seats, generation, roster, localSlot)) {
         g_sentAny = false; g_echoed = false; g_resends = 0;
         if (g_log && generation)
             g_log("[prologue] roster generation=%u slot=%u connections=%llu/%llu/%llu: profiles forgotten, declaring 0x%X",
                   generation, localSlot, static_cast<unsigned long long>(roster[0]), static_cast<unsigned long long>(roster[1]),
                   static_cast<unsigned long long>(roster[2]), g_localProfile);
+    }
+    if (!g_requested) {
+        if (!generation || localSlot > 2) return false;
+        SeatState m; m.roster = roster; m.profile = g_localProfile;
+        return Emit(m, nowMs, out);
     }
     const Hold agreement = prologue::Agreement(g_seats);
     const bool settled = agreement != Hold::MissingProfile && agreement != Hold::NotAcknowledged;
@@ -300,14 +321,7 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
         const auto at = LocationOf(now);
         m.phase = SeatPhase::Bound; m.worldId = at.world; m.roomId = at.room; m.eventProgram = at.evt;
     }
-    const bool changed = !g_sentAny || m.roster != g_sent.roster || m.profile != g_sent.profile || m.latched != g_sent.latched ||
-        m.phase != g_sent.phase || m.worldId != g_sent.worldId || m.roomId != g_sent.roomId || m.eventProgram != g_sent.eventProgram;
-    const bool retry = !changed && !g_echoed && nowMs - g_sentMs >= ECHO_RETRY_MS && g_resends < MAX_RESENDS;
-    if (!changed && !retry) return false;
-    if (changed) g_resends = 0; else ++g_resends;
-    m.seq = ++g_seq;
-    out = m;
-    return true;
+    return Emit(m, nowMs, out);
 }
 
 void NoteSent(const SeatState& sent, std::uint64_t nowMs) {

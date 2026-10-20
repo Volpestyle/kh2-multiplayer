@@ -250,6 +250,14 @@ namespace slot {
     constexpr std::uint64_t FRIEND2_ACTOR_PTR = 0x228; // qword [CONFIRMED] Slot 1 only — Friend 2 actor object
 }
 
+// VUH-2568: actor+0x5C0 points to a status record, not SLOT0_BASE.
+// Native party HUD readers 18E8A0/18E8D0; player recharge 3C20E0 (Steam Global).
+namespace status {
+    constexpr std::uint64_t HP = 0, MAX_HP = 4;
+    constexpr std::uint64_t MP = 0x180, MAX_MP = 0x184;
+    constexpr std::uint64_t MP_CHARGE = 0x1BC, MP_CHARGE_MAX = 0x1C0;
+}
+
 // Convenience: absolute addresses for Slot 0 HP/MaxHP
 namespace slot0 {
     constexpr std::uint64_t HP         = 0x2A23598;    // [CONFIRMED] = SLOT0_BASE + 0x80

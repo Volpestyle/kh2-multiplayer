@@ -53,6 +53,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/RenderHook.cpp` | | D3D12 capture (screenshots/clips) and debug overlay |
 | `src/CrownAsset.cpp` | | VUH-2480: loads KH2FM's crown mesh and gold sprite from the player's install on a background thread (`docs/HOST_CROWN.md`) |
 | `src/EventStartMirror.cpp` | | VUH-2359: records the host's checked in-field event starts (FUN_1403AC350) for the event-hold Acquire; a friend in the same field replays them natively (`docs/PARTY_SETUP.md`) |
+| `src/NativePartyHud.cpp` | | VUH-2568: owner SeatState vitals feed display-only native friend gauges and portraits; local player and gameplay status stay native (`docs/NATIVE_PARTY_HUD.md`) |
 | `src/Warp.cpp` | | Room warp requests via the game's transition function |
 | `src/PlayerKit.cpp` | | VUH-1513 default-off (`KH2COOP_PLAYER_KIT=0x5A`) player kit: post-hook on the MEMT resolver `3E2EB0` sets resolved member 0 to Roxas in world 4; blocks native-Sora clone puppets while set (docs/PLAYER_KITS.md) |
 | `src/SaveGuard.cpp` | ~520 | Redirects write opens under the KH2 save folder to a sandbox, denies deletes/moves/copies (installed first at init) |

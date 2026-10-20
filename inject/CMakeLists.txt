@@ -79,6 +79,7 @@ add_library(kh2coop_inject SHARED
     src/DamagePolicy.cpp
     src/AllyHit.cpp
     src/EventStartMirror.cpp
+    src/NativePartyHud.cpp
 )
 
 if(MSVC)

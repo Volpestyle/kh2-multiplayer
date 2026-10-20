@@ -2,6 +2,7 @@
 #include "kh2coop/Types.hpp"
 #include "kh2coop/EnemyRecordKey.hpp"
 #include "kh2coop/CoopDifficulty.hpp"
+#include "kh2coop/SeatVitals.hpp"
 #include <optional>
 #include <array>
 #include <cstddef>
@@ -11,10 +12,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 28;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 29;
 
 // ===========================================================================
 // Protocol v28 adds StageEnd (54): a friend's own script ended a host-led prologue stage (VUH-2555).
+// Protocol v29 appends authenticated owner vitals to SeatState (VUH-2568).
 // Protocol v26 adds SeatState (53): each seat's selected profile and prologue readiness (VUH-2464).
 // Protocol v25 adds host friendly fire to ClientHello/SessionState (VUH-2421).
 // Protocol v24 appends the host's story party row for the target world to the RoomTransition packet (VUH-2342).
@@ -354,7 +356,7 @@ struct ReviveRequest {
 // is the profile vector this seat has received for `roster` (its acknowledgement); `phase` says how
 // far this seat got: 0 declared, 1 acknowledged, 2 first-field bound at world/room/evt (both gameplay
 // actors and private status of the prologue layout). seq is strictly increasing per author process.
-// Wire order is field order: 45 payload bytes.
+// Wire order is field order: 72 payload bytes (v29).
 enum class SeatPhase : std::uint8_t { Declared = 0, Acknowledged = 1, Bound = 2 };
 struct SeatState {
     std::array<std::uint64_t,3> roster{};
@@ -365,7 +367,9 @@ struct SeatState {
     SeatPhase phase{SeatPhase::Declared};
     std::uint8_t ownerSlot{0xFF};
     std::uint8_t reserved{0};
+    SeatVitals vitals{};
 };
+inline constexpr std::size_t SEAT_STATE_BYTES = 72;
 inline constexpr bool validSeatPhase(SeatPhase p) { return static_cast<std::uint8_t>(p) <= 2; }
 
 // VUH-2555: reliable, scoped report from a friend's DLL that its own script started a host-led stage

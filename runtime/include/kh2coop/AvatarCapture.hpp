@@ -7,7 +7,7 @@
 // Every offset used here is [CONFIRMED] in pointer_map_v1.md /
 // HANDOFF_FRIEND_CONTROL.md. Things without a confirmed source are left to
 // the caller: `inEvent` (cutscene/load — set AvatarInCutscene), `downed`.
-// MP is not mapped yet and stays 0.
+// Native HUD MP: status +0x180/+0x184 (FUN_14018E8D0, Steam Global).
 // ============================================================================
 
 #include "kh2coop/KH2Offsets.hpp"
@@ -47,10 +47,15 @@ AvatarState captureAvatar(const Reader& mem, std::uint64_t exeBase, std::uint64_
     // record, so the slot-0 HP there is the clone's. Normally the two are the same record.
     if (actor != 0) {
         const auto status = mem.template read<std::uint64_t>(actor + capture::ACTOR_STATUS);
-        if (status >= exeBase && status < exeBase + capture::IMAGE_SPAN) {
+        if (status >= exeBase && status <= exeBase + capture::IMAGE_SPAN - 0x188) {
             const auto hp = mem.template read<std::int32_t>(status);
             const auto maxHp = mem.template read<std::int32_t>(status + 4);
-            if (maxHp > 0 && hp >= 0 && hp <= maxHp) { a.hp = hp; a.maxHp = maxHp; }
+            if (maxHp > 0 && hp >= 0 && hp <= maxHp) {
+                a.hp = hp; a.maxHp = maxHp;
+                const auto mp = mem.template read<std::int32_t>(status + o::status::MP);
+                const auto maxMp = mem.template read<std::int32_t>(status + o::status::MAX_MP);
+                if (mp >= 0 && maxMp >= mp && maxMp <= 9999000) { a.mp = mp; a.maxMp = maxMp; }
+            }
         }
     }
     if (inEvent) a.flags |= AvatarInCutscene;

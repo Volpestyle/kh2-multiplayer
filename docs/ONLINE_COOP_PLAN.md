@@ -878,6 +878,13 @@ and 16 foreign files stayed unchanged; three owned PC processes and the owned
 Mac relay/supervisor are absent. See the [closed attempt](../build/rig/vuh1495-populated-join-prep-20261006-01/live-root01/result.md)
 and [independent result review](../build/rig/vuh1495-populated-join-review-20261006-01/live-review-01/result.md).
 
+**Native party HUD (VUH-2568, 2026-10-20).** The separate native-HUD design
+binds owner SeatState vitals to KH2's friend gauges using display-only status
+views, with the owner's portrait and color. It leaves the local gauge,
+gameplay actors and SAVE untouched. See [native party HUD](NATIVE_PARTY_HUD.md)
+for the calibrated HP/MP readers, lifecycle rules and current verification.
+PC2 acceptance remains a follow-up while VUH-2339 is open.
+
 The overlay now shows the actual network player slots and owner HP. The bounded
 HUD run `073856` passed through the impaired Mac relay: both games showed their
 correct Host/You labels and two 24/24 bars, independently distinguished from the

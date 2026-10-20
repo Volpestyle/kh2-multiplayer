@@ -471,8 +471,11 @@ void testAvatarCapture() {
     m.put<std::uint64_t>(actor + capture::ACTOR_STATUS, own);
     m.put<std::int32_t>(own, 19);
     m.put<std::int32_t>(own + 4, 20);
+    m.put<std::int32_t>(own + 0x180, 3600);
+    m.put<std::int32_t>(own + 0x184, 10000);
     const auto ownHp = captureAvatar(m, exe, actor, false, false);
     check(ownHp.hp == 19 && ownHp.maxHp == 20, "HP comes from the actor's own status record");
+    check(ownHp.mp == 3600 && ownHp.maxMp == 10000, "native HUD MP comes from the owning actor, including private-slot layouts");
     check(captureAvatar(m, exe, 0, false, false).hp == 87, "no actor keeps the slot-0 HP");
     m.put<std::int32_t>(own, 21);
     check(captureAvatar(m, exe, actor, false, false).hp == 87, "an implausible own record falls back to slot 0");
@@ -896,7 +899,7 @@ void testVersionReject() {
     while (steadyMs() < legacyDeadline && !disconnected) {
         host.tick(0); legacy.tick(0); std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    check(PROTOCOL_VERSION == 28 && disconnected && reason == "Protocol mismatch: client="+std::to_string(legacyVersion)+" server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
+    check(PROTOCOL_VERSION == 29 && disconnected && reason == "Protocol mismatch: client="+std::to_string(legacyVersion)+" server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
           "otherwise matching legacy peer is rejected for exact protocol mismatch with free capacity");
     }
 }
