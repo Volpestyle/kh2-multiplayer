@@ -658,10 +658,15 @@ struct ClipVertex {
     float u {}, v {};
 };
 inline constexpr float NearW = 10.0f;
+// VUH-2502: the near distance in the game's GPU projection (root CBV 0 of its scene bundles:
+// z_clip = z_view - 4, w = z_view). The CPU view-projection at ViewProjRva carries z_view - 2.
+inline constexpr float SceneNear = 4.0f;
 // Triangles in D3D clip space (y up), far to near for unsorted alpha blending. Triangles with a
 // vertex at or behind the near plane are dropped. Returns the vertex count written (3 per triangle).
+// sceneDepth gives each vertex the game's own scene depth, for a draw that tests against it; without
+// it z sits mid-range, for a draw over the finished frame.
 inline std::size_t ClipTriangles(const Prop& prop, const Character& who, const Matrix& head, const Matrix& viewProj,
-                                 std::span<ClipVertex> out) {
+                                 std::span<ClipVertex> out, bool sceneDepth = false) {
     const Matrix toClip = Multiply(head, viewProj);
     // The tilt's pivot: the centre of the crown's base (X is the head's up axis).
     float px = 0.0f, py = 0.0f, pz = 0.0f;
@@ -679,8 +684,8 @@ inline std::size_t ClipTriangles(const Prop& prop, const Character& who, const M
         float q[4] {};
         for (int c = 0; c < 4; ++c)
             for (int k = 0; k < 4; ++k) q[c] += p[k] * toClip[static_cast<std::size_t>(k * 4 + c)];
-        // The game's projection has screen y growing with world +Y (down) and z equal to w.
-        clip[i] = {q[0], -q[1], 0.5f * q[3], q[3], v.u, v.v};
+        // The game's projection has screen y growing with world +Y (down).
+        clip[i] = {q[0], -q[1], sceneDepth ? q[3] - SceneNear : 0.5f * q[3], q[3], v.u, v.v};
     }
     struct Order {
         float depth;

@@ -53,6 +53,7 @@ add_library(kh2coop_inject SHARED
     src/PuppetCommandGuard.cpp
     src/RenderHook.cpp
     src/CrownAsset.cpp
+    src/SceneCrown.cpp
     src/Warp.cpp
     src/PlayerKit.cpp
     src/PartyNative.cpp

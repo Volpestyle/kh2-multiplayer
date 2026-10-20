@@ -56,10 +56,18 @@ Donald.
    (`actor+0x808`) and the frame's view x projection (RVA `0xAD6CF0`). Head world = bone with its Y
    and Z columns negated, times the actor matrix: what `FUN_1403B50F0`/`FUN_1401A7AF0` compute.
    The head must be finite and within 400 units of the actor.
-3. **Draw** (`RenderHook.cpp`, Present). The crown's head-local vertices go through head x
-   view-projection on the CPU, are sorted far to near and drawn as alpha-blended textured triangles
-   over the finished frame (D3D12 pipeline built on first use; shaders compiled with
-   `d3dcompiler_47.dll`). Behind the near plane, nothing is drawn.
+3. **Draw** (`SceneCrown.cpp`, VUH-2502). The crown's head-local vertices go through head x
+   view-projection on the CPU. Each vertex gets the game's own scene depth (`z = w - 4`, see "Depth and
+   the HUD"), and the triangles are recorded into the game's frame as alpha-blended textured triangles.
+   They test and write the scene depth, so hair, scenery and characters in front of the head hide the
+   crown, and the effects, particles and HUD drawn after it go over it. Behind the near plane, nothing
+   is drawn. The draw uses no input layout or descriptor heap: the vertices and the gold sprite are
+   root SRV buffers, and the shader samples the sprite bilinearly by hand. D3D12 objects are built on
+   first use, with shaders compiled by `d3dcompiler_47.dll`. `[crown-scene] first crown in the game's
+   frame (...)` is logged once.
+   A frame with no insertion point (no scene bundle seen, an unknown pipeline, root bindings it can't
+   restore) keeps the older Present-time draw over the finished frame (`RenderHook.cpp`).
+   `KH2COOP_CROWN_SCENE=0` forces that path.
 
 The VUH-2455 gate is unchanged: the crown shows only in network co-op field play with no event,
 cutscene or menu, with the camera on the local player, and 4 s after an event. Any failure (asset,
@@ -103,8 +111,8 @@ close-ups and the hand-back, is crown-free on every screen.
 
 ## Depth and the HUD
 
-Not done for Roxas yet (VUH-2502 continues). A one-frame trace of the game's D3D12 recording on FM-02
-(Computer Room save point, 2026-10-19) shows how the frame is built. An earlier note here said the
+A one-frame trace of the game's D3D12 recording on FM-02 (Computer Room save point, 2026-10-19) shows
+how the frame is built. The trace was diagnostic and is not in the tree. An earlier note here said the
 scene was D3D11; that was wrong. The game's only `D3D11CreateDevice` call (flags `0x820`, BGRA and video
 support, no context) is the movie device.
 
@@ -123,16 +131,28 @@ support, no context) is the movie device.
   the projection: x 1.299, y 2.309 (16:9), `z_clip = z_view - 4`, `w = z_view`. The CPU matrix at
   `0xAD6CF0` matches in x, y and w but carries `z_view - 2`, so its depth is not the GPU's.
 
-A depth-tested crown therefore has to be recorded into the game's direct list just before the first
-main-target bundle whose PSO tests depth without writing it (the effects), using the game's camera
-CBVs. Afterwards the game's root signature and root arguments must be restored on that list, because
-bundles inherit them. Being drawn before the effects also keeps it under the HUD.
+So the Roxas crown (`SceneCrown.cpp`) is recorded into that direct list at one of two points:
+- just before the first scene-target bundle whose first pipeline tests depth without writing it (the
+  effects); or
+- if the frame has none, just before the list binds a different depth target after the scene.
+
+The scene target is the depth view, at least 1024 wide, of the first bundle that writes depth.
+`SceneCrown` hooks pipeline creation (depth flags and formats per PSO), depth-view creation (width) and
+the command-list calls that record bundles and root bindings. Before recording the crown it knows the
+list's root signature and root arguments, with each bundle's bindings carried over to the calling list
+as D3D12 bundles do. After the draw it sets them back, along with the list's pipeline. A list that used
+root constants or root SRV/UAV views (KH2 uses only descriptor tables and root CBVs) gets no crown, and
+the Present-time draw stands in. The game's camera comes from the CPU view-projection at `0xAD6CF0`
+with the GPU's near distance (`crownprop::SceneNear` = 4). Reading the projection constant buffer
+instead would follow a different near plane, but nothing shows one changes.
 
 ## Limits
 
-- Drawn over the finished frame without the game's depth buffer: the crown is not hidden by scenery
-  or a character in front of the head, and it draws over the HUD and the game's effects (see above).
-  The painted marker had the same.
+- `SceneNear` (4) was read from FM-02's projection constant buffer. If a room used another near plane,
+  the crown's depth would be off by the difference. That would show as the crown poking through or
+  sinking into hair, not as a missing crown.
+- Frames that fall back to the Present-time draw (and the painted marker) are not hidden by scenery
+  and draw over the HUD and the game's effects.
 - A host Sora who holds Proofs wears gold during co-op field play; his own colour comes back when the
   gate closes.
 - On a friend's screen outside the prologue, a host Sora's body can be a party puppet with another

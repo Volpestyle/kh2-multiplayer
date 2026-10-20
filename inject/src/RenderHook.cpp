@@ -28,6 +28,7 @@
 #include "CoopHudMailbox.hpp"
 #include "HostCrown.hpp"
 #include "CrownAsset.hpp"
+#include "SceneCrown.hpp"
 
 #include <Windows.h>
 #include <d3d11.h>
@@ -824,6 +825,35 @@ bool EnsureOverlayGdi() {
     return true;
 }
 
+// VUH-2502: the crown for a scene-pass draw, read while the game records its frame (any thread).
+// The mailbox read can lose to the game thread's publish; the last copy stands in for 200 ms.
+std::size_t SceneCrownVertices(crownprop::ClipVertex* out, std::size_t max) {
+    static std::mutex mutex;
+    static hud::Snapshot last;
+    static std::uint64_t lastMs = 0;
+    hud::Snapshot snapshot;
+    const auto nowMs = GetTickCount64();
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (g_hudMailbox.TryCopy(nowMs, snapshot)) { last = snapshot; lastMs = nowMs; }
+        else if (nowMs - lastMs < 200) snapshot = last;
+        else return 0;
+    }
+    const auto* asset = crownasset::Ready();
+    if (!g_crownEnabled || !asset || !snapshot.crownCurrent || !snapshot.crownHeadValid || snapshot.crownNative ||
+        snapshot.crownCharacter >= crownprop::Characters.size())
+        return 0;
+    return crownprop::ClipTriangles(asset->prop, crownprop::Characters[snapshot.crownCharacter], snapshot.crownHead,
+                                    snapshot.crownViewProj, std::span<crownprop::ClipVertex>(out, max), true);
+}
+bool SceneCrownTexture(scenecrown::Texture& out) {
+    const auto* asset = crownasset::Ready();
+    if (!asset || asset->rgba.size() < static_cast<std::size_t>(asset->side) * asset->side * 4) return false;
+    out = {asset->rgba.data(), asset->side};
+    return true;
+}
+std::uint64_t g_sceneCrownSeen = 0;  // scenecrown::Drawn() at the previous present
+
 void PollCoopHud() {
     hud::Snapshot snapshot;
     const auto nowMs = GetTickCount64();
@@ -1433,6 +1463,8 @@ void OnPresent(IDXGISwapChain* swapChain) {
         const auto* crownAsset = crownasset::Ready();
         if (g_renderHud.crownNative) {
             // VUH-2502: the game draws its own crown on this model (depth, sorting, effects).
+        } else if (const auto scene = scenecrown::Drawn(); scene != g_sceneCrownSeen) {
+            g_sceneCrownSeen = scene;  // VUH-2502: drawn inside the game's frame, under its effects and HUD
         } else if (g_crownEnabled && g_renderHud.crownCurrent && g_renderHud.crownHeadValid && crownAsset &&
             !g_crownMesh.failed && g_renderHud.crownCharacter < crownprop::Characters.size()) {
             // VUH-2480: the real crown on the head bone; none at all when it is behind the camera.
@@ -1717,6 +1749,10 @@ bool Install(uintptr_t exeBase, LogFn log) {
     g_stopWorker = false;
     g_worker = std::thread(WorkerMain);
     if (g_log) g_log("  Present hook installed (%d entry points)", hooked);
+    // VUH-2502: KH2COOP_CROWN_SCENE=0 keeps the crown over the finished frame.
+    if (g_crownEnabled && !(GetEnvironmentVariableA("KH2COOP_CROWN_SCENE", crownValue, sizeof(crownValue)) == 1 &&
+                            crownValue[0] == '0'))
+        scenecrown::Install(log, &SceneCrownVertices, &SceneCrownTexture);
     return true;
 }
 

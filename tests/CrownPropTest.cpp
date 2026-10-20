@@ -294,6 +294,10 @@ void Clip() {
     Check(n == 6, "a triangle behind the near plane is dropped");
     Check(out[0].w == 200 && out[3].w == 50, "far triangles come first");
     Check(out[5].y == -1 && out[5].z == 25 && out[5].v == 1, "clip y is flipped to D3D's up and z is half w");
+    std::array<crownprop::ClipVertex, 12> scene {};
+    crownprop::ClipTriangles(prop, who, Translation(0, 0, 0), viewProj, scene, true);
+    Check(scene[0].z == 200 - crownprop::SceneNear && scene[5].z == 50 - crownprop::SceneNear && scene[5].w == 50,
+          "scene depth is w less the game's GPU near distance");
     const crownprop::Character lifted {"X", 0, 0, 0, 100};
     std::array<crownprop::ClipVertex, 3> small {};
     Check(crownprop::ClipTriangles(prop, lifted, Translation(0, 0, 0), viewProj, small) == 3 && small[0].w == 300,
