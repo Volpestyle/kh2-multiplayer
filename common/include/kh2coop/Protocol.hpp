@@ -11,9 +11,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 27;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 28;
 
 // ===========================================================================
+// Protocol v28 adds StageEnd (54): a friend's own script ended a host-led prologue stage (VUH-2555).
 // Protocol v26 adds SeatState (53): each seat's selected profile and prologue readiness (VUH-2464).
 // Protocol v25 adds host friendly fire to ClientHello/SessionState (VUH-2421).
 // Protocol v24 appends the host's story party row for the target world to the RoomTransition packet (VUH-2342).
@@ -366,6 +367,23 @@ struct SeatState {
     std::uint8_t reserved{0};
 };
 inline constexpr bool validSeatPhase(SeatPhase p) { return static_cast<std::uint8_t>(p) <= 2; }
+
+// VUH-2555: reliable, scoped report from a friend's DLL that its own script started a host-led stage
+// end (EventScenes.hpp InFieldEvents rows with hostLed, such as the Day 1 Sandlot duel's stages): the
+// exact native start FUN_1403AC350(id, flags, params) at world/room/evt. The relay admits it only from
+// a verified client at the host's admitted room, stamps ownerSlot and broadcasts it to every verified peer
+// (as SeatState); the host, still in open field at that location, makes the same start, so the stage ends there too and the
+// host's own script leads to the next room. seq is strictly increasing per author process.
+// Wire order is field order: 52 payload bytes.
+struct StageEnd {
+    std::uint32_t seq{0};
+    std::uint16_t worldId{0}, roomId{0}, eventProgram{0};
+    std::uint32_t id{0};
+    std::uint8_t flags{0};
+    std::array<std::uint32_t, 9> params{};
+    std::uint8_t ownerSlot{0xFF};
+};
+inline constexpr std::size_t STAGE_END_PAYLOAD_SIZE = 52;
 
 // Reliable, scoped host report (VUH-1515): an enemy on the host hit the
 // host-side native clone of targetSlot's player. The relay validates it

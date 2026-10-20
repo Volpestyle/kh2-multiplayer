@@ -3183,6 +3183,8 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
     const bool control = eventholdnative::EnterInput();
     __try {
         if (g_origInputCollector) g_origInputCollector(inputStruct);
+        // VUH-2555: a friend's queued stage end starts here on the host, outside the actor update.
+        if (spawncontroller::IsDiagnosticGameThread()) eventstartmirror::ApplyStageEnd();
         __try {
             const bool held = control && eventholdnative::HoldingInput();
             if (PollMailbox() && !held) ApplyPrimaryMailboxInput(inputStruct);

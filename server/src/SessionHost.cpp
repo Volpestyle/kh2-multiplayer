@@ -980,6 +980,28 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::StageEnd: {
+                // VUH-2555: a friend's own script ended a host-led prologue stage. Admitted only from a
+                // verified client at the host's admitted room; stamped and broadcast to every verified
+                // peer like SeatState (the host acts on it; the author's echo and other friends ignore it).
+                StageEnd stage; read(reader, stage);
+                auto* host = hostPeer();
+                if (!reader.atEnd() || ps->status != PeerStatus::Verified || fromHost(*ps) || ps->worldQuarantined ||
+                    !admittedScope || !room_ || !room_->epoch || !host || stage.ownerSlot != 0xFF ||
+                    stage.seq <= ps->lastStageEndSeq || stage.worldId != room_->worldId || stage.roomId != room_->roomId ||
+                    stage.eventProgram != room_->eventProgram) {
+                    ++rejectedWorld_;
+                    return;
+                }
+                ps->lastStageEndSeq = stage.seq;
+                stage.ownerSlot = static_cast<std::uint8_t>(ps->assignedSlot);
+                broadcastToVerified(encode(stage), true);
+                log("StageEnd owner=" + std::to_string(stage.ownerSlot) + " seq=" + std::to_string(stage.seq) +
+                    " id=" + std::to_string(stage.id) + " location=" + std::to_string(stage.worldId) + "/" +
+                    std::to_string(stage.roomId) + "/" + std::to_string(stage.eventProgram));
+                break;
+            }
+
             case PacketType::ReviveRequest: {
                 ReviveRequest request; read(reader,request);
                 // VUH-1504 hop log (diagnostic only, bounded per process): every refusal names its reason.

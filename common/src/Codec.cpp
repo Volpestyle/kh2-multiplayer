@@ -227,7 +227,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(MissionState) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(StageEnd) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -1024,6 +1024,27 @@ std::vector<std::uint8_t> encode(const SeatState& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::SeatState, w.data());
 }
 
+void write(ByteWriter& w, const StageEnd& m) {
+    if (!m.seq || (m.ownerSlot > 2 && m.ownerSlot != 0xFF)) throw std::runtime_error("StageEnd: invalid seq or slot");
+    w.writeU32(m.seq); w.writeU16(m.worldId); w.writeU16(m.roomId); w.writeU16(m.eventProgram);
+    w.writeU32(m.id); w.writeU8(m.flags);
+    for (auto p : m.params) w.writeU32(p);
+    w.writeU8(m.ownerSlot);
+}
+void read(ByteReader& r, StageEnd& out) {
+    if (r.remaining() != STAGE_END_PAYLOAD_SIZE) throw std::runtime_error("StageEnd: wrong payload length");
+    StageEnd m;
+    m.seq = r.readU32(); m.worldId = r.readU16(); m.roomId = r.readU16(); m.eventProgram = r.readU16();
+    m.id = r.readU32(); m.flags = r.readU8();
+    for (auto& p : m.params) p = r.readU32();
+    m.ownerSlot = r.readU8();
+    if (!m.seq || (m.ownerSlot > 2 && m.ownerSlot != 0xFF)) throw std::runtime_error("StageEnd: invalid seq or slot");
+    out = m;
+}
+std::vector<std::uint8_t> encode(const StageEnd& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::StageEnd, w.data());
+}
+
 void write(ByteWriter& w, const RemoteHit& m) {
     write(w, m.location);
     w.writeU64(m.seq); w.writeU64(m.hostConnectionId); w.writeU64(m.targetConnectionId);
@@ -1745,6 +1766,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("ReviveRequest: wrong frame length");
     if (type == PacketType::SeatState && (len != 45 || size != kHeaderSize + len))
         throw std::runtime_error("SeatState: wrong frame length");
+    if (type == PacketType::StageEnd && (len != STAGE_END_PAYLOAD_SIZE || size != kHeaderSize + len))
+        throw std::runtime_error("StageEnd: wrong frame length");
     if (type == PacketType::RemoteHit && (len != REMOTE_HIT_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("RemoteHit: wrong frame length");
     if (type == PacketType::TargetAuthority && (len != TARGET_AUTHORITY_PAYLOAD_SIZE || size != kHeaderSize + len))

@@ -773,6 +773,8 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             static unsigned reviveEnvelopeLogs = 0;
             const auto reviveDrop = [&](const char* why) {
                 if (inner == PacketType::ReviveRequest && reviveEnvelopeLogs < 32) { ++reviveEnvelopeLogs; log(std::string("[revive-hop] envelope drop reason=") + why); }
+                static unsigned stageEndLogs = 0; // VUH-2555 (diagnostic only, bounded)
+                if (inner == PacketType::StageEnd && stageEndLogs < 16) { ++stageEndLogs; log(std::string("[stage-end] envelope drop reason=") + why); }
             };
             if(!source){reviveDrop("source-not-roster-or-delivery");return;}
             if(m.scope.sourceConnectionId==avatarConnections_[0] && m.scope.kind==WorldSourceKind::Native && inner!=PacketType::DesyncNotice &&

@@ -8,7 +8,7 @@
 // refused install leaves every event on the hold.
 #include <cstdint>
 
-namespace kh2coop { struct EventStart; }  // kh2coop/Protocol.hpp
+namespace kh2coop { struct EventStart; struct StageEnd; }  // kh2coop/Protocol.hpp
 namespace kh2coop::inject::eventstartmirror {
 using LogFn = void (*)(const char* fmt, ...);
 
@@ -22,4 +22,14 @@ void LogOrigin(std::uintptr_t context, std::uint32_t epoch) noexcept;
 // in the same open field location (in field, no menu, cutscene or event). False leaves the game as it
 // was; the caller keeps the event hold.
 bool Replay(const EventStart& start, std::uint16_t eventProgram) noexcept;
+// VUH-2555, friend, game thread: this seat's own start of a host-led stage end (EventScenes hostLed) that
+// is not yet reported; the caller sends it to the host. seq and ownerSlot are left for the caller.
+bool TakeStageEnd(StageEnd& out) noexcept;
+// VUH-2555, host, game thread (world packets): queues a friend's reported stage end. The start itself is
+// made from the input callback (ApplyStageEnd), never inside the actor update, where starting an event
+// took the host down (run 20261020-105439).
+bool ReplayStageEnd(const StageEnd& stage) noexcept;
+// VUH-2555, host, input callback: the queued stage end, if any. The host makes the same native start if it
+// is a host-led row and the host is in open field at that location (its own stage has not ended yet).
+void ApplyStageEnd() noexcept;
 }  // namespace kh2coop::inject::eventstartmirror

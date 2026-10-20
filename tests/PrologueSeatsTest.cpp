@@ -3,6 +3,7 @@
 // roster pinning, sequence floor and echo to the author).
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/BlockedExitPolicy.hpp"
+#include "kh2coop/EventScenes.hpp"
 #include "kh2coop/PrologueSeats.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/SessionHost.hpp"
@@ -32,7 +33,7 @@ void codec() {
     const auto bytes = encode(m);
     const std::uint8_t* p = nullptr; std::size_t n = 0;
     check(decodePacketHeader(bytes.data(), bytes.size(), p, n) == PacketType::SeatState && n == 45 &&
-          static_cast<unsigned>(PacketType::SeatState) == 53 && PROTOCOL_VERSION == 27, "SeatState is type 53, 45 bytes, protocol 27");
+          static_cast<unsigned>(PacketType::SeatState) == 53 && PROTOCOL_VERSION == 28, "SeatState is type 53, 45 bytes, protocol 28");
     ByteReader r(p, n); SeatState back; read(r, back);
     check(r.atEnd() && encode(back) == bytes && back.roster == m.roster && back.seq == 7 && back.profile == 0x5A &&
           back.latched == m.latched && back.phase == SeatPhase::Bound && back.ownerSlot == 1 && back.roomId == 7 &&
@@ -48,6 +49,26 @@ void codec() {
     auto longer = bytes; longer.push_back(0); threw = false;
     try { decodePacketHeader(longer.data(), longer.size(), p, n); } catch (const std::exception&) { threw = true; }
     check(threw, "trailing frame byte refused");
+    // VUH-2555: StageEnd (54), a friend's own start of a host-led stage end.
+    StageEnd stage; stage.seq = 3; stage.worldId = 2; stage.roomId = 4; stage.eventProgram = 77; stage.id = 0x313131; stage.flags = 9;
+    stage.params = {2, 0x402, 0x4E004E, 0x4E, 1, 0xFFFFFFFF, 3, 0, 0};
+    const auto stageBytes = encode(stage);
+    check(decodePacketHeader(stageBytes.data(), stageBytes.size(), p, n) == PacketType::StageEnd && n == STAGE_END_PAYLOAD_SIZE &&
+          static_cast<unsigned>(PacketType::StageEnd) == 54, "StageEnd is type 54, 52 bytes");
+    ByteReader sr(p, n); StageEnd stageBack; read(sr, stageBack);
+    check(sr.atEnd() && encode(stageBack) == stageBytes && stageBack.params == stage.params && stageBack.ownerSlot == 0xFF &&
+          isScopedWorldPacket(PacketType::StageEnd) && !isMaterialWorldPacket(PacketType::StageEnd), "StageEnd exact roundtrip, scoped");
+    threw = false;
+    try { auto bad = stage; bad.seq = 0; (void)encode(bad); } catch (const std::exception&) { threw = true; }
+    check(threw, "StageEnd refuses sequence 0");
+    // The Day 1 Sandlot duel's two stage ends are host-led rows; the shop events are not.
+    using namespace kh2coop::eventscenes;
+    const auto* s1 = QualifiedStageEnd(2, 4, 77, 0x313131, 9, stage.params);
+    const auto* s2 = QualifiedStageEnd(2, 4, 78, 0x323131, 8, {2, 0xD02, 0x7E007E, 0x7E, 1, 0xFFFFFFFF, 3, 0, 0});
+    check(s1 && s1->hostLed && s2 && s2->hostLed && HostLedAt(2, 4, 77) == s1 && HostLedAt(2, 4, 78) == s2 &&
+          !HostLedAt(2, 7, 95) && !HostLedAt(2, 4, 76), "the Sandlot duel's stage ends are host-led rows, nothing else");
+    check(!QualifiedStart(2, 4, 77, 0x313131, 9, stage.params) && !QualifiedStart(2, 4, 78, 0x323131, 8, s2->params),
+          "a host-led stage end is not an in-field event the host publishes for the friend to replay");
 }
 
 // VUH-2486: an unchecked prologue field before the first release holds only for a bounded,
@@ -290,11 +311,14 @@ void network() {
     SessionHost server(config); if (!server.start()) { check(false, "ENet host starts"); return; }
     std::array<std::unique_ptr<NetworkClient>, 2> clients;
     std::array<std::vector<SeatState>, 2> received;
+    std::array<std::vector<StageEnd>, 2> stages;
     for (unsigned i = 0; i < 2; ++i) {
         ClientCallbacks cb;
-        cb.onWorldEnvelope = [&received, i](const WorldEnvelope& e) {
+        cb.onWorldEnvelope = [&received, &stages, i](const WorldEnvelope& e) {
             const std::uint8_t* p = nullptr; std::size_t n = 0; // the admitted inner packet
-            if (decodePacketHeader(e.packet.data(), e.packet.size(), p, n) != PacketType::SeatState) return;
+            const auto type = decodePacketHeader(e.packet.data(), e.packet.size(), p, n);
+            if (type == PacketType::StageEnd) { ByteReader s(p, n); StageEnd m; read(s, m); stages[i].push_back(m); return; }
+            if (type != PacketType::SeatState) return;
             ByteReader s(p, n); SeatState m; read(s, m); received[i].push_back(m);
         };
         clients[i] = std::make_unique<NetworkClient>("127.0.0.1", config.port, "seat-test", "none", "seat" + std::to_string(i), static_cast<SlotType>(i), cb);
@@ -320,6 +344,25 @@ void network() {
     clients[1]->sendNativeWorld(encode(seat(roster, 4, 0x5A, {0x5A, 0x5A, 0}, SeatPhase::Acknowledged)), {1, clients[1]->deliverySerial(), 0}, true); pump();
     check(received[0].size() == 3 && received[0].back().ownerSlot == 1 && received[0].back().phase == SeatPhase::Acknowledged,
           "a newer acknowledgement is admitted and stamped");
+    // VUH-2555: StageEnd goes from a client to the host only, at the host's admitted room.
+    StageEnd stage; stage.seq = 1; stage.worldId = 2; stage.roomId = 4; stage.eventProgram = 77; stage.id = 0x313131; stage.flags = 9;
+    stage.params = {2, 0x402, 0x4E004E, 0x4E, 1, 0xFFFFFFFF, 3, 0, 0};
+    clients[1]->sendNativeWorld(encode(stage), {1, clients[1]->deliverySerial(), 0}, true); pump();
+    check(stages[0].empty() && stages[1].empty(), "a stage end before the host's first room is refused");
+    clients[0]->sendRoomTransition(RoomTransition {1, 2, 4, 0, 77, 77, 77}); pump();
+    stage.seq = 2;
+    clients[1]->sendNativeWorld(encode(stage), {1, clients[1]->deliverySerial(), 0}, true); pump();
+    check(stages[0].size() == 1 && stages[0].back().ownerSlot == 1 && stages[0].back().id == 0x313131 && stages[1].size() == 1,
+          "the friend's stage end reaches the host (and its own echo), owner slot stamped by the relay");
+    clients[1]->sendNativeWorld(encode(stage), {1, clients[1]->deliverySerial(), 0}, true); pump();
+    auto other = stage; other.seq = 3; other.eventProgram = 78;
+    clients[1]->sendNativeWorld(encode(other), {1, clients[1]->deliverySerial(), 0}, true); pump();
+    auto stamped = stage; stamped.seq = 4; stamped.ownerSlot = 0;
+    clients[1]->sendNativeWorld(encode(stamped), {1, clients[1]->deliverySerial(), 0}, true); pump();
+    auto fromHost = stage; fromHost.seq = 5;
+    clients[0]->sendNativeWorld(encode(fromHost), {1, clients[0]->deliverySerial(), 1}, true); pump();
+    check(stages[0].size() == 1 && stages[1].size() == 1,
+          "a repeated sequence, another location, a pre-stamped owner and the host's own report are all refused");
     for (auto& c : clients) c->disconnect();
     server.stop();
 }

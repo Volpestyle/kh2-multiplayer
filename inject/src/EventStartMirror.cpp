@@ -33,6 +33,13 @@ bool g_checked = false;
 std::uint16_t g_startProgram = 0;
 std::uintptr_t g_installContext = 0, g_installCaller = 0;
 bool g_replaying = false;
+bool g_client = false;
+// VUH-2555, friend: its own host-led stage-end start, until the caller sends it (game thread).
+bool g_stagePending = false;
+StageEnd g_stage {};
+// VUH-2555, host: a friend's reported stage end, until the input callback makes the start.
+bool g_hostStagePending = false;
+StageEnd g_hostStage {};
 
 struct Field {
     std::uint8_t now[10] {};
@@ -67,10 +74,17 @@ void __fastcall HookedStart(std::uint32_t id, std::uint8_t flags, std::uint32_t*
     // Every start taken in open field is recorded with its arguments (the trace each checked row
     // comes from, VUH-2487); only a checked one is ever published.
     const bool open = !g_replaying && ReadField(before) && Open(before) && params && CopyParams(params, s.params);
-    const bool checked = open &&
-        eventscenes::QualifiedStart(before.now[0], before.now[1], EventProgram(before), id, flags, s.params);
+    const auto* row = open ? eventscenes::QualifiedStart(before.now[0], before.now[1], EventProgram(before), id, flags, s.params)
+                           : nullptr;
+    const bool checked = row != nullptr;
     g_original(id, flags, params);
     if (!open) return;
+    if (g_client && eventscenes::QualifiedStageEnd(before.now[0], before.now[1], EventProgram(before), id, flags, s.params)) {
+        g_stage = {};
+        g_stage.worldId = before.now[0]; g_stage.roomId = before.now[1]; g_stage.eventProgram = EventProgram(before);
+        g_stage.id = id; g_stage.flags = flags; g_stage.params = s.params;
+        g_stagePending = true;
+    }
     s.worldId = before.now[0]; s.roomId = before.now[1]; s.id = id; s.flags = flags;
     g_context = ReadContext();
     g_start = s;
@@ -94,7 +108,7 @@ void Install(std::uintptr_t exeBase, LogFn log) {
     const bool host = GetEnvironmentVariableA("KH2COOP_EVENT_HOLD_PRODUCER", producer, sizeof(producer)) == 1 && producer[0] == '1';
     const bool client = GetEnvironmentVariableA("KH2COOP_EVENT_HOLD_CONTROL", control, sizeof(control)) == 1 && control[0] == '1';
     if (!host && !client) return;
-    g_base = exeBase; g_log = log;
+    g_base = exeBase; g_log = log; g_client = client;
     if (std::memcmp(reinterpret_cast<const void*>(exeBase + RVA_EVENT_START), kStartBytes, sizeof(kStartBytes)) != 0) {
         if (log) log("[event-mirror] REFUSED: 3AC350 bytes differ; in-field events keep the hold");
         return;
@@ -135,6 +149,45 @@ bool StartFor(std::uintptr_t context, EventStart& out) noexcept {
     if (!Installed() || !context || context != g_context || !g_checked) return false;
     out = g_start;
     return true;
+}
+
+bool TakeStageEnd(StageEnd& out) noexcept {
+    if (!g_stagePending) return false;
+    g_stagePending = false;
+    out = g_stage;
+    return true;
+}
+
+bool ReplayStageEnd(const StageEnd& stage) noexcept {
+    if (!Installed()) return false;
+    g_hostStage = stage;
+    g_hostStagePending = true;
+    if (g_log) g_log("[event-mirror] stage end from seat %u queued id=%X at=%02X/%02X evt=%u", stage.ownerSlot, stage.id,
+                     stage.worldId, stage.roomId, stage.eventProgram);
+    return true;
+}
+
+void ApplyStageEnd() noexcept {
+    if (!g_hostStagePending || !Installed()) return;
+    g_hostStagePending = false;
+    const StageEnd stage = g_hostStage;
+    const auto* row = eventscenes::QualifiedStageEnd(stage.worldId, stage.roomId, stage.eventProgram, stage.id, stage.flags,
+                                                     stage.params);
+    Field f {};
+    if (!row || !ReadField(f) || !Open(f) || f.now[0] != stage.worldId || f.now[1] != stage.roomId ||
+        EventProgram(f) != stage.eventProgram) {
+        if (g_log) g_log("[event-mirror] stage end from seat %u refused id=%X row=%u at=%02X/%02X evt=%u open=%u reported=%02X/%02X evt=%u",
+                         stage.ownerSlot, stage.id, row ? 1u : 0u, f.now[0], f.now[1], EventProgram(f),
+                         Open(f) ? 1u : 0u, stage.worldId, stage.roomId, stage.eventProgram);
+        return;
+    }
+    auto params = stage.params;
+    g_replaying = true;
+    g_original(stage.id, stage.flags, params.data());
+    g_replaying = false;
+    const auto context = ReadContext();
+    if (g_log) g_log("[event-mirror] host ended the stage the friend (seat %u) ended: %.*s context=%llX", stage.ownerSlot,
+                     static_cast<int>(row->name.size()), row->name.data(), static_cast<unsigned long long>(context));
 }
 
 bool Replay(const EventStart& start, std::uint16_t eventProgram) noexcept {

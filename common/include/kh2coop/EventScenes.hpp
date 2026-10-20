@@ -58,12 +58,34 @@ struct InFieldEvent {
     std::uint8_t flags;
     std::array<std::uint32_t, 9> params;
     std::string_view name;
+    bool hostLed = false;  // a HostLedStageEnds row (VUH-2555)
 };
 inline constexpr std::array<InFieldEvent, 3> InFieldEvents {{
     {2, 7, 95, 0x343031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-armor-shop-104"},
     {2, 7, 97, 0x363031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-accessory-shop-106"},
     {2, 7, 99, 0x383031, 9, {2, 0x402, 0x510051, 0x51, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-cat-lock-on-108"},
 }};
+
+// VUH-2555: host-led stage ends. Each seat runs a fight stage's script on its own copy of the fight and
+// ends it on its own player's combo; a friend's own start of one of these is reported to the host
+// (StageEnd), which makes the same start, so the stage ends on the host too and the host's own script
+// leads both seats on. They are not InFieldEvents: the host's own start of one is not published for the
+// friend to replay (the friend plays its own copy, or keeps the ordinary hold). The Day 1 Sandlot bat duel
+// against Seifer: stage 1 (evt77) ends with event "111", which leads to evt78; stage 2 (evt78) ends with
+// event "112", which leads to the Woods. Identical starts on both seats (runs 20261020-093747, -100758).
+inline constexpr std::array<InFieldEvent, 2> HostLedStageEnds {{
+    {2, 4, 77, 0x313131, 9, {2, 0x402, 0x4E004E, 0x4E, 1, 0xFFFFFFFF, 3, 0, 0}, "tt04-duel-stage1-111", true},
+    {2, 4, 78, 0x323131, 8, {2, 0xD02, 0x7E007E, 0x7E, 1, 0xFFFFFFFF, 3, 0, 0}, "tt04-duel-stage2-112", true},
+}};
+inline const InFieldEvent* QualifiedStageEnd(std::uint16_t world, std::uint16_t room, std::uint16_t eventProgram,
+                                             std::uint32_t id, std::uint8_t flags,
+                                             const std::array<std::uint32_t, 9>& params) noexcept {
+    for (const auto& e : HostLedStageEnds)
+        if (e.world == world && e.room == room && e.eventProgram == eventProgram && e.id == id && e.flags == flags &&
+            e.params == params)
+            return &e;
+    return nullptr;
+}
 inline const InFieldEvent* QualifiedStart(std::uint16_t world, std::uint16_t room, std::uint16_t eventProgram,
                                           std::uint32_t id, std::uint8_t flags,
                                           const std::array<std::uint32_t, 9>& params) noexcept {
@@ -71,6 +93,14 @@ inline const InFieldEvent* QualifiedStart(std::uint16_t world, std::uint16_t roo
         if (e.world == world && e.room == room && e.eventProgram == eventProgram && e.id == id && e.flags == flags &&
             e.params == params)
             return &e;
+    return nullptr;
+}
+
+// VUH-2555: the host-led row at this field location (world, room, evt), if any: where a seat's own
+// replayed attacks must not end the stage on the other seat.
+inline const InFieldEvent* HostLedAt(std::uint16_t world, std::uint16_t room, std::uint16_t eventProgram) noexcept {
+    for (const auto& e : HostLedStageEnds)
+        if (e.world == world && e.room == room && e.eventProgram == eventProgram) return &e;
     return nullptr;
 }
 

@@ -121,6 +121,7 @@ LocalDownedState g_localDowned {};             // this frame's owner publication
 std::string g_reviveSession;                   // latched per session generation
 std::uint32_t g_reviveSessionGeneration = 0;
 std::uint64_t g_reviveRequestSeq = 0;          // requester: DLL lifetime; never recycled
+std::uint32_t g_stageEndSeq = 0;               // VUH-2555, friend: DLL lifetime
 RemoteHitApplyFn g_remoteHitApply = nullptr;   // VUH-1515: set once by EntityHook when requested
 std::uint64_t g_remoteHitSeq = 0;              // host: DLL lifetime; never recycled
 std::uint64_t g_remoteHitLastSeq = 0;          // owner: last admitted seq for g_remoteHitHost
@@ -3853,16 +3854,38 @@ bool ReceiveWorldPackets() {
                               static_cast<unsigned long long>(g_bridge.ConnectionId(g_bridge.LocalSlot())),
                               static_cast<unsigned long long>(scope->targetDeliverySerial),
                               static_cast<unsigned long long>(g_bridge.DeliverySerial()));
+                    if (!envelope.packet.empty() && envelope.packet.front() == static_cast<std::uint8_t>(PacketType::StageEnd) && g_log)
+                        g_log("[event-mirror] stage end envelope drop kind=%u target=%llu/%llu delivery=%llu/%llu", // VUH-2555
+                              static_cast<unsigned>(scope->kind), static_cast<unsigned long long>(scope->targetConnectionId),
+                              static_cast<unsigned long long>(g_bridge.ConnectionId(g_bridge.LocalSlot())),
+                              static_cast<unsigned long long>(scope->targetDeliverySerial),
+                              static_cast<unsigned long long>(g_bridge.DeliverySerial()));
                     ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectScope);
                     continue;
                 }
                 packet = std::move(envelope.packet);
                 type = decodePacketHeader(packet.data(), packet.size(), payload, size);
+                if (type == PacketType::StageEnd && g_log) g_log("[event-mirror] stage end envelope received"); // VUH-2555
                 if (packet.size() != size + 3 || !isScopedWorldPacket(type)) {
                     ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectFraming);continue;
                 }
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
                 if (type == PacketType::SeatState) { ReceiveSeatState(*scope, payload, size); continue; }
+                if (type == PacketType::StageEnd) { // VUH-2555: a friend's own stage end, for the host to make too;
+                    // admitted before the role branches (its source is the friend), like SeatState
+                    ByteReader r(payload, size);
+                    StageEnd stage;
+                    read(r, stage);
+                    if (CurrentRole() != Role::Host) continue; // the author's echo, or another friend's report
+                    if (stage.ownerSlot >= 1 && stage.ownerSlot <= 2 &&
+                        g_bridge.ConnectionId(stage.ownerSlot) == scope->sourceConnectionId &&
+                        RequesterCurrent(stage.ownerSlot, scope->sourceConnectionId, scope->sourceDeliverySerial))
+                        (void)eventstartmirror::ReplayStageEnd(stage);
+                    else if (g_log)
+                        g_log("[event-mirror] stage end refused: role=%u owner=%u source=%llu", static_cast<unsigned>(CurrentRole()),
+                              stage.ownerSlot, static_cast<unsigned long long>(scope->sourceConnectionId));
+                    continue;
+                }
                 if (partynative::Requested() && (type == PacketType::PartyLayout || type == PacketType::PartyReapply ||
                                                   type == PacketType::PartyIntent)) {
                     ReceivePartyPacket(*scope, type, payload, size); // VUH-1519: before the role branches (host echo)
@@ -5510,6 +5533,16 @@ void OnFrameStart(std::uint32_t frame) {
     if (partynative::Requested()) // VUH-1519, default off
         partynative::Observe(WorldSessionGeneration(), PartyRoster(), g_bridge.LocalSlot(), true);
     TickNativeResync(frame);
+    if (role == Role::Client) { // VUH-2555: this seat's own host-led stage end goes to the host
+        StageEnd stage;
+        if (eventstartmirror::TakeStageEnd(stage)) {
+            stage.seq = ++g_stageEndSeq;
+            ProducerWorldContext context;
+            const bool sent = CaptureWorldContext(context) && SendCapturedWorld(encode(stage), context);
+            if (g_log) g_log("[event-mirror] friend reported its stage end id=%X at=%02X/%02X evt=%u seq=%u%s", stage.id,
+                             stage.worldId, stage.roomId, stage.eventProgram, stage.seq, sent ? "" : " (SEND FAILED)");
+        }
+    }
     { // VUH-2464: declare/acknowledge this seat's profile and publish the prologue hold
         SeatState seat;
         const auto nowMs = GetTickCount64();

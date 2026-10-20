@@ -793,8 +793,37 @@ never strands it. The decision is `kh2coop/BlockedExitPolicy.hpp`, unit-tested i
 Sandlot, door 0) was already matching. In run `20261020-093747` the friend ran ahead and waited, the
 host played the same event and loaded btl 78, and the friend followed. In run `20261020-100758` the
 duel's end sent the friend's script to the Woods, door 0 btl 126, while the host announced door 50
-evt22; the friend took the host's room in place of its own. What still lets the friend run ahead is
-that each seat's duel stage ends on that seat's own combo (VUH-2555).
+evt22; the friend took the host's room in place of its own.
+
+**Host-led stage ends (VUH-2555, protocol 28).** A duel stage ends on each seat's own combo, and in
+runs `080107` and `093747` the host's own Roxas never hit Seifer: its stage ended only when the
+friend's clone, replaying the friend's swings, happened to land two hits close enough together. Now:
+- The Sandlot duel's stage-end starts (event "111" at evt77, "112" at evt78) are `HostLedStageEnds`
+  rows (`EventScenes.hpp`), not `InFieldEvents`: the host's own start of one is not published.
+- A friend whose own script makes one reports it (`StageEnd`, packet 54: the exact native start). The
+  relay admits it only from a verified client at the host's admitted room, stamps the owner slot and
+  broadcasts it to every verified seat like `SeatState`; only the host acts on it. Runs
+  `20261020-114151` to `-133220` looked like a lost packet or a frozen host; the host was paused on its
+  own combo tutorial box (raised by the clone's first hit on Seifer), which the scenario never
+  dismissed, so its network tick never took the report.
+- The host queues it on receipt and, from its input callback, makes the same start if it is still in
+  open field at that location (`eventstartmirror::ApplyStageEnd`). The stage ends there too, credited
+  to the seat that landed it, and the host's own script leads both seats to the next stage. Making the
+  start from the world-packet receive, inside the actor update, took the host down (run
+  `20261020-105439`).
+- Not done: keeping the other seat's clone's replayed hits from ending a stage. Refusing to build
+  those hits in `HookedBuildHit` took the host down twice, right after the first refusal (runs
+  `20261020-105439`, `20261020-111950`; the crash dump came out empty), so it was removed. The host's
+  stage can still end from the clone's replayed swings, as before; the friend's report makes sure it
+  ends anyway.
+- When the host ends a stage first, the friend keeps the ordinary event hold and is released when the
+  host's battle ends (runs `20261020-093747`, `-100758`).
+- Live (run `20261020-135936`): only the friend fought. The host's own script ended stage 1 on the
+  friend's third hit claim (applied natively through the clone), and the friend's report arrived just
+  after and was refused as already playing. Claims arrive with network spacing, so the host's combo
+  can end early, as here, or never (`080107`); the report is the backstop for the second case. The
+  lead chose this: claimed hits count on the host, the report covers a stage the claims don't end.
+  The report path itself has no live receipt yet.
 
 **Sites.** Market Street: Tram Common, each group raw566 plus the absent
 raw567/568: `tt07-95` (`TT07_MS101`, package `b_40`, group 88), and its two
