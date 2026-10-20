@@ -21,7 +21,26 @@ The painted rectangles from VUH-2415/VUH-2455 remain as the fallback.
   Nonexistence and Proof of Peace ("...Perhaps it has changed Sora."). One proof is bronze, two
   silver, three gold. The co-op crown is always gold and changes nothing in the save.
 
-## How it is drawn
+## Sora wears the game's own crown (VUH-2502)
+
+Sora's models carry the crown mesh themselves (`P_EX100` group 3, and every form and world skin). For
+those rows (`Character::nativeMesh`) nothing is drawn over the frame. While the crown gate is open,
+the game thread sets the wearer's texture-animation slot to gold 156 through `FUN_1403CD8A0(actor,
+slot)`, as the Proof unlock does (`FUN_1403A9E20` -> `FUN_1403CD8A0` -> `FUN_1401A87A0`). The game then
+draws its own crown with its own depth, sorting and effects. It is re-applied every 30 frames in case
+the game resets it. When the gate closes or the wearer changes it is restored, only on a still-live
+actor with the same model:
+- a local Sora runs `FUN_1403A9E20` again and gets back his own Proof crown, whatever its colour;
+- a remote copy goes back to the transparent slot 164.
+
+No save or Proof state changes. The game thread logs `[crown-native] on|off|wearer ...`.
+
+Live on PC1 (slot 4, Sora in the Beast's Castle Parlor, host + friend loopback, runs
+`20261019-212133` and `20261019-212428`): `[crown-native] on` for the host's Sora and no overlay
+draw. In the host's camera-orbit take the gold crown sits on Sora's head and is partly hidden behind
+Donald.
+
+## How Roxas's crown is drawn
 
 1. **Asset** (`inject/src/CrownAsset.cpp`, pure parsing in `common/include/kh2coop/CrownProp.hpp`).
    At DLL start a background thread reads the player's own install: it finds `obj/P_EX100.mdlx` by
@@ -48,6 +67,10 @@ unknown model, faulting read, pipeline) falls back to the painted marker; `KH2CO
 turns both off.
 
 ## Characters
+
+Each row also has `pitchDeg`, a tilt back about the head bone's Z axis (its side-to-side axis) through
+the centre of the crown's base. Roxas's `kRoxasPitch` stays 0 until James picks one of the VUH-2502
+candidates (0, 10 or 20 degrees). Sora's rows use the game's own crown, which the pitch doesn't touch.
 
 The crown is authored in Sora's head-bone space. `crownprop::Characters` maps a gameplay model
 (objentry name) to its head bone and an offset in that bone's space. A row is added only when the
@@ -80,7 +103,10 @@ close-ups and the hand-back, is crown-free on every screen.
 
 ## Depth and the HUD
 
-Not done. A depth test against the game's scene depth would hide the crown behind scenery, but it
+Not done for Roxas (VUH-2502 continues). The game renders its scene with D3D11 (`D3D11CreateDevice` is
+imported; `d3d11.dll` is loaded), and D3D12 only composites the finished image. A one-frame trace of
+the D3D12 recording on FM-02 found a single 4-vertex fullscreen draw. So the scene depth buffer and the
+effect and HUD passes are on the D3D11 side, and a scene-pass crown has to be drawn there. A depth test against the game's scene depth would hide the crown behind scenery, but it
 would not stop it drawing over the HUD: the HUD is drawn after the 3D pass and writes no depth. That
 needs the crown recorded before the game's HUD command list, which means locating the game's
 3D/HUD split in its D3D12 submission: more RE than this polish warrants.
@@ -90,8 +116,11 @@ needs the crown recorded before the game's HUD command list, which means locatin
 - Drawn over the finished frame without the game's depth buffer: the crown is not hidden by scenery
   or a character in front of the head, and it draws over the HUD (see above). The painted marker had
   the same.
-- A host Sora who holds Proofs also shows the game's own crown at the same spot; ours is drawn over
-  it, so he wears gold whatever his own colour.
+- A host Sora who holds Proofs wears gold during co-op field play; his own colour comes back when the
+  gate closes.
+- On a friend's screen outside the prologue, a host Sora's body can be a party puppet with another
+  model (in the Beast's Castle Parlor it is `P_EX020`, Goofy's actor). It has no row, so the friend sees
+  the painted marker.
 - On a friend's screen in the Roxas days without the prologue party (for example FM-02), the host has
   no model there, so the friend sees the marker.
 - `0x713540` and `0xAD6CF0` are build-specific. A changed build fails the key-table hash (marker) but

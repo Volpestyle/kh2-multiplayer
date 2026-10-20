@@ -22,6 +22,7 @@ bool Install(uintptr_t exeBase, LogFn log);
 // Game-owner thread publishes value-only telemetry. Nonblocking; failure hides
 // prior HUD data. No native writes or game pointers enter the render thread.
 void PublishCoopHud(const hud::Snapshot& snapshot) noexcept;
+bool CrownEnabled() noexcept;  // KH2COOP_HOST_CROWN, read at Install
 void InvalidateCoopHud() noexcept;
 
 // Stops the encoder thread and closes the channel. Call before

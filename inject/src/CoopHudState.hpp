@@ -51,6 +51,9 @@ struct Snapshot {
     std::int8_t crownSource {-1};
     bool crownHeadValid {};
     std::uint8_t crownCharacter {};
+    // VUH-2502: the wearer's model shows the game's own crown (its texture-animation slot set to
+    // gold by the game thread), so nothing is drawn over the frame.
+    bool crownNative {};
     std::array<float, 16> crownHead {}, crownViewProj {};
 };
 static_assert(std::is_trivially_copyable_v<Snapshot> && std::is_standard_layout_v<Snapshot>);

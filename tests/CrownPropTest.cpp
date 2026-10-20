@@ -298,6 +298,24 @@ void Clip() {
     std::array<crownprop::ClipVertex, 3> small {};
     Check(crownprop::ClipTriangles(prop, lifted, Translation(0, 0, 0), viewProj, small) == 3 && small[0].w == 300,
           "the character offset applies in bone space; output stops at capacity");
+
+    // VUH-2502: the tilt turns about Z through the base centre (min X, mean Y, mean Z).
+    crownprop::Prop tiltProp;
+    tiltProp.vertices = {{0, -1, 100, 0, 0}, {0, 1, 100, 0, 0}, {10, 0, 100, 0, 0}};
+    tiltProp.triangles = {{0, 1, 2}};
+    std::array<crownprop::ClipVertex, 3> flat {}, tilted {};
+    const crownprop::Character level {"X", 0, 0, 0, 0, 0.0f};
+    const crownprop::Character back {"X", 0, 0, 0, 0, 90.0f};
+    crownprop::ClipTriangles(tiltProp, level, Translation(0, 0, 0), viewProj, flat);
+    crownprop::ClipTriangles(tiltProp, back, Translation(0, 0, 0), viewProj, tilted);
+    const auto approx = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
+    Check(approx(flat[2].x, 10) && approx(flat[2].y, 0), "no pitch leaves the crown as authored");
+    Check(approx(tilted[2].x, 0) && approx(tilted[2].y, -10) && approx(tilted[2].w, 100),
+          "a 90 degree pitch turns the crown's top from +X to +Y about the base, depth unchanged");
+    bool native = true;
+    for (const auto& c : crownprop::Characters)
+        native = native && c.nativeMesh == (c.model.substr(0, 7) == "P_EX100") && (c.nativeMesh || c.headBone == 113);
+    Check(native, "every Sora model shows the game's own crown; both Roxases keep the drawn one");
 }
 
 void HostHead() {

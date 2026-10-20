@@ -567,49 +567,55 @@ inline bool DdsSprite(std::span<const std::uint8_t> dds, int index, int count, s
 // Other models (Mickey P_EX200 has a different, smaller head frame) keep the painted marker until a
 // row is verified.
 inline constexpr float kCrownDrop = -4.5f;
+// VUH-2502: pitchDeg tilts our drawn crown back about the head bone's Z axis (its side-to-side axis)
+// through the crown's base centre, positive back. nativeMesh: the model carries the game's own crown
+// group (texture-animation slot 156 turns it gold), so the game draws it and we draw nothing.
+inline constexpr float kRoxasPitch = 0.0f;  // James picks from the VUH-2502 candidates
 struct Character {
     std::string_view model;
     std::uint16_t headBone;
     float dx, dy, dz;
+    float pitchDeg = 0.0f;
+    bool nativeMesh = false;
 };
 inline constexpr std::array<Character, 37> Characters {{
-    {"P_EX100", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_NM", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_NM_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_NM_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_NM_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_NM_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_NM_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_NM_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TR", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TR_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TR_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TR_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TR_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TR_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_TR_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_WI", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_WI_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_WI_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_WI_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_WI_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_WI_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_WI_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_XM", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_XM_BTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_XM_MAGF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_XM_TRIF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_XM_ULTF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_XM_HTLF", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX100_XM_KH1F", 140, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX110", 113, kCrownDrop, 0.0f, 0.0f},
-    {"P_EX110_BTLF", 113, kCrownDrop, 0.0f, 0.0f},
+    {"P_EX100", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_BTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_MAGF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TRIF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_ULTF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_HTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_KH1F", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_NM", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_NM_BTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_NM_MAGF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_NM_TRIF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_NM_ULTF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_NM_HTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_NM_KH1F", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TR", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TR_BTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TR_MAGF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TR_TRIF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TR_ULTF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TR_HTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_TR_KH1F", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_WI", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_WI_BTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_WI_MAGF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_WI_TRIF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_WI_ULTF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_WI_HTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_WI_KH1F", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_XM", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_XM_BTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_XM_MAGF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_XM_TRIF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_XM_ULTF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_XM_HTLF", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX100_XM_KH1F", 140, kCrownDrop, 0.0f, 0.0f, 0.0f, true},
+    {"P_EX110", 113, kCrownDrop, 0.0f, 0.0f, kRoxasPitch, false},
+    {"P_EX110_BTLF", 113, kCrownDrop, 0.0f, 0.0f, kRoxasPitch, false},
 }};
 inline const Character* FindCharacter(std::span<const char> name) noexcept {
     const auto end = std::find(name.begin(), name.end(), '\0');
@@ -657,10 +663,19 @@ inline constexpr float NearW = 10.0f;
 inline std::size_t ClipTriangles(const Prop& prop, const Character& who, const Matrix& head, const Matrix& viewProj,
                                  std::span<ClipVertex> out) {
     const Matrix toClip = Multiply(head, viewProj);
+    // The tilt's pivot: the centre of the crown's base (X is the head's up axis).
+    float px = 0.0f, py = 0.0f, pz = 0.0f;
+    if (!prop.vertices.empty()) {
+        px = prop.vertices[0].x;
+        for (const auto& v : prop.vertices) { px = std::min(px, v.x); py += v.y; pz += v.z; }
+        py /= static_cast<float>(prop.vertices.size()); pz /= static_cast<float>(prop.vertices.size());
+    }
+    const float pitch = who.pitchDeg * 3.14159265f / 180.0f, cs = std::cos(pitch), sn = std::sin(pitch);
     std::vector<ClipVertex> clip(prop.vertices.size());
     for (std::size_t i = 0; i < prop.vertices.size(); ++i) {
         const auto& v = prop.vertices[i];
-        const float p[4] {v.x + who.dx, v.y + who.dy, v.z + who.dz, 1.0f};
+        const float rx = v.x - px, ry = v.y - py;
+        const float p[4] {px + cs * rx - sn * ry + who.dx, py + sn * rx + cs * ry + who.dy, v.z + who.dz, 1.0f};
         float q[4] {};
         for (int c = 0; c < 4; ++c)
             for (int k = 0; k < 4; ++k) q[c] += p[k] * toClip[static_cast<std::size_t>(k * 4 + c)];

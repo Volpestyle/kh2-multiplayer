@@ -1116,6 +1116,55 @@ static std::uint32_t g_crownClearFrames = 0;  // VUH-2455: settle count for the 
 static bool g_crownAfterEvent = false;          // the gate last closed for an event or cutscene
 static int g_crownGateLogged = -1;              // last logged gate bits
 
+// VUH-2502: Sora's models carry the game's own crown (P_EX100 group 3), normally drawn with the
+// transparent texture-animation slot 164. While the crown gate is open on such a wearer, slot 156
+// (gold) shows it, set through FUN_1403CD8A0 as the Proof unlock does (FUN_1403A9E20); the game then
+// draws it with its own depth and effects. Re-applied every 30 frames in case the game resets it.
+// When the gate closes or the wearer changes it is restored: a local Sora recomputes his own Proof
+// crown (FUN_1403A9E20), a remote copy goes back to 164. Only a still-live actor with the same model
+// is restored. No save or Proof state changes.
+static struct { uintptr_t actor = 0, model = 0; bool local = false; std::uint32_t frame = 0; } g_nativeCrown;
+static bool g_nativeCrownLogged = false;
+constexpr uintptr_t RVA_SET_TEXANIM_SLOT = 0x3CD8A0;  // FUN_1403CD8A0(actor, slot)
+constexpr uintptr_t RVA_PROOF_CROWN = 0x3A9E20;       // FUN_1403A9E20(actor)
+constexpr std::uint32_t kGoldCrownSlot = 156, kNoCrownSlot = 164;
+static bool IsLiveActor(uintptr_t actor);
+static bool SetNativeCrown(uintptr_t actor, bool on, bool local) {
+    __try {
+        if (on) reinterpret_cast<void(__fastcall*)(uintptr_t, std::uint32_t)>(g_exeBase + RVA_SET_TEXANIM_SLOT)(actor, kGoldCrownSlot);
+        else if (local) reinterpret_cast<void(__fastcall*)(uintptr_t)>(g_exeBase + RVA_PROOF_CROWN)(actor);
+        else reinterpret_cast<void(__fastcall*)(uintptr_t, std::uint32_t)>(g_exeBase + RVA_SET_TEXANIM_SLOT)(actor, kNoCrownSlot);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+static bool UpdateNativeCrown(uintptr_t wearer, bool want) {
+    uintptr_t model = 0;
+    if (want && (!wearer || !ReadHitTrace(wearer + 0x7B0, model) || !model)) want = false;
+    if (g_nativeCrown.actor && (!want || g_nativeCrown.actor != wearer || g_nativeCrown.model != model)) {
+        uintptr_t still = 0;
+        const bool same = IsLiveActor(g_nativeCrown.actor) && ReadHitTrace(g_nativeCrown.actor + 0x7B0, still) &&
+            still == g_nativeCrown.model;
+        const bool restored = same && SetNativeCrown(g_nativeCrown.actor, false, g_nativeCrown.local);
+        Log("[crown-native] off actor=%llX local=%u restored=%u frame=%u", static_cast<unsigned long long>(g_nativeCrown.actor),
+            g_nativeCrown.local ? 1u : 0u, restored ? 1u : 0u, g_frameCounter);
+        g_nativeCrown = {};
+    }
+    if (!want) return false;
+    if (g_nativeCrown.actor != wearer || g_frameCounter - g_nativeCrown.frame >= 30) {
+        const bool fresh = g_nativeCrown.actor != wearer;
+        if (!SetNativeCrown(wearer, true, false)) {
+            if (!g_nativeCrownLogged) Log("[crown-native] set FAULT actor=%llX", static_cast<unsigned long long>(wearer));
+            g_nativeCrownLogged = true;
+            g_nativeCrown = {};
+            return false;
+        }
+        if (fresh) Log("[crown-native] on actor=%llX model=%llX local=%u frame=%u", static_cast<unsigned long long>(wearer),
+                       static_cast<unsigned long long>(model), wearer == g_soraActor ? 1u : 0u, g_frameCounter);
+        g_nativeCrown = {wearer, model, wearer == g_soraActor, g_frameCounter};
+    }
+    return true;
+}
+
 static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& before) {
     hud::Input input;
     input.before = before;
@@ -1140,11 +1189,23 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     input.after = enemysync::CapturePuppetAuthority();
     auto snapshot = hud::Project(input, GetTickCount64(), g_frameCounter);
     // VUH-2480: the crowned actor's head bone for the real crown; the painted marker stands in without it.
+    std::uintptr_t wearer = 0;
     if (snapshot.crownCurrent) {
-        const std::uintptr_t wearer = snapshot.crownSource == 0 ? g_soraActor
+        wearer = snapshot.crownSource == 0 ? g_soraActor
             : snapshot.crownSource > 0 ? g_puppets[snapshot.crownSource - 1].actor : 0;
         (void)crown::ReadHostHead(g_exeBase, wearer, snapshot);
+        static uintptr_t loggedWearer = 0;
+        if (wearer != loggedWearer) {  // VUH-2502: which model wears it on this screen, and whether its head reads
+            loggedWearer = wearer;
+            char name[32] {};
+            const bool named = wearer && crown::detail::CopyModelName(wearer, name);
+            Log("[crown-native] wearer actor=%llX source=%d model=%s head=%u", static_cast<unsigned long long>(wearer),
+                snapshot.crownSource, named ? name : "?", snapshot.crownHeadValid ? 1u : 0u);
+        }
     }
+    const bool nativeRow = snapshot.crownHeadValid && snapshot.crownCharacter < crownprop::Characters.size() &&
+        crownprop::Characters[snapshot.crownCharacter].nativeMesh;
+    snapshot.crownNative = UpdateNativeCrown(wearer, render::CrownEnabled() && snapshot.crownCurrent && nativeRow);
     // VUH-2455: every crown gate transition, with the raw gates, to place any event-shot leak.
     const int gateBits = (input.fieldClear ? 1 : 0) | (input.cameraFollowsLocal ? 2 : 0) |
         (input.cameraValid ? 4 : 0) | (snapshot.crownCurrent ? 8 : 0) | (input.afterEvent ? 16 : 0);

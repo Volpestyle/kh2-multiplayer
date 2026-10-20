@@ -178,6 +178,9 @@ unsigned g_fps = 0;
 bool g_disabled = false;
 bool g_renderDiagnostics = false;
 bool g_crownEnabled = true;  // VUH-2415: KH2COOP_HOST_CROWN=0 turns the host crown off
+}  // namespace
+bool CrownEnabled() noexcept { return g_crownEnabled; }
+namespace {
 float g_crownFov = crown::DefaultFovYDegrees;
 float g_crownHead = 0.0f;  // VUH-2455: 0 sizes the head by camera distance; KH2COOP_CROWN_HEAD fixes it
 float CrownHead(const Vec3& eye, const Vec3& look) {
@@ -1428,7 +1431,9 @@ void OnPresent(IDXGISwapChain* swapChain) {
         bool drawCrown = false;
         g_crownClipCount = 0;
         const auto* crownAsset = crownasset::Ready();
-        if (g_crownEnabled && g_renderHud.crownCurrent && g_renderHud.crownHeadValid && crownAsset &&
+        if (g_renderHud.crownNative) {
+            // VUH-2502: the game draws its own crown on this model (depth, sorting, effects).
+        } else if (g_crownEnabled && g_renderHud.crownCurrent && g_renderHud.crownHeadValid && crownAsset &&
             !g_crownMesh.failed && g_renderHud.crownCharacter < crownprop::Characters.size()) {
             // VUH-2480: the real crown on the head bone; none at all when it is behind the camera.
             g_crownClipCount = crownprop::ClipTriangles(crownAsset->prop, crownprop::Characters[g_renderHud.crownCharacter],
