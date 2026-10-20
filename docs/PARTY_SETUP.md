@@ -841,7 +841,21 @@ there, from New Game or a save such as FM-02, builds both Roxases at the fight
 and releases both seats together: in run `20261019-171352` the host held
 (`remote-unbound`) until the friend bound. The encounter checklist is
 `docs/PROLOGUE_ENCOUNTERS.md`. Before the seat's first release, an open prologue field with no site
-is held with reason `unpinned-field`. The friend's blocked opening exit is
+is held with reason `unpinned-field`.
+
+**A field without a site is native solo, so neither player sees the other there** (VUH-2570). The
+clone is only built by the checked-site ingress; elsewhere each seat plays its own Roxas while enemies
+still mirror. The Dive's Station of Calling (`02/21` btl 1 evt 0) was such a field. Its group is raw566
+alone (headerId 23, no raw567/568 rows), which the ingress handles like any other: the clone is built
+from a copy of the raw566 record. It is now `tt33-calling`; in run `20261020-170232` both seats bound,
+released together, each drew the other along the whole path, and both logged the same 10 Dusk deaths.
+Pinned receipt literals may be written in either hex case: `Bytes()` read only lowercase, so the first
+pin of this site (copied from an uppercase log) never matched and the bounded
+`[missing-party] site shape refused reason=...` line now names the failing check at a checked location.
+Other fields seen unpinned in logs so far (2026-10-20), so solo for both seats: the Usual Spot
+(`02/02` evt0), Back Alley evt4, Tram Common free roam (`02/07` evt3 and evt4), the Woods (`02/0D`
+evt22), the Old Mansion (`02/0E` evt1), Basement Hall evt2 (`02/13`), the Computer Room (`02/15`
+evt0), the Station of Serenity (`02/20` evt2) and `02/22` evt157. Each needs its own pinned receipt. The friend's blocked opening exit is
 outside this scope: it has no player actor, and member 0 is still Sora until
 the first field.
 

@@ -9,7 +9,7 @@ namespace kh2coop::routespawn {
 // Exact installed ARD definitions; see docs/ROUTE_SPAWNS.md for provenance.
 template<std::size_t N> constexpr auto Bytes(const char (&hex)[N]) {
     static_assert(N%2==1); std::array<std::uint8_t,(N-1)/2> out{};
-    auto digit=[](char c) { return c>='0' && c<='9' ? c-'0' : c-'a'+10; };
+    auto digit=[](char c) { return c>='0' && c<='9' ? c-'0' : c>='A' && c<='F' ? c-'A'+10 : c-'a'+10; };
     for(std::size_t i=0;i<out.size();++i) out[i]=static_cast<std::uint8_t>((digit(hex[2*i])<<4)|digit(hex[2*i+1]));
     return out;
 }
@@ -177,6 +177,12 @@ inline constexpr auto Sandlot77Records=Bytes("36020000de6b0dc200000080de6b0d4200
 inline constexpr std::array<std::uint8_t,10> Sandlot78Location{2,4,0,0,0x4E,0,0x4E,0,0x4E,0};
 inline constexpr auto Sandlot78Header=Bytes("01005d0004000000000000000000000000000000000000000000000000000000000000000000000000000000");
 inline constexpr auto Sandlot78Records=Bytes("36020000de6b0dc200000080de6b0d4200000000e4cb16c00000000000001100000000000000000000000000000000000000000000000000000000000000000037020000e16b0dc200000080cb21d4c200000000e4cb16c00000000000001200000000000000000000000000000000000000000000000000000000000000000038020000cb21d44200000080dc6b0d4200000000e4cb16c000000000000013000000000000000000000000000000000000000000000000000000000000000000780600009b4216c4000000809c42164400000000db0f493f00000000030014000200000000000000000000000000000000000000000000000000000000000000");
+// VUH-2570: the Dive's Station of Calling, btl1 evt0 (b_00, headerId 23: raw566 alone, no 567/568 rows;
+// the clone is built from the raw566 copy as everywhere). Unpinned, it stayed native solo and neither seat
+// saw the other. Both seats logged byte-identical receipts from FM-00 (runs 20261019-225122 to -231804).
+inline constexpr std::array<std::uint8_t,10> Calling33Location{2,0x21,0,0,0,0,1,0,0,0};
+inline constexpr auto Calling33Header=Bytes("0100170001000000000000000000000000000000000000000000000021000000000000000000000000000000");
+inline constexpr auto Calling33Records=Bytes("360200000080fc4400007a440000204300000000368da7bf00000000010001000000000000000000000000000000000000000000000000000000000000000000");
 inline constexpr MissingPartySite MissingPartySites[]{
     {BaileyLocation,808738658,BaileyHeader,BaileyRecords,84,1,false,"hb08-bailey"},
     {TramCommon95Location,808738658,TramCommon95Header,TramCommon95Records,90,14,true,"tt07-95"},
@@ -187,6 +193,7 @@ inline constexpr MissingPartySite MissingPartySites[]{
     {BackAlley73Location,808738658,BackAlley73Header,BackAlley73Records,90,14,true,"tt03-73"},
     {Sandlot77Location,825515874,Sandlot77Header,Sandlot77Records,90,14,true,"tt04-77"},
     {Sandlot78Location,842293090,Sandlot78Header,Sandlot78Records,90,14,true,"tt04-78"},
+    {Calling33Location,808476525,Calling33Header,Calling33Records,90,14,true,"tt33-calling"},
 };
 // Header +4 is the group's record count; every record of the group is pinned.
 inline const MissingPartySite* MissingPartySiteFor(const std::array<std::uint8_t,10>& location,std::uint32_t key,

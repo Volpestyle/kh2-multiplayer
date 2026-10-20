@@ -1812,16 +1812,28 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
     std::array<std::uint8_t,44> header{};
     std::array<std::uint8_t,256> records{};
     std::array<std::uint8_t,routespawn::BaileyCaller.size()> call{};
-    if(!ReadStamp(stamp) || !routespawn::MissingPartySiteAt(stamp.location) ||
-       !ReadNative(reinterpret_cast<uintptr_t>(controller),native) || native.spawnArray!=native.header+44 ||
-       reinterpret_cast<uintptr_t>(record)!=native.spawnArray ||
-       !CopyNative(native.header,header.data(),header.size()))return false;
+    if(!ReadStamp(stamp) || !routespawn::MissingPartySiteAt(stamp.location))return false;
+    // VUH-2570: at a checked location, say which shape check refused the group (bounded).
+    static std::atomic<unsigned> shapeLogs{0};
+    const auto refuse=[&](const char* why) {
+        if(g_log && shapeLogs.fetch_add(1)<16)
+            g_log("[missing-party] site shape refused reason=%s header=%llX spawn=%llX region=%llX record=%llX",why,
+                  static_cast<unsigned long long>(native.header),static_cast<unsigned long long>(native.spawnArray),
+                  static_cast<unsigned long long>(native.regionArray),reinterpret_cast<unsigned long long>(record));
+        return false;
+    };
+    if(!ReadNative(reinterpret_cast<uintptr_t>(controller),native))return refuse("controller");
+    if(native.spawnArray!=native.header+44)return refuse("spawn-array");
+    if(reinterpret_cast<uintptr_t>(record)!=native.spawnArray)return refuse("record-index");
+    if(!CopyNative(native.header,header.data(),header.size()))return refuse("header-read");
     const std::size_t count=Field<std::uint16_t>(header.data(),4);
-    if(!count || count>records.size()/64 || native.regionArray!=native.spawnArray+count*64 ||
-       !CopyNative(native.spawnArray,records.data(),count*64))return false;
+    if(!count || count>records.size()/64)return refuse("count");
+    if(native.regionArray!=native.spawnArray+count*64)return refuse("region-array");
+    if(!CopyNative(native.spawnArray,records.data(),count*64))return refuse("records-read");
     const auto groupBytes=std::span<const std::uint8_t>(records.data(),count*64);
     const auto* site=routespawn::MissingPartySiteFor(stamp.location,native.key,caller-g_exeBase,header,groupBytes);
-    if(!site || !CopyNative(g_exeBase+0x3FF71B,call.data(),call.size()) || call!=routespawn::BaileyCaller)return false;
+    if(!site)return refuse("bytes");
+    if(!CopyNative(g_exeBase+0x3FF71B,call.data(),call.size()) || call!=routespawn::BaileyCaller)return refuse("caller");
     // The clone's direct object: Bailey keeps normal Sora; a prologue site takes the one remote seat's
     // latched, prologue-qualified profile. Without one the authored local load stays solo and admission holds.
     std::uint16_t cloneObject=84;

@@ -295,6 +295,17 @@ void site() {
     check(duel2 && duel2->prologue && std::string_view(duel2->name) == "tt04-78" && MissingPartySiteAt(Sandlot78Location) == duel2 &&
           !MissingPartySiteFor(Sandlot78Location, 842293090, 0x3FF727, Sandlot77Header, Sandlot77Records),
           "the duel's second stage (evt78) is a checked prologue site with its own group");
+    const auto* calling = MissingPartySiteFor(Calling33Location, 808476525, 0x3FF727, Calling33Header, Calling33Records);
+    auto callingWrongProgram = Calling33Location; callingWrongProgram[6] = 0;
+    check(calling && calling->prologue && Calling33Records.size() == 64 && std::string_view(calling->name) == "tt33-calling" &&
+          MissingPartySiteAt(Calling33Location) == calling && !MissingPartySiteAt(callingWrongProgram) &&
+          !MissingPartySiteFor(Calling33Location, 808738658, 0x3FF727, Calling33Header, Calling33Records),
+          "the Dive's Station of Calling (raw566 alone) is a checked prologue site (VUH-2570)");
+    // The receipt's bytes, read independently of the literal: raw566, x = 0x44FC8000 (2020.0), headerId 23.
+    check(Calling33Records[0] == 0x36 && Calling33Records[1] == 0x02 && Calling33Records[5] == 0x80 &&
+          Calling33Records[6] == 0xFC && Calling33Records[7] == 0x44 && Calling33Header[2] == 0x17 &&
+          Bytes("AbF0")[0] == 0xAB && Bytes("AbF0")[1] == 0xF0,
+          "pinned receipt bytes parse as logged, upper or lower case hex");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&

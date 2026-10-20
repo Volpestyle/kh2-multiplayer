@@ -41,7 +41,7 @@ readings, confirmed only where the live column says so.
 | 3 | 04 Sandlot | 79 | `TT04_MS301` | 1 Dusk (318) | early Dusk | not yet |
 | 3 | 32 Station of Serenity | 154 | `TT32_MS302` | 3 Dusks (318) | Dive: weapon tutorial | not yet |
 | 3 | 32 Station of Serenity | 155 | `TT32_MS303` | none | Dive | not yet |
-| 3 | 33 Station of Calling | 1 | none | 10 Dusks (318) on the path | Dive | loopback from FM-00, both seats fight all 10 (VUH-2466) |
+| 3 | 33 Station of Calling | 1 | none | 10 Dusks (318) on the path | Dive | checked site `tt33-calling` (VUH-2570): both seats see each other and fight all 10, loopback from FM-00 |
 | 3 | 34 Station of Awakening | 157 | `TT34_MS304` | B_EX100 (307), Twilight Thorn | boss | not yet |
 | 4 | 03 Back Alley | 180 | `TT03_MS400` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
 | 5 | 04 Sandlot | 181 | `TT04_MS500` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
