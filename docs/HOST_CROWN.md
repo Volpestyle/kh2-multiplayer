@@ -103,19 +103,36 @@ close-ups and the hand-back, is crown-free on every screen.
 
 ## Depth and the HUD
 
-Not done for Roxas (VUH-2502 continues). The game renders its scene with D3D11 (`D3D11CreateDevice` is
-imported; `d3d11.dll` is loaded), and D3D12 only composites the finished image. A one-frame trace of
-the D3D12 recording on FM-02 found a single 4-vertex fullscreen draw. So the scene depth buffer and the
-effect and HUD passes are on the D3D11 side, and a scene-pass crown has to be drawn there. A depth test against the game's scene depth would hide the crown behind scenery, but it
-would not stop it drawing over the HUD: the HUD is drawn after the 3D pass and writes no depth. That
-needs the crown recorded before the game's HUD command list, which means locating the game's
-3D/HUD split in its D3D12 submission: more RE than this polish warrants.
+Not done for Roxas yet (VUH-2502 continues). A one-frame trace of the game's D3D12 recording on FM-02
+(Computer Room save point, 2026-10-19) shows how the frame is built. An earlier note here said the
+scene was D3D11; that was wrong. The game's only `D3D11CreateDevice` call (flags `0x820`, BGRA and video
+support, no context) is the movie device.
+
+- The scene is D3D12: one direct command list per frame executes about 90 bundles (type 1) in order.
+  The bundles are recorded each frame when the scene changes and re-executed while it is static, so a
+  trace can catch a frame with no bundle recording at all.
+- Scene depth is a 1920x1080 `D32_FLOAT_S8X24` view, cleared to 1.0 at the start of the list, tested
+  `LESS_EQUAL` (not reversed-Z).
+- Main-target bundle order: world (opaque, depth write), characters (alpha blend, depth write, back-face
+  cull), effects such as the save-point light pillars (depth test, no write), particles, post-process
+  quads, then the HUD (depth func `ALWAYS`, writing depth). The characters are also drawn a second time
+  into a 256x256 target with its own depth.
+- The list clears the scene depth again just before `Close`. So the depth buffer is empty, and was
+  overwritten by the HUD, long before Present: a Present-time draw cannot depth-test against the scene.
+- Camera: the bundles' root CBV 2 holds the row-vector view matrix, and root CBV 0 (floats 20-35) holds
+  the projection: x 1.299, y 2.309 (16:9), `z_clip = z_view - 4`, `w = z_view`. The CPU matrix at
+  `0xAD6CF0` matches in x, y and w but carries `z_view - 2`, so its depth is not the GPU's.
+
+A depth-tested crown therefore has to be recorded into the game's direct list just before the first
+main-target bundle whose PSO tests depth without writing it (the effects), using the game's camera
+CBVs. Afterwards the game's root signature and root arguments must be restored on that list, because
+bundles inherit them. Being drawn before the effects also keeps it under the HUD.
 
 ## Limits
 
 - Drawn over the finished frame without the game's depth buffer: the crown is not hidden by scenery
-  or a character in front of the head, and it draws over the HUD (see above). The painted marker had
-  the same.
+  or a character in front of the head, and it draws over the HUD and the game's effects (see above).
+  The painted marker had the same.
 - A host Sora who holds Proofs wears gold during co-op field play; his own colour comes back when the
   gate closes.
 - On a friend's screen outside the prologue, a host Sora's body can be a party puppet with another
