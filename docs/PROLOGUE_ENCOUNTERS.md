@@ -41,7 +41,7 @@ readings, confirmed only where the live column says so.
 | 3 | 04 Sandlot | 79 | `TT04_MS301` | 1 Dusk (318) | early Dusk | not yet |
 | 3 | 32 Station of Serenity | 154 | `TT32_MS302` | 3 Dusks (318) | Dive: weapon tutorial | not yet |
 | 3 | 32 Station of Serenity | 155 | `TT32_MS303` | none | Dive | not yet |
-| 3 | 33 Station of Calling | 1 | none | 8 Dusks (318) | Dive | not yet |
+| 3 | 33 Station of Calling | 1 | none | 10 Dusks (318) on the path | Dive | loopback from FM-00, both seats fight all 10 (VUH-2466) |
 | 3 | 34 Station of Awakening | 157 | `TT34_MS304` | B_EX100 (307), Twilight Thorn | boss | not yet |
 | 4 | 03 Back Alley | 180 | `TT03_MS400` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
 | 5 | 04 Sandlot | 181 | `TT04_MS500` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
@@ -68,5 +68,16 @@ Jobs and minigames (host-owned, solo activities; `Party NO_FRIEND`, no Dusks):
 ## Rehearsal saves
 
 PC1's rig saves reach only part of this list: FM-00 starts on the Station of Serenity save point
-(room 32, evt program 2), FM-01 at the Usual Spot on Day 6, and FM-02 in the Computer
+(room 32, evt program 2, chest already open), FM-01 at the Usual Spot on Day 6, and FM-02 in the Computer
 Room on Day 6. They're rehearsals; opening-route evidence comes from New Game.
+
+From FM-00 (2026-10-19, PC1 loopback, VUH-2466):
+- The Station of Serenity's way on is a door standing at the platform edge, about (60, 600). It is
+  map geometry, not an actor; `F_EX030_TT` at (-450, -328) is the chest, already open in this save.
+  Walking into the door is the trigger, with no reaction command. The friend is warped along to the
+  Station of Calling (`02/21 btl 1 evt 0`).
+- The Station of Calling's btl 1 set (`b_00`) places its 10 Dusks along the stained-glass path that
+  leaves the platform toward -z, in five groups of 1, 1, 3, 2 and 3. None are on the platform. Walking
+  the path in order from (2020, -500) through (2000, -1350), (2200, -2150), (800, -2341), (0, 250)
+  and (-50, 2700) meets each group. With both seats' pilots on that route (background pilots), both
+  Roxases fought all 10 with Reversal. Neither was hit, and both logs record the same 10 deaths.
