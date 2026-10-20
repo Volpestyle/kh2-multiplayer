@@ -392,6 +392,13 @@ def host_pair():
     return steps
 
 
+def own_events(loc, tag):
+    """Since VUH-2359 the friend plays the host's scenes and in-field events natively, with their dialog:
+    once its own event starts (or it is already there), skip it like the host does, until it arrives."""
+    return [{"do": "wait_until", "expr": f"peek('0x2A11478','u32',0) != 0 or location(0) == {loc}", "timeoutMs": 900000,
+             "pollMs": 500}] + own_advance(f"location(0) == {loc}", 24, tag, guard=" and peek('0x2A11478','u32',0) != 0")
+
+
 def friend_pair():
     blocked = "log_count('client native exit blocked', 0) > 0"
     steps = pair_opening([
@@ -420,8 +427,8 @@ def friend_pair():
          "message": "the host's hit on its copy of this seat changed this seat's own HP"}]
     for loc, room, evt, tag, name in (([2, 7, 0, 97, 97, 97], 7, 97, "reload97", "take_reload_friend"),
                                       ([2, 7, 0, 99, 99, 99], 7, 99, "reload99", "take_crown_friend")):
-        steps += stop(loc, room, evt) + one(tag) + [two_roxases(f"evt{evt}"), take(name)]
-    steps += stop([2, 4, 0, 76, 76, 76], 4, 76) + one("sandlot") + [two_roxases("Sandlot")] + mark_clone("sandlot") + [
+        steps += own_events(loc, f"fe{evt}") + stop(loc, room, evt) + one(tag) + [two_roxases(f"evt{evt}"), take(name)]
+    steps += own_events([2, 4, 0, 76, 76, 76], "fe76") + stop([2, 4, 0, 76, 76, 76], 4, 76) + one("sandlot") + [two_roxases("Sandlot")] + mark_clone("sandlot") + [
         {"do": "save", "as": "sandlot_log", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 0)},
         {"do": "clip", "instance": 0, "seconds": 25, "fps": 30, "name": "sandlot_friend_view_host_moves", "background": True},
         {"do": "wait_until", "expr": clone_moved("sandlot"), "timeoutMs": 180000, "pollMs": 1000},
