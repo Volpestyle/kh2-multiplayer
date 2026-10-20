@@ -1876,6 +1876,7 @@ protected actor. Protection is best effort during loads.
 | `relay` | `port build content mod args` | Start `kh2coop_server` on loopback for this run; the version gate defaults to what the runtime sends |
 | `runtime` | `instance role peerId link args expect timeoutMs` | Start `kh2coop_runtime_scaffold --network --no-camera --pid <instance>` and wait for `expect` in its log (default `Verified membership; native bootstrap remains separate`). Refuse an existing owned runtime/log or live owned writer for the same game PID before opening the log. `link: {latencyMs, jitterMs, lossPct}` sets the runtime's impairment both ways (owner→viewer crosses two runtimes, so 50 ms each = 100 ms) |
 | `reconnect_mark` | `as instances timeoutMs` | Seal current original `[0,1,2]` process/session/connection/generation/native-load/provenance observations and exact log prefixes; default timeout10s, maximum15s. Preserve raw inputs on success or failure |
+| `runtime_stop` | `instance name` | VUH-1512: drop one seat's connection by terminating that instance's owned runtime (`name`, default `runtime_<instance>`), leaving its game running, as a lost link or the launcher's Disconnect fallback does. A later `runtime` step with its own `name` (for example `runtime_1_rejoin`) reconnects the seat |
 | `runtime_pause` | `instance:1 after as timeoutMs` | Suspend only the original registered Friend1 Popen handle after a qualified reconnect baseline. Wait for fresh exact retirement/survivor evidence, then resume the same process. One pause per baseline; timeout1–20s; retain recovery receipt in finally |
 | `reconnect_check` | `after as timeoutMs` | Require the original successful pause receipt and original live process/relay bindings, then strict same-session native recovery against the baseline. Default45s, maximum60s. Retain raw/partial inputs; repeat with a distinct `as` after final population gates |
 | `record` / `record_stop` | `as instances` | Sample every party actor's position (with the instance's world/room) on those instances in the background; `record_stop` writes `<as>.csv` |
@@ -1900,7 +1901,8 @@ Expressions are Python with these helpers (the instance index is the last
 argument, default 0): `room()` → `(world, room)`; `pos(name='P_EX100')` →
 `(x, y, z)`; `actor(name)` → the `kh2ctl entities` record (`hp`, `maxHp`,
 `team`, `motionId`, `address`, …); `actors()`; `enemies()` (objentry type 3/4);
-`peek(rva, kind='u32')`; `log_count(text)` (lines in the inject log, e.g.
+`peek(rva, kind='u32')`; `peek_at(address, kind='u32')` (an absolute address
+inside the module image, such as an actor field: `address + 0x4D8`); `log_count(text)` (lines in the inject log, e.g.
 `'attacker=P_EX100'` from the hit log); `dist(a, b)`; `saved`;
 `enemy_hps(i)` (sorted `(name, hp)` of live combat enemies); `bridge(i)` (the instance's AvatarBridge via `avatarctl peek`: local
 frames/s and both puppet slots); `puppet_error(saved['rec'], owner, viewer)`.
@@ -3260,7 +3262,13 @@ gate is closed); it is for development, and the unskipped fixture stays the
 acceptance evidence for the engine-driven scenes. `net_prologue_party_sora.json` and
 `net_prologue_party_sora_skip.json` (VUH-1512) are the same checks with the friend on
 `KH2COOP_PROFILE=0x54`: each seat expects the host's Roxas and the friend's Sora, one of
-them local and the other a clone. `net_prologue_party_refusal.json` (and its skipped
+them local and the other a clone. The Roxas + Roxas fixtures also read each seat's clone
+model color at first control: the host's copy of the friend wears seat 1's blue and the
+friend's copy of the host seat 0's gold. `net_prologue_party_sora_reconnect.json` takes
+the Sora skip fixture to first control, drops the friend's runtime (`runtime_stop`) and
+joins a new one. The friend must declare Sora again and be re-admitted by one host-led load
+after the profiles agree, the host must not reload, and the friend's input must move the
+host's Sora clone again. `net_prologue_party_refusal.json` (and its skipped
 `_refusal_skip`) reruns the opening with the friend on `KH2COOP_PROFILE=0x5B` (Mickey)
 and asserts that both seats hold at evt95 with `unqualified-profile` and log
 `profile 0x5B refused: Mickey`, with one Roxas each, no clone or Sora stand-in, and

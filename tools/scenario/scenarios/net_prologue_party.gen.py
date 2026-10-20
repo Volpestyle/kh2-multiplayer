@@ -123,6 +123,26 @@ def advance_until(expr, rounds, tag, skip=False):
 
 released = ("log_count('[prologue] control released at=02/{room:02X} evt={evt}', 0) > 0 and "
             "log_count('[prologue] control released at=02/{room:02X} evt={evt}', 1) > 0")
+# VUH-1512: each seat's clone of its own body wears the owner seat's color (PrologueSeats.hpp SeatColors) in
+# the actor's model color word (+0x4D8: red, green, blue, alpha 0x80): the host's copy of the friend is blue,
+# the friend's copy of the host gold. A Sora friend's clones are different bodies and keep their colors.
+SEAT_COLOR_WORDS = {0: 0x805898B8, 1: 0x80C88868}
+
+
+def duplicate_colors(friend):
+    if friend != "0x5A":
+        return []
+    out = []
+    for i, owner in ((0, 1), (1, 0)):
+        out.append({"do": "save", "as": f"clone_color{i}",
+                    "expr": f"peek_at('0x%X' % (int({clone_addr(i)}, 16) + 0x4D8), 'u32', {i})"})
+    out.append({"do": "assert", "expr": " and ".join(
+        f"log_count('[prologue] duplicate body 0x5A', {i}) > 0 and int(str(saved['clone_color{i}']), 0) == {SEAT_COLOR_WORDS[owner]}"
+        for i, owner in ((0, 1), (1, 0))),
+        "message": "a seat's clone of its own Roxas does not wear the owner seat's color"})
+    return out
+
+
 def build(skip, friend="0x5A"):
     friend_boot = {"do": "boot", "newGame": True, "initTimeoutMs": 60000}
     if friend != "0x5A":
@@ -156,7 +176,7 @@ def build(skip, friend="0x5A"):
         {"do": "save", "as": "first_control_log0", "expr": lines("\\[(?:prologue|missing-party\\] born)", 0)},
         {"do": "save", "as": "first_control_log1", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 1)},
         {"do": "assert", "expr": bodies(friend), "message": "first control: a seat lacks the host's Roxas or the friend's chosen body"},
-        {"do": "clip", "instance": 1, "seconds": 4, "fps": 30, "name": "first_control_friend"},
+        {"do": "clip", "instance": 1, "seconds": 4, "fps": 30, "name": "first_control_friend"}] + duplicate_colors(friend) + [
         # Owner-only input, each seat filmed from the other.
         {"do": "clip", "instance": 1, "seconds": 8, "fps": 30, "name": "friend_view_host_moves", "background": True},
         {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_move.json", "seconds": 60, "name": "host_move", "allowStuck": True},
@@ -295,18 +315,18 @@ for name, skipped in (("net_prologue_party_refusal", False), ("net_prologue_part
 PC1_TAILSCALE, PAIR_PORT = "100.108.214.60", 27802
 
 
-def clone_pos(i):
+def clone_pos(i, body="P_EX110"):
     return (f"[(a['position']['x'], a['position']['y'], a['position']['z']) for a in actors({i}) "
-            f"if a['name'] == 'P_EX110' and int(a['address'], 16) != int({canon(i)}, 16)]")
+            f"if a['name'] == '{body}' and int(a['address'], 16) != int({canon(i)}, 16)]")
 
 
-def mark_clone(tag, i=0):
-    return [{"do": "save", "as": f"{tag}_cpos", "expr": f"{clone_pos(i)}[0]"}]
+def mark_clone(tag, i=0, body="P_EX110"):
+    return [{"do": "save", "as": f"{tag}_cpos", "expr": f"{clone_pos(i, body)}[0]"}]
 
 
-def clone_moved(tag, i=0):
+def clone_moved(tag, i=0, body="P_EX110"):
     # Owner moves are 300+ units (the Sandlot route about 300); an idle seat drifts at most ~70 (collision push).
-    return f"len({clone_pos(i)}) == 1 and dist({clone_pos(i)}[0], saved['{tag}_cpos']) > 150"
+    return f"len({clone_pos(i, body)}) == 1 and dist({clone_pos(i, body)}[0], saved['{tag}_cpos']) > 150"
 
 
 def own_hp(tag):
@@ -481,3 +501,56 @@ for role, steps, text in (("host", host_pair(), "PC1 host: relay on its Tailscal
     Path(__file__).with_name(f"net_prologue_party_pc2_{role}.json").write_text(json.dumps(
         {"name": f"net_prologue_party_pc2_{role}", "description": f"VUH-2464 two-PC acceptance. {text} Never saves.",
          "playerDefaults": True, "steps": steps}, indent=1), encoding="utf-8")
+
+
+# Reconnect (VUH-1512): the Sora friend's connection drops at first control (its runtime ends, the game stays
+# open, as with the launcher's Disconnect) and a new runtime joins. The friend must declare Sora again on the
+# new roster; its host-led re-admission load waits for the agreement and rebuilds it as Sora; the host keeps
+# its load and rebinds; and the friend's input must drive the host's Sora clone again.
+def reconnect():
+    base = build(True, friend="0x54")
+    cut = next(n for n, st in enumerate(base) if st.get("name") == "first_control_friend") + 1
+    count = "log_count('{text}', {i})"
+    def counts(tag, text):
+        return [{"do": "save", "as": f"{tag}{i}", "expr": count.format(text=text, i=i)} for i in (0, 1)]
+    def more(tag, text):
+        return " and ".join(f"{count.format(text=text, i=i)} > saved['{tag}{i}']" for i in (0, 1))
+    released95 = "[prologue] control released at=02/07 evt=95"
+    sora = "len(log_matches(r'seat accepted owner=1 .*profile=0x54 ', {i}))"
+    return base[:cut] + counts("gen_before", "[prologue] roster generation") +         counts("released_before", released95) + counts("loads_before", "[warp] load complete") + [
+        {"do": "save", "as": f"sora_before{i}", "expr": sora.format(i=i)} for i in (0, 1)] + [
+        {"do": "clip", "instance": 0, "seconds": 10, "fps": 30, "name": "drop_host", "background": True},
+        {"do": "wait", "ms": 2000},
+        {"do": "runtime_stop", "instance": 1},
+        {"do": "wait", "ms": 6000}, {"do": "clip_wait"}] + snap("dropped") + [
+        {"do": "save", "as": "dropped_log0", "expr": lines("\[prologue\]", 0, 8)},
+        {"do": "save", "as": "dropped_log1", "expr": lines("\[prologue\]", 1, 8)},
+        # The relay may still hold the dropped connection until its timeout.
+        {"do": "runtime", "instance": 1, "role": "friend1", "name": "runtime_1_rejoin", "timeoutMs": 90000},
+        {"do": "wait_until", "expr": more("released_before", released95), "timeoutMs": 60000, "pollMs": 500},
+        {"do": "wait", "ms": 2000}] + snap("rejoined") + census("rejoined") + [
+        {"do": "save", "as": "rejoined_log0", "expr": lines("\[prologue\]", 0, 16)},
+        {"do": "save", "as": "rejoined_log1", "expr": lines("\[prologue\]", 1, 16)},
+        {"do": "assert", "expr": bodies("0x54") + " and log_count('roster generation=', 1) > saved['gen_before1'] and " +
+                                 " and ".join(f"{sora.format(i=i)} > saved['sora_before{i}']" for i in (0, 1)),
+         "message": "after the reconnect a seat lacks the host's Roxas or the friend's Sora, or Sora was not declared again"},
+        # The host does not reload; the friend's re-admission is one host-led load into the host's room.
+        {"do": "assert", "expr": f"{count.format(text='[warp] load complete', i=0)} == saved['loads_before0'] and "
+                                 f"{count.format(text='[warp] load complete', i=1)} == saved['loads_before1'] + 1 and "
+                                 "log_count('client load into a prologue site proceeds: profiles agreed', 1) > 0",
+         "message": "the host reloaded, or the friend's re-admission was not one load after the profiles agreed"}] + mark_clone("rejoined", body="P_EX100") + [
+        {"do": "clip", "instance": 0, "seconds": 8, "fps": 30, "name": "rejoined_host_view_friend_moves", "background": True},
+        {"do": "pilot", "instance": 1, "route": "tools/rig/route_pilot/routes/prologue_move.json", "seconds": 60,
+         "name": "rejoined_friend_move", "allowStuck": True},
+        {"do": "clip_wait"},
+        {"do": "wait_until", "expr": clone_moved("rejoined", body="P_EX100"), "timeoutMs": 30000, "pollMs": 1000},
+        {"do": "clip", "instance": 1, "seconds": 4, "fps": 30, "name": "rejoined_friend"}]
+
+
+Path(__file__).with_name("net_prologue_party_sora_reconnect.json").write_text(json.dumps(
+    {"name": "net_prologue_party_sora_reconnect",
+     "description": "VUH-1512 reconnect on PC1: net_prologue_party_sora_skip to first control (Tram Common evt95), then "
+                    "the friend's runtime ends with its game left open and a new runtime joins. The friend must declare "
+                    "Sora again and be re-admitted by one load after the profiles agree; the host keeps its load; both "
+                    "seats bind and release, and the friend's input must move the host's Sora clone. Never saves.",
+     "playerDefaults": True, "steps": reconnect()}, indent=1), encoding="utf-8")

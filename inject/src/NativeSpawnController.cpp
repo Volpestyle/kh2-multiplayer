@@ -1872,6 +1872,7 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
     result=privatestatus::SpawnMissingParty(record,controller,g_originalWrapper,g_log,seatSite,cloneObject,&bound,&clone);
     if(site->prologue) {
         const auto nativeError=GetLastError();
+        if(bound)prologueparty::ColorDuplicate(clone,cloneObject,seatSite.localObject);
         prologueparty::NoteConstruction(site->location,bound,bound?"bound":"unbound",clone);
         SetLastError(nativeError);
     }

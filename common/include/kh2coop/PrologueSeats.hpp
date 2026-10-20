@@ -170,6 +170,28 @@ inline bool RemoteProfile(const Seats& s, std::uint16_t& profile, Hold& reason) 
     return false;
 }
 
+// VUH-1512: the other seat with a profile, for the agreed two-seat layout.
+inline bool RemoteSlot(const Seats& s, std::uint8_t& slot) {
+    if (Agreement(s) != Hold::None) return false;
+    for (std::size_t i = 0; i < 3; ++i)
+        if (i != s.localSlot && s.roster[i]) { slot = static_cast<std::uint8_t>(i); return true; }
+    return false;
+}
+
+// VUH-1512: a clone of this seat's own body (two Roxases, or two Soras) wears its owner seat's color.
+// The values are the actor's native model color (red, green, blue; 128 is the model's own color),
+// which the game multiplies by the room light. A clone of a different body keeps its own colors.
+using SeatColor = std::array<std::uint8_t, 3>;
+inline constexpr std::array<SeatColor, 3> SeatColors {{
+    {0xB8, 0x98, 0x58},   // seat 0, the host: gold
+    {0x68, 0x88, 0xC8},   // seat 1: blue
+    {0x70, 0xB8, 0x70}}}; // seat 2: green
+inline bool DuplicateColor(std::uint16_t localObject, std::uint16_t cloneObject, std::uint8_t ownerSlot, SeatColor& color) {
+    if (!localObject || localObject != cloneObject || ownerSlot >= SeatColors.size()) return false;
+    color = SeatColors[ownerSlot];
+    return true;
+}
+
 // Control at `here` (a qualified prologue field) is released only when the
 // profiles are agreed and acknowledged, this seat bound both actors here, and
 // every other seat reported the same binding at the same location.

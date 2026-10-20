@@ -402,9 +402,10 @@ and cannot delay the core route.
    A Roxas host and Sora friend build both bodies natively on both seats, with
    no second load, through the first field, both reloads and the Sandlot door.
    A refused profile holds both seats and shows its reason on screen
-   (`docs/PARTY_SETUP.md`, "Roxas host, Sora friend"). Open: the opening
-   scenes' friend representation (VUH-2359), reconnect restore, and the
-   two-PC clip, which waits for bld.
+   (`docs/PARTY_SETUP.md`, "Roxas host, Sora friend"). A reconnect restores
+   the friend's profile (one host-led load after the profiles agree), and a
+   duplicate body wears its owner seat's color. Open: the opening scenes'
+   friend representation (VUH-2359) and the two-PC clip, which waits for bld.
 4. **VUH-1514 — early party-member profiles.** After the two native-player
    examples, prove Donald's input-triggered hit, then Goofy's. Each must appear
    as the selected friend in the opening scene, with its own controls, camera,

@@ -855,6 +855,35 @@ Evidence: skipped run `20261020-013141` and unskipped run `20261020-020857`
 reloads and the Sandlot door, both seats moving and taking damage), refusal run
 `20261020-015253` (Mickey).
 
+**Reconnect (VUH-1512).** A friend that drops (its runtime ends; its game stays
+open) and joins again declares its profile again on the new roster from the
+same `KH2COOP_PROFILE`, so its choice comes back without a relaunch. The
+session re-admits it with one host-led load into the host's room. That load
+used to start before the new roster's profiles agreed, so it built story
+Roxas and no clone, and the friend held `local-unbound` for good. A client's
+host-led load into a checked prologue site now waits until the seats'
+agreement is complete on that world-session generation
+(`prologueparty::ProfilesSettled`, logged `[warp] client load into a prologue
+site waits ...`). The host keeps its load and rebinds its clone. Run
+`20261020-032537`: the friend came back as Sora, both seats released, and the
+friend's input moved the host's Sora clone. The returning friend enters at the
+room's entrance, not where it left. While the friend is away the host holds
+with reason `solo`; it has no bound for a friend that never returns.
+
+**Duplicate colors (VUH-1512).** A clone of this seat's own body (two Roxases,
+or two Soras) wears its owner seat's color: seat 0 (the host) gold, seat 1
+blue, seat 2 green (`prologue::SeatColors`). The color is the actor's native
+model color, three bytes at `+0x4D8` (red, green, blue; 128 is the model's own
+color, alpha `+0x4DB` untouched). The render setup `FUN_1403CC3D0` multiplies
+them by the room light (`+0xA98`) into the drawn color `+0x8B0` every frame,
+and nothing else rewrote them in the probe (`20261020-033155`). The DLL writes
+the three bytes once after a bound construction, on the clone only. A clone of
+a different body (a Sora friend's) keeps its own colors. Run `20261020-034007`
+(Roxas + Roxas, skipped fixture): both seats logged the color at evt95, evt97,
+evt99 and the Sandlot, and read back `0x80C88868` (blue) on the host's clone
+and `0x805898B8` (gold) on the friend's. Under Tram Common's warm light the
+blue is subtler than the gold.
+
 **Events.** A host event tears down the field actors, the clone included, and
 the friend holds with reason `remote-unbound` until the post-event reload
 rebuilds both seats. While the prologue scope holds (TT, native member 0 is

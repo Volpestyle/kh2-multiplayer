@@ -19,6 +19,7 @@
 #include "Warp.hpp"
 #include "EnemySync.hpp"
 #include "ProgressSync.hpp"
+#include "PrologueParty.hpp"
 
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/Protocol.hpp"
@@ -102,6 +103,7 @@ void RefreshWaitingAtExit();
 RoomTransition g_hostTarget {};
 bool g_hostQueued = false;
 bool g_hostIssued = false;
+bool g_loggedSettling = false;  // VUH-1512
 std::uint32_t g_hostIssueLoad = 0;
 std::uint32_t g_hostGeneration = 0;
 HANDLE g_mapping = nullptr;
@@ -316,8 +318,8 @@ bool BlockedExitMatchesHost() {
 // announced room is the prologue's first field, which no client exit ever names. Only when the
 // queued target is a checked prologue site may it issue from the client's own blocked exit at this
 // load, as the matching-exit case does. A free client still waits for the safe field gate.
-bool BlockedExitToPrologueSite() {
-    if (!g_blockedExit || g_blockedExitLoad != g_loadSerial || g_hostTarget.door > 0xFF) return false;
+bool HostTargetIsPrologueSite() {
+    if (g_hostTarget.door > 0xFF) return false;
     const auto lo = [](std::uint16_t v) { return static_cast<std::uint8_t>(v & 0xFF); };
     const auto hi = [](std::uint16_t v) { return static_cast<std::uint8_t>(v >> 8); };
     const std::array<std::uint8_t, 10> now {static_cast<std::uint8_t>(g_hostTarget.worldId), static_cast<std::uint8_t>(g_hostTarget.roomId),
@@ -326,6 +328,9 @@ bool BlockedExitToPrologueSite() {
     const auto* site = routespawn::MissingPartySiteAt(now);
     return site && site->prologue;
 }
+bool BlockedExitToPrologueSite() {
+    return g_blockedExit && g_blockedExitLoad == g_loadSerial && HostTargetIsPrologueSite();
+}
 
 void IssueHostTransition() {
     if (!g_hostQueued || !g_hostGeneration ||
@@ -333,6 +338,13 @@ void IssueHostTransition() {
     const bool atNativeExit = BlockedExitMatchesHost() || BlockedExitToPrologueSite();
     const bool safe = SafeToWarp();  // always: it also refreshes the channel's diagnostics
     if (!atNativeExit && !safe) return;
+    // VUH-1512: a reconnect re-admits the client into the host's prologue site before the new roster's
+    // profiles agree; a load issued then builds story Roxas and no clone. Wait for the agreement.
+    const bool settling = HostTargetIsPrologueSite() && !prologueparty::ProfilesSettled(g_hostGeneration);
+    if (settling != g_loggedSettling && g_log)
+        g_log("[warp] client load into a prologue site %s", settling ? "waits for the seats' profile agreement" : "proceeds: profiles agreed");
+    g_loggedSettling = settling;
+    if (settling) return;
     // Room initialization reads programs and chest flags from SAVE. Wait for
     // the complete host snapshot and apply it before starting the native load.
     if (!progresssync::ApplyAtRoomBoundary(g_hostGeneration, atNativeExit)) return;

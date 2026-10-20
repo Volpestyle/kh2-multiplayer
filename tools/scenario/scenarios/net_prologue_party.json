@@ -3034,6 +3034,21 @@
    "name": "first_control_friend"
   },
   {
+   "do": "save",
+   "as": "clone_color0",
+   "expr": "peek_at('0x%X' % (int([a['address'] for a in actors(0) if a['name'] == 'P_EX110' and int(a['address'], 16) != int(peek('0x2A105D0','u64',0), 16)][0], 16) + 0x4D8), 'u32', 0)"
+  },
+  {
+   "do": "save",
+   "as": "clone_color1",
+   "expr": "peek_at('0x%X' % (int([a['address'] for a in actors(1) if a['name'] == 'P_EX110' and int(a['address'], 16) != int(peek('0x2A105D0','u64',1), 16)][0], 16) + 0x4D8), 'u32', 1)"
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('[prologue] duplicate body 0x5A', 0) > 0 and int(str(saved['clone_color0']), 0) == 2160625768 and log_count('[prologue] duplicate body 0x5A', 1) > 0 and int(str(saved['clone_color1']), 0) == 2153289912",
+   "message": "a seat's clone of its own Roxas does not wear the owner seat's color"
+  },
+  {
    "do": "clip",
    "instance": 1,
    "seconds": 8,

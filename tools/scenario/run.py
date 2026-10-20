@@ -284,6 +284,11 @@ class Context:
             sample = kh2ctl("peek", "--rva", f"{key}:{kind}", pid=self.inst(index).pid)["samples"][0]
             return next(v for k, v in sample.items() if k != "t")
 
+        def peek_at(address: int | str, kind: str = "u32", index: int = 0):
+            """An absolute address inside the module image, such as an actor field (VUH-1512)."""
+            base = int(kh2ctl("peek", "--rva", "0x0:u8", pid=self.inst(index).pid)["moduleBase"], 16)
+            return peek((int(address, 16) if isinstance(address, str) else address) - base, kind, index)
+
         def pos(name: str = "P_EX100", index: int = 0):
             p = self.actor(name, index)["position"]
             return (p["x"], p["y"], p["z"])
@@ -360,7 +365,7 @@ class Context:
                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             return json.loads(out.stdout.strip().splitlines()[-1])
 
-        return {"peek": peek, "pos": pos, "room": room, "enemies": enemies, "enemy_hps": enemy_hps, "actor": self.actor,
+        return {"peek": peek, "peek_at": peek_at, "pos": pos, "room": room, "enemies": enemies, "enemy_hps": enemy_hps, "actor": self.actor,
                 "actors": self.actors, "log_count": log_count, "dist": dist, "saved": self.saved,
                 "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
@@ -1459,7 +1464,8 @@ def step_runtime(ctx: Context, step: dict) -> dict:
     cmd += ["--desync-dir", str((ctx.run_dir / "desync-local" / f"peer_{inst.index}").resolve())]
     if inst.inject_log is not None:
         cmd += ["--inject-log", str(inst.inject_log)]
-    name = f"runtime_{inst.index}"
+    # A reconnect after runtime_stop names its own process and log (VUH-1512).
+    name = step.get("name", f"runtime_{inst.index}")
     # A second writer would also truncate the original identity/recovery log.
     if any(owner == name for owner, _, _ in ctx.processes) or (ctx.run_dir / f"{name}.log").exists():
         raise StepFailed(f"runtime {inst.index} already has an owned process/log; duplicate launch refused")
@@ -1484,6 +1490,21 @@ def step_runtime(ctx: Context, step: dict) -> dict:
 
     wait_for(ctx, ready, f"runtime {inst.index}: {expect!r}", step.get("timeoutMs", 15000) / 1000, 0.5)
     return {"pid": proc.pid, "role": step["role"], "link": link}
+
+
+def step_runtime_stop(ctx: Context, step: dict) -> dict:
+    """Drop one seat's connection (VUH-1512): terminate that instance's owned runtime and leave its game
+    running, as a lost link or the launcher's Disconnect fallback does. A later `runtime` step with its own
+    `name` reconnects the seat."""
+    inst = ctx.inst(step.get("instance", 1))
+    name = step.get("name", f"runtime_{inst.index}")
+    live = [proc for owner, proc, _ in ctx.processes if owner == name and proc.poll() is None]
+    if len(live) != 1:
+        raise StepFailed(f"runtime_stop: expected one live owned {name}, found {len(live)}")
+    proc = live[0]
+    proc.terminate()  # the retained Popen handle: only our own child
+    proc.wait(timeout=5)
+    return {"pid": proc.pid, "exitCode": proc.returncode}
 
 
 ARRIVAL_PATTERN = (r"\[enemysync\] (?:host|client) arrived epoch=(?P<epoch>\d+) "
@@ -4852,7 +4873,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,
-         "relay": step_relay, "runtime": step_runtime, "record": step_record,
+         "relay": step_relay, "runtime": step_runtime, "runtime_stop": step_runtime_stop, "record": step_record,
          "record_stop": step_record_stop, "wander": step_wander, "hit_all": step_hit_all,
          "clear_host_enemies": step_clear_host_enemies,
          "kh2ctl": step_kh2ctl, "transition_check": step_transition_check,

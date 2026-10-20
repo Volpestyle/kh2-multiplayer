@@ -52,6 +52,8 @@ std::atomic<std::uint64_t> g_bodyAtLow {~0ull};
 std::atomic<std::uint16_t> g_bodyAtHigh {0xFFFF};
 std::uint16_t g_refusalLogged = 0;
 std::atomic<std::uint16_t> g_refused {0};
+// VUH-1512: the generation whose profile agreement is complete (or refused), published by Tick.
+std::atomic<std::uint32_t> g_settledGeneration {0};
 // VUH-1512: the area loader's object registration (FUN_1403E0460(object, priority, kind)) and its file
 // queue (FUN_1403E0660(object, priority, kind, childKind)), build 9002b2de. The loader registers the player
 // placeholder 566 from member 0 and the friend seats 567/568 through the party row, which is 00/12/12/12
@@ -186,6 +188,9 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
                   generation, localSlot, static_cast<unsigned long long>(roster[0]), static_cast<unsigned long long>(roster[1]),
                   static_cast<unsigned long long>(roster[2]), g_localProfile);
     }
+    const Hold agreement = prologue::Agreement(g_seats);
+    const bool settled = agreement != Hold::MissingProfile && agreement != Hold::NotAcknowledged;
+    g_settledGeneration.store(settled ? generation : 0, std::memory_order_release);
     std::array<std::uint8_t, 10> now {};
     const bool nowRead = ReadNow(now);
     // The hold for this frame (published for the input collector).
@@ -334,6 +339,21 @@ void ResolveLocal(std::uintptr_t resolvedMembers) {
                      now[0], now[1], LocationOf(now).evt, body, key);
 }
 
+void ColorDuplicate(std::uintptr_t clone, std::uint16_t cloneObject, std::uint16_t localObject) {
+    constexpr std::uintptr_t MODEL_COLOR = 0x4D8;
+    std::uint8_t owner = 0;
+    prologue::SeatColor color {};
+    if (!g_requested || !clone || !prologue::RemoteSlot(g_seats, owner) ||
+        !prologue::DuplicateColor(localObject, cloneObject, owner, color)) return;
+    bool written = false;
+    __try {
+        std::memcpy(reinterpret_cast<void*>(clone + MODEL_COLOR), color.data(), color.size());
+        written = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    if (g_log) g_log("[prologue] duplicate body 0x%X: clone=%llX takes seat %u's color %02X%02X%02X%s", cloneObject,
+                     static_cast<unsigned long long>(clone), owner, color[0], color[1], color[2], written ? "" : " (FAULTED)");
+}
+
 void NoteConstruction(const std::array<std::uint8_t, 10>& location, bool bound, const char* reason, std::uintptr_t clone) {
     g_construction = {location, warp::LoadSerial(), clone, bound, reason};
     if (g_log) g_log("[prologue] construction at=%02X/%02X evt=%u load=%u bound=%u clone=%llX reason=%s",
@@ -361,6 +381,9 @@ bool HoldInput(void* inputStruct) {
 std::uint8_t PublishedHold() { return g_hold.load(std::memory_order_acquire); }
 UnpinnedNotice Notice() { return static_cast<UnpinnedNotice>(g_notice.load(std::memory_order_acquire)); }
 std::uint16_t RefusedProfile() { return g_refused.load(std::memory_order_acquire); }
+bool ProfilesSettled(std::uint32_t generation) {
+    return !g_requested || (generation && g_settledGeneration.load(std::memory_order_acquire) == generation);
+}
 
 bool PrologueScope() {
     std::uint8_t world = 0xFF; std::uint16_t member0 = 0;

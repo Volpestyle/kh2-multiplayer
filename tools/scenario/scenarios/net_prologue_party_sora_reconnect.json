@@ -1,0 +1,4091 @@
+{
+ "name": "net_prologue_party_sora_reconnect",
+ "description": "VUH-1512 reconnect on PC1: net_prologue_party_sora_skip to first control (Tram Common evt95), then the friend's runtime ends with its game left open and a new runtime joins. The friend must declare Sora again and be re-admitted by one load after the profiles agree; the host keeps its load; both seats bind and release, and the friend's input must move the host's Sora clone. Never saves.",
+ "playerDefaults": true,
+ "steps": [
+  {
+   "do": "boot",
+   "newGame": true,
+   "initTimeoutMs": 60000
+  },
+  {
+   "do": "boot",
+   "newGame": true,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_PROFILE": "0x54"
+   }
+  },
+  {
+   "do": "relay",
+   "port": 27802,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "hang_check",
+   "instance": 0,
+   "on": false
+  },
+  {
+   "do": "hang_check",
+   "instance": 1,
+   "on": false
+  },
+  {
+   "do": "wait",
+   "ms": 8000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng1_game_mode_0"
+  },
+  {
+   "do": "save",
+   "as": "ng1_game_mode_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng1_game_mode_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "ng1_game_mode_1"
+  },
+  {
+   "do": "save",
+   "as": "ng1_game_mode_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ng1_game_mode_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "press",
+   "button": "cross",
+   "ms": 150,
+   "instance": 0
+  },
+  {
+   "do": "press",
+   "button": "cross",
+   "ms": 150,
+   "instance": 1
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng2_vibration_0"
+  },
+  {
+   "do": "save",
+   "as": "ng2_vibration_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng2_vibration_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "ng2_vibration_1"
+  },
+  {
+   "do": "save",
+   "as": "ng2_vibration_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ng2_vibration_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "press",
+   "button": "cross",
+   "ms": 150,
+   "instance": 0
+  },
+  {
+   "do": "press",
+   "button": "cross",
+   "ms": 150,
+   "instance": 1
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng3_confirm_0"
+  },
+  {
+   "do": "save",
+   "as": "ng3_confirm_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng3_confirm_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "ng3_confirm_1"
+  },
+  {
+   "do": "save",
+   "as": "ng3_confirm_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ng3_confirm_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "press",
+   "button": "cross",
+   "ms": 150,
+   "instance": 0
+  },
+  {
+   "do": "press",
+   "button": "cross",
+   "ms": 150,
+   "instance": 1
+  },
+  {
+   "do": "wait",
+   "ms": 15000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ng4_opening_0"
+  },
+  {
+   "do": "save",
+   "as": "ng4_opening_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ng4_opening_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "ng4_opening_1"
+  },
+  {
+   "do": "save",
+   "as": "ng4_opening_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ng4_opening_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[prologue] seat accepted', 0) >= 2 and log_count('[prologue] seat accepted', 1) >= 2",
+   "timeoutMs": 120000,
+   "pollMs": 2000
+  },
+  {
+   "do": "save",
+   "as": "seats_opening0",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[prologue\\] seat accepted[^\\n]*)', 0)][-6:]"
+  },
+  {
+   "do": "save",
+   "as": "seats_opening1",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[prologue\\] seat accepted[^\\n]*)', 1)][-6:]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "save",
+   "as": "ev00_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev00_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "save",
+   "as": "ev00_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ev00_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "save",
+   "as": "ev01_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev01_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "save",
+   "as": "ev01_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ev01_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "save",
+   "as": "ev02_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev02_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "save",
+   "as": "ev02_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ev02_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "ev03_0"
+  },
+  {
+   "do": "save",
+   "as": "ev03_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev03_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "ev03_1"
+  },
+  {
+   "do": "save",
+   "as": "ev03_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ev03_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "save",
+   "as": "ev04_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev04_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "save",
+   "as": "ev04_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ev04_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "save",
+   "as": "ev05_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "ev05_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "save",
+   "as": "ev05_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "ev05_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and peek('0xB65210','i32',0) != 0 and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',0) != 255 and peek('0xB65210','i32',0) != 0) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0) and peek('0x7435D0','u8',0) == 255) and not (location(0) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'start', '--duration-ms', '100'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and peek('0xB65210','i32',1) != 0 and not (location(1) == [2, 7, 0, 95, 95, 95]) and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'down', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '100'] if (peek('0x7435D0','u8',1) != 255 and peek('0xB65210','i32',1) != 0 and (log_count('client native exit blocked', 1) == 0 or peek('0x2A11478','u32',1) != 0)) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 300
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "argsExpr": "['player-press', '--button', 'cross', '--duration-ms', '150'] if ((not (peek('0x9BA8D0','u8',1) != 0 and peek('0x7435D0','u8',1) == 255 and peek('0xB65210','i32',1) == 0 and peek('0x2A11478','u32',1) == 0 and peek('0x2A1147C','u32',1) == 0) and peek('0x7435D0','u8',1) == 255) and not (location(1) == [2, 7, 0, 95, 95, 95])) else ['peek', '--rva', '0x9BA8D0:u8']"
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0) == [2, 7, 0, 95, 95, 95] and location(1) == [2, 7, 0, 95, 95, 95]",
+   "timeoutMs": 240000,
+   "pollMs": 1000
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[prologue] control released at=02/07 evt=95', 0) > 0 and log_count('[prologue] control released at=02/07 evt=95', 1) > 0",
+   "timeoutMs": 180000,
+   "pollMs": 1000
+  },
+  {
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "first_control_0"
+  },
+  {
+   "do": "save",
+   "as": "first_control_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "first_control_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "first_control_1"
+  },
+  {
+   "do": "save",
+   "as": "first_control_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "first_control_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "save",
+   "as": "first_control_roxas0",
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
+  },
+  {
+   "do": "save",
+   "as": "first_control_canonical0",
+   "expr": "peek('0x2A105D0','u64',0)"
+  },
+  {
+   "do": "save",
+   "as": "first_control_roxas1",
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
+  },
+  {
+   "do": "save",
+   "as": "first_control_canonical1",
+   "expr": "peek('0x2A105D0','u64',1)"
+  },
+  {
+   "do": "save",
+   "as": "first_control_actors0",
+   "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(0)]"
+  },
+  {
+   "do": "save",
+   "as": "first_control_actors1",
+   "expr": "[(a['name'], a.get('objectId'), a.get('hp')) for a in actors(1)]"
+  },
+  {
+   "do": "save",
+   "as": "first_control_log0",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[(?:prologue|missing-party\\] born)[^\\n]*)', 0)][-40:]"
+  },
+  {
+   "do": "save",
+   "as": "first_control_log1",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[(?:prologue|missing-party\\] born|warp\\] client)[^\\n]*)', 1)][-40:]"
+  },
+  {
+   "do": "assert",
+   "expr": "sorted(a['name'] for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX100', 'P_EX110'] and sorted(a['name'] for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX100', 'P_EX110']",
+   "message": "first control: a seat lacks the host's Roxas or the friend's chosen body"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 4,
+   "fps": 30,
+   "name": "first_control_friend"
+  },
+  {
+   "do": "save",
+   "as": "gen_before0",
+   "expr": "log_count('[prologue] roster generation', 0)"
+  },
+  {
+   "do": "save",
+   "as": "gen_before1",
+   "expr": "log_count('[prologue] roster generation', 1)"
+  },
+  {
+   "do": "save",
+   "as": "released_before0",
+   "expr": "log_count('[prologue] control released at=02/07 evt=95', 0)"
+  },
+  {
+   "do": "save",
+   "as": "released_before1",
+   "expr": "log_count('[prologue] control released at=02/07 evt=95', 1)"
+  },
+  {
+   "do": "save",
+   "as": "loads_before0",
+   "expr": "log_count('[warp] load complete', 0)"
+  },
+  {
+   "do": "save",
+   "as": "loads_before1",
+   "expr": "log_count('[warp] load complete', 1)"
+  },
+  {
+   "do": "save",
+   "as": "sora_before0",
+   "expr": "len(log_matches(r'seat accepted owner=1 .*profile=0x54 ', 0))"
+  },
+  {
+   "do": "save",
+   "as": "sora_before1",
+   "expr": "len(log_matches(r'seat accepted owner=1 .*profile=0x54 ', 1))"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 10,
+   "fps": 30,
+   "name": "drop_host",
+   "background": true
+  },
+  {
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "do": "runtime_stop",
+   "instance": 1
+  },
+  {
+   "do": "wait",
+   "ms": 6000
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "dropped_0"
+  },
+  {
+   "do": "save",
+   "as": "dropped_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "dropped_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "dropped_1"
+  },
+  {
+   "do": "save",
+   "as": "dropped_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "dropped_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "save",
+   "as": "dropped_log0",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[prologue\\][^\\n]*)', 0)][-8:]"
+  },
+  {
+   "do": "save",
+   "as": "dropped_log1",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[prologue\\][^\\n]*)', 1)][-8:]"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1",
+   "name": "runtime_1_rejoin",
+   "timeoutMs": 90000
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[prologue] control released at=02/07 evt=95', 0) > saved['released_before0'] and log_count('[prologue] control released at=02/07 evt=95', 1) > saved['released_before1']",
+   "timeoutMs": 60000,
+   "pollMs": 500
+  },
+  {
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "rejoined_0"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_loc0",
+   "expr": "location(0)"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_gates0",
+   "expr": "[peek('0x9BA8D0','u8',0), peek('0x7435D0','u8',0), peek('0xB65210','i32',0), peek('0x2A11478','u32',0), peek('0x2A1147C','u32',0)]"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "rejoined_1"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_loc1",
+   "expr": "location(1)"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_gates1",
+   "expr": "[peek('0x9BA8D0','u8',1), peek('0x7435D0','u8',1), peek('0xB65210','i32',1), peek('0x2A11478','u32',1), peek('0x2A1147C','u32',1)]"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_roxas0",
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')]"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_canonical0",
+   "expr": "peek('0x2A105D0','u64',0)"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_roxas1",
+   "expr": "[(a['address'], a.get('hp'), a['position']) for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')]"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_canonical1",
+   "expr": "peek('0x2A105D0','u64',1)"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_log0",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[prologue\\][^\\n]*)', 0)][-16:]"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_log1",
+   "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[prologue\\][^\\n]*)', 1)][-16:]"
+  },
+  {
+   "do": "assert",
+   "expr": "sorted(a['name'] for a in actors(0) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX100', 'P_EX110'] and sorted(a['name'] for a in actors(1) if a['name'] in ('P_EX110', 'P_EX100')) == ['P_EX100', 'P_EX110'] and log_count('roster generation=', 1) > saved['gen_before1'] and len(log_matches(r'seat accepted owner=1 .*profile=0x54 ', 0)) > saved['sora_before0'] and len(log_matches(r'seat accepted owner=1 .*profile=0x54 ', 1)) > saved['sora_before1']",
+   "message": "after the reconnect a seat lacks the host's Roxas or the friend's Sora, or Sora was not declared again"
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('[warp] load complete', 0) == saved['loads_before0'] and log_count('[warp] load complete', 1) == saved['loads_before1'] + 1 and log_count('client load into a prologue site proceeds: profiles agreed', 1) > 0",
+   "message": "the host reloaded, or the friend's re-admission was not one load after the profiles agreed"
+  },
+  {
+   "do": "save",
+   "as": "rejoined_cpos",
+   "expr": "[(a['position']['x'], a['position']['y'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX100' and int(a['address'], 16) != int(peek('0x2A105D0','u64',0), 16)][0]"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 8,
+   "fps": 30,
+   "name": "rejoined_host_view_friend_moves",
+   "background": true
+  },
+  {
+   "do": "pilot",
+   "instance": 1,
+   "route": "tools/rig/route_pilot/routes/prologue_move.json",
+   "seconds": 60,
+   "name": "rejoined_friend_move",
+   "allowStuck": true
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len([(a['position']['x'], a['position']['y'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX100' and int(a['address'], 16) != int(peek('0x2A105D0','u64',0), 16)]) == 1 and dist([(a['position']['x'], a['position']['y'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX100' and int(a['address'], 16) != int(peek('0x2A105D0','u64',0), 16)][0], saved['rejoined_cpos']) > 150",
+   "timeoutMs": 30000,
+   "pollMs": 1000
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 4,
+   "fps": 30,
+   "name": "rejoined_friend"
+  }
+ ]
+}

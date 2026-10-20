@@ -121,6 +121,19 @@ void policy() {
               mine == rs[local] && theirs == rs[1 - local],
               local ? "the Sora friend builds itself as Sora and the host as Roxas" : "the Roxas host builds the friend's clone as Sora");
     }
+    {
+        prologue::Seats p;
+        prologue::Rebase(p, 9, two, 1);
+        prologue::Accept(p, seat(two, 1, 0x5A, {0x5A, 0x5A, 0}, SeatPhase::Acknowledged, 0));
+        prologue::Accept(p, seat(two, 1, 0x5A, {0x5A, 0x5A, 0}, SeatPhase::Acknowledged, 1));
+        std::uint8_t owner = 9; prologue::SeatColor c {};
+        check(prologue::RemoteSlot(p, owner) && owner == 0 && prologue::DuplicateColor(0x5A, 0x5A, owner, c) &&
+              c == prologue::SeatColors[0], "a friend's clone of the host's Roxas wears the host's seat color");
+        check(!prologue::DuplicateColor(0x54, 0x5A, 0, c) && !prologue::DuplicateColor(0x5A, 0x5A, 3, c),
+              "a clone of a different body keeps its own colors");
+        check(prologue::SeatColors[0] != prologue::SeatColors[1] && prologue::SeatColors[1] != prologue::SeatColors[2],
+              "every seat's color is distinct");
+    }
     prologue::Seats q;
     prologue::Rebase(q, 8, two, 1);
     std::uint16_t none = 1; Hold held = Hold::None;

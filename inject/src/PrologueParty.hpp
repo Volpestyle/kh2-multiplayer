@@ -38,6 +38,10 @@ bool LocalBody(std::uint16_t& object, std::uint16_t& statusKey);
 // whose agreed profile is not the story Roxas gets that body as resolved member 0, so the authored player
 // record builds it. Scripted events and every other load keep the native member.
 void ResolveLocal(std::uintptr_t resolvedMembers);
+// VUH-1512, missing-party ingress after a bound construction (game thread): a clone of this seat's own body
+// takes its owner seat's color through the actor's native model color bytes (+0x4D8..0x4DA, read each
+// frame by the render setup FUN_1403CC3D0; alpha +0x4DB untouched). Nothing else is written.
+void ColorDuplicate(std::uintptr_t clone, std::uint16_t cloneObject, std::uint16_t localObject);
 // The construction outcome at `location` for this load: bound clone/local, or a refusal reason.
 void NoteConstruction(const std::array<std::uint8_t, 10>& location, bool bound, const char* reason,
                       std::uintptr_t clone = 0);
@@ -57,5 +61,9 @@ UnpinnedNotice Notice();
 // VUH-1512, any thread: the declared profile this seat's prologue hold refuses (0 when none), for the
 // on-screen note while both seats hold at a checked site.
 std::uint16_t RefusedProfile();
+// VUH-1512, any thread: false until the seats' profiles are declared and acknowledged on this world-session
+// generation's roster (a reconnect starts a new one). A client's host-led load into a prologue site waits
+// for it, so that load builds this seat's own body and the clone from the agreed pair.
+bool ProfilesSettled(std::uint32_t generation);
 
 } // namespace kh2coop::inject::prologueparty
