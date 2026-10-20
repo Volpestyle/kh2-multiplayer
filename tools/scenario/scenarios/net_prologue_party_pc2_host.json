@@ -2035,6 +2035,13 @@
    "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[(?:prologue|missing-party\\] born)[^\\n]*)', 0)][-40:]"
   },
   {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 8,
+   "fps": 30,
+   "name": "take_join_host"
+  },
+  {
    "do": "wait",
    "ms": 6000
   },
@@ -2109,6 +2116,18 @@
    "as": "save_before_damage"
   },
   {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 10,
+   "fps": 30,
+   "name": "take_damage_host",
+   "background": true
+  },
+  {
+   "do": "wait",
+   "ms": 2000
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['hit', 'damage', '--victim', [a['address'] for a in actors(0) if a['name'] == 'P_EX110' and int(a['address'], 16) != int(peek('0x2A105D0','u64',0), 16)][0], '--amount', '1']"
@@ -2116,6 +2135,9 @@
   {
    "do": "wait",
    "ms": 1500
+  },
+  {
+   "do": "clip_wait"
   },
   {
    "do": "save",
@@ -3712,6 +3734,13 @@
    "do": "assert",
    "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 2 and log_count('[prologue] unpinned field', 0) == 0",
    "message": "evt97: this seat lacks the other Roxas, or a prologue field played unheld"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 8,
+   "fps": 30,
+   "name": "take_reload_host"
   },
   {
    "do": "pilot",
@@ -5317,6 +5346,13 @@
    "do": "assert",
    "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 2 and log_count('[prologue] unpinned field', 0) == 0",
    "message": "evt99: this seat lacks the other Roxas, or a prologue field played unheld"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 8,
+   "fps": 30,
+   "name": "take_crown_host"
   },
   {
    "do": "pilot",

@@ -331,6 +331,11 @@ def stop(loc, room, evt):
             {"do": "wait", "ms": 2000}]
 
 
+def take(name, seconds=8):
+    """One short take per experiment (James, 2026-10-20): instance 0 is this runner's own seat."""
+    return {"do": "clip", "instance": 0, "seconds": seconds, "fps": 30, "name": name}
+
+
 def two_roxases(tag):
     return {"do": "assert", "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 2 and "
                                     "log_count('[prologue] unpinned field', 0) == 0",
@@ -345,6 +350,7 @@ def host_pair():
     steps += own_advance("location(0) == [2, 7, 0, 95, 95, 95]", 50, "ev")
     steps += stop([2, 7, 0, 95, 95, 95], 7, 95) + one("first_control") + [two_roxases("first control")] + mark_clone("first_control") + [
         {"do": "save", "as": "first_control_log", "expr": lines("\\[(?:prologue|missing-party\\] born)", 0)},
+        take("take_join_host"),
         # The friend films from its release; give its clip a head start, then move.
         {"do": "wait", "ms": 6000},
         {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_move.json", "seconds": 60, "name": "host_move", "allowStuck": True},
@@ -354,14 +360,16 @@ def host_pair():
         {"do": "clip_wait"}, {"do": "wait", "ms": 1000}] + one("after_friend_move", capture=False) + [
         # One synthetic native hit on this seat's copy of the friend; the friend's runner checks its own HP and SAVE.
         {"do": "progress_snapshot", "instances": [0], "as": "save_before_damage"},
+        dict(take("take_damage_host", 10), background=True),
+        {"do": "wait", "ms": 2000},
         {"do": "kh2ctl", "instance": 0, "argsExpr": f"['hit', 'damage', '--victim', {clone_addr(0)}, '--amount', '1']"},
-        {"do": "wait", "ms": 1500}] + one("after_clone_damage", capture=False) + [
+        {"do": "wait", "ms": 1500}, {"do": "clip_wait"}] + one("after_clone_damage", capture=False) + [
         {"do": "progress_snapshot", "instances": [0], "as": "save_after_damage", "compare": "save_before_damage"},
         # Leave the friend time to read its own HP before the route moves on.
         {"do": "wait", "ms": 20000},
         {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_armor_shop.json", "seconds": 60, "name": "host_armor_shop", "allowStuck": True}]
     steps += own_advance("location(0) == [2, 7, 0, 97, 97, 97]", 40, "rl")
-    steps += stop([2, 7, 0, 97, 97, 97], 7, 97) + one("reload97") + [two_roxases("evt97"),
+    steps += stop([2, 7, 0, 97, 97, 97], 7, 97) + one("reload97") + [two_roxases("evt97"), take("take_reload_host"),
         {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_accessory_shop.json", "seconds": 60, "name": "host_accessory_shop", "allowStuck": True}]
     for _ in range(4):
         steps += [{"do": "kh2ctl", "instance": 0, "argsExpr":
@@ -369,7 +377,7 @@ def host_pair():
                    f"and {field(0)} and peek('0x2A11162','u16',0) == 31) else ['peek', '--rva', '0x9BA8D0:u8']"},
                   {"do": "wait", "ms": 2000}]
     steps += own_advance("location(0) == [2, 7, 0, 99, 99, 99]", 40, "as")
-    steps += stop([2, 7, 0, 99, 99, 99], 7, 99) + one("reload99") + [two_roxases("evt99"),
+    steps += stop([2, 7, 0, 99, 99, 99], 7, 99) + one("reload99") + [two_roxases("evt99"), take("take_crown_host"),
         {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_cat.json", "seconds": 90, "name": "host_cat", "allowStuck": True}]
     steps += own_advance("location(0) == [2, 4, 0, 76, 76, 76]", 60, "ct")
     steps += stop([2, 4, 0, 76, 76, 76], 4, 76) + one("sandlot") + [two_roxases("Sandlot")] + mark_clone("sandlot") + [
@@ -394,6 +402,7 @@ def friend_pair():
     steps += own_advance(blocked, 50, "ev", guard=f" and not ({blocked})")
     steps += stop([2, 7, 0, 95, 95, 95], 7, 95) + one("first_control") + [two_roxases("first control")] + mark_clone("first_control") + [
         {"do": "save", "as": "first_control_log", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 0)},
+        take("take_join_friend"),
         {"do": "clip", "instance": 0, "seconds": 25, "fps": 30, "name": "friend_view_host_moves", "background": True},
         {"do": "wait_until", "expr": clone_moved("first_control"), "timeoutMs": 180000, "pollMs": 1000},
         # The host starts filming when its own move ends: move a few seconds in, inside its clip.
@@ -403,12 +412,15 @@ def friend_pair():
         {"do": "progress_snapshot", "instances": [0], "as": "save_before_damage"},
         # The host hits its copy of this seat once it has seen this move, then waits 20 s and walks on:
         # read this seat's own HP and SAVE after the host has moved again, so the hit has certainly landed.
-        {"do": "wait_until", "expr": clone_moved("after_friend_move"), "timeoutMs": 240000, "pollMs": 1000}] + one("after_host_hit", capture=False) + [
+        dict(take("take_damage_friend", 30), background=True),
+        {"do": "wait_until", "expr": clone_moved("after_friend_move"), "timeoutMs": 240000, "pollMs": 1000},
+        {"do": "clip_wait"}] + one("after_host_hit", capture=False) + [
         {"do": "progress_snapshot", "instances": [0], "as": "save_after_damage", "compare": "save_before_damage"},
         {"do": "assert", "expr": f"{own_hp('after_host_hit')} == {own_hp('after_friend_move')}",
          "message": "the host's hit on its copy of this seat changed this seat's own HP"}]
-    for loc, room, evt, tag in (([2, 7, 0, 97, 97, 97], 7, 97, "reload97"), ([2, 7, 0, 99, 99, 99], 7, 99, "reload99")):
-        steps += stop(loc, room, evt) + one(tag) + [two_roxases(f"evt{evt}")]
+    for loc, room, evt, tag, name in (([2, 7, 0, 97, 97, 97], 7, 97, "reload97", "take_reload_friend"),
+                                      ([2, 7, 0, 99, 99, 99], 7, 99, "reload99", "take_crown_friend")):
+        steps += stop(loc, room, evt) + one(tag) + [two_roxases(f"evt{evt}"), take(name)]
     steps += stop([2, 4, 0, 76, 76, 76], 4, 76) + one("sandlot") + [two_roxases("Sandlot")] + mark_clone("sandlot") + [
         {"do": "save", "as": "sandlot_log", "expr": lines("\\[(?:prologue|missing-party\\] born|warp\\] client)", 0)},
         {"do": "clip", "instance": 0, "seconds": 25, "fps": 30, "name": "sandlot_friend_view_host_moves", "background": True},

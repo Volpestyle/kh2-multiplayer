@@ -2031,6 +2031,13 @@
   {
    "do": "clip",
    "instance": 0,
+   "seconds": 8,
+   "fps": 30,
+   "name": "take_join_friend"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
    "seconds": 25,
    "fps": 30,
    "name": "friend_view_host_moves",
@@ -2104,10 +2111,21 @@
    "as": "save_before_damage"
   },
   {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 30,
+   "fps": 30,
+   "name": "take_damage_friend",
+   "background": true
+  },
+  {
    "do": "wait_until",
    "expr": "len([(a['position']['x'], a['position']['y'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110' and int(a['address'], 16) != int(peek('0x2A105D0','u64',0), 16)]) == 1 and dist([(a['position']['x'], a['position']['y'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110' and int(a['address'], 16) != int(peek('0x2A105D0','u64',0), 16)][0], saved['after_friend_move_cpos']) > 150",
    "timeoutMs": 240000,
    "pollMs": 1000
+  },
+  {
+   "do": "clip_wait"
   },
   {
    "do": "save",
@@ -2179,6 +2197,13 @@
    "message": "evt97: this seat lacks the other Roxas, or a prologue field played unheld"
   },
   {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 8,
+   "fps": 30,
+   "name": "take_reload_friend"
+  },
+  {
    "do": "wait_until",
    "expr": "location(0) == [2, 7, 0, 99, 99, 99]",
    "timeoutMs": 900000,
@@ -2218,6 +2243,13 @@
    "do": "assert",
    "expr": "len([a for a in actors(0) if a['name'] == 'P_EX110']) == 2 and log_count('[prologue] unpinned field', 0) == 0",
    "message": "evt99: this seat lacks the other Roxas, or a prologue field played unheld"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 8,
+   "fps": 30,
+   "name": "take_crown_friend"
   },
   {
    "do": "wait_until",
