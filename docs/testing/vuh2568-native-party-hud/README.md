@@ -50,7 +50,14 @@ shutdown restoration are covered by unit controls, rather than this live run.
   FAIL. The final approved scope does not claim guest native casting.
 - `raw-pins.json`: SHA-256 seal of the retained raw files.
 
-The lead copies this folder to the evidence store and posts its durable link on
-[VUH-2568](https://linear.app/vuhlp/issue/VUH-2568). Only this README and the
-returned `evidence.json` manifest belong in Git; raw media and logs remain in
-the evidence store.
+The lead published the bundle to the evidence store and closed
+[VUH-2568](https://linear.app/vuhlp/issue/VUH-2568). The returned
+[evidence manifest](evidence.json) records each retained object's size, SHA-256
+and durable link. Key evidence:
+
+- [Captioned loopback clip](clankie://evidence/sha256/cec8f983927d48ff20c052da3e76f7aa2e55e5af2f7e74c588d1ee433e297b7f)
+- [Host HUD with distinct NPC](clankie://evidence/sha256/c9b888a820c681c0688413fc857bda959270051685e8d34a7ed1af84974e2094)
+- [Guest HUD after reload](clankie://evidence/sha256/d2f30643e9d63ce8b38ab5ab1f061cf247ef176a343b10086a6ba87068973097)
+
+Only this README and `evidence.json` belong in Git; raw media and logs remain
+in the evidence store.
