@@ -623,19 +623,34 @@ def step_walk_to(ctx: Context, step: dict) -> dict:
     helpers = ctx.namespace()
     # targetExpr (VUH-2342): an (x, z) re-evaluated every pulse, for a target that moves (LoD's gusts).
     target = (float(step["x"]), float(step["z"])) if "targetExpr" not in step else tuple(ctx.eval(step["targetExpr"]))
-    start = helpers["pos"]("P_EX100", index)
+
+    def own_position():
+        # "self": this instance's canonical player (0x2A105D0), whatever its body (VUH-2466: two Roxases, one a clone).
+        if step.get("body") != "self":
+            return helpers["pos"](step.get("body", "P_EX100"), index)
+        canonical = int(str(helpers["peek"]("0x2A105D0", "u64", index)), 16)
+        actor = next((a for a in ctx.actors(index) if int(a["address"], 16) == canonical), None)
+        return None if actor is None else (actor["position"]["x"], actor["position"]["y"], actor["position"]["z"])
+
+    if step.get("until") and ctx.eval(step["until"]):  # already there (or in an event with no player actor)
+        return {"skipped": True}
+    start = own_position()
+    if start is None:  # "self" in an event: no player actor to walk
+        return {"skipped": "no player actor"}
     samples = []
     deadline = time.monotonic() + step.get("timeoutMs", 12000) / 1000
     while time.monotonic() < deadline:
         ctx.check_all()
-        position = helpers["pos"]("P_EX100", index)
+        position = own_position()
+        if position is None:
+            break
         if "targetExpr" in step:
             target = tuple(ctx.eval(step["targetExpr"]))
         samples.append({"position": position, "enemies": {
             peer: helpers["enemies"](peer) for peer in range(len(ctx.instances))}})
         dx, dz = target[0] - position[0], target[1] - position[2]
         distance = math.hypot(dx, dz)
-        if distance <= 100 or (step.get("until") and ctx.eval(step["until"])):
+        if distance <= step.get("radius", 100) or (step.get("until") and ctx.eval(step["until"])):
             break
         keys = ("0x718C68", "0x718C70", "0x718C78", "0x718C80")
         sample = kh2ctl("peek", "--rva", ",".join(f"{key}:f32" for key in keys),
@@ -647,7 +662,7 @@ def step_walk_to(ctx: Context, step: dict) -> dict:
         fx, fz, dx, dz = fx / length, fz / length, dx / distance, dz / distance
         kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.5f}",
                "--ly", f"{dx * fx + dz * fz:.5f}", "--duration-ms", "200", pid=ctx.inst(index).pid)
-    end = helpers["pos"]("P_EX100", index)
+    end = own_position() or start
     evidence = {"target": target, "start": start, "end": end,
                 "displacement": math.hypot(end[0] - start[0], end[2] - start[2]), "samples": samples}
     name = step.get("as", "walk_to")
@@ -684,7 +699,8 @@ def step_fight(ctx: Context, step: dict) -> dict:
                 player = kh2ctl("peek", "--rva", "0x2A105D0:u64", pid=pid)["samples"][0]["0x2A105D0"]
                 me = next((a for a in actors if int(a["address"], 16) == int(str(player), 0)), None) or \
                     next((a for a in actors if a["name"] == "P_EX100"), None)
-                foes = [a for a in actors if a.get("objectType") in (3, 4) and not a["name"].startswith("F_")
+                # types (VUH-2466): add 9 (BTLNPC) for a bat duel such as the Day 1 Sandlot's.
+                foes = [a for a in actors if a.get("objectType") in step.get("types", (3, 4)) and not a["name"].startswith("F_")
                         and a.get("hp", -1) > 0]
                 if out["enemiesStart"] is None:
                     out["enemiesStart"] = len(foes)

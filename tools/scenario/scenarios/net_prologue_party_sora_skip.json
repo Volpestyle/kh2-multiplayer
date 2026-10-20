@@ -6958,6 +6958,16 @@
    "allowStuck": true
   },
   {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "x": -2690,
+   "z": -1070,
+   "radius": 20,
+   "timeoutMs": 3000,
+   "until": "peek('0x2A11162','u16',0) == 31 or location(0) != [2, 7, 0, 97, 97, 97]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['player-press', '--button', 'triangle', '--duration-ms', '120'] if (location(0) == [2, 7, 0, 97, 97, 97] and peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0 and peek('0x2A11162','u16',0) == 31) else ['peek', '--rva', '0x9BA8D0:u8']"
@@ -6967,6 +6977,16 @@
    "ms": 2000
   },
   {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "x": -2690,
+   "z": -1070,
+   "radius": 20,
+   "timeoutMs": 3000,
+   "until": "peek('0x2A11162','u16',0) == 31 or location(0) != [2, 7, 0, 97, 97, 97]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['player-press', '--button', 'triangle', '--duration-ms', '120'] if (location(0) == [2, 7, 0, 97, 97, 97] and peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0 and peek('0x2A11162','u16',0) == 31) else ['peek', '--rva', '0x9BA8D0:u8']"
@@ -6976,6 +6996,16 @@
    "ms": 2000
   },
   {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "x": -2690,
+   "z": -1070,
+   "radius": 20,
+   "timeoutMs": 3000,
+   "until": "peek('0x2A11162','u16',0) == 31 or location(0) != [2, 7, 0, 97, 97, 97]"
+  },
+  {
    "do": "kh2ctl",
    "instance": 0,
    "argsExpr": "['player-press', '--button', 'triangle', '--duration-ms', '120'] if (location(0) == [2, 7, 0, 97, 97, 97] and peek('0x9BA8D0','u8',0) != 0 and peek('0x7435D0','u8',0) == 255 and peek('0xB65210','i32',0) == 0 and peek('0x2A11478','u32',0) == 0 and peek('0x2A1147C','u32',0) == 0 and peek('0x2A11162','u16',0) == 31) else ['peek', '--rva', '0x9BA8D0:u8']"
@@ -6983,6 +7013,16 @@
   {
    "do": "wait",
    "ms": 2000
+  },
+  {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "x": -2690,
+   "z": -1070,
+   "radius": 20,
+   "timeoutMs": 3000,
+   "until": "peek('0x2A11162','u16',0) == 31 or location(0) != [2, 7, 0, 97, 97, 97]"
   },
   {
    "do": "kh2ctl",

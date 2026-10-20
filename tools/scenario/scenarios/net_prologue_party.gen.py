@@ -207,7 +207,11 @@ def build(skip, friend="0x5A"):
         {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/prologue_accessory_shop.json", "seconds": 60,
          "name": "host_accessory_shop", "allowStuck": True}]
     for _ in range(4):
-        steps += [{"do": "kh2ctl", "instance": 0, "argsExpr":
+        # The pilot stops within 60 of the counter; Pence wandering closer then takes the reaction (Talk,
+        # not the shop's 31) and the tutorial never starts (runs 20261020-051947, -053558). Step in first.
+        steps += [{"do": "walk_to", "instance": 0, "body": "self", "x": -2690, "z": -1070, "radius": 20, "timeoutMs": 3000,
+                   "until": "peek('0x2A11162','u16',0) == 31 or location(0) != [2, 7, 0, 97, 97, 97]"},
+                  {"do": "kh2ctl", "instance": 0, "argsExpr":
                    f"['player-press', '--button', 'triangle', '--duration-ms', '120'] if (location(0) == [2, 7, 0, 97, 97, 97] "
                    f"and {field(0)} and peek('0x2A11162','u16',0) == 31) else ['peek', '--rva', '0x9BA8D0:u8']"},
                   {"do": "wait", "ms": 2000}]

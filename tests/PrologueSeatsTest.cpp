@@ -241,6 +241,12 @@ void site() {
         alleyBits = alleyBits && !MissingPartySiteFor(BackAlley73Location, 808738658, 0x3FF727, BackAlley73Header, r);
     }
     check(alleyBits, "every changed Back Alley record bit refuses its site");
+    // VUH-2466: the Day-1 Sandlot bat duel (evt77): four records, the opponent 1656 included.
+    const auto* duel = MissingPartySiteFor(Sandlot77Location, 825515874, 0x3FF727, Sandlot77Header, Sandlot77Records);
+    check(duel && duel->prologue && Sandlot77Records.size() == 4 * 64 && std::string_view(duel->name) == "tt04-77" &&
+          MissingPartySiteAt(Sandlot77Location) == duel &&
+          !MissingPartySiteFor(Sandlot77Location, 808738658, 0x3FF727, Sandlot77Header, Sandlot77Records),
+          "the Sandlot evt77 bat duel is a checked prologue site under its own key");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&

@@ -33,7 +33,7 @@ readings, confirmed only where the live column says so.
 | 1 | 07 Tram Common | 97 | `TT07_MS103` | none | scripted, no spawn | checked site (VUH-2487) |
 | 1 | 07 Tram Common | 99 | `TT07_MS105` | none | cat lock-on | checked site (VUH-2487) |
 | 1 | 04 Sandlot | 76 | `TT04_MS106` | none | scripted, no spawn | checked site `tt04-76` |
-| 1 | 04 Sandlot | 77 | `TT04_MS107` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
+| 1 | 04 Sandlot | 77 | `TT04_MS107` | N_EX570_BTL (1656) | one-on-one bat fight (Seifer) | checked site `tt04-77`; both seats rebuild and hit Seifer; the duel's event runs on the friend alone (VUH-2555) |
 | 1 | 04 Sandlot | 78 | `TT04_MS108` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
 | 1 | 14 Old Mansion | 127 | `TT14_MS109` | 1 Dusk M_EX990 (318) | early Dusk | not yet |
 | 1 | 14 Old Mansion | 128 | `TT14_MS110` | 1 Dusk (318) | early Dusk | not yet |
@@ -94,3 +94,15 @@ From FM-01 (2026-10-20, PC1 loopback, VUH-2466):
   copy fails the ordinary 8-unit point binding (`no-point-match`), so it stays unbound with unscaled
   HP, and the relay flags an enemy-hash desync (VUH-2550). That is the native placement divergence that record
   binding (`docs/ENEMY_RECORD_BINDING.md`) addresses, not a prologue-layout effect.
+
+From New Game (2026-10-20, PC1 loopback, VUH-2466):
+- The Day 1 bat duel starts from the Struggle bats lying in the Sandlot (`W_EX010_U0/V0/W0_RTN`).
+  Their reaction is "Pick It Up" (555 to 557). The pick opens a description, then "No, I'll use a
+  different one / This will do!" with the cursor on No: Down, then Cross, starts the duel (btl 77).
+- Its player ingress is a four-record group, `raw566`, the absent `raw567/568` and the opponent
+  `N_EX570_BTL` 1656, under key 825515874 (headerId 71). It was byte-identical on both seats (run
+  `20261020-071814`) and is pinned as `tt04-77`. In run `20261020-080107` both seats rebuilt as
+  Roxas + Roxas there and released together. The battle tutorial boxes need Cross before anyone can
+  move. Both seats hit Seifer, with the friend's hits claimed to the host, but about 8 s in the duel's
+  event played on the friend alone, which then waited for the host (VUH-2555).
+
