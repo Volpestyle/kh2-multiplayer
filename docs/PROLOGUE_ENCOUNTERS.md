@@ -50,7 +50,7 @@ readings, confirmed only where the live column says so.
 | 5 | 05 Sandlot (Struggle) | 86 | `TT05_MS403` | 3 Dusks (318) | time-stop Dusks | not yet |
 | 5 | 05 Sandlot (Struggle) | 87 | `TT05_MS404` | B_EX110_SKIRMISH (2229), Axel | boss skirmish | not yet |
 | 5 | 05 Sandlot (Struggle) | 88 | `TT05_MS405` | N_EX600_BTL (2095) | Struggle match | not yet |
-| 6 | 03 Back Alley | 73 | `TT03_MS601` | 2 Dusks (318), 1 Dusk (309) | Dusk ambush | not yet (FM-01 route) |
+| 6 | 03 Back Alley | 73 | `TT03_MS601` | 2 Dusks (318), 1 Dusk (309) | Dusk ambush | checked site `tt03-73`; loopback from FM-01, both seats fight; the 309 does not bind (below) |
 | 6 | 19 Basement Hall | 134 | `TT19_MS602` | 4 Dusks (318), then 2 (309) | Mansion Dusk ambush | checked site `tt19-134`; loopback from FM-02 |
 | 6 | 20 Basement Hall | 137 | `TT20_MS603` | B_EX110 (81), Axel | Axel I | loopback, VUH-2465 |
 
@@ -81,3 +81,16 @@ From FM-00 (2026-10-19, PC1 loopback, VUH-2466):
   the path in order from (2020, -500) through (2000, -1350), (2200, -2150), (800, -2341), (0, 250)
   and (-50, 2700) meets each group. With both seats' pilots on that route (background pilots), both
   Roxases fought all 10 with Reversal. Neither was hit, and both logs record the same 10 deaths.
+
+From FM-01 (2026-10-20, PC1 loopback, VUH-2466):
+- The Usual Spot's way out is the door toward +x, trigger near (369, 83) (`tt1_solo` step 13). It loads
+  the Back Alley straight into the Day 6 ambush, btl 73 (`02/03 evt 73`).
+- Its player ingress is `raw566` plus the absent `raw567/568` (headerId 90), byte-identical on both
+  seats, so it is pinned as checked site `tt03-73` (run `20261020-043937`). In run `20261020-044700`
+  both seats rebuilt as Roxas + Roxas there with seat colors, released together, and fought the two
+  318 Dusks natively. Both died in 46 s, with host hit claims, and Dusk hits on both Roxases.
+- The third enemy (object 309) appears once the two 318s are gone. It spawns at a different point on
+  each seat, about 80 to 500 units apart, in this run and in the unchecked probe alike. The client's
+  copy fails the ordinary 8-unit point binding (`no-point-match`), so it stays unbound with unscaled
+  HP, and the relay flags an enemy-hash desync (VUH-2550). That is the native placement divergence that record
+  binding (`docs/ENEMY_RECORD_BINDING.md`) addresses, not a prologue-layout effect.

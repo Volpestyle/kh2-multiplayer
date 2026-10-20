@@ -229,6 +229,18 @@ void site() {
         hallBits = hallBits && !MissingPartySiteFor(BasementHall134Location, 808738658, 0x3FF727, BasementHall134Header, r);
     }
     check(hallBits, "every changed hall record bit refuses its site");
+    // VUH-2466: the Day-6 Back Alley Dusk ambush (evt73, headerId 90).
+    const auto* alley = MissingPartySiteFor(BackAlley73Location, 808738658, 0x3FF727, BackAlley73Header, BackAlley73Records);
+    check(alley && alley->prologue && alley->localObject == 90 && alley->localKey == 14 &&
+          MissingPartySiteAt(BackAlley73Location) == alley && std::string_view(alley->name) == "tt03-73" &&
+          !MissingPartySiteFor(BackAlley73Location, 808738658, 0x3FF727, BasementHall134Header, BasementHall134Records),
+          "the Back Alley evt73 (headerId 90) is a checked prologue site with its own group");
+    bool alleyBits = true;
+    for (std::size_t i = 0; i < BackAlley73Records.size(); ++i) {
+        auto r = BackAlley73Records; r[i] ^= 1;
+        alleyBits = alleyBits && !MissingPartySiteFor(BackAlley73Location, 808738658, 0x3FF727, BackAlley73Header, r);
+    }
+    check(alleyBits, "every changed Back Alley record bit refuses its site");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&
