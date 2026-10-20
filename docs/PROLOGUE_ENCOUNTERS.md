@@ -34,7 +34,7 @@ readings, confirmed only where the live column says so.
 | 1 | 07 Tram Common | 99 | `TT07_MS105` | none | cat lock-on | checked site (VUH-2487) |
 | 1 | 04 Sandlot | 76 | `TT04_MS106` | none | scripted, no spawn | checked site `tt04-76` |
 | 1 | 04 Sandlot | 77 | `TT04_MS107` | N_EX570_BTL (1656) | one-on-one bat fight (Seifer) | checked site `tt04-77`; both seats rebuild and hit Seifer; a friend that runs ahead waits and follows the host to 78 (VUH-2555) |
-| 1 | 04 Sandlot | 78 | `TT04_MS108` | N_EX570_BTL (1656) | one-on-one bat fight | checked site `tt04-78` (receipts byte-identical on both seats, run `20261020-093747`) |
+| 1 | 04 Sandlot | 78 | `TT04_MS108` | N_EX570_BTL (1656) | one-on-one bat fight | checked site `tt04-78`; both seats rebuild, fight and leave for the Woods together (run `20261020-100758`) |
 | 1 | 14 Old Mansion | 127 | `TT14_MS109` | 1 Dusk M_EX990 (318) | early Dusk | not yet |
 | 1 | 14 Old Mansion | 128 | `TT14_MS110` | 1 Dusk (318) | early Dusk | not yet |
 | 2 | 02 Usual Spot | 2 | `TT02_MS201` | none | scripted | not yet |

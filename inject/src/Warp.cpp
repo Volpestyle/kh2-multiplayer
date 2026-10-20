@@ -21,6 +21,7 @@
 #include "ProgressSync.hpp"
 #include "PrologueParty.hpp"
 
+#include "kh2coop/BlockedExitPolicy.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
@@ -307,11 +308,6 @@ void __fastcall HookedLoadCompleteDirect() {
 // taking (TT basement, after the Dusk fight). That request is blocked and the
 // event then waits for its load, so the safe-state gate never opens. Where the
 // game asked for this exact world/room/door itself, issue the host's target.
-bool BlockedExitMatchesHost() {
-    return g_blockedExit && g_blockedExitLoad == g_loadSerial &&
-           g_blockedExit->world == g_hostTarget.worldId && g_blockedExit->room == g_hostTarget.roomId &&
-           g_blockedExit->door == g_hostTarget.door;
-}
 
 // VUH-2464: a client that joined at the title runs into its own opening exits (the movie room,
 // the title and Usual Spot scenes) before the host has announced any room; the host's first
@@ -328,26 +324,25 @@ bool HostTargetIsPrologueSite() {
     const auto* site = routespawn::MissingPartySiteAt(now);
     return site && site->prologue;
 }
-bool BlockedExitToPrologueSite() {
-    return g_blockedExit && g_blockedExitLoad == g_loadSerial && HostTargetIsPrologueSite();
-}
-
-// VUH-2555: in the Roxas prologue each seat's own scripts run a duel or an event program on that seat's
-// copy of the scene, so a friend's script can finish first and ask for a different next room (the Day 1
-// Sandlot bat duel asked for btl 78 or 81 while the host was still fighting). That exit is blocked and
-// the friend waits in its fade; when the host's own battle ends and it announces where the story goes,
-// the friend takes the host's room from that same blocked exit, whatever its own script asked for.
-bool BlockedExitInPrologue() {
-    return g_blockedExit && g_blockedExitLoad == g_loadSerial && g_blockedExit->world == 2 &&
-           g_hostTarget.worldId == 2 && prologueparty::PrologueScope();
+// VUH-2344/2464/2555: whether the host's room is issued from the client's own blocked native exit at
+// this load (kh2coop/BlockedExitPolicy.hpp). VUH-2555: in the Roxas prologue each seat runs a duel's or
+// an event's script on its own copy of the scene, so the friend's can finish first and ask for the next
+// room itself; the friend then waits in its fade and takes the host's room when the host announces it,
+// the same room by the matching case, another room by PrologueSuperseded.
+blockedexit::Issue BlockedExitIssue() {
+    if (!g_blockedExit) return blockedexit::Issue::No;
+    const blockedexit::Room blocked {g_blockedExit->world, g_blockedExit->room, g_blockedExit->door};
+    const blockedexit::Room host {g_hostTarget.worldId, g_hostTarget.roomId, g_hostTarget.door};
+    return blockedexit::FromBlockedExit(g_blockedExitLoad == g_loadSerial, blocked, host, HostTargetIsPrologueSite(),
+                                        prologueparty::PrologueScope());
 }
 
 void IssueHostTransition() {
     if (!g_hostQueued || !g_hostGeneration ||
         enemysync::WorldSessionGeneration() != g_hostGeneration || g_transitionPending) return;
-    const bool matching = BlockedExitMatchesHost();
-    const bool superseded = !matching && !BlockedExitToPrologueSite() && BlockedExitInPrologue();
-    const bool atNativeExit = matching || BlockedExitToPrologueSite() || superseded;
+    const auto issue = BlockedExitIssue();
+    const bool superseded = issue == blockedexit::Issue::PrologueSuperseded;
+    const bool atNativeExit = issue != blockedexit::Issue::No;
     const bool safe = SafeToWarp();  // always: it also refreshes the channel's diagnostics
     if (!atNativeExit && !safe) return;
     // VUH-1512: a reconnect re-admits the client into the host's prologue site before the new roster's

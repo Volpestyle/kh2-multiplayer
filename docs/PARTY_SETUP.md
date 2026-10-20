@@ -788,9 +788,13 @@ which are claimed to the host. A blocked exit that names the host's next room is
 exit (VUH-2344). In the prologue (TT, prologue scope) the friend now also takes the host's next room
 from its blocked exit when its own script asked for a different one (`warp::BlockedExitInPrologue`,
 logged `... in place of its own target (prologue)`), so a branch the friend's copy reached alone
-(btl 81 rather than 78, run `20261020-082907`) never strands it. Run `20261020-093747`: the friend
-ran ahead and waited, the host played the same event and loaded btl 78, and the friend followed from
-its blocked exit (that run's targets matched).
+never strands it. The decision is `kh2coop/BlockedExitPolicy.hpp`, unit-tested in
+`PrologueSeatsTest`. Matching compares world, room and door, so btl 81 against the host's 78 (both the
+Sandlot, door 0) was already matching. In run `20261020-093747` the friend ran ahead and waited, the
+host played the same event and loaded btl 78, and the friend followed. In run `20261020-100758` the
+duel's end sent the friend's script to the Woods, door 0 btl 126, while the host announced door 50
+evt22; the friend took the host's room in place of its own. What still lets the friend run ahead is
+that each seat's duel stage ends on that seat's own combo (VUH-2555).
 
 **Sites.** Market Street: Tram Common, each group raw566 plus the absent
 raw567/568: `tt07-95` (`TT07_MS101`, package `b_40`, group 88), and its two

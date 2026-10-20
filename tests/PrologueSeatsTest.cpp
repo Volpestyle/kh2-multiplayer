@@ -2,6 +2,7 @@
 // missing-party site, and the relay over real loopback ENet (any-seat authorship, owner stamping,
 // roster pinning, sequence floor and echo to the author).
 #include "kh2coop/NetworkClient.hpp"
+#include "kh2coop/BlockedExitPolicy.hpp"
 #include "kh2coop/PrologueSeats.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/SessionHost.hpp"
@@ -66,6 +67,28 @@ void unpinned() {
     check(u.NoticeVisible(5001 + prologue::UnpinnedGraceMs) &&
           !u.NoticeVisible(5001 + prologue::UnpinnedGraceMs + prologue::UnpinnedNoticeMs), "the note shows for a while");
     check(u.Tick(true, basement, 99999) == U::Step::Played, "never held again after the release");
+}
+
+void blockedExit() {
+    using namespace kh2coop::blockedexit;
+    // VUH-2555, run 20261020-082907: in the Day 1 Sandlot duel the friend's own script ran ahead and asked
+    // for the duel's btl 81 (the Sandlot, 02/04 door 0); its exit was blocked and it waited. The host's
+    // battle then ends and it announces btl 78, the same room and door: the friend takes it (Matching).
+    const Room sandlot81 {2, 4, 0}, sandlot78 {2, 4, 0};
+    check(FromBlockedExit(true, sandlot81, sandlot78, false, true) == Issue::Matching,
+          "a friend whose duel script asked for btl 81 takes the host's btl 78 in the same room");
+    // A script that ran ahead into another room (the host announces Tram Common) still yields in the prologue.
+    const Room tramCommon {2, 7, 0}, otherDoor {2, 4, 1};
+    check(FromBlockedExit(true, sandlot81, tramCommon, false, true) == Issue::PrologueSuperseded &&
+          FromBlockedExit(true, otherDoor, sandlot78, false, true) == Issue::PrologueSuperseded,
+          "in the TT prologue the friend takes the host's room in place of another room its script asked for");
+    check(FromBlockedExit(true, sandlot81, tramCommon, false, false) == Issue::No &&
+          FromBlockedExit(true, Room {4, 1, 0}, Room {4, 2, 0}, false, true) == Issue::No,
+          "outside the prologue, or outside TT, a different room waits for the safe field gate");
+    check(FromBlockedExit(false, sandlot81, sandlot78, true, true) == Issue::No,
+          "an exit blocked at an earlier load never issues");
+    check(FromBlockedExit(true, Room {2, 1, 0}, tramCommon, true, false) == Issue::PrologueSite,
+          "a title-joined friend takes the host's first checked prologue site (VUH-2464)");
 }
 
 void soloWait() {
@@ -301,4 +324,4 @@ void network() {
     server.stop();
 }
 } // namespace
-int main() { if (enet_initialize()) return 2; codec(); unpinned(); soloWait(); policy(); site(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }
+int main() { if (enet_initialize()) return 2; codec(); unpinned(); soloWait(); blockedExit(); policy(); site(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }
