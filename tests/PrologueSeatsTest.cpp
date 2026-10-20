@@ -247,6 +247,10 @@ void site() {
           MissingPartySiteAt(Sandlot77Location) == duel &&
           !MissingPartySiteFor(Sandlot77Location, 808738658, 0x3FF727, Sandlot77Header, Sandlot77Records),
           "the Sandlot evt77 bat duel is a checked prologue site under its own key");
+    const auto* duel2 = MissingPartySiteFor(Sandlot78Location, 842293090, 0x3FF727, Sandlot78Header, Sandlot78Records);
+    check(duel2 && duel2->prologue && std::string_view(duel2->name) == "tt04-78" && MissingPartySiteAt(Sandlot78Location) == duel2 &&
+          !MissingPartySiteFor(Sandlot78Location, 842293090, 0x3FF727, Sandlot77Header, Sandlot77Records),
+          "the duel's second stage (evt78) is a checked prologue site with its own group");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&

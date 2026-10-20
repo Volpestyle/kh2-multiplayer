@@ -621,6 +621,8 @@ def step_walk_to(ctx: Context, step: dict) -> dict:
     """Measured native walking using the same camera basis as the GoA approach."""
     index = step.get("instance", 0)
     helpers = ctx.namespace()
+    if step.get("until") and ctx.eval(step["until"]):  # already there (or in an event with no player actor)
+        return {"skipped": True}
     # targetExpr (VUH-2342): an (x, z) re-evaluated every pulse, for a target that moves (LoD's gusts).
     target = (float(step["x"]), float(step["z"])) if "targetExpr" not in step else tuple(ctx.eval(step["targetExpr"]))
 
@@ -632,8 +634,6 @@ def step_walk_to(ctx: Context, step: dict) -> dict:
         actor = next((a for a in ctx.actors(index) if int(a["address"], 16) == canonical), None)
         return None if actor is None else (actor["position"]["x"], actor["position"]["y"], actor["position"]["z"])
 
-    if step.get("until") and ctx.eval(step["until"]):  # already there (or in an event with no player actor)
-        return {"skipped": True}
     start = own_position()
     if start is None:  # "self" in an event: no player actor to walk
         return {"skipped": "no player actor"}

@@ -332,10 +332,22 @@ bool BlockedExitToPrologueSite() {
     return g_blockedExit && g_blockedExitLoad == g_loadSerial && HostTargetIsPrologueSite();
 }
 
+// VUH-2555: in the Roxas prologue each seat's own scripts run a duel or an event program on that seat's
+// copy of the scene, so a friend's script can finish first and ask for a different next room (the Day 1
+// Sandlot bat duel asked for btl 78 or 81 while the host was still fighting). That exit is blocked and
+// the friend waits in its fade; when the host's own battle ends and it announces where the story goes,
+// the friend takes the host's room from that same blocked exit, whatever its own script asked for.
+bool BlockedExitInPrologue() {
+    return g_blockedExit && g_blockedExitLoad == g_loadSerial && g_blockedExit->world == 2 &&
+           g_hostTarget.worldId == 2 && prologueparty::PrologueScope();
+}
+
 void IssueHostTransition() {
     if (!g_hostQueued || !g_hostGeneration ||
         enemysync::WorldSessionGeneration() != g_hostGeneration || g_transitionPending) return;
-    const bool atNativeExit = BlockedExitMatchesHost() || BlockedExitToPrologueSite();
+    const bool matching = BlockedExitMatchesHost();
+    const bool superseded = !matching && !BlockedExitToPrologueSite() && BlockedExitInPrologue();
+    const bool atNativeExit = matching || BlockedExitToPrologueSite() || superseded;
     const bool safe = SafeToWarp();  // always: it also refreshes the channel's diagnostics
     if (!atNativeExit && !safe) return;
     // VUH-1512: a reconnect re-admits the client into the host's prologue site before the new roster's
@@ -369,7 +381,8 @@ void IssueHostTransition() {
     // Only this authority path bypasses the native-exit detour.
     g_requestTransition(&packet, 1, 0, 0, 0);
     if (g_log) g_log("[warp] client issued epoch=%u transition=%u%s", issuedEpoch, issuedTransition,
-                     atNativeExit ? " at its own blocked native exit" : "");
+                     superseded ? " at its own blocked native exit, in place of its own target (prologue)"
+                     : atNativeExit ? " at its own blocked native exit" : "");
     g_blockedExit.reset();
     RefreshWaitingAtExit();
 }

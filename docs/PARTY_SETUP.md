@@ -780,6 +780,18 @@ progress applied first, as VUH-2344 does for a matching exit. It does not see
 the Usual Spot or title scenes; it lands in the first field and builds the
 host's clone there.
 
+**A friend's script that runs ahead (VUH-2555).** Each seat runs a scene's own scripts on its copy
+of it, so in the Day 1 Sandlot bat duel the seat that lands its combo first plays the duel's event
+and asks for the next stage. On the friend that exit is blocked (client authority) and it waits in
+its fade ("Waiting for host..."). The host's duel also advances, partly from the friend's hits,
+which are claimed to the host. A blocked exit that names the host's next room is issued from that
+exit (VUH-2344). In the prologue (TT, prologue scope) the friend now also takes the host's next room
+from its blocked exit when its own script asked for a different one (`warp::BlockedExitInPrologue`,
+logged `... in place of its own target (prologue)`), so a branch the friend's copy reached alone
+(btl 81 rather than 78, run `20261020-082907`) never strands it. Run `20261020-093747`: the friend
+ran ahead and waited, the host played the same event and loaded btl 78, and the friend followed from
+its blocked exit (that run's targets matched).
+
 **Sites.** Market Street: Tram Common, each group raw566 plus the absent
 raw567/568: `tt07-95` (`TT07_MS101`, package `b_40`, group 88), and its two
 same-room event reloads `tt07-97` (event 104, `TT07_MS103`, `b_42` group 132)
