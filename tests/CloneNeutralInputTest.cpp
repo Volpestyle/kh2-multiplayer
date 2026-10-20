@@ -25,6 +25,7 @@ static MH_STATUS MH_CreateHook(void* target, void* detour, void** original) {
     ++g_mhCreate; g_mhTarget = target; g_mhDetour = detour; g_mhOriginal = original; return g_mhCreateResult;
 }
 static MH_STATUS MH_EnableHook(void*) { ++g_mhEnable; return MH_OK; }
+static MH_STATUS MH_DisableHook(void*) { return MH_OK; }
 
 namespace kh2coop {
 namespace inject {
@@ -68,6 +69,8 @@ static int g_fail = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++g_fail; } } while (0)
 
 static uintptr_t& Q(uintptr_t a) { return *reinterpret_cast<uintptr_t*>(a); }
+static unsigned g_commandCalls = 0;
+static void __fastcall FakeCommandUpdate(void*) { ++g_commandCalls; }
 
 // ---- fake original for the 0x3A89A0 detour ----
 struct Seen { int calls; uintptr_t actor; std::uint16_t id; std::uint8_t flags; float stick[4]; std::uint32_t target[4]; };
@@ -117,6 +120,7 @@ static int Run(bool on) {
     nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
     nt->FileHeader.TimeDateStamp = 0x669E384A; nt->OptionalHeader.SizeOfImage = 0x2C2B000;
     std::memcpy(image + 0x3A89A0, cloneneutral::MOVEMENT_PROLOGUE, sizeof(cloneneutral::MOVEMENT_PROLOGUE));
+    std::memcpy(image + 0x3A8980, cloneneutral::COMMAND_PROLOGUE, sizeof(cloneneutral::COMMAND_PROLOGUE));
     const uintptr_t fc = g_exeBase + 0x2A10620;
     for (int i = 0; i < 0x1000; ++i) image[0x2A10620 + i] = static_cast<std::uint8_t>(i * 7 + 3);
     *reinterpret_cast<std::uint16_t*>(fc + 8) = 0x0123; image[0x2A10620 + 0xC] = 0x3F;   // a pending command
@@ -140,7 +144,7 @@ static int Run(bool on) {
 
     auto actor = [&](int i, uintptr_t desc, uintptr_t pad) {
         const uintptr_t a = reinterpret_cast<uintptr_t>(g_heap) + 0x1000 * i;
-        Q(a + offsets::actor::OBJENTRY_PTR) = desc; Q(a + 0xDB8) = pad; Q(a + 0xDD0) = fc; return a;
+        Q(a + offsets::actor::OBJENTRY_PTR) = desc; Q(a + 0xDB8) = pad; Q(a + 0xDD0) = fc; Q(a + 0xDC0) = fc; return a;
     };
     const uintptr_t foreign = 0x1234560;
     const uintptr_t head = actor(0, sora, entry0);
@@ -168,6 +172,10 @@ static int Run(bool on) {
         cloneneutral::HookedMovementUpdate(reinterpret_cast<void*>(clone));
         CHECK(g_seen.calls == 1 && g_seen.id == 0x0123 && g_seen.flags == 0x3F && g_seen.stick[0] == 0.5f);
         CHECK(g_logLines == 0 && fcIntact());
+        cloneneutral::g_origCommandUpdate = &FakeCommandUpdate;
+        const auto commandBefore = g_commandCalls;
+        cloneneutral::HookedCommandUpdate(reinterpret_cast<void*>(clone));
+        CHECK(g_commandCalls == commandBefore + 1 && fcIntact());
     } else {
         // Install refusals leave everything off.
         playerkit::g_blocks = true;
@@ -178,6 +186,10 @@ static int Run(bool on) {
         cloneneutral::Install(g_exeBase);
         CHECK(!cloneneutral::Enabled() && g_mhCreate == 0);
         image[0x3A89A0 + 20] ^= 0xFF;
+        image[0x3A8980 + 10] ^= 0xFF;
+        cloneneutral::Install(g_exeBase);
+        CHECK(!cloneneutral::Enabled() && g_mhCreate == 0);
+        image[0x3A8980 + 10] ^= 0xFF;
         nt->FileHeader.TimeDateStamp ^= 1;
         cloneneutral::Install(g_exeBase);
         CHECK(!cloneneutral::Enabled() && g_mhCreate == 0);
@@ -190,12 +202,13 @@ static int Run(bool on) {
         CHECK(Q(clone + 0xDB8) == entry0);
         g_mhCreateResult = MH_OK;
         cloneneutral::Install(g_exeBase);
-        CHECK(cloneneutral::Enabled() && g_mhCreate == 2 && g_mhEnable == 1);
-        CHECK(g_mhTarget == reinterpret_cast<void*>(g_exeBase + 0x3A89A0));
-        CHECK(g_mhDetour == reinterpret_cast<void*>(&cloneneutral::HookedMovementUpdate));
+        CHECK(cloneneutral::Enabled() && g_mhCreate == 3 && g_mhEnable == 2);
+        CHECK(g_mhTarget == reinterpret_cast<void*>(g_exeBase + 0x3A8980));
+        CHECK(g_mhDetour == reinterpret_cast<void*>(&cloneneutral::HookedCommandUpdate));
         CHECK(cloneneutral::g_stats->hookInstalled == 1 && cloneneutral::g_stats->magic == 0x33494E43);
         CHECK(reinterpret_cast<std::uint8_t*>(cloneneutral::g_stats) == cloneneutral::g_neutral + 0x100);
-        *g_mhOriginal = reinterpret_cast<void*>(&FakeMovementUpdate);
+        cloneneutral::g_origMovementUpdate = &FakeMovementUpdate;
+        *g_mhOriginal = reinterpret_cast<void*>(&FakeCommandUpdate);
 
         for (uintptr_t a : {head, clone, friendA, otherPlayer, oddPointer, building, badName, clone2}) cloneneutral::Gate(a);
         cloneneutral::Gate(0);
@@ -204,6 +217,29 @@ static int Run(bool on) {
         CHECK(Q(friendA + 0xDB8) == entry0 && Q(otherPlayer + 0xDB8) == entry0 && Q(badName + 0xDB8) == entry0);
         CHECK(Q(oddPointer + 0xDB8) == foreign);
         CHECK(Q(clone + 0xDB8) == neutral && Q(clone2 + 0xDB8) == neutral);
+        // One local menu tick per frame: each extra neutral Sora contributes none.
+        const auto commandBefore = g_commandCalls;
+        cloneneutral::HookedCommandUpdate(reinterpret_cast<void*>(clone));
+        cloneneutral::HookedCommandUpdate(reinterpret_cast<void*>(clone2));
+        CHECK(g_commandCalls == commandBefore && cloneneutral::g_stats->commandTicksSkipped == 2 && fcIntact());
+        auto commandPasses = [&](uintptr_t a) {
+            const auto calls = g_commandCalls;
+            cloneneutral::HookedCommandUpdate(reinterpret_cast<void*>(a));
+            return g_commandCalls == calls + 1 && fcIntact();
+        };
+        CHECK(commandPasses(head) && commandPasses(building) && commandPasses(friendA) && commandPasses(otherPlayer));
+        Q(clone2 + 0xDC0) = fc + 0x10;
+        CHECK(commandPasses(clone2));
+        Q(clone2 + 0xDC0) = fc;
+        Q(clone2 + 0xDD0) = fc + 0x10;
+        CHECK(commandPasses(clone2));
+        Q(clone2 + 0xDD0) = fc;
+        Q(g_exeBase + 0x2A105D0) = clone2;
+        CHECK(commandPasses(clone2));
+        Q(g_exeBase + 0x2A105D0) = building;
+        Q(g_exeBase + offsets::active_entity_list::HEAD) = clone2;
+        CHECK(commandPasses(clone2));
+        Q(g_exeBase + offsets::active_entity_list::HEAD) = head;
         CHECK(cloneneutral::g_stats->neutralized == 2 && cloneneutral::g_stats->refusedPointer == 1 &&
               cloneneutral::g_stats->restored == 0);
         {   // Party kits (rev3): a Roxas clone (90, P_EX110) is neutralized only while party kits are active.

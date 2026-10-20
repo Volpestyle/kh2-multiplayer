@@ -1,0 +1,386 @@
+{
+  "name": "net_guest_native_magic",
+  "playerDefaults": true,
+  "description": "VUH-2573 / VUH-2568 single-PC loopback: each owner casts real native Fire through Down/Cross/Cross, costs 10 remaining MP and naturally recharges. Initial Fire availability, 80HP/10MP are RAM fixture setup only; no MP writes after setup and no in-game saves. Both native party HUDs must follow. Two Sora profiles.",
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_PROFILE": "0x54"
+      }
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_PROFILE": "0x54"
+      }
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay",
+      "port": 27813,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all((bridge(i).get('puppet0') or {}).get('active') for i in range(2))",
+      "timeoutMs": 30000,
+      "pollMs": 1000
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(log_count('[nativehud] slot=0 owner='+str(1-i),i)>0 for i in range(2))",
+      "timeoutMs": 15000
+    },
+    {
+      "do": "wait",
+      "ms": 3000
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 1500
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": 1,
+      "ms": 1500
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "save",
+      "as": "local",
+      "expr": "[int(peek(0x2A105D0,'u64',i),16) for i in range(2)]"
+    },
+    {
+      "do": "save",
+      "as": "status",
+      "expr": "[int(peek_at(saved['local'][i]+0x5C0,'u64',i),16) for i in range(2)]"
+    },
+    {
+      "do": "save",
+      "as": "gauges",
+      "expr": "[int(peek(0xABD250,'u64',i),16) for i in range(2)]"
+    },
+    {
+      "do": "save",
+      "as": "views",
+      "expr": "[int(peek_at(saved['gauges'][i]+0x40,'u64',i),16) for i in range(2)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(saved['views'][i] and saved['views'][i]!=saved['local'][i] for i in range(2))",
+      "message": "native friend gauge did not bind a display view"
+    },
+    {
+      "do": "save",
+      "as": "hud_status",
+      "expr": "[int(peek_at(saved['views'][i]+0x5C0,'u64',i),16) for i in range(2)]"
+    },
+    {
+      "do": "save",
+      "as": "fire_before",
+      "expr": "[peek(0x9ACE44,'u8',i) for i in range(2)]"
+    },
+    {
+      "do": "save",
+      "as": "command_before",
+      "expr": "[{'flags':peek(0x2A10644,'u32',i),'driveCount':peek(0x2A107D8,'i32',i),'magicCount':peek(0x2A106D8,'i32',i),'magicRootState':peek(0x2A1066D,'u8',i),'boundActor':peek(0x2A11100,'u64',i),'chargeMax':peek_at(saved['status'][i]+0x1C0,'f32',i)} for i in range(2)]"
+    },
+    {
+      "do": "checkpoint",
+      "name": "Single-PC loopback: each Sora owns 80 HP and 10 MP; Fire is temporarily available in RAM"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--rva','0x9ACE44','--type','u8','--value',str(max(1,saved['fire_before'][0]))]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(saved['status'][0]+4),'--type','i32','--value','80']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(saved['status'][0]+0),'--type','i32','--value','80']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(saved['status'][0]+388),'--type','i32','--value','10']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--addr',str(saved['status'][0]+384),'--type','i32','--value','10']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--rva','0x9ACE44','--type','u8','--value',str(max(1,saved['fire_before'][1]))]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(saved['status'][1]+4),'--type','i32','--value','80']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(saved['status'][1]+0),'--type','i32','--value','80']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(saved['status'][1]+388),'--type','i32','--value','10']"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--addr',str(saved['status'][1]+384),'--type','i32','--value','10']"
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek_at(saved['hud_status'][0]+0,'i32',0)==80 and peek_at(saved['hud_status'][1]+0,'i32',1)==80 and peek_at(saved['hud_status'][0]+384,'i32',0)==10 and peek_at(saved['hud_status'][1]+384,'i32',1)==10",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "save",
+      "as": "command_after",
+      "expr": "[{'flags':peek(0x2A10644,'u32',i),'driveCount':peek(0x2A107D8,'i32',i),'magicCount':peek(0x2A106D8,'i32',i),'magicRootState':peek(0x2A1066D,'u8',i),'boundActor':peek(0x2A11100,'u64',i),'chargeMax':peek_at(saved['status'][i]+0x1C0,'f32',i)} for i in range(2)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(peek(0x2A106D8,'i32',i)>0 for i in range(2))",
+      "message": "no native spells available in setup"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "native_magic_full"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "native_magic_full"
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 18,
+      "fps": 20,
+      "name": "native_fire_both",
+      "background": true
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "seconds": 18,
+      "fps": 20,
+      "name": "native_fire_both",
+      "background": true
+    },
+    {
+      "do": "checkpoint",
+      "name": "Guest native Fire, no MP/control-state writes"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "down",
+      "ms": 60
+    },
+    {
+      "do": "wait",
+      "ms": 300
+    },
+    {
+      "do": "save",
+      "as": "cursor_after_down_1",
+      "expr": "{'index':peek(0x2A106BC,'i32',1),'magicState':peek(0x2A1066D,'u8',1),'magicCount':peek(0x2A106D8,'i32',1)}"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cursor_after_down_1']['index']==1",
+      "message": "A single Down must select Magic, not skip to Items"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 60
+    },
+    {
+      "do": "wait",
+      "ms": 350
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 60
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek_at(saved['status'][1]+384,'i32',1)==0",
+      "timeoutMs": 8000,
+      "message": "Native Fire did not consume the owning seat MP"
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek_at(saved['hud_status'][0]+384,'i32',0)==0",
+      "timeoutMs": 5000,
+      "message": "Remote native HUD did not show the owner MP drop"
+    },
+    {
+      "do": "checkpoint",
+      "name": "Host native Fire, no MP/control-state writes"
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "down",
+      "ms": 60
+    },
+    {
+      "do": "wait",
+      "ms": 300
+    },
+    {
+      "do": "save",
+      "as": "cursor_after_down_0",
+      "expr": "{'index':peek(0x2A106BC,'i32',0),'magicState':peek(0x2A1066D,'u8',0),'magicCount':peek(0x2A106D8,'i32',0)}"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['cursor_after_down_0']['index']==1",
+      "message": "A single Down must select Magic, not skip to Items"
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 60
+    },
+    {
+      "do": "wait",
+      "ms": 350
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 60
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek_at(saved['status'][0]+384,'i32',0)==0",
+      "timeoutMs": 8000,
+      "message": "Native Fire did not consume the owning seat MP"
+    },
+    {
+      "do": "wait_until",
+      "expr": "peek_at(saved['hud_status'][1]+384,'i32',1)==0",
+      "timeoutMs": 5000,
+      "message": "Remote native HUD did not show the owner MP drop"
+    },
+    {
+      "do": "save",
+      "as": "native_cost",
+      "expr": "[{'ownerMP':peek_at(saved['status'][i]+384,'i32',i),'remoteMP':peek_at(saved['hud_status'][1-i]+384,'i32',1-i),'charge':peek_at(saved['status'][i]+444,'f32',i),'chargeMax':peek_at(saved['status'][i]+448,'f32',i)} for i in range(2)]"
+    },
+    {
+      "do": "clip_wait"
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(peek_at(saved['status'][i]+384,'i32',i)==10 for i in range(2))",
+      "timeoutMs": 120000,
+      "pollMs": 500
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(peek_at(saved['hud_status'][i]+384,'i32',i)==10 for i in range(2))",
+      "timeoutMs": 5000
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 4,
+      "fps": 20,
+      "name": "native_recharged",
+      "background": true
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "seconds": 4,
+      "fps": 20,
+      "name": "native_recharged",
+      "background": true
+    },
+    {
+      "do": "clip_wait"
+    },
+    {
+      "do": "save",
+      "as": "native_refill",
+      "expr": "[{'ownerMP':peek_at(saved['status'][i]+384,'i32',i),'remoteMP':peek_at(saved['hud_status'][1-i]+384,'i32',1-i),'chargeMax':peek_at(saved['status'][i]+448,'f32',i)} for i in range(2)]"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "native_magic_recharged"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['poke','--rva','0x9ACE44','--type','u8','--value',str(saved['fire_before'][0])]"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "native_magic_recharged"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['poke','--rva','0x9ACE44','--type','u8','--value',str(saved['fire_before'][1])]"
+    }
+  ]
+}

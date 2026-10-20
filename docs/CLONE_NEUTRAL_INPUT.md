@@ -32,10 +32,10 @@ Static RE, `[GHIDRA]`. Two native paths deliver the local pad to every player-cl
 **Install** (`cloneneutral::Install`, called from `Initialize`). Install is refused, leaving the whole module off with log `[cloneneutral] configured=0 refused=<reason>`, when any of these holds:
 - `KH2COOP_PLAYER_KIT` blocks native-Sora puppets;
 - the exe timestamp is not `0x669E384A`, or SizeOfImage is not `0x2C2B000`;
-- the 48-byte prologue of `0x3A89A0` differs;
+- the 48-byte prologue of `0x3A89A0` or 17-byte wrapper at `0x3A8980` differs;
 - MinHook fails.
 
-On success it allocates a never-freed 4 KiB page and installs the `0x3A89A0` detour. The page holds the neutral pad entry at +0x000 (0x68 bytes) and a `Stats` block at +0x100 (magic `CNI3`).
+On success it allocates a never-freed 4 KiB page and installs the `0x3A89A0` movement and `0x3A8980` command-tick detours. The page holds the neutral pad entry at +0x000 (0x68 bytes) and a `Stats` block at +0x100 (magic `CNI3`).
 
 **Gate** (`cloneneutral::Gate`) runs in `HookedPerEntityUpdate` before each actor's own update, on the owner thread. It only considers player-class actors.
 - **Canonical player** (list head or `[0x2A105D0]`): `+0xDB8` is only ever restored to entry 0, and only if it holds this module's neutral pointer.
@@ -43,12 +43,14 @@ On success it allocates a never-freed 4 KiB page and installs the `0x3A89A0` det
 - **Persistence:** once neutral, an actor stays neutral for its whole life. Its neutral state is re-zeroed on each of its updates.
 - **Never written:** global entry 0.
 
+**Command-tick detour** (`HookedCommandUpdate`, VUH-2573) skips `0x3A8980` only for an already-neutralized noncanonical player-class actor with both `+0xDC0` and `+0xDD0` pointing at FC. This prevents the clone from consuming the local menu edge again. The canonical actor keeps the original lock-on, menu and countdown tick. No actor/controller pointer or eligibility flag is changed. See [native guest Magic](NATIVE_GUEST_MAGIC.md) for the native trace and live evidence.
+
 **Movement-update detour** (`HookedMovementUpdate`) applies only to an actor that is player-class, has a neutral `+0xDB8`, has `+0xDD0 == FC`, and is not canonical.
 - It runs the original with FC's command record neutralised exactly as `0x3D7F00` does: id = 0, flags `&= 0xE0`, target sub-struct = `0x3BDA50`'s `{0,0,0,-1}`. FC's stick copy is zeroed.
 - It restores all of these in `__finally`. FC ends up as if the clone's movement update never ran.
-- A non-gated `0x3A89A0` call that arrives while a window is open gets the real values and is counted in `nestedPassThrough`. Static analysis found no such path, and none was seen live.
+- A non-gated `0x3A89A0` call that arrives while a window is open gets the real values and is counted in `nestedPassThrough`, and appended `commandTicksSkipped` (the earlier fields retain their offsets). Static analysis found no such path, and none was seen live.
 
-**Stats** (read-only from outside by RPM): `neutralized`, `restored`, `refusedPointer`, `transitionSkips`, `hookInstalled`, `rezero`, `movementGated`, `commandSuppressed`, `nestedPassThrough`.
+**Stats** (read-only from outside by RPM): `neutralized`, `restored`, `refusedPointer`, `transitionSkips`, `hookInstalled`, `rezero`, `movementGated`, `commandSuppressed`, `nestedPassThrough`, and appended `commandTicksSkipped` (the earlier fields retain their offsets).
 
 ## Native reads and writes
 
@@ -89,21 +91,12 @@ In live-03 none of them changed the clone's action or animation in GoA.
 
 **A neutral clone has no native controller.** It stands still unless the puppet driver moves it. A future "release to native" path would need Friend AI.
 
-## Follow-ups: the shared FIELD_COMMAND (not changed by this module)
+## Remaining shared FIELD_COMMAND follow-ups
 
-**1. Double FC tick per frame.**
-- With a clone in the room, FC ticks twice per frame: in the canonical player's update and in the clone's, both via `+0xDC0` → `0x3A8980`.
-- A tick does a lot of work:
-  - rebuilds the command record and copies the stick;
-  - ORs press flags into `FC+0x0C`;
-  - runs FC `vtable+0x10` (`0x3F29E0`, menu and command logic on the bound actor `+0xAE0`) and `0x408520`;
-  - runs `0x3DD280` (lock-on);
-  - decrements the `+0xC40` countdown.
-- Menu state, lock-on and countdowns may therefore advance twice. It is not checked whether a press can trigger twice, or be cleared before the canonical consumes it.
-- **Ruled out:** nulling the clone's `+0xDC0`. `0x3FD5A0`/`0x3FD5F0`/`0x3FD7E0`/`0x3FD720` dereference it without a null check.
-- **Candidate:** a gated `0x3A8980` early-out for neutral clones, after an audit of every tick side effect.
+VUH-2573 addresses the double FC tick through the command-tick detour described
+above. It does not replace the following separate death, form or teardown paths.
 
-**2. FC calls the clone makes on death, revive or menu toggles.** These run through the clone's own `+0xDC0` and act on the shared FC:
+**1. FC calls the clone makes on death, revive or menu toggles.** These run through the clone's own `+0xDC0` and act on the shared FC:
 - `0x4150E0`/`0x415B40` (status `[+0x5C0]==1`) → `0x3FD5A0`;
 - `0x3A7330`/`0x3A81C0` → `0x3FD5A0`;
 - `0x3AA9E0` → `0x3FD7E0`/`0x3FD720`;
@@ -112,7 +105,7 @@ In live-03 none of them changed the clone's action or animation in GoA.
 
 A clone that dies, is revived (VUH-1504) or changes form can therefore reset or toggle the canonical player's command menu.
 
-**3. Teardown.**
+**2. Teardown.**
 - `0x3A7120` and `0x3A8F30` unbind FC (`0x3FD610`). When `[0x2A105D0]` is non-zero they also clear it, whichever actor runs them.
 - `0x3A9FA0` and `0x3AAB00` unbind and null `+0xDC0`.
 

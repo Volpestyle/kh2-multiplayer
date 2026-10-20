@@ -46,6 +46,10 @@ static constexpr uintptr_t ACTOR_FIELD_COMMAND = 0xDD0;   // [GHIDRA] 0x3A7A9E
 static constexpr uintptr_t RVA_NATIVE_PLAYER = 0x2A105D0;  // [GHIDRA] set by 0x3A7A40
 static constexpr uintptr_t RVA_FIELD_COMMAND = 0x2A10620;  // [GHIDRA] YS::FIELD_COMMAND static (0x24560)
 static constexpr uintptr_t RVA_MOVEMENT_UPDATE = 0x3A89A0; // [GHIDRA] type slot +0x20 body (0x404A40, 0x3A7090, ...)
+static constexpr uintptr_t RVA_COMMAND_UPDATE = 0x3A8980; // type slot +0x18 -> FC tick 0x3FD690
+static constexpr uintptr_t ACTOR_COMMAND_UPDATE = 0xDC0;
+static constexpr std::uint8_t COMMAND_PROLOGUE[] = {
+    0x48,0x8B,0x89,0xC0,0x0D,0,0,0x48,0x85,0xC9,0x0F,0x85,0,0x4D,0x05,0,0xC3};
 static constexpr uintptr_t FC_COMMAND_ID = 0x08;           // u16, reset to 0 by 0x3D7F00(FC+8)
 static constexpr uintptr_t FC_COMMAND_FLAGS = 0x0C;        // u8, & 0xE0 by 0x3D7F00
 static constexpr uintptr_t FC_COMMAND_TARGET = 0x10;       // 16 bytes, 0x3BDA50: {handle(0)=0, 0, handle(0)=0, -1}
@@ -76,13 +80,15 @@ struct Stats {
     std::uint64_t movementGated;     // 0x3A89A0 calls run with FC's command and stick neutralised
     std::uint64_t commandSuppressed; // ... of which FC held a non-zero command id
     std::uint64_t nestedPassThrough; // non-gated 0x3A89A0 calls while a gated window was open
+    std::uint64_t commandTicksSkipped; // neutral clones must not advance the shared local menu
 };
 // Owner-thread plain increments. The fixture reads them by RPM from another process;
 // each counter is one aligned field, so a read is never torn, only possibly one update stale.
-static_assert(sizeof(Stats) == 0x38 && STATS_OFFSET >= PAD_ENTRY_BYTES, "stats layout");
+static_assert(sizeof(Stats) == 0x40 && STATS_OFFSET >= PAD_ENTRY_BYTES, "stats layout");
 
 using PFN_MovementUpdate = void(__fastcall*)(void* actor);
 static PFN_MovementUpdate g_origMovementUpdate = nullptr;
+static PFN_MovementUpdate g_origCommandUpdate = nullptr;
 static std::uint8_t* g_neutral = nullptr;
 static Stats* g_stats = nullptr;
 static std::atomic<int> g_state {0};   // 0 off/unconfigured, 1 on (page + hook ready)
@@ -128,7 +134,9 @@ static bool VerifyMovementImage(uintptr_t base) {
         nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
         nt->FileHeader.TimeDateStamp == IMAGE_TIMESTAMP && nt->OptionalHeader.SizeOfImage == IMAGE_SIZE &&
         std::memcmp(reinterpret_cast<const void*>(base + RVA_MOVEMENT_UPDATE), MOVEMENT_PROLOGUE,
-                    sizeof(MOVEMENT_PROLOGUE)) == 0;
+                    sizeof(MOVEMENT_PROLOGUE)) == 0 &&
+        std::memcmp(reinterpret_cast<const void*>(base + RVA_COMMAND_UPDATE), COMMAND_PROLOGUE,
+                    sizeof(COMMAND_PROLOGUE)) == 0;
 }
 
 // Called from HookedPerEntityUpdate's pre-call block (inside its __try), on
@@ -188,6 +196,25 @@ static bool MovementGated(uintptr_t actor) {
     return *reinterpret_cast<const uintptr_t*>(actor + ACTOR_PAD_ENTRY) == reinterpret_cast<uintptr_t>(g_neutral) &&
         *reinterpret_cast<const uintptr_t*>(actor + ACTOR_FIELD_COMMAND) == g_exeBase + RVA_FIELD_COMMAND &&
         !CanonicalActor(actor);
+}
+
+// The clone's neutral pad does not neutralize FC's own pad (FC+AE8). Its
+// +DC0 tick otherwise consumes the canonical player's button edge a second
+// time, advancing Attack -> Magic -> Items in one frame. Leave FC and all its
+// lock-on/menu/countdown work exclusively with the canonical native actor.
+static void __fastcall HookedCommandUpdate(void* actorObj) {
+    const auto actor = reinterpret_cast<uintptr_t>(actorObj);
+    bool gated = false;
+    __try {
+        gated = MovementGated(actor) &&
+            *reinterpret_cast<const uintptr_t*>(actor + ACTOR_COMMAND_UPDATE) == g_exeBase + RVA_FIELD_COMMAND;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { gated = false; }
+    if (!gated) { g_origCommandUpdate(actorObj); return; }
+    ++g_stats->commandTicksSkipped;
+    if (g_stats->commandTicksSkipped <= 8)
+        Log("[cloneneutral] command-tick-skipped frame=%u actor=%p canonical=%p count=%llu", g_frameCounter,
+            actorObj, reinterpret_cast<void*>(*reinterpret_cast<const uintptr_t*>(g_exeBase + RVA_NATIVE_PLAYER)),
+            static_cast<unsigned long long>(g_stats->commandTicksSkipped));
 }
 
 // The FC bytes a gated window neutralises and restores (plain data, copied by value).
@@ -277,6 +304,7 @@ static void Install(uintptr_t exeBase) {
     if (playerkit::BlocksNativeSoraPuppets()) refused = "player-kit";
     else if (!VerifyMovementImage(exeBase)) refused = "image";
     std::uint8_t* page = nullptr;
+    bool movementCreated = false, commandCreated = false;
     if (!refused) {
         // Process-lifetime storage, intentionally never freed. Zero-filled.
         page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
@@ -289,16 +317,29 @@ static void Install(uintptr_t exeBase) {
         auto* target = reinterpret_cast<void*>(exeBase + RVA_MOVEMENT_UPDATE);
         if (MH_CreateHook(target, reinterpret_cast<void*>(&HookedMovementUpdate),
                           reinterpret_cast<void**>(&g_origMovementUpdate)) != MH_OK) refused = "hook-create";
-        else if (MH_EnableHook(target) != MH_OK) refused = "hook-enable";
+        else {
+            movementCreated = true;
+            auto* command = reinterpret_cast<void*>(exeBase + RVA_COMMAND_UPDATE);
+            if (MH_CreateHook(command, reinterpret_cast<void*>(&HookedCommandUpdate),
+                              reinterpret_cast<void**>(&g_origCommandUpdate)) != MH_OK) refused = "command-hook-create";
+            else {
+                commandCreated = true;
+                if (MH_EnableHook(target) != MH_OK) refused = "hook-enable";
+                else if (MH_EnableHook(command) != MH_OK) refused = "command-hook-enable";
+            }
+        }
     }
     if (refused) {
+        // Until publication both callbacks delegate, even if rollback fails.
+        if (movementCreated) MH_DisableHook(reinterpret_cast<void*>(exeBase + RVA_MOVEMENT_UPDATE));
+        if (commandCreated) MH_DisableHook(reinterpret_cast<void*>(exeBase + RVA_COMMAND_UPDATE));
         Log("[cloneneutral] configured=0 refused=%s", refused);
         return;
     }
     g_stats->hookInstalled = 1;
     g_state.store(1, std::memory_order_release);
-    Log("[cloneneutral] configured=1 neutral=%p stats=%p hook=%p", g_neutral, g_stats,
-        reinterpret_cast<void*>(exeBase + RVA_MOVEMENT_UPDATE));
+    Log("[cloneneutral] configured=1 neutral=%p stats=%p hook=%p commandHook=%p", g_neutral, g_stats,
+        reinterpret_cast<void*>(exeBase + RVA_MOVEMENT_UPDATE), reinterpret_cast<void*>(exeBase + RVA_COMMAND_UPDATE));
 }
 
 }  // namespace cloneneutral
