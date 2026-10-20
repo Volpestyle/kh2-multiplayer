@@ -1287,8 +1287,10 @@ class ReviveGuard:
     (the host pilot owns window focus) and no position or HP writes."""
 
     # The revive prompt fired at 54 and 11 units in run 20261017-051854 and
-    # stayed "none" at 144-150, so walk well inside that before holding.
-    REACH, HOLD_MS, TIMEOUT = 50.0, 1600, 60.0
+    # stayed "none" at 144-150, so walk well inside that before holding. A
+    # prologue-layout clone has a solid body: in the Basement Hall a reviver
+    # stopped about 95 units from it with the prompt up (VUH-2466, run 190931).
+    REACH, HOLD_MS, TIMEOUT = 100.0, 1600, 60.0
     KEEP_AWAY = 300.0  # step away from the nearest living enemy inside this
 
     def __init__(self, ctx: Context, host: int, friend: int) -> None:

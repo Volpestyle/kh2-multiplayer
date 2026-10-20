@@ -29,6 +29,25 @@ bosses are parked: the common search override does not change their separate
 targeting paths. Family-specific targeting qualification remains a live check.
 No party/status room expansion or package/profile change is included.
 
+### Dusks hit the friend natively (VUH-2466)
+
+In the prologue's Basement Hall (both Roxases bound at site `tt19-134`), host targeting sends Dusks
+at the friend's clone (79 rewrites in run `20261019-171742`). The friend's mirrored Dusks then hit the
+friend's own Roxas natively. Run `20261019-192627` had both seats fighting with no stand-in
+protection: `[enemy-mirror] hit ... driven=1` on the friend for attacks 18, 17 and 18 (6, 3 and 3
+damage), with its own reaction and i-frames.
+
+An earlier reading said the opposite. In runs `171742`–`192214` the friend's mirrored Dusks built no
+hits, but every one of those fixtures carried the runner's `"protect": [1]` stand-in aid, which keeps
+the friend on team 0. A forwarding change was designed, reviewed (D14.4, r1–r4) and tested on that
+reading. It would have forwarded the host's zeroed clone hits for Dusks to the friend as `RemoteHit`s,
+with a one-kind-per-swing guard and a flinch rule. It was dropped unlanded once the unprotected run
+showed native hits. The reviewed diff is kept at `build/rig/vuh2466/forward-dropped-r4.diff`. Its
+measurements still hold if a family is ever found that truly builds no client hits:
+- A pose-driven clone never flinches, so it takes a whole combo. Dusk 309's attack 73 landed
+  4+4+4+2 on the clone, where a native Roxas takes the first hit or two.
+- HP-only forwarded damage has no reaction or i-frames.
+
 ### BC Soldier loopback, 2026-10-12
 
 Run [201627](../build/scenarios/20261012-201627_net_enemy_target_all_soldier_1/report.md)
