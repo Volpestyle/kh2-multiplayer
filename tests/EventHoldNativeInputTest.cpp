@@ -3,6 +3,7 @@
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include <array>
+#include <vector>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -54,6 +55,33 @@ int main(int argc,char** argv){
   auto cheld=cstep(8,1004);check(cheld.neutral&&!cheld.failed&&c.Holding(),"held in the combat pause");
   c.Wake();auto close=cstep(8,1005);check(close.start,"wake presses Start to close the combat pause");
   cstep(8,1006);cstep(255,1007);check(c.Current()==S::Phase::OwnerWait,"combat pause closed, waiting on owner");
+  // VUH-2537: a close the pause ignores unwinds with Circle, Cross, Start until the menu reads closed.
+  // Simulated menu: `pages` modal pages that only Cross advances, then a submenu Circle leaves, then
+  // the plain menu that Start closes.
+  auto unwind=[&](int pages,bool submenu,std::uint64_t until,std::vector<std::uint16_t>& presses){
+    S u;u.Acquire(ok);S::Sample t=ok;unsigned menu=255;bool sub=submenu;
+    auto tick=[&](std::uint64_t now){t.menu=menu;t.now=now;auto o=u.Tick(t);
+      const std::uint16_t b=static_cast<std::uint16_t>(o.buttons|(o.start?S::StartButton:0));
+      if(b){presses.push_back(b);
+        if(menu==255&&b==S::StartButton)menu=10;
+        else if(pages>0){if(b==S::CrossButton)--pages;}
+        else if(sub){if(b==S::CircleButton)sub=false;}
+        else if(b==S::StartButton)menu=255;}
+      return o;};
+    tick(1001);tick(1002);tick(1003);u.Wake();
+    S::Output last{};for(std::uint64_t now=1004;now<until&&!last.failed;now+=50)last=tick(now);
+    return std::make_pair(u.Current(),last);};
+  {std::vector<std::uint16_t> p;auto r=unwind(2,false,20000,p);
+   check(r.first==S::Phase::OwnerWait&&!r.second.stuck,"two modal pages: Cross advances them and Start closes the menu");
+   bool order=p.size()>=5&&p[0]==S::StartButton&&p[1]==S::StartButton&&p[2]==S::CircleButton&&p[3]==S::StartButton&&
+              p[4]==S::CrossButton;
+   check(order,"the first close is Start; the unwind tries Circle and Start before any Cross");}
+  {std::vector<std::uint16_t> p;auto r=unwind(0,true,20000,p);
+   bool cross=false;for(auto b:p)cross=cross||b==S::CrossButton;
+   check(r.first==S::Phase::OwnerWait&&!cross,"a submenu backs out on Circle and the menu closes on Start, with no Cross");}
+  {std::vector<std::uint16_t> p;auto r=unwind(1000,false,60000,p);
+   check(r.first==S::Phase::Failed&&r.second.stuck&&r.second.failed&&!r.second.neutral&&p.size()==2+S::UnwindPresses,
+         "a pause that never closes fails after UnwindPresses, reports it and returns the input");}
   S d;check(d.Acquire(ok),"menu-change acquire");at=ok;at.menu=255;at.now=1001;d.Tick(at);at.now=1002;d.Tick(at);
   at.menu=8;at.now=1003;d.Tick(at);at.menu=10;at.now=1004;check(d.Tick(at).failed,"a different menu replacing the owned pause still fails");
   // VUH-2359: a transition into a qualified scene closes the pause, then gives input back at once

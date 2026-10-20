@@ -44,11 +44,11 @@ bool ReadInput(void* ptr, NativeInputSample& out) noexcept {
         return *reinterpret_cast<uintptr_t*>(base + offsets::INPUT_STRUCT_PTR) == reinterpret_cast<uintptr_t>(ptr);
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
-bool Overlay(void* ptr, bool start) noexcept {
+bool Overlay(void* ptr, std::uint16_t buttons) noexcept {
     __try {
         if (*reinterpret_cast<uintptr_t*>(base + offsets::INPUT_STRUCT_PTR) != reinterpret_cast<uintptr_t>(ptr)) return false;
         auto* raw = reinterpret_cast<std::uint8_t*>(ptr) + offsets::input::RAW_SLOT0;
-        *reinterpret_cast<std::uint16_t*>(raw + offsets::input::BUTTONS) = start ? 0x0008 : 0;
+        *reinterpret_cast<std::uint16_t*>(raw + offsets::input::BUTTONS) = buttons;
         raw[offsets::input::LSTICK_X] = raw[offsets::input::LSTICK_Y] = 128;
         raw[offsets::input::RSTICK_X] = raw[offsets::input::RSTICK_Y] = 128;
         return true;
@@ -226,18 +226,25 @@ bool ApplyInput(void* inputStruct) {
         ack.epoch == release.epoch && ack.flags == (eventhold::SafeConverged | eventhold::LiveEligible);
     native.value.healthy = Enabled() && channel.Healthy(GetTickCount64());
     auto output = input.Tick(native.value);
-    if (output.neutral && (!channel.Healthy(GetTickCount64()) || !Enabled() || !Overlay(inputStruct, output.start))) {
+    const auto buttons = static_cast<std::uint16_t>(output.buttons | (output.start ? InputState::StartButton : 0));
+    if (output.neutral && (!channel.Healthy(GetTickCount64()) || !Enabled() || !Overlay(inputStruct, buttons))) {
         channel.Invalidate(eventhold::Abort::Unsupported); input.Fail(); output.failed = true;
     }
     inputHeld.store(input.Holding(), std::memory_order_release);
+    // VUH-2537: say why, once: the player has the input back and the next hold and room follow once
+    // the menu is closed.
+    if (output.stuck && log)
+        log("[event-control] hold could not close the pause: menu %u still open after %u unwind presses "
+            "(Start, then Circle/Cross/Start); input returned to the player, later holds and the host's "
+            "next room resume once the menu closes", native.value.menu, input.Unwound());
     if (output.timedOut && log)
         log("[event-control] owner did not converge %llu ms after release epoch=%u; input returned",
             static_cast<unsigned long long>(InputState::ReleaseTimeoutMs), release.epoch);
-    if (log && (oldPhase != input.Current() || output.start || output.released))
-        log("[event-control] input phase=%u menu=%u neutral=%u start=%u failed=%u released=%u ordinal=%llu tid=%lu abort=%lu",
+    if (log && (oldPhase != input.Current() || buttons || output.released))
+        log("[event-control] input phase=%u menu=%u neutral=%u start=%u failed=%u released=%u ordinal=%llu tid=%lu abort=%lu buttons=%04X unwound=%u",
             static_cast<unsigned>(input.Current()), native.value.menu, output.neutral ? 1u : 0u, output.start ? 1u : 0u,
             output.failed ? 1u : 0u, output.released ? 1u : 0u, static_cast<unsigned long long>(release.ordinal),
-            GetCurrentThreadId(), static_cast<unsigned long>(channel.Reason()));
+            GetCurrentThreadId(), static_cast<unsigned long>(channel.Reason()), buttons, input.Unwound());
     return wasHeld || output.neutral || output.released;
 }
 } // namespace kh2coop::inject::eventholdnative

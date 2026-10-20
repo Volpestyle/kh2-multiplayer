@@ -1172,7 +1172,17 @@ that is only waiting on convergence, and a client that hasn't converged 10 s
 after the release gets its input back. A room-entry cutscene's acquire is
 published before the host's room transition (the transition waits for the
 event to end), so friends are paused in the room they're in and follow once it
-ends. VUH-2289: in two-player play the TARGET_ALL clone seats Sora as a
+ends. VUH-2537 (2026-10-20): the hold's Start can open KH2's one-time menu
+tutorials (for example "What is Auto-Reload?" after the Station of Calling).
+Those pages ignore Start, so the close used to fail and leave the friend in the
+menu. Now, if the pause is still up 400 ms after a press, the close cycles
+Circle, Start, then Cross. Circle backs out of a submenu, Start closes the plain
+menu, and Cross advances a modal page only after both of those have failed. It
+stops as soon as the menu reads closed. After 24 presses it gives up, logs
+`[event-control] hold could not close the pause ...` and returns the input; the
+next hold and the host's next room resume once the menu closes. The hold still
+uses only native input; holding the friend without the menu would need a native
+pause the game doesn't offer to input. VUH-2289: in two-player play the TARGET_ALL clone seats Sora as a
 companion, and the pause menu's companion loops faulted on that player key
 (exe+0x36A4AB). The clone path now installs partyempty's guards and the
 two-caller key skip is unconditional; `net_boss_intro_2p` covers it. The natural-event profile reuses the existing bounded menu-liveness

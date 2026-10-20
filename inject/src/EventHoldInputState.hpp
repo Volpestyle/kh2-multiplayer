@@ -21,11 +21,22 @@ public:
         bool failed = false;
         bool released = false;
         bool timedOut = false;
+        std::uint16_t buttons = 0;  // a press other than Start (the close unwind's Circle or Cross)
+        bool stuck = false;         // the pause did not close within UnwindPresses
     };
+    static constexpr std::uint16_t StartButton = 0x0008, CircleButton = 0x2000, CrossButton = 0x4000;
+    // VUH-2537: Start does not close a modal page over the pause menu (KH2's first-open tutorials, such
+    // as "What is Auto-Reload?", advance only on Cross). While the pause is still up UnwindStepMs after a
+    // press, the close goes on with Circle (backs out of a submenu, closes the plain menu), Start (closes
+    // the plain menu), then Cross (advances a page both of those ignore), stopping the moment the menu
+    // reads closed. Cross comes only after Circle and Start have both failed, so it never opens a submenu.
+    static constexpr std::uint64_t UnwindStepMs = 400;
+    static constexpr unsigned UnwindPresses = 24;
     // VUH-2268: after the host's release, a client that has not converged in
     // this long gets its input back instead of staying frozen.
     static constexpr std::uint64_t ReleaseTimeoutMs = 10000;
     Phase Current() const noexcept { return phase_; }
+    unsigned Unwound() const noexcept { return unwound_; }
     bool Holding() const noexcept {
         return phase_ != Phase::Idle && phase_ != Phase::Complete && phase_ != Phase::Failed;
     }
@@ -76,7 +87,8 @@ public:
             if (!owned_ || s.menu != pauseMenu_) { Fail(); break; }
             if (wake_) {
                 phase_ = Phase::CloseRelease;
-                deadline_ = s.now + 1000;
+                lastPress_ = s.now;
+                unwound_ = 0;
                 return {true, true, false, false};
             }
             return {true, false, false, false};
@@ -85,7 +97,23 @@ public:
             return {true, false, false, false};
         case Phase::Closing:
             if (s.menu == 255) { owned_ = false; phase_ = Phase::OwnerWait; }
-            else if (s.menu != pauseMenu_ || s.now >= deadline_) { Fail(); break; }
+            else if (!unwound_ && s.menu != pauseMenu_) { Fail(); break; }
+            else if (s.now >= lastPress_ + UnwindStepMs) {
+                if (unwound_ >= UnwindPresses) {
+                    Fail();
+                    Output out {false, false, true, false};
+                    out.stuck = true;
+                    return out;
+                }
+                static constexpr std::uint16_t order[] = {CircleButton, StartButton, CrossButton};
+                const std::uint16_t press = order[unwound_ % 3];
+                ++unwound_;
+                lastPress_ = s.now;
+                phase_ = Phase::CloseRelease;
+                Output out {true, press == StartButton, false, false};
+                if (press != StartButton) out.buttons = press;
+                return out;
+            }
             return {true, false, false, false};
         case Phase::OwnerWait:
             if (s.menu != 255) { Fail(); break; }
@@ -109,7 +137,8 @@ public:
     }
 private:
     Phase phase_ = Phase::Idle;
-    std::uint64_t deadline_ = 0, releaseDeadline_ = 0;
+    std::uint64_t deadline_ = 0, releaseDeadline_ = 0, lastPress_ = 0;
+    unsigned unwound_ = 0;
     bool owned_ = false, wake_ = false, follow_ = false, press_ = false;
     unsigned pauseMenu_ = 10;
 };
