@@ -68,6 +68,20 @@ void unpinned() {
     check(u.Tick(true, basement, 99999) == U::Step::Played, "never held again after the release");
 }
 
+void soloWait() {
+    using S = prologue::SoloWait;
+    S w;
+    check(w.Tick(false, true, 1000) == S::Step::Off && w.Tick(true, false, 2000) == S::Step::Waiting &&
+          w.SecondsLeft(2000) == 60, "a seat left alone waits, showing the seconds left");
+    check(w.Tick(true, false, 2000 + prologue::SoloWaitMs - 1) == S::Step::Waiting &&
+          w.Tick(true, false, 2000 + prologue::SoloWaitMs) == S::Step::Released && w.SecondsLeft(70000) == 0,
+          "after 60 s it plays on solo");
+    check(w.Tick(false, false, 80000) == S::Step::Released && w.Tick(true, false, 90000) == S::Step::Released,
+          "the next checked site does not wait again while still alone");
+    check(w.Tick(false, true, 100000) == S::Step::Off && w.Tick(true, false, 110000) == S::Step::Waiting,
+          "a peer that came back and left again is waited for again");
+}
+
 void policy() {
     using prologue::Hold;
     const std::array<std::uint64_t, 3> two{11, 12, 0};
@@ -265,4 +279,4 @@ void network() {
     server.stop();
 }
 } // namespace
-int main() { if (enet_initialize()) return 2; codec(); unpinned(); policy(); site(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }
+int main() { if (enet_initialize()) return 2; codec(); unpinned(); soloWait(); policy(); site(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }

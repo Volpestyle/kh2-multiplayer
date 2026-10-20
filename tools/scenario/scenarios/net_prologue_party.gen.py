@@ -126,7 +126,7 @@ released = ("log_count('[prologue] control released at=02/{room:02X} evt={evt}',
 # VUH-1512: each seat's clone of its own body wears the owner seat's color (PrologueSeats.hpp SeatColors) in
 # the actor's model color word (+0x4D8: red, green, blue, alpha 0x80): the host's copy of the friend is blue,
 # the friend's copy of the host gold. A Sora friend's clones are different bodies and keep their colors.
-SEAT_COLOR_WORDS = {0: 0x805898B8, 1: 0x80C88868}
+SEAT_COLOR_WORDS = {0: 0x805898B8, 1: 0x80F08050}
 
 
 def duplicate_colors(friend):

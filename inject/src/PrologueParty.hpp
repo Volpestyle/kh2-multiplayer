@@ -65,5 +65,10 @@ std::uint16_t RefusedProfile();
 // generation's roster (a reconnect starts a new one). A client's host-led load into a prologue site waits
 // for it, so that load builds this seat's own body and the clone from the agreed pair.
 bool ProfilesSettled(std::uint32_t generation);
+// VUH-1512, any thread: while this seat waits alone at a checked site (prologue::SoloWait), the seconds left
+// and the last known display name of the seat it waits for (empty when unknown). False when not waiting.
+bool SoloWaiting(std::array<char, 24>& name, std::uint32_t& secondsLeft);
+// Any thread: the session's latest display names (HUD roster), remembered per connected slot for SoloWaiting.
+void NoteRosterNames(const std::array<std::uint64_t, 3>& connections, const std::array<std::array<char, 24>, 3>& names);
 
 } // namespace kh2coop::inject::prologueparty

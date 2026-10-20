@@ -1178,7 +1178,8 @@ static void PublishCoopHud(const AvatarState& local, const PuppetAuthority& befo
     input.clearFrames = g_crownClearFrames;
     input.afterEvent = g_crownAfterEvent;
     input.local = local;
-    (void)g_avatarBridge.TryReadRosterNames(input.names);
+    if (g_avatarBridge.TryReadRosterNames(input.names))
+        prologueparty::NoteRosterNames(input.names.connections, input.names.names);  // VUH-1512: "Waiting for <name>"
     for (int i = 0; i < 2; ++i) {
         auto& remote = input.remote[static_cast<std::size_t>(i)];
         remote.active = IsPuppetActive(i);

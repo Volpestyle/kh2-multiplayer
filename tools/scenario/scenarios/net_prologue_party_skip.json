@@ -3869,7 +3869,7 @@
   },
   {
    "do": "assert",
-   "expr": "log_count('[prologue] duplicate body 0x5A', 0) > 0 and int(str(saved['clone_color0']), 0) == 2160625768 and log_count('[prologue] duplicate body 0x5A', 1) > 0 and int(str(saved['clone_color1']), 0) == 2153289912",
+   "expr": "log_count('[prologue] duplicate body 0x5A', 0) > 0 and int(str(saved['clone_color0']), 0) == 2163245136 and log_count('[prologue] duplicate body 0x5A', 1) > 0 and int(str(saved['clone_color1']), 0) == 2153289912",
    "message": "a seat's clone of its own Roxas does not wear the owner seat's color"
   },
   {

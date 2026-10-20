@@ -184,7 +184,7 @@ inline bool RemoteSlot(const Seats& s, std::uint8_t& slot) {
 using SeatColor = std::array<std::uint8_t, 3>;
 inline constexpr std::array<SeatColor, 3> SeatColors {{
     {0xB8, 0x98, 0x58},   // seat 0, the host: gold
-    {0x68, 0x88, 0xC8},   // seat 1: blue
+    {0x50, 0x80, 0xF0},   // seat 1: blue
     {0x70, 0xB8, 0x70}}}; // seat 2: green
 inline bool DuplicateColor(std::uint16_t localObject, std::uint16_t cloneObject, std::uint8_t ownerSlot, SeatColor& color) {
     if (!localObject || localObject != cloneObject || ownerSlot >= SeatColors.size()) return false;
@@ -230,6 +230,34 @@ public:
 private:
     std::uint64_t sinceMs_ = 0, releasedMs_ = 0;
     std::array<std::uint8_t, 10> at_ {};
+    bool released_ = false;
+};
+
+// VUH-2464 policy, bounded by VUH-1512 (lead, 2026-10-20): a seat left alone at a checked site (its peer
+// dropped, or never joined) holds as `solo` for SoloWaitMs, saying who it waits for, then plays on natively.
+// It stays released for every later solo hold until another seat connects; a peer that comes back rejoins
+// at the next checked site through the normal re-admission, and the next solo spell waits again.
+inline constexpr std::uint64_t SoloWaitMs = 60000;
+class SoloWait {
+public:
+    enum class Step { Off, Waiting, Released };
+    // soloHold: this frame's decision at a checked site is Hold::Solo; peers: another seat is connected.
+    Step Tick(bool soloHold, bool peers, std::uint64_t nowMs) noexcept {
+        if (peers) { sinceMs_ = 0; released_ = false; return Step::Off; }
+        if (!soloHold) return released_ ? Step::Released : Step::Off;
+        if (released_) return Step::Released;
+        if (!sinceMs_) sinceMs_ = nowMs ? nowMs : 1;
+        if (nowMs - sinceMs_ < SoloWaitMs) return Step::Waiting;
+        released_ = true;
+        return Step::Released;
+    }
+    // Whole seconds left while waiting (0 when not waiting).
+    std::uint32_t SecondsLeft(std::uint64_t nowMs) const noexcept {
+        if (released_ || !sinceMs_ || nowMs - sinceMs_ >= SoloWaitMs) return 0;
+        return static_cast<std::uint32_t>((SoloWaitMs - (nowMs - sinceMs_) + 999) / 1000);
+    }
+private:
+    std::uint64_t sinceMs_ = 0;
     bool released_ = false;
 };
 

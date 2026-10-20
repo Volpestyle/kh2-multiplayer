@@ -3263,8 +3263,8 @@ acceptance evidence for the engine-driven scenes. `net_prologue_party_sora.json`
 `net_prologue_party_sora_skip.json` (VUH-1512) are the same checks with the friend on
 `KH2COOP_PROFILE=0x54`: each seat expects the host's Roxas and the friend's Sora, one of
 them local and the other a clone. The Roxas + Roxas fixtures also read each seat's clone
-model color at first control: the host's copy of the friend wears seat 1's blue and the
-friend's copy of the host seat 0's gold. `net_prologue_party_sora_reconnect.json` takes
+model color at first control: the host's copy of the friend wears seat 1's blue
+(`0x80F08050`) and the friend's copy of the host seat 0's gold (`0x805898B8`). `net_prologue_party_sora_reconnect.json` takes
 the Sora skip fixture to first control, drops the friend's runtime (`runtime_stop`) and
 joins a new one. The friend must declare Sora again and be re-admitted by one host-led load
 after the profiles agree, the host must not reload, and the friend's input must move the

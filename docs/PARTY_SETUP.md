@@ -867,8 +867,19 @@ agreement is complete on that world-session generation
 site waits ...`). The host keeps its load and rebinds its clone. Run
 `20261020-032537`: the friend came back as Sora, both seats released, and the
 friend's input moved the host's Sora clone. The returning friend enters at the
-room's entrance, not where it left. While the friend is away the host holds
-with reason `solo`; it has no bound for a friend that never returns.
+room's entrance, not where it left (accepted for now).
+
+**Solo wait (VUH-1512, part of this hold policy).** A seat left alone at a checked
+site, because its peer dropped or never joined, holds with reason `solo` for
+`prologue::SoloWaitMs` (60 s). The overlay shows "Waiting for <name>..." (the
+peer's last HUD roster name) and the seconds left. Then the seat plays on solo
+(`[prologue] solo wait over ...`), and later solo holds release at once until
+another seat connects. A seat that returns joins through the normal
+re-admission. At a load this seat has already played, a roster change no
+longer holds it again: the returning seat binds at the next checked site
+(`[prologue] already playing ...: <reason> waits for the next checked site`).
+A host event at an unchanged roster still holds the friend `remote-unbound`
+as before.
 
 **Duplicate colors (VUH-1512).** A clone of this seat's own body (two Roxases,
 or two Soras) wears its owner seat's color: seat 0 (the host) gold, seat 1
@@ -880,9 +891,10 @@ and nothing else rewrote them in the probe (`20261020-033155`). The DLL writes
 the three bytes once after a bound construction, on the clone only. A clone of
 a different body (a Sora friend's) keeps its own colors. Run `20261020-034007`
 (Roxas + Roxas, skipped fixture): both seats logged the color at evt95, evt97,
-evt99 and the Sandlot, and read back `0x80C88868` (blue) on the host's clone
-and `0x805898B8` (gold) on the friend's. Under Tram Common's warm light the
-blue is subtler than the gold.
+evt99 and the Sandlot, and read back blue on the host's clone and `0x805898B8`
+(gold) on the friend's. Under Tram Common's warm light that first blue
+(`68 88 C8`) was subtler than the gold, so seat 1 is now `50 80 F0`
+(`0x80F08050`).
 
 **Events.** A host event tears down the field actors, the clone included, and
 the friend holds with reason `remote-unbound` until the post-event reload

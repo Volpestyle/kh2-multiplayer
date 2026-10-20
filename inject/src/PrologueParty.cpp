@@ -11,7 +11,9 @@
 #include "MinHook.h"
 
 #include <Windows.h>
+#include <algorithm>
 #include <atomic>
+#include <mutex>
 #include <cstdlib>
 #include <cstring>
 
@@ -43,6 +45,7 @@ std::atomic<std::uint64_t> g_holdNowLow {0};
 std::atomic<std::uint16_t> g_holdNowHigh {0};
 Hold g_loggedHold = Hold::None;
 std::array<std::uint8_t, 10> g_loggedAt {};
+std::uint32_t g_loggedLoad = 0;  // a reload at the same location (a re-admission) logs its decision again
 std::array<std::uint8_t, 10> g_unpinnedAt {};
 bool g_released = false;   // this seat has been released at a site once
 prologue::UnpinnedStart g_unpinnedStart;  // VUH-2486
@@ -52,6 +55,20 @@ std::atomic<std::uint64_t> g_bodyAtLow {~0ull};
 std::atomic<std::uint16_t> g_bodyAtHigh {0xFFFF};
 std::uint16_t g_refusalLogged = 0;
 std::atomic<std::uint16_t> g_refused {0};
+// VUH-1512: the bounded solo hold; the seat it waits for and the last display name seen per slot.
+prologue::SoloWait g_soloWait;
+// The load (NOW and serial) this seat last played at, and the roster then. After a seat drops or returns,
+// it joins at the next checked site, so at that load only the solo wait holds this seat again; the same
+// roster's holds (a host event's remote-unbound) are unchanged.
+std::array<std::uint8_t, 10> g_playedAt {};
+std::array<std::uint64_t, 3> g_playedRoster {};
+std::uint32_t g_playedLoad = 0;
+bool g_playedLogged = false;
+std::uint8_t g_lastRemoteSlot = 0xFF;
+std::mutex g_namesLock;
+std::array<std::array<char, 24>, 3> g_names {};
+std::array<char, 24> g_waitName {};
+std::atomic<std::uint32_t> g_waitSeconds {0};
 // VUH-1512: the generation whose profile agreement is complete (or refused), published by Tick.
 std::atomic<std::uint32_t> g_settledGeneration {0};
 // VUH-1512: the area loader's object registration (FUN_1403E0460(object, priority, kind)) and its file
@@ -223,17 +240,44 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
                    std::memory_order_release);
     if (decided) hold = prologue::Release(g_seats, LocationOf(now), LocalBoundHere(now));
     else if (early) hold = Hold::Unpinned;
+    const bool playedHere = decided && g_playedLoad && g_playedLoad == warp::LoadSerial() && g_playedAt == now;
+    if (playedHere && roster != g_playedRoster && hold != Hold::None && hold != Hold::Solo) {
+        if (g_log && !g_playedLogged)
+            g_log("[prologue] already playing at=%02X/%02X evt=%u: %s waits for the next checked site", now[0], now[1],
+                  LocationOf(now).evt, prologue::HoldName(hold));
+        g_playedLogged = true;
+        hold = Hold::None;
+    }
+    // VUH-1512: a seat left alone waits SoloWaitMs, then plays on solo until another seat connects.
+    if (std::uint8_t remote = 0; prologue::RemoteSlot(g_seats, remote)) g_lastRemoteSlot = remote;
+    const auto solo = g_soloWait.Tick(hold == Hold::Solo, prologue::Present(roster) >= 2, nowMs);
+    if (hold == Hold::Solo && solo == prologue::SoloWait::Step::Released) {
+        if (g_log && g_loggedHold == Hold::Solo)
+            g_log("[prologue] solo wait over after %llu ms at=%02X/%02X evt=%u: playing on solo; a returning seat rejoins at the next checked site",
+                  static_cast<unsigned long long>(prologue::SoloWaitMs), now[0], now[1], LocationOf(now).evt);
+        hold = Hold::None;
+    }
+    if (solo == prologue::SoloWait::Step::Waiting && hold == Hold::Solo) {
+        std::lock_guard lock(g_namesLock);
+        g_waitName = g_lastRemoteSlot < g_names.size() ? g_names[g_lastRemoteSlot] : std::array<char, 24> {};
+        g_waitSeconds.store((std::max)(1u, g_soloWait.SecondsLeft(nowMs)), std::memory_order_release);
+    } else {
+        g_waitSeconds.store(0, std::memory_order_release);
+    }
     g_refused.store(decided && hold == Hold::UnqualifiedProfile ? prologue::RefusedProfile(g_seats) : 0,
                     std::memory_order_release);
     Publish(hold, now);
-    if (decided && hold == Hold::None) g_released = true;
+    if (decided && hold == Hold::None) {
+        g_released = true;
+        if (!playedHere) { g_playedAt = now; g_playedRoster = roster; g_playedLoad = warp::LoadSerial(); g_playedLogged = false; }
+    }
     // One line per decision at each prologue field location (a seat that arrives after its peer bound
     // is released at its first field frame), and one when a hold ends by leaving the field.
-    if (g_log && (decided || early) && (hold != g_loggedHold || now != g_loggedAt)) {
+    if (g_log && (decided || early) && (hold != g_loggedHold || now != g_loggedAt || warp::LoadSerial() != g_loggedLoad)) {
         g_log("[prologue] %s at=%02X/%02X evt=%u site=%s localBound=%u", hold == Hold::None ? "control released" : "hold",
               now[0], now[1], LocationOf(now).evt, site ? site->name : "none", LocalBoundHere(now) ? 1u : 0u);
         if (hold != Hold::None) g_log("[prologue] hold reason=%s", prologue::HoldName(hold));
-        g_loggedHold = hold; g_loggedAt = now;
+        g_loggedHold = hold; g_loggedAt = now; g_loggedLoad = warp::LoadSerial();
     } else if (g_log && !decided && !early && g_loggedHold != Hold::None) {
         g_log("[prologue] hold ended without release: left the prologue field at=%02X/%02X evt=%u", now[0], now[1], LocationOf(now).evt);
         g_loggedHold = Hold::None;
@@ -381,6 +425,20 @@ bool HoldInput(void* inputStruct) {
 std::uint8_t PublishedHold() { return g_hold.load(std::memory_order_acquire); }
 UnpinnedNotice Notice() { return static_cast<UnpinnedNotice>(g_notice.load(std::memory_order_acquire)); }
 std::uint16_t RefusedProfile() { return g_refused.load(std::memory_order_acquire); }
+bool SoloWaiting(std::array<char, 24>& name, std::uint32_t& secondsLeft) {
+    secondsLeft = g_waitSeconds.load(std::memory_order_acquire);
+    if (!secondsLeft) return false;
+    std::lock_guard lock(g_namesLock);
+    name = g_waitName;
+    return true;
+}
+
+void NoteRosterNames(const std::array<std::uint64_t, 3>& connections, const std::array<std::array<char, 24>, 3>& names) {
+    std::lock_guard lock(g_namesLock);
+    for (std::size_t i = 0; i < names.size(); ++i)
+        if (connections[i] && names[i][0]) g_names[i] = names[i];
+}
+
 bool ProfilesSettled(std::uint32_t generation) {
     return !g_requested || (generation && g_settledGeneration.load(std::memory_order_acquire) == generation);
 }

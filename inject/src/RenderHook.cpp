@@ -931,6 +931,7 @@ void RefreshOverlayText(DXGI_FORMAT format) {
     FillRect(g_overlayDc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
     SetTextColor(g_overlayDc, RGB(255, 255, 255));
     TextOutW(g_overlayDc, 8, 5, text, static_cast<int>(wcslen(text)));
+    std::uint32_t soloSeconds = 0;
     if (eventholdnative::HoldingInput() || warp::WaitingAtBlockedExit()) {
         SetTextColor(g_overlayDc, RGB(255, 210, 90));
         // Events, World Map travel (VUH-2341) and a friend left at its own
@@ -950,6 +951,14 @@ void RefreshOverlayText(DXGI_FORMAT format) {
         constexpr wchar_t next[] = L"Both players wait. Relaunch as Roxas or Sora.";
         TextOutW(g_overlayDc, 8, 39, reason, static_cast<int>(wcslen(reason)));
         TextOutW(g_overlayDc, 8, 70, next, static_cast<int>(std::size(next) - 1));
+    } else if (std::array<char, 24> name {}; prologueparty::SoloWaiting(name, soloSeconds)) {
+        // VUH-1512: this seat is alone at a checked site and plays on solo after prologue::SoloWaitMs.
+        SetTextColor(g_overlayDc, RGB(255, 210, 90));
+        wchar_t waiting[64], next[64];
+        swprintf_s(waiting, L"Waiting for %hs...", name[0] ? name.data() : "your friend");
+        swprintf_s(next, L"Continuing solo in %u s", soloSeconds);
+        TextOutW(g_overlayDc, 8, 39, waiting, static_cast<int>(wcslen(waiting)));
+        TextOutW(g_overlayDc, 8, 70, next, static_cast<int>(wcslen(next)));
     } else if (const auto notice = prologueparty::Notice(); notice != prologueparty::UnpinnedNotice::None) {
         // VUH-2486: a session started at a mid-prologue save with no two-player layout.
         SetTextColor(g_overlayDc, RGB(255, 210, 90));
@@ -1466,6 +1475,7 @@ void OnPresent(IDXGISwapChain* swapChain) {
                                  warp::WaitingAtBlockedExit() ||
                                  prologueparty::Notice() != prologueparty::UnpinnedNotice::None ||
                                  prologueparty::RefusedProfile() != 0 ||
+                                 [] { std::array<char, 24> name {}; std::uint32_t seconds = 0; return prologueparty::SoloWaiting(name, seconds); }() ||
                                  warp::DoorHeldRecently();
         // VUH-2415: decide visibility before touching the ring, so a hidden crown submits nothing.
         bool drawCrown = false;
