@@ -37,7 +37,7 @@ std::vector<std::uint8_t> unchecked(const FieldObjects& m) {
 }
 void codec() {
     auto m = sample(); auto bytes = encode(m);
-    check(PROTOCOL_VERSION == 32 && bytes[0] == 51 && bytes.size() == 3 + FIELD_OBJECT_HEADER_BYTES + FIELD_OBJECT_ENTRY_BYTES,
+    check(PROTOCOL_VERSION == 33 && bytes[0] == 51 && bytes.size() == 3 + FIELD_OBJECT_HEADER_BYTES + FIELD_OBJECT_ENTRY_BYTES,
           "protocol25 packet51 has exact full-location header and entry size");
     check(encode(decode(bytes)) == bytes, "all fields round trip including anchor and unrestricted native type");
     check(isWorldPacket(PacketType::FieldObjects) && isScopedWorldPacket(PacketType::FieldObjects) &&

@@ -1,7 +1,7 @@
 # Downed / revive network contract (VUH-1504)
 
 The downed contract was introduced in protocol11; the current session protocol
-is **32** (D17 native difficulty and returns), with AvatarBridge **4**. Older network
+is **33** (D17 native difficulty and returns; v33 the host's mission end), with AvatarBridge **4**. Older network
 peers and avatar mappings refuse the new contract. The sealed friend packages
 are unchanged. ENet and the default-off Steam backend use the same policy.
 
@@ -381,12 +381,15 @@ boss/encounter defeat or a save point.
   seats in wave 1, between the waves and in wave 2. Assumed from Ghidra and not yet observed live:
   - that the save byte is at + 0x2498 (FM-02 reads 3, Critical, through the same read the policy uses);
   - that the re-down in a new room is clean.
-- **Known gap (live, run `20261021-174207`):** in FM-02's Basement Hall the host's event starts on the same
-  frame as `mission_complete` (5568). The mission edge fires (`encounter defeated: mission complete`) but
-  its claim is refused (`connection=0 claimed=0`): the downed scope, and so every revive request, needs
-  field play, and the next field frame (5838) is past the friend's fresh pose. The friend sits out into
-  the Axel fight until a save point. The follow-up (v33) has the friend owe itself the return
-  from the host's relay-scoped MissionState (end trap 3), under the same receipt rules.
+- **The host's mission end on the client (v33, VUH-2656).** In FM-02's Basement Hall the host's event
+  starts on the same frame as `mission_complete` (5568, run `20261021-174207`): the host's mission edge
+  fires but its claim is refused (`connection=0 claimed=0`), because the downed scope, and so every revive
+  request, needs field play. So a client counts the host's mission ends itself: an admitted MissionState
+  (the host's connection and delivery, relay-scoped, this client's current room) whose end trap turned 3
+  for its mission is one count (a resend is not another). A count that rises outside a transition or load
+  window, while this client is downed, owes it the return (`[downed] host mission complete ... owed=1`):
+  the same receipt as a relayed return, applied out of the event or carried through the room change to
+  25% on the next room's first settled field frame; another session revokes it. One per downing.
 - The cage edge (2 -> 0 in field) has not fired live yet: no run so far had a forced battle end in field.
 - A boss whose post-fight transition comes before its forced battle clears is VUH-2628's path. A boss
   that ends a mission through its boss end (Twilight Thorn's TT34 trap 16) is not a mission-complete edge.

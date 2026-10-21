@@ -16,7 +16,7 @@
 
 ## Current implementation and qualification (2026-10-20)
 
-Current compatibility is protocol **32**, AvatarBridge **4** and WorldBridge
+Current compatibility is protocol **33**, AvatarBridge **4** and WorldBridge
 **12**. Use a matching product set; protocol numbers in dated results below
 identify those historical runs, not today's compatibility. The preview accepts
 only the verified Steam Global executable (`9002b2de`); Steam relay-only and ENet

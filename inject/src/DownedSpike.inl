@@ -983,6 +983,7 @@ static bool HoldInput(void* inputStruct) {
 // ---------------------------------------------------------------------------
 static downedreturn::EncounterTracker g_encounter;
 static downedreturn::MissionCompleteTracker g_missionComplete;
+static downedreturn::MissionCompleteTracker g_hostMissionEnd; // VUH-2656: a client's view of the host's ends
 static downedreturn::PendingEncounter g_encounterReturn;
 static downedreturn::LivingGate g_living;
 static downedreturn::ReturnLatch g_returnLatch;
@@ -1280,6 +1281,21 @@ static void Tick(uintptr_t head) {
                     static_cast<unsigned>(allyhit::DownedRefusals()), g_down.downedFrames, s.hp, s.deadAction ? 1u : 0u, g_down.deadFlagLost, g_down.actionLost,
                     g_down.controllerOn, g_down.statCalls, g_down.hitAttempts, g_down.enemyHits,
                     g_down.driftInput, g_down.driftNoInput, g_down.inputFrames, g_down.noInputFrames, s.motionId, static_cast<unsigned long long>(s.task));
+        }
+    }
+    if (enemysync::ActivationRole() == 2) {
+        // VUH-2656 (v33): the host's admitted MissionState ended its mission with mission_complete in this
+        // client's room (one count per mission, outside a transition or load window): a downing held here
+        // is owed its return, applied out of the event or carried through the room change as below.
+        const bool hostWon = g_hostMissionEnd.Step(enemysync::ClientHostMissionCompletes(), warp::TransitionSerial(),
+                                                   warp::LoadSerial(), warp::TransitionPending() || warp::LoadPending());
+        if (hostWon) {
+            std::uint64_t identity = 0;
+            const bool identityKnown = enemysync::SessionIdentity(identity);
+            const bool owed = g_owedReturn.OweHostEnd(g_down.state == State::Downed, identityKnown, identity);
+            Log("[downed] host mission complete room=%u/%u downed=%u owed=%u episode=%llX frame=%u", s.room.world,
+                s.room.room, g_down.state == State::Downed ? 1u : 0u, owed ? 1u : 0u,
+                static_cast<unsigned long long>(g_down.episode), g_frameCounter);
         }
     }
     const bool resolveReady = g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.hp > 0 &&

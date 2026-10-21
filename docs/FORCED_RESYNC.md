@@ -1,6 +1,6 @@
 # Forced world resync
 
-Current components require protocol32, AvatarBridge4, WorldBridge12 and
+Current components require protocol33, AvatarBridge4, WorldBridge12 and
 CaptureChannel1, rebuilt together. The VUH-2628 safe-field recovery and its
 bounded live result are recorded under [completion and limits](#completion-and-limits).
 

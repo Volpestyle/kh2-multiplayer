@@ -557,6 +557,66 @@ int main() {
           }
       } }
 
+    // VUH-2656 (v33): the host's mission end owes a held downing its return, with no request: only while
+    // downed, only with a known session, one per downing (a relayed return already owed is not doubled).
+    { OwedReturn o;
+      CHECK(!o.OweHostEnd(false, true, 0xA1) && !o.Owed());   // not downed: nothing to return
+      CHECK(!o.OweHostEnd(true, false, 0) && !o.Owed());      // no session
+      CHECK(o.OweHostEnd(true, true, 0xA1) && o.KindOwed() == static_cast<std::uint8_t>(Kind::EncounterDefeat));
+      CHECK(!o.OweHostEnd(true, true, 0xA1));                 // once
+      OwedReturn relayed; CHECK(relayed.Owe(2, true, true, 0xA1) && !relayed.OweHostEnd(true, true, 0xA1) &&
+                                relayed.KindOwed() == 2); }
+
+    // Regression (VUH-2656, run 20261021-174207, FM-02 Basement Hall): the host kills wave 2 and its
+    // cutscene starts on the same frame as mission_complete (5568), so the host's encounter edge has no field
+    // frame and sends nothing (its claim was refused live). The friend, downed in wave 1 and in its own event
+    // by then, receives the host's MissionState with end trap 3 (5600 here): its count rises outside any
+    // window, so the held downing is owed its return; the event ends in the room change to the Axel fight
+    // (7300) and the carried receipt resolves at 25% on that room's first settled field frame (7350).
+    //   none       the host's end never arrives: the friend sits out into the Axel fight, as before v33;
+    //   window     the end is admitted while a transition is pending: not taken (and not later);
+    //   up         the friend was revived before the end: nothing owed, nothing resolved;
+    //   replaced   the session is replaced before the new room's field: revoked, the friend sits out.
+    { enum class Case { Owed, None, Window, Up, Replaced };
+      for (const Case c : {Case::Owed, Case::None, Case::Window, Case::Up, Case::Replaced}) {
+          MissionCompleteTracker hostEnd; OwedReturn owed; DispositionLatch old; old.Observe(1, 0);
+          std::uint32_t transition = 2, load = 3, completes = 4;
+          bool held = true, sat = false, returned = false, resolvedGeneric = false, resolvePending = false;
+          for (std::uint32_t frame = 5500; frame < 7400; ++frame) {
+              const bool event = frame >= 5568 && frame < 7350;
+              const bool window = (frame >= 7300 && frame < 7340) || (c == Case::Window && frame >= 5590 && frame < 5610);
+              if (frame == 5600 && c != Case::None) ++completes;    // ReceiveMission: end trap turned 3
+              if (frame == 5590 && c == Case::Up) held = false;     // revived before the end (partner revive)
+              if (frame == 7300) ++transition;
+              if (frame == 7340) ++load;
+              const std::uint64_t identity = c == Case::Replaced && frame >= 7320 ? 0xB2 : 0xA1;
+              // DownedSpike Tick: the room change's decision (HoldLost) first,
+              if (held && frame == 7300) {
+                  const auto d = AfterTransitionFor(owed, old, true);
+                  held = false;
+                  sat = d.after == AfterTransition::SitOut;
+                  resolvePending = d.after == AfterTransition::Resolve && d.why != Disposition::Returned;
+              }
+              // then the host's end (role 2),
+              if (hostEnd.Step(completes, transition, load, window)) (void)owed.OweHostEnd(held, true, identity);
+              // then the owed step and the generic resolve.
+              OwedFacts f; f.identityKnown = true; f.identity = identity; f.frame = frame; f.downed = held;
+              f.applyReady = !event && !window; f.resolveReady = !held && !event && !window;
+              const auto action = OwedTick(owed, f, [] { return OwedOutcome::Applied; });
+              if (action == OwedAction::Resolve) returned = true;
+              if (action == OwedAction::RevokedSitOut) sat = true;
+              if (action == OwedAction::Attempt) held = false;
+              if (resolvePending && f.resolveReady) { resolvePending = false; resolvedGeneric = true; }
+          }
+          switch (c) {
+          case Case::Owed: CHECK(returned && !sat && !resolvedGeneric); break;
+          case Case::None: case Case::Window: CHECK(!returned && sat && !resolvedGeneric); break;
+          case Case::Up: CHECK(!returned && !sat && !resolvedGeneric); break;
+          case Case::Replaced: CHECK(!returned && sat && !resolvedGeneric); break;
+          }
+          CHECK(!owed.Owed());
+      } }
+
     CHECK(std::string_view(KindName(Kind::EncounterDefeat)) == "encounter-defeat" &&
           std::string_view(KindName(Kind::SavePoint)) == "save-point");
 

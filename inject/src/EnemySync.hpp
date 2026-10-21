@@ -155,6 +155,10 @@ bool SessionIdentity(std::uint64_t& out) noexcept;
 // VUH-2632: how many missions this host's script ended with mission_complete (table-4 trap 3), counted
 // by the mission mirror's host detour (0 while it is parked or its hooks are not installed).
 std::uint32_t HostMissionCompletes() noexcept;
+// VUH-2656: on a client, how many of the host's missions it has seen end with mission_complete: an
+// admitted MissionState (the host's connection and delivery, relay-scoped, this client's current room
+// from the host's last RoomTransition) whose end trap turned 3 for its mission.
+std::uint32_t ClientHostMissionCompletes() noexcept;
 // Capture once at the native observation. Retained work must send that context;
 // a newer header never grants permission to relabel an old packet.
 bool CaptureWorldContext(ProducerWorldContext& context);

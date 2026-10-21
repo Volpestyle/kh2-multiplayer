@@ -127,6 +127,14 @@ public:
         identity_ = identity;
         return true;
     }
+    // VUH-2656 (v33): a downed client's own receipt from the host's mission end. The host won its mission
+    // (MissionState end trap 3, see HostEnd) while this player was held downed in that room: the return is
+    // owed with no request, because a cutscene that starts on the same frame leaves the host no field frame
+    // to send one (run 20261021-174207). The same receipt and rules as a relayed return; one per downing.
+    bool OweHostEnd(bool downedHeld, bool identityKnown, std::uint64_t identity) noexcept {
+        if (!downedHeld) return false;
+        return Owe(static_cast<std::uint8_t>(Kind::EncounterDefeat), true, identityKnown, identity);
+    }
     // The room change: an owed return is carried; the plain decision is kept as its fallback.
     bool AtTransition(AfterTransition plain) noexcept {
         if (!kind_) return false;

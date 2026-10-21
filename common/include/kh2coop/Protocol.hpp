@@ -12,9 +12,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 32;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 33;
 
 // ===========================================================================
+// Protocol v33 (VUH-2656, D17): a downed client owes itself the return when the host's MissionState ends its
+// mission with mission_complete (end trap 3); no wire change, a behavior every peer must share.
 // Protocol v32 (VUH-2632, D17): the host's native difficulty in the RoomTransition packet trailer, and
 // ReviveRequest's kind (a partner revive, or a return at an encounter defeat or a save point); 51 bytes.
 // Protocol v31 admits host-only TT34 mission end16 and its authored event315 (VUH-2569).
