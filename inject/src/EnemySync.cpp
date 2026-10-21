@@ -1,3 +1,4 @@
+#include "kh2coop/EnemyClass.hpp"
 #include "EnemyRecordBinding.hpp"
 // ============================================================================
 // EnemySync â€” see EnemySync.hpp.
@@ -135,6 +136,10 @@ HeldAuthority g_authority {};                  // owner: latest admitted adverti
 std::uint64_t g_authorityFloor = 0, g_authorityFloorHost = 0;
 unsigned g_authorityLogs = 0;
 unsigned g_remoteHitLogs = 0;
+ScriptReactionCompletionFn g_scriptReactionCompletionApply{};
+std::uint64_t g_scriptReactionCompletionSequence{};
+std::atomic<ScriptCameraCurrentFn> g_scriptCameraCurrent{nullptr};
+std::atomic<ScriptReactionCurrentFn> g_scriptReactionCurrent{nullptr};
 ScriptCallApplyFn g_scriptCallApply = nullptr; // VUH-2252: set once by EntityHook
 std::uint64_t g_scriptCallSeq = 0;             // host: DLL lifetime; never recycled
 std::uint64_t g_scriptCallFloor = 0, g_scriptCallFloorHost = 0; // client: last admitted seq per host connection
@@ -614,7 +619,8 @@ bool ReadNativeEnemy(uintptr_t actor, NativeEnemy& enemy, bool& isEnemy) {
     if (enemy.objentry <= g_exeBase || enemy.objentry >= g_exeBase + 0x3000000) return false;
     std::uint8_t type = 0;
     if (!ReadNative(enemy.objentry + offsets::objentry::TYPE_FLAGS, type)) return false;
-    if (type != offsets::objentry::TYPE_BOSS && type != offsets::objentry::TYPE_MOB) return true;
+    if (!ReadNative(enemy.objentry + offsets::objentry::OBJECT_ID, enemy.objectId)) return false;
+    if (!enemyclass::Combat(type, enemy.objectId)) return true;
     char prefix[2] {};
     if (!CopyNative(enemy.objentry + offsets::objentry::NAME, prefix, sizeof(prefix))) return false;
     if (prefix[0] == 'F' && prefix[1] == '_') return true;
@@ -872,7 +878,7 @@ bool IsEnemy(uintptr_t actor) {
     const uintptr_t obj = ObjEntry(actor);
     if (!obj || !HpPtr(actor)) return false;
     const auto type = Read<std::uint8_t>(obj + offsets::objentry::TYPE_FLAGS);
-    if (type != offsets::objentry::TYPE_BOSS && type != offsets::objentry::TYPE_MOB) return false;
+    if (!enemyclass::Combat(type, Read<std::uint32_t>(obj + offsets::objentry::OBJECT_ID))) return false;
     const char* name = reinterpret_cast<const char*>(obj + offsets::objentry::NAME);
     return !(name[0] == 'F' && name[1] == '_');
 }
@@ -890,8 +896,10 @@ bool SafeNativeGameplay() {
                Read<std::int32_t>(g_exeBase + offsets::CONTROLLABLE) == 0 &&
                Read<std::uint8_t>(g_exeBase + offsets::IN_FIELD) != 0 &&
                Read<std::uint8_t>(g_exeBase + offsets::OPEN_MENU) == 0xFF &&
-               *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
-               *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) == 0;
+               ((*reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
+                 *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) == 0) ||
+                OwnedScriptCameraCurrent(*reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT),
+                    *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE)));
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -1513,25 +1521,31 @@ void DrainPendingSpawnTrace(bool correlate) {
     DrainLifecycleTrace(census);
 }
 
-bool ActivationContext(Role role, RoomTransition& location) {
+bool ActivationIdentityContext(Role role, RoomTransition& location, bool requireGameplay) {
     CheckActivationGeneration();
     if (role == Role::Off || CurrentRole() != role || g_role != role ||
         !g_orderedDeliverySerial || g_bridge.DeliverySerial() != g_orderedDeliverySerial ||
         g_activationGeneration == 0 || g_activationOrderedGeneration != g_activationGeneration ||
         !g_inst.live || g_seenTransition != warp::TransitionSerial() ||
-        g_seenLoad != warp::LoadSerial() || !SafeNativeGameplay() ||
+        g_seenLoad != warp::LoadSerial() || (requireGameplay && !SafeNativeGameplay()) ||
         !ReadLocationChecked(location) || location.worldId != g_inst.world ||
         location.roomId != g_inst.room || location.door != g_inst.door ||
         location.mapProgram != g_inst.map || location.battleProgram != g_inst.btl ||
         location.eventProgram != g_inst.evt) return false;
     if (role == Role::Host) {
-        if (g_hostBeginPending || !progresssync::HostReady()) return false;
+        // Identity-only camera proof must not depend on the per-frame progress
+        // sampler: that sampler itself uses this proof to admit an entity camera.
+        if (g_hostBeginPending || (requireGameplay && !progresssync::HostReady())) return false;
         location.epoch = g_epoch;
     } else {
         if (!g_host.arrived || !warp::HostTransitionArrived(g_host.epoch)) return false;
         location.epoch = g_host.epoch;
     }
     return location.epoch != 0 && g_bridge.SessionGeneration() == g_activationGeneration;
+}
+
+bool ActivationContext(Role role, RoomTransition& location) {
+    return ActivationIdentityContext(role,location,true);
 }
 
 #include "SpawnEmission.inl"
@@ -1907,8 +1921,9 @@ bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
     // VUH-2341: World Map travel holds friends like an event; it ends only
     // after the host lands in a room and the ordinary release rules pass.
     const bool travel = warp::HostTravelling();
-    const bool active = (before.state >= 2 && before.state <= 4) || before.context != 0 || travel;
-    const bool idle = before.state == 0 && before.context == 0 && !travel;
+    const bool ownedCamera = OwnedScriptCameraCurrent(before.context,before.state);
+    const bool active = (!ownedCamera && ((before.state >= 2 && before.state <= 4) || before.context != 0)) || travel;
+    const bool idle = ((before.state == 0 && before.context == 0) || ownedCamera) && !travel;
     if ((!active && !idle) || active == publication.activePublished) return true;
     // VUH-2487: an event that starts with a checked scene's own load (tt13-basement-entry) is announced
     // as that scene first, so its hold carries the scene's epoch and a friend already loading the
@@ -2986,7 +3001,7 @@ bool CaptureHostResync(std::uint32_t frame, ResyncSnapshot& snapshot, ProducerWo
         snapshot.recordDefinitions.push_back(recordsBefore.entries[i].content);
     for (const auto& spawn : g_inst.spawns) {
         if (!spawn.announced || spawn.spawnIndex == UINT16_MAX ||
-            (spawn.objectType != offsets::objentry::TYPE_MOB && spawn.objectType != offsets::objentry::TYPE_BOSS)) return false;
+            !enemyclass::Combat(spawn.objectType,spawn.objectId)) return false;
         ResyncEnemyState row;
         row.identity = {static_cast<std::uint16_t>(spawn.spawnIndex + 1), g_inst.btl,
                         spawn.spawnIndex, spawn.objectId, spawn.spawnPos};
@@ -3874,6 +3889,17 @@ bool ReceiveWorldPackets() {
                 }
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
                 if (type == PacketType::SeatState) { ReceiveSeatState(*scope, payload, size); continue; }
+                if(type==PacketType::ScriptReactionCompletion) {
+                    ByteReader r(payload,size);ScriptReactionCompletion m;read(r,m);
+                    RoomTransition room;
+                    if(CurrentRole()==Role::Host && g_scriptReactionCompletionApply && r.atEnd() &&
+                       m.ownerSlot>=1 && m.ownerSlot<=2 && scope->sourceConnectionId==m.requesterConnectionId &&
+                       RequesterCurrent(m.ownerSlot,m.requesterConnectionId,scope->sourceDeliverySerial) &&
+                       ReadLocationChecked(room) && m.location.epoch==g_epoch && SameLocation(m.location,room))
+                        (void)g_scriptReactionCompletionApply({m.occurrence,m.requesterConnectionId,m.resource,m.objectId,
+                                                            m.location.epoch,m.netId,m.command,m.ownerSlot});
+                    continue;
+                }
                 if (type == PacketType::StageEnd) { // VUH-2555: a friend's own stage end, for the host to make too;
                     // admitted before the role branches (its source is the friend), like SeatState
                     ByteReader r(payload, size);
@@ -4230,7 +4256,7 @@ bool ResyncFinalWriteContext(const NativeRecordWriteCheck& check) {
 }
 bool ResyncNativeSampleCurrent(const NativeEnemy& expected) {
     return expected.hp > 0 && expected.maxHp > 0 && expected.hp <= expected.maxHp &&
-        (expected.objectType == offsets::objentry::TYPE_MOB || expected.objectType == offsets::objentry::TYPE_BOSS) &&
+        enemyclass::Combat(expected.objectType,expected.objectId) &&
         Read<std::uint8_t>(expected.objentry + offsets::objentry::TYPE_FLAGS) == expected.objectType &&
         Read<std::uint16_t>(expected.objentry + offsets::objentry::NAME) != 0x5F46 && // F_ is noncombat
         Read<std::int32_t>(expected.status) == expected.hp && Read<std::int32_t>(expected.status + 4) == expected.maxHp;
@@ -4595,7 +4621,7 @@ void LogCausalDisappearance(const combatcausal::Target& original,const NativeCen
     NativeEnemy classified{};bool isEnemy=false;
     const bool classifierRead=ReadNativeEnemy(original.actor,classified,isEnemy);
     const char* exclusion=!objRead?"objentry-read":!objentry?"null-objentry":!inModule?"objentry-range":
-        !typeRead?"type-read":(type!=offsets::objentry::TYPE_BOSS && type!=offsets::objentry::TYPE_MOB)?"nonenemy-type":
+        !typeRead?"type-read":(!enemyclass::Combat(type,original.objectId))?"nonenemy-type":
         !prefixRead?"prefix-read":(prefix[0]=='F' && prefix[1]=='_')?"friendly-prefix":
         !statusRead?"status-read":!status?"null-status":!hpRead?"hp-read":
         !classifierRead?"remaining-metadata-read":watched.state!=CensusState::Complete?"census-unavailable":
@@ -5155,7 +5181,7 @@ bool ScaleHostHealth(NativeCensus& census) {
         if (native == census.enemies.end() || native->hp <= 0 || native->maxHp <= 0 || native->hp > native->maxHp) continue;
         const HealthIdentity identity{s.actor, s.objentry, s.status, s.controller, s.record, s.spawnIndex};
         const auto scaled = g_inst.difficulty.Scale({native->hp, native->maxHp},
-            native->objectType == offsets::objentry::TYPE_BOSS, g_hostHealthHistory.Applied(identity));
+            enemyclass::Boss(native->objectType, native->objectId), g_hostHealthHistory.Applied(identity));
         if (scaled.hp != native->hp || scaled.maxHp != native->maxHp) {
             if (!WriteHostScaledHealth(*native, s.controller, s.record, scaled, generation)) return false;
             if (g_log) g_log("[coop-difficulty] scale frame=%u objectId=%u actor=%llX players=%u mode=%u hp=%d->%d max=%d->%d",
@@ -5836,7 +5862,7 @@ bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept {
     WithdrawRecordBindings("native-mirror-boundary-held");return false;
 }
 
-bool SuppressFieldBrain(uintptr_t actor) noexcept {
+bool SuppressClientDecision(uintptr_t actor) noexcept {
     enemymirror::FieldCallbackReader reader;if(!reader)return false;
     // Suppress decisions while connected even before binding or during a stream
     // hold. Pose readiness must never authorize a client-only puzzle pickup.
@@ -5845,7 +5871,12 @@ bool SuppressFieldBrain(uintptr_t actor) noexcept {
        !g_orderedDeliverySerial || g_orderedDeliverySerial!=g_bridge.DeliverySerial() ||
        !RuntimeWriterLive())return false;
     NativeField f;bool field=false;
-    return ReadNativeField(actor,f,field) && field;
+    if(ReadNativeField(actor,f,field) && field)return true;
+    // Thorn's script owns captured players and RC phases. Stream warmup or
+    // missing point binding cannot authorize a second client BDX decision.
+    NativeEnemy enemy;bool combat=false;
+    return ReadNativeEnemy(actor,enemy,combat) && combat &&
+        enemyclass::LargeBoss(enemy.objectType,enemy.objectId);
 }
 bool FieldActorCurrent(uintptr_t actor) noexcept {
     enemymirror::FieldCallbackReader reader;if(!reader)return false;
@@ -5884,7 +5915,10 @@ enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     if (!s.status || !ReadNative(actor + 0x5C0, liveStatus) || liveStatus != s.status || !ReadNative(s.status, hp) ||
         hp <= 0) return Gate::None;
     out.netId = static_cast<std::uint16_t>(s.netId);
-    if (!g_mirror.PoseAt(out.netId, g_mirrorFrame, out) || out.objectId != s.objectId) return Gate::Bound;
+    if (!g_mirror.PoseAt(out.netId, g_mirrorFrame, out) || out.objectId != s.objectId) {
+        out.objectId=s.objectId; // exact class policy also applies while the stream warms up
+        return Gate::Bound;
+    }
     // S5: a stream pose far from where this spawn appeared is refused, never driven.
     const float dx = out.position.x - s.spawnPos.x, dy = out.position.y - s.spawnPos.y, dz = out.position.z - s.spawnPos.z;
     const float d2 = dx * dx + dy * dy + dz * dz;
@@ -6465,6 +6499,36 @@ void Shutdown() {
     g_bridge.Close();
 }
 
+void SetScriptCameraCurrent(ScriptCameraCurrentFn check) noexcept { g_scriptCameraCurrent.store(check,std::memory_order_release); }
+void SetScriptReactionCurrent(ScriptReactionCurrentFn check) noexcept {
+    g_scriptReactionCurrent.store(check,std::memory_order_release);
+}
+std::uint16_t ActionableNativeReaction(std::uint16_t raw) noexcept {
+    const auto check=g_scriptReactionCurrent.load(std::memory_order_acquire);
+    return check?check(raw):raw;
+}
+bool OwnedScriptCameraCurrent(uintptr_t context, std::int32_t state) noexcept {
+    const auto check=g_scriptCameraCurrent.load(std::memory_order_acquire);
+    // The timeline destructor clears its state before the event updater clears
+    // the context. Exact registered ownership also covers that closing interval.
+    return context && state>=0 && state<=4 && check && check(context,state);
+}
+bool ScriptCameraScopeCurrent(const DownedScope& scope) noexcept {
+    try {
+        const auto role=CurrentRole();RoomTransition room;
+        if(role==Role::Off || !scope.context.generation ||
+           WorldSessionGeneration()!=scope.context.generation ||
+           g_bridge.DeliverySerial()!=scope.context.deliverySerial ||
+           g_bridge.LocalSlot()!=scope.localSlot || !ActivationIdentityContext(role,room,false) ||
+           room.epoch!=scope.epoch || room.worldId!=scope.worldId || room.roomId!=scope.roomId ||
+           room.door!=scope.door || room.mapProgram!=scope.mapProgram ||
+           room.battleProgram!=scope.battleProgram || room.eventProgram!=scope.eventProgram)return false;
+        for(std::uint8_t i=0;i<3;++i)if(g_bridge.ConnectionId(i)!=scope.connections[i])return false;
+        return WorldSessionGeneration()==scope.context.generation &&
+            g_bridge.DeliverySerial()==scope.context.deliverySerial;
+    } catch(...) {return false;}
+}
+
 bool CaptureDownedScope(DownedScope& out) noexcept {
     out = {};
     try {
@@ -6718,6 +6782,17 @@ TargetAuthorityView CurrentTargetAuthority(std::uint64_t maxAgeMs) noexcept {
 void SetRemoteHitApply(RemoteHitApplyFn apply) noexcept { g_remoteHitApply = apply; }
 RemoteHitStats GetRemoteHitStats() noexcept { return g_remoteHitStats; }
 
+void SetScriptReactionCompletion(ScriptReactionCompletionFn apply) noexcept {g_scriptReactionCompletionApply=apply;}
+bool SendScriptReactionCompletion(const ScriptReactionCompletionRecord& c) {
+    DownedScope s;
+    if(CurrentRole()!=Role::Client || !CaptureDownedScope(s) || s.localSlot<1 || s.localSlot>2 ||
+       !s.connections[s.localSlot] || c.epoch!=s.epoch || g_scriptReactionCompletionSequence==UINT64_MAX)return false;
+    ScriptReactionCompletion m;
+    m.location={s.epoch,s.worldId,s.roomId,s.door,s.mapProgram,s.battleProgram,s.eventProgram};
+    m.seq=++g_scriptReactionCompletionSequence;m.requesterConnectionId=s.connections[s.localSlot];
+    m.occurrence=c.occurrence;m.resource=c.resource;m.objectId=c.objectId;m.netId=c.netId;m.command=c.command;
+    return SendCapturedWorld(encode(m),s.context);
+}
 bool SendScriptCalls(const ScriptCallRecord* records, std::size_t count, std::uint32_t hostFrame, std::uint64_t& seqOut) {
     seqOut = 0;
     DownedScope s;

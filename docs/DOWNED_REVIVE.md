@@ -328,7 +328,10 @@ carries `promptKind = 0`, so the overlay is unchanged.
   - Labels must fit `hud::HealthColumnChars` (10 cells), or they are ellipsized.
 - **Native reaction command (RC): the prompt yields.** The game's own RC also uses
   Triangle, so a prompt that would show is hidden while the RC is up. The hide
-  reason is `native-reaction`, and each suppression is logged as
+  reason is `native-reaction`. It also reports actionable Triangle ownership
+  when no revive target is nearby; the prompt remains hidden. Field, event,
+  menu, transition and local-down guards still take precedence. Each actual
+  in-range revive suppression is logged as
   `[revive-prompt] yield to native RC 0x2A11162=…`, at most 256 times per process.
   - The address is `offsets::REACT_CMD_STEAM` = `0x2A11162` (u16), calibrated in
     run 004215 at the GoA flag409 chest: it read `0x20` with "Open" showing and
@@ -339,6 +342,18 @@ carries `promptKind = 0`, so the overlay is unchanged.
     field play: the local player is canonical and not downed, with no event,
     menu or transition, for 30 consecutive frames (`NativeReactionFor`). Outside
     field play it counts as 0.
+  - VUH-2569 live07 exposed a further limit: this address is the canonical
+    controller's cached CMDINFO command, which can survive a skipped native
+    refresh. ScriptMirror now supplies an occurrence-qualified reaction before
+    the settled-field gate. Unrelated native targets retain native behavior;
+    a known mirrored target needs its fresh selection, current native identity,
+    host-owned occurrence and owner admission. The completion callback remains
+    consume-once. Native acceptance and this read-only query must share that
+    proof; no global HUD command is cleared. Runtime qualification is pending.
+  - The existing version7 fixture remains360 bytes and records both raw RC
+    addresses unchanged. Its fresh `promptHide` reports the product-qualified
+    ownership decision for the pilot's input observation; this changes no
+    network fields, combat strategy or revive timing.
 - `kh2coop_revive_prompt_test` covers the rules, cancels, latch, hide reasons,
   L1 exclusion, the RC gate and yield, and the HUD row (fill, label width,
   scope).

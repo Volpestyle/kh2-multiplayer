@@ -109,9 +109,22 @@ int main() {
       CHECK(NativeReactionFor(g, 0, true) == 0);
       CHECK(NativeReactionFor(g, 0x20, false) == 0);                          // menu/event/load resets
       CHECK(NativeReactionFor(g, 0x20, true) == 0); }
-    // The yield names only prompts it actually suppressed.
-    { State s; auto f = Good(); f.nativeReaction = 0x20; f.targetValid = false; CHECK(Step(s, f).hide == Hide::NoTarget); }
-    { State s; auto f = Good(); f.nativeReaction = 0x20; f.distance = kRange + 1.0f; CHECK(Step(s, f).hide == Hide::OutOfRange); }
+    // The existing read-only hide field reports actionable Triangle ownership
+    // even without a nearby revive target. This never creates a visible prompt.
+    { State s; auto f = Good(true); f.nativeReaction = 432; f.targetValid = false;
+      for(int i=0;i<80;++i) { const auto o=Step(s,f); CHECK(o.hide==Hide::NativeReaction && o.kind==Kind::Hidden && !o.fire && !o.progress); }
+      f.triangle=false; CHECK(!Step(s,f).fire); }
+    { State s; auto f = Good(); f.nativeReaction = 0x20; f.distance = kRange + 1.0f;
+      CHECK(Step(s, f).hide == Hide::NativeReaction);
+      f.nativeReaction=0; CHECK(Step(s,f).hide==Hide::OutOfRange); }
+    { auto guarded=[](auto mutate,Hide want) { State s;auto f=Good();f.nativeReaction=432;
+        f.targetValid=false;mutate(f);const auto o=Step(s,f);return o.hide==want && o.kind==Kind::Hidden && !o.fire; };
+      CHECK(guarded([](Facts& f){f.enabled=false;},Hide::Off));
+      CHECK(guarded([](Facts& f){f.localCanonical=false;},Hide::LocalUnavailable));
+      CHECK(guarded([](Facts& f){f.localDowned=true;},Hide::LocalDowned));
+      CHECK(guarded([](Facts& f){f.inEvent=true;},Hide::Event));
+      CHECK(guarded([](Facts& f){f.menuOpen=true;},Hide::Menu));
+      CHECK(guarded([](Facts& f){f.transition=true;},Hide::Transition)); }
     // Next to the chest's "Open" RC the prompt hides; away from it, it shows and a fresh hold fires.
     { State s; auto rc = Good(); rc.nativeReaction = 0x20; Output o {};
       for (int i = 0; i < 30; ++i) { auto f = rc; f.triangle = (i % 2) == 0; o = Step(s, f); CHECK(!o.fire); }

@@ -1,0 +1,30 @@
+{
+  "description": "VUH-2569 FM-00 rehearsal: FM-00 save point -> Station of Serenity door (base ~(60,600), walk-in trigger) -> Station of Calling 2/33.",
+  "steps": [
+    {
+      "do": "walk",
+      "to": [
+        60,
+        420
+      ],
+      "tol": 25,
+      "timeoutSec": 12
+    },
+    {
+      "do": "door",
+      "to": [
+        60,
+        600
+      ],
+      "room": [
+        2,
+        33
+      ],
+      "timeoutSec": 20,
+      "settleSec": 60
+    }
+  ],
+  "name": "twilight_thorn_serenity_door",
+  "retries": 0,
+  "source": "VUH-2466 run 20261020-002047_thorn_1; original route_fm00_to_calling.json in wt-vuh2338-2/build/rig/vuh2466. Coordinates retained without inventing route points."
+}

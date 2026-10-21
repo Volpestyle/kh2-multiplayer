@@ -3,6 +3,7 @@
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/SessionHost.hpp"
 #include "ScriptMirror.hpp"
+#include "ScriptReaction.hpp"
 #include <enet/enet.h>
 #include <array>
 #include <chrono>
@@ -38,6 +39,139 @@ bool refusedRead(const std::vector<std::uint8_t>& bytes) {
 }
 bool refusedWrite(const ScriptCall& m) { try { encode(m); } catch (const std::exception&) { return true; } return false; }
 
+void reactionChecks() {
+    std::array<R::ReactionSeat, 3> seats{{{100, {10,0,0}, true,true,true},
+                                        {101, {-10,0,0}, true,true,true},
+                                        {102, {0,20,0}, true,true,true}}};
+    check(R::ReactionWinner({}, 50, seats) == 0, "RC distance tie chooses stable seat zero");
+    seats[0].living = false;
+    check(R::ReactionWinner({}, 50, seats) == 1, "downed host cannot win a reaction");
+    seats[1].fresh = false;
+    check(R::ReactionWinner({}, 50, seats) == 2, "stale seat cannot win a reaction");
+    seats[2].capable = false;
+    check(R::ReactionWinner({}, 50, seats) == -1, "unsupported profile cannot claim a reaction");
+    seats[1].fresh = seats[2].capable = true;
+    check(R::ReactionWinner({}, 9, seats) == -1, "outside range is not eligible");
+    check(R::ReactionWinner({0, std::numeric_limits<float>::quiet_NaN(), 0}, 50, seats) == -1,
+          "nonfinite trigger refuses arbitration");
+    std::array<R::ActorRoleFacts,3> roles{{{500,10,true,true},{500,20,true,true},{600,30,true,true}}};
+    check(R::SelectActorRole(500,20,10,roles)==1,"executing remote coroutine wins over canonical local controller");
+    check(R::SelectActorRole(500,99,10,roles)==0,"native parent resolves nested role callback");
+    check(R::SelectActorRole(500,99,98,roles)==-1,"ambiguous root callback refuses both captured roles");
+    roles[0].current=false;
+    check(R::SelectActorRole(500,10,98,roles)==1,"retired actor roots cannot borrow a role");
+    roles[1].captured=false;
+    check(R::SelectActorRole(500,99,98,roles)==-1,"uncaptured fallback is refused");
+    R::ReactionOccurrences occurrences;
+    auto* w = occurrences.Open(0xABC, 1, 1, 432, 7, 100, 60, {}, 50, seats);
+    check(w && w->slot == 1, "attack occurrence offers Reversal to closest living friend");
+    if (!w) return;
+    const auto first = w->occurrence;
+    check(occurrences.Open(0xABC, 1, 1, 432, 7, 110, 60, {}, 50, seats) == w &&
+          w->openedFrame == 100 && w->occurrence == first, "repeated offers cannot extend or remint a window");
+    R::ReactionCompletion claim{first, 101, 7, 1, 432, 1};
+    auto forged = claim; forged.slot = 0; forged.connection = 100;
+    check(!R::ConsumeReaction(*w, forged, 7, 120, seats), "nonwinner completion is refused");
+    forged = claim; ++forged.source;
+    check(!R::ConsumeReaction(*w, forged, 7, 120, seats), "a projectile cannot borrow another trigger");
+    seats[1].connection = 201;
+    check(!R::ConsumeReaction(*w, claim, 7, 120, seats), "seat replacement retires old owner's rights");
+    seats[1].connection = 101;
+    check(!R::ConsumeReaction(*w, claim, 7, 120, seats), "returning connection cannot resurrect a revoked window");
+    auto downed=*w;downed.consumed=false;seats[1].living=false;
+    check(!R::RefreshReaction(downed,7,120,seats) && downed.consumed,"frame observation permanently revokes downed owner");
+    seats[1].living=true;
+    check(!R::ConsumeReaction(downed,claim,7,121,seats),"revive cannot resurrect the old occurrence");
+    auto valid=*w;valid.consumed=false;
+    check(!R::ConsumeReaction(valid, claim, 8, 120, seats) && !R::ConsumeReaction(valid, claim, 7, 160, seats),
+          "old room and expired window cannot complete");
+    check(R::ConsumeReaction(valid, claim, 7, 159, seats) && !R::ConsumeReaction(valid, claim, 7, 159, seats),
+          "winner's callback is reserved once before native execution");
+    check(occurrences.Open(0xABC, 1, 1, 432, 7, 160, 60, {}, 50, seats)->consumed,
+          "repeated script offer cannot resurrect a consumed trigger");
+    occurrences.Retire(0xABC, 1);
+    check(!occurrences.Find(first), "freed attack forgets its reaction window");
+    w = occurrences.Open(0xABC, 2, 1, 432, 7, 170, 60, {}, 50, seats);
+    check(w && w->occurrence > first && !R::ConsumeReaction(*w, claim, 7, 171, seats),
+          "reused attack handle has a new occurrence and rejects old completion");
+    const auto second = w ? w->occurrence : 0;
+    occurrences.Reset();
+    w = occurrences.Open(0xABC, 1, 1, 432, 7, 180, 60, {}, 50, seats);
+    check(w && w->occurrence > second, "session reset never rewinds host occurrence IDs");
+    occurrences.Reset();
+    bool filled=true;
+    for (unsigned i=0; i<R::ReactionOccurrences::Capacity; ++i)
+        filled=filled && occurrences.Open(i+1, 1, 1, 432, 7, 200, 60, {}, 50, seats) != nullptr;
+    check(filled,"bounded RC registry retains each distinct live attack");
+    check(!occurrences.Open(999, 1, 1, 432, 7, 200, 60, {}, 50, seats), "full registry refuses without evicting a live claim");
+}
+
+void completionCodecChecks() {
+    ScriptReactionCompletion m;m.location={9,2,34,0,157,157,157};m.seq=12;
+    m.requesterConnectionId=101;m.occurrence=999;m.resource=7;m.objectId=307;m.netId=1;m.command=297;
+    const auto bytes=encode(m);const std::uint8_t* p=nullptr;std::size_t n=0;
+    check(decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::ScriptReactionCompletion &&
+          n==SCRIPT_REACTION_COMPLETION_BYTES,"reaction completion has exact bounded framing");
+    ByteReader r(p,n);ScriptReactionCompletion decoded;read(r,decoded);
+    check(r.atEnd() && encode(decoded)==bytes,"reaction completion preserves room, occurrence and owner identity");
+    auto bad=m;bad.occurrence=0;
+    bool refused=false;try{encode(bad);}catch(const std::exception&){refused=true;}
+    check(refused,"unminted reaction occurrence refuses serialization");
+    auto trailing=bytes;trailing.push_back(0);
+    refused=false;try{decodePacketHeader(trailing.data(),trailing.size(),p,n);}catch(const std::exception&){refused=true;}
+    check(refused,"trailing completion bytes refuse framing");
+    auto offers=sample();offers.entries.resize(1);
+    auto& offer=offers.entries[0];offer.table=255;offer.index=1;offer.effect=77;
+    offer.args={num(0xFFFFFFFE),num(1),num(345),num(1)};
+    const auto offerBytes=encode(offers);
+    decodePacketHeader(offerBytes.data(),offerBytes.size(),p,n);
+    ByteReader offerReader(p,n);ScriptCall decodedOffer;read(offerReader,decodedOffer);
+    check(offerReader.atEnd() && encode(decodedOffer)==offerBytes,
+          "normalized RC offer roundtrip preserves 64-bit occurrence, command and seat");
+    auto invalid=offers;invalid.entries[0].args[2]=num(0);
+    check(refusedWrite(invalid),"zero offer command refuses");
+    invalid=offers;invalid.entries[0].args[2]=num(65536);
+    check(refusedWrite(invalid),"overflow offer command refuses");
+    invalid=offers;invalid.entries[0].args[3]=num(3);
+    check(refusedWrite(invalid),"unadmitted offer seat refuses");
+    invalid=offers;invalid.entries[0].args[0]=flt(1);
+    check(refusedWrite(invalid),"floating occurrence refuses");
+}
+
+void ownerCodecChecks() {
+    auto packet=sample();packet.entries.clear();
+    const auto add=[&](std::uint16_t operation,std::initializer_list<std::uint64_t> values) {
+        ScriptCallEntry record;record.netId=3;record.objectId=307;record.table=255;record.index=operation;record.effect=0x80000001u;
+        std::copy(values.begin(),values.end(),record.args.begin());packet.entries.push_back(record);
+    };
+    add(2,{num(1),num(101),num(2),num(60)});
+    add(3,{num(253),flt(0)});
+    add(4,{flt(1),flt(2),flt(3),flt(0.5f)});
+    add(5,{num(0x30306372),num(1)});
+    add(12,{num(1),num(101),num(2)});
+    add(1,{num(9),num(1),num(297),num(1)});
+    add(7,{num(1),num(297),num(1),num(100)});
+    add(8,{num(253),flt(25.5f)});
+    add(9,{num(0x80000001u),num(1305),num(UINT32_MAX),num(0)});
+    add(11,{num(100)});add(6,{});add(13,{num(16386),num(5)});add(14,{});
+    const auto bytes=encode(packet);const std::uint8_t* p=nullptr;std::size_t n=0;
+    decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader reader(p,n);ScriptCall decoded;read(reader,decoded);
+    check(reader.atEnd() && encode(decoded)==bytes && decoded.entries.size()==13,
+          "owner role, capture, camera, command and attack descriptors roundtrip without native handles");
+    auto bad=packet;bad.entries[0].args[0]=num(3);check(refusedWrite(bad),"role begin refuses unknown seat");
+    bad=packet;bad.entries[0].args[3]=num(61);check(refusedWrite(bad),"role begin refuses unbounded lease policy");
+    bad=packet;bad.entries[1].args[1]=num(0);check(refusedWrite(bad),"capture rate must retain its native float tag");
+    bad=packet;bad.entries[3].args[1]=num(2);check(refusedWrite(bad),"camera cannot name an arbitrary target actor");
+    bad=packet;bad.entries[6].args[0]=num(0);check(refusedWrite(bad),"owner command cannot replace the ordinary attack category");
+    bad=packet;bad.entries[6].args[3]=num(256);check(refusedWrite(bad),"command priority refuses truncation");
+    bad=packet;bad.entries[7].args[1]=flt(-1);check(refusedWrite(bad),"role motion refuses negative time");
+    bad=packet;bad.entries[8].args[0]=num(3);check(refusedWrite(bad),"script attack requires an immutable actor-role identity");
+    bad=packet;bad.entries[11].args[0]=num(16387);check(refusedWrite(bad),"attach refuses unqualified native flags");
+    bad=packet;bad.entries[11].args[1]=num(6);check(refusedWrite(bad),"attach refuses another bone");
+    bad=packet;bad.entries[11].args[2]=num(15845);check(refusedWrite(bad),"attach cannot carry a BDX callback PC");
+    bad=packet;bad.entries[12].args[0]=num(1);check(refusedWrite(bad),"detach cannot carry native actor handles");
+}
+
 void codecChecks() {
     const auto m = sample();
     const auto bytes = encode(m);
@@ -64,6 +198,7 @@ void codecChecks() {
     bad = m; bad.entries[1].netId = 0; check(refusedWrite(bad), "netId 0 refused");
     bad = m; bad.entries[1].args[1] = num(1); check(refusedWrite(bad), "a nonzero unused value refused");
     bad = m; bad.entries[1].args[0] = R::Tagged(R::kTagAddress, 5); check(refusedWrite(bad), "a handle value refused");
+    bad = m; bad.entries[1].args[0] = R::Tagged(R::kTagWork, 5); check(refusedWrite(bad), "native workspace tag refused by wire writer");
     bad = m; bad.entries[0].args[2] = num(1); check(refusedWrite(bad), "an int inside a vector refused");
     bad = m; bad.entries[0].args[0] = flt(std::numeric_limits<float>::quiet_NaN()); check(refusedWrite(bad), "NaN refused");
     bad = m; bad.entries[0].args[0] = flt(2.0e5f); check(refusedWrite(bad), "out-of-bound float refused");
@@ -73,6 +208,10 @@ void codecChecks() {
     check(refusedRead(patched), "reader refuses a trap outside the list");
     patched = bytes; patched[3 + SCRIPT_CALL_HEADER_BYTES - 1] = 0;
     check(refusedRead(patched), "reader refuses a zero entry count");
+    patched=bytes;
+    const auto tagOffset=3+SCRIPT_CALL_HEADER_BYTES+SCRIPT_CALL_ENTRY_BYTES+13+4;
+    for(unsigned k=0;k<4;++k)patched[tagOffset+k]=static_cast<std::uint8_t>(R::kTagWork>>(8*k));
+    check(refusedRead(patched),"wire reader refuses a patched native workspace tag");
 }
 
 void rulesAgreeWithCodec() {
@@ -80,9 +219,14 @@ void rulesAgreeWithCodec() {
     for (std::size_t i = 0; i < R::kTrapCount; ++i) {
         const auto& t = R::kTraps[i];
         const auto shape = scriptCallShape(t.table, t.index);
-        const unsigned scriptArgs = t.kind == R::Kind::EffectStartPos ? 5u : 1u + (t.vector ? 1u : t.values);
-        const bool pinned = t.body && t.bodySize > 0 && (t.flags & 0xFFFF) == scriptArgs &&
-                            R::FindTrap(t.table, t.index) == static_cast<int>(i);
+        const unsigned scriptArgs = t.kind == R::Kind::EffectStartPos || t.kind==R::Kind::AttackRc ? 5u :
+            t.kind==R::Kind::AttackStrike?4u:1u + (t.vector ? 1u : t.values);
+        const bool pinned = R::FindTrap(t.table,t.index)==static_cast<int>(i) &&
+            (t.fnRva ? t.body && t.bodySize>0 && (t.flags&0xFFFF)==scriptArgs :
+             t.table==255 && ((t.index==1 && t.kind==R::Kind::ReactionOffer) ||
+                             (t.index==12 && t.kind==R::Kind::ReactionOwner) ||
+                             (t.kind==R::Kind::Owner && ((t.index>=2 && t.index<=8) || t.index==11 || t.index==13 || t.index==14)) ||
+                             (t.kind==R::Kind::OwnerAttackStart && t.index==9)) && !t.body && !t.bodySize);
         if (t.replay == R::Replay::None) {  // never on the wire itself: it travels as another trap
             const int wire = R::FindWire(t.wireTable, t.wireIndex);
             converted = converted && pinned && shape.kind == ScriptCallKind::None && wire >= 0 &&
@@ -105,6 +249,9 @@ void rulesAgreeWithCodec() {
     }
     check(shapes, "every DLL trap sent as itself is on the wire list with the same shape, effect id rule, argument count and a pinned body");
     check(converted, "start_pos and set_dir never go on the wire; each travels as a trap that does");
+    const auto hide=R::FindTrap(1,133),show=R::FindTrap(1,134);
+    check(hide>=0 && show>=0 && R::kTraps[hide].group==R::Group::Visibility &&
+          R::kTraps[show].group==R::Group::Visibility,"boss body visibility is separate from shadow visibility");
     check(values, "DLL value rules and wire validation agree on every trap; an effect id is required exactly for effect calls");
     check(R::FindTrap(1, 121) < 0 && scriptCallShape(1, 121).kind == ScriptCallKind::None, "target_search is not mirrored");
 }
@@ -238,6 +385,162 @@ void effectChecks() {
     check(blocked.Drain(2, onlyEffects, exp2) == 0 && blocked.Size() == 2, "a later record for a netId waits behind an earlier one");
 }
 
+void attackLifetimeChecks() {
+    R::HostEffects host;
+    R::ClientEffects client;
+    const auto old=host.Add(0x100,0x5000,0x6000,5,307,false);
+    check(client.Put(old,{0x100,0x5000,0x6000,5},false),"attack resource pairs without eviction");
+    // The native constructor/destructor adapters invoke this before memory is
+    // freed or reused, even when address, handle and owner are identical.
+    host.ForgetAllocation(0x5000);client.ForgetAllocation(0x5000);
+    const auto next=host.Add(0x100,0x5000,0x6000,5,307,false);
+    client.Put(next,{0x100,0x5000,0x6000,5},false);
+    check(next>old && !client.Find(old) && client.Find(next),"recycled allocation never revives an old attack resource");
+    R::HostEffects full;
+    R::ClientEffects copies;
+    for(std::uint32_t i=1;i<=R::HostEffects::kCap;++i) {
+        full.Add(i,i,i,5,307,false);copies.Put(i,{i,i,i,5},false);
+    }
+    check(!full.Add(9999,9999,9999,5,307,false) && full.Find(1) &&
+          !copies.Put(9999,{9999,9999,9999,5},false) && copies.Find(1),
+          "collision registry exhaustion preserves every existing pairing");
+    auto start=effectCall(77,2,10);
+    auto end=effectCall(77,2,13);
+    R::Hold held;held.Put(start,1);
+    check(held.HoldsStart(77,true) && !held.HoldsStart(77,false),"attack and visual starts have distinct namespaces");
+    held.Put(effectCall(77,2,12),1);
+    held.CancelResource(start.netId,77,true);
+    std::size_t expired=0;
+    check(!held.HoldsStart(77,true) && held.Drain(2,[](const R::Call&){return true;},expired)==0,
+          "free before driven cancels held attack start and fields before any native allocation");
+    auto visual=effectCall(77,0,38);
+    auto position=effectCall(77,2,12);
+    // Namespace is explicit even if future fields share a coalescing group.
+    check(R::KeyOf(visual)!=R::KeyOf(position),"attack fields cannot overwrite visual resource fields");
+    R::Sender sender;
+    for(std::size_t i=0;i<R::Sender::kPendingCap;++i) sender.Observe(start);
+    check(sender.Observe(end)==R::Sender::Outcome::Full,"saturated normal queue refuses immediate attack end");
+    R::Retirements pending;
+    check(pending.Put(end),"attack end has a reserved deferred path");
+    pending.Drain(sender);
+    check(pending.Size()==1,"deferred end survives a still-full queue");
+    sender.Commit(1);pending.Drain(sender);
+    R::Call batch[R::Sender::kPendingCap]{};
+    const auto n=sender.Peek(batch,R::Sender::kPendingCap);
+    check(!pending.Size() && n==R::Sender::kPendingCap && batch[n-1].effect==77 &&
+          batch[n-1].trap==R::FindTrap(2,13),"attack end queues after earlier starts when capacity returns");
+}
+
+void storedResourceHandleChecks() {
+    // Reproduce the BDX lifetime, not just the tag parser: attack_new returns
+    // @ADR, the script stores its low word, then fields/RC/free push @???.
+    R::HostEffects attacks;
+    const auto resource=attacks.Add(0x100,0x5000,0x6000,5,307,false);
+    struct NativeAllocation { std::uintptr_t allocation,owner;bool live; } native{0x5000,0x6000,true};
+    unsigned nativeReads=0;
+    const auto current=[&](std::uint32_t handle,const R::HostEffect& pair) {
+        ++nativeReads;
+        return handle==0x100 && native.live && pair.effect==native.allocation && pair.part==native.owner;
+    };
+    const auto returned=attacks.CaptureNative(R::Tagged(R::kTagAddress,0x100),current);
+    check(returned.status==R::NativeResourceStatus::Paired && returned.value.id==resource,
+          "native returned address pairs with the announced attack resource");
+    R::Sender sender;
+    const std::uint16_t operations[]{12,51,13};bool accepted=true;
+    for(const auto operation:operations) {
+        const auto stored=attacks.CaptureNative(R::Tagged(R::kTagWork,0x100),current);
+        accepted=accepted && stored.status==R::NativeResourceStatus::Paired && stored.value.id==resource;
+        if(stored.status!=R::NativeResourceStatus::Paired)continue;
+        R::Call call;call.netId=stored.value.netId;call.objectId=stored.value.objectId;
+        call.effect=stored.value.id;call.trap=static_cast<std::uint8_t>(R::FindTrap(2,operation));
+        if(operation==12)for(unsigned k=0;k<4;++k)call.values[k]=flt(static_cast<float>(k));
+        if(operation==51){call.values[0]=num(345);call.values[1]=flt(800);call.values[2]=flt(500);}
+        if(operation==13)native.live=false; // native free retires its flag after the pre-call capture
+        accepted=accepted && attacks.StillPaired(stored) && R::ValidValues(call.trap,call.values) &&
+            sender.Observe(call)==R::Sender::Outcome::Queued;
+    }
+    R::Call batch[3];const auto count=sender.Peek(batch,3);
+    check(accepted && count==3 && batch[0].effect==resource && batch[1].effect==resource &&
+          batch[2].effect==resource && R::kTraps[batch[0].trap].index==12 &&
+          R::kTraps[batch[1].trap].index==51 && R::kTraps[batch[2].trap].index==13,
+          "stored work attack handle preserves ordered position, reaction command and free on one resource");
+    const auto retired=attacks.CaptureNative(R::Tagged(R::kTagWork,0x100),current);
+    check(retired.status==R::NativeResourceStatus::NotCurrent,
+          "integer handle cannot revive an attack whose native lifetime ended");
+    native.live=true;native.owner=0xDEAD;
+    check(attacks.CaptureNative(R::Tagged(R::kTagWork,0x100),current).status==R::NativeResourceStatus::NotCurrent,
+          "stored work handle still requires its registered native owner");
+    native.owner=0x6000;native.allocation=0xDEAD;
+    check(attacks.CaptureNative(R::Tagged(R::kTagWork,0x100),current).status==R::NativeResourceStatus::NotCurrent,
+          "stored work handle still requires its registered native allocation");
+    const auto reads=nativeReads;
+    check(attacks.CaptureNative(R::Tagged(R::kTagFloat,0x100),current).status==R::NativeResourceStatus::WrongTag &&
+          attacks.CaptureNative(R::Tagged(0xDEADBEEF,0x100),current).status==R::NativeResourceStatus::WrongTag &&
+          attacks.CaptureNative(R::Tagged(R::kTagWork,0x999),current).status==R::NativeResourceStatus::Unpaired &&
+          attacks.CaptureNative(R::Tagged(R::kTagAddress,0x999),current).status==R::NativeResourceStatus::Unpaired &&
+          attacks.CaptureNative(R::Tagged(R::kTagWork,0),current).status==R::NativeResourceStatus::Unpaired && nativeReads==reads,
+          "unsupported tags and unregistered work handles never reach native allocation reads");
+    // Native callbacks can destroy and reuse a handle while the observed trap
+    // runs. The pre-call snapshot must neither dangle nor name the replacement.
+    attacks.ForgetAllocation(0x5000);native.allocation=0x5000;
+    const auto replacement=attacks.Add(0x100,0x5000,0x6000,5,307,false);
+    check(!attacks.StillPaired(returned) && returned.value.id==resource && replacement>resource &&
+          attacks.CaptureNative(num(0x100),current).value.id==replacement,
+          "native reentry cannot retarget a captured integer handle to a replacement resource");
+    R::HostEffects effects;
+    const auto effect=effects.Add(0x200,0x7000,0x8000,5,307);
+    const auto liveEffect=[](std::uint32_t handle,const R::HostEffect& pair) {
+        return handle==0x200 && pair.effect==0x7000 && pair.part==0x8000;
+    };
+    check(effects.CaptureNative(R::Tagged(R::kTagWork,0x200),liveEffect).status==R::NativeResourceStatus::Paired &&
+          effects.CaptureNative(num(0x200),liveEffect).value.id==effect &&
+          !attacks.CaptureNative(num(0x200),current).value.id,
+          "stored effect handles use their own validated pairing, never the attack registry");
+}
+
+void nativeScalarChecks() {
+    const auto work=[](std::uint32_t bits){return R::Tagged(R::kTagWork,bits);};
+    const auto normalize=[&](std::uint8_t table,std::uint16_t index,const std::array<std::uint64_t,5>& args,
+                             const std::array<std::uint64_t,4>& expected) {
+        const auto trap=R::FindTrap(table,index);std::uint64_t values[4]{};
+        if(!R::NormalizeNativeScalars(trap,args.data(),values))return false;
+        for(unsigned k=0;k<4;++k)if(values[k]!=expected[k])return false;
+        return R::ValidValues(trap,values);
+    };
+    const auto fbits=[](float f){std::uint32_t bits;std::memcpy(&bits,&f,4);return bits;};
+    check(normalize(2,10,{work(0xDEAD),work(7),work(0x80000000u),work(0xFFFFFFFFu),0},
+                    {num(7),num(0x80000000u),num(0xFFFFFFFFu),0}),
+          "native attack start preserves low32 integer bits without consuming actor argument");
+    check(normalize(2,11,{work(0xDEAD),work(fbits(800)),work(fbits(500)),0,0},
+                    {flt(800),flt(500),0,0}) &&
+          normalize(2,51,{work(0xDEAD),work(0xBEEF),work(345),work(fbits(800)),work(fbits(500))},
+                    {num(345),flt(800),flt(500),0}) &&
+          normalize(2,17,{work(0xDEAD),work(0xBEEF),work(1),work(0xFFFFFFFFu),0},
+                    {num(1),num(0xFFFFFFFFu),0,0}),
+          "native radius, RC and strike use only wrapper-proven scalar positions");
+    check(normalize(0,52,{work(0xDEAD),work(fbits(30)),work(1),0,0},{flt(30),num(1),0,0}) &&
+          normalize(0,66,{work(0xDEAD),work(1),0,0,0},{num(1),0,0,0}) &&
+          normalize(1,22,{work(0xDEAD),work(9),work(0xBEEF),work(2),work(3)},
+                    {num(9),num(2),num(3),0}),
+          "native fade, pause and positioned effect start normalize scalar slots without reading vector handle");
+    std::uint64_t values[4]{};
+    for(const auto bits:{0x7FC00000u,0x7F800000u,fbits(100001),fbits(-1)}) {
+        const std::uint64_t args[]{work(0xDEAD),work(bits),work(fbits(1)),0,0};
+        check(!R::NormalizeNativeScalars(R::FindTrap(2,11),args,values),
+              "invalid native radius refuses before any prompt or resource mutation");
+    }
+    for(const auto command:{0u,65536u}) {
+        const std::uint64_t args[]{work(0xDEAD),work(0xBEEF),work(command),work(fbits(1)),work(fbits(1))};
+        check(!R::NormalizeNativeScalars(R::FindTrap(2,51),args,values),"invalid native RC command refuses");
+    }
+    const std::uint64_t raw[]{work(1),work(2),work(3),work(4),work(5)};
+    check(!R::NormalizeNativeScalars(R::FindTrap(0,38),raw,values) &&
+          !R::NormalizeNativeScalars(R::FindTrap(1,1),raw,values) &&
+          !R::NormalizeNativeScalars(R::FindTrap(255,7),raw,values) &&
+          !R::ValidValues(R::FindTrap(2,11),raw),
+          "native scalar normalization cannot admit arbitrary actor, vector, owner or wire values");
+}
+
 void enetChecks() {
     SessionConfig config; config.bindAddress = "127.0.0.1"; config.port = 29881;
     config.gameBuild = "script-call-test"; config.modHash = "none";
@@ -248,10 +551,15 @@ void enetChecks() {
     };
     SessionHost server(config, relayCallbacks); if (!server.start()) { check(false, "script call ENet bind"); return; }
     std::array<std::vector<ScriptCall>, 3> received;
+    std::array<std::vector<ScriptReactionCompletion>, 3> completions;
     std::array<std::unique_ptr<NetworkClient>, 3> clients;
     auto make = [&](unsigned i) {
         ClientCallbacks cb;
         cb.onWorldEnvelope = [&, i](const WorldEnvelope& e) {
+            if(e.packet.front()==static_cast<std::uint8_t>(PacketType::ScriptReactionCompletion)) {
+                const std::uint8_t* p;std::size_t n;decodePacketHeader(e.packet.data(),e.packet.size(),p,n);
+                ByteReader r(p,n);ScriptReactionCompletion c;read(r,c);completions[i].push_back(c);return;
+            }
             if (e.packet.front() != static_cast<std::uint8_t>(PacketType::ScriptCall)) return;
             const std::uint8_t* p; std::size_t n; decodePacketHeader(e.packet.data(), e.packet.size(), p, n);
             ByteReader r(p, n); ScriptCall c; read(r, c); received[i].push_back(c);
@@ -296,6 +604,43 @@ void enetChecks() {
     refusedBy("host-connection", "forged host connection script call refused", [&] { clients[0]->sendScriptCall(forgedHost); });
     ++calls.seq; clients[0]->sendScriptCall(calls); pump();
     check(received[1].size() == 3 && received[2].size() == 2, "a valid script call after refusals still forwards");
+    ScriptReactionCompletion completion;completion.location=room;completion.seq=1;
+    completion.requesterConnectionId=server.peerBySlot(SlotType::Friend1)->connectionId;
+    completion.occurrence=1;completion.resource=1;completion.objectId=enemy.objectId;completion.netId=enemy.netId;completion.command=345;
+    const auto sendCompletion=[&](unsigned slot,const ScriptReactionCompletion& m){
+        return clients[slot]->sendNativeWorld(encode(m),ProducerWorldContext{1,clients[slot]->deliverySerial(),0},true);
+    };
+    check(sendCompletion(1,completion),"owner submits reaction completion through native world envelope");pump();
+    check(completions[0].size()==1 && completions[0][0].ownerSlot==1 && completions[1].empty() && completions[2].empty(),
+          "relay stamps reaction owner and delivers only to verified host");
+    const auto refusedCompletion=[&](const ScriptReactionCompletion& m,const char* label){
+        const auto before=server.rejectedWorldMessages();sendCompletion(1,m);pump();
+        check(server.rejectedWorldMessages()==before+1 && completions[0].size()==1,label);
+    };
+    refusedCompletion(completion,"duplicate completion sequence cannot arrive twice");
+    auto forgedCompletion=completion;forgedCompletion.seq=2;++forgedCompletion.requesterConnectionId;
+    refusedCompletion(forgedCompletion,"forged reaction owner connection is refused");
+    forgedCompletion=completion;forgedCompletion.seq=3;++forgedCompletion.location.epoch;
+    refusedCompletion(forgedCompletion,"old reaction room cannot grant a callback");
+    forgedCompletion=completion;forgedCompletion.seq=4;++forgedCompletion.objectId;
+    refusedCompletion(forgedCompletion,"unannounced reaction source is refused");
+    // A terminal source's deferred end cannot poison an unrelated living
+    // source's end in the same reliable batch.
+    auto living=enemy;living.netId=4;manifest.entries.push_back(living);
+    clients[0]->sendEnemyManifest(manifest);pump();
+    clients[0]->sendEnemyDeath({room.epoch,enemy.netId});pump();
+    ScriptCall ends=calls;ends.seq=++calls.seq;ends.entries.clear();
+    ScriptCallEntry end;end.netId=enemy.netId;end.objectId=enemy.objectId;end.table=2;end.index=13;end.effect=11;
+    ends.entries.push_back(end);end.netId=living.netId;end.effect=12;ends.entries.push_back(end);
+    const auto prior=received[1].size();clients[0]->sendScriptCall(ends);pump();
+    check(received[1].size()==prior+1 && received[1].back().entries.size()==2,
+          "terminal and living owners' paired attack ends forward in one batch");
+    auto deadStart=ends;deadStart.seq=++calls.seq;deadStart.entries.resize(1);
+    deadStart.entries[0].index=10;
+    for(unsigned k=0;k<3;++k)deadStart.entries[0].args[k]=num(0);
+    refusedBy("actor-identity","terminal source cannot create another attack",[&]{clients[0]->sendScriptCall(deadStart);});
+    auto wrongEnd=ends;wrongEnd.seq=++calls.seq;++wrongEnd.entries[0].objectId;
+    refusedBy("actor-identity","terminal teardown still requires announced source identity",[&]{clients[0]->sendScriptCall(wrongEnd);});
     for (auto& c : clients) if (c) c->disconnect();
     server.stop();
 }
@@ -303,11 +648,17 @@ void enetChecks() {
 
 int main() {
     if (enet_initialize() != 0) return 2;
+    reactionChecks();
+    completionCodecChecks();
+    ownerCodecChecks();
     codecChecks();
     rulesAgreeWithCodec();
     senderChecks();
     holdChecks();
     effectChecks();
+    attackLifetimeChecks();
+    storedResourceHandleChecks();
+    nativeScalarChecks();
     enetChecks();
     enet_deinitialize();
     std::cout << "failures=" << errors << '\n';

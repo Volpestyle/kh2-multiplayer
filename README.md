@@ -41,10 +41,10 @@ Hollow Bastion and Land of Dragons first visits via native doors.
 
 ## What works today
 
-**Current source: protocol 29, AvatarBridge 4, WorldBridge 12.** Use matching
+**Current source: protocol 30, AvatarBridge 4, WorldBridge 12.** Use matching
 DLL, runtime and relay products; older preview ZIPs keep their original
 versions and feature limits. The checked-in package validator/pins still target
-protocol 18, so current protocol-29 packaging is blocked until they are refreshed
+protocol 18, so current protocol-30 packaging is blocked until they are refreshed
 and qualified; see [packaging](tools/packaging/README.md).
 
 - Each player controls a native character in their own game; remote players

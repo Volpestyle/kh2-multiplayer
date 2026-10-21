@@ -1,3 +1,5 @@
+#include "kh2coop/EnemyClass.hpp"
+#include "ScriptCamera.hpp"
 // ============================================================================
 // EntityHook â€” PerEntityUpdate hook + friend AI replacement
 //
@@ -731,7 +733,7 @@ static bool IsEnemyVictim(uintptr_t actor) {
     const auto obj = *reinterpret_cast<const uintptr_t*>(actor + offsets::actor::OBJENTRY_PTR);
     if (obj <= g_exeBase || obj >= g_exeBase + 0x3000000) return false;
     const uint8_t type = *reinterpret_cast<const uint8_t*>(obj + offsets::objentry::TYPE_FLAGS);
-    return type == offsets::objentry::TYPE_BOSS || type == offsets::objentry::TYPE_MOB;
+    return enemyclass::Combat(type, *reinterpret_cast<const std::uint32_t*>(obj + offsets::objentry::OBJECT_ID));
 }
 
 static bool SyncDropsHit(void* victim) {
@@ -1448,7 +1450,7 @@ static damagepolicy::ActorClass ClassifyDamageActor(const nativehittrace::ActorS
     if (DamageReservedActor(actor.actor, context, roster)) return ActorClass::RemoteRepresentation;
     if (actor.type == 1)
         return NativeAiPermission(actor, context, roster) ? ActorClass::NativeCompanion : ActorClass::Unknown;
-    if ((actor.type == offsets::objentry::TYPE_BOSS || actor.type == offsets::objentry::TYPE_MOB) &&
+    if (enemyclass::Combat(actor.type, actor.objectId) &&
         actor.namePrefix != 0x5F46 && actor.objectId && actor.hp > 0 && actor.maxHp > 0) return ActorClass::Enemy;
     // A typed, checked native actor outside the player/companion/enemy classes
     // may affect the local victim, but never receives host-enemy permission.
@@ -2629,6 +2631,8 @@ static void BindPuppetDrive(int index, uintptr_t actor) {
 
 static void DrivePuppetMotion(void* actorObj, int index) {
     if (!IsPuppetActive(index) || PuppetTarget(index) != reinterpret_cast<uintptr_t>(actorObj)) return;
+    if (scriptmirror::OwnsPuppet(reinterpret_cast<uintptr_t>(actorObj))) return;
+    if (scriptmirror::OwnsVisualPuppet(reinterpret_cast<uintptr_t>(actorObj))) return;
     const auto actor = reinterpret_cast<uintptr_t>(actorObj);
     BindPuppetDrive(index, actor);
     PuppetDriver& d = g_puppets[index];
@@ -2812,6 +2816,7 @@ static void MirrorCloneHp(int index, uintptr_t actor, const AvatarState& pose) {
 }
 static void ApplyPuppetTransform(void* actorObj, int index) {
     if (!IsPuppetActive(index) || PuppetTarget(index) != reinterpret_cast<uintptr_t>(actorObj)) return;
+    if (scriptmirror::OwnsPuppet(reinterpret_cast<uintptr_t>(actorObj))) return;
     BindPuppetDrive(index, reinterpret_cast<uintptr_t>(actorObj));
     const auto& pose = g_puppets[index].pose.pose;
     const auto actor = reinterpret_cast<uintptr_t>(actorObj);
@@ -3506,10 +3511,12 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         // update this frame. seq carries the DLL's game-frame counter so a
         // recording shows dropped frames; the runtime restamps it to send.
         downedspike::PinDowned(reinterpret_cast<uintptr_t>(actorObj)); // VUH-2465
+        scriptmirror::OwnerPostUpdate(reinterpret_cast<uintptr_t>(actorObj));
         if (reinterpret_cast<uintptr_t>(actorObj) == g_soraActor && g_avatarBridge.IsOpen()) {
-            const bool inEvent =
-                *reinterpret_cast<const std::int32_t*>(g_exeBase + offsets::CUTSCENE_STATE) != 0 ||
-                *reinterpret_cast<const uintptr_t*>(g_exeBase + offsets::EVENT_CONTEXT) != 0;
+            const auto eventState=*reinterpret_cast<const std::int32_t*>(g_exeBase+offsets::CUTSCENE_STATE);
+            const auto eventContext=*reinterpret_cast<const uintptr_t*>(g_exeBase+offsets::EVENT_CONTEXT);
+            const bool inEvent=(eventState!=0 || eventContext!=0) &&
+                !enemysync::OwnedScriptCameraCurrent(eventContext,eventState);
             const auto hudAuthority = enemysync::CapturePuppetAuthority();
             AvatarState avatar = captureAvatar(DirectMemory {}, g_exeBase, g_soraActor,
                                                inEvent, false);
@@ -3526,13 +3533,16 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         }
 
         const int puppet = PuppetIndexFor(reinterpret_cast<uintptr_t>(actorObj));
-        if (puppet >= 0) {
+        if (puppet >= 0 && !scriptmirror::OwnsPuppet(reinterpret_cast<uintptr_t>(actorObj))) {
             // Sora clones don't run the friend AI hook, so their motion is
             // set here; companions got theirs in HookedFriendAI.
             if (IsPlayerClassActor(reinterpret_cast<uintptr_t>(actorObj))) {
                 DrivePuppetMotion(actorObj, puppet);
             }
             ApplyPuppetTransform(actorObj, puppet);
+            // Keep ordinary puppet safety maintenance, then source-bound role
+            // visuals get the final pose without camera/command authority.
+            scriptmirror::VisualPostUpdate(reinterpret_cast<uintptr_t>(actorObj));
         } else if (savedFriendSlot != 0) {
             // Re-inject movement input after physics overwrites.
             // The motion controller tick (FUN_1403c6740) has already run

@@ -980,6 +980,23 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
             }
 
+            case PacketType::ScriptReactionCompletion: {
+                ScriptReactionCompletion m;read(reader,m);
+                auto* host=hostPeer();
+                if(!reader.atEnd() || ps->status!=PeerStatus::Verified || fromHost(*ps) || ps->worldQuarantined ||
+                   !admittedScope || !room_ || !room_->epoch || !host || !host->transportPeer ||
+                   m.ownerSlot!=0xFF || m.seq<=ps->lastScriptReactionCompletionSeq ||
+                   m.requesterConnectionId!=ps->connectionId || !sameResyncRoom(m.location,*room_)) {
+                    ++rejectedWorld_;return;
+                }
+                ps->lastScriptReactionCompletionSeq=m.seq; // consume before gameplay checks
+                const bool alive=manifest_.epoch==room_->epoch && !deadEnemies_.count(m.netId) &&
+                    std::any_of(manifest_.entries.begin(),manifest_.entries.end(),[&](const auto& e){return e.netId==m.netId && e.objectId==m.objectId;});
+                if(!alive){++rejectedWorld_;return;}
+                m.ownerSlot=static_cast<std::uint8_t>(ps->assignedSlot);
+                sendTo(host->transportPeer,encode(m),true);
+                break;
+            }
             case PacketType::StageEnd: {
                 // VUH-2555: a friend's own script ended a host-led prologue stage. Admitted only from a
                 // verified client at the host's admitted room; stamped and broadcast to every verified
@@ -1226,17 +1243,22 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     return;
                 }
                 for (const auto& e : calls.entries) {
+                    // A paired collision resource must still be destroyed when
+                    // its source has just died/left. This grants only attack_free
+                    // for an identity announced in this epoch, never new work.
+                    const bool teardown=e.effect!=0 && ((e.table==2 && e.index==13) ||
+                        (e.table==255 && e.index==6));
                     bool present = std::any_of(fieldObjects_.begin(), fieldObjects_.end(), [&](const auto& f) {
-                        return f.present && f.netId == e.netId && f.objectId == e.objectId;
+                        return (f.present || teardown) && f.netId == e.netId && f.objectId == e.objectId;
                     });
-                    if (!present && manifest_.epoch == room_->epoch && !deadEnemies_.count(e.netId)) {
+                    if (!present && manifest_.epoch == room_->epoch && (teardown || !deadEnemies_.count(e.netId))) {
                         present = std::any_of(manifest_.entries.begin(), manifest_.entries.end(), [&](const auto& enemy) {
                             return enemy.netId == e.netId && enemy.objectId == e.objectId;
                         });
                         const auto& lifecycle = ordinaryLifecycle_.Current();
                         if (lifecycle) {
                             const auto* row = ordinarylifecycle::Find(*lifecycle, e.netId);
-                            if (row && row->terminal) present = false;
+                            if (row && row->terminal && !teardown) present = false;
                         }
                     }
                     if (!present) {

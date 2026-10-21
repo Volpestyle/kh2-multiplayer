@@ -1,0 +1,56 @@
+{
+  "description": "VUH-2569 FM-00 rehearsal: open the menu once and page through KH2's first-open tutorial (Auto-Reload, Abilities: 4 pages, Cross each), then close the menu with Circle, so the host's event hold later finds a plain menu it can close with Start.",
+  "steps": [
+    {
+      "do": "hold",
+      "keys": [],
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "key": "start",
+      "times": 1
+    },
+    {
+      "do": "hold",
+      "keys": [],
+      "ms": 2000
+    },
+    {
+      "do": "capture",
+      "name": "menu_open"
+    },
+    {
+      "do": "press",
+      "key": "confirm",
+      "times": 4,
+      "gapMs": 1500
+    },
+    {
+      "do": "hold",
+      "keys": [],
+      "ms": 1000
+    },
+    {
+      "do": "capture",
+      "name": "menu_after_pages"
+    },
+    {
+      "do": "press",
+      "key": "jump",
+      "times": 1
+    },
+    {
+      "do": "hold",
+      "keys": [],
+      "ms": 1500
+    },
+    {
+      "do": "capture",
+      "name": "menu_closed"
+    }
+  ],
+  "name": "twilight_thorn_menu_tutorial",
+  "retries": 0,
+  "source": "VUH-2466 run 20261020-002047_thorn_1; original route_menu_tutorial_dismiss.json in wt-vuh2338-2/build/rig/vuh2466. Coordinates retained without inventing route points."
+}

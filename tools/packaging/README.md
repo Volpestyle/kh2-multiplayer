@@ -2,7 +2,7 @@
 
 `build_friend.py` copies explicitly selected local products and the installed
 CPython 3.11 standard library/Tk. It never downloads, installs, launches KH2,
-opens a listener or writes the game folder. Current source is protocol **29**,
+opens a listener or writes the game folder. Current source is protocol **30**,
 but `product_protocol.py` still accepts only **18** and `friend-products.json` pins the
 protocol-18 / AvatarBridge-4 cohort built from `bb7122a` (including the VUH-2239 server fix). DLL, runtime, relay,
 avatarctl and portable CLI share one source revision and build ID. Refresh all
@@ -12,7 +12,7 @@ cohorts and packaged hashes.
 These historical products cannot package current source: the builder explicitly
 rejects a source/product protocol mismatch. A current package requires a
 separately reviewed validator update and a complete matching native cohort;
-changing version labels alone does not qualify binaries. No current protocol-29
+changing version labels alone does not qualify binaries. No current protocol-30
 package is established by this manifest. The historical local copies live under
 `build/rig/vuh2239-protocol18-20261013-02/products/`.
 

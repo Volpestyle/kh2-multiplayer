@@ -1,0 +1,23 @@
+{
+  "description": "VUH-2569 FM-00 rehearsal: Station of Calling lower platform -> its door (~(-50,2860), front faces +z, placed from a still and the view-projection) -> Station of Awakening 2/34.",
+  "steps": [
+    {
+      "do": "door",
+      "to": [
+        -50,
+        2860
+      ],
+      "room": [
+        2,
+        34
+      ],
+      "timeoutSec": 25,
+      "settleSec": 240,
+      "note": "After the actual2/34 door crossing, hand off without waiting for event=false: an owned boss camera keeps event active while commands297/298/299 need Triangle. Scenario still checks both native room tuples and boss admission before combat; no second input driver overlaps the door pilot.",
+      "settle": false
+    }
+  ],
+  "name": "twilight_thorn_awakening_door",
+  "retries": 0,
+  "source": "VUH-2466 run 20261020-002047_thorn_1; original route_calling_to_awakening.json in wt-vuh2338-2/build/rig/vuh2466. Coordinates retained without inventing route points."
+}

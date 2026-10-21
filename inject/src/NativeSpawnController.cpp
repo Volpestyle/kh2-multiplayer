@@ -1,4 +1,5 @@
 #include "NativeSpawnController.hpp"
+#include "kh2coop/EnemyClass.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativePrivateStatus.hpp"
 #include "PlayerKit.hpp"
@@ -580,7 +581,7 @@ Qualification Qualify(uintptr_t address, QualificationUse use = QualificationUse
             Field<std::uint32_t>(entry.data(), 0) != id) return fail("objentry identity/read");
         const bool helper=observedMixed && id==2406 && entry[4]==21 &&
             std::memcmp(entry.data()+8,"M_EX640_HB",sizeof("M_EX640_HB"))==0;
-        if ((!helper && entry[4] != offsets::objentry::TYPE_BOSS && entry[4] != offsets::objentry::TYPE_MOB) ||
+        if ((!helper && !enemyclass::Combat(entry[4],id)) ||
             (entry[8] == 'F' && entry[9] == '_')) return fail("noncombat/mixed records", Scope::OutOfScope);
         if(observedMixed && ((id==2406 && !helper) || (id==2407 && entry[4]!=offsets::objentry::TYPE_MOB)))
             return fail("observed mixed class changed",Scope::OutOfScope);
@@ -1566,7 +1567,7 @@ void ReadTraceActor(TraceEvent& event) {
     }
     event.actorAvailable = true;
     event.objectIdMatchesRecord = event.recordAvailable && event.actorObjectId == event.objectId;
-    if ((event.actorType != offsets::objentry::TYPE_BOSS && event.actorType != offsets::objentry::TYPE_MOB) ||
+    if (!enemyclass::Combat(event.actorType,event.actorObjectId) ||
         (name[0] == 'F' && name[1] == '_')) {
         event.outcome = TraceOutcome::OutOfScope;
         event.reason = "returned actor is not combat";
@@ -1684,7 +1685,7 @@ EmissionBirth CaptureEmissionBirth(void* actor,const Qualification& q,const void
         b.helper=true;b.available=true;return b;
     }
     uintptr_t controller=0,definition=0;
-    if((type!=offsets::objentry::TYPE_BOSS && type!=offsets::objentry::TYPE_MOB) ||
+    if(!enemyclass::Combat(type,b.objectId) ||
        (name[0]=='F' && name[1]=='_') || !ReadNative(b.actor+0x5C0,b.status) ||
        !ReadNative(b.actor+0x9E8,controller) || controller!=b.controller ||
        !ReadNative(b.actor+0x9F0,definition) || definition!=b.record)return b;
@@ -3102,8 +3103,7 @@ void CaptureSelectedOccupancyImpl(uintptr_t base, const NativeRecordCatalog& cat
         // Conservative reviewed type envelope (saved 3DF930 cases through 0x18).
         // Out-of-envelope metadata is unknown, not proof of a noncombat actor.
         const bool noncombat = objectFields && f.objectId != 0 && f.objectType <= 0x18 &&
-            ((f.objectType != offsets::objentry::TYPE_BOSS &&
-            f.objectType != offsets::objentry::TYPE_MOB) || (f.objectName[0] == 'F' && f.objectName[1] == '_'));
+            (!enemyclass::Combat(f.objectType,f.objectId) || (f.objectName[0] == 'F' && f.objectName[1] == '_'));
         row.excludedKnownNoncombat = row.stable && pointerFields && noncombat && !selectedObject &&
             !f.controller && !f.record && !row.selectedIdConflict;
         if (row.exactSelectedReference) {

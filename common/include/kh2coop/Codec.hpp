@@ -67,6 +67,7 @@ enum class PacketType : std::uint8_t {
     MissionState = 52, // the host's running mission, periodic and unreliable (VUH-2342)
     SpawnEmission = 50, // successful host controller emission + retained trigger point
     SeatState = 53, // any seat -> relay (roster/slot stamped) -> all incl. author (VUH-2464)
+    ScriptReactionCompletion = 55, // owner -> relay -> verified host (ScriptMirror)
     StageEnd = 54, // client -> relay (admitted room, slot stamped) -> all verified; the host acts (VUH-2555)
     LocalResyncCommand = 0xF0, NativeResyncSnapshot = 0xF1,
 };
@@ -126,6 +127,7 @@ void write(ByteWriter& w, const PartyIntent& m);
 void write(ByteWriter& w, const ReviveRequest& m);
 void write(ByteWriter& w, const SeatState& m);
 void write(ByteWriter& w, const StageEnd& m);
+void write(ByteWriter& w, const ScriptReactionCompletion& m);
 void write(ByteWriter& w, const RemoteHit& m);
 void write(ByteWriter& w, const TargetAuthority& m);
 void write(ByteWriter& w, const ScriptCall& m);
@@ -167,6 +169,7 @@ void read(ByteReader& r, PartyIntent& m);
 void read(ByteReader& r, ReviveRequest& m);
 void read(ByteReader& r, SeatState& m);
 void read(ByteReader& r, StageEnd& m);
+void read(ByteReader& r, ScriptReactionCompletion& m);
 void read(ByteReader& r, RemoteHit& m);
 void read(ByteReader& r, TargetAuthority& m);
 void read(ByteReader& r, ScriptCall& m);
@@ -255,6 +258,7 @@ std::vector<std::uint8_t> encode(const PartyIntent& m);
 std::vector<std::uint8_t> encode(const ReviveRequest& m);
 std::vector<std::uint8_t> encode(const SeatState& m);
 std::vector<std::uint8_t> encode(const StageEnd& m);
+std::vector<std::uint8_t> encode(const ScriptReactionCompletion& m);
 std::vector<std::uint8_t> encode(const RemoteHit& m);
 std::vector<std::uint8_t> encode(const TargetAuthority& m);
 std::vector<std::uint8_t> encode(const ScriptCall& m);
@@ -290,6 +294,7 @@ inline bool isWorldPacket(PacketType t) {
         case PacketType::PartyIntent:
         case PacketType::ReviveRequest:
         case PacketType::SeatState:
+        case PacketType::ScriptReactionCompletion:
         case PacketType::StageEnd:
         case PacketType::RemoteHit:
         case PacketType::TargetAuthority:

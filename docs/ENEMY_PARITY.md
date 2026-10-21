@@ -1,3 +1,23 @@
+## Twilight Thorn (VUH-2569, implementation awaiting live qualification)
+
+The combat classifier admits exact object307 (`B_EX100`, objentry type12).
+Other type12 objects remain excluded. The existing census, manifest, point
+binding, motion/HP mirror, hit claims and resync paths share this classifier;
+no second boss simulation is introduced. Exact307 boss-leave retirement,
+mission4/16 and event315 support are deferred from this reaction-only slice;
+a two-seat kill and onward travel remain unqualified.
+
+Thorn's client decision stays suppressed while the current admitted runtime is
+live, including before point binding, motion warmup and stream holds. This
+extends the existing field decision guard and shape-checked brain hook.
+Animation callbacks6/16/17 also remain host-owned; native animation, effects and
+hitbox work preceding the BDX callback still runs locally. Capture/RC playback
+uses [ScriptMirror](SCRIPT_MIRROR.md) and the selected actual player owner.
+
+Installed data, per-phase ownership and remaining evidence requirements are in
+[TWILIGHT_THORN.md](TWILIGHT_THORN.md). Unit checks and static pins do not qualify
+the full fight: the captioned two-screen single-PC loopback kill is still pending.
+
 ## Host controller emissions (VUH-2302, protocol 20)
 
 For qualified static combat type-2 controllers, an emission enclosed by the

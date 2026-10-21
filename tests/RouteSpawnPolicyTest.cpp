@@ -166,9 +166,43 @@ void bailey() {
     c=b;c.localAttached=false;check(!Bound(c),"changed original record/controller refused");
     c=b;c.current=false;check(!Bound(c),"unwind, stale load, disconnect or scope fault cannot publish");
 }
+void twilightThornParty() {
+    const auto accepts=[](auto h,auto r) {
+        return MissingPartySiteFor(TwilightThorn157Location,808738658,0x3FF727,h,r)!=nullptr;
+    };
+    mutations(TwilightThorn157Header,TwilightThorn157Records,accepts);
+    const auto* site=MissingPartySiteAt(TwilightThorn157Location);
+    check(site && site->prologue && site->localObject==90 && site->localKey==14 && SitePlayerRecordAt(*site,1),
+          "Thorn's exact site selects authored Roxas record1");
+    if(!site)return;
+    const auto player=site->records.subspan(64,64);
+    check(player.size()==64 && Equal(player,std::span(TwilightThorn157Records).subspan(64,64)) &&
+          player[0]==0x36 && player[1]==2 && !player[2] && !player[3],
+          "only raw566 record1 supplies the missing-party template");
+    check(TwilightThorn157Records[0]==0x33 && TwilightThorn157Records[1]==1 &&
+          !TwilightThorn157Records[2] && !TwilightThorn157Records[3],
+          "the preceding authored boss307 remains in the pinned group");
+    check(SiteHasPlayerRecord(*site,player),"existing entrance selector admits only the complete authored player record");
+    check(!SitePlayerRecordAt(*site,0) && !SiteHasPlayerRecord(*site,site->records.first(64)),
+          "boss record0 cannot become a player template");
+    check(!SitePlayerRecordAt(*site,2) && !SitePlayerRecordAt(*site,UINT16_MAX),
+          "record indices cannot escape the complete group");
+    auto wrong=*site;wrong.records=wrong.records.first(wrong.records.size()-1);
+    check(!SiteHasPlayerRecord(wrong,player),"partial record storage cannot supply a player template");
+    for(const auto& legacy:MissingPartySites)if(&legacy!=site)
+        check(SitePlayerRecordAt(legacy,0),"every existing site retains its authored first player record");
+    for(unsigned i=0;i<TwilightThorn157Location.size();++i) {
+        auto changed=TwilightThorn157Location;changed[i]^=1;
+        check(!MissingPartySiteFor(changed,808738658,0x3FF727,TwilightThorn157Header,TwilightThorn157Records),
+              "Thorn party admission requires every NOW byte");
+    }
+    check(!MissingPartySiteFor(TwilightThorn157Location,808738659,0x3FF727,TwilightThorn157Header,TwilightThorn157Records) &&
+          !MissingPartySiteFor(TwilightThorn157Location,808738658,0x3FF728,TwilightThorn157Header,TwilightThorn157Records),
+          "Thorn party admission keeps exact package and native caller");
+}
 }
 int main() {
-    morale();bailey();
+    morale();bailey();twilightThornParty();
     std::cout<<"Route spawn policy: "<<(failures?"FAIL":"PASS")<<" ("<<failures<<" failures)\n";
     return failures?1:0;
 }

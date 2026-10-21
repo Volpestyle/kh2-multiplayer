@@ -12,9 +12,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 29;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 30;
 
 // ===========================================================================
+// Protocol v30 adds owner-scoped ScriptReactionCompletion (55) and actor-owner ScriptCall descriptors (VUH-2569).
 // Protocol v28 adds StageEnd (54): a friend's own script ended a host-led prologue stage (VUH-2555).
 // Protocol v29 appends authenticated owner vitals to SeatState (VUH-2568).
 // Protocol v26 adds SeatState (53): each seat's selected profile and prologue readiness (VUH-2464).
@@ -372,6 +373,17 @@ struct SeatState {
 inline constexpr std::size_t SEAT_STATE_BYTES = 72;
 inline constexpr bool validSeatPhase(SeatPhase p) { return static_cast<std::uint8_t>(p) <= 2; }
 
+// ScriptMirror: the selected owner completed one host-minted reaction window.
+// Resource is a paired script attack or command role, never a native handle.
+struct ScriptReactionCompletion {
+    RoomTransition location{};
+    std::uint64_t seq{}, requesterConnectionId{}, occurrence{};
+    std::uint32_t resource{}, objectId{};
+    std::uint16_t netId{}, command{};
+    std::uint8_t ownerSlot{0xFF}; // relay stamps it, like StageEnd
+};
+inline constexpr std::size_t SCRIPT_REACTION_COMPLETION_BYTES = 53;
+
 // VUH-2555: reliable, scoped report from a friend's DLL that its own script started a host-led stage
 // end (EventScenes.hpp InFieldEvents rows with hostLed, such as the Day 1 Sandlot duel's stages): the
 // exact native start FUN_1403AC350(id, flags, params) at world/room/evt. The relay admits it only from
@@ -446,7 +458,7 @@ inline constexpr std::uint8_t TARGET_AUTHORITY_MAX_MODE = 1;
 inline constexpr std::uint32_t SCRIPT_TAG_INT = 0x544E4940;   // '@INT'
 inline constexpr std::uint32_t SCRIPT_TAG_FLOAT = 0x544C4640; // '@FLT'
 inline constexpr float SCRIPT_CALL_MAX_FLOAT = 100000.0f;
-enum class ScriptCallKind : std::uint8_t { None, Scalars, Vector4 };
+enum class ScriptCallKind : std::uint8_t { None, Scalars, Vector4, Integers };
 struct ScriptCallShape {
     ScriptCallKind kind{ScriptCallKind::None};
     std::uint8_t argc{0};
@@ -457,7 +469,28 @@ struct ScriptCallShape {
 // effect_set_dir (0/41) as the set_rot (0/40) it results in.
 inline constexpr ScriptCallShape scriptCallShape(std::uint8_t table, std::uint16_t index) {
     using K = ScriptCallKind;
-    return table == 1 && index == 1 ? ScriptCallShape{K::Scalars, 1}     // trap_obj_set_rot (float)
+    return table == 2 && index == 10 ? ScriptCallShape{K::Scalars, 3, true} // script attack creation
+         : table == 2 && index == 11 ? ScriptCallShape{K::Scalars, 2, true} // attack radius
+         : table == 2 && index == 12 ? ScriptCallShape{K::Vector4, 4, true} // attack position
+         : table == 2 && index == 13 ? ScriptCallShape{K::Scalars, 0, true} // attack free
+         : table == 7 && index == 14 ? ScriptCallShape{K::Vector4, 4, true} // reaction offset
+         : table == 2 && index == 51 ? ScriptCallShape{K::Scalars, 3, true} // receiver bound to source copy, command + bounds
+         : table == 255 && index == 1 ? ScriptCallShape{K::Integers, 4, true} // RC occurrence low/high, command, owner slot
+         : table == 255 && index == 12 ? ScriptCallShape{K::Integers, 3, true} // immutable owner slot + connection low/high
+         : table == 255 && index == 2 ? ScriptCallShape{K::Integers, 4, true} // actor role: seat, connection low/high, bounded lease
+         : table == 255 && index == 3 ? ScriptCallShape{K::Scalars, 2, true} // capture source motion on actor owner
+         : table == 255 && index == 4 ? ScriptCallShape{K::Vector4, 4, true} // role position xyz + facing
+         : table == 255 && index == 5 ? ScriptCallShape{K::Integers, 2, true} // source camera fourcc + target role/source
+         : table == 255 && index == 6 ? ScriptCallShape{K::Scalars, 0, true} // release role
+         : table == 255 && index == 7 ? ScriptCallShape{K::Integers, 4, true} // native owner command descriptor
+         : table == 255 && index == 8 ? ScriptCallShape{K::Scalars, 2, true} // role motion id/time
+         : table == 255 && index == 9 ? ScriptCallShape{K::Integers, 4, true} // actor-owner script attack: slot/id/args
+         : table == 255 && index == 11 ? ScriptCallShape{K::Integers, 1, true} // role lease heartbeat
+         : table == 255 && index == 13 ? ScriptCallShape{K::Integers, 2, true} // owner attach: qualified flags/bone, no callback/data
+         : table == 255 && index == 14 ? ScriptCallShape{K::Scalars, 0, true} // owner detach
+         : table == 1 && (index == 133 || index == 134) ? ScriptCallShape{K::Scalars, 0} // actor hide/show
+         : table == 2 && index == 17 ? ScriptCallShape{K::Scalars, 2, true} // strike paired source copy on actual actor owner
+         : table == 1 && index == 1 ? ScriptCallShape{K::Scalars, 1}     // trap_obj_set_rot (float)
          : table == 8 && index == 2 ? ScriptCallShape{K::Vector4, 4}     // trap_obj_set_xyzrot
          : table == 1 && (index == 85 || index == 86) ? ScriptCallShape{K::Scalars, 1} // texanm start/stop
          : table == 6 && (index == 45 || index == 64) ? ScriptCallShape{K::Scalars, 0} // hide/show shadow
@@ -489,6 +522,7 @@ inline constexpr std::size_t SCRIPT_CALL_MAX_ENTRIES = 32;
 inline constexpr std::uint16_t SCRIPT_CALL_HEADER_BYTES = 37;
 inline constexpr std::uint16_t SCRIPT_CALL_ENTRY_BYTES = 45;
 // Every arg the shape uses is tagged and finite (floats within the bound); unused args are zero.
+inline constexpr bool scriptOwnerCommandMode(std::uint32_t mode) noexcept { return mode==1 || mode==2; }
 bool validScriptCallEntry(const ScriptCallEntry& e);
 inline constexpr float REVIVE_RANGE = 200.0f; // native world units; initial policy
 inline constexpr std::uint64_t REVIVE_AVATAR_MAX_AGE_MS = 1000;

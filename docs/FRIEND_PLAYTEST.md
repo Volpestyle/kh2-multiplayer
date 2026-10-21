@@ -7,7 +7,7 @@
 > See [Steam setup](FRIEND_PLAYTEST_STEAM.md) and the
 > [current plan](ONLINE_COOP_PLAN.md) for later evidence and route limits.
 >
-> Current source uses protocol 29 / AvatarBridge 4 / WorldBridge 12. The checked-in
+> Current source uses protocol 30 / AvatarBridge 4 / WorldBridge 12. The checked-in
 > package validator and pins still target protocol 18: a current-source ZIP
 > cannot be built with them unchanged. See [packaging](../tools/packaging/README.md).
 > Do not combine old package products with current DLL/runtime/relay binaries.

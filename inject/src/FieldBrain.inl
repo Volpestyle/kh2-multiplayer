@@ -19,7 +19,7 @@ static bool FieldBrainDecision(uintptr_t actor) {
     if(!g_fieldCallbacks.Enter())return false;
     bool suppressed=false;
     __try {
-        if(OwnerThread() && enemysync::SuppressFieldBrain(actor)) {
+        if(OwnerThread() && enemysync::SuppressClientDecision(actor)) {
             suppressed=true;++g_fieldBrainSkips;
             if(auto* d=Find(actor);d && DrivenNow(actor)) {
                 ++d->skips;++g_mstats.skips;d->lastSkipFrame=g_frameCounter;
@@ -137,7 +137,7 @@ static void LeaveFieldObject(uintptr_t actor) noexcept {
 static void PrepareFieldActor(uintptr_t actor) {
     if(!g_fieldCallbacks.Enter())return;
     __try {
-        if(OwnerThread() && enemysync::SuppressFieldBrain(actor)) {
+        if(OwnerThread() && enemysync::SuppressClientDecision(actor)) {
             if(!EnsureFieldPuzzleHook(actor))(void)EnsureBrainHook(actor);
             LeaveFieldObject(actor);
         }

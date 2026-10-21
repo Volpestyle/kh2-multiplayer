@@ -12,6 +12,7 @@
 #include <cstring>
 #include <initializer_list>
 #include "kh2coop/KH2Offsets.hpp"
+#include "kh2coop/EnemyClass.hpp"
 #include "EnemyMirrorState.hpp"
 #include "EnemyPopulation.hpp"
 
@@ -70,7 +71,7 @@ static uintptr_t g_packActors[3] {};
 // This fixture exercises enemy driving; field and escaped-leave ownership are
 // supplied by their separate native controls.
 static bool FieldActorCurrent(uintptr_t) noexcept { return false; }
-static bool SuppressFieldBrain(uintptr_t) noexcept { return false; }
+static bool SuppressClientDecision(uintptr_t) noexcept { return false; }
 static bool ConsumeFieldLeave(uintptr_t) noexcept { return false; }
 static bool PopulationLeftCleanupRequested(uintptr_t) noexcept { return false; }
 static bool MirrorRequested() noexcept { return g_requested; }

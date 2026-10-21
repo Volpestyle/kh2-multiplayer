@@ -1,3 +1,4 @@
+#include "kh2coop/EnemyClass.hpp"
 #include "NativeLifecycleTrace.hpp"
 #include "NativeTraceFiber.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -134,7 +135,7 @@ ActorSnapshot CaptureActor(uintptr_t actor) {
         !Copy(result.objentry + offsets::objentry::NAME, classifiedName, sizeof(classifiedName)) ||
         std::memcmp(name, classifiedName, sizeof(name)) != 0) return result;
     result.classificationAvailable = true;
-    result.combat = (result.type == offsets::objentry::TYPE_BOSS || result.type == offsets::objentry::TYPE_MOB) &&
+    result.combat = enemyclass::Combat(result.type, result.objectId) &&
                     !(name[0] == 'F' && name[1] == '_');
     // Noncombat may have smaller layouts. Do not probe combat-only fields.
     if (!result.combat) return result;

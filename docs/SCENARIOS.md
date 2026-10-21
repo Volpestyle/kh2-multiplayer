@@ -3292,3 +3292,69 @@ minutes skipped, longer unskipped; the 2/1 evt56 opening stall (VUH-2338) can st
 The `hit damage` hit is synthetic native damage on a chosen actor, not an
 enemy attack. A single held stick does not move Roxas while Tram Common's
 tutorial box is up, which is why movement goes through the pilot's walk.
+
+### Two active combat pilots
+
+A `pilot` step may name `revivePeer: N`, another earlier booted instance. It is
+pad-only and extends that pilot's single input driver; do not also start
+`ReviveGuard`. Each pilot observes its current PID's downed/revive receipts,
+keeps a logically downed owner neutral (engine HP remains1), and approaches a
+downed peer through ordinary stick input before holding Triangle within100
+units. Native RCs cancel the hold immediately. Scope/actor/read failures stay
+neutral and recovery attempts have a60-second limit. The peer's position is
+read from its current canonical actor, independent of the cinematic camera.
+
+`net_twilight_thorn_rehearsal.json` uses this on both seats with real doors and
+no protect/immunity or memory-based kills. It records successful native revival
+for any natural downing; no downing leaves revival unqualified. Its two-screen
+30-second clip blocks explicitly disclose startup/encoder gaps and still need
+caption assembly and visual review before being used as kill evidence.
+
+
+Thorn fight routes may opt into `blockedThornProbe`: after one second with less
+than15 units of canonical movement just outside melee reach, a selected live307
+can receive one native jump and at most two Cross taps. Three attempts and a
+three-second cooldown bound the experiment; RC, revive, tutorial, damage and
+scope changes preempt it. This does not prove head geometry or damage. The
+fixture explicitly uses `lowHp:0` so a25% native revival can resume attacks;
+ordinary guard and recent-damage escape remain, with full incoming damage.
+
+The Thorn scenario checks its existing owned background pilot processes after
+each finalized paired clip block. A failed pilot stops further recording; the
+current clips and samples remain collected. This avoids recording several
+minutes after combat automation has already failed, without adding another
+input driver or runner API. Kill, RC, damage, revive and exit assertions remain
+unchanged.
+
+The Twilight Thorn rehearsal's live08 observation reads existing version7
+read-only downed prompt fields from the paired DLL. It uses the product's
+qualified actionable RC for pilot Triangle decisions, retaining raw cached RC
+as diagnostic data. Pilot routes/reach/timing/strategy are unchanged. Both
+native RC adapters must report successful installation before the route; this
+assertion and the existing kill/reward/exit checks remain strict.
+
+A `pilot` step may set `externalEvidence: true` when the scenario owns that
+seat's recordings. The pilot still releases input, logs the failure and exits
+with the same status; it skips only its best-effort failure screenshot/clip.
+Use this for background combat pilots beside paired `clip` steps, including
+Thorn, so their failure handler cannot contend with an active recorder. The
+default retains standalone pilot failure evidence.
+
+For a short milestone proof, `pilot_until` monitors exactly two existing named
+pad pilots and their paired 30-second background clips. Supply `pilots`, an
+`until` evidence expression, an `abort` expression, `timeoutMs` (at most150000),
+`everyMs:100`, `abortEveryMs:1000`, `maxBlocks` (at most6), two `clips` and `as`.
+Start the initial indexed clip pair before the pilots. The step stops and reaps
+both exact input children before either neutral release, checks release status,
+then drains the active clips without starting another pair. Natural pilot exit,
+timeout, game death, abort or capture failure fails the proof. Existing
+`pilot_wait` and `clip_wait` behavior is unchanged.
+
+`net_twilight_thorn_reactions.json` uses this for the exact trimmed RC build:
+opening297/298/299 and ground345/432 must complete on the appropriate owners,
+with a matching checked client send and host callback for the friend. It stops
+at that milestone; it is not a kill fixture. Actual mission/room checks and a
+sampled128HP boss floor abort a failed qualification before continuing toward
+a kill. Its Session1 read-only state trace retains raw/qualified reaction fields
+and process identity; encoding gaps and sampling jitter remain explicit. The
+separate full-kill rehearsal keeps its original victory/reward/exit checks.

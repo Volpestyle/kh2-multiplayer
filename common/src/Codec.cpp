@@ -1,4 +1,5 @@
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/EnemyClass.hpp"
 #include "kh2coop/ProgressAllowList.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
 #include <map>
@@ -53,7 +54,7 @@ std::map<std::uint32_t,std::uint8_t> rsProgress(const ProgressUpdate& p) {
     rsRequire(out.size()==count);return out;
 }
 void rsEnemy(ByteWriter& w,const ResyncEnemyState& e) {
-    const auto& i=e.identity;rsRequire(i.netId&&i.objectId&&(e.objectType==3||e.objectType==4)&&std::isfinite(i.spawnPosition.x)&&std::isfinite(i.spawnPosition.y)&&std::isfinite(i.spawnPosition.z)&&e.maxHp>0);
+    const auto& i=e.identity;rsRequire(i.netId&&i.objectId&&enemyclass::Combat(e.objectType,i.objectId)&&std::isfinite(i.spawnPosition.x)&&std::isfinite(i.spawnPosition.y)&&std::isfinite(i.spawnPosition.z)&&e.maxHp>0);
     rsRequire((e.life==ResyncLife::Alive&&e.hp>0&&e.hp<=e.maxHp)||(e.life==ResyncLife::ObservedDeadHistory&&e.hp<=0));
     w.writeU16(i.netId);w.writeU16(i.battleProgram);w.writeU16(i.spawnIndex);w.writeU32(i.objectId);write(w,i.spawnPosition);w.writeU32(e.objectType);w.writeI32(e.hp);w.writeI32(e.maxHp);w.writeU8(static_cast<std::uint8_t>(e.life));w.writeU16(e.record.definitionIndex);w.writeU16(e.record.recordIndex);
 }
@@ -227,7 +228,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(MissionState) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(StageEnd) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(StageEnd) RS_INNER(ScriptReactionCompletion) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -1030,6 +1031,22 @@ std::vector<std::uint8_t> encode(const SeatState& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::SeatState, w.data());
 }
 
+void write(ByteWriter& w, const ScriptReactionCompletion& m) {
+    if(!m.location.epoch || !m.seq || !m.requesterConnectionId || !m.occurrence || !m.resource ||
+       !m.objectId || !m.netId || !m.command || (m.ownerSlot>2 && m.ownerSlot!=0xFF))
+        throw std::runtime_error("ScriptReactionCompletion: invalid identity");
+    write(w,m.location);w.writeU64(m.seq);w.writeU64(m.requesterConnectionId);w.writeU64(m.occurrence);
+    w.writeU32(m.resource);w.writeU32(m.objectId);w.writeU16(m.netId);w.writeU16(m.command);w.writeU8(m.ownerSlot);
+}
+void read(ByteReader& r, ScriptReactionCompletion& out) {
+    if(r.remaining()!=SCRIPT_REACTION_COMPLETION_BYTES)throw std::runtime_error("ScriptReactionCompletion: wrong payload length");
+    ScriptReactionCompletion m;read(r,m.location);m.seq=r.readU64();m.requesterConnectionId=r.readU64();m.occurrence=r.readU64();
+    m.resource=r.readU32();m.objectId=r.readU32();m.netId=r.readU16();m.command=r.readU16();m.ownerSlot=r.readU8();
+    ByteWriter validate;write(validate,m);out=m;
+}
+std::vector<std::uint8_t> encode(const ScriptReactionCompletion& m) {
+    ByteWriter w;write(w,m);return encodePacket(PacketType::ScriptReactionCompletion,w.data());
+}
 void write(ByteWriter& w, const StageEnd& m) {
     if (!m.seq || (m.ownerSlot > 2 && m.ownerSlot != 0xFF)) throw std::runtime_error("StageEnd: invalid seq or slot");
     w.writeU32(m.seq); w.writeU16(m.worldId); w.writeU16(m.roomId); w.writeU16(m.eventProgram);
@@ -1112,10 +1129,31 @@ bool validScriptCallEntry(const ScriptCallEntry& e) {
         const auto tag = static_cast<std::uint32_t>(e.args[i] >> 32);
         const auto bits = static_cast<std::uint32_t>(e.args[i]);
         if (i >= shape.argc) { if (e.args[i] != 0) return false; continue; }
+        if (shape.kind==ScriptCallKind::Integers && tag!=SCRIPT_TAG_INT) return false;
         if (tag == SCRIPT_TAG_FLOAT) {
             float f; std::memcpy(&f, &bits, sizeof(f));
             if (!std::isfinite(f) || std::fabs(f) > SCRIPT_CALL_MAX_FLOAT) return false;
         } else if (tag != SCRIPT_TAG_INT || shape.kind == ScriptCallKind::Vector4) return false;
+    }
+    if(e.table==255 && e.index==1) {
+        if(!(static_cast<std::uint32_t>(e.args[0]) || static_cast<std::uint32_t>(e.args[1])) ||
+           static_cast<std::uint32_t>(e.args[2])==0 || static_cast<std::uint32_t>(e.args[2])>UINT16_MAX ||
+           static_cast<std::uint32_t>(e.args[3])>=3)return false;
+    }
+    if(e.table==255 && e.index==12 && (static_cast<std::uint32_t>(e.args[0])>=3 ||
+       !(static_cast<std::uint32_t>(e.args[1]) || static_cast<std::uint32_t>(e.args[2]))))return false;
+    if(e.table==255) {
+        const auto bits=[&](unsigned i){return static_cast<std::uint32_t>(e.args[i]);};
+        const auto tag=[&](unsigned i){return static_cast<std::uint32_t>(e.args[i]>>32);};
+        if(e.index==2 && (bits(0)>=3 || !(bits(1) || bits(2)) || bits(3)!=60))return false;
+        if(e.index==3 || e.index==8) {
+            float value=0;const auto raw=bits(1);std::memcpy(&value,&raw,sizeof(value));
+            if(tag(0)!=SCRIPT_TAG_INT || bits(0)>4095 || tag(1)!=SCRIPT_TAG_FLOAT || value<0)return false;
+        }
+        if(e.index==5 && (!bits(0) || bits(1)>1))return false;
+        if(e.index==13 && (bits(0)!=16386 || bits(1)!=5))return false;
+        if(e.index==7 && (!scriptOwnerCommandMode(bits(0)) || !bits(1) || bits(1)>UINT16_MAX || bits(3)>255))return false;
+        if(e.index==9 && (!(bits(0)&0x80000000u) || !bits(1) || bits(1)>UINT16_MAX))return false;
     }
     return true;
 }
@@ -1772,6 +1810,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("ReviveRequest: wrong frame length");
     if (type == PacketType::SeatState && (len != SEAT_STATE_BYTES || size != kHeaderSize + len))
         throw std::runtime_error("SeatState: wrong frame length");
+    if(type==PacketType::ScriptReactionCompletion && (len!=SCRIPT_REACTION_COMPLETION_BYTES || size!=kHeaderSize+len))
+        throw std::runtime_error("ScriptReactionCompletion: wrong frame length");
     if (type == PacketType::StageEnd && (len != STAGE_END_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("StageEnd: wrong frame length");
     if (type == PacketType::RemoteHit && (len != REMOTE_HIT_PAYLOAD_SIZE || size != kHeaderSize + len))

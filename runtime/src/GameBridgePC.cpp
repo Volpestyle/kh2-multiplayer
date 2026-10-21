@@ -1,3 +1,4 @@
+#include "kh2coop/EnemyClass.hpp"
 #include "kh2coop/GameBridgePC.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 
@@ -590,7 +591,7 @@ bool GameBridgePC::isEnemyActor(std::uint64_t actorAddr) const {
     const std::uint64_t objEntryPtr = actorObjEntryPtr(actorAddr);
     if (objEntryPtr == 0) return false;
     const std::uint8_t type = readAbs<std::uint8_t>(objEntryPtr + objentry::TYPE_FLAGS);
-    return type == objentry::TYPE_BOSS || type == objentry::TYPE_MOB;
+    return enemyclass::Combat(type, readAbs<std::uint32_t>(objEntryPtr + objentry::OBJECT_ID));
 }
 
 bool GameBridgePC::DiscoverEntityAddresses() {

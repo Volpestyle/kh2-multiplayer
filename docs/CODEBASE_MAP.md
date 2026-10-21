@@ -1,7 +1,7 @@
 # Codebase Map
 
 Navigation guide reviewed 2026-10-20 against main `2ed98fa`. Source versions:
-protocol **29**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**.
+protocol **30**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**.
 Tables list key components rather than every source file; use the build files
 for the complete target list and symbol searches for current locations.
 [Setup](../SETUP.md) covers building; the [plan](ONLINE_COOP_PLAN.md) owns current
@@ -89,6 +89,8 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/EnemyTargetRemote.inl`, `src/EnemyTargetRemote.hpp` | VUH-1515 default-off (`KH2COOP_ENEMY_TARGET_REMOTE=1`, every machine): host enemies on the allowlist (Shadow 302) choose the nearest live player or remote clone at bdscript `target_search` (`exe+0x755B00` swap); one damage path per mode: Forward forwards zeroed clone hits as `RemoteHit` (type 45) and the owner cancels its local copy only under a fresh `TargetAuthority` (type 46, protocol v14) naming its slot; Mirror mode chooses targets only (docs/ENEMY_TARGET_REMOTE.md) |
 | `src/MissionMirror.inl`, `src/MissionMirror.hpp` | VUH-2342, on with the enemy mirror (`KH2COOP_MISSION_MIRROR=0` parks it): host sends its running mission's gauges, counters, timer and result in `MissionState` (type 52, protocol 23); clients on the same mission file take them through the native setters, drop their own gauge/fail trap calls, and fail when the host fails (docs/MISSION_MIRROR.md) |
 | `src/ScriptMirror.inl`, `src/ScriptMirror.hpp` | VUH-2252, on with the enemy mirror (`KH2COOP_SCRIPT_MIRROR=0` parks it): host swaps pinned bdscript trap slots (`exe+0x753490` tables) and sends mirrored enemies' calls (tilt, texture animation, shadow, scissoring) in `ScriptCall` (type 49, protocol 19) only when the value changed; clients replay them on the driven copy (docs/SCRIPT_MIRROR.md) |
+| `src/ScriptActorOwner.inl` | VUH-2569 actor-role ownership, capture/attachment, owner camera and command routing inside ScriptMirror; host-owned reaction occurrences use completion packet55. Broader captured phases and a Thorn kill remain unqualified. |
+| `src/ScriptReaction.hpp`, `src/ScriptCamera.hpp` | Pure reaction identity/freshness/consume and seat-resolution rules, plus scoped camera timeline admission; native adapters retain pinned caller/body and lifetime checks. |
 
 EntityHook.cpp also holds the VUH-1501 hit-ownership hooks (BuildHit `0x3D23C0` log, ApplyHitDamage `0x3D3BA0` drop filter + claims, host apply), driven through `common/include/kh2coop/HitChannel.hpp`.
 Those diagnostic claims/manual apply requests remain separate from protocol
@@ -175,6 +177,7 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 |------|------|
 | `include/kh2coop/Types.hpp` | Vec3, ActorState, AvatarState, InputFrame, SlotType, etc. |
 | `include/kh2coop/Protocol.hpp` | Session messages, clock sync, world sync (RoomTransition, EventHold, EnemyManifest/Hp/Death, HitClaim, TransitionAck, ProgressUpdate) |
+| `include/kh2coop/EnemyClass.hpp` | Shared combat/boss classifier; admits exact Thorn307/type12 without globally admitting other type12 or script-created actors. |
 | `include/kh2coop/PrologueSeats.hpp` | Qualified profile/readiness, solo-wait and seat-color rules; checked native site identities live in `RouteSpawnPolicy.hpp` |
 | `include/kh2coop/EventScenes.hpp` | Checked host-led story scene and in-field event mappings |
 | `include/kh2coop/Codec.hpp` | PacketType enum, encode/decode declarations, `isWorldPacket` |
@@ -210,6 +213,7 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 | `kh2ctl/src/world_resync.cpp` | Existing admitted-host mailbox command, isolated from local HitChannel types; queue receipt only |
 | `mcp_kh2ctl/server.py` | Python MCP server wrapping kh2ctl for agent use |
 | `scenario/run.py` | Scenario runner: rig lock, save hashing, JSON scenarios, crash/hang bundles, reports; default-off current secondary equipment/map binding capture (`docs/SCENARIOS.md`) |
+| `scenario/scenarios/net_twilight_thorn_reactions.json` | Short opening/ground RC proof for the exact trimmed build; stops the existing pilots at the joined milestone and finalizes paired clips. Separate from the full-kill rehearsal. |
 | `scenario/resync_evidence.py` | Strict native ACK/original-target/relay/runtime joins and independent fresh native evidence; incomplete remains failure |
 | `scenario/trace_audit.py` | Saved spawn/lifecycle envelope and predicate auditor, plus separate native-hit incoming witnesses and damage-policy matrix/checked-zero evidence; never overall gameplay acceptance |
 | `scenario/scenarios/*.json` | Live controls and runner self-tests, including strict two-pack native HP/death acceptance and positional activation controls |
@@ -227,6 +231,7 @@ loopback ports). None launches or attaches to KH2.
 | File | What |
 |------|------|
 | `PrologueSeatsTest.cpp` | Profile/readiness, solo-wait and seat-color pure controls; no native-site or live route acceptance |
+| `ScriptCameraTest.cpp`, `ScriptOwnerCommandTest.cpp`, `ScriptReactionCacheTest.cpp` | Stable camera/owner-command and native-reaction receipt policy controls, including canonical-seat selection and empty client candidate tables; no live boss acceptance. |
 | `SteamBrokerTest.cpp`, `SteamNativeAdapterTest.cpp`, `SteamPipeTest.cpp` | Broker policy, native adapter and authenticated local IPC controls; live two-account evidence is separate |
 | `NativePartyHudTest.cpp` | Display-only owner vitals, gauge views and retirement controls over owned memory |
 | `CrownPropTest.cpp` | Installed-asset crown parsing and geometry controls |

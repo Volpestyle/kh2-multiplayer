@@ -1,0 +1,265 @@
+{
+  "name": "net_twilight_thorn_reactions",
+  "playerDefaults": true,
+  "protect": [],
+  "description": "Short post09 exact-trimmed-DLL, single-PC loopback proof through the same FM00 real doors: all opening297/298/299, actual ground345/432 owner0 and owner1 completion; owner1 joins host offer/client consume-once local queued1/host complete by exact immutable tuple. Stop BOTH existing pad pilots at the milestone or any abort, neutral release, finalize active paired30s clips, then clean owned teardown. No full kill attempt, warps, forced death, protection or synthetic state. Session1 existing Game.state read-only observations at about10Hz retain qualified/raw/source/prompt fields; no new input object.",
+  "qualificationGaps": [
+    "This short RC proof is not full kill, mission4/16, event315, survival, child317 parity or two-PC acceptance.",
+    "Capture is paired30s blocks with encoder/handoff gaps; actions logged in a gap are not automatically filmed. Active clip may have a neutral tail after pilot stop.",
+    "Root must use the exact reviewed trimmed DLL containing consume-once local completion queued logging in both branches; new scenario alone cannot attest product identity.",
+    "Read-only Game.state runs in Session1 on exact context-owned PID handles; raw fallback/unavailable prompt telemetry is recorded honestly, not relabeled qualified.",
+    "Read-only host307 HP floor128 is checked with the1s native guard and at goal/afterneutralclip tail; missing/excess boss rows refuse. This coarse sampled floor reduces kill drift but is not an atomic no-kill guarantee."
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+      }
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+      }
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)[:2] == [2,32] and location(1)[:2] == [2,32]",
+      "message": "FM-00 must load Station of Serenity on both seats; slotMoves is relative to the save-list cursor"
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1",
+      "message": "Both seats must qualify all native RC pins and hooks before the route starts"
+    },
+    {
+      "do": "relay",
+      "port": 27809,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[enemysync] client arrived epoch=',1)>0",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "hang_check",
+      "instance": 0,
+      "on": false
+    },
+    {
+      "do": "hang_check",
+      "instance": 1,
+      "on": false
+    },
+    {
+      "do": "save",
+      "as": "evidence_scope",
+      "expr": "{'topology':'single-PC loopback, two native seats','input':'pad mailbox; no OS focus','boot':'FM-00 rehearsal, not New Game acceptance','clips':'30-second two-screen blocks; encoding gaps are not continuous footage','caption_work':'Burn in HOST / FRIEND and Single-PC loopback labels during final assembly; retain raw blocks','watchdog':'gameplay hang checks off across native event holds; all steps have fixed deadlines','reaction_observation':'Live08: existing read-only v7 promptHide from product-qualified actionable RC; raw cached RC remains diagnostic; routes/reach/timing/strategy unchanged'}"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_serenity_door.json",
+      "name": "host_to_calling",
+      "seconds": 120,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[2,33,0,0,1,0] and location(1)==location(0)",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "save",
+      "as": "calling_deaths_before",
+      "expr": "log_count('[enemysync] host death epoch',0)"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_calling_path.json",
+      "name": "host_calling_path",
+      "seconds": 360,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 1
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_calling_path.json",
+      "name": "friend_calling_path",
+      "seconds": 360,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 0
+    },
+    {
+      "do": "pilot_wait"
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[enemysync] host death epoch',0) >= saved['calling_deaths_before']+10 and all(not any(a.get('objectId')==318 and a.get('hp',-1)>0 for a in actors(i)) for i in (0,1))",
+      "message": "The real Calling path must clear all ten Dusks on both seats before the boss door"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_menu_tutorial.json",
+      "name": "host_menu_tutorial",
+      "seconds": 40,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_menu_tutorial.json",
+      "name": "friend_menu_tutorial",
+      "seconds": 40,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "assert",
+      "expr": "peek('0x7435D0','u8',0)==255 and peek('0x7435D0','u8',1)==255",
+      "message": "First-open menu tutorial must be closed before boss event hold"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_awakening_door.json",
+      "name": "host_to_awakening",
+      "seconds": 260,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[2,34,0,157,157,157] and location(1)==location(0) and all(any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1))",
+      "timeoutMs": 120000
+    },
+    {
+      "do": "save",
+      "as": "thorn_ingress",
+      "expr": "[{'location':location(i),'mission':mission(i),'boss':[a for a in actors(i) if a.get('objectId')==307],'player':[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)]} for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['mission'] and row['mission']['file']=='TT34_MS304.bar' and len(row['boss'])==1 and len(row['player'])==1 for row in saved['thorn_ingress'])",
+      "message": "Both seats require the real Thorn mission, one exact307 boss, and a canonical native player"
+    },
+    {
+      "do": "wait_until",
+      "expr": "[(a['hp'],a['maxHp']) for a in actors(0) if a.get('objectId')==307]==[(a['hp'],a['maxHp']) for a in actors(1) if a.get('objectId')==307]",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "save",
+      "as": "rc_patterns",
+      "expr": "{'offer': '\\\\[script-rc\\\\] offer source=(?P<source>\\\\d+) resource=(?P<resource>\\\\d+) occurrence=(?P<occurrence>\\\\d+) command=(?P<command>\\\\d+) owner=(?P<owner>\\\\d+) epoch=(?P<epoch>\\\\d+)(?:\\\\s|$)', 'complete': '\\\\[script-rc\\\\] complete source=(?P<source>\\\\d+) resource=(?P<resource>\\\\d+) occurrence=(?P<occurrence>\\\\d+) command=(?P<command>\\\\d+) owner=(?P<owner>\\\\d+)(?:\\\\s|$)', 'local': '\\\\[script-rc\\\\] local completion source=(?P<source>\\\\d+) resource=(?P<resource>\\\\d+) occurrence=(?P<occurrence>\\\\d+) command=(?P<command>\\\\d+) owner=(?P<owner>\\\\d+) queued=(?P<queued>[01])(?:\\\\s|$)', 'identity': '\\\\[statehash\\\\] native epoch=(?P<epoch>\\\\d+) frame=\\\\d+ netId=(?P<source>\\\\d+) objectId=307 hp=\\\\d+(?:\\\\s|$)'}"
+    },
+    {
+      "do": "save",
+      "as": "rc_identity",
+      "expr": "log_matches(saved['rc_patterns']['identity'],0)[-1]"
+    },
+    {
+      "do": "save",
+      "as": "rc_baseline",
+      "expr": "{'offer':len(log_matches(saved['rc_patterns']['offer'],0)),'complete':len(log_matches(saved['rc_patterns']['complete'],0)),'local':len(log_matches(saved['rc_patterns']['local'],1)),'fullParty':log_count('[downed] full party down',0)}"
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 30,
+      "fps": 30,
+      "name": "rc_proof_host_00",
+      "background": true
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "seconds": 30,
+      "fps": 30,
+      "name": "rc_proof_friend_00",
+      "background": true
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_host_fight.json",
+      "name": "host_thorn",
+      "seconds": 180,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 1,
+      "externalEvidence": true
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_fight.json",
+      "name": "friend_thorn",
+      "seconds": 180,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 0,
+      "externalEvidence": true
+    },
+    {
+      "do": "pilot_until",
+      "pilots": [
+        "host_thorn",
+        "friend_thorn"
+      ],
+      "until": "([{'opening':opening,'groundHost':host,'groundFriend':friend,'clientQueued':local,'identity':saved['rc_identity']} for offers in [log_matches(saved['rc_patterns']['offer'],0)[saved['rc_baseline']['offer']:]] for completed in [log_matches(saved['rc_patterns']['complete'],0)[saved['rc_baseline']['complete']:]] for locals_ in [log_matches(saved['rc_patterns']['local'],1)[saved['rc_baseline']['local']:]] for opening in [[c for c in completed if c['command'] in ('297','298','299') and c['source']==saved['rc_identity']['source'] and any(o['epoch']==saved['rc_identity']['epoch'] and all(c[k]==o[k] for k in ('source','resource','occurrence','command','owner')) for o in offers)]] if {c['command'] for c in opening}=={'297','298','299'} for host in completed if host['command'] in ('345','432') and host['owner']=='0' and host['source']==saved['rc_identity']['source'] and any(o['epoch']==saved['rc_identity']['epoch'] and all(host[k]==o[k] for k in ('source','resource','occurrence','command','owner')) for o in offers) for friend in completed if friend['command'] in ('345','432') and friend['owner']=='1' and friend['source']==saved['rc_identity']['source'] and any(o['epoch']==saved['rc_identity']['epoch'] and all(friend[k]==o[k] for k in ('source','resource','occurrence','command','owner')) for o in offers) for local in locals_ if local['queued']=='1' and all(friend[k]==local[k] for k in ('source','resource','occurrence','command','owner'))] or [False])[0]",
+      "abort": "any(location(i)!=saved['thorn_ingress'][i]['location'] for i in (0,1)) or any(m is None or m['file']!='TT34_MS304.bar' or (m['flags'] & 0x14)==0x14 or m['result']!=0 for m in [mission(i) for i in (0,1)]) or log_count('[downed] full party down',0)>saved['rc_baseline']['fullParty'] or any(len(bosses)!=1 or bosses[0].get('hp',0)<=128 for bosses in [[a for a in actors(0) if a.get('objectId')==307]])",
+      "timeoutMs": 150000,
+      "everyMs": 100,
+      "maxBlocks": 6,
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "rc_proof_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "rc_proof_friend"
+        }
+      ],
+      "as": "rc_proof",
+      "abortEveryMs": 1000
+    }
+  ]
+}

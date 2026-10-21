@@ -27,6 +27,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -46,8 +47,9 @@ CUTSCENE_STATE, EVENT_CONTEXT = 0xB65210, 0x2A11478
 BATTLE_STATUS, REACT_CMD = 0x2A11404, 0x2A11162
 CAMERA, INPUT_STRUCT_PTR = 0x718C60, 0x79CF00
 SAVE, STORY = 0x9A98B0, (0x1C90, 0x260)  # story flag range of the live SAVE block
-SLOT0_HP = 0x2A23518 + 0x80  # max HP follows at +4
+CANONICAL_PLAYER = 0x2A105D0  # actor -> status +0x5C0 -> HP +0, max HP +4 (EntityHook::ActorHp)
 SAVE_REACTIONS = {55}  # save point "Save" (FM-02 start, 2026-10-17); never taken
+KNOWN_EVENT_REACTIONS = frozenset((297, 298, 299))  # Thorn Key Counter/Lunarsault/Break Raid only
 GAME_OVER_MENU = 8  # open-menu id while the Game Over screen is up (solo teach-03); co-op downed has none
 
 STUCK_SECONDS = 120.0
@@ -88,6 +90,109 @@ class INPUT(ctypes.Structure):
         _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT), ("pad", ctypes.c_byte * 32)]
     _anonymous_ = ("u",)
     _fields_ = [("type", wt.DWORD), ("u", _U)]
+
+
+class PromptReactionReader:
+    """Read existing v7 prompt telemetry; never creates or writes its mapping.
+
+    Requires the native actionable-RC/field-guard prompt precedence (VUH-2569).
+    Unknown, frozen or out-of-scope observations retain the original raw command.
+    """
+
+    SIZE, MAGIC, VERSION = 360, 0x4E574448, 7
+    SETTLE_FRAMES, FRESH_SECONDS = 30, 0.5
+
+    def __init__(self, pid: int) -> None:
+        self.pid, self.handle, self.view = pid, None, None
+        self.retry_at = 0.0
+        self.reset()
+
+    def reset(self) -> None:
+        self.key = self.frame = self.first_frame = None
+        self.advanced_at = 0.0
+
+    def close(self) -> None:
+        if self.view:
+            k32.UnmapViewOfFile(self.view)
+            self.view = None
+        if self.handle:
+            k32.CloseHandle(self.handle)
+            self.handle = None
+        self.reset()
+
+    def read(self) -> bytes | None:
+        if not self.view:
+            if time.monotonic() < self.retry_at:
+                return None
+            self.retry_at = time.monotonic() + 1.0
+            k32.OpenFileMappingW.argtypes = [wt.DWORD, wt.BOOL, wt.LPCWSTR]
+            k32.OpenFileMappingW.restype = wt.HANDLE
+            k32.MapViewOfFile.argtypes = [wt.HANDLE, wt.DWORD, wt.DWORD, wt.DWORD, ctypes.c_size_t]
+            k32.MapViewOfFile.restype = ctypes.c_void_p
+            k32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+            k32.UnmapViewOfFile.restype = wt.BOOL
+            k32.CloseHandle.argtypes = [wt.HANDLE]
+            self.handle = k32.OpenFileMappingW(4, False, f"Local\\kh2coop_downed_{self.pid}")
+            if not self.handle:
+                return None
+            self.view = k32.MapViewOfFile(self.handle, 4, 0, 0, self.SIZE)
+            if not self.view:
+                self.close()
+                return None
+        first = ctypes.string_at(self.view, self.SIZE)
+        second = ctypes.string_at(self.view, self.SIZE)
+        return first if first == second else None
+
+    def interpret(self, s: dict, raw: bytes | None) -> tuple[int, dict]:
+        original = s["react"]
+        info = {"source": "raw", "filtered": False}
+        field = s["inField"] and not s["event"] and s["menu"] == 255 \
+            and s["hp"] is not None and s["hp"] > 0 and s["player"] > 0x10000 \
+            and len(s["roomScope"]) == 6 and s["world"] != 255
+        if not field or raw is None or len(raw) != self.SIZE:
+            self.reset()
+            return original, info
+        magic, version = struct.unpack_from("<II", raw)
+        frame, state, actor, hp, maximum, flags, dead, off, published, task = \
+            struct.unpack_from("<IIQiiIIIIQ", raw, 24)
+        kind, hide, shifted = struct.unpack_from("<I", raw, 328)[0], \
+            struct.unpack_from("<I", raw, 340)[0], struct.unpack_from("<I", raw, 356)[0]
+        known = (kind, hide) in {(0, 8), (0, 9), (0, 10), (2, 10), (1, 0), (2, 0), (0, 7)}
+        if magic != self.MAGIC or version != self.VERSION or not frame or state != 1 \
+                or actor != s["player"] or hp != s["hp"] or maximum != s["maxHp"] \
+                or flags & 4 or dead or off or published != 1 or task or shifted != original or not known:
+            self.reset()
+            return original, info
+        info.update(frame=frame, promptKind=kind, promptHide=hide)
+        now, key = time.monotonic(), (tuple(s["roomScope"]), actor)
+        if self.key != key or self.frame is None or frame < self.frame \
+                or frame-self.frame > 120 or now-self.advanced_at > self.FRESH_SECONDS:
+            self.key, self.frame, self.first_frame, self.advanced_at = key, frame, frame, now
+            return original, info
+        if frame != self.frame:
+            self.frame, self.advanced_at = frame, now
+        if frame-self.first_frame < self.SETTLE_FRAMES:
+            return original, info
+        info["source"] = "downed-prompt-v7"
+        if hide == 7:  # The native actionable command owns Triangle.
+            return original, info
+        info["filtered"] = original != 0
+        return 0, info
+
+    def reaction(self, game, s: dict) -> tuple[int, dict]:
+        try:
+            if game.pid != self.pid or not game.alive():
+                raise ValueError("fixture PID/process unavailable")
+            raw = self.read()
+            now = game.rva(NOW, 10)
+            current_scope = tuple(now[:3]) + struct.unpack_from("<HHH", now, 4)
+            if current_scope != tuple(s["roomScope"]) \
+                    or int.from_bytes(game.rva(CANONICAL_PLAYER, 8), "little") != s["player"]:
+                raise ValueError("fixture actor/scope changed")
+            return self.interpret(s, raw)
+        except (OSError, ValueError, struct.error):
+            self.reset()
+            return s["react"], {"source": "raw", "filtered": False}
 
 
 class Game:
@@ -140,17 +245,32 @@ class Game:
             k32.CloseHandle(handle)
 
     def state(self) -> dict:
-        now = self.rva(NOW, 4)
+        now = self.rva(NOW, 10)
         s = {"world": now[0], "room": now[1], "door": now[2],
+             "roomScope": tuple(now[:3]) + struct.unpack_from("<HHH", now, 4),
              "inField": self.rva(IN_FIELD, 1)[0] != 0,
              "event": int.from_bytes(self.rva(CUTSCENE_STATE, 4), "little", signed=True) != 0
              or int.from_bytes(self.rva(EVENT_CONTEXT, 8), "little") != 0,
              "menu": self.rva(OPEN_MENU, 1)[0],
              "battle": int.from_bytes(self.rva(BATTLE_STATUS, 4), "little"),
              "react": int.from_bytes(self.rva(REACT_CMD, 2), "little"),
-             "hp": int.from_bytes(self.rva(SLOT0_HP, 4), "little", signed=True),
-             "maxHp": int.from_bytes(self.rva(SLOT0_HP + 4, 4), "little", signed=True),
+             "hp": None, "maxHp": None, "player": 0, "playerPos": None,
              "story": hashlib.sha1(self.rva(SAVE + STORY[0], STORY[1])).hexdigest()[:12]}
+        # Prologue status-pool index 79 may belong to the other seat's clone.
+        # Read only this game's canonical actor, and refuse a replaced actor/status.
+        try:
+            player = int.from_bytes(self.rva(CANONICAL_PLAYER, 8), "little")
+            if player > 0x10000:
+                status = int.from_bytes(self.read(player + 0x5C0, 8), "little")
+                if status > 0x10000:
+                    hp, max_hp = struct.unpack("<ii", self.read(status, 8))
+                    position = struct.unpack("<fff", self.read(player + 0x670, 12))
+                    if int.from_bytes(self.rva(CANONICAL_PLAYER, 8), "little") == player \
+                            and int.from_bytes(self.read(player + 0x5C0, 8), "little") == status \
+                            and 0 <= hp <= max_hp <= 10000000 and all(math.isfinite(v) for v in position):
+                        s.update(hp=hp, maxHp=max_hp, player=player, playerPos=position)
+        except OSError:
+            pass  # actor replacement/loading: the fight waits with neutral input
         cam = self.rva(CAMERA, 0x58)
         look, eye = struct_floats(cam, 0x08, 3), struct_floats(cam, 0x18, 3)
         s["forward"] = (look[0] - eye[0], look[2] - eye[2])
@@ -169,7 +289,17 @@ class Game:
         except OSError:
             s["pad"] = None
         s["free"] = s["inField"] and not s["event"] and s["menu"] == 0xFF and s["world"] != 0xFF
+        s["reactRaw"] = s["react"]
+        reader = getattr(self, "prompt_reactions", None)
+        if reader is None:
+            reader = self.prompt_reactions = PromptReactionReader(self.pid)
+        s["react"], s["reactObservation"] = reader.reaction(self, s)
         return s
+
+    def close_prompt(self) -> None:
+        reader = getattr(self, "prompt_reactions", None)
+        if reader is not None:
+            reader.close()
 
 
 def struct_floats(data: bytes, offset: int, n: int) -> tuple:
@@ -372,9 +502,10 @@ def kh2ctl(*args: str, timeout: float = 60) -> dict:
         return {"ok": False, "error": out.stderr.strip()[-300:]}
 
 
-def enemies(pid: int) -> list[dict]:
-    actors = kh2ctl("entities", "--pid", str(pid)).get("actors", [])
-    return [a for a in actors if a.get("objectType") in (3, 4) and not a["name"].startswith("F_")
+def enemies(pid: int, timeout: float = 60) -> list[dict]:
+    actors = kh2ctl("entities", "--pid", str(pid), timeout=timeout).get("actors", [])
+    return [a for a in actors if (a.get("objectType") in (3, 4)
+            or (a.get("objectType") == 12 and a.get("objectId") == 307)) and not a["name"].startswith("F_")
             and a.get("hp", -1) > 0]
 
 
@@ -419,6 +550,147 @@ class Retry(Exception):
     """Game Over → Continue reloaded another room: replay from the step that leads back."""
 
 
+def event_reaction_allowed(s: dict, scope: tuple, commands: set[int]) -> bool:
+    """A named native camera RC is narrower than ordinary field freedom."""
+    return bool(commands and s["event"] and s["inField"] and s["menu"] == 0xFF
+                and s["roomScope"] == scope and s["player"] and s["hp"] is not None and s["hp"] > 0
+                and s["react"] in commands)
+
+
+class DownedLog:
+    """Observe one current-run PID's logical state; native HP1 is not alive."""
+
+    def __init__(self, pid: int) -> None:
+        self.path = ROOT / "build" / "rig" / "logs" / f"kh2coop_inject_{pid}.log"
+        self.offset, self.pending = 0, b""
+        self.downed, self.full_party, self.actor, self.known = False, False, 0, False
+        self.downs, self.revives = 0, 0
+
+    def update(self) -> bool:
+        try:
+            with self.path.open("rb") as log:
+                if log.seek(0, 2) < self.offset:
+                    self.known = False  # unexpected truncation is not proof of recovery
+                    return False
+                log.seek(self.offset)
+                data = log.read(1024 * 1024)
+                self.offset += len(data)
+        except OSError:
+            self.known = False
+            return False
+        lines = (self.pending + data).split(b"\n")
+        self.pending = lines.pop()
+        for raw in lines:
+            line = raw.decode("utf-8", "replace")
+            if "[downed] gate intercept " in line:
+                actor = re.search(r" actor=([0-9A-Fa-f]+) ", line)
+                self.actor = int(actor[1], 16) if actor else 0
+                self.downed, self.full_party = True, False
+                self.downs += 1
+            elif "[downed] revive returned " in line:
+                state = re.search(r" state=(\d+)", line)
+                fault = re.search(r" fault=(\d+)", line)
+                hp = re.search(r" hp=(\d+)/", line)
+                if state and state[1] == "1" and hp and int(hp[1]) > 0 and (not fault or fault[1] == "0"):
+                    self.downed, self.full_party, self.actor = False, False, 0
+                    self.revives += 1
+            elif "[downed] logical hold ended " in line:
+                self.downed, self.full_party, self.actor = False, False, 0
+            elif "[downed] full party down " in line or "[downed] gate pass mode=" in line and "full party down:" in line:
+                self.full_party = True
+            elif "[downed] hold lost " in line or "[downed] revive FAULT" in line:
+                self.downed, self.actor = True, 0  # refused/unknown: never infer living
+        self.known = len(data) < 1024 * 1024 and (not self.downed or bool(self.actor))
+        return self.known
+
+
+class CooperativeFight:
+    """Revive within the active pilot: the same pad writer owns every input.
+
+    Reach100/hold1600ms/timeout60s reuse scenario.ReviveGuard's proven bounds.
+    Native reaction commands always take priority; no death is forced.
+    """
+
+    REACH, HOLD_SECONDS, TIMEOUT = 100.0, 1.6, 60.0
+
+    def __init__(self, game: Game, peer: Game) -> None:
+        self.peer = peer
+        self.own_log, self.peer_log = DownedLog(game.pid), DownedLog(peer.pid)
+        self.since: float | None = None
+        self.mode = ""
+
+    def neutral(self, pilot, mode: str) -> bool:
+        pilot.kb.hold(set())
+        if mode != self.mode:
+            pilot.write("coop_revive", state=mode, peerPid=self.peer.pid,
+                        ownDowns=self.own_log.downs, peerDowns=self.peer_log.downs,
+                        ownRevives=self.own_log.revives, peerRevives=self.peer_log.revives)
+            self.mode = mode
+        if self.since is None:
+            self.since = time.monotonic()
+        if time.monotonic() - self.since > self.TIMEOUT:
+            raise Stuck(f"cooperative revive {mode} exceeded {self.TIMEOUT:.0f}s")
+        return True
+
+    def step(self, pilot, own: dict, event_reaction: bool = False) -> bool:
+        """True consumes this combat tick; False leaves native combat/RCs alone."""
+        if not isinstance(pilot.kb, PadInput):
+            raise Stuck("cooperative revive requires pad input")
+        own_ok, peer_ok = self.own_log.update(), self.peer_log.update()
+        if not own_ok or not peer_ok:
+            return self.neutral(pilot, "unknown-log")
+        if self.own_log.full_party or self.peer_log.full_party:
+            return self.neutral(pilot, "full-party-down")
+        if self.own_log.downed:
+            return self.neutral(pilot, "own-logical-downed")
+        if event_reaction:
+            return False  # authenticated own living state: native camera RC wins revival
+        if not self.peer_log.downed:
+            if self.mode:
+                pilot.write("coop_revive", state="combat", peerPid=self.peer.pid,
+                            ownRevives=self.own_log.revives, peerRevives=self.peer_log.revives)
+            self.since, self.mode = None, ""
+            return False
+        self.neutral(pilot, "peer-logical-downed")
+        try:
+            peer = self.peer.state()
+        except (OSError, ValueError):
+            return True
+        if own["hp"] is None or own["hp"] <= 0 or not peer["free"] \
+                or own["roomScope"] != peer["roomScope"] or not own["playerPos"] or not peer["playerPos"] \
+                or self.peer_log.actor != peer["player"]:
+            return True
+        if not own["free"]:
+            return False  # ordinary bounded tutorial/event handling still applies
+        if own["react"]:
+            return False  # native RC handler, never a revive hold
+        target = peer["playerPos"]
+        distance = math.hypot(target[0] - own["playerPos"][0], target[2] - own["playerPos"][2])
+        if distance > self.REACH:
+            pilot.kb.hold(steer({**own, "pos": own["playerPos"]}, (target[0], target[2])))
+            time.sleep(0.2)
+            pilot.kb.hold(set())
+            return True
+        pilot.write("coop_revive_hold", peerPid=self.peer.pid, distance=round(distance, 1), milliseconds=1600)
+        end = time.monotonic() + self.HOLD_SECONDS
+        pilot.kb.hold({"react"})
+        try:
+            while time.monotonic() < end:
+                time.sleep(0.05)
+                current, peer_now = pilot.game.state(), self.peer.state()
+                if not self.own_log.update() or not self.peer_log.update() or self.own_log.downed \
+                        or not self.peer_log.downed or self.own_log.full_party or self.peer_log.full_party \
+                        or not current["free"] or current["react"] or not peer_now["free"] \
+                        or current["roomScope"] != peer_now["roomScope"] \
+                        or current["player"] != own["player"] or peer_now["player"] != peer["player"]:
+                    break
+        except (OSError, ValueError):
+            pass
+        finally:
+            pilot.kb.hold(set())
+        return True
+
+
 class Pilot:
     def __init__(self, game: Game, out: Path, keys: dict, mode: str = "pad") -> None:
         self.game, self.out = game, out
@@ -435,6 +707,7 @@ class Pilot:
         self.doors: list[dict] = []
         self.module_set: frozenset[str] = frozenset()
         self.module_at = 0.0
+        self.cooperative: CooperativeFight | None = None
 
     def write(self, kind: str, **data) -> None:
         with self.log_lock:
@@ -494,6 +767,9 @@ class Pilot:
         def record() -> None:
             if prev:
                 prev.join(timeout=240)
+            if not self.game.alive():
+                self.write("clip_skipped", name=path.name, reason="owned-game-exited")
+                return
             try:
                 done = subprocess.run([str(KH2CTL), "clip", "--pid", str(self.game.pid), "--seconds",
                                        str(min(seconds, 30)), "--fps", "30", "--out", str(path)],
@@ -513,6 +789,9 @@ class Pilot:
         at most 30 s here). None, logged, when no screenshot was written."""
         path, end = self.out / f"{name}.png", time.monotonic() + 45
         while True:
+            if not self.game.alive():
+                self.write("capture_skipped", name=name, reason="owned-game-exited")
+                return None
             out = kh2ctl("capture", "--pid", str(self.game.pid), "--out", str(path))
             if path.exists():
                 return path.name
@@ -575,7 +854,7 @@ class Pilot:
                 self.kb.hold(steer(s, aim))
                 time.sleep(0.06)
             self.kb.hold(set())
-            if want:  # story scenes after a door can run for minutes (the pod room finale)
+            if want and step.get("settle", True):  # opt-out hands a native event to the next owned pilot
                 self.settle(True, 2.0, time.monotonic() + float(step.get("settleSec", 300)), step.get("menus"))
             result = {"from": start["pos"], "to": self.state()["pos"]}
         elif kind == "hold":
@@ -695,10 +974,20 @@ class Pilot:
         stats = {"enemiesStart": None, "swings": 0, "reactions": {}, "minHp": None, "deaths": 0, "evades": 0,
                  "escapes": 0, "downed": 0, "heals": 0}
         calm_since, locked, heal_ready, reacted, window_tries = None, False, 0.0, 0.0, 0
+        tutorial_confirms, tutorial_at = 0, 0.0
+        blocked_approach, probe_count, probe_at = None, 0, -3.0
         guard = step.get("guard", "guard" if isinstance(self.kb, PadInput) else None)
         recent: list[tuple[float, int]] = []  # (time, hp) samples for the damage window
         first = self.state()
         room = (first["world"], first["room"])
+        event_commands = set(step.get("eventReactions", ()))
+        if not event_commands <= KNOWN_EVENT_REACTIONS or any(type(command) is not int for command in event_commands):
+            raise ValueError("eventReactions permits only named Thorn commands297/298/299")
+        if event_commands and not isinstance(self.kb, PadInput):
+            raise ValueError("eventReactions requires pad input")
+        event_scope = first["roomScope"]
+        event_log = self.cooperative.own_log if self.cooperative else DownedLog(self.game.pid)
+        event_presses, event_exhausted = 0, False
         heal = step.get("heal")  # {"below": 0.5, "keys": [...], "max": 3}: menu keys to use a Potion
 
         def hurting(s: dict, share: float) -> bool:
@@ -725,18 +1014,46 @@ class Pilot:
 
         while time.monotonic() < deadline:
             s = self.state()
+            event_rc = event_reaction_allowed(s, event_scope, event_commands)
+            if self.cooperative and self.cooperative.step(self, s, event_rc):
+                blocked_approach = None
+                time.sleep(0.1)
+                continue
+            if event_rc:
+                blocked_approach = None
+                self.kb.hold(set())
+                if not self.cooperative and (not event_log.update() or event_log.downed or event_log.full_party):
+                    time.sleep(0.1)
+                    continue
+                if event_presses < 32 and time.monotonic() > reacted + float(step.get("reactGapSec", 0.8)):
+                    reacted = time.monotonic()
+                    event_presses += 1
+                    stats["reactions"][s["react"]] = stats["reactions"].get(s["react"], 0) + 1
+                    self.write("event_reaction", command=s["react"], attempt=event_presses, scope=list(event_scope))
+                    self.kb.tap("react")
+                elif event_presses >= 32 and not event_exhausted:
+                    self.write("event_reaction_limit", attempts=event_presses, scope=list(event_scope))
+                    event_exhausted = True
+                time.sleep(0.1)
+                continue
+            if s["hp"] is None:
+                blocked_approach = None
+                self.kb.hold(set())
+                time.sleep(0.3)
+                continue
             stats["minHp"] = s["hp"] if stats["minHp"] is None else min(stats["minHp"], s["hp"])
             if s["hp"] <= 0 and s["world"] != 0xFF:
+                blocked_approach = None
                 self.kb.hold(set())
                 if s["menu"] != GAME_OVER_MENU:
                     # Downed in co-op: no Game Over; wait (bounded) for a revive or the menu.
                     stats["downed"] += 1
                     self.write("downed", stats=stats)
                     until = time.monotonic() + float(step.get("downedSec", 60))
-                    while time.monotonic() < until and s["hp"] <= 0 and s["menu"] != GAME_OVER_MENU:
+                    while time.monotonic() < until and (s["hp"] is None or s["hp"] <= 0) and s["menu"] != GAME_OVER_MENU:
                         time.sleep(0.5)
                         s = self.state()
-                    if s["hp"] > 0:
+                    if s["hp"] is not None and s["hp"] > 0:
                         self.write("revived", hp=s["hp"])
                         recent.clear()
                         continue
@@ -758,14 +1075,28 @@ class Pilot:
                 recent.clear()
                 continue
             if not s["free"]:
+                blocked_approach = None
                 self.kb.hold(set())
                 if s["event"]:
                     self.kb.tap("confirm")
+                elif step.get("dismissComboTutorial", False) and isinstance(self.kb, PadInput) \
+                        and s["inField"] and s["battle"] and s["menu"] == 0 \
+                        and (s["world"], s["room"]) == room and tutorial_confirms < 4 \
+                        and time.monotonic() - tutorial_at >= 1.0:
+                    # VUH-2555/eddd8884: the first-hit combo box has menu=0,
+                    # event=0. In this opted-in combat fixture only, Cross closes
+                    # it through the pad mailbox. Never answer an unknown menu.
+                    self.kb.tap("confirm")
+                    tutorial_confirms += 1
+                    tutorial_at = time.monotonic()
+                    self.write("combat_tutorial_confirm", attempt=tutorial_confirms,
+                               menu=s["menu"], event=s["event"], room=list(room))
                 time.sleep(0.3)
                 continue
             falling = hurting(s, 0.1)
             if s["react"] and s["battle"] and s["react"] not in SAVE_REACTIONS \
                     and (falling or time.monotonic() > reacted + float(step.get("reactGapSec", 0.8))):
+                blocked_approach = None
                 reacted = time.monotonic()
                 stats["reactions"][s["react"]] = stats["reactions"].get(s["react"], 0) + 1
                 self.kb.tap("react")
@@ -778,6 +1109,7 @@ class Pilot:
                 self.kb.hold(set())
                 return {**stats, "exitRoom": [s["world"], s["room"]]}
             if not foes:
+                blocked_approach = None
                 self.kb.hold(set())
                 calm_since = calm_since or time.monotonic()
                 if time.monotonic() - calm_since > float(step.get("clearSec", 3)):
@@ -793,6 +1125,8 @@ class Pilot:
             tx, tz = target["position"]["x"], target["position"]["z"]
             gap = math.hypot(tx - p[0], tz - p[2])
             near = [f for f in foes if math.hypot(f["position"]["x"] - p[0], f["position"]["z"] - p[2]) < reach * 2]
+            if want_heal(s):
+                blocked_approach = None
             if want_heal(s) and not heal_window(s, foes) and window_tries < int(heal.get("escapes", 2)):
                 # Make the window: run from the nearby enemies, then heal on a later pass.
                 # Enemies that keep up get a best-effort heal after `escapes` tries.
@@ -809,7 +1143,7 @@ class Pilot:
                 time.sleep(1.5)
                 after = self.state()["hp"]
                 self.write("heal", hp=s["hp"], after=after)
-                if after > s["hp"]:
+                if after is not None and after > s["hp"]:
                     stats["heals"] += 1
                     heal_ready = time.monotonic() + 3
                 else:
@@ -821,11 +1155,13 @@ class Pilot:
                         time.sleep(0.3)
                 continue
             if near and step.get("escape", True) and hurting(s, float(step.get("pinnedDrop", 0.3))):
+                blocked_approach = None
                 stats["escapes"] += 1
                 self.escape(s, near)
                 recent.clear()
                 continue
             if low and s["hp"] < low * max(s["maxHp"], 1) and gap < reach * 2:
+                blocked_approach = None
                 stats["evades"] += 1
                 self.kb.hold(steer(s, (2 * p[0] - tx, 2 * p[2] - tz)))
                 time.sleep(0.15)
@@ -833,9 +1169,32 @@ class Pilot:
                 time.sleep(0.6)
                 self.kb.hold(set())
             elif gap > reach:
+                # Opt-in Thorn stall experiment: root distance is not its head
+                # distance. Only a reproduced short, blocked approach may probe.
+                probe = step.get("blockedThornProbe", False) and isinstance(self.kb, PadInput) \
+                    and target.get("objectId") == 307 and target.get("objectType") == 12 \
+                    and s["roomScope"] == event_scope and s["playerPos"] is not None \
+                    and s["react"] == 0 and not falling and reach < gap <= reach + 80
+                if probe:
+                    point, now = s["playerPos"], time.monotonic()
+                    identity = (target["address"], target["hp"], s["player"])
+                    if blocked_approach is None or blocked_approach[0] != identity \
+                            or math.dist(point, blocked_approach[1]) >= 15 \
+                            or math.hypot(tx - blocked_approach[3], tz - blocked_approach[4]) >= 15:
+                        blocked_approach = (identity, point, now, tx, tz)
+                    elif now - blocked_approach[2] >= 1.0 and probe_count < 3 and now - probe_at >= 3.0:
+                        probe_count += 1
+                        probe_at, blocked_approach = now, None
+                        result = self.thorn_attack_probe(event_scope, target["address"], deadline)
+                        self.write("blocked_thorn_probe", attempt=probe_count, gap=round(gap, 1), **result)
+                        stats["swings"] += result["attacks"]
+                        continue
+                else:
+                    blocked_approach = None
                 self.kb.hold(steer(s, (tx, tz)))
                 time.sleep(0.15)
             else:
+                blocked_approach = None
                 self.kb.hold(set())
                 for _ in range(3):
                     self.kb.tap("attack", 70)
@@ -843,14 +1202,93 @@ class Pilot:
                     stats["swings"] += 1
                     # A Dusk combo can take most of Roxas's HP inside one burst: recheck between swings.
                     now = self.state()
-                    if now["hp"] <= 0 or want_heal(now) or hurting(now, float(step.get("pinnedDrop", 0.3))) or \
+                    if now["hp"] is None or now["hp"] <= 0 or want_heal(now) or hurting(now, float(step.get("pinnedDrop", 0.3))) or \
                             (now["react"] and now["battle"] and now["react"] not in SAVE_REACTIONS):
                         break
                 # Block the counter when the burst was answered with damage and an enemy is in reach.
-                if guard and gap < reach and hurting(self.state(), 0.05):
+                after_burst = self.state()
+                if guard and gap < reach and after_burst["hp"] is not None and hurting(after_burst, 0.05):
                     stats["guards"] = stats.get("guards", 0) + 1
                     self.kb.tap(guard, 300)
         raise Stuck("fight did not clear")
+
+    def thorn_attack_probe(self, scope: tuple, target_address: str, deadline: float) -> dict:
+        """One bounded native jump/two-Cross experiment; no direct state writes.
+
+        Every action rechecks ordinary combat and cooperative priorities. A
+        selected, live exact307 is required throughout; no inferred head pose.
+        """
+        end = min(deadline, time.monotonic() + 1.0)
+        start_hp = None
+        start_player = None
+        result = {"attacks": 0, "jumped": False, "reason": "complete"}
+
+        def ready(action_ms: int) -> bool:
+            nonlocal start_hp, start_player
+            if time.monotonic() >= end:
+                result["reason"] = "deadline"
+                return False
+            try:
+                now = self.state()
+            except (OSError, ValueError):
+                result["reason"] = "state-unavailable"
+                return False
+            if self.cooperative and self.cooperative.step(self, now):
+                result["reason"] = "cooperative-priority"
+                return False
+            if not isinstance(self.kb, PadInput) or not now["free"] or not now["inField"] \
+                    or now["menu"] != 255 or now["event"] or now["react"] \
+                    or now["roomScope"] != scope or not now["player"] or not now["playerPos"] \
+                    or now["hp"] is None or now["hp"] <= 0:
+                result["reason"] = "combat-priority"
+                return False
+            if not self.cooperative:
+                own_log = DownedLog(self.game.pid)
+                if not own_log.update() or own_log.downed or own_log.full_party:
+                    result["reason"] = "logical-state"
+                    return False
+            if start_hp is not None and now["hp"] < start_hp:
+                result["reason"] = "incoming-damage"
+                return False
+            if start_player is not None and now["player"] != start_player:
+                result["reason"] = "actor-replaced"
+                return False
+            start_hp = now["hp"] if start_hp is None else start_hp
+            start_player = now["player"] if start_player is None else start_player
+            try:
+                foes = enemies(self.game.pid, timeout=max(0.01, end - time.monotonic()))
+                point = now["playerPos"]
+                selected = min(foes, key=lambda a: math.hypot(a["position"]["x"] - point[0],
+                               a["position"]["z"] - point[2])) if foes else None
+                live = selected is not None and selected["address"] == target_address \
+                    and selected.get("objectId") == 307 and selected.get("objectType") == 12 \
+                    and selected.get("hp", 0) > 0
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                live = False
+            if not live:
+                result["reason"] = "target-retired"
+                return False
+            if time.monotonic() + action_ms / 1000 >= end:
+                result["reason"] = "deadline"
+                return False
+            return True
+
+        self.kb.hold(set())
+        try:
+            if not ready(90):
+                return result
+            self.kb.tap("jump", 90)
+            result["jumped"] = True
+            time.sleep(min(0.1, max(0.0, end - time.monotonic())))
+            for _ in range(2):
+                if not ready(70):
+                    break
+                self.kb.tap("attack", 70)
+                result["attacks"] += 1
+                time.sleep(min(0.1, max(0.0, end - time.monotonic())))
+        finally:
+            self.kb.hold(set())
+        return result
 
     def escape(self, s: dict, near: list[dict]) -> None:
         """Run from the nearby enemies' centroid with a jump. A wall stops the
@@ -906,11 +1344,16 @@ def run_route(pilot: Pilot, route: dict, first: int) -> int:
         except Stuck as why:
             pilot.kb.release()
             pilot.write("stuck", index=i, reason=str(why), state=pilot.last)
-            try:
-                pilot.capture("stuck")
-                pilot.clip("stuck", 10)
-            except Exception as error:  # evidence is best effort; the stop isn't
-                pilot.write("evidence_error", error=str(error))
+            if getattr(pilot, "external_evidence", False):
+                pilot.write("evidence_external", owner="scenario")
+            else:
+                try:
+                    if pilot.game.alive():
+                        pilot.capture("stuck")
+                    if pilot.game.alive():
+                        pilot.clip("stuck", 10)
+                except Exception as error:  # evidence is best effort; the stop isn't
+                    pilot.write("evidence_error", error=str(error))
             print(json.dumps({"ok": False, "stuckAt": i, "reason": str(why)}))
             return 3
         pilot.write("done", index=i, seconds=round(time.monotonic() - t0, 1), result=result,
@@ -995,6 +1438,8 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=900)
     ap.add_argument("--release-all", action="store_true")
     ap.add_argument("--input", choices=("pad", "keys"), default="pad")
+    ap.add_argument("--revive-peer-pid", type=int, help="integrated pad-only cooperative fight with this owned game")
+    ap.add_argument("--external-evidence", action="store_true", help="scenario owns failure captures/clips")
     args = ap.parse_args()
     game = Game(args.pid)
     route = json.loads(args.route.read_text(encoding="utf-8")) if args.route else {}
@@ -1012,14 +1457,25 @@ def main() -> int:
     if not owned(args.pid):
         print(json.dumps({"ok": False, "error": f"pid {args.pid} is not a rig-owned game"}))
         return 2
+    if args.revive_peer_pid and (args.input != "pad" or args.revive_peer_pid == args.pid or not owned(args.revive_peer_pid)):
+        print(json.dumps({"ok": False, "error": "revive peer requires pad input and a different rig-owned game"}))
+        return 2
     args.out.mkdir(parents=True, exist_ok=True)
     pilot = Pilot(game, args.out, keys, args.input)
+    pilot.external_evidence = args.external_evidence
+    if args.revive_peer_pid:
+        pilot.cooperative = CooperativeFight(game, Game(args.revive_peer_pid))
     try:
         if args.route:
             return run_route(pilot, route, args.from_step)
         return run_teach(pilot, args.teach, args.seconds)
     finally:
-        pilot.finish()
+        try:
+            pilot.finish()
+        finally:
+            game.close_prompt()
+            if pilot.cooperative:
+                pilot.cooperative.peer.close_prompt()
 
 
 if __name__ == "__main__":

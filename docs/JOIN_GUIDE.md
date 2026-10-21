@@ -10,10 +10,10 @@ built checkout with `kh2ctl`. For the Steam private package, use
 [the Steam guide](FRIEND_PLAYTEST_STEAM.md); it needs no Tailscale or separate
 relay. [Historical package instructions](FRIEND_PLAYTEST.md) cover the sealed protocol-10
 ENet preview; those are not current-source package instructions. The checked-in
-package validator/pins target protocol 18, so current protocol-29 packaging is
+package validator/pins target protocol 18, so current protocol-30 packaging is
 blocked pending refresh and qualification ([details](../tools/packaging/README.md)).
 
-Current source uses **protocol 29, AvatarBridge 4 and WorldBridge 12**. Rebuild
+Current source uses **protocol 30, AvatarBridge 4 and WorldBridge 12**. Rebuild
 all participating products together. The current launchers enable gameplay
 features listed in [known limits](FRIEND_PLAYTEST_KNOWN_ISSUES.md); the raw
 commands below do not reproduce those environment defaults automatically.
@@ -98,7 +98,7 @@ Tailscale-relayed connections can work; see Tailscale's
 
 ## Matching runtime configuration (both PCs)
 
-Use **protocol 29** binaries for relay and runtimes. Protocol version is
+Use **protocol 30** binaries for relay and runtimes. Protocol version is
 compiled in; there is no `--protocol` flag or runtime config key to change it.
 The game-build identifier below is the reported compatibility value, not the
 Windows executable's file-version field. Always specify the port: relay and
@@ -219,7 +219,7 @@ through `kh2ctl`.
 ## Historical ENet checks and current limits
 
 The dated runs below used their original products. Their counts are historical
-evidence, not protocol-29 regressions. Current gameplay limits are maintained
+evidence, not protocol-30 regressions. Current gameplay limits are maintained
 in [known issues](FRIEND_PLAYTEST_KNOWN_ISSUES.md).
 
 - Without `--bind`, the relay listens on every network interface,

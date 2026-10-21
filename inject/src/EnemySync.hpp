@@ -92,8 +92,8 @@ bool FriendlyFire() noexcept;
 // EntityHook's counter, which Panacea's loader also advances).
 bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept;
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept;
-// Field authority is independent of motion readiness: local pickups stay held while binding.
-bool SuppressFieldBrain(uintptr_t actor) noexcept;
+// Host-owned field and Thorn decisions stay suppressed through binding/stream holds.
+bool SuppressClientDecision(uintptr_t actor) noexcept;
 bool FieldActorCurrent(uintptr_t actor) noexcept;
 bool ConsumeFieldLeave(uintptr_t actor) noexcept;
 
@@ -189,6 +189,18 @@ struct DownedScope {
     std::uint8_t localSlot = 0xFF;
 };
 bool CaptureDownedScope(DownedScope& out) noexcept;
+// An admitted script role may open a native entity-camera task. This read-only
+// proof is independent of gameplay/event gates, so those gates can query it.
+using ScriptCameraCurrentFn = bool (*)(uintptr_t context, std::int32_t state) noexcept;
+void SetScriptCameraCurrent(ScriptCameraCurrentFn check) noexcept;
+bool OwnedScriptCameraCurrent(uintptr_t context, std::int32_t state) noexcept;
+bool ScriptCameraScopeCurrent(const DownedScope& scope) noexcept;
+// ScriptMirror qualifies cached native RCs against its current occurrence.
+// No provider or an unrelated native target preserves the native command.
+using ScriptReactionCurrentFn = std::uint16_t (*)(std::uint16_t raw) noexcept;
+void SetScriptReactionCurrent(ScriptReactionCurrentFn check) noexcept;
+std::uint16_t ActionableNativeReaction(std::uint16_t raw) noexcept;
+
 // The owner's publication this frame (the same value given to
 // AvatarBridge::SetLocalDownedState); ReviveOwnerGate::Consume judges against it.
 void NoteLocalDownedState(const LocalDownedState& state) noexcept;
@@ -240,6 +252,15 @@ TargetAuthorityView CurrentTargetAuthority(std::uint64_t maxAgeMs) noexcept;
 // VUH-2252 ScriptCall (ScriptMirror.inl). A script call a host mirrored enemy's script made on
 // that enemy: bdscript trap table/index and its tagged values after the actor (Protocol.hpp
 // ScriptCallEntry; that header stays out of EntityHook's unit). Game thread.
+struct ScriptReactionCompletionRecord {
+    std::uint64_t occurrence{}, requesterConnectionId{};
+    std::uint32_t resource{}, objectId{}, epoch{};
+    std::uint16_t netId{}, command{};
+    std::uint8_t ownerSlot{0xFF};
+};
+using ScriptReactionCompletionFn = bool (*)(const ScriptReactionCompletionRecord&);
+void SetScriptReactionCompletion(ScriptReactionCompletionFn apply) noexcept;
+bool SendScriptReactionCompletion(const ScriptReactionCompletionRecord& completion);
 struct ScriptCallRecord {
     std::uint16_t netId = 0;
     std::uint32_t objectId = 0;

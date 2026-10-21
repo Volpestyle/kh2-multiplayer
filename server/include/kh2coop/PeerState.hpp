@@ -34,6 +34,7 @@ struct PeerState {
     bool worldQuarantined{false};
     std::uint64_t hostSourceFloor{0};
     std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
+    std::uint64_t lastScriptReactionCompletionSeq{};
     std::uint32_t lastStageEndSeq{0}; // VUH-2555: accepted stage-end reports, connection-wide
 
     std::uint64_t lastReviveSeq{0}, revivedEpisode{0};

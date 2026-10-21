@@ -1,0 +1,24 @@
+{
+  "name": "twilight_thorn_fight",
+  "retries": 0,
+  "description": "Single-PC loopback native Thorn combat; no HP/team/position writes, immunity, synthetic hits, or Continue retries. Friend approaches the live307 at reach300; host also approaches at reach300, with no neutral delay. Owned camera reactions297/298/299 are opt-in, pad-only and bounded to32 presses within330s; event state is never treated as globally free. The known first-hit combo tutorial is dismissed with bounded Cross. Actual owner1 completion remains required; no distance bias forces a recipient. LowHp0 explicitly keeps native25%-revived seats attacking; ordinary recent-damage escape, guard, RC and peer revival priority remain. The bounded blocked-approach jump/two-Cross probe is an experiment, not a claimed head unlock.",
+  "steps": [
+    {
+      "do": "fight",
+      "reach": 300,
+      "clearSec": 8,
+      "timeoutSec": 330,
+      "retries": 0,
+      "dismissComboTutorial": true,
+      "downedSec": 60,
+      "note": "Native pad combat begins immediately. Only297/298/299 may use Triangle during the owned camera event, with exact initial room scope and living/logical-down checks. The known first-hit menu0/event0 box still receives bounded Cross; unknown event RCs receive no Triangle.",
+      "eventReactions": [
+        297,
+        298,
+        299
+      ],
+      "lowHp": 0,
+      "blockedThornProbe": true
+    }
+  ]
+}

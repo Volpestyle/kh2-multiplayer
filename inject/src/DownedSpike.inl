@@ -163,6 +163,7 @@ struct PromptRuntime {
     uint16_t reactLib = 0, reactShifted = 0;
     reviveprompt::RcGate rcGate {};
     reviveprompt::Hide lastHide = reviveprompt::Hide::Off;
+    bool yielding = false;
 };
 static PromptRuntime g_prompt;
 static std::atomic<bool> g_promptTriangle {false};
@@ -455,9 +456,11 @@ static void NoteHit(void* atk, void* victim) {
     if (g_down.resolve && ReadHitTrace(reinterpret_cast<uintptr_t>(atk) + 0x10, ownerHandle)) {
         __try { attacker = g_down.resolve(ownerHandle); } __except (EXCEPTION_EXECUTE_HANDLER) { attacker = 0; }
     }
+    std::uint32_t objectId=0;
     if (attacker && attacker != g_down.downedActor &&
         ReadHitTrace(attacker + offsets::actor::OBJENTRY_PTR, objentry) && objentry &&
-        ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) && (type == 3 || type == 4))
+        ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, objectId) &&
+        ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) && enemyclass::Combat(type,objectId))
         ++g_down.enemyHits;
     if (g_down.hitLogs < 8) {
         ++g_down.hitLogs;
@@ -473,9 +476,11 @@ static bool AttackerIsEnemy(void* atk, uintptr_t self, uintptr_t* attackerOut, u
     if (g_down.resolve && ReadHitTrace(reinterpret_cast<uintptr_t>(atk) + 0x10, ownerHandle)) {
         __try { attacker = g_down.resolve(ownerHandle); } __except (EXCEPTION_EXECUTE_HANDLER) { attacker = 0; }
     }
+    std::uint32_t objectId=0;
     const bool enemy = attacker && attacker != self &&
         ReadHitTrace(attacker + offsets::actor::OBJENTRY_PTR, objentry) && objentry &&
-        ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) && (type == 3 || type == 4);
+        ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, objectId) &&
+        ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) && enemyclass::Combat(type,objectId);
     if (attackerOut) *attackerOut = attacker;
     if (typeOut) *typeOut = type;
     return enemy;
@@ -829,7 +834,8 @@ static void PromptTick(const Snap& s) {
     g_prompt.reactLib = reactLib;
     g_prompt.reactShifted = reactShifted;
     const bool fieldPlay = f.enabled && f.localCanonical && !f.localDowned && !f.inEvent && !f.menuOpen && !f.transition;
-    f.nativeReaction = reviveprompt::NativeReactionFor(g_prompt.rcGate, reactShifted, fieldPlay);
+    f.nativeReaction = reviveprompt::NativeReactionFor(g_prompt.rcGate,
+        fieldPlay ? enemysync::ActionableNativeReaction(reactShifted) : 0, fieldPlay);
     f.localHp = s.hp;
     f.triangle = g_promptTriangle.exchange(false, std::memory_order_acq_rel);
     if (f.triangle) ++g_prompt.triangleFrames;
@@ -853,13 +859,15 @@ static void PromptTick(const Snap& s) {
         f.distance = dist;
     }
     g_prompt.out = reviveprompt::Step(g_prompt.state, f);
-    if (g_prompt.out.hide == reviveprompt::Hide::NativeReaction &&
-        g_prompt.lastHide != reviveprompt::Hide::NativeReaction && g_prompt.yieldLogs < 256) {
+    const bool yielding = g_prompt.out.hide == reviveprompt::Hide::NativeReaction &&
+        f.targetValid && f.distance <= reviveprompt::kRange;
+    if (yielding && !g_prompt.yielding && g_prompt.yieldLogs < 256) {
         ++g_prompt.yieldLogs;  // every suppression episode, bounded per process
         Log("[revive-prompt] yield to native RC 0x2A11162=%04X slot=%u episode=%llX dist=%.1f frame=%u",
             static_cast<unsigned>(f.nativeReaction), static_cast<unsigned>(f.targetSlot),
             static_cast<unsigned long long>(f.targetEpisode), f.distance, g_frameCounter);
     }
+    g_prompt.yielding = yielding;
     if (g_prompt.out.hide != g_prompt.lastHide && g_prompt.logs < 32) {
         ++g_prompt.logs;
         Log("[revive-prompt] %s slot=%u episode=%llX dist=%.1f nativeRC=%u", reviveprompt::HideName(g_prompt.out.hide),

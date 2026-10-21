@@ -59,6 +59,13 @@ void codecAndStaging(){
         if(mode==11)invalid.nativeFingerprint[0]^=1;
         check(throws([&]{(void)encodeResyncSnapshot(invalid);}),"incomplete or inconsistent snapshot cannot serialize as complete");
     }
+    auto large=snapshot();large.enemies[0].identity.objectId=307;large.enemies[0].objectType=12;
+    large.nativeFingerprint=resyncNativeFingerprint(large);
+    check(decodeResyncSnapshot(encodeResyncSnapshot(large)).enemies[0].identity.objectId==307,
+          "exact Twilight Thorn large boss survives complete resync serialization");
+    large.enemies[0].identity.objectId=308;
+    check(throws([&]{large.nativeFingerprint=resyncNativeFingerprint(large);(void)encodeResyncSnapshot(large);}),
+          "other type12 objects are excluded from combat snapshots");
     const auto empty=snapshot(false);check(decodeResyncSnapshot(encodeResyncSnapshot(empty)).enemies.empty(),"explicit complete empty census is valid, unlike missing coverage");
     // Force multiple genuine canonical parts with unique full typed rows.
     for(std::uint16_t id=2;id<=400;++id){auto row=s.enemies[0];row.identity.netId=id;row.identity.spawnIndex=id;s.enemies.push_back(row);}s.livingCount=400;s.nativeFingerprint=resyncNativeFingerprint(s);

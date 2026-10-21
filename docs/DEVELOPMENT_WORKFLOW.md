@@ -75,7 +75,7 @@ A change applies when the host next connects.
 Set `KH2COOP_COOP_DIFFICULTY=off|normal|hard` on the **host runtime**.
 Unset or unknown values select Off. The relay advertises the admitted host's
 mode; a friend's environment cannot override it. This feature was introduced in
-protocol v18; current builds require matching protocol **29** peers. Older peers
+protocol v18; current builds require matching protocol **30** peers. Older peers
 receive a protocol mismatch rejection. The player launcher selects Normal;
 direct runtime launches default to Off.
 
@@ -153,7 +153,7 @@ offline development continued without protection or permission changes.
 
 ## Rebuilding while KH2 runs
 
-Current source uses protocol **29**, AvatarBridge **4**, WorldBridge **12**
+Current source uses protocol **30**, AvatarBridge **4**, WorldBridge **12**
 and CaptureChannel **1**. Rebuild runtime, relay, inject DLL, avatarctl and kh2ctl
 from the same source cohort. Incompatible mappings fail their version checks;
 an older DLL already injected into KH2 cannot validate the new runtime.

@@ -1192,6 +1192,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
             case PacketType::MissionState:
             case PacketType::EnemyMotion:
                 break; // raw world delivery only (VUH-1515)
+            case PacketType::ScriptReactionCompletion:
             case PacketType::ScriptCall:
                 break; // raw world delivery only (VUH-2252)
             case PacketType::PartyLayout: {

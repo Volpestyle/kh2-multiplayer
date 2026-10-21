@@ -181,3 +181,200 @@ registries, and checks that the DLL's trap table agrees with the wire allowlist.
    needs the other actor mapped as well.
 3. **Missions:** done separately as a state mirror, not a call mirror
    (`MissionState`, [MISSION_MIRROR.md](MISSION_MIRROR.md), VUH-2342).
+
+## Reaction commands and actor ownership (VUH-2569; reusable VUH-2418 slice)
+
+This extends the same reliable, ordered source-netId ScriptCall stream. The host
+keeps all BDX workspaces, program counters, attack receivers, coroutines and
+phase decisions. Native addresses never enter these descriptors. The current
+implementation still needs the full Twilight Thorn live qualification described
+in [TWILIGHT_THORN.md](TWILIGHT_THORN.md).
+
+Script-created attacks use the existing resource pairing model with native 2/10
+start, 2/11 radius, 2/12 position, 7/14 reaction offset, 2/51 RC and 2/13 free. Exact
+native constructor/destructor hooks retire pairings before allocation reuse.
+Collision resources never silently evict another live pairing; bounded deferred
+retirements survive queue saturation. A free cancels a held, unborn start and
+can retire an existing resource after source death.
+
+Each attack/command window receives one host-minted 64-bit occurrence. Arbitration
+chooses the nearest eligible living, fresh, capable seat in 3D, with stable seat
+index breaking ties. The window latches source, command, epoch, owner slot and
+connection, expires after 180 game frames and cannot be renewed by repeated
+native offers. Observed downing, stale ownership or replacement permanently
+revokes that occurrence. Completion reserves consumption before native entry.
+Packet 55 `ScriptReactionCompletion` has 53 payload bytes (room, sequence,
+requester connection, occurrence, resource, objectId, netId, command, slot).
+The relay stamps the actual admitted sender's slot and sends only to the host;
+the host rechecks current scope and winner before executing its local receiver.
+Native Triangle RC always takes priority over a revive hold.
+
+Normalized table 255 operations carry only these values:
+
+| Index | Descriptor |
+|---|---|
+| 1 | occurrence low/high, command, owner slot |
+| 12 | immutable owner slot and connection low/high |
+| 2 | actor role begin: slot, connection low/high, bounded 60-frame lease policy |
+| 3 | captured native motion id and original float blend parameter |
+| 4 /8 | host player-role position/facing or motion/time |
+| 5 | resident source-camera fourcc and player/source target choice |
+| 7 | command mode (1 general override, 2 captured motion), command, flags and priority |
+| 9 | immutable owning role resource plus native player attack arguments |
+| 11 /6 | heartbeat /role end |
+| 13 /14 | native owner attachment flags/bone /detach |
+
+Actor role resources use the high bit, distinct from attack/effect IDs. Source
+and selected actor handles, status roots and object-entry roots stay local and
+must remain current. The host also requires the exact native coroutine; the
+owner refuses a replacement coroutine. A fresh room/epoch/connection and a
+one-second heartbeat lease bound every role. Retirement releases only that
+role's matching capture/attachment and collision resources; it cannot reset a
+replacement actor, coroutine or unrelated attachment.
+
+The selected player's owner replays native capture, camera and command helpers
+against its own player and locally bound source. Cameras require a matching
+resident BAR asset. Current native attachment qualification is flags 16386,
+source bone 5; owner callback/data arguments are zero. The host alone retains
+its BDX attachment callback. Boss hide/show uses ordinary mirrored actor calls,
+separate from shadow visibility. Native owner-created scripted strikes use the
+existing BuildHit/D4 claim path; damage on the host's remote clone remains zero.
+No client BDX workspace is copied or independently executed.
+
+Actual-owner and spectator playback distinguish the source animation bank from
+ordinary player motion. Only the latest authored capture ID qualifies as borrowed;
+explicit idle0 returns to the player bank. Unknown post-capture IDs refuse.
+The shared native capture leaf preserves blend bits, then corrects the clock
+separately after rechecking scope, allocations, handles and requested animation
+ID. A consumed RC blocks motion repair and clock writes. Matching ID is not
+proof of a nonnull animation asset; the installed Thorn motion inventory remains
+the qualified scope.
+
+A spectator retains a separate current network-clone visual binding; it never
+becomes the role's command actor. Native D48 must be zero, source/actor roots and
+owner connection must match, and the avatar must be live in the same room.
+Ordinary clone transform/team/collision maintenance continues; source-bound
+visual pose runs last. Callback6/16/17 and command routing suppress this exact
+visual target, including guarded cleanup reentry. Cameras and commands remain
+on the actual player owner. Player hide/show and temporary helper-model parity
+are outside this visual slice.
+
+The existing15-frame heartbeat refreshes idempotent Begin, capture and current
+attachment state, recovering an initial packet refused before room arrival.
+It does not restart a missed camera or a consumed command. A per-seat resource
+floor scoped to the authenticated transport prevents a retired role from being
+reopened by a later heartbeat. Identical authored capture retriggers within one
+role are not distinguished from refresh; Thorn's inspected distinct inputs
+bound this policy. The animation extension still requires live qualification.
+
+All additional native trap bodies and helper boundaries are pinned. Installation
+requires all owner trap slots, both native command helpers and the reaction dispatch hook; failure
+restores owned slots and disables created hooks, retaining in-flight trampolines
+until global teardown. Client BDX damage/motion callbacks remain suppressed even
+before motion binding for exact Thorn 307, preserving the one-brain rule.
+
+Native entity cameras (kind 11) keep the admitted role's gameplay scope. A local
+proof binds the exact context opened by that role to its resident camera asset,
+source transform, source/player roots, coroutine, session, room, load and roster.
+The existing gameplay gate, EventHold observer and avatar capture use that same
+proof. Menu, frozen and loading guards still apply; a replacement story context
+uses the ordinary event hold. This adds no wire record.
+
+BDX stores native resource handles in 32-bit fields. Native work values carry
+`@???` (`0x3F3F3F40`), and some callers use `@INT`; both can look up an already
+registered resource alongside `@ADR`. Native allocation and owner checks must
+still pass. Capturing the pair before the call and checking its incarnation
+afterwards protects native reentry. Unregistered values never reach native
+handle decoding. These tags remain forbidden on the wire.
+
+Pinned wrappers consume scalar low words independently of workspace tags. The
+host normalizes only their proven scalar positions: attack start/radius/RC/strike,
+effect start/pause/fade. Vector fields come from checked post-native float4 reads;
+actor, resource and vector arguments are never normalized as scalars. Finite
+float, range and RC command checks precede clearing a native attack's prompt.
+Bounded refusal logs expose invalid values. Live02 exhausted the friend's native
+512 KiB effect arena when starts arrived without lifetime calls; live04 exposed
+the actual work tag and the separate scalar boundary. Live05 delivered1060 effect-fade and1066 attack-free records without an
+exception; native pool occupancy recovery remains unmeasured.
+
+Captured animation commands can enter either native helper (`3B25C0` or
+`3B2850`) using the canonical player's controller, even when their animation
+actor belongs to another seat. Pinned native caller pairs identify this producer;
+the already registered target source selects one current captured role. Ambiguous,
+stale or unsupported targets refuse. A qualified captured command uses mode2 and
+its owner's local captured helper, always with native category1. General BDX
+commands keep VM-first routing and mode1. Mode belongs to the occurrence identity;
+changing semantics retires the old window. The wire carries only a checked source
+root, so nonroot target parts refuse with a diagnostic. Callback PCs and native
+target memory remain local.
+
+Role retirement revokes commands immediately. If its exact registered entity
+camera is still current, a small local receipt waits for authored native playback
+to finish before releasing the old capture or attachment. Thorn's eight camera
+assets end on finite native frame counters independently of BDX or reaction
+input; the longest is 608 authored ticks (about 20.27 seconds while unpaused).
+No global event cancellation or timeout hard-free is used. A replaced scene,
+changed load or changed native roots abandon that receipt without native writes.
+A seat with pending cleanup cannot admit a new role; completion is reported
+only after native context and timeline idle are observed.
+
+Progress sampling uses the same registered camera proof for its event terms.
+The identity-only scope check does not require the sampler's mutable readiness
+flag: each progress tick clears that flag before checking gameplay. Requiring it
+inside the camera proof created a permission cycle in live03 and retired the
+role on the first camera frame. Ordinary gameplay admission still requires a
+fresh progress sample, and all menu, frozen, field and load guards remain.
+
+Thorn deliberately hooks the selected player into another native coroutine while
+one entity camera may still be playing. A newer Begin can inherit that exact
+camera and its verified capture/attachment only for the same seat, connection,
+source, player, load and current admitted scope. The host omits the old End for
+this continuation; the owner retires the old role's collision resources without
+ending the continuing camera. Reaction occurrences and commands remain fresh.
+
+The native timeline destructor sets its state to zero before the separate event
+updater clears the entity-camera context. Exact registered camera proof covers
+known timeline states0..4, including this closing interval. A changed context or
+unknown state still fails the proof; no idle timeline alone grants gameplay.
+The actual progress-tick regression covers this ordering, script publication
+and census admission, with replacement-context and invalid-state controls.
+
+The native RC cache adapter observes refresh408520 and its last winner408BD0,
+then validates the immutable host-owned occurrence at preaccept3B22D0, pinned
+to caller3B2340. A fresh selection records all native roots, source/resource
+incarnation, seat/connection, scope and four logical TARGET words. Query and
+preaccept are idempotent and non-consuming; only the matching native inline
+callback consumes the existing occurrence. An unchanged cached HUD command
+does not renew that proof. Other native reactions retain their normal path.
+
+Revival and the read-only prompt observation use the same actionable result.
+The existing version7 prompt fields expose Triangle ownership without new
+network fields; raw cached commands remain diagnostic. The ground callback
+uses native TARGET's no-part sentinel UINT32_MAX. Per-command traces retain
+continuing late-fight samples of selection, native gates and active request.
+
+All three additional hooks and their caller/body pins must qualify before
+this provider registers. Their independent rollback retains the existing owner
+traps and dispatch suppression; a proven client source's RC callback refuses
+while qualification is unavailable. The rehearsal checks installation on both
+seats before the route. An accepted action interrupted without its callback
+conservatively fences later mirrored reactions in the same scope/load. Only a
+qualified callback or scope/load retirement releases that fence; no blind cache
+clear or action relabelling is used. This liveness boundary requires live proof.
+
+Local reaction validation uses the authenticated local seat's canonical actor
+and native live roots. The targeting candidate array belongs to the host and
+cannot establish a client's local liveness. Shared actor-owner seat selection
+keeps the explicit canonical actor for the local seat and uses nonzero host
+candidates only for other seats. An unused third candidate with default slot0
+cannot erase the host player after an occurrence is consumed. Build17 contains
+the regression. Full-source live09 completed opening and ground reactions for
+both owners, but stalled at a later friend-owned captured426. The trimmed
+build19 passed202/202 tests and its separate exact-binary live10 completed
+opening297/298/299 and ground432 for both owners. The friend milestone joins
+the host offer, client queued receipt and host completion for resource67/
+occurrence31. An earlier queued28/14 has no host completion, so this does not
+qualify every window. Captured426, the kill and terminal flow remain unqualified.
+See [the limited reaction result](testing/vuh2569-reactions/README.md). Completion traces
+use immutable claim snapshots across callback reentry; a client queued receipt
+must also join a host completion before it counts as an applied reaction.

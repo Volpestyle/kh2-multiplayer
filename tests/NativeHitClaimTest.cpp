@@ -406,23 +406,26 @@ void Reset(bool client = false, bool registerReader = true) {
     SeedRecordCatalog();
 }
 
-void TestMirrorPoseAdmission() {
+void TestMirrorPoseAdmission(bool largeBoss = false) {
     namespace em = kh2coop::inject::enemymirror;
     Reset(true);
+    const auto objectId = largeBoss ? enemyclass::TwilightThorn : em::kSoldierObjectId;
+    Put(object + offsets::objentry::TYPE_FLAGS, static_cast<std::uint8_t>(largeBoss ? 12 : 4));
     g_mirrorRequested = true;
     g_mirror.Reset(9);
     g_mirrorFrame = 100;
     // Use the actual EnemySync gate and its existing owned native binding.
     // No MirrorPose stand-in: status reads touch the fixture's native bytes.
-    g_inst.spawns[0].objectId = em::kSoldierObjectId;
-    g_host.enemies[1].objectId = em::kSoldierObjectId;
-    Put(object + offsets::objentry::OBJECT_ID, em::kSoldierObjectId);
+    g_inst.spawns[0].objectId = objectId;
+    g_inst.spawns[0].objectType = largeBoss?12u:4u;
+    g_host.enemies[1].objectId = objectId;
+    Put(object + offsets::objentry::OBJECT_ID, objectId);
     em::Pose pose;
     auto gate = [&] { pose = {}; return MirrorPose(enemy, pose); };
-    Check(gate() == em::Gate::Bound && pose.netId == 1,
-          "actual MirrorPose: living bound Soldier without stream stays native");
+    Check(gate() == em::Gate::Bound && pose.netId == 1 && pose.objectId==objectId,
+          "actual MirrorPose: living bound class remains identified before stream readiness");
     EnemyMotion motion; motion.epoch = 9; motion.sequence = 1; motion.hostFrame = 100;
-    EnemyMotionEntry row; row.netId = 1; row.objectId = em::kSoldierObjectId;
+    EnemyMotionEntry row; row.netId = 1; row.objectId = objectId;
     row.motionId = 9; row.motionTime = 12; row.position = {80, -20, 8};
     motion.entries.push_back(row);
     Check(g_mirror.Ingest(motion, 100), "actual gate fixture accepts initial stream sample");
@@ -448,7 +451,7 @@ void TestMirrorPoseAdmission() {
     Check(gate() == em::Gate::None, "actual MirrorPose refuses host/local family disagreement");
     g_host.enemies[1].objectId = row.objectId;
     g_mirrorFrame = 134; g_mirror.Tick(134);
-    Check(gate() == em::Gate::Bound, "actual MirrorPose releases stale stream to native AI");
+    Check(gate() == em::Gate::Bound, "actual MirrorPose reports stale stream as Bound for its class ownership policy");
     motion.sequence = 3; motion.hostFrame = 136;
     Check(g_mirror.Ingest(motion, 134), "actual gate fixture accepts recovery sample");
     g_mirror.Tick(134);
@@ -460,6 +463,46 @@ void TestMirrorPoseAdmission() {
     g_mirrorRequested = false;
     Check(gate() == em::Gate::None, "actual MirrorPose default-off bypass grants no drive authority");
     g_mirror.Reset(0);
+    Reset();
+}
+
+void TestLargeBossCensus() {
+    Reset();
+    Put(object + offsets::objentry::TYPE_FLAGS, std::uint8_t{12});
+    Put(object + offsets::objentry::OBJECT_ID, enemyclass::TwilightThorn);
+    auto census = CaptureNativeCensus();
+    Check(census.state == CensusState::Complete && census.enemies.size() == 1 &&
+          census.enemies[0].objectId == 307 && census.enemies[0].objectType == 12 && IsEnemy(enemy),
+          "Thorn is a combat enemy in the production census and damage classifier");
+    Check(census.enemies.size()==1 && ResyncNativeSampleCurrent(census.enemies[0]),
+          "native resync sample accepts exact Thorn type12 with its current HP/status");
+    auto other=census.enemies.empty()?NativeEnemy{}:census.enemies[0];other.objectId=308;
+    Check(!ResyncNativeSampleCurrent(other),"native resync sample rejects another type12 object");
+    Put(object + offsets::objentry::OBJECT_ID, std::uint32_t{308});
+    census = CaptureNativeCensus();
+    Check(census.state == CensusState::Complete && census.enemies.empty() && !IsEnemy(enemy),
+          "another type-12 object gets no combat authority");
+    Put(object + offsets::objentry::OBJECT_ID, enemyclass::TwilightThorn);
+    Put(object + offsets::objentry::NAME, std::uint16_t{0x5F46});
+    Check(CaptureNativeCensus().enemies.empty() && !IsEnemy(enemy), "F_ exclusion still applies to large bosses");
+    Reset();
+}
+
+void TestLargeBossDecisionOwnership() {
+    Reset(true);g_mirrorRequested=true;g_orderedDeliverySerial=g_bridge.deliverySerial;
+    Put(object + offsets::objentry::TYPE_FLAGS,std::uint8_t{12});
+    Put(object + offsets::objentry::OBJECT_ID,enemyclass::TwilightThorn);
+    g_inst.byActor.clear(); // deliberately no manifest/point binding yet
+    Check(SuppressClientDecision(enemy),"Thorn client cannot run a decision before binding or pose warmup");
+    Put(object + offsets::objentry::OBJECT_ID,std::uint32_t{308});
+    Check(!SuppressClientDecision(enemy),"another large object receives no script brain suppression");
+    Put(object + offsets::objentry::OBJECT_ID,enemyclass::TwilightThorn);
+    g_bridge.writerPid=0;
+    Check(!SuppressClientDecision(enemy),"retired runtime grants no unbound script ownership");
+    Reset();g_mirrorRequested=true;g_orderedDeliverySerial=g_bridge.deliverySerial;
+    Put(object + offsets::objentry::TYPE_FLAGS,std::uint8_t{12});
+    Put(object + offsets::objentry::OBJECT_ID,enemyclass::TwilightThorn);
+    Check(!SuppressClientDecision(enemy),"host retains its native Thorn decision");
     Reset();
 }
 
@@ -537,6 +580,71 @@ void ResetWorld() {
     w::g_requestTransition = NativeWarp;
     g_applyStatDelta = NativeDeath;
     warpCalls = deathCalls = 0;
+}
+DownedScope ownedCameraScope{};
+bool OwnedCameraFixture(uintptr_t context,std::int32_t state) noexcept {
+    return context==image+0x71000 && state>=0 && state<=4 && ScriptCameraScopeCurrent(ownedCameraScope);
+}
+void TestOwnedCameraGameplay() {
+    // Registered proof is synthetic here; native kind/source/asset identity has
+    // its own rule regression. Exercise the actual shared gameplay/transport gates.
+    Reset();Check(CaptureDownedScope(ownedCameraScope),"capture admitted room before entity camera");
+    SetScriptCameraCurrent(&OwnedCameraFixture);
+    Put(image+offsets::CUTSCENE_STATE,std::int32_t{2});
+    Put(image+offsets::EVENT_CONTEXT,image+0x71000);
+    namespace progress=kh2coop::inject::progresssync;
+    // Production order: progress resets sample readiness before testing gameplay.
+    // The identity proof must survive that reset and allow the fresh sample.
+    progress::Tick(50,true,false);
+    Check(progress::HostReady(),"actual progress tick refreshes readiness through a registered camera without a permission cycle");
+    DownedScope continued{};
+    Check(SafeNativeGameplay() && CaptureDownedScope(continued) &&
+          CaptureNativeCensus().state==CensusState::Complete,
+          "registered camera keeps actual script scope and complete native census alive");
+    ScriptCallRecord call{};call.netId=1;call.objectId=309;call.table=1;call.index=1;
+    call.args[0]=std::uint64_t{SCRIPT_TAG_FLOAT}<<32;
+    std::uint64_t sequence=0;
+    Check(SendScriptCalls(&call,1,50,sequence) && sequence!=0,
+          "actual ScriptCall producer remains usable through owned camera");
+    // Native timeline retirement and event-context retirement are separate.
+    Put(image+offsets::CUTSCENE_STATE,std::int32_t{0});
+    progress::Tick(51,true,false);
+    Check(progress::HostReady() && CaptureDownedScope(continued) &&
+          CaptureNativeCensus().state==CensusState::Complete && SendScriptCalls(&call,1,51,sequence),
+          "timeline idle with the same installed camera preserves real progress, scope, census and script producer");
+    g_eventHoldProducerEnabled=true;g_hostEventPublication={};
+    Check(CaptureWorldContext(g_hostEventPublication.admittedRoom),"camera fixture captures existing host hold scope");
+    Check(TickHostEventHold(51,true) && !g_hostEventPublication.activePublished &&
+          !g_hostEventPublication.pending,
+          "owned camera does not publish a global friend input hold");
+    Put(image+offsets::EVENT_CONTEXT,image+0x72000);
+    Check(!SafeNativeGameplay() && !CaptureDownedScope(continued),
+          "replacement story context cannot inherit camera gameplay");
+    Check(TickHostEventHold(52,true) && g_hostEventPublication.activePublished,
+          "a real replacement context still acquires the ordinary event hold");
+    progress::Tick(53,true,false);
+    Check(!progress::HostReady() && ScriptCameraScopeCurrent(ownedCameraScope),
+          "story blocks progress while admitted identity remains separate from gameplay permission");
+    SetScriptCameraCurrent(nullptr);g_eventHoldProducerEnabled=false;
+    for(unsigned mutation=0;mutation<11;++mutation) {
+        Reset();CaptureDownedScope(ownedCameraScope);SetScriptCameraCurrent(&OwnedCameraFixture);
+        Put(image+offsets::CUTSCENE_STATE,std::int32_t{2});Put(image+offsets::EVENT_CONTEXT,image+0x71000);
+        if(mutation==0)Put(image+offsets::OPEN_MENU,std::uint8_t{0});
+        if(mutation==1)Put(image+offsets::CONTROLLABLE,std::int32_t{1});
+        if(mutation==2)Put(image+offsets::IN_FIELD,std::uint8_t{0});
+        if(mutation==3)++g_bridge.deliverySerial;
+        if(mutation==4)++g_bridge.connections[2];
+        if(mutation==5)++g_epoch;
+        if(mutation==6)++load;
+        if(mutation==7)++transition;
+        if(mutation==8)pendingTransition=true;
+        if(mutation==9)Put(image+offsets::CUTSCENE_STATE,std::int32_t{-1});
+        if(mutation==10)Put(image+offsets::CUTSCENE_STATE,std::int32_t{5});
+        progress::Tick(54,true,false);
+        Check(!progress::HostReady() && !SafeNativeGameplay(),"progress sampling and gameplay retain menu, frozen, field, delivery, roster, epoch, teardown and native-state fences");
+        SetScriptCameraCurrent(nullptr);
+    }
+    Reset();
 }
 ProgressUpdate FullProgress(std::uint8_t value) {
     namespace p = kh2coop::inject::progresssync;
@@ -3354,6 +3462,10 @@ int main() try {
     Check(!CurrentPuppetActor(player, transition, load),
           "pending native teardown prevents puppet release");
     TestMirrorPoseAdmission();
+    TestMirrorPoseAdmission(true);
+    TestLargeBossCensus();
+    TestLargeBossDecisionOwnership();
+    TestOwnedCameraGameplay();
     TestWorldRetirement();
     TestEnemyHpOrdering();
     TestCombatCausalBoundaries();

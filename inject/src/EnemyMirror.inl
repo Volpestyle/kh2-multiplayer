@@ -62,6 +62,7 @@ struct Driven {
     std::uint32_t firstBound = 0;  // first frame seen bound (spawn settle, S7)
     std::uint32_t runStart = 0;    // first frame of the current driven run
     bool running = false, forceSet = false;
+    bool hostBrainOnly = false;
     std::uint32_t blend = 0;
     std::uint32_t lastSkipFrame = 0;  // BrainBody skipped the brain on this frame
     std::uint32_t seenFrame = 0;      // last PreUpdate with a slot (trace)
@@ -128,7 +129,9 @@ static void BrainBodyEntered(void* handler, void* actor, Brain original) {
     Driven* d = OwnerThread() ? Find(reinterpret_cast<uintptr_t>(actor)) : nullptr;
     if(OwnerThread() && FieldBrainDecision(reinterpret_cast<uintptr_t>(actor)))return;
     if (d) {
-        if (DrivenNow(reinterpret_cast<uintptr_t>(actor))) {
+        if (DrivenNow(reinterpret_cast<uintptr_t>(actor)) ||
+            (d->hostBrainOnly && d->boundFrame==g_frameCounter &&
+             enemysync::RecordMirrorAuthorityCurrent(reinterpret_cast<uintptr_t>(actor)))) {
             ++d->skips;
             ++g_mstats.skips;
             d->lastSkipFrame = g_frameCounter;
@@ -531,11 +534,16 @@ void PreUpdateEntered(uintptr_t actor) {
     if (!d) d = Allocate(actor);
     if (!d) { ++g_mstats.tableFull; return; }
     d->pose.field=pose.field;
+    d->hostBrainOnly=pose.objectId==enemyclass::TwilightThorn;
     if (!d->firstBound) d->firstBound = g_frameCounter ? g_frameCounter : 1;
     d->boundFrame = g_frameCounter;
     if (enemysync::PopulationRequested() && !pose.field) { SyncHistory(); NoteBound(actor, pose.netId); }
     if (pose.netId) d->netId = pose.netId;
     bool drive = gate == Gate::Drive;
+    if(d->hostBrainOnly && !EnsureBrainHook(actor)) {
+        NoteLog("owned-brain-refused",actor,pose.netId,pose.objectId);
+        return;
+    }
     if (drive && g_frameCounter - d->firstBound < kSpawnSettleFrames) {  // let the local spawn-in finish (S7)
         drive = false;
         ++d->settleHolds;

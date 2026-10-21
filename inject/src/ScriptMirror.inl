@@ -22,7 +22,8 @@
 //         only while it is still the same live instance. A record for a copy not driven yet waits
 //         in the Hold (180 frames) and later records for that netId wait behind it.
 // Both: one "[script-mirror] ... sec" line per second with activity: the per-second message counts.
-// Nothing here writes HP, team, collision, motion or position.
+// Actor-owner playback includes native capture/attachment, pose and collision-resource
+// helpers. HP damage still enters the existing native BuildHit/D4 owner path.
 
 namespace scriptmirror {
 
@@ -31,6 +32,15 @@ using TrapFn = void(__fastcall*)(std::uint64_t* args);
 using XyzRotFn = void(__fastcall*)(uintptr_t actor, const float* rotation);
 
 struct Slot { uintptr_t entry = 0, native = 0; bool swapped = false; };
+struct ReactionBinding {
+    std::uint32_t handle{}, resource{}, objectId{}, epoch{}, command{}, expires{};
+    std::uint16_t netId{};
+    uintptr_t attack{}, owner{};
+    float range{};
+    std::uint64_t occurrence{}, connection{};
+    std::uint8_t slot{0xFF};
+    bool consumed{};
+};
 struct State {
     bool requested = false, hostActive = false, swapRefused = false;
     bool clientChecked = false, clientReady = false;
@@ -39,17 +49,92 @@ struct State {
     Slot slots[R::kTrapCount] {};
     XyzRotFn xyzRot = nullptr;
     R::Sender sender;
-    R::HostEffects hostEffects;
-    R::ClientEffects clientEffects;
+    R::Retirements retirements;
+    R::ReactionOccurrences occurrences;
+    std::array<ReactionBinding,R::ReactionOccurrences::Capacity> reactions{};
+    R::HostEffects hostEffects, hostAttacks;
+    R::ClientEffects clientEffects, clientAttacks;
     R::Hold hold;
     R::Second second;
     std::uint64_t secondMs = 0;
     std::uint64_t faults = 0, invalid = 0;
     unsigned unmappedLogs = 0;  // this room
+    unsigned resourceMissLogs = 0, storedHandleLogs = 0, invalidLogs = 0; // bounded raw-tag diagnostics per room
 };
 static State g_sm;
+static std::atomic<bool> g_smLifetimeReliable{true};
+static bool g_smLifetimeReady = false;
+using AttackConstructFn = uintptr_t(__fastcall*)(uintptr_t,uintptr_t,uintptr_t,std::uint32_t,std::uint32_t,int,std::uint32_t);
+using AttackDestroyFn = void(__fastcall*)(uintptr_t);
+static AttackConstructFn g_smAttackConstruct = nullptr;
+static AttackDestroyFn g_smAttackDestroy = nullptr;
+using ReactionCallbackFn=void(__fastcall*)(uintptr_t,uintptr_t,std::uint32_t,const std::uint32_t*);
+static ReactionCallbackFn g_smReactionCallback=nullptr;
+static bool SmInstallReactionCallback();
+static void SmTickReactions();
+static int SmApplyReactionOffer(const R::Call&,uintptr_t);
+static int SmApplyReactionOwner(const R::Call&,uintptr_t);
+static bool SmCompleteReaction(const enemysync::ScriptReactionCompletionRecord&);
+static bool SmSetReactionCommand(const ReactionBinding&,std::uint32_t) noexcept;
+static bool SmOwnerInstall();
+static std::uint16_t SmNativeReactionCurrent(std::uint16_t) noexcept;
+static bool SmNativeReactionReady() noexcept;
+static bool SmNativeReactionPins();
+static bool SmNativeReactionInstall();
+static void SmNativeReactionShutdown();
+static bool SmNativeReactionCallbackAllowed(uintptr_t,std::uint32_t,const std::uint32_t*);
+static void SmOwnerReset(bool);
+static void SmOwnerFrame();
+static int SmOwnerApply(const R::Call&,uintptr_t);
+static bool SmOwnerAttackSource(std::uint64_t,std::uint16_t&,std::uint32_t&,std::uint8_t&,std::uint32_t&);
+static uintptr_t SmOwnerAttackActor(std::uint32_t,std::uint16_t,std::uint32_t,std::uint8_t&);
 
 static bool SmGameThread() noexcept { return spawncontroller::IsDiagnosticGameThread(); }
+
+// Invalidate BEFORE destruction or construction. Reusing the same handle,
+// address, owner and attack ID can never make an old wire resource live again.
+static void SmForgetAllocation(uintptr_t attack) {
+    if (!g_sm.requested) return;
+    if (!SmGameThread()) { g_smLifetimeReliable.store(false); return; }
+    if (const auto* paired=g_sm.hostAttacks.FindAllocation(attack)) {
+        R::Call end{};
+        end.netId=paired->netId;end.objectId=paired->objectId;end.effect=paired->id;
+        end.trap=static_cast<std::uint8_t>(R::FindTrap(2,13));
+        if(g_sm.sender.Observe(end)==R::Sender::Outcome::Full && !g_sm.retirements.Put(end))
+            g_smLifetimeReliable.store(false);
+    }
+    g_sm.hostAttacks.ForgetAllocation(attack);
+    g_sm.clientAttacks.ForgetAllocation(attack);
+    for(auto& reaction:g_sm.reactions)if(reaction.attack==attack) {
+        g_sm.occurrences.Retire(reaction.handle,reaction.resource);
+        reaction={};
+    }
+}
+static uintptr_t __fastcall SmAttackConstruct(uintptr_t attack,uintptr_t owner,uintptr_t source,
+    std::uint32_t id,std::uint32_t kind,int collision,std::uint32_t serial) {
+    SmForgetAllocation(attack);
+    return g_smAttackConstruct(attack,owner,source,id,kind,collision,serial);
+}
+static void __fastcall SmAttackDestroy(uintptr_t attack) {
+    SmForgetAllocation(attack);
+    g_smAttackDestroy(attack);
+}
+static bool SmInstallAttackLifetimes() {
+    std::uint8_t construct[sizeof(R::kAttackConstruct)]{}, destroy[sizeof(R::kAttackDestroy)]{};
+    if (!ReadHitTraceMemory(g_exeBase+0x3CF830,construct,sizeof(construct)) ||
+        !ReadHitTraceMemory(g_exeBase+0x3CFB10,destroy,sizeof(destroy)) ||
+        std::memcmp(construct,R::kAttackConstruct,sizeof(construct)) ||
+        std::memcmp(destroy,R::kAttackDestroy,sizeof(destroy))) return false;
+    void* ctor=reinterpret_cast<void*>(g_exeBase+0x3CF830);
+    void* dtor=reinterpret_cast<void*>(g_exeBase+0x3CFB10);
+    auto status=MH_CreateHook(ctor,reinterpret_cast<void*>(&SmAttackConstruct),reinterpret_cast<void**>(&g_smAttackConstruct));
+    if(status!=MH_OK)return false;
+    status=MH_CreateHook(dtor,reinterpret_cast<void*>(&SmAttackDestroy),reinterpret_cast<void**>(&g_smAttackDestroy));
+    if(status!=MH_OK){MH_RemoveHook(ctor);return false;}
+    if(MH_EnableHook(ctor)!=MH_OK){MH_RemoveHook(dtor);MH_RemoveHook(ctor);return false;}
+    if(MH_EnableHook(dtor)!=MH_OK){MH_DisableHook(ctor);MH_RemoveHook(dtor);MH_RemoveHook(ctor);return false;}
+    return true;
+}
 
 static bool SmEnvParked() {
     char v[8] {};
@@ -65,7 +150,7 @@ static bool SmReadEntry(std::size_t i, uintptr_t& entry, uintptr_t& fn, std::uin
     if (!ReadHitTrace(g_exeBase + R::kTrapTables + 8u * t.table, table) || !table) return false;
     entry = R::EntryRva(table, t.index);
     if (!ReadHitTrace(entry, fn) || !ReadHitTrace(entry + 8, flags)) return false;
-    std::uint8_t body[160] {};
+    std::uint8_t body[512] {};
     const uintptr_t native = g_exeBase + t.fnRva;
     bodyOk = t.bodySize <= sizeof(body) && ReadHitTraceMemory(native, body, t.bodySize) && R::BodyMatches(i, body);
     return true;
@@ -121,15 +206,24 @@ static bool SmSameEffect(std::uint32_t handle, uintptr_t effect, uintptr_t part)
     uintptr_t now = 0;
     return effect && SmDecode(handle) == effect && SmEffectState(effect, killed, now) && !killed && now && now == part;
 }
+// ATTACK_MAGIC: flags+8 (0x800 retires it), owner handle+0x10. The script
+// creator re-pairs every allocation, including reuse of a native handle.
+static bool SmAttackState(std::uint32_t handle, uintptr_t attack, uintptr_t owner) noexcept {
+    std::uint32_t flags=0, ownerHandle=0;
+    uintptr_t vtable=0;
+    return g_smLifetimeReady && g_smLifetimeReliable.load() && attack && owner && SmDecode(handle)==attack &&
+        ReadHitTrace(attack, vtable) && vtable == g_exeBase+0x5D7090 &&
+        ReadHitTrace(attack+8, flags) && !(flags&0x800u) &&
+        ReadHitTrace(attack+0x10, ownerHandle) && SmDecode(ownerHandle)==owner;
+}
+
 
 // ---- host ----------------------------------------------------------------------------------------
 // What a detour keeps from before the native call.
 struct Before {
     std::uint64_t args[5] {};
     std::uint32_t argc = 0;
-    const R::HostEffect* effect = nullptr;  // effect calls: the tracked effect, checked live
-    std::uint32_t effectHandle = 0;
-    bool effectChecked = false;
+    R::NativeResourceReference resource{}; // checked snapshot; native reentry can retire the registry entry
 };
 static void SmBefore(std::size_t i, const std::uint64_t* args, Before& b) noexcept;
 static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after);
@@ -157,23 +251,55 @@ static void SmBefore(std::size_t i, const std::uint64_t* args, Before& b) noexce
     const auto& t = R::kTraps[i];
     b.argc = (t.flags & 0xFFFF) < 5 ? (t.flags & 0xFFFF) : 5;
     if (!SmCopyArgs(args, b.args, b.argc)) { b.argc = 0; return; }
-    if (t.kind != R::Kind::EffectField && t.kind != R::Kind::EffectCall) return;
-    if (R::TagOf(b.args[0]) != R::kTagAddress) return;
-    b.effectHandle = R::BitsOf(b.args[0]);
-    b.effect = g_sm.hostEffects.Find(b.effectHandle);
-    b.effectChecked = b.effect && SmSameEffect(b.effectHandle, b.effect->effect, b.effect->part);
+    if (t.kind != R::Kind::EffectField && t.kind != R::Kind::EffectCall &&
+        t.kind != R::Kind::AttackField && t.kind != R::Kind::AttackCall && t.kind != R::Kind::AttackRc &&
+        t.kind != R::Kind::AttackStrike) return;
+    if (R::IsAttackKind(t.kind)) {
+        b.resource=g_sm.hostAttacks.CaptureNative(b.args[0],[](std::uint32_t handle,const R::HostEffect& paired) {
+            return SmAttackState(handle,paired.effect,paired.part);
+        });
+    } else {
+        b.resource=g_sm.hostEffects.CaptureNative(b.args[0],[](std::uint32_t handle,const R::HostEffect& paired) {
+            return SmSameEffect(handle,paired.effect,paired.part);
+        });
+    }
+    if(b.resource.status!=R::NativeResourceStatus::Paired && g_sm.resourceMissLogs<12) {
+        ++g_sm.resourceMissLogs;
+        const auto why=b.resource.status==R::NativeResourceStatus::WrongTag?"tag":
+            b.resource.status==R::NativeResourceStatus::Unpaired?"unpaired":"native";
+        Log("[script-mirror] resource miss trap=%s reason=%s raw=%016llX tag=%08X handle=%08X registered=%u id=%u",
+            t.name,why,static_cast<unsigned long long>(b.args[0]),R::TagOf(b.args[0]),b.resource.handle,
+            b.resource.value.id?1u:0u,b.resource.value.id);
+    } else if(b.resource.status==R::NativeResourceStatus::Paired && (R::TagOf(b.args[0])==R::kTagInt || R::TagOf(b.args[0])==R::kTagWork) &&
+              g_sm.storedHandleLogs<4) {
+        ++g_sm.storedHandleLogs;
+        Log("[script-mirror] stored handle accepted trap=%s raw=%016llX handle=%08X id=%u",
+            t.name,static_cast<unsigned long long>(b.args[0]),b.resource.handle,b.resource.value.id);
+    }
 }
 
-static void SmEmit(R::Call c) {
-    if (!R::ValidValues(c.trap, c.values)) { ++g_sm.invalid; return; }
+static bool SmInvalidValues(const R::Call& c,const char* reason) {
+    ++g_sm.invalid;
+    if(g_sm.invalidLogs++<8)Log("[script-mirror] invalid trap=%s reason=%s values=%016llX,%016llX,%016llX,%016llX",
+        c.trap<R::kTrapCount?R::kTraps[c.trap].name:"unknown",reason,
+        static_cast<unsigned long long>(c.values[0]),static_cast<unsigned long long>(c.values[1]),
+        static_cast<unsigned long long>(c.values[2]),static_cast<unsigned long long>(c.values[3]));
+    return false;
+}
+static bool SmNativeScalars(std::size_t trap,const Before& b,R::Call& c) {
+    return R::NormalizeNativeScalars(trap,b.args,c.values) || SmInvalidValues(c,"native-scalar");
+}
+static bool SmEmit(R::Call c) {
+    if (!R::ValidValues(c.trap, c.values)) return SmInvalidValues(c,"wire-values");
     ++g_sm.second.calls;
     ++g_sm.second.perTrap[c.trap];
     switch (g_sm.sender.Observe(c)) {
         case R::Sender::Outcome::Queued: ++g_sm.second.queued; break;
         case R::Sender::Outcome::Replaced: ++g_sm.second.replaced; break;
         case R::Sender::Outcome::Repeat: ++g_sm.second.repeats; break;
-        case R::Sender::Outcome::Full: ++g_sm.second.full; break;
+        case R::Sender::Outcome::Full: ++g_sm.second.full; return false;
     }
+    return true;
 }
 
 // The announced, mirrored host spawn an actor argument names; 0 otherwise (counted, and the first
@@ -204,6 +330,88 @@ static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after
     R::Call c {};
     c.trap = static_cast<std::uint8_t>(i);
     switch (t.kind) {
+        case R::Kind::AttackStart: {
+            if (g_sm.retirements.Size()+g_sm.hostAttacks.Size()>=R::Retirements::kCap) {
+                ++g_sm.second.full;return;
+            }
+            std::uint8_t ownerSlot=0xFF;std::uint32_t ownerRole=0;
+            if(SmOwnerAttackSource(b.args[0],c.netId,c.objectId,ownerSlot,ownerRole))
+                c.trap=static_cast<std::uint8_t>(R::FindTrap(255,9));
+            else c.netId=SmMirroredSpawn(i,b.args[0],c.objectId);
+            if(!c.netId)return;
+            std::uint64_t result=0;
+            if(!SmCopyArgs(after,&result,1) || R::TagOf(result)!=R::kTagAddress)return;
+            const auto handle=R::BitsOf(result);
+            const auto attack=SmDecode(handle);
+            std::uint32_t ignored=0;
+            const auto owner=SmActorOf(b.args[0],ignored);
+            if(!SmAttackState(handle,attack,owner))return;
+            if(!SmNativeScalars(i,b,c))return;
+            if(ownerSlot!=0xFF) {
+                for(unsigned k=3;k>0;--k)c.values[k]=c.values[k-1];
+                c.values[0]=R::Tagged(R::kTagInt,ownerRole);
+            }
+            if(!R::ValidValues(c.trap,c.values)){SmInvalidValues(c,"native-start");return;}
+            c.effect=g_sm.hostAttacks.Add(handle,attack,owner,c.netId,c.objectId,false,ownerSlot,ownerRole);
+            if (!c.effect) { ++g_sm.second.full; return; }
+            SmEmit(c);
+            return;
+        }
+        case R::Kind::ReactionOwner:
+        case R::Kind::ReactionOffer: return; // wire-only operations
+        case R::Kind::Owner:
+        case R::Kind::OwnerAttackStart:return;
+        case R::Kind::AttackStrike:
+        case R::Kind::AttackRc:
+        case R::Kind::AttackField:
+        case R::Kind::AttackCall: {
+            if(b.resource.status!=R::NativeResourceStatus::Paired || !g_sm.hostAttacks.StillPaired(b.resource)) {
+                if(b.resource.status==R::NativeResourceStatus::NotCurrent && g_sm.hostAttacks.StillPaired(b.resource))
+                    g_sm.hostAttacks.Erase(b.resource.handle);
+                ++g_sm.second.untracked;return;
+            }
+            const auto tracked=b.resource.value;
+            c.netId=tracked.netId;c.objectId=tracked.objectId;c.effect=tracked.id;
+            if(t.kind==R::Kind::AttackStrike) {
+                std::uint32_t targetId=0;
+                const auto target=SmActorOf(b.args[1],targetId);
+                // The paired source enemy is the victim. Player attacks stay on
+                // their actual owner and use D4; no host clone damage exception.
+                if(tracked.ownerSlot==0xFF || enemysync::HostEnemyNetId(target,targetId)!=c.netId || targetId!=c.objectId)return;
+                if(!SmNativeScalars(i,b,c))return;
+            } else if(t.kind==R::Kind::AttackRc) {
+                // The native receiver can be a local BDX object. It stays on
+                // the host; the client uses its source actor only as a callback
+                // anchor and never executes the receiver's workspace.
+                // Validate before installing authority or clearing native attack+11C.
+                if(!SmNativeScalars(i,b,c))return;
+                ReactionBinding* entry=nullptr;
+                for(auto& r:g_sm.reactions)if(r.resource==tracked.id){entry=&r;break;}
+                if(!entry)for(auto& r:g_sm.reactions)if(!r.resource){entry=&r;break;}
+                if(entry) {
+                    *entry={};entry->handle=b.resource.handle;entry->resource=tracked.id;
+                    entry->netId=tracked.netId;entry->objectId=tracked.objectId;
+                    entry->attack=tracked.effect;entry->owner=tracked.part;
+                    entry->command=R::BitsOf(c.values[0]);
+                    entry->range=std::max(R::FloatOf(c.values[1]),R::FloatOf(c.values[2]));
+                }
+                // No seat receives an unarbitrated prompt, including seat 0.
+                const std::uint32_t noCommand=0;
+                std::memcpy(reinterpret_cast<void*>(tracked.effect+0x11C),&noCommand,sizeof(noCommand));
+            } else if(t.kind==R::Kind::AttackField) {
+                if(!SmReadFloat4(tracked.effect+t.field,c.values)){++g_sm.faults;return;}
+            } else if(!SmNativeScalars(i,b,c))return;
+            const bool queued=SmEmit(c);
+            if(t.ends) {
+                if(!queued && !g_sm.retirements.Put(c)) {
+                    // Admission above reserves a deferred slot for every resource.
+                    Log("[script-mirror] retirement invariant failed id=%u",c.effect);
+                    g_smLifetimeReliable.store(false);
+                }
+                g_sm.hostAttacks.Erase(b.resource.handle);
+            }
+            return;
+        }
         case R::Kind::Actor:
         case R::Kind::ActorEvent: {
             c.netId = SmMirroredSpawn(i, b.args[0], c.objectId);
@@ -228,15 +436,14 @@ static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after
             bool killed = true;
             uintptr_t part = 0;
             if (!SmEffectState(effect, killed, part) || killed || !part) return;
+            if(!SmNativeScalars(i,b,c))return;
             c.effect = g_sm.hostEffects.Add(handle, effect, part, c.netId, c.objectId);
             if (t.kind == R::Kind::EffectStart) {
-                for (unsigned k = 0; k < 3; ++k) c.values[k] = b.args[1 + k];
                 SmEmit(c);
                 return;
             }
             // start_pos(id, pos, a3, a4) is start(id, a3, a4) then set_pos(pos).
             c.trap = static_cast<std::uint8_t>(R::FindTrap(t.wireTable, t.wireIndex));
-            c.values[0] = b.args[1]; c.values[1] = b.args[3]; c.values[2] = b.args[4];
             SmEmit(c);
             R::Call pos = c;
             pos.trap = static_cast<std::uint8_t>(R::FindTrap(0, 38));
@@ -247,12 +454,13 @@ static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after
         }
         case R::Kind::EffectField:
         case R::Kind::EffectCall: {
-            if (!b.effect || !b.effectChecked) {
-                if (b.effect) g_sm.hostEffects.Erase(b.effectHandle);  // the handle no longer names it
+            if (b.resource.status!=R::NativeResourceStatus::Paired || !g_sm.hostEffects.StillPaired(b.resource)) {
+                if (b.resource.status==R::NativeResourceStatus::NotCurrent && g_sm.hostEffects.StillPaired(b.resource))
+                    g_sm.hostEffects.Erase(b.resource.handle);  // never erase a replacement born inside the call
                 ++g_sm.second.untracked;
                 return;
             }
-            const R::HostEffect tracked = *b.effect;
+            const R::HostEffect tracked = b.resource.value;
             c.netId = tracked.netId;
             c.objectId = tracked.objectId;
             c.effect = tracked.id;
@@ -260,10 +468,10 @@ static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after
             if (t.kind == R::Kind::EffectField) {
                 if (!SmReadFloat4(tracked.part + t.field, c.values)) { ++g_sm.faults; return; }  // what the setter wrote
             } else {
-                for (unsigned k = 0; k < t.values; ++k) c.values[k] = b.args[1 + k];
+                if(!SmNativeScalars(i,b,c))return;
             }
             SmEmit(c);
-            if (t.ends) g_sm.hostEffects.Erase(b.effectHandle);
+            if (t.ends) g_sm.hostEffects.Erase(b.resource.handle);
             return;
         }
     }
@@ -282,7 +490,9 @@ static void SmRestoreAll() noexcept {
 
 // All or nothing: every entry must hold this build's native function before any is swapped.
 static bool SmSwapAll() {
+    if (!g_smLifetimeReady || !g_smLifetimeReliable.load()) return false;
     for (std::size_t i = 0; i < R::kTrapCount; ++i) {
+        if (!R::kTraps[i].fnRva) continue;
         uintptr_t entry = 0, fn = 0;
         std::uint32_t flags = 0;
         bool bodyOk = false;
@@ -301,6 +511,7 @@ static bool SmSwapAll() {
         g_sm.slots[i].native = native;
     }
     for (std::size_t i = 0; i < R::kTrapCount; ++i) {
+        if (!R::kTraps[i].fnRva) continue;
         auto& s = g_sm.slots[i];
         void* prior = InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(s.entry),
                                                         reinterpret_cast<void*>(kSmDetours[i]), reinterpret_cast<void*>(s.native));
@@ -312,6 +523,7 @@ static bool SmSwapAll() {
 }
 
 static void SmFlush() {
+    g_sm.retirements.Drain(g_sm.sender);
     R::Call batch[32];
     enemysync::ScriptCallRecord records[32];
     for (int packet = 0; packet < 2 && g_sm.sender.Pending(); ++packet) {
@@ -329,25 +541,51 @@ static void SmFlush() {
         std::uint64_t seq = 0;
         if (!enemysync::SendScriptCalls(records, n, g_frameCounter, seq)) { ++g_sm.second.sendFailed; return; }
         g_sm.sender.Commit(n);
+        g_sm.retirements.Drain(g_sm.sender);
         ++g_sm.second.packets;
         g_sm.second.records += static_cast<std::uint32_t>(n);
     }
 }
 
-static void SmResetRoom() {
+// Attack resources carry collision. Retire them before discarding a pairing;
+// unlike visual effects, silent registry eviction is never acceptable.
+static void SmRetireClientAttacks() noexcept {
+    g_sm.clientAttacks.Each([](std::uint32_t, const R::ClientEffect& pair) {
+        if (!SmAttackState(pair.handle, pair.effect, pair.part)) return;
+        __try {
+            std::uint64_t args[1]{R::Tagged(R::kTagAddress, pair.handle)};
+            reinterpret_cast<TrapFn>(g_exeBase + 0x4323B0)(args);
+        } __except(EXCEPTION_EXECUTE_HANDLER) { ++g_sm.faults; }
+    });
+    g_sm.clientAttacks.Reset();
+}
+
+static void SmResetRoom(bool retire = true) {
+    SmOwnerReset(retire);
     g_sm.unmappedLogs = 0;
+    g_sm.resourceMissLogs = g_sm.storedHandleLogs = g_sm.invalidLogs = 0;
     g_sm.sender.Reset();
+    g_sm.retirements.Reset();
+    g_sm.occurrences.Reset();g_sm.reactions={};
     g_sm.hostEffects.Reset();
+    g_sm.hostAttacks.Reset();
     g_sm.clientEffects.Reset();
+    // After load/room teardown, old native objects are no longer ours to write.
+    if (retire) SmRetireClientAttacks(); else g_sm.clientAttacks.Reset();
     g_sm.hold.Reset();
 }
 
 static void SmStopHost(const char* why) {
     if (!g_sm.hostActive && !g_sm.slots[0].swapped) return;
     g_sm.hostActive = false;
+    for(const auto& binding:g_sm.reactions)if(binding.resource)
+        (void)SmSetReactionCommand(binding,binding.command);
+    g_sm.occurrences.Reset();g_sm.reactions={};
     SmRestoreAll();
     g_sm.sender.Reset();
+    g_sm.retirements.Reset();
     g_sm.hostEffects.Reset();
+    g_sm.hostAttacks.Reset();
     Log("[script-mirror] host stop why=%s faults=%llu invalid=%llu", why, static_cast<unsigned long long>(g_sm.faults),
         static_cast<unsigned long long>(g_sm.invalid));
 }
@@ -355,9 +593,11 @@ static void SmStopHost(const char* why) {
 // ---- client --------------------------------------------------------------------------------------
 // The native traps, unswapped, and the xyzrot helper, all this build's (checked once).
 static bool SmClientReady() {
+    if (!g_smLifetimeReady || !g_smLifetimeReliable.load()) return false;
     if (g_sm.clientChecked) return g_sm.clientReady;
     g_sm.clientChecked = true;
     for (std::size_t i = 0; i < R::kTrapCount; ++i) {
+        if (!R::kTraps[i].fnRva) continue;
         uintptr_t entry = 0, fn = 0;
         std::uint32_t flags = 0;
         bool bodyOk = false;
@@ -377,6 +617,9 @@ static bool SmClientReady() {
         return false;
     }
     g_sm.xyzRot = reinterpret_cast<XyzRotFn>(g_exeBase + R::kXyzRotHelperRva);
+    std::uint8_t attackHelper[sizeof(R::kAttackPosHelper)]{};
+    if(!ReadHitTraceMemory(g_exeBase+0x437A80,attackHelper,sizeof(attackHelper)) ||
+       std::memcmp(attackHelper,R::kAttackPosHelper,sizeof(attackHelper))!=0)return false;
     g_sm.clientReady = true;
     Log("[script-mirror] client ready traps=%zu", R::kTrapCount);
     return true;
@@ -436,11 +679,85 @@ static std::uint32_t SmOwnHandle(uintptr_t actor) noexcept {
     return handle;
 }
 
+#include "ScriptActorOwner.inl"
+
+static bool SmAttackVector(uintptr_t attack, const std::uint64_t* values) noexcept {
+    __try {
+        float position[4];
+        for(unsigned k=0;k<4;++k)position[k]=R::FloatOf(values[k]);
+        using Setter=void(__fastcall*)(uintptr_t,const float*);
+        reinterpret_cast<Setter>(g_exeBase+0x437A80)(attack,position);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 enum class Applied : std::uint8_t { Ok, Refused, Unpaired, Stale, Fault };
 // One record on its driven copy.
 static Applied SmReplay(const R::Call& c, uintptr_t actor) {
     const auto& t = R::kTraps[c.trap];
     std::uint64_t result = 0;
+    if(t.kind==R::Kind::Owner)return SmOwnerApply(c,actor)?Applied::Ok:Applied::Refused;
+    if(R::IsAttackKind(t.kind)) {
+        if(t.kind==R::Kind::ReactionOffer)return SmApplyReactionOffer(c,actor)?Applied::Ok:Applied::Refused;
+        if(t.kind==R::Kind::ReactionOwner)return SmApplyReactionOwner(c,actor)?Applied::Ok:Applied::Refused;
+        if(t.kind==R::Kind::AttackStart || t.kind==R::Kind::OwnerAttackStart) {
+            std::uint8_t ownerSlot=0xFF;
+            uintptr_t attackOwner=actor;std::uint32_t ownerRole=0;
+            const std::uint64_t* values=c.values;
+            std::uint64_t shifted[4]{};
+            std::size_t nativeTrap=c.trap;
+            if(t.kind==R::Kind::OwnerAttackStart) {
+                ownerRole=R::BitsOf(c.values[0]);
+                attackOwner=SmOwnerAttackActor(ownerRole,c.netId,c.objectId,ownerSlot);
+                if(!attackOwner)return Applied::Refused;
+                nativeTrap=static_cast<std::size_t>(R::FindTrap(2,10));
+                for(unsigned k=0;k<3;++k)shifted[k]=c.values[k+1];
+                values=shifted;
+            }
+            const auto handle=SmOwnHandle(attackOwner);
+            if(!handle || !SmCallTrap(nativeTrap,handle,values,result))return Applied::Fault;
+            const auto made=R::TagOf(result)==R::kTagAddress?R::BitsOf(result):0;
+            const auto attack=SmDecode(made);
+            if(!SmAttackState(made,attack,attackOwner))return Applied::Refused;
+            // Repeated start IDs must never replace a still-live collision object.
+            if (g_sm.clientAttacks.Find(c.effect) ||
+                !g_sm.clientAttacks.Put(c.effect,{made,attack,attackOwner,c.netId,ownerSlot,ownerRole},false)) {
+                std::uint64_t unused=0;
+                (void)SmCallTrap(static_cast<std::size_t>(R::FindTrap(2,13)),made,c.values,unused);
+                return Applied::Refused;
+            }
+            return Applied::Ok;
+        }
+        const auto* pair=g_sm.clientAttacks.Find(c.effect);
+        if(!pair)return Applied::Unpaired;
+        const auto paired=*pair;
+        const auto attackOwner=paired.ownerSlot==0xFF?actor:paired.part;
+        if(paired.netId!=c.netId || !SmAttackState(paired.handle,paired.effect,attackOwner)) {
+            g_sm.clientAttacks.Erase(c.effect);return Applied::Stale;
+        }
+        if(paired.ownerRole && !t.ends) {
+            std::uint8_t slot=0xFF;
+            if(SmOwnerAttackActor(paired.ownerRole,c.netId,c.objectId,slot)!=attackOwner)return Applied::Refused;
+        }
+        bool ok=false;
+        if(t.replay==R::Replay::AttackStrike) {
+            const auto target=SmOwnHandle(actor);
+            if(!target || paired.ownerSlot==0xFF || attackOwner!=g_soraActor)return Applied::Refused;
+            std::uint64_t args[4]{R::Tagged(R::kTagAddress,paired.handle),R::Tagged(R::kTagAddress,target),c.values[0],c.values[1]};
+            reinterpret_cast<TrapFn>(g_sm.slots[c.trap].native)(args);ok=true;
+        } else if(t.replay==R::Replay::AttackRc) {
+            const auto receiver=SmOwnHandle(actor);
+            if(!receiver)return Applied::Refused;
+            std::uint64_t args[5]{R::Tagged(R::kTagAddress,paired.handle),R::Tagged(R::kTagAddress,receiver),
+                R::Tagged(R::kTagInt,0),c.values[1],c.values[2]};
+            reinterpret_cast<TrapFn>(g_sm.slots[c.trap].native)(args);
+            ok=true;
+        }
+        else if(t.replay==R::Replay::AttackVector)ok=SmAttackVector(paired.effect,c.values);
+        else if(t.replay==R::Replay::FieldWrite)ok=SmWriteField(paired.effect+t.field,c.values);
+        else ok=SmCallTrap(c.trap,paired.handle,c.values,result);
+        if(t.ends)g_sm.clientAttacks.Erase(c.effect);
+        return ok?Applied::Ok:Applied::Fault;
+    }
     if (!c.effect) {
         if (t.replay == R::Replay::XyzRotHelper) return SmCallXyzRot(actor, c.values) ? Applied::Ok : Applied::Fault;
         const std::uint32_t handle = SmOwnHandle(actor);
@@ -496,12 +813,31 @@ static int SmApplyRecord(const enemysync::ScriptCallRecord& r) {
         ++g_sm.second.refused;
         return 0;
     }
+    if (r.table==2 && r.index==13) {
+        // Ending an existing resource needs its still-live allocation, not a
+        // still-driven source. EnemyDeath may precede its final free on the wire.
+        const auto* pair=g_sm.clientAttacks.Find(c.effect);
+        if(!pair) {
+            // A start waiting for birth/drive must not outlive its end. Cancel
+            // the whole uncreated resource, including fields and RC offers.
+            g_sm.hold.CancelResource(c.netId,c.effect,true);
+            return 1;
+        }
+        if(pair->netId!=c.netId)return 0;
+        return SmCount(SmReplay(c,pair->part),false)?1:0;
+    }
+    if(r.table==255 && r.index==6) {
+        g_sm.hold.CancelOwner(c.netId,c.effect);
+        return SmOwnerApply(c,0);
+    }
     const uintptr_t actor = SmDrivenActor(c.netId, c.objectId);
     // Behind anything already waiting for this netId, or until its copy is driven. An effect record
     // waits only behind its own start; without one it has nothing to act on.
     if (!actor || g_sm.hold.HoldsNetId(c.netId)) {
-        const bool needsStart = c.effect && R::kTraps[i].kind != R::Kind::EffectStart && !g_sm.clientEffects.Find(c.effect);
-        if (needsStart && !g_sm.hold.HoldsStart(c.effect)) { ++g_sm.second.unpaired; return 0; }
+        const bool attack = R::IsAttackKind(R::kTraps[i].kind);
+        const bool start = R::kTraps[i].kind == R::Kind::EffectStart || R::kTraps[i].kind == R::Kind::AttackStart || R::kTraps[i].kind == R::Kind::OwnerAttackStart || R::kTraps[i].kind == R::Kind::Owner;
+        const bool needsStart = c.effect && !start && !(attack ? g_sm.clientAttacks.Find(c.effect) : g_sm.clientEffects.Find(c.effect));
+        if (needsStart && !g_sm.hold.HoldsStart(c.effect, attack)) { ++g_sm.second.unpaired; return 0; }
         if (g_sm.hold.Put(c, g_frameCounter)) ++g_sm.second.held; else ++g_sm.second.refused;
         return 0;
     }
@@ -519,6 +855,595 @@ static void SmDrainHold() {
         return true;
     }, expired);
     g_sm.second.expired += static_cast<std::uint32_t>(expired);
+}
+
+// ---- owner-routed reactions ---------------------------------------------------------------------
+static bool SmPoint(uintptr_t actor,R::ReactionPoint& point) noexcept {
+    float v[3]{};
+    const auto at=actor+offsets::actor::ENTITY_TRANSFORM+offsets::entity::POS_X;
+    if(!actor || !ReadHitTraceMemory(at,v,sizeof(v)))return false;
+    point={v[0],v[1],v[2]};return R::Finite(point);
+}
+static std::array<R::ReactionSeat,3> SmReactionSeats(const enemysync::DownedScope& scope) {
+    std::array<R::ReactionSeat,3> seats{};
+    for(unsigned candidate=0;candidate<3;++candidate) {
+        const auto actor=enemytarget::g.candidateActor[candidate];
+        const auto slot=candidate?enemytarget::g.ownerSlot[candidate]:std::uint8_t{0};
+        uintptr_t status=0;
+        if(!actor || slot>=3 || !scope.connections[slot] || (slot==0 && downedspike::LogicallyDowned()) ||
+           !enemytarget::ReadLive(actor,status))continue;
+        auto& seat=seats[slot];
+        seat.connection=scope.connections[slot];
+        seat.fresh=SmPoint(actor,seat.position);
+        seat.living=seat.fresh;seat.capable=seat.fresh;
+    }
+    return seats;
+}
+// Native FIELD_COMMAND cache authority. All native stores remain in original
+// functions; this adapter observes a fresh winner and may refuse preacceptance.
+using NativeRcRefreshFn=void(__fastcall*)(uintptr_t);
+using NativeRcWinnerFn=void(__fastcall*)(uintptr_t,uintptr_t,const std::uint32_t*,int,int);
+using NativeRcAcceptFn=bool(__fastcall*)(uintptr_t,uintptr_t,const std::uint32_t*);
+static NativeRcRefreshFn g_smRcRefresh=nullptr;
+static NativeRcWinnerFn g_smRcWinner=nullptr;
+static NativeRcAcceptFn g_smRcAccept=nullptr;
+static bool g_smRcCreated[3]{};
+static std::atomic<bool> g_smRcInstalled{false};
+static bool SmNativeReactionReady() noexcept {
+    return g_smRcInstalled.load(std::memory_order_acquire);
+}
+static R::NativeReactionCache g_smRcCache;
+static R::NativeReactionAcceptance g_smRcAcceptance;
+struct SmRcProof {
+    R::NativeReactionIdentity identity{};
+    enemysync::DownedScope scope{};
+};
+static SmRcProof g_smRcPending{},g_smRcPublished{},g_smRcAccepted{},g_smRcOwnedSource{};
+static uintptr_t g_smRcRefreshing=0;
+static bool g_smRcAccepting=false,g_smRcAcceptedHandoff=false;
+static constexpr std::uint32_t kSmRcHookRvas[]{0x408520,0x408BD0,0x3B22D0};
+static bool SmRcSameScope(const enemysync::DownedScope& a,const enemysync::DownedScope& b) noexcept {
+    return a.context.generation==b.context.generation && a.context.deliverySerial==b.context.deliverySerial &&
+        a.context.hostSourceSerial==b.context.hostSourceSerial && a.epoch==b.epoch && a.worldId==b.worldId &&
+        a.roomId==b.roomId && a.door==b.door && a.mapProgram==b.mapProgram &&
+        a.battleProgram==b.battleProgram && a.eventProgram==b.eventProgram &&
+        a.connections==b.connections && a.localSlot==b.localSlot;
+}
+// Canonical static controller only. No arbitrary DD0/controller or TARGET decode.
+static bool SmRcController(uintptr_t controller) noexcept {
+    uintptr_t canonical=0,dd0=0,owner=0,bound=0,back=0;
+    return SmGameThread() && SmOwnerReady() && g_sm.requested &&
+        controller==g_exeBase+0x2A10620 && ReadHitTrace(g_exeBase+0x2A105D0,canonical) &&
+        canonical && canonical==g_soraActor && SmOwnHandle(canonical) &&
+        ReadHitTrace(canonical+0xDD0,dd0) && dd0==controller &&
+        ReadHitTrace(controller+0xAE0,owner) && owner==canonical &&
+        ReadHitTrace(controller+0xC38,bound) && bound==canonical &&
+        ReadHitTrace(controller+0xB10,back) && back==controller;
+}
+static bool SmRcTarget(uintptr_t at,std::array<std::uint32_t,4>& target) noexcept {
+    return at && ReadHitTraceMemory(at,target.data(),sizeof(target));
+}
+static bool SmRcRoots(uintptr_t actor,uintptr_t& status,uintptr_t& entry) noexcept {
+    return actor && SmOwnHandle(actor) && enemytarget::ReadLive(actor,status) && status &&
+        ReadHitTrace(actor+offsets::actor::OBJENTRY_PTR,entry) && entry;
+}
+static bool SmRcSourceCurrent(uintptr_t source,std::uint16_t netId,std::uint32_t objectId) noexcept {
+    return g_sm.hostActive?enemysync::HostEnemyNetId(source,objectId)==netId:
+        SmDrivenActor(netId,objectId)==source;
+}
+// A host has no driven-table entry after the RC resource retires. Retain only
+// this source-ownership receipt across cache early returns; it grants refusal,
+// never a new occurrence. All roots and the admitted scope must still match.
+static bool SmRcObservedSource(const SmRcProof& observed,std::uint32_t handle) noexcept {
+    const auto& id=observed.identity;
+    uintptr_t status=0,entry=0;std::uint32_t objectId=0;
+    const auto source=static_cast<uintptr_t>(id.roots[2]);
+    return id.resource && id.target[0]==handle && source &&
+        id.load==warp::LoadSerial() && id.transition==warp::TransitionSerial() &&
+        enemysync::ScriptCameraScopeCurrent(observed.scope) && SmOwnHandle(source)==handle &&
+        ReadHitTrace(source+0x5C0,status) && status==id.roots[5] &&
+        ReadHitTrace(source+offsets::actor::OBJENTRY_PTR,entry) && entry && entry==id.roots[6] &&
+        ReadHitTrace(entry+offsets::objentry::OBJECT_ID,objectId) && objectId==id.objectId;
+}
+// Recognition is registry/role first. A stale attack may have disappeared while
+// its source is still admitted; the source handle alone never grants admission.
+static bool SmRcKnownSource(std::uint32_t handle) noexcept {
+    if(!handle)return false;
+    if(SmRcObservedSource(g_smRcOwnedSource,handle) || SmRcObservedSource(g_smRcAccepted,handle))return true;
+    for(const auto& binding:g_sm.reactions)if(binding.resource && SmOwnHandle(binding.owner)==handle &&
+        SmRcSourceCurrent(binding.owner,binding.netId,binding.objectId))return true;
+    for(const auto& role:g_smRoles)if(role.resource && role.sourceHandle==handle &&
+        SmOwnerActorCurrent(role) && SmRcSourceCurrent(role.source,role.netId,role.objectId))return true;
+    for(const auto& cleanup:g_smOwnerCleanup) {
+        const auto& role=cleanup.role;
+        if(role.resource && role.sourceHandle==handle && SmOwnHandle(role.source)==handle &&
+            SmRcSourceCurrent(role.source,role.netId,role.objectId))return true;
+    }
+    for(const auto& driven:enemymirror::g_driven)if(driven.actor && SmOwnHandle(driven.actor)==handle &&
+        SmOwnerMirroredSource(driven.actor))return true;
+    return false;
+}
+// Build a current, local-owner proof without mutating/renewing a window. The
+// full immutable identity is captured at the winner, never relabelled on read.
+static bool SmRcProofNow(uintptr_t controller,std::uint16_t command,
+    const std::array<std::uint32_t,4>& target,SmRcProof& proof) noexcept {
+    proof={};
+    enemysync::DownedScope scope;
+    if(!command || !SmRcController(controller) || !SmOwnerScope(scope) || scope.localSlot>=3 ||
+        downedspike::LogicallyDowned() || !target[0] || target[1] || target[3]!=UINT32_MAX)return false;
+    // The host-only targeting table is never populated on a client. Validate
+    // this seat's checked canonical roots below; arbitration already happened
+    // in the host-owned occurrence and remains unchanged.
+    const auto localActor=R::ReactionActorForSeat(scope.localSlot,scope.localSlot,g_soraActor);
+    const auto connection=scope.connections[scope.localSlot];
+    if(!localActor || !connection)return false;
+    auto& id=proof.identity;
+    id.target=target;id.command=command;id.epoch=scope.epoch;id.slot=scope.localSlot;id.connection=connection;
+    id.load=warp::LoadSerial();id.transition=warp::TransitionSerial();id.actorHandle=SmOwnHandle(g_soraActor);
+    uintptr_t playerStatus=0,playerEntry=0,source=0,sourceStatus=0,sourceEntry=0,native=0;
+    if(!SmRcRoots(localActor,playerStatus,playerEntry))return false;
+    if(target[2]) {
+        const ReactionBinding* selected=nullptr;
+        for(const auto& binding:g_sm.reactions) {
+            if(!binding.resource || binding.handle!=target[2] || SmOwnHandle(binding.owner)!=target[0])continue;
+            if(selected)return false;
+            selected=&binding;
+        }
+        if(!selected || selected->command!=command || !selected->occurrence || selected->consumed ||
+            selected->slot!=scope.localSlot || selected->epoch!=scope.epoch || selected->connection!=connection ||
+            !SmAttackState(selected->handle,selected->attack,selected->owner) ||
+            !SmRcSourceCurrent(selected->owner,selected->netId,selected->objectId))return false;
+        if(g_sm.hostActive) {
+            const auto* pair=g_sm.hostAttacks.Find(selected->handle);
+            const auto* window=g_sm.occurrences.Find(selected->occurrence);
+            if(!pair || pair->id!=selected->resource || pair->effect!=selected->attack ||
+                pair->part!=selected->owner || !window || !R::ReactionLive(*window,scope.epoch,g_frameCounter) ||
+                window->slot!=scope.localSlot || window->connection!=connection ||
+                window->source!=selected->netId || window->command!=command)return false;
+        } else {
+            const auto* pair=g_sm.clientAttacks.Find(selected->resource);
+            if(!pair || pair->handle!=selected->handle || pair->effect!=selected->attack ||
+                pair->netId!=selected->netId || g_frameCounter>=selected->expires)return false;
+        }
+        source=selected->owner;native=selected->attack;
+        id.family=1;id.resource=selected->resource;id.incarnation=selected->resource;
+        id.occurrence=selected->occurrence;id.source=selected->netId;id.objectId=selected->objectId;
+    } else {
+        const ScriptActorRole* selected=nullptr;
+        for(const auto& role:g_smRoles) {
+            if(role.sourceHandle!=target[0] || !role.resource || role.reaction.command!=command ||
+                role.slot!=scope.localSlot || role.actor!=g_soraActor)continue;
+            if(selected)return false;
+            selected=&role;
+        }
+        if(!selected || !SmOwnerCurrent(*selected,scope) || selected->actor!=localActor ||
+            (g_sm.hostActive && (g_frameCounter-selected->commandFrame>15 || !selected->commandAnnounced)) ||
+            (!g_sm.hostActive && GetTickCount64()>=selected->deadline) ||
+            !R::OwnerCommandCaptureLive(selected->commandMode,SmOwnerCaptureCurrent(*selected)) ||
+            !R::ReactionLive(selected->reaction,scope.epoch,g_frameCounter) ||
+            selected->reaction.slot!=scope.localSlot || selected->reaction.connection!=connection)return false;
+        source=selected->source;native=selected->thread;
+        id.family=2;id.resource=selected->resource;
+        id.incarnation=g_sm.hostActive?selected->commandIncarnation:selected->reaction.occurrence;
+        id.objectId=selected->objectId;id.mode=selected->commandMode;
+        id.occurrence=selected->reaction.occurrence;id.source=selected->netId;
+    }
+    if(!SmRcRoots(source,sourceStatus,sourceEntry))return false;
+    id.roots={controller,g_soraActor,source,playerStatus,playerEntry,sourceStatus,sourceEntry,native};
+    proof.scope=scope;
+    return true;
+}
+static bool SmRcProofCurrent(const SmRcProof& saved) noexcept {
+    if(!saved.identity.occurrence || !enemysync::ScriptCameraScopeCurrent(saved.scope))return false;
+    SmRcProof now{};
+    return SmRcProofNow(static_cast<uintptr_t>(saved.identity.roots[0]),saved.identity.command,
+        saved.identity.target,now) && SmRcSameScope(saved.scope,now.scope) && saved.identity==now.identity;
+}
+// Bounded per-command/decision changes plus one continuing five-second sample.
+// This budget is not spent by the first Dusks' per-frame offers.
+struct SmRcTrace { std::uint16_t command{};std::uint8_t decision{};std::uint32_t frame{};unsigned changes{}; };
+static std::array<SmRcTrace,16> g_smRcTrace{};
+static void SmRcLog(std::uint16_t command,std::uint8_t decision,const char* where) noexcept {
+    SmRcTrace* entry=nullptr;
+    for(auto& trace:g_smRcTrace)if(trace.command==command){entry=&trace;break;}
+    if(!entry)for(auto& trace:g_smRcTrace)if(!trace.command){trace={command,0xFF,0,0};entry=&trace;break;}
+    if(!entry)return; // no hash collision/eviction can renew a per-command budget
+    const bool changed=entry->decision!=decision;
+    if((changed && entry->changes<12) || g_frameCounter-entry->frame>=300) {
+        if(changed)++entry->changes;
+        entry->decision=decision;entry->frame=g_frameCounter;
+        const auto& receipt=g_smRcCache.Published();
+        std::uint8_t flags=0,status=0;std::uint32_t control=0;std::uint64_t system=0;
+        const auto controller=g_exeBase+0x2A10620;
+        const bool gates=ReadHitTrace(controller+0xB3C,flags) && ReadHitTrace(controller+0xB45,status) &&
+            ReadHitTrace(controller+0x24,control) && ReadHitTrace(g_exeBase+0x9AB580,system);
+        std::uint16_t cached=0,active=0;std::array<std::uint32_t,4> cachedTarget{},activeTarget{};
+        const bool cacheRead=ReadHitTrace(controller+0xB42,cached) && SmRcTarget(controller+0xB28,cachedTarget);
+        const bool activeRead=ReadHitTrace(controller+8,active) && SmRcTarget(controller+0x10,activeTarget);
+        Log("[script-rc-cache] where=%s command=%u decision=%u frame=%u serial=%llu selectedFrame=%u resource=%u occurrence=%llu target=%X/%X/%X/%X gates=%u flags=%X status=%u control=%X system=%llX accepted=%llu handoff=%u cacheRead=%u cached=%u cacheTarget=%X/%X/%X/%X activeRead=%u active=%u activeTarget=%X/%X/%X/%X",
+            where,command,decision,g_frameCounter,receipt.refresh,receipt.frame,receipt.identity.resource,
+            receipt.identity.occurrence,receipt.identity.target[0],receipt.identity.target[1],
+            receipt.identity.target[2],receipt.identity.target[3],gates?1u:0u,flags,status,control,system,
+            g_smRcAccepted.identity.occurrence,g_smRcAcceptedHandoff?1u:0u,
+            cacheRead?1u:0u,cached,cachedTarget[0],cachedTarget[1],cachedTarget[2],cachedTarget[3],
+            activeRead?1u:0u,active,activeTarget[0],activeTarget[1],activeTarget[2],activeTarget[3]);
+    }
+}
+// 0 unrelated/unknown, 1 admitted, 2 no current binding, 3 no fresh selection.
+// Log-only: 4 native gate, 5 callback admitted, 6 callback refused,
+// 7 unqualified static owner, 8 pending native callback fence, 9 scope-retired fence,
+// 10 native accepted result did not prove its active inline request.
+static unsigned SmRcDecision(uintptr_t controller,std::uint16_t command,
+    const std::array<std::uint32_t,4>& target) noexcept {
+    if(!SmRcKnownSource(target[0]))return 0;
+    SmRcProof now{};
+    if(!SmRcProofNow(controller,command,target,now))return 2;
+    if(!SmRcSameScope(g_smRcPublished.scope,now.scope) || !g_smRcCache.Current(now.identity,g_frameCounter))return 3;
+    if(g_smRcAcceptance.Pending() && !g_smRcAcceptance.Current(now.identity) &&
+        SmRcSameScope(g_smRcAccepted.scope,now.scope) &&
+        g_smRcAccepted.identity.load==now.identity.load &&
+        g_smRcAccepted.identity.transition==now.identity.transition)return 8;
+    return 1;
+}
+static std::uint16_t SmNativeReactionCurrent(std::uint16_t raw) noexcept {
+    const auto controller=g_exeBase+0x2A10620;
+    if(!raw || !SmNativeReactionReady() || !SmGameThread() || !SmOwnerReady() || !g_sm.requested)return raw;
+    std::uint16_t command=0;
+    std::array<std::uint32_t,4> target{};
+    if(!ReadHitTrace(controller+0xB42,command) || command!=raw || !SmRcTarget(controller+0xB28,target))return raw;
+    if(!SmRcController(controller)) {
+        if(SmRcKnownSource(target[0]))SmRcLog(command,7,"query-owner-unavailable");
+        return raw; // unqualified/unstable canonical ownership remains conservative
+    }
+    auto decision=SmRcDecision(controller,command,target);
+    if(decision==1) {
+        std::uint8_t cacheFlags=0,status=0;std::uint32_t control=0;std::uint64_t system=0;
+        if(!ReadHitTrace(controller+0xB3C,cacheFlags) || !(cacheFlags&1) ||
+            !ReadHitTrace(controller+0xB45,status) || status>=4 || !ReadHitTrace(controller+0x24,control) || (control&1) ||
+            !ReadHitTrace(g_exeBase+0x9AB580,system) || ((system&(1ull<<23)) && !(system&(1ull<<28))))decision=4;
+    }
+    if(decision)SmRcLog(command,static_cast<std::uint8_t>(decision),"query");
+    return R::NativeReactionCommand(raw,decision!=0,decision==1);
+}
+static void __fastcall SmNativeRcWinner(uintptr_t result,uintptr_t descriptor,
+    const std::uint32_t* target,int priority,int distance) {
+    const auto returnAddress=reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if(!SmNativeReactionReady() || !SmGameThread() || !SmOwnerReady() || !g_smRcRefreshing) {
+        g_smRcWinner(result,descriptor,target,priority,distance);return;
+    }
+    g_smRcPending={};g_smRcCache.Winner(nullptr,g_frameCounter);
+    const auto caller=returnAddress>=g_exeBase?returnAddress-g_exeBase:0;
+    uintptr_t component=0;std::uint16_t command=0;
+    std::array<std::uint32_t,4> input{};SmRcProof before{};
+    const bool candidate=(caller==0x408145 || caller==0x4084F2) &&
+        ReadHitTrace(result,component) && component==g_smRcRefreshing &&
+        ReadHitTrace(descriptor,command) && SmRcTarget(reinterpret_cast<uintptr_t>(target),input) &&
+        SmRcProofNow(component-0xB10,command,input,before);
+    g_smRcWinner(result,descriptor,target,priority,distance); // always preserve original side effects
+    std::uint16_t written=0;std::array<std::uint32_t,4> output{};
+    if(candidate && g_smRcRefreshing==component && ReadHitTrace(result+0xA,written) && written==command &&
+        SmRcTarget(result+0x14,output) && output==input && SmRcProofCurrent(before)) {
+        g_smRcPending=before;g_smRcCache.Winner(&before.identity,g_frameCounter);
+    }
+}
+static void SmRcEndRefresh(uintptr_t component) noexcept {
+    std::uint16_t command=0;std::array<std::uint32_t,4> target{};
+    const bool current=SmRcController(component-0xB10) && ReadHitTrace(component+0x32,command) &&
+        SmRcTarget(component+0x18,target) && SmRcProofCurrent(g_smRcPending);
+    g_smRcCache.End(current?&g_smRcPending.identity:nullptr,command,target,g_frameCounter);
+    g_smRcPublished=g_smRcCache.Published().valid?g_smRcPending:SmRcProof{};
+    if(g_smRcCache.Published().valid)g_smRcOwnedSource=g_smRcPublished;
+    if(SmRcKnownSource(target[0]))SmRcLog(command,
+        static_cast<std::uint8_t>(SmRcDecision(component-0xB10,command,target)),"refresh");
+    g_smRcPending={};
+}
+static void __fastcall SmNativeRcRefresh(uintptr_t component) {
+    if(!SmNativeReactionReady() || !SmRcController(component-0xB10)) {g_smRcRefresh(component);return;}
+    if(g_smRcRefreshing) {
+        g_smRcCache.Poison();g_smRcPending={};g_smRcPublished={};
+        g_smRcRefresh(component);return;
+    }
+    g_smRcPending={};g_smRcPublished={};
+    if(!g_smRcCache.Begin()){g_smRcRefresh(component);return;}
+    g_smRcRefreshing=component;
+    __try {g_smRcRefresh(component);SmRcEndRefresh(component);}
+    __finally {
+        g_smRcRefreshing=0;
+        if(AbnormalTermination()){g_smRcCache.Reset();g_smRcPending={};g_smRcPublished={};}
+    }
+}
+static bool __fastcall SmNativeRcAccept(uintptr_t controller,uintptr_t descriptor,const std::uint32_t* target) {
+    const auto returnAddress=reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if(returnAddress!=g_exeBase+0x3B24FC || controller!=g_exeBase+0x2A10620 ||
+        !SmNativeReactionReady() || !SmGameThread() || !SmOwnerReady() || !g_sm.requested)
+        return g_smRcAccept(controller,descriptor,target);
+    std::uint16_t command=0;std::array<std::uint32_t,4> logical{};
+    if(!ReadHitTrace(descriptor,command) || !SmRcTarget(reinterpret_cast<uintptr_t>(target),logical))
+        return g_smRcAccept(controller,descriptor,target);
+    if(!SmRcKnownSource(logical[0]))return g_smRcAccept(controller,descriptor,target);
+    if(!SmRcController(controller)){SmRcLog(command,7,"accept-owner-refused");return false;}
+    const auto decision=SmRcDecision(controller,command,logical);
+    SmRcLog(command,static_cast<std::uint8_t>(decision),"accept");
+    if(decision!=1 || g_smRcAccepting || !SmRcProofCurrent(g_smRcPublished))return false;
+    // Latch immutable identity before native entry. Acceptance does not consume.
+    // A native transition may invoke code reentrantly; it cannot replace this stamp.
+    if(g_smRcAcceptance.Pending()) {
+        // An interrupted old native action may still reach 3B5FA0 using the
+        // controller's CURRENT inline TARGET. Never relabel it to a new binding.
+        // Only a different admitted scope/load or its actual callback retires it.
+        if(!SmRcSameScope(g_smRcAccepted.scope,g_smRcPublished.scope) ||
+            g_smRcAccepted.identity.load!=g_smRcPublished.identity.load ||
+            g_smRcAccepted.identity.transition!=g_smRcPublished.identity.transition) {
+            SmRcLog(command,9,"pending-scope-retired");g_smRcAccepted={};g_smRcAcceptance.Reset();g_smRcAcceptedHandoff=false;
+        } else {SmRcLog(command,8,"pending-callback-fence");return false;}
+    }
+    if(!g_smRcAcceptance.Reserve(g_smRcCache.Published(),g_smRcPublished.identity))return false;
+    g_smRcAccepted=g_smRcPublished;g_smRcAccepting=true;g_smRcAcceptedHandoff=false;
+    bool accepted=false;
+    __try {
+        accepted=g_smRcAccept(controller,descriptor,target);
+        if(accepted) {
+            std::uint16_t active=0;std::array<std::uint32_t,4> activeTarget{};
+            g_smRcAcceptedHandoff=SmRcController(controller) && ReadHitTrace(controller+8,active) &&
+                SmRcTarget(controller+0x10,activeTarget) &&
+                R::NativeReactionActive(g_smRcAccepted.identity,controller+0x10,active,activeTarget);
+            if(!g_smRcAcceptedHandoff)SmRcLog(command,10,"native-active-handoff-refused");
+        }
+    }
+    __finally {
+        g_smRcAccepting=false;g_smRcAcceptance.Finish(accepted);
+        if(!accepted){g_smRcAccepted={};g_smRcAcceptedHandoff=false;}
+    }
+    return accepted;
+}
+static bool SmNativeReactionCallbackAllowed(uintptr_t receiver,std::uint32_t command,const std::uint32_t* target) {
+    std::array<std::uint32_t,4> logical{};
+    if(!SmRcTarget(reinterpret_cast<uintptr_t>(target),logical))return !SmOwnerMirroredSource(receiver);
+    if(!SmRcKnownSource(logical[0]))return true;
+    if(!SmNativeReactionReady())return false;
+    const auto accepted=g_smRcAccepted;
+    // Callback need not be the same frame as selection. Window/current-root
+    // validation remains mandatory; acceptance metadata never extends its life.
+    const auto controller=g_exeBase+0x2A10620;
+    std::uint16_t active=0;std::array<std::uint32_t,4> activeTarget{};
+    const bool observed=g_smRcAcceptance.Current(accepted.identity) && SmRcController(controller) &&
+        ReadHitTrace(controller+8,active) && SmRcTarget(controller+0x10,activeTarget) && activeTarget==logical &&
+        R::NativeReactionActive(accepted.identity,reinterpret_cast<uintptr_t>(target),active,activeTarget) &&
+        command==accepted.identity.command && logical==accepted.identity.target && receiver==accepted.identity.roots[2];
+    const bool admitted=observed && g_smRcAcceptedHandoff && SmRcProofCurrent(accepted);
+    SmRcLog(static_cast<std::uint16_t>(command),admitted?5:6,"callback");
+    if(!observed)return false;
+    // The old native callback has now been observed. Retire its latch even on
+    // expiry/revocation; never send/consume a completion for an invalid window.
+    if(!g_smRcAcceptance.Take(accepted.identity))return false;
+    g_smRcAccepted={};g_smRcAcceptedHandoff=false;
+    return admitted;
+}
+static bool SmNativeReactionPins() {
+    return SmOwnerPin(0x3A8B10,R::kNativeRcActionGeneral,sizeof(R::kNativeRcActionGeneral)) &&
+        SmOwnerPin(0x3AA370,R::kNativeRcActionDirect,sizeof(R::kNativeRcActionDirect)) &&
+        SmOwnerPin(0x3B22D0,R::kNativeRcAcceptreactionFull,sizeof(R::kNativeRcAcceptreactionFull)) &&
+        SmOwnerPin(0x3B24BB,R::kNativeRcAcceptreactionCaller,sizeof(R::kNativeRcAcceptreactionCaller)) &&
+        SmOwnerPin(0x408BD0,R::kNativeRcSelectcandidateFull,sizeof(R::kNativeRcSelectcandidateFull)) &&
+        SmOwnerPin(0x408130,R::kNativeRcSelectcandidatePrimaryCaller,sizeof(R::kNativeRcSelectcandidatePrimaryCaller)) &&
+        SmOwnerPin(0x4084E2,R::kNativeRcSelectcandidateFallbackCaller,sizeof(R::kNativeRcSelectcandidateFallbackCaller)) &&
+        SmOwnerPin(0x408520,R::kNativeRcRefreshcacheFull,sizeof(R::kNativeRcRefreshcacheFull)) &&
+        SmOwnerPin(0x40858D,R::kNativeRcRefreshcacheQueryCaller,sizeof(R::kNativeRcRefreshcacheQueryCaller)) &&
+        SmOwnerPin(0x408651,R::kNativeRcRefreshcachePublishWindow,sizeof(R::kNativeRcRefreshcachePublishWindow)) &&
+        SmOwnerPin(0x40873D,R::kNativeRcRefreshcacheClearWindow,sizeof(R::kNativeRcRefreshcacheClearWindow)) &&
+        SmOwnerPin(0x3BEE00,R::kNativeRcAttacktargetFull,sizeof(R::kNativeRcAttacktargetFull));
+}
+static void SmNativeReactionShutdown() {
+    g_smRcInstalled.store(false,std::memory_order_release);
+    enemysync::SetScriptReactionCurrent(nullptr);
+    // Detours check installed before touching owner-thread metadata. Trampolines
+    // remain allocated until global MinHook teardown, including partial installs.
+    for(unsigned i=0;i<3;++i)if(g_smRcCreated[i]) {
+        const auto status=MH_DisableHook(reinterpret_cast<void*>(g_exeBase+kSmRcHookRvas[i]));
+        if(status!=MH_OK && status!=MH_ERROR_DISABLED)Log("[script-rc-cache] disable rva=%X status=%d",kSmRcHookRvas[i],status);
+    }
+    if(SmGameThread()) {
+        g_smRcCache.Reset();g_smRcAcceptance.Reset();g_smRcPending={};g_smRcPublished={};g_smRcAccepted={};g_smRcOwnedSource={};g_smRcAcceptedHandoff=false;g_smRcRefreshing=0;
+    }
+}
+static bool SmNativeReactionInstall() {
+    g_smRcInstalled.store(false,std::memory_order_release);
+    void* detours[]{reinterpret_cast<void*>(&SmNativeRcRefresh),reinterpret_cast<void*>(&SmNativeRcWinner),
+        reinterpret_cast<void*>(&SmNativeRcAccept)};
+    void** originals[]{reinterpret_cast<void**>(&g_smRcRefresh),reinterpret_cast<void**>(&g_smRcWinner),
+        reinterpret_cast<void**>(&g_smRcAccept)};
+    for(unsigned i=0;i<3;++i) {
+        const auto status=MH_CreateHook(reinterpret_cast<void*>(g_exeBase+kSmRcHookRvas[i]),detours[i],originals[i]);
+        if(status!=MH_OK){SmNativeReactionShutdown();return false;}
+        g_smRcCreated[i]=true;
+    }
+    for(unsigned i=0;i<3;++i)if(MH_EnableHook(reinterpret_cast<void*>(g_exeBase+kSmRcHookRvas[i]))!=MH_OK) {
+        SmNativeReactionShutdown();return false;
+    }
+    g_smRcInstalled.store(true,std::memory_order_release);
+    Log("[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0");
+    return true;
+}
+
+
+static bool SmSetReactionCommand(const ReactionBinding& binding,std::uint32_t command) noexcept {
+    if(!SmAttackState(binding.handle,binding.attack,binding.owner))return false;
+    __try { *reinterpret_cast<std::uint32_t*>(binding.attack+0x11C)=command;return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+static void SmTickReactions() {
+    enemysync::DownedScope scope;
+    if(!enemysync::CaptureDownedScope(scope))return;
+    const auto seats=SmReactionSeats(scope);
+    const auto role=enemysync::ActivationRole();
+    for(auto& binding:g_sm.reactions) {
+        if(!binding.resource)continue;
+        if(!SmAttackState(binding.handle,binding.attack,binding.owner)) {
+            g_sm.occurrences.Retire(binding.handle,binding.resource);binding={};continue;
+        }
+        bool enabled=false;
+        if(role==1 && g_sm.hostActive) {
+            R::ReactionPoint trigger{};
+            float p[3]{};std::uint32_t flags=0;
+            if(ReadHitTrace(binding.attack+8,flags) && (flags&1u) &&
+               ReadHitTraceMemory(binding.attack+0xE4,p,sizeof(p)))trigger={p[0],p[1],p[2]};
+            else if(!SmPoint(binding.owner,trigger))continue;
+            auto* window=g_sm.occurrences.Open(binding.handle,binding.resource,binding.netId,
+                static_cast<std::uint16_t>(binding.command),scope.epoch,g_frameCounter,180,trigger,binding.range,seats);
+            if(window && !binding.occurrence) {
+                R::Call offer{};offer.netId=binding.netId;offer.objectId=binding.objectId;offer.effect=binding.resource;
+                offer.trap=static_cast<std::uint8_t>(R::FindTrap(255,1));
+                offer.values[0]=R::Tagged(R::kTagInt,static_cast<std::uint32_t>(window->occurrence));
+                offer.values[1]=R::Tagged(R::kTagInt,static_cast<std::uint32_t>(window->occurrence>>32));
+                offer.values[2]=R::Tagged(R::kTagInt,window->command);
+                offer.values[3]=R::Tagged(R::kTagInt,window->slot);
+                R::Call identity=offer;identity.trap=static_cast<std::uint8_t>(R::FindTrap(255,12));
+                identity.values[0]=R::Tagged(R::kTagInt,window->slot);
+                identity.values[1]=R::Tagged(R::kTagInt,static_cast<std::uint32_t>(window->connection));
+                identity.values[2]=R::Tagged(R::kTagInt,static_cast<std::uint32_t>(window->connection>>32));
+                identity.values[3]=0;
+                if(SmEmit(identity) && SmEmit(offer)) {
+                    binding.occurrence=window->occurrence;binding.slot=window->slot;binding.epoch=scope.epoch;
+                    binding.connection=window->connection;
+                    Log("[script-rc] offer source=%u resource=%u occurrence=%llu command=%u owner=%u epoch=%u",
+                        binding.netId,binding.resource,window->occurrence,binding.command,binding.slot,scope.epoch);
+                }
+            }
+            if(window && R::RefreshReaction(*window,scope.epoch,g_frameCounter,seats)) {
+                const auto& seat=seats[window->slot];
+                enabled=window->slot==0 && seat.living && seat.fresh && seat.capable && seat.connection==window->connection;
+            }
+        } else if(role==2) {
+            if(binding.slot<3 && (binding.epoch!=scope.epoch ||
+               binding.connection!=scope.connections[binding.slot] ||
+               (binding.slot==scope.localSlot && downedspike::LogicallyDowned())))binding.consumed=true;
+            enabled=binding.slot==scope.localSlot && binding.epoch==scope.epoch && !binding.consumed &&
+                binding.connection==scope.connections[scope.localSlot] &&
+                g_frameCounter<binding.expires && !downedspike::LogicallyDowned();
+        }
+        (void)SmSetReactionCommand(binding,enabled?binding.command:0);
+    }
+}
+static int SmApplyReactionOwner(const R::Call& c,uintptr_t actor) {
+    if(c.effect&0x80000000u)return SmOwnerReactionIdentity(c)?1:0;
+    enemysync::DownedScope scope;
+    const auto* pair=g_sm.clientAttacks.Find(c.effect);
+    if(!pair || pair->netId!=c.netId || !SmAttackState(pair->handle,pair->effect,actor) ||
+       !enemysync::CaptureDownedScope(scope))return 0;
+    for(unsigned i=0;i<3;++i)if(R::TagOf(c.values[i])!=R::kTagInt)return 0;
+    const auto slot=R::BitsOf(c.values[0]);
+    const auto connection=static_cast<std::uint64_t>(R::BitsOf(c.values[1])) |
+        (static_cast<std::uint64_t>(R::BitsOf(c.values[2]))<<32);
+    if(slot>=3 || !connection || scope.connections[slot]!=connection)return 0;
+    ReactionBinding* destination=nullptr;
+    for(auto& binding:g_sm.reactions)if(binding.resource==c.effect) {
+        // An occurrence is immutable. Repeated delivery never renews its life.
+        return binding.connection==connection && binding.slot==slot?1:0;
+    }
+    for(auto& binding:g_sm.reactions)if(!binding.resource){destination=&binding;break;}
+    if(!destination)return 0;
+    auto& binding=*destination;
+    binding={};binding.handle=pair->handle;binding.attack=pair->effect;binding.owner=actor;
+    binding.resource=c.effect;binding.netId=c.netId;binding.objectId=c.objectId;binding.epoch=scope.epoch;
+    binding.slot=static_cast<std::uint8_t>(slot);binding.connection=connection;
+    return 1;
+}
+static int SmApplyReactionOffer(const R::Call& c,uintptr_t actor) {
+    if(c.effect&0x80000000u)return SmOwnerReactionOffer(c)?1:0;
+    enemysync::DownedScope scope;
+    if(!enemysync::CaptureDownedScope(scope))return 0;
+    const auto occurrence=static_cast<std::uint64_t>(R::BitsOf(c.values[0])) |
+        (static_cast<std::uint64_t>(R::BitsOf(c.values[1]))<<32);
+    const auto command=R::BitsOf(c.values[2]),slot=R::BitsOf(c.values[3]);
+    for(auto& binding:g_sm.reactions)if(binding.resource==c.effect) {
+        if(binding.slot!=slot || slot>=3 || binding.connection!=scope.connections[slot] ||
+           binding.owner!=actor || binding.netId!=c.netId || binding.objectId!=c.objectId ||
+           binding.epoch!=scope.epoch || !SmAttackState(binding.handle,binding.attack,actor))return 0;
+        if(binding.occurrence)return binding.occurrence==occurrence && binding.command==command?1:0;
+        binding.command=command;binding.occurrence=occurrence;binding.expires=g_frameCounter+180;
+        return SmSetReactionCommand(binding,slot==scope.localSlot && !downedspike::LogicallyDowned()?command:0)?1:0;
+    }
+    return 0;
+}
+static bool SmCompleteReaction(const enemysync::ScriptReactionCompletionRecord& completion) {
+    if(completion.resource&0x80000000u)return SmOwnerCompleteReaction(completion);
+    if(!SmGameThread() || !g_sm.hostActive || !g_smReactionCallback)return false;
+    enemysync::DownedScope scope;
+    if(!enemysync::CaptureDownedScope(scope) || scope.localSlot!=0)return false;
+    auto* window=g_sm.occurrences.Find(completion.occurrence);
+    if(!window)return false;
+    ReactionBinding* binding=nullptr;
+    for(auto& r:g_sm.reactions)if(r.resource==completion.resource && r.netId==completion.netId &&
+       r.objectId==completion.objectId && r.occurrence==completion.occurrence){binding=&r;break;}
+    if(!binding || !SmAttackState(binding->handle,binding->attack,binding->owner))return false;
+    const auto seats=SmReactionSeats(scope);
+    const R::ReactionCompletion claim{completion.occurrence,completion.requesterConnectionId,
+        completion.epoch,completion.netId,completion.command,completion.ownerSlot};
+    if(!R::ConsumeReaction(*window,claim,scope.epoch,g_frameCounter,seats))return false;
+    const auto player=SmOwnerSeatActor(completion.ownerSlot);
+    const auto owner=SmOwnHandle(binding->owner);
+    if(!owner || !player)return false; // occurrence remains consumed on native refusal
+    // Native ground selection (407CCB -> 3BEE00) initializes this exact
+    // logical TARGET. The fourth word is the no-part sentinel, not kind 3.
+    const std::uint32_t target[4]{owner,0,binding->handle,UINT32_MAX};
+    (void)SmSetReactionCommand(*binding,0);
+    const auto completed=completion; // Native callback may retire/reuse the paired binding.
+    g_smReactionCallback(binding->owner,player,completion.command,target);
+    Log("[script-rc] complete source=%u resource=%u occurrence=%llu command=%u owner=%u",
+        completed.netId,completed.resource,completed.occurrence,completed.command,completed.ownerSlot);
+    return true;
+}
+static void __fastcall SmReactionCallback(uintptr_t receiver,uintptr_t player,std::uint32_t command,const std::uint32_t* target) {
+    if(!g_sm.requested || !SmGameThread()) {g_smReactionCallback(receiver,player,command,target);return;}
+    const bool ownedReceiver=enemysync::ActivationRole()==2 && SmOwnerMirroredSource(receiver);
+    // Pin/install/lifetime failure must not reopen a proven client's key11 BDX
+    // merely because the new native cache hooks could not become ready.
+    if(!SmOwnerReady()) {
+        if(!ownedReceiver)g_smReactionCallback(receiver,player,command,target);
+        return;
+    }
+    if(player==g_soraActor && !SmNativeReactionCallbackAllowed(receiver,command,target))return;
+    std::uint32_t attackHandle=0;
+    if(!target || !ReadHitTrace(reinterpret_cast<uintptr_t>(target)+8,attackHandle)) {
+        if(!ownedReceiver)g_smReactionCallback(receiver,player,command,target);
+        return;
+    }
+    if(!attackHandle && SmOwnerReactionCallback(receiver,player,command))return;
+    for(auto& binding:g_sm.reactions) {
+        if(binding.handle!=attackHandle || !binding.resource)continue;
+        enemysync::DownedScope scope;
+        if(!enemysync::CaptureDownedScope(scope) || receiver!=binding.owner || player!=g_soraActor || command!=binding.command ||
+           binding.consumed || binding.slot!=scope.localSlot || !binding.occurrence ||
+           binding.connection!=scope.connections[scope.localSlot] || binding.epoch!=scope.epoch ||
+           (scope.localSlot && g_frameCounter>=binding.expires) ||
+           downedspike::LogicallyDowned())return;
+        enemysync::ScriptReactionCompletionRecord claim{binding.occurrence,scope.connections[scope.localSlot],
+            binding.resource,binding.objectId,scope.epoch,binding.netId,static_cast<std::uint16_t>(command),scope.localSlot};
+        if(scope.localSlot==0)(void)SmCompleteReaction(claim);
+        else {
+            binding.consumed=true;(void)SmSetReactionCommand(binding,0);
+            const bool queued=enemysync::SendScriptReactionCompletion(claim);
+            Log("[script-rc] local completion source=%u resource=%u occurrence=%llu command=%u owner=%u queued=%u",
+                claim.netId,claim.resource,claim.occurrence,claim.command,claim.ownerSlot,queued?1u:0u);
+        }
+        return;
+    }
+    // This also covers warmup/held sources: an unpaired prompt must never
+    // enter a client BDX callback merely because pose driving is not ready.
+    if(ownedReceiver) {
+        Log("[script-rc] refused unpaired callback command=%u",command);
+        return;
+    }
+    g_smReactionCallback(receiver,player,command,target);
+}
+static bool SmInstallReactionCallback() {
+    std::uint8_t body[sizeof(R::kReactionCallback)]{};
+    void* target=reinterpret_cast<void*>(g_exeBase+0x3B5FA0);
+    if(!ReadHitTraceMemory(g_exeBase+0x3B5FA0,body,sizeof(body)) ||
+       std::memcmp(body,R::kReactionCallback,sizeof(body)))return false;
+    auto status=MH_CreateHook(target,reinterpret_cast<void*>(&SmReactionCallback),reinterpret_cast<void**>(&g_smReactionCallback));
+    if(status==MH_OK)status=MH_EnableHook(target);
+    return status==MH_OK;
 }
 
 // ---- both ----------------------------------------------------------------------------------------
@@ -566,23 +1491,31 @@ static void OnFrameStart() {
     const bool pending = warp::TransitionPending();
     if (transition != g_sm.transition || load != g_sm.load || pending) {
         // A room change ends every key, effect and wait: they all belong to the old room.
-        SmResetRoom();
+        SmResetRoom(false);
         g_sm.transition = transition;
         g_sm.load = load;
         if (pending) return;
     }
     const std::uint8_t role = enemysync::ActivationRole();
     const std::uint32_t generation = enemysync::WorldSessionGeneration();
+    SmOwnerFrame();
+    if (generation!=g_sm.generation && g_sm.role==2) {
+        g_sm.occurrences.Reset();g_sm.reactions={};
+    }
+    SmTickReactions();
     if (role != 1 || !generation) {
         if (g_sm.hostActive || g_sm.slots[0].swapped) SmStopHost(role != 1 ? "not-host" : "no-session");
     } else {
-        if (g_sm.hostActive && generation != g_sm.generation) { g_sm.sender.Reset(); g_sm.hostEffects.Reset(); }
+        if (g_sm.hostActive && generation != g_sm.generation) { g_sm.sender.Reset(); g_sm.retirements.Reset(); g_sm.hostEffects.Reset(); g_sm.hostAttacks.Reset(); }
         if (!g_sm.hostActive && !g_sm.swapRefused) {
             if (SmSwapAll()) g_sm.hostActive = true; else g_sm.swapRefused = true;
         }
         if (g_sm.hostActive) SmFlush();
     }
-    if (role == 2) SmDrainHold(); else { g_sm.hold.Reset(); g_sm.clientEffects.Reset(); }
+    if (generation != g_sm.generation && g_sm.role == 2) {
+        SmRetireClientAttacks(); g_sm.clientEffects.Reset(); g_sm.hold.Reset();
+    }
+    if (role == 2) SmDrainHold(); else { g_sm.hold.Reset(); g_sm.clientEffects.Reset(); SmRetireClientAttacks(); }
     g_sm.role = role;
     g_sm.generation = generation;
     SmLogSecond();
@@ -590,14 +1523,22 @@ static void OnFrameStart() {
 
 static void Install() {
     g_sm.requested = enemysync::MirrorRequested() && !SmEnvParked();
+    if (g_sm.requested) {
+        g_smLifetimeReady=SmInstallAttackLifetimes();
+        if(g_smLifetimeReady)g_smLifetimeReady=SmInstallReactionCallback();
+        if(g_smLifetimeReady)g_smLifetimeReady=SmOwnerInstall();
+        if(!g_smLifetimeReady)Log("[script-mirror] attack lifetime hooks refused; script replay parked");
+    }
     Log("[script-mirror] configure requested=%u mirror=%u traps=%zu", g_sm.requested ? 1u : 0u,
         enemysync::MirrorRequested() ? 1u : 0u, R::kTrapCount);
     if (g_sm.requested) enemysync::SetScriptCallApply(&SmApplyRecord);
+    if (g_sm.requested) enemysync::SetScriptReactionCompletion(&SmCompleteReaction);
 }
 
 static void Shutdown() {
     if (!g_sm.requested) return;
     g_sm.hostActive = false;
+    SmOwnerShutdown();
     SmRestoreAll();  // no actor writes from the shutdown thread
 }
 

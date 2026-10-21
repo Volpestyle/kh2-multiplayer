@@ -22,13 +22,31 @@ fixed wrapper, factory, player factory, Sora derived/base constructor and status
 **Site table (VUH-2464).** The same ingress now serves every entry of
 `routespawn::MissingPartySites`: exact NOW, package key, caller `3FF727`, header
 and complete group (record count from header +4), with the authored raw566
-first. Bailey keeps its direct Sora 84 clone and Sora local. The Roxas
+selected by the existing checked entrance-record match (`SitePlayerRecordAt`/`SiteHasPlayerRecord`). Bailey keeps its direct Sora 84 clone and Sora local. The Roxas
 prologue's sites (Tram Common `tt07-95`/`97`/`99` and the Sandlot `tt04-76`,
 each three records; table in `PARTY_SETUP.md`) build the
 remote seat's agreed profile (Roxas 90, key 14) before the native story Roxas;
 see `PARTY_SETUP.md`, "Prologue layout". Selection, the factory's enclosing
 object, binding and puppet admission all use the site's clone and local keys,
 and the fatal base-allocation contract covers key 1 and key 14 at form 0.
+
+**Twilight Thorn (VUH-2569).** `tt34-157` uses NOW bytes
+`022200009D009D009D00`, package `b_40`/808738658 and type1/header13.
+Its two-record group contains boss307 first and raw566 second; the ingress
+selects only player index1 and leaves the boss record unchanged. Both native
+caller and private-status template checks use that selected record. The full
+44-byte header and 128-byte group match installed `tt34.ard` at offsets
+`0x1C8` and `0x1F4`, respectively, and both observation-only receipts from
+`20261020-002047_thorn_1`: `kh2coop_inject_106888.log:9915` and
+`kh2coop_inject_84424.log:10405`. Both report caller `3FF727`, exact caller
+bytes, record index1 and members `5A/5C/5D/819`. Those receipts prove the
+native definition and player ingress. Full-source live09 (`20261020-233058`)
+also reports `born site=tt34-157 bound=1` on both seats, with distinct clone
+and canonical status records, followed by control release. This qualifies that
+ingress and binding in the recorded build, not the later captured-phase visuals
+or a boss kill. Separate trimmed build19 live10 (`20261021-001728`) passed the
+real-door route and opening/both-seat ground reaction milestones; later
+captured-phase visuals and a kill remain unqualified.
 
 The extra call requires the shipped two-player TARGET_ALL/MIRROR prerequisites,
 ready private status and neutral input, a live admitted two-player session,

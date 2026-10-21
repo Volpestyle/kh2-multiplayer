@@ -78,7 +78,9 @@ bool SafeGameplay(bool atNativeExit = false) {
            ReadMemory(g_exeBase + offsets::EVENT_CONTEXT, &eventContext, sizeof(eventContext)) &&
            ReadMemory(g_exeBase + offsets::IN_FIELD, &inField, sizeof(inField)) &&
            ReadMemory(g_exeBase + offsets::OPEN_MENU, &menu, sizeof(menu)) &&
-           (atNativeExit || (controllable == 0 && cutsceneState == 0 && eventContext == 0)) &&
+           (atNativeExit || (controllable == 0 &&
+               ((cutsceneState == 0 && eventContext == 0) ||
+                enemysync::OwnedScriptCameraCurrent(eventContext,cutsceneState)))) &&
            inField != 0 && menu == 0xFF;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;

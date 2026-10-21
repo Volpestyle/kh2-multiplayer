@@ -1279,6 +1279,15 @@ def step_pilot(ctx: Context, step: dict) -> dict:
     out = ctx.run_dir / name
     cmd = [sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--out", str(out),
            "--seconds", str(step.get("seconds", 900)), "--input", step.get("input", "pad")]
+    if not isinstance(step.get("externalEvidence", False), bool):
+        raise StepFailed("pilot externalEvidence must be a boolean")
+    if step.get("externalEvidence", False):
+        cmd.append("--external-evidence")
+    if "revivePeer" in step:
+        peer = ctx.inst(step["revivePeer"])
+        if peer.pid == inst.pid or step.get("input", "pad") != "pad" or getattr(ctx, "revive_guard", None):
+            raise StepFailed("revivePeer requires a different owned instance, pad input, and no ReviveGuard")
+        cmd += ["--revive-peer-pid", str(peer.pid)]
     if "route" in step:
         cmd += ["--route", str(ROOT / step["route"]), "--from-step", str(step.get("fromStep", 0))]
     else:
@@ -1301,14 +1310,322 @@ def finish_pilot(ctx: Context, proc, end: float, inst, step: dict, name: str, ou
     finally:
         if proc.poll() is None:
             proc.kill()
-        subprocess.run([sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--release-all",
+        released = subprocess.run([sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--release-all",
                         "--input", step.get("input", "pad")],
                        capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+        if isinstance(step.get("_releaseReceipt"), dict):
+            step["_releaseReceipt"]["exit"] = released.returncode
     if out.exists():
         ctx.artifacts += [f"{name}/{p.name}" for p in sorted(out.iterdir())]
     if proc.returncode != 0 and not step.get("allowStuck", False):
         raise StepFailed(f"pilot exited {proc.returncode} (see {name}.log, {name}/pilot.jsonl)")
     return {"exit": proc.returncode}
+
+
+def _pilot_until_games(ctx: Context, selected: list) -> tuple:
+    """Session-1 read-only Game views of exactly this context's retained seats."""
+    from ctypes import wintypes as wt
+    spec = _importlib_util.spec_from_file_location("kh2coop_proof_state", PILOT)
+    pilot = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(pilot)  # Game only: never instantiate an input/Pilot.
+    api = pilot.k32
+    api.OpenProcess.argtypes, api.OpenProcess.restype = [wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE
+    api.CloseHandle.argtypes, api.CloseHandle.restype = [wt.HANDLE], wt.BOOL
+    api.ReadProcessMemory.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p,
+                                     ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
+    api.ReadProcessMemory.restype = wt.BOOL
+    api.GetExitCodeProcess.argtypes = [wt.HANDLE, ctypes.POINTER(wt.DWORD)]
+    api.GetExitCodeProcess.restype = wt.BOOL
+    api.GetProcessTimes.argtypes = [wt.HANDLE] + [ctypes.POINTER(wt.FILETIME)] * 4
+    api.GetProcessTimes.restype = wt.BOOL
+    api.ProcessIdToSessionId.argtypes = [wt.DWORD, ctypes.POINTER(wt.DWORD)]
+    api.ProcessIdToSessionId.restype = wt.BOOL
+    api.QueryFullProcessImageNameW.argtypes = [wt.HANDLE, wt.DWORD, wt.LPWSTR, ctypes.POINTER(wt.DWORD)]
+    api.QueryFullProcessImageNameW.restype = wt.BOOL
+    pilot.psapi.EnumProcessModulesEx.argtypes = [wt.HANDLE, ctypes.POINTER(ctypes.c_void_p),
+                                                wt.DWORD, ctypes.POINTER(wt.DWORD), wt.DWORD]
+    pilot.psapi.EnumProcessModulesEx.restype = wt.BOOL
+    session = wt.DWORD()
+    if not api.ProcessIdToSessionId(os.getpid(), ctypes.byref(session)) or session.value != 1:
+        raise StepFailed("pilot_until observation requires the Session-1 desk runner")
+    registry = None
+    for _ in range(3):  # owned.txt is atomically replaced by the existing rig.
+        try:
+            registry = dict(tuple(map(int, line.split())) for line in (RIG / "owned.txt").read_text().splitlines()
+                            if line.strip())
+            break
+        except OSError:
+            time.sleep(.01)
+    if registry is None:
+        raise StepFailed("pilot_until own registry unavailable")
+    games, identities = [], []
+    try:
+        for _, _, inst, _, _, _ in selected:
+            # Preserve the handle even if the existing Game constructor fails.
+            game = pilot.Game.__new__(pilot.Game)
+            games.append(game)
+            pilot.Game.__init__(game, inst.pid)
+            created, exited, kernel, user = (wt.FILETIME() for _ in range(4))
+            game_session, image, size = wt.DWORD(), ctypes.create_unicode_buffer(32768), wt.DWORD(32768)
+            if not api.GetProcessTimes(game.handle, ctypes.byref(created), ctypes.byref(exited),
+                                       ctypes.byref(kernel), ctypes.byref(user)):
+                raise StepFailed("pilot_until process creation unavailable")
+            creation = created.dwLowDateTime | created.dwHighDateTime << 32
+            if registry.get(inst.pid) != creation or not game.alive() or not \
+                    api.ProcessIdToSessionId(inst.pid, ctypes.byref(game_session)) or game_session.value != 1:
+                raise StepFailed("pilot_until owned process/session identity changed")
+            if not api.QueryFullProcessImageNameW(game.handle, 0, image, ctypes.byref(size)) or \
+                    Path(image.value).name.casefold() != "kingdom hearts ii final mix.exe":
+                raise StepFailed("pilot_until game image unavailable or unexpected")
+            identities.append({"instance": inst.index, "pid": inst.pid, "creationFiletime": creation,
+                               "image": image.value, "session": 1, "base": hex(game.base)})
+        return pilot, games, identities
+    except BaseException as primary:
+        for game in games:
+            try:
+                game.close_prompt()
+            except Exception as error:
+                primary.add_note(f"partial prompt cleanup: {error}")
+            try:
+                if getattr(game, "handle", None) and not api.CloseHandle(game.handle):
+                    raise OSError("partial Game handle close failed")
+            except Exception as error:
+                primary.add_note(f"partial Game cleanup: {error}")
+        raise
+
+
+def _pilot_until_stop(ctx: Context, selected: list) -> tuple[dict, list[str]]:
+    """Stop both exact input children before neutral release; never select by PID."""
+    receipts, errors = {}, []
+    for proc, _, _, _, name, _ in selected:
+        before = proc.poll()
+        receipts[name] = {"before": before, "intentional": False}
+        if before is not None:
+            errors.append(f"{name} ended before stop (exit {before})")
+        else:
+            try:
+                proc.terminate()
+                # Pinned Python311: successful TerminateProcess(...,1) leaves
+                # cached returncode None; its natural-exit race stores a code.
+                # Inspect the cache WITHOUT poll (this is the only pilot reaper).
+                receipts[name]["afterTerminate"] = proc.returncode
+                if proc.returncode is None:
+                    receipts[name]["intentional"] = True
+                else:
+                    errors.append(f"{name} natural exit during terminate (exit {proc.returncode})")
+            except OSError as error:
+                errors.append(f"{name} terminate: {error}")
+    # Every termination above precedes every wait/release below.
+    for proc, _, _, _, name, _ in selected:
+        try:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+            receipts[name]["exit"] = proc.returncode
+            if receipts[name]["intentional"] and proc.returncode != 1:
+                receipts[name]["intentional"] = False
+                errors.append(f"{name} forced termination expected exit1, got {proc.returncode}")
+        except (OSError, subprocess.TimeoutExpired) as error:
+            errors.append(f"{name} reap: {error}")
+    if any(proc.poll() is None for proc, *_ in selected):
+        return receipts, errors + ["input child remains active; neutral helpers withheld"]
+    for proc, end, inst, pstep, name, out in selected:
+        release_receipt = {}
+        try:
+            released = dict(pstep)
+            released["_releaseReceipt"] = release_receipt
+            if receipts[name]["intentional"]:
+                released["allowStuck"] = True
+            receipts[name]["release"] = finish_pilot(ctx, proc, end, inst, released, name, out)
+        except Exception as error:
+            errors.append(f"{name} release: {type(error).__name__}: {error}")
+        receipts[name]["neutral"] = release_receipt
+        if release_receipt.get("exit") != 0:
+            errors.append(f"{name} neutral release unavailable/nonzero: {release_receipt}")
+    return receipts, errors
+
+
+def step_pilot_until(ctx: Context, step: dict) -> dict:
+    """Bound a short proof; stop existing pad pilots FIRST, then collect their films."""
+    pending = ctx.saved.get("_background_pilots", [])
+    names, clips = step.get("pilots", []), step.get("clips", [])
+    name = step.get("as", "pilot_until")
+    timeout = step.get("timeoutMs", 150000)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise StepFailed("pilot_until timeout must be numeric")
+    seconds, interval, maximum = timeout / 1000, step.get("everyMs", 100), step.get("maxBlocks", 6)
+    abort_interval = step.get("abortEveryMs", 1000)
+    if not isinstance(names, list) or len(names) != 2 or not all(isinstance(n, str) for n in names) or len(set(names)) != 2 or \
+            len(pending) != 2 or set(names) != {p[4] for p in pending} or \
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) or \
+            not isinstance(step.get("until"), str) or not 0 < seconds <= 150 or interval != 100 or \
+            not isinstance(abort_interval, int) or not 100 <= abort_interval <= 1000 or \
+            isinstance(maximum, bool) or not isinstance(maximum, int) or not 1 <= maximum <= 6:
+        raise StepFailed("pilot_until requires two retained pilots, a goal and bounded proof configuration")
+    selected = [next(p for p in pending if p[4] == n) for n in names]
+    indices = {p[2].index for p in selected}
+    if len(indices) != 2 or getattr(ctx, "revive_guard", None) or any(p[3].get("input", "pad") != "pad" or p[2].index in ctx.protect or
+                               not any(n == p[4] and process is p[0] for n, process, _ in ctx.processes)
+                               for p in selected) or not isinstance(clips, list) or len(clips) != 2 or not all(isinstance(c, dict) for c in clips) or \
+            {c.get("instance") for c in clips} != indices or any(c.get("seconds") != 30 or c.get("fps") != 30 or
+            not isinstance(c.get("name"), str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", c["name"]) for c in clips):
+        raise StepFailed("pilot_until requires exactly two owned pad seats and paired30s clips")
+    active = ctx.saved.get("_background_clips", [])
+    expected = {ctx.run_dir / f"{c['name']}_00_{c['instance']}.mp4" for c in clips}
+    if len(active) != 2 or {p[1] for p in active} != expected:
+        raise StepFailed("pilot_until initial pair must start before the two pilots")
+    ctx.saved.pop("_background_pilots")
+    result = {"reached": False, "reason": "", "milestone": None, "clips": [], "observationErrors": 0,
+              "observationSources": {}, "samples": 0, "blocks": 1}
+    failure, pilot, games = None, None, []
+    started, deadline = time.monotonic(), time.monotonic() + seconds
+    samples_path = ctx.run_dir / f"{name}_state.jsonl"
+    receipt_path = ctx.run_dir / f"{name}.json"
+    sample_file = None
+    next_abort = started
+    try:
+        sample_file = samples_path.open("x", encoding="utf-8")
+        ctx.artifacts.append(samples_path.name)
+        pilot, games, identities = _pilot_until_games(ctx, selected)
+        result["identities"] = identities
+        sample_file.write(json.dumps({"kind": "ownership", "identities": identities,
+                                     "readOnly": True, "intervalMs": interval}) + "\n")
+        while True:
+            ctx.check_all()
+            if any(p[0].poll() is not None for p in selected):
+                raise StepFailed("an owned pilot ended before the milestone stop")
+            if time.monotonic() >= deadline:
+                raise StepFailed("pilot_until milestone timed out")
+            row = {"kind": "sample", "t": round(time.monotonic() - started, 3),
+                   "utc": dt.datetime.now(dt.timezone.utc).isoformat(), "peers": {}}
+            for game in games:
+                try:
+                    state = game.state()
+                    row["peers"][str(game.pid)] = state
+                    source = state.get("reactObservation", {}).get("source", "unknown")
+                    result["observationSources"][source] = result["observationSources"].get(source, 0) + 1
+                except (OSError, ValueError, struct.error) as error:
+                    row["peers"][str(game.pid)] = {"error": str(error)}
+                    result["observationErrors"] += 1
+            sample_file.write(json.dumps(row) + "\n")
+            sample_file.flush()
+            result["samples"] += 1
+            if step.get("abort") and time.monotonic() >= next_abort:
+                next_abort = time.monotonic() + abort_interval / 1000
+                if ctx.eval(step["abort"]):
+                    raise StepFailed("pilot_until abort condition reached before proof")
+            goal = ctx.eval(step["until"])
+            # Check failures/deadline again after observation/evaluation.
+            if any(p[0].poll() is not None for p in selected):
+                raise StepFailed("an owned pilot ended during milestone evaluation")
+            if time.monotonic() >= deadline:
+                raise StepFailed("pilot_until milestone timed out during evaluation")
+            if goal:
+                if step.get("abort") and ctx.eval(step["abort"]):
+                    raise StepFailed("pilot_until abort condition reached at milestone")
+                if time.monotonic() >= deadline:
+                    raise StepFailed("pilot_until deadline reached during final native guard")
+                result.update(reached=True, reason="milestone", milestone=goal)
+                break
+            if not any(thread.is_alive() for thread, _, _ in ctx.saved["_background_clips"]):
+                collected = step_clip_wait(ctx, {})["clips"]
+                result["clips"].extend(collected)
+                if any(not c.get("ok") or not (ctx.run_dir / c["path"]).is_file() for c in collected):
+                    raise StepFailed("pilot_until paired capture failed")
+                if result["blocks"] >= maximum:
+                    raise StepFailed("pilot_until exhausted its bounded clip blocks")
+                # No new recording after a goal/abort that arrived during collection.
+                if any(p[0].poll() is not None for p in selected):
+                    raise StepFailed("an owned pilot ended while collecting paired clips")
+                if time.monotonic() >= deadline:
+                    raise StepFailed("pilot_until milestone timed out while collecting clips")
+                if step.get("abort") and ctx.eval(step["abort"]):
+                    raise StepFailed("pilot_until abort condition reached while collecting clips")
+                goal = ctx.eval(step["until"])
+                if any(p[0].poll() is not None for p in selected):
+                    raise StepFailed("an owned pilot ended before starting the next clip pair")
+                if time.monotonic() >= deadline:
+                    raise StepFailed("pilot_until milestone timed out before the next clip pair")
+                if goal:
+                    result.update(reached=True, reason="milestone", milestone=goal)
+                    break
+                for clip in clips:
+                    step_clip(ctx, {**clip, "name": f"{clip['name']}_{result['blocks']:02d}", "background": True})
+                result["blocks"] += 1
+            time.sleep(interval / 1000)
+    except Exception as error:
+        failure = error
+        result["reason"] = f"{type(error).__name__}: {error}"
+        if getattr(error, "__notes__", None):
+            result["cleanupErrors"] = list(error.__notes__)
+    finally:
+        def cleanup_error(where, error):
+            nonlocal failure
+            result.setdefault("cleanupErrors", []).append(f"{where}: {type(error).__name__}: {error}")
+            failure = failure or error
+
+        result["inputStoppedAfterSeconds"] = round(time.monotonic() - started, 3)
+        try:
+            result["pilots"], errors = _pilot_until_stop(ctx, selected)
+            if errors:
+                result.setdefault("cleanupErrors", []).extend(errors)
+                failure = failure or StepFailed("; ".join(errors))
+        except Exception as error:
+            cleanup_error("pilot cleanup", error)
+        # Private terminal drain: never check a possibly dead game while waiting
+        # for already-owned encoders. The public/default clip_wait is unchanged.
+        try:
+            drain_deadline = time.monotonic() + 185
+            active = ctx.saved.get("_background_clips", [])
+            while any(t.is_alive() for t, _, _ in active) and time.monotonic() < drain_deadline:
+                for thread, _, _ in active:
+                    thread.join(timeout=min(.1, max(0, drain_deadline - time.monotonic())))
+            if any(t.is_alive() for t, _, _ in active):
+                result["captureDrainIncomplete"] = True
+                raise StepFailed("owned paired encoders exceeded185s drain")
+            else:
+                collected = step_clip_wait(ctx, {})["clips"]
+                result["clips"].extend(collected)
+                if any(not c.get("ok") or not (ctx.run_dir / c["path"]).is_file() for c in collected):
+                    raise StepFailed("pilot_until paired capture failed during drain")
+        except Exception as error:
+            cleanup_error("clip drain", error)
+        for game in games:
+            try:
+                game.close_prompt()
+            except Exception as error:
+                cleanup_error("prompt close", error)
+            try:
+                if not pilot.k32.CloseHandle(game.handle):
+                    raise OSError("Game handle close failed")
+            except Exception as error:
+                cleanup_error("Game close", error)
+        if sample_file:
+            try:
+                sample_file.close()
+            except Exception as error:
+                cleanup_error("sample close", error)
+        try:
+            ctx.check_all()  # One check after drain; never poll dead games inside it.
+            if step.get("abort") and ctx.eval(step["abort"]):
+                raise StepFailed("pilot_until native terminal/room exit after neutral clip tail")
+        except Exception as error:
+            cleanup_error("post-drain instance check", error)
+        result["seconds"] = round(time.monotonic() - started, 3)
+        result["error"] = str(failure) if failure else None
+        ctx.saved[name] = result
+        try:
+            receipt_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            ctx.artifacts.append(receipt_path.name)
+        except Exception as error:
+            cleanup_error("receipt write", error)
+            result["error"] = str(failure)
+    if failure:
+        raise failure
+    return result
+
 
 
 def step_pilot_wait(ctx: Context, step: dict) -> dict:
@@ -4889,7 +5206,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
          "revive_guard": step_revive_guard,
-         "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "avatar_stall": step_avatar_stall,
+         "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "pilot_until": step_pilot_until, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,
          "relay": step_relay, "runtime": step_runtime, "runtime_stop": step_runtime_stop, "record": step_record,

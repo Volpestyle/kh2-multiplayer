@@ -1,3 +1,4 @@
+#include "kh2coop/EnemyClass.hpp"
 // ============================================================================
 // EnemyTargetRemote.inl - VUH-1515: host enemies target remote players' native
 // clones (KH2COOP_ENEMY_TARGET_REMOTE=1, default off). Native adapter.
@@ -151,7 +152,8 @@ static bool EligibleEnemy(uintptr_t enemy, uintptr_t& objentry) noexcept {
     objentry = 0;
     return ReadHitTrace(enemy + offsets::actor::OBJENTRY_PTR, objentry) && objentry > g_exeBase &&
            objentry < g_exeBase + 0x3000000 && ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) &&
-           type == offsets::objentry::TYPE_MOB && ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, id) &&
+           ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, id) &&
+           (type == offsets::objentry::TYPE_MOB || enemyclass::LargeBoss(type, id)) &&
            R::AllowedObject(id, g.allMirrored) && ReadHitTrace(enemy + OFF_TEAM, team) && team == ENEMY_TEAM && ReadLive(enemy, status);
 }
 

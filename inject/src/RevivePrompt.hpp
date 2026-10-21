@@ -32,8 +32,8 @@ struct Facts {
     bool inEvent = false;          // cutscene/event context
     bool menuOpen = false;         // menu id only: OPEN_MENU != 0xFF (pause stops Tick itself)
     bool transition = false;       // warp/room transition pending
-    std::uint16_t nativeReaction = 0; // native RC id; nonzero = the game's RC owns Triangle.
-                                      // From NativeReactionFor (REACT_CMD_STEAM, field play only).
+    std::uint16_t nativeReaction = 0; // actionable RC id; nonzero owns Triangle.
+                                      // ScriptMirror qualifies its targets before the field-play gate.
     int localHp = 0;
     bool targetValid = false;      // nearest validated, fresh, downed teammate puppet
     std::uint8_t targetSlot = 0xFF;
@@ -123,9 +123,11 @@ inline Output Step(State& s, const Facts& f) noexcept {
     else if (f.inEvent) hide = Hide::Event;
     else if (f.menuOpen) hide = Hide::Menu;
     else if (f.transition) hide = Hide::Transition;
+    // This also exposes who owns Triangle when no revive target is nearby.
+    // Both cases stay hidden and cancel a hold; field/event guards still win.
+    else if (f.nativeReaction) hide = Hide::NativeReaction;
     else if (!f.targetValid || f.targetSlot >= 3 || !f.targetEpisode) hide = Hide::NoTarget;
     else if (!(f.distance <= kRange)) hide = Hide::OutOfRange;
-    else if (f.nativeReaction) hide = Hide::NativeReaction; // a prompt the native RC suppressed
     else if (s.firedEpisode[f.targetSlot] == f.targetEpisode) hide = Hide::Fired;
 
     if (hide != Hide::None) {
