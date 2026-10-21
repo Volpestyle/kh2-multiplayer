@@ -12,6 +12,13 @@ HP/MP is RAM-controlled and labeled. Native guest Magic availability is
 tracked separately in VUH-2573. Reciprocal two-PC video remains a follow-up; a
 loopback run does not establish two-PC acceptance.
 
+**Guest native MP follow-up:** VUH-2573 fixed the shared command-controller
+double tick. Run `20261020-185351_net_guest_native_magic_1` on `9b6287b`
+shows native guest and host Fire (10 → 0 MP), natural refill to 10, and matching
+opposite HUD values. [Evidence](testing/vuh2573-native-guest-magic/README.md).
+The original VUH-2568 clip below retains its explicitly RAM-controlled guest
+scope; the new run supplies native guest MP proof on loopback.
+
 ## Native contract
 
 Steam Global executable `9002b2de`, image-relative addresses. Static evidence

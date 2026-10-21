@@ -52,7 +52,21 @@ At 100 MP the guest still skipped Magic. Mission, form, system and command-block
 flags did not reject it. Neither changing charge nor forcing an eligibility
 return is justified by that evidence.
 
-Live fix acceptance is pending. The retained fixture
-`tools/scenario/scenarios/net_guest_native_magic.json` uses pad-only input and
-initial RAM setup of Fire / 80 HP / 10 MP, then requires native casts and natural
-recharge on both seats with matching remote HUD values. It never saves in-game.
+**PASS:** `20261020-185351_net_guest_native_magic_1` on product `9b6287b`,
+all 71 steps and three segments. One Down selected Magic (index 1) on each seat;
+each owner cast Fire natively, spent 10 MP to 0, and naturally refilled to 10.
+The opposite native party HUD matched each drop and refill. The guest log
+confirms skipped ticks on its extra Sora while the canonical actor remained
+native. The host's Fire regression passed in the same run.
+
+The retained fixture `tools/scenario/scenarios/net_guest_native_magic.json`
+uses pad-only input and initial RAM setup of Fire / 80 HP / 10 MP. No MP writes
+occur after setup; original Fire bytes are restored. Four protected saves,
+801 source files, 14 game-root files and 527 asset files stayed unchanged;
+pinned inputs stayed unchanged, owned games closed and relay port 27813 freed.
+Release clone-neutral and native-party-HUD tests, clone-neutral Windows ASan,
+and independent inject review passed. No UBSan run was available on MSVC.
+
+[Evidence and scope](testing/vuh2573-native-guest-magic/README.md): captioned
+single-PC loopback with two Soras. This completes VUH-2568's guest native MP
+proof on loopback; two-PC reciprocal acceptance remains a separate follow-up.
