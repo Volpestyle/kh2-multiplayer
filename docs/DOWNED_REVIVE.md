@@ -304,19 +304,39 @@ boss/encounter defeat or a save point.
   On Proud/Critical the survivors leave.
 - **Room changes.** A downed Roxas whose room changes is downed again on the new room's first settled field
   frame, under a new episode (`[downed] sitting out in the new room`). This applies to a door the
-  survivors took and to a story transition. It is resolved at 25% instead only when every teammate known
-  was down too (the host's Continue retry) or there is no teammate.
+  survivors took and to a story transition. It is resolved at 25% instead only when every teammate it saw
+  in the old room was down too (the host's Continue retry), or in solo play.
+  - The teammates are latched each downed frame while the old room is current. The transition erases
+    every teammate pose before the hold is found lost, so they cannot be counted then.
+  - In a session whose teammates were never seen during the downing ("unavailable"), the player sits out.
+  - The log names the case: `teammate-up`, `full-party`, `solo` or `unavailable`.
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
-  `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`. A host that sat it out
-  itself comes back locally at 25%.
+  `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`.
+  - A host that sat it out comes back locally at 25% first.
+  - Its peer returns wait until it has published itself living for 30 frames. The relay refuses a requester
+    whose avatar is downed (`requester-not-alive`).
 - **Save point.** Any living seat whose settled reaction command is the save point's "Save" (55) returns
   the downed teammates in its room (`[downed] return save-point ...`). They come back at 25% where they
-  lie; walking onto the save point heals them natively.
+  lie; walking onto the save point heals them natively. It also waits for 30 living frames.
+- **Retries.** A target still downed with the same episode is asked again, 90 frames apart, at most three
+  times. The relay and the target's owner still accept one return per episode.
+- **What 2 means** (static analysis, VUH-2632; not observed live):
+  - 2 is the script "command cage". It is set by `0x3AB690`, reached from BDX `trap_command_cage_on`
+    (table 1 #117) or from a battle program flagged forced.
+  - In the field it is cleared by `0x3AB4A0`, reached from `trap_command_cage_off` (#118) or from the battle
+    program's end (table 2 #143).
+  - On a load it is cleared by the area reset `0x3ABAB0`. That is a new room generation, so never an edge.
+  - Fleeing or a transition therefore cannot fire a return. A room script that drops the cage without a
+    win (a timed or event-ended fight) would.
+  - If hostiles are still near, `0x3AB4A0` goes straight to 1, and the return waits for 1 → 0.
 
 **Limits:**
 - When the host is the one sitting out, the survivors get only in-room returns (the encounter, a save
   point in that room). Rooms stay host-led.
+- When a seat is the only one in a session and was never seen with a teammate, a forced transition while
+  downed leaves it sitting out with nobody to return it. A lone logical downing already has no game over
+  (VUH-2465).
 - Assumed from Ghidra and not yet observed live:
   - that `BATTLE_STATUS` stays 2 between a forced fight's waves and clears only at its end;
   - that the save byte is at + 0x2498;

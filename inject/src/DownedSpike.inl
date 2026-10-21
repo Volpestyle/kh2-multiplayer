@@ -142,6 +142,8 @@ struct SpikeState {
     uint32_t logicalSkips = 0, healsUndone = 0, motionRequests = 0, motionFrame = 0;
 };
 static SpikeState g_down;
+// VUH-2632 (D17): the teammates the downed player last saw in its room, for the sit-out decision.
+static downedreturn::DispositionLatch g_disposition;
 // Read by the input collector and the 3D2060 hit check (game thread; atomics for the record).
 static std::atomic<bool> g_logicalHeld {false};
 static std::atomic<uintptr_t> g_logicalActor {0};
@@ -409,6 +411,7 @@ static void BeginDowned(uintptr_t actor, int hp, uint32_t mode) {
     ReadHitTrace(actor, g_down.downedHandle0);
     ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, g_down.downedObjentry);
     g_down.episode = NextEpisode(g_down.episode); // P3 boundary: new per episode, never reused
+    g_disposition.Reset();
     g_down.episodeFrames = 0;
     g_down.hitAttempts = g_down.enemyHits = g_down.hitLogs = g_down.holdLost = 0;
     g_down.inputFrames = g_down.noInputFrames = 0;
@@ -960,11 +963,15 @@ static bool HoldInput(void* inputStruct) {
 
 // ---------------------------------------------------------------------------
 // VUH-2632 (D17): a downed teammate who sits out comes back when the host's forced battle ends (the
-// encounter is beaten) or when a living player stands at a save point. One request per target episode,
-// kind EncounterDefeat (host only, the relay checks) or SavePoint; the target owner applies it on every
-// difficulty. A host that sat the encounter out itself comes back locally.
+// encounter is beaten) or when a living player stands at a save point. Requests go per target episode
+// (bounded retries while it stays downed), kind EncounterDefeat (host only, the relay checks) or
+// SavePoint; the target owner applies one per episode on every difficulty. A host that sat the
+// encounter out comes back locally first, and its peer returns wait until it has published itself
+// living: the relay refuses a downed requester.
 // ---------------------------------------------------------------------------
 static downedreturn::EncounterTracker g_encounter;
+static downedreturn::PendingEncounter g_encounterReturn;
+static downedreturn::LivingGate g_living;
 static downedreturn::ReturnLatch g_returnLatch;
 static reviveprompt::RcGate g_returnRcGate;
 static bool PartnerReviveAllowed() { return SessionRevivePolicy().reviveAllowed; }
@@ -975,7 +982,7 @@ static void SendReturns(uint8_t kind, const Snap& s) {
             a.worldId != s.room.world || a.roomId != s.room.room)
             continue;
         const auto slot = static_cast<uint8_t>(a.ownerSlot);
-        if (!g_returnLatch.Take(slot, a.downedEpisode)) continue;
+        if (!g_returnLatch.Take(slot, a.downedEpisode, g_frameCounter)) continue;
         uint64_t seq = 0;
         const bool sent = enemysync::SendReviveRequest(slot, a.downedEpisode, seq, kind);
         if (sent) ++g_down.returnsSent;
@@ -989,24 +996,37 @@ static void ReturnTick(const Snap& s) {
     uint8_t menu = 0xFF;
     const bool menuOpen = !ReadHitTrace(g_exeBase + offsets::OPEN_MENU, menu) || menu != 0xFF;
     const bool field = s.canonical && !s.inEvent && !menuOpen && !warp::TransitionPending();
+    // This frame's publication (Tick published before this call) says living with a checked scope.
+    const bool living = g_down.state == State::Ready && s.hp > 0;
+    g_living.Step(living && g_down.published == PublishKind::Alive && g_net.published.sampledAtMs != 0 &&
+                  !g_net.published.downed);
     if (enemysync::ActivationRole() == 1) {
         uint8_t battle = 0;
         if (!ReadHitTrace(g_exeBase + offsets::BATTLE_STATUS, battle)) battle = 0xFF; // unread: never an edge
         if (battle != 0xFF && g_encounter.Step(battle, warp::TransitionSerial(), warp::LoadSerial(), field)) {
             Log("[downed] encounter defeated: forced battle ended room=%u/%u frame=%u", s.room.world, s.room.room, g_frameCounter);
-            SendReturns(static_cast<uint8_t>(downedreturn::Kind::EncounterDefeat), s);
-            if (g_down.state == State::Downed && g_returnLatch.Take(0, g_down.episode)) {
+            g_encounterReturn.Arm(warp::TransitionSerial(), warp::LoadSerial());
+            if (g_down.state == State::Downed) {
                 const Result r = TryRevive(g_down.episode);
                 Log("[downed] return encounter-defeat self episode=%llX result=%d",
                     static_cast<unsigned long long>(g_down.episode), static_cast<int>(r));
             }
         }
+        switch (g_encounterReturn.Tick(warp::TransitionSerial(), warp::LoadSerial(), g_living.Settled())) {
+        case downedreturn::PendingEncounter::Step::Send:
+            SendReturns(static_cast<uint8_t>(downedreturn::Kind::EncounterDefeat), s);
+            break;
+        case downedreturn::PendingEncounter::Step::Dropped:
+            Log("[downed] encounter-defeat returns ended: the room changed frame=%u", g_frameCounter);
+            break;
+        default: break;
+        }
     }
-    const bool living = g_down.state == State::Ready && s.hp > 0;
     uint16_t react = 0;
     if (!ReadHitTrace(g_exeBase + offsets::REACT_CMD_STEAM, react)) react = 0;
     const auto settled = reviveprompt::NativeReactionFor(g_returnRcGate, react, field && living);
-    if (downedreturn::AtSavePoint(settled, living)) SendReturns(static_cast<uint8_t>(downedreturn::Kind::SavePoint), s);
+    if (downedreturn::AtSavePoint(settled, living) && g_living.Settled())
+        SendReturns(static_cast<uint8_t>(downedreturn::Kind::SavePoint), s);
 }
 
 // EntityHook PublishCoopHud: the HUD fields for this frame's prompt.
@@ -1035,6 +1055,17 @@ static void Tick(uintptr_t head) {
         g_down.graceLastHp = s.hp;
     }
     if (g_down.state == State::Downed) {
+        // VUH-2632 (D17): this frame's teammates, before a transition erases them (Quill R1: on the first
+        // suspended frame this owner still runs first; afterwards no pose is left to count).
+        {
+            unsigned known = 0, downed = 0;
+            for (const auto& d : g_puppets) {
+                if (!d.have || g_frameCounter - d.poseFrame > 600) continue;
+                ++known;
+                if (d.pose.pose.flags & kh2coop::AvatarDowned) ++downed;
+            }
+            g_disposition.Observe(known, downed);
+        }
         HoldLost lost = HoldLost::None;
         if (!s.canonical || s.actor != g_down.downedActor) lost = HoldLost::Actor;
         else if (!(s.room == g_down.downedRoom)) lost = HoldLost::Room;
@@ -1044,15 +1075,12 @@ static void Tick(uintptr_t head) {
             // VUH-2465: a forced transition (a host-led load or a story event's room change) ends a
             // logical downing. The old actor and episode retire (a late request finds no Downed state).
             // VUH-2632 (D17): the player then sits out into the next room, downed again on the first
-            // settled field frame of the new actor, unless every teammate known was down too (the host's
-            // Continue retry) or there is none; then it is resolved at 25% there, as before.
-            unsigned known = 0, downed = 0;
-            for (const auto& d : g_puppets) {
-                if (!d.have || g_frameCounter - d.poseFrame > 600) continue;
-                ++known;
-                if (d.pose.pose.flags & kh2coop::AvatarDowned) ++downed;
-            }
-            const bool sitOut = downedreturn::SitOutAfterTransition(known, downed) == downedreturn::AfterTransition::SitOut;
+            // settled field frame of the new actor, unless every teammate it saw in the old room was down
+            // too (the host's Continue retry) or this is solo play; then it is resolved at 25% there, as
+            // before. Decided from the old room's latched teammates; their poses are gone by now.
+            const auto decision = downedreturn::SitOutAfterTransition(g_disposition, enemysync::ActivationRole() != 0);
+            const bool sitOut = decision.after == downedreturn::AfterTransition::SitOut;
+            const unsigned known = g_disposition.Known(), downed = g_disposition.Downed();
             g_down.state = State::Ready;
             g_down.logical = false;
             g_down.downedActor = 0;
@@ -1062,12 +1090,12 @@ static void Tick(uintptr_t head) {
             g_logicalHeld.store(false, std::memory_order_release);
             if (sitOut)
                 Log("[downed] logical hold ended reason=%u episode=%llX retired; sitting out into the next room "
-                    "(teammates known=%u downed=%u)", static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode),
-                    known, downed);
+                    "(%s: teammates known=%u downed=%u)", static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode),
+                    downedreturn::DispositionName(decision.why), known, downed);
             else
                 Log("[downed] logical hold ended reason=%u episode=%llX retired; resolving at %d%% on the next field frame "
-                    "(teammates known=%u downed=%u)", static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode),
-                    kRevivePercent, known, downed);
+                    "(%s: teammates known=%u downed=%u)", static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode),
+                    kRevivePercent, downedreturn::DispositionName(decision.why), known, downed);
         } else if (lost != HoldLost::None) {
             // Terminal: Sora may still be natively dead with no game over; the
             // owned process must be closed by the runner (kh2ctl).

@@ -288,7 +288,7 @@ code addresses these at the library value `+0x80`:
 
 | RVA | Meaning |
 |---|---|
-| `0x2A11404` (`BATTLE_STATUS`+0x80) | battle type: `0x3AB690` sets `2` (forced battle), `0x3ABAB0` clears it, `0x3ABB20` tests `!= 0` |
+| `0x2A11404` (`BATTLE_STATUS`+0x80) | battle type: 0 none, 1 battle (enemies near), 2 forced "command cage". `0x3AB690` sets `2` (BDX `trap_command_cage_on`, table 1 #117, or a battle program flagged forced); `0x3AB4A0` clears it in field (`trap_command_cage_off` #118, or the battle program's end, table 2 #143) and re-evaluates 0/1; `0x3ABAB0` is the area-load reset; `0x3AB6B0` is the 0/1/2 setter; `0x3ABB20` tests `!= 0` |
 | `0x2A171E8` (`CONTROLLABLE`+0x80) | frozen-entity-group bitset; `0x3BFA40` skips an entity whose group bit is set. `0` = nothing frozen |
 | `0xABB878` (`PAUSE_STATUS`+0x80) | pause-blocker bitmask; the pause watcher `0x1572B0` opens pause only when it is `0`, `0x9BA8D0 != 0` and Start is pressed |
 | `0x9BA8D0` | "in field" byte; the load task `0x152A90` clears it at load start; `0x152CD0` / `0x152F40` set it before running finalizers, so the byte alone is not completion proof |

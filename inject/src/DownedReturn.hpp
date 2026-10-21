@@ -4,9 +4,12 @@
 // James: "theyll come back after the boss is beat or the player goes back to the save point"
 // ... "or reaches a new save point". On every difficulty, whether or not a partner revive is allowed.
 //
-//   EncounterDefeat  the host's forced battle ends: BATTLE_STATUS (0x2A11404) goes from 2 (forced,
-//                    set by 0x3AB690) to 0 (cleared by 0x3ABAB0) in settled field play, within one
-//                    room generation. The host issues it; the downed player returns at 25% HP.
+//   EncounterDefeat  the host's forced battle ends: BATTLE_STATUS (0x2A11404) goes from 2 to 0 in
+//                    settled field play, within one room generation. 2 is the script's "command cage"
+//                    (0x3AB690: BDX trap_command_cage_on, or a battle program flagged forced); in field it
+//                    is cleared by trap_command_cage_off or the battle program's end (both 0x3AB4A0), on a
+//                    load by the area reset 0x3ABAB0 (a new generation, so never an edge). The host issues
+//                    it once it is living and published; the downed player returns at 25% HP.
 //   SavePoint        a living player stands at a save point: that seat's settled native reaction
 //                    command is the save point's "Save" (55). Any save point counts, so returning to
 //                    one and reaching a new one are the same trigger. The save point's own heal does
@@ -58,26 +61,125 @@ constexpr bool AtSavePoint(std::uint16_t settledReaction, bool localLiving) noex
     return localLiving && settledReaction == kSaveReaction;
 }
 
-// A room change while logically downed (D17): the player sits out into the next room, still downed,
-// unless it is a full-party retry: every teammate known was downed too (the host's Continue reloads the
-// room for everyone), or there is no teammate at all (solo play).
-enum class AfterTransition : std::uint8_t { Resolve, SitOut };
-constexpr AfterTransition SitOutAfterTransition(unsigned teammatesKnown, unsigned teammatesDowned) noexcept {
-    return teammatesKnown == 0 || teammatesDowned >= teammatesKnown ? AfterTransition::Resolve : AfterTransition::SitOut;
-}
-
-// One return per target episode, per slot.
-class ReturnLatch {
+// The old room's teammates, as the downed player last saw them there. Observed every downed frame
+// before the transition: the transition erases every teammate pose before the hold is found lost, so
+// the decision below must not count them at that point (Quill, VUH-2632 R1). A sample with no fresh
+// teammate keeps the last one that had some. Reset with each new downing.
+class DispositionLatch {
 public:
-    bool Take(std::uint8_t slot, std::uint64_t episode) noexcept {
-        if (slot >= 3 || !episode || returned_[slot] == episode) return false;
-        returned_[slot] = episode;
-        return true;
+    void Observe(unsigned teammatesKnown, unsigned teammatesDowned) noexcept {
+        if (!teammatesKnown) return;
+        sampled_ = true;
+        known_ = teammatesKnown;
+        downed_ = teammatesDowned;
     }
-    void Reset() noexcept { returned_[0] = returned_[1] = returned_[2] = 0; }
+    void Reset() noexcept { *this = {}; }
+    [[nodiscard]] bool Sampled() const noexcept { return sampled_; }
+    [[nodiscard]] unsigned Known() const noexcept { return known_; }
+    [[nodiscard]] unsigned Downed() const noexcept { return downed_; }
 
 private:
-    std::uint64_t returned_[3] {};
+    bool sampled_ = false;
+    unsigned known_ = 0, downed_ = 0;
+};
+
+// A room change while logically downed (D17): the player sits out into the next room, still downed,
+// unless it is a full-party retry (every teammate seen was downed too: the host's Continue reloads the
+// room for everyone) or solo play (no session). In a session whose teammates were never seen during
+// this downing, they are unavailable, not absent: the player sits out, as when a teammate was up.
+enum class AfterTransition : std::uint8_t { Resolve, SitOut };
+enum class Disposition : std::uint8_t { Solo, FullParty, TeammateUp, Unavailable };
+struct TransitionDecision {
+    AfterTransition after;
+    Disposition why;
+};
+inline TransitionDecision SitOutAfterTransition(const DispositionLatch& old, bool session) noexcept {
+    if (old.Sampled())
+        return old.Downed() >= old.Known() ? TransitionDecision {AfterTransition::Resolve, Disposition::FullParty}
+                                           : TransitionDecision {AfterTransition::SitOut, Disposition::TeammateUp};
+    return session ? TransitionDecision {AfterTransition::SitOut, Disposition::Unavailable}
+                   : TransitionDecision {AfterTransition::Resolve, Disposition::Solo};
+}
+constexpr const char* DispositionName(Disposition d) noexcept {
+    switch (d) {
+    case Disposition::Solo: return "solo";
+    case Disposition::FullParty: return "full-party";
+    case Disposition::TeammateUp: return "teammate-up";
+    case Disposition::Unavailable: return "unavailable";
+    }
+    return "?";
+}
+
+// A return asks the relay as this seat, and the relay refuses a requester whose last avatar there is
+// downed or at HP 0 (requester-not-alive). So a seat sends only after it has published itself living for
+// kLivingSettleFrames in a row (Quill, VUH-2632 R2: a downed host whose teammate wins the encounter
+// revives itself first). The relay's copy is not visible here, so a target still downed with the same
+// episode is asked again, kReturnRetryFrames apart, at most kReturnAttempts times; the relay and the
+// target's owner still accept one return per episode.
+constexpr std::uint32_t kLivingSettleFrames = 30;
+constexpr std::uint32_t kReturnRetryFrames = 90;
+constexpr std::uint8_t kReturnAttempts = 3;
+constexpr std::uint32_t kEncounterReturnFrames = kReturnRetryFrames * kReturnAttempts;
+
+class LivingGate {
+public:
+    void Step(bool livingPublished) noexcept {
+        frames_ = !livingPublished ? 0 : frames_ < kLivingSettleFrames ? frames_ + 1 : frames_;
+    }
+    [[nodiscard]] bool Settled() const noexcept { return frames_ >= kLivingSettleFrames; }
+
+private:
+    std::uint32_t frames_ = 0;
+};
+
+// Host side: an encounter defeat stays pending in its room generation until the host is living and
+// published, then sends for kEncounterReturnFrames (the latch spaces and bounds the requests).
+class PendingEncounter {
+public:
+    enum class Step : std::uint8_t { Idle, Wait, Send, Dropped, Expired };
+    void Arm(std::uint32_t transition, std::uint32_t load) noexcept {
+        armed_ = true;
+        sending_ = false;
+        transition_ = transition;
+        load_ = load;
+        sendFrames_ = 0;
+    }
+    Step Tick(std::uint32_t transition, std::uint32_t load, bool livingSettled) noexcept {
+        if (!armed_) return Step::Idle;
+        if (transition != transition_ || load != load_) { armed_ = false; return Step::Dropped; }
+        if (!sending_ && !livingSettled) return Step::Wait;
+        sending_ = true;
+        if (sendFrames_++ >= kEncounterReturnFrames) { armed_ = false; return Step::Expired; }
+        return Step::Send;
+    }
+    [[nodiscard]] bool Armed() const noexcept { return armed_; }
+
+private:
+    bool armed_ = false, sending_ = false;
+    std::uint32_t transition_ = 0, load_ = 0, sendFrames_ = 0;
+};
+
+// Per target slot: the first request for an episode, then a bounded retry while it is still downed.
+class ReturnLatch {
+public:
+    bool Take(std::uint8_t slot, std::uint64_t episode, std::uint32_t frame) noexcept {
+        if (slot >= 3 || !episode) return false;
+        Entry& e = entries_[slot];
+        if (e.episode != episode) { e = {episode, frame, 1}; return true; }
+        if (e.attempts >= kReturnAttempts || frame - e.frame < kReturnRetryFrames) return false;
+        e.frame = frame;
+        ++e.attempts;
+        return true;
+    }
+    void Reset() noexcept { for (auto& e : entries_) e = {}; }
+
+private:
+    struct Entry {
+        std::uint64_t episode = 0;
+        std::uint32_t frame = 0;
+        std::uint8_t attempts = 0;
+    };
+    Entry entries_[3] {};
 };
 
 } // namespace kh2coop::inject::downedreturn
