@@ -5,9 +5,11 @@ struct ScriptOwnerVisual {
     std::uint32_t handle{},objectId{},load{},transition{},motion{UINT32_MAX};
     int puppet{-1};
     bool captured{},attached{},wantAttachment{},applying{};
+    std::uint32_t refusedLogged{UINT32_MAX};  // VUH-2580: the motion last logged as refused for this clone
 };
 struct ScriptActorRole {
     std::uint32_t resource{},objectId{},epoch{};
+    const char* bindRefused{};  // VUH-2580: the last logged reason the clone could not be bound
     std::uint16_t netId{};
     std::uint8_t slot{0xFF};
     std::uint64_t connection{},deadline{};
@@ -38,6 +40,7 @@ static std::array<ScriptOwnerCleanup,3> g_smOwnerCleanup{};
 static std::array<ScriptOwnerCleanup,3> g_smVisualCleanup{};
 static ScriptActorRole g_smVisualNativeReplay{}; // exact callback suppression while retiring native visuals
 static unsigned g_smVisualBindLogs=0;
+static unsigned g_smVisualDiagLogs=0;  // VUH-2580
 static std::array<std::uint32_t,3> g_smRoleAdmissionFloor{};
 static enemysync::DownedScope g_smRoleAdmissionScope{};
 static bool SmOwnerSameAdmissionSession(const enemysync::DownedScope& scope) {
@@ -305,35 +308,42 @@ static bool SmOwnerMotionCurrent(const ScriptActorRole& role,const enemysync::Do
     return visual?SmOwnerVisualCurrent(role,scope):SmOwnerLocalCurrent(role,scope);
 }
 static bool SmOwnerInstallMotion(ScriptActorRole& role,R::OwnerCaptureSignature capture,bool borrowed,bool visual,
-                                 bool newCapture=false) {
+                                 bool newCapture=false,const char** why=nullptr) {
+    // VUH-2580: every refusal names itself for the caller's bounded log.
+    const auto fail=[why](const char* reason){if(why)*why=reason;return false;};
     enemysync::DownedScope scope;
-    if(!SmOwnerScope(scope) || !SmOwnerMotionCurrent(role,scope,visual) || (role.reaction.consumed && !newCapture) ||
-       (visual && role.visual.applying))return false;
+    if(!SmOwnerScope(scope))return fail("scope");
+    if(!SmOwnerMotionCurrent(role,scope,visual))return fail("not-current");
+    if(role.reaction.consumed && !newCapture)return fail("command-consumed");
+    if(visual && role.visual.applying)return fail("applying");
     auto target=visual?SmOwnerVisualActor(role):role;
     std::uint32_t eligibility=0;
-    if(SmOwnerMotionState(target)==ScriptOwnerMotionState::Foreign ||
-       (borrowed && (!ReadHitTrace(target.actor+0x6C8,eligibility) || !(eligibility&0x80))))return false;
+    if(SmOwnerMotionState(target)==ScriptOwnerMotionState::Foreign)return fail("foreign-state");
+    if(borrowed && (!ReadHitTrace(target.actor+0x6C8,eligibility) || !(eligibility&0x80)))return fail("borrow-ineligible");
     const auto resource=role.resource,sourceHandle=role.sourceHandle,targetHandle=target.actorHandle;
     const auto source=role.source,actor=target.actor;const auto connection=role.connection;
     if(visual)role.visual.applying=true;
     const bool ok=SmOwnerNativeMotion(sourceHandle,targetHandle,capture,borrowed,visual);
     if(role.resource!=resource || role.connection!=connection || role.source!=source ||
        role.sourceHandle!=sourceHandle || (visual?role.visual.actor:role.actor)!=actor ||
-       (visual?role.visual.handle:role.actorHandle)!=targetHandle)return false;
+       (visual?role.visual.handle:role.actorHandle)!=targetHandle)return fail("replaced-during-install");
     if(visual)role.visual.applying=false;
-    if(!ok || !SmOwnerScope(scope) || !SmOwnerMotionCurrent(role,scope,visual) || (role.reaction.consumed && !newCapture))return false;
+    if(!ok)return fail("native-install");
+    if(!SmOwnerScope(scope) || !SmOwnerMotionCurrent(role,scope,visual) || (role.reaction.consumed && !newCapture))
+        return fail("stale-after-install");
     target=visual?SmOwnerVisualActor(role):role;
     std::uint32_t installedMotion=UINT32_MAX;
-    if(!ReadHitTrace(actor+offsets::actor::ANIM_ID,installedMotion) || installedMotion!=R::BitsOf(capture.motion))return false;
+    if(!ReadHitTrace(actor+offsets::actor::ANIM_ID,installedMotion) || installedMotion!=R::BitsOf(capture.motion))
+        return fail("motion-not-installed");
     const auto state=SmOwnerMotionState(target);
     if(borrowed) {
-        if(state!=ScriptOwnerMotionState::Source)return false;
+        if(state!=ScriptOwnerMotionState::Source)return fail("not-source-bank");
         if(visual) {
-            if(!ReadHitTrace(actor+0x2B8,role.visual.bank))return false;
+            if(!ReadHitTrace(actor+0x2B8,role.visual.bank))return fail("bank-read");
             role.visual.captured=true;role.visual.motion=R::BitsOf(capture.motion);
         } else role.captured=true;
     } else {
-        if(state!=ScriptOwnerMotionState::Own)return false;
+        if(state!=ScriptOwnerMotionState::Own)return fail("not-own-bank");
         if(visual){role.visual.captured=false;role.visual.bank=0;role.visual.motion=R::BitsOf(capture.motion);}
         // The capture receipt remains for matching heartbeats and teardown;
         // its native state is now own-bank, so cleanup cannot reset it again.
@@ -387,15 +397,28 @@ static void SmOwnerRetireVisual(ScriptActorRole& role,bool native) {
 }
 static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope& scope,uintptr_t actor) {
     if(role.visual.actor)return role.visual.actor==actor && SmOwnerVisualCurrent(role,scope);
-    if(!role.haveCapture || role.slot>=3 || g_smVisualCleanup[role.slot].role.resource ||
-       !SmOwnerCurrent(role,scope) || GetTickCount64()>=role.deadline || actor==g_soraActor || !IsPlayerClassActor(actor))return false;
+    // VUH-2580: a refused bind names itself once per role and reason.
+    const auto refuse=[&](const char* why) {
+        if(role.bindRefused!=why && g_smVisualDiagLogs<64) {
+            ++g_smVisualDiagLogs;role.bindRefused=why;
+            Log("[script-visual] bind refused role=%u seat=%u actor=%llX reason=%s",role.resource,role.slot,
+                static_cast<unsigned long long>(actor),why);
+        }
+        return false;
+    };
+    if(!role.haveCapture || role.slot>=3)return false;
+    if(g_smVisualCleanup[role.slot].role.resource)return refuse("cleanup-pending");
+    if(!SmOwnerCurrent(role,scope))return refuse("role-not-current");
+    if(GetTickCount64()>=role.deadline)return refuse("deadline");
+    if(actor==g_soraActor || !IsPlayerClassActor(actor))return false;
     const auto index=PuppetIndexFor(actor);
-    if(!SmOwnerVisualPose(role,scope,index))return false;
+    if(!SmOwnerVisualPose(role,scope,index))return refuse("pose");
     uintptr_t thread=0,capture=0;std::uint32_t parent=0,motionFlags=0,typeFlags=0;
-    if(!ReadHitTrace(actor+0xD48,thread) || thread || !ReadHitTrace(actor+0x2B0,capture) ||
-       !ReadHitTrace(actor+0x18C,motionFlags) || ((motionFlags&0x4000) && capture!=actor) ||
-       !ReadHitTrace(actor+0x6C8,typeFlags) || !(typeFlags&0x80) ||
-       !ReadHitTrace(actor+0x6A0,parent) || parent)return false;
+    if(!ReadHitTrace(actor+0xD48,thread) || thread)return refuse("thread");
+    if(!ReadHitTrace(actor+0x2B0,capture) || !ReadHitTrace(actor+0x18C,motionFlags) ||
+       ((motionFlags&0x4000) && capture!=actor))return refuse("foreign-capture");
+    if(!ReadHitTrace(actor+0x6C8,typeFlags) || !(typeFlags&0x80))return refuse("type-flags");
+    if(!ReadHitTrace(actor+0x6A0,parent) || parent)return refuse("attached");
     ScriptOwnerVisual visual{};visual.actor=actor;visual.puppet=index;
     visual.handle=SmOwnHandle(actor);visual.load=warp::LoadSerial();visual.transition=warp::TransitionSerial();
     if(!visual.handle || !ReadHitTrace(actor+0x5C0,visual.status) || !visual.status ||
@@ -409,13 +432,22 @@ static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope
     }
     return SmOwnerVisualCurrent(role,scope);
 }
+// VUH-2580: the owner is on a motion the clone may not replay (an unqualified post-capture ID).
+static bool SmOwnerVisualRefused(const ScriptActorRole& role) {
+    const auto motion=role.haveMotion?role.motion:R::BitsOf(role.captureValues[0]);
+    return R::OwnerMotion(motion,role.haveCapture,R::BitsOf(role.captureValues[0]),role.reaction.consumed)==
+        R::OwnerMotionBank::Refuse;
+}
 static bool OwnsVisualPuppet(uintptr_t actor) {
     enemysync::DownedScope scope;if(!SmOwnerScope(scope))return false;
     // Reserve a checked target before generic playback can select the same
     // numeric ID from the wrong bank. Native capture itself waits for POST.
+    // VUH-2580: while the owner is on a refused motion and the clone holds no borrowed bank, the ordinary
+    // puppet keeps driving it; reserving it then froze the clone in its last pose.
     for(auto& role:g_smRoles)if(role.resource && role.slot!=scope.localSlot && role.haveCapture &&
         SmOwnerBindVisual(role,scope,actor) &&
-        (role.visual.applying || SmOwnerMotionState(SmOwnerVisualActor(role))!=ScriptOwnerMotionState::Foreign))return true;
+        (role.visual.applying || (SmOwnerMotionState(SmOwnerVisualActor(role))!=ScriptOwnerMotionState::Foreign &&
+                                  (role.visual.captured || !SmOwnerVisualRefused(role)))))return true;
     return false;
 }
 // Runs after the ordinary puppet's team/collision/HP and transform maintenance.
@@ -428,7 +460,18 @@ static void VisualPostUpdate(uintptr_t actor) {
         if(!SmOwnerVisualCurrent(role,scope)){SmOwnerRetireVisual(role,true);continue;}
         const auto motion=role.haveMotion?role.motion:R::BitsOf(role.captureValues[0]);
         const auto bank=R::OwnerMotion(motion,role.haveCapture,R::BitsOf(role.captureValues[0]),role.reaction.consumed);
-        if(bank==R::OwnerMotionBank::Refuse)continue;
+        if(bank==R::OwnerMotionBank::Refuse) {
+            // VUH-2580: say once per role and motion why the clone does not take the owner's motion.
+            if(role.visual.refusedLogged!=motion && g_smVisualDiagLogs<64) {
+                ++g_smVisualDiagLogs;role.visual.refusedLogged=motion;
+                Log("[script-visual] refused role=%u motion=%u capture=%u consumed=%u",role.resource,motion,
+                    R::BitsOf(role.captureValues[0]),role.reaction.consumed?1u:0u);
+            }
+            // A borrowed bank still installed would hold the clone in the owner's past motion: the native
+            // cleanup returns it to its own bank and the ordinary puppet takes it back.
+            if(role.visual.captured)SmOwnerRetireVisual(role,true);
+            continue;
+        }
         auto target=SmOwnerVisualActor(role);
         const auto state=SmOwnerMotionState(target);
         std::uint32_t current=UINT32_MAX;
@@ -436,12 +479,21 @@ static void VisualPostUpdate(uintptr_t actor) {
         const bool borrowed=bank==R::OwnerMotionBank::Source;
         if((borrowed && (state!=ScriptOwnerMotionState::Source || current!=motion || role.visual.motion!=motion)) ||
            (!borrowed && (state!=ScriptOwnerMotionState::Own || current!=motion))) {
-            if(!SmOwnerInstallMotion(role,{R::Tagged(R::kTagInt,motion),role.captureValues[1]},borrowed,true)) {
+            const char* why="unknown";
+            if(!SmOwnerInstallMotion(role,{R::Tagged(R::kTagInt,motion),role.captureValues[1]},borrowed,true,false,&why)) {
+                // VUH-2580: an install failure retired the clone's role silently.
+                if(g_smVisualDiagLogs<64) {
+                    ++g_smVisualDiagLogs;
+                    Log("[script-visual] install failed role=%u motion=%u borrowed=%u reason=%s",role.resource,motion,
+                        borrowed?1u:0u,why);
+                }
                 SmOwnerRetireVisual(role,true);continue;
             }
         }
         if(!SmOwnerVisualCurrent(role,scope)){SmOwnerRetireVisual(role,true);continue;}
-        if(role.havePosition) {
+        // VUH-2580: the owner's script-set placement belongs to its captured (borrowed) motion. Once the owner
+        // is back on its own motion the ordinary puppet stream places the clone; a stale placement froze it.
+        if(role.havePosition && borrowed) {
             const auto entity=actor+offsets::actor::ENTITY_TRANSFORM;
             std::memcpy(reinterpret_cast<void*>(entity+offsets::entity::POS_X),role.position,3*sizeof(float));
             *reinterpret_cast<float*>(entity+offsets::entity::ROT_Y)=role.position[3];
