@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "decisive-reports.tar",
+      "size": 4413440,
+      "sha256": "850e6e59227b946e6032efcb61fc72638ccfc3520176e9a40e491a9bd6a70598",
+      "url": "clankie://evidence/sha256/850e6e59227b946e6032efcb61fc72638ccfc3520176e9a40e491a9bd6a70598"
+    },
+    {
+      "path": "media/caption-full.png",
+      "size": 552916,
+      "sha256": "7fe87f067b5f0a8399abf2a0ab0f81747c2a67ea748123cfa5a19e32b87cf957",
+      "url": "clankie://evidence/sha256/7fe87f067b5f0a8399abf2a0ab0f81747c2a67ea748123cfa5a19e32b87cf957"
+    },
+    {
+      "path": "media/contact-every-output-frame.jpg",
+      "size": 1562727,
+      "sha256": "3a56d1c7493e7c732a42fc0dd23e1e15a156c0485d417400621de0a7fe2b6fe1",
+      "url": "clankie://evidence/sha256/3a56d1c7493e7c732a42fc0dd23e1e15a156c0485d417400621de0a7fe2b6fe1"
+    },
+    {
+      "path": "media/live13-failure-paired-captioned.mp4",
+      "size": 991534,
+      "sha256": "89edc9c154d4a01cfaaf8a46c4b9e5d83df9f94038eae2de5aa6a4c93dcc92ab",
+      "url": "clankie://evidence/sha256/89edc9c154d4a01cfaaf8a46c4b9e5d83df9f94038eae2de5aa6a4c93dcc92ab"
+    },
+    {
+      "path": "source-inputs.tar",
+      "size": 16384000,
+      "sha256": "4c15df911eeb8553c639be22028b8b4c50b3a834fc0ad3368081b9685a468757",
+      "url": "clankie://evidence/sha256/4c15df911eeb8553c639be22028b8b4c50b3a834fc0ad3368081b9685a468757"
+    }
+  ]
+}
