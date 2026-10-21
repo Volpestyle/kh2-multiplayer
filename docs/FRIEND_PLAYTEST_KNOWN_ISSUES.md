@@ -42,9 +42,11 @@
   courtyard walks are not a general workaround for current builds.
 - **Characters and route.** The friend launcher offers Roxas and Sora before
   starting the game. Local two-instance evidence covers Roxas+Roxas and a Roxas
-  host with a Sora friend at first prologue control, reloads and the Sandlot
-  door. Opening-scene friend representation and two-PC profile qualification
-  remain open. Donald/Goofy/Riku and arbitrary host replacements are not admitted
+  host with a Sora friend at first prologue control and reloads, plus separate
+  bounded runs at the checked Day 1-6 prologue sites. A session that starts by
+  loading a save in an unchecked room plays solo until the next checked site.
+  The Twilight Thorn boss, opening-scene friend representation and two-PC
+  profile qualification remain open. Donald/Goofy/Riku and arbitrary host replacements are not admitted
   playable profiles. The target route is New Game / Roxas Days 1-6 through TT,
   HB 1 and LoD 1 / Shan-Yu, not a claimed completed playthrough. See
   [party setup](PARTY_SETUP.md) and the [plan](ONLINE_COOP_PLAN.md).
