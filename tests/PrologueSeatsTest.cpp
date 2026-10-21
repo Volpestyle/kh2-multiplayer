@@ -319,6 +319,16 @@ void site() {
           StepAsideAt(Woods13Location) && !StepAsideAt(woodsOtherDoor) && !MissingPartySiteAt(woodsOtherDoor) &&
           StepAsideZ == 150.0f,
           "the Day 1 Woods (door 50, evt22) is a checked prologue site where seat 1 steps aside (VUH-2578)");
+    const auto* dusk127 = MissingPartySiteFor(Mansion127Location, 825515874, 0x3FF727, Mansion127Header, Mansion127Records);
+    check(dusk127 && dusk127->prologue && std::string_view(dusk127->name) == "tt14-127" && Mansion127Records.size() == 4 * 64 &&
+          Mansion127Header[2] == 65 && Mansion127Records[3 * 64] == 0x3E && Mansion127Records[3 * 64 + 1] == 0x01 &&
+          MissingPartySiteAt(Mansion127Location) == dusk127 && !StepAsideAt(Mansion127Location),
+          "the Day 1 Old Mansion Dusk (btl127, the Dusk 318 pinned with the players) is a checked prologue site (VUH-2466)");
+    const auto* dusk128 = MissingPartySiteFor(Mansion128Location, 842293090, 0x3FF727, Mansion128Header, Mansion128Records);
+    check(dusk128 && dusk128->prologue && std::string_view(dusk128->name) == "tt14-128" && Mansion128Header[2] == 87 &&
+          MissingPartySiteAt(Mansion128Location) == dusk128 &&
+          !MissingPartySiteFor(Mansion128Location, 842293090, 0x3FF727, Mansion127Header, Mansion127Records),
+          "the Mansion Dusk's second stage (btl128) is a checked prologue site with its own group (VUH-2466)");
     const auto* alley4 = MissingPartySiteFor(BackAlley4Location, 808804197, 0x3FF727, BackAlley4Header, BackAlley4Records);
     auto alley4Short = std::vector<std::uint8_t>(BackAlley4Records.begin(), BackAlley4Records.begin() + 4 * 64);
     check(alley4 && alley4->prologue && std::string_view(alley4->name) == "tt03-4" && BackAlley4Records.size() == 18 * 64 &&

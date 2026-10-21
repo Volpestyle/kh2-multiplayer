@@ -35,8 +35,8 @@ readings, confirmed only where the live column says so.
 | 1 | 04 Sandlot | 76 | `TT04_MS106` | none | scripted, no spawn | checked site `tt04-76` |
 | 1 | 04 Sandlot | 77 | `TT04_MS107` | N_EX570_BTL (1656) | one-on-one bat fight (Seifer) | checked site `tt04-77`; both seats rebuild and hit Seifer; a friend that runs ahead waits and follows the host to 78 (VUH-2555) |
 | 1 | 04 Sandlot | 78 | `TT04_MS108` | N_EX570_BTL (1656) | one-on-one bat fight | checked site `tt04-78`; both seats rebuild, fight and leave for the Woods together (run `20261020-100758`) |
-| 1 | 14 Old Mansion | 127 | `TT14_MS109` | 1 Dusk M_EX990 (318) | early Dusk | not yet |
-| 1 | 14 Old Mansion | 128 | `TT14_MS110` | 1 Dusk (318) | early Dusk | not yet |
+| 1 | 14 Old Mansion | 127 | `TT14_MS109` | 1 Dusk M_EX990 (318) | early Dusk | checked site `tt14-127`; both seats fight, loopback from FM-01 (below) |
+| 1 | 14 Old Mansion | 128 | `TT14_MS110` | 1 Dusk (318) | early Dusk | checked site `tt14-128`; both seats fight and defeat it (below) |
 | 2 | 02 Usual Spot | 2 | `TT02_MS201` | none | scripted | not yet |
 | 3 | 04 Sandlot | 79 | `TT04_MS301` | 1 Dusk (318) | early Dusk | not yet |
 | 3 | 32 Station of Serenity | 154 | `TT32_MS302` | 3 Dusks (318) | Dive: weapon tutorial | not yet |
@@ -106,3 +106,12 @@ From New Game (2026-10-20, PC1 loopback, VUH-2466):
   move. Both seats hit Seifer, with the friend's hits claimed to the host, but about 8 s in the duel's
   event played on the friend alone, which then waited for the host (VUH-2555).
 
+From the Day 1 route and FM-01 (2026-10-20, PC1 loopback, VUH-2466):
+- The Woods' way to the Old Mansion: from the entrance, (0, -500), (900, 800), (1400, 1600), then north
+  through the exit near (1430, 2060) (minimap; run `20261020-155349`). The Mansion front loads as evt1.
+- The Day 1 Dusk fight starts from the Zipper Dusk (`M_EX990_ZIPPER_RTN`, object 2317, an inert object
+  by the gate): its reaction 559 (Triangle) plays an event and loads btl127 (run `20261020-224246`). The
+  gate itself only says "It's locked tight."
+- btl127 and btl128 are both raw566, the absent raw567/568 and the Dusk 318, pinned as `tt14-127` and
+  `tt14-128`. In run `20261020-230628` both seats released with both Roxases at each stage, fought the
+  Dusk, and the fight's own stage change moved both to btl128, where both logged the same Dusk death.
