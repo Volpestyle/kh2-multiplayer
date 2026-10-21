@@ -321,3 +321,14 @@ with Python `minidump`, search the faulting thread's stack for an
 `EXCEPTION_RECORD`, read the CONTEXT 0x4F0 bytes below it, and map DLL return
 addresses through `.pdata` and their string references (the release DLL has no
 PDB).
+
+The same death came back on 2026-10-21 (VUH-2612) through a *held* pointer: three
+WER dumps (`clr.dll+0x184880`, `clr.dll+0x5F8BC0`, `ntdll`) all hid a memcpy of
+`0x3F800000` (float 1.0) read as the descriptor at `clone+0x918`, after the game
+freed the prologue clone (game over, the post-boss event) while
+`privatestatus::MissingPartyPuppetAllowed` still held it. A page check can't catch
+this: a freed pool slot stays readable and holds garbage. A pointer kept across
+frames must prove the actor is still alive before anything of it is read, by
+walking the native active list (`inject/src/ActorLifetime.hpp`), and a descriptor
+must lie in the exe image before it is followed. In the WER report the module named
+is the CLR, not the code that faulted.

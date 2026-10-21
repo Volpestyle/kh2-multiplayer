@@ -127,7 +127,7 @@ bool FieldOpen() {
 bool LocalBoundHere(const std::array<std::uint8_t, 10>& now) {
     return g_construction.bound && g_construction.location == now && g_construction.clone &&
         warp::LoadSerial() == g_construction.load + 1 && !warp::TransitionPending() &&
-        privatestatus::MissingPartyPuppetAllowed(g_construction.clone);
+        privatestatus::MissingPartyClone(g_construction.clone); // VUH-2612: an unknown or retired entry is not live
 }
 std::array<std::uint16_t, 3> Latched() {
     std::array<std::uint16_t, 3> v {};
@@ -272,6 +272,14 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
         if (g_log && !g_playedLogged)
             g_log("[prologue] already playing at=%02X/%02X evt=%u: %s waits for the next checked site", now[0], now[1],
                   LocationOf(now).evt, prologue::HoldName(hold));
+        g_playedLogged = true;
+        hold = Hold::None;
+    }
+    // VUH-2612: the game can free this seat's clone mid-field (an event); once released here in this load,
+    // losing that binding does not hold the seat again. The next checked site binds anew.
+    if (playedHere && hold == Hold::LocalUnbound) {
+        if (g_log && !g_playedLogged)
+            g_log("[prologue] clone gone at=%02X/%02X evt=%u: already playing here, not held", now[0], now[1], LocationOf(now).evt);
         g_playedLogged = true;
         hold = Hold::None;
     }

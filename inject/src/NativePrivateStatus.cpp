@@ -1,4 +1,5 @@
 #include "kh2coop/PlayerKits.hpp"
+#include "ActorLifetime.hpp"
 #include "NativePrivateStatus.hpp"
 #include "NativePrivateStatusPins.hpp"
 #include "NativeSpawnController.hpp"
@@ -120,11 +121,32 @@ void BindFault(unsigned reason){unsigned none=0;g_bindFault.compare_exchange_str
     BindFault(17);RaiseException(0xE0423433,EXCEPTION_NONCONTINUABLE,0,nullptr);
     __assume(0);
 }
-bool Read(uintptr_t p,void* out,std::size_t n) {
+// VUH-2612: pages proven readable this frame (Drain advances g_ownerFrames once per frame), so the
+// per-frame paths query each region once instead of on every read.
+struct ReadableRange { uintptr_t lo{},hi{};unsigned frame{UINT_MAX}; };
+std::array<ReadableRange,4> g_readable{};unsigned g_readableNext=0;
+bool Readable(uintptr_t p,std::size_t n) {
+    const auto frame=g_ownerFrames.load(std::memory_order_relaxed);
+    if(!spawncontroller::IsDiagnosticGameThread())return lifetime::Readable(p,n); // the cache is the game thread's
+    for(const auto& r:g_readable)if(r.frame==frame && p>=r.lo && p<r.hi && n<=r.hi-p)return true;
+    MEMORY_BASIC_INFORMATION info{};
+    if(!lifetime::Readable(p,n) || !VirtualQuery(reinterpret_cast<LPCVOID>(p),&info,sizeof(info)))return false;
+    const auto lo=reinterpret_cast<uintptr_t>(info.BaseAddress);
+    if(p+n<=lo+info.RegionSize)g_readable[g_readableNext++%g_readable.size()]={lo,lo+info.RegionSize,frame};
+    return true;
+}
+bool Copy(uintptr_t p,void* out,std::size_t n) {
     if(p<0x10000 || p>=0x800000000000ULL || n>0x800000000000ULL-p)return false;
     __try {std::memcpy(out,reinterpret_cast<void*>(p),n);return true;}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+bool Read(uintptr_t p,void* out,std::size_t n) {return Readable(p,n) && Copy(p,out,n);}
+// VUH-2612: a held clone pointer is followed only while the clone is still on the native active list.
+// The walk reads only listed actors and the static region table, so it skips the page query.
+lifetime::Walk Walked(uintptr_t actor) {
+    return lifetime::Find(g_base,actor,[](uintptr_t p,void* out,std::size_t n){return Copy(p,out,n);});
+}
+bool Listed(uintptr_t actor) {return Walked(actor)==lifetime::Walk::Listed;}
 template<class T> bool Read(uintptr_t p,T& out){return Read(p,&out,sizeof(out));}
 int Index(uintptr_t p) {
     const auto start=g_base+PoolRva;
@@ -216,7 +238,7 @@ bool PartyKeysMatch(const std::array<int,2>& keys,unsigned count) {
 }
 int CloneDescriptorKey(uintptr_t p) {
     std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,8> name{};
-    if(!Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || !Read(p+8,name))return 0; // form: per kit row (the table)
+    if(!lifetime::DescriptorInImage(g_base,p) || !Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || !Read(p+8,name))return 0; // form: per kit row (the table)
     return kh2coop::kitDescriptorKey(id,type,key,form,name.data(),name.size(),RoxasAllowed()); // the reviewed kit table
 }
 bool SoraDescriptor(uintptr_t p) {return CloneDescriptorKey(p)==1;}
@@ -711,17 +733,29 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
 }
 bool MissingPartyPuppetAllowed(uintptr_t actor) {
     const DWORD error=GetLastError();bool allowed=true;
+    int walked=-1; // VUH-2612: walked once per call, at the first entry for this actor
     for(unsigned i=g_missingBudget.count;i>0;--i) {
         const auto& m=g_missing[i-1];if(m.actor!=actor)continue;
         Stamp now{};uintptr_t status=0,canonical=0,localStatus=0,controller=0,record=0;
+        // VUH-2612: the game can free the clone under us (post-boss event 157, 2026-10-21 dumps); a clone
+        // no longer listed is refused before anything of it is read.
+        if(walked<0)walked=static_cast<int>(Walked(actor));
+        if(walked!=static_cast<int>(lifetime::Walk::Listed)) {
+            static uintptr_t s_unlistedLogged=0;static int s_unlistedWhy=-1;
+            if(s_unlistedLogged!=actor || s_unlistedWhy!=walked)if(const auto log=g_missingLog.load()){
+                s_unlistedLogged=actor;s_unlistedWhy=walked;
+                log(walked==static_cast<int>(lifetime::Walk::Capped)?"[missing-party] clone %llX past the active-list walk cap: refused":
+                    "[missing-party] clone %llX no longer listed: refused",static_cast<unsigned long long>(actor));}
+            allowed=false;break;
+        }
         const bool player=PlayerActor(actor,status,m.cloneKey);
         if(player && routespawn::NewPrivateBirth(m.serial,OwnedSerial(status),Owned(status),g_ready.load()))continue;
         allowed=m.bound && g_ready.load() && StampNow(now) && now.now==m.stamp.now &&
             routespawn::MissingPartyLoadCurrent(m.stamp.load,m.stamp.transition,now.load,now.transition,warp::TransitionPending()) &&
             playerkit::MissingPartyReady() && enemysync::WorldContextCurrent(m.context) &&
             player && status==m.status && Owned(status) && OwnedSerial(status)==m.serial &&
+            Read(g_base+PlayerRva,canonical) && canonical==m.local && // VUH-2612: the canonical pointer before m.local is read
             PlayerActor(m.local,localStatus,m.localKey) && localStatus==m.localStatus && !Owned(localStatus) &&
-            Read(g_base+PlayerRva,canonical) && canonical==m.local &&
             Read(actor+0x9E8,controller) && controller==m.controller &&
             Read(actor+0x9F0,record) && record==reinterpret_cast<uintptr_t>(m.record.data());
         break;
@@ -764,10 +798,12 @@ void Drain(LogFn log) {
         const auto& m=g_missing[i];Stamp now{};uintptr_t controller=0,record=0;
         if(!m.bound || !StampNow(now) || now.now!=m.stamp.now ||
            !routespawn::MissingPartyLoadCurrent(m.stamp.load,m.stamp.transition,now.load,now.transition,warp::TransitionPending()))continue;
-        const bool roots=Read(m.actor+0x9E8,controller) && Read(m.actor+0x9F0,record);
-        log("[missing-party] attachment allowed=%u roots=%u clone=%llX controller=%llX expectedController=%llX record=%llX expectedRecord=%llX load=%u transition=%u frame=%u",
-            MissingPartyPuppetAllowed(m.actor)?1u:0u,roots?1u:0u,m.actor,controller,m.controller,record,
-            reinterpret_cast<uintptr_t>(m.record.data()),now.load,now.transition,frame);
+        // VUH-2612: the retained clone is read only while it is still listed.
+        const bool listed=Listed(m.actor);
+        const bool roots=listed && Read(m.actor+0x9E8,controller) && Read(m.actor+0x9F0,record);
+        log("[missing-party] attachment allowed=%u roots=%u clone=%llX controller=%llX expectedController=%llX record=%llX expectedRecord=%llX load=%u transition=%u frame=%u listed=%u",
+            listed && MissingPartyPuppetAllowed(m.actor)?1u:0u,roots?1u:0u,m.actor,controller,m.controller,record,
+            reinterpret_cast<uintptr_t>(m.record.data()),now.load,now.transition,frame,listed?1u:0u);
     }
     for(unsigned i=0;i<8;++i) {
         Event e{};bool have=false;
