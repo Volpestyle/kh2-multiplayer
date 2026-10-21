@@ -110,6 +110,15 @@ public:
         }
         if (identity_ && teammatesKnown) seen_ = true;
     }
+    // The adapter's sample, bookended: the identity read before the authority capture and the owned
+    // count, and again after (Quill R4). The runtime retires a session's puppet authority before it
+    // publishes the next identity (both interlocked), so an identity unchanged across the reads proves the
+    // count belongs to it. Unknown or changed across them: the count is discarded and only the later
+    // identity is taken (a replacement still starts over).
+    void StepBookended(bool knownBefore, std::uint64_t before, unsigned owned, bool knownAfter, std::uint64_t after) noexcept {
+        if (knownBefore && knownAfter && before == after) Step(true, before, owned);
+        else Step(knownAfter, after, 0);
+    }
     [[nodiscard]] bool Seen() const noexcept { return seen_; }
 
 private:

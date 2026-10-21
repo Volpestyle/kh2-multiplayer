@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 #include <string_view>
 
 using namespace kh2coop::inject::downedreturn;
@@ -115,6 +116,34 @@ int main() {
       CHECK(!CountsForSession(true, 0, friendA, 1, 0, authorityB));
       // In A itself, a cached owned pose counts; a stale one (over 600 frames) does not.
       CHECK(CountsForSession(true, 600, friendA, 1, 0, authorityA) && !CountsForSession(true, 601, friendA, 1, 0, authorityA)); }
+
+    // Regression (Quill R4, concurrent read order): the runtime replaces session A with B on its own
+    // thread while the downed owner samples. The owner captures A's authority and counts A's owned friend
+    // pose, then the runtime retires A's authority and publishes B's identity, then the owner reads the
+    // identity. 2d read the identity once, after the count, and stepped (B, 1): A's friend imported into
+    // B. Bookended, the identity read before the capture is A and after it B: the count is discarded.
+    { auto sample = [](SessionTeammates& s, bool bookended, std::uint64_t before, unsigned owned, std::uint64_t after) {
+          if (bookended) s.StepBookended(true, before, owned, true, after);
+          else s.Step(true, after, owned); };                     // 2d: one identity read, after the count
+      for (const bool bookended : {true, false}) {
+          SessionTeammates s; DispositionLatch latch;
+          for (int frame = 0; frame < 60; ++frame) sample(s, bookended, 0xA1, 1, 0xA1); // A, with the friend
+          sample(s, bookended, 0xA1, 1, 0xB2);                     // the interleaved frame
+          for (int frame = 61; frame < 180; ++frame) {
+              sample(s, bookended, 0xB2, 0, 0xB2);                 // B, alone
+              if (frame == 120) latch.Reset();
+              if (frame >= 120) latch.Observe(0, 0);
+          }
+          const auto d = SitOutAfterTransition(latch, s.Seen());
+          if (bookended) CHECK(!s.Seen() && d.why == Disposition::Solo && d.after == AfterTransition::Resolve);
+          else CHECK(s.Seen() && d.why == Disposition::Unavailable); // the 2d gap, reproduced
+      }
+      // The other bookend cases: unknown on either side discards the count; an unchanged identity keeps it.
+      SessionTeammates s;
+      s.StepBookended(true, 0xA1, 1, true, 0xA1); CHECK(s.Seen());
+      s.StepBookended(false, 0, 1, true, 0xB2); CHECK(!s.Seen());  // unknown before: B starts, count discarded
+      s.StepBookended(true, 0xB2, 1, false, 0); CHECK(!s.Seen());  // unknown after: nothing taken
+      s.StepBookended(true, 0xB2, 1, true, 0xB2); CHECK(s.Seen()); }
 
     // Regression (Quill R4 b): within one session the runtime's heartbeat lapses (the role reads Off, the
     // bridge and the session identity stay) while the friend's poses are gone; the history is kept, so
