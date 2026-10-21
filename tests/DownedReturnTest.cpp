@@ -31,6 +31,12 @@ int main() {
     // Forced, then ordinary (1), then cleared: still the forced battle's end.
     { EncounterTracker t; (void)t.Step(2, 1, 1, true); CHECK(!t.Step(1, 1, 1, true)); CHECK(t.Step(0, 1, 1, true)); }
 
+    // A room change while downed: sit out into the next room unless everyone was down (Continue) or solo.
+    CHECK(SitOutAfterTransition(1, 0) == AfterTransition::SitOut);
+    CHECK(SitOutAfterTransition(2, 1) == AfterTransition::SitOut);
+    CHECK(SitOutAfterTransition(1, 1) == AfterTransition::Resolve && SitOutAfterTransition(2, 2) == AfterTransition::Resolve);
+    CHECK(SitOutAfterTransition(0, 0) == AfterTransition::Resolve);
+
     // Save point: a living seat whose settled reaction is the save point's "Save" (55).
     CHECK(AtSavePoint(55, true) && !AtSavePoint(55, false) && !AtSavePoint(0x45, true) && !AtSavePoint(0, true));
 

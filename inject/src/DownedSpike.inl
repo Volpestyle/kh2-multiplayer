@@ -135,6 +135,8 @@ struct SpikeState {
     uint32_t reviveGuardUsed = 0, lastGateMode = 0, lastPassReason = 0;
     // VUH-2465 logical downing (see LogicalScope): engine HP 1, dead bit clear.
     bool logical = false, reviving = false, resolvePending = false, fullPartyDown = false;
+    bool sitOutPending = false; // VUH-2632 (D17): re-down in the next room, still sitting out
+    uint32_t sitOuts = 0, returnsSent = 0;
     uint32_t allDownFrames = 0, pinWrites = 0, fullPartyLoad = 0;
     float downedPos[3] {};
     uint32_t logicalSkips = 0, healsUndone = 0, motionRequests = 0, motionFrame = 0;
@@ -956,6 +958,57 @@ static bool HoldInput(void* inputStruct) {
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+// ---------------------------------------------------------------------------
+// VUH-2632 (D17): a downed teammate who sits out comes back when the host's forced battle ends (the
+// encounter is beaten) or when a living player stands at a save point. One request per target episode,
+// kind EncounterDefeat (host only, the relay checks) or SavePoint; the target owner applies it on every
+// difficulty. A host that sat the encounter out itself comes back locally.
+// ---------------------------------------------------------------------------
+static downedreturn::EncounterTracker g_encounter;
+static downedreturn::ReturnLatch g_returnLatch;
+static reviveprompt::RcGate g_returnRcGate;
+static bool PartnerReviveAllowed() { return SessionRevivePolicy().reviveAllowed; }
+static void SendReturns(uint8_t kind, const Snap& s) {
+    for (const auto& d : g_puppets) {
+        const auto& a = d.pose.pose;
+        if (!d.have || g_frameCounter - d.poseFrame > 30 || !(a.flags & kh2coop::AvatarDowned) || !a.downedEpisode ||
+            a.worldId != s.room.world || a.roomId != s.room.room)
+            continue;
+        const auto slot = static_cast<uint8_t>(a.ownerSlot);
+        if (!g_returnLatch.Take(slot, a.downedEpisode)) continue;
+        uint64_t seq = 0;
+        const bool sent = enemysync::SendReviveRequest(slot, a.downedEpisode, seq, kind);
+        if (sent) ++g_down.returnsSent;
+        Log("[downed] return %s target=%u episode=%llX seq=%llu sent=%u frame=%u",
+            downedreturn::KindName(static_cast<downedreturn::Kind>(kind)), static_cast<unsigned>(slot),
+            static_cast<unsigned long long>(a.downedEpisode), static_cast<unsigned long long>(seq), sent ? 1u : 0u, g_frameCounter);
+    }
+}
+static void ReturnTick(const Snap& s) {
+    if (g_down.control || g_down.state == State::Off || g_down.state == State::Refused) return;
+    uint8_t menu = 0xFF;
+    const bool menuOpen = !ReadHitTrace(g_exeBase + offsets::OPEN_MENU, menu) || menu != 0xFF;
+    const bool field = s.canonical && !s.inEvent && !menuOpen && !warp::TransitionPending();
+    if (enemysync::ActivationRole() == 1) {
+        uint8_t battle = 0;
+        if (!ReadHitTrace(g_exeBase + offsets::BATTLE_STATUS, battle)) battle = 0xFF; // unread: never an edge
+        if (battle != 0xFF && g_encounter.Step(battle, warp::TransitionSerial(), warp::LoadSerial(), field)) {
+            Log("[downed] encounter defeated: forced battle ended room=%u/%u frame=%u", s.room.world, s.room.room, g_frameCounter);
+            SendReturns(static_cast<uint8_t>(downedreturn::Kind::EncounterDefeat), s);
+            if (g_down.state == State::Downed && g_returnLatch.Take(0, g_down.episode)) {
+                const Result r = TryRevive(g_down.episode);
+                Log("[downed] return encounter-defeat self episode=%llX result=%d",
+                    static_cast<unsigned long long>(g_down.episode), static_cast<int>(r));
+            }
+        }
+    }
+    const bool living = g_down.state == State::Ready && s.hp > 0;
+    uint16_t react = 0;
+    if (!ReadHitTrace(g_exeBase + offsets::REACT_CMD_STEAM, react)) react = 0;
+    const auto settled = reviveprompt::NativeReactionFor(g_returnRcGate, react, field && living);
+    if (downedreturn::AtSavePoint(settled, living)) SendReturns(static_cast<uint8_t>(downedreturn::Kind::SavePoint), s);
+}
+
 // EntityHook PublishCoopHud: the HUD fields for this frame's prompt.
 static void PromptHud(uint8_t& kind, uint8_t& slot, uint16_t& progress) {
     kind = 0; slot = 255; progress = 0;
@@ -989,16 +1042,32 @@ static void Tick(uintptr_t head) {
         else if (s.objentry != g_down.downedObjentry) lost = HoldLost::Objentry;
         if (lost != HoldLost::None && g_down.logical) {
             // VUH-2465: a forced transition (a host-led load or a story event's room change) ends a
-            // logical downing. The old actor and episode retire (a late request finds no Downed state),
-            // and the player is resolved at 25% on the first settled field frame of the new actor.
+            // logical downing. The old actor and episode retire (a late request finds no Downed state).
+            // VUH-2632 (D17): the player then sits out into the next room, downed again on the first
+            // settled field frame of the new actor, unless every teammate known was down too (the host's
+            // Continue retry) or there is none; then it is resolved at 25% there, as before.
+            unsigned known = 0, downed = 0;
+            for (const auto& d : g_puppets) {
+                if (!d.have || g_frameCounter - d.poseFrame > 600) continue;
+                ++known;
+                if (d.pose.pose.flags & kh2coop::AvatarDowned) ++downed;
+            }
+            const bool sitOut = downedreturn::SitOutAfterTransition(known, downed) == downedreturn::AfterTransition::SitOut;
             g_down.state = State::Ready;
             g_down.logical = false;
             g_down.downedActor = 0;
-            g_down.resolvePending = true;
+            g_down.resolvePending = !sitOut;
+            g_down.sitOutPending = sitOut;
             g_logicalActor.store(0, std::memory_order_release);
             g_logicalHeld.store(false, std::memory_order_release);
-            Log("[downed] logical hold ended reason=%u episode=%llX retired; resolving at %d%% on the next field frame",
-                static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode), kRevivePercent);
+            if (sitOut)
+                Log("[downed] logical hold ended reason=%u episode=%llX retired; sitting out into the next room "
+                    "(teammates known=%u downed=%u)", static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode),
+                    known, downed);
+            else
+                Log("[downed] logical hold ended reason=%u episode=%llX retired; resolving at %d%% on the next field frame "
+                    "(teammates known=%u downed=%u)", static_cast<unsigned>(lost), static_cast<unsigned long long>(g_down.episode),
+                    kRevivePercent, known, downed);
         } else if (lost != HoldLost::None) {
             // Terminal: Sora may still be natively dead with no game over; the
             // owned process must be closed by the runner (kh2ctl).
@@ -1098,6 +1167,28 @@ static void Tick(uintptr_t head) {
         Log("[downed] logical resolve after transition actor=%llX hp=%d -> %d target=%d", static_cast<unsigned long long>(s.actor),
             s.hp, hp, target);
     }
+    if (g_down.sitOutPending && g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.objentry &&
+        s.hp > 0 && s.maxHp > 0 && !(s.flags & 4U) && s.task == 0 && !warp::TransitionPending() && LogicalScope(s.objentry)) {
+        // VUH-2632 (D17): still sitting out in the new room: the same logical downing as a lethal hit (engine
+        // HP 1, dead bit clear, the downed motion), under a new episode.
+        g_down.sitOutPending = false;
+        BeginDowned(s.actor, 0, 4);
+        g_down.logical = true;
+        g_logicalActor.store(s.actor, std::memory_order_release);
+        if (s.hp > 1) {
+            const auto apply = reinterpret_cast<PFN_ApplyStatDelta>(g_exeBase + RVA_APPLY_STAT);
+            g_down.reviving = true;
+            __try { (void)apply(reinterpret_cast<void*>(s.actor), 1 - s.hp, 0, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            g_down.reviving = false;
+        }
+        if (g_down.setMotion) {
+            __try { g_down.setMotion(s.actor + 0x158, kDownedMotion, 0.0f, 0.0f); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        ++g_down.sitOuts;
+        Log("[downed] sitting out in the new room episode=%llX actor=%llX hp=%d room=%u/%u frame=%u",
+            static_cast<unsigned long long>(g_down.episode), static_cast<unsigned long long>(s.actor), s.hp,
+            s.room.world, s.room.room, g_frameCounter);
+    }
     if (g_down.fullPartyDown && warp::LoadSerial() != g_down.fullPartyLoad && s.canonical && !s.inEvent && s.status &&
         s.hp > 0 && !(s.flags & 4U) && s.task == 0 && !warp::TransitionPending()) {
         g_down.fullPartyDown = false;
@@ -1107,6 +1198,7 @@ static void Tick(uintptr_t head) {
     g_logicalHeld.store(LogicallyDowned(), std::memory_order_release);
     PublishLocalDownedState(PublishFor(g_down.state, s.actor != 0 && (s.flags & 4U) != 0), g_down.episode);
     PromptTick(s);
+    ReturnTick(s);
     Channel* c = g_down.ch;
     if (c && c->requestSeq != c->doneSeq) {
         const long seq = c->requestSeq;

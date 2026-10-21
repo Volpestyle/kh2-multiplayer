@@ -1878,6 +1878,9 @@ Format: decision — why (rejected alternative).
     point itself). The return is a host-issued, validated request through the
     same consume-once owner gate and native revive.
   - **Game over only when every player is down** (unchanged).
+  - Known limit: when the host is the one sitting out, the survivors get only
+    the in-room returns (the encounter, a save point in that room); room
+    authority stays with the host.
   Implementation and evidence: [downed/revive](DOWNED_REVIVE.md#downed-rules-by-difficulty-d17-vuh-2632).
 
 ## Architecture

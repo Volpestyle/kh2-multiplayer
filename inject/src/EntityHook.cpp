@@ -79,6 +79,7 @@
 #include "DownedSpikeState.hpp"
 #include "RevivePrompt.hpp"
 #include "DownedPolicy.hpp"
+#include "DownedReturn.hpp"
 #include "DownedSpectate.hpp"
 #include "DownedSpectateAdapter.hpp"
 #include "DownedSpectateChannel.hpp"
@@ -4245,7 +4246,10 @@ bool Initialize(uintptr_t exeBase) {
     eventstartmirror::Install(exeBase, &Log); // VUH-2359: in-field events, with the event hold
     allyhit::SetDownedVictim([]() -> std::uintptr_t { return downedspike::LogicalDownedActor(); }); // VUH-2465
     // VUH-2465: an ordinary door waits while a teammate's fresh pose in this room says downed.
+    // VUH-2632 (D17): only while a partner revive is allowed; otherwise the downed player sits out and
+    // follows, and the survivors leave freely.
     warp::SetDoorHold([]() -> bool {
+        if (!downedspike::PartnerReviveAllowed()) return false;
         std::uint8_t world = 0xFF, room = 0xFF;
         if (!ReadHitTrace(g_exeBase + offsets::WORLD_ID, world) || !ReadHitTrace(g_exeBase + offsets::ROOM_ID, room)) return false;
         for (int i = 0; i < 2; ++i) {

@@ -288,9 +288,40 @@ boss/encounter defeat or a save point.
 - The scenario runner forces `KH2COOP_REVIVE_POLICY=beginner` for `playerDefaults` runs unless the
   scenario sets `"revivePolicy": "native"`.
 
-**Next:** the host's difficulty in each RoomTransition, sit out across rooms (no auto-revive on forced
-transitions; a door waits only while a revive is possible), and the host-issued return at boss/encounter
-defeat and at save points.
+**Protocol 32 (wire):**
+- The host's native difficulty rides each RoomTransition packet. A client's rule follows the host's last
+  room; until one arrives, Beginner rules apply.
+- `ReviveRequest` has a kind (51 bytes):
+  - a partner revive keeps the relay's 200-unit range;
+  - a return needs no reviver beside the target. `EncounterDefeat` is accepted only from the host
+    (`kind-not-host` otherwise); `SavePoint` from any living seat.
+- The owner applies a return on every difficulty and a partner revive only where the rule allows. One
+  return per target episode.
+- `kh2coop_revive_test` and the shared network fixture cover each kind through the real relay.
+
+**Sit out and return (native, `DownedSpike.inl`; pure rules in `DownedReturn.hpp`, `kh2coop_downed_return_test`):**
+- **Doors.** An ordinary door waits for a downed teammate only while the rule allows a partner revive.
+  On Proud/Critical the survivors leave.
+- **Room changes.** A downed Roxas whose room changes is downed again on the new room's first settled field
+  frame, under a new episode (`[downed] sitting out in the new room`). This applies to a door the
+  survivors took and to a story transition. It is resolved at 25% instead only when every teammate known
+  was down too (the host's Continue retry) or there is no teammate.
+- **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
+  field play, within one room generation, returns every downed teammate in the room:
+  `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`. A host that sat it out
+  itself comes back locally at 25%.
+- **Save point.** Any living seat whose settled reaction command is the save point's "Save" (55) returns
+  the downed teammates in its room (`[downed] return save-point ...`). They come back at 25% where they
+  lie; walking onto the save point heals them natively.
+
+**Limits:**
+- When the host is the one sitting out, the survivors get only in-room returns (the encounter, a save
+  point in that room). Rooms stay host-led.
+- Assumed from Ghidra and not yet observed live:
+  - that `BATTLE_STATUS` stays 2 between a forced fight's waves and clears only at its end;
+  - that the save byte is at + 0x2498;
+  - that the re-down in a new room is clean.
+- A boss whose post-fight transition comes before its forced battle clears is VUH-2628's path.
 
 ## Downed spectator candidate (VUH-1819; pending live qualification)
 

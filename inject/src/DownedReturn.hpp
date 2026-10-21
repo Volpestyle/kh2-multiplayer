@@ -58,6 +58,14 @@ constexpr bool AtSavePoint(std::uint16_t settledReaction, bool localLiving) noex
     return localLiving && settledReaction == kSaveReaction;
 }
 
+// A room change while logically downed (D17): the player sits out into the next room, still downed,
+// unless it is a full-party retry: every teammate known was downed too (the host's Continue reloads the
+// room for everyone), or there is no teammate at all (solo play).
+enum class AfterTransition : std::uint8_t { Resolve, SitOut };
+constexpr AfterTransition SitOutAfterTransition(unsigned teammatesKnown, unsigned teammatesDowned) noexcept {
+    return teammatesKnown == 0 || teammatesDowned >= teammatesKnown ? AfterTransition::Resolve : AfterTransition::SitOut;
+}
+
 // One return per target episode, per slot.
 class ReturnLatch {
 public:
