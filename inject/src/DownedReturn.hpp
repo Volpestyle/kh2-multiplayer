@@ -83,22 +83,41 @@ private:
     unsigned known_ = 0, downed_ = 0;
 };
 
+// Whether this seat has seen a teammate in its current session (any frame, any state). Ends with the
+// session.
+class SessionTeammates {
+public:
+    void Step(bool session, unsigned teammatesKnown) noexcept {
+        if (!session) seen_ = false;
+        else if (teammatesKnown) seen_ = true;
+    }
+    [[nodiscard]] bool Seen() const noexcept { return seen_; }
+
+private:
+    bool seen_ = false;
+};
+
 // A room change while logically downed (D17): the player sits out into the next room, still downed,
-// unless it is a full-party retry (every teammate seen was downed too: the host's Continue reloads the
-// room for everyone) or solo play (no session). In a session whose teammates were never seen during
-// this downing, they are unavailable, not absent: the player sits out, as when a teammate was up.
+// unless everyone is down, which is the native game over's case (the lead, VUH-2632 #142: a lone
+// player down is everyone down):
+//   FullParty    every teammate it saw in the old room was downed too (the host's Continue reloads
+//                the room for everyone);
+//   Solo         it has never seen a teammate in this session, or there is no session: nobody could
+//                return it, so it is resolved, as solo play was before D17.
+// A teammate seen earlier in the session but not during this downing is unavailable, not absent: the
+// player sits out, as when a teammate was up (Quill R1).
 enum class AfterTransition : std::uint8_t { Resolve, SitOut };
 enum class Disposition : std::uint8_t { Solo, FullParty, TeammateUp, Unavailable };
 struct TransitionDecision {
     AfterTransition after;
     Disposition why;
 };
-inline TransitionDecision SitOutAfterTransition(const DispositionLatch& old, bool session) noexcept {
+inline TransitionDecision SitOutAfterTransition(const DispositionLatch& old, bool teammateSeenInSession) noexcept {
     if (old.Sampled())
         return old.Downed() >= old.Known() ? TransitionDecision {AfterTransition::Resolve, Disposition::FullParty}
                                            : TransitionDecision {AfterTransition::SitOut, Disposition::TeammateUp};
-    return session ? TransitionDecision {AfterTransition::SitOut, Disposition::Unavailable}
-                   : TransitionDecision {AfterTransition::Resolve, Disposition::Solo};
+    return teammateSeenInSession ? TransitionDecision {AfterTransition::SitOut, Disposition::Unavailable}
+                                 : TransitionDecision {AfterTransition::Resolve, Disposition::Solo};
 }
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {

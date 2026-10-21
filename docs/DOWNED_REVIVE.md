@@ -304,11 +304,13 @@ boss/encounter defeat or a save point.
   On Proud/Critical the survivors leave.
 - **Room changes.** A downed Roxas whose room changes is downed again on the new room's first settled field
   frame, under a new episode (`[downed] sitting out in the new room`). This applies to a door the
-  survivors took and to a story transition. It is resolved at 25% instead only when every teammate it saw
-  in the old room was down too (the host's Continue retry), or in solo play.
+  survivors took and to a story transition. It is resolved at 25% instead only when everyone is down: every
+  teammate it saw in the old room was down too (the host's Continue retry), or it has never seen a teammate
+  in this session (solo: nobody could return it).
+  A teammate seen earlier in the session but not during the downing ("unavailable") does not count as solo:
+  the player sits out.
   - The teammates are latched each downed frame while the old room is current. The transition erases
     every teammate pose before the hold is found lost, so they cannot be counted then.
-  - In a session whose teammates were never seen during the downing ("unavailable"), the player sits out.
   - The log names the case: `teammate-up`, `full-party`, `solo` or `unavailable`.
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
@@ -334,9 +336,6 @@ boss/encounter defeat or a save point.
 **Limits:**
 - When the host is the one sitting out, the survivors get only in-room returns (the encounter, a save
   point in that room). Rooms stay host-led.
-- When a seat is the only one in a session and was never seen with a teammate, a forced transition while
-  downed leaves it sitting out with nobody to return it. A lone logical downing already has no game over
-  (VUH-2465).
 - Assumed from Ghidra and not yet observed live:
   - that `BATTLE_STATUS` stays 2 between a forced fight's waves and clears only at its end;
   - that the save byte is at + 0x2498;

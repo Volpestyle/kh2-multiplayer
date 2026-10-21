@@ -144,6 +144,7 @@ struct SpikeState {
 static SpikeState g_down;
 // VUH-2632 (D17): the teammates the downed player last saw in its room, for the sit-out decision.
 static downedreturn::DispositionLatch g_disposition;
+static downedreturn::SessionTeammates g_sessionTeammates;
 // Read by the input collector and the 3D2060 hit check (game thread; atomics for the record).
 static std::atomic<bool> g_logicalHeld {false};
 static std::atomic<uintptr_t> g_logicalActor {0};
@@ -1054,18 +1055,19 @@ static void Tick(uintptr_t head) {
         if (s.hp < g_down.graceLastHp) ++g_down.graceHpDrops;
         g_down.graceLastHp = s.hp;
     }
-    if (g_down.state == State::Downed) {
+    {
         // VUH-2632 (D17): this frame's teammates, before a transition erases them (Quill R1: on the first
         // suspended frame this owner still runs first; afterwards no pose is left to count).
-        {
-            unsigned known = 0, downed = 0;
-            for (const auto& d : g_puppets) {
-                if (!d.have || g_frameCounter - d.poseFrame > 600) continue;
-                ++known;
-                if (d.pose.pose.flags & kh2coop::AvatarDowned) ++downed;
-            }
-            g_disposition.Observe(known, downed);
+        unsigned known = 0, downed = 0;
+        for (const auto& d : g_puppets) {
+            if (!d.have || g_frameCounter - d.poseFrame > 600) continue;
+            ++known;
+            if (d.pose.pose.flags & kh2coop::AvatarDowned) ++downed;
         }
+        g_sessionTeammates.Step(enemysync::ActivationRole() != 0, known);
+        if (g_down.state == State::Downed) g_disposition.Observe(known, downed);
+    }
+    if (g_down.state == State::Downed) {
         HoldLost lost = HoldLost::None;
         if (!s.canonical || s.actor != g_down.downedActor) lost = HoldLost::Actor;
         else if (!(s.room == g_down.downedRoom)) lost = HoldLost::Room;
@@ -1078,7 +1080,7 @@ static void Tick(uintptr_t head) {
             // settled field frame of the new actor, unless every teammate it saw in the old room was down
             // too (the host's Continue retry) or this is solo play; then it is resolved at 25% there, as
             // before. Decided from the old room's latched teammates; their poses are gone by now.
-            const auto decision = downedreturn::SitOutAfterTransition(g_disposition, enemysync::ActivationRole() != 0);
+            const auto decision = downedreturn::SitOutAfterTransition(g_disposition, g_sessionTeammates.Seen());
             const bool sitOut = decision.after == downedreturn::AfterTransition::SitOut;
             const unsigned known = g_disposition.Known(), downed = g_disposition.Downed();
             g_down.state = State::Ready;

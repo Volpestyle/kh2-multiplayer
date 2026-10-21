@@ -47,6 +47,31 @@ int main() {
       DispositionLatch l = with(2, 1); l.Observe(0, 0);          // an empty sample keeps the last real one
       CHECK(l.Sampled() && l.Known() == 2 && l.Downed() == 1);
       l.Reset(); CHECK(!l.Sampled()); }
+    { SessionTeammates seen;
+      CHECK(!seen.Seen()); seen.Step(true, 0); CHECK(!seen.Seen());
+      seen.Step(true, 1); seen.Step(true, 0); CHECK(seen.Seen());   // kept after the teammate's pose is gone
+      seen.Step(false, 0); CHECK(!seen.Seen());                     // the session ended
+      seen.Step(false, 1); CHECK(!seen.Seen()); }
+
+    // Regression (lead #142): a seat alone in its session, never having seen a teammate, is downed and a
+    // story transition takes it to the next room. Nobody could return it, so it must not sit out: it is
+    // resolved (solo), as before D17.
+    { SessionTeammates session; DispositionLatch latch;
+      for (int frame = 0; frame < 120; ++frame) {
+          session.Step(true, 0);                                  // in a session, no teammate pose ever
+          if (frame >= 60) latch.Observe(0, 0);                   // downed from frame 60 on; still nobody
+      }
+      const auto d = SitOutAfterTransition(latch, session.Seen());
+      CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Solo); }
+
+    // Regression (lead #142 / Quill R1): a teammate was seen earlier in the session, then its poses were
+    // unavailable for this whole downing (stale or erased). That is not solo: the player sits out.
+    { SessionTeammates session; DispositionLatch latch;
+      for (int frame = 0; frame < 60; ++frame) session.Step(true, 1); // the friend, up, before the downing
+      latch.Reset();                                              // BeginDowned
+      for (int frame = 60; frame < 120; ++frame) { session.Step(true, 0); latch.Observe(0, 0); }
+      const auto d = SitOutAfterTransition(latch, session.Seen());
+      CHECK(d.after == AfterTransition::SitOut && d.why == Disposition::Unavailable); }
 
     // Regression (Quill R1), the adapter's frame order on a Proud door: the surviving host takes an
     // ordinary door while the friend is logically downed. Each frame the downed owner runs first, then
