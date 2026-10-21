@@ -415,8 +415,19 @@ static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope
     if(!SmOwnerVisualPose(role,scope,index))return refuse("pose");
     uintptr_t thread=0,capture=0;std::uint32_t parent=0,motionFlags=0,typeFlags=0;
     if(!ReadHitTrace(actor+0xD48,thread) || thread)return refuse("thread");
-    if(!ReadHitTrace(actor+0x2B0,capture) || !ReadHitTrace(actor+0x18C,motionFlags) ||
-       ((motionFlags&0x4000) && capture!=actor))return refuse("foreign-capture");
+    if(!ReadHitTrace(actor+0x2B0,capture) || !ReadHitTrace(actor+0x18C,motionFlags))return refuse("capture-read");
+    if((motionFlags&0x4000) && capture!=actor) {
+        // VUH-2580: name the actor that holds the clone's capture (its object ID), once per role.
+        if(role.bindRefused!="foreign-capture" && g_smVisualDiagLogs<64) {
+            uintptr_t objentry=0;std::uint32_t objectId=0;
+            if(capture && ReadHitTrace(capture+offsets::actor::OBJENTRY_PTR,objentry) && objentry)
+                (void)ReadHitTrace(objentry+offsets::objentry::OBJECT_ID,objectId);
+            Log("[script-visual] foreign capture role=%u clone=%llX capture=%llX captureObject=%u source=%llX",role.resource,
+                static_cast<unsigned long long>(actor),static_cast<unsigned long long>(capture),objectId,
+                static_cast<unsigned long long>(role.source));
+        }
+        return refuse("foreign-capture");
+    }
     if(!ReadHitTrace(actor+0x6C8,typeFlags) || !(typeFlags&0x80))return refuse("type-flags");
     if(!ReadHitTrace(actor+0x6A0,parent) || parent)return refuse("attached");
     ScriptOwnerVisual visual{};visual.actor=actor;visual.puppet=index;
