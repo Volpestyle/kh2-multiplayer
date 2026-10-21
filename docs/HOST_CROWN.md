@@ -77,8 +77,8 @@ turns both off.
 ## Characters
 
 Each row also has `pitchDeg`, a tilt back about the head bone's Z axis (its side-to-side axis) through
-the centre of the crown's base. Roxas's `kRoxasPitch` stays 0 until James picks one of the VUH-2502
-candidates (0, 10 or 20 degrees). Sora's rows use the game's own crown, which the pitch doesn't touch.
+the centre of the crown's base. Roxas's `kRoxasPitch` is 10 degrees back, James's pick of the VUH-2502
+candidates (0, 10 or 20 degrees, 2026-10-21). Sora's rows use the game's own crown, which the pitch doesn't touch.
 
 The crown is authored in Sora's head-bone space. `crownprop::Characters` maps a gameplay model
 (objentry name) to its head bone and an offset in that bone's space. A row is added only when the

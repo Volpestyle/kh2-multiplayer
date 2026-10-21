@@ -570,7 +570,7 @@ inline constexpr float kCrownDrop = -4.5f;
 // VUH-2502: pitchDeg tilts our drawn crown back about the head bone's Z axis (its side-to-side axis)
 // through the crown's base centre, positive back. nativeMesh: the model carries the game's own crown
 // group (texture-animation slot 156 turns it gold), so the game draws it and we draw nothing.
-inline constexpr float kRoxasPitch = 0.0f;  // James picks from the VUH-2502 candidates
+inline constexpr float kRoxasPitch = 10.0f;  // James's pick of the VUH-2502 candidates (0, 10, 20), 2026-10-21
 struct Character {
     std::string_view model;
     std::uint16_t headBone;

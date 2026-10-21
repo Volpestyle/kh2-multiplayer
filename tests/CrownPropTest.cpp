@@ -320,6 +320,9 @@ void Clip() {
     for (const auto& c : crownprop::Characters)
         native = native && c.nativeMesh == (c.model.substr(0, 7) == "P_EX100") && (c.nativeMesh || c.headBone == 113);
     Check(native, "every Sora model shows the game's own crown; both Roxases keep the drawn one");
+    bool pitched = true;
+    for (const auto& c : crownprop::Characters) pitched = pitched && c.pitchDeg == (c.nativeMesh ? 0.0f : 10.0f);
+    Check(pitched, "both Roxas crowns tilt back 10 degrees (James's VUH-2502 pick); the game's own Sora crown is untouched");
 }
 
 void HostHead() {
