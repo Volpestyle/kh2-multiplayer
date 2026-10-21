@@ -248,6 +248,14 @@ static constexpr uint64_t RVA_SET_ANIMATION_UNDERLYING = 0x3C86A0;
 // desired animation without fighting it every frame.
 static constexpr uint64_t RVA_MOTION_CHAIN_SET_ANIM = 0x3C88C0;
 
+// FUN_1403c7c50(motCtrl, motion): the bank lookup FUN_1403c86a0 runs after it has
+// cleared the playback chain. It returns the motion's entry index in the
+// controller's override or own bank, or -1 when neither holds it; the set then
+// fails and the actor is left with no motion at all (a T-pose, VUH-2613).
+// It only reads.
+using PFN_MotionIndex = int(__fastcall*)(void* motCtrl, int animId);
+static constexpr uint64_t RVA_MOTION_INDEX = 0x3C7C50;
+
 // ============================================================================
 // Movement field offsets within actor object
 //
@@ -433,6 +441,7 @@ struct PuppetDriver {
     uint32_t poseFrame = 0;      // DLL frame of the latest new pose
     uintptr_t actor = 0;         // actor we last drove (re-resolved per frame)
     int lastAnim = -1;           // motion we last set on `actor`
+    uint32_t missingMotion = UINT32_MAX; // VUH-2613: stream motion `actor`'s banks lack (logged once per run)
     uint32_t savedTeam = 0;      // `actor`'s team before we zeroed it
     bool teamSaved = false;
     bool savedNoCollide = false; // `actor`'s no-collision bit before we set it
@@ -2620,6 +2629,7 @@ static void BindPuppetDrive(int index, uintptr_t actor) {
     if (d.actor != actor) {  // new room / reloaded actor
         d.actor = actor;
         d.lastAnim = -1;
+        d.missingMotion = UINT32_MAX;
         d.teamSaved = false;
         d.noCollideSaved = false;
         d.applied = false;
@@ -2627,6 +2637,12 @@ static void BindPuppetDrive(int index, uintptr_t actor) {
 
     if (!d.applied) d.boundActor = CaptureHitActor(actor);
     d.applied = true;
+}
+
+static bool MotionInBanks(void* motCtrl, uint32_t motion) {
+    __try {
+        return reinterpret_cast<PFN_MotionIndex>(g_exeBase + RVA_MOTION_INDEX)(motCtrl, static_cast<int>(motion)) >= 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
 static void DrivePuppetMotion(void* actorObj, int index) {
@@ -2654,6 +2670,17 @@ static void DrivePuppetMotion(void* actorObj, int index) {
 
     auto* motCtrl = reinterpret_cast<void*>(actor + ACTOR_MOTCTRL);
     auto* time = reinterpret_cast<float*>(actor + ACTOR_MOTCTRL + MOTCTRL_CURRENT_TIME);
+    // VUH-2613: a motion the clone's banks lack (borrowed by the owner from an enemy's bank) is never set.
+    if (static_cast<int>(motion) != d.lastAnim) {
+        const bool inBanks = MotionInBanks(motCtrl, motion);
+        const uint32_t stream = motion;
+        const float speed2 = pose.velocity.x * pose.velocity.x + pose.velocity.z * pose.velocity.z;
+        motion = puppethold::BankedMotion(motion, inBanks, speed2, ANIM_IDLE, ANIM_RUN);
+        if (!inBanks && d.missingMotion != stream)
+            Log("[puppet %d] frame %u motion %u is not in the clone's banks: shows %u actor=%p",
+                index, g_frameCounter, stream, motion, actorObj);
+        d.missingMotion = inBanks ? UINT32_MAX : stream;
+    }
     if (static_cast<int>(motion) != d.lastAnim) {
         Log("[puppet %d] frame %u motion %d -> %u (stream %u, time %.1f) actor=%p",
             index, g_frameCounter, d.lastAnim, motion, pose.motionId, pose.motionTime, actorObj);

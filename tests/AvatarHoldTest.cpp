@@ -350,6 +350,24 @@ void testHeldMotion() {
     check(clock.Frames(61) == 1, "a new hold restarts the count");
 }
 
+// VUH-2613: a stream motion the puppet's banks lack (Reversal's 241/242 live only in the Dusk's bank)
+// is never handed to the native setter, which would leave a T-pose.
+void testBankedMotion() {
+    std::cout << "\n=== Receiver: a motion the puppet's banks lack stands in idle/run (VUH-2613) ===\n";
+    namespace ph = kh2coop::inject::puppethold;
+    constexpr std::uint32_t kIdle = 0, kRun = 2, kAttack = 151, kReversal = 241;
+    check(ph::BankedMotion(kAttack, true, 0.0f, kIdle, kRun) == kAttack, "a banked motion is set as streamed");
+    check(ph::BankedMotion(kReversal, false, 0.0f, kIdle, kRun) == kIdle, "a borrowed motion, standing: idle");
+    check(ph::BankedMotion(kReversal, false, 4.0f, kIdle, kRun) == kRun, "a borrowed motion, moving: run");
+    check(ph::BankedMotion(0xFFFFFFFFu, false, 0.0f, kIdle, kRun) == kIdle, "no motion (-1) is not set either");
+    check(ph::BankedMotion(kReversal, false, 1.0f, kIdle, kRun) == kIdle, "speed exactly 1 still idles");
+    // Attack, Reversal, attack again: the stand-in differs from the attack, so the second attack is a
+    // change and restarts (holding the first attack through the RC would swallow it).
+    const std::uint32_t during = ph::BankedMotion(kReversal, false, 0.0f, kIdle, kRun);
+    check(during != kAttack && ph::BankedMotion(kAttack, true, 0.0f, kIdle, kRun) != during,
+          "the attack after the reaction command is a fresh motion change");
+}
+
 } // namespace
 
 int main() {
@@ -363,6 +381,7 @@ int main() {
     testHoldEnvParsing();
     testOwnRoomLoad();
     testHeldMotion();
+    testBankedMotion();
     testSoak();
     std::cout << "\n=======================================\n"
               << (g_errors == 0 ? "ALL CHECKS PASSED" : "CHECKS FAILED: " + std::to_string(g_errors))

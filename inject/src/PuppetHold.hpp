@@ -65,6 +65,17 @@ inline std::uint32_t HeldMotion(std::uint32_t motion, std::uint8_t poseFlags, st
     return heldFrames >= kHeldIdleFrames ? idleMotion : motion;
 }
 
+// VUH-2613: a stream motion the puppet's banks lack is never set. The owner can play a motion borrowed
+// from another actor's bank (a reaction command: Reversal's 241/242 are entries of the Dusk's bank), and
+// the native setter clears the playback chain before its lookup fails, leaving a T-pose. It stands in
+// idle, or run while the stream moves, as a companion puppet does for motions it lacks. Holding the
+// previous motion instead would keep that motion from restarting when the stream returns to it.
+inline std::uint32_t BankedMotion(std::uint32_t motion, bool inBanks, float speed2, std::uint32_t idleMotion,
+                                  std::uint32_t runMotion) noexcept {
+    if (inBanks) return motion;
+    return speed2 > 1.0f ? runMotion : idleMotion;
+}
+
 // The stream's motion clock is authoritative only for a live pose.
 constexpr bool SnapMotionTime(std::uint8_t poseFlags) noexcept { return !(poseFlags & AvatarHeld); }
 
