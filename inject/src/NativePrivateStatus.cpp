@@ -123,16 +123,21 @@ void BindFault(unsigned reason){unsigned none=0;g_bindFault.compare_exchange_str
 }
 // VUH-2612: pages proven readable this frame (Drain advances g_ownerFrames once per frame), so the
 // per-frame paths query each region once instead of on every read.
-struct ReadableRange { uintptr_t lo{},hi{};unsigned frame{UINT_MAX}; };
+// The frame counter stands still while no actor updates (a load, a game-over teardown), so entries are also
+// keyed by the load and transition serials.
+struct ReadableRange { uintptr_t lo{},hi{};unsigned frame{UINT_MAX};std::uint32_t load{},transition{}; };
 std::array<ReadableRange,4> g_readable{};unsigned g_readableNext=0;
 bool Readable(uintptr_t p,std::size_t n) {
     const auto frame=g_ownerFrames.load(std::memory_order_relaxed);
-    if(!spawncontroller::IsDiagnosticGameThread())return lifetime::Readable(p,n); // the cache is the game thread's
-    for(const auto& r:g_readable)if(r.frame==frame && p>=r.lo && p<r.hi && n<=r.hi-p)return true;
+    if(!spawncontroller::IsDiagnosticGameThread() || warp::TransitionPending() || warp::LoadPending())
+        return lifetime::Readable(p,n); // the cache is the game thread's, and only between loads
+    const auto load=warp::LoadSerial(),transition=warp::TransitionSerial();
+    for(const auto& r:g_readable)if(r.frame==frame && r.load==load && r.transition==transition &&
+        p>=r.lo && p<r.hi && n<=r.hi-p)return true;
     MEMORY_BASIC_INFORMATION info{};
     if(!lifetime::Readable(p,n) || !VirtualQuery(reinterpret_cast<LPCVOID>(p),&info,sizeof(info)))return false;
     const auto lo=reinterpret_cast<uintptr_t>(info.BaseAddress);
-    if(p+n<=lo+info.RegionSize)g_readable[g_readableNext++%g_readable.size()]={lo,lo+info.RegionSize,frame};
+    if(p+n<=lo+info.RegionSize)g_readable[g_readableNext++%g_readable.size()]={lo,lo+info.RegionSize,frame,load,transition};
     return true;
 }
 bool Copy(uintptr_t p,void* out,std::size_t n) {
@@ -731,7 +736,9 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
         reinterpret_cast<uintptr_t>(missing.record.data()),stamp.load,stamp.transition,context.generation,g_missingBudget.count);
     SetLastError(nativeError);return local;
 }
-bool MissingPartyPuppetAllowed(uintptr_t actor) {
+// decided: an entry for this actor was judged (not every match skipped as an address a later birth reused).
+static bool PuppetVerdict(uintptr_t actor,bool& decided) {
+    decided=false;
     const DWORD error=GetLastError();bool allowed=true;
     int walked=-1; // VUH-2612: walked once per call, at the first entry for this actor
     for(unsigned i=g_missingBudget.count;i>0;--i) {
@@ -746,7 +753,7 @@ bool MissingPartyPuppetAllowed(uintptr_t actor) {
                 s_unlistedLogged=actor;s_unlistedWhy=walked;
                 log(walked==static_cast<int>(lifetime::Walk::Capped)?"[missing-party] clone %llX past the active-list walk cap: refused":
                     "[missing-party] clone %llX no longer listed: refused",static_cast<unsigned long long>(actor));}
-            allowed=false;break;
+            allowed=false;decided=true;break;
         }
         const bool player=PlayerActor(actor,status,m.cloneKey);
         if(player && routespawn::NewPrivateBirth(m.serial,OwnedSerial(status),Owned(status),g_ready.load()))continue;
@@ -758,15 +765,20 @@ bool MissingPartyPuppetAllowed(uintptr_t actor) {
             PlayerActor(m.local,localStatus,m.localKey) && localStatus==m.localStatus && !Owned(localStatus) &&
             Read(actor+0x9E8,controller) && controller==m.controller &&
             Read(actor+0x9F0,record) && record==reinterpret_cast<uintptr_t>(m.record.data());
-        break;
+        decided=true;break;
     }
     SetLastError(error);return allowed;
 }
+bool MissingPartyPuppetAllowed(uintptr_t actor) {bool decided=false;return PuppetVerdict(actor,decided);}
 bool MissingPartyKitScope(){return MissingKitScope();}
 bool MissingPartyClone(uintptr_t actor) {
     if(!actor)return false;
     for(unsigned i=g_missingBudget.count;i>0;--i)
-        if(g_missing[i-1].actor==actor)return g_missing[i-1].bound && MissingPartyPuppetAllowed(actor);
+        if(g_missing[i-1].actor==actor) {
+            if(!g_missing[i-1].bound)return false;
+            bool decided=false;const bool allowed=PuppetVerdict(actor,decided);
+            return decided && allowed; // VUH-2612: a reused address is no current clone
+        }
     return false;
 }
 // VUH-2482: writes only this bound clone's own private status record (HP at +0, max HP at +4), on the

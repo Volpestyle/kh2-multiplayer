@@ -206,6 +206,18 @@ inline Hold Release(const Seats& s, const Location& here, bool localBound) {
     return Hold::None;
 }
 
+// After this seat was released at this location in this load (played here), a hold there is not taken
+// again for a changed roster (a seat joined or left; Solo keeps its own wait), nor for a lost clone binding:
+// the game can free a clone mid-field (VUH-2612: the post-boss event 157, game over), which this seat sees
+// as LocalUnbound and its peer, from this seat's report, as RemoteUnbound. The next checked site binds anew.
+enum class PlayedHere : std::uint8_t { Keep, RosterChanged, BindingLost };
+inline PlayedHere PlayedHereRelease(bool playedHere, bool rosterChanged, Hold hold) {
+    if (!playedHere || hold == Hold::None) return PlayedHere::Keep;
+    if (rosterChanged && hold != Hold::Solo) return PlayedHere::RosterChanged;
+    if (hold == Hold::LocalUnbound || hold == Hold::RemoteUnbound) return PlayedHere::BindingLost;
+    return PlayedHere::Keep;
+}
+
 // VUH-2486: a session that starts at an open prologue field with no checked site (a mid-prologue
 // save, such as the Day 6 basement) has no two-player layout to bind, so the Unpinned hold would never
 // end. It holds for UnpinnedGraceMs of continuous open field at one location (a transient, such as the

@@ -492,4 +492,24 @@ void network() {
     server.stop();
 }
 } // namespace
-int main() { if (enet_initialize()) return 2; codec(); unpinned(); soloWait(); blockedExit(); policy(); site(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }
+// VUH-2612: once both seats were released at a field in this load, the game freeing a clone there (the
+// post-boss event 157 did, with no reload) holds neither seat again.
+void playedHere() {
+    using P = prologue::PlayedHere;
+    using prologue::Hold;
+    check(prologue::PlayedHereRelease(true, false, Hold::LocalUnbound) == P::BindingLost,
+          "the seat whose clone was freed keeps playing");
+    check(prologue::PlayedHereRelease(true, false, Hold::RemoteUnbound) == P::BindingLost,
+          "and so does its peer, which now sees that seat unbound");
+    check(prologue::PlayedHereRelease(false, false, Hold::LocalUnbound) == P::Keep &&
+              prologue::PlayedHereRelease(false, false, Hold::RemoteUnbound) == P::Keep,
+          "before a first release here both bindings are still required");
+    check(prologue::PlayedHereRelease(true, true, Hold::RemoteUnbound) == P::RosterChanged &&
+              prologue::PlayedHereRelease(true, true, Hold::Solo) == P::Keep,
+          "a roster change keeps its own rule; Solo keeps its wait");
+    check(prologue::PlayedHereRelease(true, false, Hold::MissingProfile) == P::Keep &&
+              prologue::PlayedHereRelease(true, false, Hold::Solo) == P::Keep &&
+              prologue::PlayedHereRelease(true, false, Hold::None) == P::Keep,
+          "a lost binding releases nothing else");
+}
+int main() { if (enet_initialize()) return 2; codec(); unpinned(); soloWait(); blockedExit(); policy(); site(); playedHere(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }

@@ -268,18 +268,13 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
     if (decided) hold = prologue::Release(g_seats, LocationOf(now), LocalBoundHere(now));
     else if (early) hold = Hold::Unpinned;
     const bool playedHere = decided && g_playedLoad && g_playedLoad == warp::LoadSerial() && g_playedAt == now;
-    if (playedHere && roster != g_playedRoster && hold != Hold::None && hold != Hold::Solo) {
+    if (const auto played = prologue::PlayedHereRelease(playedHere, roster != g_playedRoster, hold);
+        played != prologue::PlayedHere::Keep) {
         if (g_log && !g_playedLogged)
-            g_log("[prologue] already playing at=%02X/%02X evt=%u: %s waits for the next checked site", now[0], now[1],
-                  LocationOf(now).evt, prologue::HoldName(hold));
-        g_playedLogged = true;
-        hold = Hold::None;
-    }
-    // VUH-2612: the game can free this seat's clone mid-field (an event); once released here in this load,
-    // losing that binding does not hold the seat again. The next checked site binds anew.
-    if (playedHere && hold == Hold::LocalUnbound) {
-        if (g_log && !g_playedLogged)
-            g_log("[prologue] clone gone at=%02X/%02X evt=%u: already playing here, not held", now[0], now[1], LocationOf(now).evt);
+            g_log(played == prologue::PlayedHere::RosterChanged
+                      ? "[prologue] already playing at=%02X/%02X evt=%u: %s waits for the next checked site"
+                      : "[prologue] clone gone at=%02X/%02X evt=%u: already playing here, %s not held",
+                  now[0], now[1], LocationOf(now).evt, prologue::HoldName(hold));
         g_playedLogged = true;
         hold = Hold::None;
     }
