@@ -212,11 +212,14 @@ inline bool KnownReactionSource(bool hostRouted,bool mirroredCopy,std::uint32_t 
     return hostRouted || (mirroredCopy && HostRoutedReactionClass(objectId));
 }
 // Whether a client keeps a mirrored receiver's reaction callback (0x3B5FA0, its BDX key 11) to itself:
-// unpaired, it is refused, and its warmup or held state never reopens it. That holds for a host-routed
-// class (Thorn), and for a receiver whose class cannot be read. Any other mirrored enemy's callback runs
-// natively: a Dusk's Reversal shout is what starts the player's own Reversal, as before 5dd231f.
+// unpaired, it is refused, and its warmup or held state never reopens it. "Mirrored" includes
+// host-owned field and puzzle actors as well as enemies, so it stays refused for every class except
+// one qualified to run natively: the Dusk (objectId 318), whose Reversal shout is what starts the
+// player's own Reversal, as before 5dd231f. A receiver whose class cannot be read stays refused.
+inline constexpr std::uint32_t kNativeCallbackDusk=318;
+inline bool NativeCallbackClass(std::uint32_t objectId) noexcept { return objectId==kNativeCallbackDusk; }
 inline bool ClientOwnedCallbackReceiver(bool client,bool mirroredCopy,bool objectIdRead,std::uint32_t objectId) noexcept {
-    return client && mirroredCopy && (!objectIdRead || HostRoutedReactionClass(objectId));
+    return client && mirroredCopy && !(objectIdRead && NativeCallbackClass(objectId));
 }
 
 struct ReactionPoint { float x{}, y{}, z{}; };

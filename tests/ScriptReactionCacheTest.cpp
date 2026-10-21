@@ -95,6 +95,13 @@ int main() {
           "a mirrored Thorn's unpaired callback stays refused (warmup and held included)");
     check(R::ClientOwnedCallbackReceiver(true,true,false,0),
           "a mirrored receiver whose class cannot be read stays refused");
+    // r3: "mirrored" also covers host-owned F_ field/puzzle actors (SuppressClientDecision); only the
+    // qualified Dusk is exempt, so any other class, field actors included, keeps its unpaired refusal.
+    constexpr std::uint32_t fieldActor=0x1F6,otherEnemy=302;
+    check(R::ClientOwnedCallbackReceiver(true,true,true,fieldActor),
+          "a mirrored F_ field actor's unpaired callback stays refused");
+    check(R::ClientOwnedCallbackReceiver(true,true,true,otherEnemy),
+          "a mirrored enemy of another, unqualified class stays refused");
     check(!R::ClientOwnedCallbackReceiver(false,true,true,thorn) && !R::ClientOwnedCallbackReceiver(true,false,true,thorn),
           "the host, and an unmirrored receiver, never refuse here");
     check(R::NativeReactionActive(replacement,replacement.roots[0]+0x10,replacement.command,replacement.target),
