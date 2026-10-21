@@ -339,6 +339,15 @@ void site() {
           serenity154 && std::string_view(serenity154->name) == "tt32-154" && Serenity154Header[2] == 47 &&
           Serenity154Records.size() == 6 * 64 && dusk79->prologue && serenity2->prologue && serenity154->prologue,
           "the Day 3 Sandlot Dusk, the Serenity arrival from it and the Serenity tutorial Dusks are checked prologue sites (VUH-2466)");
+    const auto* s86 = MissingPartySiteFor(Struggle86Location, 842293090, 0x3FF727, Struggle86Header, Struggle86Records);
+    const auto* s87 = MissingPartySiteFor(Struggle87Location, 859070306, 0x3FF727, Struggle87Header, Struggle87Records);
+    const auto* s88 = MissingPartySiteFor(Struggle88Location, 875847522, 0x3FF727, Struggle88Header, Struggle88Records);
+    check(s86 && std::string_view(s86->name) == "tt05-86" && Struggle86Records.size() == 6 * 64 && Struggle86Header[2] == 122 &&
+          s87 && std::string_view(s87->name) == "tt05-87" && Struggle87Records.size() == 4 * 64 && Struggle87Header[2] == 144 &&
+          Struggle87Records[3 * 64] == 0xB5 && Struggle87Records[3 * 64 + 1] == 0x08 &&
+          s88 && std::string_view(s88->name) == "tt05-88" && Struggle88Records.size() == 4 * 64 && Struggle88Header[2] == 166 &&
+          Struggle88Records[3 * 64] == 0x2F && Struggle88Records[3 * 64 + 1] == 0x08,
+          "the Day 5 Sandlot fights (time-stop Dusks, Axel's skirmish, the Struggle match) are checked prologue sites (VUH-2466)");
     const auto* alley4 = MissingPartySiteFor(BackAlley4Location, 808804197, 0x3FF727, BackAlley4Header, BackAlley4Records);
     auto alley4Short = std::vector<std::uint8_t>(BackAlley4Records.begin(), BackAlley4Records.begin() + 4 * 64);
     check(alley4 && alley4->prologue && std::string_view(alley4->name) == "tt03-4" && BackAlley4Records.size() == 18 * 64 &&

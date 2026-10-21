@@ -47,9 +47,9 @@ readings, confirmed only where the live column says so.
 | 5 | 04 Sandlot | 181 | `TT04_MS500` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
 | 5 | 05 Sandlot (Struggle) | 84 / 189 | `TT05_MS401` | N_EX500_BTL (1239); 189 adds 3 Dusks | Struggle match | not yet |
 | 5 | 05 Sandlot (Struggle) | 85 | `TT05_MS402` | N_EX610_BTL (2156) | Struggle match | not yet |
-| 5 | 05 Sandlot (Struggle) | 86 | `TT05_MS403` | 3 Dusks (318) | time-stop Dusks | not yet |
-| 5 | 05 Sandlot (Struggle) | 87 | `TT05_MS404` | B_EX110_SKIRMISH (2229), Axel | boss skirmish | not yet |
-| 5 | 05 Sandlot (Struggle) | 88 | `TT05_MS405` | N_EX600_BTL (2095) | Struggle match | not yet |
+| 5 | 05 Sandlot (Struggle) | 86 | `TT05_MS403` | 3 Dusks (318) | time-stop Dusks | checked site `tt05-86`; both seats fight, loopback from FM-01 (below) |
+| 5 | 05 Sandlot (Struggle) | 87 | `TT05_MS404` | B_EX110_SKIRMISH (2229), Axel | boss skirmish | checked site `tt05-87`; both seats fight, loopback from FM-01 (below) |
+| 5 | 05 Sandlot (Struggle) | 88 | `TT05_MS405` | N_EX600_BTL (2095) | Struggle match | checked site `tt05-88`; both seats fight, loopback from FM-01 (below) |
 | 6 | 03 Back Alley | 73 | `TT03_MS601` | 2 Dusks (318), 1 Dusk (309) | Dusk ambush | checked site `tt03-73`; loopback from FM-01, both seats fight; the 309 does not bind (below) |
 | 6 | 19 Basement Hall | 134 | `TT19_MS602` | 4 Dusks (318), then 2 (309) | Mansion Dusk ambush | checked site `tt19-134`; loopback from FM-02 |
 | 6 | 20 Basement Hall | 137 | `TT20_MS603` | B_EX110 (81), Axel | Axel I | loopback, VUH-2465 |
@@ -125,3 +125,14 @@ From FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-2466):
   `20261020-234512`: both seats released with both Roxases and fought. The host's third death arrived on
   the friend just as the mission-complete event closed its gameplay gate and was not applied (the Dusk
   stayed at 15 HP there; the relay captured a desync). The unpinned probe applied all three.
+
+Day 5 Sandlot fights, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-2466):
+- btl86 (three time-stop Dusks 318, headerId 122), btl87 (Axel's skirmish, B_EX110_SKIRMISH 2229,
+  headerId 144) and btl88 (the Struggle match, N_EX600_BTL 2095, headerId 166) are each raw566, the
+  absent raw567/568 and their enemies: `tt05-86`, `tt05-87`, `tt05-88`. In runs `20261021-005228`,
+  `-005604` and `-005934` both seats released with both Roxases and fought.
+- The rig's fight bot loses btl86 and btl87 on the host (native game over: the downed spike is off in
+  these fixtures), and the friend fights on alone.
+- The Struggle match ends by each seat's own script (the same native start, the host first); the
+  friend's mission mirror does not follow its gauges (`following=0`), so its clock runs on until its
+  own end.
