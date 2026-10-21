@@ -1,7 +1,7 @@
 # Online Co-op Plan
 
 > **Status:** plan of record established 2026-10-01; current-state refresh
-> 2026-10-08 against main `23e9c52`. Supersedes the Track A
+> 2026-10-20 against main `2ed98fa`. Supersedes the Track A
 > milestones M4–M8 in `IMPLEMENTATION_BACKLOG.md` and the authority and actor
 > model sections of `kh2_three_client_coop_design.md`. Work is tracked in the
 > Linear project **KH2 Multiplayer** (vuhlp workspace); this doc holds the
@@ -13,6 +13,47 @@
 > can play, and a lighter definition of done. Next milestones, in order:
 > 3-player playable co-op (James playtests), then PvP, then a hosted
 > "Minecraft server" mode.
+
+## Current implementation and qualification (2026-10-20)
+
+Current compatibility is protocol **29**, AvatarBridge **4** and WorldBridge
+**12**. Use a matching product set; protocol numbers in dated results below
+identify those historical runs, not today's compatibility. The preview accepts
+only the verified Steam Global executable (`9002b2de`); Steam relay-only and ENet
+share the session policy. This is development preview software, with no complete
+playthrough or public-server acceptance claim.
+
+The local-primary actor model is implemented: each human controls native slot 0
+on their own PC, with other humans represented by friend-slot puppets. Ordinary
+co-op supports up to three network seats; the checked prologue layout currently
+admits two. The launcher offers Roxas or Sora; the core opening keeps a Roxas
+host and permits a Roxas or Sora friend. Other playable profiles and arbitrary
+host replacement remain requirements, not delivered roster support.
+
+Two-instance loopback evidence covers first-field construction, the Armor Shop
+reloads, the first Sandlot door, mixed-profile reconnect, seat colors and the
+Sandlot duel. Later checked sites include the Day-6 Mansion/Back Alley ambushes,
+Station of Calling and the Old Mansion front. These are separate bounded runs,
+not one continuous New Game route. Unchecked fields can remain native solo;
+the Woods walk-in is unresolved, and the Back Alley ambush's object-309 binding
+can diverge. See [party setup](PARTY_SETUP.md) and the
+[encounter checklist](PROLOGUE_ENCOUNTERS.md).
+
+Roxas logical downing, Triangle revive, delayed waves and host-led native
+Continue have bounded Day-6 loopback evidence ([downed/revive](DOWNED_REVIVE.md));
+native kills stand in for combat in that proof. The native party HUD displays
+remote owner HP/MP and portraits. A separate two-Sora loopback shows each owner
+casting Fire, spending MP and naturally refilling while the opposite HUD agrees
+([native HUD](NATIVE_PARTY_HUD.md), [guest Magic](NATIVE_GUEST_MAGIC.md)).
+These do not establish two-PC prologue, reciprocal HUD or whole-route acceptance.
+
+The current route gate remains **New Game / Roxas Days 1-6 -> Sora's TT first
+visit -> Yen Sid -> HB 1 -> world map/Gummi -> LoD 1 -> Shan-Yu**, on two PCs through
+native doors with both players active. Opening-scene friend representation,
+unqualified encounters/profiles and the two-PC route remain open. PC2 access
+(VUH-2339) is a dependency recorded by the current evidence. The dated October 8
+snapshot below is retained as history; use this summary and linked feature docs
+for current behavior and limits.
 
 ## Product principle: character-agnostic co-op
 
@@ -118,9 +159,11 @@ Sources: `docs/PLAYER_KITS.md` (including its limits), `docs/PARTY_SETUP.md`
 comments/attachments on [VUH-1513](https://linear.app/vuhlp/issue/VUH-1513).
 The table admits Sora `0x54`, Roxas `0x5A` and party-only Mickey `0x5B`;
 dual-wield Roxas `0x323` is listed but **unqualified**. Riku has no admitted row.
-`inject/src/PlayerKit.cpp` still restricts standalone kits to world 4 and native
-Sora, and its automatic TT/HB/BC clone path refuses prologue Roxas. Do not remove
-those checks globally or advertise table membership as route qualification.
+The older standalone player-kit path retains its own world/native-player
+checks. The separate checked prologue ingress in `inject/src/PrologueParty.cpp`
+and `common/include/kh2coop/PrologueSeats.hpp` now admits Roxas and Sora with
+agreed profiles and private status. It does not qualify every prologue field,
+opening scene or roster entry; see `PARTY_SETUP.md`, "Prologue layout".
 
 A **playable profile** means local input drives that character's own supported
 movement and attacks, with camera/lock-on, weapons, HUD, private remote status,
@@ -132,8 +175,8 @@ profiles refuse readiness with a reason, never silently substitute Sora.
 
 | Profile / phase | Prologue feasibility, first delivery and remaining gate |
 |---|---|
-| Roxas friend | Fastest: reuse VUH-1513's native player/remote kit. Qualify TT's normally solo layout, opening scene, status, doors and commands; existing world-4 proof is insufficient. VUH-2464 starts with Roxas+Roxas. |
-| Sora friend | Next: native player-class body and existing Sora puppet. Feed Sora's selected profile into the same opening layout and actor-owner routing; do not force a prologue friend to inherit the host's Roxas selector. Qualify Roxas+Sora through the first scene/tutorial and door under VUH-1512. No story unlock is required by design. |
+| Roxas friend | Implemented at checked prologue sites, with two-instance first-field, door and selected encounter evidence under VUH-2464/2466. Opening-scene representation, unqualified fields and the continuous two-PC route remain open. |
+| Sora friend | VUH-1512 implements selection, native body loading, first-field/reload/first-door construction, reconnect and refusal messages, with loopback evidence. Opening-scene representation and the two-PC route remain open. No story unlock is required by design. |
 | Donald, then Goofy friend | Plausible, unproved: both exist in installed game data, but neither is a player-class kit or a qualified human profile. VUH-1514 first proves native friend-actor input/attack, then opening placement, camera/HUD, HP, actions, downed and doors. They need not wait for full Riku or the long route gate. A missing TT party slot is an actor-layout problem, not a story-unlock restriction. |
 | Riku friend / full keyblade trio | VUH-2468 tries native party-Riku input first, then VUH-1513 builds full Riku if needed. Own attacks and movement, not a Roxas reskin. Use Donald's controller/actor findings if ready; Riku does not block the first few profiles. No extra player mod install or shipped game/mod-author assets. |
 | World allies / Mickey / dual-wield | Add allies one at a time with their assets, weapon and action dependencies checked in TT. Mickey keeps his bounded party-kit qualification until opening/downed/door checks pass. Dual-wield Roxas is an encounter form first. A character appearing in the game does not establish early playability. |
@@ -270,10 +313,10 @@ actors and rebind both chosen gameplay profiles before controls resume.
 
 ### Downed, revive and retry without stopping waves
 
-Current `inject/src/DownedSpike.inl` suppresses Game Over **after** native death:
+The original Sora path in `inject/src/DownedSpike.inl` suppresses Game Over **after** native death:
 HP 0, `actor+0x9B8` bit 2 set, `DEADSORA`, controls off. Its revive helper requires
-that state. `docs/DOWNED_REVIVE.md` explicitly leaves non-Sora classes and
-all-party recovery open. TCM's dead-flag/spawn caveat means holding this state
+that state. This was the baseline when D16 was designed. TCM's
+dead-flag/spawn caveat means holding this state
 is not the prologue design: a downed host must not stop the next Dusk wave.
 TCM's notes also show the spawn hook checking `!(actor+0x9B8 & 4)` and its normal
 downed path retaining 1 HP; those are research leads, not local validation
@@ -281,7 +324,14 @@ downed path retaining 1 HP; those are research leads, not local validation
 [`downed.cpp`](https://github.com/TCM-Murray/Kingdom-Hearts-II-Coop-Multiplayer/blob/30b7cd8a1e440bddfd0b095d503120cdca11737a/src/dll/downed.cpp)).
 Use their approach as a lead; D15 forbids copying code without James's decision.
 
-Proposed state flow: **Alive → logical Downed → Reviving → Alive**, or **all
+VUH-2465 now implements logical downing for Roxas, including Triangle revive,
+door holds, forced-transition recovery and host native Continue. Run
+`20261019-151151` supplies Day-6 loopback wave/revive/retry proof; native kills
+stand in for player combat. Sora retains the held-native-death path. The policy
+below remains the target for additional admitted profiles and route contexts;
+see [the implementation and limits](DOWNED_REVIVE.md#logical-downing-in-the-prologue-vuh-2465).
+
+State flow: **Alive → logical Downed → Reviving → Alive**, or **all
 humans Downed → host Retry → new room epoch**. Intercept admitted lethal damage
 before native death, retain engine HP 1 and keep the native dead bit clear.
 Publish logical HP 0/downed to the stream and HUD using the existing episode
@@ -363,9 +413,11 @@ keyboard fights) shows:
 
 ### Ordered build issues and acceptance
 
-All new slices are Backlog until this plan is reviewed; the lead schedules them
-within D14's six-started limit. The two-Roxas proof comes first; Roxas+Sora
-follows immediately, then Donald/Goofy before the full-Riku fallback.
+The ordered slices below preserve the design's dependencies; implementation and
+bounded results are recorded where available. They do not assert current tracker
+states. The lead schedules remaining work within D14's six-started limit.
+Roxas+Roxas and Roxas+Sora now have checked-site loopback proof; Donald/Goofy
+remain before the full-Riku fallback.
 The shared contract is character-agnostic; host story-body replacement is optional
 and cannot delay the core route.
 
@@ -390,7 +442,7 @@ and cannot delay the core route.
    keeps both seats: unskipped run `20261018-215915` and skipped run
    `20261018-222415` rebuilt two Roxases on each seat there, held the host until
    the friend bound, moved only the owner's Roxas, and logged no unpinned solo
-   field. Open: the Day 1 walk-through doors after the Sandlot are not pinned,
+   field. Open: Day 1 walk-through coverage after the Sandlot remains incomplete (including the Woods walk-in),
    the friend in the opening scenes moved to VUH-2359, and the two-PC clip waits
    for bld.
 3. **VUH-1512 — per-seat selector.** Depends on VUH-2464 for prologue proof.
@@ -449,17 +501,19 @@ and cannot delay the core route.
 
 Every implementation slice attaches its passing report and captures/clips to its
 own issue; DLL/memory-write/save-adjacent changes retain the required independent
-review. This design's evidence is the document/diff and tracker criteria,
-not a live run. Open technical questions belong to the slices: exact Day-1 party
-programs, dual-wield handoff/poses, Riku action reachability and native retry
-snapshot behavior. None is treated as proved by this proposal.
+review. The original design's evidence was the document/diff and tracker criteria;
+subsequent live results above qualify only their stated contexts. Remaining
+technical questions belong to the slices, including unchecked Day-1 party
+programs, encounter-specific dual-wield behavior and Riku action reachability.
+The Day-6 native retry proof does not qualify every route checkpoint.
 
-## Player launch defaults (2026-10-13)
+## Player launch defaults (reviewed 2026-10-20)
 
 The friend/package launcher uses `tools/launcher/friend_package.py`'s
 `child_environment` for both game and runtime children. Explicit parent env
-values for the eight enabled features, including `0`/`off`, override the defaults.
-Developer switches remain filtered; the two parked flags stay forced off.
+values for the nine enabled features, including `0`/`off`, override the defaults.
+Developer switches remain filtered; the two parked flags stay forced off, as
+does `ORDINARY_LIFECYCLE_EXPERIMENTAL`.
 Direct developer launches retain their native defaults.
 
 | Flag (`KH2COOP_` prefix) | Player default | Scope or parked reason |
@@ -468,12 +522,20 @@ Direct developer launches retain their native defaults.
 | `ENEMY_POPULATION` | `1` | Remove a friend's living copy when the host removes it. |
 | `ENEMY_TARGET_ALL` | `1` | Automatic private Sora on the next ordinary two-player TT/HB/BC load; qualified mirrored enemy families can target the friend. |
 | `COOP_DIFFICULTY` | `normal` | Host room-locked health factor; two-player mobs ×1.6. |
+| `FRIENDLY_FIRE` | `1` | Host policy: `1` preserves existing native/hit rules; `0` refuses damaging player-to-player hits. |
 | `EVENT_HOLD_PRODUCER` | `1` | Host event announcements, in any room. |
 | `EVENT_HOLD_CONTROL` | `1` | Client input hold/overlay followed by host-led room/state resync. Holds work in populated rooms; a client outside the host's room or unable to pause skips that one hold, and a client not converged 10 s after the host's release gets its input back (VUH-2268). |
-| `DOWNED_SPIKE` | `1` | Downed/revive: a player at 0 HP is held downed instead of Game Over (VUH-2269, `docs/DOWNED_REVIVE.md`). |
+| `DOWNED_SPIKE` | `1` | Downed/revive: Roxas is logically downed at engine HP 1 so waves continue; Sora retains held native death at HP 0 (`docs/DOWNED_REVIVE.md`). |
 | `REVIVE_PROMPT` | `1` | Hold Triangle near a downed teammate to revive them. |
 | `ENEMY_POPULATION_SPAWN` | `0` (parked) | General client spawn/lifecycle behavior is not qualified. |
 | `ENEMY_TARGET_REMOTE` | `0` (parked) | Legacy target path is superseded by the qualified all-target path. |
+
+The prologue layout follows the shipped `ENEMY_TARGET_ALL` + `ENEMY_MIRROR`
+dependency unless explicitly disabled with `KH2COOP_PROLOGUE_PARTY=0` in a
+developer launch. It requires agreed, admitted profiles and checked construction
+sites. Native party HUD projection and the corrected clone command tick apply
+through their current binding/neutral-input prerequisites; they are not extra
+launcher flags.
 
 The no-feature-env BC loopback `20261013-083241` confirmed all settings in
 the launcher logs, players=2, Soldier HP 39→63 on both peers, three agreeing
@@ -591,9 +653,10 @@ Passing/failed reports and local player/event profile are under
 `.local/vuh1497-player/`; the scenario is `net_player_progress_route.json`.
 These are source-player ENet loopbacks, not an installed-package or two-PC claim.
 
-## Where the project stands (updated 2026-10-08)
+## Historical snapshot (2026-10-08)
 
-This snapshot describes main `23e9c52` and the bounded live evidence below.
+The table below preserves the October 8 snapshot on main `23e9c52`. Subsequent
+evidence entries retain their own dates and source baselines.
 Pending chosen-AI, record-authority and batch-8 candidates are not included.
 The original decisions and phase gates remain unchanged; these passes do not
 establish a full playthrough or the two-hour friend-session gate.
@@ -1777,7 +1840,7 @@ Format: decision — why (rejected alternative).
   VUH-1513 Roxas proof is reused. Implementation proposals, starting inputs,
   death/spawn policy and ordered acceptance slices are in
   [Prologue co-op and playable cast](#prologue-co-op-and-playable-cast-vuh-2450);
-  implementation waits for lead review.
+  the original proposals are followed by bounded implementation results above.
 
 ## Architecture
 
@@ -1971,12 +2034,13 @@ loaded, get several instances into a known room, act, look, and judge.
 - **Intercept and apply.** One hook enforces the damage rule. The same boundary
   must be callable to apply a claimed hit natively on the host and, as the
   fallback, a host-detected hit on a client's avatar.
-- **Downed, not game over.** Current held native-death behavior and its bounded
-  evidence are in `DOWNED_REVIVE.md`. D16 proposes pre-death HP-1 logical downing
-  so native spawn checks keep working, teammate Triangle revive and host-led
-  all-party native retry. It has no timer revive in the initial slice. See the
-  [prologue design](#prologue-co-op-and-playable-cast-vuh-2450); those changes
-  still require implementation and live wave/retry proof.
+- **Downed, not game over.** Sora retains the held-native-death path; Roxas now
+  uses pre-death HP-1 logical downing so native spawn checks keep working, with
+  teammate Triangle revive and host-led all-party native Continue. VUH-2465's
+  Day-6 loopback proves bounded wave/revive/retry behavior using native kills as
+  the combat stand-in. No timed revive is provided. See
+  [downed/revive](DOWNED_REVIVE.md) for implementation, evidence and limits;
+  additional profiles, encounters and two-PC route qualification remain open.
 
 ### 5. Rooms, cutscenes and story state (P2)
 

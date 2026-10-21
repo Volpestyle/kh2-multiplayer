@@ -4,16 +4,26 @@ Step 2 passed on both PCs (rev11: host 20261008-000620, friend 20261008-000619):
 authenticated relayed admission, room follow, combat, attachment reconnect and
 terminal host leave. The friend Steam flow has offline review approval and passed
 its PC2 launch/title/exit UX acceptance (UX07, 20261008T060115Z-5fd7830d).
-Host/join via the package UI remains untested live. Historical probe/checklist
-sections below retain their original scope. ENet remains the development
-runtime's default packet transport. Protocol10, its channel assignments,
-session/cache/resync authority and all existing admission checks are unchanged.
+Package GUI host/join later reached technical two-PC acceptance (JOIN05).
+Effective movement with a clearly responding puppet on both package screens,
+a physical-controller friend session and the full story route remain open.
+Current source is protocol 29, AvatarBridge 4 and WorldBridge 12. Earlier runs
+retain their original products and scope; do not mix them with current binaries.
+ENet remains the bare development runtime's default transport; a Steam package
+selects Steam in its verified manifest. Session/cache/resync authority stays in
+the runtime, with host gameplay authority unchanged.
+
+The checked-in package validator/pins still target protocol 18, whereas source
+is protocol 29. Building a current-source package is blocked until that cohort
+is refreshed and qualified; see [packaging](../tools/packaging/README.md).
+The setup below applies to a complete matching package supplied by the host.
 
 ## Friend setup: Steam private preview
 
 **Status:** the Steam transport passed its two-PC Step 2 run, and the friend
-launcher passed its one-launch PC2 UX check (UX07, 2026-10-08). Host/join via the
-package UI remains untested live. Use the
+launcher passed its one-launch PC2 UX check (UX07, 2026-10-08). Technical
+two-PC package GUI host/join acceptance (JOIN05) also passed, with
+movement/puppet visibility and human-session limits described above. Use the
 specific reviewed package supplied by the host, with matching versions on both PCs.
 
 **Install and run.** Each player needs Windows, their own Steam account with the
@@ -71,13 +81,22 @@ and shutdown remain the calling application's responsibility. Test-only raw
 ENet injection still bypasses the interface deliberately to exercise malformed
 wire traffic. Its opaque peer handle is not a game/session identity.
 
-The approved next design places a Steam broker inside the game, using the
+The implemented Steam broker lives inside the game, using the
 game's existing app2552430 Steam session. The host runtime retains session,
 cache and resync logic. Joining starts with a pasted SteamID and explicit host
 admission. Routing must be relay-only with ICE disabled and verified; unsupported
 privacy settings refuse. No app480, second Steam initialization or Steam shutdown.
 The broker and its runtime link are implemented behind explicit opt-in below.
 They do not move session/cache/resync authority into the game.
+
+## Historical implementation and diagnostic notes
+
+The following probe, review and candidate sections preserve their original
+pre-attempt scope. Statements such as PENDING, default-off and `not yet executed`
+in those sections refer to their dated products, not the current qualification
+summary above. Current player defaults and limits are in
+[known issues](FRIEND_PLAYTEST_KNOWN_ISSUES.md); the capability probe remains an
+explicit diagnostic separate from the player Steam broker.
 
 ## Opt-in capability probe
 
@@ -421,7 +440,7 @@ Generic transport loss/local disconnect keeps its existing immediate retirement
 and stale-rejoin handling; delaying those would reject an incoming G7 rejoin as
 a duplicate while its old connection was retained.
 
-## Friend package flow (PENDING)
+## Historical friend package implementation notes
 
 `tools/packaging/build_friend.py --transport steam --products <pins.json>` uses
 explicit Steam-capable products, a separately pinned portable CLI, and
@@ -452,5 +471,6 @@ requires a guarded launch design and reviewed same-pipe callback routing, so thi
 package offers copy/paste invitations. No second Steam initialization is added.
 See [Valve's invite contract](https://partner.steamgames.com/doc/api/ISteamFriends#InviteUserToGame).
 
-Rev7's two-PC Step 2 PASS (20261007-214358) is transport evidence. These package
-and UI changes have offline controls only until their own reviewed acceptance run.
+Rev7's two-PC Step 2 PASS (20261007-214358) is transport evidence. These
+notes predate UX07 and JOIN05; the current qualification summary above
+records the later package results and their limits.

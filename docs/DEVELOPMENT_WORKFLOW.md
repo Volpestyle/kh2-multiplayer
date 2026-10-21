@@ -1,6 +1,6 @@
 # Development Workflow
 
-How to build, test, and iterate on the inject DLL against a running KH2 instance.
+How to build, test, and iterate on the inject DLL against a running KH2 instance. See [setup](../SETUP.md) for build requirements. Read the `kh2-rig` skill before live work, and respect the single live lane and `build/rig/rig.lock`.
 
 ## Prerequisites
 
@@ -19,8 +19,8 @@ How to build, test, and iterate on the inject DLL against a running KH2 instance
 ```
 1. Edit code (inject/src/EntityHook.cpp)
 2. kh2ctl restart        kill rig instances, rebuild the DLL, launch, inject
-3. Load a save (get into gameplay with Donald in party)
-4. Press F5 to toggle solo mode
+3. Load a save with the scenario runner's checked boot step
+4. Start matched runtime(s) / relay, or use the player launcher for its defaults
 5. Test, read build/rig/logs/kh2coop_inject_<pid>.log, repeat from step 1
 ```
 
@@ -49,13 +49,14 @@ failure. Last queue references are intentionally retained at process teardown.
 Set `KH2COOP_RENDER_DIAGNOSTICS=1` before launch for bounded queue, owner,
 Present metadata and first-failure receipts. Diagnostics do not establish queue
 association by themselves. The combined overlay-ON native result is
-[012155](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-result.md).
+historical local run `012155`; its ignored receipt is
+`build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined6-result.md`.
 
 `launch` reports `"hooksInstalled":true` and the hook list once the DLL's init
 log shows every hook. Measured 2026-10-01: 10 of 10 launches installed all four
 hooks, about 2 s from launch to injection.
 
-Loading a save is still manual or step-by-step `tap-key`; `boot-load-save` is
+Use the scenario runner's checked `boot` step to load a save; `boot-load-save` is
 known broken (see `KH2_CONTROL_CLI.md`).
 
 ## Friendly fire (VUH-2421)
@@ -63,9 +64,9 @@ known broken (see `KH2_CONTROL_CLI.md`).
 Set `KH2COOP_FRIENDLY_FIRE=0` on the **host runtime** to turn friendly fire
 off; unset or any other value keeps it on (the default). The relay advertises
 the admitted host's setting to every peer at session start, and a friend's
-environment cannot override it (protocol v25). Off refuses every
-player-to-player hit at the native hit check (3D2060), so there's no damage,
-reaction or knockback; enemy hits are unchanged. On keeps today's behaviour.
+environment cannot override it (protocol v25). Off refuses damaging
+player-to-player hits at the native hit check (3D2060), so there is no damage,
+reaction or knockback from those hits; heal-like kinds 5/6 and enemy hits are unchanged. On preserves the existing native hit policy.
 `KH2COOP_ALLY_HIT=0` installs no hit hook, so the setting has no effect there.
 A change applies when the host next connects.
 
@@ -73,8 +74,10 @@ A change applies when the host next connects.
 
 Set `KH2COOP_COOP_DIFFICULTY=off|normal|hard` on the **host runtime**.
 Unset or unknown values select Off. The relay advertises the admitted host's
-mode; a friend's environment cannot override it. Protocol v18 is required;
-v17 peers receive a protocol mismatch rejection.
+mode; a friend's environment cannot override it. This feature was introduced in
+protocol v18; current builds require matching protocol **29** peers. Older peers
+receive a protocol mismatch rejection. The player launcher selects Normal;
+direct runtime launches default to Off.
 
 The host locks the mode and connected player count when it announces a native
 room, including when hosting starts mid-room. Joins/leaves apply to the next
@@ -150,56 +153,27 @@ offline development continued without protection or permission changes.
 
 ## Rebuilding while KH2 runs
 
-Relay cached world records now require complete exact frames and the current
-nonzero room epoch; HP/death also require its current manifest. The world-cache
-receipt in `build/rig/world_cache_epoch_offline_receipt_20261003.json` records
-separate current checks; the earlier reconnect zip stays frozen. The protocol 9
-candidate adds offline-accepted bounded native record-content qualification to
-the fresh host-native resync transaction introduced in protocol 8. Its unchanged
-89-step local living Bootstrap passed on 2026-10-04; absent-pack reconnect
-recovery remains open ([current witness scope](FORCED_RESYNC.md#native-record-content-candidate-2026-10-04)). Do not remove the
-fresh-actor anti-refill guard to make a reload inherit old host deaths: checked
-creation/lifecycle evidence and a same-point alive-refill negative control are
-required. Automatic desync reporting now transfers bounded actual peer artifacts
-under a frozen session/connection roster and preserves partial results. Shared
-CaptureChannel caller leases serialize automatic and CLI capture/clip requests;
-outstanding timed-out sequences still block reuse. See `DESYNC_REPORTS.md` for
-registration, output roots, capture witnesses and collection limits.
+Current source uses protocol **29**, AvatarBridge **4**, WorldBridge **12**
+and CaptureChannel **1**. Rebuild runtime, relay, inject DLL, avatarctl and kh2ctl
+from the same source cohort. Incompatible mappings fail their version checks;
+an older DLL already injected into KH2 cannot validate the new runtime.
 
-Protocol **7** sequences absolute enemy HP at the DLL publication point and
-rejects older same-room samples before relay caching or client/native mutation.
-Reliable equal-sequence cache replay remains supported; see `HP_ORDERING.md`.
-That ordering result alone does not prove native convergence; the protocol 8
-transaction adds separate source cuts and per-target delivery fences.
+The normal co-op path is local-primary avatar/puppet and host-native world
+replication. The relay defaults to native traffic; `--simulate` enables the
+legacy synthetic test mode. The runtime's `--legacy-replica` path is also opt-in.
+Steam uses the in-game broker and Valve relays without a separate ENet server.
+See [runtime](../runtime/README.md), [server](../server/README.md),
+[forced resync](FORCED_RESYNC.md), [HP ordering](HP_ORDERING.md) and
+[desync reports](DESYNC_REPORTS.md) for their respective behavior and limits.
+A host `world-resync` queue receipt alone is not native recovery success.
 
-The current source uses protocol **10**, AvatarBridge **3**,
-WorldBridge **12** and CaptureChannel **1**. AvatarBridge v3 appends the bounded
-HUD roster-label slot; mixed v2/v3 mappings are refused. The reviewed name patch
-has a matched private Release DLL/runtime/avatarctl build, but no live names
-acceptance or deployment. Protocol 10 retains the fresh-observation requirement
-for automatic resync. Runtime, relay, inject DLL and avatarctl must be rebuilt
-together. Shared mappings with incompatible versions fail their version checks;
-the changed WorldBridge layout rejects older mappings. An already injected
-older DLL is not current validation. Existing protocol-v3 native receipts stay
-historical. AvatarState telemetry/recording layout and the v3 claim shape are
-unchanged. V5 introduced opaque world-incarnation identity and typed closure
-reasons; v6 adds diagnostic request/chunk/done messages and a third ENet channel.
-WorldBridge 12 retains captured generation/delivery/source context and uses a
-separate bounded CAS operator mailbox, preserving the DLL ring's single producer.
-Protocol 9 adds full record witnesses (native coverage255); generic synthetic
-coverage127 is rejected by the native consumer. Exact content qualification and
-write fences do not prove controller lifetime or creation authority. Historical
-protocol-8 native results retain their checked scope and do not validate v9.
-Cancellation immediately unarms native world authority; lazy attachment retains
-bounded post-cut continuation after the validated bootstrap. The relay defaults
-to native traffic; `--simulate` opts into legacy simulation, which cannot satisfy
-native capture. The CLI's host `world-resync` queue receipt is not native success.
-Friend rejoin retries at most five times within 60 seconds, after
-1/2/4/8/8-second delays, with separate four-second transport and roster
-deadlines. Initial failure and Player loss stop networking; host loss ends the
-session. Ten uninterrupted seconds of verified membership reset the retry
-budget, without asserting native bootstrap readiness. Avatar restoration,
-native world recovery and progress/warp behavior still need a native run.
+The player launcher's environment defaults differ from direct developer
+launches. Its `child_environment` enables enemy mirror/population/all-target,
+Normal difficulty, friendly fire, event hold, downed and revive prompts, while
+filtering developer switches and keeping general population spawning and legacy
+targeting parked. Explicit inherited values for enabled flags override those
+defaults. See [the plan](ONLINE_COOP_PLAN.md#player-launch-defaults-reviewed-2026-10-20)
+and `tools/launcher/friend_package.py` for scope and profiles.
 
 Each injection loads a fresh copy of `build/inject/staging/kh2coop_inject.dll`
 from `build/rig/dll/`, so the linker never hits a locked DLL and you can rebuild

@@ -1,8 +1,13 @@
 # KH2 Co-op — Steam private preview
 
-This package flow has offline review approval and passed its PC2 launch/title/exit
-UX check (UX07, 2026-10-08). The underlying two-account Steam Step 2 also passed.
-Host/join via the package UI remains untested live.
+The Steam transport passed its two-account, two-PC rev11 check. The package
+passed launch/title/exit (UX07) and technical GUI host/join (JOIN05). Effective
+movement with a clearly responding puppet on both package screens and a
+physical-controller friend session still need qualification. Use the specific
+matching package supplied by your host; current source is protocol 29,
+AvatarBridge 4 and WorldBridge 12, not the old acceptance products. The checked-in
+package validator/pins still target protocol 18; they cannot produce a current
+protocol-29 ZIP unchanged. See [packaging](../tools/packaging/README.md).
 
 You need Steam running, signed in to your account owning KINGDOM HEARTS HD
 1.5+2.5 ReMIX, Windows, and the exact supported Steam Global KH2 build. No
@@ -15,7 +20,9 @@ use Valve relays; there is no direct-IP fallback. Up to three players can play.
    **Steam (beta)** selected. If `steam_appid.txt` is missing, check the permission
    box to create it beside KH2 with app ID 2552430. Existing correct files are
    preserved; a different app ID is refused. No administrator access is needed.
-3. Click **Start game**. Wait for save protection and your actual **SteamID**.
+3. If your supplied package offers **Character**, choose it before starting the
+   game (current source offers Roxas or Sora; see limits below). Click **Start
+   game**. Wait for save protection and your actual **SteamID**.
    Check that it is your account, then tick the account confirmation. You can
    enter an expected SteamID to catch the wrong account. This must be a 17-digit
    SteamID64, not a profile name, URL or friend code.
@@ -61,6 +68,17 @@ confirmed owned game closure. Changed or pre-existing app-ID files are preserved
 After an uncertain launch, leave the file in place until the game is closed and
 check the launch receipt. Never delete your saves as a troubleshooting step.
 
-The existing preview gameplay limits still apply. Stop on antivirus warnings and
+Current-source launcher defaults enable host enemy mirroring/population, all-player
+targeting, normal co-op difficulty, friendly fire, event hold, downed handling
+and revive prompts. Experimental population spawning remains disabled. These
+settings do not imply full-story qualification. The launcher currently connects
+after a loaded save; the New Game/title-time route remains a separate development
+and acceptance path, not a completed package workflow.
+
+Roxas+Roxas and a Roxas host with a Sora friend have local two-instance prologue
+field/reload/Sandlot-door evidence. Opening-scene friend representation, two-PC
+profile qualification and the full New Game-to-Shan-Yu route remain open. The
+[current gameplay limits](FRIEND_PLAYTEST_KNOWN_ISSUES.md) apply; older supplied
+packages keep their original defaults. Stop on antivirus warnings and
 contact the host rather than adding exclusions. To uninstall, close the game and
 launcher, then delete the extracted package and ZIP.

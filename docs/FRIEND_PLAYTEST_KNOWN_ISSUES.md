@@ -1,4 +1,70 @@
-# First friend playtest: known issues
+# Private preview: known issues
+
+> **Historical ENet release09 guide (2026-10-06, protocol 10).** The instructions
+> and behavior in the historical section belong to that sealed preview. Use them
+> only with its complete original package. Later Steam two-PC checks supersede
+> the old separate-PC transport gap, but do not upgrade this package's gameplay.
+> See [Steam setup](FRIEND_PLAYTEST_STEAM.md) and the
+> [current plan](ONLINE_COOP_PLAN.md) for later evidence and route limits.
+>
+> Current source uses protocol 29 / AvatarBridge 4 / WorldBridge 12. The checked-in
+> package validator and pins still target protocol 18: a current-source ZIP
+> cannot be built with them unchanged. See [packaging](../tools/packaging/README.md).
+> Do not combine old package products with current DLL/runtime/relay binaries.
+
+## Current source behavior and remaining limits
+
+- **Supported game only.** Windows Steam Global KH2 Final Mix, compatibility
+  identifier `1.0.0.10-steam-global`. The package checks the exact executable
+  fingerprint; Epic and different Steam patches are refused.
+- **Two-PC evidence is bounded.** Steam rev11 covers authenticated relay-only
+  admission, room follow, combat, attachment reconnect and terminal host leave.
+  UX07 covers launch/title/exit; JOIN05 covers technical package GUI host/join.
+  Effective movement with a clearly responding puppet on both package screens,
+  a physical-controller friend session and the full route remain unqualified.
+- **Current player defaults.** The launchers enable enemy mirroring, population
+  handling, all-player enemy targeting, normal co-op difficulty, friendly fire,
+  event-hold production/control, downed handling and revive prompts. Explicit
+  supported environment overrides can disable these. Experimental population
+  spawning, remote-only enemy targeting and ordinary lifecycle experiments stay
+  disabled. Bare DLL/manual runtime launches need deliberate configuration.
+- **Enemies and bosses.** Admitted, bound enemy copies follow the host's AI;
+  this replaces the old preview's independent-enemy behavior. Creeper 317,
+  Fiery Globe 76 and Lance Warrior 2409 remain denied. Binding and brain-shape
+  checks can leave other copies on local AI. General boss/projectile/reaction
+  command and separated-player wave coverage is incomplete. See
+  [enemy parity](ENEMY_PARITY.md).
+- **Story and reconnect.** Populated reconnect, reconstruction after kills,
+  proximity/wave/cull consistency and whole-party down/retry still have gaps.
+  Event hold is enabled by the launchers, but that does not qualify every story
+  event or populated room. Stop on missing/resurrected enemies, repeated damage,
+  a room mismatch or a stuck hold; preserve both screens and logs. Historical
+  courtyard walks are not a general workaround for current builds.
+- **Characters and route.** The friend launcher offers Roxas and Sora before
+  starting the game. Local two-instance evidence covers Roxas+Roxas and a Roxas
+  host with a Sora friend at first prologue control, reloads and the Sandlot
+  door. Opening-scene friend representation and two-PC profile qualification
+  remain open. Donald/Goofy/Riku and arbitrary host replacements are not admitted
+  playable profiles. The target route is New Game / Roxas Days 1-6 through TT,
+  HB 1 and LoD 1 / Shan-Yu, not a claimed completed playthrough. See
+  [party setup](PARTY_SETUP.md) and the [plan](ONLINE_COOP_PLAN.md).
+- **Do not save.** SaveGuard redirects write opens into a sandbox and blocks
+  protected-file deletion/moves/copies. Session progress is temporary; never
+  copy sandbox files over original saves. Stop at corrupt-save/deletion prompts;
+  do not copy another Steam account's whole save container.
+- **Network setup differs.** [Steam](FRIEND_PLAYTEST_STEAM.md) needs Steam signed
+  in, the host's explicit SteamID allowlist and Valve relays, with no direct-IP
+  fallback. ENet development needs approved private Tailscale access and
+  an existing relay. No public port forwarding or firewall changes are part of
+  either package flow. Sessions are limited to 30 minutes.
+- **UI and startup.** Use distinct plain ASCII names (the HUD displays at most
+  23 characters). A brief unavailable HUD during menus/rewards can clear when
+  gameplay resumes. Hide the HUD if it stutters and report the logs. Startup
+  can fail during mod initialization: resolve the launcher's owned-game closure
+  before retrying. Stop at antivirus warnings; do not disable protection.
+
+
+## Historical release09 package limits
 
 The desktop rehearsal passed on two fresh package folders sharing one Windows
 game installation through the private Mac relay. A separate friend PC remains

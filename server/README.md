@@ -1,41 +1,51 @@
-# Server
+# ENet session relay
 
-Host-authoritative relay server for the co-op session. Runs without KH2 attached.
-
-## Components
-
-- **`SessionHost`** -- manages the lobby, version-gates peers, assigns canonical slots, broadcasts snapshots/events, evicts stale peers.
-- **`SimulationState`** -- server-side fake physics sim (movement, gravity, jump, attack/guard/dodge state machine) for protocol testing without KH2.
-- **`PeerState`** -- per-peer tracking: slot, connection status, heartbeat, last input.
-- **`ServerMain`** -- CLI entry point with arg parsing, signal handling, and 60fps authoritative loop.
+`kh2coop_server` runs without KH2 attached. It admits peers, assigns canonical
+slots and routes host-native avatar/world/session traffic. Native traffic is
+the default; synthetic physics is available only with `--simulate` for tests.
+Steam sessions use the in-game broker and do not start this separate ENet server.
 
 ## Running
 
-```
-./build/kh2coop_server [options]
-  --port <port>                Listen port (default 7782)
-  --build <hash>               Required game build hash
-  --mod <hash>                 Required mod hash
-  --session <id>               Session identifier
-  --max-peers <n>              Max peers (default 3)
-  --heartbeat-timeout-ms <ms>  Heartbeat timeout (default 5000)
-  --pending-timeout-ms <ms>    Pending peer timeout (default 2000)
+Build with `cmake --build build --target kh2coop_server --config Release`.
+For a local development session:
+
+```powershell
+.\build\Release\kh2coop_server.exe --bind 127.0.0.1 --port 7946 --build dev --content none --mod none
 ```
 
-## What works
+Select matching game/content/mod labels and port on every runtime. The server's
+default port is **7782**, while the standalone runtime defaults to **7946**.
+Without `--bind`, the server listens on all interfaces; use an explicit loopback
+or authorized private address for development.
 
-- Accept up to 3 ENet peers
-- Version gate: reject peers with mismatched build/mod hash
-- Canonical slot assignment: client declares desired slot in handshake, server honors or rejects if taken
-- Broadcast `SessionState`, `ActorSnapshot`, `EnemySnapshot`, `EventMessage` to all verified peers
-- Stale-peer eviction: configurable heartbeat timeout and pending-peer timeout
-- Authoritative simulation loop: processes `InputFrame`s, updates `SimulationState` per tick (60fps), broadcasts snapshots
-- Graceful disconnect handling and session state rebuild
-- All verified via 3-client integration test in `FakeSimulation.cpp`
+| Option | Default / meaning |
+|---|---|
+| `--bind <ip>` | Listen address; omitted means all interfaces |
+| `--port <port>` | `7782` |
+| `--build <hash>` | Required game build label, `dev` |
+| `--content <hash>` | Required content label, `none` |
+| `--mod <hash>` | Required mod label, `none` |
+| `--session <id>` | Session identifier, `local-test` |
+| `--max-peers <n>` | `3` |
+| `--heartbeat-timeout-ms <ms>` | Verified peer idle timeout, `5000` |
+| `--pending-timeout-ms <ms>` | Unverified peer timeout, `2000` |
+| `--desync-dir <path>` | Automatic report root, `build/rig/desync` |
+| `--simulate` | Legacy synthetic actor simulation; no native KH2 validation |
 
-## What's next
+## Responsibilities and limits
 
-- Wire to live KH2 host process (replace `SimulationState` with real game state from `GameBridgePC`)
-- Packet logging for replay/debug
-- Reconnect flow with state resync
-- Session/instance split for public-realm mode (Track B/C)
+- `SessionHost` gates protocol/build/content/mod compatibility, maintains the roster and routes admitted host world authority.
+- Host-agreed settings include room-locked co-op difficulty and friendly fire; a friend's environment does not override them.
+- Native world caching, ordered HP/death, resync and diagnostic collection are implemented. See [forced resync](../docs/FORCED_RESYNC.md), [HP ordering](../docs/HP_ORDERING.md) and [desync reports](../docs/DESYNC_REPORTS.md) for their bounds.
+- `SimulationState` provides fake movement/combat only when explicitly enabled. It does not replace the host's live game simulation.
+- `ServerMain` services ENet on an approximately 16 ms loop and stops on Ctrl+C.
+
+Current source requires protocol **29** peers. Compatibility labels are handshake
+values, not binary provenance; rebuild and select a coherent source cohort.
+The [project plan](../docs/ONLINE_COOP_PLAN.md) records current native acceptance
+and remaining route/reconnect work. Public-realm session/instance splitting is
+not the current campaign milestone.
+
+For headless regression use the serial CTest suite and `kh2coop_fake_sim` described
+in [setup](../SETUP.md); these do not establish live gameplay correctness.

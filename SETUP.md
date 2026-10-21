@@ -1,247 +1,94 @@
-# Developer Setup
+# Developer setup
 
-Step-by-step guide to go from zero to a working kh2-multiplayer dev environment.
+For an unpacked player preview, start with [the player guide](docs/FRIEND_PLAYTEST_STEAM.md).
+This page covers building and developing the Windows Steam Global mod.
 
-## Prerequisites
+## Requirements
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| **MSVC Build Tools** | C++20 support | Build the mod (`cl.exe` — via VS Build Tools or full VS install) |
-| **CMake** | 3.20+ | Build system |
-| **Python** | 3.11+ | MCP bridges (Ghidra, Cheat Engine) |
-| **JDK** | 21+ | Ghidra (Eclipse Temurin recommended) |
-| **Git** | any recent | Clone repos |
-| **Cheat Engine** | 7.5+ | Runtime memory analysis / dynamic RE |
-| **KH2 Final Mix PC** | **Steam Global** | Target game build |
+- A legally installed **KINGDOM HEARTS HD 1.5+2.5 ReMIX**, KH2 Final Mix **Steam Global**, and Steam running for Steam sessions. Epic, Steam JP and PCSX2 are not supported by the current runtime offsets.
+- Visual Studio Build Tools with a C++20-capable MSVC x64 toolchain, Windows SDK and MASM (`ml64`).
+- CMake 3.20+, Git, and Python 3.11+ for scenarios and developer tooling. The Windows Python installer includes Tkinter for the launcher.
+- An interactive Windows desktop for KH2. Session 0 cannot run the game.
 
-### Install via winget (Windows)
+Cheat Engine and Ghidra are optional reverse-engineering tools, not requirements
+for building, launching or injecting the mod. OpenKH, the KH2 Lua Library and the
+other reference repositories in [AGENTS.md](AGENTS.md) are likewise optional;
+they are not build dependencies.
 
-```bash
-winget install EclipseAdoptium.Temurin.21.JDK
-```
+## Clone and build
 
-CMake and Visual Studio should be installed manually or via Visual Studio Installer.
+Run from a Visual Studio x64 developer shell:
 
-## Target Game Build
-
-All memory offsets and pointer chains are verified against **KH2 Final Mix PC (Steam Global)**.
-Other builds (Epic, Steam JP, PCSX2) have different base addresses — see `KH2Offsets.hpp` and the KH2 Lua Library for cross-version tables, but Steam Global is the primary development target.
-
-## Repository Layout
-
-The project expects several sibling repositories alongside `kh2-multiplayer/`. From the parent directory (e.g. `C:\Users\<you>\`):
-
-```
-├── kh2-multiplayer/        # This repo — the mod itself
-├── openkh/                 # OpenKH modding toolkit (file formats, struct defs)
-├── kh2-lua-library/        # Community KH2 runtime address tables
-├── kh2-tools/
-│   ├── KHPCPatchManager/   # Binary patch manager for KH2
-│   ├── LuaBackend/         # Lua scripting engine source (hooks KH2 frame loop)
-│   ├── mods/               # Reference character mods (axel-mix, dual-wield-roxas, vanitas)
-│   └── archives/           # Original download ZIPs
-├── GhidraMCP/              # Ghidra MCP bridge for AI-assisted RE
-├── ghidra_12.0.4_PUBLIC/   # Ghidra installation
-└── cheatengine-mcp-bridge/ # Cheat Engine MCP bridge for AI-assisted RE
-```
-
-### Clone everything
-
-```bash
-# The mod itself
-git clone https://github.com/<org>/kh2-multiplayer.git
-
-# Sibling repos
-git clone https://github.com/OpenKH/OpenKh.git openkh
-git clone https://github.com/aliosgaming/KH2-Lua-Library.git kh2-lua-library
-git clone https://github.com/AntonioDePau/KHPCPatchManager.git kh2-tools/KHPCPatchManager
-git clone https://github.com/Sirius902/LuaBackend.git kh2-tools/LuaBackend
-```
-
-## Building the Mod
-
-```bash
+```powershell
+git clone https://github.com/Volpestyle/kh2-multiplayer.git
 cd kh2-multiplayer
-cmake -B build -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build
+cmake -S . -B build -A x64
+cmake --build build --config Release
 ```
 
-ENet (UDP networking library) is fetched automatically via CMake FetchContent.
+CMake fetches ENet and, on Windows, MinHook. An offline build can supply their
+existing source directories through `FETCHCONTENT_SOURCE_DIR_ENET` and
+`FETCHCONTENT_SOURCE_DIR_MINHOOK` with `FETCHCONTENT_FULLY_DISCONNECTED=ON`.
 
-### Build targets
+| Target | Release output |
+|---|---|
+| `kh2coop_inject` | `build/inject/staging/kh2coop_inject.dll` |
+| `kh2coop_runtime_scaffold` | `build/Release/kh2coop_runtime_scaffold.exe` |
+| `kh2coop_server` | `build/Release/kh2coop_server.exe` |
+| `kh2coop_fake_sim` | `build/Release/kh2coop_fake_sim.exe` |
+| `avatarctl` | `build/Release/avatarctl.exe` |
+| `kh2ctl` | `build/tools/kh2ctl/Release/kh2ctl.exe` |
 
-| Target | Description |
-|--------|-------------|
-| `kh2coop_server` | Host-authoritative relay server |
-| `kh2coop_runtime_scaffold` | Runtime entry point (attaches to live KH2) |
-| `kh2coop_fake_sim` | End-to-end test harness (no KH2 needed) |
-| `kh2ctl` | Local KH2 control CLI for restart, waits, menu input, and mailbox-driven friend control |
+These paths assume the Visual Studio multi-configuration generator. Source uses
+protocol **29**, AvatarBridge **4**, WorldBridge **12** and CaptureChannel **1**.
+Rebuild the DLL, runtime, relay and control tools together; an already injected
+DLL retains its old build. Packaged products need a matching receipt cohort.
+The checked-in protocol-18 product manifest and launcher validator are historical;
+packaging current source requires updating both with reviewed products.
+See [packaging](tools/packaging/README.md).
 
-### Quick test (no KH2 required)
+## Verify without KH2
 
-```bash
-./build/kh2coop_fake_sim
+```powershell
+ctest --test-dir build -C Release --output-on-failure
+.\build\Release\kh2coop_fake_sim.exe
 ```
 
-## Reverse Engineering Tools
+Run CTest serially: some headless tests bind fixed loopback ports. The fake
+simulation exercises networking without attaching to the game. These checks do
+not establish live gameplay compatibility.
 
-### Cheat Engine + MCP Bridge
+## Run and configure
 
-Used for **dynamic analysis** — live memory inspection, breakpoints, AOB scans while KH2 is running.
+Use [the development workflow](docs/DEVELOPMENT_WORKFLOW.md) for launch,
+injection, scenario runs, desktop-session requirements and save protection.
+Read the `kh2-rig` skill before any live automated run. Add the built `kh2ctl`
+directory to PATH for the short commands in that workflow.
 
-1. Install [Cheat Engine](https://cheatengine.org/) 7.5+
-2. Clone the MCP bridge:
-   ```bash
-   git clone https://github.com/miscusi-peek/cheatengine-mcp-bridge.git
-   ```
-3. Install Python dependencies:
-   ```bash
-   pip install mcp pywin32
-   ```
-4. In Cheat Engine: `File > Execute Script` and load `cheatengine-mcp-bridge/ce_mcp_bridge.lua`
-5. Attach Cheat Engine to `KINGDOM HEARTS II FINAL MIX.exe`
-
-### Ghidra + GhidraMCP
-
-Used for **static analysis** — decompilation, cross-references, call graphs of the KH2 binary.
-
-1. Download [Ghidra 12.0.4](https://github.com/NationalSecurityAgency/ghidra/releases) and extract it
-2. Clone the MCP bridge:
-   ```bash
-   git clone https://github.com/LaurieWired/GhidraMCP.git
-   ```
-3. Download the extension from [GhidraMCP releases](https://github.com/LaurieWired/GhidraMCP/releases) (v1.4)
-   - Extract the outer ZIP, then install the inner `GhidraMCP-1-4.zip` via Ghidra's `File > Install Extensions`
-   - Ghidra 12 will warn about version mismatch — click "Install Anyway"
-4. Restart Ghidra, create a project, import `KINGDOM HEARTS II FINAL MIX.exe`, let auto-analysis complete
-5. Enable the plugin: `File > Configure > Developer > check GhidraMCPPlugin`
-6. The HTTP server starts on port 8080
-
-### MCP Configuration (for AI-assisted development)
-
-Add both MCP servers so Claude Code / OpenCode / Codex can use them.
-
-**Claude Code** (`~/.claude.json` → `mcpServers`):
-```json
-"cheatengine": {
-  "type": "stdio",
-  "command": "python",
-  "args": ["<path>/cheatengine-mcp-bridge/MCP_Server/mcp_cheatengine.py"],
-  "env": {}
-},
-"ghidra": {
-  "type": "stdio",
-  "command": "python",
-  "args": ["<path>/GhidraMCP/bridge_mcp_ghidra.py", "--ghidra-server", "http://127.0.0.1:8080/"],
-  "env": {}
-}
+```powershell
+Copy-Item kh2coop_runtime.ini.example kh2coop_runtime.ini
 ```
 
-**OpenCode** (`~/.config/opencode/opencode.json` → `mcp`):
-```json
-"cheatengine": {
-  "type": "local",
-  "command": ["python", "<path>/cheatengine-mcp-bridge/MCP_Server/mcp_cheatengine.py"],
-  "enabled": true
-},
-"ghidra": {
-  "type": "local",
-  "command": ["python", "<path>/GhidraMCP/bridge_mcp_ghidra.py", "--ghidra-server", "http://127.0.0.1:8080/"],
-  "enabled": true
-}
-```
+The standalone runtime starts offline with camera override enabled. Its example
+ENet port is **7946**, while the standalone server defaults to **7782**; set the
+same explicit port and matching game/content/mod identifiers on both sides.
+See [runtime](runtime/README.md) and [server](server/README.md) for CLI options.
+The friend launcher selects the player defaults (including Normal difficulty)
+for its children; direct developer launches retain lower-level defaults.
 
-**Codex** (`~/.codex/config.toml`):
-```toml
-[mcp_servers.cheatengine]
-command = 'python'
-args = ["-u", "<path>/cheatengine-mcp-bridge/MCP_Server/mcp_cheatengine.py"]
+For a packaged player build, [friend.py](tools/launcher/README.md) handles owned
+game launch, injection and Steam account confirmation. The older developer UI
+`pythonw tools/launcher/launcher.py` expects an already injected game and uses ENet.
 
-[mcp_servers.ghidra]
-command = 'python'
-args = ["-u", "<path>/GhidraMCP/bridge_mcp_ghidra.py", "--ghidra-server", "http://127.0.0.1:8080/"]
-```
+## Optional analysis and MCP tools
 
-Replace `<path>` with actual absolute paths.
+- [Lessons learned](docs/LESSONS_LEARNED.md): read before reverse engineering.
+- [OpenKH reference](docs/OPENKH_REFERENCE.md): file formats, animation/entity IDs and party mapping; not runtime offsets.
+- `scripts/ghidra.ps1`: saved-project headless decompilation and xrefs. Coordinate access to the same Ghidra project; do not remove another reader's lock.
+- Cheat Engine MCP: call `ping` and `get_process_info` before memory operations and verify attachment to the intended live KH2 PID.
+- [KH2 control CLI/MCP](docs/KH2_CONTROL_CLI.md): canonical controls and wrapper setup. The wrapper is `tools/mcp_kh2ctl/server.py`; set `KH2CTL_BIN` to the absolute built CLI path if discovery needs an override.
 
-### Optional: KH2 Control MCP
-
-This repo now includes a local KH2 control MCP wrapper on top of `kh2ctl`.
-
-Build the CLI first:
-
-```bash
-cd kh2-multiplayer
-cmake --build build --target kh2ctl --config Release
-```
-
-Then add the MCP server.
-
-**Claude Code** (`~/.claude.json` → `mcpServers`):
-```json
-"kh2ctl": {
-  "type": "stdio",
-  "command": "python",
-  "args": ["<path>/kh2-multiplayer/tools/mcp_kh2ctl/server.py"],
-  "env": {
-    "KH2CTL_BIN": "<path>/kh2-multiplayer/build/tools/kh2ctl/Release/kh2ctl.exe"
-  }
-}
-```
-
-**OpenCode** (`~/.config/opencode/opencode.json` → `mcp`):
-```json
-"kh2ctl": {
-  "type": "local",
-  "command": ["python", "<path>/kh2-multiplayer/tools/mcp_kh2ctl/server.py"],
-  "enabled": true,
-  "environment": {
-    "KH2CTL_BIN": "<path>/kh2-multiplayer/build/tools/kh2ctl/Release/kh2ctl.exe"
-  }
-}
-```
-
-**Codex** (`~/.codex/config.toml`):
-```toml
-[mcp_servers.kh2ctl]
-command = 'python'
-args = ["-u", "<path>/kh2-multiplayer/tools/mcp_kh2ctl/server.py"]
-
-[mcp_servers.kh2ctl.env]
-KH2CTL_BIN = "<path>/kh2-multiplayer/build/tools/kh2ctl/Release/kh2ctl.exe"
-```
-
-Useful first tools:
-
-- `restart_kh2`
-- `boot_load_save`
-- `get_state`
-- `wait_room`
-- `friend_move`
-- `friend_press`
-
-## Runtime Configuration
-
-Copy the example config:
-```bash
-cp kh2coop_runtime.ini.example kh2coop_runtime.ini
-```
-
-Key settings:
-- `runtime_mode` — `campaign_coop` (default) or `public_realm`
-- `client_role` — `0` (Player), `1` (Friend1), `2` (Friend2)
-- `camera_override` — enable local camera retargeting
-- `panic_hotkey` — F8 to restore vanilla camera if things break
-
-## Reference Material
-
-| Resource | Location | Use for |
-|----------|----------|---------|
-| OpenKH | `../openkh` | File formats, entity types, party slot mapping, animation IDs, world IDs |
-| KH2 Lua Library | `../kh2-lua-library` | Runtime memory addresses across all PC builds + PCSX2 |
-| LuaBackend source | `../kh2-tools/LuaBackend` | Frame hook mechanism, Lua API for memory read/write |
-| KHPCPatchManager | `../kh2-tools/KHPCPatchManager` | Mod packaging and distribution |
-| Character mods | `../kh2-tools/mods/` | Reference implementations for entity spawning, party slots, model swaps |
-| Project docs | `docs/` | Architecture, RE sessions, backlog, pointer map |
-
-See `AGENTS.md` for detailed guidance on when to consult each resource.
+Use the scenario runner's checked `boot` step to load saves during automation;
+`boot-load-save` is known broken. Never save in-game during automation without
+James's explicit approval. Launch, restart and kill only rig-owned processes
+through `kh2ctl`; do not use `scripts/restart-kh2.ps1` from an agent.
