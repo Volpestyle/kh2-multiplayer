@@ -27,15 +27,24 @@ no kill, reward, mission16, event315, onward-travel, captured426, Creeper-count,
 complete clone-visual or two-PC proof. Terminal support was deliberately
 excluded from this landing. Those requirements remain on VUH-2569.
 
-Local evidence in the owned worktree, pending media publication:
+Published on [VUH-2569](https://linear.app/vuhlp/issue/VUH-2569/twilight-thorn-boss-sync-the-fight-across-seats-one-host-owned-boss):
 
-- `build/scenarios/20261021-001728_net_twilight_thorn_reactions_1/`: report,
-  exact milestone receipts, read-only observations, logs and four raw clips.
-- `build/rig/vuh2569-live10/`: unchanged-save and source checks, closure receipts
-  and `source-inputs.tar` (SHA256
-  `52ae2432f8b281dd5eb31f302f11395744482e586477a2b2172dee0b29116a46`).
-- `.local/thorn/live10-result-review-owner.md`: independent result review.
-- `.local/thorn/build-test-19.log`: full build and202/202 test output.
+- [Captioned paired-screen clip](clankie://evidence/sha256/b94398c49fe5d87bb3bc419a4e57640ea7070cef9d1f439b76421f54ca988940):
+  59.27s,30fps, host left/friend right, game-only views. Two requested30-second
+  blocks at ordinary speed, recording gap omitted, no audio or hardware frame
+  synchronization claim. Sampled raw and final frames were visually inspected.
+  Host Key Counter and later ground Reversal are visible; not every logged
+  completion is filmed. The issue embeds the playable clip.
+- [Decisive reports archive](clankie://evidence/sha256/602cefb76c190aa9289cf3de09ef01f6b16dcd0a81a5d03d07ecf5baa1295aa8):
+  unchanged `live10/report.json`, `report.md`, `rc_proof.json`, independent
+  `reviews/live10-result.md` and `checks/terminal.json`, `safety-closed.json`,
+  `instances-closed.json`. Small reports are bundled because the evidence store
+  excludes individual non-media files below16KiB and Markdown.
+- [Exact source archive](clankie://evidence/sha256/52ae2432f8b281dd5eb31f302f11395744482e586477a2b2172dee0b29116a46).
+- [Full build and202/202 checks](clankie://evidence/sha256/cab16553f5aff08305efe57d2452a8a780bb9b5cf73cc346625e82c5e3ea6be9).
+- [Evidence index](evidence.json): all published raw clips, native/runtime logs,
+  read-only observations, contact sheets and composition checks.
 
-The captioned paired-screen excerpt and evidence-store links will be added
-after visual inspection and publication. No published media link is claimed yet.
+Original local run: `build/scenarios/20261021-001728_net_twilight_thorn_reactions_1/`;
+safety/source closure: `build/rig/vuh2569-live10/`. Only this README and the
+evidence index are committed; raw artifacts remain in the evidence store.
