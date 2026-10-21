@@ -5397,6 +5397,10 @@ def run_scenario(path: Path, attempt: int) -> dict:
                 raise StepFailed(f"playerDefaults: unset developer variables first: {', '.join(leaked)}")
             ctx.player_env = {k: v for k, v in friend_package.child_environment(ROOT).items()
                               if k.startswith("KH2COOP_")}
+            # VUH-2632 (D17): automation keeps the quick Beginner revive whatever the save's difficulty;
+            # "revivePolicy": "native" runs the product rule (Standard's longer hold, Proud/Critical off).
+            if scenario.get("revivePolicy", "beginner") == "beginner":
+                ctx.player_env["KH2COOP_REVIVE_POLICY"] = "beginner"
             report["playerEnv"] = ctx.player_env
         skipping = False
         for i, step in enumerate(scenario["steps"]):

@@ -263,6 +263,35 @@ Limits:
   not a downed-state one.
 - The two-PC check rides on the VUH-2464 firewall run.
 
+## Downed rules by difficulty (D17, VUH-2632)
+
+James's decision (D17 in `ONLINE_COOP_PLAN.md`): the quick revive above is for Beginner and automation;
+Standard revives more slowly; one player down never ends the run, and an unrevived player sits out until a
+boss/encounter defeat or a save point.
+
+**Done (offline, local):**
+- `inject/src/DownedPolicy.hpp` (pure, `kh2coop_downed_policy_test`) maps the session's native difficulty
+  to `{revive allowed, hold frames}`:
+
+  | Difficulty | Partner revive | Hold |
+  |---|---|---|
+  | Beginner, unknown, or `KH2COOP_REVIVE_POLICY=beginner` | yes | 60 frames (~1 s) |
+  | Standard | yes | 300 frames (~5 s); `KH2COOP_REVIVE_HOLD_STANDARD`, 60..1800 |
+  | Proud, Critical | no (`KH2COOP_REVIVE_HARD=off`, default) | `standard` switches to Standard's rule |
+
+- The difficulty is the save's byte at save + 0x2498 (0 Beginner, 1 Standard, 2 Proud, 3 Critical; save
+  base `0x9A98B0`, checked by its `KH2J` magic). The host reads its own. A friend uses Beginner rules until
+  the host's value arrives (the per-room host value is the next step). The offset still needs a live read.
+- The revive prompt takes its hold from the policy and hides with `revive-off` when the rule disallows a
+  revive. The owner also refuses an admitted request then (`[downed] revive-request refused by policy`),
+  whoever sent it. Both log the policy at start (`[revive-prompt] policy difficulty=...`).
+- The scenario runner forces `KH2COOP_REVIVE_POLICY=beginner` for `playerDefaults` runs unless the
+  scenario sets `"revivePolicy": "native"`.
+
+**Next:** the host's difficulty in each RoomTransition, sit out across rooms (no auto-revive on forced
+transitions; a door waits only while a revive is possible), and the host-issued return at boss/encounter
+defeat and at save points.
+
 ## Downed spectator candidate (VUH-1819; pending live qualification)
 
 `KH2COOP_DOWNED_SPECTATE=1` is default off and depends on the installed
@@ -319,7 +348,8 @@ carries `promptKind = 0`, so the overlay is unchanged.
 - **Rules** (`inject/src/RevivePrompt.hpp`, pure). The prompt targets the nearest
   fresh (pose within 30 frames), downed, non-cutscene teammate puppet in the same
   world and room, within **150 units**. That's under SessionHost's 200-unit
-  admission policy. Hold **Triangle for 60 game frames**. The request fires on
+  admission policy. Hold **Triangle for 60 game frames** on Beginner; the hold and
+  whether a revive is offered at all follow the difficulty (D17, below). The request fires on
   **release** after a full hold, never while held. The hold must start with a
   fresh press. L1+Triangle (the native shortcut) never counts.
 - **Cancels.** The hold resets if you leave range, take damage, open a menu,

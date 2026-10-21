@@ -1,7 +1,8 @@
 #pragma once
 // ============================================================================
 // RevivePrompt — pure rules for the player-facing revive trigger (VUH-1504).
-// Stand within kRange of a downed teammate and hold Triangle for kHoldFrames;
+// Stand within kRange of a downed teammate and hold Triangle for the policy's hold
+// (DownedPolicy: kHoldFrames on Beginner, longer on Standard, none on Proud/Critical);
 // the request fires on RELEASE after a full hold. No game memory, no Windows
 // calls: the native adapter (DownedSpike.inl) supplies copied facts once per
 // game frame on the owner thread and sends through RequestRevive.
@@ -13,7 +14,7 @@
 namespace kh2coop::inject::reviveprompt {
 
 constexpr float kRange = 150.0f;              // under SessionHost's 200-unit policy
-constexpr std::uint32_t kHoldFrames = 60;     // ~1 s at 60 fps (game frames, not wall time)
+constexpr std::uint32_t kHoldFrames = 60;     // ~1 s at 60 fps (game frames, not wall time): Beginner
 constexpr std::uint32_t kPendingFrames = 120; // "Reviving" at most ~2 s after a fire
 constexpr std::uint16_t kTriangle = 0x1000;   // raw slot-0 button bit (PS2 order)
 constexpr std::uint16_t kL1 = 0x0400;         // L1+Triangle is the native shortcut: never a revive hold
@@ -22,7 +23,7 @@ constexpr bool TriangleHeld(std::uint16_t raw) noexcept { return (raw & kTriangl
 enum class Kind : std::uint8_t { Hidden = 0, Prompt = 1, Reviving = 2 };
 enum class Hide : std::uint8_t {
     None = 0, Off, LocalUnavailable, LocalDowned, Event, Menu, Transition, NativeReaction,
-    NoTarget, OutOfRange, Fired
+    NoTarget, OutOfRange, Fired, ReviveOff
 };
 
 struct Facts {
@@ -40,6 +41,8 @@ struct Facts {
     std::uint64_t targetEpisode = 0;
     float distance = 1e30f;
     bool triangle = false;         // Triangle seen in this frame's raw slot-0 input
+    bool reviveAllowed = true;     // VUH-2632: the session difficulty allows a partner revive
+    std::uint32_t holdFrames = kHoldFrames; // VUH-2632: the session difficulty's hold (0 counts as kHoldFrames)
 };
 
 struct State {
@@ -75,6 +78,7 @@ constexpr const char* HideName(Hide h) noexcept {
     case Hide::NoTarget: return "no-target";
     case Hide::OutOfRange: return "out-of-range";
     case Hide::Fired: return "fired";
+    case Hide::ReviveOff: return "revive-off";
     }
     return "?";
 }
@@ -128,6 +132,7 @@ inline Output Step(State& s, const Facts& f) noexcept {
     else if (f.nativeReaction) hide = Hide::NativeReaction;
     else if (!f.targetValid || f.targetSlot >= 3 || !f.targetEpisode) hide = Hide::NoTarget;
     else if (!(f.distance <= kRange)) hide = Hide::OutOfRange;
+    else if (!f.reviveAllowed) hide = Hide::ReviveOff; // Proud/Critical: the teammate sits out
     else if (s.firedEpisode[f.targetSlot] == f.targetEpisode) hide = Hide::Fired;
 
     if (hide != Hide::None) {
@@ -149,10 +154,11 @@ inline Output Step(State& s, const Facts& f) noexcept {
     out.kind = Kind::Prompt;
     out.hide = Hide::None;
     out.slot = f.targetSlot;
+    const std::uint32_t hold = f.holdFrames ? f.holdFrames : kHoldFrames;
     if (f.triangle && !hit) {
         if (risingEdge || s.held) {
-            if (s.held < kHoldFrames) ++s.held;
-            if (s.held >= kHoldFrames) s.full = true;
+            if (s.held < hold) ++s.held;
+            if (s.held >= hold) s.full = true;
         }
     } else if (released) {
         if (s.full) {
@@ -163,7 +169,7 @@ inline Output Step(State& s, const Facts& f) noexcept {
         }
         Cancel(s);
     }
-    out.progress = static_cast<std::uint16_t>(s.held * 1000 / kHoldFrames);
+    out.progress = static_cast<std::uint16_t>((s.held < hold ? s.held : hold) * 1000 / hold);
     return out;
 }
 

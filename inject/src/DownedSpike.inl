@@ -164,6 +164,7 @@ struct PromptRuntime {
     reviveprompt::RcGate rcGate {};
     reviveprompt::Hide lastHide = reviveprompt::Hide::Off;
     bool yielding = false;
+    downedpolicy::Difficulty difficulty = static_cast<downedpolicy::Difficulty>(0xFE); // last logged
 };
 static PromptRuntime g_prompt;
 static std::atomic<bool> g_promptTriangle {false};
@@ -760,8 +761,41 @@ static void RemintEpisode(const char* why) {
         static_cast<unsigned long long>(g_down.episode), g_down.episodeRemints);
 }
 
+// VUH-2632: the session's native difficulty. The host reads its own save byte (save + 0x2498); a friend
+// keeps Beginner rules until the host's value arrives.
+static downedpolicy::Difficulty LocalNativeDifficulty() {
+    std::array<std::uint8_t, 4> magic {};
+    std::uint8_t raw = 0xFF;
+    if (!ReadHitTraceMemory(g_exeBase + 0x9A98B0, magic.data(), magic.size()) ||
+        magic != std::array<std::uint8_t, 4> {'K', 'H', '2', 'J'} || !ReadHitTrace(g_exeBase + 0x9A98B0 + 0x2498, raw))
+        return downedpolicy::Difficulty::Unknown;
+    return downedpolicy::DifficultyFromByte(raw);
+}
+static downedpolicy::Difficulty SessionDifficulty() {
+    return enemysync::ActivationRole() == 2 ? downedpolicy::Difficulty::Unknown : LocalNativeDifficulty();
+}
+// KH2COOP_REVIVE_POLICY / _HOLD_STANDARD / _HARD, read once.
+static const downedpolicy::Config& ReviveConfig() {
+    static const downedpolicy::Config config = [] {
+        char policy[16] {}, hold[8] {}, hard[16] {};
+        if (GetEnvironmentVariableA("KH2COOP_REVIVE_POLICY", policy, sizeof(policy)) >= sizeof(policy)) policy[0] = 0;
+        if (GetEnvironmentVariableA("KH2COOP_REVIVE_HOLD_STANDARD", hold, sizeof(hold)) >= sizeof(hold)) hold[0] = 0;
+        if (GetEnvironmentVariableA("KH2COOP_REVIVE_HARD", hard, sizeof(hard)) >= sizeof(hard)) hard[0] = 0;
+        return downedpolicy::ParseConfig(policy, hold, hard);
+    }();
+    return config;
+}
+static downedpolicy::Policy SessionRevivePolicy() { return downedpolicy::For(SessionDifficulty(), ReviveConfig()); }
+
 static int ApplyReviveRequest(uint64_t episode, uint8_t requesterSlot, uint64_t seq) {
-    const Result r = TryRevive(episode);
+    // VUH-2632: the session's rule holds on the owner too; on Proud/Critical (switch off) a partner
+    // revive is refused here whoever sent it, and the downed player sits out until a return.
+    const bool allowed = SessionRevivePolicy().reviveAllowed;
+    const Result r = allowed ? TryRevive(episode) : Result::WrongState;
+    if (!allowed)
+        Log("[downed] revive-request refused by policy difficulty=%s requester=%u episode=%llX",
+            downedpolicy::DifficultyName(SessionDifficulty()), static_cast<unsigned>(requesterSlot),
+            static_cast<unsigned long long>(episode));
     if (r == Result::Ok) ++g_net.revivedByRequest;
     else ++g_net.nativeRefused;
     if (r != Result::Ok) {
@@ -810,10 +844,21 @@ static void PromptInput(void* inputStruct) {
         g_promptTriangle.store(true, std::memory_order_release);
 }
 
+
 static void PromptTick(const Snap& s) {
     if (!g_prompt.requested) return;
     reviveprompt::Facts f {};
     f.enabled = !g_down.control && g_down.state == State::Ready;
+    const auto difficulty = SessionDifficulty();
+    const auto policy = downedpolicy::For(difficulty, ReviveConfig());
+    f.reviveAllowed = policy.reviveAllowed;
+    f.holdFrames = policy.holdFrames;
+    if (difficulty != g_prompt.difficulty) {
+        g_prompt.difficulty = difficulty;
+        Log("[revive-prompt] policy difficulty=%s revive=%u holdFrames=%u forcedBeginner=%u frame=%u",
+            downedpolicy::DifficultyName(difficulty), policy.reviveAllowed ? 1u : 0u, policy.holdFrames,
+            ReviveConfig().forceBeginner ? 1u : 0u, g_frameCounter);
+    }
     f.localCanonical = s.canonical;
     f.localDowned = (s.flags & 4U) != 0 || LogicallyDowned();
     f.inEvent = s.inEvent;
@@ -1171,8 +1216,14 @@ static void Install(uintptr_t exeBase) {
     char rp[2] {};
     g_prompt.requested = !g_down.control &&
         GetEnvironmentVariableA("KH2COOP_REVIVE_PROMPT", rp, sizeof(rp)) == 1 && rp[0] == '1';
-    if (g_prompt.requested) Log("[revive-prompt] configure requested=1 range=%.0f holdFrames=%u nativeRcYield=0x2A11162 settle=%u",
-                                reviveprompt::kRange, reviveprompt::kHoldFrames, reviveprompt::kRcSettleFrames);
+    if (g_prompt.requested) {
+        const auto& config = ReviveConfig();
+        Log("[revive-prompt] configure requested=1 range=%.0f holdFrames=%u standardHold=%u hard=%s forcedBeginner=%u "
+            "nativeRcYield=0x2A11162 settle=%u", reviveprompt::kRange, reviveprompt::kHoldFrames,
+            downedpolicy::For(downedpolicy::Difficulty::Standard, config).holdFrames,
+            config.hard == downedpolicy::HardRule::Standard ? "standard" : "off",
+            config.forceBeginner ? 1u : 0u, reviveprompt::kRcSettleFrames);
+    }
     g_down.installMask = mask;
     const uint32_t needed = g_down.control ? (InstallResolve | InstallStatHook | InstallChannel)
                                            : (fixture ? InstallAll : (InstallAll & ~InstallChannel));

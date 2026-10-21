@@ -5,6 +5,7 @@
 #include "CoopHudState.hpp"
 
 #include <cstdio>
+#include <string_view>
 
 using namespace kh2coop::inject;
 using namespace kh2coop::inject::reviveprompt;
@@ -57,6 +58,19 @@ int main() {
     { State s; (void)Step(s, Good()); (void)HoldRelease(s, 60); Output o {};
       for (std::uint32_t i = 0; i < kPendingFrames + 2; ++i) o = Step(s, Good());
       CHECK(o.kind == Kind::Hidden && o.hide == Hide::Fired); }
+    // VUH-2632: the session difficulty's hold (Standard 300 frames) and a revive the rule disallows.
+    { State s; auto f = Good(); f.holdFrames = 300; (void)Step(s, f);
+      CHECK(!HoldRelease(s, 299, f).fire);
+      (void)Step(s, f); auto o = HoldRelease(s, 300, f); CHECK(o.fire); }
+    { State s; auto f = Good(); f.holdFrames = 300; (void)Step(s, f); Output o {};
+      for (int i = 0; i < 150; ++i) { auto g = f; g.triangle = true; o = Step(s, g); }
+      CHECK(o.progress == 500 && !o.fire); }                                               // half way
+    { State s; auto f = Good(); f.holdFrames = 0; (void)Step(s, f); CHECK(HoldRelease(s, kHoldFrames, f).fire); } // 0: default
+    { State s; auto f = Good(); f.reviveAllowed = false; auto o = Step(s, f);
+      CHECK(o.kind == Kind::Hidden && o.hide == Hide::ReviveOff && !HoldRelease(s, 60, f).fire);
+      CHECK(std::string_view(HideName(Hide::ReviveOff)) == "revive-off"); }
+    { State s; auto f = Good(); f.reviveAllowed = false; f.distance = 400.0f;              // out of range wins
+      CHECK(Step(s, f).hide == Hide::OutOfRange); }
     // Cancels mid-hold: out of range, hit, menu, event, transition, local downed, target change.
     auto cancelled = [](auto mutate) {
         State s; (void)Step(s, Good());

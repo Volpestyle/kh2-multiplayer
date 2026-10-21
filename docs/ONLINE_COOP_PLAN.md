@@ -353,6 +353,10 @@ A successful revive restores 25% max HP (minimum 1), supported locomotion and
 120-frame damage grace. Use the existing consume-once network contract; adapt
 native recovery per profile instead of blindly calling a dead-Sora helper.
 Cure/items are not revives in this slice, and there is no timed auto-revive.
+D17 (VUH-2632) sets the hold and availability by difficulty and replaces the
+two rules below with sit out and return: a door waits only while a revive is
+possible, and only a boss/encounter defeat or a save point brings a downed
+player back.
 
 A normal host door waits for a downed teammate's revive. A forced event/load
 recovers them to 25% at the safe handoff, retires the old actor/episode and admits
@@ -1844,6 +1848,37 @@ Format: decision — why (rejected alternative).
   death/spawn policy and ordered acceptance slices are in
   [Prologue co-op and playable cast](#prologue-co-op-and-playable-cast-vuh-2450);
   the original proposals are followed by bounded implementation results above.
+- **D17. Downed rules follow the difficulty; one player down never ends the
+  run** (James, 2026-10-21;
+  [VUH-2632](https://linear.app/vuhlp/issue/VUH-2632)). The ~1 s partner revive
+  of VUH-1504/VUH-2465 was an engineering default, not a decision. James:
+  *"this easy revive tho should be more for testing/automation/beginner level
+  only. maybe standard lets u revive but it takes longer? but one person dieing
+  shouldnt kill the others. even if they cant be revived, its like, theyll come
+  back after the boss is beat or the player goes back to the save point"*, and
+  later *"or reaches a new save point"*.
+  - The session difficulty is the **host's native difficulty** (its save's
+    difficulty byte), sent with each room; until it arrives, Beginner rules
+    apply. Each seat's own native damage stays its own: the difficulty is not
+    imposed on a friend's save.
+  - **Beginner**, and automation fixtures (`KH2COOP_REVIVE_POLICY=beginner`,
+    the scenario runner's default): today's quick revive, a 60-frame hold.
+  - **Standard**: revive allowed, a 300-frame (~5 s) hold, tunable with
+    `KH2COOP_REVIVE_HOLD_STANDARD` (60..1800 frames).
+  - **Proud / Critical**: no partner revive. This is the lead's reading until
+    James confirms it, behind one switch: `KH2COOP_REVIVE_HARD=off` (default) or
+    `standard` (Standard's rule).
+  - **Sit out and return, on every difficulty.** A downed player who isn't
+    revived sits out while the others play on. A normal door is held for a
+    downed teammate only while a revive is actually possible; otherwise the
+    survivors leave and the downed player follows, still sitting out. Forced
+    transitions no longer revive. The downed player returns when the boss or
+    encounter is beaten (at 25% HP, like a revive), or when a living player goes
+    back to a save point or reaches a new one (returned, then healed by the save
+    point itself). The return is a host-issued, validated request through the
+    same consume-once owner gate and native revive.
+  - **Game over only when every player is down** (unchanged).
+  Implementation and evidence: [downed/revive](DOWNED_REVIVE.md#downed-rules-by-difficulty-d17-vuh-2632).
 
 ## Architecture
 

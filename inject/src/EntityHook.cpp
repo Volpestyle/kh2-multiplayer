@@ -78,6 +78,7 @@
 #include <cstring>
 #include "DownedSpikeState.hpp"
 #include "RevivePrompt.hpp"
+#include "DownedPolicy.hpp"
 #include "DownedSpectate.hpp"
 #include "DownedSpectateAdapter.hpp"
 #include "DownedSpectateChannel.hpp"

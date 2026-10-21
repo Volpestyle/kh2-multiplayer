@@ -3097,6 +3097,9 @@ details).
   shipped defaults, with parked features forced off. A step's own `env` still
   wins. The run refuses if the runner's environment already has `KH2COOP_`
   variables. The applied set is in `report.json` under `playerEnv`.
+  Automation keeps the quick Beginner revive (`KH2COOP_REVIVE_POLICY=beginner`,
+  D17) unless the scenario sets `"revivePolicy": "native"`, which runs the
+  product rule for the save's difficulty.
 - `checkpoint` steps split the route into segments. Before the first
   checkpoint, setup failures end the run as usual. After it, a failing step
   ends only its segment, and the run skips to the next checkpoint. Crashes and
