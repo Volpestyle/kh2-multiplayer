@@ -53,6 +53,15 @@ struct ScriptOwnerResidue {
 };
 static std::array<ScriptOwnerResidue,3> g_smVisualResidue{};
 static std::array<bool,3> g_smVisualCleanupBusy{}; // a cleanup's native detach/idle and readback are running
+// VUH-2611 (host): the boss script can capture a seat's actor (1/29) before it hooks that actor (1/112), when no
+// role is current to attribute the capture to. The last such capture per seat, for the next hook of that actor.
+// Only the executing script's own source may leave one, and only this load, transition and epoch may adopt it.
+struct ScriptOwnerPendingCapture {
+    uintptr_t actor{},source{};std::uint64_t values[2]{};
+    std::uint32_t frame{},load{},transition{},epoch{};
+};
+static std::array<ScriptOwnerPendingCapture,3> g_smPendingCapture{};
+static unsigned g_smPendingCaptureLogs=0;
 static ScriptActorRole g_smVisualNativeReplay{}; // exact callback suppression while retiring native visuals
 static unsigned g_smVisualBindLogs=0;
 static unsigned g_smVisualDiagLogs=0;  // VUH-2580
@@ -764,6 +773,7 @@ static void SmOwnerRelease(ScriptActorRole& role,bool native,bool announce,bool 
 }
 static void SmOwnerReset(bool native) {
     for(auto& role:g_smRoles)SmOwnerRelease(role,native,false);
+    g_smPendingCapture={};
     SmOwnerResidueInvalidate();
 }
 static int SmOwnerNearest(uintptr_t source,const enemysync::DownedScope& scope) {
@@ -802,6 +812,8 @@ static void __fastcall SmOwnerHook(std::uint64_t* args) {
     const auto slot=SmOwnerActorSeat(actor);
     reinterpret_cast<TrapFn>(g_smOwnerTraps[1].original)(args); // VM context remains native
     if(!source || !actor || slot<0 || slot>=3 || g_smRoleSequence==0x7FFFFFFFu)return;
+    // VUH-2611: every hook of this seat consumes its pending capture, adopted below or not.
+    const auto pending=g_smPendingCapture[static_cast<unsigned>(slot)];g_smPendingCapture[static_cast<unsigned>(slot)]={};
     uintptr_t thread=0,vmSource=0;
     if(!ReadHitTrace(actor+0xD48,thread) || !thread || !ReadHitTrace(thread+0x60,vmSource) || vmSource!=source)return;
     if(g_smOwnerCleanup[static_cast<unsigned>(slot)].role.resource)return;
@@ -817,6 +829,26 @@ static void __fastcall SmOwnerHook(std::uint64_t* args) {
     role.load=warp::LoadSerial();role.transition=warp::TransitionSerial();
     (void)SmOwnerBegin(role);
     Log("[script-owner] begin source=%u role=%u seat=%u epoch=%u",netId,role.resource,role.slot,role.epoch);
+    // VUH-2611: a capture the script issued just before this hook belongs to this role while it is still installed.
+    if(!role.haveCapture && pending.actor) {
+        const auto frames=g_frameCounter-pending.frame;
+        auto captured=role;captured.captured=true;
+        std::uint32_t motion=UINT32_MAX;
+        const bool adopt=pending.actor==role.actor && pending.source==role.source && frames<=30 &&
+            pending.load==role.load && pending.transition==role.transition && pending.epoch==role.epoch &&
+            SmOwnerCaptureCurrent(captured) && ReadHitTrace(role.actor+offsets::actor::ANIM_ID,motion) &&
+            motion==R::BitsOf(pending.values[0]);
+        if(g_smPendingCaptureLogs<64) {
+            ++g_smPendingCaptureLogs;
+            Log("[script-owner] pending capture role=%u motion=%u frames=%u adopted=%u",role.resource,
+                R::BitsOf(pending.values[0]),frames,adopt?1u:0u);
+        }
+        if(adopt) {
+            role.captured=true;role.captureValues[0]=pending.values[0];role.captureValues[1]=pending.values[1];
+            role.haveCapture=true;
+            auto call=SmOwnerRecord(role,3);call.values[0]=pending.values[0];call.values[1]=pending.values[1];SmEmit(call);
+        }
+    }
 }
 static void __fastcall SmOwnerCapture(std::uint64_t* args) {
     SmOwnerResidueInvalidate(); // VUH-2580: our replays call the original, never this detour
@@ -830,6 +862,13 @@ static void __fastcall SmOwnerCapture(std::uint64_t* args) {
         role.captureValues[0]=before[2];role.captureValues[1]=before[3];role.haveCapture=true;
         auto call=SmOwnerRecord(role,3);call.values[0]=before[2];call.values[1]=before[3];SmEmit(call);return;
     }
+    // VUH-2611: no current role yet; keep it for this seat's next hook of the same actor.
+    const auto slot=SmOwnerActorSeat(actor);
+    const auto source=SmActorOf(before[0],ignored);
+    std::uint16_t vmNetId=0;std::uint32_t vmObject=0;
+    if(slot>=0 && slot<3 && source && source==SmOwnerVmSource(vmNetId,vmObject) && R::TagOf(before[2])==R::kTagInt)
+        g_smPendingCapture[static_cast<unsigned>(slot)]={actor,source,{before[2],before[3]},g_frameCounter,
+            warp::LoadSerial(),warp::TransitionSerial(),scope.epoch};
 }
 static void __fastcall SmOwnerAttach(std::uint64_t* args) {
     SmOwnerResidueInvalidate();
