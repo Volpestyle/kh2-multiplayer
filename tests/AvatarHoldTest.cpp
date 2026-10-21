@@ -402,6 +402,9 @@ void testBorrowRelease() {
               ph::ClassifyBorrow(true, 0, source, source, ref, true) == H::Unknown,
           "a partial or mixed state fails closed");
     check(ph::ClassifyBorrow(true, ref, source, 0, ref, true) == H::Unknown, "no recorded source fails closed");
+    check(ph::ClassifyBorrow(true, 0, other, source, ref, true) == H::Unknown &&
+              ph::ClassifyBorrow(true, otherRef, 0, source, ref, true) == H::Unknown,
+          "r3: a partial foreign state (one of the two set) is quarantined, never retired");
     check(std::string(ph::BorrowHeldName(H::Foreign)) == "foreign", "named in the log");
 }
 

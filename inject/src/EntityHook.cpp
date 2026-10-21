@@ -2930,6 +2930,7 @@ static void DrivePuppetMotion(void* actorObj, int index) {
                 d.missingMotion = UINT32_MAX;
                 return;
             }
+            if (d.borrowFault.clone) return; // r3: a fault refuses this tick too, before any setter or time write
             d.borrowRefused = motion;
         }
         const uint32_t stream = motion;
