@@ -15,7 +15,7 @@ host-native enemy, room and progress traffic. Network integration is active.
 | `KH2Offsets.hpp` | Steam Global memory offsets and their qualification |
 | `RuntimeMain.cpp` | Config, network admission, avatar/world pumps, diagnostics and shutdown |
 
-Source compatibility is protocol **31**, AvatarBridge **4**, WorldBridge **12**
+Source compatibility is protocol **32**, AvatarBridge **4**, WorldBridge **12**
 and CaptureChannel **1**. Build the runtime, DLL, relay and control tools together;
 restart the owned game to pick up a newly built DLL. See
 [setup](../SETUP.md) and [the development workflow](../docs/DEVELOPMENT_WORKFLOW.md).

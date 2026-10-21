@@ -12,9 +12,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 31;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 32;
 
 // ===========================================================================
+// Protocol v32 (VUH-2632, D17): the host's native difficulty in the RoomTransition packet trailer, and
+// ReviveRequest's kind (a partner revive, or a return at an encounter defeat or a save point); 51 bytes.
 // Protocol v31 admits host-only TT34 mission end16 and its authored event315 (VUH-2569).
 // Protocol v30 adds owner-scoped ScriptReactionCompletion (55) and actor-owner ScriptCall descriptors (VUH-2569).
 // Protocol v28 adds StageEnd (54): a friend's own script ended a host-led prologue stage (VUH-2555).
@@ -153,6 +155,9 @@ struct RoomTransition {
     // before its own load, so a story-forced party change (LoD's Ping) reaches its next room.
     std::uint8_t partyRowValid {0};
     std::uint32_t partyRow {0};
+    // Packet-only (VUH-2632, D17): the host's native difficulty, its save's difficulty byte (0 Beginner,
+    // 1 Standard, 2 Proud, 3 Critical; 0xFF unknown). Every seat's revive rule follows it.
+    std::uint8_t nativeDifficulty {0xFF};
 };
 
 // One successful native wrapper return, not permission to run a controller's
@@ -343,6 +348,12 @@ inline constexpr bool validMissionEndTrap(std::uint8_t t) { return t == 0 || t =
 // Reliable, scoped teammate request. Relay stamps requesterSlot and forwards
 // once to targetConnectionId only. Episode is minted by the target owner,
 // strictly increasing for that game lifetime, never an HP write authority.
+// v32 (VUH-2632, D17): kind. Revive is the partner revive (the relay keeps its range check). A return
+// brings back a downed teammate who sat out, at any distance: EncounterDefeat only from the host (its
+// forced battle ended), SavePoint from any living seat standing at a save point. Everything else is the
+// same consume-once episode contract.
+enum class ReviveKind : std::uint8_t { Revive = 0, EncounterDefeat = 1, SavePoint = 2 };
+inline constexpr bool validReviveKind(std::uint8_t k) { return k <= 2; }
 struct ReviveRequest {
     RoomTransition location{};
     std::uint64_t seq{0};
@@ -351,7 +362,9 @@ struct ReviveRequest {
     std::uint64_t targetEpisode{0};
     std::uint8_t requesterSlot{0xFF};
     std::uint8_t targetSlot{0xFF};
+    ReviveKind kind{ReviveKind::Revive};
 };
+inline constexpr std::size_t REVIVE_REQUEST_BYTES = 51;
 // VUH-2464: reliable, scoped seat declaration from ANY seat's DLL. The relay admits it only for the
 // verified roster, stamps ownerSlot and broadcasts it to every verified peer, the author included (that
 // copy is its echo). `profile` is the seat's selected player profile (an objentry kit id). `latched`

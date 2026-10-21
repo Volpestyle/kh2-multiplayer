@@ -138,7 +138,7 @@ int main() {
     using namespace kh2coop::inject::nativehud;
     auto m = Report(1);
     const auto bytes = encode(m); const std::uint8_t* p{}; std::size_t n{};
-    Check(decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::SeatState && n == SEAT_STATE_BYTES && PROTOCOL_VERSION == 31,
+    Check(decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::SeatState && n == SEAT_STATE_BYTES && PROTOCOL_VERSION == 32,
           "v29 exact SeatState framing");
     ByteReader r(p,n); SeatState back; read(r,back); Check(back.vitals == m.vitals && encode(back)==bytes,"owner vitals codec roundtrip");
     for (int kind=0;kind<7;++kind) {

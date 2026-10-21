@@ -1093,12 +1093,19 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                         p.reviveAvatar.downedEpoch==room_->epoch && p.reviveAvatar.worldId==room_->worldId &&
                         p.reviveAvatar.roomId==room_->roomId && !(p.reviveAvatar.flags & AvatarInCutscene);
                 };
-                if (target==peers_.end() || !arrived(*ps) || !arrived(*target) ||
+                // VUH-2632 (D17): a return is not a partner revive. An encounter defeat comes only from the
+                // host; a save point from any living seat. Neither needs the reviver beside the target.
+                const bool partner = request.kind == ReviveKind::Revive;
+                const bool kindAllowed = partner || request.kind == ReviveKind::SavePoint ||
+                    (request.kind == ReviveKind::EncounterDefeat && fromHost(*ps));
+                if (target==peers_.end() || !kindAllowed || !arrived(*ps) || !arrived(*target) ||
                     (ps->reviveAvatar.flags & AvatarDowned) || ps->reviveAvatar.hp<=0 ||
                     !(target->reviveAvatar.flags & AvatarDowned) || target->reviveAvatar.hp!=0 ||
                     !request.targetEpisode || request.targetEpisode!=target->reviveAvatar.downedEpisode ||
-                    request.targetEpisode<=target->revivedEpisode || !reviveInRange(ps->reviveAvatar,target->reviveAvatar)) {
+                    request.targetEpisode<=target->revivedEpisode ||
+                    (partner && !reviveInRange(ps->reviveAvatar,target->reviveAvatar))) {
                     std::string why = target==peers_.end() ? "target-missing" :
+                        !kindAllowed ? "kind-not-host" :
                         !arrived(*ps) ? "requester-not-arrived" : !arrived(*target) ? "target-not-arrived" :
                         (ps->reviveAvatar.flags & AvatarDowned) || ps->reviveAvatar.hp<=0 ? "requester-not-alive" :
                         !(target->reviveAvatar.flags & AvatarDowned) ? "target-not-downed" :
@@ -1123,7 +1130,8 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 request.requesterSlot=static_cast<std::uint8_t>(ps->assignedSlot);
                 sendTo(target->transportPeer,encode(request),true);
                 log("ReviveRequest forwarded requester="+std::to_string(request.requesterSlot)+
-                    " target="+std::to_string(request.targetSlot)+" episode="+std::to_string(request.targetEpisode));
+                    " target="+std::to_string(request.targetSlot)+" episode="+std::to_string(request.targetEpisode)+
+                    " kind="+std::to_string(static_cast<int>(request.kind)));
                 break;
             }
 

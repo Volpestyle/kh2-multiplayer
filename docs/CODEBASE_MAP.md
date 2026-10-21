@@ -1,7 +1,7 @@
 # Codebase Map
 
 Navigation guide reviewed 2026-10-20 against main `2ed98fa`. Source versions:
-protocol **31**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**.
+protocol **32**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**.
 Tables list key components rather than every source file; use the build files
 for the complete target list and symbol searches for current locations.
 [Setup](../SETUP.md) covers building; the [plan](ONLINE_COOP_PLAN.md) owns current

@@ -211,7 +211,9 @@ void NoteNativeEnemyHp(uintptr_t actor, int hp) noexcept;
 // After envelope admission and ReviveOwnerGate::Consume (episode reserved),
 // enemysync calls this exactly once; it must run the fresh native checks
 // (downed::TryRevive). Returns the native result code (1 = revived).
-using ReviveApplyFn = int (*)(std::uint64_t episode, std::uint8_t requesterSlot, std::uint64_t seq);
+// kind (v32, VUH-2632): kh2coop::ReviveKind as its byte; 0 a partner revive, 1 a return at an encounter
+// defeat, 2 at a save point. The relay checked it.
+using ReviveApplyFn = int (*)(std::uint64_t episode, std::uint8_t requesterSlot, std::uint64_t seq, std::uint8_t kind);
 void SetReviveApply(ReviveApplyFn apply) noexcept;
 struct ReviveStats {
     std::uint64_t seen = 0, admissionRefused = 0, gateRefused = 0, consumed = 0, applied = 0;
@@ -219,7 +221,11 @@ struct ReviveStats {
 ReviveStats GetReviveStats() noexcept;
 // Requester side: builds and sends one ReviveRequest for a teammate's streamed
 // downed episode through the captured-context owner ring. seqOut = its sequence.
-bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut);
+bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut,
+                       std::uint8_t kind = 0);
+// VUH-2632 (D17): the session's native difficulty byte, game thread: the host's own save (0..3), or on a
+// client the host's value from its last RoomTransition; 0xFF while unknown (Beginner rules apply).
+std::uint8_t SessionNativeDifficulty() noexcept;
 
 // VUH-1515 RemoteHit (KH2COOP_ENEMY_TARGET_REMOTE). Game thread.
 // Host: the announced netId of a host enemy actor in the current epoch, 0 = unknown.

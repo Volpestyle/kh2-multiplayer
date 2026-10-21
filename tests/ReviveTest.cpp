@@ -15,9 +15,15 @@ void check(bool ok,const char* text){std::cout<<(ok?"PASS ":"FAIL ")<<text<<'\n'
 void unitChecks(){
     ReviveRequest r{{7,5,4,0,0,1,0},42,11,12,9,1,2};
     const auto bytes=encode(r); const std::uint8_t* p=nullptr;std::size_t n=0;
-    check(decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::ReviveRequest && n==50,"revive fixed wire payload");
+    check(decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::ReviveRequest && n==REVIVE_REQUEST_BYTES,"revive fixed wire payload");
     ByteReader reader(p,n);ReviveRequest copy;read(reader,copy);
     check(encode(copy)==bytes && reader.atEnd(),"revive exact nonzero codec roundtrip");
+    for(const auto kind:{ReviveKind::Revive,ReviveKind::EncounterDefeat,ReviveKind::SavePoint}){
+        auto k=r;k.kind=kind;const auto kb=encode(k);decodePacketHeader(kb.data(),kb.size(),p,n);
+        ByteReader kr(p,n);ReviveRequest kc;read(kr,kc);check(kc.kind==kind && kr.atEnd(),"v32 revive kind roundtrip");}
+    {auto bad=bytes;bad.back()=3;bool refused=false;
+     try{decodePacketHeader(bad.data(),bad.size(),p,n);ByteReader br(p,n);ReviveRequest x;read(br,x);}catch(const std::exception&){refused=true;}
+     check(refused,"an unknown revive kind is refused");}
     for(int delta:{-1,1}){auto bad=bytes;if(delta<0)bad.pop_back();else bad.push_back(0);
         bool refused=false;try{decodePacketHeader(bad.data(),bad.size(),p,n);}catch(const std::exception&){refused=true;}
         check(refused,"truncated or trailing revive refused");}
@@ -79,7 +85,7 @@ void remoteHitUnitChecks(){
      check(refused,"remote hit reader refuses wrong payload length");}
     check(isWorldPacket(PacketType::RemoteHit) && isScopedWorldPacket(PacketType::RemoteHit) && !isMaterialWorldPacket(PacketType::RemoteHit) &&
           validateScopedWorldPacket(bytes)==PacketType::RemoteHit,"remote hit is a scoped, non-material world packet");
-    check(PROTOCOL_VERSION==31,"protocol31 retains RemoteHit");
+    check(PROTOCOL_VERSION==32,"protocol32 retains RemoteHit");
 }
 void remoteHitEnetChecks(){
     SessionConfig config;config.bindAddress="127.0.0.1";config.port=29876;

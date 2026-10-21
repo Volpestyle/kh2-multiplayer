@@ -772,7 +772,9 @@ static downedpolicy::Difficulty LocalNativeDifficulty() {
     return downedpolicy::DifficultyFromByte(raw);
 }
 static downedpolicy::Difficulty SessionDifficulty() {
-    return enemysync::ActivationRole() == 2 ? downedpolicy::Difficulty::Unknown : LocalNativeDifficulty();
+    // A client follows the host's value from its RoomTransition (v32); unknown until one arrives.
+    return enemysync::ActivationRole() == 2 ? downedpolicy::DifficultyFromByte(enemysync::SessionNativeDifficulty())
+                                            : LocalNativeDifficulty();
 }
 // KH2COOP_REVIVE_POLICY / _HOLD_STANDARD / _HARD, read once.
 static const downedpolicy::Config& ReviveConfig() {
@@ -787,10 +789,11 @@ static const downedpolicy::Config& ReviveConfig() {
 }
 static downedpolicy::Policy SessionRevivePolicy() { return downedpolicy::For(SessionDifficulty(), ReviveConfig()); }
 
-static int ApplyReviveRequest(uint64_t episode, uint8_t requesterSlot, uint64_t seq) {
+static int ApplyReviveRequest(uint64_t episode, uint8_t requesterSlot, uint64_t seq, uint8_t kind) {
     // VUH-2632: the session's rule holds on the owner too; on Proud/Critical (switch off) a partner
-    // revive is refused here whoever sent it, and the downed player sits out until a return.
-    const bool allowed = SessionRevivePolicy().reviveAllowed;
+    // revive is refused here whoever sent it, and the downed player sits out until a return. A return
+    // (an encounter defeat, a save point) comes back on every difficulty.
+    const bool allowed = kind != 0 || SessionRevivePolicy().reviveAllowed; // 0: a partner revive
     const Result r = allowed ? TryRevive(episode) : Result::WrongState;
     if (!allowed)
         Log("[downed] revive-request refused by policy difficulty=%s requester=%u episode=%llX",
@@ -804,9 +807,9 @@ static int ApplyReviveRequest(uint64_t episode, uint8_t requesterSlot, uint64_t 
             (g_down.downedActor && ReadHitTrace(g_down.downedActor + 0x9B8, flags) && (flags & 4U));
         if (ShouldRemint(g_down.state == State::Downed, dead, g_down.episodeFrames, true)) RemintEpisode("native-refusal");
     }
-    Log("[downed] revive-request native requester=%u seq=%llu episode=%llX result=%d",
+    Log("[downed] revive-request native requester=%u seq=%llu episode=%llX kind=%u result=%d",
         static_cast<unsigned>(requesterSlot), static_cast<unsigned long long>(seq),
-        static_cast<unsigned long long>(episode), static_cast<int>(r));
+        static_cast<unsigned long long>(episode), static_cast<unsigned>(kind), static_cast<int>(r));
     return static_cast<int>(r);
 }
 

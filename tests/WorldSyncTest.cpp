@@ -589,9 +589,28 @@ void testWorldCacheEpoch() {
         ByteReader r(body, n);
         RoomTransition back;
         readRoomTransitionPacket(r, back);
-        check(header && n == 16 + 6 + 5 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
-                  back.spawnPickSaltTag == 0x01020304u && back.difficultyPlayers == 1 && !back.partyRowValid,
-              "RoomTransition packet: 16 generic bytes + shared/salt/count/party-row trailer");
+        check(header && n == 16 + 6 + 5 + 1 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
+                  back.spawnPickSaltTag == 0x01020304u && back.difficultyPlayers == 1 && !back.partyRowValid &&
+                  back.nativeDifficulty == 0xFF,
+              "RoomTransition packet: 16 generic bytes + shared/salt/count/party-row/native-difficulty trailer");
+        // VUH-2632 (v32): the host's native difficulty rides the trailer; 0..3 or unknown 0xFF only.
+        for (const std::uint8_t d : {std::uint8_t{0}, std::uint8_t{1}, std::uint8_t{2}, std::uint8_t{3}}) {
+            RoomTransition diff = shared; diff.nativeDifficulty = d;
+            const auto f = encode(diff);
+            const std::uint8_t* b = nullptr; std::size_t len = 0;
+            (void)decodePacketHeader(f.data(), f.size(), b, len);
+            ByteReader dr(b, len); RoomTransition got; readRoomTransitionPacket(dr, got);
+            check(dr.atEnd() && got.nativeDifficulty == d, "RoomTransition carries the host's native difficulty");
+        }
+        {
+            RoomTransition bad = shared; bad.nativeDifficulty = 4;
+            const auto f = encode(bad);
+            const std::uint8_t* b = nullptr; std::size_t len = 0;
+            (void)decodePacketHeader(f.data(), f.size(), b, len);
+            bool threw = false;
+            try { ByteReader br(b, len); RoomTransition got; readRoomTransitionPacket(br, got); } catch (const std::exception&) { threw = true; }
+            check(threw, "RoomTransition refuses a native difficulty other than 0..3 or 0xFF");
+        }
         RoomTransition party = shared; party.partyRowValid = 1; party.partyRow = 0x12020100u;
         const auto partyFrame = encode(party);
         decodePacketHeader(partyFrame.data(), partyFrame.size(), body, n);

@@ -1861,6 +1861,7 @@ void QueueHostBeginInstance(const RoomTransition& location) {
     g_pendingHostRoom = location;
     g_pendingHostRoom.difficultyPlayers = static_cast<std::uint8_t>(g_inst.difficulty.players);
     g_pendingHostRoom.partyRowValid = 0; g_pendingHostRoom.partyRow = 0;
+    g_pendingHostRoom.nativeDifficulty = SessionNativeDifficulty(); // VUH-2632: every seat's revive rule
     std::uint32_t saveMagic = 0;
     if (PR::StoryWorld(location.worldId) && ReadNative(g_exeBase + PR::kSaveRva, saveMagic) && saveMagic == PR::kSaveMagic &&
         ReadNative(g_exeBase + PR::kSaveRva + PR::kPartyRows + 4u * location.worldId, g_pendingHostRoom.partyRow) &&
@@ -3977,11 +3978,12 @@ void AdmitReviveRequest(const WorldScope& scope, const std::uint8_t* payload, st
     // Runs inside the ReceiveWorldPackets drain: the native revive re-enters
     // HookedApplyStatDelta/hit trace only; nothing there touches this drain's
     // local packet buffer or enemysync state (round-5 review N5, checked).
-    const int result = g_reviveApply(request.targetEpisode, request.requesterSlot, request.seq);
+    const int result = g_reviveApply(request.targetEpisode, request.requesterSlot, request.seq,
+                                     static_cast<std::uint8_t>(request.kind));
     if (result == 1) ++g_reviveStats.applied;
-    if (g_log) g_log("[downed] revive-request consumed requester=%u seq=%llu episode=%llX native=%d",
+    if (g_log) g_log("[downed] revive-request consumed requester=%u seq=%llu episode=%llX kind=%u native=%d",
                      static_cast<unsigned>(request.requesterSlot), static_cast<unsigned long long>(request.seq),
-                     static_cast<unsigned long long>(request.targetEpisode), result);
+                     static_cast<unsigned long long>(request.targetEpisode), static_cast<unsigned>(request.kind), result);
 }
 
 std::array<std::uint64_t, 3> PartyRoster() {
@@ -6829,13 +6831,20 @@ bool CaptureDownedScope(DownedScope& out) noexcept {
 }
 
 void NoteLocalDownedState(const LocalDownedState& state) noexcept { g_localDowned = state; }
+std::uint8_t SessionNativeDifficulty() noexcept {
+    if (CurrentRole() == Role::Client) return g_lastRoomPacket ? g_lastRoomPacket->nativeDifficulty : 0xFF;
+    std::uint32_t magic = 0;
+    std::uint8_t raw = 0xFF;
+    return g_exeBase && ReadNative(g_exeBase + PR::kSaveRva, magic) && magic == PR::kSaveMagic &&
+        ReadNative(g_exeBase + PR::kSaveRva + 0x2498, raw) && raw <= 3 ? raw : 0xFF;
+}
 void SetReviveApply(ReviveApplyFn apply) noexcept { g_reviveApply = apply; }
 ReviveStats GetReviveStats() noexcept { return g_reviveStats; }
 
-bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut) {
+bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut, std::uint8_t kind) {
     seqOut = 0;
     DownedScope s;
-    if (!targetEpisode || !CaptureDownedScope(s) || targetSlot >= 3 || targetSlot == s.localSlot ||
+    if (!validReviveKind(kind) || !targetEpisode || !CaptureDownedScope(s) || targetSlot >= 3 || targetSlot == s.localSlot ||
         !s.connections[targetSlot] || g_reviveRequestSeq == UINT64_MAX) return false;
     ProducerWorldContext context;
     if (!CaptureWorldContext(context) || context.generation != s.context.generation ||
@@ -6848,6 +6857,7 @@ bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std
     request.targetEpisode = targetEpisode;
     request.requesterSlot = s.localSlot;
     request.targetSlot = targetSlot;
+    request.kind = static_cast<ReviveKind>(kind);
     seqOut = request.seq;
     return SendCapturedWorld(encode(request), context);
 }

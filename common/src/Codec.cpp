@@ -989,13 +989,17 @@ void write(ByteWriter& w, const ReviveRequest& m) {
     w.writeU64(m.seq); w.writeU64(m.requesterConnectionId);
     w.writeU64(m.targetConnectionId); w.writeU64(m.targetEpisode);
     w.writeU8(m.requesterSlot); w.writeU8(m.targetSlot);
+    w.writeU8(static_cast<std::uint8_t>(m.kind));
 }
 void read(ByteReader& r, ReviveRequest& m) {
-    if (r.remaining() != 50) throw std::runtime_error("ReviveRequest: wrong payload length");
+    if (r.remaining() != REVIVE_REQUEST_BYTES) throw std::runtime_error("ReviveRequest: wrong payload length");
     read(r, m.location);
     m.seq = r.readU64(); m.requesterConnectionId = r.readU64();
     m.targetConnectionId = r.readU64(); m.targetEpisode = r.readU64();
     m.requesterSlot = r.readU8(); m.targetSlot = r.readU8();
+    const auto kind = r.readU8();
+    if (!validReviveKind(kind)) throw std::runtime_error("ReviveRequest: invalid kind");
+    m.kind = static_cast<ReviveKind>(kind);
 }
 std::vector<std::uint8_t> encode(const ReviveRequest& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::ReviveRequest, w.data());
@@ -1422,6 +1426,7 @@ void writeRoomTransitionPacket(ByteWriter& w, const RoomTransition& m) {
     w.writeU8(m.difficultyPlayers);
     w.writeU8(m.partyRowValid);
     w.writeU32(m.partyRow);
+    w.writeU8(m.nativeDifficulty);
 }
 
 void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
@@ -1438,6 +1443,9 @@ void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
         throw std::runtime_error("RoomTransition: invalid party row");
     for (unsigned k = 0; k < 4; ++k)  // member ids 0x00 (playable) .. 0x12 (empty)
         if (((m.partyRow >> (8 * k)) & 0xFF) > 0x12) throw std::runtime_error("RoomTransition: invalid party member");
+    m.nativeDifficulty = r.readU8();
+    if (m.nativeDifficulty > 3 && m.nativeDifficulty != 0xFF)
+        throw std::runtime_error("RoomTransition: invalid native difficulty");
 }
 
 void read(ByteReader& r, TransitionAck& m) {
@@ -1808,7 +1816,7 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
     }
     if ((type == PacketType::PartyLayout || type == PacketType::PartyReapply || type == PacketType::PartyIntent) && size != kHeaderSize + len)
         throw std::runtime_error("Party: wrong frame length");
-    if (type == PacketType::ReviveRequest && (len != 50 || size != kHeaderSize + len))
+    if (type == PacketType::ReviveRequest && (len != REVIVE_REQUEST_BYTES || size != kHeaderSize + len))
         throw std::runtime_error("ReviveRequest: wrong frame length");
     if (type == PacketType::SeatState && (len != SEAT_STATE_BYTES || size != kHeaderSize + len))
         throw std::runtime_error("SeatState: wrong frame length");

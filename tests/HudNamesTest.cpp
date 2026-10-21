@@ -191,7 +191,7 @@ void SlotAndConcurrency() {
     Check(AVATAR_BRIDGE_VERSION == 4 && sizeof(hudnames::Roster) == 112 && sizeof(hudnames::Slot) == 128 &&
           offsetof(AvatarBridgeLayout, rosterNames) == offsetof(AvatarBridgeLayout, puppets) +
               sizeof(AvatarBridgeLayout::puppets), "v4 preserves roster layout before new downed slot");
-    Check(PROTOCOL_VERSION == 31, "network protocol31 (v31 TT34 terminal semantics; v30 ScriptReactionCompletion; v29 owner vitals; v28 StageEnd; v27 EventHold in-field start; v26 SeatState; v25 friendly fire; v19 ScriptCall; v18 co-op difficulty; v15 scoped record identity; v12 party contract, v13 EnemyMotion, v14 RemoteHit/TargetAuthority/PartyIntent)");
+    Check(PROTOCOL_VERSION == 32, "network protocol32 (v32 D17 native difficulty and revive kind; v31 TT34 terminal semantics; v30 ScriptReactionCompletion; v29 owner vitals; v28 StageEnd; v27 EventHold in-field start; v26 SeatState; v25 friendly fire; v19 ScriptCall; v18 co-op difficulty; v15 scoped record identity; v12 party contract, v13 EnemyMotion, v14 RemoteHit/TargetAuthority/PartyIntent)");
     std::printf("ABI avatarVersion=%u layoutBytes=%zu rosterOffset=%zu rosterPayload=%zu rosterSlot=%zu protocol=%u\n",
         AVATAR_BRIDGE_VERSION, sizeof(AvatarBridgeLayout), offsetof(AvatarBridgeLayout, rosterNames),
         sizeof(hudnames::Roster), sizeof(hudnames::Slot), PROTOCOL_VERSION);

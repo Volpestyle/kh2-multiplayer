@@ -71,6 +71,25 @@ void reviveNetworkChecks(kh2coop::SessionHost& server,
     request.targetSlot=0;request.targetConnectionId=ids[0];request.targetEpisode=3;++request.seq;
     clients[1]->sendReviveRequest(request);pump();
     check(total()==4 && received[0].size()==1,"friend can revive downed host through same validation");
+    // VUH-2632 (v32): request kinds. A return needs no reviver beside the target; only the host may claim
+    // an encounter defeat; a partner revive keeps its range.
+    avatars[0].flags=0;avatars[0].hp=20;
+    avatars[2].flags=AvatarDowned;avatars[2].hp=0;avatars[2].downedEpisode=4;avatars[2].position.x=REVIVE_RANGE*10;publish();
+    ReviveRequest ret{room,request.seq+1,ids[1],ids[2],4,0,2};
+    clients[1]->sendReviveRequest(ret);pump();
+    check(total()==4,"a far partner revive is still refused");
+    ++ret.seq;ret.kind=ReviveKind::EncounterDefeat;clients[1]->sendReviveRequest(ret);pump();
+    check(total()==4,"only the host may return a teammate at an encounter defeat");
+    ++ret.seq;ret.kind=ReviveKind::SavePoint;clients[1]->sendReviveRequest(ret);pump();
+    check(total()==5 && received[2].back().kind==ReviveKind::SavePoint && received[2].back().requesterSlot==1,
+          "a living seat at a save point returns a far teammate");
+    avatars[2].downedEpisode=5;publish();
+    ReviveRequest hostReturn{room,fromHost.seq+1,ids[0],ids[2],5,0,2};hostReturn.kind=ReviveKind::EncounterDefeat;
+    clients[0]->sendReviveRequest(hostReturn);pump();
+    check(total()==6 && received[2].back().kind==ReviveKind::EncounterDefeat && received[2].back().requesterSlot==0,
+          "the host returns a far teammate at an encounter defeat");
+    ++hostReturn.seq;clients[0]->sendReviveRequest(hostReturn);pump();
+    check(total()==6,"a return consumes its episode once");
     // No revive replay in late-join or world caches.
     check(server.currentRoom()->epoch==20,"revive does not mutate room authority");
 }

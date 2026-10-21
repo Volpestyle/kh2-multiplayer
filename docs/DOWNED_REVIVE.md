@@ -1,7 +1,7 @@
 # Downed / revive network contract (VUH-1504)
 
 The downed contract was introduced in protocol11; the current session protocol
-is **31** (Twilight Thorn terminal semantics), with AvatarBridge **4**. Older network
+is **32** (D17 native difficulty and returns), with AvatarBridge **4**. Older network
 peers and avatar mappings refuse the new contract. The sealed friend packages
 are unchanged. ENet and the default-off Steam backend use the same policy.
 
