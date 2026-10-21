@@ -88,6 +88,15 @@ int main() {
           "an actor the host routes reactions for still waits, whatever its class");
     check(!R::KnownReactionSource(false,false,thorn) && !R::KnownReactionSource(false,false,dusk),
           "an unmirrored, unrouted actor is never a known source");
+    // r2: the receiver callback (0x3B5FA0) on the client. reversal-02 refused 50 friend Reversals here.
+    check(!R::ClientOwnedCallbackReceiver(true,true,true,dusk),
+          "a mirrored Dusk's callback passes through on the client (Reversal starts natively)");
+    check(R::ClientOwnedCallbackReceiver(true,true,true,thorn),
+          "a mirrored Thorn's unpaired callback stays refused (warmup and held included)");
+    check(R::ClientOwnedCallbackReceiver(true,true,false,0),
+          "a mirrored receiver whose class cannot be read stays refused");
+    check(!R::ClientOwnedCallbackReceiver(false,true,true,thorn) && !R::ClientOwnedCallbackReceiver(true,false,true,thorn),
+          "the host, and an unmirrored receiver, never refuse here");
     check(R::NativeReactionActive(replacement,replacement.roots[0]+0x10,replacement.command,replacement.target),
           "native active command and inline TARGET prove accepted handoff");
     check(!R::NativeReactionActive(replacement,replacement.roots[0]+0x20,replacement.command,replacement.target),

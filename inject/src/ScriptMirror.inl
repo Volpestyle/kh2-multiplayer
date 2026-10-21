@@ -1401,7 +1401,12 @@ static bool SmCompleteReaction(const enemysync::ScriptReactionCompletionRecord& 
 }
 static void __fastcall SmReactionCallback(uintptr_t receiver,uintptr_t player,std::uint32_t command,const std::uint32_t* target) {
     if(!g_sm.requested || !SmGameThread()) {g_smReactionCallback(receiver,player,command,target);return;}
-    const bool ownedReceiver=enemysync::ActivationRole()==2 && SmOwnerMirroredSource(receiver);
+    // VUH-2620: only a host-routed class (Thorn) keeps the client's unpaired callback refused.
+    uintptr_t receiverEntry=0;std::uint32_t receiverObject=0;
+    const bool receiverRead=ReadHitTrace(receiver+offsets::actor::OBJENTRY_PTR,receiverEntry) && receiverEntry &&
+        ReadHitTrace(receiverEntry+offsets::objentry::OBJECT_ID,receiverObject);
+    const bool ownedReceiver=R::ClientOwnedCallbackReceiver(enemysync::ActivationRole()==2,
+        SmOwnerMirroredSource(receiver),receiverRead,receiverObject);
     // Pin/install/lifetime failure must not reopen a proven client's key11 BDX
     // merely because the new native cache hooks could not become ready.
     if(!SmOwnerReady()) {
