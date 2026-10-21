@@ -315,6 +315,8 @@ boss/encounter defeat or a save point.
   cannot import the old session's cached pose.
 - **A lone host.** A host downed in its room that has never seen a teammate in this session is everyone
   down by itself: after one second it takes the native game over and Continue, as the full party does.
+  Scope limit (accepted, VUH-2632): "never seen" is not "no teammate rostered". A host downed before a
+  rostered teammate's first avatar arrives takes that game over too.
   - The teammates are latched each downed frame while the old room is current. The transition erases
     every teammate pose before the hold is found lost, so they cannot be counted then.
   - The log names the case: `teammate-up`, `full-party`, `solo` or `unavailable`.
