@@ -1,6 +1,7 @@
 #pragma once
 // ScriptMirror's host-owned reaction windows. Native attack/effect handles stay
 // in the adapter; only host-minted occurrence IDs and admitted seat IDs travel.
+#include "kh2coop/EnemyClass.hpp"
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -198,6 +199,17 @@ private:
 };
 inline std::uint16_t NativeReactionCommand(std::uint16_t raw,bool knownMirror,bool admitted) noexcept {
     return knownMirror && !admitted?std::uint16_t{0}:raw;
+}
+// VUH-2620: whose native command waits for a host occurrence. An actor the host routes reactions for
+// (a reaction binding, a script-owner role or its cleanup) always does; a mirrored copy only when its
+// class's reactions are host-routed, which today is Twilight Thorn's script. Any other mirrored enemy's
+// command (a Dusk's Reversal 69, command 32) belongs to the seat that sees it and runs natively there,
+// as it did before the Thorn routing.
+inline bool HostRoutedReactionClass(std::uint32_t objectId) noexcept {
+    return objectId==kh2coop::enemyclass::TwilightThorn;
+}
+inline bool KnownReactionSource(bool hostRouted,bool mirroredCopy,std::uint32_t objectId) noexcept {
+    return hostRouted || (mirroredCopy && HostRoutedReactionClass(objectId));
 }
 
 struct ReactionPoint { float x{}, y{}, z{}; };

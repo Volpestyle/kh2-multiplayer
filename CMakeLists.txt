@@ -729,7 +729,7 @@ endif()
 
 # Native RC receipt/acceptance rules (no native memory or game process required).
 add_executable(kh2coop_script_reaction_cache_test tests/ScriptReactionCacheTest.cpp)
-target_include_directories(kh2coop_script_reaction_cache_test PRIVATE inject/src)
+target_include_directories(kh2coop_script_reaction_cache_test PRIVATE inject/src common/include)
 if(MSVC)
     target_compile_options(kh2coop_script_reaction_cache_test PRIVATE /W4 /WX)
 else()

@@ -959,8 +959,14 @@ static bool SmRcKnownSource(std::uint32_t handle) noexcept {
         if(role.resource && role.sourceHandle==handle && SmOwnHandle(role.source)==handle &&
             SmRcSourceCurrent(role.source,role.netId,role.objectId))return true;
     }
-    for(const auto& driven:enemymirror::g_driven)if(driven.actor && SmOwnHandle(driven.actor)==handle &&
-        SmOwnerMirroredSource(driven.actor))return true;
+    // VUH-2620: a mirrored copy only for a host-routed class (Thorn); a Dusk's own command stays native.
+    for(const auto& driven:enemymirror::g_driven) {
+        if(!driven.actor || SmOwnHandle(driven.actor)!=handle)continue;
+        uintptr_t entry=0;std::uint32_t objectId=0;
+        const bool known=ReadHitTrace(driven.actor+offsets::actor::OBJENTRY_PTR,entry) && entry &&
+            ReadHitTrace(entry+offsets::objentry::OBJECT_ID,objectId);
+        if(known && R::KnownReactionSource(false,SmOwnerMirroredSource(driven.actor),objectId))return true;
+    }
     return false;
 }
 // Build a current, local-owner proof without mutating/renewing a window. The

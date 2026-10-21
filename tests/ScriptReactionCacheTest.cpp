@@ -74,6 +74,20 @@ int main() {
     check(cache.Published().refresh>serial,"reset does not reuse a refresh serial");
     check(R::NativeReactionCommand(432,false,false)==432 && R::NativeReactionCommand(432,false,true)==432,"unrelated and unknown native command preserved");
     check(R::NativeReactionCommand(432,true,true)==432 && R::NativeReactionCommand(432,true,false)==0,"only known unactionable mirror command yields Triangle");
+    // VUH-2620: the friend's own command on a mirrored Dusk (objectId 318) is actionable natively, with no
+    // host occurrence; Twilight Thorn's script commands still wait for one.
+    constexpr std::uint32_t dusk=318,thorn=307;
+    check(R::NativeReactionCommand(69,R::KnownReactionSource(false,true,dusk),false)==69,
+          "friend Reversal (69) on a mirrored Dusk stays actionable");
+    check(R::NativeReactionCommand(32,R::KnownReactionSource(false,true,dusk),false)==32,
+          "friend command 32 on a mirrored Dusk stays actionable");
+    check(R::NativeReactionCommand(297,R::KnownReactionSource(false,true,thorn),false)==0 &&
+              R::NativeReactionCommand(297,R::KnownReactionSource(false,true,thorn),true)==297,
+          "a Thorn script command still needs the host occurrence");
+    check(R::NativeReactionCommand(69,R::KnownReactionSource(true,true,dusk),false)==0,
+          "an actor the host routes reactions for still waits, whatever its class");
+    check(!R::KnownReactionSource(false,false,thorn) && !R::KnownReactionSource(false,false,dusk),
+          "an unmirrored, unrouted actor is never a known source");
     check(R::NativeReactionActive(replacement,replacement.roots[0]+0x10,replacement.command,replacement.target),
           "native active command and inline TARGET prove accepted handoff");
     check(!R::NativeReactionActive(replacement,replacement.roots[0]+0x20,replacement.command,replacement.target),
