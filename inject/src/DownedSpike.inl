@@ -137,6 +137,12 @@ struct SpikeState {
     bool logical = false, reviving = false, resolvePending = false, fullPartyDown = false;
     bool sitOutPending = false; // VUH-2632 (D17): re-down in the next room, still sitting out
     uint32_t sitOuts = 0, returnsSent = 0;
+    // VUH-2656: this downing's identity (one per BeginDowned) and the host's mission running here then.
+    uint64_t downingSerial = 0, downingSession = 0;
+    uint32_t downingTransition = 0, downingLoad = 0;
+    char encounterFile[24] {};
+    bool encounterKnown = false;
+    uint32_t hostEndSerial = 0;
     uint32_t allDownFrames = 0, pinWrites = 0, fullPartyLoad = 0;
     float downedPos[3] {};
     uint32_t logicalSkips = 0, healsUndone = 0, motionRequests = 0, motionFrame = 0;
@@ -416,6 +422,12 @@ static void BeginDowned(uintptr_t actor, int hp, uint32_t mode) {
     g_down.episode = NextEpisode(g_down.episode); // P3 boundary: new per episode, never reused
     g_disposition.Reset();
     g_owedReturn.Clear();
+    ++g_down.downingSerial;
+    g_down.downingTransition = warp::TransitionSerial();
+    g_down.downingLoad = warp::LoadSerial();
+    if (!enemysync::SessionIdentity(g_down.downingSession)) g_down.downingSession = 0;
+    g_down.encounterKnown = enemysync::ActivationRole() == 2 && enemysync::CurrentHostMission(g_down.encounterFile);
+    if (!g_down.encounterKnown) std::memset(g_down.encounterFile, 0, sizeof(g_down.encounterFile));
     g_down.episodeFrames = 0;
     g_down.hitAttempts = g_down.enemyHits = g_down.hitLogs = g_down.holdLost = 0;
     g_down.inputFrames = g_down.noInputFrames = 0;
@@ -983,7 +995,6 @@ static bool HoldInput(void* inputStruct) {
 // ---------------------------------------------------------------------------
 static downedreturn::EncounterTracker g_encounter;
 static downedreturn::MissionCompleteTracker g_missionComplete;
-static downedreturn::MissionCompleteTracker g_hostMissionEnd; // VUH-2656: a client's view of the host's ends
 static downedreturn::PendingEncounter g_encounterReturn;
 static downedreturn::LivingGate g_living;
 static downedreturn::ReturnLatch g_returnLatch;
@@ -1123,6 +1134,9 @@ static void ResolveAfterTransition(const Snap& s, const char* why) {
         s.hp, hp, target, why ? " " : "", why ? why : "");
 }
 
+// VUH-2656: the downing held now (0 when not downed), for the mission mirror to bind an admitted end to.
+static std::uint64_t CurrentDowning() { return g_down.state == State::Downed ? g_down.downingSerial : 0; }
+
 // HookedPerEntityUpdate, head-of-frame block, after g_soraActor is updated.
 static void Tick(uintptr_t head) {
     if (!g_down.requested || g_down.state == State::Off) return;
@@ -1160,6 +1174,36 @@ static void Tick(uintptr_t head) {
         const bool knownAfter = enemysync::SessionIdentity(identityAfter);
         g_sessionTeammates.StepBookended(knownBefore, identityBefore, owned, knownAfter, identityAfter);
         if (g_down.state == State::Downed) g_disposition.Observe(known, downed);
+    }
+    if (enemysync::ActivationRole() == 2) {
+        // VUH-2656 (v33): the host's latest admitted mission_complete, judged once, before this frame's
+        // room-change check (an end admitted last frame in the old room is still that downing's).
+        enemysync::HostMissionEnd e;
+        bool producerCurrent = false;
+        if (enemysync::LatestHostMissionEnd(e, producerCurrent) && e.serial != g_down.hostEndSerial) {
+            g_down.hostEndSerial = e.serial;
+            downedreturn::HostEndFacts f {};
+            f.downedNow = g_down.state == State::Downed;
+            f.downingNow = f.downedNow ? g_down.downingSerial : 0;
+            f.downingAtAdmission = e.downing;
+            f.windowAtAdmission = e.window;
+            f.transitionNow = warp::TransitionSerial(); f.transitionAtAdmission = e.transition;
+            f.loadNow = warp::LoadSerial(); f.loadAtAdmission = e.load;
+            f.generationNow = enemysync::WorldSessionGeneration(); f.generationAtAdmission = e.generation;
+            f.sessionKnown = enemysync::SessionIdentity(f.sessionNow); f.sessionAtAdmission = e.session;
+            f.producerCurrent = producerCurrent;
+            f.sessionAtDowning = g_down.downingSession;
+            f.transitionAtDowning = g_down.downingTransition; f.loadAtDowning = g_down.downingLoad;
+            f.encounterKnown = g_down.encounterKnown;
+            f.sameMission = g_down.encounterKnown && std::strncmp(e.file, g_down.encounterFile, sizeof(e.file)) == 0;
+            f.sameRoom = e.worldId == g_down.downedRoom.world && e.roomId == g_down.downedRoom.room;
+            const auto verdict = downedreturn::HostEndFor(f);
+            const bool owed = verdict == downedreturn::HostEndVerdict::Owes &&
+                              g_owedReturn.OweHostEnd(true, f.sessionKnown, f.sessionNow);
+            Log("[downed] host mission complete file=%s room=%u/%u verdict=%s owed=%u episode=%llX frame=%u", e.file,
+                e.worldId, e.roomId, downedreturn::HostEndName(verdict), owed ? 1u : 0u,
+                static_cast<unsigned long long>(g_down.episode), g_frameCounter);
+        }
     }
     if (g_down.state == State::Downed) {
         HoldLost lost = HoldLost::None;
@@ -1281,21 +1325,6 @@ static void Tick(uintptr_t head) {
                     static_cast<unsigned>(allyhit::DownedRefusals()), g_down.downedFrames, s.hp, s.deadAction ? 1u : 0u, g_down.deadFlagLost, g_down.actionLost,
                     g_down.controllerOn, g_down.statCalls, g_down.hitAttempts, g_down.enemyHits,
                     g_down.driftInput, g_down.driftNoInput, g_down.inputFrames, g_down.noInputFrames, s.motionId, static_cast<unsigned long long>(s.task));
-        }
-    }
-    if (enemysync::ActivationRole() == 2) {
-        // VUH-2656 (v33): the host's admitted MissionState ended its mission with mission_complete in this
-        // client's room (one count per mission, outside a transition or load window): a downing held here
-        // is owed its return, applied out of the event or carried through the room change as below.
-        const bool hostWon = g_hostMissionEnd.Step(enemysync::ClientHostMissionCompletes(), warp::TransitionSerial(),
-                                                   warp::LoadSerial(), warp::TransitionPending() || warp::LoadPending());
-        if (hostWon) {
-            std::uint64_t identity = 0;
-            const bool identityKnown = enemysync::SessionIdentity(identity);
-            const bool owed = g_owedReturn.OweHostEnd(g_down.state == State::Downed, identityKnown, identity);
-            Log("[downed] host mission complete room=%u/%u downed=%u owed=%u episode=%llX frame=%u", s.room.world,
-                s.room.room, g_down.state == State::Downed ? 1u : 0u, owed ? 1u : 0u,
-                static_cast<unsigned long long>(g_down.episode), g_frameCounter);
         }
     }
     const bool resolveReady = g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.hp > 0 &&
@@ -1489,6 +1518,7 @@ static void Install(uintptr_t exeBase) {
         }
     }
     if (!g_down.control) enemysync::SetReviveApply(&ApplyReviveRequest);
+    if (!g_down.control) enemysync::SetDowningProbe(&CurrentDowning);
     char rp[2] {};
     g_prompt.requested = !g_down.control &&
         GetEnvironmentVariableA("KH2COOP_REVIVE_PROMPT", rp, sizeof(rp)) == 1 && rp[0] == '1';

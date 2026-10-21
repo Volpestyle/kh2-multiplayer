@@ -56,9 +56,8 @@ bool LocalMissionEnded(bool failedOnly) {
 char g_missionHostFile[MR::kFileBytes]{},g_missionLocalFile[MR::kFileBytes]{};
 std::uint8_t g_missionHostEndTrap{};
 std::atomic<std::uint32_t> g_missionHostCompletes{0};  // VUH-2632: host mission_complete (trap 3) count
-// VUH-2656: client, the host's missions seen ending with mission_complete (an admitted MissionState whose
-// end trap turned 3 for its mission; a resend of that end is not another).
-std::atomic<std::uint32_t> g_missionClientCompletes{0};
+// VUH-2656: client, the host's latest admitted mission_complete, bound to what held at admission.
+HostMissionEnd g_missionClientEnd{};
 std::uint32_t g_missionHostEndArg{};
 int g_missionParked=-1;
 unsigned g_missionLogs{};
@@ -156,8 +155,18 @@ void ReceiveMission(const WorldScope& scope,const MissionState& packet) {
     }
     h.timerState=packet.timerState;h.timerMode=packet.timerMode;h.timerValue=packet.timerValue;h.timerDuration=packet.timerDuration;
     h.endTrap=packet.endTrap;h.endArg=packet.endArg;
-    if(h.active && h.endTrap==3 && !(g_missionHost.endTrap==3 && MR::SameFile(g_missionHost.file,h.file)))
-        g_missionClientCompletes.fetch_add(1,std::memory_order_acq_rel);
+    if(h.active && h.endTrap==3 && !(g_missionHost.endTrap==3 && MR::SameFile(g_missionHost.file,h.file))) {
+        HostMissionEnd e{};
+        e.serial=g_missionClientEnd.serial+1;
+        std::memcpy(e.file,h.file,sizeof(e.file));e.file[sizeof(e.file)-1]=0;
+        e.worldId=packet.location.worldId;e.roomId=packet.location.roomId;
+        e.downing=g_downingProbe?g_downingProbe():0;  // the downing held now, not when it is read
+        e.session=g_bridge.SpawnPickSalt();e.generation=WorldSessionGeneration();
+        e.transition=warp::TransitionSerial();e.load=warp::LoadSerial();
+        e.hostConnection=scope.sourceConnectionId;e.hostDelivery=scope.sourceDeliverySerial;
+        e.window=warp::TransitionPending();  // LoadPending is a subset (Warp.cpp)
+        g_missionClientEnd=e;
+    }
     g_missionHost=h;
 }
 bool MissionReceiveCurrent() {

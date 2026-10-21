@@ -127,10 +127,8 @@ public:
         identity_ = identity;
         return true;
     }
-    // VUH-2656 (v33): a downed client's own receipt from the host's mission end. The host won its mission
-    // (MissionState end trap 3, see HostEnd) while this player was held downed in that room: the return is
-    // owed with no request, because a cutscene that starts on the same frame leaves the host no field frame
-    // to send one (run 20261021-174207). The same receipt and rules as a relayed return; one per downing.
+    // VUH-2656 (v33): a downed client's own receipt from the host's mission end, once HostEndFor says the
+    // end is this downing's (see there). The same receipt and rules as a relayed return; one per downing.
     bool OweHostEnd(bool downedHeld, bool identityKnown, std::uint64_t identity) noexcept {
         if (!downedHeld) return false;
         return Owe(static_cast<std::uint8_t>(Kind::EncounterDefeat), true, identityKnown, identity);
@@ -178,6 +176,65 @@ private:
     bool carried_ = false;
     AfterTransition fallback_ = AfterTransition::SitOut;
 };
+// VUH-2656 (v33): whether the host's admitted mission end (MissionState end trap 3) is this downing's
+// encounter. A cutscene that starts on the same frame as mission_complete leaves the host no field frame
+// to send a return (run 20261021-174207), so the downed client owes itself the return, but only for the
+// end bound to it (Quill r4):
+//   the end was admitted while this very downing was held (EntityHook runs this owner before the mission
+//   packets each frame, so an end admitted while Ready, followed by a lethal hit later that frame, names
+//   no downing and is not the new downing's);
+//   no transition or load window at admission, the room generation (transition and load) the downing's own
+//   and unchanged since, and the admitted producer (session identity, generation, host connection and
+//   delivery) still current, with the session the downing's (a replacement session cannot inherit it);
+//   the mission is the one the host was running here when the downing began (captured then; unknown fails
+//   closed), and the end's room is the downing's room.
+enum class HostEndVerdict : std::uint8_t {
+    Owes, NotDowned, OtherDowning, Window, OtherGeneration, OtherSession, UnknownEncounter, OtherEncounter, OtherRoom
+};
+struct HostEndFacts {
+    bool downedNow = false;
+    std::uint64_t downingNow = 0, downingAtAdmission = 0;
+    bool windowAtAdmission = false;
+    std::uint32_t transitionNow = 0, transitionAtAdmission = 0, loadNow = 0, loadAtAdmission = 0;
+    std::uint32_t generationNow = 0, generationAtAdmission = 0;
+    bool sessionKnown = false;
+    std::uint64_t sessionNow = 0, sessionAtAdmission = 0;
+    bool producerCurrent = false;     // the admitted producer (session, generation, host delivery) still current
+    // The downing's own scope, captured at BeginDowned: the end must fall inside it.
+    std::uint64_t sessionAtDowning = 0;
+    std::uint32_t transitionAtDowning = 0, loadAtDowning = 0;
+    bool encounterKnown = false, sameMission = false, sameRoom = false;
+};
+constexpr HostEndVerdict HostEndFor(const HostEndFacts& f) noexcept {
+    if (!f.downedNow || !f.downingNow) return HostEndVerdict::NotDowned;
+    if (f.downingAtAdmission != f.downingNow) return HostEndVerdict::OtherDowning;
+    if (f.windowAtAdmission) return HostEndVerdict::Window;
+    if (f.transitionNow != f.transitionAtAdmission || f.loadNow != f.loadAtAdmission ||
+        f.generationNow != f.generationAtAdmission || !f.generationNow) return HostEndVerdict::OtherGeneration;
+    if (f.transitionAtAdmission != f.transitionAtDowning || f.loadAtAdmission != f.loadAtDowning)
+        return HostEndVerdict::OtherGeneration;
+    if (!f.sessionKnown || !f.sessionNow || f.sessionNow != f.sessionAtAdmission || f.sessionAtDowning != f.sessionAtAdmission ||
+        !f.producerCurrent) return HostEndVerdict::OtherSession;
+    if (!f.encounterKnown) return HostEndVerdict::UnknownEncounter;
+    if (!f.sameMission) return HostEndVerdict::OtherEncounter;
+    if (!f.sameRoom) return HostEndVerdict::OtherRoom;
+    return HostEndVerdict::Owes;
+}
+constexpr const char* HostEndName(HostEndVerdict v) noexcept {
+    switch (v) {
+    case HostEndVerdict::Owes: return "owes";
+    case HostEndVerdict::NotDowned: return "not-downed";
+    case HostEndVerdict::OtherDowning: return "other-downing";
+    case HostEndVerdict::Window: return "window";
+    case HostEndVerdict::OtherGeneration: return "other-generation";
+    case HostEndVerdict::OtherSession: return "other-session";
+    case HostEndVerdict::UnknownEncounter: return "unknown-encounter";
+    case HostEndVerdict::OtherEncounter: return "other-encounter";
+    case HostEndVerdict::OtherRoom: return "other-room";
+    }
+    return "?";
+}
+
 // The adapter's per-frame owed step (DownedSpike Tick, after the room change's decision and before the
 // generic resolve): the receipt's decision, then for Attempt the one revive entry, whose outcome
 // apply() reports. The adapter performs Resolve and the revocations; tests drive this same function.

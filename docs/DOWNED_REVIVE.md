@@ -384,12 +384,19 @@ boss/encounter defeat or a save point.
 - **The host's mission end on the client (v33, VUH-2656).** In FM-02's Basement Hall the host's event
   starts on the same frame as `mission_complete` (5568, run `20261021-174207`): the host's mission edge
   fires but its claim is refused (`connection=0 claimed=0`), because the downed scope, and so every revive
-  request, needs field play. So a client counts the host's mission ends itself: an admitted MissionState
+  request, needs field play. So a client judges the host's mission end itself. An admitted MissionState
   (the host's connection and delivery, relay-scoped, this client's current room) whose end trap turned 3
-  for its mission is one count (a resend is not another). A count that rises outside a transition or load
-  window, while this client is downed, owes it the return (`[downed] host mission complete ... owed=1`):
-  the same receipt as a relayed return, applied out of the event or carried through the room change to
-  25% on the next room's first settled field frame; another session revokes it. One per downing.
+  for its mission is recorded once (a resend is not another), bound at admission to what holds then: the
+  downing this seat holds (EntityHook runs the downed owner before the packet drain, so an end admitted
+  while alive names no downing), the session identity and generation, the room generation and the host
+  producer. The owner judges it once, on its next tick (`[downed] host mission complete ... verdict=...`).
+  It is this downing's only when that same downing is still held (an episode remint is not a new one),
+  no transition or load window was open at admission, the room generation is the downing's and unchanged,
+  the producer and the session are still the ones at admission and at the downing, and the mission is the
+  one the host was running here when the downing began (captured then; unknown fails closed). Then it owes
+  the return (`verdict=owes owed=1`): the same receipt as a relayed return, applied out of the event or
+  carried through the room change to 25% on the next room's first settled field frame; another session
+  revokes it. Any other verdict grants nothing, and that end is never judged again.
 - The cage edge (2 -> 0 in field) has not fired live yet: no run so far had a forced battle end in field.
 - A boss whose post-fight transition comes before its forced battle clears is VUH-2628's path. A boss
   that ends a mission through its boss end (Twilight Thorn's TT34 trap 16) is not a mission-complete edge.

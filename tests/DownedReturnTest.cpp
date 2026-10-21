@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
+#include <string>
 #include <string_view>
 
 using namespace kh2coop::inject::downedreturn;
@@ -557,63 +558,145 @@ int main() {
           }
       } }
 
-    // VUH-2656 (v33): the host's mission end owes a held downing its return, with no request: only while
-    // downed, only with a known session, one per downing (a relayed return already owed is not doubled).
-    { OwedReturn o;
-      CHECK(!o.OweHostEnd(false, true, 0xA1) && !o.Owed());   // not downed: nothing to return
-      CHECK(!o.OweHostEnd(true, false, 0) && !o.Owed());      // no session
-      CHECK(o.OweHostEnd(true, true, 0xA1) && o.KindOwed() == static_cast<std::uint8_t>(Kind::EncounterDefeat));
-      CHECK(!o.OweHostEnd(true, true, 0xA1));                 // once
-      OwedReturn relayed; CHECK(relayed.Owe(2, true, true, 0xA1) && !relayed.OweHostEnd(true, true, 0xA1) &&
-                                relayed.KindOwed() == 2); }
+    // VUH-2656 (v33): HostEndFor, one refusal per fact; every one grants nothing.
+    { HostEndFacts ok;
+      ok.downedNow = true; ok.downingNow = ok.downingAtAdmission = 7;
+      ok.transitionNow = ok.transitionAtAdmission = ok.transitionAtDowning = 2;
+      ok.loadNow = ok.loadAtAdmission = ok.loadAtDowning = 3;
+      ok.generationNow = ok.generationAtAdmission = 5;
+      ok.sessionKnown = true; ok.sessionNow = ok.sessionAtAdmission = ok.sessionAtDowning = 0xA1; ok.producerCurrent = true;
+      ok.encounterKnown = ok.sameMission = ok.sameRoom = true;
+      CHECK(HostEndFor(ok) == HostEndVerdict::Owes);
+      auto with = [&](auto change) { HostEndFacts f = ok; change(f); return HostEndFor(f); };
+      CHECK(with([](HostEndFacts& f) { f.downedNow = false; }) == HostEndVerdict::NotDowned);
+      CHECK(with([](HostEndFacts& f) { f.downingAtAdmission = 0; }) == HostEndVerdict::OtherDowning);  // Ready at admission
+      CHECK(with([](HostEndFacts& f) { f.downingAtAdmission = 6; }) == HostEndVerdict::OtherDowning);  // an earlier downing
+      CHECK(with([](HostEndFacts& f) { f.windowAtAdmission = true; }) == HostEndVerdict::Window);
+      CHECK(with([](HostEndFacts& f) { f.transitionNow = 3; }) == HostEndVerdict::OtherGeneration);
+      CHECK(with([](HostEndFacts& f) { f.loadAtAdmission = f.loadNow = 4; }) == HostEndVerdict::OtherGeneration); // not the downing's load
+      CHECK(with([](HostEndFacts& f) { f.generationNow = 6; }) == HostEndVerdict::OtherGeneration);
+      CHECK(with([](HostEndFacts& f) { f.sessionKnown = false; }) == HostEndVerdict::OtherSession);
+      CHECK(with([](HostEndFacts& f) { f.sessionNow = 0xB2; }) == HostEndVerdict::OtherSession);
+      CHECK(with([](HostEndFacts& f) { f.sessionAtDowning = 0xB2; }) == HostEndVerdict::OtherSession);
+      CHECK(with([](HostEndFacts& f) { f.producerCurrent = false; }) == HostEndVerdict::OtherSession);   // host delivery changed
+      CHECK(with([](HostEndFacts& f) { f.encounterKnown = false; f.sameMission = false; }) == HostEndVerdict::UnknownEncounter);
+      CHECK(with([](HostEndFacts& f) { f.sameMission = false; }) == HostEndVerdict::OtherEncounter);
+      CHECK(with([](HostEndFacts& f) { f.sameRoom = false; }) == HostEndVerdict::OtherRoom);
+      CHECK(std::string_view(HostEndName(HostEndVerdict::OtherDowning)) == "other-downing"); }
 
-    // Regression (VUH-2656, run 20261021-174207, FM-02 Basement Hall): the host kills wave 2 and its
-    // cutscene starts on the same frame as mission_complete (5568), so the host's encounter edge has no field
-    // frame and sends nothing (its claim was refused live). The friend, downed in wave 1 and in its own event
-    // by then, receives the host's MissionState with end trap 3 (5600 here): its count rises outside any
-    // window, so the held downing is owed its return; the event ends in the room change to the Axel fight
-    // (7300) and the carried receipt resolves at 25% on that room's first settled field frame (7350).
-    //   none       the host's end never arrives: the friend sits out into the Axel fight, as before v33;
-    //   window     the end is admitted while a transition is pending: not taken (and not later);
-    //   up         the friend was revived before the end: nothing owed, nothing resolved;
-    //   replaced   the session is replaced before the new room's field: revoked, the friend sits out.
-    { enum class Case { Owed, None, Window, Up, Replaced };
-      for (const Case c : {Case::Owed, Case::None, Case::Window, Case::Up, Case::Replaced}) {
-          MissionCompleteTracker hostEnd; OwedReturn owed; DispositionLatch old; old.Observe(1, 0);
-          std::uint32_t transition = 2, load = 3, completes = 4;
-          bool held = true, sat = false, returned = false, resolvedGeneric = false, resolvePending = false;
-          for (std::uint32_t frame = 5500; frame < 7400; ++frame) {
-              const bool event = frame >= 5568 && frame < 7350;
-              const bool window = (frame >= 7300 && frame < 7340) || (c == Case::Window && frame >= 5590 && frame < 5610);
-              if (frame == 5600 && c != Case::None) ++completes;    // ReceiveMission: end trap turned 3
-              if (frame == 5590 && c == Case::Up) held = false;     // revived before the end (partner revive)
-              if (frame == 7300) ++transition;
-              if (frame == 7340) ++load;
-              const std::uint64_t identity = c == Case::Replaced && frame >= 7320 ? 0xB2 : 0xA1;
-              // DownedSpike Tick: the room change's decision (HoldLost) first,
-              if (held && frame == 7300) {
-                  const auto d = AfterTransitionFor(owed, old, true);
-                  held = false;
-                  sat = d.after == AfterTransition::SitOut;
-                  resolvePending = d.after == AfterTransition::Resolve && d.why != Disposition::Returned;
-              }
-              // then the host's end (role 2),
-              if (hostEnd.Step(completes, transition, load, window)) (void)owed.OweHostEnd(held, true, identity);
-              // then the owed step and the generic resolve.
-              OwedFacts f; f.identityKnown = true; f.identity = identity; f.frame = frame; f.downed = held;
-              f.applyReady = !event && !window; f.resolveReady = !held && !event && !window;
+    // Regressions (Quill r4), in the real per-frame order: EntityHook runs the downed owner's Tick (which
+    // judges the latest admitted end once), then EnemySync's packet drain (ReceiveMission admits an end and
+    // binds it to what holds then: the downing, the session, the room generation, the host producer), then
+    // the game's update (a native lethal hit begins a downing; a partner revive ends one). The model mirrors
+    // the adapter's fields and calls the same pure rules.
+    { struct End {
+          std::uint32_t serial = 0; std::string file; std::uint16_t room = 0; std::uint64_t downing = 0, session = 0;
+          std::uint32_t generation = 0, transition = 0, load = 0; std::uint64_t conn = 0; std::uint32_t delivery = 0;
+          bool window = false; };
+      struct Sim {
+          // The world.
+          std::uint64_t session = 0xA1, conn = 0x100; std::uint32_t generation = 5, transition = 2, load = 3, delivery = 1;
+          bool window = false, identityKnown = true; std::uint16_t room = 19;
+          std::string hostMission = "TT19_MS602.bar"; bool hostMissionCurrent = true;
+          // The downed owner.
+          bool downed = false; std::uint64_t downingSerial = 0, downingSession = 0;
+          std::uint32_t downingTransition = 0, downingLoad = 0; std::uint16_t downingRoom = 0;
+          std::string encounter; bool encounterKnown = false; std::uint32_t seen = 0; OwedReturn owed;
+          unsigned grants = 0; HostEndVerdict last = HostEndVerdict::NotDowned;
+          // EnemySync's latest admitted end.
+          End end;
+          void Hit() {                                          // BeginDowned (a native lethal hit)
+              downed = true; ++downingSerial; owed.Clear();
+              downingTransition = transition; downingLoad = load; downingSession = identityKnown ? session : 0;
+              downingRoom = room; encounterKnown = hostMissionCurrent; encounter = hostMissionCurrent ? hostMission : "";
+          }
+          void Revive() { downed = false; owed.Clear(); }      // a partner revive (receipt forgotten next step)
+          void Receive(const std::string& file) {               // ReceiveMission: end trap turned 3
+              End e; e.serial = end.serial + 1; e.file = file; e.room = room; e.downing = downed ? downingSerial : 0;
+              e.session = session; e.generation = generation; e.transition = transition; e.load = load;
+              e.conn = conn; e.delivery = delivery; e.window = window; end = e;
+          }
+          void Tick() {                                         // DownedSpike::Tick's role-2 block
+              if (!end.serial || end.serial == seen) return;
+              seen = end.serial;
+              HostEndFacts f;
+              f.downedNow = downed; f.downingNow = downed ? downingSerial : 0; f.downingAtAdmission = end.downing;
+              f.windowAtAdmission = end.window;
+              f.transitionNow = transition; f.transitionAtAdmission = end.transition; f.transitionAtDowning = downingTransition;
+              f.loadNow = load; f.loadAtAdmission = end.load; f.loadAtDowning = downingLoad;
+              f.generationNow = generation; f.generationAtAdmission = end.generation;
+              f.sessionKnown = identityKnown; f.sessionNow = identityKnown ? session : 0; f.sessionAtAdmission = end.session;
+              f.producerCurrent = end.session == session && end.generation == generation && end.conn == conn &&
+                                  end.delivery == delivery;
+              f.sessionAtDowning = downingSession;
+              f.encounterKnown = encounterKnown; f.sameMission = encounterKnown && end.file == encounter;
+              f.sameRoom = end.room == downingRoom;
+              last = HostEndFor(f);
+              if (last == HostEndVerdict::Owes && owed.OweHostEnd(true, f.sessionKnown, f.sessionNow)) ++grants;
+          }
+      };
+      // The intended case: downed in wave 1 (frame 100), the host's end admitted at 5600, judged at 5601.
+      { Sim w; w.Tick(); w.Hit();
+        for (int frame = 101; frame <= 5601; ++frame) { w.Tick(); if (frame == 5600) w.Receive("TT19_MS602.bar"); }
+        CHECK(w.last == HostEndVerdict::Owes && w.grants == 1 && w.owed.Owed());
+        for (int frame = 5602; frame < 5700; ++frame) w.Tick();                  // the same end, judged once
+        CHECK(w.grants == 1); }
+      // R2: frame N starts Ready; the end is admitted in the drain; a lethal hit starts downing E later in N.
+      // Next Tick: E is not the downing held at admission: nothing.
+      { Sim w; w.Tick(); w.Receive("TT19_MS602.bar"); w.Hit(); w.Tick();
+        CHECK(w.last == HostEndVerdict::OtherDowning && w.grants == 0 && !w.owed.Owed()); }
+      // R2: the end bound to downing E; a partner revive and a new downing E2 before the next Tick.
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.Revive(); w.Hit(); w.Tick();
+        CHECK(w.last == HostEndVerdict::OtherDowning && w.grants == 0); }
+      // R2: an internal episode remint is not a new physical downing (the downing serial is unchanged).
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); /* remint: no Hit() */ w.Tick();
+        CHECK(w.last == HostEndVerdict::Owes && w.grants == 1); }
+      // R3: A's end admitted; the runtime publishes replacement B before the next Tick (same room and load).
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.session = 0xB2; w.generation = 6; w.Tick();
+        CHECK(w.last == HostEndVerdict::OtherGeneration && w.grants == 0); }
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.session = 0xB2; w.Tick();     // identity only
+        CHECK(w.last == HostEndVerdict::OtherSession && w.grants == 0); }
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.session = 0; w.Tick();        // retired (zero)
+        CHECK(w.last == HostEndVerdict::OtherSession && w.grants == 0); }
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.identityKnown = false; w.Tick(); // unknown
+        CHECK(w.last == HostEndVerdict::OtherSession && w.grants == 0); }
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.delivery = 2; w.Tick();       // host delivery changed
+        CHECK(w.last == HostEndVerdict::OtherSession && w.grants == 0);
+        w.delivery = 1; w.Tick(); CHECK(w.grants == 0); }                                     // consumed: never later
+      // R1: the encounter captured at the downing.
+      { Sim w; w.hostMissionCurrent = false; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.Tick();
+        CHECK(w.last == HostEndVerdict::UnknownEncounter && w.grants == 0); }                  // unknown fails closed
+      { Sim w; w.hostMission = "TT19_MS601.bar"; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.Tick();
+        CHECK(w.last == HostEndVerdict::OtherEncounter && w.grants == 0); }                    // another mission, same room
+      { Sim w; w.Hit(); w.Tick(); w.hostMission = "TT19_MS603.bar"; w.Receive("TT19_MS603.bar"); w.Tick();
+        CHECK(w.last == HostEndVerdict::OtherEncounter && w.grants == 0); }                    // switched since the downing
+      { Sim w; w.Hit(); w.Tick(); w.load = 4; w.Receive("TT19_MS602.bar"); w.Tick();           // same file, a new load
+        CHECK(w.last == HostEndVerdict::OtherGeneration && w.grants == 0); }
+      { Sim w; w.Hit(); w.Tick(); w.window = true; w.Receive("TT19_MS602.bar"); w.window = false; w.Tick();
+        CHECK(w.last == HostEndVerdict::Window && w.grants == 0); }
+      // A resend of the same end is no new record (ReceiveMission counts an end trap that turned 3), and the
+      // seen serial stops a second judgement across a same-session liveness gap.
+      { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.Tick();
+        for (int i = 0; i < 100; ++i) w.Tick();
+        CHECK(w.grants == 1); } }
+
+    // Regression (VUH-2656, run 20261021-174207, FM-02 Basement Hall), with the receipt: owed in the event,
+    // carried through the room change to the Axel fight (7300), resolved at 25% on that room's first settled
+    // field frame (7350); a replacement session before then revokes it to the room change's own rule.
+    { for (const bool replaced : {false, true}) {
+          OwedReturn owed; DispositionLatch old; old.Observe(1, 0);
+          CHECK(owed.OweHostEnd(true, true, 0xA1));                // HostEndFor said Owes at 5601
+          bool held = true, sat = false, returned = false;
+          for (std::uint32_t frame = 5601; frame < 7400; ++frame) {
+              const bool event = frame < 7350, window = frame >= 7300 && frame < 7340;
+              if (held && frame == 7300) { held = false; sat = AfterTransitionFor(owed, old, true).after == AfterTransition::SitOut; }
+              OwedFacts f; f.identityKnown = true; f.identity = replaced && frame >= 7320 ? 0xB2 : 0xA1; f.frame = frame;
+              f.downed = held; f.applyReady = !event && !window; f.resolveReady = !held && !event && !window;
               const auto action = OwedTick(owed, f, [] { return OwedOutcome::Applied; });
               if (action == OwedAction::Resolve) returned = true;
               if (action == OwedAction::RevokedSitOut) sat = true;
-              if (action == OwedAction::Attempt) held = false;
-              if (resolvePending && f.resolveReady) { resolvePending = false; resolvedGeneric = true; }
           }
-          switch (c) {
-          case Case::Owed: CHECK(returned && !sat && !resolvedGeneric); break;
-          case Case::None: case Case::Window: CHECK(!returned && sat && !resolvedGeneric); break;
-          case Case::Up: CHECK(!returned && !sat && !resolvedGeneric); break;
-          case Case::Replaced: CHECK(!returned && sat && !resolvedGeneric); break;
-          }
+          CHECK(replaced ? (!returned && sat) : (returned && !sat));
           CHECK(!owed.Owed());
       } }
 

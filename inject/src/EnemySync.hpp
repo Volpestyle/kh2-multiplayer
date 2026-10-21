@@ -155,10 +155,28 @@ bool SessionIdentity(std::uint64_t& out) noexcept;
 // VUH-2632: how many missions this host's script ended with mission_complete (table-4 trap 3), counted
 // by the mission mirror's host detour (0 while it is parked or its hooks are not installed).
 std::uint32_t HostMissionCompletes() noexcept;
-// VUH-2656: on a client, how many of the host's missions it has seen end with mission_complete: an
-// admitted MissionState (the host's connection and delivery, relay-scoped, this client's current room
-// from the host's last RoomTransition) whose end trap turned 3 for its mission.
-std::uint32_t ClientHostMissionCompletes() noexcept;
+// VUH-2656: on a client, the host's latest mission end with mission_complete: an admitted MissionState
+// (the host's connection and delivery, relay-scoped, this client's current room from the host's last
+// RoomTransition) whose end trap turned 3 for its mission. A resend is not another. Bound at admission to
+// what held then (Quill r4): the downed owner's current downing, the session and the room generation.
+struct HostMissionEnd {
+    std::uint32_t serial = 0;           // 0: none yet; one per admitted end
+    char file[24] {};
+    std::uint16_t worldId = 0, roomId = 0;
+    std::uint64_t downing = 0;          // the downing held at admission (0: none)
+    std::uint64_t session = 0;          // the session identity at admission (0: none)
+    std::uint32_t generation = 0, transition = 0, load = 0;
+    std::uint64_t hostConnection = 0, hostDelivery = 0; // the admitted producer: the host's connection and delivery
+    bool window = false;                // a transition or load was pending at admission
+};
+// The latest end, and whether its producer is still current: the same session identity (known, nonzero),
+// session generation and host connection and delivery as at admission (Quill r4 R3).
+bool LatestHostMissionEnd(HostMissionEnd& out, bool& producerCurrent) noexcept;
+// The downed owner's current downing (0 when not downed), read at each admission. Set once by EntityHook.
+using DowningProbeFn = std::uint64_t (*)();
+void SetDowningProbe(DowningProbeFn probe) noexcept;
+// On a client: the host's mission running in this room now (admitted, current, active, not ended).
+bool CurrentHostMission(char (&file)[24]) noexcept;
 // Capture once at the native observation. Retained work must send that context;
 // a newer header never grants permission to relabel an old packet.
 bool CaptureWorldContext(ProducerWorldContext& context);

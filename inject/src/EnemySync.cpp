@@ -120,6 +120,7 @@ bool RuntimeWriterLive(std::uint32_t expectedGeneration = 0) noexcept {
 }
 // VUH-1504 revive owner state; game lifetime (never reset with sessions or rooms).
 ReviveApplyFn g_reviveApply = nullptr;         // set once by EntityHook
+DowningProbeFn g_downingProbe = nullptr;       // set once by EntityHook (VUH-2656)
 ReviveOwnerGate g_reviveGate;
 LocalDownedState g_localDowned {};             // this frame's owner publication
 std::string g_reviveSession;                   // latched per session generation
@@ -6488,8 +6489,21 @@ std::uint32_t HostMissionCompletes() noexcept {
     return g_missionHostCompletes.load(std::memory_order_acquire);
 }
 
-std::uint32_t ClientHostMissionCompletes() noexcept {
-    return g_missionClientCompletes.load(std::memory_order_acquire);
+bool LatestHostMissionEnd(HostMissionEnd& out, bool& producerCurrent) noexcept {
+    out = g_missionClientEnd;
+    producerCurrent = out.serial != 0 && out.session && out.session == g_bridge.SpawnPickSalt() &&
+        out.generation && out.generation == WorldSessionGeneration() && out.hostConnection &&
+        out.hostConnection == g_bridge.ConnectionId(0) && out.hostDelivery == g_bridge.PeerDeliverySerial(0);
+    return out.serial != 0;
+}
+
+bool CurrentHostMission(char (&file)[24]) noexcept {
+    std::memset(file, 0, sizeof(file));
+    if (CurrentRole() != Role::Client || !MissionReceiveCurrent() || !g_missionHost.active ||
+        missionmirror::rules::Ended(g_missionHost) || !g_missionHost.file[0]) return false;
+    std::memcpy(file, g_missionHost.file, sizeof(file));
+    file[sizeof(file) - 1] = 0;
+    return true;
 }
 
 std::uint32_t WorldSessionGeneration() noexcept {
@@ -6854,6 +6868,7 @@ std::uint8_t SessionNativeDifficulty() noexcept {
         ReadNative(g_exeBase + PR::kSaveRva + 0x2498, raw) && raw <= 3 ? raw : 0xFF;
 }
 void SetReviveApply(ReviveApplyFn apply) noexcept { g_reviveApply = apply; }
+void SetDowningProbe(DowningProbeFn probe) noexcept { g_downingProbe = probe; }
 ReviveStats GetReviveStats() noexcept { return g_reviveStats; }
 
 bool SendReviveRequest(std::uint8_t targetSlot, std::uint64_t targetEpisode, std::uint64_t& seqOut, std::uint8_t kind) {
