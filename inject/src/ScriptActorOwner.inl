@@ -32,6 +32,7 @@ struct ScriptActorRole {
     ScriptOwnerVisual visual{};
     std::uint64_t captureValues[2]{};
     bool haveCapture{};
+    R::OwnerVisualHeartbeat visualHeartbeat{};  // VUH-2610: spectator only; reset with the role
 };
 static std::array<ScriptActorRole,3> g_smRoles{};
 // Revocation ends command authority immediately. Native event shutdown remains
@@ -540,9 +541,12 @@ static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope
     }
     return SmOwnerVisualCurrent(role,scope);
 }
+static std::uint32_t SmOwnerVisualMotion(const ScriptActorRole& role) {
+    return role.visualHeartbeat.Motion(role.haveMotion,role.motion,role.haveCapture,R::BitsOf(role.captureValues[0]));
+}
 // VUH-2580: the owner is on a motion the clone may not replay (an unqualified post-capture ID).
 static bool SmOwnerVisualRefused(const ScriptActorRole& role) {
-    const auto motion=role.haveMotion?role.motion:R::BitsOf(role.captureValues[0]);
+    const auto motion=SmOwnerVisualMotion(role);
     return R::OwnerMotion(motion,role.haveCapture,R::BitsOf(role.captureValues[0]),role.reaction.consumed)==
         R::OwnerMotionBank::Refuse;
 }
@@ -566,7 +570,7 @@ static void VisualPostUpdate(uintptr_t actor) {
         if(!role.resource || role.slot==scope.localSlot || !role.haveCapture)continue;
         if(!SmOwnerBindVisual(role,scope,actor))continue;
         if(!SmOwnerVisualCurrent(role,scope)){SmOwnerRetireVisual(role,true);continue;}
-        const auto motion=role.haveMotion?role.motion:R::BitsOf(role.captureValues[0]);
+        const auto motion=SmOwnerVisualMotion(role);
         const auto bank=R::OwnerMotion(motion,role.haveCapture,R::BitsOf(role.captureValues[0]),role.reaction.consumed);
         if(bank==R::OwnerMotionBank::Refuse) {
             // VUH-2580: say once per role and motion why the clone does not take the owner's motion.
@@ -606,7 +610,8 @@ static void VisualPostUpdate(uintptr_t actor) {
             std::memcpy(reinterpret_cast<void*>(entity+offsets::entity::POS_X),role.position,3*sizeof(float));
             *reinterpret_cast<float*>(entity+offsets::entity::ROT_Y)=role.position[3];
         }
-        if(role.haveMotion)*reinterpret_cast<float*>(actor+ACTOR_MOTCTRL+MOTCTRL_CURRENT_TIME)=role.motionTime;
+        if(R::OwnerVisualHeartbeat::TimeApplies(role.haveMotion,role.motion,motion))
+            *reinterpret_cast<float*>(actor+ACTOR_MOTCTRL+MOTCTRL_CURRENT_TIME)=role.motionTime;
         if(role.visual.wantAttachment!=role.visual.attached) {
             const auto resource=role.resource;auto target=SmOwnerVisualActor(role);
             if(SmOwnerApplyAttachment(target,role.visual.wantAttachment) && role.resource==resource && role.visual.actor==actor)
@@ -1225,12 +1230,14 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
         if(role.slot!=scope.localSlot) {
             if(operation==3) {
                 const bool changed=!role.haveCapture || role.captureValues[0]!=call.values[0] || role.captureValues[1]!=call.values[1];
+                role.visualHeartbeat.Capture(role.haveCapture,R::BitsOf(role.captureValues[0]),R::BitsOf(call.values[0]));
                 role.captureValues[0]=call.values[0];role.captureValues[1]=call.values[1];role.haveCapture=true;
                 if(changed)role.visual.motion=UINT32_MAX;
             } else if(operation==4) {
                 for(unsigned i=0;i<4;++i)role.position[i]=R::FloatOf(call.values[i]);role.havePosition=true;
             } else if(operation==8) {
                 role.motion=R::BitsOf(call.values[0]);role.motionTime=R::FloatOf(call.values[1]);role.haveMotion=true;
+                role.visualHeartbeat.Heartbeat(role.motion);
             } else if(operation==13)role.visual.wantAttachment=true;
             else if(operation==14)role.visual.wantAttachment=false;
             return 1; // camera, commands and native attacks stay actual-owner-only

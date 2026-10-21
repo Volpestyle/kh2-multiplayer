@@ -32,6 +32,27 @@ inline OwnerMotionBank OwnerMotion(std::uint32_t motion,bool haveCapture,std::ui
     return OwnerMotionBank::Refuse;
 }
 
+// VUH-2610: the owner's motion heartbeat trails its capture record by a frame or
+// so. When a capture record replaces the capture motion, a heartbeat still naming
+// the replaced one is stale: the spectator's clone plays the newer capture and
+// takes no time from it. The allowance ends at the first heartbeat that names
+// anything else, so a later genuine return to that ID is judged as usual.
+struct OwnerVisualHeartbeat {
+    std::uint32_t replaced{UINT32_MAX};
+    void Capture(bool hadCapture,std::uint32_t previous,std::uint32_t next) noexcept {
+        if(hadCapture && previous!=next)replaced=previous;
+    }
+    void Heartbeat(std::uint32_t motion) noexcept { if(motion!=replaced)replaced=UINT32_MAX; }
+    std::uint32_t Motion(bool haveMotion,std::uint32_t motion,bool haveCapture,std::uint32_t captureMotion) const noexcept {
+        if(!haveMotion)return captureMotion;
+        return haveCapture && motion==replaced && motion!=captureMotion?captureMotion:motion;
+    }
+    // The heartbeat's motion time applies only to the motion it names.
+    static bool TimeApplies(bool haveMotion,std::uint32_t heartbeat,std::uint32_t played) noexcept {
+        return haveMotion && heartbeat==played;
+    }
+};
+
 // Wire descriptor semantics; both native helpers still receive native kind 1.
 enum class OwnerCommandMode : std::uint32_t { General=1, CapturedMotion=2 };
 inline bool ValidOwnerCommandMode(std::uint32_t mode) noexcept { return mode==1 || mode==2; }

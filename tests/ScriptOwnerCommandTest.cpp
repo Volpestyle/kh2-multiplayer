@@ -38,6 +38,34 @@ int main() {
           "different post-capture ID cannot guess a borrowed or player bank");
     check(R::OwnerMotion(42,false,0,false)==B::Own,
           "a noncaptured role can retain proved ordinary own-bank motion");
+    {   // VUH-2610: capture 255 -> 260 while the heartbeat still names 255.
+        R::OwnerVisualHeartbeat beat{};
+        beat.Capture(true,255,260);
+        auto played=beat.Motion(true,255,true,260);
+        check(played==260 && !R::OwnerVisualHeartbeat::TimeApplies(true,255,played) &&
+              R::OwnerMotion(played,true,260,false)==B::Source,
+              "a stale heartbeat of the replaced capture plays the newer capture and writes no time");
+        beat.Heartbeat(255);
+        check(beat.Motion(true,255,true,260)==260,"repeated stale heartbeats stay mapped until the heartbeat moves");
+        beat.Heartbeat(260);
+        played=beat.Motion(true,260,true,260);
+        check(played==260 && R::OwnerVisualHeartbeat::TimeApplies(true,260,played),"the caught-up heartbeat plays with its time");
+        beat.Heartbeat(255);
+        played=beat.Motion(true,255,true,260);
+        check(played==255 && R::OwnerMotion(played,true,260,false)==B::Refuse,
+              "after the heartbeat caught up, a later 255 refuses under the unchanged rule");
+        R::OwnerVisualHeartbeat other{};
+        other.Capture(true,251,252);
+        check(other.Motion(true,4,true,252)==4 && R::OwnerMotion(4,true,252,false)==B::Refuse,
+              "a heartbeat leaving the capture for another motion is never remapped");
+        other.Heartbeat(4);
+        check(other.Motion(true,251,true,252)==251,"any non-replaced heartbeat ends the allowance");
+        R::OwnerVisualHeartbeat fresh{};
+        fresh.Capture(false,0,262);
+        check(fresh.Motion(true,0,true,262)==0 && fresh.Motion(false,0,true,262)==262 &&
+              R::OwnerMotion(fresh.Motion(true,262,true,262),true,262,true)==B::Refuse,
+              "a first capture replaces nothing, a missing heartbeat plays the capture, consumed still refuses");
+    }
     for(const auto motion:std::array<std::uint32_t,3>{0,262,999})
         check(R::OwnerMotion(motion,true,262,true)==B::Refuse,
               "consumed native RC playback cannot be rewound by either bank or an unknown motion");
