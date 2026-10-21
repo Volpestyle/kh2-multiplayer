@@ -646,7 +646,7 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
         StampNow(stamp) && stamp.now==site.location && stamp.load && stamp.load!=UINT32_MAX &&
         warp::TransitionPending() &&
         Read(reinterpret_cast<uintptr_t>(nativeRecord),original) &&
-        routespawn::Equal(original,site.records.first(64)) &&
+        routespawn::SiteHasPlayerRecord(site,original) &&
         HasFreeRecord() && enemysync::CaptureWorldContext(context) && enemysync::WorldContextCurrent(context) &&
         StampNow(entrance) && Same(stamp,entrance) && g_ready.load() && warp::TransitionPending();
     if(!admitted || !g_missingBudget.Claim(stamp.load+1)) {

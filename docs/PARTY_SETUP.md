@@ -860,16 +860,21 @@ VUH-2572 pins the rest one room at a time:
   hole: the game walks Roxas from the tunnel mouth (about x -2760) to the raw566 point (x -1973).
   With the clone built there, both players were walking in at the release, then both snapped back
   to the tunnel mouth and ignored input for about 40 s (runs `20261020-171912`, `-184451`). Not
-  understood yet; the receipt is identical on both seats, so it can be pinned once that is fixed.
-- Back Alley evt4 (`02/03` door 52, 18 records) and Basement Hall evt2 (`02/13` door 50, 6 records)
-  are bigger than the old 4-record limit of the site check and the receipt log; both now take 32
-  records, and the full receipts are still to be captured.
+  understood yet (VUH-2578); the receipt is identical on both seats, so it can be pinned once that is
+  fixed.
+- The Back Alley after the Day 6 ambush (`02/03` door 52 evt4) is `tt03-4`, and the Basement Hall
+  after the post-Axel chain (`02/13` door 50 evt2) is `tt19-2`. Both groups were bigger than the old
+  4-record limit of the site check and the receipt log, which now take 32. The Back Alley's 18 records
+  are six 566/567/568 triples, one per entrance, and the game builds the triple for the entrance taken
+  (door 52 uses index 6), so the ingress accepts the pinned group's raw566 at any index. In runs
+  `20261020-200943` (FM-01) and `20261020-201601` (FM-02, without VUH-2359's prologue opt-out) both
+  seats released with both Roxases, and each seat's turn at walking was followed by the other's clone.
 - The Usual Spot (`02/02` evt0), the Computer Room (`02/15` evt0) and the Station of Serenity (`02/20`
   evt2) were only reached by loading a save there. A load from a save is not a transition, so the
   ingress never runs: a session that starts there stays solo until the next checked site.
 - `02/22` evt157 is the Twilight Thorn fight (VUH-2569).
-- Tram Common free roam (`02/07` evt3/evt4) is not a new load: the event program changes inside the
-  evt95 load, so the clone built there stays, but whether it keeps following is not yet checked live. The friend's blocked opening exit is
+- Tram Common evt3/evt4 is not a gap: those programs only last the moment before the scripted
+  reloads into evt97/evt99 (13 to 23 log lines in all seven runs that logged them). The friend's blocked opening exit is
 outside this scope: it has no player actor, and member 0 is still Sora until
 the first field.
 

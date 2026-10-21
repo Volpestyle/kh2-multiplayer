@@ -1825,15 +1825,17 @@ bool MissingPartyAtSite(const void* record,void* controller,TraceWrapper wrapper
     };
     if(!ReadNative(reinterpret_cast<uintptr_t>(controller),native))return refuse("controller");
     if(native.spawnArray!=native.header+44)return refuse("spawn-array");
-    if(reinterpret_cast<uintptr_t>(record)!=native.spawnArray)return refuse("record-index");
+    const auto offset=reinterpret_cast<uintptr_t>(record)-native.spawnArray;
+    if(reinterpret_cast<uintptr_t>(record)<native.spawnArray || offset%64)return refuse("record-index");
     if(!CopyNative(native.header,header.data(),header.size()))return refuse("header-read");
     const std::size_t count=Field<std::uint16_t>(header.data(),4);
-    if(!count || count>records.size()/64)return refuse("count");
+    if(!count || count>records.size()/64 || offset/64>=count)return refuse("count");
     if(native.regionArray!=native.spawnArray+count*64)return refuse("region-array");
     if(!CopyNative(native.spawnArray,records.data(),count*64))return refuse("records-read");
     const auto groupBytes=std::span<const std::uint8_t>(records.data(),count*64);
     const auto* site=routespawn::MissingPartySiteFor(stamp.location,native.key,caller-g_exeBase,header,groupBytes);
     if(!site)return refuse("bytes");
+    if(!routespawn::SitePlayerRecordAt(*site,offset/64))return refuse("record-index");
     if(!CopyNative(g_exeBase+0x3FF71B,call.data(),call.size()) || call!=routespawn::BaileyCaller)return refuse("caller");
     // The clone's direct object: Bailey keeps normal Sora; a prologue site takes the one remote seat's
     // latched, prologue-qualified profile. Without one the authored local load stays solo and admission holds.

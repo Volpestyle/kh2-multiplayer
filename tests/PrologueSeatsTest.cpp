@@ -313,6 +313,24 @@ void site() {
           Mansion14Header[2] == 40 && Mansion14Records.size() == 3 * 64 &&
           !MissingPartySiteAt(std::array<std::uint8_t, 10>{2, 0x0D, 0x32, 0, 1, 0, 1, 0, 0x16, 0}),
           "the Day 1 Old Mansion front (evt1) is a checked prologue site; the Woods walk-in is not (VUH-2572)");
+    const auto* alley4 = MissingPartySiteFor(BackAlley4Location, 808804197, 0x3FF727, BackAlley4Header, BackAlley4Records);
+    auto alley4Short = std::vector<std::uint8_t>(BackAlley4Records.begin(), BackAlley4Records.begin() + 4 * 64);
+    check(alley4 && alley4->prologue && std::string_view(alley4->name) == "tt03-4" && BackAlley4Records.size() == 18 * 64 &&
+          BackAlley4Header[4] == 18 && MissingPartySiteAt(BackAlley4Location) == alley4 &&
+          !MissingPartySiteFor(BackAlley4Location, 808804197, 0x3FF727, BackAlley4Header, alley4Short),
+          "the Back Alley after the ambush (18 records, every one pinned) is a checked prologue site (VUH-2572)");
+    const auto entrance6 = std::span<const std::uint8_t>(BackAlley4Records).subspan(6 * 64, 64);
+    auto foreign = std::vector<std::uint8_t>(entrance6.begin(), entrance6.end()); foreign[8] ^= 1;
+    check(SitePlayerRecordAt(*alley4, 0) && SitePlayerRecordAt(*alley4, 6) && !SitePlayerRecordAt(*alley4, 7) &&
+          !SitePlayerRecordAt(*alley4, 18) && SiteHasPlayerRecord(*alley4, entrance6) &&
+          !SiteHasPlayerRecord(*alley4, std::span<const std::uint8_t>(BackAlley4Records).subspan(7 * 64, 64)) &&
+          !SiteHasPlayerRecord(*alley4, foreign),
+          "a group's raw566 for any entrance (Back Alley door 52 takes index 6) is accepted, nothing else");
+    const auto* hall2 = MissingPartySiteFor(BasementHall2Location, 808804197, 0x3FF727, BasementHall2Header, BasementHall2Records);
+    check(hall2 && hall2->prologue && std::string_view(hall2->name) == "tt19-2" && BasementHall2Records.size() == 6 * 64 &&
+          BasementHall2Header[2] == 94 && MissingPartySiteAt(BasementHall2Location) == hall2 &&
+          MissingPartySiteAt(BasementHall134Location) != hall2,
+          "the Basement Hall after the post-Axel chain (door 50, evt2) is a checked prologue site (VUH-2572)");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
           !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
     check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&
