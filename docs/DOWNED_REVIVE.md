@@ -320,13 +320,22 @@ boss/encounter defeat or a save point.
   rostered teammate's first avatar arrives takes that game over too.
   - The teammates are latched each downed frame while the old room is current. The transition erases
     every teammate pose before the hold is found lost, so they cannot be counted then.
-  - The log names the case: `teammate-up`, `full-party`, `solo` or `unavailable`.
+  - The log names the case: `teammate-up`, `full-party`, `solo`, `unavailable`, or `returned` (an owed
+    return, below).
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
   `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`.
   - The returns go only to the teammates downed, fresh and in the room at that edge, each claimed with its
     seat's connection and downed episode. A teammate downed later, one already returned, or another player
     in the seat is not returned by that encounter (`encounter-defeat claim dropped`).
+  - Or the host's mission ends with `mission_complete` (table-4 trap 3) within one room generation
+    (`[downed] encounter defeated: mission complete`). A wave fight that is a mission can end that way and
+    go straight into an event and a scripted room change without ever clearing its cage in field: FM-02's
+    Basement Hall (TT19_MS602), whose friend sat out into the Twilight Thorn fight before this (run
+    `20261021-164443`). The mission mirror's host detour counts it, once per mission. Trap 22 (end
+    signal), a failure, a boss end and a complete in a transition's or load's window never count. With
+    the mission mirror parked (`KH2COOP_MISSION_MIRROR=0`) only the cage edge remains. A cage edge and a
+    mission edge for the same fight arm one set of returns (`encounter defeated again ...`).
   - A host that sat it out comes back locally at 25% first.
   - Its peer returns wait until it has published itself living for 30 frames. The relay refuses a requester
     whose avatar is downed (`requester-not-alive`).
@@ -335,6 +344,13 @@ boss/encounter defeat or a save point.
   lie; walking onto the save point heals them natively. It also waits for 30 living frames.
 - **Retries.** A target still downed with the same episode is asked again, 90 frames apart, at most three
   times. The relay and the target's owner still accept one return per episode.
+- **A return during an event is owed.** The owner's native revive refuses in an event (`InEvent`), and the
+  relay has consumed the episode by then. So a return (never a partner revive) refused only for that is
+  owed to the downing (`[downed] return owed`): applied on the first frame out of the event in the same
+  room (`[downed] owed return ... applied`), or, when the event ends in a room change, the player comes
+  back at 25% in the new room instead of sitting out (`returned`). No episode remint for it. One per
+  downing; another relay session, a new downing or the full party's game over forgets it. This covers a
+  downed host's own encounter return too.
 - **What 2 means** (static analysis, VUH-2632; not observed live):
   - 2 is the script "command cage". It is set by `0x3AB690`, reached from BDX `trap_command_cage_on`
     (table 1 #117) or from a battle program flagged forced.
@@ -348,11 +364,12 @@ boss/encounter defeat or a save point.
 **Limits:**
 - When the host is the one sitting out, the survivors get only in-room returns (the encounter, a save
   point in that room). Rooms stay host-led.
-- Assumed from Ghidra and not yet observed live:
-  - that `BATTLE_STATUS` stays 2 between a forced fight's waves and clears only at its end;
-  - that the save byte is at + 0x2498;
+- Observed live (runs `20261021-163826` and `-164443`, FM-02 Basement Hall): `BATTLE_STATUS` read 2 on both
+  seats in wave 1, between the waves and in wave 2. Assumed from Ghidra and not yet observed live:
+  - that the save byte is at + 0x2498 (FM-02 reads 3, Critical, through the same read the policy uses);
   - that the re-down in a new room is clean.
-- A boss whose post-fight transition comes before its forced battle clears is VUH-2628's path.
+- A boss whose post-fight transition comes before its forced battle clears is VUH-2628's path. A boss
+  that ends a mission through its boss end (Twilight Thorn's TT34 trap 16) is not a mission-complete edge.
 
 ## Downed spectator candidate (VUH-1819; pending live qualification)
 

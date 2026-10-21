@@ -145,6 +145,9 @@ static SpikeState g_down;
 // VUH-2632 (D17): the teammates the downed player last saw in its room, for the sit-out decision.
 static downedreturn::DispositionLatch g_disposition;
 static downedreturn::SessionTeammates g_sessionTeammates;
+// A return that reached this downing during an event (applied when it ends, or 25% in the next room).
+static downedreturn::OwedReturn g_owedReturn;
+static uint32_t g_owedApplyLogs = 0;
 // Read by the input collector and the 3D2060 hit check (game thread; atomics for the record).
 static std::atomic<bool> g_logicalHeld {false};
 static std::atomic<uintptr_t> g_logicalActor {0};
@@ -413,6 +416,8 @@ static void BeginDowned(uintptr_t actor, int hp, uint32_t mode) {
     ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, g_down.downedObjentry);
     g_down.episode = NextEpisode(g_down.episode); // P3 boundary: new per episode, never reused
     g_disposition.Reset();
+    g_owedReturn.Clear();
+    g_owedApplyLogs = 0;
     g_down.episodeFrames = 0;
     g_down.hitAttempts = g_down.enemyHits = g_down.hitLogs = g_down.holdLost = 0;
     g_down.inputFrames = g_down.noInputFrames = 0;
@@ -807,7 +812,15 @@ static int ApplyReviveRequest(uint64_t episode, uint8_t requesterSlot, uint64_t 
             static_cast<unsigned long long>(episode));
     if (r == Result::Ok) ++g_net.revivedByRequest;
     else ++g_net.nativeRefused;
-    if (r != Result::Ok) {
+    // A return refused only because this player is in an event is owed to the downing (the episode is
+    // consumed by now): no remint, the next frame out of the event applies it.
+    std::uint64_t identity = 0;
+    const bool identityKnown = enemysync::SessionIdentity(identity);
+    const bool owed = g_owedReturn.Owe(kind, r == Result::InEvent, identityKnown, identity);
+    if (owed)
+        Log("[downed] return owed kind=%u episode=%llX: in an event, applied when it ends", static_cast<unsigned>(kind),
+            static_cast<unsigned long long>(episode));
+    if (r != Result::Ok && !owed) {
         uint32_t flags = 0;
         const bool dead = g_down.logical ||
             (g_down.downedActor && ReadHitTrace(g_down.downedActor + 0x9B8, flags) && (flags & 4U));
@@ -971,6 +984,7 @@ static bool HoldInput(void* inputStruct) {
 // living: the relay refuses a downed requester.
 // ---------------------------------------------------------------------------
 static downedreturn::EncounterTracker g_encounter;
+static downedreturn::MissionCompleteTracker g_missionComplete;
 static downedreturn::PendingEncounter g_encounterReturn;
 static downedreturn::LivingGate g_living;
 static downedreturn::ReturnLatch g_returnLatch;
@@ -1049,14 +1063,24 @@ static void ReturnTick(const Snap& s) {
     if (enemysync::ActivationRole() == 1) {
         uint8_t battle = 0;
         if (!ReadHitTrace(g_exeBase + offsets::BATTLE_STATUS, battle)) battle = 0xFF; // unread: never an edge
-        if (battle != 0xFF && g_encounter.Step(battle, warp::TransitionSerial(), warp::LoadSerial(), field)) {
-            Log("[downed] encounter defeated: forced battle ended room=%u/%u frame=%u", s.room.world, s.room.room, g_frameCounter);
+        const bool cage = battle != 0xFF && g_encounter.Step(battle, warp::TransitionSerial(), warp::LoadSerial(), field);
+        const bool mission = g_missionComplete.Step(enemysync::HostMissionCompletes(), warp::TransitionSerial(), warp::LoadSerial());
+        if ((cage || mission) && g_encounterReturn.Armed()) {
+            Log("[downed] encounter defeated again (%s) room=%u/%u frame=%u: its returns are already pending",
+                cage ? "forced battle ended" : "mission complete", s.room.world, s.room.room, g_frameCounter);
+        } else if (cage || mission) {
+            Log("[downed] encounter defeated: %s room=%u/%u frame=%u", cage ? "forced battle ended" : "mission complete",
+                s.room.world, s.room.room, g_frameCounter);
             g_encounterReturn.Arm(warp::TransitionSerial(), warp::LoadSerial());
             ClaimEncounterTargets(s); // before the self-revive and the wait for living
             if (g_down.state == State::Downed) {
                 const Result r = TryRevive(g_down.episode);
-                Log("[downed] return encounter-defeat self episode=%llX result=%d",
-                    static_cast<unsigned long long>(g_down.episode), static_cast<int>(r));
+                std::uint64_t identity = 0;
+                const bool identityKnown = enemysync::SessionIdentity(identity);
+                const bool owed = g_owedReturn.Owe(static_cast<uint8_t>(downedreturn::Kind::EncounterDefeat),
+                                                   r == Result::InEvent, identityKnown, identity);
+                Log("[downed] return encounter-defeat self episode=%llX result=%d owed=%u",
+                    static_cast<unsigned long long>(g_down.episode), static_cast<int>(r), owed ? 1u : 0u);
             }
         }
         switch (g_encounterReturn.Tick(warp::TransitionSerial(), warp::LoadSerial(), g_living.Settled())) {
@@ -1121,6 +1145,7 @@ static void Tick(uintptr_t head) {
         // current authority owns, under an identity unchanged across the capture (R4).
         const bool knownAfter = enemysync::SessionIdentity(identityAfter);
         g_sessionTeammates.StepBookended(knownBefore, identityBefore, owned, knownAfter, identityAfter);
+        g_owedReturn.SessionStep(knownAfter, identityAfter);
         if (g_down.state == State::Downed) g_disposition.Observe(known, downed);
     }
     if (g_down.state == State::Downed) {
@@ -1136,8 +1161,10 @@ static void Tick(uintptr_t head) {
             // settled field frame of the new actor, unless every teammate it saw in the old room was down
             // too (the host's Continue retry) or this is solo play; then it is resolved at 25% there, as
             // before. Decided from the old room's latched teammates; their poses are gone by now.
-            const auto decision = downedreturn::SitOutAfterTransition(g_disposition, g_sessionTeammates.Seen());
+            // An owed return (the encounter was won during the event that ends here) resolves it instead.
+            const auto decision = downedreturn::AfterTransitionFor(g_owedReturn.Owed(), g_disposition, g_sessionTeammates.Seen());
             const bool sitOut = decision.after == downedreturn::AfterTransition::SitOut;
+            g_owedReturn.Clear();
             const unsigned known = g_disposition.Known(), downed = g_disposition.Downed();
             g_down.state = State::Ready;
             g_down.logical = false;
@@ -1190,6 +1217,7 @@ static void Tick(uintptr_t head) {
                         static_cast<unsigned long long>(g_down.episode));
                     g_down.fullPartyDown = true;
                     g_down.fullPartyLoad = warp::LoadSerial();
+                    g_owedReturn.Clear();
                     g_down.state = State::Ready;
                     g_down.logical = false;
                     g_down.downedActor = 0;
@@ -1239,6 +1267,19 @@ static void Tick(uintptr_t head) {
                     static_cast<unsigned>(allyhit::DownedRefusals()), g_down.downedFrames, s.hp, s.deadAction ? 1u : 0u, g_down.deadFlagLost, g_down.actionLost,
                     g_down.controllerOn, g_down.statCalls, g_down.hitAttempts, g_down.enemyHits,
                     g_down.driftInput, g_down.driftNoInput, g_down.inputFrames, g_down.noInputFrames, s.motionId, static_cast<unsigned long long>(s.task));
+        }
+    }
+    uint8_t openMenu = 0xFF;
+    if (g_owedReturn.Owed() && g_down.state == State::Downed && !s.inEvent && !warp::TransitionPending() &&
+        ReadHitTrace(g_exeBase + offsets::OPEN_MENU, openMenu) && openMenu == 0xFF) {
+        // The event is over and the room is the same: apply the owed return through the one revive entry.
+        const unsigned kind = g_owedReturn.KindOwed();
+        const Result r = TryRevive(g_down.episode);
+        if (r == Result::Ok) g_owedReturn.Clear();
+        if (r == Result::Ok || g_owedApplyLogs < 4) {
+            ++g_owedApplyLogs;
+            Log("[downed] owed return kind=%u applied episode=%llX result=%d frame=%u", kind,
+                static_cast<unsigned long long>(g_down.episode), static_cast<int>(r), g_frameCounter);
         }
     }
     if (g_down.resolvePending && g_down.state == State::Ready && s.canonical && !s.inEvent && s.status &&

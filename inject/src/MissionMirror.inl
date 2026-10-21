@@ -55,6 +55,7 @@ bool LocalMissionEnded(bool failedOnly) {
 }
 char g_missionHostFile[MR::kFileBytes]{},g_missionLocalFile[MR::kFileBytes]{};
 std::uint8_t g_missionHostEndTrap{};
+std::atomic<std::uint32_t> g_missionHostCompletes{0};  // VUH-2632: host mission_complete (trap 3) count
 std::uint32_t g_missionHostEndArg{};
 int g_missionParked=-1;
 unsigned g_missionLogs{};
@@ -171,6 +172,7 @@ template <std::size_t I> void __fastcall MissionDetour(std::uint64_t* args) {
             std::uint32_t arg=0;
             if(CopyNative(reinterpret_cast<uintptr_t>(args),&arg,sizeof(arg))) {
                 g_missionHostEndTrap=static_cast<std::uint8_t>(MR::kTraps[I].index);g_missionHostEndArg=arg;
+                if(MR::kTraps[I].index==3)g_missionHostCompletes.fetch_add(1,std::memory_order_acq_rel);
                 if(g_log)g_log("[mission-mirror] host end trap=%s arg=%u",MR::kTraps[I].name,arg);
             }
         }

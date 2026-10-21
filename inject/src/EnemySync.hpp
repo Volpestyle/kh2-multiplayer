@@ -152,6 +152,9 @@ std::uint32_t WorldSessionGeneration() noexcept;
 // changed by a replacement session, 0 once the runtime retires the session ("network-retired").
 // False while the bridge is closed (unknown, not ended). Not a liveness test.
 bool SessionIdentity(std::uint64_t& out) noexcept;
+// VUH-2632: how many missions this host's script ended with mission_complete (table-4 trap 3), counted
+// by the mission mirror's host detour (0 while it is parked or its hooks are not installed).
+std::uint32_t HostMissionCompletes() noexcept;
 // Capture once at the native observation. Retained work must send that context;
 // a newer header never grants permission to relabel an old packet.
 bool CaptureWorldContext(ProducerWorldContext& context);

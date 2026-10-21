@@ -346,6 +346,115 @@ int main() {
       CHECK(run(true, refused, delivered, requests) && refused == 0 && delivered == 1 && requests == 1);
       CHECK(run(false, refused, delivered, requests) && refused == 1 && delivered == 1 && requests == 2); }
 
+    // The host's mission_complete (lead #156): the count rising in one room generation is an encounter
+    // defeat; the first sample is a baseline; a rise across a transition or a load is not taken. Trap 22,
+    // a failure and a boss end leave the count unchanged (the detour counts trap 3 only), so never an edge.
+    { MissionCompleteTracker t;
+      CHECK(!t.Step(4, 10, 3));                            // baseline (missions completed before this host)
+      CHECK(!t.Step(4, 10, 3));                            // waves running
+      CHECK(t.Step(5, 10, 3));                             // mission_complete: the waves are beaten
+      CHECK(!t.Step(5, 10, 3));                            // once
+      CHECK(!t.Step(5, 11, 3));                            // the scripted room change: no count, no edge
+      CHECK(!t.Step(6, 12, 3));                            // a complete in a transition's window is not taken
+      CHECK(!t.Step(7, 12, 4));                            // nor in a load's (a retry)
+      CHECK(t.Step(8, 12, 4)); }                           // the next mission, in its own generation
+
+    // OwedReturn: only a return (kind 1 or 2) refused because the player is in an event, with a known
+    // session; one per downing; another session (or the session's end) forgets it; unknown keeps it.
+    { OwedReturn o;
+      CHECK(!o.Owe(0, true, true, 0xA1) && !o.Owed());     // a partner revive is never owed
+      CHECK(!o.Owe(1, false, true, 0xA1) && !o.Owed());    // any other refusal stays final
+      CHECK(!o.Owe(1, true, false, 0) && !o.Owed());       // no session: nothing to be owed by
+      CHECK(o.Owe(1, true, true, 0xA1) && o.Owed() && o.KindOwed() == 1);
+      CHECK(!o.Owe(2, true, true, 0xA1) && o.KindOwed() == 1); // one per downing: a second is not taken
+      o.SessionStep(false, 0); CHECK(o.Owed());            // identity unknown: kept
+      o.SessionStep(true, 0xA1); CHECK(o.Owed());          // the same session: kept
+      o.SessionStep(true, 0xB2); CHECK(!o.Owed());         // a replacement session: forgotten
+      CHECK(o.Owe(2, true, true, 0xB2)); o.SessionStep(true, 0); CHECK(!o.Owed()); // the session ended
+      CHECK(o.Owe(1, true, true, 0xB2)); o.Clear(); CHECK(!o.Owed()); }
+
+    // An owed return resolves the room change before any sit-out disposition, the full party's included.
+    { DispositionLatch up; up.Observe(1, 0);
+      DispositionLatch all; all.Observe(1, 1);
+      DispositionLatch none;
+      for (const auto* l : {&up, &all, &none})
+          for (const bool seen : {true, false}) {
+              const auto d = AfterTransitionFor(true, *l, seen);
+              CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Returned);
+              const auto plain = AfterTransitionFor(false, *l, seen);
+              const auto sit = SitOutAfterTransition(*l, seen);
+              CHECK(plain.after == sit.after && plain.why == sit.why);
+          }
+      CHECK(std::string_view(DispositionName(Disposition::Returned)) == "returned"); }
+
+    // Regression (run 20261021-164443, FM-02 Basement Hall): the friend (slot 1) is downed in wave 1 and
+    // nobody revives it. The host kills wave 2 at frame 5617: mission_complete, and the cage stays 2. The
+    // host's event starts at 5618 and the friend follows it; a second event and the scripted room change
+    // (7300) follow, with at most one field frame between the events (5888 on the host) and none for the
+    // cage to clear. Before: no edge, and the friend sat out into the Twilight Thorn fight. Now: the edge
+    // arms at 5617 with the friend's claim and the living host's request goes out; the relay delivers it
+    // 3 frames later, in the friend's event, where the native revive refuses (InEvent): it is owed, and
+    // either the field frame between the events applies it or the room change returns the friend at 25%.
+    // The relay consumes the episode once: the host's retries while the pose still shows it downed are
+    // refused there. Each frame models the owner's order: identity, transition decision, owed apply.
+    { const std::uint64_t session = 0xA1, episode = 0x735A5EA000000001ULL, connection = 0x101;
+      for (const bool missionEdge : {true, false})
+      for (const bool gap : {true, false}) {
+          EncounterTracker cage; MissionCompleteTracker mission; PendingEncounter pending; LivingGate living;
+          ReturnLatch latch; OwedReturn owed; DispositionLatch disposition; SessionTeammates teammates;
+          disposition.Observe(1, 0);                               // the host up in the old room
+          for (int i = 0; i < 60; ++i) living.Step(true);          // the host has been living all along
+          std::uint32_t transition = 2, load = 3, completes = 7, arrival = 0;
+          bool consumed = false, friendHeld = true, sat = false, returned = false, appliedInRoom = false;
+          unsigned sent = 0, delivered = 0;
+          for (std::uint32_t frame = 5600; frame < 7400; ++frame) {
+              const bool hostEvent = frame >= 5618 && !(gap && frame == 5888);
+              const bool friendEvent = frame >= 5619 && !(gap && frame == 5889);
+              if (frame == 5617 && missionEdge) ++completes;
+              if (frame == 7300) ++transition;                     // the event's room change (BeginTransition)
+              // The friend (target owner), first in its frame.
+              teammates.Step(true, session, 1);
+              owed.SessionStep(true, session);
+              if (arrival && frame == arrival) {                   // the relay: one return per episode
+                  arrival = 0;
+                  if (!consumed && friendHeld) {
+                      consumed = true;
+                      ++delivered;
+                      if (!friendEvent) { friendHeld = false; appliedInRoom = true; }
+                      else CHECK(owed.Owe(1, true, true, session));
+                  }
+              }
+              if (friendHeld && frame == 7300) {                   // the hold is lost to the room change
+                  const auto d = AfterTransitionFor(owed.Owed(), disposition, teammates.Seen());
+                  owed.Clear();
+                  friendHeld = false;
+                  if (d.after == AfterTransition::SitOut) sat = true; else returned = d.why == Disposition::Returned;
+              }
+              if (friendHeld && owed.Owed() && !friendEvent) { friendHeld = false; appliedInRoom = true; owed.Clear(); }
+              // The host's ReturnTick.
+              living.Step(true);
+              const bool byCage = cage.Step(2, transition, load, !hostEvent);
+              const bool byMission = mission.Step(completes, transition, load);
+              if ((byCage || byMission) && !pending.Armed()) {
+                  pending.Arm(transition, load);
+                  CHECK(pending.Claim({1, connection, episode}));
+              }
+              if (pending.Tick(transition, load, living.Settled()) == PendingEncounter::Step::Send)
+                  pending.ForEachClaim([&](const ReturnClaim& c) {
+                      // The friend's pose: fresh until the event releases its puppet (about 5800).
+                      const auto check = CheckClaim(c, true, connection, frame < 5800, friendHeld, episode, true);
+                      if (check == ClaimCheck::Send && latch.Take(c.slot, c.episode, frame)) { ++sent; arrival = frame + 3; }
+                      return check;
+                  });
+          }
+          if (missionEdge) {
+              CHECK(sent >= 1 && sent <= kReturnAttempts && delivered == 1 && !sat);
+              CHECK(gap ? appliedInRoom && !returned : returned && !appliedInRoom);
+          } else {
+              CHECK(sent == 0 && delivered == 0 && sat && !returned && !appliedInRoom); // the gap, reproduced
+          }
+      } }
+
     CHECK(std::string_view(KindName(Kind::EncounterDefeat)) == "encounter-defeat" &&
           std::string_view(KindName(Kind::SavePoint)) == "save-point");
 

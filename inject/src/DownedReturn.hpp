@@ -10,6 +10,11 @@
 //                    is cleared by trap_command_cage_off or the battle program's end (both 0x3AB4A0), on a
 //                    load by the area reset 0x3ABAB0 (a new generation, so never an edge). The host issues
 //                    it once it is living and published; the downed player returns at 25% HP.
+//                    Or the host's mission_complete (table-4 trap 3) in its room generation: a wave fight
+//                    that is a mission (FM-02's Basement Hall, TT19_MS602) ends in mission_complete and
+//                    goes straight into an event and a scripted room change, never clearing its cage in
+//                    field (run 20261021-164443). A return that reaches the downed player during that
+//                    event is owed to its downing (OwedReturn).
 //   SavePoint        a living player stands at a save point: that seat's settled native reaction
 //                    command is the save point's "Save" (55). Any save point counts, so returning to
 //                    one and reaching a new one are the same trigger. The save point's own heal does
@@ -56,6 +61,53 @@ public:
 private:
     std::uint32_t transition_ = 0, load_ = 0;
     bool forced_ = false;
+};
+
+// Host side: the mission mirror's host detour counts mission_complete (trap 3 only, once per mission:
+// trap 22's end signal, a failure, a retry's load and a boss end never count). An edge is a count that
+// rose while the room generation stayed the same since the previous sample: a complete in the window of
+// a transition or load is not taken. Not limited to field play: the event that follows can start on the
+// next frame (run 20261021-164443: the last Dusk and mission_complete at host frame 5617, the event at 5618).
+class MissionCompleteTracker {
+public:
+    bool Step(std::uint32_t completes, std::uint32_t transition, std::uint32_t load) noexcept {
+        const bool edge = sampled_ && completes != completes_ && transition == transition_ && load == load_;
+        sampled_ = true;
+        completes_ = completes;
+        transition_ = transition;
+        load_ = load;
+        return edge;
+    }
+
+private:
+    bool sampled_ = false;
+    std::uint32_t completes_ = 0, transition_ = 0, load_ = 0;
+};
+
+// Target side: a return (an encounter defeat or a save point) that the relay delivered while this downed
+// player was in an event, where the owner's native revive refuses (InEvent). The relay and the owner gate
+// have consumed the episode by then, so the return is owed to this downing instead of lost: applied on
+// the first frame out of the event, or, when the event ends in a room change, the player comes back at 25%
+// in the next room instead of sitting out. One per downing; a partner revive (kind 0) is never owed; any
+// other refusal stays final. Keyed to the relay session's identity: another session forgets it.
+class OwedReturn {
+public:
+    bool Owe(std::uint8_t kind, bool refusedInEvent, bool identityKnown, std::uint64_t identity) noexcept {
+        if (!kind || !refusedInEvent || !identityKnown || !identity || kind_) return false;
+        kind_ = kind;
+        identity_ = identity;
+        return true;
+    }
+    void SessionStep(bool identityKnown, std::uint64_t identity) noexcept {
+        if (kind_ && identityKnown && identity != identity_) *this = {};
+    }
+    void Clear() noexcept { *this = {}; }
+    [[nodiscard]] bool Owed() const noexcept { return kind_ != 0; }
+    [[nodiscard]] std::uint8_t KindOwed() const noexcept { return kind_; }
+
+private:
+    std::uint8_t kind_ = 0;
+    std::uint64_t identity_ = 0;
 };
 
 // A living seat at a save point (its settled, field-play reaction command).
@@ -144,7 +196,7 @@ constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, boo
 // A teammate seen earlier in the session but not during this downing is unavailable, not absent: the
 // player sits out, as when a teammate was up (Quill R1).
 enum class AfterTransition : std::uint8_t { Resolve, SitOut };
-enum class Disposition : std::uint8_t { Solo, FullParty, TeammateUp, Unavailable };
+enum class Disposition : std::uint8_t { Solo, FullParty, TeammateUp, Unavailable, Returned };
 struct TransitionDecision {
     AfterTransition after;
     Disposition why;
@@ -156,12 +208,18 @@ inline TransitionDecision SitOutAfterTransition(const DispositionLatch& old, boo
     return teammateSeenInSession ? TransitionDecision {AfterTransition::SitOut, Disposition::Unavailable}
                                  : TransitionDecision {AfterTransition::Resolve, Disposition::Solo};
 }
+// An owed return comes first: the encounter was won before the room changed.
+inline TransitionDecision AfterTransitionFor(bool returnOwed, const DispositionLatch& old, bool teammateSeenInSession) noexcept {
+    if (returnOwed) return {AfterTransition::Resolve, Disposition::Returned};
+    return SitOutAfterTransition(old, teammateSeenInSession);
+}
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {
     case Disposition::Solo: return "solo";
     case Disposition::FullParty: return "full-party";
     case Disposition::TeammateUp: return "teammate-up";
     case Disposition::Unavailable: return "unavailable";
+    case Disposition::Returned: return "returned";
     }
     return "?";
 }

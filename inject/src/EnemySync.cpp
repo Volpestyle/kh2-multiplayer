@@ -6484,6 +6484,10 @@ bool SessionIdentity(std::uint64_t& out) noexcept {
     return true;
 }
 
+std::uint32_t HostMissionCompletes() noexcept {
+    return g_missionHostCompletes.load(std::memory_order_acquire);
+}
+
 std::uint32_t WorldSessionGeneration() noexcept {
     if (!spawncontroller::IsDiagnosticGameThread() || !g_bridge.IsOpen()) return 0;
     const auto generation = g_bridge.SessionGeneration();
