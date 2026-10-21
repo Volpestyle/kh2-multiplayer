@@ -147,6 +147,11 @@ bool TwoPlayerSessionLive() noexcept; // same loading-safe lease and existing ro
 // ordered reset has been consumed, or zero while retired/unavailable. Callers
 // retain and recheck this value before applying a queued native world action.
 std::uint32_t WorldSessionGeneration() noexcept;
+// The relay session's identity: the hash of its session id that the runtime publishes before every
+// generation advance (WorldBridge::SpawnPickSalt, VUH-1515). Unchanged across a same-session resync,
+// changed by a replacement session, 0 once the runtime retires the session ("network-retired").
+// False while the bridge is closed (unknown, not ended). Not a liveness test.
+bool SessionIdentity(std::uint64_t& out) noexcept;
 // Capture once at the native observation. Retained work must send that context;
 // a newer header never grants permission to relabel an old packet.
 bool CaptureWorldContext(ProducerWorldContext& context);

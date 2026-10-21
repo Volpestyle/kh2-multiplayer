@@ -6477,6 +6477,13 @@ bool TwoPlayerSessionLive() noexcept {
         g_bridge.SessionGeneration() == generation && PartyLoadAdmitted(generation);
 }
 
+bool SessionIdentity(std::uint64_t& out) noexcept {
+    out = 0;
+    if (!g_bridge.IsOpen()) return false;
+    out = g_bridge.SpawnPickSalt();
+    return true;
+}
+
 std::uint32_t WorldSessionGeneration() noexcept {
     if (!spawncontroller::IsDiagnosticGameThread() || !g_bridge.IsOpen()) return 0;
     const auto generation = g_bridge.SessionGeneration();

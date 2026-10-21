@@ -308,13 +308,20 @@ boss/encounter defeat or a save point.
   teammate it saw in the old room was down too (the host's Continue retry), or it has never seen a teammate
   in this session (solo: nobody could return it).
   A teammate seen earlier in the session but not during the downing ("unavailable") does not count as solo:
-  the player sits out.
+  the player sits out. "The session" is the relay session's identity (the hash of its id the runtime
+  publishes with each generation): a same-session resync or a runtime liveness gap keeps the history, a
+  replacement session or the session's end clears it.
+- **A lone host.** A host downed in its room that has never seen a teammate in this session is everyone
+  down by itself: after one second it takes the native game over and Continue, as the full party does.
   - The teammates are latched each downed frame while the old room is current. The transition erases
     every teammate pose before the hold is found lost, so they cannot be counted then.
   - The log names the case: `teammate-up`, `full-party`, `solo` or `unavailable`.
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
   `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`.
+  - The returns go only to the teammates downed, fresh and in the room at that edge, each claimed with its
+    seat's connection and downed episode. A teammate downed later, one already returned, or another player
+    in the seat is not returned by that encounter (`encounter-defeat claim dropped`).
   - A host that sat it out comes back locally at 25% first.
   - Its peer returns wait until it has published itself living for 30 frames. The relay refuses a requester
     whose avatar is downed (`requester-not-alive`).

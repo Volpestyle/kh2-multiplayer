@@ -48,28 +48,105 @@ int main() {
       CHECK(l.Sampled() && l.Known() == 2 && l.Downed() == 1);
       l.Reset(); CHECK(!l.Sampled()); }
     { SessionTeammates seen;
-      CHECK(!seen.Seen()); seen.Step(true, 0); CHECK(!seen.Seen());
-      seen.Step(true, 1); seen.Step(true, 0); CHECK(seen.Seen());   // kept after the teammate's pose is gone
-      seen.Step(false, 0); CHECK(!seen.Seen());                     // the session ended
-      seen.Step(false, 1); CHECK(!seen.Seen()); }
+      CHECK(!seen.Seen()); seen.Step(true, 0xA1, 0); CHECK(!seen.Seen());
+      seen.Step(true, 0xA1, 1); seen.Step(true, 0xA1, 0); CHECK(seen.Seen()); // kept after the pose is gone
+      seen.Step(false, 0, 0); CHECK(seen.Seen());                   // identity unknown: nothing proven
+      seen.Step(true, 0, 0); CHECK(!seen.Seen());                   // the session ended
+      seen.Step(true, 0, 1); CHECK(!seen.Seen()); }                 // no session: nothing to remember
+
+    // Regression (Quill R4 a): session A sees a teammate; replacement session B goes live with no Off
+    // frame between (CheckActivationGeneration retires A without one) and has no teammate. A new downing
+    // and a story transition in B must be solo, not "unavailable".
+    { SessionTeammates session; DispositionLatch latch;
+      for (int frame = 0; frame < 60; ++frame) session.Step(true, 0xA1, 1);   // session A, with the friend
+      for (int frame = 60; frame < 180; ++frame) {
+          session.Step(true, 0xB2, 0);                           // session B, alone, live every frame
+          if (frame == 120) latch.Reset();                       // downed in B
+          if (frame >= 120) latch.Observe(0, 0);
+      }
+      const auto d = SitOutAfterTransition(latch, session.Seen());
+      CHECK(!session.Seen() && d.after == AfterTransition::Resolve && d.why == Disposition::Solo); }
+
+    // Regression (Quill R4 b): within one session the runtime's heartbeat lapses (the role reads Off, the
+    // bridge and the session identity stay) while the friend's poses are gone; the history is kept, so
+    // the downed player sits out ("unavailable"), as it would without the gap.
+    { SessionTeammates session; DispositionLatch latch;
+      for (int frame = 0; frame < 60; ++frame) session.Step(true, 0xA1, 1);   // the friend, seen
+      latch.Reset();                                              // downed
+      for (int frame = 60; frame < 120; ++frame) {
+          session.Step(true, 0xA1, 0);                           // frames 80-99 read role Off; same identity
+          latch.Observe(0, 0);
+      }
+      const auto d = SitOutAfterTransition(latch, session.Seen());
+      CHECK(session.Seen() && d.after == AfterTransition::SitOut && d.why == Disposition::Unavailable); }
 
     // Regression (lead #142): a seat alone in its session, never having seen a teammate, is downed and a
     // story transition takes it to the next room. Nobody could return it, so it must not sit out: it is
     // resolved (solo), as before D17.
     { SessionTeammates session; DispositionLatch latch;
       for (int frame = 0; frame < 120; ++frame) {
-          session.Step(true, 0);                                  // in a session, no teammate pose ever
+          session.Step(true, 0xA1, 0);                            // in a session, no teammate pose ever
           if (frame >= 60) latch.Observe(0, 0);                   // downed from frame 60 on; still nobody
       }
       const auto d = SitOutAfterTransition(latch, session.Seen());
       CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Solo); }
 
+    // Regressions (Quill R3): an encounter defeat returns the downings it claimed at its edge, and no
+    // other. Seat 1 is alive at the victory and newly downed 120 frames later, in the same room
+    // generation; seat 2 was claimed, returned, then downed anew under a new episode. Neither later
+    // downing gets the completed encounter's return (a rescan of the current puppets gave both one).
+    { struct Seat { bool downed; std::uint64_t episode; };
+      Seat seats[3] = {{false, 0}, {false, 0}, {true, 0x2A01}}; // the host; seat 1 up; seat 2 down at the edge
+      PendingEncounter pending; LivingGate living; ReturnLatch latch;
+      unsigned requests[3] {}; std::uint64_t lastEpisode[3] {};
+      pending.Arm(1, 1);
+      for (std::uint8_t slot = 1; slot < 3; ++slot)
+          if (seats[slot].downed) (void)pending.Claim({slot, 70u + slot, seats[slot].episode});
+      CHECK(pending.Claims() == 1);
+      for (std::uint32_t frame = 0; frame < 400; ++frame) {
+          living.Step(true);                                     // the host is up
+          if (frame == 150) seats[1] = {true, 0x1B01};             // seat 1: a new downing after the victory
+          if (frame == 200) seats[2] = {true, 0x2A02};             // seat 2, returned below, downed anew
+          if (pending.Tick(1, 1, living.Settled()) != PendingEncounter::Step::Send) continue;
+          pending.ForEachClaim([&](const ReturnClaim& c) {
+              const Seat& t = seats[c.slot];
+              const auto check = CheckClaim(c, true, 70u + c.slot, true, t.downed, t.episode, true);
+              if (check == ClaimCheck::Send && latch.Take(c.slot, c.episode, frame)) {
+                  ++requests[c.slot]; lastEpisode[c.slot] = c.episode;
+                  seats[c.slot] = {false, 0};                      // delivered: the owner returns it
+              }
+              return check;
+          });
+      }
+      CHECK(requests[1] == 0);                                   // not claimed at the edge: never returned
+      CHECK(requests[2] == 1 && lastEpisode[2] == 0x2A01);       // its claimed downing only
+      CHECK(seats[1].downed && seats[2].downed && seats[2].episode == 0x2A02);
+      CHECK(!pending.Armed()); }                                 // every claim dropped: ended early
+
+    // Everyone down, the host in its room: every teammate here downed, or a lone host.
+    CHECK(EveryoneDown(true, true, true) && !EveryoneDown(true, false, true));
+    CHECK(EveryoneDown(false, true, false));                       // never seen a teammate: alone
+    CHECK(!EveryoneDown(false, true, true));                       // seen earlier, absent now: not everyone
+
+    // Regression (lead #143): a host alone in its session, never having seen a teammate, is downed in its
+    // room. It used to wait forever (the check needed a teammate in the room); now one second of that is
+    // everyone down and the native game over runs, as the adapter counts it (60 frames).
+    { SessionTeammates session; std::uint32_t allDownFrames = 0; int gameOverAt = -1;
+      for (int frame = 0; frame < 200 && gameOverAt < 0; ++frame) {
+          session.Step(true, 0xA1, 0);
+          if (frame < 50) continue;                               // downed from frame 50
+          const bool any = false, all = true;                     // no fresh teammate pose in the room
+          allDownFrames = EveryoneDown(any, all, session.Seen()) ? allDownFrames + 1 : 0;
+          if (allDownFrames >= 60) gameOverAt = frame;
+      }
+      CHECK(gameOverAt == 109); }
+
     // Regression (lead #142 / Quill R1): a teammate was seen earlier in the session, then its poses were
     // unavailable for this whole downing (stale or erased). That is not solo: the player sits out.
     { SessionTeammates session; DispositionLatch latch;
-      for (int frame = 0; frame < 60; ++frame) session.Step(true, 1); // the friend, up, before the downing
+      for (int frame = 0; frame < 60; ++frame) session.Step(true, 0xA1, 1); // the friend, up, before the downing
       latch.Reset();                                              // BeginDowned
-      for (int frame = 60; frame < 120; ++frame) { session.Step(true, 0); latch.Observe(0, 0); }
+      for (int frame = 60; frame < 120; ++frame) { session.Step(true, 0xA1, 0); latch.Observe(0, 0); }
       const auto d = SitOutAfterTransition(latch, session.Seen());
       CHECK(d.after == AfterTransition::SitOut && d.why == Disposition::Unavailable); }
 
@@ -126,15 +203,33 @@ int main() {
     // Pending encounter: waits for the living gate, sends for a bounded window, and is dropped by a room change.
     { PendingEncounter e;
       CHECK(e.Tick(1, 1, true) == PendingEncounter::Step::Idle);
+      CHECK(!e.Claim({1, 77, 0x5E01}));                            // not armed
       e.Arm(1, 1);
+      CHECK(e.Claim({1, 77, 0x5E01}) && !e.Claim({1, 78, 0x5E02})); // one claim per seat
+      CHECK(!e.Claim({3, 77, 1}) && !e.Claim({2, 0, 1}) && !e.Claim({2, 77, 0}) && e.Claims() == 1);
       CHECK(e.Tick(1, 1, false) == PendingEncounter::Step::Wait && e.Armed());
       CHECK(e.Tick(1, 1, true) == PendingEncounter::Step::Send);
+      CHECK(!e.Claim({2, 79, 0x5E03}));                            // no new claim once sending began
       CHECK(e.Tick(1, 1, false) == PendingEncounter::Step::Send); // a lapse after sending began does not re-wait
       std::uint32_t sends = 2;
       while (e.Tick(1, 1, true) == PendingEncounter::Step::Send) ++sends;
       CHECK(sends == kEncounterReturnFrames && !e.Armed());
-      e.Arm(1, 1); CHECK(e.Tick(2, 1, true) == PendingEncounter::Step::Dropped && !e.Armed());
-      e.Arm(1, 1); CHECK(e.Tick(1, 2, false) == PendingEncounter::Step::Dropped); }
+      e.Arm(1, 1); e.Claim({1, 77, 1}); CHECK(e.Tick(2, 1, true) == PendingEncounter::Step::Dropped && !e.Armed());
+      e.Arm(1, 1); e.Claim({1, 77, 1}); CHECK(e.Tick(1, 2, false) == PendingEncounter::Step::Dropped);
+      e.Arm(1, 1); CHECK(e.Tick(1, 1, true) == PendingEncounter::Step::Expired); // nothing claimed
+      e.Arm(1, 1); e.Claim({1, 77, 1}); (void)e.Tick(1, 1, true);
+      e.ForEachClaim([](const ReturnClaim&) { return ClaimCheck::Drop; });
+      CHECK(e.Claims() == 0 && e.Tick(1, 1, true) == PendingEncounter::Step::Expired); }
+
+    // A claim against the target now.
+    { const ReturnClaim c {1, 77, 0x5E01};
+      CHECK(CheckClaim(c, true, 77, true, true, 0x5E01, true) == ClaimCheck::Send);
+      CHECK(CheckClaim(c, true, 78, true, true, 0x5E01, true) == ClaimCheck::Drop);   // another player in the seat
+      CHECK(CheckClaim(c, true, 77, true, false, 0, true) == ClaimCheck::Drop);       // revived
+      CHECK(CheckClaim(c, true, 77, true, true, 0x5E02, true) == ClaimCheck::Drop);   // downed anew
+      CHECK(CheckClaim(c, true, 77, false, false, 0, true) == ClaimCheck::Keep);      // stale pose: wait
+      CHECK(CheckClaim(c, true, 77, true, true, 0x5E01, false) == ClaimCheck::Keep);  // another room: wait
+      CHECK(CheckClaim(c, false, 0, true, true, 0x5E01, true) == ClaimCheck::Keep); } // scope unknown: wait
 
     // Regression (Quill R2), three seats: the host and seat 1 are down, seat 2 wins the encounter. The
     // relay (SessionHost) refuses a requester whose last avatar there is downed or at HP 0. The host
@@ -142,7 +237,7 @@ int main() {
     // (the old order) is refused, and the old once-only latch then never asked again; now the return
     // waits for the living publication and is delivered on the first request.
     auto run = [](bool gated, unsigned& refusedNotAlive, unsigned& delivered, unsigned& requests) {
-        constexpr std::uint32_t edge = 1000, relayLag = 4;    // frames for a living avatar to reach the relay
+        const std::uint32_t edge = 1000, relayLag = 4;        // frames for a living avatar to reach the relay
         std::uint32_t revivedAt = 0;
         bool hostDowned = true, seat1Downed = true;
         refusedNotAlive = delivered = requests = 0;
@@ -152,15 +247,20 @@ int main() {
             living.Step(!hostDowned);                          // this frame's local publication
             if (tracker.Step(0, 1, 1, true)) {                 // seat 2 clears the encounter
                 pending.Arm(1, 1);
+                (void)pending.Claim({1, 77, 0x5E01});           // seat 1, downed at the edge
                 hostDowned = false; revivedAt = frame;          // the host's local TryRevive, after the edge
             }
-            if (pending.Tick(1, 1, gated ? living.Settled() : true) == PendingEncounter::Step::Send && seat1Downed &&
-                latch.Take(1, 0x5E01, frame)) {
-                ++requests;
-                const bool relaySeesHostLiving = frame >= revivedAt + 1 + relayLag && !hostDowned;
-                if (!relaySeesHostLiving) ++refusedNotAlive;
-                else { ++delivered; seat1Downed = false; }       // the owner applies it once
-            }
+            if (pending.Tick(1, 1, gated ? living.Settled() : true) != PendingEncounter::Step::Send) continue;
+            pending.ForEachClaim([&](const ReturnClaim& c) {
+                const auto check = CheckClaim(c, true, 77, true, seat1Downed, seat1Downed ? 0x5E01 : 0, true);
+                if (check == ClaimCheck::Send && latch.Take(c.slot, c.episode, frame)) {
+                    ++requests;
+                    const bool relaySeesHostLiving = frame >= revivedAt + 1 + relayLag && !hostDowned;
+                    if (!relaySeesHostLiving) ++refusedNotAlive;
+                    else { ++delivered; seat1Downed = false; }   // the owner applies it once
+                }
+                return check;
+            });
         }
         return !seat1Downed;
     };

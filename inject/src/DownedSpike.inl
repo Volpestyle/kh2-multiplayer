@@ -992,6 +992,51 @@ static void SendReturns(uint8_t kind, const Snap& s) {
             static_cast<unsigned long long>(a.downedEpisode), static_cast<unsigned long long>(seq), sent ? 1u : 0u, g_frameCounter);
     }
 }
+// The encounter's targets at its edge (Quill R3): fresh, downed, in the room, with the seat's connection.
+static void ClaimEncounterTargets(const Snap& s) {
+    enemysync::DownedScope scope;
+    const bool scoped = enemysync::CaptureDownedScope(scope);
+    for (const auto& d : g_puppets) {
+        const auto& a = d.pose.pose;
+        if (!d.have || g_frameCounter - d.poseFrame > 30 || !(a.flags & kh2coop::AvatarDowned) || !a.downedEpisode ||
+            a.worldId != s.room.world || a.roomId != s.room.room)
+            continue;
+        const auto slot = static_cast<uint8_t>(a.ownerSlot);
+        const uint64_t connection = scoped && slot < 3 ? scope.connections[slot] : 0;
+        const bool claimed = g_encounterReturn.Claim({slot, connection, a.downedEpisode});
+        Log("[downed] encounter-defeat claim target=%u episode=%llX connection=%llX claimed=%u frame=%u",
+            static_cast<unsigned>(slot), static_cast<unsigned long long>(a.downedEpisode),
+            static_cast<unsigned long long>(connection), claimed ? 1u : 0u, g_frameCounter);
+    }
+}
+// Those claims only, retried while each target is still the same downing.
+static void SendClaimedReturns(const Snap& s) {
+    enemysync::DownedScope scope;
+    const bool scoped = enemysync::CaptureDownedScope(scope);
+    g_encounterReturn.ForEachClaim([&](const downedreturn::ReturnClaim& c) {
+        const PuppetDriver* target = nullptr;
+        for (const auto& d : g_puppets)
+            if (d.have && static_cast<uint8_t>(d.pose.pose.ownerSlot) == c.slot) target = &d;
+        const auto* a = target ? &target->pose.pose : nullptr;
+        const auto check = downedreturn::CheckClaim(c, scoped, scoped ? scope.connections[c.slot] : 0,
+            target && g_frameCounter - target->poseFrame <= 30, a && (a->flags & kh2coop::AvatarDowned),
+            a ? a->downedEpisode : 0, a && a->worldId == s.room.world && a->roomId == s.room.room);
+        if (check == downedreturn::ClaimCheck::Send && g_returnLatch.Take(c.slot, c.episode, g_frameCounter)) {
+            uint64_t seq = 0;
+            const bool sent = enemysync::SendReviveRequest(c.slot, c.episode, seq,
+                                                           static_cast<uint8_t>(downedreturn::Kind::EncounterDefeat));
+            if (sent) ++g_down.returnsSent;
+            Log("[downed] return encounter-defeat target=%u episode=%llX seq=%llu sent=%u frame=%u",
+                static_cast<unsigned>(c.slot), static_cast<unsigned long long>(c.episode),
+                static_cast<unsigned long long>(seq), sent ? 1u : 0u, g_frameCounter);
+        } else if (check == downedreturn::ClaimCheck::Drop) {
+            Log("[downed] encounter-defeat claim dropped target=%u episode=%llX now=%llX frame=%u",
+                static_cast<unsigned>(c.slot), static_cast<unsigned long long>(c.episode),
+                static_cast<unsigned long long>(a ? a->downedEpisode : 0), g_frameCounter);
+        }
+        return check;
+    });
+}
 static void ReturnTick(const Snap& s) {
     if (g_down.control || g_down.state == State::Off || g_down.state == State::Refused) return;
     uint8_t menu = 0xFF;
@@ -1007,6 +1052,7 @@ static void ReturnTick(const Snap& s) {
         if (battle != 0xFF && g_encounter.Step(battle, warp::TransitionSerial(), warp::LoadSerial(), field)) {
             Log("[downed] encounter defeated: forced battle ended room=%u/%u frame=%u", s.room.world, s.room.room, g_frameCounter);
             g_encounterReturn.Arm(warp::TransitionSerial(), warp::LoadSerial());
+            ClaimEncounterTargets(s); // before the self-revive and the wait for living
             if (g_down.state == State::Downed) {
                 const Result r = TryRevive(g_down.episode);
                 Log("[downed] return encounter-defeat self episode=%llX result=%d",
@@ -1015,7 +1061,7 @@ static void ReturnTick(const Snap& s) {
         }
         switch (g_encounterReturn.Tick(warp::TransitionSerial(), warp::LoadSerial(), g_living.Settled())) {
         case downedreturn::PendingEncounter::Step::Send:
-            SendReturns(static_cast<uint8_t>(downedreturn::Kind::EncounterDefeat), s);
+            SendClaimedReturns(s);
             break;
         case downedreturn::PendingEncounter::Step::Dropped:
             Log("[downed] encounter-defeat returns ended: the room changed frame=%u", g_frameCounter);
@@ -1064,7 +1110,9 @@ static void Tick(uintptr_t head) {
             ++known;
             if (d.pose.pose.flags & kh2coop::AvatarDowned) ++downed;
         }
-        g_sessionTeammates.Step(enemysync::ActivationRole() != 0, known);
+        std::uint64_t identity = 0;
+        const bool identityKnown = enemysync::SessionIdentity(identity);
+        g_sessionTeammates.Step(identityKnown, identity, known);
         if (g_down.state == State::Downed) g_disposition.Observe(known, downed);
     }
     if (g_down.state == State::Downed) {
@@ -1119,7 +1167,8 @@ static void Tick(uintptr_t head) {
                 // VUH-2465 (VUH-2266): the host is down and so is every teammate whose fresh pose is in this
                 // room. One second of that and the host lets its own native death run: the game's game
                 // over and Continue retry the room from its checkpoint (no save load or write), and the
-                // friends follow that host-led reload, which resolves their downing.
+                // friends follow that host-led reload, which resolves their downing. VUH-2632 (D17): a host
+                // that has never seen a teammate in this session is everyone down by itself.
                 bool any = false, all = true;
                 for (const auto& d : g_puppets) {
                     const auto& a = d.pose.pose;
@@ -1127,7 +1176,7 @@ static void Tick(uintptr_t head) {
                     any = true;
                     if (!(a.flags & kh2coop::AvatarDowned)) all = false;
                 }
-                g_down.allDownFrames = any && all ? g_down.allDownFrames + 1 : 0;
+                g_down.allDownFrames = downedreturn::EveryoneDown(any, all, g_sessionTeammates.Seen()) ? g_down.allDownFrames + 1 : 0;
                 if (g_down.allDownFrames >= 60 && g_origApplyStatDelta) {
                     Log("[downed] full party down episode=%llX: the host takes the native game over (Continue retries the room)",
                         static_cast<unsigned long long>(g_down.episode));

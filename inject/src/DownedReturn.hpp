@@ -83,19 +83,36 @@ private:
     unsigned known_ = 0, downed_ = 0;
 };
 
-// Whether this seat has seen a teammate in its current session (any frame, any state). Ends with the
-// session.
+// Whether this seat has seen a teammate in its current session (any frame, any state), keyed to the
+// relay session's identity (Quill R4), not to whether the runtime is live this frame:
+//   identity unknown (no bridge)      keep: nothing proves a new session;
+//   identity 0                        the session ended: forget;
+//   another identity                  a replacement session, even with no Off frame between: start over;
+//   the same identity                 the same session, through resyncs and liveness gaps: keep.
 class SessionTeammates {
 public:
-    void Step(bool session, unsigned teammatesKnown) noexcept {
-        if (!session) seen_ = false;
-        else if (teammatesKnown) seen_ = true;
+    void Step(bool identityKnown, std::uint64_t identity, unsigned teammatesKnown) noexcept {
+        if (!identityKnown) return;
+        if (identity != identity_) {
+            identity_ = identity;
+            seen_ = false;
+        }
+        if (identity_ && teammatesKnown) seen_ = true;
     }
     [[nodiscard]] bool Seen() const noexcept { return seen_; }
 
 private:
+    std::uint64_t identity_ = 0;
     bool seen_ = false;
 };
+
+// The downed host, in its room (D17, the lead's #143): everyone is down when every teammate whose fresh
+// pose is in the room is downed too, or when it has never seen a teammate in this session (a lone player
+// down). Then the host takes the native game over and Continue. A teammate seen earlier but absent now
+// is not "everyone down".
+constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, bool teammateSeenInSession) noexcept {
+    return !teammateSeenInSession || (teammateHere && everyTeammateHereDowned);
+}
 
 // A room change while logically downed (D17): the player sits out into the next room, still downed,
 // unless everyone is down, which is the native game over's case (the lead, VUH-2632 #142: a lone
@@ -151,10 +168,30 @@ private:
     std::uint32_t frames_ = 0;
 };
 
+// One target of an encounter defeat, fixed at the defeat's edge (Quill R3): the seat, the connection in
+// it and the downed episode. A later downing, a revive or another player in the seat is not this claim.
+struct ReturnClaim {
+    std::uint8_t slot = 0xFF;
+    std::uint64_t connection = 0, episode = 0;
+};
+enum class ClaimCheck : std::uint8_t { Send, Keep, Drop };
+// The claim against the target's current state: Drop when the seat's connection changed, or the target's
+// fresh pose is no longer downed or carries another episode (revived, or downed anew after the victory).
+// Keep (wait) while the pose is stale, the target is in another room, or the connection is unknown.
+constexpr ClaimCheck CheckClaim(const ReturnClaim& c, bool connectionKnown, std::uint64_t connectionNow, bool freshPose,
+                                bool downed, std::uint64_t episode, bool sameRoom) noexcept {
+    if (connectionKnown && connectionNow != c.connection) return ClaimCheck::Drop;
+    if (!freshPose) return ClaimCheck::Keep;
+    if (!downed || episode != c.episode) return ClaimCheck::Drop;
+    return connectionKnown && sameRoom ? ClaimCheck::Send : ClaimCheck::Keep;
+}
+
 // Host side: an encounter defeat stays pending in its room generation until the host is living and
-// published, then sends for kEncounterReturnFrames (the latch spaces and bounds the requests).
+// published, then sends for kEncounterReturnFrames to the claims taken at its edge only (the latch spaces
+// and bounds the requests). It ends early once every claim is dropped.
 class PendingEncounter {
 public:
+    static constexpr unsigned kMaxClaims = 3;
     enum class Step : std::uint8_t { Idle, Wait, Send, Dropped, Expired };
     void Arm(std::uint32_t transition, std::uint32_t load) noexcept {
         armed_ = true;
@@ -162,20 +199,38 @@ public:
         transition_ = transition;
         load_ = load;
         sendFrames_ = 0;
+        count_ = 0;
+    }
+    bool Claim(const ReturnClaim& c) noexcept {
+        if (!armed_ || sending_ || c.slot >= 3 || !c.connection || !c.episode || count_ >= kMaxClaims) return false;
+        for (unsigned i = 0; i < count_; ++i)
+            if (claims_[i].slot == c.slot) return false;
+        claims_[count_++] = c;
+        return true;
     }
     Step Tick(std::uint32_t transition, std::uint32_t load, bool livingSettled) noexcept {
         if (!armed_) return Step::Idle;
-        if (transition != transition_ || load != load_) { armed_ = false; return Step::Dropped; }
+        if (transition != transition_ || load != load_) { armed_ = false; count_ = 0; return Step::Dropped; }
         if (!sending_ && !livingSettled) return Step::Wait;
         sending_ = true;
-        if (sendFrames_++ >= kEncounterReturnFrames) { armed_ = false; return Step::Expired; }
+        if (!count_ || sendFrames_++ >= kEncounterReturnFrames) { armed_ = false; count_ = 0; return Step::Expired; }
         return Step::Send;
     }
+    // check(claim) -> ClaimCheck; a Drop removes that claim.
+    template <class F> void ForEachClaim(F&& check) {
+        unsigned kept = 0;
+        for (unsigned i = 0; i < count_; ++i)
+            if (check(static_cast<const ReturnClaim&>(claims_[i])) != ClaimCheck::Drop) claims_[kept++] = claims_[i];
+        count_ = kept;
+    }
     [[nodiscard]] bool Armed() const noexcept { return armed_; }
+    [[nodiscard]] unsigned Claims() const noexcept { return count_; }
 
 private:
     bool armed_ = false, sending_ = false;
     std::uint32_t transition_ = 0, load_ = 0, sendFrames_ = 0;
+    ReturnClaim claims_[kMaxClaims] {};
+    unsigned count_ = 0;
 };
 
 // Per target slot: the first request for an episode, then a bounded retry while it is still downed.
