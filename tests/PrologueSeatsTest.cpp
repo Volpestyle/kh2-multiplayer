@@ -329,6 +329,16 @@ void site() {
           MissingPartySiteAt(Mansion128Location) == dusk128 &&
           !MissingPartySiteFor(Mansion128Location, 842293090, 0x3FF727, Mansion127Header, Mansion127Records),
           "the Mansion Dusk's second stage (btl128) is a checked prologue site with its own group (VUH-2466)");
+    const auto* dusk79 = MissingPartySiteFor(Sandlot79Location, 859070306, 0x3FF727, Sandlot79Header, Sandlot79Records);
+    const auto* serenity2 = MissingPartySiteFor(Serenity2Location, 808804197, 0x3FF727, Serenity2Header, Serenity2Records);
+    const auto* serenity154 = MissingPartySiteFor(Serenity154Location, 808738658, 0x3FF727, Serenity154Header, Serenity154Records);
+    auto serenitySave = Serenity2Location; serenitySave[2] = 0x63;
+    check(dusk79 && std::string_view(dusk79->name) == "tt04-79" && Sandlot79Header[2] == 115 && Sandlot79Records.size() == 4 * 64 &&
+          serenity2 && std::string_view(serenity2->name) == "tt32-2" && Serenity2Header[2] == 91 && Serenity2Records.size() == 6 * 64 &&
+          !MissingPartySiteAt(serenitySave) &&
+          serenity154 && std::string_view(serenity154->name) == "tt32-154" && Serenity154Header[2] == 47 &&
+          Serenity154Records.size() == 6 * 64 && dusk79->prologue && serenity2->prologue && serenity154->prologue,
+          "the Day 3 Sandlot Dusk, the Serenity arrival from it and the Serenity tutorial Dusks are checked prologue sites (VUH-2466)");
     const auto* alley4 = MissingPartySiteFor(BackAlley4Location, 808804197, 0x3FF727, BackAlley4Header, BackAlley4Records);
     auto alley4Short = std::vector<std::uint8_t>(BackAlley4Records.begin(), BackAlley4Records.begin() + 4 * 64);
     check(alley4 && alley4->prologue && std::string_view(alley4->name) == "tt03-4" && BackAlley4Records.size() == 18 * 64 &&

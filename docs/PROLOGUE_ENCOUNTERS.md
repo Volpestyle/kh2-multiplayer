@@ -38,8 +38,8 @@ readings, confirmed only where the live column says so.
 | 1 | 14 Old Mansion | 127 | `TT14_MS109` | 1 Dusk M_EX990 (318) | early Dusk | checked site `tt14-127`; both seats fight, loopback from FM-01 (below) |
 | 1 | 14 Old Mansion | 128 | `TT14_MS110` | 1 Dusk (318) | early Dusk | checked site `tt14-128`; both seats fight and defeat it (below) |
 | 2 | 02 Usual Spot | 2 | `TT02_MS201` | none | scripted | not yet |
-| 3 | 04 Sandlot | 79 | `TT04_MS301` | 1 Dusk (318) | early Dusk | not yet |
-| 3 | 32 Station of Serenity | 154 | `TT32_MS302` | 3 Dusks (318) | Dive: weapon tutorial | not yet |
+| 3 | 04 Sandlot | 79 | `TT04_MS301` | 1 Dusk (318) | early Dusk | checked site `tt04-79`; both seats fight, loopback from FM-01 (below) |
+| 3 | 32 Station of Serenity | 154 | `TT32_MS302` | 3 Dusks (318) | Dive: weapon tutorial | checked site `tt32-154`; both seats fight; the last death can miss the friend (below) |
 | 3 | 32 Station of Serenity | 155 | `TT32_MS303` | none | Dive | not yet |
 | 3 | 33 Station of Calling | 1 | none | 10 Dusks (318) on the path | Dive | checked site `tt33-calling` (VUH-2570): both seats see each other and fight all 10, loopback from FM-00 |
 | 3 | 34 Station of Awakening | 157 | `TT34_MS304` | B_EX100 (307), Twilight Thorn | boss | not yet |
@@ -115,3 +115,13 @@ From the Day 1 route and FM-01 (2026-10-20, PC1 loopback, VUH-2466):
 - btl127 and btl128 are both raw566, the absent raw567/568 and the Dusk 318, pinned as `tt14-127` and
   `tt14-128`. In run `20261020-230628` both seats released with both Roxases at each stage, fought the
   Dusk, and the fight's own stage change moved both to btl128, where both logged the same Dusk death.
+
+From FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-2466):
+- btl79 (the Day 3 Sandlot Dusk) is raw566, the absent raw567/568 and the Dusk 318: `tt04-79`. Its fight
+  ends by script and both seats go into the Dive, loading the Station of Serenity at door 50 evt2, which
+  is `tt32-2` (two entrance triples; FM-00's save loads the same room at door 99, which stays unpinned).
+  Run `20261020-234113`: both seats released with both Roxases at each.
+- btl154 (Serenity's weapon-tutorial Dusks) is raw566, raw567/568 and three Dusks 318: `tt32-154`. Run
+  `20261020-234512`: both seats released with both Roxases and fought. The host's third death arrived on
+  the friend just as the mission-complete event closed its gameplay gate and was not applied (the Dusk
+  stayed at 15 HP there; the relay captured a desync). The unpinned probe applied all three.
