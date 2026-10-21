@@ -381,6 +381,13 @@ boss/encounter defeat or a save point.
   seats in wave 1, between the waves and in wave 2. Assumed from Ghidra and not yet observed live:
   - that the save byte is at + 0x2498 (FM-02 reads 3, Critical, through the same read the policy uses);
   - that the re-down in a new room is clean.
+- **Known gap (live, run `20261021-174207`):** in FM-02's Basement Hall the host's event starts on the same
+  frame as `mission_complete` (5568). The mission edge fires (`encounter defeated: mission complete`) but
+  its claim is refused (`connection=0 claimed=0`): the downed scope, and so every revive request, needs
+  field play, and the next field frame (5838) is past the friend's fresh pose. The friend sits out into
+  the Twilight Thorn fight until a save point. The follow-up (v33) has the friend owe itself the return
+  from the host's relay-scoped MissionState (end trap 3), under the same receipt rules.
+- The cage edge (2 -> 0 in field) has not fired live yet: no run so far had a forced battle end in field.
 - A boss whose post-fight transition comes before its forced battle clears is VUH-2628's path. A boss
   that ends a mission through its boss end (Twilight Thorn's TT34 trap 16) is not a mission-complete edge.
 
