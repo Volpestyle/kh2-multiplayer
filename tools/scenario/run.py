@@ -1288,6 +1288,8 @@ def step_pilot(ctx: Context, step: dict) -> dict:
         if peer.pid == inst.pid or step.get("input", "pad") != "pad" or getattr(ctx, "revive_guard", None):
             raise StepFailed("revivePeer requires a different owned instance, pad input, and no ReviveGuard")
         cmd += ["--revive-peer-pid", str(peer.pid)]
+        if "reviveHoldMs" in step:  # VUH-2632 (D17): Standard's longer hold
+            cmd += ["--revive-hold-ms", str(int(step["reviveHoldMs"]))]
     if "route" in step:
         cmd += ["--route", str(ROOT / step["route"]), "--from-step", str(step.get("fromStep", 0))]
     else:
@@ -1655,7 +1657,9 @@ class ReviveGuard:
     REACH, HOLD_MS, TIMEOUT = 100.0, 1600, 60.0
     KEEP_AWAY = 300.0  # step away from the nearest living enemy inside this
 
-    def __init__(self, ctx: Context, host: int, friend: int) -> None:
+    def __init__(self, ctx: Context, host: int, friend: int, hold_ms: int | None = None) -> None:
+        if hold_ms is not None:  # VUH-2632 (D17): Standard's revive hold is 300 frames (~5 s)
+            self.HOLD_MS = int(hold_ms)
         spec = _importlib_util.spec_from_file_location("kh2coop_route_pilot", PILOT)
         self.pilot = _importlib_util.module_from_spec(spec)
         spec.loader.exec_module(self.pilot)  # read-only state helpers only
@@ -1751,7 +1755,7 @@ def step_revive_guard(ctx: Context, step: dict) -> dict:
     guard = getattr(ctx, "revive_guard", None)
     if step.get("on", True):
         if guard is None:
-            ctx.revive_guard = ReviveGuard(ctx, step.get("host", 0), step.get("friend", 1))
+            ctx.revive_guard = ReviveGuard(ctx, step.get("host", 0), step.get("friend", 1), step.get("holdMs"))
             ctx.revive_guard.thread.start()
         return {"started": True}
     if guard is None:

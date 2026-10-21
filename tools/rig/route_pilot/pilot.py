@@ -613,8 +613,10 @@ class CooperativeFight:
 
     REACH, HOLD_SECONDS, TIMEOUT = 100.0, 1.6, 60.0
 
-    def __init__(self, game: Game, peer: Game) -> None:
+    def __init__(self, game: Game, peer: Game, hold_ms: int | None = None) -> None:
         self.peer = peer
+        if hold_ms is not None:  # VUH-2632 (D17): Standard's revive hold is 300 frames (~5 s)
+            self.HOLD_SECONDS = hold_ms / 1000.0
         self.own_log, self.peer_log = DownedLog(game.pid), DownedLog(peer.pid)
         self.since: float | None = None
         self.mode = ""
@@ -671,7 +673,8 @@ class CooperativeFight:
             time.sleep(0.2)
             pilot.kb.hold(set())
             return True
-        pilot.write("coop_revive_hold", peerPid=self.peer.pid, distance=round(distance, 1), milliseconds=1600)
+        pilot.write("coop_revive_hold", peerPid=self.peer.pid, distance=round(distance, 1),
+                    milliseconds=round(self.HOLD_SECONDS * 1000))
         end = time.monotonic() + self.HOLD_SECONDS
         pilot.kb.hold({"react"})
         try:
@@ -1439,6 +1442,7 @@ def main() -> int:
     ap.add_argument("--release-all", action="store_true")
     ap.add_argument("--input", choices=("pad", "keys"), default="pad")
     ap.add_argument("--revive-peer-pid", type=int, help="integrated pad-only cooperative fight with this owned game")
+    ap.add_argument("--revive-hold-ms", type=int, help="cooperative revive hold (default 1600; Standard needs ~5600)")
     ap.add_argument("--external-evidence", action="store_true", help="scenario owns failure captures/clips")
     args = ap.parse_args()
     game = Game(args.pid)
@@ -1464,7 +1468,7 @@ def main() -> int:
     pilot = Pilot(game, args.out, keys, args.input)
     pilot.external_evidence = args.external_evidence
     if args.revive_peer_pid:
-        pilot.cooperative = CooperativeFight(game, Game(args.revive_peer_pid))
+        pilot.cooperative = CooperativeFight(game, Game(args.revive_peer_pid), args.revive_hold_ms)
     try:
         if args.route:
             return run_route(pilot, route, args.from_step)

@@ -3303,7 +3303,9 @@ pad-only and extends that pilot's single input driver; do not also start
 `ReviveGuard`. Each pilot observes its current PID's downed/revive receipts,
 keeps a logically downed owner neutral (engine HP remains1), and approaches a
 downed peer through ordinary stick input before holding Triangle within100
-units. Native RCs cancel the hold immediately. Scope/actor/read failures stay
+units. The hold is 1600 ms; `reviveHoldMs` changes it (and `holdMs` on a
+`revive_guard` step), e.g. 5600 for Standard's 300-frame hold under
+`"revivePolicy": "native"` (D17, VUH-2632). Native RCs cancel the hold immediately. Scope/actor/read failures stay
 neutral and recovery attempts have a60-second limit. The peer's position is
 read from its current canonical actor, independent of the cinematic camera.
 
