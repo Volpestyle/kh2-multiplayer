@@ -33,10 +33,13 @@ host replacement remain requirements, not delivered roster support.
 Two-instance loopback evidence covers first-field construction, the Armor Shop
 reloads, the first Sandlot door, mixed-profile reconnect, seat colors and the
 Sandlot duel. Later checked sites include the Day-6 Mansion/Back Alley ambushes,
-Station of Calling and the Old Mansion front. These are separate bounded runs,
-not one continuous New Game route. Unchecked fields can remain native solo;
-the Woods walk-in is unresolved, and the Back Alley ambush's object-309 binding
-can diverge. See [party setup](PARTY_SETUP.md) and the
+Station of Calling, the Old Mansion front and its Day 1 Dusks, the Woods (seat 1
+steps aside at release), the Back Alley after the ambush, the Basement Hall
+after Axel, and the Day 3 Sandlot and Station of Serenity Dusks. These are
+separate bounded runs, not one continuous New Game route. Unchecked fields and
+sessions that start by loading a save there remain native solo until the next
+checked site; the Back Alley ambush's object-309 binding can diverge, and the
+Twilight Thorn boss fight is not yet qualified. See [party setup](PARTY_SETUP.md) and the
 [encounter checklist](PROLOGUE_ENCOUNTERS.md).
 
 Roxas logical downing, Triangle revive, delayed waves and host-led native
@@ -442,7 +445,7 @@ and cannot delay the core route.
    keeps both seats: unskipped run `20261018-215915` and skipped run
    `20261018-222415` rebuilt two Roxases on each seat there, held the host until
    the friend bound, moved only the owner's Roxas, and logged no unpinned solo
-   field. Open: Day 1 walk-through coverage after the Sandlot remains incomplete (including the Woods walk-in),
+   field. Open: one continuous Day 1 walk-through (the Woods and Old Mansion are now checked sites in separate runs),
    the friend in the opening scenes moved to VUH-2359, and the two-PC clip waits
    for bld.
 3. **VUH-1512 — per-seat selector.** Depends on VUH-2464 for prologue proof.

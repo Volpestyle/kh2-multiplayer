@@ -13,8 +13,10 @@ Steam relay-only transport has passed between two Windows PCs, including
 room follow, shared combat, reconnect and host departure. Package GUI host/join
 has technical two-PC acceptance; a physical-controller friend session and the
 full story route remain open. Local two-instance runs now cover Roxas+Roxas
-and a Roxas host with a Sora friend from the first controllable prologue field
-through the Sandlot door. Opening-scene friend representation and two-PC
+and a Roxas host with a Sora friend from the first controllable prologue field,
+and separate runs cover the checked Day 1-6 prologue sites (the Woods, Old
+Mansion, Back Alley, Basement Hall, Sandlot and Station of Serenity fights).
+The Twilight Thorn boss, opening-scene friend representation and two-PC
 qualification of those profiles remain open.
 
 See the [Steam preview guide](docs/FRIEND_PLAYTEST_STEAM.md),

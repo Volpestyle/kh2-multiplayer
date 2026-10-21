@@ -76,7 +76,8 @@ after a loaded save; the New Game/title-time route remains a separate developmen
 and acceptance path, not a completed package workflow.
 
 Roxas+Roxas and a Roxas host with a Sora friend have local two-instance prologue
-field/reload/Sandlot-door evidence. Opening-scene friend representation, two-PC
+field/reload evidence and separate runs at the checked Day 1-6 prologue sites.
+The Twilight Thorn boss, opening-scene friend representation, two-PC
 profile qualification and the full New Game-to-Shan-Yu route remain open. The
 [current gameplay limits](FRIEND_PLAYTEST_KNOWN_ISSUES.md) apply; older supplied
 packages keep their original defaults. Stop on antivirus warnings and
