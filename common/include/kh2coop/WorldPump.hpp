@@ -10,6 +10,7 @@
 // messages is harmless.
 // ============================================================================
 
+#include "kh2coop/RcRefusalPacketTrace.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/PopulationCutJson.hpp"
 #include "kh2coop/NetworkClient.hpp"
@@ -38,7 +39,8 @@ using WorldPumpObserver = void(*)(void*, const std::vector<std::uint8_t>&, const
 
 // Drains the DLL's outgoing ring into the network client (call every tick).
 inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats& stats,
-                         WorldPumpObserver observer = nullptr, void* observerContext = nullptr) {
+                         WorldPumpObserver observer = nullptr, void* observerContext = nullptr,
+                         bool recoveryOnly = false) {
     std::uint8_t operatorMask = 0;
     std::uint64_t operatorHost = 0;
     ProducerWorldContext operatorContext;
@@ -79,9 +81,16 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
         }
     };
     while (bridge.ReceiveFromDll(packet, context)) {
-        if (!net.ready() || !context.generation || context.generation != bridge.SessionGeneration() ||
-            !context.deliverySerial || context.deliverySerial != bridge.DeliverySerial() ||
-            context.deliverySerial != net.deliverySerial()) {
+        auto rcTrace=rcdiag::Packet(packet);rcdiag::ProducerScope(rcTrace,context);
+        rcdiag::Stdout(rcdiag::Stage::RuntimeOutgoing,"received","dll-ring-pop",rcTrace);
+        const char* rcWhy="unknown";
+        if (rcdiag::Reject(!net.ready(),"net-not-ready",rcWhy) ||
+            rcdiag::Reject(!context.generation,"generation-zero",rcWhy) ||
+            rcdiag::Reject(context.generation!=bridge.SessionGeneration(),"bridge-generation",rcWhy) ||
+            rcdiag::Reject(!context.deliverySerial,"delivery-zero",rcWhy) ||
+            rcdiag::Reject(context.deliverySerial!=bridge.DeliverySerial(),"bridge-delivery",rcWhy) ||
+            rcdiag::Reject(context.deliverySerial!=net.deliverySerial(),"net-delivery",rcWhy)) {
+            rcdiag::Stdout(rcdiag::Stage::RuntimeOutgoing,"retired",rcWhy,rcTrace);
             reviveHop(packet, !net.ready() ? "retired:net-not-ready" : "retired:context-mismatch");
             ++stats.retiredOutgoing;
             continue;
@@ -91,7 +100,15 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
             std::size_t size = 0;
             const auto type = decodePacketHeader(packet.data(), packet.size(), payload, size);
             if (packet.size() != size + 3) {
+                rcdiag::Stdout(rcdiag::Stage::RuntimeOutgoing,"refused","framing",rcTrace);
                 ++stats.rejected;
+                continue;
+            }
+            if (recoveryOnly && type != PacketType::ResyncAck && type != PacketType::ResyncResult &&
+                type != PacketType::NativeResyncSnapshot && type != PacketType::TransitionAck &&
+                type != PacketType::SeatState) {
+                rcdiag::Stdout(rcdiag::Stage::RuntimeOutgoing,"retired","recovery-quarantined",rcTrace);
+                ++stats.retiredOutgoing;
                 continue;
             }
             bool submitted = false;
@@ -124,7 +141,9 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
                                       type == PacketType::FieldObjects || type == PacketType::MissionState ||
                                       type == PacketType::StateHash ||
                                       isEphemeralWorldPacket(type);
+                rcdiag::Stdout(rcdiag::Stage::RuntimeOutgoing,"submit-enter","sendNativeWorld",rcTrace);
                 submitted = net.sendNativeWorld(packet, context, !periodic);
+                rcdiag::Stdout(rcdiag::Stage::RuntimeOutgoing,submitted?"submitted":"submit-false","sendNativeWorld-returned",rcTrace);
                 if(submitted && type==PacketType::PopulationCut && net.worldBinding()) {
                     ByteReader cutReader(payload,size);PopulationCut cut;read(cutReader,cut);
                     const auto receipt=PopulationCutJson(cut,net.worldBinding()->sessionId);
@@ -140,6 +159,7 @@ inline void pumpDllToNet(WorldBridge& bridge, NetworkClient& net, WorldPumpStats
                     net.failWorldResync(ResyncResultReason::Overflow, "native bridge submission failed");
             }
         } catch (const std::exception&) {
+            rcdiag::Stdout(rcdiag::Stage::RuntimeOutgoing,"refused","decode-or-submit-exception",rcTrace);
             ++stats.rejected;
             if (net.pendingResync())
                 net.failWorldResync(ResyncResultReason::InvalidSnapshot, "malformed native bridge record");
@@ -164,6 +184,8 @@ public:
 
     bool Receive(WorldBridge& bridge, const std::vector<std::uint8_t>& packet,
                  WorldPumpStats& stats) {
+        const auto rcTrace=rcdiag::Packet(packet);
+        rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"received","inbox-receive",rcTrace);
         // A lease arriving behind a reliable backlog is expendable. Never let
         // it bypass that backlog or take space in its durable pending queue.
         std::vector<std::uint8_t> inner;
@@ -179,6 +201,7 @@ public:
                 if (!reader.atEnd()) throw std::runtime_error("extra envelope payload");
                 inner = std::move(envelope.packet);
             } catch (const std::exception&) {
+                rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"refused","envelope-decode",rcTrace);
                 ++stats.rejected;
                 return false;
             }
@@ -200,31 +223,37 @@ public:
             return true; // intentional drop is not reliable-world corruption
         }
         if (packet.empty() || packet.size() > WORLD_RING_BYTES / 2u - 4u) {
+            rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"refused","packet-size",rcTrace);
             ++stats.inboxOverflow;
             return false;
         }
         Flush(bridge, stats);
         if (pending_.empty() && bridge.IsOpen() && bridge.SendToDll(packet)) {
+            rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"ring-enqueued","immediate-push",rcTrace);
             ++stats.toDll;
             return true;
         }
         if (packet.size() > kMaxBytes - bytes_) {
+            rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"refused","pending-overflow",rcTrace);
             ++stats.inboxOverflow;
             return false;
         }
         pending_.push_back(packet);
         bytes_ += packet.size();
         ++stats.deferred;
+        rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"deferred","retained-not-delivered",rcTrace);
         return true;
     }
 
     void Flush(WorldBridge& bridge, WorldPumpStats& stats) {
         if (!bridge.IsOpen()) return;
         while (!pending_.empty()) {
+            const auto rcTrace=rcdiag::Packet(pending_.front());
             if (!bridge.SendToDll(pending_.front())) {
                 ++stats.dllRingFull;
                 return;
             }
+            rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"ring-enqueued","flush-push",rcTrace);
             bytes_ -= pending_.front().size();
             pending_.pop_front();
             ++stats.toDll;
@@ -232,6 +261,8 @@ public:
     }
 
     void Clear() {
+        for(const auto& packet:pending_)
+            rcdiag::Stdout(rcdiag::Stage::RuntimeInbox,"retired","inbox-clear",rcdiag::Packet(packet));
         pending_.clear();
         bytes_ = 0;
     }

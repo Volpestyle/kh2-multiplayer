@@ -893,6 +893,8 @@ void checkMissionState(const MissionState& m) {
     for (const auto& c : m.counters)
         if (c.gauge != 0.0f) throw std::runtime_error("MissionState: invalid counter");
     if (m.timerState > 2 || m.timerMode > 1) throw std::runtime_error("MissionState: invalid timer");
+    if (m.endTrap == 16 && std::string_view(m.file.data()) != "TT34_MS304.bar")
+        throw std::runtime_error("MissionState: unqualified boss end");
     if (!validMissionEndTrap(m.endTrap) || (!m.endTrap && m.endArg) || (!m.active && m.endTrap))
         throw std::runtime_error("MissionState: invalid end");
 }

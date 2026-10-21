@@ -1,0 +1,224 @@
+"""Bounded offline controls only; never calls native process APIs."""
+import ast
+import copy
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
+
+import run
+import pause
+import evidence
+
+checks = []
+def check(name, value):
+    checks.append({"name": name, "pass": bool(value)})
+    if not value:
+        raise AssertionError(name)
+
+
+class Proc(subprocess.Popen):
+    def __init__(self):
+        self.pid = 111
+        self._handle = object()
+        self.returncode = None
+        self.args = [sys.executable, "--network", "--pid", "222", "--role", "friend1"]
+        self.killed = False
+    def __del__(self):
+        pass
+    def poll(self):
+        return self.returncode
+    def terminate(self):
+        self.killed = True
+        self.returncode = 1
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+class Handle:
+    def __int__(self):
+        return 9
+
+
+class Timer:
+    latest = None
+    def __init__(self, delay, callback):
+        self.delay, self.callback, self.daemon = delay, callback, False
+        self.live = False
+        Timer.latest = self
+    def start(self):
+        self.live = True
+    def cancel(self):
+        self.live = False
+    def join(self, timeout):
+        pass
+    def is_alive(self):
+        return self.live
+
+
+class API:
+    def __init__(self, proc):
+        self.proc = proc
+        self.calls = []
+        self.birth, self.pid, self.image = 12345, proc.pid, sys.executable
+        self.suspend_result, self.resume_result = 0, 0
+        self.tick_error_after_resume = False
+        self.now = 0.0
+    def process_id(self, handle):
+        check("metadata uses same retained handle", handle is self.proc._handle)
+        return self.pid
+    def executable(self, handle):
+        return self.image
+    def creation(self, handle):
+        return self.birth
+    def tick(self):
+        if self.tick_error_after_resume and "resume" in self.calls:
+            raise OSError("metadata unavailable")
+        return 10000 + int(self.now * 1000)
+    def suspend(self, handle):
+        check("suspend retained handle", handle is self.proc._handle)
+        self.calls.append("suspend")
+        return self.suspend_result
+    def resume(self, handle):
+        check("resume retained handle", handle is self.proc._handle)
+        self.calls.append("resume")
+        return self.resume_result
+
+
+def setup():
+    proc = Proc()
+    proc._handle = Handle()
+    api = API(proc)
+    owned = [("runtime_1", proc, None)]
+    games = [SimpleNamespace(index=0, pid=221), SimpleNamespace(index=1, pid=222)]
+    return proc, api, owned, games
+
+
+def execute(edit=None, failure=None, overrun=False):
+    proc, api, owned, games = setup()
+    if edit:
+        edit(proc, api, owned, games)
+    count = 0
+    def alive():
+        nonlocal count
+        count += 1
+        if failure and count == failure:
+            raise KeyboardInterrupt("cancel")
+    def sleep(seconds):
+        api.now += seconds
+        if overrun and api.now > 0.1:
+            api.now = 3.3
+            Timer.latest.callback()
+    try:
+        result = pause.pause(run.shared._runtime_lifecycle, owned, games, proc, sys.executable, alive,
+                             api=api, clock=lambda: api.now, sleep=sleep, timer_factory=Timer)
+        return result, None, proc, api
+    except BaseException as error:
+        return getattr(error, "receipt", {}), error, proc, api
+
+
+result, error, proc, api = execute()
+check("fixed2600 successful", error is None and result["completed"] and result["durationMs"] == 2600)
+check("one matching resume", api.calls == ["suspend", "resume"] and not proc.killed)
+check("creation/game identity retained", result["identity"]["creationFiletime"] == 12345 and result["identity"]["gamePid"] == 222)
+for name, edit in [
+    ("wrong registry", lambda p,a,o,g: o.append(("runtime_1",p,None))),
+    ("wrong argv game", lambda p,a,o,g: p.args.__setitem__(3,"999")),
+    ("wrong role", lambda p,a,o,g: p.args.__setitem__(5,"player")),
+    ("wrong handle PID", lambda p,a,o,g: setattr(a,"pid",999)),
+    ("missing creation", lambda p,a,o,g: setattr(a,"birth",0)),
+    ("exited runtime", lambda p,a,o,g: setattr(p,"returncode",1)),
+    ("missing handle", lambda p,a,o,g: setattr(p,"_handle",None)),
+]:
+    result, error, proc, api = execute(edit)
+    check(name + " refuses before suspend", error is not None and not api.calls)
+result, error, proc, api = execute(failure=2)
+check("cancel finally resumes", isinstance(error,KeyboardInterrupt) and api.calls == ["suspend","resume"] and result["resumed"])
+result, error, proc, api = execute(overrun=True)
+check("watchdog resumes independently and refuses pass", error is not None and result["watchdogFired"] and result["resumed"])
+result, error, proc, api = execute(lambda p,a,o,g: setattr(a,"suspend_result",-1))
+check("uncertain failed suspend still resumes", error is not None and api.calls == ["suspend","resume"])
+result, error, proc, api = execute(lambda p,a,o,g: setattr(a,"resume_result",-1))
+check("resume failure terminal only owned cleanup", error is not None and result["terminal"] and proc.killed and api.calls.count("resume")==3)
+result, error, proc, api = execute(lambda p,a,o,g: setattr(a,"tick_error_after_resume",True))
+check("successful resume not repeated on metadata error", error is not None and result["resumed"] and api.calls.count("resume")==1)
+
+session = "a" * 32
+initial = f"[eventhold-control] armed generation=1 host=10 self=11 hostDelivery=20 targetDelivery=21\n[runtime-identity] identityCurrent=1 pinPresent=1 stringsComplete=1 slot=1 selfConnection=11 hostConnection=10 pinSession={session} session={session} pinHostConnection=10 pinSlot=1"
+old = evidence.baseline(initial)
+friend = f"[eventhold-control] aborted reason=4 observationMs=12601\n[eventhold-recovery] expired connection=11 pinnedRejoin=1 cached baseline quarantined=1\n[runtime-identity] identityCurrent=1 pinPresent=1 stringsComplete=1 selfConnection=12 hostConnection=10 pinSession={session} session={session} pinHostConnection=10 pinSlot=1\n[eventhold-recovery] fresh baseline request=7 generation=2 self=12 epoch=3 resetAckRequired=1\n[eventhold-control] armed generation=2 host=10 self=12 hostDelivery=20 targetDelivery=22\n[eventhold-recovery] control restored generation=2 self=12 nativeResetAck=1"
+host = "[returning-seat-resync] action=submitted reason=host-generated-request slot=1 connection=12 epoch=3 request=7"
+native = f"[resync] ack session={session} host=10 request=7 targetSlot=1 connection=12 delivery=22 phase=0 cut=8 fingerprint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa status=2 epoch=3 world=2 room=32 door=0 map=0 battle=0 event=0 loadBefore=1 loadAfter=2 frame1=101 frame2=102 serialized=1\n[event-control] recovered lifetime generation=2 self=12 delivery=22 epoch=3 resetAckRequired=1\n[event-control] resync result request=7 reason=0 recoveredLifetime=1\n[event-control] owner ack ordinal=1 source=0 epoch=3 flags=3 generation=2 delivery=22"
+relay = f"[resync-result] component=relay session={session} host=10 request=7 reason=0 targetCount=1 target0=1,12,22,2,8,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,-"
+pause_receipt = {"completed":True,"resumed":True,"terminal":False,"suspendTickMs":10000,"resumeTickMs":12600}
+def correlation(f=friend,h=host,n=native,r=relay,p=pause_receipt):
+    return evidence.correlate(old,p,f,h,n,r)
+check("exact log chain correlates", correlation()["ready"])
+checkpoint = native.splitlines()[0].replace("phase=0", "phase=1").replace("cut=8", "cut=9").replace("frame1=101 frame2=102", "frame1=103 frame2=104").replace("loadBefore=1", "loadBefore=2")
+check("actual terminal checkpoint retains Bootstrap proof", correlation(n=native.replace("\n[event-control] recovered", "\n"+checkpoint+"\n[event-control] recovered"),r=relay.replace(",2,8,",",2,9,"))["ready"])
+for name, args in [
+    ("wrong reason", {"f":friend.replace("reason=4","reason=8")}),
+    ("late observed expiry", {"f":friend.replace("12601","15601")}),
+    ("missing pinned rejoin", {"f":friend.replace("pinnedRejoin=1","pinnedRejoin=0")}),
+    ("same connection", {"f":friend.replace("self=12","self=11")}),
+    ("changed pin", {"f":friend.replace("pinSession="+session,"pinSession="+"b"*32)}),
+    ("wrong request", {"h":host.replace("request=7","request=9")}),
+    ("same load", {"n":native.replace("loadAfter=2","loadAfter=1")}),
+    ("one native frame", {"n":native.replace("frame2=102","frame2=101")}),
+    ("unserialized", {"n":native.replace("serialized=1","serialized=0")}),
+    ("wrong cut", {"r":relay.replace(",2,8,",",2,9,")}),
+    ("wrong fingerprint", {"r":relay.replace(",aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,",",bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,")}),
+    ("missing resetACK", {"n":native.replace("ordinal=1","ordinal=2")}),
+    ("result not consumed", {"n":native.replace("recoveredLifetime=1","recoveredLifetime=0")}),
+    ("unsafe ACK", {"n":native.replace("flags=3","flags=1")}),
+    ("late new abort", {"f":friend+"\n[eventhold-control] aborted reason=4 observationMs=15000"}),
+]:
+    check(name+" refuses", not correlation(**args)["ready"])
+
+scenario = json.loads((run.ROOT/"tools/scenario/scenarios/net_safe_field_recovery.json").read_text(encoding="utf-8"))
+run.shared.validate_scenario(scenario)
+names = set(run.shared.Context(run.HERE).namespace())
+for number, step in enumerate(scenario["steps"]):
+    for key in ("expr","argsExpr","until"):
+        if key not in step:
+            continue
+        tree=ast.parse(step[key],mode="eval")
+        local={node.id for node in ast.walk(tree) if isinstance(node,ast.Name) and isinstance(node.ctx,ast.Store)}
+        used={node.id for node in ast.walk(tree) if isinstance(node,ast.Name) and isinstance(node.ctx,ast.Load)}
+        check(f"expression namespace step{number}", used <= names | local)
+check("no live drivers/warps/control writes", not any(s["do"] in {"pilot","warp","input","press","kh2ctl","protect","freeze","avatar_stall","runtime_pause"} for s in scenario["steps"]))
+sources = {
+    "runtime": (run.ROOT/"runtime/src/RuntimeMain.cpp").read_text(encoding="utf-8"),
+    "native": (run.ROOT/"inject/src/EventHoldNative.cpp").read_text(encoding="utf-8"),
+    "enemy": (run.ROOT/"inject/src/EnemySync.cpp").read_text(encoding="utf-8"),
+    "result": (run.ROOT/"common/include/kh2coop/ResyncEvidence.hpp").read_text(encoding="utf-8"),
+}
+for kind, snippets in {
+    "runtime": ["[eventhold-control] armed generation=", "[eventhold-control] aborted reason=", " observationMs=", "[eventhold-recovery] expired connection=", " pinnedRejoin=", " cached baseline quarantined=1", "[eventhold-recovery] fresh baseline request=", " resetAckRequired=1", "[eventhold-recovery] control restored generation=", " nativeResetAck=1", "[returning-seat-resync] action=", "[runtime-identity] schema=1", " pinPresent=", " pinSession=", "std::unitbuf"],
+    "native": ["[event-control] recovered lifetime generation=%u self=%llu delivery=%llu epoch=%u resetAckRequired=1", "[event-control] owner ack ordinal=%llu source=%llu epoch=%u flags=%u tid=%lu generation=%u delivery=%llu"],
+    "enemy": ["[resync] ack session=", "loadBefore=%u loadAfter=%u frame1=%llu frame2=%llu", "[event-control] resync result request=%llu reason=%u recoveredLifetime=%u"],
+    "result": ["[resync-result] component=", " targetCount=", " target", "fingerprint"],
+}.items():
+    check("current source marker contract "+kind, all(s in sources[kind] for s in snippets))
+for file in ("pause.py", "run.py", "evidence.py"):
+    tree = ast.parse((run.HERE/file).read_text(encoding="utf-8"))
+    check("no process opener "+file, not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in {"OpenProcess", "DuplicateHandle", "NtSuspendProcess", "NtResumeProcess"} for n in ast.walk(tree)))
+check("exact scenario name", scenario["name"] == "vuh2628_safe_field_recovery04")
+pause_tree = ast.parse((run.HERE/"pause.py").read_text(encoding="utf-8"))
+protected = [node for node in ast.walk(pause_tree) if isinstance(node,ast.With)
+             and any(isinstance(item.context_expr,ast.Name) and item.context_expr.id=="lock" for item in node.items)
+             and any(isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute)
+                     and isinstance(n.func.value,ast.Name) and n.func.value.id=="timer"
+                     and n.func.attr=="start" for n in ast.walk(node))]
+check("watchdog start and suspend attempt share guard", len(protected)==1 and
+      any(isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Subscript)
+          and isinstance(n.targets[0].slice,ast.Constant) and n.targets[0].slice.value=="suspendAttempted"
+          for n in ast.walk(protected[0])) and
+      any(isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="suspend" for n in ast.walk(protected[0])))
+output={"ok":all(r["pass"] for r in checks),"checks":len(checks),"scope":"offline fake retained-handle API and log/expression controls only; no live native calls", "results":checks}
+receipt = run.ROOT/".local/thorn/safe-field-recovery-checks.json"
+receipt.parent.mkdir(parents=True, exist_ok=True)
+receipt.write_text(json.dumps(output,indent=2)+"\n",encoding="utf-8")
+print(json.dumps({"ok":output["ok"],"checks":len(checks)}))

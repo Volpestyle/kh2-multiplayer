@@ -41,11 +41,11 @@ mission runs, every 15 without one. 151 payload bytes:
 - flags and result
 - 3 gauges and 3 counters, each `{flags, max, value}`
 - timer state, mode, value and duration
-- the end trap the host's mission ran (4/3 or 4/22, 0 for none) and its argument
+- the end trap the host's mission ran (4/3 or4/22; scoped4/16 for `TT34_MS304.bar`; 0 for none) and its argument
 
 The codec refuses a path (any `/`), a name that isn't printable ASCII, bytes
 after the terminator, a non-finite or out-of-range gauge, and an unknown timer
-state, or an end trap other than 4/3 or 4/22. The relay forwards it only from the verified native host, for the
+state, or an end trap other than4/3,4/22 or scoped4/16 for `TT34_MS304.bar`. The relay forwards it only from the verified native host, for the
 admitted room, with a strictly increasing sequence. It is never cached,
 replayed or part of resync.
 
@@ -163,3 +163,21 @@ native-local plus replay combination, including a late replay after egress.
 - Live: `net_lod_morale` (parity and a shared mission end) and
   `net_lod_morale_fail` (the host's morale empties; both fail). The runner's
   `mission(i)` helper reads the same fields.
+
+## Twilight Thorn victory (VUH-2569)
+
+For exact mission `TT34_MS304.bar`, the host records native 4/16
+`mission_dead_boss` after boss signal4 advances the mission to state2. The
+friend suppresses its own4/16 and seals its mission end from the host receipt
+without replaying the native boss defeat function. Other mission names cannot
+use16 on the wire, and the generic end-trap replay selector never returns16.
+The existing boss-leave and host event/room/progress paths handle retirement
+and onward travel.
+
+Installed tt34 event program157 maps signal16 to eventASCII `315` (`0x353133`,
+flags0x12), then the authored exit world2/room0/door0/programs51. Qualification
+checks every semantic descriptor bit; only the uninitialized high padding byte
+of params1 is ignored for that exact row. The full raw host descriptor is
+published/replayed unchanged. Static derivation and exhaustive descriptor tests
+are recorded in [PARTY_SETUP.md](PARTY_SETUP.md); native 315 playback, one victory
+and onward control still require live qualification.

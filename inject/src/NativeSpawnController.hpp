@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <array>
 #include <vector>
+#include <optional>
 #include "kh2coop/NativeRecordContentTypes.hpp"
 #include "kh2coop/KnownControllerMutation.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
@@ -144,6 +145,40 @@ struct NativeRecordMembership {
     bool contentComparisonAvailable = false;
     bool behaviorEligibility = false, lifetimeProven = false, globalPendingExcluded = false, atomic = false;
 };
+
+// Resync-only projection. The raw capture keeps its original status/issues and
+// indices. A view never grants activation, lifetime, write or global permission.
+// The caller keeps raw alive and immutable for the entire use of this view.
+struct NativeOrdinaryResyncView {
+    const NativeRecordCatalog* raw = nullptr;
+    std::array<std::uint8_t, 64> ordinaryToRaw = [] { std::array<std::uint8_t, 64> a{}; a.fill(0xFF); return a; }();
+    std::array<std::uint8_t, 64> rawToOrdinary = [] { std::array<std::uint8_t, 64> a{}; a.fill(0xFF); return a; }();
+    std::uint32_t ordinaryCount = 0;
+    bool qualified = false, mixed = false;
+    // Receipts from the qualification's actual reads; not independent authority.
+    std::uint8_t ruleIndex = 0xFF, scriptRawIndex = 0xFF, flagBefore = 0, flagAfter = 0;
+    bool flagBeforeAvailable = false, flagAfterAvailable = false, nativeAssetBound = false;
+    uintptr_t nativeAssetRoot = 0;
+    std::optional<std::size_t> OrdinaryIndex(std::size_t rawSlot) const noexcept {
+        if (!qualified || !raw || rawSlot >= raw->entryCount || rawSlot >= rawToOrdinary.size() ||
+            rawToOrdinary[rawSlot] >= ordinaryCount || rawToOrdinary[rawSlot] >= ordinaryToRaw.size() ||
+            ordinaryToRaw[rawToOrdinary[rawSlot]] != rawSlot) return std::nullopt;
+        return rawToOrdinary[rawSlot];
+    }
+    std::optional<std::size_t> RawIndex(std::size_t ordinal) const noexcept {
+        if (!qualified || !raw || ordinal >= ordinaryCount || ordinal >= ordinaryToRaw.size() ||
+            ordinaryToRaw[ordinal] >= raw->entryCount || ordinaryToRaw[ordinal] >= rawToOrdinary.size() ||
+            rawToOrdinary[ordinaryToRaw[ordinal]] != ordinal) return std::nullopt;
+        return ordinaryToRaw[ordinal];
+    }
+};
+bool QualifyNativeOrdinaryResyncView(uintptr_t exeBase, const NativeRecordCatalog& raw,
+    NativeOrdinaryResyncView& out);
+// No known mixed-target rule: no additional restriction. A known target requires
+// its independently-set local dormancy flag BEFORE progress staging/native load.
+bool NativeResyncDormancyPreloadReady(uintptr_t exeBase, const std::array<std::uint16_t, 6>& location);
+void ResolveNativeOrdinaryResyncMembership(uintptr_t exeBase, const NativeRecordCatalog& raw,
+    const NativeOrdinaryResyncView& view, uintptr_t actor, NativeRecordMembership& out);
 
 // layoutSha256 is caller-supplied reviewed compatibility provenance, not a
 // digest of running memory. Unknown (all-zero) provenance cannot be complete.

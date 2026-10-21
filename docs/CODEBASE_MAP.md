@@ -1,7 +1,7 @@
 # Codebase Map
 
 Navigation guide reviewed 2026-10-20 against main `2ed98fa`. Source versions:
-protocol **30**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**.
+protocol **31**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**.
 Tables list key components rather than every source file; use the build files
 for the complete target list and symbol searches for current locations.
 [Setup](../SETUP.md) covers building; the [plan](ONLINE_COOP_PLAN.md) owns current
@@ -89,6 +89,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/EnemyTargetRemote.inl`, `src/EnemyTargetRemote.hpp` | VUH-1515 default-off (`KH2COOP_ENEMY_TARGET_REMOTE=1`, every machine): host enemies on the allowlist (Shadow 302) choose the nearest live player or remote clone at bdscript `target_search` (`exe+0x755B00` swap); one damage path per mode: Forward forwards zeroed clone hits as `RemoteHit` (type 45) and the owner cancels its local copy only under a fresh `TargetAuthority` (type 46, protocol v14) naming its slot; Mirror mode chooses targets only (docs/ENEMY_TARGET_REMOTE.md) |
 | `src/MissionMirror.inl`, `src/MissionMirror.hpp` | VUH-2342, on with the enemy mirror (`KH2COOP_MISSION_MIRROR=0` parks it): host sends its running mission's gauges, counters, timer and result in `MissionState` (type 52, protocol 23); clients on the same mission file take them through the native setters, drop their own gauge/fail trap calls, and fail when the host fails (docs/MISSION_MIRROR.md) |
 | `src/ScriptMirror.inl`, `src/ScriptMirror.hpp` | VUH-2252, on with the enemy mirror (`KH2COOP_SCRIPT_MIRROR=0` parks it): host swaps pinned bdscript trap slots (`exe+0x753490` tables) and sends mirrored enemies' calls (tilt, texture animation, shadow, scissoring) in `ScriptCall` (type 49, protocol 19) only when the value changed; clients replay them on the driven copy (docs/SCRIPT_MIRROR.md) |
+| `src/KnownDormantScripts.hpp` | Reviewed room-script identity/dormancy rows for the resync-only ordinary view; currently the native-owned FM00 tutorial-game-over program with independently-set local flag40. Raw Script/317 authority denies remain unchanged. |
 | `src/ScriptActorOwner.inl` | VUH-2569 actor-role ownership, capture/attachment, owner camera and command routing inside ScriptMirror; host-owned reaction occurrences use completion packet55. Broader captured phases and a Thorn kill remain unqualified. |
 | `src/ScriptReaction.hpp`, `src/ScriptCamera.hpp` | Pure reaction identity/freshness/consume and seat-resolution rules, plus scoped camera timeline admission; native adapters retain pinned caller/body and lifetime checks. |
 

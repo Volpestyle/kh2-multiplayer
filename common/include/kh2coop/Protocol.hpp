@@ -12,9 +12,10 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 30;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 31;
 
 // ===========================================================================
+// Protocol v31 admits host-only TT34 mission end16 and its authored event315 (VUH-2569).
 // Protocol v30 adds owner-scoped ScriptReactionCompletion (55) and actor-owner ScriptCall descriptors (VUH-2569).
 // Protocol v28 adds StageEnd (54): a friend's own script ended a host-led prologue stage (VUH-2555).
 // Protocol v29 appends authenticated owner vitals to SeatState (VUH-2568).
@@ -337,7 +338,7 @@ struct MissionState {
     std::uint8_t endTrap {0};                  // the table-4 trap that ended it: 3 complete, 22 end signal, 0 none
     std::uint32_t endArg {0};                  // that trap's argument
 };
-inline constexpr bool validMissionEndTrap(std::uint8_t t) { return t == 0 || t == 3 || t == 22; }
+inline constexpr bool validMissionEndTrap(std::uint8_t t) { return t == 0 || t == 3 || t == 16 || t == 22; }
 
 // Reliable, scoped teammate request. Relay stamps requesterSlot and forwards
 // once to targetConnectionId only. Episode is minted by the target owner,

@@ -1,7 +1,7 @@
 # Downed / revive network contract (VUH-1504)
 
 The downed contract was introduced in protocol11; the current session protocol
-is **12** (party setup), with AvatarBridge **4**. Older network
+is **31** (Twilight Thorn terminal semantics), with AvatarBridge **4**. Older network
 peers and avatar mappings refuse the new contract. The sealed friend packages
 are unchanged. ENet and the default-off Steam backend use the same policy.
 
@@ -11,6 +11,20 @@ revive) is in `inject/` behind its own feature flag; see
 [Native owner side](#native-owner-side-inject) at the end.
 
 ## Native producer hook
+
+The horizontal-only native downed hold is part of the reviewed VUH-2569 cohort.
+Offline qualification preserves native update order and tests independent falling
+heights, horizontal shoves and the two-unit boundary. Build24 passed all 202 tests.
+Computer Room run `20261021-035356_net_downed_grounded_pair_1` passed 105 steps:
+both canonical owners held their native grounded XYZ during attempted movement,
+revived normally to 5/22 HP, and regained movement. Saves and teardown were clean.
+The calm room supplied no enemy shove; pin writes were zero. Thorn airborne
+settling remains pending. The prompt's 150-unit and relay's 200-unit 3D ranges
+are unchanged.
+
+Later bot01 on sealed build28 recorded three natural friend-to-host revives and
+a native host kill, but failed shared post-boss travel; it is not a complete
+Thorn acceptance. The calm regression above remains the grounded behavior proof.
 
 On each checked native owner frame (alive **and** downed), publish
 `AvatarBridge::SetLocalDownedState(LocalDownedState)` from
@@ -205,8 +219,9 @@ How it works (all in `DownedSpike.inl`, behind `KH2COOP_DOWNED_SPIKE=1`):
   - An HP orb, which heals outside the funnel, is put back to 1 through the funnel.
   - Every hit is refused at `3D2060` (AllyHit, counted as `hitsRefused`), and the game's ignore-hit
     timer is kept up.
-  - Input is neutral, and the body is pinned where it went down, because enemies that still target it
-    shove it.
+  - Input is neutral. The body holds its downing XZ against enemy shoves, while Y follows
+    the existing native update. A horizontal displacement beyond two units restores XZ only.
+    Holding the lethal Y could suspend an airborne player outside a teammate's revive reach.
   - The host's target search no longer offers a downed local player. Enemies retarget to a living
     teammate's clone where one exists.
   - The stream and HUD carry HP 0 with the existing episode contract, so SessionHost's HP-zero revive

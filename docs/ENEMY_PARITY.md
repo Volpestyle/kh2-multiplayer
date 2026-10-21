@@ -1,11 +1,15 @@
-## Twilight Thorn (VUH-2569, implementation awaiting live qualification)
+## Twilight Thorn (VUH-2569, living reactions qualified; full fight pending)
 
 The combat classifier admits exact object307 (`B_EX100`, objentry type12).
 Other type12 objects remain excluded. The existing census, manifest, point
 binding, motion/HP mirror, hit claims and resync paths share this classifier;
 no second boss simulation is introduced. Exact307 boss-leave retirement,
-mission4/16 and event315 support are deferred from this reaction-only slice;
-a two-seat kill and onward travel remain unqualified.
+mission4/16 and event315 support were deferred from the landed v30 reaction-only
+slice. The v31 cohort restores that reviewed host-only terminal path;
+a shared two-seat kill and onward travel remain unqualified. Live10
+qualified opening and both-seat ground reactions on the exact trimmed v30
+binary. The later captured426 cause remains open. Creeper population desync is
+a documented known gap tracked by VUH-2605.
 
 Thorn's client decision stays suppressed while the current admitted runtime is
 live, including before point binding, motion warmup and stream holds. This
@@ -16,7 +20,15 @@ uses [ScriptMirror](SCRIPT_MIRROR.md) and the selected actual player owner.
 
 Installed data, per-phase ownership and remaining evidence requirements are in
 [TWILIGHT_THORN.md](TWILIGHT_THORN.md). Unit checks and static pins do not qualify
-the full fight: the captioned two-screen single-PC loopback kill is still pending.
+the full fight: bot01 filmed a host kill but failed the shared exit. The complete
+shared-kill acceptance remains pending.
+
+The VUH-2628 resync path can project ordinary records from one separately
+qualified dormant room-script table row; see [Forced resync](FORCED_RESYNC.md).
+It leaves the strict raw Script catalog status and global317/mirror/producer
+denials intact and grants no mixed-table combat repair or script replay.
+Build34/recovery04 qualifies empty FM00 only; see its
+[result and paired recovered-state clip](testing/vuh2628-recovery04/README.md).
 
 ## Host controller emissions (VUH-2302, protocol 20)
 

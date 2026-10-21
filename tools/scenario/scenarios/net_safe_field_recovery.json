@@ -1,0 +1,199 @@
+{
+  "name": "vuh2628_safe_field_recovery04",
+  "description": "Bounded dormant-script recovery fix: exact FM00 Script12 remains native-owned on both seats, flag40 independently1. Fixed2600ms Friend1 pause; require fresh authenticated native convergence/reset1 ACK/Arm. Single-PC loopback, same closure.",
+  "playerDefaults": true,
+  "protect": [],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+      }
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+      }
+    },
+    {
+      "do": "assert",
+      "expr": "(log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1) and all(log_count('[script-lifecycle] installed motionEnd=1 captureId=1 cancel=1 queryBudget=2048 cancelBudget=1024 captureBudget=512 changedOnly=1',i)==1 and log_count('[script-lifecycle] unavailable reason=',i)==0 for i in (0,1))",
+      "message": "Both seats must qualify existing RC-cache hooks, actual motion-end/capture-ID observers and sole cancel hook before any route input"
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)==location(1) and location(0)[:2]==[2,32]",
+      "message": "Both real FM00 boots must be in identical full Serenity scope"
+    },
+    {
+      "do": "relay",
+      "port": 27812,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[enemysync] client arrived epoch=',1)>0 and '[eventhold-control] armed ' in runtime_log(1)",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "wait_until",
+      "expr": "all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','u32',i)==0 and int(peek('0x2A11478','u64',i),16)==0 and peek('0x2A171E8','u32',i)==0 and peek('0xABB878','u32',i)==0 for i in (0,1))",
+      "timeoutMs": 30000,
+      "pollMs": 1000
+    },
+    {
+      "do": "assert",
+      "expr": "all(not any(a.get('objectType') in (3,4,12) or a.get('objectId')==307 for a in actors(i)) for i in (0,1))",
+      "message": "The forced expiry fixture supports empty safe field only"
+    },
+    {
+      "do": "save",
+      "as": "initial_location",
+      "expr": "location(0)"
+    },
+    {
+      "do": "save",
+      "as": "initial_avatars",
+      "expr": "[bridge(i) for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(b.get('localFramesPerSecond',0)>0 and (b.get('puppet0') or {}).get('active') for b in saved['initial_avatars'])"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "initial_armed"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "initial_armed"
+    },
+    {
+      "do": "save",
+      "as": "initial_dormant_flags",
+      "expr": "[peek('0x9ABCB5','u8',i)&1 for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['initial_dormant_flags']==[1,1]",
+      "message": "Both local unshared tutorial40 flags must already be set; fixture never changes them"
+    },
+    {
+      "do": "friend_heartbeat_pause",
+      "instance": 1,
+      "pauseMs": 2600
+    },
+    {
+      "do": "wait_until",
+      "expr": "recovery_proof()['ready']",
+      "timeoutMs": 90000,
+      "pollMs": 1000
+    },
+    {
+      "do": "save",
+      "as": "heartbeat_recovery",
+      "expr": "recovery_proof()"
+    },
+    {
+      "do": "assert",
+      "expr": "all(log_count('[resync-ordinary] nativeOwnedDormant=1 raw=7 ordinary=6 ',i)>0 and (peek('0x9ABCB5','u8',i)&1)==1 for i in (0,1))",
+      "message": "Both native seats must positively qualify the complete mixed table and retain their own flag40"
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)==location(1)==saved['initial_location']==saved['heartbeat_recovery']['location']",
+      "message": "Recovered actual snapshot and both games must match the full original room"
+    },
+    {
+      "do": "assert",
+      "expr": "all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','u32',i)==0 and int(peek('0x2A11478','u64',i),16)==0 and peek('0x2A171E8','u32',i)==0 and peek('0xABB878','u32',i)==0 for i in (0,1)) and all(not any(a.get('objectType') in (3,4,12) or a.get('objectId')==307 for a in actors(i)) for i in (0,1))"
+    },
+    {
+      "do": "save",
+      "as": "recovered_avatars",
+      "expr": "[bridge(i) for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(b.get('localFramesPerSecond',0)>0 and (b.get('puppet0') or {}).get('active') and not (((b.get('puppet0') or {}).get('pose') or {}).get('flags',0)&8) for b in saved['recovered_avatars'])",
+      "message": "Both local avatar streams and remote puppet slots must be live after recovery"
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "name": "recovered_host",
+      "seconds": 10,
+      "fps": 30,
+      "background": true
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "name": "recovered_friend",
+      "seconds": 10,
+      "fps": 30,
+      "background": true
+    },
+    {
+      "do": "wait",
+      "ms": 11000
+    },
+    {
+      "do": "clip_wait"
+    },
+    {
+      "do": "assert",
+      "expr": "recovery_proof()['ready'] and location(0)==location(1)==saved['initial_location']",
+      "message": "No late new-lifetime abort or scope drift during paired recovery film"
+    },
+    {
+      "do": "assert",
+      "expr": "all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','u32',i)==0 and int(peek('0x2A11478','u64',i),16)==0 and peek('0x2A171E8','u32',i)==0 and peek('0xABB878','u32',i)==0 for i in (0,1)) and all(not any(a.get('objectType') in (3,4,12) or a.get('objectId')==307 for a in actors(i)) for i in (0,1))"
+    },
+    {
+      "do": "save",
+      "as": "final_avatars",
+      "expr": "[bridge(i) for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(b.get('localFramesPerSecond',0)>0 and (b.get('puppet0') or {}).get('active') and not (((b.get('puppet0') or {}).get('pose') or {}).get('flags',0)&8) for b in saved['final_avatars'])"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "recovered"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "recovered"
+    }
+  ]
+}

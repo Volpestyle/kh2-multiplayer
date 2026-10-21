@@ -8,7 +8,8 @@
 #include <cstring>
 #include <string_view>
 bool gameThreadKnown=true;
-namespace kh2coop::inject::spawncontroller { bool IsDiagnosticGameThread(){return gameThreadKnown;} bool DiagnosticGameThreadKnown(){return gameThreadKnown;} }
+thread_local bool gameThreadCurrent=true;
+namespace kh2coop::inject::spawncontroller { bool IsDiagnosticGameThread(){return gameThreadKnown&&gameThreadCurrent;} bool DiagnosticGameThreadKnown(){return gameThreadKnown;} }
 // VUH-2359: the native start itself is game memory; the stub records the replay and answers it.
 bool replayStarts=true;unsigned replays=0;kh2coop::EventStart replayed{};std::uint16_t replayedProgram=0;
 namespace kh2coop::inject::eventstartmirror {
@@ -99,6 +100,34 @@ int main(int argc,char** argv){
         kh2coop::eventscenes::QualifiedStart(2,7,97,0x363031,9,armor)&&!kh2coop::eventscenes::QualifiedStart(2,7,99,0x363031,9,armor)&&
         kh2coop::eventscenes::QualifiedStart(2,7,99,0x383031,9,{2,0x402,0x510051,0x51,1,0xFFFFFFFF,3,0,0})&&
         !kh2coop::eventscenes::QualifiedStart(2,7,99,0x383031,9,armor),"only the observed in-field starts, exactly, qualify");
+  // VUH-2569: the installed Thorn victory descriptor has one native padding
+  // byte. Every semantic bit remains exact, and qualification changes no input.
+  const auto& thorn=kh2coop::eventscenes::TwilightThornVictory;
+  const auto thornQualifies=[&](const auto& params) {
+    return kh2coop::eventscenes::QualifiedStart(thorn.world,thorn.room,thorn.eventProgram,thorn.id,thorn.flags,params)!=nullptr;
+  };
+  bool padding=true,semantic=true;
+  for(unsigned byte=0;byte<256;++byte) {
+    auto raw=thorn.params;raw[1]|=static_cast<std::uint32_t>(byte)<<24;const auto saved=raw;
+    padding=padding && thornQualifies(raw) && raw==saved;
+  }
+  for(unsigned arg=0;arg<thorn.params.size();++arg)for(unsigned bit=0;bit<32;++bit) {
+    auto changed=thorn.params;changed[arg]^=std::uint32_t{1}<<bit;
+    if(arg!=1 || bit<24)semantic=semantic && !thornQualifies(changed);
+  }
+  check(padding,"Thorn qualification accepts every destination padding byte without changing the descriptor");
+  check(semantic,"every changed semantic bit of the Thorn descriptor refuses qualification");
+  check(!kh2coop::eventscenes::QualifiedStart(3,34,157,thorn.id,thorn.flags,thorn.params) &&
+        !kh2coop::eventscenes::QualifiedStart(2,33,157,thorn.id,thorn.flags,thorn.params) &&
+        !kh2coop::eventscenes::QualifiedStart(2,34,156,thorn.id,thorn.flags,thorn.params) &&
+        !kh2coop::eventscenes::QualifiedStart(2,34,157,thorn.id+1,thorn.flags,thorn.params) &&
+        !kh2coop::eventscenes::QualifiedStart(2,34,157,thorn.id,thorn.flags^1,thorn.params),
+        "Thorn qualification requires its exact source, event ID and flags");
+  auto armorPadding=armor;armorPadding[1]|=0xA5000000;
+  check(!kh2coop::eventscenes::QualifiedStart(2,7,95,0x343031,9,armorPadding),
+        "Thorn padding exception does not relax another in-field event");
+  check(!kh2coop::eventscenes::QualifiedStageEnd(2,34,157,thorn.id,thorn.flags,thorn.params),
+        "Thorn victory remains a host in-field start, not a friend's stage-end request");
   check(kh2coop::eventscenes::Qualified(2,19,0,3,0,1)&&!kh2coop::eventscenes::Qualified(2,19,0,3,0,2)&&
         !kh2coop::eventscenes::Qualified(2,19,1,3,0,1),"the basement entry scene is checked exactly");
   check(kh2coop::eventscenes::Qualified(2,7,0,0,0,3)&&kh2coop::eventscenes::Qualified(2,4,0,81,81,81)&&
@@ -164,10 +193,57 @@ int main(int argc,char** argv){
  release.hostSourceSerial=21;release.epoch=3;
  check(runtime.Publish(release,GetTickCount64()),"the host's release after a replayed event published");tick();
  check(!n::HoldingInput()&&buttons()==0x4d4d,"a release after a replayed event has nothing to give back");
- replayStarts=false;acquire.hostSourceSerial=22;
+ acquire.hostSourceSerial=22;acquire.eventProgram=157;acquire.startWorld=2;acquire.startRoom=34;
+ acquire.startId=0x353133;acquire.startFlags=0x12;
+ acquire.startParams={2,0xA5000002,0x00330033,0x33,1,0xFFFFFFFF,3,0,0};
+ check(runtime.Publish(acquire,GetTickCount64()),"Thorn victory acquire with raw padding published");tick();
+ check(replays==2 && replayed.id==acquire.startId && replayed.flags==acquire.startFlags &&
+       replayed.worldId==2 && replayed.roomId==34 && replayedProgram==157 && replayed.params==acquire.startParams,
+       "Thorn native replay receives the complete raw host descriptor, including padding");
+ check(!n::HoldingInput() && buttons()==0x4d4d,"Thorn in-field replay keeps native event control");
+ release.hostSourceSerial=23;
+ check(runtime.Publish(release,GetTickCount64()),"Thorn victory release published");tick();
+ replayStarts=false;acquire.hostSourceSerial=24;
  check(runtime.Publish(acquire,GetTickCount64()),"second in-field acquire published");tick();
- check(replays==2&&buttons()==8&&n::HoldingInput(),"a refused replay falls back to the owned pause");
+ check(replays==3&&buttons()==8&&n::HoldingInput(),"a refused replay falls back to the owned pause");
  }
+ }
+ if(mode=="normal") {
+   runtime.Invalidate(e::Abort::HeartbeatExpired);tick();
+   check(!n::HoldingInput()&&runtime.Reason()==e::Abort::HeartbeatExpired,"expired lifetime remains terminal");
+   auto resumed=scope;++resumed.generation;++resumed.selfConnection;
+   menu=10;
+   check(!n::BeginRecoveredLifetime(resumed,3)&&runtime.Reason()==e::Abort::HeartbeatExpired,
+       "an old owned or foreign pause never grants recovery authority");
+   menu=255;
+   check(n::BeginRecoveredLifetime(resumed,3),"settled owner opens a separate recovered mapping");
+   check(runtime.Reason()==e::Abort::HeartbeatExpired,"old independent producer still sees immutable expiry");
+   e::Channel recovered;
+   check(recovered.OpenScopedExisting(GetCurrentProcessId(),resumed)&&recovered.Bind(resumed,GetTickCount64()),
+       "fresh runtime opens existing full-scope lifetime and publishes reset1");
+   check(!recovered.Arm(GetTickCount64()),"fresh mapping cannot arm without native reset ACK");tick();
+   n::OwnerAck(resumed,3,true,true);
+   check(recovered.Arm(GetTickCount64()),"fresh owner ACK qualifies the reset baseline");
+   e::Command next{};next.scope=resumed;next.kind=e::Kind::Acquire;next.hostSourceSerial=91;next.epoch=3;
+   check(recovered.Publish(next,GetTickCount64()),"fresh event after recovery publishes");tick();
+   check(n::HoldingInput()&&buttons()==8,"failed old input state does not poison fresh lifetime");
+   tick();menu=10;tick();
+   next.kind=e::Kind::Release;next.hostSourceSerial=92;
+   check(recovered.Publish(next,GetTickCount64()),"same-room release after recovery publishes");tick();tick();menu=255;tick();
+   n::Observe(resumed,e::Kind::Acquire,91,3,nullptr,0);
+   n::Observe(resumed,e::Kind::Release,92,3,nullptr,0);
+   n::OwnerAck(resumed,3,true,true);tick();tick();
+   check(!n::HoldingInput()&&recovered.Reason()==e::Abort::None,"same-room recovered hold releases at fresh native ACK");
+   check(!n::BeginRecoveredLifetime(resumed,3),"same lifetime cannot be recycled by another result");
+   next.kind=e::Kind::Acquire;next.hostSourceSerial=93;
+   check(recovered.Publish(next,GetTickCount64()),"next native side effect waits in the fresh FIFO");
+   check(n::EnterInput(),"registered owner enters a fresh callback");
+   gameThreadCurrent=false;
+   check(!n::EnterInput()&&recovered.Reason()==e::Abort::None,"foreign rejection never touches a replaceable mapping");
+   gameThreadCurrent=true;
+   fresh();n::ApplyInput(data);n::LeaveInput();
+   check(recovered.Reason()==e::Abort::Unsupported&&buttons()==0x4d4d,
+       "rejection arriving after EnterInput is latched inside that callback before a native side effect");
  }
  }
  n::Disable();VirtualFree(memory,0,MEM_RELEASE);std::printf("mode=%.*s checks=%u failures=%u\n",static_cast<int>(mode.size()),mode.data(),checks,failures);return failures?1:0;

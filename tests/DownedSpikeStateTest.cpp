@@ -5,6 +5,7 @@
 #include "DownedSpikeState.hpp"
 
 #include <cstdio>
+#include <initializer_list>
 
 using namespace kh2coop::inject::downedspike;
 
@@ -79,6 +80,26 @@ int main() {
         auto e = base;
         for (int i = 0; i < 5; ++i) { const auto n = NextEpisode(e); CHECK(n > e && n != 0); e = n; }
         CHECK(NextEpisode(base) != base && (NextEpisode(base) >> 32) == 0xFFFFFFFFu);
+    }
+
+    // Regression: horizontal shove must not overwrite any successive native
+    // airborne/falling/landed height with the height of the lethal hit.
+    {
+        const float downed[]{575.0f, -251.985f, 519.1f};
+        for (float nativeY : {-252.0f, -180.0f, -50.0f, 0.0f, 1000.0f}) {
+            float position[]{580.0f, nativeY, 523.0f};
+            CHECK(HoldDownedHorizontal(position, downed));
+            CHECK(position[0] == downed[0] && position[2] == downed[2]);
+            CHECK(position[1] == nativeY);
+            CHECK(!HoldDownedHorizontal(position, downed));
+            CHECK(position[1] == nativeY);
+        }
+        float verticalOnly[]{downed[0], 0.0f, downed[2]};
+        CHECK(!HoldDownedHorizontal(verticalOnly, downed));
+        CHECK(verticalOnly[1] == 0.0f);
+        float boundary[]{downed[0] + 2.0f, 0.0f, downed[2]};
+        CHECK(!HoldDownedHorizontal(boundary, downed));
+        CHECK(boundary[0] == downed[0] + 2.0f && boundary[1] == 0.0f);
     }
 
     std::printf("{\"ok\":%s,\"size\":%zu,\"offsets\":{", failures ? "false" : "true", sizeof(Channel));

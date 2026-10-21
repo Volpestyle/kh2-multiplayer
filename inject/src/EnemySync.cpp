@@ -1,3 +1,4 @@
+#include "kh2coop/RcRefusalPacketTrace.hpp"
 #include "kh2coop/EnemyClass.hpp"
 #include "EnemyRecordBinding.hpp"
 // ============================================================================
@@ -25,6 +26,7 @@
 #include "NativeLifecycleTrace.hpp"
 #include "ProgressSync.hpp"
 #include "EventHoldNative.hpp"
+#include "kh2coop/EventHoldRecovery.hpp"
 #include "Warp.hpp"
 #include "PartyNativePolicy.hpp"
 #include "PrologueParty.hpp"
@@ -321,6 +323,7 @@ struct HostRoom {
 HostRoom g_host;
 eventhold::Scope g_eventControlScope {};
 RoomTransition g_eventControlRoom {};
+std::optional<eventhold::Scope> g_recoveredControlScope;
 
 ActivationLease g_activationLease;
 std::array<std::uint64_t, 2> g_activationIncarnation {};
@@ -333,13 +336,22 @@ bool g_worldSourceExhaustionLogged = false;
 std::uint64_t g_resyncAppliedCut = 0;
 struct RequesterDelivery { std::uint64_t connection = 0, minimum = 0; };
 std::array<RequesterDelivery, 3> g_requesterDeliveries {};
-bool RequesterCurrent(std::uint8_t slot, std::uint64_t connection, std::uint64_t delivery) {
-    if (slot < 1 || slot > 2 || !connection || !delivery || g_bridge.ConnectionId(slot) != connection) return false;
-    const auto published = g_bridge.PeerDeliverySerial(slot);
-    if (!published || delivery != published) return false; // future is not confirmed authority either
-    const auto& floor = g_requesterDeliveries[slot];
-    return (floor.connection != connection || delivery >= floor.minimum) &&
-           g_bridge.ConnectionId(slot) == connection && g_bridge.PeerDeliverySerial(slot) == published;
+bool RequesterCurrent(std::uint8_t slot, std::uint64_t connection, std::uint64_t delivery,
+                      const char** failure=nullptr,rcdiag::Record* trace=nullptr) {
+    const char* why="unknown";
+    const auto fail=[&](){if(failure)*failure=why;return false;};
+    if(rcdiag::Reject(slot<1 || slot>2,"requester-slot",why) ||
+       rcdiag::Reject(!connection,"requester-connection-zero",why) || rcdiag::Reject(!delivery,"requester-delivery-zero",why) ||
+       rcdiag::Reject(g_bridge.ConnectionId(slot)!=connection,"requester-connection",why))return fail();
+    const auto published=g_bridge.PeerDeliverySerial(slot);
+    if(trace){trace->expected=published;trace->observed=delivery;}
+    if(rcdiag::Reject(!published,"requester-delivery-unpublished",why) ||
+       rcdiag::Reject(delivery!=published,"requester-delivery",why))return fail();
+    const auto& floor=g_requesterDeliveries[slot];
+    if(!rcdiag::Check(floor.connection!=connection || delivery>=floor.minimum,"requester-retirement-floor",why) ||
+       !rcdiag::Check(g_bridge.ConnectionId(slot)==connection,"requester-connection-bookend",why) ||
+       !rcdiag::Check(g_bridge.PeerDeliverySerial(slot)==published,"requester-delivery-bookend",why))return fail();
+    return true;
 }
 std::uint64_t g_activationSourceSeq = 0;
 std::uint64_t g_activationLogMs = 0;
@@ -403,6 +415,12 @@ struct NativeResyncTarget {
     bool firstObserved = false, finished = false;
 };
 std::optional<NativeResyncTarget> g_nativeResync;
+struct EventControlBootstrapReceipt {
+    ResyncKey key;
+    ProducerWorldContext context;
+    std::uint32_t load {};
+};
+std::optional<EventControlBootstrapReceipt> g_eventControlBootstrap;
 // Optional preparation only. It never calls a native emitter or grants creation.
 // Retain the reducer/tombstone through transport cleanup for this DLL lifetime.
 bool g_survivingPackEnabled = false;
@@ -515,11 +533,13 @@ void RetireWorldSession() {
     g_recordLease.Interrupt(); g_recordKeys.clear(); g_recordAuthority.clear(); g_recordContext={};
     eventholdnative::RetireOwner();
     g_eventControlScope = {}; g_eventControlRoom = {};
+    g_recoveredControlScope.reset();
     g_hostEventPublication = {};
     InvalidateClientClaims("world-session-retired");
     g_activationRecovery.reset();
     if (g_survivingPack.Intent()) g_survivingPack.Cancel();
     g_nativeResync.reset();
+    g_eventControlBootstrap.reset();
     g_resyncRecordAuthority.reset();
     if (g_resyncWriteFence == ResyncWriteFence::Exact) g_resyncWriteFence = ResyncWriteFence::Waiting;
     g_resyncOutput.clear(); g_resyncOutputContext = {};
@@ -903,6 +923,17 @@ bool SafeNativeGameplay() {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+// Recovery cannot infer full boss/RC/actor-owner state from a record/HP
+// snapshot. An admitted script camera remains gameplay elsewhere, but never
+// qualifies this initial recovery boundary. Unknown reads refuse.
+bool SafeRecoveryGameplay() {
+    __try {
+        return SafeNativeGameplay() && !eventholdnative::HoldingInput() &&
+            Read<std::int32_t>(g_exeBase + offsets::CUTSCENE_STATE) == 0 &&
+            Read<uintptr_t>(g_exeBase + offsets::EVENT_CONTEXT) == 0 &&
+            Read<std::uint32_t>(g_exeBase + offsets::PAUSE_STATUS) == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
 template <std::size_t N>
@@ -2659,6 +2690,10 @@ void QueueNativeAck(ResyncAckStatus status, const char* error, std::uint32_t fra
     if (status == ResyncAckStatus::Converged && serialized) {
         g_resyncRecordAuthority = ResyncRecordAuthority {state.snapshot, state.context};
         g_resyncWriteFence = ResyncWriteFence::Exact;
+        if (eventholdnative::Enabled() && state.begin.phase == ResyncPhase::Bootstrap &&
+            state.firstObserved && frame != state.firstFrame && ack.loadAfter != ack.loadBefore &&
+            eventhold::RecoverySnapshotSupported(state.snapshot))
+            g_eventControlBootstrap = EventControlBootstrapReceipt {state.begin.key, state.context, ack.loadAfter};
     } else {
         g_resyncWriteFence = ResyncWriteFence::Failed;
     }
@@ -2677,6 +2712,7 @@ void ReceiveResyncPlan(const ResyncPlan& plan) {
     } else {
         if (g_resyncPlan && now < g_resyncDeadline) return;
         g_resyncDeadline = now + plan.remainingMs;
+        g_eventControlBootstrap.reset();
     }
     if (role == Role::Client) InvalidateClientClaims("admitted-plan-changed");
     g_resyncPlan = plan; g_resyncHostCaptured = false;
@@ -2724,6 +2760,99 @@ bool FreshRecordCatalog(const NativeCensus& census, RecordCatalog& catalog) {
         TraceStampMatchesCensus(catalog.before, census) && TraceStampMatchesCensus(catalog.after, census) &&
         CensusMatchesInstance(census);
 }
+// Keep the global strict catalog unchanged. Mixed resync admits only a
+// qualified dormant room script and no combat HP/death or activation repair.
+bool FreshResyncRecordCatalog(const NativeCensus& census, RecordCatalog& catalog,
+    spawncontroller::NativeOrdinaryResyncView& view) {
+    spawncontroller::CaptureNativeRecordCatalog(g_exeBase, kResyncRecordLayout, catalog);
+    if (!spawncontroller::QualifyNativeOrdinaryResyncView(g_exeBase, catalog, view) ||
+        (view.mixed && (!census.enemies.empty() || !SafeRecoveryGameplay())) ||
+        !TraceStampMatchesCensus(catalog.before, census) ||
+        !TraceStampMatchesCensus(catalog.after, census) || !CensusMatchesInstance(census)) return false;
+    static unsigned ordinaryEvidenceRows = 0;
+    if (view.mixed && g_log && ordinaryEvidenceRows < 16) {
+        ++ordinaryEvidenceRows;
+        g_log("[resync-ordinary] nativeOwnedDormant=1 raw=%u ordinary=%u rule=%u scriptRaw=%u flagBefore=%u flagAfter=%u nativeAssetBound=%u load=%u transition=%u mixedCombatRepair=0",
+            catalog.entryCount, view.ordinaryCount, static_cast<unsigned>(view.ruleIndex),
+            static_cast<unsigned>(view.scriptRawIndex), static_cast<unsigned>(view.flagBefore),
+            static_cast<unsigned>(view.flagAfter), view.nativeAssetBound ? 1U : 0U,
+            catalog.before.load, catalog.before.transition);
+    }
+    return true;
+}
+// Diagnostic sidecar only: serialize the objects the existing collector already
+// produced. Never chase a recorded address or repeat a native read/guard here.
+void TraceCapturedRecordCatalog(std::uint32_t frame, const char* phase, bool fresh,
+    const RecordCatalog& catalog, const NativeCensus& census) {
+    if (!g_log) return;
+    char layout[65] {}, beforeNow[21] {}, afterNow[21] {};
+    TraceHex(catalog.layoutSha256, layout);
+    TraceHex(catalog.before.location, beforeNow); TraceHex(catalog.after.location, afterNow);
+    g_log("[resync-catalog] schema=1 kind=summary frame=%u phase=%s fresh=%u status=%u issues=%u countBeforeAvailable=%u countBefore=%d countAfterAvailable=%u countAfter=%d entries=%u declared=%u captured=%u beforeAvailable=%u afterAvailable=%u lifecycle=%u table=%u content=%u association=%u behavior=%u lifetime=%u pendingExcluded=%u atomic=%u exeBase=%llX",
+        frame, phase, static_cast<unsigned>(fresh), static_cast<unsigned>(catalog.status), catalog.issues,
+        static_cast<unsigned>(catalog.countBeforeAvailable), catalog.countBefore,
+        static_cast<unsigned>(catalog.countAfterAvailable), catalog.countAfter, catalog.entryCount,
+        catalog.declaredLogicalRecords, catalog.capturedLogicalRecords,
+        static_cast<unsigned>(catalog.beforeAvailable), static_cast<unsigned>(catalog.afterAvailable),
+        static_cast<unsigned>(catalog.lifecycleStable), static_cast<unsigned>(catalog.tableInventoryComplete),
+        static_cast<unsigned>(catalog.contentBytesComplete), static_cast<unsigned>(catalog.associationComplete),
+        static_cast<unsigned>(catalog.behaviorEligibility), static_cast<unsigned>(catalog.lifetimeProven),
+        static_cast<unsigned>(catalog.globalPendingExcluded), static_cast<unsigned>(catalog.atomic),
+        static_cast<unsigned long long>(catalog.exeBase));
+    g_log("[resync-catalog] schema=1 kind=scope frame=%u phase=%s layout=%s beforeNOW=%s beforeLoad=%u beforeTransition=%u afterNOW=%s afterLoad=%u afterTransition=%u censusState=%u censusLoad=%u censusTransition=%u world=%u room=%u door=%u map=%u battle=%u event=%u",
+        frame, phase, layout, beforeNow, catalog.before.load, catalog.before.transition,
+        afterNow, catalog.after.load, catalog.after.transition, static_cast<unsigned>(census.state),
+        census.load, census.transition, census.location.worldId, census.location.roomId, census.location.door,
+        census.location.mapProgram, census.location.battleProgram, census.location.eventProgram);
+    const auto entries = std::min<std::size_t>(catalog.entryCount, catalog.entries.size());
+    std::size_t recordsLogged = 0;
+    bool truncated = entries != catalog.entryCount;
+    for (std::size_t i = 0; i < entries; ++i) {
+        const auto& entry = catalog.entries[i];
+        char tableBefore[33] {}, tableAfter[33] {}, controllerBefore[129] {}, controllerAfter[129] {};
+        char headerBefore[89] {}, headerAfter[89] {};
+        TraceHex(entry.tableBefore, tableBefore); TraceHex(entry.tableAfter, tableAfter);
+        TraceHex(entry.controllerBefore, controllerBefore); TraceHex(entry.controllerAfter, controllerAfter);
+        TraceHex(entry.content.header, headerBefore); TraceHex(entry.headerAfter, headerAfter);
+        g_log("[resync-catalog] schema=1 kind=entry frame=%u phase=%s index=%llu issues=%u controller=%llX header=%llX spawn=%llX region=%llX declared=%u beforeRecords=%llu afterRecords=%llu masks=%llu bytes=%u association=%u tableBeforeAvailable=%u tableAfterAvailable=%u controllerBeforeAvailable=%u controllerAfterAvailable=%u headerBeforeAvailable=%u headerAfterAvailable=%u",
+            frame, phase, static_cast<unsigned long long>(i), entry.issues,
+            static_cast<unsigned long long>(entry.controller), static_cast<unsigned long long>(entry.header),
+            static_cast<unsigned long long>(entry.spawnArray), static_cast<unsigned long long>(entry.regionArray),
+            static_cast<unsigned>(entry.declaredRecords), static_cast<unsigned long long>(entry.content.records.size()),
+            static_cast<unsigned long long>(entry.recordsAfter.size()), static_cast<unsigned long long>(entry.recordReadMask.size()),
+            static_cast<unsigned>(entry.bytesComplete), static_cast<unsigned>(entry.associationUnique),
+            static_cast<unsigned>(entry.tableBeforeAvailable), static_cast<unsigned>(entry.tableAfterAvailable),
+            static_cast<unsigned>(entry.controllerBeforeAvailable), static_cast<unsigned>(entry.controllerAfterAvailable),
+            static_cast<unsigned>(entry.headerBeforeAvailable), static_cast<unsigned>(entry.headerAfterAvailable));
+        g_log("[resync-catalog] schema=1 kind=table frame=%u phase=%s index=%llu before=%s after=%s",
+            frame, phase, static_cast<unsigned long long>(i), tableBefore, tableAfter);
+        g_log("[resync-catalog] schema=1 kind=controller frame=%u phase=%s index=%llu before=%s after=%s",
+            frame, phase, static_cast<unsigned long long>(i), controllerBefore, controllerAfter);
+        g_log("[resync-catalog] schema=1 kind=header frame=%u phase=%s index=%llu before=%s after=%s",
+            frame, phase, static_cast<unsigned long long>(i), headerBefore, headerAfter);
+        const auto declared = std::max({entry.content.records.size(), entry.recordsAfter.size(), entry.recordReadMask.size()});
+        const auto records = std::min<std::size_t>(declared, 256);
+        truncated = truncated || records != declared;
+        for (std::size_t r = 0; r < records; ++r) {
+            if (recordsLogged == 1024) { truncated = true; break; }
+            ++recordsLogged;
+            const bool haveBefore = r < entry.content.records.size(), haveAfter = r < entry.recordsAfter.size();
+            const bool haveMask = r < entry.recordReadMask.size();
+            const std::array<std::uint8_t, 64> unknown {};
+            char before[129] {}, after[129] {};
+            TraceHex(haveBefore ? entry.content.records[r] : unknown, before);
+            TraceHex(haveAfter ? entry.recordsAfter[r] : unknown, after);
+            g_log("[resync-catalog] schema=1 kind=record frame=%u phase=%s index=%llu record=%llu beforePresent=%u afterPresent=%u maskPresent=%u mask=%u before=%s after=%s",
+                frame, phase, static_cast<unsigned long long>(i), static_cast<unsigned long long>(r),
+                static_cast<unsigned>(haveBefore), static_cast<unsigned>(haveAfter), static_cast<unsigned>(haveMask),
+                haveMask ? static_cast<unsigned>(entry.recordReadMask[r]) : 0u, before, after);
+        }
+    }
+    g_log("[resync-catalog] schema=1 kind=end frame=%u phase=%s entriesLogged=%llu recordsLogged=%llu truncated=%u",
+        frame, phase, static_cast<unsigned long long>(entries), static_cast<unsigned long long>(recordsLogged),
+        static_cast<unsigned>(truncated));
+}
+
 bool SameRecordCatalogSample(const RecordCatalog& a, const RecordCatalog& b) {
     if (a.entryCount != b.entryCount || a.layoutSha256 != b.layoutSha256 ||
         a.before.location != b.before.location || a.before.load != b.before.load ||
@@ -2736,6 +2865,15 @@ bool SameRecordCatalogSample(const RecordCatalog& a, const RecordCatalog& b) {
     }
     return true;
 }
+bool SameResyncRecordCatalogSample(const RecordCatalog& a,
+    const spawncontroller::NativeOrdinaryResyncView& av, const RecordCatalog& b,
+    const spawncontroller::NativeOrdinaryResyncView& bv) {
+    return av.qualified && bv.qualified && av.raw == &a && bv.raw == &b &&
+        av.mixed == bv.mixed && av.ordinaryCount == bv.ordinaryCount &&
+        av.ordinaryToRaw == bv.ordinaryToRaw && av.rawToOrdinary == bv.rawToOrdinary &&
+        SameRecordCatalogSample(a, b);
+}
+
 bool ActivationState(const spawncontroller::TraceState& native, ResyncActivationState& state) {
     if (!native.controllerAvailable || !native.cacheAvailable || !std::isfinite(native.cooldown)) return false;
     state.flags = native.flags; state.currentCount = native.currentCount;
@@ -2816,6 +2954,16 @@ bool RecordMember(const RecordCatalog& catalog, const NativeCensus& census, uint
     return member.status == NativeRecordContentStatus::Complete && member.contentComparisonAvailable &&
         TraceStampMatchesCensus(member.stamps[0], census) && TraceStampMatchesCensus(member.stamps[1], census) &&
         member.tableIndex < catalog.entryCount && member.recordIndex < catalog.entries[member.tableIndex].content.records.size();
+}
+// Membership always returns the raw slot; callers explicitly map to portable.
+bool ResyncRecordMember(const RecordCatalog& catalog,
+    const spawncontroller::NativeOrdinaryResyncView& view, const NativeCensus& census,
+    uintptr_t actor, spawncontroller::NativeRecordMembership& member) {
+    spawncontroller::ResolveNativeOrdinaryResyncMembership(g_exeBase, catalog, view, actor, member);
+    return member.status == NativeRecordContentStatus::Complete && member.contentComparisonAvailable &&
+        TraceStampMatchesCensus(member.stamps[0], census) && TraceStampMatchesCensus(member.stamps[1], census) &&
+        member.tableIndex < catalog.entryCount && view.OrdinaryIndex(member.tableIndex).has_value() &&
+        member.recordIndex < catalog.entries[member.tableIndex].content.records.size();
 }
 std::uint32_t RecordObjectId(const std::array<std::uint8_t, 64>& record) {
     std::uint32_t value = 0;
@@ -2907,20 +3055,28 @@ bool CollectResyncBindings(const ResyncSnapshot& expected, const ProducerWorldCo
         !warp::MatchesArrivedHostTransition(expected.room) ||
         census.enemies.size() != expected.enemies.size() || g_host.enemies.size() != expected.enemies.size()) return false;
     RecordCatalog before, after;
-    if (!FreshRecordCatalog(census, before) || before.entryCount != expected.recordDefinitions.size()) return false;
+    spawncontroller::NativeOrdinaryResyncView beforeView, afterView;
+    if (!FreshResyncRecordCatalog(census, before, beforeView) ||
+        beforeView.ordinaryCount != expected.recordDefinitions.size()) return false;
     std::vector<NativeRecordContentDefinition> local;
-    for (std::uint32_t i = 0; i < before.entryCount; ++i) local.push_back(before.entries[i].content);
+    for (std::uint32_t i = 0; i < beforeView.ordinaryCount; ++i) {
+        const auto raw = beforeView.RawIndex(i);
+        if (!raw) return false;
+        local.push_back(before.entries[*raw].content);
+    }
     const auto localCandidates = RecordCandidates(local);
     const auto hostCandidates = RecordCandidates(expected.recordDefinitions);
     for (const auto& definition : expected.recordDefinitions)
-        if (ResolveNativeRecordContent(definition, localCandidates, before.status).status != NativeRecordContentStatus::Complete)
+        if (ResolveNativeRecordContent(definition, localCandidates, NativeRecordContentStatus::Complete).status != NativeRecordContentStatus::Complete)
             return false;
     std::vector<ResyncActorBinding> staged;
     for (const auto& native : census.enemies) {
         spawncontroller::NativeRecordMembership member;
-        if (!RecordMember(before, census, native.actor, member) || native.hp <= 0 || native.maxHp <= 0 ||
+        if (!ResyncRecordMember(before, beforeView, census, native.actor, member) || native.hp <= 0 || native.maxHp <= 0 ||
             native.hp > native.maxHp) return false;
-        const auto resolved = ResolveNativeRecordContentRecord(local[member.tableIndex], member.recordIndex,
+        const auto ordinary = beforeView.OrdinaryIndex(member.tableIndex);
+        if (!ordinary) return false;
+        const auto resolved = ResolveNativeRecordContentRecord(local[*ordinary], member.recordIndex,
             hostCandidates, NativeRecordContentStatus::Complete);
         if (resolved.status != NativeRecordContentStatus::Complete || !resolved.definitionIndex || !resolved.recordIndex)
             return false;
@@ -2931,7 +3087,7 @@ bool CollectResyncBindings(const ResyncSnapshot& expected, const ProducerWorldCo
         if (row == expected.enemies.end() || row->life != ResyncLife::Alive ||
             row->identity.objectId != native.objectId || row->objectType != native.objectType ||
             (g_bridge.GetCoopDifficulty() == CoopDifficulty::Off && row->maxHp != native.maxHp) ||
-            RecordObjectId(local[member.tableIndex].records[member.recordIndex]) != native.objectId)
+            RecordObjectId(local[*ordinary].records[member.recordIndex]) != native.objectId)
             return false;
         const auto host = g_host.enemies.find(row->identity.netId);
         if (host == g_host.enemies.end() || host->second.objectId != row->identity.objectId ||
@@ -2948,7 +3104,7 @@ bool CollectResyncBindings(const ResyncSnapshot& expected, const ProducerWorldCo
         const auto& entry = before.entries[member.tableIndex];
         ResyncActorBinding binding;
         binding.actor = native.actor; binding.netId = row->identity.netId;
-        binding.record = {static_cast<std::uint16_t>(member.tableIndex), member.recordIndex};
+        binding.record = {static_cast<std::uint16_t>(*ordinary), member.recordIndex};
         binding.write.context = context; binding.write.room = expected.room;
         binding.write.transition = census.transition; binding.write.load = census.load;
         binding.write.controller = member.controller[0]; binding.write.record = member.record[0];
@@ -2960,7 +3116,8 @@ bool CollectResyncBindings(const ResyncSnapshot& expected, const ProducerWorldCo
         binding.write.headerBytes = entry.content.header;
         staged.push_back(binding);
     }
-    if (!FreshRecordCatalog(census, after) || !SameRecordCatalogSample(before, after)) return false;
+    if (!FreshResyncRecordCatalog(census, after, afterView) ||
+        !SameResyncRecordCatalogSample(before, beforeView, after, afterView)) return false;
     const auto repeatedCensus = CaptureNativeCensus();
     if (!CensusMatchesInstance(repeatedCensus) || repeatedCensus.enemies.size() != census.enemies.size()) return false;
     for (const auto& native : census.enemies) {
@@ -2968,9 +3125,10 @@ bool CollectResyncBindings(const ResyncSnapshot& expected, const ProducerWorldCo
             return SameNativeIdentity(native, n) && native.objectType == n.objectType && native.hp == n.hp && native.maxHp == n.maxHp;
         });
         spawncontroller::NativeRecordMembership member;
-        if (found == repeatedCensus.enemies.end() || !RecordMember(after, repeatedCensus, native.actor, member)) return false;
+        if (found == repeatedCensus.enemies.end() || !ResyncRecordMember(after, afterView, repeatedCensus, native.actor, member)) return false;
         const auto binding = std::find_if(staged.begin(), staged.end(), [&](const auto& b) { return b.actor == native.actor; });
-        if (binding == staged.end() || binding->record.definitionIndex != member.tableIndex ||
+        const auto ordinary = afterView.OrdinaryIndex(member.tableIndex);
+        if (!ordinary || binding == staged.end() || binding->record.definitionIndex != *ordinary ||
             binding->record.recordIndex != member.recordIndex || binding->write.controller != member.controller[0] ||
             binding->write.record != member.record[0]) return false;
     }
@@ -2984,40 +3142,61 @@ bool CollectResyncBindings(const ResyncSnapshot& expected, const ProducerWorldCo
 }
 
 bool CaptureHostResync(std::uint32_t frame, ResyncSnapshot& snapshot, ProducerWorldContext& context) {
-    if (!g_resyncPlan || !ResyncMembership(*g_resyncPlan) || CurrentRole() != Role::Host ||
-        g_hostBeginPending || !g_epoch || (!g_manifestSent && !g_inst.spawns.empty()) || !SafeNativeGameplay()) return false;
+    // One diagnostic row on the existing terminal refusal path. No native
+    // reads are added and no refused transaction is retried.
+    const auto refuse = [&](const char* stage) {
+        if (g_log) g_log("[resync-capture-refused] stage=%s", stage);
+        return false;
+    };
+    if (!g_resyncPlan) return refuse("no-plan");
+    if (!ResyncMembership(*g_resyncPlan)) return refuse("membership");
+    if (CurrentRole() != Role::Host) return refuse("role");
+    if (g_hostBeginPending) return refuse("host-begin-pending");
+    if (!g_epoch) return refuse("host-epoch");
+    if (!g_manifestSent && !g_inst.spawns.empty()) return refuse("manifest");
+    if (!SafeNativeGameplay()) return refuse("native-gameplay");
+    if (eventholdnative::Enabled() && !SafeRecoveryGameplay()) return refuse("recovery-gameplay");
     const auto generation = WorldSessionGeneration(), transition = warp::TransitionSerial(), load = warp::LoadSerial();
     const auto delivery = g_bridge.DeliverySerial();
     auto before = CaptureNativeCensus();
-    if (!generation || !CensusMatchesInstance(before) || g_inst.spawns.size() > RESYNC_MAX_ENEMIES) return false;
+    if (!generation || !CensusMatchesInstance(before) || g_inst.spawns.size() > RESYNC_MAX_ENEMIES) return refuse("census-before");
     snapshot = {}; snapshot.room = before.location; snapshot.room.epoch = g_epoch;
-    if (!sameResyncRoom(snapshot.room, g_resyncPlan->request.room)) return false;
+    if (!sameResyncRoom(snapshot.room, g_resyncPlan->request.room)) return refuse("request-room");
     snapshot.hold = {g_epoch, false, snapshot.room.eventProgram};
     std::uint32_t hash = 0;
-    if (!progresssync::CaptureFull(snapshot.progress, hash)) return false;
+    if (!progresssync::CaptureFull(snapshot.progress, hash)) return refuse("progress-before");
     RecordCatalog recordsBefore, recordsAfter;
-    if (!FreshRecordCatalog(before, recordsBefore)) return false;
-    for (std::uint32_t i = 0; i < recordsBefore.entryCount; ++i)
-        snapshot.recordDefinitions.push_back(recordsBefore.entries[i].content);
+    spawncontroller::NativeOrdinaryResyncView beforeView, afterView;
+    if (!FreshResyncRecordCatalog(before, recordsBefore, beforeView)) {
+        TraceCapturedRecordCatalog(frame, "before", false, recordsBefore, before);
+        return refuse("catalog-before");
+    }
+    for (std::uint32_t i = 0; i < beforeView.ordinaryCount; ++i) {
+        const auto raw = beforeView.RawIndex(i);
+        if (!raw) return refuse("ordinary-map-before");
+        snapshot.recordDefinitions.push_back(recordsBefore.entries[*raw].content);
+    }
     for (const auto& spawn : g_inst.spawns) {
         if (!spawn.announced || spawn.spawnIndex == UINT16_MAX ||
-            !enemyclass::Combat(spawn.objectType,spawn.objectId)) return false;
+            !enemyclass::Combat(spawn.objectType,spawn.objectId)) return refuse("spawn-admission");
         ResyncEnemyState row;
         row.identity = {static_cast<std::uint16_t>(spawn.spawnIndex + 1), g_inst.btl,
                         spawn.spawnIndex, spawn.objectId, spawn.spawnPos};
         row.objectType = spawn.objectType;
         if (spawn.present) {
             const auto* native = FindNativeEnemy(before, spawn);
-            if (!native || native->objectType != spawn.objectType || native->maxHp <= 0) return false;
+            if (!native || native->objectType != spawn.objectType || native->maxHp <= 0) return refuse("spawn-native");
             spawncontroller::NativeRecordMembership member;
-            if (!RecordMember(recordsBefore, before, native->actor, member) ||
-                RecordObjectId(snapshot.recordDefinitions[member.tableIndex].records[member.recordIndex]) != native->objectId)
-                return false;
-            row.record = {static_cast<std::uint16_t>(member.tableIndex), member.recordIndex};
+            if (!ResyncRecordMember(recordsBefore, beforeView, before, native->actor, member))
+                return refuse("spawn-record");
+            const auto ordinary = beforeView.OrdinaryIndex(member.tableIndex);
+            if (!ordinary || RecordObjectId(snapshot.recordDefinitions[*ordinary].records[member.recordIndex]) != native->objectId)
+                return refuse("spawn-ordinary-record");
+            row.record = {static_cast<std::uint16_t>(*ordinary), member.recordIndex};
             row.hp = native->hp; row.maxHp = native->maxHp;
         } else {
             // A historical HP row cannot establish fresh actor-to-record membership.
-            return false;
+            return refuse("historical-row");
         }
         if (row.hp > 0) ++snapshot.livingCount;
         else { row.life = ResyncLife::ObservedDeadHistory; ++snapshot.deadCount; }
@@ -3027,34 +3206,41 @@ bool CaptureHostResync(std::uint32_t frame, ResyncSnapshot& snapshot, ProducerWo
     ProgressUpdate repeated; std::uint32_t repeatedHash = 0;
     if (!CensusMatchesInstance(after) || after.enemies.size() != before.enemies.size() ||
         !progresssync::CaptureFull(repeated, repeatedHash) || hash != repeatedHash ||
-        encode(repeated) != encode(snapshot.progress)) return false;
+        encode(repeated) != encode(snapshot.progress)) return refuse("census-progress-after");
     for (const auto& native : before.enemies) {
         const auto row = std::find_if(after.enemies.begin(), after.enemies.end(), [&](const auto& value) {
             return SameNativeIdentity(native, value) && native.objectType == value.objectType &&
                 native.hp == value.hp && native.maxHp == value.maxHp;
         });
-        if (row == after.enemies.end()) return false;
+        if (row == after.enemies.end()) return refuse("native-bookend");
         const auto tracked = g_inst.byActor.find(native.actor);
         if (tracked == g_inst.byActor.end() || tracked->second >= g_inst.spawns.size() ||
-            !g_inst.spawns[tracked->second].present || !FindNativeEnemy(before, g_inst.spawns[tracked->second])) return false;
+            !g_inst.spawns[tracked->second].present || !FindNativeEnemy(before, g_inst.spawns[tracked->second])) return refuse("native-tracked");
     }
-    if (!FreshRecordCatalog(after, recordsAfter) || !SameRecordCatalogSample(recordsBefore, recordsAfter)) return false;
+    const bool catalogAfterFresh = FreshResyncRecordCatalog(after, recordsAfter, afterView);
+    if (!catalogAfterFresh || !SameResyncRecordCatalogSample(recordsBefore, beforeView, recordsAfter, afterView)) {
+        TraceCapturedRecordCatalog(frame, "before", true, recordsBefore, before);
+        TraceCapturedRecordCatalog(frame, "after", catalogAfterFresh, recordsAfter, after);
+        return refuse("catalog-after");
+    }
     for (const auto& native : after.enemies) {
         spawncontroller::NativeRecordMembership member;
-        if (!RecordMember(recordsAfter, after, native.actor, member)) return false;
+        if (!ResyncRecordMember(recordsAfter, afterView, after, native.actor, member)) return refuse("member-after");
         const auto tracked = g_inst.byActor.find(native.actor);
-        if (tracked == g_inst.byActor.end() || tracked->second >= snapshot.enemies.size()) return false;
+        if (tracked == g_inst.byActor.end() || tracked->second >= snapshot.enemies.size()) return refuse("tracked-after");
         const auto& row = snapshot.enemies[tracked->second];
-        if (row.record.definitionIndex != member.tableIndex || row.record.recordIndex != member.recordIndex) return false;
+        const auto ordinary = afterView.OrdinaryIndex(member.tableIndex);
+        if (!ordinary || row.record.definitionIndex != *ordinary || row.record.recordIndex != member.recordIndex) return refuse("record-after");
     }
     if (generation != WorldSessionGeneration() || delivery != g_bridge.DeliverySerial() ||
         transition != warp::TransitionSerial() || load != warp::LoadSerial() || !SafeNativeGameplay() ||
-        g_hpSourceSequence == UINT64_MAX || !CaptureWorldContext(context)) return false;
+        g_hpSourceSequence == UINT64_MAX || !CaptureWorldContext(context)) return refuse("scope-after");
     snapshot.hpSequence = ++g_hpSourceSequence; // explicit fresh HP sample even for an empty population
     snapshot.generation = generation; snapshot.transitionSerial = transition; snapshot.loadSerial = load;
     snapshot.captureFrameBefore = snapshot.captureFrameAfter = frame;
     snapshot.coverageMask = ResyncNativeComplete;
-    if (g_survivingPackEnabled && snapshot.enemies.size() == 5 && snapshot.livingCount == 5 &&
+    if (eventholdnative::Enabled() && !eventhold::RecoverySnapshotSupported(snapshot)) return refuse("recovery-shape");
+    if (!afterView.mixed && g_survivingPackEnabled && snapshot.enemies.size() == 5 && snapshot.livingCount == 5 &&
         !snapshot.deadCount && !snapshot.hold.active) {
         const auto selected = snapshot.enemies.front().record.definitionIndex;
         const bool oneDefinition = std::all_of(snapshot.enemies.begin(), snapshot.enemies.end(),
@@ -3091,7 +3277,8 @@ bool CaptureHostResync(std::uint32_t frame, ResyncSnapshot& snapshot, ProducerWo
         }
     }
     snapshot.nativeFingerprint = resyncNativeFingerprint(snapshot);
-    return WorldContextCurrent(context);
+    if (!WorldContextCurrent(context)) return refuse("context-final");
+    return true;
 }
 
 void ReceiveResyncSnapshot(const std::vector<std::uint8_t>& packet) {
@@ -3121,9 +3308,17 @@ void ReceiveResyncSnapshot(const std::vector<std::uint8_t>& packet) {
     if (snapshot.deadCount || snapshot.hold.active) {
         QueueNativeAck(ResyncAckStatus::Unavailable, "dead bootstrap identity or event hold unsupported"); return;
     }
+    if (eventholdnative::Enabled() && !eventhold::RecoverySnapshotSupported(snapshot)) {
+        QueueNativeAck(ResyncAckStatus::Unavailable, "boss or script population recovery unsupported"); return;
+    }
     if (begin.phase == ResyncPhase::Checkpoint) return; // observation only; no mutation/reload
     if (context.generation <= g_resyncPriorOrderedGeneration || g_host.epoch != 0 || g_host.arrived) {
         QueueNativeAck(ResyncAckStatus::Unavailable, "bootstrap requires a fresh ordered world reset"); return;
+    }
+    const std::array<std::uint16_t, 6> targetLocation {snapshot.room.worldId, snapshot.room.roomId,
+        snapshot.room.door, snapshot.room.mapProgram, snapshot.room.battleProgram, snapshot.room.eventProgram};
+    if (!spawncontroller::NativeResyncDormancyPreloadReady(g_exeBase, targetLocation)) {
+        QueueNativeAck(ResyncAckStatus::Unavailable, "target dormant script local flag unavailable"); return;
     }
     HostRoom staged;
     staged.epoch = snapshot.room.epoch; staged.world = snapshot.room.worldId;
@@ -3657,6 +3852,33 @@ bool EventControlScopeCurrent(const eventhold::Scope& scope) {
         scope.hostDelivery == g_bridge.PeerDeliverySerial(0) &&
         scope.targetDelivery == g_bridge.DeliverySerial();
 }
+bool CompleteRecoveredEventControl(const ResyncResult& result) {
+    if (!eventholdnative::Enabled() || CurrentRole() != Role::Client || !g_nativeResync ||
+        !g_eventControlBootstrap || !g_nativeResync->finished || !g_nativeResync->firstObserved ||
+        g_resyncWriteFence != ResyncWriteFence::Exact || !SafeRecoveryGameplay()) return false;
+    const auto& state = *g_nativeResync;
+    if (g_eventControlBootstrap->key != result.key ||
+        !WorldContextCurrent(g_eventControlBootstrap->context) || !WorldContextCurrent(state.context) ||
+        warp::LoadSerial() != g_eventControlBootstrap->load ||
+        warp::LoadSerial() != state.observedLoad || !warp::MatchesArrivedHostTransition(state.snapshot.room)) return false;
+    eventhold::Scope scope {};
+    if (result.key.sessionId.size() != sizeof(scope.session)) return false;
+    std::memcpy(scope.session, result.key.sessionId.data(), sizeof(scope.session));
+    scope.generation = WorldSessionGeneration(); scope.slot = g_bridge.LocalSlot();
+    scope.hostConnection = result.key.hostConnectionId; scope.selfConnection = state.target.connectionId;
+    scope.hostDelivery = g_bridge.PeerDeliverySerial(0); scope.targetDelivery = state.target.deliverySerial;
+    const auto census = CaptureNativeCensus();
+    if (!EventControlScopeCurrent(scope) || !eventhold::RecoveryResultMatches(scope, state.begin, state.snapshot, result) ||
+        !CensusMatchesInstance(census) || !SameLocation(census.location, state.snapshot.room) ||
+        !std::all_of(census.enemies.begin(), census.enemies.end(), [](const auto& row) {
+            return (row.objectType == 3 || row.objectType == 4) && row.objectId != 307;
+        }) || !eventholdnative::BeginRecoveredLifetime(scope, state.snapshot.room.epoch)) return false;
+    // Sole fresh baseline: the just-converged native snapshot, never cached
+    // RoomTransition or an old in-field start. The runtime still needs reset1 ACK.
+    g_eventControlScope = scope; g_eventControlRoom = state.snapshot.room;
+    g_recoveredControlScope = scope;
+    return true;
+}
 void ObserveEventControl(const WorldScope& source, eventhold::Kind kind, std::uint32_t epoch,
                          const RoomTransition* room, std::uint16_t eventProgram,
                          const EventStart* start = nullptr) {
@@ -3677,8 +3899,17 @@ void ObserveEventControl(const WorldScope& source, eventhold::Kind kind, std::ui
 void AckEventControl() {
     if (!eventholdnative::Enabled() || g_role != Role::Client || !EventControlScopeCurrent(g_eventControlScope)) return;
     const auto census = CaptureNativeCensus();
+    // Resync's exact record/write fence remains in force. This separate input
+    // baseline can qualify only after the matched result installed this fresh
+    // scope; it does not authorize broader enemy/progress writes.
+    const bool recoveredFence = g_resyncWriteFence == ResyncWriteFence::Exact &&
+        g_recoveredControlScope && *g_recoveredControlScope == g_eventControlScope &&
+        g_resyncRecordAuthority && WorldContextCurrent(g_resyncRecordAuthority->context) &&
+        sameResyncRoom(g_resyncRecordAuthority->snapshot.room, g_eventControlRoom) &&
+        eventhold::RecoverySnapshotSupported(g_resyncRecordAuthority->snapshot) &&
+        eventholdnative::Control().IsScopedFor(g_eventControlScope);
     const bool eligible = !g_resyncPlan && !g_nativeResync && !PackPreparationActive() &&
-        g_resyncWriteFence == ResyncWriteFence::None && g_host.arrived && g_host.ackSent &&
+        (g_resyncWriteFence == ResyncWriteFence::None || recoveredFence) && g_host.arrived && g_host.ackSent &&
         g_host.epoch && warp::HostTransitionArrived(g_host.epoch) && g_inst.live &&
         CensusMatchesInstance(census) && g_eventControlRoom.epoch == g_host.epoch &&
         SameLocation(census.location, g_eventControlRoom) && SafeNativeGameplay();
@@ -3834,6 +4065,10 @@ void ObserveCombatConsumerOutcome(const std::vector<std::uint8_t>& packet,
         packet.data(),static_cast<unsigned>(packet.size()),combatcausal::Now(),accepted);
 }
 
+static void RcHop(rcdiag::Stage stage,const char* result,const char* reason,const rcdiag::Record& trace) noexcept {
+    rcdiag::Note(stage,result,reason,trace,[](const char* line){if(g_log)g_log("%s",line);});
+}
+
 bool ReceiveWorldPackets() {
     bool hostSessionReset = false;
     std::vector<std::uint8_t> packet;
@@ -3846,6 +4081,8 @@ bool ReceiveWorldPackets() {
     while (receive()) {
         CheckActivationGeneration();
         auto causalDecodeFailure=combatcausal::Reason::RejectDecode;
+        const auto rcTrace=rcdiag::Packet(packet);
+        RcHop(rcdiag::Stage::DllEnvelope,"received","runtime-ring-pop",rcTrace);
         try {
             const std::uint8_t* payload = nullptr;
             std::size_t size = 0;
@@ -3853,17 +4090,22 @@ bool ReceiveWorldPackets() {
             std::optional<WorldScope> scope;
             if (type == PacketType::WorldEnvelope) {
                 ByteReader envelopeReader(payload, size); WorldEnvelope envelope; read(envelopeReader, envelope);
-                if (!envelopeReader.atEnd() || packet.size() != size + 3 || !WorldSessionGeneration()) {
+                const char* rcWhy="unknown";
+                if (rcdiag::Reject(!envelopeReader.atEnd(),"envelope-trailing-bytes",rcWhy) ||
+                    rcdiag::Reject(packet.size()!=size+3,"envelope-framing",rcWhy) ||
+                    rcdiag::Reject(!WorldSessionGeneration(),"world-generation",rcWhy)) {
+                    RcHop(rcdiag::Stage::DllEnvelope,"refused",rcWhy,rcTrace);
                     ObserveCombatConsumerOutcome(packet,(!envelopeReader.atEnd()||packet.size()!=size+3)?
                         combatcausal::Reason::RejectFraming:combatcausal::Reason::RejectScope);continue;
                 }
                 scope = envelope.scope;
                 const bool partyRelay = partynative::Requested() && scope->kind == WorldSourceKind::Relay &&
                     !envelope.packet.empty() && envelope.packet.front() == static_cast<std::uint8_t>(PacketType::PartyReapply);
-                if ((scope->kind != WorldSourceKind::Native && !partyRelay) ||
-                    scope->targetConnectionId != g_bridge.ConnectionId(g_bridge.LocalSlot()) ||
-                    scope->targetDeliverySerial != g_bridge.DeliverySerial() ||
-                    (g_resyncPlan && scope->sessionId != g_resyncPlan->request.key.sessionId)) {
+                if (rcdiag::Reject(scope->kind!=WorldSourceKind::Native && !partyRelay,"envelope-kind",rcWhy) ||
+                    rcdiag::Reject(scope->targetConnectionId!=g_bridge.ConnectionId(g_bridge.LocalSlot()),"target-connection",rcWhy) ||
+                    rcdiag::Reject(scope->targetDeliverySerial!=g_bridge.DeliverySerial(),"target-delivery",rcWhy) ||
+                    rcdiag::Reject(g_resyncPlan && scope->sessionId!=g_resyncPlan->request.key.sessionId,"resync-session",rcWhy)) {
+                    RcHop(rcdiag::Stage::DllEnvelope,"refused",rcWhy,rcTrace);
                     // VUH-1504 hop log (diagnostic only, bounded): envelope-level drop of a ReviveRequest.
                     if (!envelope.packet.empty() && envelope.packet.front() == static_cast<std::uint8_t>(PacketType::ReviveRequest) &&
                         ReviveLogAllowed())
@@ -3885,19 +4127,32 @@ bool ReceiveWorldPackets() {
                 type = decodePacketHeader(packet.data(), packet.size(), payload, size);
                 if (type == PacketType::StageEnd && g_log) g_log("[event-mirror] stage end envelope received"); // VUH-2555
                 if (packet.size() != size + 3 || !isScopedWorldPacket(type)) {
+                    RcHop(rcdiag::Stage::DllEnvelope,"refused","inner-framing-or-not-scoped",rcTrace);
                     ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectFraming);continue;
                 }
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
                 if (type == PacketType::SeatState) { ReceiveSeatState(*scope, payload, size); continue; }
                 if(type==PacketType::ScriptReactionCompletion) {
                     ByteReader r(payload,size);ScriptReactionCompletion m;read(r,m);
-                    RoomTransition room;
-                    if(CurrentRole()==Role::Host && g_scriptReactionCompletionApply && r.atEnd() &&
-                       m.ownerSlot>=1 && m.ownerSlot<=2 && scope->sourceConnectionId==m.requesterConnectionId &&
-                       RequesterCurrent(m.ownerSlot,m.requesterConnectionId,scope->sourceDeliverySerial) &&
-                       ReadLocationChecked(room) && m.location.epoch==g_epoch && SameLocation(m.location,room))
-                        (void)g_scriptReactionCompletionApply({m.occurrence,m.requesterConnectionId,m.resource,m.objectId,
-                                                            m.location.epoch,m.netId,m.command,m.ownerSlot});
+                    auto trace=rcdiag::Message(m);rcdiag::EnvelopeScope(trace,*scope);
+                    RcHop(rcdiag::Stage::DllReceive,"decoded","claim-before-admission",trace);
+                    RoomTransition room;const char* why="unknown";
+                    if(!rcdiag::Check(CurrentRole()==Role::Host,"receiver-role",why) ||
+                       !rcdiag::Check(g_scriptReactionCompletionApply!=nullptr,"apply-unregistered",why) ||
+                       !rcdiag::Check(r.atEnd(),"claim-trailing-bytes",why) ||
+                       !rcdiag::Check(m.ownerSlot>=1 && m.ownerSlot<=2,"stamped-owner",why) ||
+                       !rcdiag::Check(scope->sourceConnectionId==m.requesterConnectionId,"source-requester",why) ||
+                       !RequesterCurrent(m.ownerSlot,m.requesterConnectionId,scope->sourceDeliverySerial,&why,&trace) ||
+                       !rcdiag::Check(ReadLocationChecked(room),"location-unreadable",why) ||
+                       !rcdiag::Check(m.location.epoch==g_epoch,"claim-epoch",why) ||
+                       !rcdiag::Check(SameLocation(m.location,room),"claim-location",why)) {
+                        RcHop(rcdiag::Stage::DllReceive,"refused",why,trace);continue;
+                    }
+                    const auto entered=trace;
+                    RcHop(rcdiag::Stage::DllReceive,"apply-enter","claim-admitted",entered);
+                    const bool applied=g_scriptReactionCompletionApply({m.occurrence,m.requesterConnectionId,m.resource,m.objectId,
+                                                             m.location.epoch,m.netId,m.command,m.ownerSlot});
+                    RcHop(rcdiag::Stage::DllReceive,applied?"apply-true":"apply-false","apply-returned",entered);
                     continue;
                 }
                 if (type == PacketType::StageEnd) { // VUH-2555: a friend's own stage end, for the host to make too;
@@ -3944,9 +4199,15 @@ bool ReceiveWorldPackets() {
             if (type == PacketType::ResyncResult) {
                 ByteReader r(payload, size); ResyncResult result; read(r, result);
                 if (r.atEnd() && packet.size() == size + 3 && g_resyncPlan && result.key == g_resyncPlan->request.key) {
+                    const bool recoveredControl = CompleteRecoveredEventControl(result);
+                    if (g_log && eventholdnative::Enabled() && CurrentRole() == Role::Client)
+                        g_log("[event-control] resync result request=%llu reason=%u recoveredLifetime=%u",
+                            static_cast<unsigned long long>(result.key.requestId),
+                            static_cast<unsigned>(result.reason), recoveredControl ? 1u : 0u);
                     if (CurrentRole() == Role::Client && result.reason != ResyncResultReason::Converged)
                         g_resyncWriteFence = ResyncWriteFence::Failed;
                     g_resyncPlan.reset(); g_nativeResync.reset(); g_resyncOutput.clear();
+                    g_eventControlBootstrap.reset();
                 }
                 continue;
             }
@@ -4077,6 +4338,7 @@ bool ReceiveWorldPackets() {
                     g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false; g_emissionDeniedLogs = 0;
                     ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority
                     g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
+                    g_recoveredControlScope.reset();
                     g_spawnPickUnknownEpoch = 0;
                     g_host = {};
                     g_mirror.Reset(0);  // VUH-1515 S4
@@ -4222,6 +4484,7 @@ bool ReceiveWorldPackets() {
                 }
             }
         } catch (const std::exception&) {
+            RcHop(rcdiag::Stage::DllEnvelope,"refused","decode-exception",rcTrace);
             ObserveCombatConsumerOutcome(packet,causalDecodeFailure);
             SYNC_LOG("[enemysync] client: malformed world packet");
         }
@@ -4366,7 +4629,8 @@ bool ApplyNativeLeave(const NativeEnemy& expected, int hp, std::uint32_t generat
 bool ApplyNativeBossLeave(const NativeEnemy& expected, int hp, std::uint32_t generation) {
     __try {
         if (Read<uintptr_t>(expected.actor + offsets::actor::OBJENTRY_PTR) != expected.objentry ||
-            Read<std::uint8_t>(expected.objentry + offsets::objentry::TYPE_FLAGS) != bossleave::kBossType) return false;
+            !enemyclass::Boss(Read<std::uint8_t>(expected.objentry + offsets::objentry::TYPE_FLAGS),
+                              Read<std::uint32_t>(expected.objentry + offsets::objentry::OBJECT_ID))) return false;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -4940,7 +5204,7 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 // VUH-2367: a boss whose death the host's own script plays refuses the lethal on its brainless
                 // copy (Shan-Yu: 9 -> 221). Fade it out natively instead (VUH-2272's leave, no kill counted),
                 // once, outside a resync's write fence; then re-resolve the whole census next owner frame.
-                if (bossleave::Fallback(native.hp, native.objectType, contentRequired, s.bossLeaveAttempted)) {
+                if (bossleave::Fallback(native.hp, native.objectType, contentRequired, s.bossLeaveAttempted, native.objectId)) {
                     s.bossLeaveAttempted = true;
                     const bool left = ApplyNativeBossLeave(native, native.hp, generation);
                     if (g_log) g_log("[enemysync] client: host death netId %d boss lethal refused; native leave %s (hp %d)",
@@ -6251,8 +6515,10 @@ bool CaptureWorldContext(ProducerWorldContext& context) {
 }
 
 bool SendCapturedWorld(const std::vector<std::uint8_t>& packet, const ProducerWorldContext& context) {
-    if (!WorldContextCurrent(context)) return false;
+    auto trace=rcdiag::Packet(packet);rcdiag::ProducerScope(trace,context);
+    if (!WorldContextCurrent(context)) {RcHop(rcdiag::Stage::DllSend,"refused","captured-context-retired",trace);return false;}
     if (!g_bridge.SendToRuntime(packet, context)) {
+        RcHop(rcdiag::Stage::DllSend,"refused","bridge-ring-full",trace);
         if (!packet.empty()) {
             const auto type = static_cast<PacketType>(packet.front());
             if (type == PacketType::RoomTransition || type == PacketType::EventHold ||
@@ -6791,14 +7057,26 @@ RemoteHitStats GetRemoteHitStats() noexcept { return g_remoteHitStats; }
 
 void SetScriptReactionCompletion(ScriptReactionCompletionFn apply) noexcept {g_scriptReactionCompletionApply=apply;}
 bool SendScriptReactionCompletion(const ScriptReactionCompletionRecord& c) {
-    DownedScope s;
-    if(CurrentRole()!=Role::Client || !CaptureDownedScope(s) || s.localSlot<1 || s.localSlot>2 ||
-       !s.connections[s.localSlot] || c.epoch!=s.epoch || g_scriptReactionCompletionSequence==UINT64_MAX)return false;
+    auto trace=rcdiag::Claim(c.epoch,c.resource,c.objectId,c.netId,c.command,c.ownerSlot,c.requesterConnectionId,c.occurrence);
+    trace.type=static_cast<unsigned>(PacketType::ScriptReactionCompletion);
+    const char* why="unknown";DownedScope s;
+    if(rcdiag::Reject(CurrentRole()!=Role::Client,"producer-role",why) ||
+       !rcdiag::Check(CaptureDownedScope(s),"producer-scope",why) ||
+       rcdiag::Reject(s.localSlot<1 || s.localSlot>2,"producer-slot",why) ||
+       !rcdiag::Check(s.connections[s.localSlot]!=0,"producer-connection",why) ||
+       rcdiag::Reject(c.epoch!=s.epoch,"producer-epoch",why) ||
+       rcdiag::Reject(g_scriptReactionCompletionSequence==UINT64_MAX,"sequence-exhausted",why)) {
+        RcHop(rcdiag::Stage::DllSend,"refused",why,trace);return false;
+    }
     ScriptReactionCompletion m;
     m.location={s.epoch,s.worldId,s.roomId,s.door,s.mapProgram,s.battleProgram,s.eventProgram};
     m.seq=++g_scriptReactionCompletionSequence;m.requesterConnectionId=s.connections[s.localSlot];
     m.occurrence=c.occurrence;m.resource=c.resource;m.objectId=c.objectId;m.netId=c.netId;m.command=c.command;
-    return SendCapturedWorld(encode(m),s.context);
+    trace=rcdiag::Message(m);rcdiag::ProducerScope(trace,s.context);trace.slot=s.localSlot;
+    RcHop(rcdiag::Stage::DllSend,"encode-send-enter","wire-sequence-consumed",trace);
+    const bool sent=SendCapturedWorld(encode(m),s.context);
+    RcHop(rcdiag::Stage::DllSend,sent?"ring-enqueued":"send-refused","send-returned",trace);
+    return sent;
 }
 bool SendScriptCalls(const ScriptCallRecord* records, std::size_t count, std::uint32_t hostFrame, std::uint64_t& seqOut) {
     seqOut = 0;

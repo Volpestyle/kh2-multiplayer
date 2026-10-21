@@ -74,7 +74,7 @@ inline bool Failed(const Mission& m) noexcept { return m.active && m.result == k
 inline bool Ended(const Mission& m) noexcept { return m.active && (m.flags & kEnded) == kEnded; }
 // The host's mission ended, not by failing and not through an end trap its hooks saw (an engine end,
 // or a host without hooks): the friend can't replay it, so it stops following and keeps its own end.
-inline bool HostEndedUnknown(const Mission& host) noexcept { return Ended(host) && !Failed(host) && !host.endTrap; }
+inline bool HostEndedUnknown(const Mission& host) noexcept { return Ended(host) && !Failed(host) && (!host.endTrap || host.endTrap == 16); }
 
 // VUH-2343: give the final Bailey death at most three seconds at 60 owner
 // frames/s. A stuck orphan must not hold the native end forever. Reset this
@@ -128,7 +128,7 @@ inline std::int32_t TimerStartDelta(const Mission& host, const Mission& local) n
 // While the host's mission is followed they are dropped: the host's values arrive instead, and the
 // mission ends when and how the host's does. On the host the same hooks record which end ran.
 // Table 4 of the bdscript traps (names after OpenKH BdxTraps.cs where it has one).
-enum class Kind : std::uint8_t { Value, Fail, End };
+enum class Kind : std::uint8_t { Value, Fail, End, BossEnd };
 struct Trap { std::uint16_t index; std::uint32_t fnRva, flags; Kind kind; const std::uint8_t* body; std::size_t bodySize; const char* name; };
 // Each stub loads its arguments and jumps to the helper (mov edx,[rcx+8]; mov/movss ...; jmp rel32).
 inline constexpr std::uint8_t kSetCount[] = {0x8B, 0x51, 0x08, 0x8B, 0x09, 0xE9, 0x66, 0x84, 0xFC, 0xFF};       // -> 0x3FBAE0
@@ -143,6 +143,7 @@ inline constexpr std::uint8_t kAddCount[] = {0x8B, 0x51, 0x08, 0x8B, 0x09, 0xE9,
 // 0x3A37A0(arg) ends it and fires signal 0xF with arg. Both set M+4 |= 0x14.
 inline constexpr std::uint8_t kComplete[] = {0x8B, 0x09, 0xE9, 0xF9, 0xFE, 0xF6, 0xFF};                         // -> 0x3A33C0
 inline constexpr std::uint8_t kEndSignal[] = {0x8B, 0x09, 0xE9, 0xA9, 0x02, 0xF7, 0xFF};                        // -> 0x3A37A0
+inline constexpr std::uint8_t kDeadBoss[] = {0x8B, 0x09, 0xE9, 0x69, 0xFF, 0xF6, 0xFF}; // -> 0x3A3440
 #define KH2_PIN(b) b, sizeof(b)
 inline constexpr Trap kTraps[] = {
     {5, 0x433670, 0x2, Kind::Value, KH2_PIN(kSetCount), "set_count"},
@@ -155,6 +156,7 @@ inline constexpr Trap kTraps[] = {
     {41, 0x4336E0, 0x2, Kind::Value, KH2_PIN(kAddCount), "add_count"},
     {3, 0x4334C0, 0x1, Kind::End, KH2_PIN(kComplete), "mission_complete"},
     {22, 0x4334F0, 0x1, Kind::End, KH2_PIN(kEndSignal), "mission_end_signal"},
+    {16, 0x4334D0, 0x1, Kind::BossEnd, KH2_PIN(kDeadBoss), "mission_dead_boss"},
 };
 #undef KH2_PIN
 inline constexpr std::size_t kTrapCount = sizeof(kTraps) / sizeof(kTraps[0]);
@@ -188,9 +190,10 @@ inline constexpr std::uint8_t kFailHead[] = {0x48, 0x83, 0xEC, 0x28, 0x48, 0x8B,
 // mission's own ends are dropped (the host's end is replayed instead); a failure runs only after the
 // host's. Once the host's end has been replayed here, every later end or failure of that same
 // mission is dropped, so it never ends twice.
-inline bool DropLocalCall(std::size_t trap, bool following, bool hostFailed, bool replayedEnd) noexcept {
+inline bool DropLocalCall(std::size_t trap, bool following, bool hostFailed, bool replayedEnd, bool scriptedBoss = false) noexcept {
     if (trap >= kTrapCount) return false;
     const Kind kind = kTraps[trap].kind;
+    if (kind == Kind::BossEnd) return scriptedBoss && (following || replayedEnd);
     if (replayedEnd && kind != Kind::Value) return true;
     if (!following) return false;
     return kind != Kind::Fail || !hostFailed;

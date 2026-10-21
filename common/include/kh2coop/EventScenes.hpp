@@ -48,10 +48,12 @@ inline const Scene* Qualified(const RoomTransition& t) noexcept {
 // In-field events: a host event that starts inside a field room (no location to load) through the
 // native start FUN_1403AC350(id, flags, params). The host publishes the exact arguments with its event
 // hold, and a friend standing in the same field location starts the same event natively, then follows
-// the host out of it as from a scene. Each row is an observed host start, matched exactly (run
+// the host out of it as from a scene. The initial rows are observed host starts, matched exactly (run
 // 20261019-083939: the Armor Shop event, about 70 s, which then loads tt07-armor-shop above; run
 // 20261019-103812, VUH-2487: the Accessory Shop event, about 41 s, and the cat lock-on event, about
-// 93 s, the only other in-field starts of the prologue); anything else keeps the event hold.
+// 93 s, the other observed in-field starts of the prologue). Thorn's victory row
+// below is derived from installed data/native decoding and still needs live proof.
+// Anything else keeps the event hold.
 struct InFieldEvent {
     std::uint16_t world, room, eventProgram;
     std::uint32_t id;
@@ -60,10 +62,19 @@ struct InFieldEvent {
     std::string_view name;
     bool hostLed = false;  // a HostLedStageEnds row (VUH-2555)
 };
-inline constexpr std::array<InFieldEvent, 3> InFieldEvents {{
+// VUH-2569: installed tt34 evt program157's signal16 selects event "315".
+// 3A4BD0/39FBC0 decode the authored exit as world2/room0/door0, programs51.
+// Native39FBC0 leaves destination byte3 unwritten; 3A4BD0 copies it into
+// params[1]'s high byte. That padding alone is ignored when qualifying this row.
+// Publication and replay retain the host's full raw descriptor, including it.
+inline constexpr InFieldEvent TwilightThornVictory {
+    2,34,157,0x353133,0x12,{2,2,0x00330033,0x33,1,0xFFFFFFFF,3,0,0},"tt34-after-thorn-315"
+};
+inline constexpr std::array<InFieldEvent, 4> InFieldEvents {{
     {2, 7, 95, 0x343031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-armor-shop-104"},
     {2, 7, 97, 0x363031, 9, {1, 0x702, 0xFFFFFFFF, 0xFFFF, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-accessory-shop-106"},
     {2, 7, 99, 0x383031, 9, {2, 0x402, 0x510051, 0x51, 1, 0xFFFFFFFF, 3, 0, 0}, "tt07-cat-lock-on-108"},
+    TwilightThornVictory,
 }};
 
 // VUH-2555: host-led stage ends. Each seat runs a fight stage's script on its own copy of the fight and
@@ -89,9 +100,13 @@ inline const InFieldEvent* QualifiedStageEnd(std::uint16_t world, std::uint16_t 
 inline const InFieldEvent* QualifiedStart(std::uint16_t world, std::uint16_t room, std::uint16_t eventProgram,
                                           std::uint32_t id, std::uint8_t flags,
                                           const std::array<std::uint32_t, 9>& params) noexcept {
+    auto compared=params;
+    const auto& thorn=TwilightThornVictory;
+    if(world==thorn.world && room==thorn.room && eventProgram==thorn.eventProgram && id==thorn.id && flags==thorn.flags)
+        compared[1]&=0x00FFFFFF;
     for (const auto& e : InFieldEvents)
         if (e.world == world && e.room == room && e.eventProgram == eventProgram && e.id == id && e.flags == flags &&
-            e.params == params)
+            e.params == compared)
             return &e;
     return nullptr;
 }

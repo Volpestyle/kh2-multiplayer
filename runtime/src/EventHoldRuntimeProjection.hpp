@@ -9,16 +9,57 @@ enum class Admission { Ignored, Excluded, Published, Aborted };
 class RuntimeProjection {
 public:
     explicit RuntimeProjection(Channel& channel) : channel_(channel) {}
-    void Reject(Abort reason) noexcept { blocked_ = true; channel_.Invalidate(reason); }
+    void Reject(Abort reason) noexcept { RememberLifetime(); blocked_ = true; channel_.Invalidate(reason); }
     void Retire(Abort reason) noexcept {
+        RememberLifetime();
         Scope bound {};
         if (channel_.BoundScope(bound)) {
             blocked_ = true;
             channel_.Reset(reason);
         } else {
             // Initial roster/reset may precede attachment. Nothing was armed.
-            excludedCount_ = 0; baselineEpoch_ = 0;
+            if (haveLifetime_) blocked_ = true;
+            else { excludedCount_ = 0; baselineEpoch_ = 0; }
         }
+    }
+    // Setup/pump thread only, after the old producer retired and Channel was
+    // rebound to the native-created fresh scoped mapping. The caller must prove
+    // current native scope/epoch, matching authenticated begin+snapshot+result,
+    // cut/fingerprint, and two-frame Converged/result consumption. A cached
+    // RoomTransition is never that proof. This method cannot clear an old abort.
+    bool AdoptConvergedBaseline(const Scope& current,std::uint32_t epoch,
+                                const ResyncResult& result,std::uint64_t now) noexcept {
+        Scope bound {};
+        if (!blocked_ || !haveLifetime_ || !ValidScope(current) || !epoch ||
+            std::memcmp(current.session,lifetimeScope_.session,sizeof(current.session))!=0 ||
+            current.hostConnection!=lifetimeScope_.hostConnection || current.slot!=lifetimeScope_.slot ||
+            current.generation<=lifetimeScope_.generation || current.selfConnection==lifetimeScope_.selfConnection ||
+            !channel_.IsScopedFor(current) || !channel_.BoundScope(bound) || bound!=current ||
+            channel_.PublishedOrdinal()!=1 || channel_.Armed() ||
+            result.reason!=ResyncResultReason::Converged || !result.key.requestId ||
+            result.key.requestId<=baselineRequest_ || result.key.hostConnectionId!=current.hostConnection ||
+            result.key.sessionId!=std::string_view(current.session,sizeof(current.session)) ||
+            !result.targetCount || result.targetCount>result.targets.size()) return false;
+        bool matched=false;
+        std::array<bool,3> seen {};
+        for (std::size_t i=0;i<result.targetCount;++i) {
+            const auto& target=result.targets[i];
+            if (target.target.slot<1 || target.target.slot>2 || seen[target.target.slot] ||
+                !target.target.connectionId || !target.target.deliverySerial || !target.appliedCut ||
+                target.status!=ResyncAckStatus::Converged) return false;
+            seen[target.target.slot]=true;
+            if (target.target.slot==current.slot) {
+                if (target.target.connectionId!=current.selfConnection ||
+                    target.target.deliverySerial!=current.targetDelivery) return false;
+                matched=true;
+            }
+        }
+        // Heartbeat proves this Channel is the new producer, not an owner view.
+        if (!matched || !channel_.Heartbeat(now)) return false;
+        blocked_=false;baselineEpoch_=epoch;explicitBaseline_=true;
+        excludedCount_=0;excluded_.fill(0);
+        lifetimeScope_=current;baselineRequest_=result.key.requestId;
+        return true; // Arm still requires the new ordinal1 native ACK on Tick.
     }
     bool Tick(const Scope& current, bool eligible, std::uint64_t now) noexcept {
         if (blocked_) return false;
@@ -34,6 +75,7 @@ public:
             for (std::size_t i = 0; i < excludedCount_; ++i)
                 if (!channel_.ExcludeSource(excluded_[i])) { blocked_ = true; return false; }
         }
+        RememberLifetime();
         if (!channel_.Heartbeat(now)) { blocked_ = true; return false; }
         Ack ack {};
         if (!channel_.Armed() && baselineEpoch_ && channel_.ReadAck(ack) && ack.epoch == baselineEpoch_)
@@ -87,7 +129,8 @@ public:
             // Active bootstrap cannot safely be adopted. Initial inactive/cache
             // data remains solely in WorldInbox and is not an input command.
             if (command.kind == Kind::Acquire) return fail(Abort::Unsupported);
-            if (command.kind == Kind::Transition) baselineEpoch_ = command.epoch;
+            if (explicitBaseline_ && command.epoch!=baselineEpoch_) return fail(Abort::InvalidOrder);
+            if (!explicitBaseline_ && command.kind == Kind::Transition) baselineEpoch_ = command.epoch;
             bool seen = false;
             for (std::size_t i = 0; i < excludedCount_; ++i) seen |= excluded_[i] == s.hostSourceSerial;
             if (!seen) {
@@ -100,8 +143,13 @@ public:
         return channel_.Publish(command, now) ? Admission::Published : fail(channel_.Reason());
     }
 private:
+    void RememberLifetime() noexcept {
+        if (!haveLifetime_ && channel_.BoundScope(lifetimeScope_)) haveLifetime_=true;
+    }
     Channel& channel_;
-    bool blocked_ {};
+    bool blocked_ {}, haveLifetime_ {}, explicitBaseline_ {};
+    Scope lifetimeScope_ {};
+    std::uint64_t baselineRequest_ {};
     std::uint32_t baselineEpoch_ {};
     std::array<std::uint64_t, SourceCapacity> excluded_ {};
     std::size_t excludedCount_ {};

@@ -51,7 +51,9 @@
 #include "CombatCausalTrace.hpp"
 #include "DamagePolicy.hpp"
 #include "EnemyTargetRemote.hpp" // VUH-1515 (default off)
+#include "kh2coop/RcRefusalTrace.hpp" // POD-only; native headers deliberately isolate Protocol
 #include "ScriptMirror.hpp" // VUH-2252: rules for ScriptMirror.inl
+#include "NativeTraceFiber.hpp" // retained per-fiber diagnostic cleanup attribution
 #include "EventStartMirror.hpp"
 #include "AllyHit.hpp" // ally player-to-player hits (default off)
 #include "kh2coop/KH2Offsets.hpp"

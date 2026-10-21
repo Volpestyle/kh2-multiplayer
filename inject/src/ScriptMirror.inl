@@ -28,6 +28,13 @@
 namespace scriptmirror {
 
 namespace R = rules;
+namespace D = ::kh2coop::rcdiag;
+static D::Record SmRcClaim(const enemysync::ScriptReactionCompletionRecord& c) noexcept {
+    return D::Claim(c.epoch,c.resource,c.objectId,c.netId,c.command,c.ownerSlot,c.requesterConnectionId,c.occurrence);
+}
+static void SmRcHop(D::Stage stage,const char* result,const char* reason,const D::Record& r) noexcept {
+    D::Emit(stage,result,reason,r,[](const char* line){Log("%s",line);});
+}
 using TrapFn = void(__fastcall*)(std::uint64_t* args);
 using XyzRotFn = void(__fastcall*)(uintptr_t actor, const float* rotation);
 
@@ -82,7 +89,7 @@ static bool SmNativeReactionReady() noexcept;
 static bool SmNativeReactionPins();
 static bool SmNativeReactionInstall();
 static void SmNativeReactionShutdown();
-static bool SmNativeReactionCallbackAllowed(uintptr_t,std::uint32_t,const std::uint32_t*);
+static bool SmNativeReactionCallbackAllowed(uintptr_t,std::uint32_t,const std::uint32_t*,D::Record* =nullptr);
 static void SmOwnerReset(bool);
 static void SmOwnerFrame();
 static int SmOwnerApply(const R::Call&,uintptr_t);
@@ -208,13 +215,19 @@ static bool SmSameEffect(std::uint32_t handle, uintptr_t effect, uintptr_t part)
 }
 // ATTACK_MAGIC: flags+8 (0x800 retires it), owner handle+0x10. The script
 // creator re-pairs every allocation, including reuse of a native handle.
-static bool SmAttackState(std::uint32_t handle, uintptr_t attack, uintptr_t owner) noexcept {
-    std::uint32_t flags=0, ownerHandle=0;
-    uintptr_t vtable=0;
-    return g_smLifetimeReady && g_smLifetimeReliable.load() && attack && owner && SmDecode(handle)==attack &&
-        ReadHitTrace(attack, vtable) && vtable == g_exeBase+0x5D7090 &&
-        ReadHitTrace(attack+8, flags) && !(flags&0x800u) &&
-        ReadHitTrace(attack+0x10, ownerHandle) && SmDecode(ownerHandle)==owner;
+static bool SmAttackState(std::uint32_t handle, uintptr_t attack, uintptr_t owner,const char** failure=nullptr) noexcept {
+    std::uint32_t flags=0, ownerHandle=0;uintptr_t vtable=0;const char* why="unknown";
+    const bool ok=D::Check(g_smLifetimeReady,"attack-lifetime-not-ready",why) &&
+        D::Check(g_smLifetimeReliable.load(),"attack-lifetime-unreliable",why) &&
+        D::Check(attack!=0,"attack-zero",why) && D::Check(owner!=0,"attack-owner-zero",why) &&
+        D::Check(SmDecode(handle)==attack,"attack-handle-replaced",why) &&
+        D::Check(ReadHitTrace(attack,vtable),"attack-vtable-unreadable",why) &&
+        D::Check(vtable==g_exeBase+0x5D7090,"attack-vtable",why) &&
+        D::Check(ReadHitTrace(attack+8,flags),"attack-flags-unreadable",why) &&
+        D::Check(!(flags&0x800u),"attack-retired-flag",why) &&
+        D::Check(ReadHitTrace(attack+0x10,ownerHandle),"attack-owner-unreadable",why) &&
+        D::Check(SmDecode(ownerHandle)==owner,"attack-owner-replaced",why);
+    if(!ok && failure)*failure=why;return ok;
 }
 
 
@@ -679,6 +692,30 @@ static std::uint32_t SmOwnHandle(uintptr_t actor) noexcept {
     return handle;
 }
 
+static void SmRcWindow(D::Record& r,const R::ReactionWindow& w,
+                       const std::array<R::ReactionSeat,3>& seats) noexcept {
+    r.facts|=D::Window;r.openedFrame=w.openedFrame;r.duration=w.duration;
+    r.consumedBefore=w.consumed?1:0;
+    if(w.slot<seats.size()) {const auto& seat=seats[w.slot];r.facts|=D::Seat;
+        r.living=seat.living?1:0;r.fresh=seat.fresh?1:0;r.capable=seat.capable?1:0;
+        r.expected=w.connection;r.observed=seat.connection;}
+}
+static const char* SmRcConsumeReason(const R::ReactionWindow& w,const R::ReactionCompletion& c,
+    std::uint32_t epoch,std::uint32_t frame,const std::array<R::ReactionSeat,3>& seats) noexcept {
+    if(!w.occurrence || !w.source || !w.command || !w.connection || w.slot>=3)return "window-shape";
+    if(w.epoch!=epoch)return "window-epoch";
+    if(w.consumed)return "already-consumed";
+    if(!w.duration || frame<w.openedFrame || frame-w.openedFrame>=w.duration)return "window-frame";
+    if(c.epoch!=w.epoch || c.occurrence!=w.occurrence || c.source!=w.source || c.command!=w.command ||
+       c.slot!=w.slot || c.connection!=w.connection)return "window-claim";
+    const auto& seat=seats[w.slot];
+    if(!seat.living)return "seat-dead";
+    if(!seat.fresh)return "seat-stale";
+    if(!seat.capable)return "seat-incapable";
+    if(seat.connection!=w.connection)return "seat-connection";
+    return "consume-returned-false";
+}
+
 #include "ScriptActorOwner.inl"
 
 static bool SmAttackVector(uintptr_t attack, const std::uint64_t* values) noexcept {
@@ -1039,11 +1076,18 @@ static bool SmRcProofNow(uintptr_t controller,std::uint16_t command,
     proof.scope=scope;
     return true;
 }
-static bool SmRcProofCurrent(const SmRcProof& saved) noexcept {
-    if(!saved.identity.occurrence || !enemysync::ScriptCameraScopeCurrent(saved.scope))return false;
+static bool SmRcProofCurrent(const SmRcProof& saved,const char** failure=nullptr) noexcept {
+    const char* why="unknown";
+    if(!D::Check(saved.identity.occurrence!=0,"proof-occurrence-zero",why) ||
+       !D::Check(enemysync::ScriptCameraScopeCurrent(saved.scope),"proof-admitted-scope",why)) {
+        if(failure)*failure=why;return false;
+    }
     SmRcProof now{};
-    return SmRcProofNow(static_cast<uintptr_t>(saved.identity.roots[0]),saved.identity.command,
-        saved.identity.target,now) && SmRcSameScope(saved.scope,now.scope) && saved.identity==now.identity;
+    const bool ok=D::Check(SmRcProofNow(static_cast<uintptr_t>(saved.identity.roots[0]),saved.identity.command,
+        saved.identity.target,now),"proof-now",why) &&
+        D::Check(SmRcSameScope(saved.scope,now.scope),"proof-scope-replaced",why) &&
+        D::Check(saved.identity==now.identity,"proof-identity-replaced",why);
+    if(!ok && failure)*failure=why;return ok;
 }
 // Bounded per-command/decision changes plus one continuing five-second sample.
 // This budget is not spent by the first Dusks' per-frame offers.
@@ -1202,28 +1246,50 @@ static bool __fastcall SmNativeRcAccept(uintptr_t controller,uintptr_t descripto
     }
     return accepted;
 }
-static bool SmNativeReactionCallbackAllowed(uintptr_t receiver,std::uint32_t command,const std::uint32_t* target) {
+static D::Record SmRcAcceptedTrace(const SmRcProof& accepted) noexcept {
+    const auto& id=accepted.identity;
+    auto r=D::Claim(id.epoch,id.resource,id.objectId,id.source,id.command,id.slot,id.connection,id.occurrence);
+    r.tuple=id.occurrence!=0;r.facts|=D::Native|D::Accepted;r.frame=g_frameCounter;r.load=id.load;r.transition=id.transition;
+    r.slot=id.slot;r.mode=id.mode;r.actor=id.roots[1];r.sourceActor=id.roots[2];
+    r.generation=accepted.scope.context.generation;r.sourceDelivery=accepted.scope.context.deliverySerial;
+    return r;
+}
+static bool SmNativeReactionCallbackAllowed(uintptr_t receiver,std::uint32_t command,const std::uint32_t* target,D::Record* output) {
+    // Snapshot the actual accepted identity before the latch can be taken or a
+    // proof query can reenter. Current publication is not callback identity.
+    const auto diagnosticAccepted=g_smRcAccepted;
+    auto trace=SmRcAcceptedTrace(diagnosticAccepted);if(output)*output=trace;
+    const char* why="unknown";
+    const auto result=[&](bool ok,const char* reason){SmRcHop(D::Stage::NativeCallback,ok?"admitted":"refused",reason,trace);return ok;};
     std::array<std::uint32_t,4> logical{};
-    if(!SmRcTarget(reinterpret_cast<uintptr_t>(target),logical))return !SmOwnerMirroredSource(receiver);
-    if(!SmRcKnownSource(logical[0]))return true;
-    if(!SmNativeReactionReady())return false;
-    const auto accepted=g_smRcAccepted;
-    // Callback need not be the same frame as selection. Window/current-root
-    // validation remains mandatory; acceptance metadata never extends its life.
+    if(!SmRcTarget(reinterpret_cast<uintptr_t>(target),logical)) {
+        const bool ordinary=!SmOwnerMirroredSource(receiver);if(ordinary){if(output)*output={};return true;}
+        return result(false,"logical-target-unreadable");
+    }
+    if(!SmRcKnownSource(logical[0])){if(output)*output={};return true;}
+    if(!SmNativeReactionReady())return result(false,"native-cache-not-ready");
+    // Authority keeps the original post-guard snapshot point. The earlier
+    // copy is diagnostic only; guards cannot make it the acceptance authority.
+    const auto accepted=g_smRcAccepted;trace=SmRcAcceptedTrace(accepted);if(output)*output=trace;
     const auto controller=g_exeBase+0x2A10620;
     std::uint16_t active=0;std::array<std::uint32_t,4> activeTarget{};
-    const bool observed=g_smRcAcceptance.Current(accepted.identity) && SmRcController(controller) &&
-        ReadHitTrace(controller+8,active) && SmRcTarget(controller+0x10,activeTarget) && activeTarget==logical &&
-        R::NativeReactionActive(accepted.identity,reinterpret_cast<uintptr_t>(target),active,activeTarget) &&
-        command==accepted.identity.command && logical==accepted.identity.target && receiver==accepted.identity.roots[2];
-    const bool admitted=observed && g_smRcAcceptedHandoff && SmRcProofCurrent(accepted);
+    const bool observed=D::Check(g_smRcAcceptance.Current(accepted.identity),"accepted-latch",why) &&
+        D::Check(SmRcController(controller),"canonical-controller",why) &&
+        D::Check(ReadHitTrace(controller+8,active),"active-command-unreadable",why) &&
+        D::Check(SmRcTarget(controller+0x10,activeTarget),"active-target-unreadable",why) &&
+        D::Check(activeTarget==logical,"active-logical-target",why) &&
+        D::Check(R::NativeReactionActive(accepted.identity,reinterpret_cast<uintptr_t>(target),active,activeTarget),"active-inline-target",why) &&
+        D::Check(command==accepted.identity.command,"accepted-command",why) &&
+        D::Check(logical==accepted.identity.target,"accepted-target",why) &&
+        D::Check(receiver==accepted.identity.roots[2],"accepted-receiver",why);
+    const bool admitted=observed && D::Check(g_smRcAcceptedHandoff,"native-handoff",why) &&
+        SmRcProofCurrent(accepted,&why);
     SmRcLog(static_cast<std::uint16_t>(command),admitted?5:6,"callback");
-    if(!observed)return false;
-    // The old native callback has now been observed. Retire its latch even on
-    // expiry/revocation; never send/consume a completion for an invalid window.
-    if(!g_smRcAcceptance.Take(accepted.identity))return false;
+    if(!observed)return result(false,why);
+    // Preserve the original take even when admitted==false.
+    if(!g_smRcAcceptance.Take(accepted.identity))return result(false,"accepted-take");
     g_smRcAccepted={};g_smRcAcceptedHandoff=false;
-    return admitted;
+    return result(admitted,admitted?"accepted-taken":why);
 }
 static bool SmNativeReactionPins() {
     return SmOwnerPin(0x3A8B10,R::kNativeRcActionGeneral,sizeof(R::kNativeRcActionGeneral)) &&
@@ -1373,28 +1439,40 @@ static int SmApplyReactionOffer(const R::Call& c,uintptr_t actor) {
 }
 static bool SmCompleteReaction(const enemysync::ScriptReactionCompletionRecord& completion) {
     if(completion.resource&0x80000000u)return SmOwnerCompleteReaction(completion);
-    if(!SmGameThread() || !g_sm.hostActive || !g_smReactionCallback)return false;
+    auto trace=SmRcClaim(completion);trace.facts|=D::Native;trace.frame=g_frameCounter;
+    trace.load=g_sm.load;trace.transition=g_sm.transition;
+    const char* why="unknown";
+    const auto refused=[&](){SmRcHop(D::Stage::HostAttack,"refused",why,trace);return false;};
+    if(!D::Check(SmGameThread(),"game-thread",why) || !D::Check(g_sm.hostActive,"host-active",why) ||
+       !D::Check(g_smReactionCallback!=nullptr,"callback-ready",why))return refused();
     enemysync::DownedScope scope;
-    if(!enemysync::CaptureDownedScope(scope) || scope.localSlot!=0)return false;
+    if(!D::Check(enemysync::CaptureDownedScope(scope),"downed-scope",why) ||
+       !D::Check(scope.localSlot==0,"local-host-seat",why))return refused();
     auto* window=g_sm.occurrences.Find(completion.occurrence);
-    if(!window)return false;
+    if(!window){why="occurrence-missing";return refused();}
     ReactionBinding* binding=nullptr;
     for(auto& r:g_sm.reactions)if(r.resource==completion.resource && r.netId==completion.netId &&
        r.objectId==completion.objectId && r.occurrence==completion.occurrence){binding=&r;break;}
-    if(!binding || !SmAttackState(binding->handle,binding->attack,binding->owner))return false;
+    if(!D::Check(binding!=nullptr,"binding-missing",why) ||
+       !SmAttackState(binding->handle,binding->attack,binding->owner,&why))return refused();
+    trace.actor=binding->attack;trace.sourceActor=binding->owner;
     const auto seats=SmReactionSeats(scope);
     const R::ReactionCompletion claim{completion.occurrence,completion.requesterConnectionId,
         completion.epoch,completion.netId,completion.command,completion.ownerSlot};
-    if(!R::ConsumeReaction(*window,claim,scope.epoch,g_frameCounter,seats))return false;
+    const auto before=*window;SmRcWindow(trace,before,seats);
+    const bool consumed=R::ConsumeReaction(*window,claim,scope.epoch,g_frameCounter,seats);
+    trace.consumedAfter=window->consumed?1:0;
+    if(!consumed){why=SmRcConsumeReason(before,claim,scope.epoch,trace.frame,seats);return refused();}
     const auto player=SmOwnerSeatActor(completion.ownerSlot);
     const auto owner=SmOwnHandle(binding->owner);
-    if(!owner || !player)return false; // occurrence remains consumed on native refusal
-    // Native ground selection (407CCB -> 3BEE00) initializes this exact
-    // logical TARGET. The fourth word is the no-part sentinel, not kind 3.
+    if(!D::Check(owner!=0,"source-handle",why) || !D::Check(player!=0,"seat-actor",why))return refused(); // remains consumed
     const std::uint32_t target[4]{owner,0,binding->handle,UINT32_MAX};
     (void)SmSetReactionCommand(*binding,0);
     const auto completed=completion; // Native callback may retire/reuse the paired binding.
+    const auto entered=trace; // No binding/window dereference after native reentry.
+    SmRcHop(D::Stage::HostAttack,"callback-enter","consumed",entered);
     g_smReactionCallback(binding->owner,player,completion.command,target);
+    SmRcHop(D::Stage::HostAttack,"callback-returned","native-call-returned",entered);
     Log("[script-rc] complete source=%u resource=%u occurrence=%llu command=%u owner=%u",
         completed.netId,completed.resource,completed.occurrence,completed.command,completed.ownerSlot);
     return true;
@@ -1410,30 +1488,45 @@ static void __fastcall SmReactionCallback(uintptr_t receiver,uintptr_t player,st
     // Pin/install/lifetime failure must not reopen a proven client's key11 BDX
     // merely because the new native cache hooks could not become ready.
     if(!SmOwnerReady()) {
+        if(ownedReceiver)SmRcHop(D::Stage::LocalHandler,"refused","owner-not-ready",SmRcAcceptedTrace(g_smRcAccepted));
         if(!ownedReceiver)g_smReactionCallback(receiver,player,command,target);
         return;
     }
-    if(player==g_soraActor && !SmNativeReactionCallbackAllowed(receiver,command,target))return;
+    D::Record acceptedTrace{};
+    if(player==g_soraActor && !SmNativeReactionCallbackAllowed(receiver,command,target,&acceptedTrace))return;
     std::uint32_t attackHandle=0;
     if(!target || !ReadHitTrace(reinterpret_cast<uintptr_t>(target)+8,attackHandle)) {
+        SmRcHop(D::Stage::LocalHandler,"not-handled","target-handle-unreadable",acceptedTrace);
         if(!ownedReceiver)g_smReactionCallback(receiver,player,command,target);
         return;
     }
-    if(!attackHandle && SmOwnerReactionCallback(receiver,player,command))return;
+    if(!attackHandle && SmOwnerReactionCallback(receiver,player,command,&acceptedTrace))return;
     for(auto& binding:g_sm.reactions) {
         if(binding.handle!=attackHandle || !binding.resource)continue;
+        auto trace=D::Claim(binding.epoch,binding.resource,binding.objectId,binding.netId,command,binding.slot,binding.connection,binding.occurrence);
+        trace.facts|=D::Native;trace.frame=g_frameCounter;trace.expires=binding.expires;
+        trace.consumedBefore=binding.consumed?1:0;trace.actor=player;trace.sourceActor=receiver;
+        const char* why="unknown";
         enemysync::DownedScope scope;
-        if(!enemysync::CaptureDownedScope(scope) || receiver!=binding.owner || player!=g_soraActor || command!=binding.command ||
-           binding.consumed || binding.slot!=scope.localSlot || !binding.occurrence ||
-           binding.connection!=scope.connections[scope.localSlot] || binding.epoch!=scope.epoch ||
-           (scope.localSlot && g_frameCounter>=binding.expires) ||
-           downedspike::LogicallyDowned())return;
+        if(!D::Check(enemysync::CaptureDownedScope(scope),"downed-scope",why) ||
+           !D::Check(receiver==binding.owner,"binding-receiver",why) || !D::Check(player==g_soraActor,"canonical-player",why) ||
+           !D::Check(command==binding.command,"binding-command",why) || !D::Check(!binding.consumed,"already-consumed",why) ||
+           !D::Check(binding.slot==scope.localSlot,"local-selected-seat",why) || !D::Check(binding.occurrence!=0,"occurrence-zero",why) ||
+           !D::Check(binding.connection==scope.connections[scope.localSlot],"binding-connection",why) ||
+           !D::Check(binding.epoch==scope.epoch,"binding-epoch",why) ||
+           D::Reject(scope.localSlot && g_frameCounter>=binding.expires,"local-binding-expired",why) ||
+           D::Reject(downedspike::LogicallyDowned(),"local-down",why)) {
+            SmRcHop(D::Stage::LocalHandler,"refused",why,trace);return;
+        }
         enemysync::ScriptReactionCompletionRecord claim{binding.occurrence,scope.connections[scope.localSlot],
             binding.resource,binding.objectId,scope.epoch,binding.netId,static_cast<std::uint16_t>(command),scope.localSlot};
         if(scope.localSlot==0)(void)SmCompleteReaction(claim);
         else {
             binding.consumed=true;(void)SmSetReactionCommand(binding,0);
+            trace.consumedAfter=1;
+            SmRcHop(D::Stage::LocalHandler,"send-enter","attack-consumed",trace);
             const bool queued=enemysync::SendScriptReactionCompletion(claim);
+            SmRcHop(D::Stage::LocalHandler,queued?"ring-enqueued":"send-refused","attack-send-returned",trace);
             Log("[script-rc] local completion source=%u resource=%u occurrence=%llu command=%u owner=%u queued=%u",
                 claim.netId,claim.resource,claim.occurrence,claim.command,claim.ownerSlot,queued?1u:0u);
         }
@@ -1442,6 +1535,7 @@ static void __fastcall SmReactionCallback(uintptr_t receiver,uintptr_t player,st
     // This also covers warmup/held sources: an unpaired prompt must never
     // enter a client BDX callback merely because pose driving is not ready.
     if(ownedReceiver) {
+        SmRcHop(D::Stage::LocalHandler,"refused","unpaired-callback",acceptedTrace);
         Log("[script-rc] refused unpaired callback command=%u",command);
         return;
     }

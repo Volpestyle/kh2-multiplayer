@@ -35,6 +35,20 @@ struct ScriptActorRole {
     R::OwnerVisualHeartbeat visualHeartbeat{};  // VUH-2610: spectator only; reset with the role
 };
 static std::array<ScriptActorRole,3> g_smRoles{};
+// Diagnostic copies of admitted metadata, never native VM workspaces or new
+// ownership. A revoked cleanup association is explicitly distinct from active.
+struct SmLifeSnapshot {
+    ScriptActorRole role{};
+    D::Record trace{};
+    bool associated{},qualified{},revoked{};
+    std::uint64_t captureSerial{};
+    uintptr_t executing{};
+    int executingRead{-1};
+    const char* failure{"unassociated"};
+};
+static SmLifeSnapshot SmLifeCapturePrepare(std::uint64_t) noexcept;
+static void SmLifeCaptureReturned(const SmLifeSnapshot&,std::uint64_t*) noexcept;
+static void SmLifeCancelForCleanup(const ScriptActorRole&);
 // Revocation ends command authority immediately. Native event shutdown remains
 // asynchronous; retain only the exact old camera/actor cleanup receipt.
 struct ScriptOwnerCleanup { ScriptActorRole role{}; };
@@ -96,6 +110,9 @@ static bool SmOwnerCameraAsset(uintptr_t,std::uint32_t,uintptr_t* = nullptr) noe
 static bool SmOwnerOpenedCamera(ScriptActorRole&,uintptr_t,std::uint32_t) noexcept;
 static void __fastcall SmOwnerAttach(std::uint64_t*);
 static void __fastcall SmOwnerDetach(std::uint64_t*);
+static void __fastcall SmLifeMotionEnd(std::uint64_t*);
+static void __fastcall SmLifeCaptureId(std::uint64_t*);
+static bool SmOwnerPin(std::uint32_t,const std::uint8_t*,std::size_t);
 struct OwnerTrapSlot {
     std::uint16_t index;
     std::uint32_t rva,flags;
@@ -105,6 +122,7 @@ struct OwnerTrapSlot {
     uintptr_t entry{},original{};
     bool swapped{};
 };
+static constexpr std::size_t kSmOwnerCoreTrapCount=6;
 static OwnerTrapSlot g_smOwnerTraps[]{
     {3,0x42B230,0x40000000,R::kOwnerPlayer,sizeof(R::kOwnerPlayer),&SmOwnerPlayer},
     {112,0x42CA20,3,R::kOwnerHook,sizeof(R::kOwnerHook),&SmOwnerHook},
@@ -112,9 +130,16 @@ static OwnerTrapSlot g_smOwnerTraps[]{
     {157,0x42E070,3,R::kOwnerCamera,sizeof(R::kOwnerCamera),&SmOwnerCamera},
     {18,0x42C550,6,R::kOwnerAttach,sizeof(R::kOwnerAttach),&SmOwnerAttach},
     {102,0x42C5F0,1,R::kOwnerDetach,sizeof(R::kOwnerDetach),&SmOwnerDetach},
+    {14,0x42B440,0x40000001,R::kOwnerMotionEndObservation,sizeof(R::kOwnerMotionEndObservation),&SmLifeMotionEnd},
+    {238,0x42D3B0,0x40000001,R::kOwnerCaptureIdObservation,sizeof(R::kOwnerCaptureIdObservation),&SmLifeCaptureId},
 };
-static bool SmOwnerScope(enemysync::DownedScope& scope) {
-    return SmGameThread() && !warp::TransitionPending() && enemysync::CaptureDownedScope(scope);
+static bool SmOwnerScope(enemysync::DownedScope& scope,const char** failure=nullptr) {
+    const char* why="scope-current";
+    const bool current=D::Check(SmGameThread(),"scope-game-thread",why) &&
+        D::Check(!warp::TransitionPending(),"scope-transition-pending",why) &&
+        D::Check(enemysync::CaptureDownedScope(scope),"scope-capture-downed",why);
+    if(!current && failure)*failure=why;
+    return current;
 }
 static uintptr_t SmOwnerVmSource(std::uint16_t& netId,std::uint32_t& objectId) {
     netId=0;objectId=0;
@@ -138,17 +163,27 @@ static int SmOwnerActorSeat(uintptr_t actor) {
         return i?enemytarget::g.ownerSlot[i]:0;
     return -1;
 }
-static bool SmOwnerActorCurrent(const ScriptActorRole& role) {
-    uintptr_t status=0,entry=0;std::uint32_t objectId=0;
-    if(!role.source || !role.sourceHandle || SmOwnHandle(role.source)!=role.sourceHandle ||
-       !ReadHitTrace(role.source+0x5C0,status) || status!=role.sourceStatus ||
-       !ReadHitTrace(role.source+offsets::actor::OBJENTRY_PTR,entry) || entry!=role.sourceObjentry || !entry ||
-       !ReadHitTrace(entry+offsets::objentry::OBJECT_ID,objectId) || objectId!=role.objectId)return false;
+static bool SmOwnerActorCurrent(const ScriptActorRole& role,const char** failure=nullptr) {
+    uintptr_t status=0,entry=0;std::uint32_t objectId=0;const char* why="unknown";
+    const auto fail=[&](){if(failure)*failure=why;return false;};
+    if(!D::Check(role.source!=0,"source-zero",why) || !D::Check(role.sourceHandle!=0,"source-handle-zero",why) ||
+       !D::Check(SmOwnHandle(role.source)==role.sourceHandle,"source-handle-replaced",why) ||
+       !D::Check(ReadHitTrace(role.source+0x5C0,status),"source-status-unreadable",why) ||
+       !D::Check(status==role.sourceStatus,"source-status-replaced",why) ||
+       !D::Check(ReadHitTrace(role.source+offsets::actor::OBJENTRY_PTR,entry),"source-entry-unreadable",why) ||
+       !D::Check(entry==role.sourceObjentry,"source-entry-replaced",why) || !D::Check(entry!=0,"source-entry-zero",why) ||
+       !D::Check(ReadHitTrace(entry+offsets::objentry::OBJECT_ID,objectId),"source-id-unreadable",why) ||
+       !D::Check(objectId==role.objectId,"source-id-replaced",why))return fail();
     if(!role.actor)return true; // metadata for a different seat never writes an actor
-    return role.actorHandle && SmOwnHandle(role.actor)==role.actorHandle &&
-        ReadHitTrace(role.actor+0x5C0,status) && status==role.actorStatus &&
-        ReadHitTrace(role.actor+offsets::actor::OBJENTRY_PTR,entry) && entry==role.actorObjentry && entry &&
-        ReadHitTrace(entry+offsets::objentry::OBJECT_ID,objectId) && objectId==role.actorObjectId;
+    if(!D::Check(role.actorHandle!=0,"actor-handle-zero",why) ||
+       !D::Check(SmOwnHandle(role.actor)==role.actorHandle,"actor-handle-replaced",why) ||
+       !D::Check(ReadHitTrace(role.actor+0x5C0,status),"actor-status-unreadable",why) ||
+       !D::Check(status==role.actorStatus,"actor-status-replaced",why) ||
+       !D::Check(ReadHitTrace(role.actor+offsets::actor::OBJENTRY_PTR,entry),"actor-entry-unreadable",why) ||
+       !D::Check(entry==role.actorObjentry,"actor-entry-replaced",why) || !D::Check(entry!=0,"actor-entry-zero",why) ||
+       !D::Check(ReadHitTrace(entry+offsets::objentry::OBJECT_ID,objectId),"actor-id-unreadable",why) ||
+       !D::Check(objectId==role.actorObjectId,"actor-id-replaced",why))return fail();
+    return true;
 }
 static bool SmOwnerCaptureCurrent(const ScriptActorRole& role) {
     uintptr_t capture=0;std::uint32_t captureFlags=0,actorFlags=0;
@@ -166,15 +201,26 @@ static bool SmOwnerBindActor(ScriptActorRole& role) {
         ReadHitTrace(role.actor+offsets::actor::OBJENTRY_PTR,role.actorObjentry) && role.actorObjentry &&
         ReadHitTrace(role.actorObjentry+offsets::objentry::OBJECT_ID,role.actorObjectId);
 }
-static bool SmOwnerCurrent(const ScriptActorRole& role,const enemysync::DownedScope& scope) {
-    if(role.actor && role.actor==g_soraActor && downedspike::LogicallyDowned())return false;
+static bool SmOwnerCurrent(const ScriptActorRole& role,const enemysync::DownedScope& scope,
+    const char** failure=nullptr,D::Record* trace=nullptr) {
+    const char* why="role-current";
+    const auto fail=[&](){if(failure)*failure=why;return false;};
+    if(role.actor && role.actor==g_soraActor && downedspike::LogicallyDowned()){why="local-down";return fail();}
     uintptr_t currentThread=0;
-    if(role.actor && (!ReadHitTrace(role.actor+0xD48,currentThread) || currentThread!=role.thread))return false;
-    return role.resource && role.slot<3 && role.epoch==scope.epoch &&
-        enemysync::ScriptCameraScopeCurrent(role.admittedScope) &&
-        role.connection && scope.connections[role.slot]==role.connection && SmOwnerActorCurrent(role) &&
-        (g_sm.hostActive?enemysync::HostEnemyNetId(role.source,role.objectId)==role.netId:
-            SmDrivenActor(role.netId,role.objectId)==role.source);
+    if(role.actor) {
+        const bool read=ReadHitTrace(role.actor+0xD48,currentThread);
+        if(trace){trace->observedRead=read?1:0;trace->expected=role.thread;trace->observed=currentThread;}
+        if(!read || currentThread!=role.thread){why=read?"coroutine-replaced":"coroutine-unreadable";return fail();}
+    }
+    if(!D::Check(role.resource!=0,"role-resource",why) || !D::Check(role.slot<3,"role-slot",why) ||
+       !D::Check(role.epoch==scope.epoch,"role-epoch",why) ||
+       !D::Check(enemysync::ScriptCameraScopeCurrent(role.admittedScope),"admitted-scope",why) ||
+       !D::Check(role.connection!=0,"role-connection-zero",why) ||
+       !D::Check(scope.connections[role.slot]==role.connection,"role-connection-replaced",why) ||
+       !SmOwnerActorCurrent(role,&why) ||
+       !D::Check(g_sm.hostActive?enemysync::HostEnemyNetId(role.source,role.objectId)==role.netId:
+            SmDrivenActor(role.netId,role.objectId)==role.source,"source-binding",why))return fail();
+    return true;
 }
 static ScriptActorRole* SmOwnerRoleForSource(uintptr_t source) {
     uintptr_t executing=0,parent=0;
@@ -667,8 +713,7 @@ static void SmOwnerCleanupPlayer(const ScriptActorRole& released) {
             bool cleanup=false;
             if(haveThread && released.thread && currentThread==released.thread &&
                ReadHitTrace(currentThread+0x60,source) && source==released.source) {
-                using Cancel=void(__fastcall*)(uintptr_t);
-                reinterpret_cast<Cancel>(g_exeBase+0x3D6F80)(released.actor);
+                SmLifeCancelForCleanup(released); // same native call; diagnostic revoked-role context only
                 cleanup=true;
             }
             if(haveThread && !currentThread && ReadHitTrace(released.actor+0x2B0,capture) && capture==released.source)cleanup=true;
@@ -853,7 +898,13 @@ static void __fastcall SmOwnerHook(std::uint64_t* args) {
 static void __fastcall SmOwnerCapture(std::uint64_t* args) {
     SmOwnerResidueInvalidate(); // VUH-2580: our replays call the original, never this detour
     std::uint64_t before[4]{};const bool copied=SmCopyArgs(args,before,4);
+    const auto beforeObservationError=GetLastError();
+    const auto observation=SmLifeCapturePrepare(copied?before[1]:0);
+    SetLastError(beforeObservationError);
     reinterpret_cast<TrapFn>(g_smOwnerTraps[2].original)(args);
+    const auto nativeError=GetLastError();
+    SmLifeCaptureReturned(observation,args);
+    SetLastError(nativeError);
     if(!g_sm.hostActive || !copied || !SmGameThread())return;
     std::uint32_t ignored=0;const auto actor=SmActorOf(before[1],ignored);
     enemysync::DownedScope scope;if(!SmOwnerScope(scope))return;
@@ -1003,20 +1054,99 @@ static void OwnerPostUpdate(uintptr_t actor) {
     }
 }
 static std::array<R::ReactionSeat,3> SmOwnerLivingSeats(const enemysync::DownedScope&);
+// Diagnostic snapshots only. No cached pointer is dereferenced by the emitter.
+static void SmRcRoleSnapshot(D::Record&,const ScriptActorRole&) noexcept;
+struct SmOwnerRetirementObservation {
+    uintptr_t selectedActor{},secondThread{};
+    std::uint64_t scopeDelivery{},scopeConnection{};
+    std::uint32_t scopeGeneration{},scopeEpoch{},scopeSlot{255};
+    int scopeCaptured{-1};
+    int selectedRead{-1},secondRead{-1},hostActive{-1};
+};
+static D::Record SmOwnerRetirementSnapshot(const ScriptActorRole& role) noexcept {
+    auto trace=D::Claim(role.epoch,role.resource,role.objectId,role.netId,role.reaction.command,
+        role.slot,role.connection,role.reaction.occurrence);
+    trace.tuple=role.resource && role.reaction.occurrence && role.reaction.command && role.connection;
+    SmRcRoleSnapshot(trace,role);
+    // These are cached admission values, not a new/current scope proof.
+    trace.generation=role.admittedScope.context.generation;
+    trace.sourceDelivery=role.admittedScope.context.deliverySerial;
+    return trace;
+}
+static void SmOwnerRetirementLog(const char* caller,const char* reason,const D::Record& checked,
+    const ScriptActorRole& current,const SmOwnerRetirementObservation& observation) noexcept {
+    if(!current.resource)return; // original Release would be a no-op
+    const auto disposition=SmOwnerRetirementSnapshot(current);
+    const auto seen=observation; // no role/candidate references survive into Log
+    const bool same=checked.resource==disposition.resource && checked.actor==disposition.actor &&
+        checked.sourceActor==disposition.sourceActor && checked.thread==disposition.thread &&
+        checked.requester==disposition.requester && checked.epoch==disposition.epoch && checked.slot==disposition.slot &&
+        checked.load==disposition.load && checked.transition==disposition.transition;
+    D::Emit(D::Stage::RoleRetirement,"retiring",reason,checked,[&](const char* base) {
+        // Keep the one saturation row free of an unrelated tuple suffix.
+        if(!std::strstr(base," tuple=")){Log("%s",base);return;}
+        char line[4096]{};
+        std::snprintf(line,sizeof(line),
+            "%s caller=%s cachedIdentityMatchesDisposition=%u selectedActor=%llX selectedEvaluated=%d secondD48=%llX secondRead=%d hostActiveObserved=%d scopeGuardSucceeded=%d scopeGeneration=%u scopeDelivery=%llu scopeEpoch=%u scopeSlot=%u scopeConnection=%llu dispositionResource=%u dispositionActor=%llX dispositionSource=%llX dispositionThread=%llX dispositionConnection=%llu dispositionEpoch=%u dispositionSlot=%u dispositionLoad=%u dispositionTransition=%u dispositionFrame=%u dispositionOccurrence=%llu dispositionCommand=%u dispositionCommandFrame=%u dispositionOpenedFrame=%u dispositionDuration=%u dispositionConsumed=%d dispositionLease=%llu",
+            base,caller,same?1u:0u,static_cast<unsigned long long>(seen.selectedActor),seen.selectedRead,
+            static_cast<unsigned long long>(seen.secondThread),seen.secondRead,seen.hostActive,seen.scopeCaptured,seen.scopeGeneration,
+            static_cast<unsigned long long>(seen.scopeDelivery),seen.scopeEpoch,seen.scopeSlot,
+            static_cast<unsigned long long>(seen.scopeConnection),disposition.resource,static_cast<unsigned long long>(disposition.actor),
+            static_cast<unsigned long long>(disposition.sourceActor),static_cast<unsigned long long>(disposition.thread),
+            static_cast<unsigned long long>(disposition.requester),disposition.epoch,disposition.slot,disposition.load,disposition.transition,disposition.frame,
+            static_cast<unsigned long long>(disposition.occurrence),disposition.command,disposition.commandFrame,
+            disposition.openedFrame,disposition.duration,disposition.consumedBefore,static_cast<unsigned long long>(disposition.lease));
+        Log("%s",line);
+    });
+}
 static void SmOwnerFrame() {
     SmOwnerPollVisualCleanup();
     SmOwnerPollCleanup();
-    enemysync::DownedScope scope;
-    if(!SmOwnerScope(scope)){SmOwnerReset(true);return;}
+    enemysync::DownedScope scope;const char* scopeFailure="scope-current";
+    if(!SmOwnerScope(scope,&scopeFailure)) {
+        // Snapshot each currently nonzero role before the original group reset.
+        // Later native cleanup may reenter; this records reset-entry, not a
+        // claim about every role that subsequent cleanup might replace.
+        SmOwnerRetirementObservation observed{};observed.scopeCaptured=0;
+        for(const auto& role:g_smRoles)if(role.resource) {
+            const auto checked=SmOwnerRetirementSnapshot(role);
+            SmOwnerRetirementLog("scope-reset-entry",scopeFailure,checked,role,observed);
+        }
+        SmOwnerReset(true);return;
+    }
     for(auto& role:g_smRoles) {
         if(!role.resource)continue;
-        bool live=SmOwnerCurrent(role,scope);
+        auto checked=SmOwnerRetirementSnapshot(role);SmOwnerRetirementObservation observed{};
+        observed.scopeCaptured=1;observed.scopeGeneration=scope.context.generation;
+        observed.scopeDelivery=scope.context.deliverySerial;observed.scopeEpoch=scope.epoch;observed.scopeSlot=scope.localSlot;
+        if(role.slot<scope.connections.size())observed.scopeConnection=scope.connections[role.slot];
+        const char* failure="role-current";
+        bool live=SmOwnerCurrent(role,scope,&failure,&checked);
         if(role.visual.actor && !SmOwnerVisualCurrent(role,scope))SmOwnerRetireVisual(role,true);
         if(scope.localSlot==0) {
             uintptr_t thread=0;
-            live=live && g_sm.hostActive && SmOwnerSeatActor(role.slot)==role.actor &&
-                ReadHitTrace(role.actor+0xD48,thread) && thread && thread==role.thread;
-            if(!live){SmOwnerRelease(role,true,true);continue;}
+            // These are the original lazy host predicates, in the same order.
+            // Keep this SECOND D48 read separate from SmOwnerCurrent's first.
+            if(live) {
+                const bool active=g_sm.hostActive;observed.hostActive=active?1:0;
+                if(!active){failure="host-inactive";live=false;}
+                else {
+                    const auto selected=SmOwnerSeatActor(role.slot);
+                    observed.selectedActor=selected;observed.selectedRead=1;
+                    if(selected!=role.actor){failure="host-selected-actor";live=false;}
+                    else {
+                        const bool read=ReadHitTrace(role.actor+0xD48,thread);
+                        observed.secondRead=read?1:0;observed.secondThread=thread;
+                        if(!read){failure="host-second-d48-unreadable";live=false;}
+                        else if(!thread){failure="host-second-d48-zero";live=false;}
+                        else if(thread!=role.thread){failure="host-second-d48-replaced";live=false;}
+                    }
+                }
+            }
+            if(!live) {
+                SmOwnerRetirementLog("host-frame-release",failure,checked,role,observed);
+                SmOwnerRelease(role,true,true);continue;
+            }
             (void)R::RefreshReaction(role.reaction,scope.epoch,g_frameCounter,SmOwnerLivingSeats(scope));
             if(g_frameCounter-role.heartbeat>=15) {
                 // Arrival admission can legitimately drop an early Begin and
@@ -1036,9 +1166,13 @@ static void SmOwnerFrame() {
                 if(SmEmit(pulse))role.heartbeat=g_frameCounter;
             }
         } else {
-            live=live && GetTickCount64()<role.deadline &&
-                (role.slot!=scope.localSlot || (role.actor==g_soraActor && !downedspike::LogicallyDowned()));
-            if(!live)SmOwnerRelease(role,true,false);
+            live=live && D::Check(GetTickCount64()<role.deadline,"client-lease-expired",failure) &&
+                (role.slot!=scope.localSlot || (D::Check(role.actor==g_soraActor,"client-canonical-actor",failure) &&
+                    D::Check(!downedspike::LogicallyDowned(),"client-logical-down",failure)));
+            if(!live) {
+                SmOwnerRetirementLog("client-frame-release",failure,checked,role,observed);
+                SmOwnerRelease(role,true,false);
+            }
         }
     }
 }
@@ -1078,44 +1212,79 @@ static std::array<R::ReactionSeat,3> SmOwnerLivingSeats(const enemysync::DownedS
     }
     return seats;
 }
+static void SmRcRoleSnapshot(D::Record& trace,const ScriptActorRole& role) noexcept {
+    trace.facts|=D::Native|D::Role;trace.frame=g_frameCounter;trace.load=role.load;trace.transition=role.transition;
+    trace.actor=role.actor;trace.sourceActor=role.source;trace.thread=role.thread;
+    trace.commandFrame=role.commandFrame;trace.slot=role.slot;trace.mode=role.commandMode;
+    trace.facts|=D::Window;trace.openedFrame=role.reaction.openedFrame;trace.duration=role.reaction.duration;
+    trace.consumedBefore=role.reaction.consumed?1:0;
+    trace.lease=role.deadline;trace.actorStatus=role.actorStatus;trace.actorEntry=role.actorObjentry;
+    trace.sourceStatus=role.sourceStatus;trace.sourceEntry=role.sourceObjentry;
+    trace.actorHandle=role.actorHandle;trace.sourceHandle=role.sourceHandle;
+}
+#include "ScriptActorLifecycleTrace.inl"
 static bool SmOwnerCompleteReaction(const enemysync::ScriptReactionCompletionRecord& claim) {
+    auto trace=SmRcClaim(claim);trace.facts|=D::Native;trace.frame=g_frameCounter;
+    const char* why="unknown";
+    const auto refused=[&](){SmRcHop(D::Stage::HostRole,"refused",why,trace);return false;};
     enemysync::DownedScope scope;
-    if(!g_sm.hostActive || !g_smReactionCallback || !SmOwnerScope(scope) || scope.localSlot!=0)return false;
+    if(!D::Check(g_sm.hostActive,"host-active",why) || !D::Check(g_smReactionCallback!=nullptr,"callback-ready",why) ||
+       !D::Check(SmOwnerScope(scope),"owner-scope",why) || !D::Check(scope.localSlot==0,"local-host-seat",why))return refused();
     for(auto& role:g_smRoles)if(role.resource==claim.resource && role.netId==claim.netId && role.objectId==claim.objectId) {
         const R::ReactionCompletion completion{claim.occurrence,claim.requesterConnectionId,claim.epoch,
             claim.netId,claim.command,claim.ownerSlot};
         const auto seats=SmOwnerLivingSeats(scope);
-        if(!SmOwnerCurrent(role,scope) || g_frameCounter-role.commandFrame>15 ||
-           !R::OwnerCommandCaptureLive(role.commandMode,SmOwnerCaptureCurrent(role)) ||
-           SmOwnerSeatActor(role.slot)!=role.actor || !SmOwnHandle(role.source) ||
-           !R::ConsumeReaction(role.reaction,completion,scope.epoch,g_frameCounter,seats))return false;
+        SmRcRoleSnapshot(trace,role);
+        if(!SmOwnerCurrent(role,scope,&why,&trace) ||
+           !D::Check(g_frameCounter-role.commandFrame<=15,"command-producer-stale",why) ||
+           !D::Check(R::OwnerCommandCaptureLive(role.commandMode,SmOwnerCaptureCurrent(role)),"mode-capture",why) ||
+           !D::Check(SmOwnerSeatActor(role.slot)==role.actor,"selected-seat-actor",why) ||
+           !D::Check(SmOwnHandle(role.source)!=0,"source-handle",why))return refused();
+        const auto before=role.reaction;SmRcWindow(trace,before,seats);trace.frame=g_frameCounter;
+        const bool consumed=R::ConsumeReaction(role.reaction,completion,scope.epoch,g_frameCounter,seats);
+        trace.consumedAfter=role.reaction.consumed?1:0;
+        if(!consumed){why=SmRcConsumeReason(before,completion,scope.epoch,trace.frame,seats);return refused();}
         const std::uint32_t target[]{SmOwnHandle(role.source),0,0,UINT32_MAX,0};
         const auto completed=claim; // Native hook may replace this role before returning.
+        const auto entered=trace;
+        SmRcHop(D::Stage::HostRole,"callback-enter","consumed",entered);
         g_smReactionCallback(role.source,role.actor,claim.command,target);
+        SmRcHop(D::Stage::HostRole,"callback-returned","native-call-returned",entered);
         Log("[script-rc] complete source=%u resource=%u occurrence=%llu command=%u owner=%u",
             completed.netId,completed.resource,completed.occurrence,completed.command,completed.ownerSlot);
         return true;
     }
-    return false;
+    why="role-missing";return refused();
 }
-static bool SmOwnerReactionCallback(uintptr_t receiver,uintptr_t player,std::uint32_t command) {
-    enemysync::DownedScope scope;if(!SmOwnerScope(scope))return false;
+static bool SmOwnerReactionCallback(uintptr_t receiver,uintptr_t player,std::uint32_t command,
+                                   const D::Record* acceptedTrace=nullptr) {
+    auto trace=acceptedTrace?*acceptedTrace:D::Record{};trace.command=command;trace.actor=player;trace.sourceActor=receiver;
+    const char* why="unknown";
+    enemysync::DownedScope scope;
+    if(!SmOwnerScope(scope)){if(trace.tuple)SmRcHop(D::Stage::LocalHandler,"not-handled","owner-scope",trace);return false;}
     for(auto& role:g_smRoles)if(role.resource && role.source==receiver && role.actor==player && role.reaction.command==command) {
-        if(!SmOwnerCurrent(role,scope) || role.slot!=scope.localSlot || player!=g_soraActor ||
-           downedspike::LogicallyDowned() || !R::OwnerCommandCaptureLive(role.commandMode,SmOwnerCaptureCurrent(role)) ||
-           !R::ReactionLive(role.reaction,scope.epoch,g_frameCounter))return true;
+        trace= D::Claim(role.epoch,role.resource,role.objectId,role.netId,command,role.slot,role.connection,role.reaction.occurrence);
+        SmRcRoleSnapshot(trace,role);trace.consumedBefore=role.reaction.consumed?1:0;
+        if(!SmOwnerCurrent(role,scope,&why,&trace) || !D::Check(role.slot==scope.localSlot,"local-selected-seat",why) ||
+           !D::Check(player==g_soraActor,"canonical-player",why) || !D::Check(!downedspike::LogicallyDowned(),"local-down",why) ||
+           !D::Check(R::OwnerCommandCaptureLive(role.commandMode,SmOwnerCaptureCurrent(role)),"mode-capture",why) ||
+           !D::Check(R::ReactionLive(role.reaction,scope.epoch,g_frameCounter),"local-role-window",why)) {
+            SmRcHop(D::Stage::LocalHandler,"refused",why,trace);return true;
+        }
         enemysync::ScriptReactionCompletionRecord claim{role.reaction.occurrence,role.connection,
             role.resource,role.objectId,role.epoch,role.netId,static_cast<std::uint16_t>(command),role.slot};
         if(scope.localSlot==0)(void)SmOwnerCompleteReaction(claim);
         else {
-            role.reaction.consumed=true;
+            role.reaction.consumed=true;trace.consumedAfter=1;
+            SmRcHop(D::Stage::LocalHandler,"send-enter","role-consumed",trace);
             const bool queued=enemysync::SendScriptReactionCompletion(claim);
+            SmRcHop(D::Stage::LocalHandler,queued?"ring-enqueued":"send-refused","role-send-returned",trace);
             Log("[script-rc] local completion source=%u resource=%u occurrence=%llu command=%u owner=%u queued=%u",
                 claim.netId,claim.resource,claim.occurrence,claim.command,claim.ownerSlot,queued?1u:0u);
         }
         return true;
     }
-    return false;
+    if(trace.tuple)SmRcHop(D::Stage::LocalHandler,"not-handled","role-missing",trace);return false;
 }
 static uintptr_t SmOwnerInvokeCommand(OwnerCommandFn original,uintptr_t controller,int kind,std::uint32_t command,
     const std::uint32_t* target,std::uint32_t flags,int priority,bool& ok) noexcept {
@@ -1506,6 +1675,7 @@ static bool SmOwnerPin(std::uint32_t rva,const std::uint8_t* expected,std::size_
     return size<=sizeof(body) && ReadHitTraceMemory(g_exeBase+rva,body,size) && !std::memcmp(body,expected,size);
 }
 static void SmOwnerShutdown() {
+    SmLifeShutdown(); // isolated observer teardown precedes core revocation
     SmNativeReactionShutdown();
     enemysync::SetScriptCameraCurrent(nullptr);
     // A callback already inside its detour may still need the trampoline.
@@ -1534,7 +1704,8 @@ static bool SmOwnerInstall() {
     g_smOwnerInstalled.store(false,std::memory_order_release);
     const bool reactionPins=SmNativeReactionPins();
     uintptr_t table=0;if(!ReadHitTrace(g_exeBase+R::kTrapTables+8,table) || !table)return false;
-    for(auto& slot:g_smOwnerTraps) {
+    for(std::size_t i=0;i<kSmOwnerCoreTrapCount;++i) {
+        auto& slot=g_smOwnerTraps[i];
         std::uint32_t flags=0;slot.entry=R::EntryRva(table,slot.index);
         if(!ReadHitTrace(slot.entry,slot.original) || slot.original!=g_exeBase+slot.rva ||
            !ReadHitTrace(slot.entry+8,flags) || flags!=slot.flags || !SmOwnerPin(slot.rva,slot.body,slot.size))return false;
@@ -1569,7 +1740,8 @@ static bool SmOwnerInstall() {
        MH_EnableHook(reinterpret_cast<void*>(g_exeBase+0x3B25C0))!=MH_OK) {
         SmOwnerShutdown();return false;
     }
-    for(auto& slot:g_smOwnerTraps) {
+    for(std::size_t i=0;i<kSmOwnerCoreTrapCount;++i) {
+        auto& slot=g_smOwnerTraps[i];
         slot.swapped=InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(slot.entry),
             reinterpret_cast<void*>(slot.detour),reinterpret_cast<void*>(slot.original))==reinterpret_cast<void*>(slot.original);
         if(!slot.swapped){SmOwnerShutdown();return false;}
@@ -1581,5 +1753,6 @@ static bool SmOwnerInstall() {
     if(reactionPins && SmNativeReactionInstall())
         enemysync::SetScriptReactionCurrent(&SmNativeReactionCurrent);
     else Log("[script-rc-cache] unavailable pins=%u; existing owner suppression retained",reactionPins?1u:0u);
+    (void)SmLifeInstall(table); // diagnostic refusal never rolls back the core
     return true;
 }

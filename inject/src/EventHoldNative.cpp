@@ -12,6 +12,7 @@ namespace kh2coop::inject::eventholdnative {
 namespace {
 eventhold::Channel channel;
 std::atomic<bool> enabled {false}, inputHeld {false};
+std::atomic<bool> inputRejected {false};
 std::atomic_flag inputEntry = ATOMIC_FLAG_INIT;
 uintptr_t base = 0;
 LogFn log = nullptr;
@@ -54,6 +55,23 @@ bool Overlay(void* ptr, std::uint16_t buttons) noexcept {
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+bool RecoveryInputReady() noexcept {
+    __try {
+        NativeInputSample native;
+        auto* collector = reinterpret_cast<void*>(*reinterpret_cast<uintptr_t*>(base + offsets::INPUT_STRUCT_PTR));
+        return Enabled() && !input.Holding() && ReadInput(collector, native) &&
+            native.inField && native.value.menu == 255 && native.eventState == 0 &&
+            native.context == 0 && native.frozen == 0 && native.blockers == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+// Caller owns inputEntry. Observe a rejection that arrived during this callback
+// before a replay/overlay; rejected foreign callers never access the mapping.
+bool ConsumeInputRejection() noexcept {
+    if (!inputRejected.exchange(false, std::memory_order_acq_rel)) return false;
+    channel.Invalidate(eventhold::Abort::Unsupported);
+    input.Fail();
+    return true;
+}
 bool SameFact(eventhold::Command a, eventhold::Command b) {
     a.ordinal = b.ordinal = 0;
     return a == b;
@@ -74,7 +92,12 @@ void Install(uintptr_t exeBase, LogFn sink) {
 }
 void Disable() noexcept {
     enabled.store(false, std::memory_order_release);
-    channel.Invalidate(eventhold::Abort::Shutdown);
+    // Serialize against the owner-only mapping handoff. If input is in flight,
+    // it sees enabled=false; never unmap or wait inside hook retirement.
+    if (!inputEntry.test_and_set(std::memory_order_acquire)) {
+        channel.Invalidate(eventhold::Abort::Shutdown);
+        inputEntry.clear(std::memory_order_release);
+    }
     // Keep the view alive until DLL lifetime ends. A callback already in flight
     // can observe invalidation without racing an unmap during hook retirement.
 }
@@ -85,12 +108,18 @@ bool EnterInput() noexcept {
     // yet rather than aborting the channel for the whole session (prologue friends never paused).
     if (!spawncontroller::DiagnosticGameThreadKnown()) return false;
     if (!spawncontroller::IsDiagnosticGameThread()) {
-        eventhold::Scope bound {};
-        if (channel.BoundScope(bound)) channel.Invalidate(eventhold::Abort::Unsupported);
+        // Rejected readers must not touch a view the owner can now replace.
+        // The next registered collector latches the fault under its guard.
+        inputRejected.store(true, std::memory_order_release);
         return false;
     }
     if (inputEntry.test_and_set(std::memory_order_acquire)) {
+        inputRejected.store(true, std::memory_order_release);
+        return false;
+    }
+    if (inputRejected.exchange(false, std::memory_order_acq_rel)) {
         channel.Invalidate(eventhold::Abort::Unsupported);
+        inputEntry.clear(std::memory_order_release);
         return false;
     }
     return true;
@@ -101,6 +130,40 @@ bool HoldingInput() noexcept { return Enabled() && inputHeld.load(std::memory_or
 void RetireOwner() noexcept {
     if (eventhold::ValidScope(ownerScope)) channel.Invalidate(eventhold::Abort::BindingReset);
     ownerScope = {}; consumedCount = 0; ownerOrdinal = 0;
+}
+bool BeginRecoveredLifetime(const eventhold::Scope& scope, std::uint32_t epoch) {
+    if (!Enabled() || !epoch || !eventhold::ValidScope(scope) ||
+        !spawncontroller::IsDiagnosticGameThread()) return false;
+    eventhold::Scope old {};
+    if (!channel.BoundScope(old) || channel.Reason() != eventhold::Abort::HeartbeatExpired ||
+        std::memcmp(old.session, scope.session, sizeof(old.session)) != 0 ||
+        old.hostConnection != scope.hostConnection || old.slot != scope.slot ||
+        old.selfConnection == scope.selfConnection || scope.generation <= old.generation) return false;
+    if (inputEntry.test_and_set(std::memory_order_acquire)) return false;
+    // The raw callback and this owner are the registered game thread. Disable
+    // also takes this guard; a failed open leaves the old view untouched.
+    if (!RecoveryInputReady() || inputRejected.load(std::memory_order_acquire)) {
+        inputEntry.clear(std::memory_order_release); return false;
+    }
+    eventhold::Channel next;
+    if (!next.OpenScoped(GetCurrentProcessId(), scope) || !Enabled() ||
+        inputRejected.load(std::memory_order_acquire)) {
+        inputEntry.clear(std::memory_order_release); return false;
+    }
+    channel.Swap(next);
+    input = InputState {};
+    inputScope = {}; ownerScope = scope; release = {};
+    consumedCount = 0; ownerOrdinal = 0;
+    loggedOrdinal = 0; loggedFlags = UINT32_MAX;
+    inputHeld.store(false, std::memory_order_release);
+    // next owns the old view. Close it before letting another local reader in;
+    // the runtime's independent old view still contains the immutable abort.
+    next.Close();
+    inputEntry.clear(std::memory_order_release);
+    if (log) log("[event-control] recovered lifetime generation=%u self=%llu delivery=%llu epoch=%u resetAckRequired=1",
+        scope.generation, static_cast<unsigned long long>(scope.selfConnection),
+        static_cast<unsigned long long>(scope.targetDelivery), epoch);
+    return true;
 }
 void Observe(const eventhold::Scope& scope, eventhold::Kind kind, std::uint64_t source,
              std::uint32_t epoch, const RoomTransition* room, std::uint16_t eventProgram,
@@ -156,6 +219,7 @@ void OwnerAck(const eventhold::Scope& scope, std::uint32_t epoch, bool eligible,
 }
 bool ApplyInput(void* inputStruct) {
     if (!Enabled()) return false;
+    ConsumeInputRejection();
     const bool wasHeld = input.Holding();
     const auto oldPhase = input.Current();
     NativeInputSample native;
@@ -189,7 +253,8 @@ bool ApplyInput(void* inputStruct) {
             start.worldId = command.startWorld; start.roomId = command.startRoom; start.id = command.startId;
             start.flags = static_cast<std::uint8_t>(command.startFlags); start.params = command.startParams;
             const bool mirrored = hostRoom && command.startId && command.startFlags <= 0xFF && !input.Holding() &&
-                native.value.healthy && native.value.safeToPause && eventstartmirror::Replay(start, command.eventProgram);
+                native.value.healthy && native.value.safeToPause && !ConsumeInputRejection() &&
+                channel.Healthy(GetTickCount64()) && eventstartmirror::Replay(start, command.eventProgram);
             if (mirrored) {
                 if (log) log("[event-mirror] client plays the host's in-field event epoch=%u id=%X", command.epoch, command.startId);
             } else if ((!hostRoom || !input.Acquire(native.value)) && log)
@@ -224,10 +289,10 @@ bool ApplyInput(void* inputStruct) {
     native.value.ownerReleased = release.ordinal && channel.ReadAck(ack) && ack.scope == release.scope &&
         ack.processedOrdinal == release.ordinal && ack.processedHostSourceSerial == release.hostSourceSerial &&
         ack.epoch == release.epoch && ack.flags == (eventhold::SafeConverged | eventhold::LiveEligible);
-    native.value.healthy = Enabled() && channel.Healthy(GetTickCount64());
+    native.value.healthy = !ConsumeInputRejection() && Enabled() && channel.Healthy(GetTickCount64());
     auto output = input.Tick(native.value);
     const auto buttons = static_cast<std::uint16_t>(output.buttons | (output.start ? InputState::StartButton : 0));
-    if (output.neutral && (!channel.Healthy(GetTickCount64()) || !Enabled() || !Overlay(inputStruct, buttons))) {
+    if (output.neutral && (ConsumeInputRejection() || !channel.Healthy(GetTickCount64()) || !Enabled() || !Overlay(inputStruct, buttons))) {
         channel.Invalidate(eventhold::Abort::Unsupported); input.Fail(); output.failed = true;
     }
     inputHeld.store(input.Holding(), std::memory_order_release);

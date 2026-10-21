@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 
 namespace kh2coop::eventhold {
 inline constexpr std::uint32_t Version = 2; // 2: Command carries the host's in-field event start
@@ -86,30 +87,32 @@ public:
     // back. A concurrent in-progress initializer returns false; retry outside
     // native callbacks. Any creator may win the zero->initializing CAS.
     bool Open(DWORD pid, bool existingOnly = false) noexcept {
-        if (data_) return pid == pid_;
+        if (data_) return pid == pid_ && !scoped_;
         if (!pid) return false;
         char name[96] {};
         std::snprintf(name, sizeof(name), "Local\\kh2coop_event_hold_v1_%lu", static_cast<unsigned long>(pid));
-        map_ = existingOnly ? OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name)
-            : CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
-                                 static_cast<DWORD>(sizeof(Shared)), name);
-        if (!map_) return false;
-        data_ = static_cast<Shared*>(MapViewOfFile(map_, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Shared)));
-        if (!data_) { Close(); return false; }
-        if (!existingOnly && InterlockedCompareExchange(&data_->init, 1, 0) == 0) {
-            // Pagefile mappings start zeroed. No memset can race another opener.
-            data_->version = static_cast<LONG>(Version);
-            data_->bytes = static_cast<LONG>(sizeof(Shared));
-            InterlockedExchange(&data_->init, 2);
-        }
-        if (Load(data_->init) != 2 || data_->version != static_cast<LONG>(Version) ||
-            data_->bytes != static_cast<LONG>(sizeof(Shared))) {
-            Close(); return false;
-        }
-        pid_ = pid;
-        return true;
+        return OpenNamed(pid,name,existingOnly);
     }
     bool OpenExisting(DWORD pid) noexcept { return Open(pid, true); }
+    // A recovered lifetime has a separate exact-Scope namespace. No hash,
+    // legacy fallback, abort clear or producer takeover. Setup-thread only.
+    bool OpenScoped(DWORD pid, const Scope& scope) noexcept { return OpenScopedImpl(pid,scope,false); }
+    bool OpenScopedExisting(DWORD pid, const Scope& scope) noexcept { return OpenScopedImpl(pid,scope,true); }
+    bool IsScopedFor(const Scope& scope) const noexcept {
+        return data_ && scoped_ && mappingScope_ == scope;
+    }
+    // Transactional setup/teardown handoff only. Not thread-safe: the caller
+    // must quiesce every local callback/access before replacing either view.
+    // The candidate's destructor can then close the old view after the swap.
+    void Swap(Channel& other) noexcept {
+        if (this==&other) return;
+        using std::swap;
+        swap(map_,other.map_);swap(data_,other.data_);swap(pid_,other.pid_);
+        swap(mappingScope_,other.mappingScope_);swap(scoped_,other.scoped_);
+        swap(producer_,other.producer_);swap(active_,other.active_);
+        swap(next_,other.next_);swap(read_,other.read_);swap(epoch_,other.epoch_);
+        swap(sources_,other.sources_);swap(sourceCount_,other.sourceCount_);
+    }
     bool IsOpen() const noexcept { return data_ != nullptr; }
     std::uint64_t PublishedOrdinal() const noexcept {
         return data_ ? static_cast<std::uint64_t>(Load(data_->written)) : 0;
@@ -119,13 +122,15 @@ public:
         if (data_) UnmapViewOfFile(data_);
         if (map_) CloseHandle(map_);
         data_ = nullptr; map_ = nullptr; pid_ = 0; producer_ = false;
+        scoped_ = false; mappingScope_ = {};
         next_ = 0; read_ = 0; sourceCount_ = 0; epoch_ = 0; active_ = false;
     }
     // No producer takeover/rearm within a mapping lifetime, including after a
     // runtime crash. Native teardown must close its old mapping before a new run.
     bool Bind(const Scope& scope, std::uint64_t now,
               std::uint64_t timeout = HeartbeatTimeoutMs) noexcept {
-        if (!data_ || producer_ || !ValidScope(scope) || !now || timeout < 50 || timeout > 5000 ||
+        if (!data_ || producer_ || Reason()!=Abort::None || !ValidScope(scope) || (scoped_ && mappingScope_ != scope) ||
+            !now || timeout < 50 || timeout > 5000 ||
             InterlockedCompareExchange(&data_->producer, static_cast<LONG>(GetCurrentProcessId()), 0) != 0)
             return false;
         producer_ = true;
@@ -280,6 +285,37 @@ public:
         return Healthy(now) ? ReadResult::Record : ReadResult::Aborted;
     }
 private:
+    bool OpenNamed(DWORD pid, const char* name, bool existingOnly) noexcept {
+        map_ = existingOnly ? OpenFileMappingA(FILE_MAP_ALL_ACCESS,FALSE,name)
+            : CreateFileMappingA(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,
+                                 static_cast<DWORD>(sizeof(Shared)),name);
+        if (!map_) return false;
+        data_ = static_cast<Shared*>(MapViewOfFile(map_,FILE_MAP_ALL_ACCESS,0,0,sizeof(Shared)));
+        if (!data_) { Close(); return false; }
+        if (!existingOnly && InterlockedCompareExchange(&data_->init,1,0)==0) {
+            // Pagefile mappings start zeroed. No memset can race another opener.
+            data_->version=static_cast<LONG>(Version);
+            data_->bytes=static_cast<LONG>(sizeof(Shared));
+            InterlockedExchange(&data_->init,2);
+        }
+        if (Load(data_->init)!=2 || data_->version!=static_cast<LONG>(Version) ||
+            data_->bytes!=static_cast<LONG>(sizeof(Shared))) { Close(); return false; }
+        pid_=pid;
+        return true;
+    }
+    bool OpenScopedImpl(DWORD pid,const Scope& scope,bool existingOnly) noexcept {
+        if (!pid || !ValidScope(scope)) return false;
+        if (data_) return pid_==pid && IsScopedFor(scope);
+        char name[224] {};
+        const int length=std::snprintf(name,sizeof(name),
+            "Local\\kh2coop_event_hold_scoped_v2_%lu_%.*s_%08x_%08x_%016llx_%016llx_%016llx_%016llx",
+            static_cast<unsigned long>(pid),32,scope.session,scope.generation,scope.slot,
+            static_cast<unsigned long long>(scope.hostConnection),static_cast<unsigned long long>(scope.selfConnection),
+            static_cast<unsigned long long>(scope.hostDelivery),static_cast<unsigned long long>(scope.targetDelivery));
+        if (length<=0 || static_cast<std::size_t>(length)>=sizeof(name) || !OpenNamed(pid,name,existingOnly)) return false;
+        mappingScope_=scope;scoped_=true;
+        return true;
+    }
     bool Push(Command command) noexcept {
         const auto consumed = static_cast<std::uint64_t>(Load(data_->consumed));
         if (next_ >= data_->history.size() || consumed > next_ || next_-consumed >= Capacity) {
@@ -294,6 +330,8 @@ private:
     HANDLE map_ {};
     Shared* data_ {};
     DWORD pid_ {};
+    Scope mappingScope_ {};
+    bool scoped_ {};
     bool producer_ {}, active_ {};
     std::uint64_t next_ {}, read_ {};
     std::uint32_t epoch_ {};

@@ -126,6 +126,17 @@ constexpr std::int32_t kDownedMotion = 0x36;
 constexpr bool ShouldRemint(bool downed, bool deadFlag, std::uint32_t episodeFrames, bool refusedNow) noexcept {
     return downed && deadFlag && (refusedNow || episodeFrames >= kEpisodeRemintFrames);
 }
+// Keep a downed body reachable horizontally while leaving the native vertical
+// result intact. Pinning the lethal hit's Y can prevent native airborne settling.
+// The adapter supplies the same live canonical position it already guarded.
+inline bool HoldDownedHorizontal(float* position, const float* anchor) noexcept {
+    const float dx = position[0] - anchor[0], dz = position[2] - anchor[2];
+    if (!(dx * dx + dz * dz > 4.0f)) return false;
+    position[0] = anchor[0];
+    position[2] = anchor[2];
+    return true;
+}
+
 constexpr bool StickActive(float x, float y) noexcept { return x * x + y * y > kStickActive * kStickActive; }
 
 constexpr PublishKind PublishFor(State s, bool nativeDead) noexcept {

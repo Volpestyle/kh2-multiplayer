@@ -1,5 +1,6 @@
 // VUH-2252: ScriptCall wire format, relay forwarding and the DLL's send-on-change rules.
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/RcRefusalTrace.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/SessionHost.hpp"
 #include "ScriptMirror.hpp"
@@ -624,6 +625,24 @@ void enetChecks() {
     refusedCompletion(forgedCompletion,"old reaction room cannot grant a callback");
     forgedCompletion=completion;forgedCompletion.seq=4;++forgedCompletion.objectId;
     refusedCompletion(forgedCompletion,"unannounced reaction source is refused");
+    // Native-side diagnostics have no control over relay sequence/dispatch.
+    // Exhaust transport and native-lifecycle telemetry independently, then
+    // exercise the real transport. Neither logger can consume gameplay work.
+    for(const auto stage:{rcdiag::Stage::RelayCompletion,rcdiag::Stage::LifecycleQuery,
+                         rcdiag::Stage::LifecycleCancel,rcdiag::Stage::LifecycleCapture})
+        for(unsigned i=0;i<rcdiag::Limit(stage)+100;++i)
+            rcdiag::Emit(stage,"test","budget",{},[](const char*){});
+    auto corrected=completion;corrected.seq=4;
+    refusedCompletion(corrected,"manifest rejection permanently consumed wire sequence before diagnostic saturation");
+    corrected.seq=5;check(sendCompletion(1,corrected),"fresh type55 submission still returns true after trace saturation");pump();
+    check(completions[0].size()==2 && completions[0].back().seq==5 && completions[0].back().ownerSlot==1,
+          "saturated diagnostics preserve exactly one owner-stamped native completion callback");
+    const auto beforeContextReject=server.rejectedWorldMessages();
+    check(!clients[1]->sendNativeWorld(encode(corrected),ProducerWorldContext{1,clients[1]->deliverySerial()+1,0},true),
+          "retired producer delivery still refuses before transport despite diagnostics");pump();
+    check(server.rejectedWorldMessages()==beforeContextReject && completions[0].size()==2,
+          "producer refusal neither submits a relay packet nor invokes owner callback");
+
     // A terminal source's deferred end cannot poison an unrelated living
     // source's end in the same reliable batch.
     auto living=enemy;living.netId=4;manifest.entries.push_back(living);

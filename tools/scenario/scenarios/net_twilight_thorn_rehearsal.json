@@ -43,8 +43,8 @@
     },
     {
       "do": "assert",
-      "expr": "log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1",
-      "message": "Both seats must qualify all native RC pins and hooks before the route starts"
+      "expr": "(log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1) and all(log_count('[script-lifecycle] installed motionEnd=1 captureId=1 cancel=1 queryBudget=2048 cancelBudget=1024 captureBudget=512 changedOnly=1',i)==1 and log_count('[script-lifecycle] unavailable reason=',i)==0 for i in (0,1))",
+      "message": "Both seats must qualify existing RC-cache hooks, actual motion-end/capture-ID observers and sole cancel hook before any route input"
     },
     {
       "do": "relay",

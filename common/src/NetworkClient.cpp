@@ -1,3 +1,4 @@
+#include "kh2coop/RcRefusalPacketTrace.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/Revive.hpp"
 
@@ -17,21 +18,27 @@ ProducerWorldContext NetworkClient::makeTestingWorldContext() {
     return c;
 }
 bool NetworkClient::sendNativeWorld(const std::vector<std::uint8_t>& bytes,const ProducerWorldContext& c,bool reliable) {
-    if(!validWorldContext(c)||bytes.empty())return false;
+    auto rcTrace=rcdiag::Packet(bytes);rcdiag::ProducerScope(rcTrace,c);
+    const auto hop=[&](const char* result,const char* why){rcdiag::Note(rcdiag::Stage::NetworkSend,result,why,rcTrace,[&](const char* line){log(std::string(line));});};
+    const char* why="unknown";
+    if(!rcdiag::Check(validWorldContext(c),"producer-context",why) ||
+       rcdiag::Reject(bytes.empty(),"empty-packet",why)){hop("refused",why);return false;}
     const auto type=static_cast<PacketType>(bytes.front());
-    if(!isScopedWorldPacket(type)||(worldQuarantined_&&!isEphemeralWorldPacket(type)))return false;
+    if(!rcdiag::Check(isScopedWorldPacket(type),"not-scoped-world",why) ||
+       rcdiag::Reject(worldQuarantined_&&!isEphemeralWorldPacket(type),"quarantined",why)){hop("refused",why);return false;}
     try {
         validateScopedWorldPacket(bytes);
         if(type==PacketType::RoomTransition && avatarLocalSlot_==0){const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader r(p,n);RoomTransition room;readRoomTransitionPacket(r,room);if(!r.atEnd())return false;hostRoom_=room;}
         WorldEnvelope e{{avatarSessionId_,worldBinding_->selfConnectionId,c.deliverySerial,c.hostSourceSerial,0,0},bytes};
+        rcdiag::EnvelopeScope(rcTrace,e.scope);
         const bool material=resyncPlan_&&avatarLocalSlot_==0&&isMaterialWorldPacket(type);
-        // Activation is short-lived, not lossy. The DLL pump historically
-        // submits it as periodic/unreliable; promote both request and reply at
-        // this shared boundary without extending their original leases.
+        // Preserve the existing reliable/material/activation transport flags.
+        hop("submit-enter","sendPacket");
         const bool sent=sendPacket(encode(e),reliable||material||isEphemeralWorldPacket(type));
+        hop(sent?"submitted":"submit-false","sendPacket-returned-not-delivery");
         if(!sent&&material)abortResync(ResyncResultReason::Overflow,"required material submission failed");
         return sent;
-    }catch(const std::exception&){return false;}
+    }catch(const std::exception&){hop("refused","validation-encode-or-send-exception");return false;}
 }
 std::optional<HostResyncContext> NetworkClient::hostResyncContext() const {
     if (!worldReady() || avatarLocalSlot_ != 0 || !hostRoom_) return std::nullopt;
@@ -733,7 +740,10 @@ void NetworkClient::onDisconnect(std::uint32_t code, bool local) {
 
 void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool reliable, const WorldScope* admittedScope,
                               const std::uint8_t* admittedWire, std::size_t admittedWireSize) {
-    if (!connected_) return;
+    auto rcTrace=rcdiag::Packet(data,size);if(admittedScope)rcdiag::EnvelopeScope(rcTrace,*admittedScope);
+    const auto rcHop=[&](const char* result,const char* why){rcdiag::Note(rcdiag::Stage::NetworkReceive,result,why,rcTrace,[&](const char* line){log(std::string(line));});};
+    rcHop("received",admittedScope?"inner-admitted-envelope":"onReceive-entry");
+    if (!connected_) {rcHop("refused","disconnected");return;}
     // A malformed SessionState must invalidate consumers too, even when its
     // frame/header fails before the switch below. Never forward malformed data.
     const bool sessionPacket = size > 0 &&
@@ -758,15 +768,17 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
         // Clock/heartbeat transport liveness remains independent of readiness.
         if ((!ready() || rejection_) && type != PacketType::SessionState &&
             type != PacketType::ClockPong && type != PacketType::HelloReject &&
-            !(type==PacketType::DesyncCaptureRequest && !rejection_)) return;
+            !(type==PacketType::DesyncCaptureRequest && !rejection_)) {rcHop("refused","not-ready-or-rejected");return;}
         if (rejection_ && type == PacketType::SessionState) return;
 
-        if (isScopedWorldPacket(type) && !admittedScope) return; // no unscoped wire bypass
+        if (isScopedWorldPacket(type) && !admittedScope) {rcHop("refused","unscoped-wire");return;} // no unscoped wire bypass
         if (type==PacketType::WorldEnvelope) {
             WorldEnvelope m;read(reader,m);
-            if(!hasCurrentWorldBinding() || m.scope.sessionId!=avatarSessionId_ ||
-               m.scope.targetConnectionId!=worldBinding_->selfConnectionId ||
-               m.scope.targetDeliverySerial!=worldBinding_->deliverySerial) return;
+            const char* rcWhy="unknown";
+            if(!rcdiag::Check(hasCurrentWorldBinding(),"current-world-binding",rcWhy) ||
+               rcdiag::Reject(m.scope.sessionId!=avatarSessionId_,"envelope-session",rcWhy) ||
+               rcdiag::Reject(m.scope.targetConnectionId!=worldBinding_->selfConnectionId,"target-connection",rcWhy) ||
+               rcdiag::Reject(m.scope.targetDeliverySerial!=worldBinding_->deliverySerial,"target-delivery",rcWhy)) {rcHop("refused",rcWhy);return;}
             bool source=false;for(std::size_t i=0;i<3;++i)if(avatarConnections_[i]&&avatarConnections_[i]==m.scope.sourceConnectionId&&m.scope.sourceDeliverySerial==remoteDeliverySerials_[i])source=true;
             const auto inner=static_cast<PacketType>(m.packet.front());
             // VUH-1504 hop log (diagnostic only, bounded): envelope-level drops of a ReviveRequest.
@@ -776,10 +788,11 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 static unsigned stageEndLogs = 0; // VUH-2555 (diagnostic only, bounded)
                 if (inner == PacketType::StageEnd && stageEndLogs < 16) { ++stageEndLogs; log(std::string("[stage-end] envelope drop reason=") + why); }
             };
-            if(!source){reviveDrop("source-not-roster-or-delivery");return;}
+            if(!source){rcHop("refused","source-not-roster-or-delivery");reviveDrop("source-not-roster-or-delivery");return;}
             if(m.scope.sourceConnectionId==avatarConnections_[0] && m.scope.kind==WorldSourceKind::Native && inner!=PacketType::DesyncNotice &&
-               (!m.scope.hostSourceSerial || m.scope.hostSourceSerial<=worldSourceFloor_)){reviveDrop("host-source-floor");return;}
-            if(worldQuarantined_ && !isEphemeralWorldPacket(inner)){reviveDrop("quarantined");return;}
+               (!m.scope.hostSourceSerial || m.scope.hostSourceSerial<=worldSourceFloor_)){rcHop("refused","host-source-floor");reviveDrop("host-source-floor");return;}
+            if(worldQuarantined_ && !isEphemeralWorldPacket(inner)){rcHop("refused","quarantined");reviveDrop("quarantined");return;}
+            rcHop("admitted","envelope-before-inner-dispatch");
             onReceive(m.packet.data(),m.packet.size(),reliable,&m.scope,data,size);return;
         }
         if (isEphemeralWorldPacket(type))
@@ -1018,7 +1031,9 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
         }
         if(admittedScope && callbacks_.onWorldEnvelope) {
             const auto generation=transportGeneration_;
+            rcHop("callback-enter","runtime-world-envelope");
             callbacks_.onWorldEnvelope(WorldEnvelope{*admittedScope,{data,data+size}});
+            rcHop("callback-returned","runtime-world-envelope-returned");
             if(generation!=transportGeneration_)return;
         }
         if (isWorldPacket(type) && callbacks_.onWorldPacket) {
@@ -1278,6 +1293,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 break;
         }
     } catch (const std::exception& ex) {
+        rcHop("refused","decode-or-callback-exception");
         if (sessionPacket && !sessionNotified) {
             updateAvatarRoster(SessionState{});
             if (resumePin_) closeChangedSession();

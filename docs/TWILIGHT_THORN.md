@@ -6,13 +6,42 @@ Design approved by Clankie on 2026-10-20 (lead message 2); inventory baseline
 and limited live qualification below. Live runs are single-PC, two-seat
 loopback, per the lead's instruction.
 
-The reaction-only landing candidate defers native mission4/16 observation and
-suppression, event315 qualification, and exact307 boss-leave fallback. The death
-row below is the approved future design, not implemented support in this slice.
-Full-source live09 remains separate evidence; it cannot qualify the trimmed
-binary. Build19 passed the full suite and live10 independently qualified the
-exact trimmed binary's opening and both-seat ground reactions, with no kill
-attempt. VUH-2569 stays open for kill, captured426 and Creeper parity.
+The original v30 reaction-only landing deferred native mission4/16 observation
+and suppression, event315 qualification and exact307 boss-leave fallback.
+Build19/live10 qualified that trimmed binary's opening and both-seat ground
+reactions. The v31 cohort now restores the reviewed host-only terminal bundle
+and includes logical-down XZ holding, lifecycle observations and safe-field
+recovery. Build34 passed the full203-test suite. Historical attempts below retain
+their own binary and result boundaries.
+
+Bot01 (`20261021-113329_net_twilight_thorn_bots_1`, sealed build28, single-PC
+loopback) achieved a native host kill and three natural friend-to-host revives,
+but failed shared exit: the friend's expired control lifetime rejected315 and
+left it behind. Its original safety is not PASS: a movie mtime changed, although
+the bytes match the installed depot reference. [VUH-2628](https://linear.app/vuhlp/issue/VUH-2628)
+tracks the recovery boundary. Build34/recovery04 now proves a fresh authenticated
+rejoin in empty FM00 with a dormant tutorial script; see the
+[bounded result](testing/vuh2628-recovery04/README.md). It does not prove the
+parent's shared kill, rewards, cleanup or onward movement. `VUH-2617` holds the
+bot series; the sealed human14/build28 packet remains an optional baseline.
+VUH-2569 stays open for the kill and the captured426 cause.
+
+Lead22 split script-created Creeper parity into
+[VUH-2605](https://linear.app/vuhlp/issue/VUH-2605/mirror-twilight-thorns-script-created-creepers).
+The existing native cull predicate executes child BDX before its authority
+check; a replica that skips initializer BDX needs a pre-cull fence and qualified
+native disposal first. Reviewed resource/factory/typed-ledger boundaries remain
+uncommitted; no child construction is enabled and the global317 deny remains.
+Creeper population desync is a known gap on VUH-2569, not a kill-proof claim.
+
+The current full-fight cohort uses protocol v31, because limited-RC v30 peers
+reject the restored terminal semantics. Its original host-only terminal bundle
+observes signal4, mission4/16 and the
+authored315 event. Clients never blindly replay4/16. The full type55-only
+diagnostic scope is approved to locate the captured426 failure without changing
+wire, native ABI, retries, leases or pilots. The limited landing evidence above
+does not qualify the terminal bundle. The later failure chronology below is
+historical; it does not override the current status above.
 
 ## Installed evidence
 
@@ -284,3 +313,117 @@ The authored exit is world2/room0/door0/programs51. These installed-data/native
 findings are not a runtime victory start receipt and do not enable the row in
 this slice. The full prior implementation/tests/docs are retained in the
 terminal-trim21 baseline and deferred reverse patch.
+
+### Full-fight candidate and live11
+
+The subsequent full-fight candidate restores the reviewed host-only terminal
+path under protocol31: signal4, mission4/16 and the exact authored315 event.
+Clients do not blindly replay4/16. These semantics remain unqualified by a kill.
+
+Build23 passed all202 tests. Live11 (`20261021-020601`, single-PC loopback)
+ended in native full-party defeat at step39 with shared boss HP268/390.
+Earlier revives worked in both directions. The host's later downing remained
+at Y=-251.985 while the friend was usually near0, outside the unchanged3D
+revive range. In this coordinate system negative Y is upward; earlier wording
+describing a negative-Y player as below the arena was incorrect.
+
+All eleven remote reaction completions reached host application. Nine applied;
+two captured426 replies were refused after host-role retirement, before the
+producer-frame guard. The retirement trigger remains unknown. There was no
+trace saturation, kill, mission16/315, reward or cleanup proof. Four protected
+saves and all source/game baselines were unchanged; closure was clean. See
+[published reports and stills](testing/vuh2569-live11/README.md).
+
+The approved next candidate holds only downed XZ and preserves native Y. Static
+qualification shows the old XYZ hold prevented settling away from the lethal
+height; it does not establish that this alone caused live11's loss. Additional
+observational retirement rows retain the original reads and order. The combined
+full suite and a short FM-02 Computer Room grounded down/revive regression must
+pass before Thorn live12. Pilots and3D revive range stay unchanged. Creepers
+remain the documented VUH-2605 gap; VUH-2569 stays open for the kill and426 cause.
+
+Build24 passed all 202 tests. Its separate Computer Room regression
+`20261021-035356_net_downed_grounded_pair_1` passed all 105 steps in 163.6 seconds.
+Each owner entered logical downing through a real lethal `hit damage`, retained
+grounded native XYZ during attempted movement, then revived once through the
+normal Triangle/network path to 5/22 HP, Ready state, fault0 and 120-frame grace.
+Both regained ordinary movement. Four protected saves and all recorded baselines
+were unchanged; closure and the exact 538-file source archive passed independent
+review. Four native stills were inspected. This calm check has no actual enemy
+shove or airborne landing; Thorn live12 remains required on the same binary.
+
+Live12 (`20261021-040907_net_twilight_thorn_rehearsal_1`, exact build24,
+single-PC loopback) failed step41 after five paired combat blocks. Both seats
+ended at boss176/390. Opening297/298/299 and four friend-owned ground reactions
+completed; eleven accepted friend hit claims contributed64 damage. The host
+was naturally downed twice and revived once through the normal request/native
+path to5/20 HP, Ready state and fault0. The final recovery never reached another
+hold or request: sampled separation remained492-1175 units while native RCs
+retained their intended priority. All56 sampled host HP1 rows had Y0. No lethal-Y
+trajectory or native grounding/attachment state was recorded, so this does not
+prove an airborne landing or a new height defect.
+
+All six remote reaction completions reached host application; four succeeded.
+Captured426 occurrence63 was accepted by the friend's native leaf and callback,
+but found its host role already retired. The new immutable row identifies the
+first D48 read returning zero against its saved coroutine, two frames before
+host application. Later predicates were unevaluated. This is a remaining product
+qualification investigation, not proof that retirement was wrong, that a packet
+was lost, or that it alone caused the loss. The native writer/BDX exit remains
+unproven; the whole run cannot yet be certified pilot-only. Pilots are unchanged.
+
+The known enemy-only Creeper317 population desync recurred with equal progress
+hashes. Its automatic bundle was partial because of a changing log tail and
+busy capture leases. There was no kill, mission16/315, reward, final role/camera
+cleanup or onward-control proof. Four protected saves and all540 source inputs,
+14 game-root entries and527 assets were unchanged; closure left no owned
+processes or relay listener. The exact540-file/553-pin source archive predates
+edits and passed independent verification. Subsequent Ivo VUH-2580 source changes
+are integrated on mainf42c3f9; live12 does not qualify that rebuilt composition.
+
+
+Live13/build25 failed after523.5s, boss194/390 on both seats. Both pilots
+reached the60-second recovery guard; no normal revive request or native return
+occurred. All seven remote reaction completions reached host application; five
+succeeded and two found their occurrence missing. Three captured426 roles reached
+the native scheduler cancel leaf before the first zero D48 retirement read.
+This identifies that cancellation path, not the authored cancellation reason or
+the earlier live12 writer. The whole run remains unqualified as pilot-only.
+
+[Published live13 evidence](testing/vuh2569-live13/README.md) includes the bounded
+two-screen failure clip, decisive logs/reviews and exact pre-edit source archive.
+The actual1/238 observer and sole3D6F80 cancel hook installed on both seats; no
+associated1/14 row was captured. Its argument-based association missed a different
+operand shape. Four protected saves and all recorded baselines stayed unchanged;
+owned processes and relay listener closed. No kill/16/315/reward/final cleanup or
+onward-control proof follows from this run.
+
+Lead43 approved an observation-only1/14 correction: select the unique currently
+executing admitted VM, log raw input/output, and label the target unresolved.
+Never decode/dereference that alias or infer command authority from it. The
+correction has independent offline reviews; its next build and runtime proof
+remain required. See [Script Mirror](SCRIPT_MIRROR.md#native-lifecycle-observations-lead40-and43).
+The next kill attempt is human-piloted FRIEND/seat1 with the unchanged HOST bot,
+using a reviewed handoff and exact owned-process abort. No extra bot run is
+scheduled for diagnostics. Ivo's main724ddcb residue changes are composed and
+independently reviewed; live13 does not qualify that later composition. Pilots,
+protocol31 and3D revive range stay unchanged; Creepers remain VUH-2605.
+
+Mainc07d8da (VUH-2610r2) extends only spectator playback for chained captures.
+A changed capture remembers its previous motion until the first heartbeat naming
+anything else. A still-previous heartbeat selects the newer authored capture and
+cannot write its old motion time. Once caught up, a later old ID is judged by
+the unchanged borrowed-bank/refusal rule. Consumed reactions remain refused;
+camera, commands, local-owner native calls and wire31 are unchanged. Independent
+composition36 preserves the corrected observation and existing cleanup paths.
+Build27 and the human14 packet refresh qualify the combined inputs separately;
+old build26 evidence does not become a result for that new binary. Missing262/263
+capture descriptors and Creeper population parity remain separate gaps.
+
+Combined build27 on c07d8da passed all202 tests with its320 native inputs
+unchanged. The refreshed human14 packet remains held by lead51: Ivo's separate
+VUH-2611 visual12 candidate achieved a kill, then HOST crashed in clr.dll after
+the post-boss event began. Its cause and applicability to build26/27 are unknown.
+No human14 run or baseline is claimed. Packet postvictory checks introduce no
+managed call into KH2; process-exit detection is independent of the inject crash
+filter, but no dump or recovery is guaranteed. Investigate before asking James.

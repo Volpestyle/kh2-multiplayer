@@ -277,6 +277,35 @@ void testWorldInbox() {
           "a record too large for the bridge fails instead of blocking the inbox");
 }
 
+// Exercise the durable type55 path itself under backpressure. Observations must
+// never turn a deferred completion into a duplicate, reorder, or discard it.
+void testReactionCompletionInbox() {
+    WorldBridge runtime,dll;WorldInbox inbox;WorldPumpStats stats;
+    ScriptReactionCompletion first;first.location={12,2,34,0,157,157,157};first.seq=41;
+    first.requesterConnectionId=0x100000002ULL;first.occurrence=115;first.resource=0x80000024u;
+    first.objectId=307;first.netId=1;first.command=426;first.ownerSlot=1;
+    const WorldScope scope{std::string(32,'b'),first.requesterConnectionId,7,0,0x100000001ULL,9};
+    const auto a=encode(WorldEnvelope{scope,encode(first)});auto second=first;++second.seq;++second.occurrence;
+    const auto c=encode(WorldEnvelope{scope,encode(second)});
+    check(inbox.Receive(runtime,a,stats) && inbox.Receive(runtime,c,stats) && inbox.PendingCount()==2,
+          "type55 receipts defer unchanged while bridge is unattached");
+    inbox.Flush(runtime,stats);
+    check(inbox.PendingCount()==2 && stats.toDll==0,"unattached Flush preserves both completion receipts");
+    const DWORD pid=0x7FFA0000u+(GetCurrentProcessId()&0xFFFFu);
+    check(runtime.Open(pid)&&dll.Open(pid),"completion test bridge opens");
+    const auto filler=bytesOf(98,1);unsigned filled=0;while(runtime.SendToDll(filler))++filled;
+    for(unsigned i=0;i<300;++i)inbox.Flush(runtime,stats);
+    check(filled && inbox.PendingCount()==2 && stats.toDll==0 && stats.dllRingFull==300,
+          "repeated backpressure neither consumes nor duplicates durable completions");
+    std::vector<std::uint8_t> out;while(dll.ReceiveFromRuntime(out)){}
+    inbox.Flush(runtime,stats);inbox.Flush(runtime,stats);
+    check(inbox.PendingCount()==0 && stats.toDll==2 && dll.ReceiveFromRuntime(out) && out==a &&
+          dll.ReceiveFromRuntime(out) && out==c && !dll.ReceiveFromRuntime(out),
+          "type55 Flush enqueues exact immutable FIFO bytes once after pressure clears");
+    runtime.Close();check(inbox.Receive(runtime,a,stats),"completion can defer again after close");inbox.Clear();
+    check(inbox.PendingCount()==0,"session Clear retires retained completion without delivery");
+}
+
 void testSessionReset() {
     std::cout << "\n=== Ordered world session boundaries ===\n";
     WorldBridge runtime, dll;
@@ -413,6 +442,7 @@ int main() {
     testPacketRing();
     testVersion11Layout();
     testWorldInbox();
+    testReactionCompletionInbox();
     testSessionReset();
     testSessionGeneration();
     testLazyResyncInbox();

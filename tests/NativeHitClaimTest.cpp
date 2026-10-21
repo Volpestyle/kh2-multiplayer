@@ -601,6 +601,7 @@ void TestOwnedCameraGameplay() {
     Check(SafeNativeGameplay() && CaptureDownedScope(continued) &&
           CaptureNativeCensus().state==CensusState::Complete,
           "registered camera keeps actual script scope and complete native census alive");
+    Check(!SafeRecoveryGameplay(), "owned gameplay camera never qualifies dormant-script recovery");
     ScriptCallRecord call{};call.netId=1;call.objectId=309;call.table=1;call.index=1;
     call.args[0]=std::uint64_t{SCRIPT_TAG_FLOAT}<<32;
     std::uint64_t sequence=0;
@@ -644,6 +645,11 @@ void TestOwnedCameraGameplay() {
         Check(!progress::HostReady() && !SafeNativeGameplay(),"progress sampling and gameplay retain menu, frozen, field, delivery, roster, epoch, teardown and native-state fences");
         SetScriptCameraCurrent(nullptr);
     }
+    Reset();
+    Check(SafeRecoveryGameplay(), "settled native field can qualify strict recovery gameplay");
+    Put(image+offsets::PAUSE_STATUS, std::uint32_t{1});
+    Check(SafeNativeGameplay() && !SafeRecoveryGameplay(),
+          "native pause blocker independently refuses dormant-script recovery");
     Reset();
 }
 ProgressUpdate FullProgress(std::uint8_t value) {
@@ -1241,6 +1247,33 @@ void TestNativeResync() {
     Check(decodedBegin.sha256 == begin.sha256 && decodedSnapshot.nativeFingerprint == captured.nativeFingerprint &&
           g_inst.spawns[0].lastHp == 1000 && p::g_baseline[0x10] == 0,
           "complete local snapshot roundtrips without substituting stale cached HP or progress");
+
+    // VUH-2628: exercise actual snapshot admission before either progress
+    // staging or native load queuing. The local unshared tutorial bit is not
+    // reconstructed from the host's progress payload.
+    auto fm00 = captured;
+    fm00.room = {9, 2, 32, 99, 0, 0, 2};
+    fm00.hold.eventProgram = 2;
+    fm00.enemies.clear(); fm00.livingCount = fm00.deadCount = 0;
+    for (auto& definition : fm00.recordDefinitions)
+        definition.location = {2, 32, 99, 0, 0, 2};
+    fm00.nativeFingerprint = resyncNativeFingerprint(fm00);
+    auto fm00Plan = plan; fm00Plan.request.room = fm00.room;
+    const auto fm00Begin = NativeBegin(fm00Plan, fm00, begin.snapshotCut);
+    const auto fm00Packet = encodeNativeResyncSnapshot(fm00Begin, fm00);
+    ResetWorld();
+    Put(image + 0x9ABCB5, std::uint8_t{0}); // local flag40, SAVE+2405 mask01
+    StageNativeBootstrap(fm00Plan, fm00Packet);
+    Check(g_nativeResync && g_nativeResync->finished && !p::g_clientFull &&
+          !w::g_hostQueued && warpCalls == 0 && Read<std::uint8_t>(image + 0x9ABCB5) == 0,
+          "clear local flag40 refuses actual Bootstrap before StageFull or QueueHostTransition without setting it");
+    Check(verifiedProgressByteMask(0x2405) == 0,
+          "local tutorial flag40 remains outside shared progress policy");
+    ResetWorld(); Put(image + 0x9ABCB5, std::uint8_t{1});
+    StageNativeBootstrap(fm00Plan, fm00Packet);
+    Check(g_nativeResync && !g_nativeResync->finished && p::g_clientFull && w::g_hostQueued &&
+          Read<std::uint8_t>(image + 0x9ABCB5) == 1 && warpCalls == 0,
+          "independently-set local flag40 admits staging/queue only; native convergence is still required");
 
     Reset(); ReceiveResyncPlan(plan); Put(enemy + offsets::actor::LINKED_NEXT_HANDLE, std::uint32_t {1});
     ResyncSnapshot unavailable; ProducerWorldContext unused;

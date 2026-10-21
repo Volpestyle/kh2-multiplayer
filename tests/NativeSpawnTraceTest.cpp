@@ -7,6 +7,8 @@
 
 #include "../inject/src/NativeSpawnController.cpp"
 #include "kh2coop/SpawnEmissionLedger.hpp"
+#include "kh2coop/ProgressAllowList.hpp"
+#include "fixtures/Fm00MixedCatalogFixture.hpp"
 
 #include <iostream>
 #include <cstdlib>
@@ -989,6 +991,51 @@ void RecordCatalogControls(std::uint8_t* image) {
         put(actor.data() + 0x9E8, reinterpret_cast<uintptr_t>(&controllers[i]));
         put(actor.data() + 0x9F0, controllers[i].spawnArray + r * 64);
     };
+    // VUH-2628: actual FM00 type1/header0/one-record content from recovery02
+    // host log129808 line74 (20261021-145245). Controller addresses, flags0 and
+    // stable read/lifecycle results below are synthetic: this is an FM00-shaped
+    // reader regression, not a replay of the missing full runtime catalog.
+    {
+        seed({1});
+        constexpr std::array<std::uint8_t, 44> fm00Header {
+            0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        };
+        constexpr std::array<std::uint8_t, 64> fm00Record {
+            0x36, 0x02, 0x00, 0x00, 0x00, 0x80, 0x04, 0x44, 0x00, 0x00, 0x00, 0x80,
+            0x00, 0x00, 0x2F, 0x43, 0x00, 0x00, 0x00, 0x00, 0xAA, 0x61, 0x9C, 0xBF,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x63, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00
+        };
+        constexpr std::array<std::uint8_t, 10> fm00Now {2, 32, 99, 0, 0, 0, 0, 0, 2, 0};
+        std::memcpy(data[0].data(), fm00Header.data(), fm00Header.size());
+        std::memcpy(data[0].data() + 44, fm00Record.data(), fm00Record.size());
+        controllers[0].key = 808476525;
+        put(image + CONTROLLER_TABLE, TableEntry {controllers[0].key, 0, reinterpret_cast<uintptr_t>(&controllers[0])});
+        std::memcpy(image + kh2coop::offsets::NOW, fm00Now.data(), fm00Now.size());
+        capture();
+        Check(catalog.status == S::Complete && catalog.associationComplete && catalog.entryCount == 1 &&
+            catalog.declaredLogicalRecords == 1 && catalog.capturedLogicalRecords == 1 &&
+            catalog.entries[0].content.header == fm00Header && catalog.entries[0].content.records[0] == fm00Record &&
+            catalog.entries[0].recordReadMask[0] == 3 &&
+            Field<std::uint16_t>(catalog.entries[0].content.records[0].data(), 30) == 17 &&
+            catalog.entries[0].content.location.world == 2 && catalog.entries[0].content.location.room == 32 &&
+            catalog.entries[0].content.location.door == 99 && catalog.entries[0].content.location.eventProgram == 2,
+            "FM00-shaped native type1 player definition preserves header0, raw record ID17 and full content");
+        catalogFailure = controllers[0].spawnArray; catalogFailureNth = 2; capture();
+        Check(catalog.status == S::Partial && !catalog.associationComplete &&
+            catalog.entries[0].content.records[0] == fm00Record && catalog.entries[0].recordReadMask[0] == 1,
+            "FM00-shaped missing after read stays partial with genuine before content and explicit mask");
+        catalogFailure = 0; catalogFailureNth = catalogFailureSeen = 0;
+        put(image + CONTROLLER_TABLE + 4, std::uint32_t {1}); capture();
+        Check(catalog.status == S::Unsupported && !catalog.associationComplete && catalog.entryCount == 1 &&
+            (catalog.issues & Issue(RecordCatalogIssue::Script)) && !catalog.entries[0].controllerBeforeAvailable,
+            "FM00-shaped alternate script slot cannot be discarded as a complete empty population");
+    }
     seed({5, 0, 0, 0, 3, 4, 4, 4, 3, 3});
     CaptureNativeRecordCatalog(base, layout, catalog);
     Check(catalog.status == S::Complete && catalog.tableInventoryComplete && catalog.contentBytesComplete &&
@@ -1155,6 +1202,239 @@ void RecordCatalogControls(std::uint8_t* image) {
     catalogChangeLifecycle = false;
     syntheticTransition = savedTransition;
     syntheticLoad = savedLoad;
+}
+void MixedFm00CatalogControls(std::uint8_t* image) {
+    using S = kh2coop::NativeRecordContentStatus;
+    namespace fixture = fm00mixedfixture;
+    namespace known = knowndormantscripts;
+    const auto savedTransition = syntheticTransition, savedLoad = syntheticLoad;
+    const auto hooksBefore = hookCalls, scriptCallsBefore = scriptCalls;
+    const auto base = reinterpret_cast<uintptr_t>(image);
+    auto* ard = image + 0x100000;
+    auto* shadow = image + 0x108000;
+    const auto ardAddress = reinterpret_cast<uintptr_t>(ard);
+    std::array<Controller, 7> controllers {};
+    std::array<std::vector<std::uint8_t>, 7> storage;
+    auto catalog = std::make_unique<NativeRecordCatalog>();
+    NativeOrdinaryResyncView view;
+    NativeRecordMembership member;
+    alignas(8) std::array<std::uint8_t, 0xA00> actor {};
+    const auto actorAddress = reinterpret_cast<uintptr_t>(actor.data());
+    const auto location = known::Rules[0].location;
+    auto put = [](void* p, const auto& value) { std::memcpy(p, &value, sizeof(value)); };
+    auto resetRead = [&] {
+        catalogTrigger = catalogMutation = catalogFailure = 0;
+        catalogTriggerNth = catalogSeen = catalogFailureNth = catalogFailureSeen = 0;
+        catalogChangeLifecycle = false;
+    };
+    auto encode = [&](uintptr_t address) {
+        constexpr std::uint32_t bucket = 1;
+        const uintptr_t region = address & ~uintptr_t{0x1FFFFFF};
+        put(image + HANDLE_REGIONS_RVA + bucket * 8, region);
+        return (bucket << 25) | static_cast<std::uint32_t>(address & 0x1FFFFFF);
+    };
+    auto seed = [&] {
+        resetRead(); syntheticLoad = 1; syntheticTransition = 0;
+        std::memset(ard, 0, 0x2000);
+        std::memcpy(ard, fixture::BarTable.data(), fixture::BarTable.size());
+        std::memcpy(ard + 0xC00, fixture::E50Prefix.data(), fixture::E50Prefix.size());
+        std::memcpy(ard + 0xF60, fixture::Game.data(), fixture::Game.size());
+        put(ard + 16 + 10 * 16 + 8, encode(ardAddress + 0xC00));
+        put(ard + 16 + 12 * 16 + 8, encode(ardAddress + 0xF60));
+        put(image + known::ArdRootRva, ardAddress);
+        put(image + known::Flag40Rva, std::uint8_t{1});
+        put(image + CONTROLLER_COUNT, std::int32_t{7});
+        std::memcpy(image + kh2coop::offsets::NOW, fixture::Now.data(), fixture::Now.size());
+        put(image + kh2coop::offsets::IN_FIELD, std::uint8_t{1});
+        put(image + kh2coop::offsets::OPEN_MENU, std::uint8_t{255});
+        put(image + kh2coop::offsets::CUTSCENE_STATE, std::int32_t{0});
+        put(image + kh2coop::offsets::EVENT_CONTEXT, uintptr_t{0});
+        put(image + kh2coop::offsets::CONTROLLABLE, std::int32_t{0});
+        put(image + kh2coop::offsets::PAUSE_STATUS, std::uint32_t{0});
+        for (const auto& d : fixture::Definitions) {
+            const auto raw = d.raw;
+            storage[raw].assign(44 + d.count * 64 + 1, 0);
+            auto* bytes = raw == 6 ? ard + 0xC08 : storage[raw].data();
+            std::memcpy(bytes, d.header.data(), d.header.size());
+            for (std::size_t r = 0; r < d.count; ++r)
+                std::memcpy(bytes + 44 + r * 64, fixture::Records[d.first + r].data(), 64);
+            controllers[raw] = {}; controllers[raw].key = d.key;
+            controllers[raw].header = reinterpret_cast<uintptr_t>(bytes);
+            controllers[raw].spawnArray = controllers[raw].header + 44;
+            controllers[raw].regionArray = controllers[raw].spawnArray + d.count * 64;
+            put(image + CONTROLLER_TABLE + raw * 16,
+                TableEntry {d.key, 0, reinterpret_cast<uintptr_t>(&controllers[raw])});
+        }
+        put(image + CONTROLLER_TABLE + 5 * 16, TableEntry {0, 1, ardAddress + 0xF60});
+        put(actor.data() + 0x9E8, reinterpret_cast<uintptr_t>(&controllers[6]));
+        put(actor.data() + 0x9F0, controllers[6].spawnArray + 5 * 64);
+        view = {}; member = {};
+    };
+    auto capture = [&] {
+        CaptureRecordCatalogImpl(base, fixture::Layout, *catalog, &CatalogControlRead, &CaptureDiagnosticStamp);
+    };
+    auto qualify = [&] {
+        return QualifyNativeOrdinaryResyncViewImpl(base, *catalog, view, &CatalogControlRead, &CaptureDiagnosticStamp);
+    };
+    auto membership = [&] {
+        ResolveNativeOrdinaryResyncMembershipImpl(base, *catalog, view, actorAddress, member,
+            &CatalogControlRead, &CaptureDiagnosticStamp);
+    };
+    seed(); capture();
+    Check(catalog->status == S::Unsupported && catalog->issues == Issue(RecordCatalogIssue::Script) &&
+        catalog->entryCount == 7 && catalog->countBefore == 7 && catalog->countAfter == 7 &&
+        catalog->declaredLogicalRecords == 10 && catalog->capturedLogicalRecords == 10 &&
+        catalog->tableInventoryComplete && catalog->lifecycleStable && !catalog->associationComplete &&
+        !catalog->entries[5].controllerBeforeAvailable && !catalog->entries[5].headerBeforeAvailable,
+        "authentic FM00 raw7/ten records retain Script unsupported with unknown alternate controller layout");
+    bool authentic = true;
+    for (const auto& d : fixture::Definitions) {
+        const auto& entry = catalog->entries[d.raw];
+        authentic = authentic && entry.bytesComplete && entry.content.header == d.header && entry.content.records.size() == d.count;
+        for (std::size_t r = 0; r < d.count; ++r)
+            authentic = authentic && entry.content.records[r] == fixture::Records[d.first+r];
+    }
+    Check(authentic && fixture::Game == known::Fm00Game && fixture::E50Prefix == known::Fm00AnchorPrefix,
+        "six actual headers and ten records agree with independent runtime03 and selected installed BAR payloads");
+    Check(qualify() && view.qualified && view.mixed && view.raw == catalog.get() && view.ordinaryCount == 6 &&
+        view.scriptRawIndex == 5 && view.nativeAssetBound && view.nativeAssetRoot == ardAddress &&
+        view.flagBeforeAvailable && view.flagAfterAvailable && (view.flagBefore & 1) && (view.flagAfter & 1),
+        "only the exact native-owned dormant FM00 rule admits an ordinary resync view");
+    Check(catalog->status==S::Unsupported && !catalog->associationComplete && !catalog->contentBytesComplete &&
+        !catalog->entries[6].associationUnique && catalog->issues==Issue(RecordCatalogIssue::Script),
+        "qualified view never promotes or mutates raw global status or ordinary association flags");
+    const std::array<std::size_t,6> rawSlots {0,1,2,3,4,6};
+    bool mapped = true;
+    for (std::size_t ordinary = 0; ordinary < rawSlots.size(); ++ordinary)
+        mapped = mapped && view.RawIndex(ordinary) == rawSlots[ordinary] && view.OrdinaryIndex(rawSlots[ordinary]) == ordinary;
+    Check(mapped && view.OrdinaryIndex(0) == 0 && !view.OrdinaryIndex(5) && !view.OrdinaryIndex(7) && !view.RawIndex(6),
+        "raw6 e_50 maps to portable5 while raw0 remains valid and Script has no portable index");
+    ResolveNativeRecordMembership(base, *catalog, actorAddress, member);
+    Check(!member.contentComparisonAvailable, "unchanged global strict membership still refuses the mixed Script catalog");
+    membership();
+    bool wholeTable = true;
+    for (std::size_t raw = 0; raw < 7; ++raw) wholeTable = wholeTable && member.tableReadMask[raw] == 3;
+    Check(member.contentComparisonAvailable && member.tableIndex == 6 && member.recordIndex == 5 &&
+        view.OrdinaryIndex(member.tableIndex) == 5 && member.counts[0] == 7 && member.counts[1] == 7 && wholeTable &&
+        member.tableBefore[5] == catalog->entries[5].tableBefore && member.tableAfter[5] == catalog->entries[5].tableAfter,
+        "qualified membership preserves raw slot6/native count7 and both full7-slot table passes including Script");
+    std::vector<kh2coop::NativeRecordContentDefinition> expected;
+    for (std::size_t i = 0; i < view.ordinaryCount; ++i) expected.push_back(catalog->entries[*view.RawIndex(i)].content);
+    auto different = expected; different[5].records[5][40] ^= 1;
+    std::vector<kh2coop::NativeRecordContentCandidate> candidates;
+    for (const auto& d : different) candidates.push_back({&d, S::Complete, true});
+    bool completeBijection = true;
+    for (const auto& d : expected)
+        completeBijection = completeBijection && kh2coop::ResolveNativeRecordContent(d,candidates,S::Complete).status == S::Complete;
+    Check(!completeBijection && kh2coop::ResolveNativeRecordContent(expected[0],candidates,S::Complete).status == S::Complete &&
+        kh2coop::ResolveNativeRecordContent(expected[5],candidates,S::Complete).status == S::NoMatch,
+        "Script plus unreferenced e_50 mismatch cannot pass the six-definition content bijection by matching a prefix");
+    auto corrupt = view; corrupt.rawToOrdinary[6] = 4;
+    ResolveNativeOrdinaryResyncMembershipImpl(base,*catalog,corrupt,actorAddress,member,&CatalogControlRead,&CaptureDiagnosticStamp);
+    Check(!member.contentComparisonAvailable, "a forged non-bijective raw-to-portable map grants no membership");
+    seed(); capture(); Check(qualify(), "fresh mixed fixture requalifies for full raw-table mutation control");
+    resetRead(); catalogTrigger = base + CONTROLLER_TABLE + 5 * 16; catalogTriggerNth = 2;
+    catalogMutation = base + CONTROLLER_TABLE + 5 * 16 + 4; membership();
+    Check(!member.contentComparisonAvailable, "Script-slot drift during ordinary membership invalidates the whole raw7 bookend");
+    seed(); catalogTrigger = base + CONTROLLER_TABLE + 5 * 16; catalogTriggerNth = 2;
+    catalogMutation = base + CONTROLLER_TABLE + 5 * 16 + 8; capture();
+    Check(!catalog->tableInventoryComplete && !qualify(), "raw Script pointer drift cannot be hidden by unchanged ordinary content");
+    seed(); catalogTrigger = controllers[6].spawnArray; catalogTriggerNth = 2;
+    catalogMutation = controllers[6].spawnArray + 5 * 64 + 40; capture();
+    Check(!catalog->entries[6].bytesComplete && !qualify(), "unreferenced ordinary e_50 record drift rejects the mixed view itself");
+    auto refusal = [&](const char* label, const auto& change) {
+        seed(); change(); capture(); Check(!qualify() && !view.qualified, label);
+    };
+    refusal("all-Script table cannot masquerade as a supported empty ordinary view", [&] {
+        for (unsigned i=0;i<7;++i) put(image+CONTROLLER_TABLE+i*16,TableEntry{0,1,ardAddress+0xF60});
+    });
+    refusal("a second Script row rejects the entire ordinary projection", [&] {
+        put(image+CONTROLLER_TABLE+2*16,TableEntry{0,1,ardAddress+0xF60});
+    });
+    refusal("unknown Script flags never inherit the exact key0 flags1 rule", [&] { put(image+CONTROLLER_TABLE+5*16+4,std::uint32_t{3}); });
+    refusal("a different Script key refuses even for the same exact program", [&] { put(image+CONTROLLER_TABLE+5*16,std::uint32_t{1}); });
+    refusal("same program in a copied buffer is not the registered native BAR Script", [&] {
+        std::memcpy(shadow,fixture::Game.data(),fixture::Game.size());
+        put(image+CONTROLLER_TABLE+5*16+8,reinterpret_cast<uintptr_t>(shadow));
+    });
+    refusal("wrong native ARD root refuses despite equal copied program/table content", [&] {
+        std::memcpy(shadow,ard,0x2000); const auto p=reinterpret_cast<uintptr_t>(shadow);
+        put(shadow+16+10*16+8,encode(p+0xC00)); put(shadow+16+12*16+8,encode(p+0xF60));
+        put(image+known::ArdRootRva,p);
+    });
+    refusal("changed exact game program refuses native ownership qualification", [&] { ard[0xF60+80] ^= 1; });
+    refusal("wrong game BAR type refuses an otherwise exact copied payload", [&] { put(ard+16+12*16,std::uint32_t{4}); });
+    refusal("wrong game BAR name refuses an otherwise exact copied payload", [&] { ard[16+12*16+4] ^= 1; });
+    refusal("wrong game BAR descriptor refuses native ownership qualification", [&] { put(ard+16+12*16+12,std::uint32_t{327}); });
+    refusal("wrong native BAR count refuses before a convenient matching entry prefix", [&] { put(ard+4,std::uint32_t{23}); });
+    refusal("wrong e_50 native catalog anchor refuses the program root", [&] { put(ard+16+10*16+4,std::uint32_t{0x30345F65}); });
+    refusal("misaligned native handle region is not a portable pointer substitute", [&] {
+        const auto region=(ardAddress & ~uintptr_t{0x1FFFFFF}) | 1;
+        put(image+HANDLE_REGIONS_RVA+8,region);
+    });
+    refusal("duplicate ordinary controller alias still rejects the entire mixed table", [&] {
+        put(image+CONTROLLER_TABLE+16+8,reinterpret_cast<uintptr_t>(&controllers[0]));
+    });
+    refusal("duplicate native record ID still rejects the entire mixed table", [&] {
+        put(reinterpret_cast<void*>(controllers[6].spawnArray+0x1E),
+            Field<std::uint16_t>(reinterpret_cast<const std::uint8_t*>(controllers[0].spawnArray),0x1E));
+    });
+    refusal("clear host local tutorial flag refuses without writing the native bit", [&] { put(image+known::Flag40Rva,std::uint8_t{0}); });
+    for (const auto offset : std::array<unsigned,6>{0,1,2,4,6,8}) {
+        seed(); image[kh2coop::offsets::NOW+offset] ^= 1; capture();
+        Check(!qualify(), "every full FM00 location component is part of dormant Script admission");
+    }
+    seed(); capture(); catalogFailure = base + known::Flag40Rva;
+    Check(!qualify(), "unreadable host or post-load local flag never counts as a set bit");
+    seed(); capture(); catalogFailure = ardAddress + 0xF60;
+    Check(!qualify(), "unreadable exact native program span refuses qualification");
+    seed(); capture(); catalogFailure = base + HANDLE_REGIONS_RVA + 8;
+    Check(!qualify(), "unreadable native handle-region receipt refuses qualification");
+    seed(); capture(); catalogTrigger = base + known::ArdRootRva; catalogTriggerNth = 2; catalogMutation = catalogTrigger;
+    Check(!qualify(), "native ARD root drift between asset bookends refuses without following the new root");
+    seed(); capture(); catalogTrigger = base + known::Flag40Rva; catalogTriggerNth = 2; catalogMutation = catalogTrigger;
+    Check(!qualify(), "flag drift between native ownership bookends refuses the whole view");
+    seed(); capture(); catalogTrigger = ardAddress + 0xF60; catalogTriggerNth = 2; catalogMutation = catalogTrigger + 80;
+    Check(!qualify(), "program drift between native ownership bookends refuses the whole view");
+    seed(); capture(); ++syntheticLoad;
+    Check(!qualify(), "a view from a prior native load cannot be freshly qualified");
+    seed(); capture(); ++syntheticTransition;
+    Check(!qualify(), "a view from a prior transition cannot be freshly qualified");
+    seed(); capture(); put(image+CONTROLLER_COUNT,std::int32_t{6});
+    Check(!qualify(), "fresh native count must still equal the captured raw7 rather than portable6");
+    seed(); std::array<std::uint8_t,32> unknownLayout {};
+    CaptureRecordCatalogImpl(base,unknownLayout,*catalog,&CatalogControlRead,&CaptureDiagnosticStamp);
+    Check(!qualify(), "unknown image provenance cannot qualify the known dormant Script rule");
+    seed();
+    Check(NativeResyncDormancyPreloadReadyImpl(base,location,&CatalogControlRead,&CaptureDiagnosticStamp),
+        "independently set client flag qualifies only the read-only pre-load dormancy gate");
+    put(image+known::Flag40Rva,std::uint8_t{0});
+    Check(!NativeResyncDormancyPreloadReadyImpl(base,location,&CatalogControlRead,&CaptureDiagnosticStamp) &&
+        image[known::Flag40Rva]==0,
+        "client pre-load flag0 refuses before root may stage progress or queue native load");
+    put(image+known::Flag40Rva,std::uint8_t{1}); catalogFailure = base + known::Flag40Rva;
+    Check(!NativeResyncDormancyPreloadReadyImpl(base,location,&CatalogControlRead,&CaptureDiagnosticStamp),
+        "client pre-load unreadable flag refuses instead of inferring host flag or shared progress");
+    seed(); put(image+known::Flag40Rva,std::uint8_t{0});
+    constexpr uintptr_t wrongMessageFlagByte = uintptr_t{0x9ABCB0} + 17860 / 8;
+    put(image+wrongMessageFlagByte,std::uint8_t{1U << (17860 % 8)});
+    Check(!NativeResyncDormancyPreloadReadyImpl(base,location,&CatalogControlRead,&CaptureDiagnosticStamp),
+        "setting the withdrawn flag17860 interpretation never substitutes for actual local flag40");
+    seed(); ++syntheticLoad; capture();
+    Check(qualify(), "new-load client must independently recapture exact program/native root/local flag1");
+    put(image+known::Flag40Rva,std::uint8_t{0});
+    Check(!qualify(), "client post-load flag0 cannot reuse an earlier set-flag qualification");
+    seed(); put(image+CONTROLLER_COUNT,std::int32_t{6});
+    std::memcpy(image+CONTROLLER_TABLE+5*16,image+CONTROLLER_TABLE+6*16,16);
+    image[kh2coop::offsets::NOW+1]=33; capture();
+    Check(catalog->status==S::Complete && qualify() && view.qualified && !view.mixed && view.ordinaryCount==6 &&
+        view.RawIndex(5)==5 && view.OrdinaryIndex(5)==5,
+        "ordinary-only catalog outside the known mixed rule retains legacy identity mapping and complete status");
+    Check(kh2coop::verifiedProgressByteMask(0x2405)==0 && known::Flag40Rva==uintptr_t{0x9A98B0}+0x2405,
+        "tutorial flag40 stays local outside verified progress policy at the corrected native SAVE base");
+    Check(hookCalls==hooksBefore && scriptCalls==scriptCallsBefore && image[known::Flag40Rva]==1,
+        "catalog qualifications preserve the local flag and invoke neither a hook installer nor native Script dispatcher");
+    resetRead(); syntheticTransition=savedTransition; syntheticLoad=savedLoad;
 }
 unsigned mutationCtorCalls = 0, mutationInitCalls = 0, mutationTeardownCalls = 0;
 bool mutationArguments = true, mutationNested = false, mutationFault = false, mutationWait = false;
@@ -2592,6 +2872,7 @@ int main() {
           "foreign child calls preserve original behavior without operand reads or claimed factory evidence");
     factoryMode = FactoryTestMode::Off;
     RecordCatalogControls(image);
+    MixedFm00CatalogControls(image);
     GeometryControls(image);
     Check(hookCalls == 1, "headless test uses one rejecting MinHook seam and never installs or tears down native hooks");
     KnownMutationControls(image);

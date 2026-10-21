@@ -166,7 +166,8 @@ template <std::size_t I> void __fastcall MissionDetour(std::uint64_t* args) {
     const auto role=g_missionRole.load(std::memory_order_acquire);
     if(role==1) {
         // Host: remember which end ran on this mission, with its argument, then end it natively.
-        if(MR::kTraps[I].kind==MR::Kind::End && !g_missionHostEndTrap) {
+        if((MR::kTraps[I].kind==MR::Kind::End ||
+            (MR::kTraps[I].kind==MR::Kind::BossEnd && MR::SameFile(g_missionHostFile,"TT34_MS304.bar"))) && !g_missionHostEndTrap) {
             std::uint32_t arg=0;
             if(CopyNative(reinterpret_cast<uintptr_t>(args),&arg,sizeof(arg))) {
                 g_missionHostEndTrap=static_cast<std::uint8_t>(MR::kTraps[I].index);g_missionHostEndArg=arg;
@@ -178,7 +179,7 @@ template <std::size_t I> void __fastcall MissionDetour(std::uint64_t* args) {
         // dropping calls: following and the replay guard both expire with it.
         const bool fresh=GetTickCount64()-g_missionFollowMs.load(std::memory_order_acquire)<=250;
         const bool following=fresh && g_missionFollowing.load(std::memory_order_acquire);
-        if(MR::DropLocalCall(I,following,g_missionHostFailed.load(std::memory_order_acquire),fresh && g_missionReplayed)) {
+        if(MR::DropLocalCall(I,following,g_missionHostFailed.load(std::memory_order_acquire),fresh && g_missionReplayed, MR::SameFile(g_missionLocalFile,"TT34_MS304.bar"))) {
             g_missionDropped.fetch_add(1,std::memory_order_relaxed);
             std::uint32_t arg=0;
             if(following && !g_missionReplayed && MR::kTraps[I].kind==MR::Kind::End && g_missionDroppedEnd<0 &&
@@ -392,6 +393,14 @@ void ApplyMission(std::uint32_t frame) {
         g_log("[mission-mirror] client %s file=%s host=%s",following?"follow":"release",local.active?local.file:"-",
             g_missionHost.active?g_missionHost.file:"-");
     if(current && MR::Failed(g_missionHost) && MR::SameFile(g_missionHost.file,local.file))g_missionHostFailedSeen=true;
+    if(current && g_missionHost.endTrap==16 && MR::Ended(g_missionHost) &&
+       MR::SameFile(g_missionHost.file,"TT34_MS304.bar") && MR::SameFile(g_missionHost.file,local.file)) {
+        // Host alone runs re_deadboss and selects the authored victory scene. A
+        // brainless client cannot complete that native flow (VUH-2367). Seal the
+        // local end guard without replaying 4/16 or an earlier dropped local end.
+        if(!g_missionReplayed && g_log)g_log("[mission-mirror] client boss end host-led file=%s trap=16 replays=0",local.file);
+        g_missionReplayed=true;g_missionFallbackPending=false;g_missionDroppedEnd=-1;
+    }
     if(g_missionWasFollowing && !following && g_missionDroppedEnd>=0 && !g_missionReplayed)g_missionFallbackPending=true;
     if(following)g_missionFallbackPending=false;
     g_missionWasFollowing=following;

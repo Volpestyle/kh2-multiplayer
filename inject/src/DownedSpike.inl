@@ -883,19 +883,15 @@ static void PromptTick(const Snap& s) {
     }
 }
 
-// HookedPerEntityUpdate, after the local player's own update: a logically downed body stays where it
-// went down. Enemies that still target it (no clone to retarget to) shove it with their refused attacks
-// (run 20261019-133539: about 6,000 units in 90 s), which also keeps a reviver from reaching it.
+// After the local player's native update, hold its downed XZ against enemy shove
+// (20261019-133539), but preserve native Y from gravity and terrain collision.
+// Live11 retained a downed height of -251.985, beyond the unchanged 3D revive reach.
 static void PinDowned(uintptr_t actor) {
     if (!LogicallyDowned() || actor != g_down.downedActor || !OwnerThread()) return;
     const uintptr_t pos = actor + offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X;
     __try {
         auto* p = reinterpret_cast<float*>(pos);
-        const float dx = p[0] - g_down.downedPos[0], dy = p[1] - g_down.downedPos[1], dz = p[2] - g_down.downedPos[2];
-        if (dx * dx + dy * dy + dz * dz > 4.0f) {
-            p[0] = g_down.downedPos[0]; p[1] = g_down.downedPos[1]; p[2] = g_down.downedPos[2];
-            ++g_down.pinWrites;
-        }
+        if (HoldDownedHorizontal(p, g_down.downedPos)) ++g_down.pinWrites;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 

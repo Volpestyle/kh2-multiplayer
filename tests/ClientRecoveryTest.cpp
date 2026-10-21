@@ -121,6 +121,76 @@ void testScheduler() {
     stable.shutdown(); stable.connected(12102); stable.admitted(12103, 5);
     check(stable.state() == State::Terminal && stable.tick(13000) == Action::None, "callbacks after explicit shutdown cannot rearm recovery");
 }
+void testHeartbeatRecovery() {
+    constexpr std::uint64_t firstSelf = 0x100000002ULL;
+    Recovery friend1(SlotType::Friend1); admit(friend1, 0, firstSelf);
+    check(!friend1.heartbeatExpired(100000, firstSelf, false) &&
+          !friend1.heartbeatExpired(100000, 0, true) &&
+          !friend1.heartbeatExpired(100000, firstSelf + 1, true) && friend1.state() == State::Admitted,
+          "authority loss requires a retained pin and the exact nonzero admitted self incarnation");
+    check(friend1.heartbeatExpired(100, firstSelf, true) && friend1.state() == State::RetryWait && friend1.attempts() == 0,
+          "validated heartbeat loss commits recovery before caller disconnects");
+    // Model a transport that reports its local close synchronously. Admission
+    // loss must already be RetryWait before this callback is invoked.
+    auto localClose = closeInfo(DisconnectReason::TransportLost); localClose.local = true;
+    friend1.closed(100, localClose);
+    check(friend1.state() == State::RetryWait && !friend1.heartbeatExpired(100000, firstSelf, true) &&
+          friend1.tick(100) == Action::Disconnect && friend1.tick(100) == Action::None,
+          "local close and duplicate loss preserve one pending disconnect without advancing the episode clock");
+    check(friend1.tick(1099) == Action::None && friend1.tick(1100) == Action::Connect && friend1.attempts() == 1,
+          "heartbeat loss uses the existing first backoff and rejected notifications did not move its clock");
+    friend1.connected(1100); friend1.admitted(1100, firstSelf + 1);
+    check(!friend1.heartbeatExpired(100000, firstSelf, true) && friend1.state() == State::Admitted &&
+          friend1.heartbeatExpired(1110, firstSelf + 1, true) && friend1.attempts() == 1,
+          "old-incarnation loss cannot retire new admission or reset its short-flare attempt budget");
+    check(friend1.tick(1110) == Action::Disconnect && friend1.tick(3109) == Action::None &&
+          friend1.tick(3110) == Action::Connect && friend1.attempts() == 2,
+          "fresh-incarnation loss retains the second backoff of the same recovery episode");
+
+    Recovery freshRequired(SlotType::Friend2); admit(freshRequired, 0, firstSelf);
+    (void)freshRequired.heartbeatExpired(100, firstSelf, true); (void)freshRequired.tick(100);
+    (void)freshRequired.tick(1100); freshRequired.connected(1100); freshRequired.admitted(1100, firstSelf);
+    check(freshRequired.state() == State::Terminal && freshRequired.tick(1100) == Action::Disconnect,
+          "heartbeat recovery still refuses readmission under the retired self incarnation");
+
+    Recovery budget(SlotType::Friend2); std::uint64_t self = firstSelf, now = 100;
+    admit(budget, 0, self);
+    check(budget.heartbeatExpired(now, self, true) && budget.tick(now) == Action::Disconnect,
+          "heartbeat recovery starts with exactly one local transport release");
+    for (std::size_t i = 0; i < Recovery::kRetryDelays.size(); ++i) {
+        now += Recovery::kRetryDelays[i];
+        check(budget.tick(now - 1) == Action::None && budget.tick(now) == Action::Connect && budget.attempts() == i + 1,
+              "heartbeat recovery respects every existing retry delay");
+        budget.connected(now); budget.admitted(now, ++self); now += 10;
+        check(budget.heartbeatExpired(now, self, true) && budget.tick(now) == Action::Disconnect,
+              "each admitted incarnation can lose authority once without resetting the five-attempt budget");
+    }
+    check(budget.state() == State::Terminal && budget.attempts() == 5 &&
+          !budget.heartbeatExpired(now + 1, self, true) && budget.tick(now + 100000) == Action::None,
+          "five heartbeat recovery attempts exhaust the original budget and cannot restart");
+
+    Recovery expiry(SlotType::Friend1); admit(expiry, 0, firstSelf);
+    (void)expiry.heartbeatExpired(100, firstSelf, true); (void)expiry.tick(100);
+    (void)expiry.tick(59000); expiry.connected(59001); expiry.admitted(59002, firstSelf + 1);
+    check(expiry.heartbeatExpired(60100, firstSelf + 1, true) && expiry.state() == State::Terminal &&
+          expiry.tick(60100) == Action::Disconnect && expiry.tick(60101) == Action::None,
+          "new authority loss cannot extend the sixty-second episode through a brief late admission");
+
+    Recovery host(SlotType::Player); admit(host, 0, firstSelf);
+    check(!host.heartbeatExpired(100, firstSelf, true) && host.state() == State::Admitted && host.tick(100) == Action::None,
+          "Player authority loss never starts automatic friend recovery");
+    Recovery initial(SlotType::Friend1); (void)initial.start(0); initial.connected(0);
+    check(!initial.heartbeatExpired(100, firstSelf, true) && initial.state() == State::AwaitingRoster,
+          "an unadmitted friend cannot authorize heartbeat recovery");
+    Recovery shutdown(SlotType::Friend1); admit(shutdown, 0, firstSelf); shutdown.shutdown();
+    check(!shutdown.heartbeatExpired(100, firstSelf, true) && shutdown.tick(100000) == Action::None,
+          "explicit shutdown remains terminal despite authority loss");
+    Recovery terminal(SlotType::Friend1); admit(terminal, 0, firstSelf);
+    terminal.rejected(10, DisconnectReason::AdmissionRejected);
+    check(!terminal.heartbeatExpired(100, firstSelf, true) && terminal.state() == State::Terminal &&
+          terminal.tick(100) == Action::Disconnect && terminal.tick(100000) == Action::None,
+          "terminal admission refusal cannot be replaced by heartbeat recovery");
+}
 void testSteamConnectBudget() {
     Recovery delayed(SlotType::Friend1, Recovery::Backend::Steam);
     check(delayed.start(100) == Action::Connect && delayed.tick(4100) == Action::None &&
@@ -548,6 +618,7 @@ void testCallbackQuarantineAndCloseLatch() {
 } // namespace
 int main() {
     testScheduler();
+    testHeartbeatRecovery();
     testSteamConnectBudget();
     if (enet_initialize() != 0) return 2;
     testExistingHostRecovery(); testRestartedRelayPin(); testProtocolFourRefused(); testCallbackQuarantineAndCloseLatch();

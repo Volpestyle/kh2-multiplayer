@@ -1,6 +1,7 @@
 #ifndef _CRT_RAND_S
 #define _CRT_RAND_S
 #endif
+#include "kh2coop/RcRefusalPacketTrace.hpp"
 #include "kh2coop/SessionHost.hpp"
 #include "kh2coop/Revive.hpp"
 #include "kh2coop/ProgressMirror.hpp"
@@ -486,8 +487,11 @@ void SessionHost::onDisconnect(TransportPeer* peer) {
 
 void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                             std::size_t size, const WorldScope* admittedScope) {
+    auto rcTrace=rcdiag::Packet(data,size);if(admittedScope)rcdiag::EnvelopeScope(rcTrace,*admittedScope);
+    const auto rcHop=[&](rcdiag::Stage stage,const char* result,const char* why){rcdiag::Note(stage,result,why,rcTrace,[&](const char* line){log(std::string(line));});};
+    rcHop(rcdiag::Stage::RelayEnvelope,"received",admittedScope?"inner-admitted-envelope":"onReceive-entry");
     auto* ps = findPeer(peer);
-    if (!ps) return;
+    if (!ps) {rcHop(rcdiag::Stage::RelayEnvelope,"refused","peer-missing");return;}
     const bool diagnostic = size && (data[0]==static_cast<std::uint8_t>(PacketType::DesyncArtifactChunk) ||
                                       data[0]==static_cast<std::uint8_t>(PacketType::DesyncCaptureDone));
 
@@ -501,17 +505,26 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
         if(type==PacketType::LocalResyncCommand || type==PacketType::NativeResyncSnapshot)return;
         if(type==PacketType::WorldEnvelope) {
             WorldEnvelope envelope;read(reader,envelope);const auto& scope=envelope.scope;
-            if(ps->status!=PeerStatus::Verified || scope.sessionId!=session_.sessionId ||
-               scope.kind!=WorldSourceKind::Native || scope.sourceConnectionId!=ps->connectionId || scope.sourceDeliverySerial!=ps->deliverySerial ||
-               scope.targetConnectionId || scope.targetDeliverySerial || (fromHost(*ps)?!scope.hostSourceSerial:scope.hostSourceSerial!=0)) {++rejectedWorld_;return;}
+            const char* rcWhy="unknown";
+            if(rcdiag::Reject(ps->status!=PeerStatus::Verified,"peer-unverified",rcWhy) ||
+               rcdiag::Reject(scope.sessionId!=session_.sessionId,"envelope-session",rcWhy) ||
+               rcdiag::Reject(scope.kind!=WorldSourceKind::Native,"envelope-kind",rcWhy) ||
+               rcdiag::Reject(scope.sourceConnectionId!=ps->connectionId,"source-connection",rcWhy) ||
+               rcdiag::Reject(scope.sourceDeliverySerial!=ps->deliverySerial,"source-delivery",rcWhy) ||
+               rcdiag::Reject(scope.targetConnectionId!=0,"client-target-connection",rcWhy) ||
+               rcdiag::Reject(scope.targetDeliverySerial!=0,"client-target-delivery",rcWhy) ||
+               rcdiag::Reject(fromHost(*ps)?!scope.hostSourceSerial:scope.hostSourceSerial!=0,"host-source-shape",rcWhy)) {
+                rcHop(rcdiag::Stage::RelayEnvelope,"refused",rcWhy);++rejectedWorld_;return;
+            }
             const auto inner=static_cast<PacketType>(envelope.packet.front());
-            if(ps->worldQuarantined&&!isEphemeralWorldPacket(inner)){++rejectedWorld_;return;}
-            if(fromHost(*ps)&&scope.hostSourceSerial<=(std::max)(hostSourceCutFloor_,resyncBegin_?resyncBegin_->snapshotCut:0)){++rejectedWorld_;return;}
+            if(ps->worldQuarantined&&!isEphemeralWorldPacket(inner)){rcHop(rcdiag::Stage::RelayEnvelope,"refused","quarantined");++rejectedWorld_;return;}
+            if(fromHost(*ps)&&scope.hostSourceSerial<=(std::max)(hostSourceCutFloor_,resyncBegin_?resyncBegin_->snapshotCut:0)){rcHop(rcdiag::Stage::RelayEnvelope,"refused","host-source-floor");++rejectedWorld_;return;}
+            rcHop(rcdiag::Stage::RelayEnvelope,"admitted","before-inner-dispatch");
             const auto previous=forwardingScope_;forwardingScope_=scope;
             onReceive(peer,envelope.packet.data(),envelope.packet.size(),&scope);
             forwardingScope_=previous;return;
         }
-        if(isScopedWorldPacket(type)&&!admittedScope){++rejectedWorld_;return;}
+        if(isScopedWorldPacket(type)&&!admittedScope){rcHop(rcdiag::Stage::RelayEnvelope,"refused","unscoped-wire");++rejectedWorld_;return;}
         if(type==PacketType::ResyncRequest || (type>=PacketType::ResyncBegin&&type<=PacketType::ResyncResult)) {
             if(ps->status!=PeerStatus::Verified)return;
             receiveResync(*ps,type,reader);return;
@@ -982,19 +995,33 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
 
             case PacketType::ScriptReactionCompletion: {
                 ScriptReactionCompletion m;read(reader,m);
-                auto* host=hostPeer();
-                if(!reader.atEnd() || ps->status!=PeerStatus::Verified || fromHost(*ps) || ps->worldQuarantined ||
-                   !admittedScope || !room_ || !room_->epoch || !host || !host->transportPeer ||
-                   m.ownerSlot!=0xFF || m.seq<=ps->lastScriptReactionCompletionSeq ||
-                   m.requesterConnectionId!=ps->connectionId || !sameResyncRoom(m.location,*room_)) {
-                    ++rejectedWorld_;return;
+                rcTrace=rcdiag::Message(m);if(admittedScope)rcdiag::EnvelopeScope(rcTrace,*admittedScope);
+                rcHop(rcdiag::Stage::RelayCompletion,"decoded","before-claim-admission");
+                auto* host=hostPeer();const char* why="unknown";
+                if(rcdiag::Reject(!reader.atEnd(),"claim-trailing-bytes",why) ||
+                   rcdiag::Reject(ps->status!=PeerStatus::Verified,"peer-unverified",why) ||
+                   rcdiag::Reject(fromHost(*ps),"host-author",why) || rcdiag::Reject(ps->worldQuarantined,"quarantined",why) ||
+                   rcdiag::Reject(!admittedScope,"envelope-missing",why) || rcdiag::Reject(!room_,"room-missing",why) ||
+                   rcdiag::Reject(!room_->epoch,"room-epoch-zero",why) || rcdiag::Reject(!host,"host-missing",why) ||
+                   rcdiag::Reject(!host->transportPeer,"host-transport-missing",why) ||
+                   rcdiag::Reject(m.ownerSlot!=0xFF,"wire-owner-not-ff",why) ||
+                   rcdiag::Reject(m.seq<=ps->lastScriptReactionCompletionSeq,"sequence-floor",why) ||
+                   rcdiag::Reject(m.requesterConnectionId!=ps->connectionId,"requester-peer",why) ||
+                   rcdiag::Reject(!sameResyncRoom(m.location,*room_),"claim-room",why)) {
+                    rcHop(rcdiag::Stage::RelayCompletion,"refused",why);++rejectedWorld_;return;
                 }
+                rcTrace.expected=ps->lastScriptReactionCompletionSeq;
                 ps->lastScriptReactionCompletionSeq=m.seq; // consume before gameplay checks
+                rcTrace.observed=m.seq;
                 const bool alive=manifest_.epoch==room_->epoch && !deadEnemies_.count(m.netId) &&
                     std::any_of(manifest_.entries.begin(),manifest_.entries.end(),[&](const auto& e){return e.netId==m.netId && e.objectId==m.objectId;});
-                if(!alive){++rejectedWorld_;return;}
+                if(!alive){rcHop(rcdiag::Stage::RelayCompletion,"refused","manifest-alive-after-sequence-consumed");++rejectedWorld_;return;}
                 m.ownerSlot=static_cast<std::uint8_t>(ps->assignedSlot);
-                sendTo(host->transportPeer,encode(m),true);
+                rcTrace.owner=m.ownerSlot;rcTrace.slot=m.ownerSlot;
+                const auto entered=rcTrace;
+                rcHop(rcdiag::Stage::RelayCompletion,"forward-enter","owner-stamped");
+                const bool forwarded=sendTo(host->transportPeer,encode(m),true);
+                rcdiag::Note(rcdiag::Stage::RelayCompletion,forwarded?"forward-true":"forward-false","sendTo-returned-not-delivery",entered,[&](const char* line){log(std::string(line));});
                 break;
             }
             case PacketType::StageEnd: {
@@ -1444,6 +1471,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 break;
         }
     } catch (const std::exception& ex) {
+        rcHop(rcdiag::Stage::RelayEnvelope,"refused","decode-or-dispatch-exception");
         if(diagnostic && ps->status==PeerStatus::Verified)desyncCapture_->Reject(ps->connectionId,"malformed diagnostic packet");
         if(resyncPlan_&&fromHost(*ps)&&size&&data[0]>=static_cast<std::uint8_t>(PacketType::ResyncBegin)&&data[0]<=static_cast<std::uint8_t>(PacketType::ResyncEnd))
             finishResync(ResyncResultReason::InvalidSnapshot,"malformed host snapshot record");
@@ -1934,6 +1962,8 @@ void SessionHost::removePeer(TransportPeer* peer) {
 // ---------------------------------------------------------------------------
 
 bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& packet,bool reliable,bool cached) {
+    auto rcTrace=rcdiag::Packet(packet);
+
     std::optional<WorldScope> emittedScope;
     const auto finish=[&](bool result,const char* disposition,const std::vector<std::uint8_t>* wire=nullptr) {
         if(cached)cacheDiagnostics_.emit(callbacks_.onCausalDiagnostic,"relay-cache-delivery",[&](std::ostream& out){
@@ -1953,6 +1983,7 @@ bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& pa
                <<" wireSHA="<<(wire?causalSha(*wire):"-")<<" progressVersion="<<progressVersion_;
             causalRoom(out,room_?&*room_:nullptr);
         });
+        rcdiag::Note(rcdiag::Stage::RelayForward,result?"return-true":"return-false",disposition,rcTrace,[&](const char* line){log(std::string(line));});
         return result;
     };
     if(!peer||packet.empty())return finish(false,"invalid-input");
@@ -1965,6 +1996,7 @@ bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& pa
         if(simulation){scope.kind=WorldSourceKind::Simulation;scope.hostSourceSerial=simulationSourceSerial_;}
         if(type==PacketType::DesyncNotice || type==PacketType::PartyReapply){scope={session_.sessionId,host->connectionId,host->deliverySerial,lastHostSourceSerial_,0,0};scope.kind=WorldSourceKind::Relay;}
         scope.targetConnectionId=target->connectionId;scope.targetDeliverySerial=target->deliverySerial;
+        rcdiag::EnvelopeScope(rcTrace,scope);
         if(cached && callbacks_.onCausalDiagnostic){try{emittedScope=scope;}catch(...){cacheDiagnostics_.gap();}}
         if(scope.sourceConnectionId==host->connectionId && scope.kind==WorldSourceKind::Native && type!=PacketType::DesyncNotice && scope.hostSourceSerial<=target->hostSourceFloor)return finish(true,"source-floor-suppressed");
         WorldEnvelope env{scope,packet};
@@ -1981,7 +2013,9 @@ bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& pa
     }
     const bool diagnostic=isDesyncDiagnosticPacket(type);
     if(diagnostic)reliable=true;
-    return transport_->send(peer, packet.data(), packet.size(), diagnostic ? 2 : (reliable ? 0 : 1), reliable);
+    const bool sent=transport_->send(peer, packet.data(), packet.size(), diagnostic ? 2 : (reliable ? 0 : 1), reliable);
+    rcdiag::Note(rcdiag::Stage::RelayForward,sent?"submit-true":"submit-false","transport-send-returned-not-delivery",rcTrace,[&](const char* line){log(std::string(line));});
+    return sent;
 }
 
 void SessionHost::broadcastToVerified(

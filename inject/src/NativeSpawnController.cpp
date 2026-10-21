@@ -1,4 +1,5 @@
 #include "NativeSpawnController.hpp"
+#include "KnownDormantScripts.hpp"
 #include "kh2coop/EnemyClass.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativePrivateStatus.hpp"
@@ -2800,12 +2801,14 @@ void CaptureRecordCatalogImpl(uintptr_t base, const std::array<std::uint8_t, 32>
 }
 
 void ResolveRecordMembershipImpl(uintptr_t base, const NativeRecordCatalog& catalog, uintptr_t actor,
-    NativeRecordMembership& out, RecordCatalogRead read, RecordCatalogStamp stamp) {
+    NativeRecordMembership& out, RecordCatalogRead read, RecordCatalogStamp stamp,
+    const NativeOrdinaryResyncView* view = nullptr) {
     out = {};
     out.actor = actor;
     if (!IsDiagnosticGameThread()) { out.issues = Issue(RecordCatalogIssue::Thread); return; }
-    if (base != catalog.exeBase || !catalog.associationComplete || !catalog.contentBytesComplete ||
-        !catalog.tableInventoryComplete || catalog.status != NativeRecordContentStatus::Complete ||
+    const bool association = view ? view->qualified && view->raw == &catalog :
+        catalog.associationComplete && catalog.contentBytesComplete && catalog.status == NativeRecordContentStatus::Complete;
+    if (base != catalog.exeBase || !association || !catalog.tableInventoryComplete ||
         !catalog.beforeAvailable || !catalog.afterAvailable || catalog.entryCount > 64 ||
         catalog.countBefore != static_cast<std::int32_t>(catalog.entryCount) ||
         !ReadableRange(base, CONTROLLER_COUNT + 4) || !CatalogSpan(actor, 0x9F8) || actor % 8) {
@@ -2849,10 +2852,11 @@ void ResolveRecordMembershipImpl(uintptr_t base, const NativeRecordCatalog& cata
             unsigned matches = 0;
             for (std::uint32_t i = 0; i < catalog.entryCount; ++i) {
                 const auto& e = catalog.entries[i];
+                if (view && !view->OrdinaryIndex(i)) continue;
                 if (e.controller != out.controller[0]) continue;
                 ++matches; selected = &e; out.tableIndex = i;
             }
-            if (matches != 1 || !selected->associationUnique || !selected->bytesComplete ||
+            if (matches != 1 || (!view && !selected->associationUnique) || !selected->bytesComplete ||
                 selected->content.records.size() != selected->declaredRecords ||
                 selected->declaredRecords > 256 || !selected->declaredRecords ||
                 !CatalogSpan(selected->spawnArray, selected->declaredRecords * 64) ||
@@ -2894,6 +2898,245 @@ void ResolveRecordMembershipImpl(uintptr_t base, const NativeRecordCatalog& cata
     if (out.controller[0] != out.controller[1] || out.record[0] != out.record[1]) out.issues |= Issue(RecordCatalogIssue::Changed);
     out.contentComparisonAvailable = selected && !out.issues;
     out.status = out.contentComparisonAvailable ? NativeRecordContentStatus::Complete : NativeRecordContentStatus::Partial;
+}
+
+// This resync-only adapter never changes the raw collector's classification.
+// The default membership path above still requires globally complete ordinary data.
+std::array<std::uint16_t, 6> CatalogLocation(const TraceStamp& s) {
+    return {s.location[0], s.location[1], s.location[2], Field<std::uint16_t>(s.location.data(),4),
+        Field<std::uint16_t>(s.location.data(),6), Field<std::uint16_t>(s.location.data(),8)};
+}
+bool ResyncCatalogBookend(uintptr_t base, const NativeRecordCatalog& raw,
+    RecordCatalogRead read, RecordCatalogStamp stamp) {
+    TraceStamp before{}, after{}; std::int32_t count=0;
+    if (!stamp(base,before) || !CatalogSameStamp(before,raw.before) ||
+        !read(base+CONTROLLER_COUNT,&count,4) || count!=raw.countBefore) return false;
+    for (std::uint32_t i=0;i<raw.entryCount;++i) {
+        const auto& e=raw.entries[i]; std::array<std::uint8_t,16> table{};
+        if (!read(base+CONTROLLER_TABLE+i*16,table.data(),table.size()) || table!=e.tableBefore) return false;
+        if (Field<std::uint32_t>(table.data(),4)&1) continue;
+        std::array<std::uint8_t,64> controller{}, record{}; std::array<std::uint8_t,44> header{};
+        if (!read(e.controller,controller.data(),controller.size()) || controller!=e.controllerBefore ||
+            !read(e.header,header.data(),header.size()) || header!=e.content.header) return false;
+        for (std::size_t j=0;j<e.content.records.size();++j)
+            if (!read(e.spawnArray+j*64,record.data(),record.size()) || record!=e.content.records[j]) return false;
+    }
+    return stamp(base,after) && CatalogSameStamp(after,raw.before);
+}
+bool ResyncOrdinaryShape(const NativeRecordCatalog& raw, NativeOrdinaryResyncView& view) {
+    const auto loc=CatalogLocation(raw.before);
+    const NativeRecordLocation location{loc[0],loc[1],loc[2],loc[3],loc[4],loc[5]};
+    std::uint32_t records=0;
+    for (std::uint32_t i=0;i<raw.entryCount;++i) {
+        const auto& e=raw.entries[i];
+        if (!e.tableBeforeAvailable || !e.tableAfterAvailable || e.tableBefore!=e.tableAfter ||
+            e.controller!=Field<uintptr_t>(e.tableBefore.data(),8)) return false;
+        const auto flags=Field<std::uint32_t>(e.tableBefore.data(),4);
+        if (flags&1) {
+            if (flags!=1 || e.issues!=Issue(RecordCatalogIssue::Script) ||
+                Field<std::uint32_t>(e.tableBefore.data(),0)!=0 || view.scriptRawIndex!=0xFF) return false;
+            view.scriptRawIndex=static_cast<std::uint8_t>(i); continue;
+        }
+        if (flags&~2U || e.issues || !e.bytesComplete || !e.controllerBeforeAvailable || !e.controllerAfterAvailable ||
+            !e.headerBeforeAvailable || !e.headerAfterAvailable || e.controllerBefore!=e.controllerAfter ||
+            e.content.header!=e.headerAfter || e.content.layoutSha256!=raw.layoutSha256 ||
+            e.content.location!=location ||
+            e.content.groupKey!=Field<std::uint32_t>(e.tableBefore.data(),0) ||
+            e.content.groupKey!=Field<std::uint32_t>(e.controllerBefore.data(),0) ||
+            e.declaredRecords>RECORD_CAP || e.content.records.size()!=e.declaredRecords ||
+            e.recordsAfter!=e.content.records || e.recordReadMask.size()!=e.declaredRecords ||
+            !std::all_of(e.recordReadMask.begin(),e.recordReadMask.end(),[](auto m){return m==3;}) ||
+            (e.content.header[0]!=1 && e.content.header[0]!=2) ||
+            Field<std::uint16_t>(e.content.header.data(),4)!=e.declaredRecords ||
+            !CatalogSpan(e.controller,64) || e.controller%8 ||
+            !CatalogSpan(e.header,44+static_cast<std::size_t>(e.declaredRecords)*64) ||
+            e.header!=Field<uintptr_t>(e.controllerBefore.data(),8) ||
+            e.spawnArray!=Field<uintptr_t>(e.controllerBefore.data(),0x30) ||
+            e.regionArray!=Field<uintptr_t>(e.controllerBefore.data(),0x38) ||
+            e.spawnArray!=e.header+44 || e.regionArray!=e.spawnArray+e.declaredRecords*64 ||
+            !CatalogSpan(e.regionArray,1)) return false;
+        records+=e.declaredRecords;
+        if (records>1024 || CatalogOverlap(e.controller,64,e.header,44+e.declaredRecords*64)) return false;
+        const auto ordinal=view.ordinaryCount++;
+        view.ordinaryToRaw[ordinal]=static_cast<std::uint8_t>(i);
+        view.rawToOrdinary[i]=static_cast<std::uint8_t>(ordinal);
+        // Recompute associations across the ordinary subset. Raw associationUnique
+        // remains false for a mixed catalog and is never overwritten or borrowed.
+        for (std::uint32_t j=0;j<=i;++j) {
+            const auto& other=raw.entries[j];
+            if (Field<std::uint32_t>(other.tableBefore.data(),4)&1) continue;
+            if (j<i && native_record_detail::descriptorEqual(e.content,other.content)) return false;
+            if (j<i) {
+                const std::array<std::pair<uintptr_t,std::size_t>,2> a {{{e.controller,64},
+                    {e.header,44+static_cast<std::size_t>(e.declaredRecords)*64}}};
+                const std::array<std::pair<uintptr_t,std::size_t>,2> b {{{other.controller,64},
+                    {other.header,44+static_cast<std::size_t>(other.declaredRecords)*64}}};
+                for (const auto& x:a) for (const auto& y:b)
+                    if (CatalogOverlap(x.first,x.second,y.first,y.second)) return false;
+            }
+            for (std::size_t a=0;a<e.content.records.size();++a) {
+                const auto end=j==i?a:other.content.records.size();
+                for (std::size_t b=0;b<end;++b)
+                    if (Field<std::uint16_t>(e.content.records[a].data(),0x1E)==
+                        Field<std::uint16_t>(other.content.records[b].data(),0x1E)) return false;
+            }
+        }
+    }
+    return records==raw.declaredLogicalRecords && records==raw.capturedLogicalRecords;
+}
+struct ResyncDormantAsset {
+    uintptr_t root=0, scriptRegion=0, anchorRegion=0;
+    std::uint32_t scriptRegionIndex=0, anchorRegionIndex=0;
+    std::array<std::uint8_t,16> header{}, scriptEntry{}, anchorEntry{};
+    std::array<std::uint8_t,knowndormantscripts::ProgramByteCap> program{};
+    std::array<std::uint8_t,knowndormantscripts::AnchorPrefixByteCap> anchorPrefix{};
+    bool operator==(const ResyncDormantAsset&) const = default;
+};
+bool ReadResyncDormantAsset(uintptr_t base, const NativeRecordCatalog& raw,
+    const knowndormantscripts::Rule& rule, const NativeOrdinaryResyncView& view,
+    ResyncDormantAsset& out, RecordCatalogRead read, const ResyncDormantAsset* expected=nullptr) {
+    out={};
+    if (rule.programBytes.empty() || rule.programBytes.size()>out.program.size() ||
+        rule.anchorPrefix.empty() || rule.anchorPrefix.size()>out.anchorPrefix.size() ||
+        rule.anchorHeaderOffset!=rule.anchorPrefix.size() || rule.barCount>64 ||
+        rule.scriptBarIndex>=rule.barCount || rule.anchorBarIndex>=rule.barCount ||
+        !CatalogSpan(base,knowndormantscripts::ArdRootRva+8) ||
+        !read(base+knowndormantscripts::ArdRootRva,&out.root,8) ||
+        (expected && out.root!=expected->root) || out.root%16 ||
+        !CatalogSpan(out.root,16+rule.barCount*16) || !CatalogSpan(out.root,rule.scriptOffset+rule.programBytes.size()) ||
+        !CatalogSpan(out.root,rule.anchorOffset+rule.anchorSize) ||
+        !read(out.root,out.header.data(),out.header.size()) ||
+        (expected && out.header!=expected->header) || Field<std::uint32_t>(out.header.data(),0)!=0x01524142 ||
+        Field<std::uint32_t>(out.header.data(),4)!=rule.barCount) return false;
+    const auto scriptSlot=out.root+16+rule.scriptBarIndex*16, anchorSlot=out.root+16+rule.anchorBarIndex*16;
+    if (!read(scriptSlot,out.scriptEntry.data(),16) || !read(anchorSlot,out.anchorEntry.data(),16) ||
+        (expected && (out.scriptEntry!=expected->scriptEntry || out.anchorEntry!=expected->anchorEntry)) ||
+        Field<std::uint32_t>(out.scriptEntry.data(),0)!=rule.scriptType ||
+        Field<std::uint32_t>(out.scriptEntry.data(),4)!=rule.scriptName ||
+        Field<std::uint32_t>(out.scriptEntry.data(),12)!=rule.programBytes.size() ||
+        Field<std::uint32_t>(out.anchorEntry.data(),0)!=rule.anchorType ||
+        Field<std::uint32_t>(out.anchorEntry.data(),4)!=rule.anchorKey ||
+        Field<std::uint32_t>(out.anchorEntry.data(),12)!=rule.anchorSize) return false;
+    const auto resolve=[&](const auto& entry, uintptr_t& region, std::uint32_t& index, uintptr_t target) {
+        const auto rawHandle=Field<std::uint32_t>(entry.data(),8), handle=rawHandle&0x7FFFFFFFU;
+        index=handle>>25;
+        if (!rawHandle || !CatalogSpan(base,HANDLE_REGIONS_RVA+64*8) ||
+            !read(base+HANDLE_REGIONS_RVA+index*8,&region,8) || !region || region==UINTPTR_MAX ||
+            (region&0x1FFFFFFU)) return false;
+        return (region|(handle&0x1FFFFFFU))==target;
+    };
+    const auto script=out.root+rule.scriptOffset, anchor=out.root+rule.anchorOffset;
+    if (script!=raw.entries[view.scriptRawIndex].controller ||
+        !resolve(out.scriptEntry,out.scriptRegion,out.scriptRegionIndex,script) ||
+        !resolve(out.anchorEntry,out.anchorRegion,out.anchorRegionIndex,anchor) ||
+        (expected && (out.scriptRegion!=expected->scriptRegion || out.anchorRegion!=expected->anchorRegion))) return false;
+    unsigned anchorMatches=0;
+    for (std::uint32_t i=0;i<view.ordinaryCount;++i) {
+        const auto& e=raw.entries[view.ordinaryToRaw[i]];
+        if (e.content.groupKey==rule.anchorKey && e.header==anchor+rule.anchorHeaderOffset) ++anchorMatches;
+    }
+    if (anchorMatches!=1 || !CatalogSpan(anchor,rule.anchorPrefix.size())) return false;
+    // All new witnesses are disjoint from ordinary mutable spans and the native
+    // table/count/NOW/flag metadata. Exact duplicate region slots are harmless.
+    const std::array<std::pair<uintptr_t,std::size_t>,5> payloads {{{out.root,16+rule.barCount*16},
+        {script,rule.programBytes.size()},{anchor,rule.anchorPrefix.size()},
+        {base+HANDLE_REGIONS_RVA+out.scriptRegionIndex*8,8},{base+HANDLE_REGIONS_RVA+out.anchorRegionIndex*8,8}}};
+    const std::array<std::pair<uintptr_t,std::size_t>,5> metadata {{{base+CONTROLLER_TABLE,raw.entryCount*16},
+        {base+CONTROLLER_COUNT,4},{base+offsets::NOW,10},{base+rule.flagRva,1},
+        {base+knowndormantscripts::ArdRootRva,8}}};
+    for (const auto& a:payloads) {
+        for (const auto& b:metadata) if (CatalogOverlap(a.first,a.second,b.first,b.second)) return false;
+        for (std::uint32_t i=0;i<view.ordinaryCount;++i) {
+            const auto& e=raw.entries[view.ordinaryToRaw[i]];
+            if (CatalogOverlap(a.first,a.second,e.controller,64) ||
+                CatalogOverlap(a.first,a.second,e.header,44+static_cast<std::size_t>(e.declaredRecords)*64)) return false;
+        }
+    }
+    for (std::size_t i=0;i<payloads.size();++i) for (std::size_t j=0;j<i;++j)
+        if (payloads[i]!=payloads[j] && CatalogOverlap(payloads[i].first,payloads[i].second,payloads[j].first,payloads[j].second)) return false;
+    for (const auto& a:metadata) for (std::uint32_t i=0;i<view.ordinaryCount;++i) {
+        const auto& e=raw.entries[view.ordinaryToRaw[i]];
+        if (CatalogOverlap(a.first,a.second,e.controller,64) ||
+            CatalogOverlap(a.first,a.second,e.header,44+static_cast<std::size_t>(e.declaredRecords)*64)) return false;
+    }
+    return read(script,out.program.data(),rule.programBytes.size()) &&
+        std::equal(rule.programBytes.begin(),rule.programBytes.end(),out.program.begin()) &&
+        read(anchor,out.anchorPrefix.data(),rule.anchorPrefix.size()) &&
+        std::equal(rule.anchorPrefix.begin(),rule.anchorPrefix.end(),out.anchorPrefix.begin());
+}
+bool NativeResyncDormancyPreloadReadyImpl(uintptr_t base, const std::array<std::uint16_t,6>& location,
+    RecordCatalogRead read, RecordCatalogStamp stamp) {
+    const auto* rule=knowndormantscripts::Find(location);
+    if (!rule) return true;
+    if (rule->predicate!=knowndormantscripts::DormancyPredicate::AllBitsSet || !rule->flagMask) return false;
+    TraceStamp before{}, after{}; std::uint8_t first=0, last=0;
+    return IsDiagnosticGameThread() && CatalogSpan(base,rule->flagRva+1) &&
+        stamp(base,before) && before.load && read(base+rule->flagRva,&first,1) && (first&rule->flagMask)==rule->flagMask &&
+        read(base+rule->flagRva,&last,1) && (last&rule->flagMask)==rule->flagMask && first==last &&
+        stamp(base,after) && CatalogSameStamp(before,after);
+}
+bool QualifyNativeOrdinaryResyncViewImpl(uintptr_t base, const NativeRecordCatalog& raw,
+    NativeOrdinaryResyncView& out, RecordCatalogRead read, RecordCatalogStamp stamp) {
+    out={}; out.raw=&raw;
+    if (!IsDiagnosticGameThread() || base!=raw.exeBase || raw.entryCount>64 ||
+        !raw.beforeAvailable || !raw.afterAvailable || !raw.lifecycleStable || !raw.tableInventoryComplete ||
+        !CatalogSameStamp(raw.before,raw.after) || !raw.countBeforeAvailable || !raw.countAfterAvailable ||
+        raw.countBefore!=static_cast<std::int32_t>(raw.entryCount) || raw.countBefore!=raw.countAfter) return false;
+    const auto* rule=knowndormantscripts::Find(CatalogLocation(raw.before));
+    // A known mixed target cannot evade its required Script by clearing bit0 or
+    // omitting that slot and presenting a generic all-ordinary capture instead.
+    if (!rule && !raw.issues && raw.status==NativeRecordContentStatus::Complete &&
+        raw.associationComplete && raw.contentBytesComplete) {
+        out.ordinaryCount=raw.entryCount;
+        for (std::uint32_t i=0;i<raw.entryCount;++i) out.rawToOrdinary[i]=out.ordinaryToRaw[i]=static_cast<std::uint8_t>(i);
+        out.qualified=true; return true;
+    }
+    if (raw.issues!=Issue(RecordCatalogIssue::Script) || raw.status!=NativeRecordContentStatus::Unsupported ||
+        raw.layoutSha256!=knowndormantscripts::ImageLayout || !raw.before.load ||
+        !CatalogSpan(base,HANDLE_REGIONS_RVA+64*8)) return false;
+    if (!rule || rule->predicate!=knowndormantscripts::DormancyPredicate::AllBitsSet || !rule->flagMask ||
+        raw.entryCount!=rule->rawCount || !ResyncOrdinaryShape(raw,out) ||
+        out.scriptRawIndex==0xFF || out.ordinaryCount!=rule->ordinaryCount || !out.ordinaryCount) return false;
+    out.mixed=true; out.ruleIndex=static_cast<std::uint8_t>(rule-knowndormantscripts::Rules.data());
+    ResyncDormantAsset before{}, after{};
+    if (!ResyncCatalogBookend(base,raw,read,stamp)) return false;
+    out.flagBeforeAvailable=read(base+rule->flagRva,&out.flagBefore,1);
+    if (!out.flagBeforeAvailable || (out.flagBefore&rule->flagMask)!=rule->flagMask ||
+        !ReadResyncDormantAsset(base,raw,*rule,out,before,read) ||
+        !ResyncCatalogBookend(base,raw,read,stamp) ||
+        !ReadResyncDormantAsset(base,raw,*rule,out,after,read,&before) || before!=after) return false;
+    out.flagAfterAvailable=read(base+rule->flagRva,&out.flagAfter,1);
+    if (!out.flagAfterAvailable || out.flagBefore!=out.flagAfter || (out.flagAfter&rule->flagMask)!=rule->flagMask ||
+        !ResyncCatalogBookend(base,raw,read,stamp)) return false;
+    out.nativeAssetBound=true; out.nativeAssetRoot=before.root; out.qualified=true; return true;
+}
+void ResolveNativeOrdinaryResyncMembershipImpl(uintptr_t base, const NativeRecordCatalog& raw,
+    const NativeOrdinaryResyncView& view, uintptr_t actor, NativeRecordMembership& out,
+    RecordCatalogRead read, RecordCatalogStamp stamp) {
+    out={}; out.actor=actor;
+    if (!view.qualified || view.raw!=&raw) {out.issues=Issue(RecordCatalogIssue::NoAssociation); return;}
+    if (!view.mixed) {ResolveRecordMembershipImpl(base,raw,actor,out,read,stamp); return;}
+    NativeOrdinaryResyncView current;
+    if (!QualifyNativeOrdinaryResyncViewImpl(base,raw,current,read,stamp) || !current.mixed ||
+        current.ordinaryToRaw!=view.ordinaryToRaw || current.rawToOrdinary!=view.rawToOrdinary ||
+        current.ordinaryCount!=view.ordinaryCount || current.scriptRawIndex!=view.scriptRawIndex ||
+        current.ruleIndex!=view.ruleIndex || current.nativeAssetRoot!=view.nativeAssetRoot) {
+        out.issues=Issue(RecordCatalogIssue::NoAssociation); return;
+    }
+    const auto& rule=knowndormantscripts::Rules[current.ruleIndex];
+    if (CatalogOverlap(actor,0x9F8,current.nativeAssetRoot,16+rule.barCount*16) ||
+        CatalogOverlap(actor,0x9F8,current.nativeAssetRoot+rule.scriptOffset,rule.programBytes.size()) ||
+        CatalogOverlap(actor,0x9F8,base+knowndormantscripts::ArdRootRva,8) ||
+        CatalogOverlap(actor,0x9F8,base+HANDLE_REGIONS_RVA,64*8) || CatalogOverlap(actor,0x9F8,base+rule.flagRva,1)) {
+        out.issues=Issue(RecordCatalogIssue::Alias); return;
+    }
+    ResolveRecordMembershipImpl(base,raw,actor,out,read,stamp,&current);
+    NativeOrdinaryResyncView after;
+    if (!QualifyNativeOrdinaryResyncViewImpl(base,raw,after,read,stamp) ||
+        after.nativeAssetRoot!=current.nativeAssetRoot || after.rawToOrdinary!=current.rawToOrdinary) {
+        out.issues|=Issue(RecordCatalogIssue::Changed); out.contentComparisonAvailable=false;
+        out.status=NativeRecordContentStatus::Partial;
+    }
 }
 constexpr std::uint64_t OccIssue(SelectedOccupancyIssue issue) { return static_cast<std::uint64_t>(issue); }
 
@@ -3184,6 +3427,17 @@ void CaptureNativeRecordCatalog(uintptr_t exeBase,
 void ResolveNativeRecordMembership(uintptr_t exeBase, const NativeRecordCatalog& catalog,
     uintptr_t actor, NativeRecordMembership& out) {
     ResolveRecordMembershipImpl(exeBase, catalog, actor, out, &CopyNative, &CaptureDiagnosticStamp);
+}
+bool QualifyNativeOrdinaryResyncView(uintptr_t exeBase, const NativeRecordCatalog& raw,
+    NativeOrdinaryResyncView& out) {
+    return QualifyNativeOrdinaryResyncViewImpl(exeBase,raw,out,&CopyNative,&CaptureDiagnosticStamp);
+}
+bool NativeResyncDormancyPreloadReady(uintptr_t exeBase, const std::array<std::uint16_t,6>& location) {
+    return NativeResyncDormancyPreloadReadyImpl(exeBase,location,&CopyNative,&CaptureDiagnosticStamp);
+}
+void ResolveNativeOrdinaryResyncMembership(uintptr_t exeBase, const NativeRecordCatalog& raw,
+    const NativeOrdinaryResyncView& view, uintptr_t actor, NativeRecordMembership& out) {
+    ResolveNativeOrdinaryResyncMembershipImpl(exeBase,raw,view,actor,out,&CopyNative,&CaptureDiagnosticStamp);
 }
 
 void RegisterDiagnosticGameThread() {

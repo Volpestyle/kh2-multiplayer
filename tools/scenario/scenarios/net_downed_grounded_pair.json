@@ -1,0 +1,612 @@
+{
+  "name": "net_downed_grounded_pair",
+  "description": "Flat26 two-seat single-PC FM02 Computer Room logical-down regression for XZ-only/nativeY hold. Canonical P_EX110 only, native TakeDamage lethal hits through hooked stat funnel, normal Triangle/network revive, both directions sequentially. Uses first checked-in safe waypoint only; never Save, warp, rawHP/pose/team/control write, protection or focus. Ground baseline is observed nativeY (not zero). Exact canonical position recording during attempted downed input and actual postrevive movement; no actual enemy shove or airborne landing claim.",
+  "playerDefaults": true,
+  "protect": [],
+  "qualificationGaps": [
+    "Offline draft only; no actual run or pixel proof yet.",
+    "Historical VUH2465 Computer Room proof is documented in DOWNED_REVIVE.md; its20261019-151151 artifacts are not local here.",
+    "Calm Computer Room supplies no enemy shove; this checks unchanged flat-ground hold and control/revive, not collision push or airborne settling.",
+    "Calm-fixture3000ms Triangle covers60nativeframes at20FPS; lower FPS may still fail. Thorn pilot1600ms holds are unchanged. Missing actual native receipt fails; no blind debug-revive fallback.",
+    "Existing Recorder tracks world/room and canonical-address XYZ only; full scope, status identity and grounded moveState are checked at phase boundaries, not atomically on every recorded row."
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "slotMoves": -1,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "slotMoves": -1,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)[:2]==[2,21] and location(1)==location(0)",
+      "message": "FM-02 must boot both native seats into the same Computer Room full scope"
+    },
+    {
+      "do": "save",
+      "as": "flat_scope",
+      "expr": "location(0)"
+    },
+    {
+      "do": "save",
+      "as": "flat_patterns",
+      "expr": "{'gate': '\\\\[downed\\\\] gate intercept mode=4 logical=1 episode=(?P<episode>[0-9A-Fa-f]+) actor=(?P<actor>[0-9A-Fa-f]+) hp=[0-9]+ delta=-?[0-9]+ -> engine hp 1, dead bit clear room=(?P<scope>[0-9/]+) frame=(?P<frame>\\\\d+)', 'revive': '\\\\[downed\\\\] revive returned hp=(?P<hp>\\\\d+)/(?P<maxHp>\\\\d+) flags9B8=0x[0-9A-Fa-f]+ logical=1 fault=(?P<fault>\\\\d+) state=(?P<state>\\\\d+)', 'consume': '\\\\[downed\\\\] revive-request consumed requester=(?P<requester>\\\\d+) seq=(?P<seq>\\\\d+) episode=(?P<episode>[0-9A-Fa-f]+) native=(?P<native>\\\\d+)', 'grace': '\\\\[downed\\\\] revive grace frames=(?P<frames>\\\\d+) fault=(?P<fault>\\\\d+)', 'apply': '\\\\[downed\\\\] revive episode=(?P<episode>[0-9A-Fa-f]+) actor=(?P<actor>[0-9A-Fa-f]+) hp=\\\\d+/\\\\d+ target=(?P<target>\\\\d+) logical=1 frame=\\\\d+'}"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(log_matches(r'\\[downed\\] configure requested=1 control=0 fixture=[01] installMask=\\d+ state=ready revivePercent=25',i))==1 and log_count('[downed] configure requested=1 control=1',i)==0 and len(log_matches(r'\\[downed\\] configure [^\\n]*REFUSED',i))==0 for i in (0,1))",
+      "message": "Product downed Ready/non-control hooks must qualify both owners before any lethal hit"
+    },
+    {
+      "do": "relay",
+      "port": 27810,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[enemysync] client arrived epoch=',1)>0",
+      "timeoutMs": 30000,
+      "pollMs": 500,
+      "message": "Wait for the real two-seat arrival barrier"
+    },
+    {
+      "do": "walk_to",
+      "instance": 0,
+      "body": "self",
+      "x": -385,
+      "z": -5,
+      "radius": 60,
+      "timeoutMs": 15000,
+      "as": "off_save_0",
+      "note": "Reuse ONLY tt1_solo first checked-in safe waypoint: off save point, west along room; do not take its later exit waypoints"
+    },
+    {
+      "do": "walk_to",
+      "instance": 1,
+      "body": "self",
+      "x": -385,
+      "z": -5,
+      "radius": 60,
+      "timeoutMs": 15000,
+      "as": "off_save_1",
+      "note": "Reuse ONLY tt1_solo first checked-in safe waypoint: off save point, west along room; do not take its later exit waypoints"
+    },
+    {
+      "do": "walk_to",
+      "instance": 0,
+      "body": "self",
+      "x": -250,
+      "z": -760,
+      "radius": 300,
+      "timeoutMs": 15000,
+      "as": "off_computer_0",
+      "note": "Head toward tt1_solo second in-room waypoint but stop300units short, away from ComputerRC30 and far before doorway trigger(-234,-785)"
+    },
+    {
+      "do": "walk_to",
+      "instance": 1,
+      "body": "self",
+      "x": -250,
+      "z": -760,
+      "radius": 300,
+      "timeoutMs": 15000,
+      "as": "off_computer_1",
+      "note": "Head toward tt1_solo second in-room waypoint but stop300units short, away from ComputerRC30 and far before doorway trigger(-234,-785)"
+    },
+    {
+      "do": "save",
+      "as": "flat_field_preflight",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==saved['flat_scope'] and location(1)==saved['flat_scope'] and all(peek('0x2A11162','u16',i)==0 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','i32',i)==0 and int(peek('0x2A11478','u64',i),16)==0 for i in (0,1))",
+      "timeoutMs": 10000,
+      "pollMs": 500,
+      "message": "Require rawRC0 after moving away from Save55 and Computer30; preserve native interactions and refuse before any lethal if field guard is unavailable"
+    },
+    {
+      "do": "wait",
+      "ms": 600,
+      "note": "Allow final native walking inertia to settle before measuring the stable grounded baseline"
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 8,
+      "as": "flat_ground",
+      "sample": {
+        "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]",
+        "everyMs": 250
+      }
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_ground_samples'])>=3 and all('value' in s and len(s['value'])==2 for s in saved['flat_ground_samples'])",
+      "message": "Need at least three complete paired native samples; missing reads cannot pass vacuously"
+    },
+    {
+      "do": "save",
+      "as": "flat_ground_last",
+      "expr": "saved['flat_ground_samples'][-1]['value']"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_ground_last'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_ground_last']) and ('flat_identity' not in saved or all(saved['flat_ground_last'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_ground_last'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_ground_last'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Require exact canonical grounded P_EX110, unchanged full scope, no event/menu/task/dead bit"
+    },
+    {
+      "do": "assert",
+      "expr": "all(s['value'][i]['owned'][0]['moveState']==2 and s['value'][i]['scope']==saved['flat_scope'] and s['value'][i]['canonical']==saved['flat_ground_last'][i]['canonical'] and s['value'][i]['canonicalAfter']==saved['flat_ground_last'][i]['canonical'] and abs(s['value'][i]['owned'][0]['position'][k]-saved['flat_ground_last'][i]['owned'][0]['position'][k])<=2.1 for s in saved['flat_ground_samples'] for i in (0,1) for k in ('x','y','z'))",
+      "message": "Grounded baseline must hold all XYZ at each native floor height; Y is never assumed zero"
+    },
+    {
+      "do": "save",
+      "as": "flat_identity",
+      "expr": "[{'actor':r['canonical'],'status':r['owned'][0]['status'],'maxHp':r['owned'][0]['maxHp'],'targetHp':max(1,r['owned'][0]['maxHp']//4)} for r in saved['flat_ground_last']]"
+    },
+    {
+      "do": "walk_to",
+      "instance": 0,
+      "body": "self",
+      "targetExpr": "[(a['position']['x'],a['position']['z']) for a in actors(1) if int(a['address'],16)==saved['flat_identity'][1]['actor']][0]",
+      "radius": 80,
+      "timeoutMs": 10000,
+      "as": "flat_friend_approach",
+      "note": "Approach the actual peer native position using existing camera-basis pad steering, not a pose write"
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_before",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_friend_before'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_friend_before']) and ('flat_identity' not in saved or all(saved['flat_friend_before'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_friend_before'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_friend_before'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Both owners must still be grounded and current before native lethal hit"
+    },
+    {
+      "do": "assert",
+      "expr": "all(saved['flat_friend_before'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_friend_before'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_friend_before'][i]['owned'][0]['hp']>0 and saved['flat_friend_before'][i]['react']==0 for i in (0,1)) and dist([saved['flat_friend_before'][0]['owned'][0]['position'][k] for k in ('x','y','z')],[saved['flat_friend_before'][1]['owned'][0]['position'][k] for k in ('x','y','z')])<125",
+      "message": "Require both exact living owners within125 native3D units with no raw reaction before downing"
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_counts",
+      "expr": "{'gate':len(log_matches(saved['flat_patterns']['gate'],1)),'returns':len(log_matches(saved['flat_patterns']['revive'],1)),'consume':len(log_matches(saved['flat_patterns']['consume'],1)),'grace':len(log_matches(saved['flat_patterns']['grace'],1)),'apply':len(log_matches(saved['flat_patterns']['apply'],1)),'prompt':log_count('[revive-prompt] hold complete', 0),'ended':log_count('[downed] logical hold ended', 1),'remint':log_count('[downed] episode re-minted', 1)}"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "argsExpr": "['hit','damage','--victim',peek('0x2A105D0','u64',1),'--amount',str(saved['flat_friend_before'][1]['owned'][0]['hp'])]",
+      "note": "Existing native TakeDamage path tail-jumps through hooked ApplyStatDelta, as VUH2465 real-lethal proof; hit kill bypasses that hook and is unsuitable"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches(saved['flat_patterns']['gate'],1))==saved['flat_friend_counts']['gate']+1",
+      "timeoutMs": 5000,
+      "pollMs": 500,
+      "message": "One native logical mode4 down must be intercepted"
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_episode",
+      "expr": "log_matches(saved['flat_patterns']['gate'],1)[-1]"
+    },
+    {
+      "do": "assert",
+      "expr": "int(saved['flat_friend_episode']['episode'],16)>0 and int(saved['flat_friend_episode']['actor'],16)==saved['flat_identity'][1]['actor'] and saved['flat_friend_episode']['scope']=='/'.join(str(v) for v in saved['flat_scope'])",
+      "message": "Logical episode must belong to this canonical actor and full admitted Computer Room scope"
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_down",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_friend_down'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_friend_down']) and ('flat_identity' not in saved or all(saved['flat_friend_down'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_friend_down'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_friend_down'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Logical down must retain grounded native actor, engine dead bit clear, and no game-over/event/menu"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_friend_down'][1]['owned'][0]['hp']==1 and saved['flat_friend_down'][0]['owned'][0]['hp']==saved['flat_friend_before'][0]['owned'][0]['hp']",
+      "message": "EngineHP1 is logical down, and the other owner must remain living/unharmed"
+    },
+    {
+      "do": "record",
+      "as": "flat_friend_hold_track",
+      "instances": [
+        1
+      ]
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": 1,
+      "ms": 600
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": -1,
+      "ms": 600
+    },
+    {
+      "do": "wait",
+      "ms": 600
+    },
+    {
+      "do": "record_stop",
+      "as": "flat_friend_hold_track"
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_hold_rows",
+      "expr": "[r for r in saved['flat_friend_hold_track'].rows if r[1]==1 and int(r[4],16)==saved['flat_identity'][1]['actor']]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_friend_hold_rows'])>=3 and saved['flat_friend_hold_rows'][-1][0]-saved['flat_friend_hold_rows'][0][0]>=1 and all(r[2]=='02/15' and abs(r[7+j]-saved['flat_friend_down'][1]['owned'][0]['position'][k])<=2.1 for r in saved['flat_friend_hold_rows'] for j,k in ((0,'x'),(1,'y'),(2,'z')))",
+      "message": "Sample exact canonical XYZ throughout both attempted native stick directions; Recorder head and Sora-name shortcuts are not authority"
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_held",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_friend_held'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_friend_held']) and ('flat_identity' not in saved or all(saved['flat_friend_held'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_friend_held'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_friend_held'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Downed owner must remain grounded and in the original full field scope after movement input"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_friend_held'][1]['owned'][0]['hp']==1 and log_count('[downed] logical hold ended',1)==saved['flat_friend_counts']['ended'] and log_count('[downed] episode re-minted',1)==saved['flat_friend_counts']['remint'] and len(log_matches(saved['flat_patterns']['gate'],1))==saved['flat_friend_counts']['gate']+1",
+      "message": "A flat hold must not retire, re-mint or become a second down while nativeY is preserved"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "flat_friend_downed"
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==saved['flat_scope'] and location(1)==saved['flat_scope'] and peek('0x2A11162','u16',0)==0 and peek('0x7435D0','u8',0)==255",
+      "timeoutMs": 10000,
+      "pollMs": 500,
+      "message": "Normal Triangle is permitted only with no raw native RC and the same settled field"
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "triangle",
+      "ms": 3000,
+      "note": "Calm-fixture-only3000ms normal Triangle provides60nativeframes at20FPS; actual native consume/return remains mandatory. Thorn pilot1600ms budgets are unchanged."
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches(saved['flat_patterns']['revive'],1))==saved['flat_friend_counts']['returns']+1",
+      "timeoutMs": 8000,
+      "pollMs": 500,
+      "message": "Native revive must actually return; a sent request or prompt alone cannot pass"
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_native",
+      "expr": "{'return':log_matches(saved['flat_patterns']['revive'],1)[-1],'apply':log_matches(saved['flat_patterns']['apply'],1)[saved['flat_friend_counts']['apply']:],'consume':log_matches(saved['flat_patterns']['consume'],1)[saved['flat_friend_counts']['consume']:],'grace':log_matches(saved['flat_patterns']['grace'],1)[saved['flat_friend_counts']['grace']:],'promptCount':log_count('[revive-prompt] hold complete',0)}"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_friend_native']['return']['fault']=='0' and saved['flat_friend_native']['return']['state']=='1' and int(saved['flat_friend_native']['return']['hp'])==saved['flat_identity'][1]['targetHp'] and int(saved['flat_friend_native']['return']['maxHp'])==saved['flat_identity'][1]['maxHp'] and len(saved['flat_friend_native']['apply'])==1 and saved['flat_friend_native']['apply'][0]['episode']==saved['flat_friend_episode']['episode'] and int(saved['flat_friend_native']['apply'][0]['actor'],16)==saved['flat_identity'][1]['actor'] and len(saved['flat_friend_native']['consume'])==1 and saved['flat_friend_native']['consume'][0]['episode']==saved['flat_friend_episode']['episode'] and saved['flat_friend_native']['consume'][0]['requester']==str(0) and saved['flat_friend_native']['consume'][0]['native']=='1' and len(saved['flat_friend_native']['grace'])==1 and saved['flat_friend_native']['grace'][0]['frames']=='120' and saved['flat_friend_native']['grace'][0]['fault']=='0' and saved['flat_friend_native']['promptCount']==saved['flat_friend_counts']['prompt']+1",
+      "message": "One normal prompt must consume this exact episode once, return native quarterHP/Ready1 fault0, and request120-frame grace fault0"
+    },
+    {
+      "do": "wait",
+      "ms": 300
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_revived",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_friend_revived'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_friend_revived']) and ('flat_identity' not in saved or all(saved['flat_friend_revived'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_friend_revived'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_friend_revived'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Revived native canonical owner must stand grounded in the same scope with no dead bit/task"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_friend_revived'][1]['canonical']==saved['flat_identity'][1]['actor'] and saved['flat_friend_revived'][1]['owned'][0]['status']==saved['flat_identity'][1]['status'] and saved['flat_friend_revived'][1]['owned'][0]['hp']==saved['flat_identity'][1]['targetHp']",
+      "message": "Post-return canonical status HP must equal the actual maxHP quarter (FM02 max22 gives5)"
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": 1,
+      "ms": 500
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_moved_right",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_friend_moved_right'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_friend_moved_right']) and ('flat_identity' not in saved or all(saved['flat_friend_moved_right'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_friend_moved_right'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_friend_moved_right'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "First restored movement pulse must stay on grounded native Computer Room floor"
+    },
+    {
+      "do": "input",
+      "instance": 1,
+      "lx": -1,
+      "ms": 500
+    },
+    {
+      "do": "save",
+      "as": "flat_friend_moved_left",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_friend_moved_left'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_friend_moved_left']) and ('flat_identity' not in saved or all(saved['flat_friend_moved_left'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_friend_moved_left'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_friend_moved_left'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Second restored movement pulse must stay on grounded native Computer Room floor"
+    },
+    {
+      "do": "assert",
+      "expr": "max(sum((saved[k][1]['owned'][0]['position'][a]-saved['flat_friend_revived'][1]['owned'][0]['position'][a])**2 for a in ('x','z')) for k in ('flat_friend_moved_right','flat_friend_moved_left'))>=400",
+      "message": "At least one of two opposite normal pad pulses must move the revived owner20 nativeXZ units; no wall-only false conclusion"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "flat_friend_control_returned"
+    },
+    {
+      "do": "walk_to",
+      "instance": 1,
+      "body": "self",
+      "targetExpr": "[(a['position']['x'],a['position']['z']) for a in actors(0) if int(a['address'],16)==saved['flat_identity'][0]['actor']][0]",
+      "radius": 80,
+      "timeoutMs": 10000,
+      "as": "flat_host_approach",
+      "note": "Approach the actual peer native position using existing camera-basis pad steering, not a pose write"
+    },
+    {
+      "do": "save",
+      "as": "flat_host_before",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_host_before'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_host_before']) and ('flat_identity' not in saved or all(saved['flat_host_before'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_host_before'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_host_before'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Both owners must still be grounded and current before native lethal hit"
+    },
+    {
+      "do": "assert",
+      "expr": "all(saved['flat_host_before'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_host_before'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_host_before'][i]['owned'][0]['hp']>0 and saved['flat_host_before'][i]['react']==0 for i in (0,1)) and dist([saved['flat_host_before'][0]['owned'][0]['position'][k] for k in ('x','y','z')],[saved['flat_host_before'][1]['owned'][0]['position'][k] for k in ('x','y','z')])<125",
+      "message": "Require both exact living owners within125 native3D units with no raw reaction before downing"
+    },
+    {
+      "do": "save",
+      "as": "flat_host_counts",
+      "expr": "{'gate':len(log_matches(saved['flat_patterns']['gate'],0)),'returns':len(log_matches(saved['flat_patterns']['revive'],0)),'consume':len(log_matches(saved['flat_patterns']['consume'],0)),'grace':len(log_matches(saved['flat_patterns']['grace'],0)),'apply':len(log_matches(saved['flat_patterns']['apply'],0)),'prompt':log_count('[revive-prompt] hold complete', 1),'ended':log_count('[downed] logical hold ended', 0),'remint':log_count('[downed] episode re-minted', 0)}"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "argsExpr": "['hit','damage','--victim',peek('0x2A105D0','u64',0),'--amount',str(saved['flat_host_before'][0]['owned'][0]['hp'])]",
+      "note": "Existing native TakeDamage path tail-jumps through hooked ApplyStatDelta, as VUH2465 real-lethal proof; hit kill bypasses that hook and is unsuitable"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches(saved['flat_patterns']['gate'],0))==saved['flat_host_counts']['gate']+1",
+      "timeoutMs": 5000,
+      "pollMs": 500,
+      "message": "One native logical mode4 down must be intercepted"
+    },
+    {
+      "do": "save",
+      "as": "flat_host_episode",
+      "expr": "log_matches(saved['flat_patterns']['gate'],0)[-1]"
+    },
+    {
+      "do": "assert",
+      "expr": "int(saved['flat_host_episode']['episode'],16)>0 and int(saved['flat_host_episode']['actor'],16)==saved['flat_identity'][0]['actor'] and saved['flat_host_episode']['scope']=='/'.join(str(v) for v in saved['flat_scope'])",
+      "message": "Logical episode must belong to this canonical actor and full admitted Computer Room scope"
+    },
+    {
+      "do": "save",
+      "as": "flat_host_down",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_host_down'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_host_down']) and ('flat_identity' not in saved or all(saved['flat_host_down'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_host_down'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_host_down'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Logical down must retain grounded native actor, engine dead bit clear, and no game-over/event/menu"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_host_down'][0]['owned'][0]['hp']==1 and saved['flat_host_down'][1]['owned'][0]['hp']==saved['flat_host_before'][1]['owned'][0]['hp']",
+      "message": "EngineHP1 is logical down, and the other owner must remain living/unharmed"
+    },
+    {
+      "do": "record",
+      "as": "flat_host_hold_track",
+      "instances": [
+        0
+      ]
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 600
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": -1,
+      "ms": 600
+    },
+    {
+      "do": "wait",
+      "ms": 600
+    },
+    {
+      "do": "record_stop",
+      "as": "flat_host_hold_track"
+    },
+    {
+      "do": "save",
+      "as": "flat_host_hold_rows",
+      "expr": "[r for r in saved['flat_host_hold_track'].rows if r[1]==0 and int(r[4],16)==saved['flat_identity'][0]['actor']]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_host_hold_rows'])>=3 and saved['flat_host_hold_rows'][-1][0]-saved['flat_host_hold_rows'][0][0]>=1 and all(r[2]=='02/15' and abs(r[7+j]-saved['flat_host_down'][0]['owned'][0]['position'][k])<=2.1 for r in saved['flat_host_hold_rows'] for j,k in ((0,'x'),(1,'y'),(2,'z')))",
+      "message": "Sample exact canonical XYZ throughout both attempted native stick directions; Recorder head and Sora-name shortcuts are not authority"
+    },
+    {
+      "do": "save",
+      "as": "flat_host_held",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_host_held'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_host_held']) and ('flat_identity' not in saved or all(saved['flat_host_held'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_host_held'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_host_held'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Downed owner must remain grounded and in the original full field scope after movement input"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_host_held'][0]['owned'][0]['hp']==1 and log_count('[downed] logical hold ended',0)==saved['flat_host_counts']['ended'] and log_count('[downed] episode re-minted',0)==saved['flat_host_counts']['remint'] and len(log_matches(saved['flat_patterns']['gate'],0))==saved['flat_host_counts']['gate']+1",
+      "message": "A flat hold must not retire, re-mint or become a second down while nativeY is preserved"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "flat_host_downed"
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==saved['flat_scope'] and location(1)==saved['flat_scope'] and peek('0x2A11162','u16',1)==0 and peek('0x7435D0','u8',1)==255",
+      "timeoutMs": 10000,
+      "pollMs": 500,
+      "message": "Normal Triangle is permitted only with no raw native RC and the same settled field"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "triangle",
+      "ms": 3000,
+      "note": "Calm-fixture-only3000ms normal Triangle provides60nativeframes at20FPS; actual native consume/return remains mandatory. Thorn pilot1600ms budgets are unchanged."
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches(saved['flat_patterns']['revive'],0))==saved['flat_host_counts']['returns']+1",
+      "timeoutMs": 8000,
+      "pollMs": 500,
+      "message": "Native revive must actually return; a sent request or prompt alone cannot pass"
+    },
+    {
+      "do": "save",
+      "as": "flat_host_native",
+      "expr": "{'return':log_matches(saved['flat_patterns']['revive'],0)[-1],'apply':log_matches(saved['flat_patterns']['apply'],0)[saved['flat_host_counts']['apply']:],'consume':log_matches(saved['flat_patterns']['consume'],0)[saved['flat_host_counts']['consume']:],'grace':log_matches(saved['flat_patterns']['grace'],0)[saved['flat_host_counts']['grace']:],'promptCount':log_count('[revive-prompt] hold complete',1)}"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_host_native']['return']['fault']=='0' and saved['flat_host_native']['return']['state']=='1' and int(saved['flat_host_native']['return']['hp'])==saved['flat_identity'][0]['targetHp'] and int(saved['flat_host_native']['return']['maxHp'])==saved['flat_identity'][0]['maxHp'] and len(saved['flat_host_native']['apply'])==1 and saved['flat_host_native']['apply'][0]['episode']==saved['flat_host_episode']['episode'] and int(saved['flat_host_native']['apply'][0]['actor'],16)==saved['flat_identity'][0]['actor'] and len(saved['flat_host_native']['consume'])==1 and saved['flat_host_native']['consume'][0]['episode']==saved['flat_host_episode']['episode'] and saved['flat_host_native']['consume'][0]['requester']==str(1) and saved['flat_host_native']['consume'][0]['native']=='1' and len(saved['flat_host_native']['grace'])==1 and saved['flat_host_native']['grace'][0]['frames']=='120' and saved['flat_host_native']['grace'][0]['fault']=='0' and saved['flat_host_native']['promptCount']==saved['flat_host_counts']['prompt']+1",
+      "message": "One normal prompt must consume this exact episode once, return native quarterHP/Ready1 fault0, and request120-frame grace fault0"
+    },
+    {
+      "do": "wait",
+      "ms": 300
+    },
+    {
+      "do": "save",
+      "as": "flat_host_revived",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_host_revived'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_host_revived']) and ('flat_identity' not in saved or all(saved['flat_host_revived'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_host_revived'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_host_revived'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Revived native canonical owner must stand grounded in the same scope with no dead bit/task"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['flat_host_revived'][0]['canonical']==saved['flat_identity'][0]['actor'] and saved['flat_host_revived'][0]['owned'][0]['status']==saved['flat_identity'][0]['status'] and saved['flat_host_revived'][0]['owned'][0]['hp']==saved['flat_identity'][0]['targetHp']",
+      "message": "Post-return canonical status HP must equal the actual maxHP quarter (FM02 max22 gives5)"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": 1,
+      "ms": 500
+    },
+    {
+      "do": "save",
+      "as": "flat_host_moved_right",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_host_moved_right'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_host_moved_right']) and ('flat_identity' not in saved or all(saved['flat_host_moved_right'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_host_moved_right'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_host_moved_right'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "First restored movement pulse must stay on grounded native Computer Room floor"
+    },
+    {
+      "do": "input",
+      "instance": 0,
+      "lx": -1,
+      "ms": 500
+    },
+    {
+      "do": "save",
+      "as": "flat_host_moved_left",
+      "expr": "[{'instance':i,'scope':location(i),'canonical':p,'owned':[a for a in actors(i) if int(a['address'],16)==p],'canonicalAfter':int(peek('0x2A105D0','u64',i),16),'flags9B8':peek_at(p+0x9B8,'u32',i),'task':int(peek('0x2AE8050','u64',i),16),'inField':peek('0x9BA8D0','u8',i),'event':peek('0xB65210','i32',i),'eventContext':int(peek('0x2A11478','u64',i),16),'menu':peek('0x7435D0','u8',i),'react':peek('0x2A11162','u16',i)} for i in (0,1) for p in [int(peek('0x2A105D0','u64',i),16)]]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['flat_host_moved_left'])==2 and all(r['scope']==saved['flat_scope'] and r['canonical']>65536 and r['canonical']==r['canonicalAfter'] and len(r['owned'])==1 and r['owned'][0]['name']=='P_EX110' and r['owned'][0]['objectType']==0 and int(r['owned'][0]['status'],16)>65536 and r['owned'][0]['maxHp']>0 and r['inField']!=0 and r['event']==0 and r['eventContext']==0 and r['menu']==255 and r['task']==0 and (r['flags9B8'] & 4)==0 and r['owned'][0]['moveState']==2 for r in saved['flat_host_moved_left']) and ('flat_identity' not in saved or all(saved['flat_host_moved_left'][i]['canonical']==saved['flat_identity'][i]['actor'] and saved['flat_host_moved_left'][i]['owned'][0]['status']==saved['flat_identity'][i]['status'] and saved['flat_host_moved_left'][i]['owned'][0]['maxHp']==saved['flat_identity'][i]['maxHp'] for i in (0,1)))",
+      "message": "Second restored movement pulse must stay on grounded native Computer Room floor"
+    },
+    {
+      "do": "assert",
+      "expr": "max(sum((saved[k][0]['owned'][0]['position'][a]-saved['flat_host_revived'][0]['owned'][0]['position'][a])**2 for a in ('x','z')) for k in ('flat_host_moved_right','flat_host_moved_left'))>=400",
+      "message": "At least one of two opposite normal pad pulses must move the revived owner20 nativeXZ units; no wall-only false conclusion"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "flat_host_control_returned"
+    },
+    {
+      "do": "assert",
+      "expr": "all(location(i)==saved['flat_scope'] and peek('0x7435D0','u8',i)==255 and int(peek('0x2AE8050','u64',i),16)==0 for i in (0,1)) and all(log_count('[downed] gate intercept mode=0',i)==0 and log_count('[downed] full party down',i)==0 for i in (0,1))",
+      "message": "Finish in the original Computer Room with no native held death/full-party game over"
+    },
+    {
+      "do": "save",
+      "as": "flat_result",
+      "expr": "{'friend':saved['flat_friend_native'],'host':saved['flat_host_native'],'nativeFloorY':[r['owned'][0]['position']['y'] for r in saved['flat_ground_last']],'scope':saved['flat_scope'],'limit':'calm room: attempted input, not an actual enemy shove or airborne landing test'}"
+    }
+  ]
+}

@@ -6,7 +6,9 @@
 #define NOMINMAX
 #endif
 
+#include "kh2coop/RcRefusalPacketTrace.hpp"
 #include "kh2coop/AutomaticResyncNotice.hpp"
+#include "kh2coop/ReturningSeatResync.hpp"
 #include "kh2coop/AvatarSync.hpp"
 #include "kh2coop/CameraController.hpp"
 #include "kh2coop/ClientRecovery.hpp"
@@ -30,6 +32,7 @@
 #include "kh2coop/InputMailbox.hpp"
 #include "kh2coop/WorldPump.hpp"
 #include "EventHoldRuntimeProjection.hpp"
+#include "kh2coop/EventHoldRecovery.hpp"
 #include <timeapi.h> // timeBeginPeriod (winmm)
 #endif
 
@@ -938,6 +941,11 @@ int main(int argc, char* argv[]) {
     kh2coop::eventhold::Abort eventHoldLoggedAbort = kh2coop::eventhold::Abort::None;
     bool eventHoldLoggedArm = false;
     std::uint64_t eventHoldLastPulseMs = 0, eventHoldLastTickOkMs = 0, eventHoldMaxPulseGapMs = 0;
+    bool eventHoldRecoveryRequired = false, eventHoldAwaitingAck = false;
+    std::uint64_t eventHoldExpiredConnection = 0, eventHoldRecoveryDeadline = 0;
+    std::optional<kh2coop::eventhold::Scope> eventHoldExpiry;
+    std::optional<std::pair<kh2coop::ResyncBegin, kh2coop::ResyncSnapshot>> eventHoldRecoverySnapshot;
+    std::optional<kh2coop::ResyncResult> eventHoldRecoveryResult;
     std::uint8_t worldSessionSlot = kh2coop::WORLD_SLOT_UNKNOWN;
     std::string worldSessionHost;
     std::string worldSessionId;
@@ -1106,6 +1114,58 @@ int main(int argc, char* argv[]) {
     };
     const auto pulseEventHoldControl = [&]() {
         if (!eventHoldControlEnabled) return;
+        if (eventHoldAwaitingAck && GetTickCount64() >= eventHoldRecoveryDeadline) {
+            eventHoldProjection.Reject(kh2coop::eventhold::Abort::Unsupported);
+            eventHoldAwaitingAck = false;
+            worldQuarantined = true;
+            worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+            std::cerr << "[eventhold-recovery] native reset ACK deadline; quarantined\n";
+        }
+        // The native owner creates this mapping only after consuming the same
+        // successful result and proving its own two-frame convergence. Failed
+        // opens do not touch the old mapping or clear its immutable abort.
+        if (eventHoldRecoveryResult && eventHoldRecoverySnapshot && game.IsAttached()) {
+            const auto scope = eventHoldScope();
+            const auto& [begin, snapshot] = *eventHoldRecoverySnapshot;
+            const auto now = GetTickCount64();
+            if (!kh2coop::eventhold::RecoveryResultMatches(scope, begin, snapshot, *eventHoldRecoveryResult) ||
+                !eventHoldEligible() || now >= eventHoldRecoveryDeadline) {
+                eventHoldProjection.Reject(kh2coop::eventhold::Abort::Unsupported);
+                worldQuarantined = true;
+                worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                eventHoldRecoveryResult.reset();
+                std::cerr << "[eventhold-recovery] fresh control handshake refused or timed out; quarantined\n";
+            } else {
+                kh2coop::eventhold::Channel next;
+                if (next.OpenScopedExisting(static_cast<DWORD>(game.ProcessId()), scope)) {
+                    if (!next.Bind(scope, now)) {
+                        eventHoldProjection.Reject(kh2coop::eventhold::Abort::Unsupported);
+                        worldQuarantined = true;
+                        worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                        eventHoldRecoveryResult.reset();
+                        std::cerr << "[eventhold-recovery] scoped producer refused; quarantined\n";
+                    } else {
+                        eventHoldControl.Swap(next);
+                        const bool adopted = eventHoldProjection.AdoptConvergedBaseline(
+                            scope, snapshot.room.epoch, *eventHoldRecoveryResult, now);
+                        next.Close(); // old producer abort is never cleared
+                        eventHoldRecoveryResult.reset();
+                        if (!adopted) {
+                            eventHoldProjection.Reject(kh2coop::eventhold::Abort::Unsupported);
+                            worldQuarantined = true;
+                            worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
+                        } else {
+                            eventHoldAwaitingAck = true;
+                            eventHoldLoggedArm = false;
+                            eventHoldLoggedAbort = kh2coop::eventhold::Abort::None;
+                            std::cout << "[eventhold-recovery] fresh baseline request=" << begin.key.requestId
+                                << " generation=" << scope.generation << " self=" << scope.selfConnection
+                                << " epoch=" << snapshot.room.epoch << " resetAckRequired=1\n";
+                        }
+                    }
+                }
+            }
+        }
         // Runtime wall-time pump, independent of AvatarBridge frame freshness.
         if (!eventHoldOpenAttempted && game.IsAttached() && worldSessionSlot >= 1 && worldSessionSlot <= 2) {
             eventHoldOpenAttempted = true;
@@ -1131,6 +1191,11 @@ int main(int argc, char* argv[]) {
                     << " hostDelivery=" << scope.hostDelivery << " targetDelivery=" << scope.targetDelivery << '\n';
             }
             const auto reason = eventHoldControl.Reason();
+            kh2coop::eventhold::Scope expired {};
+            if (reason == kh2coop::eventhold::Abort::HeartbeatExpired &&
+                eventHoldControl.BoundScope(expired) && expired.selfConnection == worldSelfConnectionId &&
+                expired.selfConnection != eventHoldExpiredConnection && !eventHoldRecoveryRequired)
+                eventHoldExpiry = expired;
             if (reason != kh2coop::eventhold::Abort::None && reason != eventHoldLoggedAbort) {
                 eventHoldLoggedAbort = reason;
                 std::cerr << "[eventhold-control] aborted reason=" << static_cast<LONG>(reason)
@@ -1141,10 +1206,19 @@ int main(int argc, char* argv[]) {
                         ? pulseMs - eventHoldLastTickOkMs : 0)
                     << " tickOk=" << tickOk << " armed=" << eventHoldControl.Armed() << '\n';
             }
+            if (tickOk && eventHoldRecoveryRequired && eventHoldControl.Armed()) {
+                eventHoldRecoveryRequired = false;
+                eventHoldAwaitingAck = false;
+                eventHoldRecoverySnapshot.reset();
+                std::cout << "[eventhold-recovery] control restored generation=" << scope.generation
+                    << " self=" << scope.selfConnection << " nativeResetAck=1\n";
+            }
         }
     };
     const auto enqueueWorld = [&](const std::vector<std::uint8_t>& packet) {
+        const auto rcTrace=kh2coop::rcdiag::Packet(packet);
         const bool queued=worldInbox.Receive(worldBridge, packet, worldStats);
+        kh2coop::rcdiag::Stdout(kh2coop::rcdiag::Stage::RuntimeEnvelope,queued?"inbox-accepted":"inbox-refused","Receive-returned-not-delivery",rcTrace);
         if(combatCausalTrace)combatCausalPacket("net-to-inbox",packet,{},queued);
         if (queued) return true;
         if (eventHoldControlEnabled) eventHoldProjection.Retire(kh2coop::eventhold::Abort::Overflow);
@@ -1184,6 +1258,8 @@ int main(int argc, char* argv[]) {
             if (!markerQueued) return;
         }
         if (!enqueueWorld(kh2coop::encodeNativeResyncSnapshot(begin, snapshot))) return;
+        if (eventHoldRecoveryRequired)
+            eventHoldRecoverySnapshot = std::make_pair(begin, snapshot);
         worldCauseReceipt("snapshot-delivered", worldSessionGeneration, false, &begin);
         // The client can receive the complete snapshot and newer ordered world
         // records before KH2 attaches. Keep those records separately from the
@@ -1239,6 +1315,13 @@ int main(int argc, char* argv[]) {
         return netClient->requestWorldResync(mask, generated, kh2coop::ResyncRequestOrigin::AutomaticNotice);
     };
     if (automaticRecoveryEnabled) std::cout << "[automatic-resync-seal] schema=1 action=begin seq=0 dropped=0\n";
+    kh2coop::ReturningSeatResync returningSeatRecovery(
+        exactEnvironmentOne("KH2COOP_EVENT_HOLD_CONTROL"),
+        [](const kh2coop::ReturningSeatResync::Event& event) {
+            std::cout << "[returning-seat-resync] action=" << event.action << " reason=" << event.reason
+                << " slot=" << static_cast<unsigned>(event.slot) << " connection=" << event.connection
+                << " epoch=" << event.context.room.epoch << " request=" << event.key.requestId << '\n';
+        });
     const auto diagnosticBinding = [&]() {
         kh2coop::DesyncBinding binding;
         binding.sessionId = diagnosticSessionId;
@@ -1414,6 +1497,32 @@ int main(int argc, char* argv[]) {
         observeIdentity("retire-after");
     };
 
+#ifdef _WIN32
+    const auto serviceEventHoldControl = [&]() {
+        pulseEventHoldControl();
+        if (eventHoldExpiry) {
+            const auto expired = *eventHoldExpiry;
+            eventHoldExpiry.reset();
+            const bool pinned = resumePin && resumePin->sessionId ==
+                std::string_view(expired.session, sizeof(expired.session)) &&
+                resumePin->hostConnectionId == expired.hostConnection &&
+                static_cast<std::uint32_t>(resumePin->localSlot) == expired.slot &&
+                worldSelfConnectionId == expired.selfConnection;
+            const bool rejoin = recovery.heartbeatExpired(recoveryNow(), expired.selfConnection, pinned);
+            // Authentication controls whether to retry, never whether known
+            // authority loss fences the native producer and normal traffic.
+            eventHoldExpiredConnection = expired.selfConnection;
+            eventHoldRecoveryRequired = true;
+            eventHoldAwaitingAck = false;
+            eventHoldRecoverySnapshot.reset(); eventHoldRecoveryResult.reset();
+            retireNetworkState();
+            if (!rejoin) recovery.shutdown();
+            std::cout << "[eventhold-recovery] expired connection=" << expired.selfConnection
+                << " pinnedRejoin=" << rejoin << " cached baseline quarantined=1\n";
+        }
+    };
+#endif
+
     if (options.config.networkingEnabled) {
         kh2coop::ClientCallbacks callbacks;
 
@@ -1476,6 +1585,7 @@ int main(int argc, char* argv[]) {
                                                      options.config.peerId, options.config.ownedSlot};
             }
             netReady = true; // verified membership, not native bootstrap readiness
+            returningSeatRecovery.ObserveRoster(ss, options.config.peerId);
 #ifdef _WIN32
             if (game.IsAttached() && !mailboxWriter.IsOpen() &&
                 mailboxWriter.Create(static_cast<DWORD>(game.ProcessId()))) {
@@ -1651,7 +1761,7 @@ int main(int argc, char* argv[]) {
             worldPeerDeliverySerials[binding.selfSlot] = binding.deliverySerial;
             worldBridge.SetDeliverySerial(worldDeliverySerial);
             worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
-            worldQuarantined = !initial;
+            worldQuarantined = !initial || eventHoldRecoveryRequired;
             if (worldQuarantined) {
                 worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
                 avatarSync.clear();
@@ -1673,14 +1783,27 @@ int main(int argc, char* argv[]) {
             observeIdentity("world-binding");
         };
         callbacks.onWorldEnvelope = [&](const kh2coop::WorldEnvelope& envelope) {
-            if (!netReady || worldSessionSlot == kh2coop::WORLD_SLOT_UNKNOWN ||
-                (envelope.scope.kind != kh2coop::WorldSourceKind::Native &&
-                 !(envelope.scope.kind == kh2coop::WorldSourceKind::Relay && !envelope.packet.empty() &&
-                   envelope.packet.front() == static_cast<std::uint8_t>(kh2coop::PacketType::PartyReapply)))) return;
-            if (worldQuarantined && (!netClient || !netClient->pendingResync())) return;
+            serviceEventHoldControl();
+            auto rcTrace=kh2coop::rcdiag::Packet(envelope.packet);kh2coop::rcdiag::EnvelopeScope(rcTrace,envelope.scope);
+            const auto rcHop=[&](const char* result,const char* why){kh2coop::rcdiag::Stdout(kh2coop::rcdiag::Stage::RuntimeEnvelope,result,why,rcTrace);};
+            rcHop("received","network-callback");
+            const char* rcWhy="unknown";
+            if (kh2coop::rcdiag::Reject(!netReady,"runtime-not-ready",rcWhy) ||
+                kh2coop::rcdiag::Reject(worldSessionSlot==kh2coop::WORLD_SLOT_UNKNOWN,"runtime-slot-unknown",rcWhy) ||
+                kh2coop::rcdiag::Reject(envelope.scope.kind!=kh2coop::WorldSourceKind::Native &&
+                 !(envelope.scope.kind==kh2coop::WorldSourceKind::Relay && !envelope.packet.empty() &&
+                   envelope.packet.front()==static_cast<std::uint8_t>(kh2coop::PacketType::PartyReapply)),"runtime-kind",rcWhy)) {
+                rcHop("refused",rcWhy);return;
+            }
+            if (worldQuarantined && (!netClient || !netClient->pendingResync())) {rcHop("refused","runtime-quarantined");return;}
+            if (eventHoldRecoveryRequired && (envelope.packet.empty() ||
+                (!kh2coop::isMaterialWorldPacket(static_cast<kh2coop::PacketType>(envelope.packet.front())) &&
+                 static_cast<kh2coop::PacketType>(envelope.packet.front()) != kh2coop::PacketType::SeatState))) {
+                rcHop("refused","recovery-normal-traffic-quarantined");return;
+            }
             if (pendingNativeSnapshot && !worldBridge.IsOpen()) {
                 const auto& begin = pendingNativeSnapshot->first;
-                if (envelope.scope.hostSourceSerial <= begin.snapshotCut) return;
+                if (envelope.scope.hostSourceSerial <= begin.snapshotCut) {rcHop("retired","continuation-source-cut");return;}
                 if (envelope.packet.empty()) {
                     netClient->failWorldResync(kh2coop::ResyncResultReason::InvalidSnapshot,
                                                "empty native continuation");
@@ -1697,12 +1820,12 @@ int main(int argc, char* argv[]) {
                     ++worldStats.inboxOverflow;
                     netClient->failWorldResync(kh2coop::ResyncResultReason::Overflow,
                                                "unattached native continuation overflow");
-                    return;
+                    rcHop("refused","continuation-overflow");return;
                 }
                 pendingNativeContinuationBytes += packet.size();
                 pendingNativeContinuation.push_back(std::move(packet));
                 ++worldStats.deferred;
-                return;
+                rcHop("deferred","unattached-continuation-not-delivered");return;
             }
             // Already admitted by NetworkClient. Publish the immutable control
             // receipt before world enqueue so normal native consumption can
@@ -1717,12 +1840,15 @@ int main(int argc, char* argv[]) {
                         << " source=" << envelope.scope.hostSourceSerial
                         << " reason=" << static_cast<LONG>(eventHoldControl.Reason()) << '\n';
             }
+            rcHop("enqueue-enter","sole-native-world-path");
             enqueueWorld(kh2coop::encode(envelope)); // unchanged sole native world path
         };
         callbacks.onResyncPlan = [&](const kh2coop::ResyncPlan& plan) {
             if (eventHoldControlEnabled) {
                 eventHoldProjection.Retire(kh2coop::eventhold::Abort::Unsupported);
                 eventHoldProjection.Reject(kh2coop::eventhold::Abort::Unsupported);
+                eventHoldRecoveryResult.reset();
+                if (plan.phase == kh2coop::ResyncPhase::Bootstrap) eventHoldRecoverySnapshot.reset();
             }
             for (std::size_t index = 0; index < plan.targetCount; ++index)
                 worldPeerDeliverySerials[plan.targets[index].slot] = plan.targets[index].deliverySerial;
@@ -1744,6 +1870,12 @@ int main(int argc, char* argv[]) {
             if (eventHoldControlEnabled) {
                 eventHoldProjection.Retire(kh2coop::eventhold::Abort::Unsupported);
                 eventHoldProjection.Reject(kh2coop::eventhold::Abort::Unsupported);
+                if (eventHoldRecoveryRequired && eventHoldRecoverySnapshot &&
+                    kh2coop::eventhold::RecoveryResultMatches(eventHoldScope(), eventHoldRecoverySnapshot->first,
+                        eventHoldRecoverySnapshot->second, result)) {
+                    eventHoldRecoveryResult = result;
+                    eventHoldRecoveryDeadline = GetTickCount64() + kh2coop::ClientRecovery::kRosterMs;
+                }
             }
 #endif
             std::cout << kh2coop::formatResyncResultEvidence(result, "runtime", diagnosticSlot,
@@ -1774,6 +1906,7 @@ int main(int argc, char* argv[]) {
 #endif
             observeIdentity("resync-result");
             automaticRecovery.Terminal(result);
+            returningSeatRecovery.Terminal(result);
         };
 
         callbacks.onEvent = [](const kh2coop::EventMessage& evt) {
@@ -1858,7 +1991,7 @@ int main(int argc, char* argv[]) {
         if (!avatarBridge.IsOpen()) return;
         if (!netClient || !netReady || worldSessionSlot >= 3 || worldSessionGeneration == 0 ||
             !worldConnectionIds[0] || !worldConnectionIds[worldSessionSlot] ||
-            worldQuarantined || worldBridge.GetPuppetAuthorityMode() != kh2coop::PuppetAuthorityMode::Network) {
+            worldQuarantined || eventHoldRecoveryRequired || worldBridge.GetPuppetAuthorityMode() != kh2coop::PuppetAuthorityMode::Network) {
             publishInactiveAvatars();
             return;
         }
@@ -1950,6 +2083,7 @@ int main(int argc, char* argv[]) {
          ++tick) {
 
 #ifdef _WIN32
+        serviceEventHoldControl();
         worldBridge.PulseRuntimeWriter();
 #endif
         // Pump network events every tick, even before KH2 is attached.
@@ -1957,6 +2091,17 @@ int main(int argc, char* argv[]) {
             if (steamHost) steamHost->tick(0);
             eventHoldTimed("network-outer", [&] { netClient->tick(0); });
             if (automaticRecoveryEnabled) automaticRecovery.Pump(netClient->hostResyncContext(),
+                [&]() { return netClient->resyncBusy(); }, submitAutomaticResync);
+            const auto returnContext = netClient->hostResyncContext();
+            bool returnField = false;
+            if (returnContext && game.IsAttached() && netReady && !membershipInvalidated) {
+                const auto local = game.ReadRoomState();
+                const auto& room = returnContext->room;
+                returnField = !local.inCutscene && !local.inTransition && local.worldId == room.worldId &&
+                    local.roomId == room.roomId && local.mapProgram == room.mapProgram &&
+                    local.battleProgram == room.battleProgram && local.eventProgram == room.eventProgram;
+            }
+            returningSeatRecovery.Pump(returnContext, returnField,
                 [&]() { return netClient->resyncBusy(); }, submitAutomaticResync);
             if (membershipInvalidated) {
                 membershipInvalidated = false;
@@ -1969,7 +2114,12 @@ int main(int argc, char* argv[]) {
                 recovery.closed(recoveryNow(), info);
             }
             const auto action = recovery.tick(recoveryNow());
-            if (action == kh2coop::ClientRecovery::Action::Disconnect) {
+            if (action == kh2coop::ClientRecovery::Action::Disconnect
+#ifdef _WIN32
+                || (eventHoldRecoveryRequired && recovery.state() == kh2coop::ClientRecovery::State::Terminal &&
+                    netClient->isConnected())
+#endif
+                ) {
                 observeIdentity("recovery-disconnect");
                 retireNetworkState();
                 netClient->disconnect();
@@ -1998,9 +2148,9 @@ int main(int argc, char* argv[]) {
             }
 #ifdef _WIN32
             if (worldBridge.IsOpen() && !netReady)
-                if(!combatCausalTrace) kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
+                if(!combatCausalTrace) kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats, nullptr, nullptr, eventHoldRecoveryRequired);
                 else kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats,combatCausalThunk,
-                    const_cast<void*>(static_cast<const void*>(&combatCausalOutgoing)));
+                    const_cast<void*>(static_cast<const void*>(&combatCausalOutgoing)), eventHoldRecoveryRequired);
 #endif
             if (recovery.state() != lastRecoveryState) {
                 lastRecoveryState = recovery.state();
@@ -2014,9 +2164,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-#ifdef _WIN32
-        pulseEventHoldControl();
-#endif
         // Collection filesystem/capture work runs on one owned worker. Poll
         // and upload before the attachment early-return, just like heartbeats.
         const auto binding = diagnosticBinding();
@@ -2145,9 +2292,9 @@ int main(int argc, char* argv[]) {
                     worldBridge.SetNetStats(kh2coop::WORLD_NET_UNKNOWN,
                                             kh2coop::WORLD_NET_UNKNOWN);
                 }
-                if(!combatCausalTrace) kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats);
+                if(!combatCausalTrace) kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats, nullptr, nullptr, eventHoldRecoveryRequired);
                 else kh2coop::pumpDllToNet(worldBridge, *netClient, worldStats,combatCausalThunk,
-                    const_cast<void*>(static_cast<const void*>(&combatCausalOutgoing)));
+                    const_cast<void*>(static_cast<const void*>(&combatCausalOutgoing)), eventHoldRecoveryRequired);
             }
             pumpAvatars(room.worldId, room.roomId);
         }
@@ -2260,9 +2407,10 @@ int main(int argc, char* argv[]) {
                              std::chrono::milliseconds(options.config.tickMs);
         while (g_running && std::chrono::steady_clock::now() < tickEnd) {
             eventHoldTimed("pump-sleep", [&] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
+            serviceEventHoldControl();
             if (netClient) eventHoldTimed("network-inner", [&] { if (steamHost) steamHost->tick(0); netClient->tick(0); });
             worldBridge.PulseRuntimeWriter();
-            pulseEventHoldControl();
+            serviceEventHoldControl();
             eventHoldTimed("avatar-inner", [&] { pumpAvatars(pumpWorld, pumpRoom); });
         }
 #else
@@ -2273,6 +2421,7 @@ int main(int argc, char* argv[]) {
 
     // ----- Graceful shutdown -----
     automaticRecovery.Shutdown();
+    returningSeatRecovery.Shutdown();
     if (automaticRecoveryEnabled) std::cout << "[automatic-resync-seal] schema=1 action=end seq="
         << automaticReceiptSequence << " pending=" << automaticRecovery.PendingCount() << " dropped=0\n";
     observeIdentity("shutdown-before");

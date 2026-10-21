@@ -1,11 +1,15 @@
 # Forced world resync
 
-Protocol 10 adds complete native census, living-count and combat-count summaries
+Current components require protocol31, AvatarBridge4, WorldBridge12 and
+CaptureChannel1, rebuilt together. The VUH-2628 safe-field recovery and its
+bounded live result are recorded under [completion and limits](#completion-and-limits).
+
+The following opening contract describes the historical protocol10 cohort.
+Protocol 10 added complete native census, living-count and combat-count summaries
 to StateHash. Protocol 9 added exact ordinary-record content
 to the fresh native-state transaction introduced in protocol 8. AvatarBridge
-remains 2, WorldBridge is 11 and CaptureChannel remains 1. All components must
-be rebuilt together. Older protocol peers or mappings cannot validate this
-candidate. The dated protocol-8 native results below retain their original
+was 2, WorldBridge was11 and CaptureChannel was1. That cohort required matched
+peers and mappings. The dated protocol-8 native results below retain their original
 scope; they are not native validation of the current protocol.
 
 Automatic recovery requires two distinct client observations. A newer host
@@ -810,7 +814,76 @@ native authority and queued world warp/progress/HP work; quarantine stays in
 place until another authorized bootstrap. Already-entered native calls cannot
 be undone by this cross-process invalidation.
 
+## Dormant room scripts in an ordinary resync catalog (VUH-2628)
+
+The raw collector remains strict: any Script row still makes its catalog
+Unsupported. Resync has a separate ordinary view with explicit raw-to-portable
+indices. It retains every raw table slot/count and its original bookends,
+including the Script row. All ordinary definitions, including empty and
+unreferenced definitions, must match completely; a passing subset is refused.
+The view grants no script replay, population creation or general actor authority.
+Existing global Script and317 denials remain unchanged.
+
+`inject/src/KnownDormantScripts.hpp` is the reviewed qualification table. Its
+only initial row is FM00 Serenity: full tuple world2/room32/door99/map0/battle0/
+event2, seven raw slots, six ordinary definitions and the exact MapScript12
+`game` program. The native ARD root, resolved BAR entry, Script pointer and
+ordinary e_50 anchor must agree; matching copied script bytes alone cannot admit
+it. Program and local flag reads are bounded and bookended with the current raw
+table/load/transition scope. The raw6 e_50 definition becomes portable5; native
+membership and write witnesses retain raw count7 and slot6. Mixed-table combat
+HP/death application and activation repair remain unsupported in this slice.
+
+This328-byte `tutorial-gameov` program remains native-owned on both seats.
+Native room initialization creates the rejoiner's local VM through the existing
+Bootstrap load. Its sole trigger checks local flag40; if clear it opens tutorial
+message17860 (0x45C4), sets40 and returns. If already set it only checks and
+returns. Flag40 is SAVE+2405 mask01 (word exe+9ABCB4 bit8). It is outside the
+shared progress allow list and the separately checked Personal spans; shared
+progress equality does not prove it. Recovery never copies, sets or clears it.
+
+Host capture requires this bit already1 at both bookends. The friend independently
+requires1 before staging progress or queuing the native load, then again with the
+exact program and native asset association after its new load during both
+convergence observations. Clear/unknown flag, changed code/root/row, other Script,
+all-Script, partial reads, ambiguity, mismatching ordinary content or active
+UI/story/pause refuses the whole transaction. Later table rows require their own
+reviewed identity/dormancy proof and regression; another room is not admitted by
+having key0/flags1 or an empty combat census.
+
+Recovery04 on build34 passed35 steps in127.7s in single-PC loopback. A fixed
+2.6s friend-runtime pause expired the original lifetime, then a fresh pinned
+connection, changed native load and two-frame convergence, new scoped reset1
+ACK and Arm completed. Both native seats positively qualified the raw7/ordinary6
+catalog with their own flag40 already1. The paired clip films the recovered
+idle field; the handshake is log evidence. Four protected saves, twelve movie
+hashes and all539 pins/products were unchanged, with clean owned teardown.
+See the [result and evidence](testing/vuh2628-recovery04/README.md). Recovery03
+remains FAIL. The1500ms lease, quarantine, budgets and no-cache-replay rule are
+unchanged. This result qualifies only empty FM00 and this dormant script.
+
 ## Completion and limits
+
+VUH-2628 connects the existing pinned friend rejoin to
+this host-owned native transaction after an event-control HeartbeatExpired.
+The expired1500ms lifetime stays terminal. A returning seat's cached baseline
+remains quarantined, and only a matching successful native snapshot/result can
+create a new full-scope local control mapping. Its ordinal1 Reset still needs
+the native owner's SafeConverged and LiveEligible ACK before control arms.
+Normal avatars and gameplay requests remain gated during this handshake;
+bootstrap acknowledgments and the existing material continuation remain in the
+resync path. The existing authenticated SeatState profile agreement also passes
+in both directions: a prologue bootstrap load requires it before convergence.
+A failed or unauthenticated rejoin never restores authority.
+
+The implemented scope is a settled safe field with an empty or supported
+ordinary record-bound population; the live proof above covers empty FM00 only. Active307,
+boss/script reconstruction, active story and expiry leaving an owned pause open
+remain refused. A host can carry one returning-seat hint to its next eligible
+room; a failed attempt is not retried in the same incarnation/epoch. Existing
+transport attempt budgets, transaction deadlines and native write fences remain
+in force. Recovery does not replay cached315 or mission4/16. The sealed build28
+baseline remains separately preserved in the VUH-2569 worktree.
 
 `Received`, `Arrived`, transport End, ordinary StateHash and TransitionAck are
 not completion. Native `Converged` requires a changed Bootstrap load, exact full

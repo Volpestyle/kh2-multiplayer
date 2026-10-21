@@ -93,6 +93,20 @@ public:
         advance(now);
         if (state_ == State::Connecting) failed("initial connection initiation failed", false);
     }
+    // The admitted friend's native authority heartbeat expired while its
+    // transport may still be connected. The caller must validate the retained
+    // resume pin and pass the self incarnation whose authority was lost.
+    // Commit recovery before performing the returned Disconnect action: a
+    // synchronous local close must not turn this loss into a local shutdown.
+    // Duplicate/stale notifications do not advance clocks or spend budgets.
+    [[nodiscard]] bool heartbeatExpired(std::uint64_t now, std::uint64_t expectedSelfId,
+                                        bool retainedPinValidated) {
+        if (!retainedPinValidated || state_ != State::Admitted || !expectedSelfId || expectedSelfId != selfId_ ||
+            (localSlot_ != SlotType::Friend1 && localSlot_ != SlotType::Friend2)) return false;
+        advance(now);
+        failed("admitted authority heartbeat expired", true);
+        return true;
+    }
     [[nodiscard]] Action tick(std::uint64_t now) {
         advance(now);
         if (disconnectPending_) { disconnectPending_ = false; return Action::Disconnect; }

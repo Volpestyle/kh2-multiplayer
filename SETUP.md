@@ -40,7 +40,7 @@ existing source directories through `FETCHCONTENT_SOURCE_DIR_ENET` and
 | `kh2ctl` | `build/tools/kh2ctl/Release/kh2ctl.exe` |
 
 These paths assume the Visual Studio multi-configuration generator. Source uses
-protocol **30**, AvatarBridge **4**, WorldBridge **12** and CaptureChannel **1**.
+protocol **31**, AvatarBridge **4**, WorldBridge **12** and CaptureChannel **1**.
 Rebuild the DLL, runtime, relay and control tools together; an already injected
 DLL retains its old build. Packaged products need a matching receipt cohort.
 The checked-in protocol-18 product manifest and launcher validator are historical;

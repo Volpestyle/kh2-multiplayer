@@ -41,7 +41,7 @@ or authorized private address for development.
 - `SimulationState` provides fake movement/combat only when explicitly enabled. It does not replace the host's live game simulation.
 - `ServerMain` services ENet on an approximately 16 ms loop and stops on Ctrl+C.
 
-Current source requires protocol **30** peers. Compatibility labels are handshake
+Current source requires protocol **31** peers. Compatibility labels are handshake
 values, not binary provenance; rebuild and select a coherent source cohort.
 The [project plan](../docs/ONLINE_COOP_PLAN.md) records current native acceptance
 and remaining route/reconnect work. Public-realm session/instance splitting is

@@ -29,7 +29,7 @@ MissionState decode(const std::vector<std::uint8_t>& bytes) {
 }
 void codec() {
     auto m = sample(); const auto bytes = encode(m);
-    check(PROTOCOL_VERSION == 30 && bytes[0] == 52 && bytes.size() == 3 + MISSION_STATE_BYTES && MISSION_STATE_BYTES == 151,
+    check(PROTOCOL_VERSION == 31 && bytes[0] == 52 && bytes.size() == 3 + MISSION_STATE_BYTES && MISSION_STATE_BYTES == 151,
           "protocol25 packet52 has the exact 151-byte payload");
     check(encode(decode(bytes)) == bytes, "every field round trips");
     check(isWorldPacket(PacketType::MissionState) && isScopedWorldPacket(PacketType::MissionState) &&
@@ -136,6 +136,10 @@ void partyRows() {
 }
 void bossLeave() {
     namespace BL = kh2coop::inject::bossleave;
+    check(BL::Fallback(50, 12, false, false, 307), "Thorn copy uses checked boss leave after a refused lethal");
+    check(!BL::Fallback(50, 12, false, false, 308), "other type-12 objects cannot gain boss-leave authority");
+    check(!BL::Fallback(50, 12, true, false, 307), "Thorn cannot bypass the record-authority write fence");
+    check(!BL::Fallback(50, 12, false, true, 307), "Thorn leave is attempted once per occurrence");
     check(BL::Fallback(221, 3, false, false), "VUH-2367: a boss copy that refused the lethal fades out");
     check(!BL::Fallback(0, 3, false, false), "a boss the lethal killed needs no fallback");
     check(!BL::Fallback(221, 4, false, false), "an ordinary enemy keeps the failed lethal as it was");
@@ -144,6 +148,17 @@ void bossLeave() {
 }
 }  // namespace
 int main() {
+    {
+        auto m=sample();m.endTrap=16;
+        check(throws([&]{encode(m);}), "boss end observation refuses an unrelated mission");
+        m.file={};std::memcpy(m.file.data(),"TT34_MS304.bar",14);
+        check(decode(encode(m)).endTrap==16, "Thorn host boss end observation roundtrips without changing payload size");
+        std::size_t boss=0;while(boss<MR::kTrapCount && MR::kTraps[boss].kind!=MR::Kind::BossEnd)++boss;
+        check(boss<MR::kTrapCount && MR::EndTrapIndex(16)<0, "boss end is observed, never a replayable end trap");
+        check(MR::DropLocalCall(boss,true,false,false,true) &&
+              !MR::DropLocalCall(boss,true,false,false,false) &&
+              MR::DropLocalCall(boss,false,false,true,true), "only qualified boss following/end guard drops local 4/16");
+    }
     codec();
     rules();
     partyRows();

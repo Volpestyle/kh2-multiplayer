@@ -1014,8 +1014,9 @@ native start `FUN_1403AC350(id "104", flags 9, params)`, and the params name whe
 afterwards (02/07 evt3, the scene above).
 
 How the friend plays it:
-- `EventStartMirror` hooks that start on both seats. The host records each start that matches a row
-  of `InFieldEvents` in `EventScenes.hpp` exactly, taken in open field.
+- `EventStartMirror` hooks that start on both seats. The host records each start that qualifies against
+  `InFieldEvents` in `EventScenes.hpp`, taken in open field. The observed rows match all parameters exactly;
+  Thorn's statically derived row has the single padding exception documented below.
 - The event-hold Acquire for the context that start installed carries its arguments
   (`EventHold.start`; the control command has the same fields).
 - A friend converged in the host's room and safe to pause calls the same native start with the same
@@ -1031,7 +1032,8 @@ the saves were unchanged.
 **More rows (VUH-2487).** The host logs every event start it sees in open field, as
 `[event-mirror] native start id=... checked=0|1 params=...`. For every event hold it also logs one
 `[event-mirror] host event ... origin=...` line, naming the checked start, the other builder that
-installed it (`origin=install caller=<RVA>`), or `unknown`. Rows come only from those lines.
+installed it (`origin=install caller=<RVA>`), or `unknown`. The measured rows below come from those lines.
+The VUH-2569 Thorn row below is a separate static qualification and still needs runtime proof.
 
 Measured holds on the unskipped prologue (host frames, run `20261019-103812`). All three are started
 by `FUN_1403AC350` in open field:
@@ -1044,6 +1046,26 @@ by `FUN_1403AC350` in open field:
 
 With the rows, the friend plays all three natively and reaches the Sandlot with both Roxases. The
 committed fixture passes (run `20261019-110448`).
+
+**Thorn victory (VUH-2569, static qualification).** Installed `tt34.ard` event
+program157 registers signal16/argument-1 to event ID `0x353133` ("315"), flags
+`0x12`. The native path is mission trap4/16 `4334D0` → `3A3440` → `3A41E0`
+→ `3A3540` → `3AABE0` → `3F60D0` → event start `3AC350`. The in-field row
+is source world2/room34/event157 and semantic parameters
+`{2,2,00330033,33,1,FFFFFFFF,3,0,0}` (hex). The authored exit is world2/room0,
+door0 and map/battle/event51, resolved by native `39FBC0` from installed
+`07localset.bin` world2 event51. This row follows the host's actual event start;
+the friend does not replay mission trap4/16.
+
+Only `params[1]`'s high byte is ignored for this exact row's qualification.
+`39FBC0` writes destination bytes0,1,2 and4–9, leaving byte3 unwritten;
+`3A4BD0` copies bytes0–7 into the descriptor. Qualification compares
+`params[1] & 0x00FFFFFF == 2` and every other semantic bit exactly. It changes
+neither the captured descriptor nor its publication, control projection or
+native replay: all nine raw host parameters, including padding, are retained.
+The installed event bytes and native decoding establish this allowance;
+they are not a runtime315 start receipt. Both-screen victory playback, the
+exact start-time NOW and onward control remain live acceptance gaps.
 
 One fix came with this: since VUH-2359 a friend loads the checked scene locations itself, and each
 reads as an open field for a frame before its event starts. Those frames were logged as
@@ -1061,8 +1083,8 @@ The TT basement (Day 6) holds, from the older D15 route logs:
   story events.
 
 Limits:
-- In-field rows exist only for the three prologue starts. Other in-field events keep the hold until a
-  host start for them is traced and added.
+- The three observed prologue starts and the statically qualified Thorn victory row are admitted.
+  Other in-field events keep the hold until their host start is qualified and added.
 - Each seat advances its own dialog, so the seats finish at different times. The faster one waits at
   its blocked exit until the host's next room arrives.
 - The basement proof warped the host into the scene, because the route pilot cannot win the Dusk

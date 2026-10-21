@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "contact-sheet.jpg",
+      "size": 672743,
+      "sha256": "ca62f27b431e4d903d425081788b22f398c65083e2d3723287054a5027e89d6e",
+      "url": "clankie://evidence/sha256/ca62f27b431e4d903d425081788b22f398c65083e2d3723287054a5027e89d6e"
+    },
+    {
+      "path": "decisive-reports.tar",
+      "size": 706560,
+      "sha256": "d76f66e778d091ece0e1e147dbfeeba97ff43a7a4f60211528ec5a68b9c3d7f3",
+      "url": "clankie://evidence/sha256/d76f66e778d091ece0e1e147dbfeeba97ff43a7a4f60211528ec5a68b9c3d7f3"
+    },
+    {
+      "path": "recovered_0.png",
+      "size": 1897021,
+      "sha256": "6fa4c5c915743050070ebfa34a9cfb36d5505eff938c16f99e79fcebdc51883e",
+      "url": "clankie://evidence/sha256/6fa4c5c915743050070ebfa34a9cfb36d5505eff938c16f99e79fcebdc51883e"
+    },
+    {
+      "path": "recovered_1.png",
+      "size": 1922919,
+      "sha256": "f10f3083d9e62894e82d970d79e6e59c6910a664b19452663f463b7027919551",
+      "url": "clankie://evidence/sha256/f10f3083d9e62894e82d970d79e6e59c6910a664b19452663f463b7027919551"
+    },
+    {
+      "path": "recovered_friend_1.mp4",
+      "size": 4163125,
+      "sha256": "d3fb1a2c135176ca2f8d18c9fce689151702c6eafb49233c62660fbc91337b02",
+      "url": "clankie://evidence/sha256/d3fb1a2c135176ca2f8d18c9fce689151702c6eafb49233c62660fbc91337b02"
+    },
+    {
+      "path": "recovered_host_0.mp4",
+      "size": 4148621,
+      "sha256": "b5b6faf574bc697b855bec90de6eac3f3cd74ffe9823c7677fe40fcba389d4dc",
+      "url": "clankie://evidence/sha256/b5b6faf574bc697b855bec90de6eac3f3cd74ffe9823c7677fe40fcba389d4dc"
+    },
+    {
+      "path": "recovery04-two-screen-captioned.mp4",
+      "size": 2970954,
+      "sha256": "5d8e4ad1ad38f63bbd91caf37dbfd66435f336067be9cb6144640fec7a9c9565",
+      "url": "clankie://evidence/sha256/5d8e4ad1ad38f63bbd91caf37dbfd66435f336067be9cb6144640fec7a9c9565"
+    },
+    {
+      "path": "source-inputs.tar",
+      "size": 15933440,
+      "sha256": "c5c6fe8cd8d374498993ffa76c879231d70e493106f1ade9d2bbf3ebf44efb3a",
+      "url": "clankie://evidence/sha256/c5c6fe8cd8d374498993ffa76c879231d70e493106f1ade9d2bbf3ebf44efb3a"
+    }
+  ]
+}

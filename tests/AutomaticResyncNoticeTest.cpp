@@ -1,10 +1,12 @@
 // Bounded host-notice policy and real generator/loopback controls; no KH2.
 #include "WorldWireFixture.hpp"
 #include "kh2coop/AutomaticResyncNotice.hpp"
+#include "kh2coop/ReturningSeatResync.hpp"
 #include "kh2coop/SessionHost.hpp"
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 using namespace kh2coop;
 namespace {
@@ -54,6 +56,109 @@ void policyControls() {
     { Policy p; p.busy = true; p.Notice(); p.policy.Pump(std::nullopt, [&] { return true; }, [&](auto m, auto* g) { return p.Submit(m,g); }); check(!p.policy.PendingCount() && p.Last("discard", "captured-context-changed"), "missing admission explicitly invalidates pending candidate"); }
     { Policy p; p.busy = true; p.Notice(); p.policy.Shutdown(); check(!p.policy.PendingCount() && p.Last("discard", "shutdown"), "shutdown records pending disposition"); }
     { Policy p; p.Notice(); const auto row = formatAutomaticResyncNotice(p.events.back(), 4, 99, 3); check(row.find("receipt=1") != std::string::npos && row.find("connection=8589934594") != std::string::npos && row.find("request=1") != std::string::npos && row.find("dropped=0") != std::string::npos, "actual receipt formatter preserves causal request and full-width identity"); }
+}
+struct ReturningPolicy {
+    HostResyncContext current = context();
+    SessionState roster;
+    bool busy = false, eligible = true, sendOk = true;
+    unsigned sends = 0;
+    std::vector<ReturningSeatResync::Event> events;
+    ReturningSeatResync policy;
+    explicit ReturningPolicy(bool enabled = true)
+        : policy(enabled, [&](const auto& event) { events.push_back(event); }) {
+        roster.sessionId = current.binding.sessionId;
+        for (unsigned i = 0; i < 3; ++i)
+            roster.actors.push_back({i + 1, static_cast<SlotType>(i), "peer" + std::to_string(i), "sora", current.connections[i]});
+        Observe();
+    }
+    void Observe() { policy.ObserveRoster(roster, "peer0"); }
+    void Return(unsigned slot = 1) {
+        ++current.connections[slot];
+        for (auto& actor : roster.actors)
+            if (static_cast<unsigned>(actor.slot) == slot) actor.connectionId = current.connections[slot];
+        Observe();
+    }
+    bool Submit(std::uint8_t mask, ResyncRequest* generated) {
+        generated->key = {current.binding.sessionId, current.binding.hostConnectionId, ++sends};
+        generated->room = current.room; generated->connections = current.connections; generated->targetMask = mask;
+        busy = sendOk;
+        return sendOk;
+    }
+    void Pump() {
+        policy.Pump(current, eligible, [&] { return busy; }, [&](auto mask, auto* generated) { return Submit(mask, generated); });
+    }
+    ResyncResult Result(ResyncResultReason reason = ResyncResultReason::Converged, unsigned slot = 1) const {
+        ResyncResult result;
+        result.key = {current.binding.sessionId, current.binding.hostConnectionId, sends}; result.reason = reason;
+        result.targetCount = 1;
+        result.targets[0].target = {static_cast<std::uint8_t>(slot), current.connections[slot], 11};
+        result.targets[0].status = ResyncAckStatus::Converged;
+        return result;
+    }
+    void Finish(ResyncResultReason reason = ResyncResultReason::Converged, unsigned slot = 1) {
+        busy = false; policy.Terminal(Result(reason, slot));
+    }
+};
+void returningSeatControls() {
+    { ReturningPolicy p(false); p.Return(); p.Pump(); check(!p.sends && !p.policy.PendingCount() && p.events.empty(), "return policy disabled has no hints or submissions"); }
+    { ReturningPolicy p; p.Pump(); p.Observe(); p.Pump(); check(!p.sends && !p.policy.PendingCount(), "initial roster and duplicate admission never imply a return"); }
+    { ReturningPolicy p; p.roster.actors.pop_back(); p.Observe(); p.roster.actors.push_back({3, SlotType::Friend2, "first-peer", "sora", p.current.connections[2]}); p.Observe(); p.Pump(); check(!p.sends, "first peer sight after an empty seat is not a returning peer"); }
+    { ReturningPolicy p; const auto actor = p.roster.actors[1]; p.roster.actors.erase(p.roster.actors.begin() + 1); p.current.connections[1] = 0; p.Observe(); p.current.connections[1] = actor.connectionId + 1; auto returned = actor; returned.connectionId = p.current.connections[1]; p.roster.actors.push_back(returned); p.Observe(); p.Pump(); check(p.sends == 1 && p.policy.PendingCount() == 1 && p.events.back().key.requestId == 1, "same peer/seat fresh full-width incarnation survives an absent roster"); p.Observe(); p.Pump(); check(p.sends == 1, "duplicate roster and Pump cannot renew active return request"); p.Finish(); p.Pump(); check(!p.policy.PendingCount() && p.sends == 1, "exact authenticated target convergence retires hint"); }
+    { ReturningPolicy p; p.Return(); p.Pump(); p.Finish(ResyncResultReason::NativeUnavailable); p.Observe(); p.Pump(); p.Pump(); check(p.sends == 1 && p.policy.PendingCount() == 1, "failed transaction is retained but same epoch cannot retry"); --p.current.room.epoch; p.Pump(); check(p.sends == 1, "older epoch cannot rewind spent attempt"); p.current.room.epoch += 2; p.Pump(); check(p.sends == 2 && p.events.back().context.room.epoch == p.current.room.epoch, "strictly newer eligible host epoch captures a fresh generated request"); }
+    { ReturningPolicy p; p.sendOk = false; p.Return(); p.Pump(); p.Pump(); p.policy.Pump(std::nullopt, true, [] { return false; }, [&](auto mask, auto* out) { return p.Submit(mask, out); }); p.Pump(); check(p.sends == 1 && p.policy.PendingCount() == 1, "failed submission and missing context preserve consumed epoch"); ++p.current.room.epoch; p.Pump(); check(p.sends == 2, "failed send can be retried only in a genuinely new epoch"); }
+    { ReturningPolicy p; p.Return(); unsigned calls = 0; bool escaped = false; try { p.policy.Pump(p.current, true, [] { return false; }, [&](auto, auto*) -> bool { ++calls; throw std::runtime_error("submit failure"); }); } catch (const std::runtime_error&) { escaped = true; } p.Pump(); check(escaped && calls == 1 && !p.sends && p.policy.PendingCount() == 1, "throwing generator preserves exception and spends original epoch before call"); ++p.current.room.epoch; p.Pump(); check(p.sends == 1, "new epoch may submit after earlier generator exception"); }
+    { ReturningPolicy p; p.Return(); p.eligible = false; p.Pump(); p.Pump(); check(!p.sends && p.policy.PendingCount() == 1, "unsupported native host state retains hint without submission"); p.eligible = true; p.busy = true; p.Pump(); check(!p.sends, "foreign active transaction defers rather than submits"); p.busy = false; p.Pump(); check(p.sends == 1, "fresh complete current context drains a deferred hint once"); }
+    { ReturningPolicy p; p.Return(); const auto field = p.current.room; const auto& scene = eventscenes::Scenes.front(); p.current.room = {field.epoch, scene.world, scene.room, static_cast<std::uint8_t>(scene.door), scene.map, scene.battle, scene.event}; p.Pump(); check(!p.sends && p.policy.PendingCount() == 1, "known event-only scene cannot be submitted even with caller eligible"); p.current.room = field; ++p.current.room.epoch; p.Pump(); check(p.sends == 1, "later qualified field permits original returning hint"); }
+    for (unsigned mode = 0; mode < 7; ++mode) {
+        ReturningPolicy p; p.Return(); auto mismatch = p.current;
+        if (mode == 0) mismatch.binding.selfSlot = 1;
+        if (mode == 1) ++mismatch.binding.hostConnectionId;
+        if (mode == 2) ++mismatch.binding.selfConnectionId;
+        if (mode == 3) mismatch.binding.deliverySerial = 0;
+        if (mode == 4) ++mismatch.connections[2];
+        if (mode == 5) mismatch.binding.sessionId[0] = 'b';
+        if (mode == 6) mismatch.room.epoch = 0;
+        p.policy.Pump(mismatch, true, [] { return false; }, [&](auto mask, auto* out) { return p.Submit(mask, out); });
+        check(!p.sends && p.policy.PendingCount() == 1, "full host binding/roster mismatch refuses without laundering pending hint");
+    }
+    for (unsigned mode = 0; mode < 6; ++mode) {
+        ReturningPolicy p; p.Return(); p.Pump(); auto result = p.Result();
+        if (mode == 0) ++result.key.requestId;
+        if (mode == 1) ++result.key.hostConnectionId;
+        if (mode == 2) ++result.targets[0].target.connectionId;
+        if (mode == 3) result.targets[0].target.slot = 2;
+        if (mode == 4) result.targets[0].target.deliverySerial = 0;
+        if (mode == 5) result.targets[0].status = ResyncAckStatus::Arrived;
+        p.policy.Terminal(result); check(p.policy.PendingCount() == 1, "wrong result key/target or incomplete convergence cannot retire hint");
+    }
+    { ReturningPolicy p; p.Return(); p.Pump(); auto wrong = p.Result(); ++wrong.key.requestId; p.policy.Terminal(wrong); p.Finish(); check(!p.policy.PendingCount(), "unrelated result does not destroy exact in-flight convergence association"); p.Observe(); p.Pump(); check(p.sends == 1, "converged same incarnation never rearms on duplicate roster"); }
+    for (unsigned mode = 0; mode < 6; ++mode) {
+        ReturningPolicy p; p.Return();
+        p.policy.Pump(p.current, true, [] { return false; }, [&](auto mask, auto* out) {
+            p.Submit(mask, out);
+            if (mode == 0) out->key = {};
+            if (mode == 1) out->key.sessionId[0] = 'b';
+            if (mode == 2) ++out->key.hostConnectionId;
+            if (mode == 3) out->targetMask = 4;
+            if (mode == 4) ++out->connections[2];
+            if (mode == 5) ++out->room.door;
+            return true;
+        });
+        p.busy = false; p.policy.Terminal(p.Result()); p.Pump();
+        check(p.sends == 1 && p.policy.PendingCount() == 1, "mismatched generated request grants no completion key and still spends epoch");
+    }
+    for (unsigned mode = 0; mode < 5; ++mode) {
+        ReturningPolicy p; p.Return();
+        if (mode == 0) p.roster.sessionId[0] = 'b';
+        if (mode == 1) ++p.roster.actors[0].connectionId;
+        if (mode == 2) p.roster.actors[1].ownerPeerId = "replacement-peer";
+        if (mode == 3) p.roster.actors[2].connectionId = p.roster.actors[1].connectionId;
+        if (mode == 4) p.roster.actors[0].ownerPeerId = "foreign-host";
+        p.Observe(); p.Pump(); check(!p.policy.PendingCount() && !p.sends, "session/host/peer change or malformed roster retires old returning hint");
+    }
+    { ReturningPolicy p; p.Return(); p.Pump(); const auto oldResult = p.Result(); p.Return(2); p.policy.Terminal(oldResult); check(p.policy.PendingCount() == 2, "other-seat roster replacement revokes old result association"); p.busy = false; p.Pump(); check(p.sends == 2 && p.events.back().slot == 2, "full roster revalidation drains new seat without retrying original spent epoch"); p.Finish(ResyncResultReason::Converged, 2); ++p.current.room.epoch; p.Pump(); check(p.sends == 3 && p.events.back().slot == 1, "failed original seat requires fresh eligible epoch after roster drift"); }
+    { ReturningPolicy p; p.Return(); p.Pump(); const auto oldResult = p.Result(); p.Return(); p.policy.Terminal(oldResult); p.busy = false; p.Pump(); check(p.sends == 2 && p.policy.PendingCount() == 1, "previous-incarnation completion cannot retire successor return"); p.Finish(); p.policy.Terminal(oldResult); p.Pump(); check(!p.policy.PendingCount() && p.sends == 2, "duplicate old completion cannot reopen converged successor"); }
+    { ReturningPolicy p; p.Return(); p.policy.Shutdown(); p.Pump(); check(!p.policy.PendingCount() && !p.sends, "shutdown retires all prior roster/hints"); }
 }
 void realGenerator() {
     SessionConfig cfg; cfg.bindAddress = "127.0.0.1"; cfg.port = 17921; cfg.gameBuild = "automatic-notice-private"; cfg.modHash = "m"; cfg.contentHash = "c";
@@ -126,4 +231,4 @@ void realGenerator() {
     policy.Shutdown(); for (auto& c : clients) c->disconnect(); relay.stop();
 }
 }
-int main() { if (enet_initialize() != 0) return 2; policyControls(); realGenerator(); enet_deinitialize(); std::cout << "checks=" << checks << " failures=" << failures << '\n'; return failures ? 1 : 0; }
+int main() { if (enet_initialize() != 0) return 2; policyControls(); returningSeatControls(); realGenerator(); enet_deinitialize(); std::cout << "checks=" << checks << " failures=" << failures << '\n'; return failures ? 1 : 0; }
