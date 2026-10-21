@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "caption-full.png",
+      "size": 531437,
+      "sha256": "8001f4cc83ce44d73783972427c725950b948e93686cd5e6e593744a3c300e54",
+      "url": "clankie://evidence/sha256/8001f4cc83ce44d73783972427c725950b948e93686cd5e6e593744a3c300e54"
+    },
+    {
+      "path": "contact-every-output-frame.jpg",
+      "size": 1555401,
+      "sha256": "47d1463e71bbc8a8a9ddfb1b30e0bd9c0512718a8666a58678487d2dee2dc5a9",
+      "url": "clankie://evidence/sha256/47d1463e71bbc8a8a9ddfb1b30e0bd9c0512718a8666a58678487d2dee2dc5a9"
+    },
+    {
+      "path": "decisive-reports.tar",
+      "size": 4945920,
+      "sha256": "35e253cd2223a3daa342eb9258318802528e4e8a980aad6e6c2d2c5173530ebe",
+      "url": "clankie://evidence/sha256/35e253cd2223a3daa342eb9258318802528e4e8a980aad6e6c2d2c5173530ebe"
+    },
+    {
+      "path": "live12-failure-paired-captioned.mp4",
+      "size": 775749,
+      "sha256": "a24db694dd2a5faafc2ff53ee3d7e01b74aec8070f75b1277cb755e946f1f87d",
+      "url": "clankie://evidence/sha256/a24db694dd2a5faafc2ff53ee3d7e01b74aec8070f75b1277cb755e946f1f87d"
+    },
+    {
+      "path": "source-inputs.tar",
+      "size": 14100480,
+      "sha256": "2f6ca888a1f41dbb60152e909623a2828f568a870f47e12e9dfeba9bfba6e5a9",
+      "url": "clankie://evidence/sha256/2f6ca888a1f41dbb60152e909623a2828f568a870f47e12e9dfeba9bfba6e5a9"
+    }
+  ]
+}
