@@ -1,11 +1,12 @@
 // Included inside ScriptMirror. Normalized actor roles use the same reliable
 // source-netId ScriptCall stream as effects/attacks. Native handles stay local.
 struct ScriptOwnerVisual {
-    uintptr_t actor{},status{},objentry{},bank{};
+    uintptr_t actor{},status{},objentry{},bank{},anchor{};
     std::uint32_t handle{},objectId{},load{},transition{},motion{UINT32_MAX};
     int puppet{-1};
     bool captured{},attached{},wantAttachment{},applying{};
     std::uint32_t refusedLogged{UINT32_MAX};  // VUH-2580: the motion last logged as refused for this clone
+    std::uint32_t installs{};  // VUH-2580: successful installs on this clone, logged at cleanup
 };
 struct ScriptActorRole {
     std::uint32_t resource{},objectId{},epoch{};
@@ -38,6 +39,19 @@ static std::array<ScriptActorRole,3> g_smRoles{};
 struct ScriptOwnerCleanup { ScriptActorRole role{}; };
 static std::array<ScriptOwnerCleanup,3> g_smOwnerCleanup{};
 static std::array<ScriptOwnerCleanup,3> g_smVisualCleanup{};
+// VUH-2580: 0x42D0E0 only switches the clone to its idle state, which unwinds our borrowed
+// capture (+2B0/+2B8/+18C 0x4000) over the next frames. A next role of the same owner admitted
+// inside that window finds our own leftovers, not a foreign capture. Minted only after a completed
+// cleanup of the released role, from the capture signature verified before the native idle; one use,
+// by a strictly newer role of the same admission, before any intervening operation.
+struct ScriptOwnerResidue {
+    ScriptActorRole role{};
+    uintptr_t bank{},anchor{};
+    std::uint32_t motion{UINT32_MAX},frame{};
+    std::uint64_t tick{};
+};
+static std::array<ScriptOwnerResidue,3> g_smVisualResidue{};
+static std::array<bool,3> g_smVisualCleanupBusy{}; // a cleanup's native detach/idle and readback are running
 static ScriptActorRole g_smVisualNativeReplay{}; // exact callback suppression while retiring native visuals
 static unsigned g_smVisualBindLogs=0;
 static unsigned g_smVisualDiagLogs=0;  // VUH-2580
@@ -307,6 +321,28 @@ static bool SmOwnerNativeMotion(std::uint32_t source,std::uint32_t target,
 static bool SmOwnerMotionCurrent(const ScriptActorRole& role,const enemysync::DownedScope& scope,bool visual) {
     return visual?SmOwnerVisualCurrent(role,scope):SmOwnerLocalCurrent(role,scope);
 }
+// VUH-2580: the clone still holds exactly our borrowed capture of this source: its current source bank,
+// the anchor and motion our install left, D48 empty and no parent. Partial or zero states do not qualify.
+static bool SmOwnerResidueExact(const ScriptActorRole& old,uintptr_t bank,uintptr_t anchor,std::uint32_t motion) {
+    const auto actor=old.visual.actor;
+    uintptr_t capture=0,nowBank=0,nowAnchor=0,sourceBank=0,thread=0;std::uint32_t parent=0,current=UINT32_MAX;
+    auto target=SmOwnerVisualActor(old);target.captured=true;
+    return bank && anchor && SmOwnerMotionState(target)==ScriptOwnerMotionState::Source &&
+        ReadHitTrace(actor+0x2B0,capture) && capture==old.source &&
+        ReadHitTrace(actor+0x2B8,nowBank) && nowBank==bank &&
+        ReadHitTrace(old.source+ACTOR_MOTCTRL,sourceBank) && sourceBank==bank &&
+        ReadHitTrace(actor+0x2A0,nowAnchor) && nowAnchor==anchor &&
+        ReadHitTrace(actor+offsets::actor::ANIM_ID,current) && current==motion &&
+        ReadHitTrace(actor+0xD48,thread) && !thread && ReadHitTrace(actor+0x6A0,parent) && !parent;
+}
+// A script capture, attach or detach that is not our replay may write any clone: no receipt survives it.
+static void SmOwnerResidueInvalidate() { for(auto& r:g_smVisualResidue)r={}; }
+static bool SmOwnerCleanupNames(uintptr_t actor) {
+    for(unsigned i=0;i<g_smVisualCleanup.size();++i)
+        if(g_smVisualCleanupBusy[i] || (g_smVisualCleanup[i].role.resource && g_smVisualCleanup[i].role.visual.actor==actor))return true;
+    for(const auto& c:g_smOwnerCleanup)if(c.role.resource && (c.role.actor==actor || c.role.visual.actor==actor))return true;
+    return false;
+}
 static bool SmOwnerInstallMotion(ScriptActorRole& role,R::OwnerCaptureSignature capture,bool borrowed,bool visual,
                                  bool newCapture=false,const char** why=nullptr) {
     // VUH-2580: every refusal names itself for the caller's bounded log.
@@ -340,6 +376,7 @@ static bool SmOwnerInstallMotion(ScriptActorRole& role,R::OwnerCaptureSignature 
         if(state!=ScriptOwnerMotionState::Source)return fail("not-source-bank");
         if(visual) {
             if(!ReadHitTrace(actor+0x2B8,role.visual.bank))return fail("bank-read");
+            if(!ReadHitTrace(actor+0x2A0,role.visual.anchor))role.visual.anchor=0; // no receipt without it
             role.visual.captured=true;role.visual.motion=R::BitsOf(capture.motion);
         } else role.captured=true;
     } else {
@@ -348,44 +385,74 @@ static bool SmOwnerInstallMotion(ScriptActorRole& role,R::OwnerCaptureSignature 
         // The capture receipt remains for matching heartbeats and teardown;
         // its native state is now own-bank, so cleanup cannot reset it again.
     }
+    if(visual)++role.visual.installs;
     return true;
+}
+// Mint after the released role's idle returned, from the pre-call signature: the post-idle clone must
+// continue it exactly, and no deferred cleanup may still write the clone.
+static void SmOwnerMintResidue(const ScriptActorRole& released,uintptr_t bank,uintptr_t anchor,std::uint32_t motion) {
+    if(released.slot>=g_smVisualResidue.size() || !released.visual.captured ||
+       SmOwnerCleanupNames(released.visual.actor) || !SmOwnerVisualRoots(released) ||
+       !SmOwnerResidueExact(released,bank,anchor,motion))return;
+    g_smVisualResidue[released.slot]={released,bank,anchor,motion,g_frameCounter,GetTickCount64()};
 }
 static void SmOwnerPollVisualCleanup() {
     if(!SmOwnerReady() || !SmGameThread())return;
+    // VUH-2580 diagnostic: each cleanup ends with a named outcome (bounded).
+    const auto outcome=[](const ScriptActorRole& r,const char* what) {
+        if(g_smVisualDiagLogs<64) {
+            ++g_smVisualDiagLogs;
+            Log("[script-visual] cleanup role=%u actor=%llX installs=%u %s",r.resource,
+                static_cast<unsigned long long>(r.visual.actor),r.visual.installs,what);
+        }
+    };
     for(auto& pending:g_smVisualCleanup) {
         if(!pending.role.resource)continue;
         const auto released=pending.role;
-        if(!SmOwnerVisualRoots(released)){pending={};continue;}
+        if(released.slot<g_smVisualResidue.size())g_smVisualResidue[released.slot]={};
+        if(!SmOwnerVisualRoots(released)){outcome(released,"dropped: roots");pending={};continue;}
         const auto& driver=g_puppets[released.visual.puppet];
         if(IsPuppetActive(released.visual.puppet) &&
            (driver.pose.pose.ownerSlot!=static_cast<SlotType>(released.slot) || driver.pose.provenance.ownerConnectionId!=released.connection)) {
-            pending={};continue; // a different connection now drives this allocation
+            outcome(released,"dropped: other connection");pending={};continue; // a different connection now drives this allocation
         }
         uintptr_t context=0;std::int32_t state=0;
         if(!ReadHitTrace(g_exeBase+offsets::EVENT_CONTEXT,context) ||
            !ReadHitTrace(g_exeBase+offsets::CUTSCENE_STATE,state) || context || state)continue;
         // Only our still-installed source motion may authorize native cleanup.
-        if(!SmOwnerVisualBank(released)){pending={};continue;}
+        if(!SmOwnerVisualBank(released)){outcome(released,"dropped: not our bank");pending={};continue;}
         auto target=SmOwnerVisualActor(released);std::uint32_t parent=0;
         if(!ReadHitTrace(target.actor+0x6A0,parent) || (parent && !SmOwnerHasAttachment(target,true))) {
-            pending={};continue;
+            outcome(released,"dropped: foreign parent");pending={};continue;
         }
         pending={}; // callbacks cannot find authority during detach/idle
+        // VUH-2580: the slot stays reserved through native detach/idle and the receipt readback.
+        g_smVisualCleanupBusy[released.slot]=true;
         if(parent) {
             g_smVisualNativeReplay=released;
             const bool detached=SmOwnerApplyAttachment(target,false);
             g_smVisualNativeReplay={};
-            if(!detached)continue;
+            if(!detached){g_smVisualCleanupBusy[released.slot]=false;outcome(released,"failed: detach");continue;}
         }
-        if(!SmOwnerVisualBank(released))continue;
+        if(!SmOwnerVisualBank(released)){g_smVisualCleanupBusy[released.slot]=false;outcome(released,"dropped: bank after detach");continue;}
+        // VUH-2580: the receipt's signature is the verified pre-call capture, never the post-call state.
+        uintptr_t bank=0,anchor=0;std::uint32_t motion=UINT32_MAX;
+        const bool signed_=ReadHitTrace(target.actor+0x2B8,bank) && bank==released.visual.bank &&
+            ReadHitTrace(target.actor+0x2A0,anchor) && anchor==released.visual.anchor &&
+            ReadHitTrace(target.actor+offsets::actor::ANIM_ID,motion) && motion==released.visual.motion;
         g_smVisualNativeReplay=released;
-        (void)SmOwnerNativePlayer(target.actor,0x42D0E0);
+        const bool idled=SmOwnerNativePlayer(target.actor,0x42D0E0);
         g_smVisualNativeReplay={};
+        g_smVisualCleanupBusy[released.slot]=false;
+        outcome(released,idled?"restored own bank":"failed: idle");
+        if(idled && signed_)SmOwnerMintResidue(released,bank,anchor,motion);
         if(PuppetTarget(released.visual.puppet)==target.actor)
             g_puppets[released.visual.puppet].lastAnim=-1;
     }
 }
 static void SmOwnerRetireVisual(ScriptActorRole& role,bool native) {
+    // VUH-2580: any retire of this seat ends an older receipt; only its own completed cleanup mints anew.
+    if(role.slot<g_smVisualResidue.size())g_smVisualResidue[role.slot]={};
     if(!role.visual.actor)return;
     const auto released=role;role.visual={}; // authority ends before native entry
     if(SmOwnerVisualRoots(released) &&
@@ -394,6 +461,27 @@ static void SmOwnerRetireVisual(ScriptActorRole& role,bool native) {
     if(native && released.slot<g_smVisualCleanup.size() && !g_smVisualCleanup[released.slot].role.resource)
         g_smVisualCleanup[released.slot].role=released;
     SmOwnerPollVisualCleanup();
+}
+// VUH-2580: the clone still holds our own capture from the completed cleanup of an older role of this
+// same admission (session, host connection, epoch, room, seat connection and source), and nothing ran on
+// it since but its own native update. Identity is matched before any saved pointer is read; the receipt
+// is consumed before the readback, so a failure never refunds it. Visual binding only.
+static bool SmOwnerClaimResidue(const ScriptActorRole& role,uintptr_t actor,int puppet) {
+    if(role.slot>=g_smVisualResidue.size() || !g_smVisualResidue[role.slot].role.resource)return false;
+    const auto r=g_smVisualResidue[role.slot];g_smVisualResidue[role.slot]={};
+    const auto& old=r.role;const auto& a=old.admittedScope;const auto& b=role.admittedScope;
+    const auto now=GetTickCount64();
+    const bool same=old.resource<role.resource && old.visual.actor==actor && old.visual.puppet==puppet &&
+        now>=r.tick && now-r.tick<1000 && g_frameCounter-r.frame<=2 &&
+        old.slot==role.slot && old.connection==role.connection && old.epoch==role.epoch &&
+        old.source==role.source && old.sourceHandle==role.sourceHandle && old.sourceStatus==role.sourceStatus &&
+        old.sourceObjentry==role.sourceObjentry && old.netId==role.netId && old.objectId==role.objectId &&
+        a.context.generation==b.context.generation && a.context.deliverySerial==b.context.deliverySerial &&
+        a.connections==b.connections && a.epoch==b.epoch &&
+        a.worldId==b.worldId && a.roomId==b.roomId && a.door==b.door && a.mapProgram==b.mapProgram &&
+        a.battleProgram==b.battleProgram && a.eventProgram==b.eventProgram;
+    return same && PuppetTarget(puppet)==actor && !SmOwnerCleanupNames(actor) && SmOwnerVisualRoots(old) &&
+        SmOwnerResidueExact(old,r.bank,r.anchor,r.motion);
 }
 static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope& scope,uintptr_t actor) {
     if(role.visual.actor)return role.visual.actor==actor && SmOwnerVisualCurrent(role,scope);
@@ -407,7 +495,7 @@ static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope
         return false;
     };
     if(!role.haveCapture || role.slot>=3)return false;
-    if(g_smVisualCleanup[role.slot].role.resource)return refuse("cleanup-pending");
+    if(g_smVisualCleanup[role.slot].role.resource || g_smVisualCleanupBusy[role.slot])return refuse("cleanup-pending");
     if(!SmOwnerCurrent(role,scope))return refuse("role-not-current");
     if(GetTickCount64()>=role.deadline)return refuse("deadline");
     if(actor==g_soraActor || !IsPlayerClassActor(actor))return false;
@@ -416,7 +504,9 @@ static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope
     uintptr_t thread=0,capture=0;std::uint32_t parent=0,motionFlags=0,typeFlags=0;
     if(!ReadHitTrace(actor+0xD48,thread) || thread)return refuse("thread");
     if(!ReadHitTrace(actor+0x2B0,capture) || !ReadHitTrace(actor+0x18C,motionFlags))return refuse("capture-read");
-    if((motionFlags&0x4000) && capture!=actor) {
+    const bool residue=(motionFlags&0x4000) && capture!=actor && capture==role.source &&
+        SmOwnerClaimResidue(role,actor,index);
+    if((motionFlags&0x4000) && capture!=actor && !residue) {
         // VUH-2580: name the actor that holds the clone's capture (its object ID), once per role.
         if(role.bindRefused!="foreign-capture" && g_smVisualDiagLogs<64) {
             uintptr_t objentry=0;std::uint32_t objectId=0;
@@ -436,6 +526,13 @@ static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope
        !ReadHitTrace(actor+offsets::actor::OBJENTRY_PTR,visual.objentry) || !visual.objentry ||
        !ReadHitTrace(visual.objentry+offsets::objentry::OBJECT_ID,visual.objectId))return false;
     visual.wantAttachment=role.visual.wantAttachment;role.visual=visual;
+    if(residue) {
+        if(g_smVisualDiagLogs<64) {
+            ++g_smVisualDiagLogs;
+            Log("[script-visual] own residue role=%u clone=%llX capture=%llX",role.resource,
+                static_cast<unsigned long long>(actor),static_cast<unsigned long long>(capture));
+        }
+    }
     if(g_smVisualBindLogs<32) {
         ++g_smVisualBindLogs;
         Log("[script-visual] bound role=%u seat=%u puppet=%d actor=%llX",role.resource,role.slot,index,
@@ -662,6 +759,7 @@ static void SmOwnerRelease(ScriptActorRole& role,bool native,bool announce,bool 
 }
 static void SmOwnerReset(bool native) {
     for(auto& role:g_smRoles)SmOwnerRelease(role,native,false);
+    SmOwnerResidueInvalidate();
 }
 static int SmOwnerNearest(uintptr_t source,const enemysync::DownedScope& scope) {
     R::ReactionPoint trigger{};float xyz[3]{};
@@ -716,6 +814,7 @@ static void __fastcall SmOwnerHook(std::uint64_t* args) {
     Log("[script-owner] begin source=%u role=%u seat=%u epoch=%u",netId,role.resource,role.slot,role.epoch);
 }
 static void __fastcall SmOwnerCapture(std::uint64_t* args) {
+    SmOwnerResidueInvalidate(); // VUH-2580: our replays call the original, never this detour
     std::uint64_t before[4]{};const bool copied=SmCopyArgs(args,before,4);
     reinterpret_cast<TrapFn>(g_smOwnerTraps[2].original)(args);
     if(!g_sm.hostActive || !copied || !SmGameThread())return;
@@ -728,6 +827,7 @@ static void __fastcall SmOwnerCapture(std::uint64_t* args) {
     }
 }
 static void __fastcall SmOwnerAttach(std::uint64_t* args) {
+    SmOwnerResidueInvalidate();
     std::uint64_t before[6]{};const bool copied=SmCopyArgs(args,before,6);
     reinterpret_cast<TrapFn>(g_smOwnerTraps[4].original)(args); // keep host callback and workspace native
     if(!SmOwnerReady() || !g_sm.hostActive || !copied || !SmGameThread() ||
@@ -744,6 +844,7 @@ static void __fastcall SmOwnerAttach(std::uint64_t* args) {
     }
 }
 static void __fastcall SmOwnerDetach(std::uint64_t* args) {
+    SmOwnerResidueInvalidate();
     std::uint64_t before=0;const bool copied=SmCopyArgs(args,&before,1);
     std::uint32_t resource=0,ignored=0;
     const auto actor=copied?SmActorOf(before,ignored):0;
