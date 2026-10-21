@@ -1,5 +1,18 @@
 # KH2 Co-op — private friend preview
 
+> **Historical ENet release09 guide (2026-10-06, protocol 10).** The instructions
+> and behavior below belong to that sealed preview, not current source. Use them
+> only with its complete original package. Later Steam two-PC checks supersede
+> the old separate-PC transport gap, but do not upgrade this package's gameplay.
+> See [Steam setup](FRIEND_PLAYTEST_STEAM.md) and the
+> [current plan](ONLINE_COOP_PLAN.md) for later evidence and route limits.
+>
+> Current source uses protocol 29 / AvatarBridge 4 / WorldBridge 12. The checked-in
+> package validator and pins still target protocol 18: a current-source ZIP
+> cannot be built with them unchanged. See [packaging](../tools/packaging/README.md).
+> Do not combine old package products with current DLL/runtime/relay binaries.
+
+
 You need your own Windows Steam Global KH2, Steam running, and private Tailscale relay access arranged with your host. This ZIP includes Python and the co-op tools, but no game or saves. Only the exact verified game EXE is supported; the launcher checks its fingerprint before starting it. Epic and other Steam patches are refused.
 
 ## Start and join

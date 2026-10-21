@@ -1,132 +1,95 @@
-# Architecture Modes: CampaignCoop vs PublicRealm
+# Architecture modes: CampaignCoop and planned PublicRealm
 
-> **2026-10-01:** `docs/ONLINE_COOP_PLAN.md` moves CampaignCoop to the
-> local-primary actor model described below for PublicRealm (each human is
-> `LocalPrimary` on their own machine; other humans are `RemoteReplica`
-> puppets in the friend slots), pending spike VUH-1489. PublicRealm itself is
-> parked until the co-op playtest gate (plan D11).
+Reviewed 2026-10-20 against main `2ed98fa`. The
+[online co-op plan](ONLINE_COOP_PLAN.md) owns product decisions, route gates and
+qualification. CampaignCoop is implemented; PublicRealm and PvP are future work.
+A runtime enum or schema type does not establish a playable realm service.
 
-This project supports two runtime modes sharing one infrastructure. This document defines the boundary between them.
+## Current CampaignCoop
 
-## Shared infrastructure (both modes)
+Up to three session roles (`player`, `friend1`, `friend2`) share the host's
+world. Each human controls the native local player at engine slot 0 on their
+own PC. Remote humans appear as friend-slot puppets. Session ownership is
+paired with connection/generation provenance; it does not mean that friend1
+controls native slot 1 on its own machine.
 
-| Layer | Location | Notes |
-|-------|----------|-------|
-| Transport | `common/NetworkClient` | ENet UDP, 2 channels (reliable + unreliable) |
-| Binary codec | `common/Codec` | Framed packets, little-endian, 3-byte header |
-| Identity types | `common/Types.hpp` | `PeerId`, `CharacterId`, `ActorNetId`, `InstanceId`, `PartyId`, `RealmId` |
-| Version/content gating | `SessionHost` | Build hash + mod hash + content hash enforcement |
-| Actor state structs | `common/Types.hpp` | `ActorState`, `EnemyState`, `RoomState` |
-| Game bridge | `runtime/GameBridgePC` | Memory read/write, entity discovery, camera retarget |
-| Camera controller | `runtime/CameraController` | Per-slot follow with cutscene safety |
-| Replica controller | `runtime/ReplicaController` | Snapshot dedup and application |
+| Layer | Implementation and responsibility |
+|---|---|
+| Inject DLL | Native hooks, local input/character, puppets, world application, damage policy, SaveGuard and rendering |
+| Runtime | Avatar interpolation, shared-memory bridge pumping, transport and bounded recovery |
+| SessionHost | Authenticated session slots, owner avatar relay, host-only world traffic/caches and client claim routing |
+| Transport | ENet with reliable control/world, unreliable avatars and reliable diagnostics; or opt-in authenticated Steam relay-only broker |
+| AvatarBridge / WorldBridge | Versioned DLL/runtime mappings with owner and native delivery provenance |
+| Progress mirror | Host-owned allowlisted shared story data, preserving personal data in memory |
+| SeatState / native HUD | Selected profile/readiness and authenticated owner HP/MP for display-only native friend gauges |
 
----
+The host's game runs authoritative enemy decisions. Player-launch defaults
+mirror their motion on clients and enable population removal, remote targeting,
+co-op difficulty, event hold, friendly fire and downed/revive. General native
+factory spawning and the legacy target-forward path remain parked. Direct
+DLL/developer launches may have different defaults; consult the
+[launch defaults](ONLINE_COOP_PLAN.md#player-launch-defaults-reviewed-2026-10-20).
+Enabled behavior is broader than its live qualification: denylisted families,
+record binding, bosses, projectiles and story programs retain specific limits.
 
-## Mode A: CampaignCoop
+A client's native player hit produces an authenticated claim to the host;
+the host attempts the supported native damage once and broadcasts absolute HP
+and deaths. Incoming enemy attacks on the local player remain native on that
+player's machine. Puppet HP and HUD display do not authorize remote damage.
+See [enemy parity](ENEMY_PARITY.md), [targeting](ENEMY_TARGET_REMOTE.md) and
+[damage/revive](DOWNED_REVIVE.md).
 
-**Goal:** Up to 3 players share one host-authoritative party, same story, same room timeline.
+### Session and transport shape
 
-### Actor model
-- Canonical slots: `PLAYER` (0), `FRIEND_1` (1), `FRIEND_2` (2)
-- Each human owns exactly one slot for the session
-- `SlotType` is the primary identity inside the instance
-- `ActorNetId` assigned as `static_cast<uint32_t>(slot)` in v1
+ENet uses a standalone `kh2coop_server`, which can run on a PC or Mac. Steam
+keeps SessionHost in the gameplay host's runtime and uses each game's broker
+and Valve relays, with explicit account admission and no direct-IP fallback.
+Neither path moves the host's enemy/story simulation into a dedicated server.
+See [ENet joining](JOIN_GUIDE.md) and [Steam transport](STEAM_TRANSPORT.md).
 
-### Authority
-- Host KH2 process owns room state, enemy state, story flags, transitions, rewards
-- Host save file is the session truth
-- Non-host clients are replicas: remote actors are snapshot-driven, local AI suppressed
+Host loss ends the session. A verified roster or successful reconnect is not
+proof of native room/enemy recovery. Prologue profile/readiness agreement gates
+construction and input release at checked sites; broader opening-scene identity
+and the uninterrupted two-PC route remain open. See [party setup](PARTY_SETUP.md)
+and [prologue encounters](PROLOGUE_ENCOUNTERS.md).
 
-### Session shape
-- One `SessionHost` per session
-- One `CampaignPartyInstance` active at a time
-- Instance lifetime = session lifetime (no instance switching in v1)
+### Configuration and persistence
 
-### Native role mapping
-| Human | NativeRole | KH2 slot |
-|-------|-----------|----------|
-| Player A | `LocalPrimary` or `LocalCompanion1/2` depending on owned slot | Slot they own |
-| Remote peers | Replica-driven via `ApplyReplicaActorState` | Their owned slot |
-
-### Config
 ```ini
 runtime_mode = campaign_coop
-client_role = 0  # or 1, 2
+# Session role, independent of local native slot zero:
+client_role = 0
 ```
 
----
+Protocol **29**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**
+are the current source versions. Match all source products; old receipts remain
+historical. Package validation has its own version contract; see
+[packaging](../tools/packaging/README.md) before assembling a ZIP.
 
-## Mode B: PublicRealm (planned)
+Shared story state is mirrored in memory; personal stats/inventory remain
+personal. Automation must never save in-game. SaveGuard redirects writes as a
+backstop and grants no permission to persist co-op progress to original saves.
 
-**Goal:** Persistent characters, public joinable servers, party-formed adventure instances, optional PvP.
+## Planned PublicRealm and PvP
 
-### Actor model
-- Local player = `LocalPrimary` (always controls their own character locally)
-- Other humans = `RemoteReplica` (custom-spawned actors, not forced into co-op party slots)
-- No forced duplicate AI parties per player in v1
-- `ActorNetId` is a server-assigned unique ID, not tied to `SlotType`
+The direction is playable three-player co-op first, then PvP, then a hosted
+server mode (plan D14). The older realm design proposes public hubs, parties,
+adventure instances, persistent characters and arenas. These are design ideas,
+not current commands or supported services.
 
-### Authority
-- **Realm service** owns: login, character roster, party membership, instance registry, realm seed metadata, chat/presence
-- **Instance authority** owns: player transforms, enemy state, spawn events, room transitions, reward writeback
-- V1: client-hosted instances. V2 (future): dedicated instance workers for PvP/competitive.
+| Aspect | Current co-op | Proposed realm |
+|---|---|---|
+| Identity | Three session slots plus connection provenance | Server-assigned actor/instance identities |
+| Lifetime | Private play session, host-owned world | Persistent realm with separate adventure instances |
+| Joining | Private ENet address or allowlisted SteamID invitation | Public hubs and party formation |
+| Persistence | Allowlisted in-memory shared progress | Separate character, realm and instance stores |
+| Authority | Host KH2 enemies/story, owner local avatars | Stronger server validation for competitive instances |
 
-### Session shape
-- `RealmService` manages the persistent world layer
-- Instances are created/destroyed dynamically: `PublicHubInstance`, `AdventureInstance`, `PvpArenaInstance`
-- Players may be in different instances simultaneously (e.g., one in hub, another in adventure)
-- Parties form/dissolve in hubs, then enter instances together
+A future save-to-seed import would select accessible content, not replay a live
+save as a server simulation. No public login, database, matchmaking or reward
+writeback service is delivered here. RealmSeed and related retained types are
+schema background.
 
-### Instance types
-
-| Type | Description | Combat | Max players |
-|------|-------------|--------|-------------|
-| `CampaignPartyInstance` | Shared story, 3-slot party | Yes | 3 |
-| `PublicHubInstance` | Safe zone, no combat (v1) | No | Higher cap |
-| `AdventureInstance` | Party combat room | Yes | Party size |
-| `PvpArenaInstance` | Curated arena, opt-in PvP | Yes (PvP) | 2+ |
-
-### Save-to-seed import
-A save file becomes a `RealmSeed` (not a live simulation):
-- Unlocked worlds, warp points, story flags, cleared bosses
-- The realm service uses the seed to determine accessible content
-- See `Protocol.hpp::RealmSeed` for the struct definition
-
-### Persistence separation
-- **Character persistence:** level, stats, equipment, abilities, archetype, cosmetics
-- **Realm persistence:** seed info, public unlock state, hub state, global events
-- **Instance persistence:** ephemeral (room, enemies, combat state); writes back at checkpoints
-
----
-
-## What diverges between modes
-
-| Aspect | CampaignCoop | PublicRealm |
-|--------|-------------|-------------|
-| Actor identity | `SlotType` (0/1/2) | `ActorNetId` (server-assigned) |
-| Session lifetime | One session = one play session | Realm persists across sessions |
-| Player cap per instance | 3 | Varies by instance type |
-| Story progression | Host save drives everything | Realm seed defines available content |
-| AI companions | Native KH2 party AI (suppressed on replicas) | Disabled in multi-human instances (v1) |
-| Character persistence | None (host save only) | Per-character record in realm DB |
-| Matchmaking | Manual (share server address) | Party forming in public hubs |
-
----
-
-## Sequencing recommendation
-
-1. **Finish CampaignCoop vertical slice** (Track A) -- this is the current priority
-2. **Refactor protocol IDs for scale** (Track B) -- stable IDs, session/instance split, runtime mode enum
-3. **Build PublicRealm v1** (Track C) -- realm service, save-to-seed, public hubs, adventure instances
-4. **Add PvP** (Track D) -- arena instances, server-validated damage, stronger authority
-
-Do not pivot to PublicRealm before having real multi-actor replication, enemy authority, transitions, and stable room sync in CampaignCoop.
-
----
-
-## Reference docs
-- `docs/kh2_multiplayer_scope_expansion_review.md` -- full analysis and rationale
-- `docs/kh2_realm_protocol_sketch.jsonc` -- protocol v2 schema sketch
-- `common/include/kh2coop/Types.hpp` -- enum and type alias definitions
-- `common/include/kh2coop/Protocol.hpp` -- v1 and v2 protocol records
+Historical design references: [scope expansion](archive/kh2_multiplayer_scope_expansion_review.md)
+and [realm protocol sketch](kh2_realm_protocol_sketch.jsonc). Current contracts
+live in `common/include/kh2coop/Protocol.hpp` and the feature docs above.

@@ -1,7 +1,8 @@
 # KH2 development launcher
 
-The self-contained friend preview uses [friend.py](friend.py) and the separate
-[one-page guide](../../docs/FRIEND_PLAYTEST.md). Its bundled Python needs no install;
+The player-facing launcher uses [friend.py](friend.py) and the separate
+[Steam guide](../../docs/FRIEND_PLAYTEST_STEAM.md). The original
+[ENet release09 guide](../../docs/FRIEND_PLAYTEST.md) is historical. Its bundled Python needs no install;
 it verifies the supported game EXE and starts/injects/closes only its own game
 through the portable canonical CLI. Build instructions and provenance rules are
 in [tools/packaging](../packaging/README.md). The developer launcher below retains
@@ -18,7 +19,7 @@ The standard CPython Windows installer includes Tkinter. No package install, bui
 1. Prepare/load/inject the intended game using the existing `kh2ctl` workflow. This launcher offers no game launch, injection, load, save, restart or kill action.
 2. Click **Refresh games**, select the existing PID, and ensure no other runtime is attached to it. The launcher checks that the retained PID handle is a KH2 process and that its AvatarBridge exists. This is not a DLL/version/saveguard attestation.
 3. Choose **host** (player slot 0) or **join** (friend1/friend2), a literal private tailnet IPv4 address and matching UDP port, and a unique **peer ID**. Peer ID is supported by `--peer-id`; it is not a distinct in-game display-name feature. No DNS/public/loopback fallback is used.
-4. A gameplay host may use an existing remote relay, including a Mac. Check **start a relay here** only when hosting a relay on this PC and entering this PC's existing tailnet IP. That relay receives explicit `--bind`, port and compatibility identifiers. Failure to bind stops startup rather than changing interfaces. All participants must use matching reported game/content/mod identifiers and protocol-10 binaries; these reported values do not verify binary identity.
+4. A gameplay host may use an existing remote relay, including a Mac. Check **start a relay here** only when hosting a relay on this PC and entering this PC's existing tailnet IP. That relay receives explicit `--bind`, port and compatibility identifiers. Failure to bind stops startup rather than changing interfaces. All participants must use matching reported game/content/mod identifiers and matching source-protocol binaries; these reported values do not verify binary identity. Current native source is protocol 29, while this UI's plan metadata still imports the historical protocol-18 packaging constant; that label does not attest the selected binaries.
 5. Click **Connect**. Config, exact argv, logs and exit receipts go only into ignored `tools/launcher/.local/runs/<stamp>/`. Preferences are in `.local/preferences.json`; PIDs are not remembered. Disconnect/close/time limit affect only this launcher's runtime and optional relay. The game and external relay remain running.
 
 Existing binary paths can be supplied without config editing:
@@ -45,37 +46,53 @@ python -B tools/launcher/launcher.py --plan --mode host --local-relay --pid 1234
 These are examples, not adopted endpoint/readiness/PID receipts. Runtime uses structured argv without a shell. Offline syntax/config checks and the earlier actual Session1 GUI roster/ping/disconnect/close/time-limit runs passed. The new creation-time helper path has separate headless evidence above; the post-fix Session1 GUI check053047 also passed. Source/data map and preparation result: `build/rig/vuh1507-launcher-20261005-01/`.
 
 
-## Steam (beta), opt-in source UI
+## Player launcher and Steam
 
-The friend launcher source now offers **Connection: Steam (beta)**. It defaults
-to ENet / relay every time. This is not in sealed release09, and no new package
-has been built. A future private package must select the reviewed broker DLL and
-matching runtime; old products do not qualify a Steam broker receipt.
+`friend.py` is the packaged player UI. It starts, injects and closes only its
+owned game through the portable canonical CLI, verifies its package and exact
+supported EXE, and requires the SaveGuard receipt before connection. See the
+[player guide](../../docs/FRIEND_PLAYTEST_STEAM.md) for the complete flow.
 
-Choose the connection mode **before Start game**. Only that canonical launch
-child receives `KH2COOP_STEAM_BROKER=1`; inherited diagnostic switches remain
-filtered. The launcher still verifies the game/package, saveguard and retained
-ownership. Changing modes requires closing the owned game and starting it again.
+Its source UI starts with **Steam (beta)** selected. At package startup the
+manifest's `defaultTransport` selects Steam or ENet (a missing value falls back
+to ENet). Current source is protocol **29**; the checked-in packaging validator
+and product selection remain protocol **18**. They are historical inputs, so
+building a current package requires a reviewed validator update and a coherent
+new product cohort. See [packaging](../packaging/README.md). Source UI behavior
+does not establish that a current packaged build has shipped.
 
-After the game authenticates with Steam, **Your SteamID** displays the complete
-app-2552430 broker-ready receipt for that owned PID. Copy shares that ID. Host
-mode accepts one or two comma-separated friend SteamID64s; join mode takes the
-host SteamID64 and the existing friend slot. Both friends can copy their own ID
-for the host allowlist. IDs/URLs/friend codes outside the exact desktop-account
-format, duplicate entries and self-admission are refused. IDs are not discovered
-from another process or from the clipboard.
+Choose transport and player character before **Start game**. Steam enables the
+broker only for that owned game. Confirm that **Your SteamID** is the intended
+account, optionally verify it against **Expected SteamID**, and explicitly
+confirm the host allowlist. Host accepts up to two distinct friend SteamID64s;
+join accepts the host SteamID64 or a `kh2coop:steam:` invitation. Invalid IDs,
+duplicates and self-admission are rejected. The missing `steam_appid.txt` helper
+requires the visible consent checkbox; it creates only the expected app-ID file
+and removes its owned file after game closure.
 
-Connect builds `--steam-host --steam-allow ID ...` or `--steam-join ID`, with
-explicit owned PID and the existing campaign/compatibility/runtime limits. Steam
-uses Valve relays only and does not launch an ENet server. The existing relay
-fields retain their values and behavior in ENet mode; they are hidden and unused
-by Steam, including the local-relay checkbox. There is no automatic fallback.
+Connect builds `--steam-host --steam-allow ID ...` or `--steam-join ID` with the
+owned PID and matching compatibility/runtime settings. Steam uses Valve relays
+without Tailscale or an ENet server. ENet fields and the local-relay checkbox
+are hidden and unused in Steam mode. There is no automatic transport fallback.
+Disconnect before editing an active allowlist; ending hosting ends its friends'
+session. Changing game transport requires closing and restarting the owned game.
 
-The owned broker log is read with write sharing, a bounded 8-KiB prefix and a
-creation-time floor from the launch request. Missing, locked, stale or incomplete
-receipts cannot supply an identity. Runtime/broker authentication remains the
-connection authority. A ready ID or roster is not native gameplay acceptance.
-Busy/close handling, helper jobs, HUD controls and retained game cleanup are
-unchanged. Offline tests and real Tk sample-ID screenshots are in
-`build/rig/vuh1493-steam-p2p-20261006-01/launcher-candidate/`. Two-account Steam
-connection and the future matched package still require live qualification.
+The launcher reads the owned broker log with write sharing, bounded reads and a
+creation-time floor. Missing, locked, stale or incomplete receipts cannot supply
+an identity. Account readiness and verified roster status do not establish
+native gameplay convergence. Steam terminal errors are surfaced and stop the
+owned helper session. Helpers retain their Job Object ownership boundary;
+the game remains separately owned by the canonical CLI.
+
+`child_environment` applies player defaults to both game and runtime children:
+enemy mirror/population/all-target, Normal difficulty, friendly fire, event hold,
+downed handling and revive prompts. Explicit inherited values for enabled flags
+win; developer diagnostic flags are filtered and general population spawning
+and legacy targeting remain parked. Play-as choices use admitted profiles. See
+[the plan](../../docs/ONLINE_COOP_PLAN.md#player-launch-defaults-reviewed-2026-10-20)
+for current scope and limitations. The developer launcher also supplies these helper-process defaults through
+`windows_owned.py`; its already-running game retains its original environment.
+
+Historical launcher receipts under `build/rig/` describe their recorded builds
+and routes. They do not qualify a newly rebuilt protocol-29 package or establish
+clean-machine/two-PC acceptance for that package.

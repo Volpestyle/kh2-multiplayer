@@ -2,11 +2,18 @@
 
 `build_friend.py` copies explicitly selected local products and the installed
 CPython 3.11 standard library/Tk. It never downloads, installs, launches KH2,
-opens a listener or writes the game folder. `friend-products.json` pins the
+opens a listener or writes the game folder. Current source is protocol **29**,
+but `product_protocol.py` still accepts only **18** and `friend-products.json` pins the
 protocol-18 / AvatarBridge-4 cohort built from `bb7122a` (including the VUH-2239 server fix). DLL, runtime, relay,
 avatarctl and portable CLI share one source revision and build ID. Refresh all
 five product receipts together; the existing validator rejects mixed versions,
-cohorts and packaged hashes. The pinned local copies live under
+cohorts and packaged hashes.
+
+These historical products cannot package current source: the builder explicitly
+rejects a source/product protocol mismatch. A current package requires a
+separately reviewed validator update and a complete matching native cohort;
+changing version labels alone does not qualify binaries. No current protocol-29
+package is established by this manifest. The historical local copies live under
 `build/rig/vuh2239-protocol18-20261013-02/products/`.
 
 This cohort builds all five native products with the static MSVC CRT. Earlier
@@ -15,7 +22,7 @@ Only the direct/transitive CRT import closure from the shipped products is copie
 to `bin`; `crt-imports.json` retains each dumpbin output and the kept/omitted set
 outside the ZIP. Python's own runtime DLLs remain in its separate directory.
 
-Build the matched native products in one CMake directory with
+For a future refreshed cohort, build the matched native products in one CMake directory with
 `-DKH2COOP_PORTABLE_PACKAGE=ON`. This changes only the CLI package-root guard,
 absolute rig root, portable command allowlist and disabled rebuild/restart path.
 Normal developer builds default OFF and retain existing behavior. Use
@@ -26,7 +33,10 @@ For MSVC, retain its default CXX flags and append
 `/experimental:deterministic /pathmap:<absolute-repo>=/source`; pass linker
 `/PDBALTPATH:portable.pdb`. Do not package PDBs. Build targets `kh2coop_inject`,
 `kh2coop_runtime_scaffold`, `kh2coop_server`, `avatarctl` and `kh2ctl` from the
-same checkout, then refresh the existing per-role receipt paths and hashes.
+same checkout, then refresh every per-role receipt path, hash and cohort field
+alongside the reviewed validator. The commands below are the packaging procedure
+once those prerequisites are satisfied; the checked-in v18 selection will
+currently be rejected.
 
 ```powershell
 python -B tools/launcher/test_friend_package.py
@@ -59,7 +69,8 @@ local user/repository identifiers in ASCII/UTF-8 and both UTF-16 byte orders.
 
 The friend launcher applies the qualified gameplay defaults to both game and
 runtime children through the existing `child_environment`: mirror, population,
-TARGET_ALL, Normal difficulty and the two event-hold flags. Explicit inherited
+TARGET_ALL, Normal difficulty, friendly fire, the two event-hold flags, downed
+handling and the revive prompt. Explicit inherited
 `0`/`off` disables still win. Parked spawn/legacy targeting and developer test
 flags remain excluded. The shipped set and scope are in
 [`ONLINE_COOP_PLAN.md`](../../docs/ONLINE_COOP_PLAN.md). Steam app-ID environment
@@ -76,11 +87,13 @@ without an app-ID file, live guard installation, connect/disconnect, name/HP
 rendering, or save preservation. Those require the lead's bounded desktop
 rehearsal in a fresh unpacked folder. Never test by attempting an in-game save.
 
+## Historical installed-package evidence (protocol 18)
+
 The v18 installed-package rehearsal used the extracted ZIP's GameOwner and
 Session APIs, without feature environment overrides, on a two-player ENet
 loopback. BC HP scaled 39 to 63 on both peers, the friend's real Sora took an
 enemy hit, deaths agreed and the room transition produced no desync notice.
-Four protected saves were unchanged. This validates the installed native cohort;
+Four protected saves were unchanged. This validates only that historical installed native cohort;
 it does not establish a clean-machine install or two-PC Steam acceptance.
 
 The refreshed `7331a05` cohort also passes installed-package TT rehearsal

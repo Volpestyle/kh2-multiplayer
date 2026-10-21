@@ -1,12 +1,25 @@
-# Playing together privately over Tailscale (VUH-1493)
+# Development co-op over a private ENet/Tailscale relay
 
 The relay (`kh2coop_server`) can run next to the host's game or on a separate
 machine, including a Mac. Players join the relay's address. The host's KH2
 game runs the enemies and story; the relay forwards the session's traffic.
 There's no central service.
 
-This guide covers the **current dev build**: run from a built checkout with
-`kh2ctl`. Player packaging (P4) will replace these steps.
+This guide covers the **current ENet development path**, run from a matching
+built checkout with `kh2ctl`. For the Steam private package, use
+[the Steam guide](FRIEND_PLAYTEST_STEAM.md); it needs no Tailscale or separate
+relay. [Historical package instructions](FRIEND_PLAYTEST.md) cover the sealed protocol-10
+ENet preview; those are not current-source package instructions. The checked-in
+package validator/pins target protocol 18, so current protocol-29 packaging is
+blocked pending refresh and qualification ([details](../tools/packaging/README.md)).
+
+Current source uses **protocol 29, AvatarBridge 4 and WorldBridge 12**. Rebuild
+all participating products together. The current launchers enable gameplay
+features listed in [known limits](FRIEND_PLAYTEST_KNOWN_ISSUES.md); the raw
+commands below do not reproduce those environment defaults automatically.
+Use the launcher for that player configuration, or deliberately supply the
+same `SHIPPED_DEFAULTS` from `tools/launcher/friend_package.py` to the game and
+runtime. Keep profile admission and room qualification in view.
 
 The development checkout also has a [host/join launcher](../tools/launcher/README.md): run `pythonw tools/launcher/launcher.py` in the Windows desktop after preparing and injecting the game with kh2ctl. It selects the loaded game and manages the runtime and optional private relay. The manual commands below remain useful for a friend's setup and troubleshooting.
 
@@ -28,20 +41,11 @@ A Mac can run the relay or a headless client for transport checks. Each human
 player needs a Windows KH2 game. For automated tests, the rig can run two or
 three real games on this PC and script each player's controls.
 
-The private transport check passed on 2026-10-04: a real Windows game displayed
-the Mac's moving Friend1 avatar for a full two-minute connection, and the Mac
-received 5,660 valid game poses. All four protected saves were unchanged.
-See the [result and captures](../build/rig/vuh1493-realgame-20261005-01/lead-result.md).
-Two real games on this PC also passed scripted movement through a Mac relay,
-normally and with configured delay/loss. See [testing without a friend](#testing-without-a-friend).
-The first human friend session on a separate Windows PC remains open.
-
-The development guide's game/runtime/relay flow also passed a two-game dry run
-through the Mac (`20261005-020845`): explicit matching protocol10 configuration,
-native movement in both directions, both overlays showing RTT/loss, no crash,
-and unchanged protected saves. See the [result and captures](../build/rig/vuh1493-join-guide-dry-run-20261005-01/guide3-result.md)
-and [independent review](../build/rig/vuh1493-join-guide-dry-run-20261005-01/guide3-acceptance-review.md).
-Account invitations and setup on a separate Windows PC still need that session.
+Steam transport and package GUI host/join have since passed separate two-PC
+technical checks (rev11 and JOIN05). Those do not establish a physical-controller
+friend session, the current prologue profiles on two PCs, or full-story co-op.
+The older ENet/Mac checks below retain their original limited scope; their
+artifacts are local ignored evidence, not files shipped by a fresh clone.
 
 ## Testing without a friend
 
@@ -94,7 +98,7 @@ Tailscale-relayed connections can work; see Tailscale's
 
 ## Matching runtime configuration (both PCs)
 
-Use **protocol 10** binaries for relay and runtimes. Protocol version is
+Use **protocol 29** binaries for relay and runtimes. Protocol version is
 compiled in; there is no `--protocol` flag or runtime config key to change it.
 The game-build identifier below is the reported compatibility value, not the
 Windows executable's file-version field. Always specify the port: relay and
@@ -180,9 +184,9 @@ peer IDs. A second friend uses `--role friend2`. Each slot can be taken once.
   Donald's or Goofy's model) moves where they move and plays their
   animations, and it hides when they leave your room.
   Move each player in turn, capture both directions, and keep relay/runtime logs.
-- Combat: the host owns enemy HP. A friend's hits play their reaction, but
-  the HP change comes from the host (VUH-1502; friend hit claims are
-  VUH-1501).
+- Combat: the host owns enemy HP. A friend's accepted hit claims are applied
+  once by the host, which broadcasts absolute HP/death state. With launcher
+  defaults, admitted enemy copies also follow the host's mirrored AI.
 - Round-trip time and loss: the runtime logs `Net: rtt=...` every 5 s.
   `enet_loss` counts reliable traffic; `avatar_loss` counts gaps in received
   avatar sequences once sampled. The optional `kh2ctl overlay on --pid <pid>`
@@ -193,8 +197,9 @@ peer IDs. A second friend uses `--role friend2`. Each slot can be taken once.
   Earlier overlay crashes and startup capture failures remain in the evidence.
 
 
-If a player drops and returns with missing enemies, the current playtest
-workaround is for the host to leave and re-enter the room. Stop runtimes and
+If a player drops and returns with missing enemies, stop and retain both logs.
+Populated reconnect and reconstruction after kills remain incomplete; old
+courtyard walk workarounds are not general recovery guarantees. Stop runtimes and
 relay with Ctrl+C afterward; only the live operator stops rig-owned games
 through `kh2ctl`.
 
@@ -211,7 +216,11 @@ through `kh2ctl`.
 - **Two verified peers but no puppet**: check the room, local game PID and
   matching DLL. Keep the logs for the live lane.
 
-## Known limits (dev build)
+## Historical ENet checks and current limits
+
+The dated runs below used their original products. Their counts are historical
+evidence, not protocol-29 regressions. Current gameplay limits are maintained
+in [known issues](FRIEND_PLAYTEST_KNOWN_ISSUES.md).
 
 - Without `--bind`, the relay listens on every network interface,
   including the host's LAN. With `--bind 100.x`, only on Tailscale
@@ -241,13 +250,10 @@ through `kh2ctl`.
   unchanged. See the [result](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-result.md)
   and [acceptance review](../build/rig/vuh1493-combat-progress-mac-relay-20261005-01/combined2-acceptance-review.md).
   Earlier setup failures and overlay crashes retain their original outcomes.
-- The first human friend session still needs James to choose a participant
-  with a working Windows KH2 installation, an authorized game/account and
-  loadable save, matching build/mod configuration, and authorized Tailscale
-  access to the relay. Account sharing/invitations and any access-policy
-  changes require the owner; the tested Mac path creates none of them.
-  Another human's controls, separate Windows setup and internet path remain
-  untested. Player-ready packaging is also still pending.
+- A physical-controller friend session and full route remain unqualified.
+  ENet access still requires the owner's authorized Tailscale setup. Steam's
+  later two-PC result does not create Tailscale access or qualify these older
+  ENet products. Current package builds require explicit matching product pins.
 
 A later combined run (`012155`) passed with both overlays ON after the render
 queue fix. Five client claims applied exactly once; native HP/death and chest
