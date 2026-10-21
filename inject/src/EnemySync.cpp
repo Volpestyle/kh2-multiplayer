@@ -5686,6 +5686,9 @@ void OnFrameStart(std::uint32_t frame) {
     if (!CensusMatchesInstance(census)) {
         InterruptCensus(census.state == CensusState::Complete ? "instance changed" : census.reason,
                         census.failedAt, census.nodeCount);
+        // VUH-2606: the host keeps publishing its mission through a mid-mission event.
+        if (missionmirror::rules::PublishWhileHeld(g_role == Role::Host, census.state == CensusState::Complete, census.reason))
+            PublishMission(frame);
         DrainSpawnTrace(census);
         DrainLifecycleTrace(census);
         nativehittrace::Drain(g_log, g_hitTraceFrame);

@@ -80,6 +80,11 @@ void rules() {
     name(local.file, "MU09_MS108.bar"); local.flags = MR::kEnded;
     check(!MR::Follows(host, local), "an ended local mission is left alone");
     local.flags = 0;
+    check(MR::PublishWhileHeld(true, false, "gameplay gate"), "the host publishes its mission through a mid-mission event (VUH-2606)");
+    check(!MR::PublishWhileHeld(false, false, "gameplay gate") && !MR::PublishWhileHeld(true, true, "gameplay gate") &&
+          !MR::PublishWhileHeld(true, false, "instance changed") && !MR::PublishWhileHeld(true, false, "location read") &&
+          !MR::PublishWhileHeld(true, false, nullptr),
+          "only the host's gameplay-gate hold publishes; other census failures and the friend don't");
     host.active = false; check(!MR::Follows(host, local), "no host mission: don't follow");
     host.active = true;
 

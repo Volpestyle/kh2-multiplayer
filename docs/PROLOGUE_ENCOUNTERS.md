@@ -133,9 +133,10 @@ Day 5 Sandlot fights, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-
   `-005604` and `-005934` both seats released with both Roxases and fought.
 - The rig's fight bot loses btl86 and btl87 on the host (native game over: the downed spike is off in
   these fixtures), and the friend fights on alone.
-- The Struggle match ends by each seat's own script (the same native start, the host first); the
-  friend's mission mirror does not follow its gauges (`following=0`), so its clock runs on until its
-  own end.
+- The Struggle match used to end out of step: a mid-match event closed the host's gameplay gate, the
+  host stopped publishing its mission, and the friend released and ran its own clock (run
+  `20261021-005934`). The host now publishes through that hold (VUH-2606); in run `20261021-022350` the
+  friend followed to the end and finished with the host's result (`client fail like the host`).
 
 More sites, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-2466), all from byte-identical
 receipts on both seats; in each run both seats released with both Roxases:

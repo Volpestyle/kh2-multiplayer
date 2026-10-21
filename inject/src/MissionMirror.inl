@@ -108,7 +108,8 @@ void PublishMission(std::uint32_t frame) {
         g_missionHostEndTrap=0;g_missionHostEndArg=0;
     }
     if(frame%(m.active?3u:15u) || g_missionSequence==UINT64_MAX)return;
-    RoomTransition room;if(!ActivationContext(Role::Host,room))return;
+    // VUH-2606: identity only, so a mid-mission event (gameplay gate closed) still publishes.
+    RoomTransition room;if(!ActivationIdentityContext(Role::Host,room,false))return;
     MissionState packet;packet.location=room;packet.sequence=++g_missionSequence;packet.hostFrame=frame;
     if(m.active) {
         packet.active=true;std::memcpy(packet.file.data(),m.file,MR::kFileBytes);

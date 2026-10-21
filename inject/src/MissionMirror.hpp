@@ -91,6 +91,13 @@ struct EndReplayDeferral {
 
 // The host's mission is shown here only when both games run the same mission file and this one
 // hasn't ended. Everything below assumes Follows() was true.
+// VUH-2606: a mid-mission event (the Day 5 Struggle match) closes the host's gameplay gate and holds its
+// enemy census. Mission state still goes out on those frames, or the friend's copy goes stale, it stops
+// following, and its own clock runs the match to a different end. Only the gameplay gate qualifies: any
+// other census failure (a load, a changed instance) still stops publishing.
+inline bool PublishWhileHeld(bool host, bool censusComplete, const char* reason) noexcept {
+    return host && !censusComplete && reason && std::strcmp(reason, "gameplay gate") == 0;
+}
 inline bool Follows(const Mission& host, const Mission& local) noexcept {
     return host.active && local.active && SameFile(host.file, local.file) && !Ended(local);
 }
