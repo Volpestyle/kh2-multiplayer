@@ -45,7 +45,9 @@ Two-PC reciprocal acceptance and other character combinations were not run.
 
 - Release clone-neutral and native-party-HUD tests: 2/2 passed.
 - Clone-neutral Windows AddressSanitizer passed. MSVC UBSan was not run.
-- Independent inject review: ADOPT for live validation, followed by the passing run.
+- Independent inject review: ADOPT for live validation, followed by the passing
+  run. No blocking defect found in the pinned ABI, canonical pass-through,
+  shared-controller ownership, partial-install rollback or save safety.
 - Four protected saves, 801 source files, 14 game-root files and 527 asset
   files unchanged. Sealed inputs unchanged; owned games absent; relay 27813 free.
 
@@ -59,6 +61,15 @@ Two-PC reciprocal acceptance and other character combinations were not run.
   static traces, retained with their original diagnostic labels.
 - `raw-pins.json`: retained-file size/SHA-256 seal.
 
-Only this README and the lead-returned `evidence.json` belong in Git. Raw
-media/products stay in the evidence store. The lead has the complete PC bundle
-path for publication; preserve the worktree until that copy is confirmed.
+The lead published the qualifying files. The returned [evidence manifest](evidence.json)
+records retained objects and durable links. The store takes media and
+non-Markdown files of at least 16 KiB; Markdown and small text stay out by design.
+The approved-live report's 71/71 PASS and independent review's ADOPT conclusion
+are summarized above, and the complete report is attached to the issue.
+
+- [Captioned native guest Fire / reciprocal MP clip](clankie://evidence/sha256/6f5d83b11ac0f215505078ede8adfae23174fcb17e30655a22f12d801912728f)
+- [Complete retained-file size/hash seal](clankie://evidence/sha256/60384d4ad0bae7833015c2b7713566b23d1f1d19d4b2c04cfd48c4c430730a62)
+
+Every returned manifest entry was checked against its PC file's size and hash.
+Only this README and `evidence.json` belong in Git. Raw media/products stay in
+the evidence store; smaller source records remain in the PC bundle.
