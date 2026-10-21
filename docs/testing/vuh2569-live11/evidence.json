@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "decisive-reports.tar",
+      "size": 4915200,
+      "sha256": "d28104737803cbdef74726d51ab5537605a1a5bf327ee57a24efa37178eb8e04",
+      "url": "clankie://evidence/sha256/d28104737803cbdef74726d51ab5537605a1a5bf327ee57a24efa37178eb8e04"
+    },
+    {
+      "path": "seat0-0s.png",
+      "size": 243610,
+      "sha256": "cbe27c716ec6b20d5115908e7c6ba93513a29622fda57ae04b75aba58c64f497",
+      "url": "clankie://evidence/sha256/cbe27c716ec6b20d5115908e7c6ba93513a29622fda57ae04b75aba58c64f497"
+    },
+    {
+      "path": "seat0-10s.png",
+      "size": 255539,
+      "sha256": "fd0c95ed2e65d39dc44d983448a0e95ca0b84a165052da6ca346da3d23793b69",
+      "url": "clankie://evidence/sha256/fd0c95ed2e65d39dc44d983448a0e95ca0b84a165052da6ca346da3d23793b69"
+    },
+    {
+      "path": "seat0-20s.png",
+      "size": 257252,
+      "sha256": "9f98658737074129fa11f53a18cb182f1255d8bceff5732c8cd6cbb1c502475a",
+      "url": "clankie://evidence/sha256/9f98658737074129fa11f53a18cb182f1255d8bceff5732c8cd6cbb1c502475a"
+    },
+    {
+      "path": "seat1-0s.png",
+      "size": 159251,
+      "sha256": "630ac5a35a3f155184c78e0c38f499c61ea19aad76c0acc70c88b4fc2089d446",
+      "url": "clankie://evidence/sha256/630ac5a35a3f155184c78e0c38f499c61ea19aad76c0acc70c88b4fc2089d446"
+    },
+    {
+      "path": "source-inputs.tar",
+      "size": 13844480,
+      "sha256": "3eed2131aa69190c2acf2227bbd4833ea2b6170bc2fdad5cf5be441ed29b4cbf",
+      "url": "clankie://evidence/sha256/3eed2131aa69190c2acf2227bbd4833ea2b6170bc2fdad5cf5be441ed29b4cbf"
+    }
+  ]
+}
