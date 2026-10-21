@@ -97,9 +97,11 @@ inline BorrowEnd BorrowRelease(std::uint32_t streamMotion, std::uint32_t borrowe
 // What the clone's motion controller holds now, against a borrow receipt. Only Ours may go through the
 // native own-bank set, which decrements through the reference: the exact source as capture holder, the
 // reference pointing at exactly that source's count, and the source still listed under its saved handle.
-// AlreadyOwn (nothing held) and Foreign (another complete capture replaced ours) retire the receipt
-// without a write; anything partial (one of the two set), mixed, unreadable or with a stale source
-// identity is Unknown and fails closed.
+// AlreadyOwn (nothing held) and Foreign (another complete capture replaced ours: its reference is its own
+// holder's count, holder + kBorrowReferenceOffset) retire the receipt without a write; anything partial
+// (one of the two set), mixed (a reference and holder that do not belong together), unreadable or with a
+// stale source identity is Unknown and fails closed.
+constexpr std::uintptr_t kBorrowReferenceOffset = 0x5B8; // the holder's reference count (actor +0x5B8)
 enum class BorrowHeld : std::uint8_t { Ours, AlreadyOwn, Foreign, Unknown };
 inline BorrowHeld ClassifyBorrow(bool read, std::uintptr_t reference, std::uintptr_t captureSource, std::uintptr_t source,
                                  std::uintptr_t sourceReference, bool sourceIdentity) noexcept {
@@ -109,7 +111,9 @@ inline BorrowHeld ClassifyBorrow(bool read, std::uintptr_t reference, std::uintp
     const bool ourReference = reference == sourceReference, ourCapture = captureSource == source;
     if (ourReference && ourCapture) return sourceIdentity ? BorrowHeld::Ours : BorrowHeld::Unknown;
     if (ourReference || ourCapture) return BorrowHeld::Unknown;
-    return BorrowHeld::Foreign;
+    const bool pair = captureSource <= ~std::uintptr_t {} - kBorrowReferenceOffset &&
+                      reference == captureSource + kBorrowReferenceOffset;
+    return pair ? BorrowHeld::Foreign : BorrowHeld::Unknown;
 }
 inline const char* BorrowHeldName(BorrowHeld h) noexcept {
     switch (h) {

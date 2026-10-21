@@ -405,6 +405,12 @@ void testBorrowRelease() {
     check(ph::ClassifyBorrow(true, 0, other, source, ref, true) == H::Unknown &&
               ph::ClassifyBorrow(true, otherRef, 0, source, ref, true) == H::Unknown,
           "r3: a partial foreign state (one of the two set) is quarantined, never retired");
+    check(ph::ClassifyBorrow(true, 0x95B8, 0xB000, source, ref, true) == H::Unknown,
+          "r4: a mixed foreign pair (reference and holder of different actors) is quarantined");
+    check(ph::ClassifyBorrow(true, 0xB000 + ph::kBorrowReferenceOffset, 0xB000, source, ref, true) == H::Foreign,
+          "r4: a self-consistent foreign pair retires");
+    check(ph::ClassifyBorrow(true, 0x5B7, ~std::uintptr_t {}, source, ref, true) == H::Unknown,
+          "r4: a holder whose count address would overflow is quarantined");
     check(std::string(ph::BorrowHeldName(H::Foreign)) == "foreign", "named in the log");
 }
 
