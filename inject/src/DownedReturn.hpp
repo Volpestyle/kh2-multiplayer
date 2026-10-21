@@ -19,6 +19,8 @@
 
 #include <cstdint>
 
+#include "kh2coop/PuppetProvenance.hpp"
+
 namespace kh2coop::inject::downedreturn {
 
 enum class Kind : std::uint8_t { None = 0, EncounterDefeat = 1, SavePoint = 2 };
@@ -89,6 +91,15 @@ private:
 //   identity 0                        the session ended: forget;
 //   another identity                  a replacement session, even with no Off frame between: start over;
 //   the same identity                 the same session, through resyncs and liveness gaps: keep.
+// A teammate pose that may enter that history: fresh, and owned by the current puppet authority (its
+// generation and connections). EntityHook runs the downed owner before EnemySync's generation drain and
+// puppet polling, so on a replacement session's first frame the new identity is visible while the old
+// session's pose is still cached; its provenance names the old generation and fails here (Quill R4).
+inline bool CountsForSession(bool have, std::uint32_t ageFrames, const PuppetProvenance& tag, std::uint8_t ownerSlot,
+                             int puppetIndex, const PuppetAuthority& current) noexcept {
+    return have && ageFrames <= 600 && ValidPuppetProvenance(tag, ownerSlot, puppetIndex, current);
+}
+
 class SessionTeammates {
 public:
     void Step(bool identityKnown, std::uint64_t identity, unsigned teammatesKnown) noexcept {

@@ -783,7 +783,7 @@ else()
 endif()
 # VUH-2632 (D17): when a downed teammate who sits out comes back.
 add_executable(kh2coop_downed_return_test tests/DownedReturnTest.cpp)
-target_include_directories(kh2coop_downed_return_test PRIVATE inject/src)
+target_include_directories(kh2coop_downed_return_test PRIVATE inject/src common/include)
 if(MSVC)
     target_compile_options(kh2coop_downed_return_test PRIVATE /W4 /WX)
 else()

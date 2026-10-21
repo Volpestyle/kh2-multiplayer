@@ -310,7 +310,9 @@ boss/encounter defeat or a save point.
   A teammate seen earlier in the session but not during the downing ("unavailable") does not count as solo:
   the player sits out. "The session" is the relay session's identity (the hash of its id the runtime
   publishes with each generation): a same-session resync or a runtime liveness gap keeps the history, a
-  replacement session or the session's end clears it.
+  replacement session or the session's end clears it. Only a teammate pose that the current puppet
+  authority owns (its generation and connections) adds to it, so a replacement session's first frame
+  cannot import the old session's cached pose.
 - **A lone host.** A host downed in its room that has never seen a teammate in this session is everyone
   down by itself: after one second it takes the native game over and Continue, as the full party does.
   - The teammates are latched each downed frame while the old room is current. The transition erases

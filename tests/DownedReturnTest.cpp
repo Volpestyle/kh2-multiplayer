@@ -67,6 +67,55 @@ int main() {
       const auto d = SitOutAfterTransition(latch, session.Seen());
       CHECK(!session.Seen() && d.after == AfterTransition::Resolve && d.why == Disposition::Solo); }
 
+    // Regression (Quill R4, adapter order): the replacement's first frame. The runtime retires session A's
+    // puppet authority, publishes B's identity and advances the generation; the game's next frame runs
+    // the downed owner first, while A's friend pose is still cached in the puppet drivers (EnemySync's
+    // drain and puppet polling clear it later in that frame). Counting that pose under B's identity (the
+    // 2c adapter) made B "seen" for good; its provenance names A's generation and is refused now, also
+    // once B's authority is armed. B is alone: a downing there is solo.
+    { using kh2coop::PuppetAuthority; using kh2coop::PuppetAuthorityMode; using kh2coop::PuppetProvenance;
+      using kh2coop::PuppetProducer;
+      struct Driver { bool have; std::uint32_t poseFrame; PuppetProvenance tag; std::uint8_t owner; };
+      const PuppetAuthority authorityA {PuppetAuthorityMode::Network, 0, 7, {0x100, 0x101, 0}};
+      const PuppetProvenance friendA {PuppetProducer::Network, 0, 7, 0x101, 0x100, 0x100};
+      Driver drivers[2] = {{false, 0, {}, 255}, {false, 0, {}, 255}};
+      SessionTeammates session, unvalidated; DispositionLatch latch;
+      std::uint32_t frame = 0;
+      auto tick = [&](bool known, std::uint64_t identity, const PuppetAuthority& now) {
+          unsigned owned = 0, cached = 0;                      // DownedSpike::Tick, first in the frame
+          for (int i = 0; i < 2; ++i) {
+              const Driver& d = drivers[i];
+              if (CountsForSession(d.have, frame - d.poseFrame, d.tag, d.owner, i, now)) ++owned;
+              if (d.have && frame - d.poseFrame <= 600) ++cached;
+          }
+          session.Step(known, identity, owned);
+          unvalidated.Step(known, identity, cached);
+          return cached; };
+      for (; frame < 60; ++frame) {                            // session A, the friend live
+          drivers[0] = {true, frame, friendA, 1};
+          (void)tick(true, 0xA1, authorityA);
+      }
+      CHECK(session.Seen());
+      // Frame 60: B's identity is out, A's authority retired (Unavailable), A's pose still cached.
+      CHECK(tick(true, 0xB2, PuppetAuthority {}) == 1);
+      CHECK(!session.Seen() && unvalidated.Seen());            // the 2c adapter imported A's friend into B
+      drivers[0] = {false, 0, {}, 255};                        // polling clears it later in frame 60
+      ++frame;
+      // B's authority is armed (generation 8, new connections); still no teammate in B.
+      const PuppetAuthority authorityB {PuppetAuthorityMode::Network, 0, 8, {0x200, 0, 0}};
+      for (; frame < 180; ++frame) {
+          (void)tick(true, 0xB2, authorityB);
+          if (frame == 120) latch.Reset();                     // downed in B
+          if (frame >= 120) latch.Observe(0, 0);
+      }
+      const auto d = SitOutAfterTransition(latch, session.Seen());
+      CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Solo);
+      CHECK(SitOutAfterTransition(latch, unvalidated.Seen()).why == Disposition::Unavailable); // the bug
+      // Even had A's pose survived into B's armed authority, its provenance would not count.
+      CHECK(!CountsForSession(true, 0, friendA, 1, 0, authorityB));
+      // In A itself, a cached owned pose counts; a stale one (over 600 frames) does not.
+      CHECK(CountsForSession(true, 600, friendA, 1, 0, authorityA) && !CountsForSession(true, 601, friendA, 1, 0, authorityA)); }
+
     // Regression (Quill R4 b): within one session the runtime's heartbeat lapses (the role reads Off, the
     // bridge and the session identity stay) while the friend's poses are gone; the history is kept, so
     // the downed player sits out ("unavailable"), as it would without the gap.

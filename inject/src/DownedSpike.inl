@@ -1104,15 +1104,22 @@ static void Tick(uintptr_t head) {
     {
         // VUH-2632 (D17): this frame's teammates, before a transition erases them (Quill R1: on the first
         // suspended frame this owner still runs first; afterwards no pose is left to count).
-        unsigned known = 0, downed = 0;
-        for (const auto& d : g_puppets) {
+        unsigned known = 0, downed = 0, owned = 0;
+        const auto authority = enemysync::CapturePuppetAuthority();
+        for (int i = 0; i < 2; ++i) {
+            const auto& d = g_puppets[i];
+            if (downedreturn::CountsForSession(d.have, g_frameCounter - d.poseFrame, d.pose.provenance,
+                                               static_cast<uint8_t>(d.pose.pose.ownerSlot), i, authority))
+                ++owned;
             if (!d.have || g_frameCounter - d.poseFrame > 600) continue;
             ++known;
             if (d.pose.pose.flags & kh2coop::AvatarDowned) ++downed;
         }
+        // The old room's disposition takes every cached pose (R1); the session's history only poses its
+        // current authority owns (R4).
         std::uint64_t identity = 0;
         const bool identityKnown = enemysync::SessionIdentity(identity);
-        g_sessionTeammates.Step(identityKnown, identity, known);
+        g_sessionTeammates.Step(identityKnown, identity, owned);
         if (g_down.state == State::Downed) g_disposition.Observe(known, downed);
     }
     if (g_down.state == State::Downed) {
