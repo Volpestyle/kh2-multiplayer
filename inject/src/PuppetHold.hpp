@@ -94,6 +94,31 @@ inline BorrowEnd BorrowRelease(std::uint32_t streamMotion, std::uint32_t borrowe
     if (frames > kBorrowFrames) return BorrowEnd::Expired;
     return BorrowEnd::Keep;
 }
+// What the clone's motion controller holds now, against a borrow receipt. Only Ours may go through the
+// native own-bank set, which decrements through the reference: the exact source as capture holder, the
+// reference pointing at exactly that source's count, and the source still listed under its saved handle.
+// AlreadyOwn (nothing held) and Foreign (another capture replaced ours) retire the receipt without a
+// write; anything partial, unreadable or with a stale source identity is Unknown and fails closed.
+enum class BorrowHeld : std::uint8_t { Ours, AlreadyOwn, Foreign, Unknown };
+inline BorrowHeld ClassifyBorrow(bool read, std::uintptr_t reference, std::uintptr_t captureSource, std::uintptr_t source,
+                                 std::uintptr_t sourceReference, bool sourceIdentity) noexcept {
+    if (!read || !source) return BorrowHeld::Unknown;
+    if (!reference && !captureSource) return BorrowHeld::AlreadyOwn;
+    const bool ourReference = reference == sourceReference, ourCapture = captureSource == source;
+    if (ourReference && ourCapture) return sourceIdentity ? BorrowHeld::Ours : BorrowHeld::Unknown;
+    if (ourReference || ourCapture) return BorrowHeld::Unknown;
+    return BorrowHeld::Foreign;
+}
+inline const char* BorrowHeldName(BorrowHeld h) noexcept {
+    switch (h) {
+    case BorrowHeld::Ours: return "ours";
+    case BorrowHeld::AlreadyOwn: return "already-own";
+    case BorrowHeld::Foreign: return "foreign";
+    case BorrowHeld::Unknown: return "unknown";
+    }
+    return "?";
+}
+
 inline const char* BorrowEndName(BorrowEnd e) noexcept {
     switch (e) {
     case BorrowEnd::Keep: return "keep";

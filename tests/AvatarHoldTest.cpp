@@ -384,6 +384,25 @@ void testBorrowRelease() {
     check(ph::BorrowRelease(241, 241, 10, false, true, false) == E::Scope,
           "a transition or load ends it before anything else");
     check(std::string(ph::BorrowEndName(E::Scope)) == "transition-or-load", "named in the log");
+
+    // r2: only our exact borrow, from a source still under its saved handle, may reach the native
+    // own-bank set (it decrements through the reference).
+    using H = ph::BorrowHeld;
+    constexpr std::uintptr_t source = 0x7000, ref = source + 0x5B8, other = 0x9000, otherRef = other + 0x5B8;
+    check(ph::ClassifyBorrow(true, ref, source, source, ref, true) == H::Ours, "our capture and reference: released");
+    check(ph::ClassifyBorrow(true, ref, source, source, ref, false) == H::Unknown,
+          "ours, but the source is no longer listed under its handle: no decrement");
+    check(ph::ClassifyBorrow(true, 0, 0, source, ref, true) == H::AlreadyOwn, "already back on its own bank: no write");
+    check(ph::ClassifyBorrow(true, otherRef, other, source, ref, true) == H::Foreign,
+          "another owner's capture (a script owner took over): retired without touching it");
+    check(ph::ClassifyBorrow(false, ref, source, source, ref, true) == H::Unknown, "an unreadable controller fails closed");
+    check(ph::ClassifyBorrow(true, ref, other, source, ref, true) == H::Unknown &&
+              ph::ClassifyBorrow(true, otherRef, source, source, ref, true) == H::Unknown &&
+              ph::ClassifyBorrow(true, ref, 0, source, ref, true) == H::Unknown &&
+              ph::ClassifyBorrow(true, 0, source, source, ref, true) == H::Unknown,
+          "a partial or mixed state fails closed");
+    check(ph::ClassifyBorrow(true, ref, source, 0, ref, true) == H::Unknown, "no recorded source fails closed");
+    check(std::string(ph::BorrowHeldName(H::Foreign)) == "foreign", "named in the log");
 }
 
 } // namespace
