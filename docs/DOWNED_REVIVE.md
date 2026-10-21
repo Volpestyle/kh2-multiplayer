@@ -331,7 +331,7 @@ boss/encounter defeat or a save point.
   - Or the host's mission ends with `mission_complete` (table-4 trap 3) within one room generation
     (`[downed] encounter defeated: mission complete`). A wave fight that is a mission can end that way and
     go straight into an event and a scripted room change without ever clearing its cage in field: FM-02's
-    Basement Hall (TT19_MS602), whose friend sat out into the Twilight Thorn fight before this (run
+    Basement Hall (TT19_MS602), whose friend sat out into the Axel fight (B_EX110, TT20_MS603) before this (run
     `20261021-164443`). The mission mirror's host detour counts it, once per mission. Trap 22 (end
     signal), a failure, a boss end and a complete in a transition's or load's window (a window open at
     either sample, its serials stable or not, or one aborted between them) never count; that count is
@@ -385,7 +385,7 @@ boss/encounter defeat or a save point.
   frame as `mission_complete` (5568). The mission edge fires (`encounter defeated: mission complete`) but
   its claim is refused (`connection=0 claimed=0`): the downed scope, and so every revive request, needs
   field play, and the next field frame (5838) is past the friend's fresh pose. The friend sits out into
-  the Twilight Thorn fight until a save point. The follow-up (v33) has the friend owe itself the return
+  the Axel fight until a save point. The follow-up (v33) has the friend owe itself the return
   from the host's relay-scoped MissionState (end trap 3), under the same receipt rules.
 - The cage edge (2 -> 0 in field) has not fired live yet: no run so far had a forced battle end in field.
 - A boss whose post-fight transition comes before its forced battle clears is VUH-2628's path. A boss
