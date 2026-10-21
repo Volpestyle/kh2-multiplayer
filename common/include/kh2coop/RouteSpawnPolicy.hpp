@@ -187,6 +187,11 @@ inline constexpr auto Calling33Records=Bytes("360200000080fc4400007a440000204300
 // seats logged byte-identical receipts (run 20261020-155646). The Woods before it (door 50, evt22) is not
 // pinned: its walk-in entrance resets both players to the tunnel mouth when the clone is built there
 // (runs 20261020-171912, -184451; docs/PARTY_SETUP.md).
+// VUH-2578: the Woods, entered from the Back Alley's hole (door 50, evt22, headerId 57: raw566 plus the
+// absent raw567/568). Nine byte-identical receipts from both seats (runs 20261020-100758, -151129, -155646).
+inline constexpr std::array<std::uint8_t,10> Woods13Location{2,0x0D,0x32,0,1,0,1,0,0x16,0};
+inline constexpr auto Woods13Header=Bytes("0100390003000000000000000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr auto Woods13Records=Bytes("36020000b89ef6c4bbd306b748819fc400000000db0fc93f00000000013207000000000000000000000000000000000000000000000000000000000000000000370200005c8f01c5bbd306b7480193c400000000db0fc93f00000000013208000000000000000000000000000000000000000000000000000000000000000000380200005c8f01c5bbd306b74801acc400000000db0fc93f00000000013209000000000000000000000000000000000000000000000000000000000000000000");
 inline constexpr std::array<std::uint8_t,10> Mansion14Location{2,0x0E,0,0,1,0,0,0,1,0};
 inline constexpr auto Mansion14Header=Bytes("010028000300000000000000000000000000000000000000000000000e000000000000000000000000000000");
 inline constexpr auto Mansion14Records=Bytes("36020000a7a8dcc397c11fb829ec44c5000000004ee43d400000000001000100000000000000000000000000000000000000000000000000000000000000000037020000724a0bc42025f9b700fe49c5000000004ee43d400000000001000200000000000000000000000000000000000000000000000000000000000000000038020000ce19b4c338cfafb7ae294cc5000000004ee43d4000000000010003000000000000000000000000000000000000000000000000000000000000000000");
@@ -212,9 +217,20 @@ inline constexpr MissingPartySite MissingPartySites[]{
     {Sandlot78Location,842293090,Sandlot78Header,Sandlot78Records,90,14,true,"tt04-78"},
     {Calling33Location,808476525,Calling33Header,Calling33Records,90,14,true,"tt33-calling"},
     {Mansion14Location,808476525,Mansion14Header,Mansion14Records,90,14,true,"tt14-1"},
+    {Woods13Location,808804197,Woods13Header,Woods13Records,90,14,true,"tt13-22"},
     {BackAlley4Location,808804197,BackAlley4Header,BackAlley4Records,90,14,true,"tt03-4"},
     {BasementHall2Location,808804197,BasementHall2Header,BasementHall2Records,90,14,true,"tt19-2"},
 };
+// VUH-2578: at these sites both seats' players stand on the same raw566 point, so each seat's clone is
+// driven exactly onto the local player. In the Woods the push-out sent both players to the tunnel mouth
+// and held them there for about 40 s (5 of 8 early releases); seat 1 steps its own player aside by
+// StepAsideZ once per load at its release, and 3 of 3 runs then walked on (runs 20261020-214917 to -215400).
+inline constexpr float StepAsideZ=150.0f;
+inline constexpr std::array<std::array<std::uint8_t,10>,1> StepAsideSites{{Woods13Location}};
+inline bool StepAsideAt(const std::array<std::uint8_t,10>& location) {
+    for(const auto& l:StepAsideSites)if(l==location)return true;
+    return false;
+}
 // Header +4 is the group's record count; every record of the group is pinned.
 inline const MissingPartySite* MissingPartySiteFor(const std::array<std::uint8_t,10>& location,std::uint32_t key,
         std::uintptr_t caller,std::span<const std::uint8_t> header,std::span<const std::uint8_t> records) {

@@ -856,12 +856,13 @@ VUH-2572 pins the rest one room at a time:
 - The Old Mansion's front on Day 1 (`02/0E` evt1) is `tt14-1`. In run `20261020-184958` (FM-01 with a
   host warp) both seats bound and released together, and the friend's screen followed the host's
   Roxas across the yard.
-- The Woods (`02/0D` door 50 evt22) is not pinned. Its entrance is a walk-in from the Back Alley's
-  hole: the game walks Roxas from the tunnel mouth (about x -2760) to the raw566 point (x -1973).
-  With the clone built there, both players were walking in at the release, then both snapped back
-  to the tunnel mouth and ignored input for about 40 s (runs `20261020-171912`, `-184451`). Not
-  understood yet (VUH-2578); the receipt is identical on both seats, so it can be pinned once that is
-  fixed.
+- The Woods (`02/0D` door 50 evt22) is `tt13-22` (VUH-2578). Both seats' players stand on the same
+  raw566 point there, so each seat's clone was driven exactly onto the local player. When the release
+  came early, the push-out sent both players to the tunnel mouth (x -2760, the way back to the Back
+  Alley) and held them there for about 40 s (5 of 8 runs; runs `20261020-171912` to `-212449`). Holding
+  input after the release did not help. Seat 1 now steps its own player aside by 150 units (z) once per
+  load at its release (`routespawn::StepAsideSites`), and 4 of 4 runs walked on with each seat seeing
+  the other (runs `20261020-214917` to `-215400` and the confirmation run).
 - The Back Alley after the Day 6 ambush (`02/03` door 52 evt4) is `tt03-4`, and the Basement Hall
   after the post-Axel chain (`02/13` door 50 evt2) is `tt19-2`. Both groups were bigger than the old
   4-record limit of the site check and the receipt log, which now take 32. The Back Alley's 18 records

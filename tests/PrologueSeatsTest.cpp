@@ -311,8 +311,14 @@ void site() {
     check(mansion && mansion->prologue && std::string_view(mansion->name) == "tt14-1" &&
           MissingPartySiteAt(Mansion14Location) == mansion && !MissingPartySiteAt(mansionOtherProgram) &&
           Mansion14Header[2] == 40 && Mansion14Records.size() == 3 * 64 &&
-          !MissingPartySiteAt(std::array<std::uint8_t, 10>{2, 0x0D, 0x32, 0, 1, 0, 1, 0, 0x16, 0}),
-          "the Day 1 Old Mansion front (evt1) is a checked prologue site; the Woods walk-in is not (VUH-2572)");
+          !StepAsideAt(Mansion14Location),
+          "the Day 1 Old Mansion front (evt1) is a checked prologue site (VUH-2572)");
+    const auto* woods = MissingPartySiteFor(Woods13Location, 808804197, 0x3FF727, Woods13Header, Woods13Records);
+    auto woodsOtherDoor = Woods13Location; woodsOtherDoor[2] = 0;
+    check(woods && woods->prologue && std::string_view(woods->name) == "tt13-22" && Woods13Header[2] == 57 &&
+          StepAsideAt(Woods13Location) && !StepAsideAt(woodsOtherDoor) && !MissingPartySiteAt(woodsOtherDoor) &&
+          StepAsideZ == 150.0f,
+          "the Day 1 Woods (door 50, evt22) is a checked prologue site where seat 1 steps aside (VUH-2578)");
     const auto* alley4 = MissingPartySiteFor(BackAlley4Location, 808804197, 0x3FF727, BackAlley4Header, BackAlley4Records);
     auto alley4Short = std::vector<std::uint8_t>(BackAlley4Records.begin(), BackAlley4Records.begin() + 4 * 64);
     check(alley4 && alley4->prologue && std::string_view(alley4->name) == "tt03-4" && BackAlley4Records.size() == 18 * 64 &&

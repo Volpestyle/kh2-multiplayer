@@ -45,6 +45,7 @@ struct Construction {
 std::atomic<std::uint8_t> g_hold {0};
 std::atomic<std::uint64_t> g_holdNowLow {0};
 std::atomic<std::uint16_t> g_holdNowHigh {0};
+std::uint32_t g_stepAsideLoad = 0;  // VUH-2578: the load at which seat 1 last stepped aside
 Hold g_loggedHold = Hold::None;
 std::array<std::uint8_t, 10> g_loggedAt {};
 std::uint32_t g_loggedLoad = 0;  // a reload at the same location (a re-admission) logs its decision again
@@ -96,6 +97,11 @@ constexpr unsigned MAX_RESENDS = 15;
 
 template <class T> bool Read(std::uintptr_t rva, T& out) {
     __try { out = *reinterpret_cast<const T*>(g_base + rva); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+// VUH-2578: moves this seat's player by routespawn::StepAsideZ (entity transform position z).
+bool StepAside(std::uintptr_t actor, float& z) {
+    __try { auto* p = reinterpret_cast<float*>(actor + 0x640 + 0x38); z = *p; *p = z + routespawn::StepAsideZ; return true; }
     __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 bool ReadNow(std::array<std::uint8_t, 10>& now) {
@@ -288,6 +294,17 @@ bool Tick(std::uint32_t generation, const std::array<std::uint64_t, 3>& roster, 
     g_refused.store(decided && hold == Hold::UnqualifiedProfile ? prologue::RefusedProfile(g_seats) : 0,
                     std::memory_order_release);
     Publish(hold, now);
+    // VUH-2578: where both seats' players stand on the same raw566 point (the Woods), each clone would be
+    // driven exactly onto the local player; seat 1 steps its own player aside once per load at its release.
+    if (decided && hold == Hold::None && localSlot == 1 && routespawn::StepAsideAt(now) &&
+        g_stepAsideLoad != warp::LoadSerial()) {
+        g_stepAsideLoad = warp::LoadSerial();
+        std::uintptr_t actor = 0;
+        float z = 0;
+        const bool moved = Read(0x2A105D0, actor) && actor && StepAside(actor, z);
+        if (g_log) g_log("[prologue] step aside at=%02X/%02X evt=%u: seat 1 moved=%u z=%.0f -> %.0f", now[0], now[1],
+                         LocationOf(now).evt, moved ? 1u : 0u, z, z + routespawn::StepAsideZ);
+    }
     if (decided && hold == Hold::None) {
         g_released = true;
         if (!playedHere) { g_playedAt = now; g_playedRoster = roster; g_playedLoad = warp::LoadSerial(); g_playedLogged = false; }
