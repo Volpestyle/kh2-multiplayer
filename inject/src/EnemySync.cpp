@@ -4731,7 +4731,11 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         for(auto& s:g_inst.spawns){s.netId=-1;s.ordinaryBinding.bound=0;}return false;
     }
     const auto holdAll = [&] {
-        for (auto& s : g_inst.spawns) { s.netId = -1; s.ordinaryBinding.bound = 0; }
+        // VUH-2584: remember the ID a body was bound to before the hold (HeldContinuous).
+        for (auto& s : g_inst.spawns) {
+            if (s.ordinaryBinding.bound > 0) s.ordinaryBinding.held = s.ordinaryBinding.bound;
+            s.netId = -1; s.ordinaryBinding.bound = 0;
+        }
         return false;
     };
     if (!CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
@@ -4766,7 +4770,7 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
     }
     if(certified && (!FreshRecordCatalog(census,ordinaryAfter) || !SameRecordCatalogSample(ordinaryBefore,ordinaryAfter)))return holdAll();
     if(!certified && g_resyncWriteFence==ResyncWriteFence::None)RetireAbsentEmissionBirths(census);
-    const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame});
+    const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame, warp::LoadSerial()});
     if (WorldSessionGeneration() != generation || !CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
     // The entire fresh population is resolved before any native HP/death write.
     // Historical rows outside this census cannot retain write/hash authority.

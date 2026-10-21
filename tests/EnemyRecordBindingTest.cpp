@@ -29,6 +29,42 @@ struct Fixture {
     rb::Result run(bool complete=true) { return lease.Resolve(scope,local,host,complete); }
 };
 
+// VUH-2584: a death announced while the census was held (the mission-complete event closed the
+// gameplay gate) still applies to the same body in the same load; nothing else is loosened.
+void OrdinaryHeldDeath() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const ob::Identity roots{0x7FF62746DCA0ULL,0x7FF62793A518ULL,0x7FF6279330A8ULL,0x7FF6279F8130ULL,0x7FF6278FFC54ULL,318};
+    const std::array<float,3> point{1,2,3};
+    auto resolve=[&](ob::Local l,ob::Host h,ob::Scope scope) {
+        const std::array locals{l}; const std::array hosts{h};
+        return ob::Resolve(locals,hosts,scope).front();
+    };
+    ob::Local local{roots,point,{},true,true};
+    ob::Host host{1,318,point,false};
+    const auto live=resolve(local,host,{2,2,3900,3});
+    check("held: living body bound before the hold",live.id==1 && live.next.bound==1);
+    auto heldPrior=live.next; heldPrior.held=heldPrior.bound; heldPrior.bound=0;  // what a held census leaves
+    host.dead=true;
+    auto l=local; l.prior=heldPrior;
+    const auto death=resolve(l,host,{2,2,4156,3});
+    check("held: the host death applies to the same body when the gate reopens",death.id==1 && death.next.held==0);
+    for (int mode=0;mode<8;++mode) {
+        auto m=l; auto h=host; ob::Scope now{2,2,4156,3};
+        switch(mode) {
+        case 0:now.load=4;break;             // a new load in between
+        case 1:now.load=0;m.prior.scope.load=0;break; // unknown load
+        case 2:++m.identity.actor;break;
+        case 3:++m.identity.record;break;
+        case 4:m.prior.living=false;break;   // was not living when held
+        case 5:m.prior.held=2;break;         // held a different ID
+        case 6:++now.epoch;break;
+        case 7:now.frame=3900;break;         // no time passed
+        }
+        const auto d=resolve(m,h,now);
+        check("held: refused variant "+std::to_string(mode),d.id==0);
+    }
+}
+
 // Copied-fact production resolver controls; no native memory, writes or hooks.
 void OrdinaryTerminalControls() {
     namespace ob=kh2coop::inject::ordinarybinding;
@@ -284,6 +320,7 @@ int main(int argc,char** argv) {
 #endif
     OrdinaryLifecycleControls();
     OrdinaryTerminalControls();
+    OrdinaryHeldDeath();
     (void)argc; (void)argv;
     for (auto oid:{317u,76u}) {
         Fixture f(oid);check("first exact complete population",f.run().admitted);

@@ -17,6 +17,7 @@ struct Identity {
 };
 struct Scope {
     std::uint32_t generation{}, epoch{}, frame{};
+    std::uint32_t load{}; // VUH-2584: the load serial (0: unknown)
 };
 struct State {
     int highWater{};
@@ -28,6 +29,8 @@ struct State {
     // dead. Retained on refusal so the same tracked body cannot resurrect.
     bool terminal{};
     bool removed{}; // authenticated non-death retirement; never reusable as a new ID
+    // VUH-2584: the ID this body was bound to when the census was last held (gameplay gate closed).
+    int held{};
 };
 struct Local {
     Identity identity{};
@@ -90,6 +93,18 @@ inline bool Continuous(const Local& l, Scope now) noexcept {
            now.frame > p.scope.frame && now.frame-p.scope.frame == 1;
 }
 
+// VUH-2584: a held census (the gameplay gate closed for an event, such as a mission's closing event)
+// skips frames, so a death announced during it fails Continuous and was never applied here. The body
+// that was bound and living when the census was held, in the same load, with every sampled root
+// unchanged, is still that body; only its own held ID's death may apply to it.
+inline bool HeldContinuous(const Local& l, Scope now) noexcept {
+    const auto& p = l.prior;
+    return !p.bound && p.held > 0 && p.living && p.identity == l.identity &&
+           l.identity.controller && l.identity.record &&
+           p.scope.generation == now.generation && p.scope.epoch == now.epoch &&
+           now.load && p.scope.load == now.load && now.frame > p.scope.frame;
+}
+
 // Whole-census, order-independent selection; no native writes or spawn creation.
 // All claimants of a nonunique live ID are held, including an old incumbent.
 inline std::vector<Decision> Resolve(std::span<const Local> locals,
@@ -100,6 +115,7 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         auto& d = out[i];
         d.next = l.prior;
         d.next.bound = 0;
+        d.next.held = 0;
         d.next.identity = l.identity;
         d.next.scope = now;
         d.next.living = l.living;
@@ -146,7 +162,8 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         const bool unseen=best->dead && !best->left && !best->claimed && l.living && l.unharmed && !l.birthId &&
             !l.certificateRequired && l.identity.controller && l.identity.record &&
             !l.prior.bound && !l.prior.highWater && !l.prior.terminal && !l.prior.scope.generation;
-        if (best->dead && !exactBirth && !unseen && (l.prior.bound != best->id || !Continuous(l,now))) {
+        const bool held = l.prior.held == best->id && HeldContinuous(l,now);
+        if (best->dead && !exactBirth && !unseen && !held && (l.prior.bound != best->id || !Continuous(l,now))) {
             d.reason = Reason::UnestablishedDeath;
             continue;
         }
