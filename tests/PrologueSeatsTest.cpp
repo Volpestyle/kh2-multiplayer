@@ -348,6 +348,60 @@ void site() {
           s88 && std::string_view(s88->name) == "tt05-88" && Struggle88Records.size() == 4 * 64 && Struggle88Header[2] == 166 &&
           Struggle88Records[3 * 64] == 0x2F && Struggle88Records[3 * 64 + 1] == 0x08,
           "the Day 5 Sandlot fights (time-stop Dusks, Axel's skirmish, the Struggle match) are checked prologue sites (VUH-2466)");
+    {
+        const auto* site = MissingPartySiteFor(BackAlley180Location, 825515874u, 0x3FF727, BackAlley180Header, BackAlley180Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt03-180" && BackAlley180Records.size() == 4 * 64 &&
+              ((BackAlley180Header[2] | (BackAlley180Header[3] << 8)) == 858) && MissingPartySiteAt(BackAlley180Location) == site,
+              "tt03-180 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(Sandlot181Location, 892624738u, 0x3FF727, Sandlot181Header, Sandlot181Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt04-181" && Sandlot181Records.size() == 4 * 64 &&
+              ((Sandlot181Header[2] | (Sandlot181Header[3] << 8)) == 2215) && MissingPartySiteAt(Sandlot181Location) == site,
+              "tt04-181 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(Sandlot204Location, 1597125988u, 0x3FF727, Sandlot204Header, Sandlot204Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt04-204" && Sandlot204Records.size() == 4 * 64 &&
+              ((Sandlot204Header[2] | (Sandlot204Header[3] << 8)) == 2929) && MissingPartySiteAt(Sandlot204Location) == site,
+              "tt04-204 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(Struggle84Location, 808738658u, 0x3FF727, Struggle84Header, Struggle84Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt05-84" && Struggle84Records.size() == 4 * 64 &&
+              ((Struggle84Header[2] | (Struggle84Header[3] << 8)) == 78) && MissingPartySiteAt(Struggle84Location) == site,
+              "tt05-84 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(Struggle85Location, 825515874u, 0x3FF727, Struggle85Header, Struggle85Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt05-85" && Struggle85Records.size() == 4 * 64 &&
+              ((Struggle85Header[2] | (Struggle85Header[3] << 8)) == 100) && MissingPartySiteAt(Struggle85Location) == site,
+              "tt05-85 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(Struggle4Location, 808804197u, 0x3FF727, Struggle4Header, Struggle4Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt05-4" && Struggle4Records.size() == 15 * 64 &&
+              ((Struggle4Header[2] | (Struggle4Header[3] << 8)) == 188) && MissingPartySiteAt(Struggle4Location) == site,
+              "tt05-4 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(Struggle189Location, 842293090u, 0x3FF727, Struggle189Header, Struggle189Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt05-189" && Struggle189Records.size() == 6 * 64 &&
+              ((Struggle189Header[2] | (Struggle189Header[3] << 8)) == 122) && MissingPartySiteAt(Struggle189Location) == site,
+              "tt05-189 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(UsualSpot2Location, 808476525u, 0x3FF727, UsualSpot2Header, UsualSpot2Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt02-2" && UsualSpot2Records.size() == 3 * 64 &&
+              ((UsualSpot2Header[2] | (UsualSpot2Header[3] << 8)) == 2) && MissingPartySiteAt(UsualSpot2Location) == site,
+              "tt02-2 is a checked prologue site with its receipt (VUH-2466)");
+    }
+    {
+        const auto* site = MissingPartySiteFor(Serenity155Location, 825515874u, 0x3FF727, Serenity155Header, Serenity155Records);
+        check(site && site->prologue && std::string_view(site->name) == "tt32-155" && Serenity155Records.size() == 3 * 64 &&
+              ((Serenity155Header[2] | (Serenity155Header[3] << 8)) == 69) && MissingPartySiteAt(Serenity155Location) == site,
+              "tt32-155 is a checked prologue site with its receipt (VUH-2466)");
+    }
     const auto* alley4 = MissingPartySiteFor(BackAlley4Location, 808804197, 0x3FF727, BackAlley4Header, BackAlley4Records);
     auto alley4Short = std::vector<std::uint8_t>(BackAlley4Records.begin(), BackAlley4Records.begin() + 4 * 64);
     check(alley4 && alley4->prologue && std::string_view(alley4->name) == "tt03-4" && BackAlley4Records.size() == 18 * 64 &&

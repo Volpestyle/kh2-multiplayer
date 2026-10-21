@@ -189,7 +189,11 @@ void twilightThornParty() {
           "record indices cannot escape the complete group");
     auto wrong=*site;wrong.records=wrong.records.first(wrong.records.size()-1);
     check(!SiteHasPlayerRecord(wrong,player),"partial record storage cannot supply a player template");
-    for(const auto& legacy:MissingPartySites)if(&legacy!=site)
+    // VUH-2466: tt04-204 (the Day 5 Sandlot bat fight's second stage) also leads with its enemy 1314.
+    const auto* sandlot204=MissingPartySiteAt(Sandlot204Location);
+    check(sandlot204 && !SitePlayerRecordAt(*sandlot204,0) && SitePlayerRecordAt(*sandlot204,1),
+          "tt04-204 keeps its enemy at record0 and its player at record1");
+    for(const auto& legacy:MissingPartySites)if(&legacy!=site && &legacy!=sandlot204)
         check(SitePlayerRecordAt(legacy,0),"every existing site retains its authored first player record");
     for(unsigned i=0;i<TwilightThorn157Location.size();++i) {
         auto changed=TwilightThorn157Location;changed[i]^=1;

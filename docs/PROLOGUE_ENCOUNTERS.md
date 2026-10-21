@@ -37,16 +37,16 @@ readings, confirmed only where the live column says so.
 | 1 | 04 Sandlot | 78 | `TT04_MS108` | N_EX570_BTL (1656) | one-on-one bat fight | checked site `tt04-78`; both seats rebuild, fight and leave for the Woods together (run `20261020-100758`) |
 | 1 | 14 Old Mansion | 127 | `TT14_MS109` | 1 Dusk M_EX990 (318) | early Dusk | checked site `tt14-127`; both seats fight, loopback from FM-01 (below) |
 | 1 | 14 Old Mansion | 128 | `TT14_MS110` | 1 Dusk (318) | early Dusk | checked site `tt14-128`; both seats fight and defeat it (below) |
-| 2 | 02 Usual Spot | 2 | `TT02_MS201` | none | scripted | not yet |
+| 2 | 02 Usual Spot | 2 | `TT02_MS201` | none | scripted | checked site `tt02-2`; both seats released (below) |
 | 3 | 04 Sandlot | 79 | `TT04_MS301` | 1 Dusk (318) | early Dusk | checked site `tt04-79`; both seats fight, loopback from FM-01 (below) |
 | 3 | 32 Station of Serenity | 154 | `TT32_MS302` | 3 Dusks (318) | Dive: weapon tutorial | checked site `tt32-154`; both seats fight; the last death can miss the friend (below) |
-| 3 | 32 Station of Serenity | 155 | `TT32_MS303` | none | Dive | not yet |
+| 3 | 32 Station of Serenity | 155 | `TT32_MS303` | none | Dive | checked site `tt32-155`; both seats released (below) |
 | 3 | 33 Station of Calling | 1 | none | 10 Dusks (318) on the path | Dive | checked site `tt33-calling` (VUH-2570): both seats see each other and fight all 10, loopback from FM-00 |
 | 3 | 34 Station of Awakening | 157 | `TT34_MS304` | B_EX100 (307), Twilight Thorn | boss | not yet |
-| 4 | 03 Back Alley | 180 | `TT03_MS400` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
-| 5 | 04 Sandlot | 181 | `TT04_MS500` | N_EX570_BTL (1656) | one-on-one bat fight | not yet |
-| 5 | 05 Sandlot (Struggle) | 84 / 189 | `TT05_MS401` | N_EX500_BTL (1239); 189 adds 3 Dusks | Struggle match | not yet |
-| 5 | 05 Sandlot (Struggle) | 85 | `TT05_MS402` | N_EX610_BTL (2156) | Struggle match | not yet |
+| 4 | 03 Back Alley | 180 | `TT03_MS400` | N_EX570_BTL (1656) | one-on-one bat fight | checked site `tt03-180`; both seats fight (below) |
+| 5 | 04 Sandlot | 181 | `TT04_MS500` | N_EX570_BTL (1656) | one-on-one bat fight | checked site `tt04-181`, then `tt04-204`; both seats fight (below) |
+| 5 | 05 Sandlot (Struggle) | 84 / 189 | `TT05_MS401` | N_EX500_BTL (1239); 189 adds 3 Dusks | Struggle match | checked sites `tt05-84` and `tt05-189`; both seats fight (below) |
+| 5 | 05 Sandlot (Struggle) | 85 | `TT05_MS402` | N_EX610_BTL (2156) | Struggle match | checked site `tt05-85`, then the field `tt05-4`; both seats fight (below) |
 | 5 | 05 Sandlot (Struggle) | 86 | `TT05_MS403` | 3 Dusks (318) | time-stop Dusks | checked site `tt05-86`; both seats fight, loopback from FM-01 (below) |
 | 5 | 05 Sandlot (Struggle) | 87 | `TT05_MS404` | B_EX110_SKIRMISH (2229), Axel | boss skirmish | checked site `tt05-87`; both seats fight, loopback from FM-01 (below) |
 | 5 | 05 Sandlot (Struggle) | 88 | `TT05_MS405` | N_EX600_BTL (2095) | Struggle match | checked site `tt05-88`; both seats fight, loopback from FM-01 (below) |
@@ -136,3 +136,15 @@ Day 5 Sandlot fights, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-
 - The Struggle match ends by each seat's own script (the same native start, the host first); the
   friend's mission mirror does not follow its gauges (`following=0`), so its clock runs on until its
   own end.
+
+More sites, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-2466), all from byte-identical
+receipts on both seats; in each run both seats released with both Roxases:
+- `tt03-180` (Day 4 Back Alley bat fight, N_EX570_BTL; run `20261021-014249`).
+- `tt04-181` (Day 5 Sandlot bat fight) and its second stage `tt04-204`, whose enemy 1314 is record 0
+  and raw566 record 1 (run `20261021-014920`).
+- `tt05-84` (N_EX500_BTL; run `20261021-015611`), `tt05-85` (N_EX610_BTL) and the Struggle field after
+  it, `tt05-4` (door 53 evt4, five entrance triples, door 53 uses index 9; run `20261021-015949`), and
+  `tt05-189` (three Dusks; run `20261021-015242`; one Dusk read 37 HP on the friend and 60 on the
+  host at the end).
+- `tt02-2` (the Day 2 Usual Spot, reached by a transition; run `20261021-014623`) and `tt32-155` (the
+  Station of Serenity, evt155; run `20261021-020257`).
