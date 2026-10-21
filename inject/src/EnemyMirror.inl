@@ -312,20 +312,20 @@ static std::uint32_t SinceDriven(std::uint16_t netId) noexcept {
     return 0xFFFFFFFFu;
 }
 // C4: a forced removal overrides only the script-thread term of 0x3DAC30. The
-// native +0x80/+0x98 term and the +0xBB4 child-busy check (child +0x14) still apply.
+// native +0x80/+0x98 term, the +0xBB4 child-busy check (child +0x14) and, VUH-2614,
+// the reference count +0x5B8 still apply (enemypop::ForcedRemovalTermsAllow).
 static bool NativeRemovalTermsAllow(uintptr_t actor) noexcept {
     uintptr_t p80 = 0, p98 = 0;
-    std::uint32_t childHandle = 0;
-    if (!ReadHitTrace(actor + 0x80, p80) || !ReadHitTrace(actor + 0x98, p98)) return false;
-    if (p80 != 0 && p98 != 0) return false;
-    if (!ReadHitTrace(actor + 0xBB4, childHandle)) return false;
+    std::uint32_t childHandle = 0, busy = 0;
+    std::int32_t references = 0;
+    if (!ReadHitTrace(actor + 0x80, p80) || !ReadHitTrace(actor + 0x98, p98) ||
+        !ReadHitTrace(actor + 0x5B8, references) || !ReadHitTrace(actor + 0xBB4, childHandle)) return false;
     if (childHandle && g_resolveHandle) {
         uintptr_t child = 0;
         __try { child = g_resolveHandle(childHandle); } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
-        std::uint32_t busy = 0;
-        if (child && (!ReadHitTrace(child + 0x14, busy) || busy != 0)) return false;
+        if (child && !ReadHitTrace(child + 0x14, busy)) return false;
     }
-    return true;
+    return enemypop::ForcedRemovalTermsAllow(p80 != 0, p98 != 0, busy != 0, references);
 }
 
 // VUH-2304: +0x80 is the actor effect table; +0x98 is its list head.
@@ -404,15 +404,16 @@ static bool CullBody(void* handler, void* actor, Predicate original) {
             if (g_mstats.forceWaits++ % 300 == 0) {
                 CullLog("force-remove-wait", a, netId, since);
                 uintptr_t effects = 0, effectList = 0, child = 0;
-                std::uint32_t childHandle = 0, busy = 0, threads = 0;
+                std::uint32_t childHandle = 0, busy = 0;
+                std::int32_t references = 0;  // +0x5B8: the actor's reference count (VUH-2614), not script threads
                 const bool read = ReadHitTrace(a + 0x80, effects) && ReadHitTrace(a + 0x98, effectList) &&
-                    ReadHitTrace(a + 0xBB4, childHandle) && ReadHitTrace(a + 0x5B8, threads);
+                    ReadHitTrace(a + 0xBB4, childHandle) && ReadHitTrace(a + 0x5B8, references);
                 __try { if (childHandle && g_resolveHandle) child = g_resolveHandle(childHandle); }
                 __except (EXCEPTION_EXECUTE_HANDLER) { child = 0; }
                 const bool childRead = !child || ReadHitTrace(child + 0x14, busy);
-                Log("[enemy-pop] removal-terms actor=%llX read=%u effects=%llX list=%llX child=%X childRead=%u busy=%u threads=%u",
+                Log("[enemy-pop] removal-terms actor=%llX read=%u effects=%llX list=%llX child=%X childRead=%u busy=%u refs=%d",
                     static_cast<unsigned long long>(a), read ? 1u : 0u, static_cast<unsigned long long>(effects),
-                    static_cast<unsigned long long>(effectList), childHandle, childRead ? 1u : 0u, busy, threads);
+                    static_cast<unsigned long long>(effectList), childHandle, childRead ? 1u : 0u, busy, references);
             }
             return native;
         }

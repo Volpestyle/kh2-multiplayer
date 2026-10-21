@@ -80,6 +80,21 @@ int main() {
               L::Find(base, node(list::MAX_TRAVERSAL), chain) == L::Walk::Capped,
           "the walk cap is reported as Capped, never as not listed");
 
+    // VUH-2614: ForEach visits exactly the listed actors, in list order, and never a freed one.
+    std::vector<std::uintptr_t> seen;
+    m.reads.clear();
+    const auto all = L::ForEach(base, m, [&](std::uintptr_t actor) { seen.push_back(actor); return false; });
+    check(all == L::Walk::NotListed && seen == std::vector<std::uintptr_t> {a, b} && !m.touched(clone, clone + 0x1000),
+          "ForEach visits the listed actors in order and nothing of a freed clone");
+    seen.clear();
+    check(L::ForEach(base, m, [&](std::uintptr_t actor) { seen.push_back(actor); return actor == a; }) == L::Walk::Listed &&
+              seen.size() == 1, "ForEach stops when the visitor says so");
+    std::uint32_t visits = 0;
+    check(L::ForEach(base, chain, [&](std::uintptr_t) { ++visits; return false; }) == L::Walk::Capped &&
+              visits == list::MAX_TRAVERSAL, "ForEach stops at the traversal cap and reports Capped");
+    check(L::ForEach(base, corrupt, [&](std::uintptr_t) { return false; }) == L::Walk::NotListed,
+          "ForEach ends at a corrupt region entry");
+
     // Readable: a committed page reads; a no-access page and a released one do not.
     auto* page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 0x2000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
     const auto at = reinterpret_cast<std::uintptr_t>(page);

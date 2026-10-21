@@ -44,6 +44,7 @@
 #include "NativeLifecycleTrace.hpp"
 #include "NativeLifetimeTrace.hpp"
 #include "NativePrivateStatus.hpp"
+#include "ActorLifetime.hpp"
 #include "PrologueParty.hpp"
 #include "NativePartyHud.hpp"
 #include "NativeHitTrace.hpp"
@@ -435,6 +436,13 @@ static kh2coop::AvatarBridge g_avatarBridge;
 
 static void Log(const char* fmt, ...);
 
+// VUH-2614: a reaction-command motion this clone borrows from a source's bank (BorrowMotion).
+struct PuppetBorrow {
+    uintptr_t clone = 0, source = 0;
+    uint32_t cloneHandle = 0, sourceHandle = 0;
+    uint32_t motion = UINT32_MAX, frame = 0, transition = 0, load = 0;
+};
+
 struct PuppetDriver {
     kh2coop::PuppetPose pose {};
     bool have = false;           // a pose has arrived
@@ -442,6 +450,8 @@ struct PuppetDriver {
     uintptr_t actor = 0;         // actor we last drove (re-resolved per frame)
     int lastAnim = -1;           // motion we last set on `actor`
     uint32_t missingMotion = UINT32_MAX; // VUH-2613: stream motion `actor`'s banks lack (logged once per run)
+    PuppetBorrow borrow {};              // VUH-2614: held until released, before any free (ReleaseBorrow)
+    uint32_t borrowRefused = UINT32_MAX; // VUH-2614: stream motion this run already failed to borrow
     uint32_t savedTeam = 0;      // `actor`'s team before we zeroed it
     bool teamSaved = false;
     bool savedNoCollide = false; // `actor`'s no-collision bit before we set it
@@ -1117,7 +1127,10 @@ static bool IsPuppetActive(int index) {
 
 // Owner-thread projection only: already captured avatar values, never extra native reads.
 // warp's transition observer: game thread, inside the requesting entity update.
+static void ReleaseBorrow(PuppetDriver& d, int index, const char* why, bool atRequest = false);
+static void ReleasePuppetBorrows(const char* why, bool atRequest = false);
 static void PublishLocalForTransition() {
+    ReleasePuppetBorrows("transition-request", true); // VUH-2614: before any teardown, while both actors live
     ReleaseDownedSpectate(); // no spectator selection may survive even a same-room retry
     if (!g_avatarBridge.IsOpen()) return;
     if (const auto flagged = g_localAvatar.OnTransition(g_frameCounter)) g_avatarBridge.PublishLocal(*flagged);
@@ -1619,6 +1632,7 @@ static bool UpdatePuppetSuspension() {
         ClearNativeAiStamps();
         // Invalidate on the actual native lifecycle, including same-room
         // reloads. No restoration writes may reach a prior room's actors.
+        ReleasePuppetBorrows(pending ? "suspended" : "new-room"); // VUH-2614: before the actor is forgotten
         for (auto& d : g_puppets) {
             ForgetPuppetActor(d);
             d.pose = {};
@@ -1678,6 +1692,7 @@ static void PollPuppetPoses() {
         const bool active = IsPuppetActive(i);
         if (!active) driver.positionDiagnostic.Reset();
         if (wasApplied && !active) {
+            ReleaseBorrow(driver, i, "puppet-release"); // VUH-2614
             RestorePuppetTeam(driver, i);
             driver.lastAnim = -1;
             Log("Puppet %d released", i);
@@ -2627,6 +2642,7 @@ static void __fastcall HookedMovementDispatch(void* actor, int speedDelta, int c
 static void BindPuppetDrive(int index, uintptr_t actor) {
     PuppetDriver& d = g_puppets[index];
     if (d.actor != actor) {  // new room / reloaded actor
+        ReleaseBorrow(d, index, "new-actor"); // VUH-2614: an older clone's borrow never outlives its binding
         d.actor = actor;
         d.lastAnim = -1;
         d.missingMotion = UINT32_MAX;
@@ -2637,6 +2653,165 @@ static void BindPuppetDrive(int index, uintptr_t actor) {
 
     if (!d.applied) d.boundActor = CaptureHitActor(actor);
     d.applied = true;
+}
+
+// ============================================================================
+// VUH-2614: borrow the reaction-command motion. The owner's own game plays Reversal (241/242) from the
+// Dusk's bank: the capture leaf 0x3C6CC0 (1/29 body 0x42D160) points the player's motion controller at
+// the source (+0x2B0, bank +0x2B8, anchor +0x2A0) and at the source's reference count +0x5B8
+// (ctrl+0x1B0), which it increments. The clone borrows the same way, from a listed, living Dusk near it.
+// The count is decremented through that pointer by the clone's next motion set (0x3C8A40 -> 0x3C7300),
+// so the source must still be allocated then:
+//   - native disposal waits for the count (0x3BFD30 -> +0x40 -> 0x3DAC30 -> 0x3B4420), and so does our
+//     forced removal of a host-gone copy (enemypop::ForcedRemovalTermsAllow);
+//   - a transition request (in the requesting update), suspension, a new room, puppet release or a new
+//     actor release it before anything is torn down; an event or cutscene, the stream moving on, the
+//     source leaving the list or dying and kBorrowFrames release it too (puppethold::BorrowRelease);
+//   - a release never decrements through a count whose actor is no longer listed: that pointer is
+//     cleared instead (unreachable while disposal waits for the count, and logged).
+// ============================================================================
+using PFN_BankEntry = uintptr_t(__fastcall*)(uintptr_t bank, int index);
+static constexpr uint64_t RVA_BANK_ENTRY = 0x40D7A0;   // FUN_14040D7A0(bank, index): the entry, or 0
+static constexpr uint64_t RVA_BORROW_TRAP = 0x42D160;  // 1/29 body: 0x3C6CC0(source+0x158, target, motion, blend)
+static constexpr uintptr_t MOTCTRL_REFERENCE = 0x1B0;  // the borrowed source's +0x5B8, or 0
+static constexpr uintptr_t ACTOR_REFERENCES = 0x5B8;   // the actor's reference count
+static constexpr uintptr_t ACTOR_CAPTURE_SOURCE = 0x2B0;
+static constexpr float kBorrowReach = 400.0f;          // the source is within this of the clone
+static unsigned g_borrowLogs = 0;
+static constexpr unsigned kBorrowLogBudget = 256;
+
+static Vec3 ReadPuppetPosition(uintptr_t actor);
+static bool ReadListed(uintptr_t at, void* out, std::size_t n) { return ReadHitTraceMemory(at, out, n); }
+static bool ActorListed(uintptr_t actor) {
+    return actor && lifetime::Find(g_exeBase, actor, ReadListed) == lifetime::Walk::Listed;
+}
+static bool BorrowEventOrCutscene() {
+    uintptr_t context = 0;
+    std::int32_t state = 0;
+    return !ReadHitTrace(g_exeBase + offsets::EVENT_CONTEXT, context) ||
+           !ReadHitTrace(g_exeBase + offsets::CUTSCENE_STATE, state) || context || state;
+}
+static bool ActorLiving(uintptr_t actor) {
+    uintptr_t status = 0;
+    std::int32_t hp = 0;
+    return ReadHitTrace(actor + 0x5C0, status) && status && ReadHitTrace(status, hp) && hp > 0;
+}
+// The source is the same listed actor (by its handle) and still living.
+static bool BorrowSourceCurrent(const PuppetBorrow& b) {
+    return ActorListed(b.source) && scriptmirror::SmOwnHandle(b.source) == b.sourceHandle && ActorLiving(b.source);
+}
+// The motion's entry in the actor's override or own bank (the lookup the capture leaf makes).
+static bool BankHolds(uintptr_t actor, uint32_t motion) {
+    uintptr_t own = 0, over = 0;
+    if (!ReadHitTrace(actor + ACTOR_MOTCTRL, own) || !ReadHitTrace(actor + ACTOR_MOTCTRL + 8, over) || !own) return false;
+    __try {
+        const int index = reinterpret_cast<PFN_MotionIndex>(g_exeBase + RVA_MOTION_INDEX)(
+            reinterpret_cast<void*>(actor + ACTOR_MOTCTRL), static_cast<int>(motion));
+        if (index < 0) return false;
+        const auto entry = reinterpret_cast<PFN_BankEntry>(g_exeBase + RVA_BANK_ENTRY);
+        return (over && entry(over, index)) || entry(own, index);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+static uint32_t ObjectIdOf(uintptr_t actor) {
+    uintptr_t entry = 0;
+    uint32_t objectId = 0;
+    return ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, entry) && entry &&
+        ReadHitTrace(entry + offsets::objentry::OBJECT_ID, objectId) ? objectId : 0;
+}
+
+// Ends the borrow with an own-bank set (0x3C8A40 drops the source's count; 0x3C8CD0 resets the anchor,
+// source and bank). The clone is touched only in the borrow's room generation (the same load, and the
+// same transition unless this is the transition request itself, which warp reports before any
+// teardown) and while it is still listed under its handle; otherwise the record is only dropped.
+static void ReleaseBorrow(PuppetDriver& d, int index, const char* why, bool atRequest) {
+    const PuppetBorrow b = d.borrow;
+    if (!b.clone) return;
+    d.borrow = {};
+    const bool budget = g_borrowLogs < kBorrowLogBudget;
+    if (budget) ++g_borrowLogs;
+    const bool generation = b.load == warp::LoadSerial() && (atRequest || b.transition == warp::TransitionSerial());
+    if (!generation || !ActorListed(b.clone) || scriptmirror::SmOwnHandle(b.clone) != b.cloneHandle) {
+        if (budget) Log("[puppet %d] borrow motion=%u released=0 why=%s: %s actor=%p", index, b.motion, why,
+                        generation ? "clone no longer listed" : "room generation changed", reinterpret_cast<void*>(b.clone));
+        return;
+    }
+    const uintptr_t slot = b.clone + ACTOR_MOTCTRL + MOTCTRL_REFERENCE;
+    uintptr_t reference = 0;
+    if (ReadHitTrace(slot, reference) && reference && !ActorListed(reference - ACTOR_REFERENCES)) {
+        // Never decrement through a count whose actor may be freed.
+        __try { *reinterpret_cast<volatile uintptr_t*>(slot) = 0; } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        Log("[puppet %d] borrow motion=%u why=%s: holder %p no longer listed, reference cleared without decrement",
+            index, b.motion, why, reinterpret_cast<void*>(reference - ACTOR_REFERENCES));
+    }
+    g_inOurAnimSet = true;
+    g_inPuppetAnimSet = true;
+    __try {
+        g_setAnimationUnderlying(reinterpret_cast<void*>(b.clone + ACTOR_MOTCTRL), static_cast<int>(ANIM_IDLE), 0.0f, 0.0f);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    g_inPuppetAnimSet = false;
+    g_inOurAnimSet = false;
+    d.lastAnim = static_cast<int>(ANIM_IDLE);
+    uintptr_t after = 1, source = 1;
+    const bool read = ReadHitTrace(slot, after) && ReadHitTrace(b.clone + ACTOR_CAPTURE_SOURCE, source);
+    if (budget)
+        Log("[puppet %d] borrow motion=%u released=%u why=%s frames=%u source=%p actor=%p",
+            index, b.motion, read && !after && !source ? 1u : 0u, why, g_frameCounter - b.frame,
+            reinterpret_cast<void*>(b.source), reinterpret_cast<void*>(b.clone));
+}
+static void ReleasePuppetBorrows(const char* why, bool atRequest) {
+    for (int i = 0; i < 2; ++i) ReleaseBorrow(g_puppets[i], i, why, atRequest);
+}
+
+// Borrows `motion` for the clone from the nearest listed, living Dusk whose bank holds it, through the
+// pinned 1/29 body. Only from a clean own state, in field play, and never during a transition or load.
+static bool BorrowMotion(PuppetDriver& d, int index, uintptr_t clone, uint32_t motion) {
+    if (warp::TransitionPending() || warp::LoadPending() || BorrowEventOrCutscene() || d.borrow.clone) return false;
+    uintptr_t reference = 0, captured = 0;
+    const auto cloneHandle = scriptmirror::SmOwnHandle(clone);
+    if (!cloneHandle || !ReadHitTrace(clone + ACTOR_MOTCTRL + MOTCTRL_REFERENCE, reference) || reference ||
+        !ReadHitTrace(clone + ACTOR_CAPTURE_SOURCE, captured) || captured || !ActorListed(clone)) return false;
+    const Vec3 at = ReadPuppetPosition(clone);
+    uintptr_t best = 0;
+    float bestD2 = kBorrowReach * kBorrowReach;
+    lifetime::ForEach(g_exeBase, ReadListed, [&](uintptr_t a) {
+        if (a == clone || a == g_soraActor || !puppethold::BorrowSourceAllowed(ObjectIdOf(a))) return false;
+        const Vec3 p = ReadPuppetPosition(a);
+        const float dx = p.x - at.x, dz = p.z - at.z, d2 = dx * dx + dz * dz;
+        if (!(d2 < bestD2) || !ActorLiving(a) || !BankHolds(a, motion)) return false;
+        best = a;
+        bestD2 = d2;
+        return false;
+    });
+    const auto sourceHandle = best ? scriptmirror::SmOwnHandle(best) : 0u;
+    namespace R = scriptmirror::rules;
+    if (!sourceHandle || std::memcmp(reinterpret_cast<const void*>(g_exeBase + RVA_BORROW_TRAP), R::kOwnerCapture,
+                                     sizeof(R::kOwnerCapture)) != 0) return false;
+    std::uint64_t args[] {R::Tagged(R::kTagAddress, sourceHandle), R::Tagged(R::kTagAddress, cloneHandle),
+                          R::Tagged(R::kTagInt, motion), R::Tagged(R::kTagFloat, 0)};
+    // Recorded first: whatever the call left on the clone is released through the same path.
+    d.borrow = {clone, best, cloneHandle, sourceHandle, motion, g_frameCounter, warp::TransitionSerial(), warp::LoadSerial()};
+    bool called = false;
+    g_inOurAnimSet = true;
+    g_inPuppetAnimSet = true;
+    __try {
+        reinterpret_cast<scriptmirror::TrapFn>(g_exeBase + RVA_BORROW_TRAP)(args);
+        called = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    g_inPuppetAnimSet = false;
+    g_inOurAnimSet = false;
+    uint32_t playing = UINT32_MAX;
+    uintptr_t holder = 0, held = 0;
+    const bool installed = called && ReadHitTrace(clone + offsets::actor::ANIM_ID, playing) && playing == motion &&
+        ReadHitTrace(clone + ACTOR_CAPTURE_SOURCE, holder) && holder == best &&
+        ReadHitTrace(clone + ACTOR_MOTCTRL + MOTCTRL_REFERENCE, held) && held == best + ACTOR_REFERENCES;
+    if (g_borrowLogs < kBorrowLogBudget) {
+        ++g_borrowLogs;
+        Log("[puppet %d] borrow motion=%u installed=%u source=%p objectId=%u dist=%.0f actor=%p", index, motion,
+            installed ? 1u : 0u, reinterpret_cast<void*>(best), ObjectIdOf(best), std::sqrt(bestD2),
+            reinterpret_cast<void*>(clone));
+    }
+    if (!installed) ReleaseBorrow(d, index, "install-check");
+    return installed;
 }
 
 static bool MotionInBanks(void* motCtrl, uint32_t motion) {
@@ -2670,9 +2845,29 @@ static void DrivePuppetMotion(void* actorObj, int index) {
 
     auto* motCtrl = reinterpret_cast<void*>(actor + ACTOR_MOTCTRL);
     auto* time = reinterpret_cast<float*>(actor + ACTOR_MOTCTRL + MOTCTRL_CURRENT_TIME);
+    // VUH-2614: a held borrow ends first on any change; while it holds, the borrowed motion plays on.
+    if (d.borrow.clone) {
+        const auto& b = d.borrow;
+        const bool sameScope = b.clone == actor && b.transition == warp::TransitionSerial() &&
+            b.load == warp::LoadSerial() && !warp::TransitionPending() && !warp::LoadPending();
+        const auto end = puppethold::BorrowRelease(motion, b.motion, g_frameCounter - b.frame, sameScope,
+                                                   BorrowEventOrCutscene(), BorrowSourceCurrent(b));
+        if (end == puppethold::BorrowEnd::Keep) return;
+        ReleaseBorrow(d, index, puppethold::BorrowEndName(end));
+    }
+    if (motion != d.borrowRefused) d.borrowRefused = UINT32_MAX;
     // VUH-2613: a motion the clone's banks lack (borrowed by the owner from an enemy's bank) is never set.
     if (static_cast<int>(motion) != d.lastAnim) {
         const bool inBanks = MotionInBanks(motCtrl, motion);
+        // VUH-2614: borrowed again from a nearby Dusk where possible; the stand-in otherwise.
+        if (!inBanks && motion != d.borrowRefused && IsPlayerClassActor(actor)) {
+            if (BorrowMotion(d, index, actor, motion)) {
+                d.lastAnim = static_cast<int>(motion);
+                d.missingMotion = UINT32_MAX;
+                return;
+            }
+            d.borrowRefused = motion;
+        }
         const uint32_t stream = motion;
         const float speed2 = pose.velocity.x * pose.velocity.x + pose.velocity.z * pose.velocity.z;
         motion = puppethold::BankedMotion(motion, inBanks, speed2, ANIM_IDLE, ANIM_RUN);

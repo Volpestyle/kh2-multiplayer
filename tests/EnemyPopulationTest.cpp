@@ -145,6 +145,15 @@ int main() {
     CHECK(CullDecision(true, false, false, true, false, 0xFFFFFFFFu, true) == 0);          // forced copy (C2)
     CHECK(CullDecision(true, false, false, false, false, 0xFFFFFFFFu, true) == -1);        // forced but dying
     CHECK(CullDecision(false, true, false, false, false, 0, false) == 1);                  // forced removal
+    // VUH-2614: a host-gone copy whose reference count (+0x5B8) a clone's borrowed motion holds is
+    // deferred, not force-disposed (its release writes into the actor); it goes once the count is 0.
+    CHECK(ForcedRemovalTermsAllow(false, false, false, 0));                                 // nothing held
+    CHECK(!ForcedRemovalTermsAllow(false, false, false, 1));                                // a clone holds it
+    CHECK(!ForcedRemovalTermsAllow(false, false, false, 2));                                // and an attack
+    CHECK(!ForcedRemovalTermsAllow(false, false, false, -1));                               // never a bad count
+    CHECK(!ForcedRemovalTermsAllow(true, true, false, 0));                                  // C4 effects term kept
+    CHECK(ForcedRemovalTermsAllow(true, false, false, 0) && ForcedRemovalTermsAllow(false, true, false, 0));
+    CHECK(!ForcedRemovalTermsAllow(false, false, true, 0));                                 // C4 child term kept
     // VUH-2272: a host-left copy still present after the leave fade is stuck.
     CHECK(!LeaveStuck(kLeaveSettle - 1) && LeaveStuck(kLeaveSettle) && kLeaveSettle > 60);
     std::printf("EnemyPopulationTest: %d checks, %s\n", g_checks, g_fail ? "FAIL" : "PASS");

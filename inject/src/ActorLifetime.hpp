@@ -40,6 +40,27 @@ bool Listed(std::uintptr_t base, std::uintptr_t actor, Read&& read) {
     return Find(base, actor, read) == Walk::Listed;
 }
 
+// VUH-2614: visits each listed actor in list order, with Find's reads, until visit(actor) returns true
+// (Listed), the list ends (NotListed) or MAX_TRAVERSAL actors were visited (Capped).
+template <class Read, class Visit>
+Walk ForEach(std::uintptr_t base, Read&& read, Visit&& visit) {
+    std::uintptr_t cursor = 0;
+    if (!read(base + list::HEAD, &cursor, sizeof(cursor))) return Walk::NotListed;
+    for (std::uint32_t i = 0; cursor; ++i) {
+        if (i == list::MAX_TRAVERSAL) return Walk::Capped;
+        if (visit(cursor)) return Walk::Listed;
+        std::uint32_t link = 0;
+        std::uintptr_t region = 0;
+        if (!read(cursor + kh2coop::offsets::actor::LINKED_NEXT_HANDLE, &link, sizeof(link)) || !link) return Walk::NotListed;
+        const auto bucket = (link & 0x7FFFFFFFu) >> list::HANDLE_BUCKET_SHIFT;
+        if (!read(base + list::HANDLE_REGION_TABLE + bucket * sizeof(std::uintptr_t), &region, sizeof(region)) ||
+            !region || region == ~std::uintptr_t {} || (region & list::HANDLE_LOW_MASK))
+            return Walk::NotListed;
+        cursor = region | (link & list::HANDLE_LOW_MASK);
+    }
+    return Walk::NotListed;
+}
+
 // The in-process CLR sees a first-chance AV before any __except, so a guarded read checks the pages first:
 // committed, readable, neither guard nor no-access. Defense in depth only: a freed-and-reused slot stays
 // readable, which is why held actors are walked (Find) before they are read.

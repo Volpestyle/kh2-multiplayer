@@ -205,4 +205,14 @@ inline int CullDecision(bool nativeRemove, bool forceRemove, bool recentlyBound,
     return -1;
 }
 
+// The native terms a forced removal still requires (C4): not both the effect table (+0x80) and its
+// list (+0x98), no busy child (+0xBB4 -> +0x14) and, VUH-2614, no references (+0x5B8). +0x5B8 is the
+// actor's reference count, 0x3B4420's own term of the removal predicate: attack objects
+// (0x3CF830/0x3CFB10) and a motion borrowed from the actor's bank (capture leaf 0x3C65E0, released by
+// 0x3C7300) hold it, and the release writes through a pointer into the actor. Disposing it while held
+// would leave that write to freed memory; the removal is retried on the next update instead.
+inline bool ForcedRemovalTermsAllow(bool effects, bool effectList, bool childBusy, std::int32_t references) noexcept {
+    return !(effects && effectList) && !childBusy && references == 0;
+}
+
 }  // namespace kh2coop::inject::enemypop

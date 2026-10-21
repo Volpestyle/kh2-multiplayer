@@ -76,6 +76,36 @@ inline std::uint32_t BankedMotion(std::uint32_t motion, bool inBanks, float spee
     return speed2 > 1.0f ? runMotion : idleMotion;
 }
 
+// VUH-2614: a motion the clone lacks is borrowed, as the owner's game did, from a nearby listed source
+// whose bank holds it. Only Dusks (M_EX990, objectId 318: Reversal 241/242) qualify; Twilight Thorn's
+// borrowed motions stay with the script owner (VUH-2580), and other classes wait for their own run.
+constexpr std::uint32_t kDuskObjectId = 318;
+constexpr std::uint32_t kBorrowFrames = 90; // Reversal runs ~30 frames
+inline bool BorrowSourceAllowed(std::uint32_t objectId) noexcept { return objectId == kDuskObjectId; }
+
+// Why a borrow ends; checked every frame while it is held, before anything else drives the clone.
+enum class BorrowEnd : std::uint8_t { Keep, Scope, Event, Source, Motion, Expired };
+inline BorrowEnd BorrowRelease(std::uint32_t streamMotion, std::uint32_t borrowedMotion, std::uint32_t frames,
+                               bool sameScope, bool eventOrCutscene, bool sourceCurrent) noexcept {
+    if (!sameScope) return BorrowEnd::Scope;  // a transition or load was requested or happened
+    if (eventOrCutscene) return BorrowEnd::Event;
+    if (!sourceCurrent) return BorrowEnd::Source; // left the list, a new handle, or no longer living
+    if (streamMotion != borrowedMotion) return BorrowEnd::Motion;
+    if (frames > kBorrowFrames) return BorrowEnd::Expired;
+    return BorrowEnd::Keep;
+}
+inline const char* BorrowEndName(BorrowEnd e) noexcept {
+    switch (e) {
+    case BorrowEnd::Keep: return "keep";
+    case BorrowEnd::Scope: return "transition-or-load";
+    case BorrowEnd::Event: return "event";
+    case BorrowEnd::Source: return "source";
+    case BorrowEnd::Motion: return "motion";
+    case BorrowEnd::Expired: return "expired";
+    }
+    return "?";
+}
+
 // The stream's motion clock is authoritative only for a live pose.
 constexpr bool SnapMotionTime(std::uint8_t poseFlags) noexcept { return !(poseFlags & AvatarHeld); }
 

@@ -368,6 +368,24 @@ void testBankedMotion() {
           "the attack after the reaction command is a fresh motion change");
 }
 
+// VUH-2614: a borrowed motion is held only while everything that let it start still holds, and ends
+// first on a transition or load (before any teardown).
+void testBorrowRelease() {
+    std::cout << "\n=== Receiver: a borrowed reaction-command motion ends on time (VUH-2614) ===\n";
+    namespace ph = kh2coop::inject::puppethold;
+    using E = ph::BorrowEnd;
+    check(ph::BorrowSourceAllowed(ph::kDuskObjectId) && !ph::BorrowSourceAllowed(0) && !ph::BorrowSourceAllowed(1),
+          "only a Dusk lends a motion");
+    check(ph::BorrowRelease(241, 241, 10, true, false, true) == E::Keep, "Reversal still streamed: kept");
+    check(ph::BorrowRelease(151, 241, 10, true, false, true) == E::Motion, "the stream moved on: released");
+    check(ph::BorrowRelease(241, 241, ph::kBorrowFrames + 1, true, false, true) == E::Expired, "bounded in time");
+    check(ph::BorrowRelease(241, 241, 10, true, false, false) == E::Source, "the source left or died: released");
+    check(ph::BorrowRelease(241, 241, 10, true, true, true) == E::Event, "an event or cutscene: released");
+    check(ph::BorrowRelease(241, 241, 10, false, true, false) == E::Scope,
+          "a transition or load ends it before anything else");
+    check(std::string(ph::BorrowEndName(E::Scope)) == "transition-or-load", "named in the log");
+}
+
 } // namespace
 
 int main() {
@@ -382,6 +400,7 @@ int main() {
     testOwnRoomLoad();
     testHeldMotion();
     testBankedMotion();
+    testBorrowRelease();
     testSoak();
     std::cout << "\n=======================================\n"
               << (g_errors == 0 ? "ALL CHECKS PASSED" : "CHECKS FAILED: " + std::to_string(g_errors))
