@@ -147,7 +147,6 @@ static downedreturn::DispositionLatch g_disposition;
 static downedreturn::SessionTeammates g_sessionTeammates;
 // A return that reached this downing during an event (applied when it ends, or 25% in the next room).
 static downedreturn::OwedReturn g_owedReturn;
-static uint32_t g_owedApplyLogs = 0;
 // Read by the input collector and the 3D2060 hit check (game thread; atomics for the record).
 static std::atomic<bool> g_logicalHeld {false};
 static std::atomic<uintptr_t> g_logicalActor {0};
@@ -417,7 +416,6 @@ static void BeginDowned(uintptr_t actor, int hp, uint32_t mode) {
     g_down.episode = NextEpisode(g_down.episode); // P3 boundary: new per episode, never reused
     g_disposition.Reset();
     g_owedReturn.Clear();
-    g_owedApplyLogs = 0;
     g_down.episodeFrames = 0;
     g_down.hitAttempts = g_down.enemyHits = g_down.hitLogs = g_down.holdLost = 0;
     g_down.inputFrames = g_down.noInputFrames = 0;
@@ -1064,7 +1062,8 @@ static void ReturnTick(const Snap& s) {
         uint8_t battle = 0;
         if (!ReadHitTrace(g_exeBase + offsets::BATTLE_STATUS, battle)) battle = 0xFF; // unread: never an edge
         const bool cage = battle != 0xFF && g_encounter.Step(battle, warp::TransitionSerial(), warp::LoadSerial(), field);
-        const bool mission = g_missionComplete.Step(enemysync::HostMissionCompletes(), warp::TransitionSerial(), warp::LoadSerial());
+        const bool mission = g_missionComplete.Step(enemysync::HostMissionCompletes(), warp::TransitionSerial(),
+                                                    warp::LoadSerial(), warp::TransitionPending() || warp::LoadPending());
         if ((cage || mission) && g_encounterReturn.Armed()) {
             Log("[downed] encounter defeated again (%s) room=%u/%u frame=%u: its returns are already pending",
                 cage ? "forced battle ended" : "mission complete", s.room.world, s.room.room, g_frameCounter);
@@ -1109,6 +1108,20 @@ static void PromptHud(uint8_t& kind, uint8_t& slot, uint16_t& progress) {
     progress = g_prompt.out.progress;
 }
 
+// A downing the room change resolved (solo, the full party's Continue, or an owed return): 25% on the new
+// room's first settled field frame, through the stat funnel.
+static void ResolveAfterTransition(const Snap& s, const char* why) {
+    const int target = ReviveTarget(s.maxHp);
+    if (s.hp < target) {
+        const auto apply = reinterpret_cast<PFN_ApplyStatDelta>(g_exeBase + RVA_APPLY_STAT);
+        __try { (void)apply(reinterpret_cast<void*>(s.actor), target - s.hp, 0, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+    int hp = -1;
+    ReadHitTrace(s.status, hp);
+    Log("[downed] logical resolve after transition actor=%llX hp=%d -> %d target=%d%s%s", static_cast<unsigned long long>(s.actor),
+        s.hp, hp, target, why ? " " : "", why ? why : "");
+}
+
 // HookedPerEntityUpdate, head-of-frame block, after g_soraActor is updated.
 static void Tick(uintptr_t head) {
     if (!g_down.requested || g_down.state == State::Off) return;
@@ -1145,7 +1158,6 @@ static void Tick(uintptr_t head) {
         // current authority owns, under an identity unchanged across the capture (R4).
         const bool knownAfter = enemysync::SessionIdentity(identityAfter);
         g_sessionTeammates.StepBookended(knownBefore, identityBefore, owned, knownAfter, identityAfter);
-        g_owedReturn.SessionStep(knownAfter, identityAfter);
         if (g_down.state == State::Downed) g_disposition.Observe(known, downed);
     }
     if (g_down.state == State::Downed) {
@@ -1161,15 +1173,16 @@ static void Tick(uintptr_t head) {
             // settled field frame of the new actor, unless every teammate it saw in the old room was down
             // too (the host's Continue retry) or this is solo play; then it is resolved at 25% there, as
             // before. Decided from the old room's latched teammates; their poses are gone by now.
-            // An owed return (the encounter was won during the event that ends here) resolves it instead.
-            const auto decision = downedreturn::AfterTransitionFor(g_owedReturn.Owed(), g_disposition, g_sessionTeammates.Seen());
+            // An owed return (the encounter was won during the event that ends here) is carried in its
+            // receipt instead, still checked against the session when it resolves in the new room.
+            const auto decision = downedreturn::AfterTransitionFor(g_owedReturn, g_disposition, g_sessionTeammates.Seen());
             const bool sitOut = decision.after == downedreturn::AfterTransition::SitOut;
-            g_owedReturn.Clear();
+            const bool carried = decision.why == downedreturn::Disposition::Returned;
             const unsigned known = g_disposition.Known(), downed = g_disposition.Downed();
             g_down.state = State::Ready;
             g_down.logical = false;
             g_down.downedActor = 0;
-            g_down.resolvePending = !sitOut;
+            g_down.resolvePending = !sitOut && !carried;
             g_down.sitOutPending = sitOut;
             g_logicalActor.store(0, std::memory_order_release);
             g_logicalHeld.store(false, std::memory_order_release);
@@ -1269,31 +1282,55 @@ static void Tick(uintptr_t head) {
                     g_down.driftInput, g_down.driftNoInput, g_down.inputFrames, g_down.noInputFrames, s.motionId, static_cast<unsigned long long>(s.task));
         }
     }
-    uint8_t openMenu = 0xFF;
-    if (g_owedReturn.Owed() && g_down.state == State::Downed && !s.inEvent && !warp::TransitionPending() &&
-        ReadHitTrace(g_exeBase + offsets::OPEN_MENU, openMenu) && openMenu == 0xFF) {
-        // The event is over and the room is the same: apply the owed return through the one revive entry.
+    const bool resolveReady = g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.hp > 0 &&
+                              s.maxHp > 0 && !(s.flags & 4U) && !warp::TransitionPending();
+    if (g_owedReturn.Owed()) {
+        // The owed return's receipt (Quill r3 R1/R2): checked against the session at each use; the native
+        // funnel at most once.
+        downedreturn::OwedFacts f {};
+        f.identityKnown = enemysync::SessionIdentity(f.identity);
+        f.downed = g_down.state == State::Downed;
+        uint8_t openMenu = 0xFF;
+        f.applyReady = !s.inEvent && !warp::TransitionPending() && !warp::LoadPending() &&
+                       ReadHitTrace(g_exeBase + offsets::OPEN_MENU, openMenu) && openMenu == 0xFF;
+        f.resolveReady = resolveReady;
+        f.frame = g_frameCounter;
         const unsigned kind = g_owedReturn.KindOwed();
-        const Result r = TryRevive(g_down.episode);
-        if (r == Result::Ok) g_owedReturn.Clear();
-        if (r == Result::Ok || g_owedApplyLogs < 4) {
-            ++g_owedApplyLogs;
-            Log("[downed] owed return kind=%u applied episode=%llX result=%d frame=%u", kind,
-                static_cast<unsigned long long>(g_down.episode), static_cast<int>(r), g_frameCounter);
+        Result r = Result::Pending;
+        const auto action = downedreturn::OwedTick(g_owedReturn, f, [&] {
+            r = TryRevive(g_down.episode);
+            return r == Result::Ok ? downedreturn::OwedOutcome::Applied
+                 : r == Result::Fault || r == Result::Incomplete || r == Result::WrongState || r == Result::Off
+                     ? downedreturn::OwedOutcome::Terminal : downedreturn::OwedOutcome::NotReady;
+        });
+        switch (action) {
+        case downedreturn::OwedAction::Attempt:
+            if (r != Result::Ok || !g_owedReturn.Owed())
+                Log("[downed] owed return kind=%u episode=%llX result=%d%s frame=%u", kind,
+                    static_cast<unsigned long long>(g_down.episode), static_cast<int>(r),
+                    r == Result::Ok ? " applied" : g_owedReturn.Owed() ? " not ready" : " retired", g_frameCounter);
+            break;
+        case downedreturn::OwedAction::Resolve:
+            ResolveAfterTransition(s, "owed return");
+            break;
+        case downedreturn::OwedAction::RevokedSitOut:
+        case downedreturn::OwedAction::RevokedResolve:
+            // Carried into a room and the session changed before it was applied: the room change's own rule.
+            g_down.sitOutPending = action == downedreturn::OwedAction::RevokedSitOut;
+            g_down.resolvePending = !g_down.sitOutPending;
+            Log("[downed] owed return revoked: another session before the new room; %s instead",
+                g_down.sitOutPending ? "sitting out" : "resolving");
+            break;
+        case downedreturn::OwedAction::Forgotten:
+            Log("[downed] owed return forgotten (another session, or no longer downed) episode=%llX",
+                static_cast<unsigned long long>(g_down.episode));
+            break;
+        default: break;
         }
     }
-    if (g_down.resolvePending && g_down.state == State::Ready && s.canonical && !s.inEvent && s.status &&
-        s.hp > 0 && s.maxHp > 0 && !(s.flags & 4U) && !warp::TransitionPending()) {
+    if (g_down.resolvePending && resolveReady) {
         g_down.resolvePending = false;
-        const int target = ReviveTarget(s.maxHp);
-        if (s.hp < target) {
-            const auto apply = reinterpret_cast<PFN_ApplyStatDelta>(g_exeBase + RVA_APPLY_STAT);
-            __try { (void)apply(reinterpret_cast<void*>(s.actor), target - s.hp, 0, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
-        }
-        int hp = -1;
-        ReadHitTrace(s.status, hp);
-        Log("[downed] logical resolve after transition actor=%llX hp=%d -> %d target=%d", static_cast<unsigned long long>(s.actor),
-            s.hp, hp, target);
+        ResolveAfterTransition(s, nullptr);
     }
     if (g_down.sitOutPending && g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.objentry &&
         s.hp > 0 && s.maxHp > 0 && !(s.flags & 4U) && s.task == 0 && !warp::TransitionPending() && LogicalScope(s.objentry)) {

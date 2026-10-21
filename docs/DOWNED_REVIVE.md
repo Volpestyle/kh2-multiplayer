@@ -333,7 +333,9 @@ boss/encounter defeat or a save point.
     go straight into an event and a scripted room change without ever clearing its cage in field: FM-02's
     Basement Hall (TT19_MS602), whose friend sat out into the Twilight Thorn fight before this (run
     `20261021-164443`). The mission mirror's host detour counts it, once per mission. Trap 22 (end
-    signal), a failure, a boss end and a complete in a transition's or load's window never count. With
+    signal), a failure, a boss end and a complete in a transition's or load's window (a window open at
+    either sample, its serials stable or not, or one aborted between them) never count; that count is
+    consumed. With
     the mission mirror parked (`KH2COOP_MISSION_MIRROR=0`) only the cage edge remains. A cage edge and a
     mission edge for the same fight arm one set of returns (`encounter defeated again ...`).
   - A host that sat it out comes back locally at 25% first.
@@ -346,11 +348,22 @@ boss/encounter defeat or a save point.
   times. The relay and the target's owner still accept one return per episode.
 - **A return during an event is owed.** The owner's native revive refuses in an event (`InEvent`), and the
   relay has consumed the episode by then. So a return (never a partner revive) refused only for that is
-  owed to the downing (`[downed] return owed`): applied on the first frame out of the event in the same
-  room (`[downed] owed return ... applied`), or, when the event ends in a room change, the player comes
-  back at 25% in the new room instead of sitting out (`returned`). No episode remint for it. One per
-  downing; another relay session, a new downing or the full party's game over forgets it. This covers a
-  downed host's own encounter return too.
+  owed to the downing (`[downed] return owed`), with no episode remint. It stays scoped to the relay
+  session's identity and to that downing for its whole life:
+  - In the room, it is applied out of the event (menu closed, no transition or load) through the one
+    revive entry (`[downed] owed return ... applied`). A refusal before the native funnel (`not ready`) is
+    checked again every 30 frames. The funnel itself runs at most once per receipt: applied, or a fault or
+    an incomplete revive retires it (`retired`), as do a wrong state or the spike off.
+  - When the event ends in a room change, the return is carried in the receipt (`returned`), not turned
+    into the generic resolve. The player comes back at 25% on the new room's first settled field frame
+    (`logical resolve after transition ... owed return`).
+  - Each use needs the session identity to read known and equal to the receipt's; unknown keeps the
+    receipt and authorizes nothing. Another known identity (0, the session's end, included) forgets it
+    (`owed return forgotten`), or, once carried, revokes it (`owed return revoked`), and the room change's
+    own rule applies instead: sit out, or resolve when everyone was down.
+  - A new downing or the full party's game over clears it, and a downing revived some other way forgets
+    it. The generic solo/Continue resolve is unchanged. This covers a downed host's own encounter return
+    too.
 - **What 2 means** (static analysis, VUH-2632; not observed live):
   - 2 is the script "command cage". It is set by `0x3AB690`, reached from BDX `trap_command_cage_on`
     (table 1 #117) or from a battle program flagged forced.

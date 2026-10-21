@@ -65,50 +65,119 @@ private:
 
 // Host side: the mission mirror's host detour counts mission_complete (trap 3 only, once per mission:
 // trap 22's end signal, a failure, a retry's load and a boss end never count). An edge is a count that
-// rose while the room generation stayed the same since the previous sample: a complete in the window of
-// a transition or load is not taken. Not limited to field play: the event that follows can start on the
-// next frame (run 20261021-164443: the last Dusk and mission_complete at host frame 5617, the event at 5618).
+// rose between two samples with the same room generation and with no transition or load window open at
+// either sample (Quill r3 R3: a window already open, its serials stable, or one that opened and was
+// aborted between them, is not proof the complete was in field play's generation). A count not taken is
+// consumed: it never becomes a later edge. Not limited to field play: the event that follows can start
+// on the next frame (run 20261021-164443: the last Dusk and mission_complete at host frame 5617, the
+// event at 5618).
 class MissionCompleteTracker {
 public:
-    bool Step(std::uint32_t completes, std::uint32_t transition, std::uint32_t load) noexcept {
-        const bool edge = sampled_ && completes != completes_ && transition == transition_ && load == load_;
+    bool Step(std::uint32_t completes, std::uint32_t transition, std::uint32_t load, bool windowOpen) noexcept {
+        const bool edge = sampled_ && completes != completes_ && transition == transition_ && load == load_ &&
+                          !window_ && !windowOpen;
         sampled_ = true;
         completes_ = completes;
         transition_ = transition;
         load_ = load;
+        window_ = windowOpen;
         return edge;
     }
 
 private:
-    bool sampled_ = false;
+    bool sampled_ = false, window_ = false;
     std::uint32_t completes_ = 0, transition_ = 0, load_ = 0;
 };
 
 // Target side: a return (an encounter defeat or a save point) that the relay delivered while this downed
 // player was in an event, where the owner's native revive refuses (InEvent). The relay and the owner gate
-// have consumed the episode by then, so the return is owed to this downing instead of lost: applied on
-// the first frame out of the event, or, when the event ends in a room change, the player comes back at 25%
-// in the next room instead of sitting out. One per downing; a partner revive (kind 0) is never owed; any
-// other refusal stays final. Keyed to the relay session's identity: another session forgets it.
+// have consumed the episode by then, so the return is owed to this downing instead of lost: a checked
+// receipt of the relay session's identity, kept for the downing's whole life (Quill r3 R1). One per
+// downing; a partner revive (kind 0) is never owed; any other refusal stays final.
+//   in the room       out of the event, the one revive entry is tried. Its native funnel runs at most
+//                     once per receipt: applied, a fault or an incomplete revive finish the receipt (Quill
+//                     r3 R2); a refusal before the funnel (not ready yet) is tried again kOwedRetryFrames
+//                     later; a wrong state or the spike off can never apply and finish it too;
+//   a room change     carried (the room change's decision is "returned"), not turned into the generic
+//                     resolve: the player comes back at 25% on the new room's first settled field frame.
+//   every use         a known identity equal to the receipt's authorizes it; unknown keeps the receipt and
+//                     authorizes nothing; another known identity (0, the session's end, included) forgets
+//                     it, or, once carried, revokes it to the room change's own rule (sit out, or resolve
+//                     when everyone was down);
+//   otherwise         a new downing or the full party's game over clears it; not downed and not carried
+//                     (revived some other way) forgets it.
+enum class AfterTransition : std::uint8_t { Resolve, SitOut };
+constexpr std::uint32_t kOwedRetryFrames = 30;
+enum class OwedOutcome : std::uint8_t { Applied, NotReady, Terminal };
+enum class OwedAction : std::uint8_t { None, Attempt, Resolve, Forgotten, RevokedSitOut, RevokedResolve };
+struct OwedFacts {
+    bool identityKnown = false;
+    std::uint64_t identity = 0;
+    bool downed = false;       // the downing is still held
+    bool applyReady = false;   // no event, no menu, no transition or load window
+    bool resolveReady = false; // the new room's first settled field frame (the resolve's own conditions)
+    std::uint32_t frame = 0;
+};
 class OwedReturn {
 public:
     bool Owe(std::uint8_t kind, bool refusedInEvent, bool identityKnown, std::uint64_t identity) noexcept {
         if (!kind || !refusedInEvent || !identityKnown || !identity || kind_) return false;
+        *this = {};
         kind_ = kind;
         identity_ = identity;
         return true;
     }
-    void SessionStep(bool identityKnown, std::uint64_t identity) noexcept {
-        if (kind_ && identityKnown && identity != identity_) *this = {};
+    // The room change: an owed return is carried; the plain decision is kept as its fallback.
+    bool AtTransition(AfterTransition plain) noexcept {
+        if (!kind_) return false;
+        carried_ = true;
+        fallback_ = plain;
+        return true;
+    }
+    OwedAction Frame(const OwedFacts& f) noexcept {
+        if (!kind_) return OwedAction::None;
+        if (f.identityKnown && f.identity != identity_) {
+            const bool carried = carried_;
+            const auto fallback = fallback_;
+            *this = {};
+            return !carried ? OwedAction::Forgotten
+                 : fallback == AfterTransition::SitOut ? OwedAction::RevokedSitOut : OwedAction::RevokedResolve;
+        }
+        if (!f.identityKnown) return OwedAction::None;
+        if (carried_) {
+            if (!f.resolveReady) return OwedAction::None;
+            *this = {};
+            return OwedAction::Resolve;
+        }
+        if (!f.downed) { *this = {}; return OwedAction::Forgotten; }
+        if (!f.applyReady || (waits_ && f.frame - lastWait_ < kOwedRetryFrames)) return OwedAction::None;
+        return OwedAction::Attempt;
+    }
+    void Attempted(OwedOutcome outcome, std::uint32_t frame) noexcept {
+        if (outcome != OwedOutcome::NotReady) { *this = {}; return; }
+        ++waits_;
+        lastWait_ = frame;
     }
     void Clear() noexcept { *this = {}; }
     [[nodiscard]] bool Owed() const noexcept { return kind_ != 0; }
+    [[nodiscard]] bool Carried() const noexcept { return carried_; }
     [[nodiscard]] std::uint8_t KindOwed() const noexcept { return kind_; }
 
 private:
     std::uint8_t kind_ = 0;
     std::uint64_t identity_ = 0;
+    std::uint32_t waits_ = 0, lastWait_ = 0;
+    bool carried_ = false;
+    AfterTransition fallback_ = AfterTransition::SitOut;
 };
+// The adapter's per-frame owed step (DownedSpike Tick, after the room change's decision and before the
+// generic resolve): the receipt's decision, then for Attempt the one revive entry, whose outcome
+// apply() reports. The adapter performs Resolve and the revocations; tests drive this same function.
+template <class Apply> OwedAction OwedTick(OwedReturn& owed, const OwedFacts& f, Apply&& apply) {
+    const auto action = owed.Frame(f);
+    if (action == OwedAction::Attempt) owed.Attempted(apply(), f.frame);
+    return action;
+}
 
 // A living seat at a save point (its settled, field-play reaction command).
 constexpr bool AtSavePoint(std::uint16_t settledReaction, bool localLiving) noexcept {
@@ -195,7 +264,6 @@ constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, boo
 //                return it, so it is resolved, as solo play was before D17.
 // A teammate seen earlier in the session but not during this downing is unavailable, not absent: the
 // player sits out, as when a teammate was up (Quill R1).
-enum class AfterTransition : std::uint8_t { Resolve, SitOut };
 enum class Disposition : std::uint8_t { Solo, FullParty, TeammateUp, Unavailable, Returned };
 struct TransitionDecision {
     AfterTransition after;
@@ -208,10 +276,11 @@ inline TransitionDecision SitOutAfterTransition(const DispositionLatch& old, boo
     return teammateSeenInSession ? TransitionDecision {AfterTransition::SitOut, Disposition::Unavailable}
                                  : TransitionDecision {AfterTransition::Resolve, Disposition::Solo};
 }
-// An owed return comes first: the encounter was won before the room changed.
-inline TransitionDecision AfterTransitionFor(bool returnOwed, const DispositionLatch& old, bool teammateSeenInSession) noexcept {
-    if (returnOwed) return {AfterTransition::Resolve, Disposition::Returned};
-    return SitOutAfterTransition(old, teammateSeenInSession);
+// An owed return comes first: the encounter was won before the room changed. It is carried in the
+// receipt (Resolve, "returned"), with the plain decision as the fallback should the session change.
+inline TransitionDecision AfterTransitionFor(OwedReturn& owed, const DispositionLatch& old, bool teammateSeenInSession) noexcept {
+    const auto plain = SitOutAfterTransition(old, teammateSeenInSession);
+    return owed.AtTransition(plain.after) ? TransitionDecision {AfterTransition::Resolve, Disposition::Returned} : plain;
 }
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {

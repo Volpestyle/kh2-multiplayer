@@ -346,46 +346,144 @@ int main() {
       CHECK(run(true, refused, delivered, requests) && refused == 0 && delivered == 1 && requests == 1);
       CHECK(run(false, refused, delivered, requests) && refused == 1 && delivered == 1 && requests == 2); }
 
-    // The host's mission_complete (lead #156): the count rising in one room generation is an encounter
-    // defeat; the first sample is a baseline; a rise across a transition or a load is not taken. Trap 22,
-    // a failure and a boss end leave the count unchanged (the detour counts trap 3 only), so never an edge.
+    // The host's mission_complete (lead #156): the count rising between two samples of one room generation,
+    // with no transition or load window open at either, is an encounter defeat; the first sample is a
+    // baseline. Trap 22, a failure and a boss end leave the count unchanged (the detour counts trap 3 only).
     { MissionCompleteTracker t;
-      CHECK(!t.Step(4, 10, 3));                            // baseline (missions completed before this host)
-      CHECK(!t.Step(4, 10, 3));                            // waves running
-      CHECK(t.Step(5, 10, 3));                             // mission_complete: the waves are beaten
-      CHECK(!t.Step(5, 10, 3));                            // once
-      CHECK(!t.Step(5, 11, 3));                            // the scripted room change: no count, no edge
-      CHECK(!t.Step(6, 12, 3));                            // a complete in a transition's window is not taken
-      CHECK(!t.Step(7, 12, 4));                            // nor in a load's (a retry)
-      CHECK(t.Step(8, 12, 4)); }                           // the next mission, in its own generation
+      CHECK(!t.Step(4, 10, 3, false));                     // baseline (missions completed before this host)
+      CHECK(!t.Step(4, 10, 3, false));                     // waves running
+      CHECK(t.Step(5, 10, 3, false));                      // mission_complete: the waves are beaten
+      CHECK(!t.Step(5, 10, 3, false));                     // once
+      CHECK(!t.Step(6, 11, 3, true));                      // a complete as the transition begins: not taken
+      CHECK(!t.Step(6, 11, 4, false));                     // the load completes
+      CHECK(!t.Step(7, 11, 5, false));                     // a complete across a load (a retry): not taken
+      CHECK(t.Step(8, 11, 5, false)); }                    // the next mission, in its own generation
+    // Regression (Quill r3 R3): a window already open at the previous sample with its serials stable, the
+    // count rising inside it, still open after: not an edge. And an aborted window (open, then closed
+    // with no serial change) whose count rose inside it: not an edge either. Neither count fires later.
+    { MissionCompleteTracker t;
+      CHECK(!t.Step(4, 10, 3, false));
+      CHECK(!t.Step(4, 11, 3, true));                      // BeginTransition: serial and pending together
+      CHECK(!t.Step(5, 11, 3, true));                      // stable serials, pending before and after
+      CHECK(!t.Step(5, 11, 3, true) && !t.Step(5, 11, 4, false) && !t.Step(5, 11, 4, false));
+      MissionCompleteTracker u;
+      CHECK(!u.Step(4, 10, 3, false));
+      CHECK(!u.Step(4, 10, 3, true));                      // a window opens with no serial change
+      CHECK(!u.Step(5, 10, 3, false));                     // aborted; the count rose inside it
+      CHECK(!u.Step(5, 10, 3, false) && !u.Step(5, 10, 3, false));
+      CHECK(u.Step(6, 10, 3, false)); }                    // a later, clean complete still counts
 
     // OwedReturn: only a return (kind 1 or 2) refused because the player is in an event, with a known
-    // session; one per downing; another session (or the session's end) forgets it; unknown keeps it.
+    // session; one per downing.
     { OwedReturn o;
       CHECK(!o.Owe(0, true, true, 0xA1) && !o.Owed());     // a partner revive is never owed
       CHECK(!o.Owe(1, false, true, 0xA1) && !o.Owed());    // any other refusal stays final
       CHECK(!o.Owe(1, true, false, 0) && !o.Owed());       // no session: nothing to be owed by
       CHECK(o.Owe(1, true, true, 0xA1) && o.Owed() && o.KindOwed() == 1);
-      CHECK(!o.Owe(2, true, true, 0xA1) && o.KindOwed() == 1); // one per downing: a second is not taken
-      o.SessionStep(false, 0); CHECK(o.Owed());            // identity unknown: kept
-      o.SessionStep(true, 0xA1); CHECK(o.Owed());          // the same session: kept
-      o.SessionStep(true, 0xB2); CHECK(!o.Owed());         // a replacement session: forgotten
-      CHECK(o.Owe(2, true, true, 0xB2)); o.SessionStep(true, 0); CHECK(!o.Owed()); // the session ended
-      CHECK(o.Owe(1, true, true, 0xB2)); o.Clear(); CHECK(!o.Owed()); }
+      CHECK(!o.Owe(2, true, true, 0xA1) && o.KindOwed() == 1); // a second is not taken
+      OwedFacts f; f.downed = true; f.applyReady = true;
+      f.identityKnown = false; CHECK(o.Frame(f) == OwedAction::None && o.Owed());   // unknown authorizes nothing
+      f.identityKnown = true; f.identity = 0xA1; CHECK(o.Frame(f) == OwedAction::Attempt);
+      f.identity = 0xB2; CHECK(o.Frame(f) == OwedAction::Forgotten && !o.Owed());    // another session
+      CHECK(o.Owe(1, true, true, 0xB2)); f.identity = 0; CHECK(o.Frame(f) == OwedAction::Forgotten); // ended
+      CHECK(o.Owe(1, true, true, 0xB2)); f.identity = 0xB2; f.downed = false;
+      CHECK(o.Frame(f) == OwedAction::Forgotten && !o.Owed());                       // revived some other way
+      CHECK(o.Owe(1, true, true, 0xB2)); f.downed = true; f.applyReady = false;
+      CHECK(o.Frame(f) == OwedAction::None && o.Owed()); }                           // still in the event
 
-    // An owed return resolves the room change before any sit-out disposition, the full party's included.
+    // Regression (Quill r3 R2): the native funnel runs at most once per receipt. The adapter's step
+    // (OwedTick) with a stand-in for TryRevive's logical path: a fault or an incomplete revive while still
+    // logically downed finishes the receipt, and no later frame calls the funnel again. Refusals before the
+    // funnel (not ready) are tried again kOwedRetryFrames apart and do not count as native applications.
+    { auto owedRun = [](OwedOutcome nativeResult, unsigned notReadyFirst, unsigned& funnelCalls, unsigned& checks) {
+          OwedReturn owed; CHECK(owed.Owe(1, true, true, 0xA1));
+          funnelCalls = checks = 0;
+          for (std::uint32_t frame = 1000; frame < 1600; ++frame) {
+              OwedFacts f; f.identityKnown = true; f.identity = 0xA1; f.downed = true; // the hold never ends
+              f.applyReady = true; f.frame = frame;
+              (void)OwedTick(owed, f, [&] {
+                  ++checks;
+                  if (checks <= notReadyFirst) return OwedOutcome::NotReady;   // TryRevive refused before the funnel
+                  ++funnelCalls;                                               // ReviveLogical's stat funnel
+                  return nativeResult;
+              });
+          }
+          return owed.Owed(); };
+      unsigned calls = 0, checks = 0;
+      CHECK(!owedRun(OwedOutcome::Terminal, 0, calls, checks) && calls == 1 && checks == 1);  // fault or incomplete
+      CHECK(!owedRun(OwedOutcome::Terminal, 3, calls, checks) && calls == 1 && checks == 4);
+      CHECK(!owedRun(OwedOutcome::Applied, 0, calls, checks) && calls == 1 && checks == 1);   // the one success
+      CHECK(!owedRun(OwedOutcome::Applied, 2, calls, checks) && calls == 1 && checks == 3);
+      // Not ready the whole time: checked every kOwedRetryFrames, the funnel never reached.
+      CHECK(owedRun(OwedOutcome::Applied, 1000, calls, checks) && calls == 0 && checks == 600 / kOwedRetryFrames); }
+
+    // An owed return resolves the room change before any sit-out disposition, the full party's included,
+    // and is carried (no in-room attempts) with the plain decision kept as its fallback.
     { DispositionLatch up; up.Observe(1, 0);
       DispositionLatch all; all.Observe(1, 1);
       DispositionLatch none;
       for (const auto* l : {&up, &all, &none})
           for (const bool seen : {true, false}) {
-              const auto d = AfterTransitionFor(true, *l, seen);
-              CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Returned);
-              const auto plain = AfterTransitionFor(false, *l, seen);
+              OwedReturn owed; CHECK(owed.Owe(1, true, true, 0xA1));
+              const auto d = AfterTransitionFor(owed, *l, seen);
+              CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Returned && owed.Carried());
+              OwedFacts f; f.identityKnown = true; f.identity = 0xA1; f.applyReady = true; // no in-room attempt
+              CHECK(owed.Frame(f) == OwedAction::None);
+              OwedReturn notOwed;
+              const auto plain = AfterTransitionFor(notOwed, *l, seen);
               const auto sit = SitOutAfterTransition(*l, seen);
-              CHECK(plain.after == sit.after && plain.why == sit.why);
+              CHECK(plain.after == sit.after && plain.why == sit.why && !notOwed.Carried());
+              f.identity = 0xB2;                            // the session changes before the new room's field
+              CHECK(owed.Frame(f) == (sit.after == AfterTransition::SitOut ? OwedAction::RevokedSitOut
+                                                                            : OwedAction::RevokedResolve) && !owed.Owed());
           }
       CHECK(std::string_view(DispositionName(Disposition::Returned)) == "returned"); }
+
+    // Regression (Quill r3 R1), in the adapter's order: the room change's decision (HoldLost), then each
+    // frame the owed step, the adapter's handling of its action, then the generic resolve. Session A's
+    // return is owed in the event and carried by the room change; the new room's first settled field frame
+    // is 60.
+    //   replaced   session B (or the session's end) before frame 60: revoked to the room change's own rule
+    //              (the host was up: sit out); nothing heals the friend in B;
+    //   unknown    the identity reads unknown over frames 50-80: no resolve until it reads A again (81);
+    //   downed     a new downing at 40 (BeginDowned clears the receipt), then a partner revive: no owed
+    //              resolve later, and no generic resolve either;
+    //   same       the normal same-session return: one resolve at 60.
+    { enum class Case { Replaced, Ended, Unknown, Downed, Same };
+      for (const Case c : {Case::Replaced, Case::Ended, Case::Unknown, Case::Downed, Case::Same}) {
+          OwedReturn owed; DispositionLatch old; old.Observe(1, 0);
+          CHECK(owed.Owe(1, true, true, 0xA1));
+          const auto d = AfterTransitionFor(owed, old, true);
+          const bool carried = d.why == Disposition::Returned;
+          bool resolvePending = d.after == AfterTransition::Resolve && !carried;
+          bool sitOutPending = d.after == AfterTransition::SitOut, downed = false;
+          unsigned owedResolves = 0, genericResolves = 0, firstResolve = 0;
+          CHECK(carried && !resolvePending && !sitOutPending);
+          for (std::uint32_t frame = 1; frame < 160; ++frame) {
+              if (c == Case::Downed && frame == 40) { owed.Clear(); downed = true; }   // BeginDowned
+              if (c == Case::Downed && frame == 45) downed = false;                    // a partner revive
+              OwedFacts f; f.frame = frame; f.downed = downed;
+              f.identityKnown = !(c == Case::Unknown && frame >= 50 && frame <= 80);
+              f.identity = c == Case::Replaced && frame >= 30 ? 0xB2 : c == Case::Ended && frame >= 30 ? 0 : 0xA1;
+              f.resolveReady = !downed && frame >= 60;
+              f.applyReady = f.resolveReady;
+              const auto action = OwedTick(owed, f, [] { return OwedOutcome::Applied; });
+              if (action == OwedAction::Resolve) { ++owedResolves; firstResolve = frame; }
+              if (action == OwedAction::RevokedSitOut || action == OwedAction::RevokedResolve) {
+                  sitOutPending = action == OwedAction::RevokedSitOut;
+                  resolvePending = !sitOutPending;
+              }
+              if (resolvePending && f.resolveReady) { resolvePending = false; ++genericResolves; }
+          }
+          switch (c) {
+          case Case::Replaced: case Case::Ended:
+              CHECK(owedResolves == 0 && genericResolves == 0 && sitOutPending); break;
+          case Case::Unknown: CHECK(owedResolves == 1 && firstResolve == 81 && genericResolves == 0); break;
+          case Case::Downed: CHECK(owedResolves == 0 && genericResolves == 0 && !sitOutPending); break;
+          case Case::Same: CHECK(owedResolves == 1 && firstResolve == 60 && genericResolves == 0); break;
+          }
+          CHECK(!owed.Owed());
+      } }
 
     // Regression (run 20261021-164443, FM-02 Basement Hall): the friend (slot 1) is downed in wave 1 and
     // nobody revives it. The host kills wave 2 at frame 5617: mission_complete, and the cage stays 2. The
@@ -394,9 +492,9 @@ int main() {
     // cage to clear. Before: no edge, and the friend sat out into the Twilight Thorn fight. Now: the edge
     // arms at 5617 with the friend's claim and the living host's request goes out; the relay delivers it
     // 3 frames later, in the friend's event, where the native revive refuses (InEvent): it is owed, and
-    // either the field frame between the events applies it or the room change returns the friend at 25%.
-    // The relay consumes the episode once: the host's retries while the pose still shows it downed are
-    // refused there. Each frame models the owner's order: identity, transition decision, owed apply.
+    // either the field frame between the events applies it or the room change carries it and the friend
+    // comes back at 25% on the new room's first settled field frame (7350 here). The relay consumes the
+    // episode once: the host's retries while the pose still shows it downed are refused there.
     { const std::uint64_t session = 0xA1, episode = 0x735A5EA000000001ULL, connection = 0x101;
       for (const bool missionEdge : {true, false})
       for (const bool gap : {true, false}) {
@@ -409,12 +507,13 @@ int main() {
           unsigned sent = 0, delivered = 0;
           for (std::uint32_t frame = 5600; frame < 7400; ++frame) {
               const bool hostEvent = frame >= 5618 && !(gap && frame == 5888);
-              const bool friendEvent = frame >= 5619 && !(gap && frame == 5889);
+              const bool friendEvent = frame >= 5619 && !(gap && frame == 5889) && frame < 7350;
+              const bool window = frame >= 7300 && frame < 7340;
               if (frame == 5617 && missionEdge) ++completes;
               if (frame == 7300) ++transition;                     // the event's room change (BeginTransition)
-              // The friend (target owner), first in its frame.
+              if (frame == 7340) ++load;                           // the new room's load completes
+              // The friend (target owner).
               teammates.Step(true, session, 1);
-              owed.SessionStep(true, session);
               if (arrival && frame == arrival) {                   // the relay: one return per episode
                   arrival = 0;
                   if (!consumed && friendHeld) {
@@ -425,16 +524,19 @@ int main() {
                   }
               }
               if (friendHeld && frame == 7300) {                   // the hold is lost to the room change
-                  const auto d = AfterTransitionFor(owed.Owed(), disposition, teammates.Seen());
-                  owed.Clear();
+                  const auto d = AfterTransitionFor(owed, disposition, teammates.Seen());
                   friendHeld = false;
-                  if (d.after == AfterTransition::SitOut) sat = true; else returned = d.why == Disposition::Returned;
+                  if (d.after == AfterTransition::SitOut) sat = true;
               }
-              if (friendHeld && owed.Owed() && !friendEvent) { friendHeld = false; appliedInRoom = true; owed.Clear(); }
+              OwedFacts f; f.identityKnown = true; f.identity = session; f.frame = frame; f.downed = friendHeld;
+              f.applyReady = !friendEvent && !window; f.resolveReady = !friendHeld && !friendEvent && !window;
+              const auto action = OwedTick(owed, f, [] { return OwedOutcome::Applied; });
+              if (action == OwedAction::Attempt) { friendHeld = false; appliedInRoom = true; }
+              if (action == OwedAction::Resolve) returned = true;
               // The host's ReturnTick.
               living.Step(true);
               const bool byCage = cage.Step(2, transition, load, !hostEvent);
-              const bool byMission = mission.Step(completes, transition, load);
+              const bool byMission = mission.Step(completes, transition, load, window);
               if ((byCage || byMission) && !pending.Armed()) {
                   pending.Arm(transition, load);
                   CHECK(pending.Claim({1, connection, episode}));
@@ -448,7 +550,7 @@ int main() {
                   });
           }
           if (missionEdge) {
-              CHECK(sent >= 1 && sent <= kReturnAttempts && delivered == 1 && !sat);
+              CHECK(sent >= 1 && sent <= kReturnAttempts && delivered == 1 && !sat && !owed.Owed());
               CHECK(gap ? appliedInRoom && !returned : returned && !appliedInRoom);
           } else {
               CHECK(sent == 0 && delivered == 0 && sat && !returned && !appliedInRoom); // the gap, reproduced
