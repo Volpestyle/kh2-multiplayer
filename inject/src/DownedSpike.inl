@@ -426,8 +426,21 @@ static void BeginDowned(uintptr_t actor, int hp, uint32_t mode) {
     g_down.downingTransition = warp::TransitionSerial();
     g_down.downingLoad = warp::LoadSerial();
     if (!enemysync::SessionIdentity(g_down.downingSession)) g_down.downingSession = 0;
-    g_down.encounterKnown = enemysync::ActivationRole() == 2 && enemysync::CurrentHostMission(g_down.encounterFile);
-    if (!g_down.encounterKnown) std::memset(g_down.encounterFile, 0, sizeof(g_down.encounterFile));
+    {
+        // VUH-2656/2660: the encounter this seat goes down in: the host's current mission, else its own
+        // native mission (downed before the host's first MissionState for it), else unknown.
+        char hostFile[24] {}, localFile[24] {};
+        const bool client = enemysync::ActivationRole() == 2;
+        const bool hostCurrent = client && enemysync::CurrentHostMission(hostFile);
+        const bool localReadable = client && !hostCurrent && enemysync::LocalNativeMission(localFile);
+        const auto source = downedreturn::EncounterAtDowning(hostCurrent, localReadable);
+        g_down.encounterKnown = source != downedreturn::EncounterSource::Unknown;
+        std::memcpy(g_down.encounterFile, source == downedreturn::EncounterSource::Host ? hostFile : localFile,
+                    sizeof(g_down.encounterFile));
+        if (client)
+            Log("[downed] encounter at downing source=%s file=%s frame=%u", downedreturn::EncounterSourceName(source),
+                g_down.encounterKnown ? g_down.encounterFile : "-", g_frameCounter);
+    }
     g_down.episodeFrames = 0;
     g_down.hitAttempts = g_down.enemyHits = g_down.hitLogs = g_down.holdLost = 0;
     g_down.inputFrames = g_down.noInputFrames = 0;

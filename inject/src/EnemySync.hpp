@@ -177,6 +177,9 @@ using DowningProbeFn = std::uint64_t (*)();
 void SetDowningProbe(DowningProbeFn probe) noexcept;
 // On a client: the host's mission running in this room now (admitted, current, active, not ended).
 bool CurrentHostMission(char (&file)[24]) noexcept;
+// VUH-2660: on a client, this seat's own native mission now (its mission pointer set and readable, not
+// ended): its file. The client runs the same mission script as the host.
+bool LocalNativeMission(char (&file)[24]) noexcept;
 // Capture once at the native observation. Retained work must send that context;
 // a newer header never grants permission to relabel an old packet.
 bool CaptureWorldContext(ProducerWorldContext& context);

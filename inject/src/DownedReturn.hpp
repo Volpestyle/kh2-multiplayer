@@ -188,6 +188,26 @@ private:
 //   delivery) still current, with the session the downing's (a replacement session cannot inherit it);
 //   the mission is the one the host was running here when the downing began (captured then; unknown fails
 //   closed), and the end's room is the downing's room.
+// VUH-2660: where this downing's encounter (the mission an end must match) comes from, at BeginDowned. The
+// host's current mission first (its admitted, current MissionState). When no current host packet exists
+// yet, a seat downed in a mission's first moments (before the host's first MissionState for it arrives:
+// run 20261021-184352, where the encounter was unknown and the return failed closed) takes its own native
+// mission at the downing: the client runs the same mission script, so that is the encounter it went down
+// in. Neither (no readable, unended native mission either): unknown, which grants nothing. The host's end
+// must still match the captured file.
+enum class EncounterSource : std::uint8_t { Unknown, Host, Local };
+constexpr EncounterSource EncounterAtDowning(bool hostCurrent, bool localReadable) noexcept {
+    return hostCurrent ? EncounterSource::Host : localReadable ? EncounterSource::Local : EncounterSource::Unknown;
+}
+constexpr const char* EncounterSourceName(EncounterSource s) noexcept {
+    switch (s) {
+    case EncounterSource::Unknown: return "unknown";
+    case EncounterSource::Host: return "host";
+    case EncounterSource::Local: return "local";
+    }
+    return "?";
+}
+
 enum class HostEndVerdict : std::uint8_t {
     Owes, NotDowned, OtherDowning, Window, OtherGeneration, OtherSession, UnknownEncounter, OtherEncounter, OtherRoom
 };

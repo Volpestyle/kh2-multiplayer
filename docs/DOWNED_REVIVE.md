@@ -393,7 +393,10 @@ boss/encounter defeat or a save point.
   It is this downing's only when that same downing is still held (an episode remint is not a new one),
   no transition or load window was open at admission, the room generation is the downing's and unchanged,
   the producer and the session are still the ones at admission and at the downing, and the mission is the
-  one the host was running here when the downing began (captured then; unknown fails closed). Then it owes
+  one the host was running here when the downing began (captured then; unknown fails closed). A seat
+  downed before the host's first MissionState for its mission arrives (VUH-2660, run `20261021-184352`)
+  captures its own native mission at the downing instead, since the client runs the same mission script
+  (`[downed] encounter at downing source=host|local|unknown`); with neither, nothing is owed. Then it owes
   the return (`verdict=owes owed=1`): the same receipt as a relayed return, applied out of the event or
   carried through the room change to 25% on the next room's first settled field frame; another session
   revokes it. Any other verdict grants nothing, and that end is never judged again.

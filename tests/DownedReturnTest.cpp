@@ -598,6 +598,7 @@ int main() {
           std::uint64_t session = 0xA1, conn = 0x100; std::uint32_t generation = 5, transition = 2, load = 3, delivery = 1;
           bool window = false, identityKnown = true; std::uint16_t room = 19;
           std::string hostMission = "TT19_MS602.bar"; bool hostMissionCurrent = true;
+          std::string localMission = "TT19_MS602.bar"; bool localReadable = false; // VUH-2660
           // The downed owner.
           bool downed = false; std::uint64_t downingSerial = 0, downingSession = 0;
           std::uint32_t downingTransition = 0, downingLoad = 0; std::uint16_t downingRoom = 0;
@@ -608,7 +609,10 @@ int main() {
           void Hit() {                                          // BeginDowned (a native lethal hit)
               downed = true; ++downingSerial; owed.Clear();
               downingTransition = transition; downingLoad = load; downingSession = identityKnown ? session : 0;
-              downingRoom = room; encounterKnown = hostMissionCurrent; encounter = hostMissionCurrent ? hostMission : "";
+              downingRoom = room;
+              const auto source = EncounterAtDowning(hostMissionCurrent, !hostMissionCurrent && localReadable);
+              encounterKnown = source != EncounterSource::Unknown;
+              encounter = source == EncounterSource::Host ? hostMission : source == EncounterSource::Local ? localMission : "";
           }
           void Revive() { downed = false; owed.Clear(); }      // a partner revive (receipt forgotten next step)
           void Receive(const std::string& file) {               // ReceiveMission: end trap turned 3
@@ -674,6 +678,27 @@ int main() {
         CHECK(w.last == HostEndVerdict::OtherGeneration && w.grants == 0); }
       { Sim w; w.Hit(); w.Tick(); w.window = true; w.Receive("TT19_MS602.bar"); w.window = false; w.Tick();
         CHECK(w.last == HostEndVerdict::Window && w.grants == 0); }
+      // VUH-2660 (run 20261021-184352): downed before the host's first MissionState for the mission. Its own
+      // native mission at the downing is the encounter, and the host's end for that mission returns it.
+      { Sim w; w.hostMissionCurrent = false; w.localReadable = true; w.Hit(); w.Tick();
+        w.hostMissionCurrent = true; w.Receive("TT19_MS602.bar"); w.Tick();
+        CHECK(w.encounter == "TT19_MS602.bar" && w.last == HostEndVerdict::Owes && w.grants == 1); }
+      // Its own mission unreadable or ended too: unknown, nothing (the v33 failure, now only without either).
+      { Sim w; w.hostMissionCurrent = false; w.localReadable = false; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.Tick();
+        CHECK(w.last == HostEndVerdict::UnknownEncounter && w.grants == 0); }
+      // Its own mission is another one than the host's end: nothing.
+      { Sim w; w.hostMissionCurrent = false; w.localReadable = true; w.localMission = "TT19_MS601.bar"; w.Hit(); w.Tick();
+        w.Receive("TT19_MS602.bar"); w.Tick();
+        CHECK(w.last == HostEndVerdict::OtherEncounter && w.grants == 0); }
+      // A current host packet takes precedence over the native read (the host's mission is the session's).
+      { Sim w; w.localReadable = true; w.localMission = "TT19_MS601.bar"; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.Tick();
+        CHECK(w.encounter == "TT19_MS602.bar" && w.last == HostEndVerdict::Owes && w.grants == 1); }
+      // The early downing keeps every other 4b binding: an end admitted before the downing still names none.
+      { Sim w; w.hostMissionCurrent = false; w.localReadable = true; w.Receive("TT19_MS602.bar"); w.Hit(); w.Tick();
+        CHECK(w.last == HostEndVerdict::OtherDowning && w.grants == 0); }
+      CHECK(EncounterAtDowning(true, true) == EncounterSource::Host && EncounterAtDowning(true, false) == EncounterSource::Host &&
+            EncounterAtDowning(false, true) == EncounterSource::Local && EncounterAtDowning(false, false) == EncounterSource::Unknown);
+      CHECK(std::string_view(EncounterSourceName(EncounterSource::Local)) == "local");
       // A resend of the same end is no new record (ReceiveMission counts an end trap that turned 3), and the
       // seen serial stops a second judgement across a same-session liveness gap.
       { Sim w; w.Hit(); w.Tick(); w.Receive("TT19_MS602.bar"); w.Tick();
