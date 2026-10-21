@@ -31,6 +31,8 @@ struct State {
     bool removed{}; // authenticated non-death retirement; never reusable as a new ID
     // VUH-2584: the ID this body was bound to when the census was last held (gameplay gate closed).
     int held{};
+    // VUH-2550: the current binding came from only-unmatched-of-its-kind (no point match ever).
+    bool byKind{};
 };
 struct Local {
     Identity identity{};
@@ -52,7 +54,8 @@ struct Host {
     bool left{}; // host disappeared alive: finish the established body's leave before a refill
     bool claimed{}; // some local body of this instance has already carried this ID
 };
-enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath, Retired, Relabel, UnseenDeath };
+enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath, Retired, Relabel, UnseenDeath,
+                    UniqueKind };
 inline const char* Name(Reason r) noexcept {
     switch (r) {
     case Reason::Retired: return "authenticated-membership-retired";
@@ -65,6 +68,7 @@ inline const char* Name(Reason r) noexcept {
     case Reason::Live: return "newest-live-point";
     case Reason::BoundDeath: return "established-death";
     case Reason::UnseenDeath: return "death-before-first-sighting";
+    case Reason::UniqueKind: return "only-unmatched-of-its-kind";
     }
     return "unknown";
 }
@@ -105,6 +109,41 @@ inline bool HeldContinuous(const Local& l, Scope now) noexcept {
            now.load && p.scope.load == now.load && now.frame > p.scope.frame;
 }
 
+// VUH-2550: a body the game placed differently on each seat (the Back Alley ambush's late 309) never
+// matches a host point. It is still that enemy when it is the only fresh, never-bound, unharmed living
+// body of its kind here without a point match, and the host has exactly one living, never-claimed entry
+// of that kind without a local point match. Point matches always win; anything ambiguous stays unbound.
+inline bool FreshBody(const Local& l) noexcept {
+    return l.living && l.unharmed && l.available && !l.birthId && !l.certificateRequired &&
+           l.identity.controller && l.identity.record &&
+           !l.prior.bound && !l.prior.highWater && !l.prior.terminal && !l.prior.removed;
+}
+inline int UniqueKindId(std::span<const Local> locals, std::span<const Host> hosts, std::size_t i) noexcept {
+    const auto& l = locals[i];
+    if (!FreshBody(l)) return 0;
+    const auto pointMatched = [&](const Local& a) {
+        for (const auto& h : hosts)
+            if (!h.removed && h.id > 0 && h.objectId == a.identity.objectId && SamePoint(h.point, a.point)) return true;
+        return false;
+    };
+    if (pointMatched(l)) return 0;
+    for (std::size_t j = 0; j < locals.size(); ++j) {
+        if (j == i || locals[j].identity.objectId != l.identity.objectId || !locals[j].living) continue;
+        if (!pointMatched(locals[j])) return 0;  // another unmatched living body of this kind: ambiguous
+    }
+    int id = 0;
+    for (const auto& h : hosts) {
+        if (h.removed || h.dead || h.left || h.claimed || h.id <= 0 || h.objectId != l.identity.objectId) continue;
+        bool matched = false;
+        for (const auto& o : locals)
+            if (o.identity.objectId == h.objectId && SamePoint(h.point, o.point)) { matched = true; break; }
+        if (matched) continue;
+        if (id) return 0;  // two unmatched host entries of this kind: ambiguous
+        id = h.id;
+    }
+    return id;
+}
+
 // Whole-census, order-independent selection; no native writes or spawn creation.
 // All claimants of a nonunique live ID are held, including an old incumbent.
 inline std::vector<Decision> Resolve(std::span<const Local> locals,
@@ -141,7 +180,29 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
                 }
             }
         }
-        if (!best) { d.reason = Reason::NoPoint; continue; }
+        // VUH-2550: a body bound without a point match (only-unmatched-of-its-kind) keeps its host entry
+        // while it stays continuously bound to it (or held through a closed gate) and no other local body
+        // point-matches that entry.
+        if (!best && l.prior.byKind && !l.birthId && !l.certificateRequired) {
+            const int keep = l.prior.bound > 0 && Continuous(l,now) ? l.prior.bound
+                           : l.prior.held > 0 && HeldContinuous(l,now) ? l.prior.held : 0;
+            for (const auto& h : hosts) {
+                if (!keep || h.id != keep || h.removed || h.objectId != l.identity.objectId) continue;
+                bool other = false;
+                for (std::size_t j = 0; j < locals.size(); ++j)
+                    if (j != i && locals[j].identity.objectId == h.objectId && SamePoint(h.point, locals[j].point)) other = true;
+                if (!other) best = &h;
+                break;
+            }
+        }
+        if (!best) {
+            if (const int unique = UniqueKindId(locals, hosts, i)) {
+                d.candidate = unique; d.id = unique; d.reason = Reason::UniqueKind;
+            } else {
+                d.reason = Reason::NoPoint;
+            }
+            continue;
+        }
         d.candidate = best->id;
         if(l.prior.highWater>0 && best->id!=l.prior.highWater){d.reason=Reason::Relabel;continue;}
         if (!l.available) continue; // retain the candidate for whole-census conflict detection
@@ -182,7 +243,11 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
             }
         }
     }
-    for (auto& d : out) {
+    for (std::size_t i=0; i<out.size(); ++i) {
+        auto& d = out[i];
+        const auto& p = locals[i].prior;
+        d.next.byKind = d.id > 0 && (d.reason == Reason::UniqueKind ||
+                                     (p.byKind && (d.id == p.bound || d.id == p.held)));
         if (d.id > 0 && d.reason == Reason::BoundDeath && !d.next.living)
             d.next.terminal = true;
         d.next.bound = d.id;

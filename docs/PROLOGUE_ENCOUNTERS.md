@@ -50,7 +50,7 @@ readings, confirmed only where the live column says so.
 | 5 | 05 Sandlot (Struggle) | 86 | `TT05_MS403` | 3 Dusks (318) | time-stop Dusks | checked site `tt05-86`; both seats fight, loopback from FM-01 (below) |
 | 5 | 05 Sandlot (Struggle) | 87 | `TT05_MS404` | B_EX110_SKIRMISH (2229), Axel | boss skirmish | checked site `tt05-87`; both seats fight, loopback from FM-01 (below) |
 | 5 | 05 Sandlot (Struggle) | 88 | `TT05_MS405` | N_EX600_BTL (2095) | Struggle match | checked site `tt05-88`; both seats fight, loopback from FM-01 (below) |
-| 6 | 03 Back Alley | 73 | `TT03_MS601` | 2 Dusks (318), 1 Dusk (309) | Dusk ambush | checked site `tt03-73`; loopback from FM-01, both seats fight; the 309 does not bind (below) |
+| 6 | 03 Back Alley | 73 | `TT03_MS601` | 2 Dusks (318), 1 Dusk (309) | Dusk ambush | checked site `tt03-73`; loopback from FM-01, both seats fight; the late 309 binds by kind (VUH-2550, below) |
 | 6 | 19 Basement Hall | 134 | `TT19_MS602` | 4 Dusks (318), then 2 (309) | Mansion Dusk ambush | checked site `tt19-134`; loopback from FM-02 |
 | 6 | 20 Basement Hall | 137 | `TT20_MS603` | B_EX110 (81), Axel | Axel I | loopback, VUH-2465 |
 
@@ -94,6 +94,11 @@ From FM-01 (2026-10-20, PC1 loopback, VUH-2466):
   copy fails the ordinary 8-unit point binding (`no-point-match`), so it stays unbound with unscaled
   HP, and the relay flags an enemy-hash desync (VUH-2550). That is the native placement divergence that record
   binding (`docs/ENEMY_RECORD_BINDING.md`) addresses, not a prologue-layout effect.
+- VUH-2550: the ordinary binder now binds a body by kind when it is the only fresh, never-bound,
+  unharmed living body of its kind with no point match and the host has exactly one living,
+  never-claimed entry of that kind without one (`only-unmatched-of-its-kind`), and keeps that binding
+  while it stays continuous. In run `20261021-025442` the friend's 309 bound at once, took the host's
+  death, and the relay raised no desync.
 
 From New Game (2026-10-20, PC1 loopback, VUH-2466):
 - The Day 1 bat duel starts from the Struggle bats lying in the Sandlot (`W_EX010_U0/V0/W0_RTN`).

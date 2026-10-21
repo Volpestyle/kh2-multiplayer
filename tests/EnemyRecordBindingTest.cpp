@@ -65,6 +65,55 @@ void OrdinaryHeldDeath() {
     }
 }
 
+// VUH-2550: the Back Alley ambush's late 309 spawns at a different point on each seat. The only fresh
+// unmatched body of its kind binds to the only unmatched living host entry of its kind; nothing else.
+void OrdinaryUniqueKind() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const ob::Identity a{0x1000,0x2000,0x3000,0x4000,0x5000,309}, b{0x1100,0x2100,0x3100,0x4000,0x5040,309},
+        dusk{0x1200,0x2200,0x3200,0x4000,0x5080,318};
+    const ob::Local fresh{a,{104,-26,346},{},true,true,false,0,0,true};
+    const ob::Host host{3,309,{-29,0,-134},false};
+    const ob::Scope now{2,2,500,6};
+    auto one=[&](std::vector<ob::Local> ls,std::vector<ob::Host> hs){return ob::Resolve(ls,hs,now);};
+    auto d=one({fresh},{host});
+    check("unique: the late 309 binds by kind",d[0].id==3 && d[0].reason==ob::Reason::UniqueKind);
+    {   // The next frames keep it; its death still applies through the continuous binding.
+        auto next=fresh; next.prior=d[0].next; next.unharmed=false;  // it has since been hit
+        const auto d2=ob::Resolve(std::array{next},std::array{host},ob::Scope{2,2,501,6});
+        check("unique: the kind binding continues on the next frame",d2[0].id==3 && d2[0].reason==ob::Reason::Live);
+        auto later=next; later.prior=d2[0].next;
+        auto deadHost=host; deadHost.dead=true;
+        const auto d3=ob::Resolve(std::array{later},std::array{deadHost},ob::Scope{2,2,502,6});
+        check("unique: the host's death applies to the kind-bound body",d3[0].id==3 && d3[0].reason==ob::Reason::BoundDeath);
+        auto gap=later; gap.prior=d2[0].next;
+        const auto d4=ob::Resolve(std::array{gap},std::array{host},ob::Scope{2,2,505,6});
+        check("unique: a missed frame (no hold) does not keep it",d4[0].id==0);
+    }
+    // A point-matched 318 alongside changes nothing.
+    const ob::Local duskLocal{dusk,{10,0,10},{},true,true,false,0,0,true};
+    d=one({fresh,duskLocal},{host,ob::Host{1,318,{10,0,10},false}});
+    check("unique: other kinds keep point binding",d[0].id==3 && d[1].id==1 && d[1].reason==ob::Reason::Live);
+    auto second=fresh; second.identity=b; second.point={500,0,500};
+    d=one({fresh,second},{host});
+    check("unique: two unmatched local 309s stay unbound",d[0].id==0 && d[1].id==0);
+    d=one({fresh},{host,ob::Host{4,309,{900,0,900},false}});
+    check("unique: two unmatched host 309s stay unbound",d[0].id==0);
+    auto hurt=fresh; hurt.unharmed=false;
+    check("unique: a damaged body is not fresh",one({hurt},{host})[0].id==0);
+    auto seen=fresh; seen.prior.highWater=2;
+    check("unique: a body that carried another ID is not fresh",one({seen},{host})[0].id==0);
+    auto claimed=host; claimed.claimed=true;
+    check("unique: a host ID already carried here is not offered",one({fresh},{claimed})[0].id==0);
+    auto dead=host; dead.dead=true;
+    check("unique: a dead host entry is not offered",one({fresh},{dead})[0].id==0);
+    auto ticket=fresh; ticket.birthId=7;
+    check("unique: a birth-ticket body keeps its own rule",one({ticket},{host})[0].reason!=ob::Reason::UniqueKind);
+    // A point match elsewhere for this host entry wins over the kind rule.
+    auto near=second; near.point=host.point;
+    d=one({fresh,near},{host});
+    check("unique: a point match takes the host entry; the far body stays unbound",d[1].id==3 && d[0].id==0);
+}
+
 // Copied-fact production resolver controls; no native memory, writes or hooks.
 void OrdinaryTerminalControls() {
     namespace ob=kh2coop::inject::ordinarybinding;
@@ -321,6 +370,7 @@ int main(int argc,char** argv) {
     OrdinaryLifecycleControls();
     OrdinaryTerminalControls();
     OrdinaryHeldDeath();
+    OrdinaryUniqueKind();
     (void)argc; (void)argv;
     for (auto oid:{317u,76u}) {
         Fixture f(oid);check("first exact complete population",f.run().admitted);
