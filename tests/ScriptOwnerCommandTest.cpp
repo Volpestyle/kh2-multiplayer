@@ -301,90 +301,113 @@ int main() {
         h=line(true);
         check(reads.empty() && !h.actorRead,"post-cancel stays metadata only");
     }
-    // bots05 attempt04 (run 20261022-112719), friend role 2147483676 at frame 17301, from its release line:
-    // outcome=guards d48=0 capture=0 bank=0 parent=0 anchorOwn=1 motion=263 action ACTION_IDLE. The role had installed
-    // motion 263 on the friend's own actor through the own-bank path; nothing reset it.
-    {
-        R::OwnMotionResetFacts left{};
-        left.friendLocal=true;left.outcome=R::ReleaseCleanup::Guards;left.releaseStage=true;left.sessionCurrent=true;
-        left.field=true;left.actorProven=true;left.actorRead=true;left.roleFree=true;left.anchorOwn=true;
-        left.installed=263;left.motion=263;
-        const char* why="";
-        const auto is=[&](R::OwnMotionResetFacts f,bool want,const char* reason){
-            return R::DecideOwnMotionReset(f,why)==want && std::string(why)==reason;};
-        check(is(left,true,"own-install-left"),"attempt04: this role's own-bank 263 still on the actor at a guards release: reset to idle once");
-        auto f=left;f.friendLocal=false;
-        check(is(f,false,"not-friend-local"),"the host's own actor and other seats are never reset");
-        f=left;f.outcome=R::ReleaseCleanup::Cleaned;
-        check(is(f,false,"cleaned"),"a release whose native detach/idle ran is left to it");
-        f=left;f.releaseStage=false;
-        check(is(f,false,"not-release-stage"),"post-cancel or refused releases never act");
-        f=left;f.installed=0xFFFFFFFFu;
-        check(is(f,false,"no-own-install"),"a role that installed nothing on the actor proves no continuity");
-        f=left;f.sessionCurrent=false;
-        check(is(f,false,"session"),"a replaced or unknown session, connection or epoch: nothing (scope reset releases)");
-        f=left;f.field=false;
-        check(is(f,false,"not-field"),"inside an event or cutscene: nothing");
-        f=left;f.actorProven=false;
-        check(is(f,false,"unproven"),"an unproven actor root: nothing");
-        f=left;f.actorRead=false;
-        check(is(f,false,"unproven"),"an unreadable actor: nothing");
-        f=left;f.roleFree=false;
-        check(is(f,false,"role-current"),"a role current (or a camera cleanup pending) for the seat owns the actor");
-        f=left;f.thread=0x1234;
-        check(is(f,false,"held"),"a script coroutine holds the actor");
-        f=left;f.parent=0x10;
-        check(is(f,false,"held"),"an attachment holds the actor");
-        f=left;f.capture=0x7FF6F8F1FD10;
-        check(is(f,false,"not-own-bank"),"a borrowed capture is the detach/idle path's, not this one");
-        f=left;f.bank=0x7FF6F7D340C0;
-        check(is(f,false,"not-own-bank"),"another bank on the actor: not this install");
-        f=left;f.anchorOwn=false;
-        check(is(f,false,"not-own-bank"),"a foreign anchor: not this install");
-        f=left;f.motion=252;
-        check(is(f,false,"moved-on"),"the actor moved on to another motion: never overwritten");
-        f=left;f.installed=0;f.motion=0;
-        check(is(f,false,"already-idle"),"an installed idle needs no reset");
-        check(R::kOwnIdleMotion==0,"the reset motion is MotionSet IDLE");
-    }
-    // Quill r1 on 06ff413: the receipt comes from the install readback, not a seeded value. attempt04's state right
-    // after the role's own-bank 263 install, as its release line read it: capture 0, bank 0, anchor own, no parent,
-    // motion 263, +18C 0x4000 (263's own flags, which the general classifier refuses as Own).
+    // VUH-2617 held release. Receipts come from the install readback (Quill r1 on 06ff413), then drive the guards
+    // release to the native detach/idle pair. Replays: attempt04 (run 20261022-112719, role 2147483676, frame 17301:
+    // capture 0, bank 0, parent 0, motion 263, the role's own-bank 263) and attempt06 (run 20261022-133757, role
+    // 2147483713, frame 18186: capture 0, bank 0, parent 0, own motion 10; the role had installed 263).
     {
         R::OwnInstallFacts installed{};
         installed.rootsRead=true;installed.controllerSelf=true;installed.anchorOwn=true;installed.ownBankPresent=true;
         installed.parentOk=true;installed.installed=263;installed.motionNow=263;
-        std::uint32_t receipt=0xFFFFFFFFu;  // ScriptActorRole::ownMotion
-        if(R::OwnInstallQualified(installed))receipt=installed.installed;
-        check(receipt==263,"the own-bank 263 install with attempt04's flags mints its receipt");
-        R::OwnMotionResetFacts release{};
-        release.friendLocal=true;release.outcome=R::ReleaseCleanup::Guards;release.releaseStage=true;
-        release.sessionCurrent=true;release.field=true;release.actorProven=true;release.actorRead=true;release.roleFree=true;
-        release.anchorOwn=true;release.installed=receipt;release.motion=263;
-        const char* why="";
-        check(R::DecideOwnMotionReset(release,why) && std::string(why)=="own-install-left",
-              "receipt to release: attempt04's guards release resets the motion that install left");
+        bool ownReceipt=false;  // ScriptActorRole::ownMotion != none
+        if(R::OwnInstallQualified(installed))ownReceipt=true;
+        check(ownReceipt,"the own-bank 263 install with attempt04's flags mints its receipt");
         const auto mints=[](R::OwnInstallFacts f){return R::OwnInstallQualified(f);};
-        auto f=installed;f.motionNow=252;
-        check(!mints(f),"a failed or overtaken install (the motion is not the one just set) mints nothing");
-        f=installed;f.capture=0x7FF6F8F1FD10;
-        check(!mints(f),"a capture source on the actor: not an own install");
-        f=installed;f.bank=0x7FF6F7D340C0;
-        check(!mints(f),"a borrowed bank on the actor: not an own install");
-        f=installed;f.controllerSelf=false;
-        check(!mints(f),"a foreign motion controller: not this actor's install");
-        f=installed;f.anchorOwn=false;
-        check(!mints(f),"a foreign anchor: not an own install");
-        f=installed;f.ownBankPresent=false;
-        check(!mints(f),"no own bank: not an own install");
-        f=installed;f.parentOk=false;
-        check(!mints(f),"a parent that is not the actor's own attachment: not an own install");
-        f=installed;f.rootsRead=false;
-        check(!mints(f),"a stale or replaced actor root or an unreadable field: nothing minted");
-        f=installed;f.installed=0xFFFFFFFFu;
-        check(!mints(f),"no install attempted: nothing minted");
-        f=installed;f.installed=0xFFFFFFFFu;f.motionNow=0xFFFFFFFFu;
-        check(!mints(f),"no install, and an actor with no motion id: still nothing minted");
+        auto i=installed;i.motionNow=252;
+        check(!mints(i),"a failed or overtaken install (the motion is not the one just set) mints nothing");
+        i=installed;i.capture=0x7FF6F8F1FD10;
+        check(!mints(i),"a capture source on the actor: not an own install");
+        i=installed;i.bank=0x7FF6F7D340C0;
+        check(!mints(i),"a borrowed bank on the actor: not an own install");
+        i=installed;i.controllerSelf=false;
+        check(!mints(i),"a foreign motion controller: not this actor's install");
+        i=installed;i.anchorOwn=false;
+        check(!mints(i),"a foreign anchor: not an own install");
+        i=installed;i.ownBankPresent=false;
+        check(!mints(i),"no own bank: not an own install");
+        i=installed;i.parentOk=false;
+        check(!mints(i),"a parent that is not the actor's own attachment: not an own install");
+        i=installed;i.rootsRead=false;
+        check(!mints(i),"a stale or replaced actor root or an unreadable field: nothing minted");
+        i=installed;i.installed=0xFFFFFFFFu;
+        check(!mints(i),"no install attempted: nothing minted");
+        i=installed;i.installed=0xFFFFFFFFu;i.motionNow=0xFFFFFFFFu;
+        check(!mints(i),"no install, and an actor with no motion id: still nothing minted");
+
+        const std::uintptr_t thorn=0x7FF62E3BFD10,thornBank=0x7FF62D1D40C0;
+        R::HeldReleaseFacts held{};
+        held.friendLocal=true;held.outcome=R::ReleaseCleanup::Guards;held.releaseStage=true;held.sessionCurrent=true;
+        held.actorProven=true;held.actorRead=true;held.roleFree=true;held.heldReceipt=ownReceipt;
+        held.source=thorn;held.sourceBank=thornBank;held.sourceProven=true;
+        const char* why="";
+        const auto is=[&](R::HeldReleaseFacts f,bool want,const char* reason){
+            return R::DecideHeldRelease(f,why)==want && std::string(why)==reason;};
+        check(is(held,true,"held-guards"),"attempt04/attempt06: the own-bank receipt runs the native pair at the guards release, whatever motion the actor shows");
+        auto f=held;f.heldReceipt=false;
+        check(is(f,false,"no-receipt"),"a role with no install or capture on this actor proves nothing");
+        f=held;f.capture=thorn;f.bank=thornBank;
+        check(is(f,true,"held-guards"),"a borrowed capture of this role's own source left at a guards release is released too");
+        f=held;f.friendLocal=false;
+        check(is(f,false,"not-friend-local"),"the host's own actor and other seats are never released here");
+        f=held;f.outcome=R::ReleaseCleanup::Cleaned;
+        check(is(f,false,"not-guards"),"a cleaned release already ran the pair: never twice");
+        f=held;f.outcome=R::ReleaseCleanup::NotField;
+        check(is(f,false,"not-guards"),"inside an event or cutscene: nothing");
+        f=held;f.outcome=R::ReleaseCleanup::ReplacementParent;
+        check(is(f,false,"not-guards"),"a replacement's parent: never ours to detach");
+        f=held;f.outcome=R::ReleaseCleanup::NotCurrent;
+        check(is(f,false,"not-guards"),"a stale root: nothing");
+        f=held;f.releaseStage=false;
+        check(is(f,false,"not-release-stage"),"post-cancel or refused releases never act");
+        f=held;f.sessionCurrent=false;
+        check(is(f,false,"session"),"a replaced or unknown session, connection or epoch: nothing");
+        f=held;f.actorProven=false;
+        check(is(f,false,"unproven"),"an unproven actor root: nothing");
+        f=held;f.actorRead=false;
+        check(is(f,false,"unproven"),"an unreadable actor: nothing");
+        f=held;f.roleFree=false;
+        check(is(f,false,"role-current"),"a role current (or a camera cleanup pending) for the seat owns the actor");
+        f=held;f.thread=0x1234;
+        check(is(f,false,"held"),"a script coroutine holds the actor");
+        f=held;f.parent=0x10;
+        check(is(f,false,"held"),"an attachment holds the actor");
+        f=held;f.capture=0x7FF600000000;
+        check(is(f,false,"foreign-capture"),"another source's capture: not ours");
+        f=held;f.bank=0x7FF6AAAA0000;
+        check(is(f,false,"foreign-bank"),"another bank: not ours");
+        f=held;f.bank=thornBank;f.sourceProven=false;
+        check(is(f,false,"foreign-bank"),"a bank that cannot be matched to a proven source: not ours");
+    }
+    // The input-gate line reads only a proven root, and follows only the known FIELD_COMMAND pointer.
+    {
+        const std::uintptr_t actor=0x10000,fieldCommand=0x2A10620,action=0x90000;
+        std::vector<std::uintptr_t> reads;int decodes=0;std::uintptr_t commandAt=fieldCommand;
+        const auto read=[&](std::uintptr_t at,void* out,std::size_t size){
+            reads.push_back(at);std::memset(out,0,size);
+            if(at==actor+0xDC0)std::memcpy(out,&commandAt,sizeof(commandAt));
+            if(at==actor+0xC){const std::uint32_t handle=7;std::memcpy(out,&handle,sizeof(handle));}
+            return true;};
+        const auto decode=[&](std::uint32_t handle){++decodes;return handle==7?action:std::uintptr_t{0};};
+        const auto touched=[&](std::uintptr_t at){for(auto r:reads)if(r==at)return true;return false;};
+        auto g=R::ReadInputGate(false,actor,fieldCommand,read,decode);
+        check(reads.empty() && !decodes && !g.read,"a refused or unproven actor root: zero reads");
+        reads.clear();
+        g=R::ReadInputGate(true,actor,fieldCommand,read,decode);
+        check(g.read && g.commandRead && touched(fieldCommand+0x24) && touched(actor+0xDB8) && touched(action),
+              "a proven root: pad, commands, flags, motion, action and the FIELD_COMMAND's +0x24");
+        reads.clear();commandAt=0x55550000;
+        g=R::ReadInputGate(true,actor,fieldCommand,read,decode);
+        check(g.read && !g.commandRead && !touched(0x55550000+0x24),"a +0xDC0 that is not the FIELD_COMMAND is never followed");
+        reads.clear();
+        g=R::ReadInputGate(true,0,fieldCommand,read,decode);
+        check(reads.empty(),"no actor: nothing read");
+        reads.clear();decodes=0;
+        const auto failing=[&](std::uintptr_t at,void* out,std::size_t size){
+            reads.push_back(at);std::memset(out,0,size);
+            if(at==actor+0xC){const std::uint32_t handle=7;std::memcpy(out,&handle,sizeof(handle));return false;}
+            return true;};  // the action read itself fails, though a partial value is left behind
+        g=R::ReadInputGate(true,actor,fieldCommand,failing,decode);
+        check(!g.read && !decodes && !g.commandRead,"an actor whose fields do not all read: no action decode, no command follow");
     }
     return errors?1:0;
 }

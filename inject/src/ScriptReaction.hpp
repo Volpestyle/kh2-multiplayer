@@ -434,20 +434,34 @@ LocalHoldRoots ProveLocalHoldRoots(bool decisionCurrent,bool cancelled,std::uint
     roots.source=source && sourceHandle && listed(source)==sourceHandle && driven()==source;
     return roots;
 }
-// VUH-2617 (bots05 attempt04, run 20261022-112719, friend frame 17301): a friend local-seat role installed an own-bank
-// motion on the friend's own actor (the non-borrowed path through obj_set_motion 0x42B320, which zeroes +2B0/+2B8 and
-// restores the anchor), and its release stopped at `guards`: no coroutine, no +2B0 source, no attachment. The actor
-// kept that script motion (263, a motion the player controller does not replace) in ACTION_IDLE for the rest of the
-// fight. On the host the boss script sets the next motion; on the friend nothing did. The release now sets the actor's
-// own idle motion once, only when the actor still shows exactly the motion this role installed there, in own-bank
-// state, held by nothing else, in the role's admitted session.
-struct OwnMotionResetFacts {
-    bool friendLocal{},releaseStage{},sessionCurrent{},field{},actorProven{},actorRead{},roleFree{},anchorOwn{};
+// VUH-2617: a friend local-seat release that stops at `guards` leaves the friend's own actor held by nothing anyone
+// releases. bots05 attempt04 (frame 17301): own-bank 263 left in ACTION_IDLE; attempt06 (run 20261022-133757, frame
+// 18186): the role had installed 263, the actor was in its own motion 10, and it stayed there ~100 s while its pilot
+// held direction keys. Both lines read capture=0 bank=0 parent=0 d48=0. A cleaned release runs the native pair detach
+// (0x42C5F0 -> 0x3DA250, which acts only with a +6A0 parent) and idle (0x42D0E0 -> 0x3B4DA0(actor, 0)); a guards
+// release runs neither. The release now runs that same pair once when this role holds a positive receipt that it held
+// this actor (an own-bank install read back by OwnInstallQualified, or a borrowed capture it installed), the actor is
+// held by nothing else, and the role's admitted session is current. It replaces the earlier own-motion reset.
+struct HeldReleaseFacts {
+    bool friendLocal{},releaseStage{},sessionCurrent{},actorProven{},actorRead{},roleFree{},heldReceipt{};
+    bool sourceProven{};
     ReleaseCleanup outcome{ReleaseCleanup::NotCurrent};
-    std::uint32_t installed{0xFFFFFFFFu},motion{0xFFFFFFFFu},parent{};
-    std::uintptr_t thread{},capture{},bank{};
+    std::uint32_t parent{};
+    std::uintptr_t thread{},capture{},bank{},source{},sourceBank{};
 };
-constexpr std::uint32_t kOwnIdleMotion=0;  // MotionSet IDLE
+inline bool DecideHeldRelease(const HeldReleaseFacts& f,const char*& why) noexcept {
+    if(!f.friendLocal){why="not-friend-local";return false;}
+    if(f.outcome!=ReleaseCleanup::Guards){why="not-guards";return false;}  // cleaned ran it; others are not ours
+    if(!f.releaseStage){why="not-release-stage";return false;}
+    if(!f.heldReceipt){why="no-receipt";return false;}
+    if(!f.sessionCurrent){why="session";return false;}
+    if(!f.actorProven || !f.actorRead){why="unproven";return false;}
+    if(!f.roleFree){why="role-current";return false;}
+    if(f.thread || f.parent){why="held";return false;}
+    if(f.capture && f.capture!=f.source){why="foreign-capture";return false;}
+    if(f.bank && (!f.sourceProven || f.bank!=f.sourceBank)){why="foreign-bank";return false;}
+    why="held-guards";return true;
+}
 // Quill r1 on 06ff413: the receipt is minted from a readback of the install just made. The general own-bank
 // classifier (SmOwnerMotionState) also requires +18C without 0x4000, but +18C carries the current motion's own flags
 // (no constant writer; 252/261 read 0x6040xx, 263 reads 0x4000), so an own-bank 263 reads Foreign there and the
@@ -464,20 +478,32 @@ inline bool OwnInstallQualified(const OwnInstallFacts& f) noexcept {
     return f.rootsRead && f.controllerSelf && f.anchorOwn && f.ownBankPresent && f.parentOk && !f.capture && !f.bank &&
         f.installed!=0xFFFFFFFFu && f.motionNow==f.installed;
 }
-inline bool DecideOwnMotionReset(const OwnMotionResetFacts& f,const char*& why) noexcept {
-    if(!f.friendLocal){why="not-friend-local";return false;}
-    if(f.outcome==ReleaseCleanup::Cleaned){why="cleaned";return false;}
-    if(!f.releaseStage){why="not-release-stage";return false;}
-    if(f.installed==0xFFFFFFFFu){why="no-own-install";return false;}
-    if(!f.sessionCurrent){why="session";return false;}
-    if(!f.field){why="not-field";return false;}
-    if(!f.actorProven || !f.actorRead){why="unproven";return false;}
-    if(!f.roleFree){why="role-current";return false;}
-    if(f.thread || f.parent){why="held";return false;}
-    if(f.capture || f.bank || !f.anchorOwn){why="not-own-bank";return false;}
-    if(f.motion!=f.installed){why="moved-on";return false;}
-    if(f.installed==kOwnIdleMotion){why="already-idle";return false;}
-    why="own-install-left";return true;
+// What the native input path consults for a player actor (docs/CLONE_NEUTRAL_INPUT.md, docs/NATIVE_GUEST_MAGIC.md,
+// DownedSpike): its pad pointer +0xDB8 (processed entry 0), the shared FIELD_COMMAND at +0xDC0/+0xDD0 and its
+// +0x24 bit 0 (controller off), the action +0xC with its time +0xBA8, the actor flags +0x9B8, the actor update flags
+// +0x120 and the motion id/time. Read only from a proven actor root, through one callback, like ReadLocalHold.
+// `fieldCommand` is the FIELD_COMMAND address (exe+0x2A10620); +0x24 is read only through that exact pointer.
+struct InputGate {
+    std::uintptr_t pad{},command{},commandAux{},actionVtable{};
+    std::uint32_t command24{},flags9B8{},flags120{},motion{0xFFFFFFFFu},actionHandle{};
+    float actionTime{},motionTime{};
+    bool read{},commandRead{};
+};
+template<class Read,class Decode>
+InputGate ReadInputGate(bool actorProven,std::uintptr_t actor,std::uintptr_t fieldCommand,Read&& read,Decode&& decode) {
+    InputGate g{};
+    if(!actorProven || !actor)return g;  // a refused root: metadata only
+    g.read=read(actor+0xDB8,&g.pad,sizeof(g.pad)) && read(actor+0xDC0,&g.command,sizeof(g.command)) &&
+        read(actor+0xDD0,&g.commandAux,sizeof(g.commandAux)) && read(actor+0x9B8,&g.flags9B8,sizeof(g.flags9B8)) &&
+        read(actor+0x120,&g.flags120,sizeof(g.flags120)) && read(actor+0x180,&g.motion,sizeof(g.motion)) &&
+        read(actor+0x19C,&g.motionTime,sizeof(g.motionTime)) && read(actor+0xBA8,&g.actionTime,sizeof(g.actionTime)) &&
+        read(actor+0xC,&g.actionHandle,sizeof(g.actionHandle));
+    if(g.read && g.actionHandle) {
+        if(const std::uintptr_t action=decode(g.actionHandle))(void)read(action,&g.actionVtable,sizeof(g.actionVtable));
+    }
+    // Only the known shared FIELD_COMMAND is followed, never another pointer found in the actor.
+    g.commandRead=g.read && g.command && g.command==fieldCommand && read(g.command+0x24,&g.command24,sizeof(g.command24));
+    return g;
 }
 inline const char* ReleaseCleanupName(ReleaseCleanup c) noexcept {
     switch(c) {
