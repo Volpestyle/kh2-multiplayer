@@ -100,6 +100,7 @@ bool NetworkClient::sendResyncCapture(const ResyncBegin& begin,const ResyncSnaps
         }
         const bool sent=sendPacket(encode(ResyncEnd{begin.key,begin.phase,begin.snapshotCut,begin.totalBytes,begin.sha256}),true);
         if(!sent)abortResync(ResyncResultReason::Overflow,"snapshot end submission failed");
+        if(sent&&snapshot.bossSitOut)sitOutCaptureKey_=begin.key; // VUH-2640 Leg A
         return sent;
     }catch(const std::exception&){return false;}
 }

@@ -885,6 +885,12 @@ The host's downed state is required evidence here: with `KH2COOP_DOWNED_SPIKE=0`
 host publishes none, so a returning seat's hint waits indefinitely (unknown is never
 read as alive). That configuration is unsupported for returning seats.
 
+VUH-2640 Leg A (protocol 35): in a reviewed boss arena (`BossArenas.hpp`, Thorn's 2/34/157 only) the
+returning-seat capture is a presence-only boss sit-out. It carries the fenced seat into the arena sitting
+out, captures no enemy row and no record catalog, and restores neither world traffic nor event control.
+The seat stays a pending returning seat until a later eligible field's ordinary recovery. See
+[the design and implementation](FENCED_FRIEND_BOSS_ARENA.md).
+
 The implemented scope is a settled safe field with an empty or supported
 ordinary record-bound population; the live proof above covers empty FM00 only. Active307,
 boss/script reconstruction, active story and expiry leaving an owned pause open

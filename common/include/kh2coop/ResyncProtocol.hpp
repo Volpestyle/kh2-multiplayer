@@ -114,6 +114,16 @@ struct ResyncActivationReplay {
     std::uint32_t hostTransition{}, hostLoad{};
     bool operator==(const ResyncActivationReplay&) const = default;
 };
+// VUH-2640 Leg A (protocol 35): the host attests that its room is a reviewed boss arena (bossarena::Arenas)
+// whose boss it alone owns. A presence-only admission for a fenced returning seat: the snapshot carries no
+// enemy row and no record catalog for the arena, and nothing about the boss (no HP, pose, phase or script
+// state). The friend loads the arena and sits out; it gets no recovered event-control lifetime from it.
+struct ResyncBossSitOut {
+    std::uint16_t arena{0};      // bossarena::Arena::id
+    std::uint16_t bossNetId{0};  // the host's netId for the boss (its spawn index + 1), for relay material checks
+    std::uint32_t bossObjectId{0};
+    bool operator==(const ResyncBossSitOut&) const = default;
+};
 struct ResyncSnapshot {
     RoomTransition room;
     EventHold hold;
@@ -131,6 +141,9 @@ struct ResyncSnapshot {
     // excluded from canonical native state. Native admission/convergence must
     // separately compare the recorded before/current state at their boundaries.
     std::optional<ResyncActivationReplay> activationReplay;
+    // Optional versioned trailer, exclusive with activationReplay; covered by the snapshot SHA, not by the
+    // native fingerprint (transport attestation, not native state).
+    std::optional<ResyncBossSitOut> bossSitOut;
 };
 enum class ResyncAckStatus : std::uint8_t { Received=0, Arrived=1, Converged=2, Unavailable=3, Failed=4 };
 enum ResyncChecks : std::uint32_t {

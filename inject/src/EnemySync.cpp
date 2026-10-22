@@ -35,6 +35,7 @@
 #include "PartyRow.hpp"
 #include "BossLeave.hpp"
 
+#include "kh2coop/BossArenas.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "EventStartMirror.hpp"
 #include "kh2coop/AppliedStateHash.hpp"
@@ -418,6 +419,9 @@ struct NativeResyncTarget {
     bool firstObserved = false, finished = false;
 };
 std::optional<NativeResyncTarget> g_nativeResync;
+// VUH-2640 Leg A: this friend's latest boss sit-out arrival (presence only), for DownedSpike's outage.
+SitOutArrival g_sitOutArrival;
+bool SitOutPresence(const ResyncSnapshot& snapshot) noexcept { return snapshot.bossSitOut.has_value(); }
 struct EventControlBootstrapReceipt {
     ResyncKey key;
     ProducerWorldContext context;
@@ -2696,7 +2700,7 @@ void QueueNativeAck(ResyncAckStatus status, const char* error, std::uint32_t fra
         g_resyncWriteFence = ResyncWriteFence::Exact;
         if (eventholdnative::Enabled() && state.begin.phase == ResyncPhase::Bootstrap &&
             state.firstObserved && frame != state.firstFrame && ack.loadAfter != ack.loadBefore &&
-            eventhold::RecoverySnapshotSupported(state.snapshot))
+            eventhold::RecoverySnapshotSupported(state.snapshot) && !SitOutPresence(state.snapshot))
             g_eventControlBootstrap = EventControlBootstrapReceipt {state.begin.key, state.context, ack.loadAfter};
     } else {
         g_resyncWriteFence = ResyncWriteFence::Failed;
@@ -3169,6 +3173,41 @@ bool CaptureHostResync(std::uint32_t frame, ResyncSnapshot& snapshot, ProducerWo
     snapshot.hold = {g_epoch, false, snapshot.room.eventProgram};
     std::uint32_t hash = 0;
     if (!progresssync::CaptureFull(snapshot.progress, hash)) return refuse("progress-before");
+    // VUH-2640 Leg A: in a reviewed boss arena the only admission is the boss sit-out, presence for a fenced
+    // returning seat. No enemy row and no record catalog are captured: nothing is rebuilt on the friend,
+    // whose own load makes its own boss copy, never bound to the host. The boss stays the host's alone.
+    if (const auto* arena = bossarena::Find(snapshot.room.worldId, snapshot.room.roomId, snapshot.room.door,
+            snapshot.room.mapProgram, snapshot.room.battleProgram, snapshot.room.eventProgram)) {
+        char mission[24] {};
+        if (!eventholdnative::Enabled() || !NativeMissionFile(mission) ||
+            std::string_view(mission) != arena->missionFile) return refuse("sit-out-mission");
+        if (g_inst.spawns.size() != 1 || before.enemies.size() != 1) return refuse("sit-out-population");
+        const auto& boss = g_inst.spawns.front();
+        const auto* native = FindNativeEnemy(before, boss);
+        if (!boss.announced || !boss.present || boss.spawnIndex == UINT16_MAX || boss.objectId != arena->bossObjectId ||
+            boss.objectType != arena->bossObjectType || !native || native->objectType != boss.objectType ||
+            native->hp <= 0 || native->maxHp <= 0 || native->hp > native->maxHp) return refuse("sit-out-boss");
+        const auto after = CaptureNativeCensus();
+        ProgressUpdate repeated; std::uint32_t repeatedHash = 0;
+        if (!CensusMatchesInstance(after) || after.enemies.size() != 1 || !SameNativeIdentity(*native, after.enemies.front()) ||
+            after.enemies.front().hp <= 0 || !progresssync::CaptureFull(repeated, repeatedHash) || hash != repeatedHash ||
+            encode(repeated) != encode(snapshot.progress)) return refuse("sit-out-after");
+        if (generation != WorldSessionGeneration() || delivery != g_bridge.DeliverySerial() ||
+            transition != warp::TransitionSerial() || load != warp::LoadSerial() || !SafeNativeGameplay() ||
+            !SafeRecoveryGameplay() || g_hpSourceSequence == UINT64_MAX || !CaptureWorldContext(context))
+            return refuse("sit-out-scope");
+        snapshot.hpSequence = ++g_hpSourceSequence;
+        snapshot.generation = generation; snapshot.transitionSerial = transition; snapshot.loadSerial = load;
+        snapshot.captureFrameBefore = snapshot.captureFrameAfter = frame;
+        snapshot.coverageMask = ResyncNativeComplete;
+        snapshot.bossSitOut = ResyncBossSitOut {arena->id, static_cast<std::uint16_t>(boss.spawnIndex + 1), boss.objectId};
+        snapshot.nativeFingerprint = resyncNativeFingerprint(snapshot);
+        if (!WorldContextCurrent(context)) return refuse("context-final");
+        if (g_log) g_log("[resync-sit-out] host arena=%u boss=%u netId=%u bossStateCaptured=0 load=%u transition=%u frame=%u",
+                         static_cast<unsigned>(arena->id), boss.objectId, static_cast<unsigned>(boss.spawnIndex + 1),
+                         load, transition, frame);
+        return true;
+    }
     RecordCatalog recordsBefore, recordsAfter;
     spawncontroller::NativeOrdinaryResyncView beforeView, afterView;
     if (!FreshResyncRecordCatalog(before, recordsBefore, beforeView)) {
@@ -3314,6 +3353,11 @@ void ReceiveResyncSnapshot(const std::vector<std::uint8_t>& packet) {
     }
     if (eventholdnative::Enabled() && !eventhold::RecoverySnapshotSupported(snapshot)) {
         QueueNativeAck(ResyncAckStatus::Unavailable, "boss or script population recovery unsupported"); return;
+    }
+    // VUH-2640 Leg A: a boss sit-out only ever carries a fenced seat, one whose own lifetime expired.
+    if (SitOutPresence(snapshot) && (!eventholdnative::Enabled() || CurrentRole() != Role::Client ||
+                                     !eventholdnative::LifetimeHeartbeatExpired())) {
+        QueueNativeAck(ResyncAckStatus::Unavailable, "boss sit-out requires a fenced seat"); return;
     }
     if (begin.phase == ResyncPhase::Checkpoint) return; // observation only; no mutation/reload
     if (context.generation <= g_resyncPriorOrderedGeneration || g_host.epoch != 0 || g_host.arrived) {
@@ -3703,7 +3747,16 @@ bool ObserveNativeResync(std::uint32_t frame) {
     const auto census = CaptureNativeCensus();
     std::vector<ResyncActorBinding> bindings;
     std::vector<NativeRecordContentDefinition> definitions;
-    if (!CollectResyncBindings(state.snapshot, state.context, census, bindings, definitions)) return false;
+    // VUH-2640 Leg A: a sit-out binds nothing. The census may hold only this seat's own copies of the
+    // declared boss (its own load made them), never bound to the host; the observed state has no enemy row.
+    const bool presence = SitOutPresence(state.snapshot);
+    if (presence) {
+        if (!CensusMatchesInstance(census) || !SameLocation(census.location, state.snapshot.room) ||
+            !std::all_of(census.enemies.begin(), census.enemies.end(), [&](const auto& row) {
+                return row.objectId == state.snapshot.bossSitOut->bossObjectId &&
+                       enemyclass::LargeBoss(row.objectType, row.objectId);
+            })) return false;
+    } else if (!CollectResyncBindings(state.snapshot, state.context, census, bindings, definitions)) return false;
     std::uint32_t hash = 0;
     if (!progresssync::MatchesFull(state.snapshot.progress, hash)) {
         if (state.begin.phase == ResyncPhase::Checkpoint)
@@ -3713,7 +3766,8 @@ bool ObserveNativeResync(std::uint32_t frame) {
     ResyncSnapshot observed = state.snapshot; observed.enemies.clear();
     observed.activationReplay.reset(); // historical transport data is not native state
     observed.recordDefinitions = std::move(definitions);
-    for (const auto& native : census.enemies) {
+    const std::vector<NativeEnemy> noRows;
+    for (const auto& native : presence ? noRows : census.enemies) {
         NativeEnemy repeated; bool combat = false;
         if (!ReadNativeEnemy(native.actor, repeated, combat) || !combat ||
             !SameNativeIdentity(native, repeated) || native.objectType != repeated.objectType ||
@@ -4205,6 +4259,22 @@ bool ReceiveWorldPackets() {
                 ByteReader r(payload, size); ResyncResult result; read(r, result);
                 if (r.atEnd() && packet.size() == size + 3 && g_resyncPlan && result.key == g_resyncPlan->request.key) {
                     const bool recoveredControl = CompleteRecoveredEventControl(result);
+                    // VUH-2640 Leg A: the relay's Converged result for this seat's own sit-out arrival. The
+                    // anchor is this Bootstrap's own load, so only a later recovery Bootstrap ends the outage.
+                    if (CurrentRole() == Role::Client && result.reason == ResyncResultReason::Converged &&
+                        g_nativeResync && SitOutPresence(g_nativeResync->snapshot) && g_nativeResync->finished &&
+                        g_nativeResync->firstObserved && g_nativeResync->begin.phase == ResyncPhase::Bootstrap &&
+                        WorldContextCurrent(g_nativeResync->context) && warp::LoadSerial() == g_nativeResync->observedLoad) {
+                        const auto serial = g_sitOutArrival.serial + 1;
+                        g_sitOutArrival = {serial ? serial : 1, result.key.requestId, g_nativeResync->snapshot.bossSitOut->arena,
+                                           WorldSessionGeneration(), warp::TransitionSerial(), warp::LoadSerial(),
+                                           warp::RecoveryBootstrapLoadSerial()};
+                        if (g_log)
+                            g_log("[resync-sit-out] arrival serial=%u request=%llu arena=%u generation=%u transition=%u load=%u recoveryLoad=%u",
+                                  g_sitOutArrival.serial, static_cast<unsigned long long>(g_sitOutArrival.request),
+                                  static_cast<unsigned>(g_sitOutArrival.arena), g_sitOutArrival.generation,
+                                  g_sitOutArrival.transition, g_sitOutArrival.load, g_sitOutArrival.recoveryLoad);
+                    }
                     if (g_log && eventholdnative::Enabled() && CurrentRole() == Role::Client)
                         g_log("[event-control] resync result request=%llu reason=%u recoveredLifetime=%u",
                             static_cast<unsigned long long>(result.key.requestId),
@@ -5077,6 +5147,11 @@ bool ClientFrame(const NativeCensus& initialCensus) {
     if (!generation || !g_host.arrived || g_inst.world != g_host.world || g_inst.room != g_host.room || g_inst.btl != g_host.btl) {
         return false;  // not in the host's room instance: nothing to match
     }
+    // VUH-2640 Leg A: under a boss sit-out there is no host population to match; the boss copy stays this
+    // seat's own and unbound. Nothing to do is a completed frame (the presence observation runs after it);
+    // clearing bindings here would reset that observation. Stray-copy and population repair stay fenced.
+    if ((g_nativeResync && SitOutPresence(g_nativeResync->snapshot)) ||
+        (g_resyncRecordAuthority && SitOutPresence(g_resyncRecordAuthority->snapshot))) return true;
     NativeCensus current = initialCensus;
     PollPackPreparation(current);
     const bool contentRequired = g_resyncWriteFence != ResyncWriteFence::None;
@@ -6519,6 +6594,11 @@ bool NativeMissionFile(char (&file)[24]) noexcept {
 }
 
 bool NetworkTerminal() noexcept { return g_bridge.IsOpen() && g_bridge.NetworkTerminal(); }
+
+bool LatestSitOutArrival(SitOutArrival& out) noexcept {
+    out = g_sitOutArrival;
+    return out.serial != 0;
+}
 
 SeatAuthority CaptureSeatAuthority() noexcept {
     SeatAuthority out {};

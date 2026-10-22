@@ -1270,6 +1270,12 @@ int main(int argc, char* argv[]) {
         for (const auto& packet : continuation) {
             if (!enqueueWorld(packet)) return;
         }
+        // VUH-2640 Leg A: a boss sit-out carries this fenced seat into the arena but restores nothing. Normal
+        // world traffic stays quarantined and puppets unavailable until the real recovery's snapshot.
+        if (snapshot.bossSitOut) {
+            if (observeIdentity) observeIdentity("sit-out-delivered");
+            return;
+        }
         worldQuarantined = false;
         worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Network);
         if (observeIdentity) observeIdentity("snapshot-delivered");
@@ -1878,6 +1884,15 @@ int main(int argc, char* argv[]) {
                         eventHoldRecoverySnapshot->second, result)) {
                     eventHoldRecoveryResult = result;
                     eventHoldRecoveryDeadline = GetTickCount64() + kh2coop::ClientRecovery::kRosterMs;
+                } else if (eventHoldRecoveryRequired && eventHoldRecoverySnapshot &&
+                           eventHoldRecoverySnapshot->second.bossSitOut &&
+                           eventHoldRecoverySnapshot->first.key == result.key) {
+                    // VUH-2640 Leg A: presence only. The expired lifetime stays the seat's; no fresh one follows.
+                    const auto& sitOut = *eventHoldRecoverySnapshot->second.bossSitOut;
+                    std::cout << "[eventhold-recovery] sit-out presence request=" << result.key.requestId
+                        << " reason=" << static_cast<unsigned>(result.reason) << " arena=" << sitOut.arena
+                        << " boss=" << sitOut.bossObjectId << " controlFenced=1\n";
+                    eventHoldRecoverySnapshot.reset();
                 }
             }
 #endif
@@ -1909,7 +1924,7 @@ int main(int argc, char* argv[]) {
 #endif
             observeIdentity("resync-result");
             automaticRecovery.Terminal(result);
-            returningSeatRecovery.Terminal(result);
+            returningSeatRecovery.Terminal(result, netClient && netClient->resyncCaptureWasSitOut(result.key));
         };
 
         callbacks.onEvent = [](const kh2coop::EventMessage& evt) {
@@ -2110,8 +2125,11 @@ int main(int argc, char* argv[]) {
                     const bool downedRead = avatarBridge.ReadLocalDownedState(hostDowned);
                     const bool downedOrUnknown = kh2coop::HostDownedOrUnknown(downedRead, hostDowned,
                         {worldSessionGeneration, worldBridge.DeliverySerial(), 0}, GetTickCount64(), room);
+                    // VUH-2640 Leg A: in a reviewed boss arena the boss mission is the sit-out admission's case.
+                    const bool bossArena = kh2coop::bossarena::Find(room.worldId, room.roomId, room.door,
+                        room.mapProgram, room.battleProgram, room.eventProgram) != nullptr;
                     returnField = kh2coop::ReturningSeatHostReady({ready.readable, ready.menuOpen, ready.uncontrollable,
-                        ready.paused, downedOrUnknown, ready.bossMission});
+                        ready.paused, downedOrUnknown, ready.bossMission, bossArena});
                 }
             }
             returningSeatRecovery.Pump(returnContext, returnField,

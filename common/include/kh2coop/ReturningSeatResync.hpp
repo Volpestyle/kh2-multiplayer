@@ -1,4 +1,5 @@
 #pragma once
+#include "kh2coop/BossArenas.hpp"
 #include "kh2coop/DownedState.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/NetworkClient.hpp"
@@ -18,11 +19,15 @@ namespace kh2coop {
 // these hold, instead of on a capture that would refuse (a menu or pause, not controllable, the host downed,
 // or a boss mission running). The capture still re-checks everything itself; unread is not ready, and an
 // unread downed publication counts as downed (unknown fails closed, Quill r1).
+// VUH-2640 Leg A: a boss mission no longer waits in a reviewed boss arena (bossArena: the hint's room is a
+// bossarena::Arenas row); the capture there is the presence-only sit-out admission.
 struct HostRecoveryFacts {
     bool readable = false, menuOpen = true, uncontrollable = true, paused = true, hostDowned = true, bossMission = true;
+    bool bossArena = false;
 };
 constexpr bool ReturningSeatHostReady(const HostRecoveryFacts& f) noexcept {
-    return f.readable && !f.menuOpen && !f.uncontrollable && !f.paused && !f.hostDowned && !f.bossMission;
+    return f.readable && !f.menuOpen && !f.uncontrollable && !f.paused && !f.hostDowned &&
+           (!f.bossMission || f.bossArena);
 }
 // The host's own downed publication, projected for that check (Quill r1 P1-4): it counts as up only when it
 // was read, is fresh in the runtime's current world context, and names the very room (and epoch) the hint
@@ -119,6 +124,7 @@ public:
             const char* wait = !current ? "context-unavailable"
                 : !Current(*current) || !state.present ? "binding-roster-mismatch"
                 : !eligibleField || eventscenes::Qualified(current->room) ? "unsupported-host-state"
+                : state.presence && Arena(current->room) ? "sit-out-presence-held"
                 : state.key.requestId ? "transaction-pending"
                 : state.attempted && epoch <= state.attemptedEpoch ? "epoch-already-attempted"
                 : busy() ? "transaction-busy" : nullptr;
@@ -153,7 +159,10 @@ public:
 
     // Call only for authenticated NetworkClient results after existing cleanup.
     // Exact generated key and current target are required even for Converged.
-    void Terminal(const ResyncResult& result) {
+    // VUH-2640 Leg A: sitOut is the host's own record that this key's snapshot was a boss sit-out. Its
+    // convergence carries the seat into the arena sitting out but returns nothing: the seat stays pending
+    // (quarantined, epoch spent) for the real recovery at a later eligible epoch outside any boss arena.
+    void Terminal(const ResyncResult& result, bool sitOut = false) {
         if (!enabled_) return;
         for (std::size_t i = 1; i <= slots_.size(); ++i) {
             auto& state = slots_[i - 1];
@@ -164,9 +173,12 @@ public:
                 state.present && connections_[i] == state.connection && result.targetCount == 1 &&
                 result.targets[0].target.slot == i && result.targets[0].target.connectionId == state.connection &&
                 result.targets[0].target.deliverySerial && result.targets[0].status == ResyncAckStatus::Converged;
-            if (converged) state.pending = false;
+            const bool presence = converged && sitOut;
+            if (presence) state.presence = true;
+            else if (converged) state.pending = false;
             state.waitReason = nullptr;
-            Emit(converged ? "retired" : "waiting", converged ? "converged" : "terminal-needs-new-epoch",
+            Emit(presence ? "waiting" : converged ? "retired" : "waiting",
+                 presence ? "sit-out-presence-needs-new-epoch" : converged ? "converged" : "terminal-needs-new-epoch",
                  i, state, {}, key);
         }
     }
@@ -192,10 +204,14 @@ private:
         std::string peer;
         std::uint64_t connection {};
         bool present {}, pending {}, attempted {};
+        bool presence {}; // VUH-2640 Leg A: carried into a boss arena, sitting out; one admission per return
         std::uint32_t attemptedEpoch {}, waitEpoch {};
         const char* waitReason {};
         ResyncKey key;
     };
+    static bool Arena(const RoomTransition& r) {
+        return bossarena::Find(r.worldId, r.roomId, r.door, r.mapProgram, r.battleProgram, r.eventProgram) != nullptr;
+    }
     bool Current(const HostResyncContext& context) const {
         return !session_.empty() && context.binding.sessionId == session_ &&
             context.binding.selfSlot == 0 && context.binding.hostConnectionId == connections_[0] &&

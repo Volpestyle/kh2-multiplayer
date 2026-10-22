@@ -81,6 +81,13 @@ bool SessionHost::resyncMaterialDifference(PacketType type,const std::vector<std
     if(!resyncSnapshot_)return true;
     try {
         const auto& s=*resyncSnapshot_;const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader r(p,n);
+        // VUH-2640 Leg A: a sit-out captured no enemy. The boss stays the host's: its HP and manifest rows are
+        // not a material change for the target; any other enemy row, or the boss's death, is.
+        if(s.bossSitOut){
+            const auto boss=s.bossSitOut->bossNetId;
+            if(type==PacketType::EnemyHp){EnemyHp m;read(r,m);return std::any_of(m.entries.begin(),m.entries.end(),[&](const auto& e){return e.netId!=boss;});}
+            if(type==PacketType::EnemyManifest){EnemyManifest m;read(r,m);return std::any_of(m.entries.begin(),m.entries.end(),[&](const auto& e){return e.netId!=boss;});}
+        }
         if(type==PacketType::RoomTransition){RoomTransition m;readRoomTransitionPacket(r,m);return !sameResyncRoom(m,s.room);}
         if(type==PacketType::EventHold){EventHold m;read(r,m);return m.epoch!=s.hold.epoch||m.active!=s.hold.active||m.eventProgram!=s.hold.eventProgram;}
         if(type==PacketType::EnemyHp){EnemyHp m;read(r,m);for(const auto& e:m.entries){auto i=std::find_if(s.enemies.begin(),s.enemies.end(),[&](const auto& v){return v.identity.netId==e.netId;});if(i==s.enemies.end()||i->hp!=e.hp||i->maxHp!=e.maxHp)return true;}return false;}
@@ -133,7 +140,9 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
         // Queued post-cut material was admitted before the complete capture arrived.
         for(const auto& queue:resyncContinuation_)for(const auto& item:queue)if(item.scope.hostSourceSerial>resyncBegin_->snapshotCut&&resyncMaterialDifference(static_cast<PacketType>(item.packet.front()),item.packet))resyncMaterialChanged_=true;
         if(resyncPlan_->phase==ResyncPhase::Checkpoint&&resyncMaterialChanged_){finishResync(ResyncResultReason::NativeFailed,"checkpoint already changed");return false;}
-        refreshResyncCache(*snapshot,resyncContinuation_[0],resyncBegin_->snapshotCut);
+        // VUH-2640 Leg A: a sit-out restores nothing, so the relay's live host cache is kept as it is.
+        const bool sitOut=snapshot->bossSitOut.has_value();
+        if(!sitOut)refreshResyncCache(*snapshot,resyncContinuation_[0],resyncBegin_->snapshotCut);
         hostSourceCutFloor_=(std::max)(hostSourceCutFloor_,resyncBegin_->snapshotCut);
         lastHostSourceSerial_=(std::max)(lastHostSourceSerial_,resyncBegin_->snapshotCut);
         auto bytes=encodeResyncSnapshot(*snapshot);const auto begin=*resyncBegin_;
@@ -141,8 +150,10 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
             bool sent=sendTo(target->transportPeer,encode(begin),true);
             for(std::size_t off=0;sent&&off<bytes.size();off+=RESYNC_MAX_PART_BYTES){const auto end=(std::min)(bytes.size(),off+RESYNC_MAX_PART_BYTES);sent=sendTo(target->transportPeer,encode(ResyncPart{begin.key,begin.phase,begin.snapshotCut,static_cast<std::uint32_t>(off),{bytes.begin()+off,bytes.begin()+end}}),true);}
             sent=sent&&sendTo(target->transportPeer,encode(e),true);if(!sent){finishResync(ResyncResultReason::Overflow,"snapshot forwarding failed");return false;}
-            target->hostSourceFloor=begin.snapshotCut;target->worldQuarantined=false;
-            for(const auto& item:resyncContinuation_[i])if(item.scope.hostSourceSerial>begin.snapshotCut&&!sendTo(target->transportPeer,encode(item),true)){finishResync(ResyncResultReason::Overflow,"continuation forwarding failed");return false;}
+            target->hostSourceFloor=begin.snapshotCut;
+            // A sit-out target stays quarantined: no continuation, no later material, until a real recovery.
+            if(!sitOut){target->worldQuarantined=false;
+            for(const auto& item:resyncContinuation_[i])if(item.scope.hostSourceSerial>begin.snapshotCut&&!sendTo(target->transportPeer,encode(item),true)){finishResync(ResyncResultReason::Overflow,"continuation forwarding failed");return false;}}
             resyncContinuation_[i].clear();resyncContinuationBytes_[i]=0;
         }
         return true;
@@ -2008,7 +2019,7 @@ bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& pa
         if(cached && callbacks_.onCausalDiagnostic){try{emittedScope=scope;}catch(...){cacheDiagnostics_.gap();}}
         if(scope.sourceConnectionId==host->connectionId && scope.kind==WorldSourceKind::Native && type!=PacketType::DesyncNotice && scope.hostSourceSerial<=target->hostSourceFloor)return finish(true,"source-floor-suppressed");
         WorldEnvelope env{scope,packet};
-        if(resyncPlan_&&scope.sourceConnectionId==host->connectionId&&isMaterialWorldPacket(type)) {
+        if(resyncPlan_&&!(resyncSnapshot_&&resyncSnapshot_->bossSitOut)&&scope.sourceConnectionId==host->connectionId&&isMaterialWorldPacket(type)) {
             reliable=true;
             for(std::size_t i=0;i<resyncPlan_->targetCount;++i)if(resyncPlan_->targets[i].connectionId==target->connectionId&&target->worldQuarantined) {
                 if(resyncContinuation_[i].size()>=RESYNC_MAX_CONTINUATION_RECORDS || resyncContinuationBytes_[i]+packet.size()>RESYNC_MAX_CONTINUATION_BYTES){finishResync(ResyncResultReason::Overflow,"continuation bound");return finish(false,"continuation-overflow");}

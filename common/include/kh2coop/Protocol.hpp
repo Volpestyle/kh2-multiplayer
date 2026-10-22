@@ -12,9 +12,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 34;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 35;
 
 // ===========================================================================
+// Protocol v35 (VUH-2640 Leg A): ResyncSnapshot's optional boss sit-out trailer (16 bytes): the host attests
+// a reviewed boss arena whose boss it alone owns, and carries a fenced returning seat in sitting out.
 // Protocol v34 (VUH-2466): SpawnEmission carries a kind; the host's Struggle orb births and collections
 // ride it (71 bytes), so the friend shows the host's orbs.
 // Protocol v33 (VUH-2656, D17): a downed client owes itself the return when the host's MissionState ends its

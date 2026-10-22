@@ -182,6 +182,8 @@ public:
     void failWorldResync(ResyncResultReason reason, const std::string& error) { abortResync(reason,error); }
     bool sendNativeWorld(const std::vector<std::uint8_t>&, const ProducerWorldContext&, bool reliable);
     bool sendResyncCapture(const ResyncBegin&, const ResyncSnapshot&, const ProducerWorldContext&);
+    // VUH-2640 Leg A: the host's own record that it sent this key's snapshot as a boss sit-out.
+    bool resyncCaptureWasSitOut(const ResyncKey& key) const { return sitOutCaptureKey_ && *sitOutCaptureKey_ == key; }
     bool sendResyncAck(const ResyncAck&, const ProducerWorldContext&);
     bool sendResyncFailure(const ResyncResult&, const ProducerWorldContext&);
     bool hasCurrentWorldBinding() const { return ready() && worldBinding_ && avatarLocalSlot_<3 &&
@@ -272,6 +274,7 @@ private:
     std::optional<ResyncPlan> resyncPlan_;
     std::optional<ResyncRequest> requestedResync_;
     std::optional<ResyncBegin> completedResyncBegin_;
+    std::optional<ResyncKey> sitOutCaptureKey_;
     std::optional<RoomTransition> hostRoom_;
     ResyncAssembler resyncAssembler_;
     bool worldQuarantined_{false};

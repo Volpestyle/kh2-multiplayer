@@ -1,4 +1,5 @@
 #include "kh2coop/Codec.hpp"
+#include "kh2coop/BossArenas.hpp"
 #include "kh2coop/EnemyClass.hpp"
 #include "kh2coop/ProgressAllowList.hpp"
 #include "kh2coop/NativeRecordContent.hpp"
@@ -89,6 +90,34 @@ constexpr std::uint32_t rsActivationTag = 0x50524148; // "HARP", little endian
 constexpr std::uint16_t rsActivationVersion = 1;
 constexpr std::uint16_t rsActivationPayloadBytes = 1120;
 constexpr std::size_t rsActivationTrailerBytes = 8 + rsActivationPayloadBytes;
+// VUH-2640 Leg A: the boss sit-out trailer (protocol 35), exclusive with the activation trailer.
+constexpr std::uint32_t rsSitOutTag = 0x54495342; // "BSIT", little endian
+constexpr std::uint16_t rsSitOutVersion = 1;
+constexpr std::uint16_t rsSitOutPayloadBytes = 8;
+constexpr std::size_t rsSitOutTrailerBytes = 8 + rsSitOutPayloadBytes;
+static_assert(rsSitOutTrailerBytes != rsActivationTrailerBytes, "trailers are told apart by size");
+void rsBossSitOut(ByteWriter& w, const ResyncBossSitOut& b) {
+    w.writeU32(rsSitOutTag); w.writeU16(rsSitOutVersion); w.writeU16(rsSitOutPayloadBytes);
+    w.writeU16(b.arena); w.writeU16(b.bossNetId); w.writeU32(b.bossObjectId);
+}
+void rsBossSitOut(ByteReader& r, ResyncBossSitOut& b) {
+    rsRequire(r.remaining() == rsSitOutTrailerBytes);
+    rsRequire(r.readU32() == rsSitOutTag);
+    rsRequire(r.readU16() == rsSitOutVersion);
+    rsRequire(r.readU16() == rsSitOutPayloadBytes);
+    b.arena = r.readU16(); b.bossNetId = r.readU16(); b.bossObjectId = r.readU32();
+}
+// Presence only: the exact reviewed arena, its boss, and nothing captured that the friend could rebuild.
+void rsBossSitOutValid(const ResyncSnapshot& m) {
+    if (!m.bossSitOut) return;
+    const auto& b = *m.bossSitOut;
+    const auto* arena = bossarena::ById(b.arena);
+    rsRequire(arena && arena == bossarena::Find(m.room.worldId, m.room.roomId, m.room.door, m.room.mapProgram,
+                                                m.room.battleProgram, m.room.eventProgram) &&
+        b.bossNetId && b.bossObjectId == arena->bossObjectId && !m.activationReplay &&
+        m.coverageMask == ResyncNativeComplete && m.enemies.empty() && !m.livingCount && !m.deadCount &&
+        !m.hold.active && m.recordDefinitions.empty());
+}
 void rsActivationState(ByteWriter& w, const ResyncActivationState& s) {
     w.writeU32(s.flags); w.writeU32(s.currentCount); w.writeU32(s.initialCount);
     w.writeF32(s.cooldown); w.writeU8(s.stage); w.writeU8(s.activation); w.writeU8(s.nativeType);
@@ -176,10 +205,12 @@ void rsSnapshotValid(const ResyncSnapshot& m) {
     for(const auto& e:m.enemies){ByteWriter w;rsEnemy(w,e);rsRequire(e.identity.netId>last&&e.identity.battleProgram==m.room.battleProgram);last=e.identity.netId;if(e.life==ResyncLife::Alive)++live;else ++dead;}
     rsRequire(live==m.livingCount&&dead==m.deadCount);
     rsActivationValid(m);
+    rsBossSitOutValid(m);
     // Exact v9 encoded size: fixed snapshot fields, progress spans, 39-byte
     // enemy rows, and 92-byte definition prefixes plus every 64-byte record.
     std::size_t bytes = 114;
     if (m.activationReplay) rsSnapshotBytes(bytes, rsActivationTrailerBytes);
+    if (m.bossSitOut) rsSnapshotBytes(bytes, rsSitOutTrailerBytes);
     for (const auto& span : m.progress.spans) rsSnapshotBytes(bytes, 6 + span.bytes.size());
     rsSnapshotBytes(bytes, m.enemies.size() * 39);
     rsRequire(m.recordDefinitions.size() <= NativeRecordContentMaxDefinitions);
@@ -297,6 +328,7 @@ void write(ByteWriter& w, const ResyncSnapshot& m) {
     w.writeU16(static_cast<std::uint16_t>(m.recordDefinitions.size()));
     for (const auto& d : m.recordDefinitions) rsRecordDefinition(w, d, false);
     if (m.activationReplay) rsActivationReplay(w, *m.activationReplay);
+    if (m.bossSitOut) rsBossSitOut(w, *m.bossSitOut);
     rsRequire(w.size() - start <= RESYNC_MAX_SNAPSHOT_BYTES);
 }
 void read(ByteReader& r, ResyncSnapshot& out) {
@@ -318,7 +350,8 @@ void read(ByteReader& r, ResyncSnapshot& out) {
         NativeRecordContentDefinition d; rsRecordDefinition(r, d, records);
         m.recordDefinitions.push_back(std::move(d));
     }
-    if (!r.atEnd()) { m.activationReplay.emplace(); rsActivationReplay(r, *m.activationReplay); }
+    if (r.remaining() == rsSitOutTrailerBytes) { m.bossSitOut.emplace(); rsBossSitOut(r, *m.bossSitOut); }
+    else if (!r.atEnd()) { m.activationReplay.emplace(); rsActivationReplay(r, *m.activationReplay); }
     rsEnd(r);ByteWriter w;write(w,m);out=std::move(m);
 }
 void write(ByteWriter& w,const ResyncAck& m){rsKey(w,m.key);rsTarget(w,m.target);rsPhase(w,m.phase);rsRequire(static_cast<unsigned>(m.status)<=4&&m.error.size()<=256);w.writeU64(m.snapshotCut);rsDigest(w,m.snapshotSha256);rsDigest(w,m.observedFingerprint);w.writeU8(static_cast<std::uint8_t>(m.status));write(w,m.observedRoom);w.writeU32(m.enemyCount);w.writeU32(m.deadCount);w.writeU32(m.loadBefore);w.writeU32(m.loadAfter);w.writeU64(m.observationFrame1);w.writeU64(m.observationFrame2);w.writeU32(m.checksMask);w.writeString(m.error);}

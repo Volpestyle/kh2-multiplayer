@@ -136,6 +136,40 @@ void returningSeatControls() {
       check(!p.sends && p.policy.PendingCount() == 1, "a host not ready (boss, pause, downed) waits without spending the epoch");
       p.eligible = true; p.Pump();
       check(p.sends == 1, "the same epoch submits once the host is ready"); }
+    // VUH-2640 Leg A: in a reviewed boss arena the boss mission is the sit-out's case. A converged sit-out
+    // keeps the seat pending (quarantined, presence only); no second sit-out in an arena; a later epoch
+    // outside any arena submits the real recovery, whose convergence retires the hint.
+    { HostRecoveryFacts arena {true, false, false, false, false, true, true};
+      check(ReturningSeatHostReady(arena), "a boss mission in a reviewed boss arena no longer waits");
+      arena.bossArena = false;
+      check(!ReturningSeatHostReady(arena), "a boss mission outside a reviewed arena still waits");
+      check(!HostRecoveryFacts {}.bossArena, "unknown arena fails closed");
+      auto lastWait = [](const ReturningPolicy& q, const char* reason) {
+          return !q.events.empty() && std::string(q.events.back().action) == "waiting" &&
+                 std::string(q.events.back().reason) == reason;
+      };
+      ReturningPolicy p; p.Return();
+      const auto field = p.current.room;
+      const RoomTransition thorn {field.epoch + 1, 2, 34, 0, 157, 157, 157};
+      p.current.room = thorn; p.Pump();
+      check(p.sends == 1, "the arena epoch submits the sit-out");
+      p.busy = false; p.policy.Terminal(p.Result(), true);
+      check(p.policy.PendingCount() == 1 && lastWait(p, "sit-out-presence-needs-new-epoch") &&
+            p.policy.PendingConnections()[1] == p.current.connections[1],
+            "a converged sit-out returns nothing: the seat stays pending, still counted as returning");
+      ++p.current.room.epoch; p.Pump();
+      check(p.sends == 1 && lastWait(p, "sit-out-presence-held"), "no second sit-out in an arena (a retry's new epoch)");
+      p.current.room = field; p.current.room.epoch = thorn.epoch + 5; p.Pump();
+      check(p.sends == 2, "a later epoch outside any arena submits the real recovery");
+      p.busy = false; p.policy.Terminal(p.Result());
+      check(!p.policy.PendingCount(), "the real recovery's convergence retires the hint");
+      ReturningPolicy f; f.Return(); f.current.room = thorn; f.Pump(); f.busy = false;
+      f.policy.Terminal(f.Result(ResyncResultReason::NativeUnavailable), true);
+      ++f.current.room.epoch; f.Pump();
+      check(f.policy.PendingCount() == 1 && f.sends == 2, "a failed sit-out is an ordinary failure: a newer arena epoch may try again");
+      ReturningPolicy r; r.Return(); r.current.room = thorn; r.Pump(); r.busy = false; r.policy.Terminal(r.Result(), true);
+      r.Return(); ++r.current.room.epoch; r.Pump();
+      check(r.sends == 2, "a new connection is a new return: its first arena epoch may carry it in again"); }
     { ReturningPolicy p(false); p.Return(); p.Pump(); check(!p.sends && !p.policy.PendingCount() && p.events.empty(), "return policy disabled has no hints or submissions"); }
     { ReturningPolicy p; p.Pump(); p.Observe(); p.Pump(); check(!p.sends && !p.policy.PendingCount(), "initial roster and duplicate admission never imply a return"); }
     { ReturningPolicy p; p.roster.actors.pop_back(); p.Observe(); p.roster.actors.push_back({3, SlotType::Friend2, "first-peer", "sora", p.current.connections[2]}); p.Observe(); p.Pump(); check(!p.sends, "first peer sight after an empty seat is not a returning peer"); }

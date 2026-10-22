@@ -899,7 +899,7 @@ void testVersionReject() {
     while (steadyMs() < legacyDeadline && !disconnected) {
         host.tick(0); legacy.tick(0); std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    check(PROTOCOL_VERSION == 34 && disconnected && reason == "Protocol mismatch: client="+std::to_string(legacyVersion)+" server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
+    check(PROTOCOL_VERSION == 35 && disconnected && reason == "Protocol mismatch: client="+std::to_string(legacyVersion)+" server=" + std::to_string(PROTOCOL_VERSION) && host.verifiedPeerCount() == 0,
           "otherwise matching legacy peer is rejected for exact protocol mismatch with free capacity");
     }
 }

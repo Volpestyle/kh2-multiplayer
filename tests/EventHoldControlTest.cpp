@@ -422,6 +422,10 @@ int main() try {
             }
             require(!RecoveryResultMatches(current,b,n,r),"mismatched native recovery proof refused");
         }
+        // VUH-2640 Leg A: a boss sit-out converges (presence) but is never a recovered-lifetime proof.
+        { auto sitOut=snapshot; sitOut.bossSitOut=ResyncBossSitOut{1,1,307};
+          require(RecoverySnapshotSupported(sitOut),"a sit-out has the empty recovery shape");
+          require(!RecoveryResultMatches(s,begin,sitOut,result),"a sit-out's convergence never restores event control"); }
         ResyncEnemyState ordinary {}; ordinary.objectType=3; ordinary.identity.objectId=302;
         ordinary.hp=ordinary.maxHp=20; snapshot.enemies={ordinary}; snapshot.livingCount=1;
         require(RecoverySnapshotSupported(snapshot),"ordinary all-living population is eligible for native census proof");

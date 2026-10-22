@@ -182,6 +182,17 @@ bool CurrentHostMission(char (&file)[24]) noexcept;
 bool LocalNativeMission(char (&file)[24]) noexcept;
 // VUH-2640: this seat's native mission now, in any role (mission pointer set and readable, not ended).
 bool NativeMissionFile(char (&file)[24]) noexcept;
+// VUH-2640 Leg A: this friend's latest boss sit-out arrival: a presence-only Bootstrap into a reviewed boss
+// arena that the relay reported Converged (docs/FENCED_FRIEND_BOSS_ARENA.md). DownedSpike begins the outage
+// from it, by downedreturn::SitOutArrivalQualified. serial 0: none.
+struct SitOutArrival {
+    std::uint32_t serial = 0;
+    std::uint64_t request = 0;
+    std::uint16_t arena = 0;
+    std::uint32_t generation = 0, transition = 0, load = 0;  // at the arrival
+    std::uint32_t recoveryLoad = 0;                          // the recovery Bootstrap load serial then (its own)
+};
+bool LatestSitOutArrival(SitOutArrival& out) noexcept;
 // VUH-2640: positive session-end evidence: this seat's runtime (still the bridge's writer) stopped
 // networking for good. An unavailable or expired writer lease is not evidence either way.
 bool NetworkTerminal() noexcept;

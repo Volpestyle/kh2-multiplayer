@@ -29,6 +29,7 @@ inline bool RecoveryResultMatches(const Scope& scope, const ResyncBegin& begin,
         begin.key.hostConnectionId != scope.hostConnection || !begin.snapshotCut ||
         (begin.phase != ResyncPhase::Bootstrap && begin.phase != ResyncPhase::Checkpoint) ||
         !sameResyncRoom(begin.room, snapshot.room) || !RecoverySnapshotSupported(snapshot) ||
+        snapshot.bossSitOut || // VUH-2640 Leg A: presence only, never a recovered lifetime
         !begin.targetCount || begin.targetCount > begin.targets.size() ||
         !result.targetCount || result.targetCount > result.targets.size()) return false;
     const ResyncTarget wanted {static_cast<std::uint8_t>(scope.slot), scope.selfConnection, scope.targetDelivery};

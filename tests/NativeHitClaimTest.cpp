@@ -192,6 +192,7 @@ bool WaitingAtBlockedExit() { return productionWorldMode ? recoverywarp::Waiting
 bool HostTravelling() { return productionWorldMode && recoverywarp::HostTravelling(); }  // VUH-2341 World Map
 std::uint32_t TransitionSerial() { return productionWorldMode ? recoverywarp::TransitionSerial() : transition; }
 std::uint32_t LoadSerial() { return productionWorldMode ? recoverywarp::LoadSerial() : load; }
+std::uint32_t RecoveryBootstrapLoadSerial() { return productionWorldMode ? recoverywarp::RecoveryBootstrapLoadSerial() : 0; }
 RoomTransition ReadLocation() {
     RoomTransition result;
     enemysync::ReadLocationChecked(result);
@@ -3330,6 +3331,117 @@ void TestStruggleOrbRows() {
     ResetSpawnEmissions();
 }
 
+// VUH-2640 Leg A: the boss sit-out through the actual native host capture, friend admission, arena load,
+// two-frame convergence and result. The arena tuple, Thorn's object and mission are the reviewed row's.
+void ArenaWorld() {
+    constexpr std::uint8_t world = 2, room = 34;
+    constexpr std::uint16_t program = 157;
+    g_inst.world = g_host.world = arrivalTarget.worldId = world;
+    g_inst.room = g_host.room = arrivalTarget.roomId = room;
+    g_inst.door = arrivalTarget.door = 0;
+    g_inst.map = arrivalTarget.mapProgram = program;
+    g_inst.btl = g_host.btl = arrivalTarget.battleProgram = program;
+    g_inst.evt = arrivalTarget.eventProgram = program;
+    Put(image + offsets::WORLD_ID, world); Put(image + offsets::ROOM_ID, room);
+    Put(image + offsets::NOW + 2, std::uint8_t{0});
+    Put(image + offsets::MAP_PROGRAM, program);
+    Put(image + offsets::BATTLE_PROGRAM, program);
+    Put(image + offsets::EVENT_PROGRAM, program);
+    Put(object + offsets::objentry::TYPE_FLAGS, std::uint8_t{12});
+    Put(object + offsets::objentry::OBJECT_ID, enemyclass::TwilightThorn);
+    g_inst.spawns[0].objectId = g_host.enemies[1].objectId = enemyclass::TwilightThorn;
+    g_inst.spawns[0].objectType = 12; g_inst.spawns[0].spawnIndex = 0;
+    g_host.enemies[1].battleProgram = program;
+    Put(status, std::int32_t{900});
+    const auto mission = image + 0x80000;
+    Put(image + MR::kMissionPtr, mission); Put(mission + MR::kFlags, std::uint32_t{1});
+    const char path[] = "msn/us/TT34_MS304.bar";
+    std::memcpy(reinterpret_cast<void*>(mission + MR::kPath), path, sizeof(path));
+}
+void TestBossSitOutNative() {
+    namespace p = kh2coop::inject::progresssync;
+    namespace w = kh2coop::inject::recoverywarp;
+    namespace ehn = kh2coop::inject::eventholdnative;
+    SetEnvironmentVariableA("KH2COOP_EVENT_HOLD_CONTROL", "1"); ehn::Install(image, nullptr);
+    // The runtime's producer view of this seat's lifetime: bound and healthy now, expired below. Disable()
+    // invalidates the mapping for good (Shutdown), so the no-event-control case runs last.
+    eventhold::Channel runtime; eventhold::Scope lifetime {};
+    std::memcpy(lifetime.session, "0123456789abcdef0123456789abcdef", 32);
+    lifetime.generation = 1; lifetime.slot = 1; lifetime.hostConnection = 100; lifetime.selfConnection = 99;
+    lifetime.hostDelivery = 1; lifetime.targetDelivery = 1;
+    Check(ehn::Enabled() && runtime.OpenExisting(GetCurrentProcessId()) && runtime.Bind(lifetime, GetTickCount64()) &&
+          !ehn::LifetimeHeartbeatExpired(), "fixture: event control on, a bound lifetime not expired");
+
+    // Host: in the arena with Thorn's mission running, the capture is the sit-out and nothing else.
+    Reset(); ArenaWorld();
+    const auto plan = NativePlan(); ReceiveResyncPlan(plan);
+    ResyncSnapshot sitOut; ProducerWorldContext cut;
+    const bool captured = CaptureHostResync(500, sitOut, cut);
+    Check(captured && sitOut.bossSitOut && sitOut.bossSitOut->arena == 1 && sitOut.bossSitOut->bossNetId == 1 &&
+          sitOut.bossSitOut->bossObjectId == 307 && sitOut.enemies.empty() && !sitOut.livingCount && !sitOut.deadCount &&
+          sitOut.recordDefinitions.empty() && sitOut.coverageMask == ResyncNativeComplete && sitOut.progress.full &&
+          sitOut.loadSerial == load && cut.hostSourceSerial,
+          "host arena capture attests the boss sit-out: no enemy row, no record catalog, no boss state");
+    bool encodes = false;
+    try { encodes = captured && !encodeResyncSnapshot(sitOut).empty(); } catch (const std::exception&) {}
+    Check(encodes, "the captured sit-out passes the shared codec's exact validation");
+    for (unsigned mode = 0; mode < 3; ++mode) {
+        Reset(); ArenaWorld(); ReceiveResyncPlan(plan);
+        if (mode == 0) Put(image + MR::kMissionPtr, uintptr_t{0});                              // no boss mission
+        if (mode == 1) Put(status, std::int32_t{0});                                           // the boss is down
+        if (mode == 2) { g_inst.spawns[0].objectType = offsets::objentry::TYPE_MOB;             // not the arena's boss
+                         Put(object + offsets::objentry::TYPE_FLAGS, std::uint8_t{offsets::objentry::TYPE_MOB}); }
+        ResyncSnapshot refused; ProducerWorldContext unused;
+        Check(!CaptureHostResync(510 + mode, refused, unused),
+              "no sit-out without the arena's running mission or a living boss of its own");
+    }
+    if (!captured) { ehn::Disable(); return; }  // (Disable last: it ends the mapping's lifetime)
+    const auto begin = NativeBegin(plan, sitOut, cut.hostSourceSerial);
+    const auto packet = encodeNativeResyncSnapshot(begin, sitOut);
+
+    // Friend: a seat whose lifetime is live never accepts a sit-out.
+    ResetWorld(); ArenaWorld();
+    StageNativeBootstrap(plan, packet);
+    Check(g_nativeResync && g_nativeResync->finished && !w::g_hostQueued && warpCalls == 0,
+          "a live seat refuses a boss sit-out before any progress staging or load");
+
+    // The fenced seat: its own lifetime expired (the runtime's producer view, immutable abort).
+    runtime.Invalidate(eventhold::Abort::HeartbeatExpired);
+    Check(ehn::LifetimeHeartbeatExpired(), "fixture: this seat's lifetime expired");
+    ResetWorld(); ArenaWorld();
+    StageNativeBootstrap(plan, packet);
+    Check(g_nativeResync && !g_nativeResync->finished && w::g_hostQueued && p::g_clientFull,
+          "the fenced seat stages the host's progress and queues the arena load");
+    w::IssueHostTransition(); w::CompleteLoad(); OnFrameStart(520);
+    Check(g_nativeResync && g_nativeResync->firstObserved && !g_nativeResync->finished,
+          "first frame with only this seat's own boss copy in the census is observed, not yet converged");
+    OnFrameStart(521);
+    Check(g_nativeResync && g_nativeResync->finished && !g_resyncOutput.empty(),
+          "a second distinct frame converges without binding the boss copy");
+    const auto ack = g_resyncOutput.empty() ? ResyncAck {} : DecodeNativePacket<ResyncAck>(g_resyncOutput);
+    Check(ack.status == ResyncAckStatus::Converged && ack.enemyCount == 0 && ack.loadAfter != ack.loadBefore &&
+          ack.observedFingerprint == sitOut.nativeFingerprint && ack.checksMask == ResyncChecksComplete,
+          "converged sit-out ACK: changed load, no enemy row, the host's fingerprint");
+    Check(Read<int>(status) == 900 && deathCalls == 0, "the boss copy's own HP is never written");
+    TickNativeResync(522);
+    ResyncResult result; result.key = plan.request.key; result.reason = ResyncResultReason::Converged;
+    result.targetCount = 1; result.targets[0].target = plan.targets[0];
+    result.targets[0].status = ResyncAckStatus::Converged; result.targets[0].appliedCut = begin.snapshotCut;
+    result.targets[0].fingerprint = sitOut.nativeFingerprint;
+    g_bridge.incoming.push_back(encode(result)); ReceiveWorldPackets();
+    SitOutArrival arrival;
+    Check(LatestSitOutArrival(arrival) && arrival.arena == 1 && arrival.request == plan.request.key.requestId &&
+          arrival.load == w::LoadSerial() && arrival.recoveryLoad == arrival.load && arrival.transition == w::TransitionSerial() &&
+          arrival.generation == WorldSessionGeneration(),
+          "the relay's Converged result records the arrival, anchored to its own recovery Bootstrap load");
+    Check(ehn::LifetimeHeartbeatExpired(), "presence restores no lifetime: the expired one stays this seat's");
+    ehn::Disable();
+    Reset(); ArenaWorld(); ReceiveResyncPlan(plan);
+    ResyncSnapshot refused; ProducerWorldContext unused;
+    Check(!CaptureHostResync(530, refused, unused), "no sit-out without event control");
+    Reset();
+}
+
 int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
@@ -3653,6 +3765,7 @@ int main() try {
     TestBaileyMissionEndOrdering(true); // VUH-2352: ordinary Shadow death vs MU01 end hold
     TestMoraleBirthLifetime();
     TestStruggleOrbRows();
+    TestBossSitOutNative(); // last: enables event control and leaves this process's mapping expired
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);
     return errors ? 1 : 0;

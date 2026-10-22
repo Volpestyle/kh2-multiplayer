@@ -1,6 +1,6 @@
 # Carrying a fenced friend into the host's boss arena (VUH-2640, design)
 
-Design, approved by the lead with the decisions below. This extends VUH-2628's returning-seat recovery.
+Design, approved by the lead with the decisions below; Leg A is implemented offline (see "Leg A as implemented"). This extends VUH-2628's returning-seat recovery.
 VUH-2640's F1 outage covers an expiry *inside* the arena; this covers a friend fenced
 in an earlier room when the host moves on into a boss arena. Line references are to main `e7a5d88`.
 
@@ -143,6 +143,74 @@ Every piece below already exists and is extended, not duplicated:
 
 **Status:** this doc is committed first; Leg A is then implemented offline and goes to Quill as its own
 packet. `inject/src/DownedSpike.inl` is coordinated through the lead (Ivo is editing it).
+
+## Leg A as implemented (offline)
+
+Where the code is:
+
+- **Reviewed rows:** `common/include/kh2coop/BossArenas.hpp`. One row, `tt34-twilight-thorn`:
+  `{2,34,0,157,157,157}`, object 307, type 12, `TT34_MS304.bar`.
+- **Wire (protocol 35):** `ResyncSnapshot::bossSitOut`, a 16-byte tagged trailer (`BSIT`) that excludes
+  the activation trailer. The codec admits it only for the exact row's room and boss, with a nonzero boss
+  netId, complete coverage, no enemy row, no record definition and no active hold. It is covered by the
+  snapshot SHA but not by the native fingerprint, because it is transport attestation, not native state.
+- **Host policy:** `ReturningSeatHostReady` lets `bossMission` through when the hint's room is a row
+  (`bossArena`).
+  - `Terminal(result, sitOut)`: a converged sit-out keeps the seat pending. The host's `NetworkClient`
+    remembers which key it sent as a sit-out.
+  - After one presence, any arena waits with `sit-out-presence-held`, so a retry's new epoch can't
+    re-carry the seat. A failed sit-out is an ordinary failure, and a new connection starts fresh.
+- **Host capture:** `CaptureHostResync` takes its own branch for a row. It needs:
+  - event control on, and the row's mission file running on the host;
+  - exactly one spawn and one native enemy, and that is the row's boss, alive;
+  - a repeated census and progress, and an unchanged scope.
+
+  It captures no record catalog and no enemy row (refusal stages `sit-out-*`).
+- **Relay:** for a sit-out, the target stays quarantined after the snapshot is forwarded. Continuation is
+  dropped, there is no further continuation buffering, and the relay's cache is not refreshed from the
+  snapshot (it keeps the host's live state). The boss's netId in `EnemyHp`/`EnemyManifest` is not a
+  material change; any other enemy, or the boss's death, is.
+- **Friend runtime:** a sit-out snapshot leaves `worldQuarantined` set and puppets unavailable. Its
+  Converged result logs `[eventhold-recovery] sit-out presence ... controlFenced=1` and never feeds the
+  recovered-lifetime handshake (`RecoveryResultMatches` refuses a sit-out).
+- **Friend DLL:**
+  - `ReceiveResyncSnapshot` refuses a sit-out unless this is the client and its own lifetime expired.
+  - `ObserveNativeResync` binds nothing for a sit-out: the census may hold only copies of the declared
+    boss, and the observed state has no enemy row.
+  - `ClientFrame` matches nothing while a sit-out is in force. That counts as a completed frame, so the
+    observation still runs; stray-copy and population repair stay fenced by the resync write fence.
+  - The relay's Converged result records `SitOutArrival`: its request, arena, generation, transition,
+    load, and the recovery Bootstrap serial it anchors to.
+- **Outage:** `downedreturn::SitOutArrivalQualified`, applied in `DownedSpike.inl` as a separate commit.
+  It sets F1's pending outage from the arrival. A held outage downing that the native update moves more
+  than 200 units is logged once per episode (`[downed] outage held-player-moved`), for the `atk_thorn`
+  attach check on the next live run.
+
+Departures from the design above:
+
+- **No record catalog.** The capture is a dedicated branch, not "the same stages", because nothing is
+  rebuilt on the friend. This also avoids depending on whether the arena's spawn catalog qualifies, which
+  is unknown offline.
+- **Host avatars are not shown** to the sit-out friend in this slice. Puppets stay unavailable while it
+  is quarantined. Showing inbound avatars is a follow-up.
+- **The boss ending is a terminal refusal for that epoch,** inside the capture (the boss down, or the
+  mission gone), and a material change at the relay. Either way, Leg B's later epoch carries the seat.
+- **The proposed early wait on dead rows and an active hold is not implemented.** The refused epoch is
+  spent as before.
+
+Offline evidence (Release, serial ctest):
+
+- **`kh2coop_resync_test`:** the codec round trip, the refusals and the relay transaction (fenced target,
+  boss HP not material, another enemy or the boss's death material).
+- **`kh2coop_automatic_notice_test`:** the host policy.
+- **`kh2coop_event_hold_control_test`:** no recovered lifetime from a sit-out.
+- **`kh2coop_downed_return_test`:** the arrival rule and the duty anchor.
+- **`kh2coop_nativehit_test`:** the actual native path over owned memory. It runs the host arena capture
+  and its refusals, refuses a live seat, then takes the fenced seat through staging, load and two-frame
+  convergence, and records the arrival with the old lifetime still expired.
+
+Not proven: any live run, including the friend's own Thorn copy, its intro event on the friend, the
+`atk_thorn` attach, the friend's progress matching mid-fight, and Leg B's post-Thorn row (VUH-2674).
 
 ## Proof plan
 

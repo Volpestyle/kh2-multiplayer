@@ -332,6 +332,35 @@ int main() {
       OutageDuty g; g.Begin(0);
       CHECK(!OutageFrame(g, 0, true, OutagePlace::Elsewhere, false).act && !g.Active()); }
 
+    // VUH-2640 Leg A: a fenced friend carried into a reviewed boss arena by the host's sit-out. The arrival is
+    // the proof (host-attested, relay Converged): it qualifies only while current, its own Bootstrap the
+    // current load, the old lifetime still expired and the seat in that arena. The duty it opens is anchored
+    // to that Bootstrap, so the arrival never ends it; only the later real recovery (Leg B) does.
+    { SitOutArrivalFacts a;
+      a.serial = 1; a.arena = 1; a.generation = 6; a.transition = 12; a.load = 30; a.recoveryLoad = 30;
+      a.generationNow = 6; a.transitionNow = 12; a.loadNow = 30; a.lifetimeExpired = true; a.inArena = true;
+      CHECK(SitOutArrivalQualified(a));
+      auto with = [&](auto change) { auto g = a; change(g); return SitOutArrivalQualified(g); };
+      CHECK(!with([](auto& g) { g.serial = 0; }));                          // no arrival
+      CHECK(!with([](auto& g) { g.arena = 0; }));
+      CHECK(!with([](auto& g) { g.recoveryLoad = 29; }));                   // not its own Bootstrap
+      CHECK(!with([](auto& g) { g.recoveryLoad = 0; g.load = 0; g.loadNow = 0; }));
+      CHECK(!with([](auto& g) { g.generationNow = 7; }));                   // another world generation since
+      CHECK(!with([](auto& g) { g.transitionNow = 13; }));                  // a transition since
+      CHECK(!with([](auto& g) { g.loadNow = 31; }));                        // a load since (a later recovery)
+      CHECK(!with([](auto& g) { g.lifetimeExpired = false; }));             // a recovered lifetime: not a fenced seat
+      CHECK(!with([](auto& g) { g.inArena = false; }));
+      CHECK(!with([](auto& g) { g.generation = 0; g.generationNow = 0; }));
+      // Pending, as F1's: begun on the arena's first settled frame (after the boss intro's event).
+      CHECK(OutageStartStep(true, true, a.lifetimeExpired, false, false) == OutageStart::Wait);
+      CHECK(OutageStartStep(true, true, a.lifetimeExpired, false, true) == OutageStart::Begin);
+      OutageDuty d; d.Begin(a.recoveryLoad);
+      CHECK(d.End(30, false) == OutageEnd::Open);                            // the arrival's own load: still sitting out
+      CHECK(!OutageFrame(d, 30, false, OutagePlace::Held, false).act && d.Active());
+      const auto legB = OutageFrame(d, 41, false, OutagePlace::Held, false); // the real recovery's Bootstrap
+      CHECK(legB.act && legB.decision.after == AfterTransition::Resolve && legB.decision.why == Disposition::Outage &&
+            !d.Active()); }
+
     // Regression (VUH-2640 F1, round 3), the adapter's order through a Thorn outage: the friend's mirror binds
     // Thorn to the host's authority every frame until the expiry at 3000 (the retirement stops it); the expiry
     // is judged once against that receipt; the friend is in the boss's event until 3050, so the downing waits

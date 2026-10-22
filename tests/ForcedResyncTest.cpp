@@ -516,6 +516,72 @@ void initialExpiryLatePlan() {
           "late first Plan behind reliable marker cannot reopen consumed request or renew deadline");
 }
 
+// VUH-2640 Leg A: the boss sit-out trailer (protocol 35) and its relay transaction.
+const RoomTransition kArena{7,2,34,0,157,157,157};
+ResyncSnapshot sitOutSnapshot(){
+    auto s=snapshot(false);s.room=kArena;s.hold={7,false,157};s.coverageMask=ResyncNativeComplete;
+    s.bossSitOut=ResyncBossSitOut{1,1,307};s.nativeFingerprint=resyncNativeFingerprint(s);return s;
+}
+void bossSitOutCodec(){
+    const auto s=sitOutSnapshot();exactCodec(s);
+    const auto decoded=decodeResyncSnapshot(encodeResyncSnapshot(s));
+    check(decoded.bossSitOut==s.bossSitOut&&decoded.enemies.empty()&&!decoded.activationReplay,"sit-out trailer survives the codec exactly");
+    auto bare=s;bare.bossSitOut.reset();
+    check(encodeResyncSnapshot(s).size()==encodeResyncSnapshot(bare).size()+16,"sit-out trailer is 16 bytes");
+    check(resyncNativeFingerprint(bare)==s.nativeFingerprint,"the trailer is attestation, not native state: fingerprint unchanged");
+    for(unsigned mode=0;mode<9;++mode){auto bad=s;
+        if(mode==0)bad.bossSitOut->arena=2;                        // no such reviewed arena
+        if(mode==1)bad.bossSitOut->arena=0;
+        if(mode==2){bad.room.roomId=33;bad.hold.eventProgram=157;}  // not the arena's room
+        if(mode==3)bad.room.door=1;
+        if(mode==4)bad.bossSitOut->bossNetId=0;
+        if(mode==5)bad.bossSitOut->bossObjectId=308;               // not the arena's boss
+        if(mode==6)bad.coverageMask=ResyncComplete;
+        if(mode==7){ResyncEnemyState e;e.identity.netId=1;e.identity.objectId=307;e.identity.battleProgram=157;e.objectType=12;e.hp=900;e.maxHp=1000;bad.enemies.push_back(e);bad.livingCount=1;bad.coverageMask=ResyncComplete;}
+        if(mode==8){bad.hold.active=true;}
+        check(throws([&]{bad.nativeFingerprint=resyncNativeFingerprint(bad);(void)encodeResyncSnapshot(bad);}),"sit-out outside its exact reviewed arena, boss or empty shape is refused");
+    }
+    // A trailer of the wrong size or tag cannot be read as a sit-out (or skipped).
+    auto bytes=encodeResyncSnapshot(s);auto tagged=bytes;tagged[tagged.size()-16]^=1;
+    check(throws([&]{(void)decodeResyncSnapshot(tagged);}),"wrong sit-out tag rejected");
+    auto longer=bytes;longer.push_back(0);check(throws([&]{(void)decodeResyncSnapshot(longer);}),"sit-out trailer suffix rejected");
+}
+struct SitOutRig : Rig {
+    using Rig::Rig;
+    bool primeArena(){if(!ready())return false;clients[0]->sendRoomTransition(kArena);clients[0]->sendEventHold({7,false,157});
+        EnemyManifest m;m.epoch=7;EnemyManifestEntry boss;boss.netId=1;boss.objectId=307;boss.battleProgram=157;m.entries={boss};
+        clients[0]->sendEnemyManifest(m);clients[0]->sendEnemyHp({7,{{1,900,1000}},1});
+        return wait([&]{return !seen[1].hp.empty()&&!seen[2].hp.empty();})&&barrier();}
+    // Ordering barrier through the unfenced seat only; the fenced target must not see it at all.
+    bool fencedBarrier(){const auto n=++marker;const auto before=seen[1].progress;clients[0]->sendProgressUpdate({n,false,{}});
+        return wait([&]{return seen[2].progress==n;})&&seen[1].progress==before;}
+};
+void bossSitOutRelay(unsigned mode,std::uint16_t port){
+    SitOutRig r(port);if(!r.primeArena()||!r.begin(2)){check(false,"sit-out relay setup");return;}
+    if(!r.capture(sitOutSnapshot())){check(false,"sit-out capture forwarded to its target");return;}
+    check(r.seen[1].snapshots.back().bossSitOut.has_value(),"the target receives the host's sit-out attestation");
+    const auto hp1=r.seen[1].hp.size(),hp2=r.seen[2].hp.size();
+    if(mode==0){
+        r.clients[0]->sendEnemyHp({7,{{1,850,1000}},11});
+        check(r.wait([&]{return r.seen[2].hp.size()==hp2+1;})&&r.fencedBarrier()&&r.seen[1].hp.size()==hp1,"the boss's HP still reaches other seats but not the fenced target");
+        check(r.sendAck(1)&&r.result(ResyncResultReason::Converged),"the host-owned boss's HP is no material change: the sit-out converges");
+        const auto held=r.seen[1].holds.size();
+        r.clients[0]->sendEnemyHp({7,{{1,800,1000}},12});r.clients[0]->sendEventHold({7,true,157});
+        check(r.wait([&]{return r.seen[2].hp.size()==hp2+2;})&&r.fencedBarrier()&&r.seen[1].hp.size()==hp1&&r.seen[1].holds.size()==held,
+              "after convergence the sit-out target stays quarantined: no host HP, hold or progress reaches it");
+    }
+    if(mode==1){
+        EnemyManifest more;more.epoch=7;more.replace=false;EnemyManifestEntry other;other.netId=2;other.objectId=309;other.battleProgram=157;more.entries={other};
+        r.clients[0]->sendEnemyManifest(more);
+        check(r.sendAck(1)&&r.wait([&]{return r.clients[0]->pendingResync()&&r.clients[0]->pendingResync()->phase==ResyncPhase::Checkpoint;}),
+              "an enemy other than the declared boss is a material change (fresh checkpoint)");
+    }
+    if(mode==2){
+        r.clients[0]->sendEnemyDeath({7,1});
+        check(r.sendAck(1)&&r.wait([&]{return r.clients[0]->pendingResync()&&r.clients[0]->pendingResync()->phase==ResyncPhase::Checkpoint;}),
+              "the boss's death is a material change (the fight is ending)");
+    }
+}
 void legacy(){SessionConfig cfg;cfg.bindAddress="127.0.0.1";cfg.port=17843;cfg.gameBuild="legacy";cfg.modHash="m";cfg.contentHash="c";SessionHost relay(cfg);check(relay.start(),"version10 relay gate starts");std::string reason;bool closed=false;ClientCallbacks cb;cb.onRejected=[&](const HelloReject& r){reason=r.reason;};cb.onClosed=[&](const auto&){closed=true;};NetworkClient old("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"old8",SlotType::Friend1,cb,RuntimeMode::CampaignCoop,cfg.contentHash,8);old.connect();const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(4);while(!closed&&std::chrono::steady_clock::now()<until){relay.tick(0);old.tick(0);std::this_thread::sleep_for(std::chrono::milliseconds(1));}check(PROTOCOL_VERSION>8&&closed&&reason=="Protocol mismatch: client=8 server="+std::to_string(PROTOCOL_VERSION)&&relay.verifiedPeerCount()==0,"v8 cannot negotiate snapshots without native record-content witness semantics");old.disconnect();relay.stop();}
 }
-int main(){if(enet_initialize()!=0)return 2;codecAndStaging();recordContentCodec();loopbackSuccess(false,17831);loopbackSuccess(true,17832);checkpoint(false,17833);checkpoint(true,17834);for(unsigned i=0;i<7;++i)terminalControls(static_cast<std::uint16_t>(17835+i),i);conditionedRetirement();singleTargetAndOverflow(false,17845);singleTargetAndOverflow(true,17846);for(unsigned i=0;i<4;++i)wireStaging(i,static_cast<std::uint16_t>(17847+i));simulationUnavailable();completedReplayAndMixedCut(false,17852);completedReplayAndMixedCut(true,17853);expiredInboundEnd();for(unsigned i=0;i<3;++i)expiredOutbound(i,static_cast<std::uint16_t>(17855+i));initialExpiryLatePlan();legacy();enet_deinitialize();std::cout<<checks-failures<<" PASS, "<<failures<<" FAIL\n";return failures?1:0;}
+int main(){if(enet_initialize()!=0)return 2;codecAndStaging();recordContentCodec();loopbackSuccess(false,17831);loopbackSuccess(true,17832);checkpoint(false,17833);checkpoint(true,17834);for(unsigned i=0;i<7;++i)terminalControls(static_cast<std::uint16_t>(17835+i),i);conditionedRetirement();singleTargetAndOverflow(false,17845);singleTargetAndOverflow(true,17846);for(unsigned i=0;i<4;++i)wireStaging(i,static_cast<std::uint16_t>(17847+i));simulationUnavailable();completedReplayAndMixedCut(false,17852);completedReplayAndMixedCut(true,17853);expiredInboundEnd();for(unsigned i=0;i<3;++i)expiredOutbound(i,static_cast<std::uint16_t>(17855+i));initialExpiryLatePlan();bossSitOutCodec();for(unsigned i=0;i<3;++i)bossSitOutRelay(i,static_cast<std::uint16_t>(17871+i));legacy();enet_deinitialize();std::cout<<checks-failures<<" PASS, "<<failures<<" FAIL\n";return failures?1:0;}

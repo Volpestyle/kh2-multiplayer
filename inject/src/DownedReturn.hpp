@@ -501,6 +501,26 @@ inline OutageStep OutageFrame(OutageDuty& duty, std::uint32_t recoveryLoadNow, b
     if (place == OutagePlace::Held && holdLost) return {true, {AfterTransition::SitOut, Disposition::Outage}};
     return {};
 }
+// VUH-2640 Leg A (docs/FENCED_FRIEND_BOSS_ARENA.md): a fenced friend the host's boss sit-out carried into a
+// reviewed boss arena sits out there under the same outage duty F1 opens, pending on that room as F1's is.
+// The proof is the arrival itself, host-attested: the relay's Converged result for this seat's sit-out
+// Bootstrap. It qualifies once, while still current (the same session generation, transition and load as at
+// the arrival, and that load is its own recovery Bootstrap), while this seat's lifetime is still the expired
+// one (presence never restores it) and it stands in that arena. The duty is anchored to that same Bootstrap,
+// so the arrival never ends it; the later real recovery (Leg B) does, at 25%.
+struct SitOutArrivalFacts {
+    std::uint32_t serial = 0;                                // the arrival's; 0: none
+    std::uint16_t arena = 0;
+    std::uint32_t generation = 0, transition = 0, load = 0;  // at the arrival
+    std::uint32_t recoveryLoad = 0;                          // its recovery Bootstrap load serial
+    std::uint32_t generationNow = 0, transitionNow = 0, loadNow = 0;
+    bool lifetimeExpired = false, inArena = false;
+};
+constexpr bool SitOutArrivalQualified(const SitOutArrivalFacts& f) noexcept {
+    return f.serial && f.arena && f.recoveryLoad && f.recoveryLoad == f.load && f.generation &&
+           f.generation == f.generationNow && f.transition == f.transitionNow && f.load == f.loadNow &&
+           f.lifetimeExpired && f.inArena;
+}
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {
     case Disposition::Solo: return "solo";
