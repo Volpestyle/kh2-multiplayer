@@ -245,8 +245,26 @@ first ready frame (the ready predicate does not read CONTROLLABLE; Quill r2), an
 - relay continuation and quarantine for the presence result;
 - refusals: a mismatched row, a second enemy, dead rows, a boss ending.
 
-**Live (Ivo's desk):** the bots05 route with a forced friend-runtime pause in Calling. That pause needs its own
-qualified fixture: the old 2600 ms one no longer expires a 4000 ms lease, and a longer one must
-account for relay age since the last packet (Quill r1). Pass: the friend
-arrives in 2/34 sitting out, one host victory, no friend 315 or 4/16, Leg B at the next field returning
-at 25%, and protected saves unchanged.
+**Live (Ivo's desk):** `tools/scenario/scenarios/net_twilight_thorn_legA.json`
+(`vuh2640_thorn_legA_sitout`). It is generated offline from bots05 by
+`tools/scenario/safe_field_recovery/make_thorn_legA.py` (`--check` verifies it is current), and runs through
+that directory's `run.py` thin entry, which registers the pause. Not yet run.
+
+- **Route:** bots05's Calling route, then the qualified 4200 ms Friend1 pause (a bounded experiment) after
+  the Calling pilots, then the host alone.
+- **Passes when:**
+  - the friend's lifetime expires and it rejoins;
+  - the friend lands in 2/34/157 (`[resync-sit-out] landed`, `[downed] outage arrival qualified=1`,
+    `[downed] outage sit-out`), with no control restored;
+  - the host makes exactly one `mission_dead_boss` and one 315 publication;
+  - the friend has no 4/16 or 315 rows.
+- **Recorded, not asserted:**
+  - the Calling capture outcome;
+  - the arrival rows;
+  - `held-player-moved`;
+  - the first post-Thorn field's `[resync-catalog] ... phase=field` rows and the host's capture there
+    (VUH-2674);
+  - where the friend is at the end. Staying in the arena sitting out is the expected first-slice result.
+- **Needs** the catalog trace (VUH-2674) on the tested products; without it, the final field wait times out
+  after the Leg A asserts.
+- **Risk:** a host clearing Thorn alone is untested.

@@ -68,3 +68,9 @@ HP/team/pose, save or tutorial-flag writes are performed.
 Other scripts, all-Script tables, mixed combat, active bosses and owned-pause
 expiry remain unsupported. This regression does not prove a Thorn kill,
 rewards, onward movement, two-PC play or continuous footage of the fault.
+
+**VUH-2640 Leg A live check.** The same thin entry also runs
+`../scenarios/net_twilight_thorn_legA.json`, which is generated from bots05 by
+`make_thorn_legA.py` (`--check` verifies it is current). It uses this pause in the
+Calling, then carries the friend into Thorn's arena sitting out. See
+`docs/FENCED_FRIEND_BOSS_ARENA.md`, "Proof plan". Not yet run.
