@@ -187,6 +187,11 @@
       "ms": 8000
     },
     {
+      "do": "assert",
+      "expr": "pause_relay()['ok']",
+      "message": "Lease-only expiry (Quill): the relay must not have timed out the friend after the pause; see heartbeat_relay.json"
+    },
+    {
       "do": "save",
       "as": "legA_calling",
       "expr": "{'host_refusals':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_recovery':[l for l in runtime_log(1).splitlines() if '[eventhold-recovery]' in l][-8:],'locations':[location(0),location(1)]}"
@@ -204,38 +209,6 @@
       "do": "wait_until",
       "expr": "location(0)==[2, 34, 0, 157, 157, 157] and any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(0))",
       "timeoutMs": 120000
-    },
-    {
-      "do": "wait_until",
-      "expr": "location(1)==[2, 34, 0, 157, 157, 157] and log_count('[resync-sit-out] landed',1)>0 and log_count('[downed] outage arrival qualified=1',1)>0",
-      "timeoutMs": 120000,
-      "pollMs": 500
-    },
-    {
-      "do": "wait_until",
-      "expr": "log_count('[downed] outage sit-out',1)>0",
-      "timeoutMs": 60000,
-      "pollMs": 500
-    },
-    {
-      "do": "save",
-      "as": "legA_arrival",
-      "expr": "{'host':[m['line'] for m in log_matches(r'(?P<line>\\[resync-sit-out\\] [^\\n]*)',0)],'friend':[m['line'] for m in log_matches(r'(?P<line>\\[(?:resync-sit-out|load-cause\\] retained-issue)[^\\n]*)',1)],'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],'friend_runtime':[l for l in runtime_log(1).splitlines() if 'sit-out presence' in l or '[eventhold-recovery]' in l][-8:],'locations':[location(0),location(1)],'missions':[mission(0),mission(1)],'friend_boss':[a for a in actors(1) if a.get('objectId')==307]}"
-    },
-    {
-      "do": "assert",
-      "expr": "log_count('[resync-sit-out] host arena=1 boss=307',0)>0 and log_count('[resync-sit-out] admitted request=',1)>0 and runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
-      "message": "Leg A: the host attests the sit-out, the fenced friend admits it, and no control is restored"
-    },
-    {
-      "do": "capture",
-      "instance": 0,
-      "name": "legA_arrival_host"
-    },
-    {
-      "do": "capture",
-      "instance": 1,
-      "name": "legA_arrival_friend"
     },
     {
       "do": "save",
@@ -286,6 +259,38 @@
       "do": "assert",
       "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
       "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(1)==[2, 34, 0, 157, 157, 157] and log_count('[resync-sit-out] landed',1)>0 and log_count('[downed] outage arrival qualified=1',1)>0",
+      "timeoutMs": 120000,
+      "pollMs": 500
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[downed] outage sit-out',1)>0",
+      "timeoutMs": 60000,
+      "pollMs": 500
+    },
+    {
+      "do": "save",
+      "as": "legA_arrival",
+      "expr": "{'host':[m['line'] for m in log_matches(r'(?P<line>\\[resync-sit-out\\] [^\\n]*)',0)],'friend':[m['line'] for m in log_matches(r'(?P<line>\\[(?:resync-sit-out|load-cause\\] retained-issue)[^\\n]*)',1)],'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],'friend_runtime':[l for l in runtime_log(1).splitlines() if 'sit-out presence' in l or '[eventhold-recovery]' in l][-8:],'locations':[location(0),location(1)],'missions':[mission(0),mission(1)],'friend_boss':[a for a in actors(1) if a.get('objectId')==307]}"
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[resync-sit-out] host arena=1 boss=307',0)>0 and log_count('[resync-sit-out] admitted request=',1)>0 and runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
+      "message": "Leg A: the host attests the sit-out, the fenced friend admits it, and no control is restored"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "legA_arrival_host"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "legA_arrival_friend"
     },
     {
       "do": "fight",
@@ -466,6 +471,11 @@
       "message": "The host alone clears Thorn: exactly one host mission_dead_boss and one ASCII315 publication"
     },
     {
+      "do": "save",
+      "as": "legA_victory_load",
+      "expr": "last_load(0)"
+    },
+    {
       "do": "assert",
       "expr": "log_count('[mission-mirror] client boss end',1)==saved['legA_before']['friend_end'] and log_count('353133',1)==saved['legA_before']['friend_315'] and runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
       "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back"
@@ -482,18 +492,14 @@
     },
     {
       "do": "wait_until",
-      "expr": "location(0)[:2]!=[2,34] and peek('0x9BA8D0','u8',0)==1 and peek('0x7435D0','u8',0)==255 and peek('0xB65210','i32',0)==0 and len(log_matches(r'\\[resync-catalog\\] schema=1 kind=summary [^\\n]* phase=field ',0))>0",
+      "expr": "location(0)[:2]!=[2,34] and peek('0x9BA8D0','u8',0)==1 and peek('0x7435D0','u8',0)==255 and peek('0xB65210','i32',0)==0 and peek('0x2A11478','u64',0)==0 and field_catalog(0, saved['legA_victory_load']) is not None",
       "timeoutMs": 300000,
       "pollMs": 1000
     },
     {
-      "do": "wait",
-      "ms": 10000
-    },
-    {
       "do": "save",
       "as": "vuh2674_field",
-      "expr": "{'host_location':location(0),'host_loads':[m['line'] for m in log_matches(r'(?P<line>\\[warp\\] load complete [^\\n]*)',0)][-12:],'catalog':[m['line'] for m in log_matches(r'(?P<line>\\[resync-catalog\\] schema=1 [^\\n]* phase=field [^\\n]*)',0)],'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"
+      "expr": "{'catalog':field_catalog(0, saved['legA_victory_load']),'host_location':location(0),'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"
     },
     {
       "do": "capture",
@@ -504,6 +510,11 @@
       "do": "capture",
       "instance": 1,
       "name": "legB_friend"
+    },
+    {
+      "do": "assert",
+      "expr": "pause_relay()['ok']",
+      "message": "Lease-only expiry (Quill): the relay must not have timed out the friend after the pause; see heartbeat_relay.json"
     }
   ]
 }

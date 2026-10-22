@@ -1,6 +1,7 @@
 """Derive the VUH-2640 Leg A live check from net_twilight_thorn_bots05.json (offline, deterministic).
 
-The bots05 steps through the Calling and its menu tutorials are kept verbatim. Then the original
+The bots05 steps through the Calling and its menu tutorials are kept verbatim, and the thin entry runs
+bots05's reviewed Thorn pilot (route_pilot/thorn.py, as run_thorn.py selects). Then the original
 Friend1 runtime is paused for the qualified 4200 ms fixture (pause.py), with no friend pilot bound, so
 the friend's lifetime expires before Thorn. Only the host continues: Leg A must carry the fenced friend
 into the arena sitting out, the host clears Thorn alone, and the friend receives no 4/16, 315 or
@@ -23,7 +24,11 @@ CALLING = [2, 33, 0, 0, 1, 0]
 PILOTS_IDLE = "not saved.get('_background_pilots',[])"
 PILOT_ALIVE = ("all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) "
                "for p in saved.get('_background_pilots',[]))")
-FIELD = ("peek('0x9BA8D0','u8',{i})==1 and peek('0x7435D0','u8',{i})==255 and peek('0xB65210','i32',{i})==0")
+# Settled field: IN_FIELD, menu closed, timeline idle, and no native event context (EVENT_CONTEXT 0x2A11478).
+FIELD = ("peek('0x9BA8D0','u8',{i})==1 and peek('0x7435D0','u8',{i})==255 and peek('0xB65210','i32',{i})==0 and "
+         "peek('0x2A11478','u64',{i})==0")
+RELAY_ASSERT = {"do": "assert", "expr": "pause_relay()['ok']",
+                "message": "Lease-only expiry (Quill): the relay must not have timed out the friend after the pause; see heartbeat_relay.json"}
 
 
 def build(bots05: dict) -> dict:
@@ -53,6 +58,7 @@ def build(bots05: dict) -> dict:
             "runtime_log(0).count('[returning-seat-resync] action=pending reason=same-peer-new-connection')>saved['legA_before']['host_pending']",
          "timeoutMs": 60000, "pollMs": 500},
         {"do": "wait", "ms": 8000},
+        RELAY_ASSERT,                                         # Quill r1: the pause's exact-peer refusal, after rejoin
         {"do": "save", "as": "legA_calling", "expr":
             "{'host_refusals':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),"
             "'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],"
@@ -61,27 +67,11 @@ def build(bots05: dict) -> dict:
         copy.deepcopy(steps[22]),                             # host_to_awakening: the host alone
         {"do": "wait_until", "expr": f"location(0)=={ARENA} and any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(0))",
          "timeoutMs": 120000},
-        {"do": "wait_until", "expr":
-            f"location(1)=={ARENA} and log_count('[resync-sit-out] landed',1)>0 and "
-            "log_count('[downed] outage arrival qualified=1',1)>0",
-         "timeoutMs": 120000, "pollMs": 500},
-        {"do": "wait_until", "expr": "log_count('[downed] outage sit-out',1)>0", "timeoutMs": 60000, "pollMs": 500},
-        {"do": "save", "as": "legA_arrival", "expr":
-            "{'host':[m['line'] for m in log_matches(r'(?P<line>\\[resync-sit-out\\] [^\\n]*)',0)],"
-            "'friend':[m['line'] for m in log_matches(r'(?P<line>\\[(?:resync-sit-out|load-cause\\] retained-issue)[^\\n]*)',1)],"
-            "'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],"
-            "'friend_runtime':[l for l in runtime_log(1).splitlines() if 'sit-out presence' in l or '[eventhold-recovery]' in l][-8:],"
-            "'locations':[location(0),location(1)],'missions':[mission(0),mission(1)],"
-            "'friend_boss':[a for a in actors(1) if a.get('objectId')==307]}"},
-        {"do": "assert", "expr":
-            "log_count('[resync-sit-out] host arena=1 boss=307',0)>0 and log_count('[resync-sit-out] admitted request=',1)>0 and "
-            "runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
-         "message": "Leg A: the host attests the sit-out, the fenced friend admits it, and no control is restored"},
-        {"do": "capture", "instance": 0, "name": "legA_arrival_host"},
-        {"do": "capture", "instance": 1, "name": "legA_arrival_friend"},
         copy.deepcopy(steps[27]),                             # thorn_baseline
     ]
-    # Twelve 30-second blocks with the host's pilot only (no revivePeer: the friend's outage is not a revive).
+    # Quill: no idle host in the live boss room. The host's fight pilot starts at once; the friend's landing is
+    # awaited during the first blocks. Host pilot only, without revivePeer: a partner revive must not end the
+    # friend's outage (an explicit scope decision; bots05's Calling steps keep their revivePeer).
     out += [copy.deepcopy(steps[28]), copy.deepcopy(steps[29])]
     host_pilot = copy.deepcopy(steps[30]); host_pilot.pop("revivePeer", None)
     out.append(host_pilot)
@@ -92,6 +82,27 @@ def build(bots05: dict) -> dict:
             out.append(copy.deepcopy(steps[33]))              # clip_wait after the first block
         out.append({"do": "assert", "expr": PILOT_ALIVE,
                     "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."})
+        if n == 0:
+            out += [
+                {"do": "wait_until", "expr":
+                    f"location(1)=={ARENA} and log_count('[resync-sit-out] landed',1)>0 and "
+                    "log_count('[downed] outage arrival qualified=1',1)>0",
+                 "timeoutMs": 120000, "pollMs": 500},
+                {"do": "wait_until", "expr": "log_count('[downed] outage sit-out',1)>0", "timeoutMs": 60000, "pollMs": 500},
+                {"do": "save", "as": "legA_arrival", "expr":
+                    "{'host':[m['line'] for m in log_matches(r'(?P<line>\\[resync-sit-out\\] [^\\n]*)',0)],"
+                    "'friend':[m['line'] for m in log_matches(r'(?P<line>\\[(?:resync-sit-out|load-cause\\] retained-issue)[^\\n]*)',1)],"
+                    "'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],"
+                    "'friend_runtime':[l for l in runtime_log(1).splitlines() if 'sit-out presence' in l or '[eventhold-recovery]' in l][-8:],"
+                    "'locations':[location(0),location(1)],'missions':[mission(0),mission(1)],"
+                    "'friend_boss':[a for a in actors(1) if a.get('objectId')==307]}"},
+                {"do": "assert", "expr":
+                    "log_count('[resync-sit-out] host arena=1 boss=307',0)>0 and log_count('[resync-sit-out] admitted request=',1)>0 and "
+                    "runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
+                 "message": "Leg A: the host attests the sit-out, the fenced friend admits it, and no control is restored"},
+                {"do": "capture", "instance": 0, "name": "legA_arrival_host"},
+                {"do": "capture", "instance": 1, "name": "legA_arrival_friend"},
+            ]
     out += [
         {"do": "pilot_wait"},
         {"do": "save", "as": "legA_fight", "expr":
@@ -103,6 +114,7 @@ def build(bots05: dict) -> dict:
         {"do": "assert", "expr":
             "saved['legA_fight']['host_end']==1 and saved['legA_fight']['victory']==1",
             "message": "The host alone clears Thorn: exactly one host mission_dead_boss and one ASCII315 publication"},
+        {"do": "save", "as": "legA_victory_load", "expr": "last_load(0)"},
         {"do": "assert", "expr":
             "log_count('[mission-mirror] client boss end',1)==saved['legA_before']['friend_end'] and "
             "log_count('353133',1)==saved['legA_before']['friend_315'] and "
@@ -110,19 +122,19 @@ def build(bots05: dict) -> dict:
          "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back"},
         {"do": "capture", "instance": 0, "name": "legA_victory_host"},
         {"do": "capture", "instance": 1, "name": "legA_victory_friend"},
+        # Quill r3: the current post-victory native load, exact live tuple, settled field (event context too),
+        # and that load's own phase=field catalog block; never a historical Calling/Thorn row.
         {"do": "wait_until", "expr":
-            f"location(0)[:2]!=[2,34] and {FIELD.format(i=0)} and "
-            "len(log_matches(r'\\[resync-catalog\\] schema=1 kind=summary [^\\n]* phase=field ',0))>0",
+            f"location(0)[:2]!=[2,34] and {FIELD.format(i=0)} and field_catalog(0, saved['legA_victory_load']) is not None",
          "timeoutMs": 300000, "pollMs": 1000},
-        {"do": "wait", "ms": 10000},
         {"do": "save", "as": "vuh2674_field", "expr":
-            "{'host_location':location(0),'host_loads':[m['line'] for m in log_matches(r'(?P<line>\\[warp\\] load complete [^\\n]*)',0)][-12:],"
-            "'catalog':[m['line'] for m in log_matches(r'(?P<line>\\[resync-catalog\\] schema=1 [^\\n]* phase=field [^\\n]*)',0)],"
+            "{'catalog':field_catalog(0, saved['legA_victory_load']),'host_location':location(0),"
             "'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),"
             "'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],"
             "'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"},
         {"do": "capture", "instance": 0, "name": "vuh2674_field_host"},
         {"do": "capture", "instance": 1, "name": "legB_friend"},
+        RELAY_ASSERT,                                         # Quill r1: and again at closure
     ]
     return {
         "name": "vuh2640_thorn_legA_sitout",

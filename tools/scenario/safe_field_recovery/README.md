@@ -72,5 +72,14 @@ rewards, onward movement, two-PC play or continuous footage of the fault.
 **VUH-2640 Leg A live check.** The same thin entry also runs
 `../scenarios/net_twilight_thorn_legA.json`, which is generated from bots05 by
 `make_thorn_legA.py` (`--check` verifies it is current). It uses this pause in the
-Calling, then carries the friend into Thorn's arena sitting out. See
+Calling, then carries the friend into Thorn's arena sitting out.
+
+The entry selects bots05's reviewed Thorn pilot (`route_pilot/thorn.py`) as
+`run_thorn.py` does. It also adds:
+
+- `pause_relay()`, the pause's exact-peer relay-timeout refusal on its own;
+- `last_load()`;
+- `field_catalog()`, the current load's `phase=field` block only.
+
+`check.py` covers the scenario, its actual pilot argv and these helpers. See
 `docs/FENCED_FRIEND_BOSS_ARENA.md`, "Proof plan". Not yet run.

@@ -248,22 +248,29 @@ first ready frame (the ready predicate does not read CONTROLLABLE; Quill r2), an
 **Live (Ivo's desk):** `tools/scenario/scenarios/net_twilight_thorn_legA.json`
 (`vuh2640_thorn_legA_sitout`). It is generated offline from bots05 by
 `tools/scenario/safe_field_recovery/make_thorn_legA.py` (`--check` verifies it is current), and runs through
-that directory's `run.py` thin entry, which registers the pause. Not yet run.
+that directory's `run.py` thin entry. That entry registers the pause, and like `run_thorn.py` it selects
+bots05's reviewed Thorn pilot (`route_pilot/thorn.py`). Not yet run.
 
-- **Route:** bots05's Calling route, then the qualified 4200 ms Friend1 pause (a bounded experiment) after
-  the Calling pilots, then the host alone.
+- **Route:** bots05's Calling route and pilots, then the qualified 4200 ms Friend1 pause (a bounded
+  experiment) after the Calling pilots, then the host alone. The host's fight pilot starts as soon as the
+  arena is live, so the host never idles in the boss room; the friend's landing is awaited during the
+  first block. The host fight drops `revivePeer`, because a partner revive must not end the friend's
+  outage.
 - **Passes when:**
   - the friend's lifetime expires and it rejoins;
   - the friend lands in 2/34/157 (`[resync-sit-out] landed`, `[downed] outage arrival qualified=1`,
     `[downed] outage sit-out`), with no control restored;
   - the host makes exactly one `mission_dead_boss` and one 315 publication;
-  - the friend has no 4/16 or 315 rows.
+  - the friend has no 4/16 or 315 rows;
+  - the pause's exact-peer relay-timeout refusal (`pause_relay()`), after the rejoin and again as the final
+    step.
 - **Recorded, not asserted:**
   - the Calling capture outcome;
   - the arrival rows;
   - `held-player-moved`;
-  - the first post-Thorn field's `[resync-catalog] ... phase=field` rows and the host's capture there
-    (VUH-2674);
+  - the first post-Thorn field's catalog block, matched only for the current post-victory native load
+    and its exact live tuple in a settled field (event context included) by `field_catalog()`, so no
+    Calling or Thorn block counts; and the host's capture there (VUH-2674);
   - where the friend is at the end. Staying in the arena sitting out is the expected first-slice result.
 - **Needs** the catalog trace (VUH-2674) on the tested products; without it, the final field wait times out
   after the Leg A asserts.

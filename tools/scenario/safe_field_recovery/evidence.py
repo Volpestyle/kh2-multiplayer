@@ -32,6 +32,60 @@ def baseline(friend):
     return {"arm": arm, "identity": identity}
 
 
+def _warp_location(row):
+    world, room = (int(part, 16) for part in row["room"].split("/"))
+    return [world, room, int(row["door"]), int(row["map"]), int(row["btl"]), int(row["evt"])]
+
+
+def last_load(inject):
+    """The native load serial of the last completed load ([warp] load complete), 0 if none."""
+    loads = rows(inject, "[warp] load complete serial=")
+    return int(loads[-1]["serial"]) if loads else 0
+
+
+def field_catalog(inject, location, after_load):
+    """VUH-2674 (Quill r3): the [resync-catalog] phase=field block of the CURRENT native load only.
+
+    The current load is the last [warp] load complete row. It must be newer than after_load
+    (the load at Thorn's victory) and its six-field tuple must equal the live location. Then
+    the block is the phase=field scope row for exactly that load (before and after) and tuple,
+    logged after that load, plus its own summary and rows (same frame). A Calling or Thorn
+    block, or one of an older load or another tuple, is never matched. None if absent."""
+    loads = rows(inject, "[warp] load complete serial=")
+    if not loads:
+        return None
+    current = loads[-1]
+    serial = int(current["serial"])
+    tuple_ = _warp_location(current)
+    if serial <= after_load or tuple_ != list(location):
+        return None
+    scopes = [r for r in rows(inject, "[resync-catalog] schema=1 kind=scope ")
+              if r.get("phase") == "field" and r["_line"] > current["_line"] and
+              int(r.get("beforeLoad", -1)) == serial and int(r.get("afterLoad", -1)) == serial and
+              [int(r.get(k, -1)) for k in ("world", "room", "door", "map", "battle", "event")] == tuple_]
+    if not scopes:
+        return None
+    frame = scopes[-1]["frame"]
+    block = [r["_text"] for r in rows(inject, "[resync-catalog] schema=1 ")
+             if r.get("frame") == frame and r.get("phase") == "field" and r["_line"] > current["_line"]]
+    if not any("kind=summary " in line for line in block):
+        return None
+    return {"load": serial, "location": tuple_, "frame": int(frame), "rows": block}
+
+
+def relay_check(old, relay):
+    """VUH-2640 (Quill r1): lease-only expiry. ok is False when the post-pause relay tail
+    shows the relay timing out this friend's verified peer (the label is decoded from the
+    baseline identity's peerHex): the pause outran the relay's silence budget (pre-pause
+    age, jitter or a late watchdog), so the expiry's order is unproven. The friend's own
+    retirement logs "Peer disconnected", and pending peers carry address labels."""
+    peer = bytes.fromhex(old["identity"].get("peerHex", "")).decode("ascii", "replace")
+    if not peer:
+        return {"ok": False, "peer": "", "timeouts": [], "missing": "friend peer identity required"}
+    timeouts = [line for line in relay.splitlines() if line.rstrip().endswith("Peer timed out: " + peer)]
+    return {"ok": not timeouts, "peer": peer, "timeouts": timeouts}
+
+
 def correlate(old, pause, friend, host, native, relay):
     """All arguments after old/pause are post-pause boundary log tails."""
     try:
@@ -43,10 +97,10 @@ def correlate(old, pause, friend, host, native, relay):
         # verified peer after the pause means the pause outran the relay's silence
         # budget (pre-pause age, jitter or a late watchdog): the expiry's order is
         # unproven. The friend's own retirement logs "Peer disconnected", not this.
-        peer = bytes.fromhex(old["identity"].get("peerHex", "")).decode("ascii", "replace")
-        if not peer:
-            raise ValueError("friend peer identity required")
-        if any(line.rstrip().endswith("Peer timed out: " + peer) for line in relay.splitlines()):
+        relayed = relay_check(old, relay)
+        if relayed.get("missing"):
+            raise ValueError(relayed["missing"])
+        if not relayed["ok"]:
             raise ValueError("relay timed out the friend after the pause: lease-only expiry unproven")
         aborts = rows(friend, "[eventhold-control] aborted ")
         expired = [r for r in aborts if r.get("reason") == "4" and

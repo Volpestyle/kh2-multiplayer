@@ -183,6 +183,9 @@ def correlation(f=friend,h=host,n=native,r=relay,p=pause_receipt):
 check("exact log chain correlates", correlation()["ready"])
 check("the friend's own retirement and a pending handshake timeout do not void the proof",
       correlation(r=relay+"\n[SessionHost] Peer disconnected: peer1\n[SessionHost] Peer timed out: 127.0.0.1:61000")["ready"])
+check("relay_check alone: clean tail ok, friend timeout refused, pending timeout and own disconnect ignored",
+      evidence.relay_check(old, relay)["ok"] and not evidence.relay_check(old, relay+"\n[SessionHost] Peer timed out: peer1")["ok"] and
+      evidence.relay_check(old, relay+"\n[SessionHost] Peer timed out: 127.0.0.1:61000\n[SessionHost] Peer disconnected: peer1")["ok"])
 check("friend peer identity is required for the relay check",
       not evidence.correlate({**old, "identity": {k: v for k, v in old["identity"].items() if k != "peerHex"}},
                              pause_receipt, friend, host, native, relay)["ready"])
@@ -237,6 +240,105 @@ for file in ("pause.py", "run.py", "evidence.py"):
     tree = ast.parse((run.HERE/file).read_text(encoding="utf-8"))
     check("no process opener "+file, not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in {"OpenProcess", "DuplicateHandle", "NtSuspendProcess", "NtResumeProcess"} for n in ast.walk(tree)))
 check("exact scenario name", scenario["name"] == "vuh2628_safe_field_recovery04")
+# VUH-2640 Leg A live check: the same thin entry; the pause's relay refusal is wired after the expiry.
+import make_thorn_legA
+legA_built = make_thorn_legA.build(json.loads(make_thorn_legA.SOURCE.read_text(encoding="utf-8")))
+legA = json.loads(make_thorn_legA.TARGET.read_text(encoding="utf-8"))
+check("Leg A scenario is current with its generator", legA == legA_built)
+run.validate(legA)
+for number, step in enumerate(legA["steps"]):
+    for key in ("expr","argsExpr","until"):
+        if key in step:
+            tree=ast.parse(step[key],mode="eval")
+            local={node.id for node in ast.walk(tree) if isinstance(node,ast.Name) and isinstance(node.ctx,ast.Store)}
+            used={node.id for node in ast.walk(tree) if isinstance(node,ast.Name) and isinstance(node.ctx,ast.Load)}
+            check(f"Leg A expression namespace step{number}", used <= names | local)
+pause_at = next(i for i, s in enumerate(legA["steps"]) if s["do"] == "friend_heartbeat_pause")
+relay_at = [i for i, s in enumerate(legA["steps"]) if s.get("expr") == "pause_relay()['ok']" and s["do"] == "assert"]
+check("Leg A asserts the pause's relay-timeout refusal after the rejoin and as its final step",
+      len(relay_at) == 2 and relay_at[0] > pause_at + 1 and relay_at[1] == len(legA["steps"]) - 1)
+# R2: the actual pilot argv this entry builds: the reviewed Thorn pilot for the Calling, the awakening and the
+# host fight; bots05's Calling keeps revivePeer, the host fight has none (the friend's outage is no revive).
+launched = []
+class _Proc:
+    def poll(self): return 0
+def _start(ctx, name, cmd):
+    launched.append((name, cmd)); return _Proc()
+saved_start, saved_finish = run.shared.start_process, run.shared.finish_pilot
+run.shared.start_process = _start
+run.shared.finish_pilot = lambda *a, **k: {"exit": 0}
+try:
+    games = [SimpleNamespace(index=0, pid=4100), SimpleNamespace(index=1, pid=4101)]
+    pilot_ctx = SimpleNamespace(inst=lambda i: games[i], protect=set(), piloted=set(), run_dir=Path("."), saved={})
+    for step in legA["steps"]:
+        if step["do"] == "pilot":
+            run.shared.STEPS["pilot"](pilot_ctx, step)
+finally:
+    run.shared.start_process, run.shared.finish_pilot = saved_start, saved_finish
+thorn_pilot = str(run.ROOT / "tools/rig/route_pilot/thorn.py")
+by_name = {name: cmd for name, cmd in launched}
+check("R2: every Leg A pilot runs the reviewed Thorn pilot (route_pilot/thorn.py, as run_thorn.py selects)",
+      launched and all(cmd[2] == thorn_pilot for _, cmd in launched) and Path(thorn_pilot).exists())
+check("R2: the Calling pilots keep bots05's revivePeer; the host fight has none; no friend pilot after the pause",
+      "--revive-peer-pid" in by_name["host_calling_path"] and "--revive-peer-pid" in by_name["friend_calling_path"] and
+      "--revive-peer-pid" not in by_name["host_thorn"] and by_name["host_thorn"][4] == "4100" and
+      [name for name, _ in launched] == ["host_to_calling", "host_calling_path", "friend_calling_path",
+                                          "host_menu_tutorial", "friend_menu_tutorial", "host_to_awakening", "host_thorn"])
+# R1: the scenario's actual predicate fails on a matching verified-peer timeout.
+relay_expr = legA["steps"][relay_at[0]]["expr"]
+check("Leg A has no friend pilot after the pause",
+      not any(s["do"] == "pilot" and s.get("instance") == 1 for s in legA["steps"][pause_at:]))
+# pause_relay() through the thin entry: only the relay tail after the recorded boundary counts.
+import tempfile
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    relay_log = tmp / "relay.log"
+    before = "[SessionHost] Peer timed out: peer1\n"            # before the pause: not this pause's
+    relay_log.write_text(before + relay + "\n", encoding="utf-8")
+    fake = SimpleNamespace(run_dir=tmp, artifacts=[], saved={"heartbeat_pause": {
+        "completed": True, "baseline": old,
+        "boundaries": {"relay": {"path": str(relay_log), "bytes": len(before.encode("utf-8"))}}}})
+    clean = run.pause_relay(fake)
+    with relay_log.open("a", encoding="utf-8") as tail:
+        tail.write("[SessionHost] Peer timed out: peer1\n")
+    timed_out = run.pause_relay(fake)
+    incomplete = run.pause_relay(SimpleNamespace(run_dir=tmp, artifacts=[], saved={}))
+    check("pause_relay: a timeout before the boundary is ignored, one after it refuses, an incomplete pause refuses",
+          clean["ok"] and not timed_out["ok"] and timed_out["timeouts"] and not incomplete["ok"] and
+          (tmp / "heartbeat_relay.json").exists())
+    relay_log.write_text(before + relay + "\n[SessionHost] Peer disconnected: peer1\n[SessionHost] Peer timed out: peer2\n"
+                         "[SessionHost] Peer timed out: 127.0.0.1:61000\n", encoding="utf-8")
+    other = eval(relay_expr, {"pause_relay": lambda: run.pause_relay(fake)})
+    with relay_log.open("a", encoding="utf-8") as tail:
+        tail.write("[SessionHost] Peer timed out: peer1\n")
+    matching = eval(relay_expr, {"pause_relay": lambda: run.pause_relay(fake)})
+    check("R1: the scenario's own predicate passes for the friend's disconnect and other peers' timeouts, fails for its own",
+          other is True and matching is False)
+# R3: the post-victory field catalog: stale Calling/Thorn rows and other loads never match; the current one does.
+def _load(serial, room, door, prog):
+    return f"[warp] load complete serial={serial} transition={serial-1} room=02/{room:02X} door={door} map={prog} btl={prog} evt={prog}"
+def _block(frame, load, world, room, door, prog):
+    return [f"[resync-catalog] schema=1 kind=summary frame={frame} phase=field fresh=0 status=1 issues=32",
+            f"[resync-catalog] schema=1 kind=scope frame={frame} phase=field layout=aa beforeNOW=00 beforeLoad={load} beforeTransition=1 afterNOW=00 afterLoad={load} afterTransition=1 censusState=1 censusLoad={load} censusTransition=1 world={world} room={room} door={door} map={prog} battle={prog} event={prog}",
+            f"[resync-catalog] schema=1 kind=entry frame={frame} phase=field index=0 issues=32"]
+calling = [_load(3, 33, 0, 1)] + _block(100, 3, 2, 33, 0, 1)
+thorn = [_load(4, 34, 0, 157)] + _block(200, 4, 2, 34, 0, 157)
+field = [2, 1, 0, 54, 54, 54]
+stale = "\n".join(calling + thorn + [_load(11, 1, 0, 54)])                         # the field's load, no block yet
+current = stale + "\n" + "\n".join(_block(900, 11, 2, 1, 0, 54))
+check("R3: only stale Calling/Thorn field rows: no match", evidence.field_catalog(stale, field, 4) is None)
+matched = evidence.field_catalog(current, field, 4)
+check("R3: the current post-victory load's own block matches, with its rows only",
+      matched and matched["load"] == 11 and matched["location"] == field and matched["frame"] == 900 and len(matched["rows"]) == 3)
+check("R3: an older load, another tuple, or no newer load than the victory: no match",
+      evidence.field_catalog(current, field, 11) is None and evidence.field_catalog(current, [2, 1, 0, 54, 54, 55], 4) is None and
+      evidence.field_catalog("\n".join(calling + thorn), [2, 34, 0, 157, 157, 157], 4) is None)
+check("R3: a block of the current load but another tuple, or an older load's block, does not count",
+      evidence.field_catalog(stale + "\n" + "\n".join(_block(901, 11, 2, 2, 0, 54)), field, 4) is None and
+      evidence.field_catalog(stale + "\n" + "\n".join(_block(902, 10, 2, 1, 0, 54)), field, 4) is None)
+check("last_load: the last completed native load", evidence.last_load(current) == 11 and evidence.last_load("") == 0)
+check("Leg A boots both games with the catalog trace",
+      all(legA["steps"][i]["env"].get("KH2COOP_RESYNC_CATALOG_TRACE") == "1" for i in (0, 1)))
 pause_tree = ast.parse((run.HERE/"pause.py").read_text(encoding="utf-8"))
 protected = [node for node in ast.walk(pause_tree) if isinstance(node,ast.With)
              and any(isinstance(item.context_expr,ast.Name) and item.context_expr.id=="lock" for item in node.items)

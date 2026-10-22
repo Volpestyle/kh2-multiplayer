@@ -15,6 +15,10 @@ sys.path.insert(0, str(HERE))
 import pause
 import evidence
 
+# Quill (Leg A live r1, R2): Thorn scenarios through this entry use the reviewed VUH-2617 pilot,
+# selected exactly as tools/scenario/run_thorn.py does. The safe-field scenario has no pilot step.
+shared.PILOT = ROOT / "tools/rig/route_pilot/thorn.py"
+
 PAUSE_MS = pause.PAUSE_MS
 
 
@@ -77,9 +81,34 @@ def proof(ctx):
     return result
 
 
+def pause_relay(ctx):
+    """The qualified pause's relay-timeout refusal on its own, for scenarios that do not
+    run the full safe-field recovery proof (the Thorn Leg A check): the relay log after
+    the pause's recorded boundary must not show the relay timing out the friend."""
+    receipt = ctx.saved.get("heartbeat_pause", {})
+    if not receipt.get("completed"):
+        return {"ok": False, "missing": "pause incomplete"}
+    boundary = receipt["boundaries"]["relay"]
+    value = Path(boundary["path"]).read_bytes()
+    if len(value) < boundary["bytes"]:
+        raise shared.StepFailed("owned relay log truncated")
+    result = evidence.relay_check(receipt["baseline"], value[boundary["bytes"]:].decode("utf-8", "replace"))
+    out = ctx.run_dir / "heartbeat_relay.json"
+    out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    if out.name not in ctx.artifacts:
+        ctx.artifacts.append(out.name)
+    return result
+
+
 base_namespace = shared.Context.namespace
 def namespace(self):
-    return {**base_namespace(self), "recovery_proof": lambda: proof(self)}
+    base = base_namespace(self)
+    def inject(index):
+        path = shared.LOGS / f"kh2coop_inject_{self.inst(index).pid}.log"
+        return path.read_text(errors="replace") if path.exists() else ""
+    return {**base, "recovery_proof": lambda: proof(self), "pause_relay": lambda: pause_relay(self),
+            "last_load": lambda index=0: evidence.last_load(inject(index)),
+            "field_catalog": lambda index=0, after_load=0: evidence.field_catalog(inject(index), base["location"](index), after_load)}
 shared.Context.namespace = namespace
 shared.STEPS["friend_heartbeat_pause"] = step_pause
 base_validate = shared.validate_scenario
