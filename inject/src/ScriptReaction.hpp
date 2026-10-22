@@ -443,6 +443,7 @@ LocalHoldRoots ProveLocalHoldRoots(bool decisionCurrent,bool cancelled,std::uint
 // this actor (an own-bank install read back by OwnInstallQualified, or a borrowed capture it installed), the actor is
 // held by nothing else, and the role's admitted session is current. It replaces the earlier own-motion reset.
 struct HeldReleaseFacts {
+    bool rootsRefused{};  // a held rebuild whose saved roots failed their list/handle proof (RebuildHeld)
     bool friendLocal{},releaseStage{},sessionCurrent{},field{},actorProven{},actorRead{},roleFree{},heldReceipt{};
     bool sourceProven{};
     ReleaseCleanup outcome{ReleaseCleanup::NotCurrent};
@@ -450,6 +451,7 @@ struct HeldReleaseFacts {
     std::uintptr_t thread{},capture{},bank{},source{},sourceBank{};
 };
 inline bool DecideHeldRelease(const HeldReleaseFacts& f,const char*& why) noexcept {
+    if(f.rootsRefused){why="roots-refused";return false;}
     if(!f.friendLocal){why="not-friend-local";return false;}
     if(f.outcome!=ReleaseCleanup::Guards){why="not-guards";return false;}  // cleaned ran it; others are not ours
     if(!f.releaseStage){why="not-release-stage";return false;}
@@ -481,6 +483,17 @@ inline bool HeldReleaseIdleAllowed(bool detached,const HeldReleaseFacts& fresh,c
 // enter/exit are empty), so the motion that holds the actor stays. The held release now also sets the actor's own
 // stand motion (kOwnIdleMotion, 0, the motion the freed friend stood in) through the ordinary own-bank motion set, in
 // its own fresh admission after idle. A cleaned release never comes here.
+// Quill r2 on 96d77cc: the held rebuild (after detach and after idle) first proves both saved roots listed under their
+// saved handles (listed: ListedHandle, through the head global, the handle resolver and the list walk, none of which
+// reads either root). Only then does follow run: SmOwnerReleaseRootCurrent reads each root's +4, then the field, the
+// hold read (its own ProveLocalHoldRoots) and the scope facts, as before. A failed proof refuses with no root read.
+template<class Listed,class Follow>
+HeldReleaseFacts RebuildHeld(std::uintptr_t actor,std::uint32_t actorHandle,std::uintptr_t source,
+                             std::uint32_t sourceHandle,Listed&& listed,Follow&& follow) {
+    if(!actor || !actorHandle || listed(actor)!=actorHandle || !source || !sourceHandle || listed(source)!=sourceHandle)
+        {HeldReleaseFacts refused{};refused.rootsRefused=true;return refused;}
+    return follow();
+}
 constexpr std::uint32_t kOwnIdleMotion=0;  // MotionSet IDLE
 struct HeldPairResult {
     bool detached{},idled{},stood{};

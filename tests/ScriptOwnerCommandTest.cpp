@@ -482,6 +482,84 @@ int main() {
         p=run(true,true,R::HeldReleaseFacts{});
         check(!p.idled && std::string(p.idleWhy)=="not-friend-local","an empty rebuild admits nothing");
     }
+    // Quill r2 on 96d77cc: the held rebuild proves both saved roots listed under their saved handles before anything
+    // follows them. A fake native list (head = the friend's actor) is walked as enemytarget::ListHandle walks it: from
+    // the head global, reading each listed node's next link and resolving it, stopping at a root's predecessor. Every
+    // memory read is counted by address; idle frees or replaces the source or the actor.
+    {
+        const std::uintptr_t friendActor=0x10000,other=0x20000,thornSource=0x30000,stranger=0x40000;
+        const std::uint32_t hFriend=0x80000001,hOther=0x80000002,hThorn=0x80000003,hNew=0x80000009;
+        struct Node{std::uintptr_t at;std::uint32_t handle;};
+        std::vector<Node> list;                     // in list order; list[0] is the head
+        std::vector<std::uintptr_t> reads;
+        const auto inRoot=[&](std::uintptr_t root){std::size_t n=0;for(auto r:reads)if(r>=root && r<root+0x1000)++n;return n;};
+        const auto resolve=[&](std::uint32_t handle)->std::uintptr_t{for(const auto& n:list)if(n.handle==handle)return n.at;return 0;};
+        const auto walk=[&](std::uintptr_t at)->std::uint32_t{  // enemytarget::ListHandle
+            if(list.empty())return 0;
+            for(std::size_t i=0;i+1<list.size();++i){
+                reads.push_back(list[i].at+0x10);           // cursor + next link
+                const auto link=list[i+1].handle;
+                if(list[i+1].at==at)return link;
+            }
+            reads.push_back(list.back().at+0x10);
+            return 0;};
+        const auto listed=[&](std::uintptr_t at){
+            return R::ListedHandle(at,at==friendActor?hFriend:hThorn,
+                [&](){return list.empty()?std::uintptr_t{0}:list[0].at;},resolve,walk);};
+        int follows=0;
+        R::HeldReleaseFacts admitted{};
+        admitted.friendLocal=true;admitted.outcome=R::ReleaseCleanup::Guards;admitted.releaseStage=true;
+        admitted.sessionCurrent=true;admitted.field=true;admitted.actorProven=true;admitted.actorRead=true;
+        admitted.roleFree=true;admitted.heldReceipt=true;admitted.source=thornSource;
+        const auto rebuild=[&](){return R::RebuildHeld(friendActor,hFriend,thornSource,hThorn,listed,
+            [&](){++follows;reads.push_back(friendActor+4);reads.push_back(thornSource+4);return admitted;});};  // follows both roots
+        const auto reset=[&](){list={{friendActor,hFriend},{other,hOther},{thornSource,hThorn}};reads.clear();follows=0;};
+        const char* w="";
+        reset();
+        auto f=rebuild();
+        check(follows==1 && R::DecideHeldRelease(f,w) && std::string(w)=="held-guards",
+              "both roots listed under their saved handles: the rebuild follows them once");
+        reset();list.pop_back();                                    // idle freed the source
+        f=rebuild();
+        check(follows==0 && inRoot(thornSource)==0 && !R::DecideHeldRelease(f,w) && std::string(w)=="roots-refused",
+              "a source freed inside idle: refused with zero reads at the source root");
+        reset();list[2]={stranger,hThorn};                          // the source's handle now names another actor
+        f=rebuild();
+        check(follows==0 && inRoot(thornSource)==0 && f.rootsRefused,"the saved source handle names another actor: refused");
+        reset();list[2]={thornSource,hNew};                         // the address reused under a new handle
+        f=rebuild();
+        check(follows==0 && inRoot(thornSource)==0 && f.rootsRefused,"the source address reused under a new handle: refused, no read");
+        reset();list.erase(list.begin());                           // idle freed the friend's actor (no longer the head)
+        f=rebuild();
+        check(follows==0 && inRoot(friendActor)==0 && f.rootsRefused,"the actor freed inside idle: refused with zero reads at the actor root");
+        reset();list[0]={friendActor,hNew};                         // the actor's address under a new handle (head)
+        f=rebuild();
+        check(follows==0 && inRoot(friendActor)==0 && f.rootsRefused,"the actor address reused under a new handle: refused, no read");
+        // Integrated: detach and the first rebuild see both roots; idle frees the source. The second rebuild
+        // refuses before following either root, and there is no stand.
+        reset();
+        std::vector<std::string> seq;
+        const auto pr=R::RunHeldPair(true,[&](){seq.push_back("detach");return true;},
+            [&](){seq.push_back("rebuild");return rebuild();},
+            [&](){seq.push_back("idle");list.pop_back();return true;},
+            [&](std::uint32_t){seq.push_back("stand");return true;});
+        check(pr.idled && !pr.stood && std::string(pr.standWhy)=="roots-refused" && follows==1 &&
+              seq==std::vector<std::string>{"detach","rebuild","idle","rebuild"},
+              "idle frees the source: the second rebuild refuses with no root read and no stand");
+        reset();seq.clear();
+        const auto pa=R::RunHeldPair(true,[&](){seq.push_back("detach");return true;},
+            [&](){seq.push_back("rebuild");return rebuild();},
+            [&](){seq.push_back("idle");list.erase(list.begin());return true;},
+            [&](std::uint32_t){seq.push_back("stand");return true;});
+        check(pa.idled && !pa.stood && std::string(pa.standWhy)=="roots-refused" && follows==1,
+              "idle frees the actor: no stand");
+        reset();list.pop_back();seq.clear();                        // the source already gone after detach
+        const auto pd=R::RunHeldPair(true,[&](){seq.push_back("detach");return true;},
+            [&](){seq.push_back("rebuild");return rebuild();},
+            [&](){seq.push_back("idle");return true;},[&](std::uint32_t){seq.push_back("stand");return true;});
+        check(!pd.idled && std::string(pd.idleWhy)=="roots-refused" && follows==0 && inRoot(thornSource)==0 &&
+              seq==std::vector<std::string>{"detach","rebuild"},"a source freed by detach: no idle, no root read");
+    }
     // The input-gate line reads only a proven root, and follows only the known FIELD_COMMAND pointer.
     {
         const std::uintptr_t actor=0x10000,fieldCommand=0x2A10620,action=0x90000;

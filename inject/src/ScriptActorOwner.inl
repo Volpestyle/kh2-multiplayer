@@ -738,13 +738,17 @@ static bool SmOwnerReleaseRootCurrent(const ScriptActorRole& role) {
 // it; stage=post-cancel: after the original native coroutine cancel, metadata only; stage=refused: the release refused
 // its root, metadata only.
 static bool SmOwnerCameraSourceCurrent(const ScriptActorRole& role) noexcept;
+// A root listed under its saved handle (ListedHandle): the head global, the handle resolver and the list walk
+// (enemytarget::ListHandle stops at a root's predecessor), none of which reads the root.
+static std::uint32_t SmListedRoot(const ScriptActorRole& role,std::uintptr_t at) {
+    return R::ListedHandle(at,at==role.actor?role.actorHandle:role.sourceHandle,
+        [](){uintptr_t head=0;return ReadHitTrace(g_exeBase+offsets::active_entity_list::HEAD,head)?head:uintptr_t{0};},
+        [](std::uint32_t handle){return SmDecode(handle);},
+        [](std::uintptr_t walked){return enemytarget::ListHandle(walked);});
+}
 static R::LocalHold SmReadReleaseHold(const ScriptActorRole& role,bool decisionCurrent,bool cancelled,R::LocalHoldRoots& roots) {
     roots=R::ProveLocalHoldRoots(decisionCurrent,cancelled,role.actor,role.actorHandle,role.source,
-        role.sourceHandle,[&role](std::uintptr_t at){
-            return R::ListedHandle(at,at==role.actor?role.actorHandle:role.sourceHandle,
-                [](){uintptr_t head=0;return ReadHitTrace(g_exeBase+offsets::active_entity_list::HEAD,head)?head:uintptr_t{0};},
-                [](std::uint32_t handle){return SmDecode(handle);},
-                [](std::uintptr_t walked){return enemytarget::ListHandle(walked);});},
+        role.sourceHandle,[&role](std::uintptr_t at){return SmListedRoot(role,at);},
         [&role](){return SmOwnerCameraSourceCurrent(role)?role.source:std::uintptr_t{0};}); // driven table only, no reads
     return R::ReadLocalHold(roots.actor,role.actor,roots.source,role.source,
         [](std::uintptr_t at,void* out,std::size_t size){return ReadHitTraceMemory(at,out,size);},
@@ -797,14 +801,17 @@ static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup
         [&](){return SmOwnerNativePlayer(released.actor,0x42C5F0);},
         [&](){
             // Every fact rebuilt (after detach, and again after idle); the outcome names the guards release this
-            // belongs to. Roots are proven before any hold read (SmReadReleaseHold).
-            const bool current=SmOwnerReleaseRootCurrent(released);
-            uintptr_t event=0;std::int32_t cutscene=0;
-            const bool field=current && ReadHitTrace(g_exeBase+0x2A11478,event) && !event &&
-                ReadHitTrace(g_exeBase+0xB65210,cutscene) && !cutscene;
-            R::LocalHoldRoots rootsNow{};
-            const auto now=SmReadReleaseHold(released,current,false,rootsNow);
-            return SmOwnerHeldFacts(released,SmOwnerFriendLocal(released),outcome,current,field,rootsNow,now);},
+            // belongs to. Quill r2 on 96d77cc: both saved roots are list/handle-proven before anything follows them.
+            return R::RebuildHeld(released.actor,released.actorHandle,released.source,released.sourceHandle,
+                [&](std::uintptr_t at){return SmListedRoot(released,at);},
+                [&](){
+                    const bool current=SmOwnerReleaseRootCurrent(released);
+                    uintptr_t event=0;std::int32_t cutscene=0;
+                    const bool field=current && ReadHitTrace(g_exeBase+0x2A11478,event) && !event &&
+                        ReadHitTrace(g_exeBase+0xB65210,cutscene) && !cutscene;
+                    R::LocalHoldRoots rootsNow{};
+                    const auto now=SmReadReleaseHold(released,current,false,rootsNow);
+                    return SmOwnerHeldFacts(released,SmOwnerFriendLocal(released),outcome,current,field,rootsNow,now);});},
         [&](){return SmOwnerNativePlayer(released.actor,0x42D0E0);},
         // The role's own-bank install path (0x42B320 -> the ordinary motion set), by the role's actor handle.
         [&](std::uint32_t motion){return SmOwnerNativeMotion(0,released.actorHandle,
