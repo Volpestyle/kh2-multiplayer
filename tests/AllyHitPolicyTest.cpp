@@ -283,6 +283,38 @@ int main() {
               HookedCanHit(Attack(slot + 13, 2, 0, id + 13, 0), g_local) == (k == 1 ? 0x1234500 : 0x1234501));
         g_drivenActors[1] = 0;
     }
+    // VUH-2617: the enemy-on-player check trace (KH2COOP_THORN_HIT_TRACE=1, default off) logs the first check of
+    // each enemy attack against a player-class victim once, with the native answer, and never changes an answer.
+    {
+        const auto count = [](const char* s) {
+            unsigned n = 0;
+            for (auto at = g_logged.find(s); at != std::string::npos; at = g_logged.find(s, at + 1)) ++n;
+            return n;
+        };
+        g_drivenActors[0] = g_drivenActors[1] = 0;
+        SetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", nullptr);
+        g_logged.clear();
+        const auto thornSwing = Attack(60, 4, 0, 1014, 2), playerSwing = Attack(61, 1, 0, 126, 1);
+        g_nativeAnswer = 0x1234501;
+        CHECK("thorn trace: off by default", InstallMode("1") && !Has("enemy-on-player check trace on") &&
+              HookedCanHit(thornSwing, g_local) == 0x1234501 && !Has("[thorn-trace]"));
+        SetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", "1");
+        CHECK("thorn trace: on", InstallMode("1") && Has("enemy-on-player check trace on"));
+        CHECK("thorn trace: enemy -> local keeps the native answer, logged once per pair",
+              HookedCanHit(thornSwing, g_local) == 0x1234501 && HookedCanHit(thornSwing, g_local) == 0x1234501 &&
+              count("atkp=1014") == 1 && Has("attacker=M_EX020") && Has("(local) native=1"));
+        g_nativeAnswer = 0x1234500;
+        CHECK("thorn trace: enemy -> clone, a native no is logged as such",
+              HookedCanHit(thornSwing, g_clone) == 0x1234500 && Has("(clone) native=0") && count("atkp=1014") == 2);
+        g_nativeAnswer = 0x1234501;
+        const unsigned rows = count("[thorn-trace]");
+        CHECK("thorn trace: player attacks and enemy victims are not rows",
+              HookedCanHit(playerSwing, g_enemy) == 0x1234501 && HookedCanHit(thornSwing, g_enemy) == 0x1234501 &&
+              HookedCanHit(playerSwing, g_clone) == 0x1234500 && count("[thorn-trace]") == rows);
+        SetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", nullptr);
+        CHECK("thorn trace: reinstall without it turns it off", InstallMode("1") &&
+              HookedCanHit(Attack(62, 4, 0, 1015, 2), g_local) == 0x1234501 && count("atkp=1015") == 0);
+    }
     SetEnvironmentVariableA("KH2COOP_ALLY_HIT", nullptr);
 
     std::printf("allyhit: %d passed, %d failed\n", g_pass, g_fail);

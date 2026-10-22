@@ -453,3 +453,22 @@ attack 1014 during motion 202 at the arena edge, one 448). 1014 and 448 are not 
 script creates 631, 1305, 1015 and 1041, which hit the host); in bot02 the friend was hit natively by
 motion attacks 1034/1035 (motions 204/226). Thorn was never retargeted at the friend (bosses keep their
 own targeting), the friend never guarded, and its ScriptMirror replay kept pace with the host.
+Static analysis (headless Ghidra on the existing kh2_full project): the mirror's brain skip removes only the
+boss's BDX script tick (`0x419750` -> `FUN_1403b4460`, the script at actor+0x5B0); native motion playback
+still runs. The one hit gate found is on the victim: `FUN_1403d35f0`/`FUN_1403d2a20` nullify a hit when
+`(+0xD10 | +0xD14) & ~+0xD18` has bit 9, which Thorn's script sets on the canonical player and itself
+during `atk_thorn` (`obj_pattern_enable`, trap 1/211, not mirrored). That explains the host side (its
+player immune, the clone not), not the friend's. Motion 202 is `atk_ground`, aimed at the boss's own
+target. `KH2COOP_THORN_HIT_TRACE=1` (default off, reads only) gathers observations for the next live run.
+Every 30 frames each seat logs `[thorn-trace] host|client hostFrame=...` with its local player, both clones
+and (on the friend) the driven boss copy: position, motion, hit-pattern mask and the boss copy's motion
+time. Each actor is read only inside its own update, after its identity is proven there (the list head and
+canonical player; the driver's applied, current clone whose metadata still matches its binding; the boss
+copy the mirror bound in that update), never through a cached pointer; anything unproven prints `-`.
+`hostFrame` is the host's frame counter, and on the friend the mirror cursor sampled when the boss copy was
+captured: a sample, not exact per-actor frame alignment. The 3D2060 hook also logs the first check of
+some enemy attacks against a player (`[thorn-trace] canhit ... atkp=... victim=...(local|clone)
+native=0|1`). These are positive observations only: the rows have a 400-row budget and a 64-entry
+pointer-pair deduplication, so they are not a census of attacks (an unreadable or unclassified input, an
+upstream filter or a reused pointer also yields no row), and a native yes there precedes the later victim
+and damage gates, including the pattern gate above.

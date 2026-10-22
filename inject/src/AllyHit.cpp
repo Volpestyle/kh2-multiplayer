@@ -83,6 +83,30 @@ void TraceRow(const char* mode, const ActorFacts& o, std::uintptr_t attacker, co
           a.team, a.mask, a.kind, a.atkp, allows ? 1u : 0u, verdict == Verdict::Refuse ? "refuse" : "native",
           viaSource ? "source" : "owner");
 }
+// VUH-2617 trace (KH2COOP_THORN_HIT_TRACE=1, default off): the first check of each enemy attack against a
+// player-class victim, with the native answer. Reads only; never changes the answer. Its own seen table
+// and budget, so it neither spends nor hides the ally rows.
+std::atomic<bool> g_enemyTrace{false};
+std::atomic<unsigned> g_enemyTraced{};
+constexpr unsigned ENEMY_TRACE_BUDGET = 400;
+Seen g_enemySeen[64] {};
+unsigned g_enemySeenNext = 0;
+void TraceEnemyCheck(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t native) {
+    if (g_enemyTraced.load(std::memory_order_relaxed) >= ENEMY_TRACE_BUDGET) return;
+    const std::uintptr_t player = Player();
+    ActorFacts v {};
+    if (!ReadActor(victim, player, v) || !PlayerSide(v.side)) return;
+    AttackFacts a {};
+    if (!ReadAttack(attack, a)) return;
+    ActorFacts o {};
+    if (!ReadActor(a.owner, player, o) || PlayerSide(o.side)) return;
+    for (const auto& s : g_enemySeen) if (s.attack == attack && s.victim == victim) return;
+    g_enemySeen[g_enemySeenNext++ % 64] = {attack, victim};
+    g_enemyTraced.fetch_add(1, std::memory_order_relaxed);
+    g_log("[thorn-trace] canhit f=%u attacker=%s@%llX atkp=%u kind=%u atkTeam=%u mask=0x%02X victim=%s@%llX(%s) native=%u",
+          g_frame ? g_frame() : 0u, o.name, static_cast<unsigned long long>(a.owner), a.atkp, a.kind, a.team, a.mask,
+          v.name, static_cast<unsigned long long>(victim), SideName(v.side), (native & 0xFF) ? 1u : 0u);
+}
 // Puppet mode (VUH-1808 default). Only ever narrows a native yes, and only when the attacker (the
 // attack's owner, or its source, as native checks both) is a puppet actor driven right now.
 std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t native) {
@@ -130,6 +154,7 @@ std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::ui
 
 std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t victim) {
     const std::uint64_t native = g_original(attack, victim);
+    if (g_enemyTrace.load(std::memory_order_relaxed) && g_log) TraceEnemyCheck(attack, victim, native);
     if (const auto downed = g_downed.load(std::memory_order_acquire); downed && victim && victim == downed()) {
         if (native & 0xFF) g_downedRefusals.fetch_add(1, std::memory_order_relaxed);
         return native & ~std::uint64_t {0xFF}; // VUH-2465: nothing hits a logically downed player
@@ -252,6 +277,10 @@ bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame
     }
 #endif
     g_mode.store(static_cast<std::uint8_t>(mode), std::memory_order_release);
+    char trace[2] {};
+    g_enemyTrace.store(GetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1',
+                       std::memory_order_release);
+    if (g_enemyTrace.load() && log) log("[allyhit] VUH-2617 enemy-on-player check trace on (KH2COOP_THORN_HIT_TRACE=1)");
     if (log) log("[allyhit] installed mode=%s: %s",
                  mode == Mode::CoOp ? "coop" : mode == Mode::Puppet ? "puppet" : "trace",
                  mode == Mode::CoOp ? "ally player-to-player hits refused at 3D2060 (atkp kinds 5/6 kept); traced"

@@ -46,6 +46,7 @@
 #include "NativeLifetimeTrace.hpp"
 #include "NativePrivateStatus.hpp"
 #include "ActorLifetime.hpp"
+#include "ThornHitTrace.hpp"
 #include "PrologueParty.hpp"
 #include "NativePartyHud.hpp"
 #include "NativeHitTrace.hpp"
@@ -1664,6 +1665,78 @@ static bool UpdatePuppetSuspension() {
 }
 
 static void PollPositionFaultIdle();
+// VUH-2617 (a) trace, KH2COOP_THORN_HIT_TRACE=1 only (default off; reads only). Each actor's fields are
+// captured inside its own update and only after ThornHitTrace.hpp proves its identity there (no cached
+// pointer is followed: VUH-2612); every 30 frames the frame start prints the previous frame's captures
+// (position, motion, hit-pattern mask (actor+0xD10 | +0xD14) & ~+0xD18, and the boss copy's motion time).
+// hostFrame is the frame counter on the host and, on the friend, the mirror cursor sampled when the boss
+// copy was captured: a sample, not exact per-actor frame alignment.
+static bool ThornHitTraceEnabled() {
+    static const bool on = [] {
+        char v[2] {};
+        return GetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", v, sizeof(v)) == 1 && v[0] == '1';
+    }();
+    return on;
+}
+struct ThornTraceSnap { thornhittrace::Fields fields {}; std::uint32_t frame = 0; bool valid = false; };
+static ThornTraceSnap g_thornSnap[4];  // local, clone0, clone1, boss
+static double g_thornCursor = -1.0;
+static thornhittrace::Identity ThornIdentity(const nativehittrace::ActorSnapshot& s) {
+    constexpr auto metadata = nativehittrace::ActorObject | nativehittrace::ActorStatus | nativehittrace::ActorType |
+                              nativehittrace::ActorId | nativehittrace::ActorName | nativehittrace::ActorRepeated;
+    thornhittrace::Identity id {};
+    id.known = s.actor && (s.readMask & metadata) == metadata;
+    id.objentry = s.objentry; id.status = s.status; id.objectId = s.objectId; id.type = s.type;
+    id.namePrefix = s.namePrefix;
+    return id;
+}
+// HookedPerEntityUpdate, for the actor being updated, after enemymirror::PreUpdate.
+static void ThornHitTraceCapture(uintptr_t addr) {
+    if (!ThornHitTraceEnabled() || g_frameCounter % 30 != 29) return;
+    thornhittrace::Candidates c {};
+    c.head = g_soraActor;
+    (void)ReadHitTrace(g_exeBase + 0x2A105D0, c.canonical);  // the canonical player global (image data)
+    for (int i = 0; i < 2; ++i) {
+        const auto& d = g_puppets[i];
+        c.clone[i] = d.actor;
+        c.cloneApplied[i] = d.actor && d.applied && d.boundActor.actor == d.actor;
+        c.cloneCurrent[i] = d.actor && (d.actor == g_clones[0] || d.actor == g_clones[1]);
+        c.cloneBound[i] = ThornIdentity(d.boundActor);
+    }
+    c.bossBoundNow = enemysync::ActivationRole() == 2 && enemymirror::HostBrainBoundNow(addr);
+    static constexpr thornhittrace::Layout layout {
+        offsets::actor::OBJENTRY_PTR, 0x5C0, offsets::objentry::OBJECT_ID, offsets::objentry::TYPE_FLAGS,
+        offsets::objentry::NAME, offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X, offsets::actor::ANIM_ID,
+        enemymirror::ACTOR_MOTION_CTRL + enemymirror::MOTION_TIME, 0xD10};
+    thornhittrace::Fields f {};
+    const auto role = thornhittrace::Capture(addr, c, layout,
+        [](uintptr_t at, void* out, std::size_t n) { return ReadHitTraceMemory(at, out, n); }, f);
+    if (role == thornhittrace::Role::None) return;
+    const int slot = static_cast<int>(role) - 1;
+    g_thornSnap[slot] = {f, g_frameCounter, true};
+    if (role == thornhittrace::Role::Boss) g_thornCursor = enemysync::MirrorCursor();
+}
+static void ThornHitTraceText(const char* label, const ThornTraceSnap& s, char* out, std::size_t size) {
+    if (!s.valid || s.frame + 1 != g_frameCounter) { std::snprintf(out, size, " %s=-", label); return; }
+    std::snprintf(out, size, " %s=%.0f,%.0f,%.0f/m%u/mask%X", label, s.fields.x, s.fields.y, s.fields.z,
+                  s.fields.motion, s.fields.mask);
+}
+// Frame start: prints the captures of the previous frame. Reads no actor memory.
+static void ThornHitTraceTick() {
+    if (!ThornHitTraceEnabled() || g_frameCounter % 30 != 0) return;
+    const bool client = enemysync::ActivationRole() == 2;
+    char local[96], clone0[96], clone1[96], boss[96];
+    ThornHitTraceText("local", g_thornSnap[0], local, sizeof(local));
+    ThornHitTraceText("clone0", g_thornSnap[1], clone0, sizeof(clone0));
+    ThornHitTraceText("clone1", g_thornSnap[2], clone1, sizeof(clone1));
+    ThornHitTraceText("boss", g_thornSnap[3], boss, sizeof(boss));
+    const bool bossNow = g_thornSnap[3].valid && g_thornSnap[3].frame + 1 == g_frameCounter;
+    if (!client && !g_thornSnap[1].valid && !g_thornSnap[2].valid) return;  // the host traces only with a clone
+    Log("[thorn-trace] %s hostFrame=%.0f frame=%u%s%s%s%s bossTime=%.1f", client ? "client" : "host",
+        client ? (bossNow ? g_thornCursor : -1.0) : static_cast<double>(g_frameCounter - 1), g_frameCounter - 1,
+        local, clone0, clone1, client ? boss : "", bossNow ? g_thornSnap[3].fields.time : -1.0f);
+}
+
 static void PollPuppetPoses() {
     playerkit::UpdateBcClone();
     PollPositionFaultIdle();
@@ -3688,6 +3761,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 BeginHandleFrame();
                 allyhit::SetFriendlyFire(enemysync::FriendlyFire()); // VUH-2421: host setting, synced
                 allyhit::Tick(g_frameCounter); // stats line (silent when off or unchanged)
+                ThornHitTraceTick();           // VUH-2617: default off
             }
         }
         NoteActorForClones(addr);
@@ -3711,6 +3785,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         // VUH-1489: a P_EX100 clone reads neutral input, not pad 0 (default off).
         cloneneutral::Gate(addr);
         enemymirror::PreUpdate(addr); // VUH-1515 step 2 (default off)
+        ThornHitTraceCapture(addr);   // VUH-2617: default off; reads only this updating actor
 
         // VUH-2290: a party member (objentry type 1) never updates holding a freed or dead target.
         {

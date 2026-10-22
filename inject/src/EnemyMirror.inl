@@ -112,6 +112,13 @@ static Driven* Find(uintptr_t actor) noexcept {
     return nullptr;
 }
 static bool OwnerThread() noexcept { return GetCurrentThreadId() == g_ownerThread; }
+// VUH-2617 trace: the actor being updated now was just bound (this frame) as the host-brain-only boss copy.
+// Call only from that actor's own update, after PreUpdate; it reads no actor memory.
+inline bool HostBrainBoundNow(uintptr_t actor) noexcept {
+    if (!OwnerThread()) return false;
+    const Driven* d = Find(actor);
+    return d && d->hostBrainOnly && d->boundFrame == g_frameCounter;
+}
 // The thread check comes first: off the game thread the table is never read (rev-2 N-a).
 static void Retire(Driven& d, const char* why);
 static bool DrivenNow(uintptr_t actor) noexcept {
