@@ -350,16 +350,38 @@ pre_victory = "\n".join(calling + thorn + [_load(11, 1, 0, 54)] + _block(900, 11
 check("R2: a field load completed before the victory row, or no victory row at all, never matches",
       evidence.field_catalog(pre_victory, field, 4, marker) is None and
       evidence.field_catalog("\n".join(calling + thorn + chain + [_load(11, 1, 0, 54)] + _block(900, 11, 2, 1, 0, 54)), field, 4, marker) is None)
-# Quill r2 R1: the actual generated wait, replayed with kh2ctl's real u64 contract (a JSON hex string).
-wait = next(s for s in legA["steps"] if s["do"] == "wait_until" and "field_catalog(" in s["expr"])
-def _replay(event_context):
-    peeks = {"0x9BA8D0": 1, "0x7435D0": 255, "0xB65210": 0, "0x2A11478": event_context}
-    ns = {"location": lambda i=0: field, "peek": lambda rva, kind="u32", i=0: peeks[rva], "int": int, "str": str,
-          "saved": {"legA_arena_load": 4}, "last_load": lambda i=0: evidence.last_load(fast),
-          "field_catalog": lambda i=0, after_load=0, after_marker=None: evidence.field_catalog(fast, field, after_load, after_marker)}
-    return eval(wait["expr"], ns)
-check("R1: the generated field wait accepts a null event context as kh2ctl returns it ('0x0')", _replay("0x0") is True)
-check("R1: the generated field wait refuses a live event context ('0x7FF6A1230000')", _replay("0x7FF6A1230000") is False)
+# Route (b), lead #32: no kill and no post-Thorn field in Leg A (the field_catalog helper above stays checked for
+# the two-seat Leg B run). The host must still be fighting while the friend lands and sits out.
+check("Route (b): no post-Thorn field wait and no kill assert in Leg A",
+      not any(s["do"] == "wait_until" and "field_catalog(" in s["expr"] for s in legA["steps"]) and
+      not any(s["do"] == "assert" and "host_end']==1" in s["expr"] for s in legA["steps"]))
+host_fight = next(s for s in legA["steps"] if s.get("name") == "host_thorn")
+check("Route (b): the host fight pilot may end in a full party down (allowStuck), without revivePeer",
+      host_fight.get("allowStuck") is True and "revivePeer" not in host_fight)
+alive = [i for i, s in enumerate(legA["steps"]) if s["do"] == "assert" and s["expr"] == make_thorn_legA.HOST_ALIVE]
+landed = next(i for i, s in enumerate(legA["steps"]) if s["do"] == "wait_until" and "[resync-sit-out] landed" in s["expr"])
+sat_out = next(i for i, s in enumerate(legA["steps"]) if s["do"] == "wait_until" and "outage sit-out" in s["expr"])
+check("Route (b): bounded host survival is asserted before the landing waits and after the arrival asserts",
+      len(alive) == 2 and alive[0] < landed < sat_out < alive[1] and
+      legA["steps"][alive[1] - 1] == {"do": "capture", "instance": 1, "name": "legA_arrival_friend"})
+class _P:
+    def __init__(self, code): self.code = code
+    def poll(self): return self.code
+def _alive(pilots):
+    return eval(make_thorn_legA.HOST_ALIVE, {"any": any, "saved": {"_background_pilots": pilots}})
+check("Route (b): HOST_ALIVE is true only while the host_thorn process runs",
+      _alive([(_P(None), 0, None, {}, "host_thorn", None)]) is True and
+      _alive([(_P(1), 0, None, {}, "host_thorn", None)]) is False and
+      _alive([(_P(None), 0, None, {}, "friend_thorn", None)]) is False and _alive([]) is False)
+wait_at = next(i for i, s in enumerate(legA["steps"]) if s["do"] == "pilot_wait" and i > alive[1])
+check("Route (b): after the host pilot ends, the friend's sit-out invariants are asserted, then the relay at closure",
+      "never replays 4/16 or 315" in legA["steps"][wait_at + 2]["message"] and
+      legA["steps"][wait_at + 1].get("as") == "legA_fight")
+inventory = next(i for i, s in enumerate(legA["steps"]) if s["do"] == "progress_snapshot")
+check("Lead #32 (d): one read-only SAVE snapshot of both seats in the Calling, before the host leaves for the arena",
+      legA["steps"][inventory] == {"do": "progress_snapshot", "instances": [0, 1], "as": "legA_inventory"} and
+      legA["steps"][inventory - 1].get("as") == "legA_calling" and legA["steps"][inventory + 1].get("name") == "host_to_awakening" and
+      ("inventory", 0x3580, 0x140) in run.shared.PERSONAL_RANGES and ("characters", 0x24F0, 0xE04) in run.shared.PERSONAL_RANGES)
 check("R1: the arena anchor is saved before the host's fight pilot starts",
       next(i for i, s in enumerate(legA["steps"]) if s.get("as") == "legA_arena_load") <
       next(i for i, s in enumerate(legA["steps"]) if s.get("name") == "host_thorn"))

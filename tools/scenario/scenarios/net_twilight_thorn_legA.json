@@ -1,14 +1,15 @@
 {
   "name": "vuh2640_thorn_legA_sitout",
-  "description": "VUH-2640 Leg A live check (single-PC loopback), derived offline from net_twilight_thorn_bots05 by tools/scenario/safe_field_recovery/make_thorn_legA.py; run through that directory's run.py thin entry. The Calling route is bots05's. In the Calling, after its pilots, the original Friend1 runtime is paused 4200 ms (bounded experiment, pause.py budget) so its lifetime expires before Thorn. Only the host continues: the host attests a boss sit-out at 2/34/157, the fenced friend lands in the arena sitting out (outage), the host clears Thorn alone, and the friend gets no 4/16, 315 or restored control. KH2COOP_RESYNC_CATALOG_TRACE=1 records the first post-Thorn field's catalog for VUH-2674. Leg B is expected NOT to complete yet (no reviewed post-Thorn row): the friend is expected to stay sitting out.",
+  "description": "VUH-2640 Leg A live check (single-PC loopback), derived offline from net_twilight_thorn_bots05 by tools/scenario/safe_field_recovery/make_thorn_legA.py; run through that directory's run.py thin entry. The Calling route is bots05's. In the Calling, after its pilots, the original Friend1 runtime is paused 4200 ms (bounded experiment, pause.py budget) so its lifetime expires before Thorn. Only the host continues: the host attests a boss sit-out at 2/34/157, the fenced friend lands in the arena sitting out (outage) while the host is still fighting, and the friend gets no 4/16, 315 or restored control. Route (b) (lead #32): no kill is asserted and a full party down is an accepted end; Leg B and the post-Thorn chain belong to a two-seat run with the expiry in a later room. A read-only SAVE snapshot of characters and inventory (Potions) is taken in the Calling.",
   "playerDefaults": true,
   "protect": [],
   "qualificationGaps": [
     "Needs VUH-2640 Leg A (protocol 35) and the VUH-2674 catalog trace on the tested products.",
     "The 4200 ms pause is a bounded experiment, not a lease-before-relay guarantee (pre-pause relay age is assumed).",
     "Pre-ready native safety (between the arena load and DownedSpike's first ready frame) is shown only by footage and the friend's outage/hold rows.",
-    "A host clearing Thorn alone is untested; a host death with the friend sitting out is everyone down (Continue).",
-    "Leg B after Thorn needs VUH-2674's reviewed row; the friend staying in the arena sitting out is the expected first-slice result.",
+    "No kill: a solo pilot can't clear Thorn (VUH-2617 r5 analysis); a host death with the friend sitting out is everyone down, the accepted end.",
+    "Leg B and the post-Thorn chain (VUH-2674's field catalog) are not exercised here; they need a two-seat run with the expiry in a later room.",
+    "The inventory snapshot's Potion decoding (item id indexing at SAVE+0x3580) is offline and unverified.",
     "The atk_thorn attach on the sitting-out friend is traced ([downed] outage held-player-moved), not prevented."
   ],
   "steps": [
@@ -197,6 +198,14 @@
       "expr": "{'host_refusals':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_recovery':[l for l in runtime_log(1).splitlines() if '[eventhold-recovery]' in l][-8:],'locations':[location(0),location(1)]}"
     },
     {
+      "do": "progress_snapshot",
+      "instances": [
+        0,
+        1
+      ],
+      "as": "legA_inventory"
+    },
+    {
       "do": "pilot",
       "instance": 0,
       "route": "tools/rig/route_pilot/routes/twilight_thorn_awakening_bots04.json",
@@ -245,7 +254,8 @@
       "input": "pad",
       "background": true,
       "externalEvidence": true,
-      "_releaseReceipt": {}
+      "_releaseReceipt": {},
+      "allowStuck": true
     },
     {
       "do": "fight",
@@ -262,8 +272,8 @@
     },
     {
       "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
+      "expr": "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[]))",
+      "message": "The host's combat pilot ended before the friend landed. See host_thorn."
     },
     {
       "do": "wait_until",
@@ -298,6 +308,11 @@
       "name": "legA_arrival_friend"
     },
     {
+      "do": "assert",
+      "expr": "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[]))",
+      "message": "Bounded host survival: the host must still be fighting while the friend lands and sits out"
+    },
+    {
       "do": "fight",
       "instances": [],
       "seconds": 30,
@@ -306,11 +321,6 @@
         "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
         "everyMs": 1000
       }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
     },
     {
       "do": "fight",
@@ -323,193 +333,27 @@
       }
     },
     {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_03",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_04",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_05",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_06",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_07",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_08",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_09",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_10",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
-      "do": "fight",
-      "instances": [],
-      "seconds": 30,
-      "as": "thorn_11",
-      "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
-        "everyMs": 1000
-      }
-    },
-    {
-      "do": "assert",
-      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
-      "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."
-    },
-    {
       "do": "pilot_wait"
     },
     {
       "do": "save",
       "as": "legA_fight",
-      "expr": "{'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],'held_moved':log_count('[downed] outage held-player-moved',1),'friend_hold_ended':log_count('[downed] logical hold ended',1),'host_end':log_count('[mission-mirror] host end trap=mission_dead_boss',0)-saved['thorn_baseline']['host_end'],'victory':log_count('[event-mirror] host publishes start id=353133 ',0)-saved['thorn_baseline']['victory_start']}"
-    },
-    {
-      "do": "assert",
-      "expr": "saved['legA_fight']['host_end']==1 and saved['legA_fight']['victory']==1",
-      "message": "The host alone clears Thorn: exactly one host mission_dead_boss and one ASCII315 publication"
+      "expr": "{'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],'held_moved':log_count('[downed] outage held-player-moved',1),'friend_hold_ended':log_count('[downed] logical hold ended',1),'host_downs':log_count('[downed] gate intercept',0),'host_end':log_count('[mission-mirror] host end trap=mission_dead_boss',0)-saved['thorn_baseline']['host_end'],'victory':log_count('[event-mirror] host publishes start id=353133 ',0)-saved['thorn_baseline']['victory_start'],'host_location':location(0),'friend_location':location(1),'friend_boss':[a for a in actors(1) if a.get('objectId')==307]}"
     },
     {
       "do": "assert",
       "expr": "log_count('[mission-mirror] client boss end',1)==saved['legA_before']['friend_end'] and log_count('353133',1)==saved['legA_before']['friend_315'] and runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
-      "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back"
+      "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back, whatever ended the fight"
     },
     {
       "do": "capture",
       "instance": 0,
-      "name": "legA_victory_host"
+      "name": "legA_end_host"
     },
     {
       "do": "capture",
       "instance": 1,
-      "name": "legA_victory_friend"
-    },
-    {
-      "do": "wait_until",
-      "expr": "location(0)[:2]!=[2,34] and peek('0x9BA8D0','u8',0)==1 and peek('0x7435D0','u8',0)==255 and peek('0xB65210','i32',0)==0 and int(str(peek('0x2A11478','u64',0)),16)==0 and field_catalog(0, saved['legA_arena_load'], '[mission-mirror] host end trap=mission_dead_boss') is not None",
-      "timeoutMs": 300000,
-      "pollMs": 1000
-    },
-    {
-      "do": "save",
-      "as": "vuh2674_field",
-      "expr": "{'catalog':field_catalog(0, saved['legA_arena_load'], '[mission-mirror] host end trap=mission_dead_boss'),'host_location':location(0),'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"
-    },
-    {
-      "do": "capture",
-      "instance": 0,
-      "name": "vuh2674_field_host"
-    },
-    {
-      "do": "capture",
-      "instance": 1,
-      "name": "legB_friend"
+      "name": "legA_end_friend"
     },
     {
       "do": "assert",

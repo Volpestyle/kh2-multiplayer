@@ -4,8 +4,14 @@ The bots05 steps through the Calling and its menu tutorials are kept verbatim, a
 bots05's reviewed Thorn pilot (route_pilot/thorn.py, as run_thorn.py selects). Then the original
 Friend1 runtime is paused for the qualified 4200 ms fixture (pause.py), with no friend pilot bound, so
 the friend's lifetime expires before Thorn. Only the host continues: Leg A must carry the fenced friend
-into the arena sitting out, the host clears Thorn alone, and the friend receives no 4/16, 315 or
-restored control. KH2COOP_RESYNC_CATALOG_TRACE=1 also records the first post-Thorn field's catalog
+into the arena sitting out, and the friend receives no 4/16, 315 or restored control.
+
+Route (b), lead #32: a solo pilot can't kill Thorn (VUH-2617 r5 analysis: Leg A attempt02's solo opening
+dealt 45 and the host died at ~124 s). So this check proves the carry-in and the sit-out under a live
+fight: the host must still be fighting when the friend has landed and is sitting out, and a full party
+down afterwards is an accepted end. Leg B and the post-Thorn chain belong to a two-seat run with the
+expiry driven into a later room. A read-only SAVE snapshot of both seats' characters and inventory
+(Potions, for the pilot's heal path) is taken in the Calling. KH2COOP_RESYNC_CATALOG_TRACE=1 stays on
 (VUH-2674). Run it through this directory's thin entry (run.py), which registers the pause step.
 
     python -B tools/scenario/safe_field_recovery/make_thorn_legA.py          # rewrite the scenario
@@ -29,6 +35,8 @@ PILOT_ALIVE = ("all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) "
 FIELD = ("peek('0x9BA8D0','u8',{i})==1 and peek('0x7435D0','u8',{i})==255 and peek('0xB65210','i32',{i})==0 and "
          "int(str(peek('0x2A11478','u64',{i})),16)==0")
 VICTORY = "[mission-mirror] host end trap=mission_dead_boss"
+# Route (b): the host's own fight pilot, still running (it may end later with a full party down; allowStuck).
+HOST_ALIVE = "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[]))"
 RELAY_ASSERT = {"do": "assert", "expr": "pause_relay()['ok']",
                 "message": "Lease-only expiry (Quill): the relay must not have timed out the friend after the pause; see heartbeat_relay.json"}
 
@@ -66,6 +74,9 @@ def build(bots05: dict) -> dict:
             "'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],"
             "'friend_recovery':[l for l in runtime_log(1).splitlines() if '[eventhold-recovery]' in l][-8:],"
             "'locations':[location(0),location(1)]}"},
+        # Lead #32 (d): read-only SAVE bytes (characters incl. battle item slots, inventory) for Potions, in the
+        # Calling, not in the live boss room. The same reads as progress_snapshot elsewhere; no writes.
+        {"do": "progress_snapshot", "instances": [0, 1], "as": "legA_inventory"},
         copy.deepcopy(steps[22]),                             # host_to_awakening: the host alone
         {"do": "wait_until", "expr": f"location(0)=={ARENA} and any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(0))",
          "timeoutMs": 120000},
@@ -77,14 +88,15 @@ def build(bots05: dict) -> dict:
     # friend's outage (an explicit scope decision; bots05's Calling steps keep their revivePeer).
     out += [copy.deepcopy(steps[28]), copy.deepcopy(steps[29])]
     host_pilot = copy.deepcopy(steps[30]); host_pilot.pop("revivePeer", None)
+    host_pilot["allowStuck"] = True                           # route (b): a full party down is an accepted end
     out.append(host_pilot)
-    for n in range(12):
+    for n in range(3):                                        # route (b): the landing block plus two filmed blocks
         fight = copy.deepcopy(steps[32]); fight["as"] = f"thorn_{n:02d}"
         out.append(fight)
         if n == 0:
             out.append(copy.deepcopy(steps[33]))              # clip_wait after the first block
-        out.append({"do": "assert", "expr": PILOT_ALIVE,
-                    "message": "The host's combat pilot failed; the current paired clip block is finalized. See host_thorn."})
+            out.append({"do": "assert", "expr": HOST_ALIVE,
+                        "message": "The host's combat pilot ended before the friend landed. See host_thorn."})
         if n == 0:
             out += [
                 {"do": "wait_until", "expr":
@@ -105,39 +117,27 @@ def build(bots05: dict) -> dict:
                  "message": "Leg A: the host attests the sit-out, the fenced friend admits it, and no control is restored"},
                 {"do": "capture", "instance": 0, "name": "legA_arrival_host"},
                 {"do": "capture", "instance": 1, "name": "legA_arrival_friend"},
+                {"do": "assert", "expr": HOST_ALIVE,
+                 "message": "Bounded host survival: the host must still be fighting while the friend lands and sits out"},
             ]
     out += [
-        {"do": "pilot_wait"},
+        {"do": "pilot_wait"},                                 # the host pilot ends: full party down, a kill or its deadline
         {"do": "save", "as": "legA_fight", "expr":
             "{'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],"
             "'held_moved':log_count('[downed] outage held-player-moved',1),"
             "'friend_hold_ended':log_count('[downed] logical hold ended',1),"
+            "'host_downs':log_count('[downed] gate intercept',0),"
             "'host_end':log_count('[mission-mirror] host end trap=mission_dead_boss',0)-saved['thorn_baseline']['host_end'],"
-            "'victory':log_count('[event-mirror] host publishes start id=353133 ',0)-saved['thorn_baseline']['victory_start']}"},
-        {"do": "assert", "expr":
-            "saved['legA_fight']['host_end']==1 and saved['legA_fight']['victory']==1",
-            "message": "The host alone clears Thorn: exactly one host mission_dead_boss and one ASCII315 publication"},
+            "'victory':log_count('[event-mirror] host publishes start id=353133 ',0)-saved['thorn_baseline']['victory_start'],"
+            "'host_location':location(0),'friend_location':location(1),"
+            "'friend_boss':[a for a in actors(1) if a.get('objectId')==307]}"},
         {"do": "assert", "expr":
             "log_count('[mission-mirror] client boss end',1)==saved['legA_before']['friend_end'] and "
             "log_count('353133',1)==saved['legA_before']['friend_315'] and "
             "runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
-         "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back"},
-        {"do": "capture", "instance": 0, "name": "legA_victory_host"},
-        {"do": "capture", "instance": 1, "name": "legA_victory_friend"},
-        # Quill r1/r2: the current native load, newer than the arena load saved before combat and completed
-        # after the host's actual victory row, its exact live tuple, a settled field (event context too), and
-        # that load's own phase=field catalog block; never a historical row, never a late baseline.
-        {"do": "wait_until", "expr":
-            f"location(0)[:2]!=[2,34] and {FIELD.format(i=0)} and "
-            f"field_catalog(0, saved['legA_arena_load'], '{VICTORY}') is not None",
-         "timeoutMs": 300000, "pollMs": 1000},
-        {"do": "save", "as": "vuh2674_field", "expr":
-            f"{{'catalog':field_catalog(0, saved['legA_arena_load'], '{VICTORY}'),'host_location':location(0),"
-            "'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),"
-            "'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],"
-            "'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"},
-        {"do": "capture", "instance": 0, "name": "vuh2674_field_host"},
-        {"do": "capture", "instance": 1, "name": "legB_friend"},
+         "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back, whatever ended the fight"},
+        {"do": "capture", "instance": 0, "name": "legA_end_host"},
+        {"do": "capture", "instance": 1, "name": "legA_end_friend"},
         RELAY_ASSERT,                                         # Quill r1: and again at closure
     ]
     return {
@@ -148,17 +148,19 @@ def build(bots05: dict) -> dict:
             "The Calling route is bots05's. In the Calling, after its pilots, the original Friend1 runtime is paused "
             "4200 ms (bounded experiment, pause.py budget) so its lifetime expires before Thorn. Only the host "
             "continues: the host attests a boss sit-out at 2/34/157, the fenced friend lands in the arena sitting out "
-            "(outage), the host clears Thorn alone, and the friend gets no 4/16, 315 or restored control. "
-            "KH2COOP_RESYNC_CATALOG_TRACE=1 records the first post-Thorn field's catalog for VUH-2674. Leg B is "
-            "expected NOT to complete yet (no reviewed post-Thorn row): the friend is expected to stay sitting out."),
+            "(outage) while the host is still fighting, and the friend gets no 4/16, 315 or restored control. Route (b) "
+            "(lead #32): no kill is asserted and a full party down is an accepted end; Leg B and the post-Thorn chain "
+            "belong to a two-seat run with the expiry in a later room. A read-only SAVE snapshot of characters and "
+            "inventory (Potions) is taken in the Calling."),
         "playerDefaults": bots05["playerDefaults"],
         "protect": bots05["protect"],
         "qualificationGaps": [
             "Needs VUH-2640 Leg A (protocol 35) and the VUH-2674 catalog trace on the tested products.",
             "The 4200 ms pause is a bounded experiment, not a lease-before-relay guarantee (pre-pause relay age is assumed).",
             "Pre-ready native safety (between the arena load and DownedSpike's first ready frame) is shown only by footage and the friend's outage/hold rows.",
-            "A host clearing Thorn alone is untested; a host death with the friend sitting out is everyone down (Continue).",
-            "Leg B after Thorn needs VUH-2674's reviewed row; the friend staying in the arena sitting out is the expected first-slice result.",
+            "No kill: a solo pilot can't clear Thorn (VUH-2617 r5 analysis); a host death with the friend sitting out is everyone down, the accepted end.",
+            "Leg B and the post-Thorn chain (VUH-2674's field catalog) are not exercised here; they need a two-seat run with the expiry in a later room.",
+            "The inventory snapshot's Potion decoding (item id indexing at SAVE+0x3580) is offline and unverified.",
             "The atk_thorn attach on the sitting-out friend is traced ([downed] outage held-player-moved), not prevented.",
         ],
         "steps": out,
