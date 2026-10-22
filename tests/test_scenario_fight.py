@@ -11,6 +11,7 @@ import types
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+PLAYER = '0x1000'  # the fake player actor's address, as kh2ctl peek and actors report it
 
 
 class StepFailed(Exception):
@@ -18,7 +19,7 @@ class StepFailed(Exception):
 
 
 class FightTest(unittest.TestCase):
-    def run_fight(self, seconds, until=None, birth_at=40):
+    def run_fight(self, seconds, until=None, birth_at=40, player='P_EX100'):
         # Virtual time advances only at simulated input/wait boundaries. Real
         # threads yield cooperatively; no wall-clock thresholds decide the test.
         clock_lock = threading.Lock()
@@ -49,10 +50,10 @@ class FightTest(unittest.TestCase):
                 # At 30s, the real run still had a Dusk318 at45HP. Include
                 # an empty wave gap before the later living Creeper + receipt.
                 foes = [] if birth_at - 3 <= t < birth_at else [
-                    dict(name='M_DUSK' if t < birth_at else 'M_CREEPER',
+                    dict(name='M_DUSK' if t < birth_at else 'M_CREEPER', address='0x2000',
                          objectId=318 if t < birth_at else 317, objectType=4,
                          hp=45, position=dict(x=1000, z=0))]
-                return [dict(name='P_EX100', position=dict(x=0, z=0)), *foes]
+                return [dict(name=player, address=PLAYER, position=dict(x=0, z=0)), *foes]
 
             def eval(self, expr):
                 self.observed.append(monotonic())
@@ -62,7 +63,8 @@ class FightTest(unittest.TestCase):
 
         def kh2ctl(command, *args, **kwargs):
             if command == 'peek':
-                return {'samples': [{'0x718C68': 0, '0x718C70': 1, '0x718C78': 0, '0x718C80': 0}]}
+                # The step finds its game's canonical player through 0x2A105D0 (VUH-2466).
+                return {'samples': [{'0x718C68': 0, '0x718C70': 1, '0x718C78': 0, '0x718C80': 0, '0x2A105D0': PLAYER}]}
             self.assertEqual(command, 'player-input')
             sleep(1)
             return {}
@@ -99,6 +101,11 @@ class FightTest(unittest.TestCase):
         self.assertTrue(any(t < 30 for t in observations))
         self.assertGreaterEqual(elapsed, 40)
         self.assertLess(elapsed, 120)
+
+    def test_a_prologue_roxas_is_driven_as_the_player(self):
+        # VUH-2466: both prologue seats' players are P_EX110; the step finds its own through 0x2A105D0, not by name.
+        result, elapsed, _ = self.run_fight(30, player='P_EX110')
+        self.assertGreaterEqual(elapsed, 30)
 
     def test_missing_ticket_still_stops_at_the_deadline(self):
         result, elapsed, _ = self.run_fight(120, self.milestone(), birth_at=1000)

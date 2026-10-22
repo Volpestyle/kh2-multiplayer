@@ -49,7 +49,7 @@ def observation(slot, roster, generation, seq):
                             localReadAvailable=True, worldBefore=copy.deepcopy(world), worldAfter=world,
                             local=pose(0, seq + index), puppets=puppets))
     return dict(schema=1, command="observe", processId=100 + slot, ok=True, readOnly=True,
-                atomicAcrossBridges=False, avatarBridgeVersion=2, worldBridgeVersion=11, samples=samples)
+                atomicAcrossBridges=False, avatarBridgeVersion=2, worldBridgeVersion=13, samples=samples)
 
 
 def initial():

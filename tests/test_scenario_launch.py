@@ -39,6 +39,7 @@ class LaunchTest(unittest.TestCase):
                 self.instances = []
                 self.artifacts = []
                 self.protect = set()
+                self.protected_actors = {}  # run_scenario reports what protect covered (VUH-2364)
                 self.closed = False
                 owner.context = self
 

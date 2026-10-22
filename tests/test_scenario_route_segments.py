@@ -38,6 +38,7 @@ class RouteSegmentsTest(unittest.TestCase):
                 self.instances = []
                 self.artifacts = []
                 self.protect = set()
+                self.protected_actors = {}  # run_scenario reports what protect covered (VUH-2364)
                 self.player_env = {}
 
             def check_all(self):

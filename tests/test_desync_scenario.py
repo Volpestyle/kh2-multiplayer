@@ -195,7 +195,7 @@ class DesyncLinkageTest(unittest.TestCase):
         class Ctx:
             instances = []
         ctx = Ctx()
-        with patch.object(RUNNER, "kh2ctl", return_value={"processId": 123, "log": str(exact)}):
+        with patch.object(RUNNER, "kh2ctl", return_value={"ok": True, "command": "launch", "processId": 123, "log": str(exact)}):
             RUNNER.step_launch(ctx, {"mute": False})
         self.assertEqual(ctx.instances[0].inject_log, exact.resolve())
 
