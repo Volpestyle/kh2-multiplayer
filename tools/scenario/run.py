@@ -5532,27 +5532,44 @@ def render_md(report: dict) -> str:
 # Suite
 # --------------------------------------------------------------------------
 
-def derived_stale(path: Path) -> str | None:
-    """A scenario that is a generator's SOURCE or TARGET (tools/scenario/**/make_*.py with SOURCE, TARGET and build)
-    must leave that generator's TARGET current; returns why not. Offline and local: it imports only generators
-    whose text names this file, and builds from the files in the checkout (2026-10-22, a bots05 sample edit left the
-    derived Leg A and postfield scenarios stale while --validate and ctest passed)."""
+# Generated scenarios and the reviewed pure generators that build them, as (SOURCE, TARGET, generator) paths relative
+# to the repository. Quill r1 on 9aae587: a scenario is matched by its exact resolved path before anything is imported,
+# so an unrelated, same-named or merely mentioned file executes nothing.
+DERIVED_SCENARIOS = (
+    ("tools/scenario/scenarios/net_twilight_thorn_bots05.json", "tools/scenario/scenarios/net_twilight_thorn_legA.json",
+     "tools/scenario/safe_field_recovery/make_thorn_legA.py"),
+    ("tools/scenario/scenarios/net_twilight_thorn_bots05.json", "tools/scenario/scenarios/net_twilight_thorn_postfield.json",
+     "tools/scenario/safe_field_recovery/make_thorn_postfield.py"),
+)
+
+
+def derived_stale(path: Path, registry=DERIVED_SCENARIOS, root: Path = ROOT) -> str | None:
+    """A registered SOURCE or TARGET must leave each of its TARGETs current with the generator's pure build();
+    returns why not. Read-only: only a registered generator is imported (no bytecode written), only its build() runs,
+    never its writing main (2026-10-22, a bots05 sample edit left the derived Leg A and postfield scenarios stale
+    while --validate and ctest passed)."""
     import importlib.util
-    here = path.resolve()
-    for generator in sorted(Path(__file__).resolve().parent.rglob("make_*.py")):
-        if here.name not in generator.read_text(encoding="utf-8", errors="replace"):
+    here = Path(path).resolve()
+    for source, target, generator in registry:
+        source, target, generator = ((Path(root) / p).resolve() for p in (source, target, generator))
+        if here not in (source, target):
             continue
-        spec = importlib.util.spec_from_file_location(f"derived_{generator.stem}", generator)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        source, target, build = (getattr(module, n, None) for n in ("SOURCE", "TARGET", "build"))
-        if not (source and target and callable(build)) or here not in (Path(source).resolve(), Path(target).resolve()):
-            continue
-        built = json.dumps(build(json.loads(Path(source).read_text(encoding="utf-8"))), indent=2) + "\n"
-        current = Path(target).read_text(encoding="utf-8").replace("\r\n", "\n") if Path(target).exists() else ""
+        name = f"{target.name} (generator {generator.name})"
+        quiet = sys.dont_write_bytecode
+        try:
+            sys.dont_write_bytecode = True
+            spec = importlib.util.spec_from_file_location(f"derived_{generator.stem}", generator)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            built = json.dumps(module.build(json.loads(source.read_text(encoding="utf-8"))), indent=2) + "\n"
+            current = target.read_text(encoding="utf-8").replace("\r\n", "\n") if target.exists() else ""
+        except Exception as error:  # a registered generator that cannot build refuses, by name
+            return f"derived check failed for {name}: {type(error).__name__}: {error}"
+        finally:
+            sys.dont_write_bytecode = quiet
         if current != built:
-            rel = generator.relative_to(Path(__file__).resolve().parents[2]).as_posix()
-            return f"{Path(target).name} is stale against {Path(source).name}: run python -B {rel}"
+            return (f"{target.name} is stale against {source.name}: run python -B "
+                    f"{generator.relative_to(Path(root).resolve()).as_posix()}")
     return None
 
 

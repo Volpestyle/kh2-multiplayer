@@ -501,6 +501,61 @@ check("watchdog start and suspend attempt share guard", len(protected)==1 and
           and isinstance(n.targets[0].slice,ast.Constant) and n.targets[0].slice.value=="suspendAttempted"
           for n in ast.walk(protected[0])) and
       any(isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="suspend" for n in ast.walk(protected[0])))
+# Quill r1 on 9aae587: run.py's derived-scenario preflight selects a generator by the exact resolved SOURCE/TARGET
+# path in its registry before importing anything; an unrelated, same-named or merely mentioned file imports nothing.
+import tempfile
+derived_stale = run.shared.derived_stale
+bytecode_before = sys.dont_write_bytecode
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "copy").mkdir()
+    (t / "src.json").write_text('{"a": 1}', encoding="utf-8")
+    (t / "copy" / "src.json").write_text('{"a": 1}', encoding="utf-8")
+    (t / "ordinary.json").write_text("{}", encoding="utf-8")
+    (t / "gen_pure.py").write_text(
+        "from pathlib import Path\n(Path(__file__).parent/'pure.sentinel').write_text('x')\n"
+        "def build(d):\n    return {'from': d}\n", encoding="utf-8")
+    (t / "gen_bad.py").write_text("def build(d):\n    raise RuntimeError('boom')\n", encoding="utf-8")
+    (t / "make_unrelated.py").write_text(
+        "# mentions ordinary.json and src.json in a comment only\nfrom pathlib import Path\n"
+        "(Path(__file__).parent/'unrelated.sentinel').write_text('x')\n", encoding="utf-8")
+    registry = (("src.json", "dst.json", "gen_pure.py"),)
+    def fresh():
+        for name in ("pure.sentinel", "unrelated.sentinel"):
+            (t / name).unlink(missing_ok=True)
+    def none_ran():
+        return not (t / "pure.sentinel").exists() and not (t / "unrelated.sentinel").exists()
+    fresh()
+    check("derived: an unrelated scenario (named in another generator's comment) imports nothing",
+          derived_stale(t / "ordinary.json", registry, t) is None and none_ran())
+    check("derived: a same-named copy outside the registered paths imports nothing",
+          derived_stale(t / "copy" / "src.json", registry, t) is None and none_ran())
+    fresh()
+    stale_src = derived_stale(t / "src.json", registry, t)
+    check("derived: a registered SOURCE with no current TARGET refuses and names the generator",
+          stale_src == "dst.json is stale against src.json: run python -B gen_pure.py" and
+          (t / "pure.sentinel").exists() and not (t / "unrelated.sentinel").exists())
+    fresh()
+    check("derived: the registered TARGET path refuses the same way",
+          derived_stale(t / "dst.json", registry, t) == stale_src)
+    (t / "dst.json").write_text('{\n  "from": {\n    "a": 1\n  }\n}\n', encoding="utf-8")
+    check("derived: a current TARGET passes from either registered path",
+          derived_stale(t / "src.json", registry, t) is None and derived_stale(t / "dst.json", registry, t) is None)
+    bad = derived_stale(t / "src.json", (("src.json", "dst.json", "gen_bad.py"),), t)
+    check("derived: a registered generator that cannot build is a named refusal, not a traceback",
+          bad == "derived check failed for dst.json (generator gen_bad.py): RuntimeError: boom")
+    (t / "sc").mkdir(); (t / "gens").mkdir()
+    (t / "sc" / "src.json").write_text('{"b": 2}', encoding="utf-8")
+    (t / "gens" / "gen_pure.py").write_text((t / "gen_pure.py").read_text(encoding="utf-8"), encoding="utf-8")
+    nested = (("sc/src.json", "sc/dst.json", "gens/gen_pure.py"),)
+    check("derived: registry paths are relative to the repository, not bare names",
+          derived_stale(t / "sc" / "src.json", nested, t) == "dst.json is stale against src.json: run python -B gens/gen_pure.py"
+          and derived_stale(t / "src.json", nested, t) is None)
+    check("derived: no bytecode written and the bytecode switch restored",
+          not any(t.rglob("__pycache__")) and not any(t.rglob("*.pyc")) and sys.dont_write_bytecode is bytecode_before)
+check("derived: the real registry passes on this checkout for bots05, Leg A and postfield",
+      all(derived_stale(run.ROOT / f"tools/scenario/scenarios/net_twilight_thorn_{n}.json") is None
+          for n in ("bots05", "legA", "postfield")))
 output={"ok":all(r["pass"] for r in checks),"checks":len(checks),"scope":"offline fake retained-handle API and log/expression controls only; no live native calls", "results":checks}
 receipt = run.ROOT/".local/thorn/safe-field-recovery-checks.json"
 receipt.parent.mkdir(parents=True, exist_ok=True)
