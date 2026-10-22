@@ -120,15 +120,56 @@ void testVersion11Layout() {
     WorldBridge producer, consumer, absent;
     const DWORD pid = 0x7FF50000u + (GetCurrentProcessId() & 0xFFFFu);
     check(!absent.OpenExisting(pid), "operator OpenExisting does not manufacture absent mapping");
-    check(producer.Open(pid) && consumer.OpenExisting(pid), "version12 owned fixture mapping opens");
+    check(producer.Open(pid) && consumer.OpenExisting(pid), "version13 owned fixture mapping opens");
     check(consumer.RuntimeWriter().pid == 0, "new mapping has no runtime writer");
     producer.PulseRuntimeWriter();
     const auto writer = consumer.RuntimeWriter();
     check(writer.pid == GetCurrentProcessId() && static_cast<DWORD>(GetTickCount() - writer.heartbeat) < 1000,
           "runtime heartbeat PID and timestamp cross the real shared mapping");
-    check(WORLD_BRIDGE_VERSION == 12 && consumer.DeliverySerial() == 0 &&
+    check(WORLD_BRIDGE_VERSION == 13 && consumer.DeliverySerial() == 0 &&
           consumer.PeerDeliverySerial(0) == 0 && consumer.PeerDeliverySerial(1) == 0 && consumer.PeerDeliverySerial(2) == 0,
-          "version12 delivery floors initialize unavailable");
+          "version13 delivery floors initialize unavailable");
+    // VUH-2640 (v13): returning seats by connection at [128,152), the terminal writer at [152,156).
+    check(consumer.ReturningConnections() == std::array<std::uint64_t, 3> {} && !consumer.NetworkTerminal(),
+          "v13 formats no returning connection and no terminal writer");
+    producer.SetReturningConnections({0, 0xFEDCBA9876543211ULL, 0});
+    check(consumer.ReturningConnections() == std::array<std::uint64_t, 3> {0, 0xFEDCBA9876543211ULL, 0} &&
+          consumer.GetFriendlyFire() && consumer.LocalSlot() == WORLD_SLOT_UNKNOWN,
+          "returning connections are full 64-bit and leave the control word alone");
+    producer.SetFriendlyFire(false); producer.SetLocalSlot(1);
+    check(consumer.ReturningConnections()[1] == 0xFEDCBA9876543211ULL,
+          "control-word setters never touch the returning connections");
+    producer.SetFriendlyFire(true); producer.SetLocalSlot(WORLD_SLOT_UNKNOWN); producer.SetReturningConnections({});
+    producer.PublishNetworkTerminal();
+    check(consumer.NetworkTerminal(), "the writer's own terminal networking is positive evidence");
+    {
+        // Another runtime takes over as the writer: the old terminal PID no longer counts.
+        const auto name = std::string(WORLD_BRIDGE_PREFIX) + std::to_string(pid);
+        HANDLE h = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
+        auto* v = h ? static_cast<std::uint8_t*>(MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, 0)) : nullptr;
+        if (v) {
+            const auto writerPid = InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(v + 116), 0, 0);
+            InterlockedExchange(reinterpret_cast<volatile LONG*>(v + 116), writerPid + 4);
+            check(!consumer.NetworkTerminal(), "a terminal PID that is not the current writer's is no evidence");
+            InterlockedExchange(reinterpret_cast<volatile LONG*>(v + 116), writerPid);
+            InterlockedExchange(reinterpret_cast<volatile LONG*>(v + 152), 0);
+            check(!consumer.NetworkTerminal(), "no terminal PID: no evidence");
+            UnmapViewOfFile(v);
+        } else check(false, "test opens its own mapping for the terminal writer");
+        if (h) CloseHandle(h);
+    }
+    {
+        // An existing mapping of another layout (a v12 runtime's, its spare control bits possibly set) is refused.
+        const DWORD oldPid = 0x7FEE0000u + (GetCurrentProcessId() & 0xFFFFu); // a range no other test uses
+        const auto name = std::string(WORLD_BRIDGE_PREFIX) + std::to_string(oldPid);
+        HANDLE h = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4 << 20, name.c_str());
+        auto* v = h ? static_cast<std::uint32_t*>(MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, 0)) : nullptr;
+        if (v) { v[1] = 12; v[2] = 0x700000u | WORLD_SLOT_UNKNOWN; v[0] = WORLD_BRIDGE_MAGIC; }
+        WorldBridge old;
+        check(v && !old.OpenExisting(oldPid) && !old.Open(oldPid), "a v12 mapping is refused by a v13 participant");
+        if (v) UnmapViewOfFile(v);
+        if (h) CloseHandle(h);
+    }
     constexpr std::uint64_t wide = 0xFEDCBA9876543210ULL;
     producer.SetDeliverySerial(wide);
     producer.SetPeerDeliverySerials({wide, 0x100000001ULL, 0x200000002ULL});
@@ -154,7 +195,7 @@ void testVersion11Layout() {
     auto* view = handle ? static_cast<std::uint8_t*>(MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, 0)) : nullptr;
     check(view != nullptr, "test opens only its own mapping for ABI byte verification");
     if (view) {
-        PacketRing outgoing(view + 128);
+        PacketRing outgoing(view + 192);
         std::vector<std::uint8_t> record;
         const bool received = outgoing.pop(record);
         bool exact = received && record.size() == body.size() + 20;
@@ -163,7 +204,7 @@ void testVersion11Layout() {
             exact = reader.readU32() == context.generation && reader.readU64() == context.deliverySerial &&
                     reader.readU64() == context.hostSourceSerial && std::equal(body.begin(), body.end(), record.begin() + 20);
         }
-        check(exact, "128-byte header is followed by generation32/delivery64/source64 and exact packet bytes");
+        check(exact, "192-byte header is followed by generation32/delivery64/source64 and exact packet bytes");
         // Exercise held intermediate states on this test-owned mapping only.
         auto* mailboxState = reinterpret_cast<volatile LONG*>(view + 88);
         const ProducerWorldContext commandContext {0x87654321u, wide, 0};

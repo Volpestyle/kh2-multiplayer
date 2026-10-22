@@ -172,12 +172,14 @@ public:
     }
 
     void Shutdown() { Retire("shutdown"); }
-    // VUH-2640: the seats with a pending return (quarantined until converged), one bit per slot.
-    std::uint8_t PendingMask() const {
-        std::uint8_t mask = 0;
+    // VUH-2640: each seat with a pending return (quarantined until converged), as the connection its return
+    // belongs to, only while that connection is the seat's in the roster this policy last observed; else 0.
+    std::array<std::uint64_t, 3> PendingConnections() const {
+        std::array<std::uint64_t, 3> ids {};
         for (std::size_t i = 0; i < slots_.size(); ++i)
-            if (slots_[i].pending) mask |= static_cast<std::uint8_t>(1u << (i + 1));
-        return mask;
+            if (slots_[i].pending && slots_[i].present && slots_[i].connection == connections_[i + 1])
+                ids[i + 1] = slots_[i].connection;
+        return ids;
     }
     std::size_t PendingCount() const {
         std::size_t count = 0;

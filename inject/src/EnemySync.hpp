@@ -182,10 +182,17 @@ bool CurrentHostMission(char (&file)[24]) noexcept;
 bool LocalNativeMission(char (&file)[24]) noexcept;
 // VUH-2640: this seat's native mission now, in any role (mission pointer set and readable, not ended).
 bool NativeMissionFile(char (&file)[24]) noexcept;
-// VUH-2640: a runtime writer is live on this seat's world bridge (its session has a runtime at all).
-bool RuntimeWriterPresent() noexcept;
-// VUH-2640 H2: the host runtime's returning (quarantined) seats, one bit per slot.
-std::uint8_t ReturningSeats() noexcept;
+// VUH-2640: positive session-end evidence: this seat's runtime (still the bridge's writer) stopped
+// networking for good. An unavailable or expired writer lease is not evidence either way.
+bool NetworkTerminal() noexcept;
+// VUH-2640 H2: the puppet authority and the host runtime's returning connections, read together: the
+// returning IDs bookend the authority capture (any change in between: not valid).
+struct SeatAuthority {
+    bool valid = false;
+    PuppetAuthority authority {};
+    std::array<std::uint64_t, 3> returning {};
+};
+SeatAuthority CaptureSeatAuthority() noexcept;
 // Capture once at the native observation. Retained work must send that context;
 // a newer header never grants permission to relabel an old packet.
 bool CaptureWorldContext(ProducerWorldContext& context);

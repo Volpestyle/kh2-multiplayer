@@ -6515,9 +6515,17 @@ bool NativeMissionFile(char (&file)[24]) noexcept {
     return true;
 }
 
-bool RuntimeWriterPresent() noexcept { return RuntimeWriterLive(); }
+bool NetworkTerminal() noexcept { return g_bridge.IsOpen() && g_bridge.NetworkTerminal(); }
 
-std::uint8_t ReturningSeats() noexcept { return g_bridge.IsOpen() ? g_bridge.ReturningSeats() : 0; }
+SeatAuthority CaptureSeatAuthority() noexcept {
+    SeatAuthority out {};
+    if (!g_bridge.IsOpen()) return out;
+    const auto before = g_bridge.ReturningConnections();
+    out.authority = CapturePuppetAuthority();
+    out.returning = g_bridge.ReturningConnections();
+    out.valid = out.authority.mode == PuppetAuthorityMode::Network && before == out.returning;
+    return out;
+}
 
 bool LocalNativeMission(char (&file)[24]) noexcept {
     std::memset(file, 0, sizeof(file));

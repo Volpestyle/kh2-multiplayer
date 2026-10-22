@@ -123,7 +123,15 @@ void returningSeatControls() {
         check(HostDownedOrUnknown(true, up, ctx, 1100, other), "another room: unknown");
         auto downed = up; downed.downed = true; downed.episode = 7;
         check(HostDownedOrUnknown(true, downed, ctx, 1100, room), "fresh and downed: downed"); }
-      { ReturningPolicy q; q.Return(); check(q.policy.PendingMask() == 0x2, "the pending returning seat's bit (slot 1)"); }
+      { ReturningPolicy q; q.Return();
+        check(q.policy.PendingConnections() == std::array<std::uint64_t, 3> {0, q.current.connections[1], 0},
+              "the pending returning seat, as the connection its return belongs to (slot 1)");
+        q.Return();
+        check(q.policy.PendingConnections()[1] == q.current.connections[1],
+              "connected again: the pending return is the newest connection's, never the older one's");
+        const auto actor = q.roster.actors[1]; q.roster.actors.erase(q.roster.actors.begin() + 1); q.Observe();
+        check(q.policy.PendingConnections() == std::array<std::uint64_t, 3> {}, "a seat gone from the roster names no connection");
+        q.roster.actors.insert(q.roster.actors.begin() + 1, actor); }
       ReturningPolicy p; p.Return(); p.eligible = false; p.Pump(); p.Pump();
       check(!p.sends && p.policy.PendingCount() == 1, "a host not ready (boss, pause, downed) waits without spending the epoch");
       p.eligible = true; p.Pump();

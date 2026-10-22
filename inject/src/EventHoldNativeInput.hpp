@@ -18,4 +18,7 @@ bool LifetimeHeartbeatExpired() noexcept;
 // bounded press from its own fully validated sample of this callback's collector instance; ApplyInput only
 // emits it.
 void ServiceOrphanedPause(void* inputStruct) noexcept;
+// VUH-2640: the press (or neutral frame, 0) ApplyInput overlaid for the orphaned pause in this callback.
+// The downed hold keeps exactly these buttons; nothing else passes it.
+bool OrphanPressThisCallback(std::uint16_t& buttons) noexcept;
 } // namespace kh2coop::inject::eventholdnative

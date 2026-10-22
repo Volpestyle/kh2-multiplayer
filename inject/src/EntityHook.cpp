@@ -39,6 +39,7 @@
 #include "CrashDump.hpp"
 #include "EnemySync.hpp"
 #include "EventHoldNativeInput.hpp"
+#include "InputCollectorOrder.hpp"
 #include "NativeSpawnController.hpp"
 #include "NativeResourceTrace.hpp"
 #include "NativeLifecycleTrace.hpp"
@@ -3496,31 +3497,22 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
         // VUH-2555: a friend's queued stage end starts here on the host, outside the actor update.
         if (spawncontroller::IsDiagnosticGameThread()) eventstartmirror::ApplyStageEnd();
         __try {
-            const bool held = control && eventholdnative::HoldingInput();
-            if (PollMailbox() && !held) ApplyPrimaryMailboxInput(inputStruct);
-            if (control) eventholdnative::ServiceOrphanedPause(inputStruct); // VUH-2640 F2: decides; ApplyInput emits
-            const bool eventHeld = control && eventholdnative::ApplyInput(inputStruct);
-            if (eventHeld) {
-                // Consume held automation, retaining friends' independent input.
-                // The original collector supplies fresh physical input every call.
-                g_primaryMailboxPad = {};
-                g_primaryRawButtons = 0;
-            }
-            // VUH-2464: a prologue field holds all local control until both seats bound here.
-            // VUH-2359: not while the host's event hold owns the input: it already neutralizes it,
-            // and zeroing here would erase the Start press that opens its pause.
-            if (!eventHeld && prologueparty::HoldInput(inputStruct)) {
-                g_primaryMailboxPad = {};
-                g_primaryRawButtons = 0;
-            }
-            // VUH-1504 revive prompt: raw slot-0 buttons after the mailbox/event-hold apply.
-            downedspike::PromptInput(inputStruct);
-            downedspectate::Input(inputStruct);
-            // VUH-2465: a logically downed player has no input of its own.
-            if (downedspike::HoldInput(inputStruct)) {
-                g_primaryMailboxPad = {};
-                g_primaryRawButtons = 0;
-            }
+            struct Ops {
+                bool HoldingInput() { return eventholdnative::HoldingInput(); }
+                bool PollMailbox() { return inject::PollMailbox(); }
+                void ApplyMailbox(void* p) { ApplyPrimaryMailboxInput(p); }
+                void ServiceOrphanedPause(void* p) { eventholdnative::ServiceOrphanedPause(p); }
+                bool ApplyInput(void* p) { return eventholdnative::ApplyInput(p); }
+                bool OrphanPress(std::uint16_t& buttons) { return eventholdnative::OrphanPressThisCallback(buttons); }
+                bool PrologueHold(void* p) { return prologueparty::HoldInput(p); }
+                void PromptInput(void* p) { downedspike::PromptInput(p); }
+                void SpectateInput(void* p) { downedspectate::Input(p); }
+                bool DownedHold(void* p, std::uint16_t keep) { return downedspike::HoldInput(p, keep); }
+                // Consume held automation, retaining friends' independent input. The original collector
+                // supplies fresh physical input every call.
+                void ConsumeMailbox() { g_primaryMailboxPad = {}; g_primaryRawButtons = 0; }
+            } ops;
+            collectororder::AfterNativeCollector(ops, inputStruct, control);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             if (control) eventholdnative::AbortInput();
             Log("EXCEPTION in HookedInputCollector post-call");

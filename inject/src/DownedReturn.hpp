@@ -340,8 +340,8 @@ private:
 // is not "everyone down", unless (VUH-2640, the lead's #176 and #178) every other seat is absent on real
 // evidence: it has no connection in the host's current world roster (the relay dropped it: its heartbeat
 // expired), or it is a returning seat quarantined until its recovery converges (the host runtime's pending
-// returning-seat hint). Pose silence alone never counts: a lagging or loading teammate keeps its seat.
-// Unknown evidence (no current roster) counts nothing. Otherwise a downed host that nobody can reach would
+// returning-seat hint, for that seat's current connection). Pose silence alone never counts: a lagging or
+// loading teammate keeps its seat. Unknown evidence (no current roster) counts nothing. Otherwise a downed host that nobody can reach would
 // wait forever, and its capture (not controllable) could never return the absent seat either.
 struct SeatEvidence {
     bool rosterKnown = false;                 // the host's current world roster (puppet authority, Network)
@@ -349,6 +349,22 @@ struct SeatEvidence {
     std::array<bool, 3> connected {};         // a connection in that roster
     std::array<bool, 3> returning {};         // quarantined, rejoining (the runtime's pending hint)
 };
+// One bound observation (Quill r2 P1-3): the host runtime's returning connections, read before and after
+// the puppet-authority capture and unchanged across it, with that capture's Network roster. A slot is
+// returning only while the connection its quarantine names is the slot's connection in that roster, so a
+// newer connection in the slot never inherits an older one's quarantine. Unbound or not Network: no roster.
+inline SeatEvidence SeatEvidenceFrom(bool bound, bool network, std::uint8_t localSlot,
+                                     const std::array<std::uint64_t, 3>& roster,
+                                     const std::array<std::uint64_t, 3>& returning) noexcept {
+    SeatEvidence e {};
+    e.rosterKnown = bound && network;
+    e.localSlot = localSlot;
+    for (std::size_t slot = 0; slot < 3; ++slot) {
+        e.connected[slot] = roster[slot] != 0;
+        e.returning[slot] = returning[slot] != 0 && returning[slot] == roster[slot];
+    }
+    return e;
+}
 constexpr bool EveryOtherSeatAbsent(const SeatEvidence& e) noexcept {
     if (!e.rosterKnown || e.localSlot >= 3) return false;
     for (std::size_t slot = 0; slot < 3; ++slot)
@@ -370,6 +386,10 @@ constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, boo
 // this seat last had live (the lifetime that expired) and in the room generation (transition and load
 // serials) still current; and this seat's own native mission is Thorn's (TT34_MS304). A retired boss from
 // another room, load or session never qualifies. VUH-2628's recovery Bootstrap load ends the downing.
+// The receipt's frame is the mirror's newest host-brain-only bind, a frame scalar; its scope (identity,
+// generation, room serials) is stamped by DownedSpike when it reads that scalar on a live frame, not by the
+// mirror at the bind (Quill r2). The comparisons narrow it to binds read under the expiring lifetime; they
+// do not prove the producer's own scope at the bind.
 constexpr std::uint32_t kOutageBossFrames = 120;
 struct BossReceipt {
     std::uint32_t frame = 0;                  // 0: none
@@ -429,20 +449,53 @@ inline TransitionDecision AfterTransitionFor(OwedReturn& owed, const Disposition
     const auto plain = SitOutAfterTransition(old, teammateSeenInSession);
     return owed.AtTransition(plain.after) ? TransitionDecision {AfterTransition::Resolve, Disposition::Returned} : plain;
 }
-// VUH-2640 (F1): an outage downing (the link expired in a boss fight) resolves only on the qualified
-// recovery: the hold was lost to a room change whose completed load is this seat's recovery Bootstrap
-// (Quill r1 P1-3); that is D17's return after a boss, at 25%. Its session gone (no runtime writer live), a
-// room change resolves it solo, as play without a session does. Any other loss (an actor, handle or
-// ObjEntry replaced in the room, another room or load) is no proof of recovery: the player sits out again,
-// still tagged outage.
-inline TransitionDecision AfterTransitionWithOutage(bool outage, bool recoveryLoad, bool sessionEnded, OwedReturn& owed,
-                                                    const DispositionLatch& old, bool teammateSeenInSession) noexcept {
-    if (outage) {
-        if (recoveryLoad) return {AfterTransition::Resolve, Disposition::Outage};
-        if (sessionEnded) return {AfterTransition::Resolve, Disposition::Solo};
-        return {AfterTransition::SitOut, Disposition::Outage};
+// VUH-2640 (F1), round 3 (Quill r2 P1-1/P1-2): the outage is this seat's obligation, not one hold's. It
+// begins at the qualified expiry, anchored to the recovery Bootstrap serial then, and outlives every hold
+// it spans: an actor, room, handle or ObjEntry lost while it is open sits out again (still the outage). It
+// ends only on positive evidence, whatever the hold saw meanwhile:
+//   Recovered     a recovery Bootstrap load completed since the expiry (attributed to the host's resync
+//                 Bootstrap: an actor and room replaced by it, an actor lost before it completed, or a
+//                 Bootstrap into the same room alike): D17's return after a boss, resolved at 25%;
+//   SessionEnded  this seat's runtime stopped networking for good (ClientRecovery Terminal: no rejoin
+//                 follows), resolved solo, as play without a session.
+// An unavailable, expired or retired runtime writer lease is neither: the outage holds.
+enum class OutageEnd : std::uint8_t { Open, Recovered, SessionEnded };
+class OutageDuty {
+public:
+    void Begin(std::uint32_t recoveryAtExpiry) noexcept {
+        if (!active_) { active_ = true; recoveryAt_ = recoveryAtExpiry; }
     }
-    return AfterTransitionFor(owed, old, teammateSeenInSession);
+    bool Active() const noexcept { return active_; }
+    OutageEnd End(std::uint32_t recoveryLoadNow, bool networkTerminal) const noexcept {
+        if (!active_) return OutageEnd::Open;
+        if (recoveryLoadNow && recoveryLoadNow != recoveryAt_) return OutageEnd::Recovered;
+        return networkTerminal ? OutageEnd::SessionEnded : OutageEnd::Open;
+    }
+    void Clear() noexcept { active_ = false; recoveryAt_ = 0; }
+private:
+    bool active_ = false;
+    std::uint32_t recoveryAt_ = 0;
+};
+// Where the downed owner stands when it steps an open duty (once per frame, in the adapter's order):
+//   Held       a logical downing (holdLost: its actor, room, handle or ObjEntry changed this frame);
+//   SitOut     between rooms, waiting to be downed again;
+//   Elsewhere  neither: the duty can only end.
+enum class OutagePlace : std::uint8_t { Held, SitOut, Elsewhere };
+struct OutageStep {
+    bool act = false;   // end the hold (Held) or the pending re-down (SitOut) as `decision`
+    TransitionDecision decision {AfterTransition::SitOut, Disposition::Outage};
+};
+inline OutageStep OutageFrame(OutageDuty& duty, std::uint32_t recoveryLoadNow, bool networkTerminal,
+                              OutagePlace place, bool holdLost) noexcept {
+    if (!duty.Active()) return {};
+    const auto end = duty.End(recoveryLoadNow, networkTerminal);
+    if (end != OutageEnd::Open) {
+        duty.Clear();
+        return {place != OutagePlace::Elsewhere,
+                {AfterTransition::Resolve, end == OutageEnd::Recovered ? Disposition::Outage : Disposition::Solo}};
+    }
+    if (place == OutagePlace::Held && holdLost) return {true, {AfterTransition::SitOut, Disposition::Outage}};
+    return {};
 }
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {

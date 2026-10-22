@@ -1,5 +1,7 @@
 #include "EventHoldNative.hpp"
 #include "EventHoldInputState.hpp"
+#include "EventHoldNativeInput.hpp"
+#include "InputCollectorOrder.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include <array>
@@ -16,6 +18,22 @@ namespace kh2coop::inject::eventstartmirror {
 bool Replay(const EventStart& s,std::uint16_t program) noexcept {++replays;replayed=s;replayedProgram=program;return replayStarts;}
 }
 namespace n=kh2coop::inject::eventholdnative;
+// VUH-2640: the collector's real post-call order (InputCollectorOrder.hpp) with the real event-hold apply and
+// orphan service; a logically downed seat's neutralization is the real one; the rest is inert here.
+struct CollectorOps {
+ bool downed=false;
+ bool HoldingInput(){return n::HoldingInput();}
+ bool PollMailbox(){return false;}
+ void ApplyMailbox(void*){}
+ void ServiceOrphanedPause(void* p){n::ServiceOrphanedPause(p);}
+ bool ApplyInput(void* p){return n::ApplyInput(p);}
+ bool OrphanPress(std::uint16_t& b){return n::OrphanPressThisCallback(b);}
+ bool PrologueHold(void*){return false;}
+ void PromptInput(void*){}
+ void SpectateInput(void*){}
+ bool DownedHold(void* p,std::uint16_t keep){return downed&&kh2coop::inject::collectororder::NeutralizeHeld(p,keep);}
+ void ConsumeMailbox(){}
+};
 namespace e=kh2coop::eventhold;
 using namespace kh2coop;
 unsigned checks=0,failures=0;
@@ -32,6 +50,9 @@ int main(int argc,char** argv){
  auto fresh=[&]{std::memset(data+offsets::input::RAW_SLOT0,77,6);};
  auto tick=[&]{fresh();const bool entered=n::EnterInput();if(entered){n::ServiceOrphanedPause(data);n::ApplyInput(data);n::LeaveInput();}};
  auto buttons=[&]{return *reinterpret_cast<unsigned short*>(data+offsets::input::RAW_SLOT0);};
+ // One collector callback in the real order, the seat logically downed (DownedSpike's HoldInput last).
+ auto downedTick=[&]{fresh();const bool c=n::EnterInput();CollectorOps ops;ops.downed=true;
+  kh2coop::inject::collectororder::AfterNativeCollector(ops,data,c);if(c)n::LeaveInput();};
  {// VUH-2268: pure hold rules. A refused acquire changes nothing, a closed
   // pause waiting on the owner gives input back 10 s after the release, and a
   // new event supersedes that wait.
@@ -244,10 +265,14 @@ int main(int argc,char** argv){
    menu=10;tick();tick();check(n::HoldingInput()&&buttons()==0,"the hold's own pause is open when the lifetime expires");
    runtime.Invalidate(e::Abort::HeartbeatExpired);tick();     // the hold fails in this callback's raw apply
    check(buttons()==0x4d4d,"the failing callback emits nothing of the orphan (no decision in the raw apply)");
-   tick();                                                     // the owner service arms and prepares Start
+   // Quill r2: the seat is also logically downed (an outage downing): the collector's last step, the downed
+   // neutralization, keeps exactly the orphan's own press, and nothing of the player's.
+   downedTick();                                               // the owner service arms and prepares Start
    check(n::HoldingInput()&&buttons()==8&&runtime.Reason()==e::Abort::HeartbeatExpired,
-       "an expired lifetime's own open pause is closed with Start; the abort is untouched");
-   tick();check(n::HoldingInput()&&buttons()==0,"a neutral frame after the close press");
+       "an expired lifetime's own open pause is closed with Start, through a logical downing; the abort is untouched");
+   const auto stick=data[offsets::input::RAW_SLOT0+offsets::input::LSTICK_X];
+   check(stick==128,"the downed neutralization still centres the sticks under the orphan's press");
+   downedTick();check(n::HoldingInput()&&buttons()==0,"a neutral frame after the close press");
    // Quill r1 P1-5: a failed native sample (the collector instance bookend no longer matches): the owner
    // stops the orphan and the raw apply emits nothing; the menu stays the player's.
    const auto saved=*reinterpret_cast<uintptr_t*>(base+offsets::INPUT_STRUCT_PTR);
@@ -255,6 +280,7 @@ int main(int argc,char** argv){
    *reinterpret_cast<uintptr_t*>(base+offsets::INPUT_STRUCT_PTR)=saved;
    check(!n::HoldingInput()&&buttons()==0x4d4d,"a failed native sample: the orphan stops, nothing is emitted");
    tick();check(!n::HoldingInput()&&buttons()==0x4d4d,"and it is not re-armed for the same failure");
+   downedTick();check(!n::HoldingInput()&&buttons()==0,"no orphan press: a logically downed seat's own input is not passed");
    menu=255;tick();
    check(!n::HoldingInput()&&buttons()==0x4d4d,"the player closes it; input stays the player's");
    runtime.Invalidate(e::Abort::HeartbeatExpired);tick();

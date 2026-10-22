@@ -1065,6 +1065,7 @@ int main(int argc, char* argv[]) {
         worldBridge.SetSpawnPickSalt(kh2coop::WorldBridge::SpawnPickSaltFromSession(worldSessionId)); // VUH-1515
         worldSessionGeneration = worldBridge.AdvanceSessionGeneration();
         worldBridge.SetConnectionIds(worldConnectionIds);
+        worldBridge.SetReturningConnections({}); // VUH-2640: a new binding starts with no quarantine evidence
         worldBridge.SetLocalSlot(slot);
         if (slot < 3 && worldConnectionIds[0] && worldConnectionIds[slot] &&
             worldDeliverySerial && !worldQuarantined)
@@ -1634,6 +1635,8 @@ int main(int argc, char* argv[]) {
                     worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
                     publishInactiveAvatars();
                     worldBridge.SetConnectionIds(worldConnectionIds);
+                    // VUH-2640: the returning seats of this roster, in the same transaction (before Network).
+                    worldBridge.SetReturningConnections(returningSeatRecovery.PendingConnections());
                     worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
                     if (slot < 3 && worldConnectionIds[0] && worldConnectionIds[slot] &&
                         worldDeliverySerial && !worldQuarantined)
@@ -2113,8 +2116,8 @@ int main(int argc, char* argv[]) {
             }
             returningSeatRecovery.Pump(returnContext, returnField,
                 [&]() { return netClient->resyncBusy(); }, submitAutomaticResync);
-            // VUH-2640 H2: the host DLL's evidence of a quarantined (returning) seat.
-            worldBridge.SetReturningSeats(returningSeatRecovery.PendingMask());
+            // VUH-2640 H2: the host DLL's evidence of a quarantined (returning) seat, by connection.
+            worldBridge.SetReturningConnections(returningSeatRecovery.PendingConnections());
             if (membershipInvalidated) {
                 membershipInvalidated = false;
                 retireNetworkState();
@@ -2166,8 +2169,12 @@ int main(int argc, char* argv[]) {
 #endif
             if (recovery.state() != lastRecoveryState) {
                 lastRecoveryState = recovery.state();
-                if (lastRecoveryState == kh2coop::ClientRecovery::State::Terminal)
+                if (lastRecoveryState == kh2coop::ClientRecovery::State::Terminal) {
                     std::cerr << "[Runtime] Networking stopped: " << recovery.terminalReason() << "\n";
+#ifdef _WIN32
+                    worldBridge.PublishNetworkTerminal(); // VUH-2640: Terminal never rejoins
+#endif
+                }
                 else if (lastRecoveryState == kh2coop::ClientRecovery::State::RetryWait)
                     std::cout << "[Runtime] Rejoin waiting; world authority unavailable\n";
                 else if (lastRecoveryState == kh2coop::ClientRecovery::State::Admitted)

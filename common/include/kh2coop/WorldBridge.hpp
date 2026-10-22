@@ -41,7 +41,16 @@
 // keeps the native random spawn draw. Layout-compatible: no version change.
 // Word [13] (bytes52..56): runtime GetTickCount heartbeat; word [29]
 // (bytes116..120): writer PID, published before each heartbeat. Version12
-// requires these fields for armed sessions; ring offsets remain128.
+// requires these fields for armed sessions.
+// Version13 (VUH-2640) grows the header to192 bytes (the rings move with it).
+// Bytes [128,152) hold the host runtime's returning seats as three aligned
+// atomic uint64 connection IDs: the connection each slot's quarantine (a
+// rejoined seat waiting for its recovery to converge) applies to, zero for
+// none. A reader counts a slot as returning only when that ID equals the
+// slot's current roster ID, so a newer connection never inherits it. Bytes
+// [152,156) hold the PID of a runtime whose networking stopped for good
+// (ClientRecovery Terminal); it counts only while that PID is the writer's.
+// v12 kept spare control-word bits that old setters preserve: no reuse.
 // ============================================================================
 
 #include "kh2coop/PacketRing.hpp"
@@ -67,7 +76,7 @@ namespace kh2coop {
 
 static constexpr const char* WORLD_BRIDGE_PREFIX = "Local\\kh2coop_world_";
 static constexpr std::uint32_t WORLD_BRIDGE_MAGIC = 0x42574B32; // "2KWB"
-static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 12; // runtime pump liveness in reserved header words
+static constexpr std::uint32_t WORLD_BRIDGE_VERSION = 13; // VUH-2640: returning seats by connection, terminal writer
 static constexpr std::uint32_t WORLD_RING_BYTES = 1u << 20;      // 1 MiB each way
 static constexpr std::uint8_t WORLD_SLOT_UNKNOWN = 0xFF;
 static constexpr std::uint32_t WORLD_NET_UNKNOWN = 0xFFFFFFFFu;
@@ -111,6 +120,8 @@ public:
             SetConnectionIds({});
             SetPeerDeliverySerials({});
             SetSpawnPickSalt(0);
+            SetReturningConnections({});
+            InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 152), 0);
             *reinterpret_cast<volatile LONG*>(view_ + 88) = 0;
             std::atomic_thread_fence(std::memory_order_release);
             header[0] = WORLD_BRIDGE_MAGIC;
@@ -266,17 +277,32 @@ public:
         const LONG current = InterlockedCompareExchange(word, 0, 0);
         InterlockedExchange(word, on ? (current & ~0x10000L) : (current | 0x10000L));
     }
-    // VUH-2640: the host runtime's returning seats (a rejoined seat quarantined until its recovery converges),
-    // one bit per slot in this control word (bits 20..22). A runtime that never sets them reads as none.
-    void SetReturningSeats(std::uint8_t slotMask) {
+    // VUH-2640 (v13): runtime is the sole writer. The host's returning seats, each as the connection ID its
+    // quarantine applies to (zero: none). Published in the roster transaction and after each recovery pump.
+    void SetReturningConnections(const std::array<std::uint64_t, 3>& ids) {
         if (!view_) return;
-        auto* word = reinterpret_cast<volatile LONG*>(view_ + 8);
-        const LONG current = InterlockedCompareExchange(word, 0, 0);
-        InterlockedExchange(word, (current & ~0x700000L) | (static_cast<LONG>(slotMask & 7) << 20));
+        for (std::size_t slot = 0; slot < ids.size(); ++slot)
+            InterlockedExchange64(reinterpret_cast<volatile LONG64*>(view_ + 128 + slot * 8), static_cast<LONG64>(ids[slot]));
     }
-    [[nodiscard]] std::uint8_t ReturningSeats() const {
-        if (!view_) return 0;
-        return static_cast<std::uint8_t>((InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 8), 0, 0) >> 20) & 7);
+    [[nodiscard]] std::array<std::uint64_t, 3> ReturningConnections() const {
+        std::array<std::uint64_t, 3> ids {};
+        if (!view_) return ids;
+        for (std::size_t slot = 0; slot < ids.size(); ++slot)
+            ids[slot] = static_cast<std::uint64_t>(InterlockedCompareExchange64(
+                reinterpret_cast<volatile LONG64*>(view_ + 128 + slot * 8), 0, 0));
+        return ids;
+    }
+    // VUH-2640 (v13): this runtime's networking stopped for good (ClientRecovery Terminal: no rejoin will
+    // follow). Positive evidence that the session ended; it counts only while this PID is the writer's.
+    void PublishNetworkTerminal() {
+        if (!view_) return;
+        InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 152), static_cast<LONG>(GetCurrentProcessId()));
+    }
+    [[nodiscard]] bool NetworkTerminal() const {
+        if (!view_) return false;
+        const auto pid = static_cast<std::uint32_t>(InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 152), 0, 0));
+        const auto writer = RuntimeWriter();
+        return pid && writer.valid && writer.pid == pid;
     }
     [[nodiscard]] bool GetFriendlyFire() const {
         if (!view_) return true;
@@ -412,7 +438,7 @@ public:
     [[nodiscard]] std::uint32_t droppedToDll() const { return toDll_.dropped(); }
 
 private:
-    static constexpr std::size_t kHeaderBytes = 128;
+    static constexpr std::size_t kHeaderBytes = 192;
     static constexpr std::size_t kRingBytes = PacketRing::bytesFor(WORLD_RING_BYTES);
 
     HANDLE mapping_ = nullptr;

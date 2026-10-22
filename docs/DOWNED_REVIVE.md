@@ -318,9 +318,12 @@ boss/encounter defeat or a save point.
   down by itself: after one second it takes the native game over and Continue, as the full party does.
   VUH-2640 (the lead's #176 and #178, extending #143): so is a downed host every other seat of which is
   absent on real evidence: no connection in the host's current world roster (the relay dropped it, its
-  heartbeat expired), or a returning seat quarantined until its recovery converges (the host runtime
-  publishes its pending returning seats on the world bridge). Pose silence alone never counts: a lagging or
-  loading teammate keeps its seat. Unknown evidence counts nothing. D17's "everyone down, game over"
+  heartbeat expired), or a returning seat quarantined until its recovery converges. The host runtime
+  publishes each pending returning seat on the world bridge (v13) as the connection ID its quarantine
+  belongs to, in the roster transaction and after each recovery pump; the DLL reads those IDs before and
+  after its authority capture and counts a seat as returning only when the ID is that seat's connection in
+  the captured roster, so a newer connection never inherits an older one's quarantine. Pose silence alone
+  never counts: a lagging or loading teammate keeps its seat. Unknown evidence counts nothing. D17's "everyone down, game over"
   applied to who is actually there; otherwise the host waits forever and its recovery capture (not
   controllable) never returns the seat.
   Scope limit (accepted, VUH-2632): "never seen" is not "no teammate rostered". A host downed before a
@@ -337,15 +340,23 @@ boss/encounter defeat or a save point.
   its own native mission is TT34_MS304. Its local Thorn runs its own brain after the retirement; the hold
   keeps the friend from fighting or winning it, or being killed by it. If it was not down yet, the downing
   begins on its first settled frame in that room with the menu closed; a room change or a recovered
-  lifetime drops it first. Only this seat's recovery Bootstrap load (the completed load warp attributes to
-  it) ends the outage, at 25% in the recovered room, D17's return after the boss. Its session gone (no
-  runtime writer live), a room change resolves it solo; any other loss (an actor replaced, another room)
-  sits out again, still the outage.
+  lifetime drops it first. The outage is this seat's obligation, not one hold's: it outlives every hold it
+  spans, and any loss while it is open (an actor or handle replaced, another room, an actor gone during a
+  load) sits out again, still the outage. It ends only on positive evidence, checked every frame whatever
+  the hold saw: a recovery Bootstrap load completed since the expiry (warp attributes it to the host's
+  resync Bootstrap; it may replace actor and room, land in the same room, or complete after the actor was
+  already gone) resolves it at 25%, D17's return after the boss (`outage`); this seat's runtime stopping
+  networking for good (ClientRecovery Terminal, published on the world bridge with its PID) resolves it
+  solo. An unavailable, expired or retired runtime writer lease is neither, and the friend keeps sitting
+  out.
   If the expiry left the event hold's own pause open (menu 8 or 10), an owner service on the game thread
   (run from the input collector, which keeps running while those menus are open) closes it with the hold's
   close sequence from its own fully validated native sample, the owned menu and the event context checked at
   every step; the raw apply only emits the prepared press. Any other menu, a partial read or a changed
-  context stops it and leaves the menu to the player. The downing waits for the menu to be closed.
+  context stops it and leaves the menu to the player. The downing waits for the menu to be closed. A seat
+  that was already downed at the expiry keeps its hold, and the collector's last step, the downed
+  neutralization, passes exactly the press the orphan service emitted in that callback (never the player's
+  input), so its pause still closes.
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
   `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`.

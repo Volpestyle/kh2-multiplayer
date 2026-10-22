@@ -881,6 +881,9 @@ native facts would refuse the capture (a menu or pause open, not controllable, t
 host logically downed, or Thorn's mission running); the capture still re-checks. A
 friend whose link expires in a host-owned boss fight sits out as a D17 outage downing
 until this recovery's Bootstrap load, which resolves it at 25% (see DOWNED_REVIVE.md).
+The host's downed state is required evidence here: with `KH2COOP_DOWNED_SPIKE=0` the
+host publishes none, so a returning seat's hint waits indefinitely (unknown is never
+read as alive). That configuration is unsupported for returning seats.
 
 The implemented scope is a settled safe field with an empty or supported
 ordinary record-bound population; the live proof above covers empty FM00 only. Active307,

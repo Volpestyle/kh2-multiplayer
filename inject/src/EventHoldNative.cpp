@@ -21,6 +21,7 @@ OrphanedPause orphan; // VUH-2640 F2: an expired lifetime's own open pause, bein
 bool orphanHandled = false;      // this failed hold's pause was judged (armed or refused) once
 bool orphanEmitFailed = false;   // the raw emission could not overlay the prepared press
 struct PreparedPress { bool active = false; std::uint16_t buttons = 0; } prepared; // this callback's, from the owner
+PreparedPress emitted;           // what ApplyInput overlaid of it in this callback
 eventhold::Scope inputScope {}, ownerScope {};
 eventhold::Command release {};
 std::array<eventhold::Command, 32> consumed {};
@@ -134,8 +135,13 @@ bool HoldingInput() noexcept { return Enabled() && inputHeld.load(std::memory_or
 bool LifetimeHeartbeatExpired() noexcept {
     return Enabled() && channel.Reason() == eventhold::Abort::HeartbeatExpired;
 }
+bool OrphanPressThisCallback(std::uint16_t& buttons) noexcept {
+    buttons = emitted.active ? emitted.buttons : 0;
+    return emitted.active;
+}
 void ServiceOrphanedPause(void* inputStruct) noexcept {
     prepared = {};
+    emitted = {};
     if (!Enabled() || !spawncontroller::IsDiagnosticGameThread()) return;
     if (orphanEmitFailed) {
         orphanEmitFailed = false;
@@ -192,7 +198,7 @@ bool BeginRecoveredLifetime(const eventhold::Scope& scope, std::uint32_t epoch) 
     channel.Swap(next);
     input = InputState {};
     orphan = {};
-    orphanHandled = false; orphanEmitFailed = false; prepared = {};
+    orphanHandled = false; orphanEmitFailed = false; prepared = {}; emitted = {};
     inputScope = {}; ownerScope = scope; release = {};
     consumedCount = 0; ownerOrdinal = 0;
     loggedOrdinal = 0; loggedFlags = UINT32_MAX;
@@ -341,7 +347,7 @@ bool ApplyInput(void* inputStruct) {
     // this callback's own and only where the hold itself overlays nothing. No decision is made here.
     bool orphanNeutral = false;
     if (prepared.active && !output.neutral) {
-        if (sampleValid && Enabled() && Overlay(inputStruct, prepared.buttons)) orphanNeutral = true;
+        if (sampleValid && Enabled() && Overlay(inputStruct, prepared.buttons)) { orphanNeutral = true; emitted = prepared; }
         else orphanEmitFailed = true;
     }
     prepared = {};

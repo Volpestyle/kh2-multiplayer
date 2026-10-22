@@ -2,6 +2,7 @@
 // comes back (a forced battle's end, a save point) and the once-per-episode latch. Pure rules.
 #include "DownedReturn.hpp"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
@@ -215,6 +216,18 @@ int main() {
       e.connected = {true, true, true}; e.returning = {false, true, false}; CHECK(!EveryOtherSeatAbsent(e)); // a third seat is up
       e.rosterKnown = false; e.connected = {true, false, false}; CHECK(!EveryOtherSeatAbsent(e)); // unknown roster
       CHECK(EveryoneDown(false, true, true, true) && !EveryoneDown(true, false, true, false)); }
+    // Round 3 (Quill r2 P1-3): the returning connections bind to the roster they were read around. A slot is
+    // returning only while its quarantined connection is the slot's current one: a newer connection there
+    // never inherits it; an unbound read (the IDs changed across the capture) or no Network roster is none.
+    { const std::array<std::uint64_t, 3> roster {0x10, 0x21, 0}, returning {0, 0x21, 0};
+      const auto quarantined = SeatEvidenceFrom(true, true, 0, roster, returning);
+      CHECK(quarantined.rosterKnown && quarantined.returning[1] && EveryOtherSeatAbsent(quarantined));
+      const auto newer = SeatEvidenceFrom(true, true, 0, {0x10, 0x22, 0}, returning);   // it connected again
+      CHECK(newer.connected[1] && !newer.returning[1] && !EveryOtherSeatAbsent(newer));
+      CHECK(!EveryOtherSeatAbsent(SeatEvidenceFrom(false, true, 0, roster, returning))); // unbound
+      CHECK(!EveryOtherSeatAbsent(SeatEvidenceFrom(true, false, 0, roster, returning))); // not Network
+      const auto dropped = SeatEvidenceFrom(true, true, 0, {0x10, 0, 0}, returning);
+      CHECK(!dropped.returning[1] && EveryOtherSeatAbsent(dropped)); }                // dropped: absent anyway
 
     // Regression (lead #143): a host alone in its session, never having seen a teammate, is downed in its
     // room. It used to wait forever (the check needed a teammate in the room); now one second of that is
@@ -234,21 +247,25 @@ int main() {
     //   quarantined   the friend's link expired and it rejoined: the host runtime's returning-seat bit is set
     //                 from 900; one second after the downing (1059) the native game over runs;
     //   dropped       the relay dropped the friend: its roster connection is gone from 900; the same;
-    //   silent        connected, not quarantined, just silent (a long load, a stall): never.
-    { enum class Friend { Quarantined, Dropped, Silent };
-      for (const Friend f : {Friend::Quarantined, Friend::Dropped, Friend::Silent}) {
+    //   silent        connected, not quarantined, just silent (a long load, a stall): never;
+    //   replaced      quarantined from 900, then a newer connection takes the seat at 950 while the published
+    //                 quarantine still names the old one (before the next Pump): never (Quill r2 P1-3).
+    { enum class Friend { Quarantined, Dropped, Silent, Replaced };
+      for (const Friend f : {Friend::Quarantined, Friend::Dropped, Friend::Silent, Friend::Replaced}) {
           SessionTeammates session; std::uint32_t allDownFrames = 0; int gameOverAt = -1;
           for (std::uint32_t frame = 1; frame < 3000 && gameOverAt < 0; ++frame) {
               session.Step(true, 0xA1, frame < 900 ? 1 : 0);
-              SeatEvidence e; e.rosterKnown = true; e.localSlot = 0; e.connected = {true, true, false};
-              if (frame >= 900 && f == Friend::Quarantined) e.returning[1] = true;
-              if (frame >= 900 && f == Friend::Dropped) e.connected[1] = false;
+              std::array<std::uint64_t, 3> roster {0x10, 0x21, 0}, returning {};
+              if (frame >= 900 && (f == Friend::Quarantined || f == Friend::Replaced)) returning[1] = 0x21;
+              if (frame >= 900 && f == Friend::Dropped) roster[1] = 0;
+              if (frame >= 950 && f == Friend::Replaced) roster[1] = 0x22;
+              const auto e = SeatEvidenceFrom(true, true, 0, roster, returning);
               if (frame < 1000) continue;
               const bool any = false, all = true;
               allDownFrames = EveryoneDown(any, all, session.Seen(), EveryOtherSeatAbsent(e)) ? allDownFrames + 1 : 0;
               if (allDownFrames >= 60) gameOverAt = static_cast<int>(frame);
           }
-          CHECK(f == Friend::Silent ? gameOverAt < 0 : gameOverAt == 1059);
+          CHECK(f == Friend::Silent || f == Friend::Replaced ? gameOverAt < 0 : gameOverAt == 1059);
       } }
 
     // VUH-2640 F1: the outage sit-out. The retained receipt qualifies the boss (Quill r1 P1-1): Thorn bound to
@@ -277,67 +294,116 @@ int main() {
       // first, never promoted to the outage.
       CHECK(OutageStartStep(true, false, true, true, false) == OutageStart::Drop);
       CHECK(OutageStartStep(true, true, false, true, false) == OutageStart::Drop);
-      // Regression (Quill r1 P1-3): only the qualified recovery Bootstrap load resolves the outage; the
-      // session gone resolves it solo; any other loss sits out again, still the outage.
-      DispositionLatch up; up.Observe(1, 0);
-      DispositionLatch none;
-      for (const auto* l : {&up, &none})
-          for (const bool seen : {true, false}) {
-              OwedReturn owed;
-              const auto d = AfterTransitionWithOutage(true, true, false, owed, *l, seen);
-              CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Outage && !owed.Carried());
-              const auto ended = AfterTransitionWithOutage(true, false, true, owed, *l, seen);
-              CHECK(ended.after == AfterTransition::Resolve && ended.why == Disposition::Solo);
-              const auto other = AfterTransitionWithOutage(true, false, false, owed, *l, seen);
-              CHECK(other.after == AfterTransition::SitOut && other.why == Disposition::Outage);
-              OwedReturn owed2, owed3;
-              const auto plain = AfterTransitionWithOutage(false, true, true, owed2, *l, seen);
-              const auto same = AfterTransitionFor(owed3, *l, seen);
-              CHECK(plain.after == same.after && plain.why == same.why);
-          }
       CHECK(std::string_view(DispositionName(Disposition::Outage)) == "outage"); }
 
-    // Regression (VUH-2640 F1), the adapter's order through a Thorn outage: the friend's mirror binds Thorn to
-    // the host's authority every frame until the expiry at 3000 (the retirement stops it); the expiry is judged
-    // once against that receipt; the friend is in the boss's event until 3050, so the downing waits and begins
-    // at 3050 in the same room. At 4000 the friend's actor is replaced in the room (not a recovery): it sits out
-    // again, still the outage. The recovery's Bootstrap load at 6000 (the completed load attributed to it) ends
-    // the hold and resolves it as the outage.
-    { BossReceipt receipt; std::uint64_t lastLive = 0; std::uint32_t lastGen = 0, transition = 7, load = 9;
-      bool expired = false, seenExpiry = false, pending = false, outage = false, downed = false, sitOutOutage = false;
-      bool resolved = false, reSatOut = false; int begunAt = -1; std::uint32_t recoveryLoad = 0;
-      SessionTeammates session; DispositionLatch latch;
-      for (std::uint32_t frame = 1; frame < 6100; ++frame) {
-          if (frame < 3000) { receipt = {frame, 0xA1, 5, transition, load}; lastLive = 0xA1; lastGen = 5; session.Step(true, 0xA1, 1); }
-          else session.Step(true, 0, 0);                                      // quarantined: no session identity
-          if (frame == 3000) expired = true;
-          if (frame == 6000) { ++transition; ++load; recoveryLoad = load; expired = false; } // Bootstrap load, then recovery
-          const bool sameRoom = frame < 6000, inEvent = frame < 3050;
-          if (expired && !seenExpiry) {
-              seenExpiry = true;
-              OutageExpiryFacts f; f.frame = frame; f.lastLiveIdentity = lastLive; f.lastLiveGeneration = lastGen;
-              f.transition = transition; f.load = load; f.thornMission = true;
-              if (OutageBossQualified(receipt, f)) { if (downed) outage = true; else pending = true; }
-          } else if (!expired) seenExpiry = false;
-          switch (OutageStartStep(pending, sameRoom, expired, downed, !downed && !inEvent)) {
-          case OutageStart::Begin: pending = false; downed = true; outage = true; latch.Reset(); begunAt = static_cast<int>(frame); break;
-          case OutageStart::Drop: pending = false; break;
-          default: break;
+    // Round 3 (Quill r2 P1-1/P1-2): the outage duty ends only on positive evidence. A recovery Bootstrap
+    // completed since the expiry (its serial changed from the expiry's anchor) resolves it as the outage,
+    // wherever the owner stands; networking stopped for good resolves it solo; anything else holds, and a
+    // loss while it is open sits out again. A writer lease that lapses is not an input at all.
+    { OutageDuty d;
+      CHECK(!d.Active() && !OutageFrame(d, 5, true, OutagePlace::Held, true).act);
+      d.Begin(4); d.Begin(9);                                              // the anchor is the expiry's
+      CHECK(d.End(4, false) == OutageEnd::Open && d.End(0, false) == OutageEnd::Open);
+      CHECK(d.End(9, false) == OutageEnd::Recovered);
+      CHECK(d.End(4, true) == OutageEnd::SessionEnded && d.End(5, true) == OutageEnd::Recovered);
+      CHECK(!OutageFrame(d, 4, false, OutagePlace::Held, false).act && d.Active());
+      const auto lost = OutageFrame(d, 4, false, OutagePlace::Held, true);
+      CHECK(lost.act && lost.decision.after == AfterTransition::SitOut && lost.decision.why == Disposition::Outage && d.Active());
+      CHECK(!OutageFrame(d, 4, false, OutagePlace::SitOut, false).act && d.Active());
+      const auto done = OutageFrame(d, 5, false, OutagePlace::SitOut, false);
+      CHECK(done.act && done.decision.after == AfterTransition::Resolve && done.decision.why == Disposition::Outage && !d.Active());
+      OutageDuty e; e.Begin(0);
+      const auto ended = OutageFrame(e, 0, true, OutagePlace::Held, false);
+      CHECK(ended.act && ended.decision.after == AfterTransition::Resolve && ended.decision.why == Disposition::Solo && !e.Active());
+      OutageDuty g; g.Begin(0);
+      CHECK(!OutageFrame(g, 0, true, OutagePlace::Elsewhere, false).act && !g.Active()); }
+
+    // Regression (VUH-2640 F1, round 3), the adapter's order through a Thorn outage: the friend's mirror binds
+    // Thorn to the host's authority every frame until the expiry at 3000 (the retirement stops it); the expiry
+    // is judged once against that receipt; the friend is in the boss's event until 3050, so the downing waits
+    // and begins at 3050 in the same room. At 4000 its actor is replaced in the room (not a recovery): it sits
+    // out again, still the outage. Its lifetime recovers at 5990 and the host's Bootstrap load completes at
+    // 6000 (an older recovery's Bootstrap serial, 3, is the anchor):
+    //   RoomOnly        the load changes the room, the actor pointer kept: resolved as the outage;
+    //   ActorAndRoom    the load replaces actor and room (the actor loss is seen first): resolved as the outage
+    //                   (Quill r2 P1-1: it sat out again);
+    //   ActorLostFirst  the actor is gone at 5900, before the load completes: it sits out with no actor, and
+    //                   the completion resolves the pending re-down instead (Quill r2: the decision was lost);
+    //   SameRoom        a Bootstrap into the same room, nothing else changed: the held downing resolves;
+    //   LeaseLapsed     no recovery; the writer lease lapsing is no evidence: it stays sitting out;
+    //   Terminal        no recovery; this runtime's networking stops for good at 5000: resolved solo.
+    { enum class Run { RoomOnly, ActorAndRoom, ActorLostFirst, SameRoom, LeaseLapsed, Terminal };
+      struct Out { int begunAt = -1, resolvedAt = -1; unsigned reDowns = 0; Disposition why = Disposition::TeammateUp; bool held = false, pending = false; };
+      const auto run = [](Run kind) {
+          Out out; BossReceipt receipt; OutageDuty duty; SessionTeammates session; DispositionLatch latch;
+          std::uint64_t lastLive = 0; std::uint32_t lastGen = 0, transition = 7, load = 9, recoveryLoad = 3, pendingRecoveryAt = 0;
+          std::uint32_t room = 1, actor = 0xA0, pendingRoom = 0, heldRoom = 0, heldActor = 0;
+          bool expired = false, seenExpiry = false, pending = false, downed = false, sitOutPending = false;
+          const bool recovers = kind != Run::LeaseLapsed && kind != Run::Terminal;
+          for (std::uint32_t frame = 1; frame < 6100; ++frame) {
+              if (frame < 3000) { receipt = {frame, 0xA1, 5, transition, load}; lastLive = 0xA1; lastGen = 5; session.Step(true, 0xA1, 1); }
+              else session.Step(true, 0, 0);                                  // quarantined: no session identity
+              if (frame == 3000) expired = true;
+              if (frame == 4000) ++actor;
+              if (recovers && frame == 5990) expired = false;                 // the rejoined lifetime
+              if (kind == Run::ActorLostFirst && frame == 5900) actor = 0;    // the load tears the actor down first
+              if (recovers && frame == 6000) {
+                  ++transition; ++load; recoveryLoad = load;                  // the completed, attributed Bootstrap
+                  if (kind == Run::RoomOnly) room = 2;
+                  if (kind == Run::ActorAndRoom || kind == Run::ActorLostFirst) { room = 2; actor = 0xB0; }
+              }
+              const bool terminal = kind == Run::Terminal && frame >= 5000;
+              const bool settled = frame >= 3050 && actor != 0;
+              if (expired && !seenExpiry) {
+                  seenExpiry = true;
+                  OutageExpiryFacts f; f.frame = frame; f.lastLiveIdentity = lastLive; f.lastLiveGeneration = lastGen;
+                  f.transition = transition; f.load = load; f.thornMission = true;
+                  if (OutageBossQualified(receipt, f)) {
+                      if (downed) duty.Begin(recoveryLoad);
+                      else { pending = true; pendingRoom = room; pendingRecoveryAt = recoveryLoad; }
+                  }
+              } else if (!expired) seenExpiry = false;
+              switch (OutageStartStep(pending, room == pendingRoom, expired, downed, !downed && settled)) {
+              case OutageStart::Begin:
+                  pending = false; downed = true; heldActor = actor; heldRoom = room; latch.Reset();
+                  duty.Begin(pendingRecoveryAt); out.begunAt = static_cast<int>(frame); break;
+              case OutageStart::Promote: pending = false; duty.Begin(pendingRecoveryAt); break;
+              case OutageStart::Drop: pending = false; break;
+              default: break;
+              }
+              if (downed) {                                                   // the held frame, then HoldLost
+                  latch.Observe(0, 0);
+                  const bool lost = actor != heldActor || room != heldRoom;
+                  const auto step = OutageFrame(duty, recoveryLoad, terminal, OutagePlace::Held, lost);
+                  if (lost || step.act) {
+                      OwedReturn owed;
+                      const auto d = step.act ? step.decision : AfterTransitionFor(owed, latch, session.Seen());
+                      downed = false;
+                      sitOutPending = d.after == AfterTransition::SitOut;
+                      if (d.after == AfterTransition::Resolve) { out.resolvedAt = static_cast<int>(frame); out.why = d.why; }
+                  }
+              }
+              if (duty.Active() && !downed) {                                 // between holds
+                  const auto step = OutageFrame(duty, recoveryLoad, terminal,
+                      sitOutPending ? OutagePlace::SitOut : OutagePlace::Elsewhere, false);
+                  if (step.act) { sitOutPending = false; out.resolvedAt = static_cast<int>(frame); out.why = step.decision.why; }
+              }
+              if (sitOutPending && settled) {                                 // the re-down
+                  sitOutPending = false; downed = true; heldActor = actor; heldRoom = room; latch.Reset(); ++out.reDowns;
+              }
           }
-          if (downed) latch.Observe(0, 0);
-          const bool actorReplaced = frame == 4000;
-          if (downed && (!sameRoom || actorReplaced)) {                       // HoldLost
-              OwedReturn owed;
-              const bool recovery = !sameRoom && recoveryLoad && recoveryLoad == load;
-              const auto d = AfterTransitionWithOutage(outage, recovery, false, owed, latch, session.Seen());
-              sitOutOutage = outage && d.after == AfterTransition::SitOut && d.why == Disposition::Outage;
-              downed = false; outage = false;
-              if (actorReplaced) reSatOut = sitOutOutage;
-              resolved = d.after == AfterTransition::Resolve && d.why == Disposition::Outage;
-          }
-          if (sitOutOutage && sameRoom && !downed) { downed = true; outage = true; sitOutOutage = false; latch.Reset(); } // re-down
+          out.held = downed; out.pending = pending;
+          return out;
+      };
+      for (const Run kind : {Run::RoomOnly, Run::ActorAndRoom, Run::ActorLostFirst, Run::SameRoom}) {
+          const auto o = run(kind);
+          CHECK(o.begunAt == 3050 && o.reDowns == 1 && o.resolvedAt == 6000 && o.why == Disposition::Outage &&
+                !o.held && !o.pending);
       }
-      CHECK(begunAt == 3050 && reSatOut && resolved && !pending); }
+      const auto lapsed = run(Run::LeaseLapsed);
+      CHECK(lapsed.begunAt == 3050 && lapsed.reDowns == 1 && lapsed.resolvedAt < 0 && lapsed.held);
+      const auto ended = run(Run::Terminal);
+      CHECK(ended.resolvedAt == 5000 && ended.why == Disposition::Solo && !ended.held); }
     // A stale receipt: Thorn last bound in another session (identity A1) and the expiry comes under B2, or
     // after a load: no outage.
     { BossReceipt r {2990, 0xA1, 5, 7, 9}; OutageExpiryFacts f; f.frame = 3000; f.lastLiveIdentity = 0xB2;
