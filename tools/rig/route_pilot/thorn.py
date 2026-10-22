@@ -120,95 +120,158 @@ class DownedLog(base.DownedLog):
 class ThornPolicy:
     """VUH-2617 Thorn combat moves on top of the base fight, from live observations only (no memory writes).
 
-    Bots02-04 put Thorn at 390 -> ~220 HP inside the first minute, then stalled with both seats near-down
-    and spending long spells 1000+ units away. This adds, per seat and from its own reads:
-      - a dodge on Thorn's attack telegraphs: a sidestep across Thorn's line with a moving jump, once per
-        motion instance, with a cooldown. A motion is a telegraph if it is seeded (atk_ground 202 and the
-        native motion attacks 204/226 from bot02) or learned in this fight: at least `learn` own-HP drops
-        while Thorn was in it and near, in at least `learnRatio` of its instances;
-      - keeping away when this seat is low and the partner is alive and healthier, so one seat survives
-        to revive the other instead of both going down (D17's full-party game over);
-      - telemetry (Thorn's motion, the learned set, counters, and Thorn's HP lost per motion, which marks the
-        openings worth pressing) for tuning on the next live run. Openings are measured, not yet acted on.
+    Bots05 attempt05 (r1) showed where the seats lose: Thorn's motion is a phase, not an attack. After the
+    opening sequence (204..211, where Thorn loses most of its HP) it sits in motion 202 for minutes, and all
+    seat HP was lost there: melee attack 448 around motionTime 160 and projectile 1041 from motionTime ~390
+    on, at any distance (1800-2000 units included). Reversal RCs (345/426/432/666/667; 432 is the
+    projectile's) were taken in about a quarter of their offers. So, per seat and from its own reads:
+      - a Reversal on screen is pressed at once, before any move of this policy;
+      - danger is learned per (motion, motionTime band) from this seat's own HP loss: seeded from attempt05
+        and learned in the fight (at least `learn` drops in at least `learnRatio` of the band's visits).
+        A near band gets one sidestep across Thorn's line on entry, within `radius`; a ranged band (a hit
+        came from beyond `radius`) gets a strafe around Thorn for as long as Thorn is in it, at any
+        distance, instead of standing or approaching;
+      - Thorn's openings (seeded 209/210/211, plus motions that cost Thorn `openingLearn` HP in one visit)
+        get an attack commitment: approach and swing, with no dodge, keep-away or escape;
+      - keep-away starts at `kiteBelow` (half HP) while the partner is alive and healthier, as a strafe on
+        the `kiteRadius` ring, never a hold;
+      - telemetry: Thorn's motion and band, band hits and visits, learned bands, openings, Thorn's HP lost
+        per motion, counters.
     Pure decisions: every input is a state/entity dict, so they are tested offline."""
-    SEED = (202, 204, 226)
+    REVERSALS = (345, 426, 432, 666, 667)
+    # [motion, band, "near"|"ranged"], 64-frame bands: 202 entry, 448 around 160, 1041 from ~390 (attempt05).
+    SEED_BANDS = ((202, 0, "near"), (204, 0, "near"), (226, 0, "near"), (202, 2, "near"),
+                  (202, 6, "ranged"), (202, 7, "ranged"))
+    OPENINGS = (209, 210, 211)
 
     def __init__(self, config: dict):
         self.dodge = bool(config.get("dodge", True))
-        self.seed = frozenset(int(m) for m in config.get("seed", self.SEED))
+        self.reversals = frozenset(int(c) for c in config.get("reversals", self.REVERSALS))
+        self.reversal_gap = float(config.get("reversalGapSec", 0.2))
+        self.band_frames = max(int(config.get("bandFrames", 64)), 1)
+        self.seed = {(int(m), int(b)): str(kind) for m, b, kind in config.get("seedBands", self.SEED_BANDS)}
+        self.openings_seed = frozenset(int(m) for m in config.get("openings", self.OPENINGS))
+        self.opening_learn = int(config.get("openingLearn", 30))
         self.radius = float(config.get("radius", 650))
-        self.early = float(config.get("earlyFrames", 45))
         self.learn = int(config.get("learn", 2))
         self.ratio = float(config.get("learnRatio", 0.34))
         self.cooldown = float(config.get("dodgeCooldownSec", 1.2))
         self.step = float(config.get("dodgeStep", 400))
-        self.kite_below = float(config.get("kiteBelow", 0.25))
+        self.strafe_step = float(config.get("strafeRad", 0.6))
+        self.strafe_flip = float(config.get("strafeFlipSec", 2.0))
+        self.strafe_min, self.strafe_max = (float(v) for v in config.get("strafeRange", (400, 1800)))
+        self.kite_below = float(config.get("kiteBelow", 0.5))
         self.kite_radius = float(config.get("kiteRadius", 750))
         self.kite_margin = int(config.get("kiteMargin", 4))
-        self.motion = None
-        self.instance = 0
-        self.motion_at = 0.0
-        self.previous = None
-        self.seen: dict[int, int] = {}
-        self.hits: dict[int, int] = {}
+        self.motion = self.band = None
+        self.visit = 0                      # a new (motion, band) is a new visit
+        self.band_at = 0.0
+        self.previous = None                # the (motion, band) before this visit
+        self.seen: dict[int, int] = {}      # motion -> instances
+        self.visits: dict[tuple[int, int], int] = {}
+        self.hits: dict[tuple[int, int], dict[str, int]] = {}  # (motion, band) -> {"near": n, "ranged": n}
         self.last_hp = None
-        self.dodged_instance = None
+        self.dodged_visit = None
         self.dodge_at = float("-inf")
+        self.reversal_at = float("-inf")
         self.side = 1
+        self.strafe_sign, self.strafe_at = 1, float("-inf")
         self.kiting = False
         self.thorn = None
         self.thorn_hp = None
-        self.dealt: dict[int, int] = {}
-        self.counters = {"dodges": 0, "kites": 0, "hitsNear": 0}
+        self.dealt: dict[int, int] = {}     # motion -> Thorn HP lost
+        self.dealt_visit = 0                # Thorn HP lost in the current motion instance
+        self.counters = {"dodges": 0, "kites": 0, "strafes": 0, "commits": 0, "reversals": 0, "hitsNear": 0,
+                         "hitsRanged": 0}
 
     @staticmethod
     def flat(entity: dict) -> tuple[float, float]:
         return entity["position"]["x"], entity["position"]["z"]
 
+    def band_of(self, thorn: dict) -> int | None:
+        timing = thorn.get("motionTime")
+        return None if timing is None else int(max(timing, 0) // self.band_frames)
+
     def observe(self, thorn: dict | None, own: dict, now: float) -> None:
         if thorn is not None:
-            motion = thorn.get("motionId")
+            motion, band = thorn.get("motionId"), self.band_of(thorn)
             if motion != self.motion:
-                self.previous, self.motion, self.motion_at = self.motion, motion, now
-                self.instance += 1
                 self.seen[motion] = self.seen.get(motion, 0) + 1
+                self.dealt_visit = 0
+            if (motion, band) != (self.motion, self.band):
+                self.previous = (self.motion, self.band)
+                self.motion, self.band, self.band_at = motion, band, now
+                self.visit += 1
+                self.visits[(motion, band)] = self.visits.get((motion, band), 0) + 1
             self.thorn = {"hp": thorn.get("hp"), "motionId": motion, "motionTime": thorn.get("motionTime"),
-                          "position": list(self.flat(thorn))}
+                          "band": band, "position": list(self.flat(thorn))}
             hp = thorn.get("hp")
             if hp is not None and self.thorn_hp is not None and hp < self.thorn_hp:
                 self.dealt[motion] = self.dealt.get(motion, 0) + self.thorn_hp - hp
+                self.dealt_visit += self.thorn_hp - hp
             self.thorn_hp = hp
         hp = own.get("hp")
         if hp is not None and self.last_hp is not None and hp < self.last_hp and thorn is not None \
-                and own.get("playerPos") and self.distance(own, thorn) <= self.radius * 1.5:
-            self.counters["hitsNear"] += 1
-            for motion in {self.motion, self.previous if now - self.motion_at <= 0.5 else self.motion}:
-                if motion is not None:
-                    self.hits[motion] = self.hits.get(motion, 0) + 1
+                and own.get("playerPos"):
+            kind = "near" if self.distance(own, thorn) <= self.radius else "ranged"
+            self.counters["hitsNear" if kind == "near" else "hitsRanged"] += 1
+            keys = {(self.motion, self.band)}
+            if now - self.band_at <= 0.5 and self.previous and self.previous[0] is not None:
+                keys.add(self.previous)  # the hit can land just after Thorn's band changed
+            for key in keys:
+                if key[0] is not None and key[1] is not None:
+                    counts = self.hits.setdefault(key, {"near": 0, "ranged": 0})
+                    counts[kind] += 1
         self.last_hp = hp
 
     def distance(self, own: dict, thorn: dict) -> float:
         p, (tx, tz) = own["playerPos"], self.flat(thorn)
         return math.hypot(tx - p[0], tz - p[2])
 
-    def dangerous(self, motion) -> bool:
-        if motion is None:
-            return False
-        if motion in self.seed:
-            return True
-        hits, seen = self.hits.get(motion, 0), max(self.seen.get(motion, 0), 1)
-        return hits >= self.learn and hits / seen >= self.ratio
+    def danger(self, motion, band) -> str | None:
+        """"near" or "ranged" for a seeded or learned dangerous band, else None."""
+        if motion is None or band is None:
+            return None
+        counts = self.hits.get((motion, band), {})
+        hits = counts.get("near", 0) + counts.get("ranged", 0)
+        learned = hits >= self.learn and hits / max(self.visits.get((motion, band), 0), 1) >= self.ratio
+        if learned:
+            return "ranged" if counts.get("ranged", 0) else "near"
+        return self.seed.get((motion, band))
 
-    def learned(self) -> list[int]:
-        return sorted(m for m in set(self.hits) | set(self.seed) if self.dangerous(m))
+    def learned(self) -> list[str]:
+        keys = set(self.hits) | set(self.seed)
+        return sorted(f"{m}:{b}:{kind}" for m, b in keys if (kind := self.danger(m, b)))
+
+    def reversal(self, own: dict, now: float) -> bool:
+        """A Reversal on screen, not pressed in the last `reversalGapSec`."""
+        return own.get("react") in self.reversals and now - self.reversal_at >= self.reversal_gap
+
+    def took_reversal(self, now: float) -> None:
+        self.reversal_at = now
+        self.counters["reversals"] += 1
+
+    def opening(self, thorn: dict | None) -> bool:
+        if thorn is None:
+            return False
+        motion = thorn.get("motionId")
+        return motion in self.openings_seed or (motion == self.motion and self.dealt_visit >= self.opening_learn)
+
+    def openings(self) -> list[int]:
+        return sorted(self.openings_seed | {m for m, v in self.dealt.items() if v >= self.opening_learn})
 
     def threat(self, thorn: dict | None, own: dict, now: float) -> bool:
+        """A near band just entered, within `radius`: one sidestep per visit, with a cooldown."""
         if not self.dodge or thorn is None or not own.get("playerPos"):
             return False
-        motion, timing = thorn.get("motionId"), thorn.get("motionTime")
-        early = timing is None or timing <= self.early
-        return self.dangerous(motion) and early and self.dodged_instance != self.instance \
-            and now - self.dodge_at >= self.cooldown and self.distance(own, thorn) <= self.radius
+        return self.danger(thorn.get("motionId"), self.band_of(thorn)) == "near" \
+            and self.dodged_visit != self.visit and now - self.dodge_at >= self.cooldown \
+            and self.distance(own, thorn) <= self.radius
+
+    def volley(self, thorn: dict | None) -> bool:
+        """Thorn is in a ranged band: keep moving around it, at any distance."""
+        return self.dodge and thorn is not None and \
+            self.danger(thorn.get("motionId"), self.band_of(thorn)) == "ranged"
 
     def dodge_target(self, own: dict, thorn: dict) -> tuple[float, float]:
         """Across Thorn's line to this seat, alternating sides, and a little outward."""
@@ -220,13 +283,27 @@ class ThornPolicy:
         return p[0] + px * self.step + vx * 150, p[2] + pz * self.step + vz * 150
 
     def took_dodge(self, now: float) -> None:
-        self.dodged_instance, self.dodge_at = self.instance, now
+        self.dodged_visit, self.dodge_at = self.visit, now
         self.side = -self.side
         self.counters["dodges"] += 1
 
-    def kite(self, own: dict, thorn: dict | None, peer: dict | None):
-        """Keep away while this seat is low and the partner is alive and healthier: a target on the ring
-        `kiteRadius` from Thorn, "hold" when already outside it, or None to fight on."""
+    def strafe_target(self, own: dict, thorn: dict, now: float, radius: float | None = None) -> tuple[float, float]:
+        """A point `strafeRad` further around Thorn, at `radius` (default: this seat's distance, kept within
+        `strafeRange`). The direction flips every `strafeFlipSec`, so aimed shots trail behind."""
+        if now - self.strafe_at >= self.strafe_flip:
+            self.strafe_sign, self.strafe_at = -self.strafe_sign, now
+        p, (tx, tz) = own["playerPos"], self.flat(thorn)
+        vx, vz = p[0] - tx, p[2] - tz
+        d = math.hypot(vx, vz)
+        if d < 1:
+            vx, vz, d = 1.0, 0.0, 1.0
+        r = radius if radius is not None else min(max(d, self.strafe_min), self.strafe_max)
+        angle = math.atan2(vz, vx) + self.strafe_sign * self.strafe_step
+        return tx + math.cos(angle) * r, tz + math.sin(angle) * r
+
+    def kite(self, own: dict, thorn: dict | None, peer: dict | None, now: float):
+        """Keep away while this seat is low and the partner is alive and healthier: a strafe target on the
+        `kiteRadius` ring (or further out, if already there), or None to fight on."""
         hp, top = own.get("hp"), max(own.get("maxHp") or 1, 1)
         want = thorn is not None and own.get("playerPos") and hp is not None and hp > 0 \
             and hp <= self.kite_below * top and peer is not None and not peer.get("downed", True) \
@@ -235,19 +312,14 @@ class ThornPolicy:
         if not want:
             return None
         self.counters["kites"] += 1
-        p, (tx, tz) = own["playerPos"], self.flat(thorn)
-        vx, vz = p[0] - tx, p[2] - tz
-        d = math.hypot(vx, vz)
-        if d >= self.kite_radius:
-            return "hold"
-        if d < 1:
-            vx, vz, d = 1.0, 0.0, 1.0
-        return tx + vx / d * self.kite_radius, tz + vz / d * self.kite_radius
+        return self.strafe_target(own, thorn, now, max(self.distance(own, thorn), self.kite_radius))
 
     def snapshot(self) -> dict:
-        return {"thorn": self.thorn, "instance": self.instance, "learned": self.learned(),
-                "hits": dict(sorted(self.hits.items())), "seen": dict(sorted(self.seen.items())),
-                "dealtByMotion": dict(sorted(self.dealt.items())),
+        return {"thorn": self.thorn, "visit": self.visit, "learned": self.learned(), "openings": self.openings(),
+                "hits": {f"{m}:{b}": v for (m, b), v in sorted(self.hits.items())},
+                "visits": {f"{m}:{b}": v for (m, b), v in sorted(self.visits.items(), key=lambda kv: str(kv[0]))},
+                "seen": dict(sorted(self.seen.items(), key=lambda kv: str(kv[0]))),
+                "dealtByMotion": dict(sorted(self.dealt.items(), key=lambda kv: str(kv[0]))),
                 "kiting": self.kiting, **self.counters}
 
 
@@ -518,15 +590,43 @@ class Pilot(OriginalPilot):
 
     def combat_turn(self, s, foes, target, gap, reach, stats):
         policy = self.thorn_policy
-        if policy is None or (s["world"], s["room"]) != (2, 34) or not s["free"] or s["react"] \
+        if policy is None or (s["world"], s["room"]) != (2, 34) or not s["free"] \
                 or s["hp"] is None or s["hp"] <= 0 or not s["playerPos"]:
             return False
-        thorn = next((f for f in foes if f.get("objectId") == 307 and f.get("objectType") == 12), None)
         now = time.monotonic()
+        if s["react"]:
+            # The base already took this reaction if its gap allowed. A Reversal is pressed again at once:
+            # missed ones were Thorn's projectile hits (attempt05). Other reactions stay the base's.
+            if not policy.reversal(s, now):
+                return False
+            self.kb.tap("react")
+            policy.took_reversal(now)
+            stats["reversals"] = stats.get("reversals", 0) + 1
+            self.write("thorn_reversal", command=s["react"], hp=s["hp"])
+            return True
+        thorn = next((f for f in foes if f.get("objectId") == 307 and f.get("objectType") == 12), None)
         policy.observe(thorn, s, now)
         if thorn is None:
             return False
         point = s["playerPos"]
+        if policy.opening(thorn):
+            # An opening: approach and swing, with no dodge, keep-away or escape (the base's pinned escape
+            # would run). Reactions still break the burst.
+            policy.counters["commits"] += 1
+            stats["commits"] = stats.get("commits", 0) + 1
+            if target is not thorn or gap > reach:
+                self.kb.hold(base.steer({**s, "pos": point}, policy.flat(thorn)))
+                time.sleep(0.15)
+                return True
+            self.kb.hold(set())
+            for _ in range(3):
+                self.kb.tap("attack", 70)
+                time.sleep(0.18)
+                stats["swings"] = stats.get("swings", 0) + 1
+                now_state = self.state()
+                if now_state["hp"] is None or now_state["hp"] <= 0 or now_state["react"]:
+                    break
+            return True
         if policy.threat(thorn, s, now):
             goal = policy.dodge_target(s, thorn)
             keys = base.steer({**s, "pos": point}, goal)
@@ -543,17 +643,23 @@ class Pilot(OriginalPilot):
                        learned=policy.learned(), hp=s["hp"])
             policy.took_dodge(now)
             return True
-        goal = policy.kite(s, thorn, self.peer_vitals())
-        if goal is None:
+        kite = policy.kite(s, thorn, self.peer_vitals(), now)
+        volley = kite is None and policy.volley(thorn)
+        if kite is None and not volley:
             return False
-        keys = set() if goal == "hold" else base.steer({**s, "pos": point}, goal)
+        goal = kite if kite is not None else policy.strafe_target(s, thorn, now)
+        keys = base.steer({**s, "pos": point}, goal)
         self.kb.hold(keys)
         time.sleep(0.2)
-        stats["kites"] = stats.get("kites", 0) + 1
+        kind = "kites" if kite is not None else "strafes"
+        stats[kind] = stats.get(kind, 0) + 1
+        if volley:
+            policy.counters["strafes"] += 1
         if now - self.kite_logged_at >= 2.0:
             self.kite_logged_at = now
-            self.write("thorn_kite", hp=s["hp"], distance=round(policy.distance(s, thorn), 1),
-                       goal=goal if goal == "hold" else [round(v, 1) for v in goal], keys=sorted(keys))
+            self.write("thorn_kite" if kite is not None else "thorn_strafe", hp=s["hp"],
+                       distance=round(policy.distance(s, thorn), 1), motion=thorn.get("motionId"),
+                       band=policy.band_of(thorn), goal=[round(v, 1) for v in goal], keys=sorted(keys))
         return True
 
     def fight(self, step, deadline):

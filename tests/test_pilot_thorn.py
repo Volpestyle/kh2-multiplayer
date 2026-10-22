@@ -2,6 +2,7 @@
 import importlib.util
 import itertools
 import json
+import math
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -53,84 +54,120 @@ class PolicyTest(unittest.TestCase):
     def setUp(self):
         self.p = THORN.ThornPolicy(CONFIG)
 
-    def test_route_opts_in_with_the_seeded_telegraphs(self):
-        self.assertEqual(sorted(self.p.seed), [202, 204, 226])
+    def test_route_opts_in_with_the_attempt05_bands(self):
+        self.assertEqual(self.p.seed[(202, 7)], "ranged", "projectile 1041 from motionTime ~390")
+        self.assertEqual(self.p.seed[(202, 2)], "near", "melee 448 around motionTime 160")
+        self.assertEqual(self.p.reversals, frozenset({345, 426, 432, 666, 667}))
+        self.assertEqual((self.p.kite_below, sorted(self.p.openings_seed)), (0.5, [209, 210, 211]))
         self.assertEqual(ROUTE["steps"][0]["pinnedDrop"], 0.55)
         other = json.loads((ROOT / "tools/rig/route_pilot/routes/twilight_thorn_fight.json").read_text(encoding="utf-8"))
         self.assertEqual(other["steps"][0]["thornCombat"], CONFIG)
 
-    def test_seeded_motion_early_and_near_is_a_threat_once_per_instance(self):
+    def test_motion_time_bands(self):
+        self.assertEqual([self.p.band_of(thorn(202, time=t)) for t in (0, 10, 63, 64, 160, 471)], [0, 0, 0, 1, 2, 7])
+        self.assertIsNone(self.p.band_of(thorn(202, time=None)))
+
+    def test_a_near_band_is_a_sidestep_once_per_visit(self):
         t = thorn(202, time=10)
         self.p.observe(t, own(), 1.0)
         self.assertTrue(self.p.threat(t, own(), 1.0))
         self.p.took_dodge(1.0)
-        self.assertFalse(self.p.threat(t, own(), 5.0), "the same motion instance is dodged once")
-        self.p.observe(thorn(0), own(), 5.1)
-        self.p.observe(thorn(202, time=5), own(), 5.2)
-        self.assertTrue(self.p.threat(thorn(202, time=5), own(), 5.2), "a new instance may be dodged again")
-
-    def test_late_far_idle_or_cooling_down_is_not_a_threat(self):
-        self.p.observe(thorn(202), own(), 1.0)
-        self.assertFalse(self.p.threat(thorn(202, time=90), own(), 1.0), "too late in the motion")
-        self.assertFalse(self.p.threat(thorn(202), own(z=-200), 1.0), "farther than the radius (1000)")
-        self.assertFalse(self.p.threat(thorn(0), own(), 1.0), "idle motion")
-        self.p.took_dodge(1.0)
-        self.p.observe(thorn(0), own(), 1.2)
-        self.p.observe(thorn(204), own(), 1.4)
-        self.assertFalse(self.p.threat(thorn(204), own(), 1.4), "cooldown 1.2 s")
-        self.assertTrue(self.p.threat(thorn(204), own(), 2.3))
+        self.assertFalse(self.p.threat(t, own(), 5.0), "the same visit is dodged once")
+        self.assertFalse(self.p.threat(t, own(z=-200), 5.0), "farther than the radius (1000)")
+        later = thorn(202, time=150)
+        self.p.observe(later, own(), 5.2)
+        self.assertTrue(self.p.threat(later, own(), 5.2), "a new near band (448's) is a new visit")
+        self.p.took_dodge(5.2)
+        self.p.observe(thorn(202, time=10), own(), 5.4)
+        self.assertFalse(self.p.threat(thorn(202, time=10), own(), 5.4), "cooldown 1.2 s")
+        self.assertFalse(self.p.threat(thorn(202, time=420), own(), 9.0), "a ranged band is not a sidestep")
         off = THORN.ThornPolicy({**CONFIG, "dodge": False})
-        off.observe(thorn(202), own(), 1.0)
-        self.assertFalse(off.threat(thorn(202), own(), 1.0))
+        off.observe(t, own(), 1.0)
+        self.assertFalse(off.threat(t, own(), 1.0))
 
-    def test_motions_are_learned_from_own_hp_loss_near_thorn(self):
+    def test_a_ranged_band_is_a_strafe_at_any_distance(self):
+        self.assertTrue(self.p.volley(thorn(202, time=420)))
+        self.assertTrue(self.p.volley(thorn(202, time=480)), "the stance holds near its last frame")
+        self.assertFalse(self.p.volley(thorn(202, time=10)), "a near band")
+        self.assertFalse(self.p.volley(thorn(0, time=420)), "not a learned or seeded band")
+        self.assertFalse(THORN.ThornPolicy({**CONFIG, "dodge": False}).volley(thorn(202, time=420)))
+
+    def visit(self, motion, time, hp_before, hp_after, at, z=400.0):
+        self.p.observe(thorn(0), own(hp_before, z=z), at)
+        self.p.observe(thorn(motion, time=time), own(hp_before, z=z), at + 0.6)
+        self.p.observe(thorn(motion, time=time), own(hp_after, z=z), at + 1.2)
+
+    def test_bands_are_learned_from_own_hp_loss_near_or_from_range(self):
         hp = 20
-        for instance in range(3):
-            self.p.observe(thorn(0), own(hp), instance * 2.0)
-            self.p.observe(thorn(150), own(hp), instance * 2.0 + 0.6)
-            if instance < 2:
-                hp -= 3
-            self.p.observe(thorn(150), own(hp), instance * 2.0 + 1.2)
-        self.assertEqual(self.p.hits.get(150), 2)
-        self.assertTrue(self.p.dangerous(150), "2 hits in 3 instances")
-        self.assertIn(150, self.p.learned())
-        self.assertFalse(self.p.dangerous(0), "the idle motion between them took no hit")
+        for i in range(3):
+            self.visit(150, 200, hp, hp - 3 if i < 2 else hp, i * 2.0, z=-700)  # 1500 away
+            hp -= 3 if i < 2 else 0
+        self.assertEqual(self.p.hits[(150, 3)], {"near": 0, "ranged": 2})
+        self.assertEqual(self.p.danger(150, 3), "ranged", "2 hits in 3 visits, from range")
+        self.assertIn("150:3:ranged", self.p.learned())
+        for i in range(2):
+            self.visit(160, 20, 20, 18, 10 + i * 2.0)
+        self.assertEqual(self.p.danger(160, 0), "near")
+        self.assertIsNone(self.p.danger(0, 0), "the idle motion between them took no hit")
 
-    def test_a_motion_seen_often_with_rare_hits_is_not_learned(self):
-        hp = 20
-        for instance in range(8):
-            self.p.observe(thorn(0), own(hp), instance * 2.0)
-            self.p.observe(thorn(160), own(hp), instance * 2.0 + 0.6)
-            if instance in (2, 6):
-                hp -= 2
-            self.p.observe(thorn(160), own(hp), instance * 2.0 + 1.2)
-        self.assertEqual(self.p.hits.get(160), 2)
-        self.assertFalse(self.p.dangerous(160), "2 of 8 instances is under the 0.34 ratio")
+    def test_a_band_seen_often_with_rare_hits_is_not_learned(self):
+        for i in range(8):
+            self.visit(170, 100, 20, 18 if i in (2, 6) else 20, i * 2.0)
+        self.assertEqual(sum(self.p.hits[(170, 1)].values()), 2)
+        self.assertIsNone(self.p.danger(170, 1), "2 of 8 visits is under the 0.34 ratio")
 
-    def test_far_hits_teach_nothing(self):
-        self.p.observe(thorn(170), own(20, z=-800), 0.0)
-        self.p.observe(thorn(170), own(14, z=-800), 1.0)  # 1600 away: not Thorn's doing
-        self.assertNotIn(170, self.p.hits)
+    def test_a_hit_just_after_a_band_change_also_counts_for_the_band_before(self):
+        self.p.observe(thorn(180, time=60), own(20), 0.0)
+        self.p.observe(thorn(180, time=70), own(20), 0.3)   # band 0 -> 1
+        self.p.observe(thorn(180, time=75), own(17), 0.6)   # 0.3 s into band 1
+        self.assertIn((180, 0), self.p.hits)
+        self.assertIn((180, 1), self.p.hits)
 
-    def test_dodge_goes_across_the_line_and_alternates(self):
-        first = self.p.dodge_target(own(), thorn())
-        self.assertAlmostEqual(first[1], 400 - 150, delta=1, msg="outward, away from Thorn")
-        self.assertAlmostEqual(abs(first[0]), 400, delta=1, msg="sideways across Thorn's line")
-        self.p.took_dodge(0.0)
-        second = self.p.dodge_target(own(), thorn())
-        self.assertLess(first[0] * second[0], 0, "the next dodge takes the other side")
+    def test_a_reversal_is_pressed_at_once_then_not_again_for_a_beat(self):
+        self.assertTrue(self.p.reversal(own() | {"react": 432}, 1.0))
+        self.p.took_reversal(1.0)
+        self.assertFalse(self.p.reversal(own() | {"react": 432}, 1.15), "within 0.2 s")
+        self.assertTrue(self.p.reversal(own() | {"react": 345}, 1.25))
+        self.assertFalse(self.p.reversal(own() | {"react": 297}, 5.0), "event RCs stay the base's")
+        self.assertFalse(self.p.reversal(own(), 5.0))
 
-    def test_keep_away_only_when_low_and_the_partner_is_alive_and_healthier(self):
+    def test_openings_are_seeded_or_learned_from_thorn_hp_lost_in_one_visit(self):
+        self.assertTrue(self.p.opening(thorn(210)))
+        self.assertFalse(self.p.opening(thorn(202)))
+        self.p.observe(thorn(185, hp=300), own(), 0.0)
+        self.p.observe(thorn(185, hp=285), own(), 0.5)
+        self.assertFalse(self.p.opening(thorn(185)), "15 so far")
+        self.p.observe(thorn(185, hp=268), own(), 1.0)
+        self.assertTrue(self.p.opening(thorn(185)), "32 lost in this visit")
+        self.assertIn(185, self.p.openings())
+        self.p.observe(thorn(0, hp=268), own(), 1.5)
+        self.p.observe(thorn(185, hp=268), own(), 2.0)
+        self.assertFalse(self.p.opening(thorn(185)), "a new visit starts from zero")
+
+    def test_strafe_circles_thorn_and_flips_direction(self):
+        t, me = thorn(z=800), own(z=0)
+        first = self.p.strafe_target(me, t, 0.0)
+        self.assertAlmostEqual(math.hypot(first[0], first[1] - 800), 800, delta=1, msg="keeps this seat's distance")
+        self.assertAlmostEqual(abs(math.atan2(first[1] - 800, first[0]) - math.atan2(-800, 0)), 0.6, delta=0.01)
+        same = self.p.strafe_target(me, t, 1.0)
+        self.assertEqual(same, first, "same direction within 2 s")
+        flipped = self.p.strafe_target(me, t, 2.5)
+        self.assertLess(first[0] * flipped[0], 0, "the other way round after 2 s")
+        near = self.p.strafe_target(own(z=700), t, 2.6)
+        self.assertAlmostEqual(math.hypot(near[0], near[1] - 800), 400, delta=1, msg="not closer than 400")
+
+    def test_keep_away_from_half_hp_while_the_partner_is_alive_and_healthier(self):
         t = thorn()
-        self.assertIsNone(self.p.kite(own(20), t, {"hp": 20, "downed": False}), "healthy: fight on")
-        self.assertIsNone(self.p.kite(own(5), t, {"hp": 8, "downed": False}), "partner not 4 HP healthier")
-        self.assertIsNone(self.p.kite(own(5), t, {"hp": 20, "downed": True}), "partner downed: stay to revive")
-        self.assertIsNone(self.p.kite(own(5), t, None), "no partner known (solo host): fight on")
-        goal = self.p.kite(own(5, z=400), t, {"hp": 20, "downed": False})
-        self.assertEqual(goal, (0.0, 800 - 750), "back out to the 750 ring, on this seat's side")
-        self.assertEqual(self.p.kite(own(5, z=-100), t, {"hp": 20, "downed": False}), "hold", "already outside")
+        self.assertIsNone(self.p.kite(own(11), t, {"hp": 20, "downed": False}, 0.0), "above half: fight on")
+        self.assertIsNone(self.p.kite(own(10), t, {"hp": 13, "downed": False}, 0.0), "partner not 4 HP healthier")
+        self.assertIsNone(self.p.kite(own(10), t, {"hp": 20, "downed": True}, 0.0), "partner downed: stay to revive")
+        self.assertIsNone(self.p.kite(own(10), t, None, 0.0), "no partner known (solo host): fight on")
+        goal = self.p.kite(own(10, z=400), t, {"hp": 20, "downed": False}, 0.0)
+        self.assertAlmostEqual(math.hypot(goal[0], goal[1] - 800), 750, delta=1, msg="out on the 750 ring")
+        far = self.p.kite(own(10, z=-200), t, {"hp": 20, "downed": False}, 0.0)
+        self.assertAlmostEqual(math.hypot(far[0], far[1] - 800), 1000, delta=1, msg="already outside: keeps moving")
         self.assertTrue(self.p.kiting)
-        self.assertIsNone(self.p.kite(own(0), t, {"hp": 20, "downed": False}), "downed: never kites")
+        self.assertIsNone(self.p.kite(own(0), t, {"hp": 20, "downed": False}, 0.0), "downed: never kites")
 
     def test_thorn_hp_lost_is_counted_per_motion(self):
         self.p.observe(thorn(0, hp=300), own(), 0.0)
@@ -143,8 +180,9 @@ class PolicyTest(unittest.TestCase):
     def test_snapshot_is_json_telemetry(self):
         self.p.observe(thorn(202), own(), 0.0)
         snap = json.loads(json.dumps(self.p.snapshot()))
-        self.assertEqual(snap["thorn"]["motionId"], 202)
-        self.assertIn(202, snap["learned"])
+        self.assertEqual((snap["thorn"]["motionId"], snap["thorn"]["band"]), (202, 0))
+        self.assertIn("202:7:ranged", snap["learned"])
+        self.assertEqual(snap["openings"], [209, 210, 211])
 
 
 class DetourTest(NoSleep):
@@ -304,7 +342,38 @@ class CombatTurnTest(NoSleep):
         self.assertTrue(pilot.combat_turn(own(5), [thorn(0)], thorn(0), 400, 300, stats))
         self.assertEqual(stats["kites"], 1)
         self.assertEqual(pilot.writes[0][0], "thorn_kite")
+        self.assertTrue(pilot.kb.held, "keeps moving: never a standing hold")
         self.assertFalse(self.pilot(peer={"hp": 20, "downed": False}).combat_turn(own(20), [thorn(0)], thorn(0), 400, 300, {}))
+
+    def test_a_reversal_takes_the_turn_before_any_move(self):
+        pilot, stats = self.pilot(), {}
+        self.assertTrue(pilot.combat_turn(own() | {"react": 432}, [thorn(202)], thorn(202), 400, 300, stats))
+        self.assertEqual((pilot.kb.log, stats["reversals"], pilot.writes[0][0]), ([("tap", "react")], 1, "thorn_reversal"))
+        self.assertFalse(pilot.combat_turn(own() | {"react": 432}, [thorn(202)], thorn(202), 400, 300, stats),
+                         "pressed a beat ago: the base's own reaction branch decides")
+
+    def test_an_opening_commits_attacks_without_dodging(self):
+        pilot, stats = self.pilot(), {}
+        pilot.state = lambda: own()
+        boss = thorn(210, time=10)
+        self.assertTrue(pilot.combat_turn(own(), [boss], boss, 250, 300, stats))
+        self.assertEqual([e for e in pilot.kb.log if e and e[0] == "tap"], [("tap", "attack")] * 3)
+        self.assertEqual((stats["commits"], stats.get("dodges", 0)), (1, 0))
+        far = self.pilot()
+        far.state = lambda: own()
+        self.assertTrue(far.combat_turn(own(z=-200), [boss], boss, 1000, 300, {}))
+        self.assertEqual(far.kb.log, [("up",)], "out of reach: approach Thorn")
+        stop = self.pilot()
+        stop.state = lambda: own() | {"react": 432}
+        self.assertTrue(stop.combat_turn(own(), [boss], boss, 250, 300, {}))
+        self.assertEqual([e for e in stop.kb.log if e and e[0] == "tap"], [("tap", "attack")], "a reaction breaks the burst")
+
+    def test_a_ranged_band_strafes_at_any_distance(self):
+        pilot, stats = self.pilot(), {}
+        boss = thorn(202, time=420)
+        self.assertTrue(pilot.combat_turn(own(z=-1200), [boss], boss, 2000, 300, stats))
+        self.assertEqual((stats["strafes"], pilot.writes[0][0]), (1, "thorn_strafe"))
+        self.assertTrue(pilot.kb.held and "jump" not in pilot.kb.held)
 
     def test_the_base_pilot_never_takes_a_turn(self):
         self.assertFalse(BASE.Pilot.combat_turn(object(), own(), [thorn(202)], thorn(202), 400, 300, {}))

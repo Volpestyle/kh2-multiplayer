@@ -60,63 +60,84 @@ as historical evidence. The final no-game FileIO qualification passed, but its
 old live wrapper binds bots04/exact35 and that baseline. Bots05 uses the full
 install detector above; no old wrapper or old movie baseline is reused.
 
-## Combat pilot r1: dodge, keep-away and revive detour (VUH-2617)
+## Combat pilot: Reversals, Thorn's danger bands, openings and keep-away (VUH-2617)
 
-**Why.** In bots05 attempts 02–04, Thorn fell from 390 to about 220 HP inside the first minute, mostly in
-the large drops of the reaction sequences. Then it stalled (178–192 at the end) while both seats sat at 1–5
-HP, often 1000–1800 units away, until a full party down. Ivo's read of the clips and `pilot.jsonl`: the
-pilots soaked hits with no guard or dodge, and the revive approach had no fallback.
+**Evidence.**
+- **r1** (attempts 02–04): Thorn fell from 390 to about 220 HP in the first minute, then stalled while both
+  seats sat at 1–5 HP until a full party down.
+- **Attempt05 with r1** (`fd2b0b7`): the same stall at 212, with an analysis the logs now allow.
+  - **Thorn's motion is a phase, not an attack.** The pilot's read matches the native trace: an opening
+    sequence 0 → 204 → 205 → 206 → 226 → 207 → 208 → 209 → 210 → 211, where Thorn loses most of its HP
+    (210 alone cost it 112 and 77), then **202 for about two minutes**.
+  - **All seat HP was lost inside 202.** Joining the HP drops to the native `[thorn-trace] canhit` rows by
+    game frame gives two attacks:
+    - **448** (melee), around 202's motionTime 160;
+    - **1041** (a projectile), from motionTime ~390 on, where 202 holds near its last frame. It hit at any
+      distance, 1800–2000 units included. It caused 4 of the host's 7 drops (the whole block-01 collapse)
+      and 5 of the friend's 6.
+  - **Reversals were mostly missed.** 345/426/432/666/667 (432 is the projectile's,
+    `docs/TWILIGHT_THORN.md`) were completed in 33 of about 118 offers. The host's hit rows show 432 on
+    screen with nothing pressed.
+  - **r1's keep-away `hold` at 1600–2000 units was still hit.**
 
-**What changed.** The `fight` step's opt-in `thornCombat` block is set in both Thorn fight routes. The base
-`pilot.py` gains one hook, `combat_turn`, that never takes a turn, so every other route behaves the same.
+**Behavior (the `fight` step's opt-in `thornCombat`, both Thorn fight routes).** The base `pilot.py`
+`combat_turn` hook never takes a turn. Priority order, each per seat and from its own reads:
+1. **Reversal.** A Reversal on screen is pressed at once, at most every `reversalGapSec` (0.2 s), even when
+   the base's reaction gap (0.35 s) has not elapsed. Logged as `thorn_reversal`. Other reactions, and the
+   event RCs 297/298/299, stay the base's.
+2. **Openings.** In a seeded opening (209/210/211), or a motion that has cost Thorn `openingLearn` (30) HP in
+   the current visit, the seat approaches and swings a three-hit burst. There is no dodge, keep-away or
+   pinned escape; a reaction or a downing breaks the burst.
+3. **Near bands: one sidestep.** Danger is keyed by (motion, motionTime band of `bandFrames` 64).
+   - It is seeded from attempt05 (202 entry, 204, 226, and 448's band 2) and learned in the fight: at least
+     `learn` (2) own-HP drops in at least `learnRatio` (0.34) of the band's visits, also counting the band
+     before if Thorn changed band within 0.5 s.
+   - On entering a near band within `radius` (650), the seat sidesteps across Thorn's line with a moving
+     jump, once per visit, with a 1.2 s cooldown. Logged as `thorn_dodge`.
+4. **Ranged bands: keep moving.** A band is ranged if any of its hits came from beyond `radius` (seeded:
+   202's bands 6–7, the projectile stance).
+   - While Thorn is in one, the seat strafes around Thorn at its current distance (kept within 400–1800),
+     `strafeRad` (0.6) further around each turn.
+   - The direction flips every 2 s.
+   - It never stands still and never approaches. Logged as `thorn_strafe`.
+5. **Keep-away from half HP.** At ≤ `kiteBelow` (50%), with the partner alive and ≥ 4 HP healthier, the seat
+   strafes on the 750 ring (or further out, if already there), never a hold. A downed partner still takes
+   the revive first. Logged as `thorn_kite`.
 
-- **Dodge on telegraphs.**
-  - A Thorn motion counts as a telegraph if it is seeded: 202 (`atk_ground`, aimed at Thorn's target),
-    and 204 and 226 (the native motion attacks that hit the friend in bot02).
-  - It can also be learned during the fight: at least `learn` (2) of this seat's own HP drops while Thorn
-    was in that motion and within 1.5×`radius`, in at least `learnRatio` (0.34) of its instances.
-  - Early in such a motion (`motionTime` ≤ `earlyFrames`, 45) and within `radius` (650), the seat
-    sidesteps across Thorn's line with a moving jump. The step is `dodgeStep` (400), slightly outward,
-    alternating sides. It dodges once per motion instance, with a `dodgeCooldownSec` (1.2) cooldown.
-  - It is logged as `thorn_dodge`.
-- **Keep-away when low.** At or below `kiteBelow` (25%, 5 of Roxas's 20 HP), with the partner alive and
-  at least `kiteMargin` (4) HP healthier, the seat holds the `kiteRadius` (750) ring around Thorn instead of
-  attacking. That way one seat survives to revive the other, instead of both going down (D17's full-party
-  game over).
-  - It stops when the partner is downed (the revive takes priority), recovers, or the seat recovers.
-  - Reactions are still taken first.
-  - This changes the earlier "native 25%-revived seats keep attacking" rule only when the partner is
-    healthier.
-  - It is logged as `thorn_kite`.
-- **Revive-approach fallback.** When the approach to a downed partner gains under 40 horizontal units in
-  2 s, the seat detours to a waypoint beside the line, on the side away from Thorn's root, for 1 s with a
-  moving jump. At most 8 times per downed episode. It is logged as `coop_detour`. It applies only out of
-  revive range and outside an RC. Standing still while the native bar fills is not a stall, and entering
-  range restarts the 2 s window.
-- **Fewer run-aways.** `pinnedDrop` 0.55: escaping now needs 11 HP lost in 2 s, where before one or two
-  Thorn hits triggered a run-and-jump away.
-- **Telemetry.** `thorn_observe` adds `thornCombat`:
-  - Thorn's HP, motion, motion time and root;
-  - the learned telegraphs;
-  - per-motion own-hit and instance counts;
-  - **Thorn's HP lost per motion** (`dealtByMotion`), which marks the openings worth pressing;
-  - counters.
+These stay from r1–r2:
+- the revive-approach detour (out of revive range and outside an RC only), logged as `coop_detour`;
+- `pinnedDrop` 0.55.
 
-  `thorn_combat_summary` closes each fight.
+**Telemetry.** `thorn_observe` carries `thornCombat`, which closes in `thorn_combat_summary`:
+- Thorn's HP, motion, motionTime, band and root;
+- band hits (`near`/`ranged`) and visits;
+- the learned bands (`motion:band:kind`) and openings;
+- Thorn's HP lost per motion (`dealtByMotion`);
+- counters (`reversals`, `dodges`, `strafes`, `kites`, `commits`).
 
-**Not done.** No Potion (no evidence this save has any), no direct use of openings yet (only measured), and
-no change to reactions, which already fire. Offline: `python -B tests/test_pilot_thorn.py`, along with the
-existing `test_pilot_fight.py` and `test_pilot_pad.py`.
+**Offline only.** Tests: `python -B tests/test_pilot_thorn.py`, plus `test_pilot_fight.py` and
+`test_pilot_pad.py`.
+
+Replaying attempt05's observe rows through the policy shows decisions only, not outcomes. Every recorded
+drop falls where r3 would have been pressing a Reversal, strafing a learned ranged band, sidestepping or
+keeping away.
+
+**Unproven:**
+- whether strafing beats 1041, which may home;
+- whether earlier presses complete more Reversals: the rc-cache rows are budgeted, so the window length is
+  unmeasured;
+- whether the extra caution leaves enough damage. 202 cost Thorn only about 20 HP per seat in attempt05.
+
+The pilot can't see the projectile itself; it reads enemies and Thorn only.
 
 **Measure on the next live run:**
-- Thorn's HP per block against both seats' HP;
-- dodge count and the HP lost within 1 s after a dodge;
-- the learned set;
-- kite time;
-- detour count and whether the revive then landed;
-- `dealtByMotion` (which motions are worth attacking).
+- Reversal offers against completions per command and owner (`[script-rc]` offer/complete), and
+  `thorn_reversal` count;
+- HP lost while `thorn_strafe` against `base-fight`;
+- the learned bands;
+- Thorn's HP per block, and whether Thorn returns to its opening sequence after 202.
 
-Success is a Thorn kill, not these counts.
+A Thorn kill is the success test.
 
 ## Acceptance still open
 
