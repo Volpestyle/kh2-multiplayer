@@ -7,11 +7,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -35,13 +37,23 @@ void writeFile(const std::filesystem::path& path,const std::vector<std::uint8_t>
     std::filesystem::create_directories(path.parent_path());
     std::ofstream file(path,std::ios::binary); file.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
 }
-struct ProviderState { DesyncCapturePoll poll; bool write=true; std::size_t extra=0; std::atomic<unsigned> begins{0},finishes{0}; };
+struct ProviderState {
+    DesyncCapturePoll poll; bool write=true; std::size_t extra=0; std::atomic<unsigned> begins{0},finishes{0};
+    // VUH-2677: Begin signals this latch, so a fixture waits for the worker's capture request itself rather than
+    // polling a counter against a wall-clock window.
+    std::mutex begunMutex; std::condition_variable begunCv;
+    bool WaitBegun(std::chrono::milliseconds limit) {
+        std::unique_lock lock(begunMutex);
+        return begunCv.wait_for(lock,limit,[this]{return begins.load()!=0;});
+    }
+};
 class Provider final: public DesyncCaptureProvider {
     std::shared_ptr<ProviderState> state_;
 public:
     explicit Provider(std::shared_ptr<ProviderState> s):state_(std::move(s)){}
     DesyncCapturePoll Begin(std::uint32_t,const std::filesystem::path& output) override {
-        ++state_->begins;
+        { std::lock_guard lock(state_->begunMutex); ++state_->begins; }
+        state_->begunCv.notify_all();
         if(state_->write) { auto bytes=png(); bytes.resize(bytes.size()+state_->extra); writeFile(output,bytes); }
         auto initial=state_->poll; initial.state=DesyncCaptureState::Pending; initial.requestSeq=11; initial.doneSeq=0; return initial;
     }
@@ -149,9 +161,13 @@ void testCollector(const std::filesystem::path& root) {
 #endif
     for(unsigned change=0;change<4;++change) {
         auto s=success();s->poll.state=DesyncCaptureState::Pending;
-        DesyncCollectorOptions o;o.spoolRoot=root/("retire"+std::to_string(change));o.injectLogPath=log;o.captureTimeoutMs=10;o.captureFactory=[s]{return std::make_unique<Provider>(s);};
+        // VUH-2677: the collector skips the capture once its deadline has passed (DesyncCollector.cpp, Collect), and
+        // the spool and log I/O before it took longer than the old 10 ms budget under full-suite load, so Begin never
+        // ran. This fixture tests retirement during a pending capture: the budget is the clamp's maximum, so Begin is
+        // reached, and the fixture waits on Begin's latch (bounded) instead of a polling window.
+        DesyncCollectorOptions o;o.spoolRoot=root/("retire"+std::to_string(change));o.injectLogPath=log;o.captureTimeoutMs=8000;o.captureFactory=[s]{return std::make_unique<Provider>(s);};
         DesyncCollector c(o);auto b=binding();check(c.Start(request(),b,"before","runtime"),"retirement fixture starts");
-        check(until([&]{return s->begins.load()!=0;}),"worker starts before retirement");
+        check(s->WaitBegun(std::chrono::seconds(30)),"worker starts before retirement");
         if(change==0)++b.localGeneration;else if(change==1)++b.attachedPid;else if(change==2)++b.connections[1];else c.Cancel();
         check(until([&]{c.Tick(b,"changed");return !c.Busy();}),"retired collector completes bounded local work");
         check(!c.TakeCompleted(),"changed PID/generation/incarnation/cancel cannot publish old bytes as current contribution");
