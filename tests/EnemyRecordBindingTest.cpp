@@ -114,6 +114,30 @@ void OrdinaryUniqueKind() {
     check("unique: a point match takes the host entry; the far body stays unbound",d[1].id==3 && d[0].id==0);
 }
 
+// VUH-2466: the Day 5 Struggle Dusks (btl189), decoded from the friend's log of run 20261021-015242
+// (before VUH-2550 landed). The host announced three 318s, the last at (0,-90,-200). The friend's first
+// two point-matched (newest-live-point); its third came up at (-20,-90,-212), 23 units off, and stayed
+// unbound (no-point-match) with unscaled HP: 37 on the friend against the host's 60. The host's first
+// two points are the friend's, which the log's point matches put within 8 units.
+void OrdinaryStruggle189() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const ob::Identity d0{0x7FF627443DA0,0x7FF62793A518,0x7FF6279330A8,0x7FF6279F8130,0x7FF6278CCDB4,318},
+        d1{0x7FF62743D1A0,0x7FF62793A518,0x7FF627932E30,0x7FF6279F8130,0x7FF6278CCD74,318},
+        d2{0x7FF6274365A0,0x7FF62793A518,0x7FF627932BB8,0x7FF6279F8130,0x7FF6278CCD34,318};
+    const std::vector<ob::Local> locals{{d0,{-200,-90,200},{},true,true,false,0,0,true},
+                                        {d1,{200,-90,200},{},true,true,false,0,0,true},
+                                        {d2,{-20,-90,-212},{},true,true,false,0,0,true}};
+    const std::vector<ob::Host> hosts{{1,318,{-200,-90,200}},{2,318,{200,-90,200}},{3,318,{0,-90,-200}}};
+    const auto d=ob::Resolve(locals,hosts,ob::Scope{2,2,584,2});
+    check("btl189: the first two Dusks bind by point as logged",
+          d[0].id==1 && d[0].reason==ob::Reason::Live && d[1].id==2 && d[1].reason==ob::Reason::Live);
+    check("btl189: the third Dusk, 23 units off, binds to the host's third by kind",
+          d[2].id==3 && d[2].reason==ob::Reason::UniqueKind);
+    // A fourth announced 318 makes the host's unmatched entry ambiguous: nothing is guessed.
+    auto more=hosts; more.push_back({4,318,{300,-90,-300}});
+    check("btl189: two unmatched host Dusks leave it unbound",ob::Resolve(locals,more,ob::Scope{2,2,584,2})[2].id==0);
+}
+
 // Copied-fact production resolver controls; no native memory, writes or hooks.
 void OrdinaryTerminalControls() {
     namespace ob=kh2coop::inject::ordinarybinding;
@@ -371,6 +395,7 @@ int main(int argc,char** argv) {
     OrdinaryTerminalControls();
     OrdinaryHeldDeath();
     OrdinaryUniqueKind();
+    OrdinaryStruggle189();
     (void)argc; (void)argv;
     for (auto oid:{317u,76u}) {
         Fixture f(oid);check("first exact complete population",f.run().admitted);

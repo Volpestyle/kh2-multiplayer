@@ -65,6 +65,35 @@ Jobs and minigames (host-owned, solo activities; `Party NO_FRIEND`, no Dusks):
 | 12 Sunset Hill | 125 | `TT12_WORK_BOX` | |
 | 36 Underground Concourse | 159 | `TT36_WORK_FIGURE` | 14 N_EX610_BTL2 (2256) |
 
+## Decision: the Struggle score is the host's world (VUH-2466)
+
+Decided by the lead on 2026-10-22 (rule A); James can overrule it. A Struggle match is won on orbs,
+and each game keeps its own orbs, so one game's orbs have to be the real ones. They are the host's,
+the same rule as the host-owned boss: the friend sees and collects the host's orbs, and the orbs the
+friend drops when hit come from the opponent's host-world hits on the friend's Roxas there. The host's
+own native counter calls stay the only writers of the score, so the match is no easier than vanilla
+(each orb is collected once), and the result stays host-decided (VUH-2606).
+
+The rejected alternative was each game deciding its friend's own pickups and losses, sent to the host
+as counter claims. With two sets of orbs, the same drop could then be collected once in each game.
+
+Native facts behind it (read-only Ghidra of the installed exe, nothing copied):
+- Every orb change is a direct call to `exe+0x3FB2B0(delta, side)`, not a script call, so the
+  friend's mission mirror never sees its own changes; it only overwrites them with the host's. The
+  side is `~(actor+0x6C8 bit 7) & 1`: Roxas's side is counter 0, the opponent's counter 1.
+- A hit takes orbs at `FUN_140410100` (called from the hit path `FUN_1403d2fe0`): 3 or 15 by attack
+  class, capped at the count, and spawns that many orb prizes.
+- An orb prize's update (`FUN_14040ff50`, `FUN_140410250`) gives +1 to the side of the first actor
+  in the active list (skipping `+0x120 & 0x10080000`) that touches it. The walk takes every actor with `+0x6C8` bit 1 (set by the
+  character constructor `FUN_1403d2da0`), except one in motion states 10-39 or 140-150, with `+0x194`
+  bit 6, or with `+0x9B8` bit 2 (no contact).
+- The friend's Roxas on the host is built by `FUN_140405030` (the clone's logged constructor caller,
+  `0x40505B`), which calls the player constructor `FUN_1403a7a40`. That sets bit 7 and, through
+  `FUN_1403d2da0`, bit 1. So the clone is on Roxas's side and in the pickup walk: statically, a
+  host-world orb it touches counts for the team. No log yet shows the clone collecting one.
+- In btl84 (run `20261021-015611`) Hayner hit the friend's clone on the host 8 times of 13, and the
+  host's counter 0 fell on those hits: the friend's losses already come off the team score.
+
 ## Rehearsal saves
 
 PC1's rig saves reach only part of this list: FM-00 starts on the Station of Serenity save point
@@ -151,6 +180,7 @@ receipts on both seats; in each run both seats released with both Roxases:
 - `tt05-84` (N_EX500_BTL; run `20261021-015611`), `tt05-85` (N_EX610_BTL) and the Struggle field after
   it, `tt05-4` (door 53 evt4, five entrance triples, door 53 uses index 9; run `20261021-015949`), and
   `tt05-189` (three Dusks; run `20261021-015242`; one Dusk read 37 HP on the friend and 60 on the
-  host at the end).
+  host at the end: its friend copy came up 23 units from the host's and stayed unbound and unscaled,
+  the case VUH-2550's kind rule now binds; `OrdinaryStruggle189` replays it).
 - `tt02-2` (the Day 2 Usual Spot, reached by a transition; run `20261021-014623`) and `tt32-155` (the
   Station of Serenity, evt155; run `20261021-020257`).
