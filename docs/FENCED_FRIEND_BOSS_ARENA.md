@@ -268,9 +268,11 @@ bots05's reviewed Thorn pilot (`route_pilot/thorn.py`). Not yet run.
   - the Calling capture outcome;
   - the arrival rows;
   - `held-player-moved`;
-  - the first post-Thorn field's catalog block, matched only for the current post-victory native load
-    and its exact live tuple in a settled field (event context included) by `field_catalog()`, so no
-    Calling or Thorn block counts; and the host's capture there (VUH-2674);
+  - the first post-Thorn field's catalog block, matched by `field_catalog()` only for the current native
+    load. That load must be newer than the arena load saved before combat, must have completed after the
+    host's actual victory row, and must match the exact live tuple, in a settled field (u64 event context
+    parsed as kh2ctl's hex string). So no Calling or Thorn block, and no late baseline, can decide it. The
+    host's capture there is recorded too (VUH-2674);
   - where the friend is at the end. Staying in the arena sitting out is the expected first-slice result.
 - **Needs** the catalog trace (VUH-2674) on the tested products; without it, the final field wait times out
   after the Leg A asserts.

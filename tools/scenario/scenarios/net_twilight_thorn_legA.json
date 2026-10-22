@@ -216,6 +216,11 @@
       "expr": "{'host_end':log_count('[mission-mirror] host end trap=mission_dead_boss',0),'friend_end':log_count('[mission-mirror] client boss end host-led file=TT34_MS304.bar trap=16 replays=0',1),'victory_start':log_count('[event-mirror] host publishes start id=353133 ',0),'claims':log_count('[enemysync] host hit claim',0),'downs':[log_count('[downed] gate intercept ',i) for i in (0,1)],'revives':[len(log_matches('\\\\[downed\\\\] revive returned (?![^\\\\n]*fault=[1-9])hp=[1-9]\\\\d*/[^\\\\n]*state=1(?:\\\\s|$)',i)) for i in (0,1)]}"
     },
     {
+      "do": "save",
+      "as": "legA_arena_load",
+      "expr": "last_load(0)"
+    },
+    {
       "do": "clip",
       "instance": 0,
       "seconds": 30,
@@ -471,11 +476,6 @@
       "message": "The host alone clears Thorn: exactly one host mission_dead_boss and one ASCII315 publication"
     },
     {
-      "do": "save",
-      "as": "legA_victory_load",
-      "expr": "last_load(0)"
-    },
-    {
       "do": "assert",
       "expr": "log_count('[mission-mirror] client boss end',1)==saved['legA_before']['friend_end'] and log_count('353133',1)==saved['legA_before']['friend_315'] and runtime_log(1).count('[eventhold-recovery] control restored')==saved['legA_before']['friend_restored']",
       "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back"
@@ -492,14 +492,14 @@
     },
     {
       "do": "wait_until",
-      "expr": "location(0)[:2]!=[2,34] and peek('0x9BA8D0','u8',0)==1 and peek('0x7435D0','u8',0)==255 and peek('0xB65210','i32',0)==0 and peek('0x2A11478','u64',0)==0 and field_catalog(0, saved['legA_victory_load']) is not None",
+      "expr": "location(0)[:2]!=[2,34] and peek('0x9BA8D0','u8',0)==1 and peek('0x7435D0','u8',0)==255 and peek('0xB65210','i32',0)==0 and int(str(peek('0x2A11478','u64',0)),16)==0 and field_catalog(0, saved['legA_arena_load'], '[mission-mirror] host end trap=mission_dead_boss') is not None",
       "timeoutMs": 300000,
       "pollMs": 1000
     },
     {
       "do": "save",
       "as": "vuh2674_field",
-      "expr": "{'catalog':field_catalog(0, saved['legA_victory_load']),'host_location':location(0),'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"
+      "expr": "{'catalog':field_catalog(0, saved['legA_arena_load'], '[mission-mirror] host end trap=mission_dead_boss'),'host_location':location(0),'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"
     },
     {
       "do": "capture",

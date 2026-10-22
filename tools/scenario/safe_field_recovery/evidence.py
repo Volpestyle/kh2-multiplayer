@@ -43,11 +43,12 @@ def last_load(inject):
     return int(loads[-1]["serial"]) if loads else 0
 
 
-def field_catalog(inject, location, after_load):
+def field_catalog(inject, location, after_load, after_marker=None):
     """VUH-2674 (Quill r3): the [resync-catalog] phase=field block of the CURRENT native load only.
 
     The current load is the last [warp] load complete row. It must be newer than after_load
-    (the load at Thorn's victory) and its six-field tuple must equal the live location. Then
+    (the arena load, saved before combat), logged after the last after_marker row when one is
+    given (the host's actual victory), and its six-field tuple must equal the live location. Then
     the block is the phase=field scope row for exactly that load (before and after) and tuple,
     logged after that load, plus its own summary and rows (same frame). A Calling or Thorn
     block, or one of an older load or another tuple, is never matched. None if absent."""
@@ -55,6 +56,10 @@ def field_catalog(inject, location, after_load):
     if not loads:
         return None
     current = loads[-1]
+    if after_marker is not None:
+        markers = rows(inject, after_marker)
+        if not markers or current["_line"] < markers[-1]["_line"]:
+            return None
     serial = int(current["serial"])
     tuple_ = _warp_location(current)
     if serial <= after_load or tuple_ != list(location):

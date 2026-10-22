@@ -25,8 +25,10 @@ PILOTS_IDLE = "not saved.get('_background_pilots',[])"
 PILOT_ALIVE = ("all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) "
                "for p in saved.get('_background_pilots',[]))")
 # Settled field: IN_FIELD, menu closed, timeline idle, and no native event context (EVENT_CONTEXT 0x2A11478).
+# kh2ctl formats a u64 peek as a JSON hex string ("0x0"), so it is parsed, as other scenarios do (Quill r2).
 FIELD = ("peek('0x9BA8D0','u8',{i})==1 and peek('0x7435D0','u8',{i})==255 and peek('0xB65210','i32',{i})==0 and "
-         "peek('0x2A11478','u64',{i})==0")
+         "int(str(peek('0x2A11478','u64',{i})),16)==0")
+VICTORY = "[mission-mirror] host end trap=mission_dead_boss"
 RELAY_ASSERT = {"do": "assert", "expr": "pause_relay()['ok']",
                 "message": "Lease-only expiry (Quill): the relay must not have timed out the friend after the pause; see heartbeat_relay.json"}
 
@@ -68,6 +70,7 @@ def build(bots05: dict) -> dict:
         {"do": "wait_until", "expr": f"location(0)=={ARENA} and any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(0))",
          "timeoutMs": 120000},
         copy.deepcopy(steps[27]),                             # thorn_baseline
+        {"do": "save", "as": "legA_arena_load", "expr": "last_load(0)"},  # before host_thorn starts (Quill r2)
     ]
     # Quill: no idle host in the live boss room. The host's fight pilot starts at once; the friend's landing is
     # awaited during the first blocks. Host pilot only, without revivePeer: a partner revive must not end the
@@ -114,7 +117,6 @@ def build(bots05: dict) -> dict:
         {"do": "assert", "expr":
             "saved['legA_fight']['host_end']==1 and saved['legA_fight']['victory']==1",
             "message": "The host alone clears Thorn: exactly one host mission_dead_boss and one ASCII315 publication"},
-        {"do": "save", "as": "legA_victory_load", "expr": "last_load(0)"},
         {"do": "assert", "expr":
             "log_count('[mission-mirror] client boss end',1)==saved['legA_before']['friend_end'] and "
             "log_count('353133',1)==saved['legA_before']['friend_315'] and "
@@ -122,13 +124,15 @@ def build(bots05: dict) -> dict:
          "message": "The sitting-out friend never replays 4/16 or 315 and gets no control back"},
         {"do": "capture", "instance": 0, "name": "legA_victory_host"},
         {"do": "capture", "instance": 1, "name": "legA_victory_friend"},
-        # Quill r3: the current post-victory native load, exact live tuple, settled field (event context too),
-        # and that load's own phase=field catalog block; never a historical Calling/Thorn row.
+        # Quill r1/r2: the current native load, newer than the arena load saved before combat and completed
+        # after the host's actual victory row, its exact live tuple, a settled field (event context too), and
+        # that load's own phase=field catalog block; never a historical row, never a late baseline.
         {"do": "wait_until", "expr":
-            f"location(0)[:2]!=[2,34] and {FIELD.format(i=0)} and field_catalog(0, saved['legA_victory_load']) is not None",
+            f"location(0)[:2]!=[2,34] and {FIELD.format(i=0)} and "
+            f"field_catalog(0, saved['legA_arena_load'], '{VICTORY}') is not None",
          "timeoutMs": 300000, "pollMs": 1000},
         {"do": "save", "as": "vuh2674_field", "expr":
-            "{'catalog':field_catalog(0, saved['legA_victory_load']),'host_location':location(0),"
+            f"{{'catalog':field_catalog(0, saved['legA_arena_load'], '{VICTORY}'),'host_location':location(0),"
             "'host_capture':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),"
             "'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],"
             "'friend_location':location(1),'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)][-6:]}"},

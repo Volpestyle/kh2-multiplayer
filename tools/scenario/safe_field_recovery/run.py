@@ -108,7 +108,8 @@ def namespace(self):
         return path.read_text(errors="replace") if path.exists() else ""
     return {**base, "recovery_proof": lambda: proof(self), "pause_relay": lambda: pause_relay(self),
             "last_load": lambda index=0: evidence.last_load(inject(index)),
-            "field_catalog": lambda index=0, after_load=0: evidence.field_catalog(inject(index), base["location"](index), after_load)}
+            "field_catalog": lambda index=0, after_load=0, after_marker=None:
+                evidence.field_catalog(inject(index), base["location"](index), after_load, after_marker)}
 shared.Context.namespace = namespace
 shared.STEPS["friend_heartbeat_pause"] = step_pause
 base_validate = shared.validate_scenario

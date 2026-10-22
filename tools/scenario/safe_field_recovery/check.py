@@ -337,6 +337,32 @@ check("R3: a block of the current load but another tuple, or an older load's blo
       evidence.field_catalog(stale + "\n" + "\n".join(_block(901, 11, 2, 2, 0, 54)), field, 4) is None and
       evidence.field_catalog(stale + "\n" + "\n".join(_block(902, 10, 2, 1, 0, 54)), field, 4) is None)
 check("last_load: the last completed native load", evidence.last_load(current) == 11 and evidence.last_load("") == 0)
+# Quill r2 R2: anchored on the arena load before combat and the host's actual victory row, not a late baseline.
+victory = "[mission-mirror] host end trap=mission_dead_boss file=TT34_MS304.bar"
+chain = [_load(n, 0x10 + n, 0, 50 + n) for n in range(5, 11)]
+fast = "\n".join(calling + thorn + [victory] + chain + [_load(11, 1, 0, 54)] + _block(900, 11, 2, 1, 0, 54))
+marker = "[mission-mirror] host end trap=mission_dead_boss"
+check("R2: a fast kill and chain (field reached before the late save) still match on the arena anchor",
+      evidence.field_catalog(fast, field, 4, marker) and evidence.field_catalog(fast, field, 4, marker)["load"] == 11)
+check("R2: the old late baseline (the field's own load) would have rejected it; the arena anchor does not",
+      evidence.field_catalog(fast, field, evidence.last_load(fast), marker) is None)
+pre_victory = "\n".join(calling + thorn + [_load(11, 1, 0, 54)] + _block(900, 11, 2, 1, 0, 54) + [victory])
+check("R2: a field load completed before the victory row, or no victory row at all, never matches",
+      evidence.field_catalog(pre_victory, field, 4, marker) is None and
+      evidence.field_catalog("\n".join(calling + thorn + chain + [_load(11, 1, 0, 54)] + _block(900, 11, 2, 1, 0, 54)), field, 4, marker) is None)
+# Quill r2 R1: the actual generated wait, replayed with kh2ctl's real u64 contract (a JSON hex string).
+wait = next(s for s in legA["steps"] if s["do"] == "wait_until" and "field_catalog(" in s["expr"])
+def _replay(event_context):
+    peeks = {"0x9BA8D0": 1, "0x7435D0": 255, "0xB65210": 0, "0x2A11478": event_context}
+    ns = {"location": lambda i=0: field, "peek": lambda rva, kind="u32", i=0: peeks[rva], "int": int, "str": str,
+          "saved": {"legA_arena_load": 4}, "last_load": lambda i=0: evidence.last_load(fast),
+          "field_catalog": lambda i=0, after_load=0, after_marker=None: evidence.field_catalog(fast, field, after_load, after_marker)}
+    return eval(wait["expr"], ns)
+check("R1: the generated field wait accepts a null event context as kh2ctl returns it ('0x0')", _replay("0x0") is True)
+check("R1: the generated field wait refuses a live event context ('0x7FF6A1230000')", _replay("0x7FF6A1230000") is False)
+check("R1: the arena anchor is saved before the host's fight pilot starts",
+      next(i for i, s in enumerate(legA["steps"]) if s.get("as") == "legA_arena_load") <
+      next(i for i, s in enumerate(legA["steps"]) if s.get("name") == "host_thorn"))
 check("Leg A boots both games with the catalog trace",
       all(legA["steps"][i]["env"].get("KH2COOP_RESYNC_CATALOG_TRACE") == "1" for i in (0, 1)))
 pause_tree = ast.parse((run.HERE/"pause.py").read_text(encoding="utf-8"))
