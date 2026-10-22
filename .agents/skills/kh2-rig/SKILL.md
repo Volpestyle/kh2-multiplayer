@@ -90,6 +90,7 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 - **Closure checks:** after every live run, check that the four protected saves, the foreign files, the game-root entries and the asset targets are unchanged. Owned PIDs must be gone, the relay stopped and the port free.
 - **Private game view:** `kh2-readonly-view-DO-NOT-RECURSE` contains junctions to the real Image/STEAM folders. A recursive delete can delete their real contents. Remove each junction only as a link, never recursively, and verify both targets afterwards.
 - **One rig lock:** only live runs are serialized.
+- **Desk stop:** while the main checkout's `build/rig/vuh2617-fileio-desk-stop.json` exists, the desk is stopped: queue nothing, whatever PID it names. `desk-scenario.ps1` refuses (`tests/test_desk_stop.py`); legacy wrappers don't read it, so check it by hand before any live queue.
 
 Canonical helper argument examples and limits: `tools/rig/README.md`. Pin the promoted helper bytes in new packets; old frozen packets retain their original lane paths and hashes.
 
