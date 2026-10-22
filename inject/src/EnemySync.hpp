@@ -182,9 +182,11 @@ bool CurrentHostMission(char (&file)[24]) noexcept;
 bool LocalNativeMission(char (&file)[24]) noexcept;
 // VUH-2640: this seat's native mission now, in any role (mission pointer set and readable, not ended).
 bool NativeMissionFile(char (&file)[24]) noexcept;
-// VUH-2640 Leg A: this friend's latest boss sit-out arrival: a presence-only Bootstrap into a reviewed boss
-// arena that the relay reported Converged (docs/FENCED_FRIEND_BOSS_ARENA.md). DownedSpike begins the outage
-// from it, by downedreturn::SitOutArrivalQualified. serial 0: none.
+// VUH-2640 Leg A: this friend's latest boss sit-out arrival: the admitted presence-only Bootstrap into a
+// reviewed boss arena, minted when that Bootstrap's own load completes there, whatever the transaction's
+// outcome (docs/FENCED_FRIEND_BOSS_ARENA.md). Evaluated on read, so DownedSpike sees it on its first frame
+// after the load. DownedSpike begins the outage from it, by downedreturn::SitOutArrivalQualified. serial 0:
+// none. Game thread only.
 struct SitOutArrival {
     std::uint32_t serial = 0;
     std::uint64_t request = 0;

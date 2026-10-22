@@ -503,8 +503,8 @@ inline OutageStep OutageFrame(OutageDuty& duty, std::uint32_t recoveryLoadNow, b
 }
 // VUH-2640 Leg A (docs/FENCED_FRIEND_BOSS_ARENA.md): a fenced friend the host's boss sit-out carried into a
 // reviewed boss arena sits out there under the same outage duty F1 opens, pending on that room as F1's is.
-// The proof is the arrival itself, host-attested: the relay's Converged result for this seat's sit-out
-// Bootstrap. It qualifies once, while still current (the same session generation, transition and load as at
+// The proof is the arrival itself: the host-attested sit-out Bootstrap this seat admitted, whose own load
+// completed in that arena (Quill r1: bound to the load, not to the transaction's result). It qualifies once, while still current (the same session generation, transition and load as at
 // the arrival, and that load is its own recovery Bootstrap), while this seat's lifetime is still the expired
 // one (presence never restores it) and it stands in that arena. The duty is anchored to that same Bootstrap,
 // so the arrival never ends it; the later real recovery (Leg B) does, at 25%.

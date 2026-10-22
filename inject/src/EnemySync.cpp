@@ -420,6 +420,19 @@ struct NativeResyncTarget {
 };
 std::optional<NativeResyncTarget> g_nativeResync;
 // VUH-2640 Leg A: this friend's latest boss sit-out arrival (presence only), for DownedSpike's outage.
+// Quill r1: bound to the admitted Bootstrap, not to the transaction's outcome. The admission is recorded
+// when this fenced seat accepts a sit-out Bootstrap; the arrival is minted the moment that Bootstrap's own
+// load completes in the arena (LatestSitOutArrival evaluates it on read, so DownedSpike's first settled
+// frame already sees it). A later Checkpoint, a failure or a lost result neither clears nor delays it,
+// and nothing here restores authority: it only makes this seat sit out.
+struct SitOutAdmission {
+    bool pending = false;
+    std::uint64_t request = 0;
+    std::uint16_t arena = 0;
+    std::uint32_t loadAtAdmission = 0;      // the admitted Bootstrap's load is exactly the next one
+    std::uint32_t recoveryAtAdmission = 0;  // and its attribution is fresh: never a recovery serial seen before
+};
+SitOutAdmission g_sitOutAdmission;
 SitOutArrival g_sitOutArrival;
 bool SitOutPresence(const ResyncSnapshot& snapshot) noexcept { return snapshot.bossSitOut.has_value(); }
 struct EventControlBootstrapReceipt {
@@ -3393,6 +3406,14 @@ void ReceiveResyncSnapshot(const std::vector<std::uint8_t>& packet) {
         QueueNativeAck(ResyncAckStatus::Unavailable, "native bootstrap context or progress unavailable"); return;
     }
     g_host = std::move(staged); g_hostHpSequence = snapshot.hpSequence;
+    g_sitOutAdmission = {};
+    if (SitOutPresence(snapshot)) {
+        g_sitOutAdmission = {true, begin.key.requestId, snapshot.bossSitOut->arena, g_nativeResync->loadBefore,
+                             warp::RecoveryBootstrapLoadSerial()};
+        if (g_log) g_log("[resync-sit-out] admitted request=%llu arena=%u loadAtAdmission=%u",
+                         static_cast<unsigned long long>(begin.key.requestId), static_cast<unsigned>(snapshot.bossSitOut->arena),
+                         g_nativeResync->loadBefore);
+    }
     g_spawnPickUnknownEpoch = trailer.known ? 0 : snapshot.room.epoch;
     AdvanceClientManifestRevision(); InvalidateClientClaims("bootstrap-admitted");
     g_resyncRecordAuthority = ResyncRecordAuthority {snapshot, context};
@@ -4259,22 +4280,6 @@ bool ReceiveWorldPackets() {
                 ByteReader r(payload, size); ResyncResult result; read(r, result);
                 if (r.atEnd() && packet.size() == size + 3 && g_resyncPlan && result.key == g_resyncPlan->request.key) {
                     const bool recoveredControl = CompleteRecoveredEventControl(result);
-                    // VUH-2640 Leg A: the relay's Converged result for this seat's own sit-out arrival. The
-                    // anchor is this Bootstrap's own load, so only a later recovery Bootstrap ends the outage.
-                    if (CurrentRole() == Role::Client && result.reason == ResyncResultReason::Converged &&
-                        g_nativeResync && SitOutPresence(g_nativeResync->snapshot) && g_nativeResync->finished &&
-                        g_nativeResync->firstObserved && g_nativeResync->begin.phase == ResyncPhase::Bootstrap &&
-                        WorldContextCurrent(g_nativeResync->context) && warp::LoadSerial() == g_nativeResync->observedLoad) {
-                        const auto serial = g_sitOutArrival.serial + 1;
-                        g_sitOutArrival = {serial ? serial : 1, result.key.requestId, g_nativeResync->snapshot.bossSitOut->arena,
-                                           WorldSessionGeneration(), warp::TransitionSerial(), warp::LoadSerial(),
-                                           warp::RecoveryBootstrapLoadSerial()};
-                        if (g_log)
-                            g_log("[resync-sit-out] arrival serial=%u request=%llu arena=%u generation=%u transition=%u load=%u recoveryLoad=%u",
-                                  g_sitOutArrival.serial, static_cast<unsigned long long>(g_sitOutArrival.request),
-                                  static_cast<unsigned>(g_sitOutArrival.arena), g_sitOutArrival.generation,
-                                  g_sitOutArrival.transition, g_sitOutArrival.load, g_sitOutArrival.recoveryLoad);
-                    }
                     if (g_log && eventholdnative::Enabled() && CurrentRole() == Role::Client)
                         g_log("[event-control] resync result request=%llu reason=%u recoveredLifetime=%u",
                             static_cast<unsigned long long>(result.key.requestId),
@@ -6596,6 +6601,27 @@ bool NativeMissionFile(char (&file)[24]) noexcept {
 bool NetworkTerminal() noexcept { return g_bridge.IsOpen() && g_bridge.NetworkTerminal(); }
 
 bool LatestSitOutArrival(SitOutArrival& out) noexcept {
+    auto& a = g_sitOutAdmission;
+    const auto recovery = warp::RecoveryBootstrapLoadSerial(), load = warp::LoadSerial();
+    if (a.pending && CurrentRole() == Role::Client && load > a.loadAtAdmission && !warp::TransitionPending()) {
+        const auto* arena = bossarena::ById(a.arena);
+        RoomTransition now {};
+        // Landed: the very next load is the attributed recovery Bootstrap, it is the current load, and this
+        // seat stands in the admitted arena's exact tuple.
+        const bool landed = arena && recovery != a.recoveryAtAdmission && recovery == a.loadAtAdmission + 1 &&
+            load == recovery && ReadLocationChecked(now) &&
+            arena == bossarena::Find(now.worldId, now.roomId, now.door, now.mapProgram, now.battleProgram, now.eventProgram);
+        a.pending = false;
+        if (landed) {
+            const auto serial = g_sitOutArrival.serial + 1;
+            g_sitOutArrival = {serial ? serial : 1, a.request, a.arena, WorldSessionGeneration(), warp::TransitionSerial(),
+                               load, recovery};
+        }
+        if (g_log)
+            g_log("[resync-sit-out] %s serial=%u request=%llu arena=%u generation=%u transition=%u load=%u recoveryLoad=%u",
+                  landed ? "landed" : "landing-dropped", g_sitOutArrival.serial, static_cast<unsigned long long>(a.request),
+                  static_cast<unsigned>(a.arena), WorldSessionGeneration(), warp::TransitionSerial(), load, recovery);
+    }
     out = g_sitOutArrival;
     return out.serial != 0;
 }

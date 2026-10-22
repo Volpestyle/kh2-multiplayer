@@ -586,6 +586,7 @@ void ResetWorld() {
     w::g_channel = &testWarpChannel; w::g_exeBase = image; w::g_log = nullptr;
     w::g_ready = true; w::g_clientAuthority = true; w::g_transitionPending = false;
     w::g_transitionSerial = transition; w::g_loadSerial = load;
+    w::g_recoveryBootstrapLoad = 0; // VUH-2640: serials restart with this owned fixture incarnation
     w::g_hostQueued = w::g_hostIssued = false; w::g_hostGeneration = 0;
     w::g_requestTransition = NativeWarp;
     g_applyStatDelta = NativeDeath;
@@ -3412,7 +3413,18 @@ void TestBossSitOutNative() {
     StageNativeBootstrap(plan, packet);
     Check(g_nativeResync && !g_nativeResync->finished && w::g_hostQueued && p::g_clientFull,
           "the fenced seat stages the host's progress and queues the arena load");
-    w::IssueHostTransition(); w::CompleteLoad(); OnFrameStart(520);
+    SitOutArrival arrival;
+    const std::uint32_t before = LatestSitOutArrival(arrival) ? arrival.serial : 0;
+    Check(!LatestSitOutArrival(arrival) || arrival.serial == before, "no arrival before the admitted Bootstrap's load");
+    w::IssueHostTransition(); w::CompleteLoad();
+    // Quill r1: the fence is bound to the admitted Bootstrap's own load, before any convergence or result.
+    Check(LatestSitOutArrival(arrival) && arrival.serial == before + 1 && arrival.arena == 1 &&
+          arrival.request == plan.request.key.requestId && arrival.load == w::LoadSerial() &&
+          arrival.recoveryLoad == arrival.load && arrival.transition == w::TransitionSerial() &&
+          arrival.generation == WorldSessionGeneration() && !g_nativeResync->finished && g_resyncOutput.empty(),
+          "the arrival is minted at the admitted Bootstrap's own load in the arena, before convergence or result");
+    const auto landed = arrival;
+    OnFrameStart(520);
     Check(g_nativeResync && g_nativeResync->firstObserved && !g_nativeResync->finished,
           "first frame with only this seat's own boss copy in the census is observed, not yet converged");
     OnFrameStart(521);
@@ -3428,13 +3440,31 @@ void TestBossSitOutNative() {
     result.targetCount = 1; result.targets[0].target = plan.targets[0];
     result.targets[0].status = ResyncAckStatus::Converged; result.targets[0].appliedCut = begin.snapshotCut;
     result.targets[0].fingerprint = sitOut.nativeFingerprint;
+    // The relay promotes a material change to a Checkpoint: the native transaction is replaced, the arrival is not.
+    auto checkpointPlan = plan; checkpointPlan.phase = ResyncPhase::Checkpoint; checkpointPlan.stage = ResyncPlanStage::Fenced;
+    ReceiveResyncPlan(checkpointPlan);
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial && arrival.load == landed.load,
+          "a Checkpoint promotion keeps the Bootstrap's arrival (no second arrival, none lost)");
     g_bridge.incoming.push_back(encode(result)); ReceiveWorldPackets();
-    SitOutArrival arrival;
-    Check(LatestSitOutArrival(arrival) && arrival.arena == 1 && arrival.request == plan.request.key.requestId &&
-          arrival.load == w::LoadSerial() && arrival.recoveryLoad == arrival.load && arrival.transition == w::TransitionSerial() &&
-          arrival.generation == WorldSessionGeneration(),
-          "the relay's Converged result records the arrival, anchored to its own recovery Bootstrap load");
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial,
+          "the relay's result neither mints nor clears the arrival");
     Check(ehn::LifetimeHeartbeatExpired(), "presence restores no lifetime: the expired one stays this seat's");
+    // Failure after the load: the friend stands in the arena anyway, so it still sits out.
+    ResetWorld(); ArenaWorld(); StageNativeBootstrap(plan, packet);
+    w::IssueHostTransition(); w::CompleteLoad();
+    ResyncResult failed = result; failed.reason = ResyncResultReason::Deadline;
+    failed.targets[0].status = ResyncAckStatus::Unavailable;
+    g_bridge.incoming.push_back(encode(failed)); ReceiveWorldPackets();
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 1 && arrival.recoveryLoad == w::LoadSerial(),
+          "a transaction that fails after the arena load still yields the arrival (bound to the load, not the outcome)");
+    // Failure before the load, then a load that is not the admitted Bootstrap: no arrival, the admission drops.
+    ResetWorld(); ArenaWorld(); StageNativeBootstrap(plan, packet);
+    g_bridge.incoming.push_back(encode(failed)); ReceiveWorldPackets();
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 1, "a failure before the load mints nothing");
+    w::CompleteLoad(); // an unattributed load: not the admitted recovery Bootstrap
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 1, "a load that is not the admitted Bootstrap mints nothing");
+    w::IssueHostTransition(); w::CompleteLoad();
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 1, "a dropped admission never lands later");
     ehn::Disable();
     Reset(); ArenaWorld(); ReceiveResyncPlan(plan);
     ResyncSnapshot refused; ProducerWorldContext unused;

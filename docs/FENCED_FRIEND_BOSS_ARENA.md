@@ -179,10 +179,19 @@ Where the code is:
     boss, and the observed state has no enemy row.
   - `ClientFrame` matches nothing while a sit-out is in force. That counts as a completed frame, so the
     observation still runs; stray-copy and population repair stay fenced by the resync write fence.
-  - The relay's Converged result records `SitOutArrival`: its request, arena, generation, transition,
-    load, and the recovery Bootstrap serial it anchors to.
+  - The arrival is bound to the admitted Bootstrap, not to the transaction's outcome (Quill r1). Admitting
+    a sit-out Bootstrap records its request, arena, load serial and recovery serial. The `SitOutArrival`
+    (request, arena, generation, transition, load, and the recovery Bootstrap serial it anchors to) is
+    minted when that Bootstrap's own load completes. That is the very next load, freshly attributed to a
+    recovery Bootstrap, with this seat standing in the arena's exact tuple. It is evaluated when
+    `LatestSitOutArrival` is read, so DownedSpike sees it on its first frame after the load. A relay
+    promotion to Checkpoint (which replaces the native transaction), a failed or lost result, or no result
+    at all neither clears nor delays it. Any other admitted Bootstrap, or a load that isn't this one, drops
+    the admission. None of this restores authority: it only makes the seat sit out.
 - **Outage:** `downedreturn::SitOutArrivalQualified`, applied in `DownedSpike.inl` as a separate commit.
-  It sets F1's pending outage from the arrival. A held outage downing that the native update moves more
+  It sets F1's pending outage from the arrival, so the hold begins on the arena's first settled frame
+  (DownedSpike's ready conditions: menu closed, out of the intro event, controllable). Nothing holds the seat
+  before that first settled frame. A held outage downing that the native update moves more
   than 200 units is logged once per episode (`[downed] outage held-player-moved`), for the `atk_thorn`
   attach check on the next live run.
 
@@ -206,8 +215,11 @@ Offline evidence (Release, serial ctest):
 - **`kh2coop_event_hold_control_test`:** no recovered lifetime from a sit-out.
 - **`kh2coop_downed_return_test`:** the arrival rule and the duty anchor.
 - **`kh2coop_nativehit_test`:** the actual native path over owned memory. It runs the host arena capture
-  and its refusals, refuses a live seat, then takes the fenced seat through staging, load and two-frame
-  convergence, and records the arrival with the old lifetime still expired.
+  and its refusals, and refuses a live seat. It then takes the fenced seat through staging and the load,
+  where the arrival is minted before any convergence or result, and on through two-frame convergence. The
+  arrival survives a Checkpoint promotion and the result, and the old lifetime stays expired. A failure after
+  the load still yields the arrival. A failure before it, followed by a load that isn't the admitted
+  Bootstrap, mints none and drops the admission.
 
 Not proven: any live run, including the friend's own Thorn copy, its intro event on the friend, the
 `atk_thorn` attach, the friend's progress matching mid-fight, and Leg B's post-Thorn row (VUH-2674).
