@@ -347,5 +347,44 @@ int main() {
         check(is(f,false,"already-idle"),"an installed idle needs no reset");
         check(R::kOwnIdleMotion==0,"the reset motion is MotionSet IDLE");
     }
+    // Quill r1 on 06ff413: the receipt comes from the install readback, not a seeded value. attempt04's state right
+    // after the role's own-bank 263 install, as its release line read it: capture 0, bank 0, anchor own, no parent,
+    // motion 263, +18C 0x4000 (263's own flags, which the general classifier refuses as Own).
+    {
+        R::OwnInstallFacts installed{};
+        installed.rootsRead=true;installed.controllerSelf=true;installed.anchorOwn=true;installed.ownBankPresent=true;
+        installed.parentOk=true;installed.installed=263;installed.motionNow=263;
+        std::uint32_t receipt=0xFFFFFFFFu;  // ScriptActorRole::ownMotion
+        if(R::OwnInstallQualified(installed))receipt=installed.installed;
+        check(receipt==263,"the own-bank 263 install with attempt04's flags mints its receipt");
+        R::OwnMotionResetFacts release{};
+        release.friendLocal=true;release.outcome=R::ReleaseCleanup::Guards;release.releaseStage=true;
+        release.sessionCurrent=true;release.field=true;release.actorProven=true;release.actorRead=true;release.roleFree=true;
+        release.anchorOwn=true;release.installed=receipt;release.motion=263;
+        const char* why="";
+        check(R::DecideOwnMotionReset(release,why) && std::string(why)=="own-install-left",
+              "receipt to release: attempt04's guards release resets the motion that install left");
+        const auto mints=[](R::OwnInstallFacts f){return R::OwnInstallQualified(f);};
+        auto f=installed;f.motionNow=252;
+        check(!mints(f),"a failed or overtaken install (the motion is not the one just set) mints nothing");
+        f=installed;f.capture=0x7FF6F8F1FD10;
+        check(!mints(f),"a capture source on the actor: not an own install");
+        f=installed;f.bank=0x7FF6F7D340C0;
+        check(!mints(f),"a borrowed bank on the actor: not an own install");
+        f=installed;f.controllerSelf=false;
+        check(!mints(f),"a foreign motion controller: not this actor's install");
+        f=installed;f.anchorOwn=false;
+        check(!mints(f),"a foreign anchor: not an own install");
+        f=installed;f.ownBankPresent=false;
+        check(!mints(f),"no own bank: not an own install");
+        f=installed;f.parentOk=false;
+        check(!mints(f),"a parent that is not the actor's own attachment: not an own install");
+        f=installed;f.rootsRead=false;
+        check(!mints(f),"a stale or replaced actor root or an unreadable field: nothing minted");
+        f=installed;f.installed=0xFFFFFFFFu;
+        check(!mints(f),"no install attempted: nothing minted");
+        f=installed;f.installed=0xFFFFFFFFu;f.motionNow=0xFFFFFFFFu;
+        check(!mints(f),"no install, and an actor with no motion id: still nothing minted");
+    }
     return errors?1:0;
 }

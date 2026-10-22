@@ -351,6 +351,22 @@ static ScriptOwnerMotionState SmOwnerMotionState(const ScriptActorRole& target) 
        SmOwnerCaptureCurrent(captured))return ScriptOwnerMotionState::Source;
     return ScriptOwnerMotionState::Foreign;
 }
+// VUH-2617 (Quill r1 on 06ff413): rules::OwnInstallQualified from the local actor right after its own-bank install,
+// with the same proven root and reads as SmOwnerMotionState except +18C, which belongs to the installed motion.
+static bool SmOwnerOwnInstallReadback(const ScriptActorRole& target,std::uint32_t installed) {
+    R::OwnInstallFacts f{};f.installed=installed;
+    uintptr_t controllerActor=0,anchor=0,ownBank=0;std::uint32_t parent=0;
+    f.rootsRead=target.actor && SmOwnerActorCurrent(target) &&
+        ReadHitTrace(target.actor+ACTOR_MOTCTRL+0x10,controllerActor) && ReadHitTrace(target.actor+0x2A0,anchor) &&
+        ReadHitTrace(target.actor+0x2B0,f.capture) && ReadHitTrace(target.actor+0x2B8,f.bank) &&
+        ReadHitTrace(target.actor+0x6A0,parent) && ReadHitTrace(target.actor+offsets::actor::ANIM_ID,f.motionNow);
+    if(!f.rootsRead)return false;
+    f.controllerSelf=controllerActor==target.actor;
+    f.anchorOwn=anchor==target.actor+0x80;
+    f.ownBankPresent=ReadHitTrace(target.actor+ACTOR_MOTCTRL,ownBank) && ownBank;
+    f.parentOk=!parent || SmOwnerHasAttachment(target,true);
+    return R::OwnInstallQualified(f);
+}
 static bool SmOwnerLocalCurrent(const ScriptActorRole& role,const enemysync::DownedScope& scope) {
     return SmOwnerReady() && !g_sm.hostActive && role.slot==scope.localSlot && role.actor==g_soraActor &&
         GetTickCount64()<role.deadline && !downedspike::LogicallyDowned() && SmOwnerCurrent(role,scope);
@@ -437,7 +453,10 @@ static bool SmOwnerInstallMotion(ScriptActorRole& role,R::OwnerCaptureSignature 
             role.visual.captured=true;role.visual.motion=R::BitsOf(capture.motion);
         } else role.captured=true;
     } else {
-        if(state!=ScriptOwnerMotionState::Own)return fail("not-own-bank");
+        // The local actor's own install is read back for the motion just installed (its +18C is that motion's);
+        // a visual clone keeps the general classifier.
+        if(state!=ScriptOwnerMotionState::Own &&
+           (visual || !SmOwnerOwnInstallReadback(target,R::BitsOf(capture.motion))))return fail("not-own-bank");
         if(visual){role.visual.captured=false;role.visual.bank=0;role.visual.motion=R::BitsOf(capture.motion);}
         else role.ownMotion=R::BitsOf(capture.motion);  // the release's continuity receipt for this exact install
         // The capture receipt remains for matching heartbeats and teardown;

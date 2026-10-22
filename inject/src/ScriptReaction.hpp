@@ -448,6 +448,22 @@ struct OwnMotionResetFacts {
     std::uintptr_t thread{},capture{},bank{};
 };
 constexpr std::uint32_t kOwnIdleMotion=0;  // MotionSet IDLE
+// Quill r1 on 06ff413: the receipt is minted from a readback of the install just made. The general own-bank
+// classifier (SmOwnerMotionState) also requires +18C without 0x4000, but +18C carries the current motion's own flags
+// (no constant writer; 252/261 read 0x6040xx, 263 reads 0x4000), so an own-bank 263 reads Foreign there and the
+// receipt was never minted. This qualification is for the local actor's own install only: the controller is the
+// actor's own, the anchor its own, no +2B0 source and no +2B8 bank, its own bank present, no parent but its own
+// attachment, and the current motion exactly the one just installed. +18C is not consulted. Visual clones and
+// borrowed captures keep the general classifier.
+struct OwnInstallFacts {
+    bool rootsRead{},controllerSelf{},anchorOwn{},ownBankPresent{},parentOk{};
+    std::uintptr_t capture{},bank{};
+    std::uint32_t installed{0xFFFFFFFFu},motionNow{0xFFFFFFFFu};
+};
+inline bool OwnInstallQualified(const OwnInstallFacts& f) noexcept {
+    return f.rootsRead && f.controllerSelf && f.anchorOwn && f.ownBankPresent && f.parentOk && !f.capture && !f.bank &&
+        f.installed!=0xFFFFFFFFu && f.motionNow==f.installed;
+}
 inline bool DecideOwnMotionReset(const OwnMotionResetFacts& f,const char*& why) noexcept {
     if(!f.friendLocal){why="not-friend-local";return false;}
     if(f.outcome==ReleaseCleanup::Cleaned){why="cleaned";return false;}
