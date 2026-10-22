@@ -35,8 +35,13 @@ PILOT_ALIVE = ("all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) "
 FIELD = ("peek('0x9BA8D0','u8',{i})==1 and peek('0x7435D0','u8',{i})==255 and peek('0xB65210','i32',{i})==0 and "
          "int(str(peek('0x2A11478','u64',{i})),16)==0")
 VICTORY = "[mission-mirror] host end trap=mission_dead_boss"
-# Route (b): the host's own fight pilot, still running (it may end later with a full party down; allowStuck).
-HOST_ALIVE = "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[]))"
+# Route (b): the host is still fighting (it may end later with a full party down; allowStuck). Quill r1 R1: its
+# fight pilot still runs, AND fresh native evidence: no new host logical downing ([downed] gate intercept) since
+# the fight's baseline, and the canonical host player's live HP above zero.
+HOST_ALIVE = ("any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[])) and "
+              "log_count('[downed] gate intercept ',0)==saved['thorn_baseline']['downs'][0] and "
+              "[a for a in actors(0) if int(a['address'],16)==int(peek('0x2A105D0','u64',0),16)][0]['hp']>0")
+ENDINGS = ("kill", "defeat", "deadline")
 RELAY_ASSERT = {"do": "assert", "expr": "pause_relay()['ok']",
                 "message": "Lease-only expiry (Quill): the relay must not have timed out the friend after the pause; see heartbeat_relay.json"}
 
@@ -76,6 +81,8 @@ def build(bots05: dict) -> dict:
             "'locations':[location(0),location(1)]}"},
         # Lead #32 (d): read-only SAVE bytes (characters incl. battle item slots, inventory) for Potions, in the
         # Calling, not in the live boss room. The same reads as progress_snapshot elsewhere; no writes.
+        {"do": "assert", "expr": f"location(0)=={CALLING} and location(1)=={CALLING}",
+         "message": "The inventory read happens in the Calling, never in the boss room (Quill r1)"},
         {"do": "progress_snapshot", "instances": [0, 1], "as": "legA_inventory"},
         copy.deepcopy(steps[22]),                             # host_to_awakening: the host alone
         {"do": "wait_until", "expr": f"location(0)=={ARENA} and any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(0))",
@@ -121,7 +128,13 @@ def build(bots05: dict) -> dict:
                  "message": "Bounded host survival: the host must still be fighting while the friend lands and sits out"},
             ]
     out += [
+        # Quill r1 R2: keep the host pilot's own process to classify its ending once collected.
+        {"do": "save", "as": "legA_host_pilot", "expr": "[p for p in saved.get('_background_pilots',[]) if p[4]=='host_thorn']"},
         {"do": "pilot_wait"},                                 # the host pilot ends: full party down, a kill or its deadline
+        {"do": "save", "as": "legA_ending", "expr": "host_ending()"},
+        {"do": "assert", "expr": f"saved['legA_ending']['ending'] in {ENDINGS}",
+         "message": "The host pilot's ending must be a native defeat, a real kill or the fight's own deadline; "
+                    "any other exit or reason fails (Quill r1). See legA_ending and host_thorn/pilot.jsonl"},
         {"do": "save", "as": "legA_fight", "expr":
             "{'friend_outage':[m['line'] for m in log_matches(r'(?P<line>\\[downed\\] outage [^\\n]*)',1)],"
             "'held_moved':log_count('[downed] outage held-player-moved',1),"

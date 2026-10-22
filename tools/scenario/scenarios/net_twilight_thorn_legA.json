@@ -198,6 +198,11 @@
       "expr": "{'host_refusals':log_matches(r'\\[resync-capture-refused\\] stage=(?P<stage>\\S+)',0),'host_returning':[l for l in runtime_log(0).splitlines() if '[returning-seat-resync]' in l][-8:],'friend_recovery':[l for l in runtime_log(1).splitlines() if '[eventhold-recovery]' in l][-8:],'locations':[location(0),location(1)]}"
     },
     {
+      "do": "assert",
+      "expr": "location(0)==[2, 33, 0, 0, 1, 0] and location(1)==[2, 33, 0, 0, 1, 0]",
+      "message": "The inventory read happens in the Calling, never in the boss room (Quill r1)"
+    },
+    {
       "do": "progress_snapshot",
       "instances": [
         0,
@@ -272,7 +277,7 @@
     },
     {
       "do": "assert",
-      "expr": "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[]))",
+      "expr": "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[])) and log_count('[downed] gate intercept ',0)==saved['thorn_baseline']['downs'][0] and [a for a in actors(0) if int(a['address'],16)==int(peek('0x2A105D0','u64',0),16)][0]['hp']>0",
       "message": "The host's combat pilot ended before the friend landed. See host_thorn."
     },
     {
@@ -309,7 +314,7 @@
     },
     {
       "do": "assert",
-      "expr": "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[]))",
+      "expr": "any(p[4]=='host_thorn' and p[0].poll() is None for p in saved.get('_background_pilots',[])) and log_count('[downed] gate intercept ',0)==saved['thorn_baseline']['downs'][0] and [a for a in actors(0) if int(a['address'],16)==int(peek('0x2A105D0','u64',0),16)][0]['hp']>0",
       "message": "Bounded host survival: the host must still be fighting while the friend lands and sits out"
     },
     {
@@ -333,7 +338,22 @@
       }
     },
     {
+      "do": "save",
+      "as": "legA_host_pilot",
+      "expr": "[p for p in saved.get('_background_pilots',[]) if p[4]=='host_thorn']"
+    },
+    {
       "do": "pilot_wait"
+    },
+    {
+      "do": "save",
+      "as": "legA_ending",
+      "expr": "host_ending()"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['legA_ending']['ending'] in ('kill', 'defeat', 'deadline')",
+      "message": "The host pilot's ending must be a native defeat, a real kill or the fight's own deadline; any other exit or reason fails (Quill r1). See legA_ending and host_thorn/pilot.jsonl"
     },
     {
       "do": "save",

@@ -1,4 +1,5 @@
 """Pure log correlation for the single forced heartbeat-expiry fixture."""
+import json
 import re
 
 
@@ -89,6 +90,37 @@ def relay_check(old, relay):
         return {"ok": False, "peer": "", "timeouts": [], "missing": "friend peer identity required"}
     timeouts = [line for line in relay.splitlines() if line.rstrip().endswith("Peer timed out: " + peer)]
     return {"ok": not timeouts, "peer": peer, "timeouts": timeouts}
+
+
+def stuck_reason(pilot_jsonl):
+    """The last `stuck` row's reason in a route pilot's pilot.jsonl (None if the pilot never got stuck).
+    An unreadable row is an error, not a missing reason."""
+    reason = None
+    for line in pilot_jsonl.splitlines():
+        if line.strip():
+            row = json.loads(line)
+            if row.get("kind") == "stuck":
+                reason = str(row.get("reason"))
+    return reason
+
+
+DEFEATS = ("downed and not revived",)
+
+
+def route_b_ending(exit_code, reason, host_end, new_downs):
+    """Leg A route (b) (Quill r1 R2): the host pilot's ending, positively classified, or None (unknown: fail).
+      kill      exit 0 and exactly one host mission_dead_boss;
+      defeat    exit 3 (Stuck), a native defeat reason ('died N times' at Game Over, or downed and not revived)
+                and a new host downing since the fight's baseline;
+      deadline  exit 3 with the fight's own 'fight did not clear' and no new host downing."""
+    if exit_code == 0 and host_end == 1:
+        return "kill"
+    if exit_code == 3 and new_downs > 0 and reason is not None and \
+            (re.fullmatch(r"died [1-9]\d* times", reason) or reason in DEFEATS):
+        return "defeat"
+    if exit_code == 3 and new_downs == 0 and reason == "fight did not clear":
+        return "deadline"
+    return None
 
 
 def correlate(old, pause, friend, host, native, relay):

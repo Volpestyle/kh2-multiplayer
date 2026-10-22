@@ -367,20 +367,68 @@ check("Route (b): bounded host survival is asserted before the landing waits and
 class _P:
     def __init__(self, code): self.code = code
     def poll(self): return self.code
-def _alive(pilots):
-    return eval(make_thorn_legA.HOST_ALIVE, {"any": any, "saved": {"_background_pilots": pilots}})
-check("Route (b): HOST_ALIVE is true only while the host_thorn process runs",
-      _alive([(_P(None), 0, None, {}, "host_thorn", None)]) is True and
+    @property
+    def returncode(self): return self.code
+def _alive(pilots, downs=4, hp=12):
+    # Quill r1 R1: the live process AND fresh native evidence (no new gate intercept since baseline 4; HP > 0).
+    ns = {"any": any, "int": int, "saved": {"_background_pilots": pilots, "thorn_baseline": {"downs": [4, 0]}},
+          "log_count": lambda text, i=0: downs if text == "[downed] gate intercept " and i == 0 else 0,
+          "actors": lambda i=0: [{"address": "0x30", "hp": 99}, {"address": "0x40", "hp": hp}],
+          "peek": lambda rva, kind="u32", i=0: "0x40"}
+    return eval(make_thorn_legA.HOST_ALIVE, ns)
+running = [(_P(None), 0, None, {}, "host_thorn", None)]
+check("Route (b) R1: HOST_ALIVE needs the running host pilot, no new host downing and the canonical host's live HP",
+      _alive(running) is True and
       _alive([(_P(1), 0, None, {}, "host_thorn", None)]) is False and
       _alive([(_P(None), 0, None, {}, "friend_thorn", None)]) is False and _alive([]) is False)
+check("Route (b) R1 negative: a running pilot with the host logically downed, or at HP 0, is not fighting",
+      _alive(running, downs=5) is False and _alive(running, hp=0) is False)
+check("Route (b) R1: the host read is the canonical player, not the first actor",
+      _alive(running, hp=1) is True and _alive(running, hp=-1) is False)
+# Quill r1 R2: a positively classified ending, from the retained exit code and the pilot's own stuck reason.
+E = evidence.route_b_ending
+check("Route (b) R2: kill, defeat and deadline are classified from exit, reason and native counts",
+      E(0, None, 1, 0) == "kill" and E(3, "died 1 times", 0, 1) == "defeat" and
+      E(3, "downed and not revived", 0, 2) == "defeat" and E(3, "fight did not clear", 0, 0) == "deadline")
+check("Route (b) R2 negatives: an unknown exit or reason, or a defeat without a native downing, is no ending",
+      E(17, None, 0, 0) is None and E(17, "died 1 times", 0, 1) is None and E(3, "game exited", 0, 1) is None and
+      E(3, "died 1 times", 0, 0) is None and E(0, None, 0, 0) is None and E(2, None, 1, 0) is None and
+      E(3, "fight did not clear", 0, 1) is None and E(3, "no progress for 120 s outside an event or menu", 0, 0) is None)
+check("Route (b) R2: the stuck reason is the pilot's last stuck row",
+      evidence.stuck_reason('{"kind":"step"}\n{"kind":"stuck","reason":"died 1 times"}\n') == "died 1 times" and
+      evidence.stuck_reason('{"kind":"step"}\n') is None)
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp); (tmp / "host_thorn").mkdir()
+    (tmp / "host_thorn" / "pilot.jsonl").write_text('{"kind":"stuck","reason":"died 1 times"}\n', encoding="utf-8")
+    fake = run.shared.Context.__new__(run.shared.Context)
+    fake.run_dir = tmp
+    fake.saved = {"legA_host_pilot": [(_P(3), 0, None, {}, "host_thorn", None)],
+                  "thorn_baseline": {"host_end": 0, "downs": [4, 0]}}
+    counts = {"[mission-mirror] host end trap=mission_dead_boss": 0, "[downed] gate intercept ": 5}
+    saved_base = run.base_namespace
+    run.base_namespace = lambda self: {"log_count": lambda text, i=0: counts.get(text, 0), "location": lambda i=0: []}
+    try:
+        defeat = run.namespace(fake)["host_ending"]()
+        fake.saved["legA_host_pilot"] = [(_P(17), 0, None, {}, "host_thorn", None)]
+        unknown = run.namespace(fake)["host_ending"]()
+    finally:
+        run.base_namespace = saved_base
+check("Route (b) R2: host_ending() classifies the retained process's exit (3 + Game Over + a downing: defeat; 17: none)",
+      defeat == {"exit": 3, "reason": "died 1 times", "hostEnd": 0, "newDowns": 1, "ending": "defeat"} and
+      unknown["ending"] is None and unknown["exit"] == 17)
 wait_at = next(i for i, s in enumerate(legA["steps"]) if s["do"] == "pilot_wait" and i > alive[1])
-check("Route (b): after the host pilot ends, the friend's sit-out invariants are asserted, then the relay at closure",
-      "never replays 4/16 or 315" in legA["steps"][wait_at + 2]["message"] and
-      legA["steps"][wait_at + 1].get("as") == "legA_fight")
+check("Route (b): the host pilot is retained before pilot_wait, its ending classified, then the friend's invariants",
+      legA["steps"][wait_at - 1] == {"do": "save", "as": "legA_host_pilot",
+                                     "expr": "[p for p in saved.get('_background_pilots',[]) if p[4]=='host_thorn']"} and
+      legA["steps"][wait_at + 1] == {"do": "save", "as": "legA_ending", "expr": "host_ending()"} and
+      legA["steps"][wait_at + 2]["expr"] == "saved['legA_ending']['ending'] in ('kill', 'defeat', 'deadline')" and
+      legA["steps"][wait_at + 3].get("as") == "legA_fight" and
+      "never replays 4/16 or 315" in legA["steps"][wait_at + 4]["message"])
 inventory = next(i for i, s in enumerate(legA["steps"]) if s["do"] == "progress_snapshot")
-check("Lead #32 (d): one read-only SAVE snapshot of both seats in the Calling, before the host leaves for the arena",
+check("Lead #32 (d): one read-only SAVE snapshot of both seats in the Calling, guarded by a fresh Calling assert",
       legA["steps"][inventory] == {"do": "progress_snapshot", "instances": [0, 1], "as": "legA_inventory"} and
-      legA["steps"][inventory - 1].get("as") == "legA_calling" and legA["steps"][inventory + 1].get("name") == "host_to_awakening" and
+      legA["steps"][inventory - 1]["expr"] == f"location(0)=={make_thorn_legA.CALLING} and location(1)=={make_thorn_legA.CALLING}" and
+      legA["steps"][inventory - 2].get("as") == "legA_calling" and legA["steps"][inventory + 1].get("name") == "host_to_awakening" and
       ("inventory", 0x3580, 0x140) in run.shared.PERSONAL_RANGES and ("characters", 0x24F0, 0xE04) in run.shared.PERSONAL_RANGES)
 check("R1: the arena anchor is saved before the host's fight pilot starts",
       next(i for i, s in enumerate(legA["steps"]) if s.get("as") == "legA_arena_load") <

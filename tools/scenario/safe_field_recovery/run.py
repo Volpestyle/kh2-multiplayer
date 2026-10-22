@@ -106,7 +106,20 @@ def namespace(self):
     def inject(index):
         path = shared.LOGS / f"kh2coop_inject_{self.inst(index).pid}.log"
         return path.read_text(errors="replace") if path.exists() else ""
+    def host_ending(pilot="host_thorn", retained="legA_host_pilot", baseline="thorn_baseline"):
+        # Leg A route (b), Quill r1 R2: the retained pilot's actual exit code and stuck reason, with the native
+        # counts since the fight's baseline, classified; None (an unknown ending) fails the scenario's assert.
+        procs = [p[0] for p in self.saved.get(retained, []) if p[4] == pilot]
+        exit_code = procs[0].returncode if len(procs) == 1 else None
+        jsonl = self.run_dir / pilot / "pilot.jsonl"
+        reason = evidence.stuck_reason(jsonl.read_text(encoding="utf-8")) if jsonl.exists() else None
+        before = self.saved[baseline]
+        host_end = base["log_count"]("[mission-mirror] host end trap=mission_dead_boss", 0) - before["host_end"]
+        new_downs = base["log_count"]("[downed] gate intercept ", 0) - before["downs"][0]
+        return {"exit": exit_code, "reason": reason, "hostEnd": host_end, "newDowns": new_downs,
+                "ending": evidence.route_b_ending(exit_code, reason, host_end, new_downs)}
     return {**base, "recovery_proof": lambda: proof(self), "pause_relay": lambda: pause_relay(self),
+            "host_ending": host_ending,
             "last_load": lambda index=0: evidence.last_load(inject(index)),
             "field_catalog": lambda index=0, after_load=0, after_marker=None:
                 evidence.field_catalog(inject(index), base["location"](index), after_load, after_marker)}
