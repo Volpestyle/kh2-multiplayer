@@ -1,0 +1,220 @@
+{
+  "name": "net_forced_resync_outsider_seatstate",
+  "description": "VUH-2675 D14: three seats converge in empty GoA, the host forces a single-target resync of Friend1 only, then Friend2 (outside the resync) must keep admitting Friend1's SeatState. Friend2's runtime must log Friend1's new delivery serial (2: the first resync of a fresh connection) from the relay's plan notice, without being fenced itself. Friend2's DLL must log new accepted owner=1 seats after convergence, with the host as the control. The scenario is otherwise net_forced_resync_smoke's exact checks (Converged native acknowledgment, relay and host terminal, two complete statehash samples, census). It does not exercise StageEnd (no event here), and it cannot show Friend2 refusing an old-serial envelope: the relay refuses a stale source serial first (SessionHost source-delivery), so that clause stays with ForcedResyncTest outsiderAdmitsRecoveredSeat.",
+  "playerDefaults": true,
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "boot",
+      "instance": 2,
+      "initTimeoutMs": 60000
+    },
+    {
+      "do": "warp",
+      "instance": 0,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 1,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "warp",
+      "instance": 2,
+      "world": 4,
+      "room": 26
+    },
+    {
+      "do": "relay",
+      "port": 27809,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "runtime",
+      "instance": 2,
+      "role": "friend2"
+    },
+    {
+      "do": "transition_check",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "as": "initial",
+      "target": [
+        4,
+        26
+      ]
+    },
+    {
+      "do": "statehash_check",
+      "as": "before",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['count'] == 0 and row['unmatched'] == 0 for row in saved['before']['instances'].values())",
+      "message": "the room must be empty on every seat before the resync"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[prologue] seat accepted owner=1', 2) >= 3 and log_count('[prologue] seat accepted owner=1', 0) >= 3",
+      "timeoutMs": 30000,
+      "pollMs": 1000
+    },
+    {
+      "do": "assert",
+      "expr": "'peer delivery slot=' not in runtime_log(2) and 'peer delivery slot=' not in runtime_log(1)",
+      "message": "no peer serial moved before the forced resync"
+    },
+    {
+      "do": "forced_resync",
+      "as": "forced_resync",
+      "instance": 0,
+      "slot": "1"
+    },
+    {
+      "do": "assert",
+      "expr": "[t[0] for t in saved['forced_resync']['audit']['targets']] == [1]",
+      "message": "the resync targeted Friend1 only"
+    },
+    {
+      "do": "save",
+      "as": "f2_owner1_converged",
+      "expr": "log_count('[prologue] seat accepted owner=1', 2)"
+    },
+    {
+      "do": "save",
+      "as": "host_owner1_converged",
+      "expr": "log_count('[prologue] seat accepted owner=1', 0)"
+    },
+    {
+      "do": "save",
+      "as": "f1_owner2_converged",
+      "expr": "log_count('[prologue] seat accepted owner=2', 1)"
+    },
+    {
+      "do": "wait_until",
+      "expr": "'[Runtime] peer delivery slot=1 serial=' in runtime_log(2)",
+      "timeoutMs": 10000,
+      "pollMs": 500
+    },
+    {
+      "do": "assert",
+      "expr": "[line.split('serial=')[1].split(' ')[0] for line in runtime_log(2).splitlines() if '[Runtime] peer delivery slot=' in line] == ['2']",
+      "message": "Friend2 recorded exactly one peer serial move: Friend1 to 2"
+    },
+    {
+      "do": "assert",
+      "expr": "'peer delivery slot=' not in runtime_log(1) and 'peer delivery slot=' not in runtime_log(0)",
+      "message": "the notice path ran only on the outsider (the target and host take the plan itself)"
+    },
+    {
+      "do": "statehash_check",
+      "as": "after",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "minEnemies": 0,
+      "expectedFields": 0,
+      "consecutiveSamples": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "do": "native_enemy_census",
+      "as": "after_census",
+      "instances": [
+        0,
+        1,
+        2
+      ],
+      "samples": 2,
+      "intervalMs": 1500
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['count'] == 0 and row['unmatched'] == 0 for row in saved['after']['instances'].values())",
+      "message": "the room must stay empty on every seat after the resync"
+    },
+    {
+      "do": "forced_resync_evidence",
+      "from": "forced_resync",
+      "statehash": "after",
+      "census": "after_census"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[prologue] seat accepted owner=1', 2) >= saved['f2_owner1_converged'] + 3",
+      "timeoutMs": 20000,
+      "pollMs": 1000
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[prologue] seat accepted owner=1', 0) >= saved['host_owner1_converged'] + 3",
+      "timeoutMs": 20000,
+      "pollMs": 1000
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[prologue] seat accepted owner=2', 1) >= saved['f1_owner2_converged'] + 3",
+      "timeoutMs": 20000,
+      "pollMs": 1000
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[event-mirror] stage end envelope drop', 2) == 0 and '[stage-end] envelope drop' not in runtime_log(2)",
+      "message": "Friend2 dropped no StageEnd envelope"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "outsider_resync_host0"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "outsider_resync_friend1"
+    },
+    {
+      "do": "capture",
+      "instance": 2,
+      "name": "outsider_resync_friend2"
+    }
+  ]
+}

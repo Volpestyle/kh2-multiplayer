@@ -405,6 +405,24 @@ changed zero bytes; nonempty/dead/changed-flag recovery remains open. The first
 attempt is retained as a failure at obsolete readiness log text; the runner now
 waits for verified membership while native bootstrap checks remain separate.
 
+`net_forced_resync_outsider_seatstate.json` (VUH-2675, D14) is the same empty-GoA
+smoke with shipped player defaults and a single-target resync of Friend1 only.
+Friend2 sits outside it and must keep admitting Friend1's traffic:
+- Before the resync, Friend2 and the host each log at least three
+  `[prologue] seat accepted owner=1`, and no runtime has logged a peer serial move.
+- After the resync, Friend2's runtime logs exactly one
+  `[Runtime] peer delivery slot=1 serial=2`. Delivery serials start at 1 and only
+  a resync plan moves them, so 2 is this resync. Neither the host nor Friend1
+  logs one: they take the plan itself.
+- After the smoke's own convergence evidence, Friend2's DLL accepts at least three
+  more owner=1 seats. The host's owner=1 and Friend1's owner=2 seats are the
+  controls. Friend2 logs no StageEnd envelope drop.
+
+It does not exercise StageEnd, because there is no event in this room. It cannot
+show Friend2 refusing an old-serial envelope: the relay refuses a stale source
+serial first (`source-delivery`), so that clause stays with `ForcedResyncTest`
+`outsiderAdmitsRecoveredSeat`. Not run yet.
+
 `net_forced_resync_native_nonempty.json` retains a separate living-only first-pack
 fixture with host-only damage and exact typed native population checks. Its first
 run `20261003-132801` failed before requesting resync: current four actors matched
