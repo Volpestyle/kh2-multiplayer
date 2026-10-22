@@ -316,12 +316,26 @@ boss/encounter defeat or a save point.
   first frame nor a replacement that lands between the reads can import the old session's pose.
 - **A lone host.** A host downed in its room that has never seen a teammate in this session is everyone
   down by itself: after one second it takes the native game over and Continue, as the full party does.
+  VUH-2640 (the lead's #176, extending #143): so is a downed host that no teammate has been present for,
+  anywhere, for 5 s (`kTeammatesAbsentFrames` = 300): every other seat absent or quarantined. A quarantined
+  seat (its link expired, rejoining) sends no avatar, so it counts as absent; a teammate live in another
+  room keeps sending poses and is present. D17's "everyone down, game over" applied to who is actually
+  there; otherwise the host waits forever and its recovery capture (not controllable) never returns the
+  seat.
   Scope limit (accepted, VUH-2632): "never seen" is not "no teammate rostered". A host downed before a
   rostered teammate's first avatar arrives takes that game over too.
   - The teammates are latched each downed frame while the old room is current. The transition erases
     every teammate pose before the hold is found lost, so they cannot be counted then.
   - The log names the case: `teammate-up`, `full-party`, `solo`, `unavailable`, or `returned` (an owed
     return, below).
+- **A link that expires in a boss fight (VUH-2640).** No mid-fight rejoin: a boss's script and AI state
+  come only from host capture. A friend whose event-control lifetime expires while its mirror had a
+  host-owned boss (Thorn) bound within two seconds sits out as a logical downing tagged `outage`
+  (`[downed] outage expiry ...`, `[downed] outage sit-out ...`): its local Thorn runs its own brain after the
+  retirement, and the hold keeps the friend from fighting or winning it, or being killed by it. If it was not
+  down yet, the downing begins on its first settled frame in that room (after an intro event); a room
+  change or a recovered lifetime first drops it. VUH-2628's recovery Bootstrap load in the host's next
+  eligible room ends it, and it resolves at 25% there (`outage`), D17's return after the boss.
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
   `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`.

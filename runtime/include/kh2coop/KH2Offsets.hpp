@@ -84,6 +84,7 @@ constexpr std::uint64_t CUTSCENE_STATE = 0x0B65210;   // [GHIDRA] int32 timeline
 constexpr std::uint64_t EVENT_CONTEXT  = 0x2A11478;   // [GHIDRA] pointer; native event-active predicate 0x3AC220
 constexpr std::uint64_t IN_FIELD       = 0x09BA8D0;   // [GHIDRA] u8, cleared at room-load start, set when the room is live
 constexpr std::uint64_t OPEN_MENU      = 0x07435D0;   // [KH2LIB] u8 menu id, 0xFF = none (menu manager 0x2F5E50)
+constexpr std::uint64_t MISSION_PTR    = 0x2A0FF68;   // running mission object (0 = none); +0x40 its path (MissionMirror)
 constexpr std::uint64_t CUTSCENE_LEN   = 0x0B64F34;   // [KH2LIB] Cutscene length
 constexpr std::uint64_t CUTSCENE_SKIP  = 0x0B64F1C;   // [KH2LIB] Cutscene skip flag
 constexpr std::uint64_t GAME_SPEED     = 0x0717424;   // [KH2LIB] Game speed

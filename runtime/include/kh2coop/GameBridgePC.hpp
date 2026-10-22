@@ -37,6 +37,11 @@ public:
     // --- IGameBridge interface ---
     bool IsAttached() const override;
     RoomState ReadRoomState() const override;
+    // VUH-2640 H1: the native facts the host's recovery capture refuses on, read fresh (unread: not ready).
+    struct RecoveryReadiness {
+        bool readable = false, menuOpen = true, uncontrollable = true, paused = true, bossMission = true;
+    };
+    RecoveryReadiness ReadRecoveryReadiness() const;
     std::optional<ActorState> ReadActorState(SlotType slot) const override;
     std::vector<EnemyState> ReadEnemyStates() const override;
     bool WriteCameraTarget(SlotType slot) override;

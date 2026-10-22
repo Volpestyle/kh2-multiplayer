@@ -876,6 +876,12 @@ resync path. The existing authenticated SeatState profile agreement also passes
 in both directions: a prologue bootstrap load requires it before convergence.
 A failed or unauthenticated rejoin never restores authority.
 
+VUH-2640: a returning-seat hint now also waits, epoch unspent, while the host's own
+native facts would refuse the capture (a menu or pause open, not controllable, the
+host logically downed, or Thorn's mission running); the capture still re-checks. A
+friend whose link expires in a host-owned boss fight sits out as a D17 outage downing
+until this recovery's Bootstrap load, which resolves it at 25% (see DOWNED_REVIVE.md).
+
 The implemented scope is a settled safe field with an empty or supported
 ordinary record-bound population; the live proof above covers empty FM00 only. Active307,
 boss/script reconstruction, active story and expiry leaving an owned pause open

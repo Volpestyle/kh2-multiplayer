@@ -127,6 +127,9 @@ bool EnterInput() noexcept {
 void AbortInput() noexcept { channel.Invalidate(eventhold::Abort::Unsupported); }
 void LeaveInput() noexcept { inputEntry.clear(std::memory_order_release); }
 bool HoldingInput() noexcept { return Enabled() && inputHeld.load(std::memory_order_acquire); }
+bool LifetimeHeartbeatExpired() noexcept {
+    return Enabled() && channel.Reason() == eventhold::Abort::HeartbeatExpired;
+}
 void RetireOwner() noexcept {
     if (eventhold::ValidScope(ownerScope)) channel.Invalidate(eventhold::Abort::BindingReset);
     ownerScope = {}; consumedCount = 0; ownerOrdinal = 0;

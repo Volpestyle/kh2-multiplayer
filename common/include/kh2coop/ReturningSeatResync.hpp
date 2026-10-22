@@ -12,6 +12,17 @@
 
 namespace kh2coop {
 
+// VUH-2640 (H1): the host's own native facts that its recovery capture refuses on, read fresh by the runtime
+// with the room it already compares. The returning-seat hint spends its one attempt per epoch only when
+// these hold, instead of on a capture that would refuse (a menu or pause, not controllable, the host downed,
+// or a boss mission running). The capture still re-checks everything itself; unread is not ready.
+struct HostRecoveryFacts {
+    bool readable = false, menuOpen = true, uncontrollable = true, paused = true, hostDowned = true, bossMission = true;
+};
+constexpr bool ReturningSeatHostReady(const HostRecoveryFacts& f) noexcept {
+    return f.readable && !f.menuOpen && !f.uncontrollable && !f.paused && !f.hostDowned && !f.bossMission;
+}
+
 // Host owner-thread scheduling hints only; no snapshot/native authority, clock,
 // retry deadline or request-ID generator. Callbacks must not reenter this policy.
 // ObserveRoster accepts only the current NetworkClient's verified host roster.

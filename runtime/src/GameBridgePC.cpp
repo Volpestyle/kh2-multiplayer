@@ -785,6 +785,35 @@ RoomState GameBridgePC::ReadRoomState() const {
     return rs;
 }
 
+GameBridgePC::RecoveryReadiness GameBridgePC::ReadRecoveryReadiness() const {
+    using namespace offsets;
+    RecoveryReadiness r;
+#ifdef _WIN32
+    if (!attached_ || !processHandle_) return r;
+    const auto read = [&](std::uint64_t address, void* out, std::size_t size) {
+        SIZE_T got = 0;
+        return ReadProcessMemory(static_cast<HANDLE>(processHandle_), reinterpret_cast<LPCVOID>(address), out, size, &got) &&
+               got == size;
+    };
+    std::uint8_t menu = 0;
+    std::int32_t frozen = -1;
+    std::uint32_t pause = UINT32_MAX;
+    std::uint64_t mission = 0;
+    if (!read(baseAddress_ + OPEN_MENU, &menu, sizeof(menu)) || !read(baseAddress_ + CONTROLLABLE, &frozen, sizeof(frozen)) ||
+        !read(baseAddress_ + PAUSE_STATUS, &pause, sizeof(pause)) || !read(baseAddress_ + MISSION_PTR, &mission, sizeof(mission)))
+        return r;
+    char path[64] {};
+    if (mission && !read(mission + 0x40, path, sizeof(path))) return r;
+    path[sizeof(path) - 1] = 0;
+    r.readable = true;
+    r.menuOpen = menu != 0xFF;
+    r.uncontrollable = frozen != 0;
+    r.paused = pause != 0;
+    r.bossMission = mission != 0 && std::strstr(path, "TT34_MS304") != nullptr; // Twilight Thorn
+#endif
+    return r;
+}
+
 std::optional<ActorState> GameBridgePC::ReadActorState(SlotType slot) const {
     using namespace offsets;
     if (!attached_) return std::nullopt;

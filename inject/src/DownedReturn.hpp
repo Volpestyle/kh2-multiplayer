@@ -335,9 +335,39 @@ private:
 // The downed host, in its room (D17, the lead's #143): everyone is down when every teammate whose fresh
 // pose is in the room is downed too, or when it has never seen a teammate in this session (a lone player
 // down). Then the host takes the native game over and Continue. A teammate seen earlier but absent now
-// is not "everyone down".
-constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, bool teammateSeenInSession) noexcept {
-    return !teammateSeenInSession || (teammateHere && everyTeammateHereDowned);
+// is not "everyone down", unless (VUH-2640, the lead's #176) no teammate has been present anywhere for
+// kTeammatesAbsentFrames: every other seat absent or quarantined. A quarantined seat (its link expired,
+// rejoining) sends no avatar at all (RuntimeMain), so to this host it is a seat with no fresh pose in any
+// room. A teammate live in another room keeps sending poses and is present. Otherwise a downed host with
+// nobody able to reach it would wait forever, and its capture (not controllable) could never return the
+// absent seat either.
+constexpr std::uint32_t kTeammatesAbsentFrames = 300; // 5 s at 60 fps
+constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, bool teammateSeenInSession,
+                            std::uint32_t framesSinceAnyTeammate) noexcept {
+    return !teammateSeenInSession || (teammateHere && everyTeammateHereDowned) ||
+           framesSinceAnyTeammate >= kTeammatesAbsentFrames;
+}
+
+// VUH-2640 (F1): a friend whose event-control lifetime expires (HeartbeatExpired) during a host-owned boss
+// fight sits out until the fight resolves. There is no mid-fight rejoin: a boss's script and AI state come
+// only from host capture and are never invented. After the expiry the retired world session lets the
+// friend's local copy of the boss run its own brain, so the friend is held as a D17 logical downing tagged
+// outage: it can neither fight and win that unsynced boss nor be killed by it. The friend's own mirror is
+// the proof of a host-owned boss: it bound a host-brain-only boss (Thorn) within kOutageBossFrames of the
+// expiry. VUH-2628's recovery Bootstrap load ends the downing, which resolves at 25% in the recovered room
+// (D17's return after a boss), whatever the session history or the latch say.
+constexpr std::uint32_t kOutageBossFrames = 120;
+constexpr bool OutageBossRecent(std::uint32_t frame, std::uint32_t hostBrainBoundFrame) noexcept {
+    return hostBrainBoundFrame != 0 && frame - hostBrainBoundFrame <= kOutageBossFrames;
+}
+// The pending outage downing (the friend was not downed yet at the expiry): begun on the first settled
+// frame it can be (the same conditions as a sit-out re-down), only in the room of the expiry and only while
+// that lifetime is still the expired one; a room change or a recovered lifetime drops it.
+enum class OutageStart : std::uint8_t { Idle, Wait, Begin, Drop };
+constexpr OutageStart OutageStartStep(bool pending, bool sameRoom, bool lifetimeExpired, bool ready) noexcept {
+    if (!pending) return OutageStart::Idle;
+    if (!sameRoom || !lifetimeExpired) return OutageStart::Drop;
+    return ready ? OutageStart::Begin : OutageStart::Wait;
 }
 
 // A room change while logically downed (D17): the player sits out into the next room, still downed,
@@ -349,7 +379,7 @@ constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, boo
 //                return it, so it is resolved, as solo play was before D17.
 // A teammate seen earlier in the session but not during this downing is unavailable, not absent: the
 // player sits out, as when a teammate was up (Quill R1).
-enum class Disposition : std::uint8_t { Solo, FullParty, TeammateUp, Unavailable, Returned };
+enum class Disposition : std::uint8_t { Solo, FullParty, TeammateUp, Unavailable, Returned, Outage };
 struct TransitionDecision {
     AfterTransition after;
     Disposition why;
@@ -367,6 +397,13 @@ inline TransitionDecision AfterTransitionFor(OwedReturn& owed, const Disposition
     const auto plain = SitOutAfterTransition(old, teammateSeenInSession);
     return owed.AtTransition(plain.after) ? TransitionDecision {AfterTransition::Resolve, Disposition::Returned} : plain;
 }
+// VUH-2640 (F1): an outage downing (the link expired in a boss fight) is resolved by the room change that
+// ends it (the recovery's Bootstrap load): the D17 return after a boss, at 25%.
+inline TransitionDecision AfterTransitionWithOutage(bool outage, OwedReturn& owed, const DispositionLatch& old,
+                                                    bool teammateSeenInSession) noexcept {
+    if (outage) return {AfterTransition::Resolve, Disposition::Outage};
+    return AfterTransitionFor(owed, old, teammateSeenInSession);
+}
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {
     case Disposition::Solo: return "solo";
@@ -374,6 +411,7 @@ constexpr const char* DispositionName(Disposition d) noexcept {
     case Disposition::TeammateUp: return "teammate-up";
     case Disposition::Unavailable: return "unavailable";
     case Disposition::Returned: return "returned";
+    case Disposition::Outage: return "outage";
     }
     return "?";
 }

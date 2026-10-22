@@ -100,6 +100,18 @@ struct ReturningPolicy {
     }
 };
 void returningSeatControls() {
+    // VUH-2640 H1: the host's own refusal facts keep the hint waiting with its epoch unspent.
+    { HostRecoveryFacts ok {true, false, false, false, false, false};
+      check(ReturningSeatHostReady(ok), "host recovery ready: readable, no menu, controllable, unpaused, up, no boss");
+      auto with = [&](auto change) { auto f = ok; change(f); return ReturningSeatHostReady(f); };
+      check(!with([](auto& f) { f.readable = false; }) && !with([](auto& f) { f.menuOpen = true; }) &&
+            !with([](auto& f) { f.uncontrollable = true; }) && !with([](auto& f) { f.paused = true; }) &&
+            !with([](auto& f) { f.hostDowned = true; }) && !with([](auto& f) { f.bossMission = true; }),
+            "each host refusal fact keeps the returning seat waiting");
+      ReturningPolicy p; p.Return(); p.eligible = false; p.Pump(); p.Pump();
+      check(!p.sends && p.policy.PendingCount() == 1, "a host not ready (boss, pause, downed) waits without spending the epoch");
+      p.eligible = true; p.Pump();
+      check(p.sends == 1, "the same epoch submits once the host is ready"); }
     { ReturningPolicy p(false); p.Return(); p.Pump(); check(!p.sends && !p.policy.PendingCount() && p.events.empty(), "return policy disabled has no hints or submissions"); }
     { ReturningPolicy p; p.Pump(); p.Observe(); p.Pump(); check(!p.sends && !p.policy.PendingCount(), "initial roster and duplicate admission never imply a return"); }
     { ReturningPolicy p; p.roster.actors.pop_back(); p.Observe(); p.roster.actors.push_back({3, SlotType::Friend2, "first-peer", "sora", p.current.connections[2]}); p.Observe(); p.Pump(); check(!p.sends, "first peer sight after an empty seat is not a returning peer"); }

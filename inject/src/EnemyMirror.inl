@@ -91,6 +91,8 @@ struct Stats {
 static Driven g_driven[kMaxDriven] {};
 static BrainHook g_brains[kMaxBrains] {};
 static unsigned g_brainCount = 0;
+static std::uint32_t g_hostBrainBoundFrame = 0; // VUH-2640: a host-brain-only boss (Thorn) last bound
+std::uint32_t HostBrainBoundFrame() noexcept { return g_hostBrainBoundFrame; }
 static uintptr_t g_refusedTargets[kMaxBrains] {};
 static unsigned g_refusedCount = 0;
 static bool g_guard = false;
@@ -536,6 +538,7 @@ void PreUpdateEntered(uintptr_t actor) {
     if (!d) { ++g_mstats.tableFull; return; }
     d->pose.field=pose.field;
     d->hostBrainOnly=pose.objectId==enemyclass::TwilightThorn;
+    if (d->hostBrainOnly) g_hostBrainBoundFrame = g_frameCounter ? g_frameCounter : 1;
     if (!d->firstBound) d->firstBound = g_frameCounter ? g_frameCounter : 1;
     d->boundFrame = g_frameCounter;
     if (enemysync::PopulationRequested() && !pose.field) { SyncHistory(); NoteBound(actor, pose.netId); }

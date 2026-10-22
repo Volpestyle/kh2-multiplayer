@@ -203,9 +203,13 @@ int main() {
       CHECK(!pending.Armed()); }                                 // every claim dropped: ended early
 
     // Everyone down, the host in its room: every teammate here downed, or a lone host.
-    CHECK(EveryoneDown(true, true, true) && !EveryoneDown(true, false, true));
-    CHECK(EveryoneDown(false, true, false));                       // never seen a teammate: alone
-    CHECK(!EveryoneDown(false, true, true));                       // seen earlier, absent now: not everyone
+    CHECK(EveryoneDown(true, true, true, 0) && !EveryoneDown(true, false, true, 0));
+    CHECK(EveryoneDown(false, true, false, 0));                    // never seen a teammate: alone
+    CHECK(!EveryoneDown(false, true, true, 0));                    // seen earlier, absent now: not everyone
+    // VUH-2640 H2 (lead #176): no teammate present anywhere for 5 s (every other seat absent or quarantined)
+    // is everyone down; one frame short, or a teammate live in another room, is not.
+    CHECK(EveryoneDown(false, true, true, kTeammatesAbsentFrames) && !EveryoneDown(false, true, true, kTeammatesAbsentFrames - 1));
+    CHECK(!EveryoneDown(true, false, true, 0));                    // a living teammate here
 
     // Regression (lead #143): a host alone in its session, never having seen a teammate, is downed in its
     // room. It used to wait forever (the check needed a teammate in the room); now one second of that is
@@ -215,10 +219,89 @@ int main() {
           session.Step(true, 0xA1, 0);
           if (frame < 50) continue;                               // downed from frame 50
           const bool any = false, all = true;                     // no fresh teammate pose in the room
-          allDownFrames = EveryoneDown(any, all, session.Seen()) ? allDownFrames + 1 : 0;
+          allDownFrames = EveryoneDown(any, all, session.Seen(), UINT32_MAX) ? allDownFrames + 1 : 0;
           if (allDownFrames >= 60) gameOverAt = frame;
       }
       CHECK(gameOverAt == 109); }
+
+    // Regression (VUH-2640 H2), in the adapter's order: the friend's link expires at frame 900 (quarantined:
+    // no avatar from then on); the host is downed in its room at 1000. Its last teammate pose is 900, so at
+    // 1199 no teammate has been present for 5 s: everyone down, and one second later (1258) the native game
+    // over. Without H2 it waited forever. A friend live in another room (fresh poses, not in this room)
+    // never triggers it.
+    { for (const bool quarantined : {true, false}) {
+          SessionTeammates session; std::uint32_t lastTeammate = 0, allDownFrames = 0; int gameOverAt = -1;
+          for (std::uint32_t frame = 1; frame < 2000 && gameOverAt < 0; ++frame) {
+              const bool friendPose = !quarantined || frame < 900;   // the friend's avatar arrives this frame
+              session.Step(true, 0xA1, friendPose ? 1 : 0);
+              if (friendPose) lastTeammate = frame;
+              if (frame < 1000) continue;                            // downed from frame 1000
+              const bool any = false, all = true;                    // the friend is not in the host's room
+              const std::uint32_t since = lastTeammate ? frame - lastTeammate : UINT32_MAX;
+              allDownFrames = EveryoneDown(any, all, session.Seen(), since) ? allDownFrames + 1 : 0;
+              if (allDownFrames >= 60) gameOverAt = static_cast<int>(frame);
+          }
+          CHECK(quarantined ? gameOverAt == 1258 : gameOverAt < 0);
+      } }
+
+    // VUH-2640 F1: the outage sit-out. A host-owned boss bound within two seconds of the expiry; a pending
+    // outage downing begins only in the expiry's room while that lifetime is the expired one; an outage
+    // downing resolves at the recovery's room change, whatever the latch, the session history or a receipt.
+    { CHECK(OutageBossRecent(1000, 900) && OutageBossRecent(1000, 1000 - kOutageBossFrames));
+      CHECK(!OutageBossRecent(1000, 1000 - kOutageBossFrames - 1) && !OutageBossRecent(1000, 0));
+      CHECK(OutageStartStep(false, true, true, true) == OutageStart::Idle);
+      CHECK(OutageStartStep(true, true, true, false) == OutageStart::Wait);  // in the boss intro's event
+      CHECK(OutageStartStep(true, true, true, true) == OutageStart::Begin);
+      CHECK(OutageStartStep(true, false, true, true) == OutageStart::Drop);  // left the room first
+      CHECK(OutageStartStep(true, true, false, true) == OutageStart::Drop);  // a recovered lifetime began
+      DispositionLatch up; up.Observe(1, 0);
+      DispositionLatch none;
+      for (const auto* l : {&up, &none})
+          for (const bool seen : {true, false}) {
+              OwedReturn owed;
+              const auto d = AfterTransitionWithOutage(true, owed, *l, seen);
+              CHECK(d.after == AfterTransition::Resolve && d.why == Disposition::Outage && !owed.Carried());
+              OwedReturn owed2, owed3;
+              const auto plain = AfterTransitionWithOutage(false, owed2, *l, seen);
+              const auto same = AfterTransitionFor(owed3, *l, seen);
+              CHECK(plain.after == same.after && plain.why == same.why);
+          }
+      CHECK(std::string_view(DispositionName(Disposition::Outage)) == "outage"); }
+
+    // Regression (VUH-2640 F1), the adapter's order through a Thorn outage: the friend's mirror binds Thorn
+    // every frame until the expiry at 3000 (the retirement stops it); the expiry is judged once; the friend is
+    // in the boss's event until 3050, so the downing waits and begins at 3050 in the same room; a lethal hit
+    // never happens (held). The recovery's Bootstrap load at 6000 ends the hold and resolves it as the outage
+    // (D17's return after the boss), named so in the log, not by the session history's accident.
+    { std::uint32_t bound = 0; bool expired = false, seenExpiry = false, pending = false, outage = false, downed = false;
+      bool resolved = false, satOut = false; int begunAt = -1;
+      SessionTeammates session; DispositionLatch latch;
+      for (std::uint32_t frame = 1; frame < 6100; ++frame) {
+          if (frame < 3000) { bound = frame; session.Step(true, 0xA1, 1); }   // host-owned Thorn bound; the host seen
+          else session.Step(true, 0, 0);                                      // quarantined: no session identity
+          if (frame == 3000) expired = true;
+          if (frame == 6000) expired = false;                                 // a recovered lifetime (after the load)
+          const bool sameRoom = frame < 6000, inEvent = frame < 3050;
+          if (expired && !seenExpiry) {
+              seenExpiry = true;
+              if (OutageBossRecent(frame, bound)) { if (downed) outage = true; else pending = true; }
+          } else if (!expired) seenExpiry = false;
+          switch (OutageStartStep(pending, sameRoom, expired, !downed && !inEvent)) {
+          case OutageStart::Begin: pending = false; downed = true; outage = true; latch.Reset(); begunAt = static_cast<int>(frame); break;
+          case OutageStart::Drop: pending = false; break;
+          default: break;
+          }
+          if (downed) latch.Observe(0, 0);
+          if (downed && !sameRoom) {                                          // HoldLost: the Bootstrap load
+              OwedReturn owed;
+              const auto d = AfterTransitionWithOutage(outage, owed, latch, session.Seen());
+              downed = false; outage = false;
+              resolved = d.after == AfterTransition::Resolve && d.why == Disposition::Outage;
+              satOut = d.after == AfterTransition::SitOut;
+          }
+      }
+      CHECK(begunAt == 3050 && resolved && !satOut && !pending); }
+
 
     // Regression (lead #142 / Quill R1): a teammate was seen earlier in the session, then its poses were
     // unavailable for this whole downing (stale or erased). That is not solo: the player sits out.

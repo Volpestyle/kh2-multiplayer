@@ -2100,6 +2100,14 @@ int main(int argc, char* argv[]) {
                 returnField = !local.inCutscene && !local.inTransition && local.worldId == room.worldId &&
                     local.roomId == room.roomId && local.mapProgram == room.mapProgram &&
                     local.battleProgram == room.battleProgram && local.eventProgram == room.eventProgram;
+                if (returnField) {
+                    // VUH-2640 H1: don't spend the epoch on a capture that would refuse.
+                    const auto ready = game.ReadRecoveryReadiness();
+                    kh2coop::LocalDownedState hostDowned;
+                    const bool downedRead = avatarBridge.ReadLocalDownedState(hostDowned);
+                    returnField = kh2coop::ReturningSeatHostReady({ready.readable, ready.menuOpen, ready.uncontrollable,
+                        ready.paused, downedRead && hostDowned.downed, ready.bossMission});
+                }
             }
             returningSeatRecovery.Pump(returnContext, returnField,
                 [&]() { return netClient->resyncBusy(); }, submitAutomaticResync);

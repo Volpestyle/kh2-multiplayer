@@ -593,6 +593,8 @@ static int ApplyStatDeltaBody(void* actor, int delta, int idx, int reactFlag) {
 }
 
 static void ReleaseDownedSpectate();
+// VUH-2640 (EnemyMirror.inl, included below): the last frame a host-brain-only boss was bound to the host.
+namespace enemymirror { std::uint32_t HostBrainBoundFrame() noexcept; }
 #include "DownedSpike.inl"
 
 static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
