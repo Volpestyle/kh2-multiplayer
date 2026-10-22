@@ -1,0 +1,33 @@
+{
+  "description": "VUH2617 bot04: recover the proven pre-door approach only AFTER scenario Calling10; then unchanged native door step.",
+  "steps": [
+    {
+      "do": "walk",
+      "to": [
+        -50,
+        2700
+      ],
+      "tol": 100,
+      "timeoutSec": 12,
+      "note": "Known bot01 post-fight anchor; this door route starts only AFTER strict Calling10 passed. Restore approach after drift, then unchanged real crossing."
+    },
+    {
+      "do": "door",
+      "to": [
+        -50,
+        2860
+      ],
+      "room": [
+        2,
+        34
+      ],
+      "timeoutSec": 25,
+      "settleSec": 240,
+      "note": "After the actual2/34 door crossing, hand off without waiting for event=false: an owned boss camera keeps event active while commands297/298/299 need Triangle. Scenario still checks both native room tuples and boss admission before combat; no second input driver overlaps the door pilot.",
+      "settle": false
+    }
+  ],
+  "name": "twilight_thorn_awakening_bots04",
+  "retries": 0,
+  "source": "VUH-2466 run 20261020-002047_thorn_1; original route_calling_to_awakening.json in wt-vuh2338-2/build/rig/vuh2466. Coordinates retained without inventing route points."
+}
