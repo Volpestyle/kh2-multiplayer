@@ -114,7 +114,8 @@ install detector above; no old wrapper or old movie baseline is reused.
    fight, which approaches and attacks. r3/r4's strafe through these bands is withdrawn (see attempt06 above).
 5. **Keep-away at 25%, for the lower seat only.** At ≤ `kiteBelow` (25%), with the partner alive and ≥ 4 HP
    healthier, the seat strafes on the 750 ring (or further out, if already there), `strafeRad` (0.6) further
-   around each turn, flipping every 2 s, never holding still. So when both seats are low, both keep chipping.
+   around each turn, flipping every 2 s, never holding still. The 4 HP margin decides it: at own 1 against a
+   partner at 5, the lower seat keeps away; seats within 3 HP of each other both keep chipping.
    A downed partner still takes the revive first. Logged as `thorn_kite`.
 
 These stay from r1–r2:
