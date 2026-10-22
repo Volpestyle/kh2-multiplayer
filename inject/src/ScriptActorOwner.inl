@@ -768,7 +768,8 @@ static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outc
 // cleaned release runs, once (rules::DecideHeldRelease). Detach runs on facts from the release's own reads; the
 // input-gate line is read from the same proven root before any native call. Idle runs only if detach succeeded and a
 // full admission rebuilt after detach (canonical friend, session, field, list-proven root, a fresh hold read, the seat's
-// slots) still holds (rules::HeldReleaseIdleAllowed). Nothing of the actor is read after idle.
+// slots) still holds (rules::HeldReleaseIdleAllowed). The own stand motion follows only a second full admission rebuilt
+// after idle (rules::RunHeldPair); nothing of the actor is read after the stand.
 static unsigned g_smHeldReleaseLogs=0;
 static R::HeldReleaseFacts SmOwnerHeldFacts(const ScriptActorRole& released,bool friendLocal,R::ReleaseCleanup outcome,
                                             bool releaseStage,bool field,const R::LocalHoldRoots& roots,const R::LocalHold& h) {
@@ -795,7 +796,8 @@ static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup
     const auto pair=R::RunHeldPair(release,
         [&](){return SmOwnerNativePlayer(released.actor,0x42C5F0);},
         [&](){
-            // Every fact rebuilt after detach; the outcome names the guards release this belongs to.
+            // Every fact rebuilt (after detach, and again after idle); the outcome names the guards release this
+            // belongs to. Roots are proven before any hold read (SmReadReleaseHold).
             const bool current=SmOwnerReleaseRootCurrent(released);
             uintptr_t event=0;std::int32_t cutscene=0;
             const bool field=current && ReadHitTrace(g_exeBase+0x2A11478,event) && !event &&
@@ -809,14 +811,15 @@ static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup
             {R::Tagged(R::kTagInt,motion),SmOwnerFloat(0)},false,false);});
     const bool detached=pair.detached,idled=pair.idled,stood=pair.stood;
     const char* idleWhy=pair.idleWhy;
+    const char* standWhy=pair.standWhy;
     if(g_smHeldReleaseLogs<32) {
         ++g_smHeldReleaseLogs;
         Log("[script-owner] local held-release %s role=%u seat=%u why=%s ownMotion=%d captured=%u detach=%u idleWhy=%s "
-            "idle=%u stand=%u gateRead=%u pad=%llX padEntry0=%u command=%llX commandAux=%llX fieldCommand=%u command24=%X "
+            "idle=%u standWhy=%s stand=%u gateRead=%u pad=%llX padEntry0=%u command=%llX commandAux=%llX fieldCommand=%u command24=%X "
             "flags9B8=%X flags120=%X motion=%u motionTime=%.1f action=%X actionVt=%llX actionTime=%.2f frame=%u (%u/32)",
             release?"ran":"kept",released.resource,released.slot,why,
             released.ownMotion==UINT32_MAX?-1:static_cast<int>(released.ownMotion),released.captured?1u:0u,
-            detached?1u:0u,idleWhy,idled?1u:0u,stood?1u:0u,gate.read?1u:0u,static_cast<unsigned long long>(gate.pad),
+            detached?1u:0u,idleWhy,idled?1u:0u,standWhy,stood?1u:0u,gate.read?1u:0u,static_cast<unsigned long long>(gate.pad),
             gate.pad==g_exeBase+0xBF31A0?1u:0u,static_cast<unsigned long long>(gate.command),
             static_cast<unsigned long long>(gate.commandAux),gate.command==g_exeBase+0x2A10620?1u:0u,gate.command24,
             gate.flags9B8,gate.flags120,gate.motion,gate.motionTime,gate.actionHandle,

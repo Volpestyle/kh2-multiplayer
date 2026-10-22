@@ -382,25 +382,58 @@ int main() {
         check(is(f,false,"not-field"),"an event or cutscene running: nothing");
 
         // Quill r1 on 18b15fa: idle follows only a successful detach and a fresh admission rebuilt after it. Each run
-        // records its calls in order; nothing may follow idle.
+        // records its calls in order; only a second admission and the stand may follow idle, and nothing the stand.
         std::vector<std::string> calls;
-        const auto run=[&](bool release,bool detachOk,R::HeldReleaseFacts fresh,bool idleOk=true,bool standOk=true){
-            calls.clear();
+        // The first rebuild (after detach) returns `fresh`, the second (after idle) `after` (by default the same).
+        const auto runAfter=[&](bool release,bool detachOk,R::HeldReleaseFacts fresh,R::HeldReleaseFacts after,
+                                bool idleOk=true,bool standOk=true){
+            calls.clear();int rebuilds=0;
             return R::RunHeldPair(release,[&](){calls.push_back("detach");return detachOk;},
-                [&](){calls.push_back("rebuild");return fresh;},[&](){calls.push_back("idle");return idleOk;},
+                [&](){calls.push_back("rebuild");return rebuilds++==0?fresh:after;},
+                [&](){calls.push_back("idle");return idleOk;},
                 [&](std::uint32_t motion){calls.push_back("stand"+std::to_string(motion));return standOk;});};
+        const auto run=[&](bool release,bool detachOk,R::HeldReleaseFacts fresh,bool idleOk=true,bool standOk=true){
+            return runAfter(release,detachOk,fresh,fresh,idleOk,standOk);};
         const auto order=[&](std::initializer_list<const char*> want){
             return std::vector<std::string>(want.begin(),want.end())==calls;};
         auto p=run(true,true,held);
         check(p.detached && p.idled && p.stood && std::string(p.idleWhy)=="held-guards" &&
-              order({"detach","rebuild","idle","stand0"}),
-              "detach, a fresh admission, idle, then the own stand motion 0 once, last (no read after idle)");
+              std::string(p.standWhy)=="held-guards" && order({"detach","rebuild","idle","rebuild","stand0"}),
+              "detach, a fresh admission, idle, a second fresh admission, then the own stand 0 once, last");
+        // Quill r1 on 62ce05f: idle runs the old action's exit, so each fact is revoked inside the idle boundary in
+        // turn; the stand never runs on authority from before idle.
+        {   const auto revoked=[&](R::HeldReleaseFacts after,const char* reason){
+                const auto q=runAfter(true,true,held,after);
+                return q.idled && !q.stood && std::string(q.standWhy)==reason &&
+                    order({"detach","rebuild","idle","rebuild"});};
+            auto a=held;a.sessionCurrent=false;
+            check(revoked(a,"session"),"session, epoch, connection or admitted scope revoked by idle: no stand");
+            a=held;a.actorProven=false;
+            check(revoked(a,"unproven"),"the root no longer list/handle-proven after idle: no stand");
+            a=held;a.releaseStage=false;
+            check(revoked(a,"not-release-stage"),"the room, load or transition changed by idle: no stand");
+            a=held;a.roleFree=false;
+            check(revoked(a,"role-current"),"a new role or camera cleanup took the seat inside idle: no stand");
+            a=held;a.thread=0x1234;
+            check(revoked(a,"held"),"a coroutine appeared inside idle: no stand");
+            a=held;a.friendLocal=false;
+            check(revoked(a,"not-friend-local"),"no longer the canonical friend after idle: no stand");
+            a=held;a.field=false;
+            check(revoked(a,"not-field"),"an event began inside idle: no stand");
+            a=held;a.actorRead=false;
+            check(revoked(a,"unproven"),"the hold read failed after idle: no stand");
+            a=held;a.parent=0x10;
+            check(revoked(a,"held"),"a parent set inside idle: no stand");
+            a=held;a.capture=0x7FF600000000;
+            check(revoked(a,"foreign-capture"),"another capture inside idle: no stand");
+            a=held;a.bank=0x7FF6AAAA0000;
+            check(revoked(a,"foreign-bank"),"another bank inside idle: no stand"); }
         // bots05 attempt07 (run 20261022-150823, friend frame 15074): role 2147483663, own motion 262 left at a guards
         // release (capture 0, bank 0, parent 0, d48 0); detach=1 idle=1 left it in 262. The held release stands it.
         {   auto a07=held;a07.capture=0;a07.bank=0;a07.parent=0;a07.thread=0;
             const char* w="";
             const auto q=run(R::DecideHeldRelease(a07,w),true,a07);
-            check(std::string(w)=="held-guards" && q.stood && order({"detach","rebuild","idle","stand0"}),
+            check(std::string(w)=="held-guards" && q.stood && order({"detach","rebuild","idle","rebuild","stand0"}),
                   "attempt07's guards release in its own 262: the pair, then stand 0, once"); }
         // The ten cleaned releases of attempt07 (capture and bank of the source, outcome cleaned): the release path runs
         // its own pair; the held path refuses them, so they never get a stand motion.
@@ -409,9 +442,11 @@ int main() {
             const auto q=run(R::DecideHeldRelease(cleaned,w),true,held);
             check(std::string(w)=="not-guards" && !q.stood && calls.empty(),"a cleaned release: no held call, no stand"); }
         p=run(true,true,held,false);
-        check(p.detached && !p.idled && !p.stood && order({"detach","rebuild","idle"}),"idle failed: no stand motion");
+        check(p.detached && !p.idled && !p.stood && std::string(p.standWhy)=="idle-failed" &&
+              order({"detach","rebuild","idle"}),"idle failed: no second rebuild, no stand motion");
         p=run(true,true,held,true,false);
-        check(p.idled && !p.stood && order({"detach","rebuild","idle","stand0"}),"a failed stand is reported, not retried");
+        check(p.idled && !p.stood && order({"detach","rebuild","idle","rebuild","stand0"}),
+              "a failed stand is reported, not retried");
         p=run(false,true,held);
         check(!p.detached && !p.idled && !p.stood && calls.empty(),"a refused release runs nothing");
         p=run(true,false,held);

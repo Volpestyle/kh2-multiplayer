@@ -471,17 +471,21 @@ inline bool HeldReleaseIdleAllowed(bool detached,const HeldReleaseFacts& fresh,c
     return DecideHeldRelease(fresh,why);
 }
 // The pair in order: detach; on success only, rebuild every fact (the only reads between the calls); idle only on that
-// fresh decision; then, only if idle returned, the own stand motion. Nothing reads the actor after idle.
+// fresh decision; then, only if idle returned, rebuild every fact again and stand only on that second decision.
+// Quill r1 on 62ce05f: idle (0x42D0E0 -> 0x3B4DA0) runs the old action's virtual exit before it enters action 0, and
+// the guards admission does not constrain that old action, so nothing decided before idle authorizes the stand.
+// Nothing reads the actor after the stand.
 // bots05 attempt07 (run 20261022-150823, friend frame 15074): the pair ran (detach=1 idle=1) on a guards release whose
 // actor stood in its own motion 262 (+18C 0x4002) and the friend stayed in 262 at one spot ~1170 frames while its pilot
 // drove, until a Thorn hit set a hit-reaction motion; it then moved normally. Idle switches the action only (ACTION_IDLE
 // enter/exit are empty), so the motion that holds the actor stays. The held release now also sets the actor's own
 // stand motion (kOwnIdleMotion, 0, the motion the freed friend stood in) through the ordinary own-bank motion set, in
-// the same admitted call as idle. A cleaned release never comes here.
+// its own fresh admission after idle. A cleaned release never comes here.
 constexpr std::uint32_t kOwnIdleMotion=0;  // MotionSet IDLE
 struct HeldPairResult {
     bool detached{},idled{},stood{};
     const char* idleWhy{"-"};
+    const char* standWhy{"-"};
 };
 template<class Detach,class Rebuild,class Idle,class Stand>
 HeldPairResult RunHeldPair(bool release,Detach&& detach,Rebuild&& rebuild,Idle&& idle,Stand&& stand) {
@@ -492,7 +496,10 @@ HeldPairResult RunHeldPair(bool release,Detach&& detach,Rebuild&& rebuild,Idle&&
     if(out.detached)fresh=rebuild();
     if(!HeldReleaseIdleAllowed(out.detached,fresh,out.idleWhy))return out;
     out.idled=idle();
-    if(out.idled)out.stood=stand(kOwnIdleMotion);
+    if(!out.idled){out.standWhy="idle-failed";return out;}
+    const HeldReleaseFacts after=rebuild();
+    if(!DecideHeldRelease(after,out.standWhy))return out;
+    out.stood=stand(kOwnIdleMotion);
     return out;
 }
 // Quill r1 on 06ff413: the receipt is minted from a readback of the install just made. The general own-bank
