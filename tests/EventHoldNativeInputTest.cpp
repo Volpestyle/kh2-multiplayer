@@ -56,6 +56,25 @@ int main(int argc,char** argv){
   auto cheld=cstep(8,1004);check(cheld.neutral&&!cheld.failed&&c.Holding(),"held in the combat pause");
   c.Wake();auto close=cstep(8,1005);check(close.start,"wake presses Start to close the combat pause");
   cstep(8,1006);cstep(255,1007);check(c.Current()==S::Phase::OwnerWait,"combat pause closed, waiting on owner");
+  // VUH-2640 F2: an expired lifetime's own open pause is closed with the hold's close sequence: Start, a
+  // neutral frame, then Circle/Start/Cross every UnwindStepMs, until the menu reads closed. Only the hold's
+  // own pause (owned, 8 or 10, still showing); another menu before the first press, or a pause still open
+  // after the last press, is left alone.
+  {using O=n::OrphanedPause;O o;
+   check(!o.Arm(false,10,10,1000)&&!o.Arm(true,7,7,1000)&&!o.Arm(true,10,255,1000)&&!o.Arm(true,10,8,1000)&&!o.Active(),
+         "orphaned pause: only the hold's own pause, still showing");
+   check(o.Arm(true,8,8,1000)&&o.Active(),"orphaned combat pause armed");
+   auto first=o.Tick(8,1000);check(first.neutral&&first.start&&!first.buttons,"first press: Start");
+   auto rel=o.Tick(8,1001);check(rel.neutral&&!rel.start&&!rel.buttons,"then a neutral frame");
+   auto wait=o.Tick(8,1002);check(wait.neutral&&!wait.start&&!wait.buttons,"held neutral until the next step");
+   auto second=o.Tick(8,1000+S::UnwindStepMs);check(second.buttons==S::CircleButton,"then Circle");
+   o.Tick(8,1001+S::UnwindStepMs);
+   auto third=o.Tick(8,1000+2*S::UnwindStepMs);check(third.start,"then Start");
+   auto closed=o.Tick(255,1001+2*S::UnwindStepMs);check(closed.done&&!closed.neutral&&!o.Active(),"menu closed: input returned");
+   O f;f.Arm(true,10,10,5);auto foreign=f.Tick(4,6);check(foreign.gaveUp&&!foreign.neutral&&!f.Active(),"a different menu first: left alone");
+   O s2;s2.Arm(true,10,10,5);std::uint64_t t=5;unsigned presses=0;bool gaveUp=false;
+   for(int i=0;i<1000&&s2.Active();++i){auto step2=s2.Tick(10,t);presses+=step2.start||step2.buttons;gaveUp=step2.gaveUp;t+=S::UnwindStepMs;}
+   check(gaveUp&&presses==S::UnwindPresses+1&&!s2.Active(),"a pause that never closes: bounded, then left alone");}
   // VUH-2537: a close the pause ignores unwinds with Circle, Cross, Start until the menu reads closed.
   // Simulated menu: `pages` modal pages that only Cross advances, then a submenu Circle leaves, then
   // the plain menu that Start closes.
@@ -209,6 +228,16 @@ int main(int argc,char** argv){
  }
  }
  if(mode=="normal") {
+   // VUH-2640 F2, the adapter: the hold's own pause (menu 10) is open when the lifetime expires. The raw
+   // callback closes it (Start), holds a neutral frame, and gives the input back once the menu reads closed;
+   // the abort stays HeartbeatExpired throughout.
+   menu=10;tick();tick();check(n::HoldingInput()&&buttons()==0,"the hold's own pause is open when the lifetime expires");
+   runtime.Invalidate(e::Abort::HeartbeatExpired);tick();
+   check(n::HoldingInput()&&buttons()==8&&runtime.Reason()==e::Abort::HeartbeatExpired,
+       "an expired lifetime's own open pause is closed with Start; the abort is untouched");
+   tick();check(n::HoldingInput()&&buttons()==0,"a neutral frame after the close press");
+   menu=255;tick();
+   check(!n::HoldingInput()&&buttons()==0x4d4d,"the pause closed: input returned to the player");
    runtime.Invalidate(e::Abort::HeartbeatExpired);tick();
    check(!n::HoldingInput()&&runtime.Reason()==e::Abort::HeartbeatExpired,"expired lifetime remains terminal");
    auto resumed=scope;++resumed.generation;++resumed.selfConnection;

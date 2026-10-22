@@ -1235,8 +1235,10 @@ static void Tick(uintptr_t head) {
             g_down.outagePending = false;          // a lethal hit downed it meanwhile: that downing sits out
             g_down.outage = true;
         }
+        uint8_t outageMenu = 0;
         const bool ready = g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.objentry &&
-            s.hp > 0 && s.maxHp > 0 && !(s.flags & 4U) && s.task == 0 && !warp::TransitionPending() && LogicalScope(s.objentry);
+            s.hp > 0 && s.maxHp > 0 && !(s.flags & 4U) && s.task == 0 && !warp::TransitionPending() && LogicalScope(s.objentry) &&
+            ReadHitTrace(g_exeBase + offsets::OPEN_MENU, outageMenu) && outageMenu == 0xFF; // after F2 closed the pause
         switch (downedreturn::OutageStartStep(g_down.outagePending, s.room == g_down.outageRoom, expired, ready)) {
         case downedreturn::OutageStart::Begin:
             g_down.outagePending = false;

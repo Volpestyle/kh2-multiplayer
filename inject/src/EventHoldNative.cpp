@@ -17,6 +17,7 @@ std::atomic_flag inputEntry = ATOMIC_FLAG_INIT;
 uintptr_t base = 0;
 LogFn log = nullptr;
 InputState input;
+OrphanedPause orphan; // VUH-2640 F2: an expired lifetime's own open pause, being closed
 eventhold::Scope inputScope {}, ownerScope {};
 eventhold::Command release {};
 std::array<eventhold::Command, 32> consumed {};
@@ -155,6 +156,7 @@ bool BeginRecoveredLifetime(const eventhold::Scope& scope, std::uint32_t epoch) 
     }
     channel.Swap(next);
     input = InputState {};
+    orphan = {};
     inputScope = {}; ownerScope = scope; release = {};
     consumedCount = 0; ownerOrdinal = 0;
     loggedOrdinal = 0; loggedFlags = UINT32_MAX;
@@ -293,12 +295,36 @@ bool ApplyInput(void* inputStruct) {
         ack.processedOrdinal == release.ordinal && ack.processedHostSourceSerial == release.hostSourceSerial &&
         ack.epoch == release.epoch && ack.flags == (eventhold::SafeConverged | eventhold::LiveEligible);
     native.value.healthy = !ConsumeInputRejection() && Enabled() && channel.Healthy(GetTickCount64());
+    const bool ownedOpen = input.OwnedPauseOpen();
+    const unsigned pauseMenu = input.PauseMenu();
     auto output = input.Tick(native.value);
     const auto buttons = static_cast<std::uint16_t>(output.buttons | (output.start ? InputState::StartButton : 0));
     if (output.neutral && (ConsumeInputRejection() || !channel.Healthy(GetTickCount64()) || !Enabled() || !Overlay(inputStruct, buttons))) {
         channel.Invalidate(eventhold::Abort::Unsupported); input.Fail(); output.failed = true;
     }
-    inputHeld.store(input.Holding(), std::memory_order_release);
+    // VUH-2640 F2: the lifetime expired while this hold's own pause was open. Close it with the hold's close
+    // sequence, reading only the native menu; the expired lifetime itself is never cleared or rebound.
+    bool orphanNeutral = false;
+    if (output.failed && ownedOpen && channel.Reason() == eventhold::Abort::HeartbeatExpired &&
+        orphan.Arm(true, pauseMenu, native.value.menu, native.value.now) && log)
+        log("[event-control] lifetime expired with its own pause open (menu %u): closing it; the lifetime stays expired",
+            pauseMenu);
+    if (orphan.Active() && !output.neutral) {
+        const auto o = orphan.Tick(native.value.menu, native.value.now);
+        const auto pressed = static_cast<std::uint16_t>(o.buttons | (o.start ? InputState::StartButton : 0));
+        if (o.neutral && (!Enabled() || !Overlay(inputStruct, pressed))) {
+            orphan = {};
+            if (log) log("[event-control] orphaned pause close stopped: input overlay unavailable");
+        } else {
+            orphanNeutral = o.neutral;
+            if (pressed && log) log("[event-control] orphaned pause close press=%04X menu=%u presses=%u", pressed,
+                native.value.menu, orphan.Presses());
+            if (o.done && log) log("[event-control] orphaned pause closed; input returned to the player");
+            if (o.gaveUp && log) log("[event-control] orphaned pause left open: menu %u is not the hold's own or did not close",
+                native.value.menu);
+        }
+    }
+    inputHeld.store(input.Holding() || orphan.Active(), std::memory_order_release);
     // VUH-2537: say why, once: the player has the input back and the next hold and room follow once
     // the menu is closed.
     if (output.stuck && log)
@@ -313,6 +339,6 @@ bool ApplyInput(void* inputStruct) {
             static_cast<unsigned>(input.Current()), native.value.menu, output.neutral ? 1u : 0u, output.start ? 1u : 0u,
             output.failed ? 1u : 0u, output.released ? 1u : 0u, static_cast<unsigned long long>(release.ordinal),
             GetCurrentThreadId(), static_cast<unsigned long>(channel.Reason()), buttons, input.Unwound());
-    return wasHeld || output.neutral || output.released;
+    return wasHeld || output.neutral || output.released || orphanNeutral;
 }
 } // namespace kh2coop::inject::eventholdnative

@@ -336,6 +336,9 @@ boss/encounter defeat or a save point.
   down yet, the downing begins on its first settled frame in that room (after an intro event); a room
   change or a recovered lifetime first drops it. VUH-2628's recovery Bootstrap load in the host's next
   eligible room ends it, and it resolves at 25% there (`outage`), D17's return after the boss.
+  If the expiry left the event hold's own pause open (menu 8 or 10), the input collector first closes it
+  with the hold's close sequence (`[event-control] lifetime expired with its own pause open ...`), reading
+  only the native menu; the downing waits for the menu to be closed.
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
   `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`.
