@@ -47,9 +47,12 @@
 // atomic uint64 connection IDs: the connection each slot's quarantine (a
 // rejoined seat waiting for its recovery to converge) applies to, zero for
 // none. A reader counts a slot as returning only when that ID equals the
-// slot's current roster ID, so a newer connection never inherits it. Bytes
-// [152,156) hold the PID of a runtime whose networking stopped for good
-// (ClientRecovery Terminal); it counts only while that PID is the writer's.
+// slot's current roster ID, so a newer connection never inherits it.
+// Bytes [168,176) hold the writer's incarnation (its process creation time),
+// published before its PID on every pulse, so a recycled PID is another
+// writer. Bytes [152,168) hold a terminal receipt (ClientRecovery Terminal:
+// networking stopped for good): PID32 | generation32 << 32, then the
+// incarnation. It counts only while all three are the current writer's.
 // v12 kept spare control-word bits that old setters preserve: no reuse.
 // ============================================================================
 
@@ -121,7 +124,8 @@ public:
             SetPeerDeliverySerials({});
             SetSpawnPickSalt(0);
             SetReturningConnections({});
-            InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 152), 0);
+            ClearNetworkTerminal();
+            InterlockedExchange64(reinterpret_cast<volatile LONG64*>(view_ + 168), 0);
             *reinterpret_cast<volatile LONG*>(view_ + 88) = 0;
             std::atomic_thread_fence(std::memory_order_release);
             header[0] = WORLD_BRIDGE_MAGIC;
@@ -174,23 +178,45 @@ public:
     bool ReceiveFromRuntime(std::vector<std::uint8_t>& packet) { return toDll_.pop(packet); }
 
     // Runtime alone renews this lease, on the same pump that publishes world work.
-    void PulseRuntimeWriter() {
+    void PulseRuntimeWriter() { PulseRuntimeWriter(SelfIncarnation()); }
+    // The incarnation is explicit only for tests standing in for another writer.
+    void PulseRuntimeWriter(std::uint64_t incarnation) {
         if (!view_) return;
         // Publish replacement identity before freshness: an old binding must
-        // never receive the new writer's heartbeat before seeing its new PID.
+        // never receive the new writer's heartbeat before seeing its new PID
+        // (and, VUH-2640, its incarnation: the PID may be a recycled one).
+        InterlockedExchange64(reinterpret_cast<volatile LONG64*>(view_ + 168), static_cast<LONG64>(incarnation));
         InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 116), static_cast<LONG>(GetCurrentProcessId()));
         InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 52), static_cast<LONG>(GetTickCount()));
     }
-    struct WriterView { std::uint32_t pid = 0, heartbeat = 0, generation = 0; bool valid = false; };
+    struct WriterView {
+        std::uint32_t pid = 0, heartbeat = 0, generation = 0;
+        bool valid = false;
+        std::uint64_t incarnation = 0;
+    };
     [[nodiscard]] WriterView RuntimeWriter() const {
         if (!view_) return {};
         const auto generation = SessionGeneration();
+        auto* incarnation = reinterpret_cast<volatile LONG64*>(view_ + 168);
         auto* pid = reinterpret_cast<volatile LONG*>(view_ + 116);
+        const auto first = static_cast<std::uint64_t>(InterlockedCompareExchange64(incarnation, 0, 0));
         const auto before = static_cast<std::uint32_t>(InterlockedCompareExchange(pid, 0, 0));
         const auto heartbeat = static_cast<std::uint32_t>(InterlockedCompareExchange(
             reinterpret_cast<volatile LONG*>(view_ + 52), 0, 0));
         const auto after = static_cast<std::uint32_t>(InterlockedCompareExchange(pid, 0, 0));
-        return before == after && SessionGeneration() == generation ? WriterView {after, heartbeat, generation, true} : WriterView {};
+        const auto last = static_cast<std::uint64_t>(InterlockedCompareExchange64(incarnation, 0, 0));
+        return before == after && first == last && SessionGeneration() == generation
+            ? WriterView {after, heartbeat, generation, true, last} : WriterView {};
+    }
+    // This process's creation time: with its PID, one writer lifetime.
+    static std::uint64_t SelfIncarnation() {
+        static const std::uint64_t self = [] {
+            FILETIME created {}, exited {}, kernel {}, user {};
+            if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return std::uint64_t {1};
+            const auto value = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+            return value ? value : std::uint64_t {1};
+        }();
+        return self;
     }
 
     // Runtime side
@@ -293,16 +319,40 @@ public:
         return ids;
     }
     // VUH-2640 (v13): this runtime's networking stopped for good (ClientRecovery Terminal: no rejoin will
-    // follow). Positive evidence that the session ended; it counts only while this PID is the writer's.
-    void PublishNetworkTerminal() {
+    // follow). Positive evidence that the session ended, as a receipt of this writer's PID, incarnation and
+    // current generation; the runtime re-stamps it each tick while Terminal (a later generation is another
+    // binding until then). A new writer clears it before its first pulse.
+    void ClearNetworkTerminal() {
         if (!view_) return;
-        InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 152), static_cast<LONG>(GetCurrentProcessId()));
+        InterlockedExchange64(reinterpret_cast<volatile LONG64*>(view_ + 152), 0);
+    }
+    void PublishNetworkTerminal() { PublishNetworkTerminal(SelfIncarnation()); }
+    void PublishNetworkTerminal(std::uint64_t incarnation) {
+        if (!view_) return;
+        auto* receipt = reinterpret_cast<volatile LONG64*>(view_ + 152);
+        auto* receiptIncarnation = reinterpret_cast<volatile LONG64*>(view_ + 160);
+        const auto packed = static_cast<std::uint64_t>(GetCurrentProcessId()) |
+                            (static_cast<std::uint64_t>(SessionGeneration()) << 32);
+        if (static_cast<std::uint64_t>(InterlockedCompareExchange64(receipt, 0, 0)) == packed &&
+            static_cast<std::uint64_t>(InterlockedCompareExchange64(receiptIncarnation, 0, 0)) == incarnation) return;
+        InterlockedExchange64(receipt, 0); // invalid while the incarnation changes
+        InterlockedExchange64(receiptIncarnation, static_cast<LONG64>(incarnation));
+        InterlockedExchange64(receipt, static_cast<LONG64>(packed));
     }
     [[nodiscard]] bool NetworkTerminal() const {
         if (!view_) return false;
-        const auto pid = static_cast<std::uint32_t>(InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 152), 0, 0));
         const auto writer = RuntimeWriter();
-        return pid && writer.valid && writer.pid == pid;
+        if (!writer.valid || !writer.pid || !writer.incarnation) return false;
+        auto* receipt = reinterpret_cast<volatile LONG64*>(view_ + 152);
+        const auto first = static_cast<std::uint64_t>(InterlockedCompareExchange64(receipt, 0, 0));
+        const auto incarnation = static_cast<std::uint64_t>(InterlockedCompareExchange64(
+            reinterpret_cast<volatile LONG64*>(view_ + 160), 0, 0));
+        const auto last = static_cast<std::uint64_t>(InterlockedCompareExchange64(receipt, 0, 0));
+        const auto after = RuntimeWriter();
+        return first && first == last && after.valid && after.pid == writer.pid &&
+               after.incarnation == writer.incarnation && after.generation == writer.generation &&
+               static_cast<std::uint32_t>(first) == writer.pid &&
+               static_cast<std::uint32_t>(first >> 32) == writer.generation && incarnation == writer.incarnation;
     }
     [[nodiscard]] bool GetFriendlyFire() const {
         if (!view_) return true;

@@ -346,8 +346,9 @@ boss/encounter defeat or a save point.
   the hold saw: a recovery Bootstrap load completed since the expiry (warp attributes it to the host's
   resync Bootstrap; it may replace actor and room, land in the same room, or complete after the actor was
   already gone) resolves it at 25%, D17's return after the boss (`outage`); this seat's runtime stopping
-  networking for good (ClientRecovery Terminal, published on the world bridge with its PID) resolves it
-  solo. An unavailable, expired or retired runtime writer lease is neither, and the friend keeps sitting
+  networking for good (ClientRecovery Terminal, a world-bridge receipt of that runtime's PID, process
+  incarnation and current generation; a later runtime, even one with a recycled PID, never inherits it)
+  resolves it solo. An unavailable, expired or retired runtime writer lease is neither, and the friend keeps sitting
   out.
   If the expiry left the event hold's own pause open (menu 8 or 10), an owner service on the game thread
   (run from the input collector, which keeps running while those menus are open) closes it with the hold's

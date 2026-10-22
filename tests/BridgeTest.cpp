@@ -140,24 +140,48 @@ void testVersion11Layout() {
     check(consumer.ReturningConnections()[1] == 0xFEDCBA9876543211ULL,
           "control-word setters never touch the returning connections");
     producer.SetFriendlyFire(true); producer.SetLocalSlot(WORLD_SLOT_UNKNOWN); producer.SetReturningConnections({});
-    producer.PublishNetworkTerminal();
+    check(writer.incarnation == WorldBridge::SelfIncarnation() && writer.incarnation != 0,
+          "the writer view carries the writer's incarnation (its creation time)");
+    // Quill r3: the terminal receipt is the writer's lifetime and generation, not just its PID.
+    constexpr std::uint64_t incarnationA = 0x01DC0000AAAA0001ULL, incarnationB = 0x01DC0000BBBB0002ULL;
+    producer.PulseRuntimeWriter(incarnationA);
+    check(!consumer.NetworkTerminal(), "no receipt: no evidence");
+    producer.PublishNetworkTerminal(incarnationA);
     check(consumer.NetworkTerminal(), "the writer's own terminal networking is positive evidence");
+    // Runtime A exits with its receipt in the mapping; runtime B gets the same (recycled) PID.
+    producer.PulseRuntimeWriter(incarnationB);
+    check(consumer.RuntimeWriter().pid == GetCurrentProcessId() && !consumer.NetworkTerminal(),
+          "a replacement writer with the same PID does not inherit the old terminal receipt");
+    (void)producer.AdvanceSessionGeneration();
+    check(!consumer.NetworkTerminal(), "nor after it binds a new generation");
+    producer.PublishNetworkTerminal(incarnationB);
+    check(consumer.NetworkTerminal(), "until it publishes its own Terminal");
+    (void)producer.AdvanceSessionGeneration();
+    check(!consumer.NetworkTerminal(), "a receipt from an older generation counts for nothing until re-stamped");
+    producer.PublishNetworkTerminal(incarnationB);
+    check(consumer.NetworkTerminal(), "re-stamped under the current generation");
+    producer.ClearNetworkTerminal();
+    check(!consumer.NetworkTerminal(), "a new writer's clear retires it");
     {
-        // Another runtime takes over as the writer: the old terminal PID no longer counts.
+        // A receipt being replaced (zeroed first) never reads as current; a torn receipt never matches.
         const auto name = std::string(WORLD_BRIDGE_PREFIX) + std::to_string(pid);
         HANDLE h = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
         auto* v = h ? static_cast<std::uint8_t*>(MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, 0)) : nullptr;
         if (v) {
-            const auto writerPid = InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(v + 116), 0, 0);
-            InterlockedExchange(reinterpret_cast<volatile LONG*>(v + 116), writerPid + 4);
-            check(!consumer.NetworkTerminal(), "a terminal PID that is not the current writer's is no evidence");
-            InterlockedExchange(reinterpret_cast<volatile LONG*>(v + 116), writerPid);
-            InterlockedExchange(reinterpret_cast<volatile LONG*>(v + 152), 0);
-            check(!consumer.NetworkTerminal(), "no terminal PID: no evidence");
+            producer.PublishNetworkTerminal(incarnationB);
+            const auto packed = InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(v + 152), 0, 0);
+            InterlockedExchange64(reinterpret_cast<volatile LONG64*>(v + 160), static_cast<LONG64>(incarnationA));
+            check(!consumer.NetworkTerminal(), "the receipt's incarnation must be the writer's");
+            InterlockedExchange64(reinterpret_cast<volatile LONG64*>(v + 160), static_cast<LONG64>(incarnationB));
+            InterlockedExchange64(reinterpret_cast<volatile LONG64*>(v + 152), packed + 4);
+            check(!consumer.NetworkTerminal(), "the receipt's PID must be the writer's");
+            InterlockedExchange64(reinterpret_cast<volatile LONG64*>(v + 152), 0);
+            check(!consumer.NetworkTerminal(), "a receipt mid-replacement is no evidence");
             UnmapViewOfFile(v);
-        } else check(false, "test opens its own mapping for the terminal writer");
+        } else check(false, "test opens its own mapping for the terminal receipt");
         if (h) CloseHandle(h);
     }
+    producer.PulseRuntimeWriter();
     {
         // An existing mapping of another layout (a v12 runtime's, its spare control bits possibly set) is refused.
         const DWORD oldPid = 0x7FEE0000u + (GetCurrentProcessId() & 0xFFFFu); // a range no other test uses

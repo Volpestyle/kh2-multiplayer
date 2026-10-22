@@ -102,7 +102,8 @@ and native combat metadata before one byte-verified TakeDamage attempt, then
 recaptures the census before HP/death publication. WorldBridge v13 carries atomic
 roster/delivery floors, explicit puppet authority, captured producer context, a
 separate bounded CAS operator mailbox, and (VUH-2640) the host's returning seats by
-connection ID and a terminal-networking writer PID in a 192-byte header. Protocol history: v9 retained v3 claims and v4 connection-tagged avatar relays;
+connection ID, the writer's incarnation and a terminal-networking receipt bound to
+it in a 192-byte header. Protocol history: v9 retained v3 claims and v4 connection-tagged avatar relays;
 AvatarBridge v2 introduced pose provenance. Current bridge v4 retains DLL
 owner checks even for an unchanged cached pose.
 V5 also requires opaque world-incarnation identity and typed closure semantics.

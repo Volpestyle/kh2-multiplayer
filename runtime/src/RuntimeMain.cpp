@@ -2169,18 +2169,19 @@ int main(int argc, char* argv[]) {
 #endif
             if (recovery.state() != lastRecoveryState) {
                 lastRecoveryState = recovery.state();
-                if (lastRecoveryState == kh2coop::ClientRecovery::State::Terminal) {
+                if (lastRecoveryState == kh2coop::ClientRecovery::State::Terminal)
                     std::cerr << "[Runtime] Networking stopped: " << recovery.terminalReason() << "\n";
-#ifdef _WIN32
-                    worldBridge.PublishNetworkTerminal(); // VUH-2640: Terminal never rejoins
-#endif
-                }
                 else if (lastRecoveryState == kh2coop::ClientRecovery::State::RetryWait)
                     std::cout << "[Runtime] Rejoin waiting; world authority unavailable\n";
                 else if (lastRecoveryState == kh2coop::ClientRecovery::State::Admitted)
                     std::cout << "[Runtime] Verified membership; native bootstrap remains separate\n";
                 observeIdentity("recovery-state");
             }
+#ifdef _WIN32
+            // VUH-2640: Terminal never rejoins. Its receipt names this writer and the current generation,
+            // re-stamped each tick so a later retirement's generation still carries it.
+            if (recovery.state() == kh2coop::ClientRecovery::State::Terminal) worldBridge.PublishNetworkTerminal();
+#endif
         }
 
         // Collection filesystem/capture work runs on one owned worker. Poll
@@ -2264,6 +2265,7 @@ int main(int argc, char* argv[]) {
             }
             if (!worldBridge.IsOpen()) {
                 if (worldBridge.Open(static_cast<DWORD>(game.ProcessId()))) {
+                    worldBridge.ClearNetworkTerminal(); // VUH-2640: a new writer starts with no terminal receipt
                     worldBridge.PulseRuntimeWriter();
                     const auto priorGeneration = worldSessionGeneration;
                     worldBridge.SetPuppetAuthorityMode(kh2coop::PuppetAuthorityMode::Unavailable);
