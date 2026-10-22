@@ -239,7 +239,7 @@
       "seconds": 30,
       "as": "thorn_00",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       }
     },
@@ -257,7 +257,7 @@
       "seconds": 30,
       "as": "thorn_01",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -286,7 +286,7 @@
       "seconds": 30,
       "as": "thorn_02",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -315,7 +315,7 @@
       "seconds": 30,
       "as": "thorn_03",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -344,7 +344,7 @@
       "seconds": 30,
       "as": "thorn_04",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -373,7 +373,7 @@
       "seconds": 30,
       "as": "thorn_05",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -402,7 +402,7 @@
       "seconds": 30,
       "as": "thorn_06",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -431,7 +431,7 @@
       "seconds": 30,
       "as": "thorn_07",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -460,7 +460,7 @@
       "seconds": 30,
       "as": "thorn_08",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -489,7 +489,7 @@
       "seconds": 30,
       "as": "thorn_09",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -518,7 +518,7 @@
       "seconds": 30,
       "as": "thorn_10",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -547,7 +547,7 @@
       "seconds": 30,
       "as": "thorn_11",
       "sample": {
-        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)]",
         "everyMs": 1000
       },
       "clips": [
@@ -596,7 +596,7 @@
     {
       "do": "save",
       "as": "thorn_final",
-      "expr": "{'seats':[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)],'host_rc':log_matches(r'(?P<line>\\[script-rc\\] (?:offer|complete) [^\\n]*)',0),'friend_rc':log_matches(r'(?P<line>\\[script-rc\\] [^\\n]*)',1),'host_mission':log_matches(r'(?P<line>\\[mission-mirror\\] host end [^\\n]*)',0),'friend_mission':log_matches(r'(?P<line>\\[mission-mirror\\] client [^\\n]*end[^\\n]*)',1),'events':[[m['line'] for m in log_matches(r'(?P<line>\\[event-mirror\\] [^\\n]*)',i)] for i in (0,1)]}"
+      "expr": "{'seats':[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i),'potion':peek('0x9ACE31','u8',i)} for i in (0,1)],'host_rc':log_matches(r'(?P<line>\\[script-rc\\] (?:offer|complete) [^\\n]*)',0),'friend_rc':log_matches(r'(?P<line>\\[script-rc\\] [^\\n]*)',1),'host_mission':log_matches(r'(?P<line>\\[mission-mirror\\] host end [^\\n]*)',0),'friend_mission':log_matches(r'(?P<line>\\[mission-mirror\\] client [^\\n]*end[^\\n]*)',1),'events':[[m['line'] for m in log_matches(r'(?P<line>\\[event-mirror\\] [^\\n]*)',i)] for i in (0,1)]}"
     },
     {
       "do": "assert",
