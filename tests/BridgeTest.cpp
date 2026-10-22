@@ -20,6 +20,9 @@
 #include <enet/enet.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <cstring>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -284,6 +287,211 @@ void testVersion11Layout() {
           "actual bridge decoder preserves captured widths without reading replacement header values");
 }
 
+// VUH-2640 (Quill r4): the real terminal reader (WorldBridge::ReadTerminal) against every placement of a
+// writer's recorded stores between its loads. The stores come from the real WritePulse / WriteTerminal; a
+// generation advance is one store, as its interlocked increment is. Truth: the current writer (it becomes
+// current at its incarnation store) has a committed receipt for the current generation, with a known
+// incarnation. Any acceptance must have been true at some instant within the read.
+namespace terminalcuts {
+struct Op { std::size_t at; unsigned size; std::uint64_t value; };
+struct Plain {
+    std::uint8_t* bytes;
+    std::uint32_t Load32(std::size_t at) const { std::uint32_t v; std::memcpy(&v, bytes + at, 4); return v; }
+    std::uint64_t Load64(std::size_t at) const { std::uint64_t v; std::memcpy(&v, bytes + at, 8); return v; }
+    void Store32(std::size_t at, std::uint32_t v) const { std::memcpy(bytes + at, &v, 4); }
+    void Store64(std::size_t at, std::uint64_t v) const { std::memcpy(bytes + at, &v, 8); }
+};
+struct Recorder {
+    Plain mem;
+    std::vector<Op>* ops;
+    std::uint32_t Load32(std::size_t at) const { return mem.Load32(at); }
+    std::uint64_t Load64(std::size_t at) const { return mem.Load64(at); }
+    void Store32(std::size_t at, std::uint32_t v) const { mem.Store32(at, v); if (ops) ops->push_back({at, 4, v}); }
+    void Store64(std::size_t at, std::uint64_t v) const { mem.Store64(at, v); if (ops) ops->push_back({at, 8, v}); }
+};
+void Apply(std::uint8_t* bytes, const Op& op) {
+    if (op.size == 4) Plain {bytes}.Store32(op.at, static_cast<std::uint32_t>(op.value)); else Plain {bytes}.Store64(op.at, op.value);
+}
+// The reader's loads, each preceded by the stores the schedule places before it.
+struct Scheduled {
+    std::uint8_t* bytes;
+    const std::vector<Op>* ops;
+    const std::vector<unsigned>* cut;
+    mutable std::size_t loads = 0, applied = 0;
+    void Advance() const {
+        const unsigned target = loads < cut->size() ? (*cut)[loads] : cut->back();
+        while (applied < target) Apply(bytes, (*ops)[applied++]);
+        ++loads;
+    }
+    std::uint32_t Load32(std::size_t at) const { Advance(); return Plain {bytes}.Load32(at); }
+    std::uint64_t Load64(std::size_t at) const { Advance(); return Plain {bytes}.Load64(at); }
+    void Store32(std::size_t, std::uint32_t) const { std::abort(); } // the reader never stores
+    void Store64(std::size_t, std::uint64_t) const { std::abort(); }
+};
+// truth[k]: after the first k stores.
+std::vector<bool> Truth(const std::array<std::uint8_t, 192>& initial, const std::vector<Op>& ops) {
+    auto bytes = initial;
+    const Plain m {bytes.data()};
+    std::uint32_t writerPid = m.Load32(WorldBridge::kWriterPidAt);
+    std::uint64_t writerIncarnation = m.Load64(WorldBridge::kWriterIncarnationAt);
+    bool receipt = m.Load64(WorldBridge::kTerminalAt) != 0;
+    std::uint64_t word = m.Load64(WorldBridge::kTerminalAt), receiptIncarnation = m.Load64(WorldBridge::kTerminalIncarnationAt);
+    const auto now = [&] {
+        return receipt && receiptIncarnation && static_cast<std::uint32_t>(word) == writerPid &&
+               receiptIncarnation == writerIncarnation &&
+               static_cast<std::uint32_t>(word >> 32) == m.Load32(WorldBridge::kGenerationAt);
+    };
+    std::vector<bool> truth {now()};
+    for (std::size_t j = 0; j < ops.size(); ++j) {
+        Apply(bytes.data(), ops[j]);
+        if (ops[j].at == WorldBridge::kWriterIncarnationAt) {
+            writerIncarnation = ops[j].value; // a new writer is current from its incarnation store
+            for (std::size_t k = j + 1; k < ops.size(); ++k)
+                if (ops[k].at == WorldBridge::kWriterPidAt) { writerPid = static_cast<std::uint32_t>(ops[k].value); break; }
+        } else if (ops[j].at == WorldBridge::kWriterPidAt) {
+            writerPid = static_cast<std::uint32_t>(ops[j].value);
+        } else if (ops[j].at == WorldBridge::kTerminalAt) {
+            receipt = ops[j].value != 0;
+            word = ops[j].value;
+            receiptIncarnation = m.Load64(WorldBridge::kTerminalIncarnationAt);
+        }
+        truth.push_back(now());
+    }
+    return truth;
+}
+struct Result { std::uint64_t schedules = 0, accepted = 0, violations = 0; bool atStart = false, atEnd = false; };
+Result Explore(const std::array<std::uint8_t, 192>& initial, const std::vector<Op>& ops) {
+    constexpr std::size_t kMaxLoads = 17; // two writer views (7 loads each) around the receipt (3)
+    const auto truth = Truth(initial, ops);
+    const auto n = static_cast<unsigned>(ops.size());
+    Result r;
+    std::vector<unsigned> cut(kMaxLoads, 0);
+    for (;;) {
+        auto bytes = initial;
+        const Scheduled s {bytes.data(), &ops, &cut};
+        const bool accepted = WorldBridge::ReadTerminal(s);
+        if (s.loads > kMaxLoads) std::abort();
+        ++r.schedules;
+        if (accepted) {
+            ++r.accepted;
+            bool justified = false;
+            for (unsigned k = cut[0]; k <= cut[s.loads - 1]; ++k) justified = justified || truth[k];
+            if (!justified) ++r.violations;
+        }
+        if (cut.front() == 0 && cut.back() == 0) r.atStart = accepted;
+        if (cut.front() == n) { r.atEnd = accepted; break; }
+        std::size_t i = kMaxLoads;
+        while (i > 0 && cut[i - 1] == n) --i;
+        const unsigned next = cut[i - 1] + 1;
+        for (std::size_t j = i - 1; j < kMaxLoads; ++j) cut[j] = next;
+    }
+    return r;
+}
+} // namespace terminalcuts
+
+void testTerminalInterleavings() {
+    using namespace terminalcuts;
+    using WB = WorldBridge;
+    // Unknown incarnation (Quill r4): a failed read and a zero creation time are both unknown (0), never 1.
+    FILETIME zero {}, created {};
+    created.dwHighDateTime = 0x01DC; created.dwLowDateTime = 0xAAAA0001;
+    check(WB::IncarnationFrom(false, created) == 0 && WB::IncarnationFrom(true, zero) == 0 &&
+          WB::IncarnationFrom(true, created) == 0x000001DCAAAA0001ULL,
+          "a failed or zero process creation time is an unknown incarnation (0)");
+    constexpr std::uint32_t X = 0x1234, Y = 0x5678, G = 7;
+    constexpr std::uint64_t A = 0x01DC0000AAAA0001ULL, B = 0x01DC0000BBBB0002ULL, C = 0x01DC0000CCCC0003ULL;
+    using Mem = std::array<std::uint8_t, 192>;
+    const auto start = [&](std::uint64_t incarnation, bool published) {
+        return [=](const Recorder& m) {
+            m.Store32(WB::kGenerationAt, G);
+            WB::WritePulse(m, X, 100, incarnation);
+            if (published) WB::WriteTerminal(m, X, incarnation);
+        };
+    };
+    const auto advance = [](const Recorder& m) { m.Store32(WB::kGenerationAt, m.Load32(WB::kGenerationAt) + 1); };
+    const auto clear = [](const Recorder& m) { m.Store64(WB::kTerminalAt, 0); };
+    // Two writers at once (the old runtime still publishing while its replacement pulses): each one's stores
+    // recorded from the real functions, then merged in the given order ('a' or 'b' per store).
+    const auto merged = [](std::function<void(const Recorder&)> a, std::function<void(const Recorder&)> b, const char* order) {
+        return [=](const Recorder& m) {
+            Mem ca {}, cb {};
+            std::memcpy(ca.data(), m.mem.bytes, ca.size());
+            std::memcpy(cb.data(), m.mem.bytes, cb.size());
+            std::vector<Op> oa, ob;
+            a(Recorder {Plain {ca.data()}, &oa});
+            b(Recorder {Plain {cb.data()}, &ob});
+            std::size_t ia = 0, ib = 0;
+            for (const char* o = order; *o; ++o) {
+                const Op& op = *o == 'a' ? oa.at(ia++) : ob.at(ib++);
+                if (op.size == 4) m.Store32(op.at, static_cast<std::uint32_t>(op.value)); else m.Store64(op.at, op.value);
+            }
+            if (ia != oa.size() || ib != ob.size()) std::abort();
+        };
+    };
+    struct Case {
+        const char* name;
+        std::function<void(const Recorder&)> init, writer;
+        bool atStart, atEnd;
+    };
+    const auto pulseB = [&](std::uint32_t pid) { return [=](const Recorder& m) { WB::WritePulse(m, pid, 101, B); }; };
+    const auto publishA = [&](const Recorder& m) { WB::WriteTerminal(m, X, A); };
+    const std::vector<Case> cases {
+        {"same key, new incarnation: A's receipt -> 0 -> the same PID/generation word as B's", start(A, true),
+         [&](const Recorder& m) { WB::WritePulse(m, X, 101, B); WB::WriteTerminal(m, X, B); }, true, true},
+        {"same PID replacement that never publishes", start(A, true),
+         [&](const Recorder& m) { WB::WritePulse(m, X, 101, B); }, true, false},
+        {"inner replacement: B clears, pulses with the same PID, binds a new generation", start(A, true),
+         [&](const Recorder& m) { clear(m); WB::WritePulse(m, X, 101, B); advance(m); }, true, false},
+        {"outer replacement: B, then C with the same PID; C publishes", start(A, true),
+         [&](const Recorder& m) { WB::WritePulse(m, X, 101, B); clear(m); WB::WritePulse(m, X, 102, C); WB::WriteTerminal(m, X, C); }, true, true},
+        {"replacement with another PID", start(A, true),
+         [&](const Recorder& m) { clear(m); WB::WritePulse(m, Y, 101, B); advance(m); }, true, false},
+        {"A's later generation, re-stamped", start(A, true),
+         [&](const Recorder& m) { advance(m); WB::WriteTerminal(m, X, A); }, true, true},
+        {"A's later generation, not re-stamped", start(A, true), advance, true, false},
+        {"the old writer publishes after its replacement (another PID) pulsed", start(A, false),
+         merged(publishA, pulseB(Y), "bbbaaa"), false, false},
+        {"the old writer's publish interleaved with its replacement's pulse", start(A, false),
+         merged(publishA, pulseB(Y), "bababa"), false, false},
+        {"the old writer commits between its replacement's incarnation and PID", start(A, false),
+         merged(publishA, pulseB(Y), "aababb"), false, false},
+        {"an unknown-incarnation writer (same PID) publishing: it retires the receipt instead", start(A, true),
+         [&](const Recorder& m) { WB::WritePulse(m, X, 101, 0); WB::WriteTerminal(m, X, 0); }, true, false},
+        {"unknown from the start", start(0, true),
+         [&](const Recorder& m) { WB::WritePulse(m, X, 101, 0); WB::WriteTerminal(m, X, 0); }, false, false},
+        // The reader's own guard, without the writer's: a receipt naming an unknown incarnation (as written
+        // by a writer that did publish one) is still no evidence.
+        {"a receipt of an unknown incarnation, however it was written",
+         [&](const Recorder& m) {
+             m.Store32(WB::kGenerationAt, G);
+             WB::WritePulse(m, X, 100, 0);
+             m.Store64(WB::kTerminalIncarnationAt, 0);
+             m.Store64(WB::kTerminalAt, static_cast<std::uint64_t>(X) | (static_cast<std::uint64_t>(G) << 32));
+         },
+         [&](const Recorder& m) { WB::WritePulse(m, X, 101, 0); }, false, false},
+    };
+    for (const auto& c : cases) {
+        Mem initial {};
+        c.init(Recorder {Plain {initial.data()}, nullptr});
+        std::vector<Op> ops;
+        auto scratch = initial;
+        c.writer(Recorder {Plain {scratch.data()}, &ops});
+        const auto r = Explore(initial, ops);
+        const bool ok = r.violations == 0 && r.atEnd == c.atEnd && r.atStart == c.atStart;
+        check(ok, std::string("every interleaving (") + std::to_string(r.schedules) + " schedules, " +
+                  std::to_string(r.accepted) + " accepted, " + std::to_string(r.violations) + " unjustified): " + c.name);
+    }
+    // The writer's own guard, without the reader's: an unknown incarnation publishes nothing, and retires a
+    // receipt that was there.
+    {
+        Mem bytes {};
+        const Recorder m {Plain {bytes.data()}, nullptr};
+        start(A, true)(m);
+        WB::WriteTerminal(m, X, 0);
+        check(m.Load64(WB::kTerminalAt) == 0, "an unknown incarnation writes no receipt and retires the old one");
+    }
+}
+
 void testWorldInbox() {
     std::cout << "\n=== Deferred world delivery ===\n";
     WorldBridge runtime, dll;
@@ -506,6 +714,7 @@ void testLazyResyncInbox() {
 int main() {
     testPacketRing();
     testVersion11Layout();
+    testTerminalInterleavings();
     testWorldInbox();
     testReactionCompletionInbox();
     testSessionReset();
