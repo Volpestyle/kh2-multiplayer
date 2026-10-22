@@ -16,6 +16,9 @@ SPEC.loader.exec_module(THORN)
 BASE = THORN.base
 ROUTE = json.loads((ROOT / "tools/rig/route_pilot/routes/twilight_thorn_host_fight.json").read_text(encoding="utf-8"))
 CONFIG = ROUTE["steps"][0]["thornCombat"]
+# r6's targeted stance (202 bands 6-7, 1500-1800, only the seat Thorn shoots at): still the default mechanism
+# (`reflectTargeted` true) and what these behavior tests pin. The routes run r6c (ReflectSeatTest below).
+R6 = {**CONFIG, "reflectTargeted": True, "reflectBands": [6, 7], "reflectRange": [1500, 1800]}
 
 
 def thorn(motion=0, time=10.0, x=0.0, z=800.0, hp=300):
@@ -53,7 +56,7 @@ class Kb:
 
 class PolicyTest(unittest.TestCase):
     def setUp(self):
-        self.p = THORN.ThornPolicy(CONFIG)
+        self.p = THORN.ThornPolicy(R6)
 
     def test_route_opts_in_with_the_attempt05_bands(self):
         self.assertEqual(self.p.seed[(202, 7)], "ranged", "projectile 1041 from motionTime ~390")
@@ -62,7 +65,7 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual((self.p.kite_below, sorted(self.p.openings_seed)), (0.25, [209, 210, 211]))
         self.assertEqual(ROUTE["steps"][0]["pinnedDrop"], 0.55)
         other = json.loads((ROOT / "tools/rig/route_pilot/routes/twilight_thorn_fight.json").read_text(encoding="utf-8"))
-        self.assertEqual(other["steps"][0]["thornCombat"], CONFIG)
+        self.assertEqual(other["steps"][0]["thornCombat"], {**CONFIG, "reflect": False}, "r6c: the friend never takes the stance")
 
     def test_motion_time_bands(self):
         self.assertEqual([self.p.band_of(thorn(202, time=t)) for t in (0, 10, 63, 64, 160, 471)], [0, 0, 0, 1, 2, 7])
@@ -82,7 +85,7 @@ class PolicyTest(unittest.TestCase):
         self.p.observe(thorn(202, time=10), own(), 5.4)
         self.assertFalse(self.p.threat(thorn(202, time=10), own(), 5.4), "cooldown 1.2 s")
         self.assertFalse(self.p.threat(thorn(202, time=420), own(), 9.0), "a ranged band is not a sidestep")
-        off = THORN.ThornPolicy({**CONFIG, "dodge": False})
+        off = THORN.ThornPolicy({**R6, "dodge": False})
         off.observe(t, own(), 1.0)
         self.assertFalse(off.threat(t, own(), 1.0))
 
@@ -312,7 +315,7 @@ class ReviveStepTest(unittest.TestCase):
 class CombatTurnTest(NoSleep):
     def pilot(self, peer=None):
         pilot = THORN.Pilot.__new__(THORN.Pilot)
-        pilot.kb, pilot.thorn_policy, pilot.writes = Kb(), THORN.ThornPolicy(CONFIG), []
+        pilot.kb, pilot.thorn_policy, pilot.writes = Kb(), THORN.ThornPolicy(R6), []
         pilot.cooperative = None
         pilot.kite_logged_at = 0.0
         pilot.write = lambda kind, **f: pilot.writes.append((kind, f))
@@ -413,9 +416,9 @@ class ReversalCadenceTest(unittest.TestCase):
         p = THORN.Pilot.__new__(THORN.Pilot)
         p.kb = self.Pad(self.clock, presses)
         p.kb.thorn_combat = True
-        p.kb.reversals, p.kb.reversal_gap = THORN.ThornPolicy(CONFIG).reversals, 0.2
+        p.kb.reversals, p.kb.reversal_gap = THORN.ThornPolicy(R6).reversals, 0.2
         p.cooperative, p.game, p.kite_logged_at = cooperative, SimpleNamespace(pid=1), 0.0
-        p.thorn_policy = THORN.ThornPolicy(CONFIG)
+        p.thorn_policy = THORN.ThornPolicy(R6)
         p.write = lambda *a, **k: None
         def state():
             s = own() | {"roomScope": [2, 34, 0, 157, 157, 157], "event": False, "inField": True, "menu": 255,
@@ -474,7 +477,7 @@ class ReflectStanceTest(unittest.TestCase):
     def tearDown(self):
         THORN.time.monotonic, THORN.time.sleep = self.saved
 
-    def pilot(self, config=CONFIG, peer=None):
+    def pilot(self, config=R6, peer=None):
         pilot = THORN.Pilot.__new__(THORN.Pilot)
         pilot.kb, pilot.thorn_policy, pilot.writes = Kb(), THORN.ThornPolicy(config), []
         pilot.cooperative, pilot.kite_logged_at, pilot.reflect_logged_at = None, 0.0, 0.0
@@ -483,14 +486,16 @@ class ReflectStanceTest(unittest.TestCase):
         pilot.state = lambda: own()
         return pilot
 
-    def test_the_route_turns_the_stance_on_with_the_reviewed_bounds(self):
-        p = THORN.ThornPolicy(CONFIG)
+    def test_r6_bounds_and_defaults(self):
+        p = THORN.ThornPolicy(R6)
         self.assertEqual((p.reflect, p.reflect_motion, sorted(p.reflect_bands), p.reflect_command), (True, 202, [6, 7], 432))
         self.assertEqual((p.reflect_min, p.reflect_max, p.reflect_still, p.reflect_target), (1500, 1800, 0.5, 4.0))
+        self.assertTrue(p.reflect_targeted)
         self.assertFalse(THORN.ThornPolicy({}).reflect, "off unless configured")
+        self.assertTrue(THORN.ThornPolicy({"reflect": True}).reflect_targeted, "targeted unless configured otherwise")
 
     def test_band_entry_and_exit(self):
-        p = THORN.ThornPolicy(CONFIG)
+        p = THORN.ThornPolicy(R6)
         self.assertEqual([p.reflect_band(thorn(202, time=t)) for t in (383, 384, 450, 511, 512)],
                          [False, True, True, True, False], "bands 6-7 are motionTime 384-511")
         self.assertFalse(p.reflect_band(thorn(210, time=420)))
@@ -504,7 +509,7 @@ class ReflectStanceTest(unittest.TestCase):
         self.assertTrue(p.reflect_stance(thorn(202, time=480), 20.0, 17.0), "a press keeps it targeted")
 
     def test_the_stand_off_goal(self):
-        p, t = THORN.ThornPolicy(CONFIG), thorn(z=800)
+        p, t = THORN.ThornPolicy(R6), thorn(z=800)
         self.assertIsNone(p.reflect_goal(own(z=800 - 1650), t), "in range: hold still")
         self.assertIsNone(p.reflect_goal(own(z=800 - 1500), t))
         self.assertEqual(p.reflect_goal(own(z=0), t), (0.0, 800 - 1650), "too close: straight out to the middle")
@@ -636,7 +641,7 @@ class ReflectStanceTest(unittest.TestCase):
     def test_every_other_phase_is_r5_behavior(self):
         """The same states through r6 with the stance on and with it off (r5's paths): identical inputs, results,
         stats and logs, outside the stance (every motion and band but 202's 6-7, and 6-7 for a seat not targeted)."""
-        off = {**CONFIG, "reflect": False}
+        off = {**R6, "reflect": False}
         cases = []
         for motion, timing in ((0, 10), (204, 10), (209, 10), (210, 30), (202, 10), (202, 150), (202, 300), (152, 20),
                                (202, 420), (202, 480)):
@@ -649,7 +654,7 @@ class ReflectStanceTest(unittest.TestCase):
         for case in cases:
             motion, timing, hp, peer, z, react = case
             runs = []
-            for config in (CONFIG, off):
+            for config in (R6, off):
                 self.clock[0] = 100.0
                 pilot, stats = self.pilot(config, peer), {}
                 boss = thorn(motion, time=timing)
@@ -657,6 +662,81 @@ class ReflectStanceTest(unittest.TestCase):
                 runs.append((result, pilot.kb.log, stats, [k for k, _ in pilot.writes], self.clock[0]))
             self.assertEqual(runs[0], runs[1], case)
         self.assertGreater(len(cases), 150)
+
+class ReflectSeatTest(unittest.TestCase):
+    """r6c (live08): the host is the reflect seat outright. Through all of 202 it stands 1600-1900 from Thorn's root,
+    with no targeting test: Thorn shoots the farther seat, and bot01's chip came only from host reflections at
+    1588-1907. The friend route has the stance off. Revive, event and reaction handling still run first."""
+
+    setUp, tearDown = ReflectStanceTest.setUp, ReflectStanceTest.tearDown
+
+    def pilot(self, config=CONFIG, peer=None):
+        return ReflectStanceTest.pilot(self, config, peer)
+
+    def test_the_routes_make_the_host_the_reflect_seat(self):
+        p = THORN.ThornPolicy(CONFIG)
+        self.assertEqual((p.reflect, p.reflect_targeted, sorted(p.reflect_bands)), (True, False, list(range(8))))
+        self.assertEqual((p.reflect_min, p.reflect_max, p.reflect_still), (1600, 1900, 0.5))
+        other = json.loads((ROOT / "tools/rig/route_pilot/routes/twilight_thorn_fight.json").read_text(encoding="utf-8"))
+        self.assertFalse(THORN.ThornPolicy(other["steps"][0]["thornCombat"]).reflect, "the friend never takes the stance")
+
+    def test_every_202_band_without_any_targeting(self):
+        p = THORN.ThornPolicy(CONFIG)
+        self.assertEqual(p.reflect_seen_at, float("-inf"))
+        self.assertTrue(all(p.reflect_stance(thorn(202, time=t), 10.0, float("-inf")) for t in (0, 63, 160, 320, 384, 511)))
+        self.assertFalse(p.reflect_stance(thorn(202, time=512), 10.0, float("-inf")), "past band 7")
+        for motion in (0, 152, 204, 209, 210, 211, 222):
+            self.assertFalse(p.reflect_stance(thorn(motion, time=420), 10.0, float("-inf")), motion)
+        self.assertFalse(p.reflect_stance(None, 10.0, float("-inf")))
+
+    def test_the_host_holds_its_stand_off_and_walks_straight_back_to_it(self):
+        boss = thorn(202, time=150)                     # band 2, nothing on screen, never targeted
+        for z, keys in ((800 - 1750, [()]), (800 - 1600, [()]), (800 - 1900, [()]), (800 - 1550, [("down",)]),
+                        (800 - 1950, [("up",)]), (400, [("down",)])):
+            pilot, stats = self.pilot(), {}
+            self.assertTrue(pilot.combat_turn(own(z=z), [boss], boss, abs(800 - z), 300, stats), z)
+            self.assertEqual(pilot.kb.log, keys, z)
+            self.assertEqual(stats["reflect"], 1)
+        goal = THORN.ThornPolicy(CONFIG).reflect_goal(own(z=0), thorn(z=800))
+        self.assertEqual(goal, (0.0, 800 - 1750), "straight out to the middle, 1750")
+
+    def test_the_stance_takes_the_turn_from_the_base_fight_through_all_of_202(self):
+        for timing in (10, 150, 300, 420):
+            pilot, stats = self.pilot(), {}
+            boss = thorn(202, time=timing)
+            self.assertTrue(pilot.combat_turn(own(z=800 - 1750), [boss], boss, 1750, 300, stats))
+            self.assertEqual((pilot.kb.log, stats.get("dodges"), stats.get("commits")), ([()], None, None), timing)
+
+    def test_the_log_names_the_facing(self):
+        pilot = self.pilot()
+        boss = thorn(202, time=420)
+        pilot.combat_turn(own(z=800 - 1750), [boss], boss, 1750, 300, {})
+        kind, fields = pilot.writes[0]
+        self.assertEqual((kind, fields["distance"], fields["facing"]),
+                         ("thorn_reflect", 1750.0, THORN.ThornPolicy(CONFIG).facing(own(z=800 - 1750), boss)))
+        p = THORN.ThornPolicy(CONFIG)
+        self.assertIsNone(p.facing(own() | {"forward": None}, boss))
+        self.assertEqual(p.facing(own(z=0) | {"forward": [0.0, 420.0]}, thorn(z=800)), 1.0)
+        self.assertEqual(p.facing(own(z=0) | {"forward": [0.0, -420.0]}, thorn(z=800)), -1.0)
+
+    def test_outside_202_the_host_is_r5(self):
+        """The same states with the host route and with its stance off: identical outside motion 202."""
+        off = {**CONFIG, "reflect": False}
+        cases = [(motion, timing, hp, z, react) for motion, timing in ((0, 10), (204, 10), (209, 10), (210, 30), (152, 20),
+                                                                       (222, 40), (211, 5))
+                 for hp in (20, 5) for z, react in ((400, 0), (-850, 0), (0, 0), (400, 345), (400, 432))]
+        for case in cases:
+            motion, timing, hp, z, react = case
+            runs = []
+            for config in (CONFIG, off):
+                self.clock[0] = 100.0
+                pilot, stats = self.pilot(config), {}
+                boss = thorn(motion, time=timing)
+                result = pilot.combat_turn(own(hp, z=z) | {"react": react}, [boss], boss, abs(800 - z), 300, stats)
+                runs.append((result, pilot.kb.log, stats, [k for k, _ in pilot.writes], self.clock[0]))
+            self.assertEqual(runs[0], runs[1], case)
+        self.assertGreater(len(cases), 60)
+
 
 class BaseHookTest(unittest.TestCase):
     """The base fight loop asks combat_turn after choosing its target, and a taken turn skips the attack."""

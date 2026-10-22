@@ -195,6 +195,9 @@ class ThornPolicy:
         self.reflect_min, self.reflect_max = (float(v) for v in config.get("reflectRange", (1500, 1800)))
         self.reflect_still = float(config.get("reflectStillSec", 0.5))
         self.reflect_target = float(config.get("reflectTargetSec", 4.0))
+        # r6c: false makes this seat the reflect seat outright (the host route): the gate is Thorn's motion and band
+        # alone. Thorn shoots the seat farther from it (bot01 58/60 completions), so the stand-off itself draws it.
+        self.reflect_targeted = bool(config.get("reflectTargeted", True))
         self.reflect_seen_at = float("-inf")
         self.motion = self.band = None
         self.visit = 0                      # a new (motion, band) is a new visit
@@ -259,6 +262,16 @@ class ThornPolicy:
     def distance(self, own: dict, thorn: dict) -> float:
         p, (tx, tz) = own["playerPos"], self.flat(thorn)
         return math.hypot(tx - p[0], tz - p[2])
+
+    def facing(self, own: dict, thorn: dict) -> float | None:
+        """r6c log only: cos between the camera's horizontal forward and this seat's direction to Thorn (bot01's
+        chipping reflections mostly had it above 0.9, as lock-on keeps it)."""
+        p, (tx, tz), forward = own["playerPos"], self.flat(thorn), own.get("forward")
+        if not forward:
+            return None
+        vx, vz, (fx, fz) = tx - p[0], tz - p[2], forward
+        n = math.hypot(vx, vz) * math.hypot(fx, fz)
+        return round((vx * fx + vz * fz) / n, 2) if n else None
 
     def danger(self, motion, band) -> str | None:
         """"near" or "ranged" for a seeded or learned dangerous band, else None."""
@@ -336,9 +349,10 @@ class ThornPolicy:
 
     def reflect_stance(self, thorn: dict | None, now: float, last_press: float) -> bool:
         """r6: Thorn in its projectile stance and this seat targeted (it saw or pressed the reflect Reversal within
-        `reflectTargetSec`). The other seat never takes the stance."""
+        `reflectTargetSec`). The other seat never takes the stance. r6c: with `reflectTargeted` false, this seat in the
+        band, targeted or not (the host route; the friend route has the stance off)."""
         return self.reflect and self.reflect_band(thorn) and \
-            now - max(self.reflect_seen_at, last_press) <= self.reflect_target
+            (not self.reflect_targeted or now - max(self.reflect_seen_at, last_press) <= self.reflect_target)
 
     def reflect_goal(self, own: dict, thorn: dict):
         """None (hold still) inside `reflectRange` of Thorn's root; else a point straight out or in, to its middle."""
@@ -694,7 +708,7 @@ class Pilot(OriginalPilot):
             if now - self.reflect_logged_at >= 2.0:
                 self.reflect_logged_at = now
                 self.write("thorn_reflect", hp=s["hp"], distance=round(policy.distance(s, thorn), 1),
-                           band=policy.band_of(thorn), still=still, keys=sorted(keys))
+                           band=policy.band_of(thorn), still=still, keys=sorted(keys), facing=policy.facing(s, thorn))
             return True
         if policy.opening(thorn):
             # An opening: approach and swing, with no dodge, keep-away or escape (the base's pinned escape

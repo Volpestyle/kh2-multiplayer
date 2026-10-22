@@ -145,6 +145,36 @@ install detector above; no old wrapper or old movie baseline is reused.
      - the HP gate for the second opening (≈ 148–158) rests on 3 runs;
      - the standing seat takes the hits it doesn't reverse; bot01's host lived at 1–5 HP on the friend's
        revives.
+   - **Superseded on the routes by r6c (item 7).** The targeted stance stays the default mechanism
+     (`reflectTargeted` true).
+7. **The host is the reflect seat outright (r6c, live08).**
+   - **Why live08 missed.**
+     - The stance gave the host only 2 turns, and its 15 432 completions chipped nothing.
+     - 12 of the 15 came while the friend was downed. The co-op revive step owns that turn, ahead of
+       `combat_turn`, and presses 432 while walking to the friend. So neither the stance nor the targeting
+       memory ever saw those offers.
+     - Thorn shoots the seat farther from it (bot01 58/60 completions, live08 24/34). Outside revives the host
+       fought in close, so it wasn't shot.
+     - So r6's targeting was circular: a seat only went out after being shot, and only a seat already out gets
+       shot.
+   - **Where chip comes from.** bot01's chipping reflections were all host completions from 1588–1907 units:
+     17 sole-event drops, 116 HP. None of the 15 below 1588 chipped, and neither of the 2 at 2022 did.
+     No friend (client) reflection has been seen to chip, in either run.
+   - **Analysis:** `.local/review/vuh-2617-thorn-pilot/r6c-analysis/`.
+   - **The host route** sets `reflectTargeted: false`, `reflectBands` 0–7 and `reflectRange` 1600–1900:
+     - through all of 202 the host holds that stand-off from Thorn's root, and walks straight out or in to its
+       middle (1750);
+     - r6's still window and r6b's precedence are unchanged.
+   - **The friend route** turns the stance off. On r5 behavior it stays the nearer seat.
+   - **Logged:** `thorn_reflect` adds `facing`, the cos from the camera's forward to Thorn. bot01 chipped in 13 of
+     35 completions at cos > 0.9 and 4 of 24 below that.
+   - **Elsewhere.** Outside 202 the host is r5. The actual r6b `thorn.py` against r6c gives identical results:
+     - on r6b's route, all 6510 grid states match, including 288 stance states;
+     - on the r6c host route, all 2940 states outside 202 match.
+   - **Caveats:**
+     - the farther-seat targeting and the 1588–1907 band are correlations from two runs;
+     - a downed friend still pulls the host off its stand-off;
+     - the host takes every orb it doesn't reverse.
 
 These stay from r1–r2:
 - the revive-approach detour (out of revive range and outside an RC only), logged as `coop_detour`;
@@ -169,7 +199,8 @@ The pilot can't see the projectile itself; it reads enemies and Thorn only. The 
 pilot, ended attempt06.
 
 **Measure on the next live run:**
-- r6: host and friend 432 completions in 202 against Thorn's HP drops in the same statehash windows, and
+- r6c: host 432 completions in 202, with their distance and `facing`, against Thorn's HP drops in the same
+  statehash windows (`r6c-analysis/reflect_aim.py`); how often the friend is the farther seat or downed; and
   whether Thorn reaches ≤ ~150 and starts its second opening (204 after 202);
 - Thorn's HP per block, and the chip damage in 202 (`dealtByMotion`);
 - Reversal offers against completions per command and owner (`[script-rc]` offer/complete);
