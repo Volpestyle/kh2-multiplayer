@@ -343,14 +343,16 @@ int main() {
       auto with = [&](auto change) { auto g = a; change(g); return SitOutArrivalQualified(g); };
       CHECK(!with([](auto& g) { g.serial = 0; }));                          // no arrival
       CHECK(!with([](auto& g) { g.arena = 0; }));
-      CHECK(!with([](auto& g) { g.recoveryLoad = 29; }));                   // not its own Bootstrap
-      CHECK(!with([](auto& g) { g.recoveryLoad = 0; g.load = 0; g.loadNow = 0; }));
+      CHECK(with([](auto& g) { g.recoveryLoad = 0; }));                     // r3: the anchor is no qualification input
+      CHECK(with([](auto& g) { g.recoveryLoad = 29; }));                    // (a failed load leaves an older anchor)
+      CHECK(!with([](auto& g) { g.load = 0; g.loadNow = 0; }));              // no landed load
       CHECK(!with([](auto& g) { g.generationNow = 7; }));                   // another world generation since
       CHECK(!with([](auto& g) { g.transitionNow = 13; }));                  // a transition since
       CHECK(!with([](auto& g) { g.loadNow = 31; }));                        // a load since (a later recovery)
       CHECK(!with([](auto& g) { g.lifetimeExpired = false; }));             // a recovered lifetime: not a fenced seat
       CHECK(!with([](auto& g) { g.inArena = false; }));
-      CHECK(!with([](auto& g) { g.generation = 0; g.generationNow = 0; }));
+      CHECK(with([](auto& g) { g.generation = 0; g.generationNow = 0; }));     // r3: a fenced session after a failure
+      CHECK(!with([](auto& g) { g.generation = 0; g.generationNow = 6; }));    // ... but never a changed one
       // Pending, as F1's: begun on the arena's first settled frame (after the boss intro's event).
       CHECK(OutageStartStep(true, true, a.lifetimeExpired, false, false) == OutageStart::Wait);
       CHECK(OutageStartStep(true, true, a.lifetimeExpired, false, true) == OutageStart::Begin);

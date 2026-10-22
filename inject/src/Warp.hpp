@@ -12,6 +12,7 @@ struct ProducerWorldContext;
 struct WorldScope;
 struct ResyncBegin;
 struct ResyncTarget;
+struct ResyncKey;
 namespace inject {
 namespace warp {
 
@@ -67,6 +68,13 @@ std::uint32_t LoadSerial();
 // VUH-2640: the serial of the last completed load this seat's resync Bootstrap issued (its attributed cause
 // matched the arrived room); 0 if none yet.
 std::uint32_t RecoveryBootstrapLoadSerial();
+// VUH-2640 Leg A r3: retain the issued-load receipt of this one admitted sit-out Bootstrap (nullptr clears).
+// Recorded from the host cause when exactly that Bootstrap is issued; it survives the cause's retirement
+// and is consumed by the next CompleteLoad. RetainedIssuedLoad: the load serial its issued native load
+// completed at (the next load, inside the issued transition, in the issued target tuple), 0 otherwise.
+// Grants no authority. Game thread only.
+void RetainIssuedBootstrap(const ResyncKey* key) noexcept;
+std::uint32_t RetainedIssuedLoad(const ResyncKey& key) noexcept;
 RoomTransition ReadLocation();
 // VUH-1515 spawn picks: while the client executes the load the host issued (between its issue and
 // CompleteLoad) and the native location equals that target, the host's epoch for it; else 0.

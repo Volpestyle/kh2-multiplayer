@@ -182,8 +182,15 @@ Where the code is:
   - The arrival is bound to the admitted Bootstrap, not to the transaction's outcome (Quill r1). Admitting
     a sit-out Bootstrap records its request, arena, load serial and recovery serial. The `SitOutArrival`
     (request, arena, generation, transition, load, and the recovery Bootstrap serial it anchors to) is
-    minted when that Bootstrap's own load completes. That is the very next load, freshly attributed to a
-    recovery Bootstrap, with this seat standing in the arena's exact tuple. It is evaluated when
+    minted when that Bootstrap's own issued native load completes. That is the very next load, inside the
+    issued transition, in the issued target tuple, with this seat standing in the arena's exact tuple. The
+    evidence is warp's retained issued-load receipt (r3, Quill r2). It is recorded from the host cause's own
+    issue evidence for exactly this admitted key, it survives the cause's retirement by a failed
+    transaction, and the next `CompleteLoad` consumes it: completed if that load is the issued one, dropped
+    otherwise. So a failure after the issue but before completion still lands the sit-out. The outage
+    anchor is the recovery Bootstrap serial at the arrival, which is this load's when it was still
+    attributed, so only a later recovery Bootstrap ends the duty. A failure fences the native world session
+    (generation 0), which the arrival rule accepts as long as it is unchanged. It is evaluated when
     `LatestSitOutArrival` is read, so DownedSpike sees it on its first frame after the load. A relay
     promotion to Checkpoint (which replaces the native transaction), a failed or lost result, or no result
     at all neither clears nor delays it. Any other admitted Bootstrap, or a load that isn't this one, drops
@@ -219,9 +226,14 @@ Offline evidence (Release, serial ctest):
   where the arrival is minted before any convergence or result, and on through two-frame convergence. The
   arrival survives a Checkpoint promotion and the result, and the old lifetime stays expired. A failure after
   the load still yields the arrival. A failure before it, followed by a load that isn't the admitted
-  Bootstrap, mints none and drops the admission.
+  Bootstrap, mints none and drops the admission. In the real order (issue, then the runtime-like failure
+  path that retires the load cause and fences the session, then completion in the arena), the unattributed
+  load still lands. It qualifies the arrival rule, the pending outage begins on the first ready frame by
+  rule composition, and the duty stays open. A replacement transition, or an issued load landing outside
+  its target, mints nothing.
 
-Not proven: any live run, including the friend's own Thorn copy, its intro event on the friend, the
+Not proven: any live run, including whether the seat is natively safe between the load and DownedSpike's
+first ready frame (the ready predicate does not read CONTROLLABLE; Quill r2), and the friend's own Thorn copy, its intro event on the friend, the
 `atk_thorn` attach, the friend's progress matching mid-fight, and Leg B's post-Thorn row (VUH-2674).
 
 ## Proof plan

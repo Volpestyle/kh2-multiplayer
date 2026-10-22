@@ -503,23 +503,25 @@ inline OutageStep OutageFrame(OutageDuty& duty, std::uint32_t recoveryLoadNow, b
 }
 // VUH-2640 Leg A (docs/FENCED_FRIEND_BOSS_ARENA.md): a fenced friend the host's boss sit-out carried into a
 // reviewed boss arena sits out there under the same outage duty F1 opens, pending on that room as F1's is.
-// The proof is the arrival itself: the host-attested sit-out Bootstrap this seat admitted, whose own load
-// completed in that arena (Quill r1: bound to the load, not to the transaction's result). It qualifies once, while still current (the same session generation, transition and load as at
-// the arrival, and that load is its own recovery Bootstrap), while this seat's lifetime is still the expired
+// The proof is the arrival itself: the host-attested sit-out Bootstrap this seat admitted, whose own issued native
+// load completed in that arena (Quill r1/r2: bound to the issued load, not to the transaction's result or to the
+// load cause surviving a failure; EnemySync mints it only then). It qualifies once, while still current (the same
+// session generation, transition and load as at the arrival), while this seat's lifetime is still the expired
 // one (presence never restores it) and it stands in that arena. The duty is anchored to that same Bootstrap,
 // so the arrival never ends it; the later real recovery (Leg B) does, at 25%.
 struct SitOutArrivalFacts {
     std::uint32_t serial = 0;                                // the arrival's; 0: none
     std::uint16_t arena = 0;
     std::uint32_t generation = 0, transition = 0, load = 0;  // at the arrival
-    std::uint32_t recoveryLoad = 0;                          // its recovery Bootstrap load serial
+    std::uint32_t recoveryLoad = 0;                          // the duty's anchor (not a qualification input)
     std::uint32_t generationNow = 0, transitionNow = 0, loadNow = 0;
     bool lifetimeExpired = false, inArena = false;
 };
 constexpr bool SitOutArrivalQualified(const SitOutArrivalFacts& f) noexcept {
-    return f.serial && f.arena && f.recoveryLoad && f.recoveryLoad == f.load && f.generation &&
-           f.generation == f.generationNow && f.transition == f.transitionNow && f.load == f.loadNow &&
-           f.lifetimeExpired && f.inArena;
+    // generation 0 is valid: a failed transaction fences the native world session before the issued load lands
+    // (Quill r2). Only an unchanged one counts.
+    return f.serial && f.arena && f.load && f.generation == f.generationNow &&
+           f.transition == f.transitionNow && f.load == f.loadNow && f.lifetimeExpired && f.inArena;
 }
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {

@@ -192,7 +192,7 @@ struct SitOutArrival {
     std::uint64_t request = 0;
     std::uint16_t arena = 0;
     std::uint32_t generation = 0, transition = 0, load = 0;  // at the arrival
-    std::uint32_t recoveryLoad = 0;                          // the recovery Bootstrap load serial then (its own)
+    std::uint32_t recoveryLoad = 0;                          // the recovery Bootstrap serial then: the outage's anchor
 };
 bool LatestSitOutArrival(SitOutArrival& out) noexcept;
 // VUH-2640: positive session-end evidence: this seat's runtime (still the bridge's writer) stopped

@@ -129,6 +129,7 @@ void LeaveFieldCallback() noexcept {}
 #undef Pop
 #undef GetStatistics
 #include "../inject/src/ProgressSync.cpp"
+#include "../inject/src/DownedReturn.hpp" // VUH-2640 Leg A r3: the arrival rule, composed in the sit-out test
 // Keep the established claim tests' controlled lifecycle boundary. The focused
 // reset tests route those adapters to this second, actual Warp implementation;
 // only its namespace differs. No hook installation or named mapping is used.
@@ -193,6 +194,8 @@ bool HostTravelling() { return productionWorldMode && recoverywarp::HostTravelli
 std::uint32_t TransitionSerial() { return productionWorldMode ? recoverywarp::TransitionSerial() : transition; }
 std::uint32_t LoadSerial() { return productionWorldMode ? recoverywarp::LoadSerial() : load; }
 std::uint32_t RecoveryBootstrapLoadSerial() { return productionWorldMode ? recoverywarp::RecoveryBootstrapLoadSerial() : 0; }
+void RetainIssuedBootstrap(const ResyncKey* key) noexcept { if (productionWorldMode) recoverywarp::RetainIssuedBootstrap(key); }
+std::uint32_t RetainedIssuedLoad(const ResyncKey& key) noexcept { return productionWorldMode ? recoverywarp::RetainedIssuedLoad(key) : 0; }
 RoomTransition ReadLocation() {
     RoomTransition result;
     enemysync::ReadLocationChecked(result);
@@ -587,6 +590,7 @@ void ResetWorld() {
     w::g_ready = true; w::g_clientAuthority = true; w::g_transitionPending = false;
     w::g_transitionSerial = transition; w::g_loadSerial = load;
     w::g_recoveryBootstrapLoad = 0; // VUH-2640: serials restart with this owned fixture incarnation
+    w::g_retainedIssue = {};
     w::g_hostQueued = w::g_hostIssued = false; w::g_hostGeneration = 0;
     w::g_requestTransition = NativeWarp;
     g_applyStatDelta = NativeDeath;
@@ -3465,6 +3469,48 @@ void TestBossSitOutNative() {
     Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 1, "a load that is not the admitted Bootstrap mints nothing");
     w::IssueHostTransition(); w::CompleteLoad();
     Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 1, "a dropped admission never lands later");
+    // Quill r2, the real order: admit, issue the native load, then the runtime's failure path (result, a new world
+    // generation with delivery 0 and its reset marker, which retires the load cause), then the issued load
+    // completes in the arena. The load is unattributed, but the retained issued-load receipt still lands it.
+    ResetWorld(); ArenaWorld(); StageNativeBootstrap(plan, packet);
+    w::IssueHostTransition();
+    Check(warpCalls == 1 && w::g_transitionPending && w::g_hostIssued, "fixture: the admitted Bootstrap's native load is issued");
+    const auto recoveryBefore = w::RecoveryBootstrapLoadSerial();
+    g_bridge.incoming.push_back(encode(failed));
+    ++g_bridge.generation; g_bridge.deliverySerial = 0;
+    g_bridge.incoming.push_back(encodeWorldSessionReset(g_bridge.generation, 0));
+    ReceiveWorldPackets();
+    Check(!w::g_hostIssued && !w::g_hostQueued, "the runtime-like failure path retires the issued load cause");
+    w::CompleteLoad();
+    Check(w::RecoveryBootstrapLoadSerial() == recoveryBefore, "the completed load is unattributed (its cause was retired)");
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 2 && arrival.load == w::LoadSerial() &&
+          arrival.recoveryLoad == recoveryBefore && arrival.generation == WorldSessionGeneration(),
+          "issue, failure, then completion in the arena: the retained issued-load receipt lands the sit-out");
+    Check(!WorldSessionGeneration(), "fixture: the failure left the native world session fenced (generation 0)");
+    {
+        kh2coop::inject::downedreturn::SitOutArrivalFacts f;
+        f.serial = arrival.serial; f.arena = arrival.arena; f.generation = arrival.generation;
+        f.transition = arrival.transition; f.load = arrival.load; f.recoveryLoad = arrival.recoveryLoad;
+        f.generationNow = WorldSessionGeneration(); f.transitionNow = w::TransitionSerial(); f.loadNow = w::LoadSerial();
+        f.lifetimeExpired = ehn::LifetimeHeartbeatExpired(); f.inArena = true;
+        Check(kh2coop::inject::downedreturn::SitOutArrivalQualified(f) &&
+              kh2coop::inject::downedreturn::OutageStartStep(true, true, f.lifetimeExpired, false, false) == kh2coop::inject::downedreturn::OutageStart::Wait &&
+              kh2coop::inject::downedreturn::OutageStartStep(true, true, f.lifetimeExpired, false, true) == kh2coop::inject::downedreturn::OutageStart::Begin,
+              "that arrival qualifies DownedSpike's rule; the hold begins on the first ready frame (rule composition, not DownedSpike's Tick)");
+        kh2coop::inject::downedreturn::OutageDuty duty; duty.Begin(arrival.recoveryLoad);
+        Check(duty.End(w::RecoveryBootstrapLoadSerial(), false) == kh2coop::inject::downedreturn::OutageEnd::Open,
+              "the anchor is the recovery serial then: the unattributed arrival does not end its own duty");
+    }
+    // A replacement transition after the issue: not the issued load, so the receipt drops.
+    ResetWorld(); ArenaWorld(); StageNativeBootstrap(plan, packet);
+    w::IssueHostTransition(); ++w::g_transitionSerial; w::CompleteLoad();
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 2,
+          "a replacement transition after the issue is not the issued load: no arrival");
+    // The issued load lands elsewhere than its target tuple: dropped.
+    ResetWorld(); ArenaWorld(); StageNativeBootstrap(plan, packet);
+    w::IssueHostTransition(); Put(image + offsets::ROOM_ID, std::uint8_t{33}); w::CompleteLoad();
+    Check(LatestSitOutArrival(arrival) && arrival.serial == landed.serial + 2,
+          "an issued load that lands outside its target tuple is not the arena landing: no arrival");
     ehn::Disable();
     Reset(); ArenaWorld(); ReceiveResyncPlan(plan);
     ResyncSnapshot refused; ProducerWorldContext unused;

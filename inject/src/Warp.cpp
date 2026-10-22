@@ -122,6 +122,20 @@ struct HostLoadCause {
 };
 HostLoadCause g_hostCause;
 std::uint32_t g_recoveryBootstrapLoad = 0; // VUH-2640
+// VUH-2640 Leg A r3 (Quill r2): the issued-load receipt of one admitted sit-out Bootstrap. It is copied from the
+// host cause's own issue evidence when that exact Bootstrap is issued, survives the cause's retirement (a failed
+// transaction's SetClientAuthority(false)), and is consumed by the very next CompleteLoad: completed only if that
+// load is the issued one (the next load, inside the issued transition, in the issued target tuple), else dropped.
+// It grants nothing; EnemySync uses it only to impose the sit-out on a seat that did land in the arena.
+struct RetainedIssue {
+    std::optional<ResyncKey> wanted;   // the admitted sit-out Bootstrap's key
+    std::optional<ResyncKey> key;      // set at its issue
+    std::optional<ResyncTarget> target;
+    RoomTransition room {};
+    std::uint32_t loadBefore = 0, issueTransition = 0, completedLoad = 0;
+    bool armed = false;
+};
+RetainedIssue g_retainedIssue;
 std::uint64_t g_loadEvidenceSequence = 0;
 std::uint32_t g_loadLastSealFrame = 0;
 bool g_loadSealEmitted = false;
@@ -289,6 +303,17 @@ void CompleteLoad() {
     if (attributed && g_hostCause.begin && g_hostCause.begin->phase == ResyncPhase::Bootstrap)
         g_recoveryBootstrapLoad = g_loadSerial;
     LogLoadCause("load", attributed);
+    if (g_retainedIssue.armed) {
+        auto& retained = g_retainedIssue;
+        auto issuedRoom = retained.room; issuedRoom.epoch = location.epoch;
+        const bool issuedLoad = g_loadSerial == retained.loadBefore + 1 && g_transitionSerial == retained.issueTransition &&
+                                SameLoadRoom(issuedRoom, location);
+        retained.armed = false;
+        if (issuedLoad) retained.completedLoad = g_loadSerial;
+        if (g_log) g_log("[load-cause] retained-issue %s request=%llu load=%u attributed=%u",
+                         issuedLoad ? "completed" : "dropped", static_cast<unsigned long long>(retained.key->requestId),
+                         g_loadSerial, attributed ? 1u : 0u);
+    }
     if (g_travelRequested && location.worldId != 0xFF && !TravelWorld(location.worldId)) {
         g_travelRequested = false;
         if (g_log) g_log("[travel] landed room=%02X/%02X door=%u", location.worldId, location.roomId, location.door);
@@ -377,6 +402,15 @@ void IssueHostTransition() {
     g_hostCause.loadBefore = g_hostIssueLoad;
     g_hostCause.issueTransition = issuedTransition;
     LogLoadCause("issue", LoadCauseCurrent(g_hostCause));
+    auto& retained = g_retainedIssue;
+    if (retained.wanted && g_hostCause.begin && g_hostCause.begin->phase == ResyncPhase::Bootstrap &&
+        g_hostCause.begin->key == *retained.wanted && LoadCauseCurrent(g_hostCause)) {
+        retained.key = g_hostCause.begin->key; retained.target = g_hostCause.target; retained.room = g_hostTarget;
+        retained.loadBefore = g_hostIssueLoad; retained.issueTransition = issuedTransition;
+        retained.completedLoad = 0; retained.armed = true;
+        if (g_log) g_log("[load-cause] retained-issue armed request=%llu loadBefore=%u issueTransition=%u",
+                         static_cast<unsigned long long>(retained.key->requestId), retained.loadBefore, issuedTransition);
+    }
     // Only this authority path bypasses the native-exit detour.
     g_requestTransition(&packet, 1, 0, 0, 0);
     if (g_log) g_log("[warp] client issued epoch=%u transition=%u%s", issuedEpoch, issuedTransition,
@@ -637,6 +671,14 @@ std::uint32_t HostIssuedLoadEpoch(const RoomTransition& loading) {
     return same ? g_hostTarget.epoch : 0;
 }
 std::uint32_t RecoveryBootstrapLoadSerial() { return g_recoveryBootstrapLoad; }
+void RetainIssuedBootstrap(const ResyncKey* key) noexcept {
+    g_retainedIssue = {};
+    if (key) g_retainedIssue.wanted = *key;
+}
+std::uint32_t RetainedIssuedLoad(const ResyncKey& key) noexcept {
+    const auto& retained = g_retainedIssue;
+    return retained.wanted && *retained.wanted == key && retained.key && *retained.key == key ? retained.completedLoad : 0;
+}
 
 std::uint32_t LoadSerial() { return g_loadSerial; }
 
