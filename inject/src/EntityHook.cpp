@@ -83,6 +83,7 @@
 #include "RevivePrompt.hpp"
 #include "DownedPolicy.hpp"
 #include "DownedReturn.hpp"
+#include "kh2coop/BossArenas.hpp" // VUH-2640 Leg A: POD rows only
 #include "DownedSpectate.hpp"
 #include "DownedSpectateAdapter.hpp"
 #include "DownedSpectateChannel.hpp"

@@ -163,6 +163,8 @@ static downedreturn::OutageDuty g_outageDuty; // VUH-2640: open from the qualifi
 static uint64_t g_lastLiveIdentity = 0;       // VUH-2640: this seat's session while its lifetime was live
 static downedreturn::BossReceipt g_bossReceipt {}; // VUH-2640: the last host-owned boss bind, with its scope
 static uint32_t g_lastLiveGeneration = 0;
+static uint32_t g_sitOutArrivalSeen = 0;      // VUH-2640 Leg A: the last sit-out arrival judged
+static uint64_t g_outageMovedEpisode = 0;     // VUH-2640 Leg A trace: the episode already logged as moved
 // Read by the input collector and the 3D2060 hit check (game thread; atomics for the record).
 static std::atomic<bool> g_logicalHeld {false};
 static std::atomic<uintptr_t> g_logicalActor {0};
@@ -986,13 +988,27 @@ static void PromptTick(const Snap& s) {
 // After the local player's native update, hold its downed XZ against enemy shove
 // (20261019-133539), but preserve native Y from gravity and terrain collision.
 // Live11 retained a downed height of -251.985, beyond the unchanged 3D revive reach.
+// VUH-2640 Leg A trace (the lead's decision 2): a sit-out friend's own local Thorn runs its own brain, and its
+// atk_thorn cinematic attaches and moves the canonical player, here the held downed one. How far this
+// update carried a held outage downing before the pin is logged once per episode; not checked live yet.
+constexpr float kOutageMovedLog = 200.0f;
 static void PinDowned(uintptr_t actor) {
     if (!LogicallyDowned() || actor != g_down.downedActor || !OwnerThread()) return;
     const uintptr_t pos = actor + offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X;
+    float before[3] {};
+    bool read = false;
     __try {
         auto* p = reinterpret_cast<float*>(pos);
+        before[0] = p[0]; before[1] = p[1]; before[2] = p[2]; read = true;
         if (HoldDownedHorizontal(p, g_down.downedPos)) ++g_down.pinWrites;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    if (!read || !g_outageDuty.Active() || g_down.episode == g_outageMovedEpisode) return;
+    const float dx = before[0] - g_down.downedPos[0], dz = before[2] - g_down.downedPos[2];
+    if (dx * dx + dz * dz <= kOutageMovedLog * kOutageMovedLog) return;
+    g_outageMovedEpisode = g_down.episode;
+    Log("[downed] outage held-player-moved episode=%llX dist=%.0f from=(%.0f,%.0f,%.0f) held=(%.0f,%.0f,%.0f) frame=%u",
+        static_cast<unsigned long long>(g_down.episode), std::sqrt(dx * dx + dz * dz), before[0], before[1], before[2],
+        g_down.downedPos[0], g_down.downedPos[1], g_down.downedPos[2], g_frameCounter);
 }
 
 // HookedInputCollector, last: a logically downed player has no input (VUH-2465). Neutral sticks,
@@ -1248,6 +1264,31 @@ static void Tick(uintptr_t head) {
                 receipt.generation, mission[0] ? mission : "-", s.room.world, s.room.room, g_frameCounter);
         } else if (!expired) {
             g_outageExpirySeen = false;
+        }
+        // VUH-2640 Leg A: a fenced friend the host's boss sit-out carried into a reviewed boss arena arrives
+        // sitting out: F1's pending outage in that room, anchored to the arrival's own recovery Bootstrap, so
+        // only a later recovery (Leg B) ends it. Judged once per arrival (DownedReturn's rule).
+        enemysync::SitOutArrival arrival;
+        if (enemysync::LatestSitOutArrival(arrival) && arrival.serial != g_sitOutArrivalSeen) {
+            g_sitOutArrivalSeen = arrival.serial;
+            const auto* arena = kh2coop::bossarena::ById(arrival.arena);
+            downedreturn::SitOutArrivalFacts f;
+            f.serial = arrival.serial; f.arena = arrival.arena;
+            f.generation = arrival.generation; f.transition = arrival.transition; f.load = arrival.load;
+            f.recoveryLoad = arrival.recoveryLoad;
+            f.generationNow = enemysync::WorldSessionGeneration();
+            f.transitionNow = warp::TransitionSerial(); f.loadNow = warp::LoadSerial();
+            f.lifetimeExpired = expired;
+            f.inArena = arena && s.room.ok && s.room.world == arena->location[0] && s.room.room == arena->location[1] &&
+                        s.room.door == arena->location[2] && s.room.map == arena->location[3] &&
+                        s.room.battle == arena->location[4] && s.room.event == arena->location[5];
+            const bool qualified = downedreturn::SitOutArrivalQualified(f);
+            if (qualified && g_down.state == State::Downed) g_outageDuty.Begin(arrival.recoveryLoad);
+            else if (qualified) { g_down.outagePending = true; g_down.outageRoom = s.room; g_down.outageRecoveryAt = arrival.recoveryLoad; }
+            Log("[downed] outage arrival qualified=%u request=%llu arena=%u downed=%u room=%u/%u load=%u recoveryLoad=%u frame=%u",
+                qualified ? 1u : 0u, static_cast<unsigned long long>(arrival.request), static_cast<unsigned>(arrival.arena),
+                g_down.state == State::Downed ? 1u : 0u, s.room.world, s.room.room, arrival.load, arrival.recoveryLoad,
+                g_frameCounter);
         }
         uint8_t outageMenu = 0;
         const bool ready = g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.objentry &&
