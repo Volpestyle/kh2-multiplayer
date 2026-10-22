@@ -1,7 +1,9 @@
 #include "ScriptReaction.hpp"
 #include "kh2coop/Codec.hpp"
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <vector>
 
 namespace R = kh2coop::inject::scriptmirror::rules;
 namespace {
@@ -192,6 +194,36 @@ int main() {
         check(std::string(R::ReleaseCleanupName(R::ReleaseCleanup::NotField))=="not-field" &&
               std::string(R::ReleaseCleanupName(R::ReleaseCleanup::Guards))=="guards" &&
               std::string(R::ReleaseCleanupName(R::ReleaseCleanup::Cleaned))=="cleaned","release line names");
+    }
+    // Quill r1 (0b376cf): the release line reads only proven roots. A counting reader records every address.
+    {
+        const std::uintptr_t actor=0x10000,source=0x50000,action=0x90000;
+        std::vector<std::uintptr_t> reads;int decodes=0;
+        const auto read=[&](std::uintptr_t at,void* out,std::size_t size){
+            reads.push_back(at);std::memset(out,0,size);
+            if(at==actor+0xC){const std::uint32_t handle=7;std::memcpy(out,&handle,sizeof(handle));}
+            return true;};
+        const auto decode=[&](std::uint32_t handle){++decodes;return handle==7?action:std::uintptr_t{0};};
+        const auto touched=[&](std::uintptr_t lo,std::uintptr_t hi){
+            for(auto at:reads)if(at>=lo && at<hi)return true;return false;};
+        auto h=R::ReadLocalHold(false,actor,true,source,read,decode);
+        check(reads.empty() && !decodes && !h.actorRead && !h.sourceRead,
+              "a refused actor root (stale room, handle or game thread): zero reads, even with a proven source");
+        reads.clear();decodes=0;
+        h=R::ReadLocalHold(true,actor,false,source,read,decode);
+        check(h.actorRead && !h.sourceRead && !touched(source,source+0x1000) && touched(actor,actor+0x1000) && decodes==1,
+              "an unproven or freed source is never followed: the actor's fields only");
+        reads.clear();decodes=0;
+        h=R::ReadLocalHold(true,actor,true,source,read,decode);
+        check(h.actorRead && h.sourceRead && touched(source+0x158,source+0x159) && touched(action,action+1),
+              "both roots proven: the source's bank and the decoded action are read");
+        reads.clear();decodes=0;
+        h=R::ReadLocalHold(true,0,true,source,read,decode);
+        check(reads.empty() && !decodes,"no actor: nothing read");
+        reads.clear();decodes=0;
+        const auto failing=[&](std::uintptr_t at,void*,std::size_t){reads.push_back(at);return false;};
+        h=R::ReadLocalHold(true,actor,false,source,failing,decode);
+        check(!h.actorRead && reads.size()==1 && !decodes,"an unreadable actor stops at the first field: no action decode");
     }
     return errors?1:0;
 }

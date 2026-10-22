@@ -385,6 +385,30 @@ inline ReleaseCleanup DecideReleaseCleanup(const ReleaseCleanupFacts& f) noexcep
     if(!f.parentRead || !(f.parentZero || f.attachment))return ReleaseCleanup::ReplacementParent;
     return ReleaseCleanup::Cleaned;
 }
+// The release line's read-only snapshot of the friend's own actor. Every read goes through `read(address, out, size)`
+// and only for a root proven by the caller: none at all for a refused actor; the source's bank (+0x158 of the
+// source) only for a source proven on its own (driven binding and list handle), never inferred from the actor.
+// `decode` resolves the +0xC action handle; its object is read only when decode returns it.
+struct LocalHold {
+    std::uintptr_t thread{},capture{},bank{},sourceBank{},anchor{},actionVtable{};
+    std::uint32_t flags6C8{},flags18C{},parent{},motion{0xFFFFFFFFu},actionHandle{};
+    bool actorRead{},sourceRead{};
+};
+template<class Read,class Decode>
+LocalHold ReadLocalHold(bool actorProven,std::uintptr_t actor,bool sourceProven,std::uintptr_t source,
+                        Read&& read,Decode&& decode) {
+    LocalHold h{};
+    if(!actorProven || !actor)return h;  // a refused root: metadata only
+    h.actorRead=read(actor+0xD48,&h.thread,sizeof(h.thread)) && read(actor+0x2B0,&h.capture,sizeof(h.capture)) &&
+        read(actor+0x2B8,&h.bank,sizeof(h.bank)) && read(actor+0x6C8,&h.flags6C8,sizeof(h.flags6C8)) &&
+        read(actor+0x18C,&h.flags18C,sizeof(h.flags18C)) && read(actor+0x6A0,&h.parent,sizeof(h.parent)) &&
+        read(actor+0x2A0,&h.anchor,sizeof(h.anchor)) && read(actor+0x180,&h.motion,sizeof(h.motion));
+    if(h.actorRead && read(actor+0xC,&h.actionHandle,sizeof(h.actionHandle)) && h.actionHandle) {
+        if(const std::uintptr_t action=decode(h.actionHandle))(void)read(action,&h.actionVtable,sizeof(h.actionVtable));
+    }
+    h.sourceRead=sourceProven && source && read(source+0x158,&h.sourceBank,sizeof(h.sourceBank));
+    return h;
+}
 inline const char* ReleaseCleanupName(ReleaseCleanup c) noexcept {
     switch(c) {
     case ReleaseCleanup::NotCurrent: return "not-current";
