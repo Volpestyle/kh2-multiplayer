@@ -220,6 +220,16 @@ void CaptureHostActivation(const float* position4);
 bool SpawnEmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* trigger, spawncontroller::EmissionPhase phase, spawncontroller::EmissionPermit& permit, const spawncontroller::EmissionBirth* birth);
 bool CopySpawnEmissionPoint(std::uint32_t key, std::uint16_t header, float* output);
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence);
+// VUH-2466: the Struggle orb hooks (StruggleOrbsHook.hpp), on the game thread. The host books each orb
+// and queues its birth and collection as SpawnEmission rows; the client shows the host's orbs.
+bool OrbHostLive();
+bool OrbClientFollow();
+void OrbHostBirth(std::uintptr_t manager, std::uintptr_t record, std::uint8_t type, const float* point, const float* velocity);
+// collector: an OrbCollector value (Protocol.hpp stays out of this header).
+void OrbHostCollect(std::uintptr_t manager, std::uintptr_t record, std::uint8_t collector, std::uint16_t netId);
+void OrbClientTick();
+std::uint16_t HostCollectorNetId(uintptr_t actor) noexcept;  // a host enemy collector's netId, or 0
+uintptr_t ClientActorForNetId(std::uint16_t netId) noexcept; // the client's living copy of a host enemy, or 0
 
 void Shutdown();
 

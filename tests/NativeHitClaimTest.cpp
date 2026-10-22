@@ -208,6 +208,12 @@ bool TakeStageEnd(StageEnd&) noexcept { return false; }
 bool ReplayStageEnd(const StageEnd&) noexcept { return false; }
 void ApplyStageEnd() noexcept {}
 }
+// VUH-2466: no orb manager in these harnesses (StruggleOrbsTest has the orb rules).
+namespace kh2coop::inject::struggleorbs {
+std::uintptr_t Manager() { return 0; }
+std::uintptr_t CreateDisplay(const CreateRequest&) { return 0; }
+bool StartFlight(const VanishRequest&) { return false; }
+}
 namespace kh2coop::inject::lifecycletrace {
 bool PopEvent(Event&) { return false; }
 Stats GetStats() { return {}; }

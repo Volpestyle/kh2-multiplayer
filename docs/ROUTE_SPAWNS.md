@@ -275,6 +275,11 @@ placement may differ until existing host pose mirroring takes over. Identity and
 HP parity must therefore be proved through occurrence tickets and native actor
 roots, not spatial matching. If live evidence requires generated-point replay,
 design it separately without silently changing that wire field's meaning.
+Protocol 34 (VUH-2466) adds a `kind` to SpawnEmission. A controller row keeps every
+field above unchanged and carries no orb fields; an orb row (the Struggle's orbs,
+[PROLOGUE_ENCOUNTERS.md](PROLOGUE_ENCOUNTERS.md#decision-the-struggle-score-is-the-hosts-world-vuh-2466))
+has no controller identity, and its `point` is the orb's birth point. The ledger never
+answers a controller lookup with an orb row.
 
 The observer reserves its 64-return budget for successful births, with only
 eight entry logs; startup null returns no longer exhaust it. The updated LoD

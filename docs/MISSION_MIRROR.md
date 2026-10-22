@@ -113,7 +113,8 @@ can't die. That belongs to the spawn controller, not this mirror.
 
 The host's mission is what counts. The friend's own orb pickups and hits change
 nothing until the host's game sees them (as with enemy HP, the host owns the
-outcome).
+outcome). VUH-2466: in the Struggle the friend shows and collects the host's orbs
+instead of its own ([the orb rule](PROLOGUE_ENCOUNTERS.md#decision-the-struggle-score-is-the-hosts-world-vuh-2466)).
 
 ## Logs and checks
 

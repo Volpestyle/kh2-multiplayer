@@ -94,6 +94,23 @@ Native facts behind it (read-only Ghidra of the installed exe, nothing copied):
 - In btl84 (run `20261021-015611`) Hayner hit the friend's clone on the host 8 times of 13, and the
   host's counter 0 fell on those hits: the friend's losses already come off the team score.
 
+How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`, `StruggleOrbsHook.cpp`):
+- The host gives every orb born at its orb manager (`*(exe+0x2AEA190)`, through `FUN_1403dc950`) an ID
+  and sends its birth (descriptor, point, scatter) and later its collection (the host's player, the
+  friend's clone, or an enemy by netId) as SpawnEmission orb rows, in the same FIFO as controller births.
+  The relay caches them per room, so a late friend gets them too.
+- The friend, while it is a client in the host's room, skips its own orb drops (`FUN_140410100`,
+  `FUN_140410090`) and pickups (`FUN_14040ff50`, `FUN_140410250`). It creates the host's orbs through the
+  same allocator, puts the host's scatter on them and marks them to keep (as the native callers do), and
+  starts an orb's native flight to the friend's copy of the collector only when the host collected it.
+  An orb already collected by the time its birth applies is never shown. At most 64 native calls a frame.
+- The score itself is untouched: the friend's counters still follow the host's through the mission
+  mirror. There is no pickup claim. The friend collects by its clone touching the host's orb on the
+  host, a position latency behind; whether that misses orbs the friend brushes past is for the first live
+  run after the freeze. `KH2COOP_STRUGGLE_ORBS=0` leaves each game its own orbs.
+- `kh2coop_struggle_orbs_test` replays btl84's logged counter sequence as host births and pickups: at
+  every 120-frame sample the friend shows exactly the host's orbs on the field (10 at the end).
+
 ## Rehearsal saves
 
 PC1's rig saves reach only part of this list: FM-00 starts on the Station of Serenity save point

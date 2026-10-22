@@ -61,7 +61,7 @@ runtime_mode = campaign_coop
 client_role = 0
 ```
 
-Protocol **33**, AvatarBridge **4**, WorldBridge **12**, CaptureChannel **1**
+Protocol **34**, AvatarBridge **4**, WorldBridge **13**, CaptureChannel **1**
 are the current source versions. Match all source products; old receipts remain
 historical. Package validation has its own version contract; see
 [packaging](../tools/packaging/README.md) before assembling a ZIP.

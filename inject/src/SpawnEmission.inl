@@ -16,6 +16,10 @@ struct PendingSpawnEmission {
 };
 std::vector<PendingSpawnEmission> g_emissionOutbox;
 SpawnEmissionLedger g_emissionLedger;
+// VUH-2466: the host's Struggle orbs (IDs per orb manager) and the friend's display copies.
+struggleorbs::HostBook g_orbBook;
+struggleorbs::ClientDisplay g_orbDisplay;
+unsigned g_orbLogs = 0;
 std::uint64_t g_emissionSequence = 0;
 unsigned g_emissionDeniedLogs = 0;
 struct LocalEmissionBirth {
@@ -271,6 +275,23 @@ void AdoptEmissionBirth(uintptr_t actor,int id) {
 void ResetSpawnEmissions() {
     g_emissionOutbox.clear(); g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false;
     g_emissionSequence = 0; g_emissionDeniedLogs = 0;
+    g_orbBook.Reset(); g_orbDisplay.Reset(); g_orbLogs = 0;
+}
+// VUH-2466: a host orb row joins the same FIFO as controller births. It has no native birth to observe.
+void QueueOrbRow(SpawnEmission value) {
+    const auto generation=WorldSessionGeneration();
+    RoomTransition location;
+    if(CurrentRole()!=Role::Host || !generation || g_emissionSequence==UINT64_MAX || !ReadLocationChecked(location))return;
+    std::erase_if(g_emissionOutbox,[generation](const PendingSpawnEmission& p){return p.generation!=generation ||
+        p.transition!=warp::TransitionSerial() || p.load!=warp::LoadSerial();});
+    if(g_emissionOutbox.size()>=SPAWN_EMISSION_CAP) {
+        if(g_log && g_orbLogs<64){++g_orbLogs;g_log("[struggle-orbs] host outbox full: orb %u row dropped",value.orbId);}
+        return;
+    }
+    value.location=location; value.sequence=++g_emissionSequence;
+    PendingSpawnEmission row{};row.value=value;row.generation=generation;row.transition=warp::TransitionSerial();row.load=warp::LoadSerial();
+    row.warmup={g_hitTraceFrame,g_hitTraceFrame};
+    g_emissionOutbox.push_back(row);
 }
 void FlushSpawnEmissions(const NativeCensus& census) {
     RoomTransition room;
@@ -279,7 +300,7 @@ void FlushSpawnEmissions(const NativeCensus& census) {
     if(!observedGeneration || !CensusMatchesInstance(census))return;
     // Observe every queued birth before FIFO publication: an initializing head
     // must not create an unobserved gap for later births from the same tick.
-    for(auto& p:g_emissionOutbox)if(!p.birth.helper && !p.retired) {
+    for(auto& p:g_emissionOutbox)if(p.value.kind==SpawnEmissionKind::Controller && !p.birth.helper && !p.retired) {
         if(p.generation!=observedGeneration || p.transition!=warp::TransitionSerial() ||
            p.load!=warp::LoadSerial() || !SameLocation(p.value.location,room) ||
            !p.warmup.Current(g_hitTraceFrame,!p.birth.status)) {
@@ -303,7 +324,7 @@ void FlushSpawnEmissions(const NativeCensus& census) {
             if(g_log)g_log("[spawn-birth] host-refused reason=birth-membership-or-roots seq=%llu",static_cast<unsigned long long>(pending.value.sequence));
             g_emissionOutbox.erase(g_emissionOutbox.begin());continue;
         }
-        if(!pending.birth.helper) {
+        if(pending.value.kind==SpawnEmissionKind::Controller && !pending.birth.helper) {
             if(!pending.birth.status)return; // checked pending initialization; no identity yet
             const auto found=g_inst.byActor.find(pending.birth.actor);
             const NativeEnemy* native=nullptr;
@@ -326,7 +347,16 @@ void FlushSpawnEmissions(const NativeCensus& census) {
         if (!CaptureWorldContext(context) || !SendCapturedWorld(encode(pending.value), context)) return;
         if(g_emissionOutbox.empty() || g_emissionOutbox.front().value.sequence!=pending.value.sequence ||
            g_emissionOutbox.front().generation!=pending.generation)return;
-        if (g_log) g_log("[spawn-emission] sent epoch=%u seq=%llu key=%u header=%u record=%u netId=%u point=(%.1f,%.1f,%.1f,%.1f)",
+        if (pending.value.kind != SpawnEmissionKind::Controller) {
+            if (g_log && g_orbLogs < 400) {
+                ++g_orbLogs;
+                g_log("[struggle-orbs] sent epoch=%u seq=%llu %s orb=%u type=%u point=(%.1f,%.1f,%.1f) collector=%u netId=%u",
+                    room.epoch, static_cast<unsigned long long>(pending.value.sequence),
+                    pending.value.kind == SpawnEmissionKind::OrbBirth ? "birth" : "collect", pending.value.orbId,
+                    pending.value.orbType, pending.value.point[0], pending.value.point[1], pending.value.point[2],
+                    static_cast<unsigned>(pending.value.collector), pending.value.collectorNetId);
+            }
+        } else if (g_log) g_log("[spawn-emission] sent epoch=%u seq=%llu key=%u header=%u record=%u netId=%u point=(%.1f,%.1f,%.1f,%.1f)",
             room.epoch, static_cast<unsigned long long>(pending.value.sequence), pending.value.controllerKey,
             pending.value.headerId, pending.value.recordIndex, pending.value.netId, pending.value.point[0], pending.value.point[1],
             pending.value.point[2], pending.value.point[3]);
@@ -340,7 +370,15 @@ void ReceiveSpawnEmission(const WorldScope& scope, const SpawnEmission& value) {
         !scope.sourceConnectionId || scope.sourceConnectionId != g_bridge.ConnectionId(0) ||
         scope.sourceDeliverySerial != g_bridge.PeerDeliverySerial(0) || !scope.hostSourceSerial ||
         !sameActivationLocation(value.location, *g_lastRoomPacket)) return;
-    if (g_emissionLedger.Add(value) && g_log)
-        g_log("[spawn-emission] received epoch=%u seq=%llu key=%u header=%u record=%u netId=%u",
+    if (!g_emissionLedger.Add(value) || !g_log) return;
+    if (value.kind != SpawnEmissionKind::Controller) {
+        if (g_orbLogs < 400) {
+            ++g_orbLogs;
+            g_log("[struggle-orbs] received epoch=%u seq=%llu %s orb=%u", value.location.epoch,
+                static_cast<unsigned long long>(value.sequence), value.kind == SpawnEmissionKind::OrbBirth ? "birth" : "collect", value.orbId);
+        }
+        return;
+    }
+    g_log("[spawn-emission] received epoch=%u seq=%llu key=%u header=%u record=%u netId=%u",
             value.location.epoch, static_cast<unsigned long long>(value.sequence), value.controllerKey, value.headerId, value.recordIndex,value.netId);
 }

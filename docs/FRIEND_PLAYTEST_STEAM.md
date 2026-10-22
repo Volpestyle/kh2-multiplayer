@@ -4,10 +4,10 @@ The Steam transport passed its two-account, two-PC rev11 check. The package
 passed launch/title/exit (UX07) and technical GUI host/join (JOIN05). Effective
 movement with a clearly responding puppet on both package screens and a
 physical-controller friend session still need qualification. Use the specific
-matching package supplied by your host; current source is protocol 33,
+matching package supplied by your host; current source is protocol 34,
 AvatarBridge 4 and WorldBridge 12, not the old acceptance products. The checked-in
 package validator/pins still target protocol 18; they cannot produce a current
-protocol-33 ZIP unchanged. See [packaging](../tools/packaging/README.md).
+protocol-34 ZIP unchanged. See [packaging](../tools/packaging/README.md).
 
 You need Steam running, signed in to your account owning KINGDOM HEARTS HD
 1.5+2.5 ReMIX, Windows, and the exact supported Steam Global KH2 build. No

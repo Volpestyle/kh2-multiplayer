@@ -29,7 +29,7 @@ MissionState decode(const std::vector<std::uint8_t>& bytes) {
 }
 void codec() {
     auto m = sample(); const auto bytes = encode(m);
-    check(PROTOCOL_VERSION == 33 && bytes[0] == 52 && bytes.size() == 3 + MISSION_STATE_BYTES && MISSION_STATE_BYTES == 151,
+    check(PROTOCOL_VERSION == 34 && bytes[0] == 52 && bytes.size() == 3 + MISSION_STATE_BYTES && MISSION_STATE_BYTES == 151,
           "protocol25 packet52 has the exact 151-byte payload");
     check(encode(decode(bytes)) == bytes, "every field round trips");
     check(isWorldPacket(PacketType::MissionState) && isScopedWorldPacket(PacketType::MissionState) &&

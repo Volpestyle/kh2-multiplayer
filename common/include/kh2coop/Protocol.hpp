@@ -12,9 +12,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 33;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 34;
 
 // ===========================================================================
+// Protocol v34 (VUH-2466): SpawnEmission carries a kind; the host's Struggle orb births and collections
+// ride it (69 bytes), so the friend shows the host's orbs.
 // Protocol v33 (VUH-2656, D17): a downed client owes itself the return when the host's MissionState ends its
 // mission with mission_complete (end trap 3); no wire change, a behavior every peer must share.
 // Protocol v32 (VUH-2632, D17): the host's native difficulty in the RoomTransition packet trailer, and
@@ -162,6 +164,10 @@ struct RoomTransition {
     std::uint8_t nativeDifficulty {0xFF};
 };
 
+enum class SpawnEmissionKind : std::uint8_t { Controller = 0, OrbBirth = 1, OrbCollect = 2 };
+// Who took a host orb: the host's own player, the friend's player (its clone on the host), or an enemy.
+enum class OrbCollector : std::uint8_t { None = 0, Host = 1, Friend = 2, Enemy = 3 };
+
 // One successful native wrapper return, not permission to run a controller's
 // other records. Sequence is host-connection scoped; room binds replay lifetime.
 struct SpawnEmission {
@@ -171,8 +177,20 @@ struct SpawnEmission {
     std::uint16_t headerId {0}, recordIndex {0};
     std::array<float, 4> point {};
     std::uint16_t netId {0}; // exact host combat occurrence; zero is a helper, never late-death authority
+    // VUH-2466 (v34): a Struggle orb row instead of a controller birth. An orb row has no controller
+    // identity (key, header, record and netId all zero). Birth: the host's orb `orbId` was created with
+    // descriptor `orbType` (0..3) at `point`, with scatter `velocity`. Collect: `collector` took it
+    // (`collectorNetId` names an enemy collector).
+    SpawnEmissionKind kind {SpawnEmissionKind::Controller};
+    std::uint8_t orbType {0};
+    std::uint16_t orbId {0};
+    std::array<float, 3> velocity {};
+    OrbCollector collector {OrbCollector::None};
+    std::uint16_t collectorNetId {0};
 };
 inline constexpr std::size_t SPAWN_EMISSION_CAP = 4096;
+inline constexpr std::size_t SPAWN_EMISSION_BYTES = 69;
+inline constexpr std::uint8_t ORB_TYPES = 4;
 
 // Ephemeral native activation challenge. The requester owns the deadline on
 // its monotonic clock; receipt never renews it. A host response must be captured

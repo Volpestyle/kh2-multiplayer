@@ -7,14 +7,14 @@ its PC2 launch/title/exit UX acceptance (UX07, 20261008T060115Z-5fd7830d).
 Package GUI host/join later reached technical two-PC acceptance (JOIN05).
 Effective movement with a clearly responding puppet on both package screens,
 a physical-controller friend session and the full story route remain open.
-Current source is protocol 33, AvatarBridge 4 and WorldBridge 12. Earlier runs
+Current source is protocol 34, AvatarBridge 4 and WorldBridge 13. Earlier runs
 retain their original products and scope; do not mix them with current binaries.
 ENet remains the bare development runtime's default transport; a Steam package
 selects Steam in its verified manifest. Session/cache/resync authority stays in
 the runtime, with host gameplay authority unchanged.
 
 The checked-in package validator/pins still target protocol 18, whereas source
-is protocol 33. Building a current-source package is blocked until that cohort
+is protocol 34. Building a current-source package is blocked until that cohort
 is refreshed and qualified; see [packaging](../tools/packaging/README.md).
 The setup below applies to a complete matching package supplied by the host.
 

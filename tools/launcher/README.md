@@ -19,7 +19,7 @@ The standard CPython Windows installer includes Tkinter. No package install, bui
 1. Prepare/load/inject the intended game using the existing `kh2ctl` workflow. This launcher offers no game launch, injection, load, save, restart or kill action.
 2. Click **Refresh games**, select the existing PID, and ensure no other runtime is attached to it. The launcher checks that the retained PID handle is a KH2 process and that its AvatarBridge exists. This is not a DLL/version/saveguard attestation.
 3. Choose **host** (player slot 0) or **join** (friend1/friend2), a literal private tailnet IPv4 address and matching UDP port, and a unique **peer ID**. Peer ID is supported by `--peer-id`; it is not a distinct in-game display-name feature. No DNS/public/loopback fallback is used.
-4. A gameplay host may use an existing remote relay, including a Mac. Check **start a relay here** only when hosting a relay on this PC and entering this PC's existing tailnet IP. That relay receives explicit `--bind`, port and compatibility identifiers. Failure to bind stops startup rather than changing interfaces. All participants must use matching reported game/content/mod identifiers and matching source-protocol binaries; these reported values do not verify binary identity. Current native source is protocol 33, while this UI's plan metadata still imports the historical protocol-18 packaging constant; that label does not attest the selected binaries.
+4. A gameplay host may use an existing remote relay, including a Mac. Check **start a relay here** only when hosting a relay on this PC and entering this PC's existing tailnet IP. That relay receives explicit `--bind`, port and compatibility identifiers. Failure to bind stops startup rather than changing interfaces. All participants must use matching reported game/content/mod identifiers and matching source-protocol binaries; these reported values do not verify binary identity. Current native source is protocol 34, while this UI's plan metadata still imports the historical protocol-18 packaging constant; that label does not attest the selected binaries.
 5. Click **Connect**. Config, exact argv, logs and exit receipts go only into ignored `tools/launcher/.local/runs/<stamp>/`. Preferences are in `.local/preferences.json`; PIDs are not remembered. Disconnect/close/time limit affect only this launcher's runtime and optional relay. The game and external relay remain running.
 
 Existing binary paths can be supplied without config editing:
@@ -55,7 +55,7 @@ supported EXE, and requires the SaveGuard receipt before connection. See the
 
 Its source UI starts with **Steam (beta)** selected. At package startup the
 manifest's `defaultTransport` selects Steam or ENet (a missing value falls back
-to ENet). Current source is protocol **33**; the checked-in packaging validator
+to ENet). Current source is protocol **34**; the checked-in packaging validator
 and product selection remain protocol **18**. They are historical inputs, so
 building a current package requires a reviewed validator update and a coherent
 new product cohort. See [packaging](../packaging/README.md). Source UI behavior
@@ -94,5 +94,5 @@ for current scope and limitations. The developer launcher also supplies these he
 `windows_owned.py`; its already-running game retains its original environment.
 
 Historical launcher receipts under `build/rig/` describe their recorded builds
-and routes. They do not qualify a newly rebuilt protocol-33 package or establish
+and routes. They do not qualify a newly rebuilt protocol-34 package or establish
 clean-machine/two-PC acceptance for that package.

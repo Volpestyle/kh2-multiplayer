@@ -41,6 +41,8 @@
 #include "kh2coop/CausalDiagnostics.hpp"
 #include "kh2coop/ActivationLease.hpp"
 #include "kh2coop/SpawnEmissionLedger.hpp"
+#include "StruggleOrbs.hpp"
+#include "StruggleOrbsHook.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/Codec.hpp"
 #include "kh2coop/PopulationCutJson.hpp"
@@ -4339,6 +4341,7 @@ bool ReceiveWorldPackets() {
                     ApplyHostPartyRow(t);
                     ResetOrdinaryLifecycle(); // retire old history before this batch can carry the new cut
                     g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false; g_emissionDeniedLogs = 0;
+                    g_orbDisplay.Reset(); // VUH-2466: the old room's orbs are not this room's
                     ClearPendingOrdinaryCuts(); // a superseding host epoch retires queued native authority
                     g_lastRoomPacket = t;         // review F2: a later resync of this load reuses its trailer
                     g_recoveredControlScope.reset();
@@ -7049,6 +7052,81 @@ void AdmitScriptCall(const WorldScope& scope, const std::uint8_t* payload, std::
     }
 }
 } // namespace
+
+// VUH-2466: the Struggle orb hooks' context, on the game thread. The pickup hook asks once per orb per
+// frame, so each answer is kept for its frame.
+bool OrbHostLive() {
+    static std::uint32_t frame = UINT32_MAX; static bool live = false;
+    if (frame != g_hitTraceFrame) {
+        RoomTransition location;
+        frame = g_hitTraceFrame; live = CurrentRole() == Role::Host && ActivationContext(Role::Host, location);
+    }
+    return live;
+}
+bool OrbClientFollow() {
+    static std::uint32_t frame = UINT32_MAX; static bool follow = false;
+    if (frame != g_hitTraceFrame) {
+        RoomTransition room;
+        frame = g_hitTraceFrame;
+        follow = CurrentRole() == Role::Client && ActivationContext(Role::Client, room) && g_lastRoomPacket &&
+                 sameActivationLocation(room, *g_lastRoomPacket);
+    }
+    return follow;
+}
+void OrbHostBirth(std::uintptr_t manager, std::uintptr_t record, std::uint8_t type, const float* point, const float* velocity) {
+    const std::uint16_t id = g_orbBook.Birth(manager, record);
+    if (!id) {
+        if (g_log && g_orbLogs < 64) { ++g_orbLogs; g_log("[struggle-orbs] host birth refused: no orb ID left in this match"); }
+        return;
+    }
+    SpawnEmission row{};
+    row.kind = SpawnEmissionKind::OrbBirth; row.orbId = id; row.orbType = type;
+    std::copy_n(point, 4, row.point.begin()); std::copy_n(velocity, 3, row.velocity.begin());
+    for (float v : row.point) if (!std::isfinite(v)) return;
+    for (float v : row.velocity) if (!std::isfinite(v)) return;
+    QueueOrbRow(row);
+}
+void OrbHostCollect(std::uintptr_t manager, std::uintptr_t record, std::uint8_t collectorValue, std::uint16_t netId) {
+    const auto collector = collectorValue <= static_cast<std::uint8_t>(OrbCollector::Enemy) ? static_cast<OrbCollector>(collectorValue)
+                                                                                           : OrbCollector::None;
+    const std::uint16_t id = g_orbBook.Collect(manager, record);
+    if (!id) return;  // born before this session was live, or not an orb of this match
+    SpawnEmission row{};
+    row.kind = SpawnEmissionKind::OrbCollect; row.orbId = id;
+    row.collector = collector == OrbCollector::Enemy && !netId ? OrbCollector::None : collector;
+    row.collectorNetId = row.collector == OrbCollector::Enemy ? netId : 0;
+    QueueOrbRow(row);
+}
+void OrbClientTick() {
+    if (!OrbClientFollow()) return;
+    g_orbDisplay.Receive(g_emissionLedger.TakeOrbs());
+    if (!g_orbDisplay.Queued()) return;
+    const auto before = g_orbDisplay.Stats();
+    g_orbDisplay.Tick(struggleorbs::Manager(), &struggleorbs::CreateDisplay, &struggleorbs::StartFlight);
+    const auto& after = g_orbDisplay.Stats();
+    if (g_log && g_orbLogs < 400 && (after.createFailed != before.createFailed || after.vanishFailed != before.vanishFailed ||
+                                     after.created / 16 != before.created / 16)) {
+        ++g_orbLogs;
+        g_log("[struggle-orbs] client shown=%zu created=%llu vanished=%llu skipped=%llu createFailed=%llu vanishFailed=%llu queued=%zu",
+            g_orbDisplay.Shown(), static_cast<unsigned long long>(after.created), static_cast<unsigned long long>(after.vanished),
+            static_cast<unsigned long long>(after.skipped), static_cast<unsigned long long>(after.createFailed),
+            static_cast<unsigned long long>(after.vanishFailed), g_orbDisplay.Queued());
+    }
+}
+std::uint16_t HostCollectorNetId(uintptr_t actor) noexcept {
+    if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending || !actor) return 0;
+    const auto found = g_inst.byActor.find(actor);
+    if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return 0;
+    const auto& spawn = g_inst.spawns[found->second];
+    if (!spawn.present || !spawn.announced || spawn.actor != actor || spawn.spawnIndex + 1 > 0xFFFF) return 0;
+    return static_cast<std::uint16_t>(spawn.spawnIndex + 1);
+}
+uintptr_t ClientActorForNetId(std::uint16_t netId) noexcept {
+    if (CurrentRole() != Role::Client || !netId) return 0;
+    for (const auto& spawn : g_inst.spawns)
+        if (spawn.present && spawn.netId == netId && spawn.actor && spawn.lastHp > 0) return spawn.actor;
+    return 0;
+}
 
 std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept {
     if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending || !actor) return 0;
