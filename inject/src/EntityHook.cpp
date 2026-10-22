@@ -603,6 +603,7 @@ namespace enemymirror { std::uint32_t HostBrainBoundFrame() noexcept; }
 namespace scriptmirror {
 bool VeilReady() noexcept;
 std::uint32_t VeilHandle(uintptr_t actor) noexcept;
+bool VeilHandleNames(uintptr_t actor, std::uint32_t handle) noexcept;
 bool Veil(uintptr_t actor, std::uint32_t handle, bool hide) noexcept;
 }
 #include "DownedSpike.inl"

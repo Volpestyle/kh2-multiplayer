@@ -550,22 +550,25 @@ struct SitOutVeilFacts {
     bool ready = false;              // the pinned native obj_hide/obj_show traps resolved, on the game thread
     bool veiled = false;             // the veil hid a copy not yet shown or forgotten
 };
-// The client tracker's spawns, as the veil sees each: the arena's lone living boss or nothing (any second living,
-// present spawn, or a lone one that is not the boss object and type, is not a sit-out copy).
+// The client tracker's spawns, as the veil sees each against a fresh, complete native census of this frame: proven,
+// the census holds a row at its address with the tracker's own identity (objentry, status, object id and type), so a
+// freed and reused address never qualifies; living, that row's HP. The candidate is the arena's lone boss: exactly
+// one living native enemy in the census, and it is that proven spawn.
 struct VeilSpawn {
     std::uintptr_t actor = 0;
     std::uint32_t objectId = 0, objectType = 0;
-    bool present = false, living = false, bound = false;
+    bool proven = false, living = false, bound = false;
 };
 template <class Spawns, class View>
-bool LoneBossCopy(const Spawns& spawns, std::uint32_t objectId, std::uint32_t objectType, View&& view,
-                  std::uintptr_t& actor, bool& bound) {
+bool LoneBossCopy(const Spawns& spawns, std::size_t nativeLiving, std::uint32_t objectId, std::uint32_t objectType,
+                  View&& view, std::uintptr_t& actor, bool& bound) {
     actor = 0; bound = false;
+    if (nativeLiving != 1) return false;
     bool found = false;
     VeilSpawn copy {};
     for (const auto& s : spawns) {
         const VeilSpawn v = view(s);
-        if (!v.present || !v.living) continue;
+        if (!v.proven || !v.living) continue;
         if (found) return false;
         found = true; copy = v;
     }
@@ -593,6 +596,59 @@ constexpr VeilStep SitOutVeilStep(const SitOutVeilFacts& f, const char*& why) no
     if (!f.handleOwn) { why = "unowned"; return VeilStep::None; }
     if (!f.ready) { why = "no-traps"; return VeilStep::None; }
     why = "sit-out"; return VeilStep::Hide;
+}
+// The adapter's order (Quill r1 on 23c8bb8). No actor root is read unless the world facts admit it:
+//   hidden   the saved actor is followed only in its own transition and load, with no transition pending, and then
+//            only through its saved handle (names: the handle resolves to it first, then its own +4 handle is that
+//            handle); its binding is the tracker's for that exact actor (boundNow), never the lone-copy admission;
+//   not yet  find runs only once the arrival, the sit-out and its world admit a hide; it proves the incarnation on a
+//            fresh census (LoneBossCopy); handleOf reads only an actor find just proved.
+// The one native call (Hide or Show) is the last thing run.
+struct VeilWorld {
+    bool client = false, latched = false, attempted = false, veiled = false, sitOutOpen = false;
+    bool transitionPending = false, worldCurrent = false, loadCurrent = false;
+};
+struct VeilRun {
+    VeilStep step = VeilStep::None;
+    const char* why = "";
+    bool ok = false, bound = false;
+    std::uintptr_t actor = 0;
+    std::uint32_t handle = 0;
+};
+template <class Ready, class Find, class HandleOf, class Names, class BoundNow, class Call>
+VeilRun RunSitOutVeil(const VeilWorld& w, std::uintptr_t hiddenActor, std::uint32_t hiddenHandle, Ready&& ready,
+                      Find&& find, HandleOf&& handleOf, Names&& names, BoundNow&& boundNow, Call&& call) {
+    VeilRun out;
+    SitOutVeilFacts f;
+    f.client = w.client; f.latched = w.latched; f.attempted = w.attempted; f.veiled = w.veiled;
+    f.sitOutOpen = w.sitOutOpen; f.transitionPending = w.transitionPending; f.worldCurrent = w.worldCurrent;
+    f.loadCurrent = w.loadCurrent;
+    if (w.veiled) {
+        out.actor = hiddenActor; out.handle = hiddenHandle;
+        if (!w.transitionPending && w.loadCurrent && names(hiddenActor, hiddenHandle)) {
+            f.handleOwn = true;
+            f.copyBound = boundNow(hiddenActor);
+            f.ready = ready();
+        }
+    } else if (w.client && w.latched && !w.attempted && w.sitOutOpen && !w.transitionPending && w.worldCurrent) {
+        std::uintptr_t actor = 0;
+        bool bound = false;
+        f.copyFound = find(actor, bound);
+        if (f.copyFound) {
+            f.copyBound = bound;
+            if (!bound) {
+                out.actor = actor;
+                out.handle = handleOf(actor);
+                f.handleOwn = out.handle != 0;
+                if (f.handleOwn) f.ready = ready();
+            }
+        }
+    }
+    out.step = SitOutVeilStep(f, out.why);
+    out.bound = f.copyBound;
+    if (out.step == VeilStep::Hide || out.step == VeilStep::Show)
+        out.ok = call(out.actor, out.handle, out.step == VeilStep::Hide);
+    return out;
 }
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {

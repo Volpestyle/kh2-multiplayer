@@ -696,10 +696,16 @@ static std::uint32_t SmOwnHandle(uintptr_t actor) noexcept {
 // client's pinned native as for a replayed call, on an actor by its own handle. B_EX100's class (vtable 0x5D2858
 // +0x80/+0x88: 0x419820/0x419830) sets +0x124 |= 0x300, or clears 0x100 and restores the 0x200 shadow bit from +0xB90.
 bool VeilReady() noexcept { return g_sm.requested && SmGameThread() && SmClientReady(); }
+// An actor the census just proved: its own handle (its +4, naming itself).
 std::uint32_t VeilHandle(uintptr_t actor) noexcept { return actor ? SmOwnHandle(actor) : 0; }
+// A retained receipt (Quill r1 on 23c8bb8): the saved handle must resolve to the saved actor before that actor's +4 is
+// read; then its +4 must still be that handle.
+bool VeilHandleNames(uintptr_t actor, std::uint32_t handle) noexcept {
+    return actor && handle && SmDecode(handle) == actor && SmOwnHandle(actor) == handle;
+}
 bool Veil(uintptr_t actor, std::uint32_t handle, bool hide) noexcept {
     const int i = R::FindTrap(1, hide ? 133 : 134);
-    if (i < 0 || !VeilReady() || !handle || SmOwnHandle(actor) != handle) return false;
+    if (i < 0 || !VeilReady() || !VeilHandleNames(actor, handle)) return false;
     const std::uint64_t none[4] {};
     std::uint64_t result = 0;
     return SmCallTrap(static_cast<std::size_t>(i), handle, none, result);

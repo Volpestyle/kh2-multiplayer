@@ -6660,9 +6660,29 @@ bool FindSitOutBossCopy(std::uint16_t arenaId, SitOutBossCopy& out) noexcept {
     if (!arena || CurrentRole() != Role::Client || !g_inst.live || g_inst.world != arena->location[0] ||
         g_inst.room != arena->location[1] || g_inst.door != arena->location[2] || g_inst.map != arena->location[3] ||
         g_inst.btl != arena->location[4] || g_inst.evt != arena->location[5]) return false;
-    return downedreturn::LoneBossCopy(g_inst.spawns, arena->bossObjectId, arena->bossObjectType, [](const Spawn& s) {
-        return downedreturn::VeilSpawn {s.actor, s.objectId, s.objectType, s.present, !s.killed && s.lastHp > 0, s.netId >= 0};
-    }, out.actor, out.bound);
+    // Quill r1 on 23c8bb8: a fresh, complete census of this frame, never the tracker's cached rows alone (an
+    // interrupted census keeps them, and a freed address may hold another actor by now).
+    try {
+        const auto census = CaptureNativeCensus();
+        if (!CensusMatchesInstance(census)) return false;
+        std::size_t living = 0;
+        for (const auto& row : census.enemies) if (row.hp > 0) ++living;
+        return downedreturn::LoneBossCopy(g_inst.spawns, living, arena->bossObjectId, arena->bossObjectType,
+            [&census](const Spawn& s) {
+                const auto* row = FindNativeEnemy(census, s);
+                const bool proven = row && row->objectType == s.objectType;
+                return downedreturn::VeilSpawn {s.actor, s.objectId, s.objectType, proven, proven && row->hp > 0,
+                                                s.netId >= 0};
+            }, out.actor, out.bound);
+    } catch (...) { out = {}; return false; }
+}
+
+bool SitOutCopyBound(uintptr_t actor) noexcept {
+    if (!actor || CurrentRole() != Role::Client) return false;
+    const auto it = g_inst.byActor.find(actor);
+    if (it == g_inst.byActor.end() || it->second >= g_inst.spawns.size()) return false;
+    const auto& s = g_inst.spawns[it->second];
+    return s.actor == actor && s.netId >= 0;
 }
 
 SeatAuthority CaptureSeatAuthority() noexcept {

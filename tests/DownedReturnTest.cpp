@@ -433,25 +433,102 @@ int main() {
       u.loadCurrent = false; CHECK(step(u, VeilStep::Forget, "gone"));
       // Ended while the copy's traps were unavailable: it waits rather than forgetting a copy it hid.
       u.loadCurrent = true; u.ready = false; CHECK(step(u, VeilStep::None, "no-traps")); }
-    // The candidate: the client tracker's lone living, present spawn, the arena's boss (307, type 12).
+    // The candidate, on a fresh complete census: exactly one living native enemy, and it is a tracked spawn whose
+    // census row carries the tracker's own identity (proven), the arena's boss (307, type 12).
     { const auto view = [](const VeilSpawn& s) { return s; };
       const VeilSpawn thorn {0x7FF60615FD10, 307, 12, true, true, false};
       std::uintptr_t actor = 1; bool bound = true;
-      const auto lone = [&](std::initializer_list<VeilSpawn> spawns) {
-          return LoneBossCopy(spawns, 307, 12, view, actor, bound); };
+      const auto lone = [&](std::initializer_list<VeilSpawn> spawns, std::size_t living = 1) {
+          return LoneBossCopy(spawns, living, 307, 12, view, actor, bound); };
       CHECK(lone({thorn}) && actor == thorn.actor && !bound);                  // attempt02's netId 0 copy
       auto b = thorn; b.bound = true;
       CHECK(lone({b}) && actor == thorn.actor && bound);                       // bound: reported, the rule refuses it
-      auto gone = thorn; gone.present = false; auto dead = thorn; dead.living = false; dead.actor = 0x10;
-      CHECK(lone({gone, thorn}) && lone({dead, thorn}) && actor == thorn.actor); // left or dead spawns don't count
+      auto reused = thorn; reused.proven = false;                              // Quill r1: a freed, reused address
+      CHECK(!lone({reused}) && actor == 0 && !bound);                          // (another identity there now)
+      CHECK(!lone({thorn}, 2) && !lone({thorn}, 0));                           // an untracked second enemy, or none
+      auto dead = thorn; dead.living = false; dead.actor = 0x10;
+      CHECK(lone({reused, thorn}) && lone({dead, thorn}) && actor == thorn.actor); // unproven or dead spawns don't count
       auto second = thorn; second.actor = 0x7FF600001000; second.objectId = 318;
-      CHECK(!lone({thorn, second}) && actor == 0 && !bound);                   // a second living enemy: not a lone boss
+      CHECK(!lone({thorn, second}, 2) && !lone({thorn, second}) && actor == 0 && !bound); // a second living enemy
       auto twin = thorn; twin.actor = 0x7FF600002000;
       CHECK(!lone({thorn, twin}) && !lone({twin, thorn}));                    // two boss copies: neither is the one
-      CHECK(!lone({}) && !lone({gone}) && !lone({dead}));
+      CHECK(!lone({}) && !lone({reused}) && !lone({dead}));
       auto other = thorn; other.objectId = 318; CHECK(!lone({other}));        // not the arena's boss object
       auto type = thorn; type.objectType = 3; CHECK(!lone({type}));
       auto none = thorn; none.actor = 0; CHECK(!lone({none})); }
+
+    // Quill r1/r2 on 23c8bb8, the adapter's composition (RunSitOutVeil) with counting fakes: which callbacks run, in
+    // which order, and the one native call last.
+    { struct Fakes {
+          std::string calls;                  // r=ready f=find h=handleOf n=names b=boundNow H/S=native hide/show
+          bool findOk = true, findBound = false, namesOk = true, boundNow = false, readyOk = true, callOk = true;
+          std::uintptr_t found = 0x7FF60615FD10, callActor = 0; std::uint32_t handle = 0x80390300, callHandle = 0;
+      };
+      const auto runWith = [](Fakes& k, const VeilWorld& w, std::uintptr_t hiddenActor, std::uint32_t hiddenHandle) {
+          k.calls.clear();
+          return RunSitOutVeil(w, hiddenActor, hiddenHandle,
+              [&] { k.calls += 'r'; return k.readyOk; },
+              [&](std::uintptr_t& a, bool& bnd) { k.calls += 'f'; a = k.found; bnd = k.findBound; return k.findOk; },
+              [&](std::uintptr_t) { k.calls += 'h'; return k.handle; },
+              [&](std::uintptr_t, std::uint32_t) { k.calls += 'n'; return k.namesOk; },
+              [&](std::uintptr_t) { k.calls += 'b'; return k.boundNow; },
+              [&](std::uintptr_t a, std::uint32_t h, bool hide) {
+                  k.calls += hide ? 'H' : 'S'; k.callActor = a; k.callHandle = h; return k.callOk; }); };
+      VeilWorld fresh; fresh.client = fresh.latched = fresh.sitOutOpen = fresh.worldCurrent = true;
+      Fakes k;
+      auto r = runWith(k, fresh, 0, 0);
+      CHECK(r.step == VeilStep::Hide && r.ok && k.calls == "fhrH" && k.callActor == k.found && k.callHandle == k.handle);
+      // Every world refusal before a hide reads nothing and calls nothing.
+      const auto quiet = [&](auto change) { auto w = fresh; change(w); Fakes q; const auto x = runWith(q, w, 0, 0);
+          return x.step == VeilStep::None && q.calls.empty(); };
+      CHECK(quiet([](auto& w) { w.client = false; }));
+      CHECK(quiet([](auto& w) { w.latched = false; }));
+      CHECK(quiet([](auto& w) { w.attempted = true; }));
+      CHECK(quiet([](auto& w) { w.sitOutOpen = false; }));
+      CHECK(quiet([](auto& w) { w.transitionPending = true; }));
+      CHECK(quiet([](auto& w) { w.worldCurrent = false; }));                 // a changed load or transition
+      // The census refuses (incomplete, a reused address, a second enemy): no root read, no call.
+      k.findOk = false; r = runWith(k, fresh, 0, 0);
+      CHECK(r.step == VeilStep::None && std::string(r.why) == "no-copy" && k.calls == "f");
+      k = {}; k.findBound = true; r = runWith(k, fresh, 0, 0);
+      CHECK(r.step == VeilStep::None && std::string(r.why) == "bound" && k.calls == "f");
+      k = {}; k.handle = 0; r = runWith(k, fresh, 0, 0);
+      CHECK(r.step == VeilStep::None && std::string(r.why) == "unowned" && k.calls == "fh");
+      k = {}; k.readyOk = false; r = runWith(k, fresh, 0, 0);
+      CHECK(r.step == VeilStep::None && std::string(r.why) == "no-traps" && k.calls == "fhr");
+      k = {}; k.callOk = false; r = runWith(k, fresh, 0, 0);
+      CHECK(r.step == VeilStep::Hide && !r.ok && k.calls == "fhrH");        // a faulted hide is reported, once
+
+      // Hidden: the saved root is followed only in its own world, and only through its saved handle.
+      VeilWorld hid = fresh; hid.veiled = hid.attempted = true; hid.loadCurrent = true;
+      const std::uintptr_t A = 0x7FF60615FD10; const std::uint32_t HA = 0x80390300;
+      k = {}; r = runWith(k, hid, A, HA);
+      CHECK(r.step == VeilStep::None && std::string(r.why) == "held" && k.calls == "nbr");
+      { auto w = hid; w.transitionPending = true; w.sitOutOpen = false; k = {}; r = runWith(k, w, A, HA);
+        CHECK(r.step == VeilStep::None && k.calls.empty()); }                // pending: zero reads
+      { auto w = hid; w.loadCurrent = false; w.sitOutOpen = false; k = {}; r = runWith(k, w, A, HA);
+        CHECK(r.step == VeilStep::Forget && k.calls.empty()); }              // changed load/transition: zero reads
+      { auto w = hid; w.sitOutOpen = false; k = {}; k.namesOk = false; r = runWith(k, w, A, HA);
+        CHECK(r.step == VeilStep::Forget && k.calls == "n"); }               // dead or reused receipt: no call
+      // The session ends with the same proven actor still there: shown once, on the saved actor and handle.
+      { auto w = hid; w.sitOutOpen = false; k = {}; r = runWith(k, w, A, HA);
+        CHECK(r.step == VeilStep::Show && r.ok && k.calls == "nbrS" && k.callActor == A && k.callHandle == HA); }
+      { auto w = hid; w.client = false; k = {}; r = runWith(k, w, A, HA);
+        CHECK(r.step == VeilStep::Show && k.calls == "nbrS"); }
+
+      // R2, composed: the lone unbound boss is hidden; a second living spawn appears (the lone-copy admission would
+      // now refuse); the hidden boss is then bound. Its own binding shows it once on the saved handle. An unrelated
+      // binding (boundNow of the saved actor stays false) shows nothing.
+      k = {}; r = runWith(k, fresh, 0, 0);
+      CHECK(r.step == VeilStep::Hide && r.ok);
+      const auto savedActor = r.actor; const auto savedHandle = r.handle;
+      k = {}; k.findOk = false;                                              // two living spawns now
+      r = runWith(k, hid, savedActor, savedHandle);
+      CHECK(r.step == VeilStep::None && std::string(r.why) == "held" && k.calls == "nbr");
+      k = {}; k.findOk = false; k.boundNow = true;                           // the hidden boss bound
+      r = runWith(k, hid, savedActor, savedHandle);
+      CHECK(r.step == VeilStep::Show && std::string(r.why) == "bound" && r.bound && k.calls == "nbrS" &&
+            k.callActor == savedActor && k.callHandle == savedHandle); }
 
     // Regression (VUH-2640 F1, round 3), the adapter's order through a Thorn outage: the friend's mirror binds
     // Thorn to the host's authority every frame until the expiry at 3000 (the retirement stops it); the expiry

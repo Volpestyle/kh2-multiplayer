@@ -1726,61 +1726,52 @@ static void Install(uintptr_t exeBase) {
 
 // VUH-2640 Leg A veil, after this frame's tracker (enemysync::OnFrameStart) and outage step (Tick): hide this client's
 // own unbound copy of the arena's boss while the arrival's sit-out is open, and show it again if the sit-out ends
-// with that copy still in place (downedreturn::SitOutVeilStep). Nothing is sent; game thread only.
+// with that copy still in place (downedreturn::RunSitOutVeil, which orders every read). Nothing is sent; game thread.
 void VeilTick() {
     if (!g_down.requested || g_down.state == State::Off || !OwnerThread()) return;
     if (!g_veil.arrival.serial && !g_veil.veiled) return;
-    downedreturn::SitOutVeilFacts f;
-    f.client = enemysync::ActivationRole() == 2;
-    f.latched = g_veil.arrival.serial != 0;
-    f.attempted = g_veil.attempted;
-    f.veiled = g_veil.veiled;
-    f.sitOutOpen = g_outageDuty.Active() || g_down.outagePending;
-    f.transitionPending = warp::TransitionPending();
     const auto transition = warp::TransitionSerial(), load = warp::LoadSerial();
-    f.worldCurrent = f.latched && g_veil.arrival.generation == enemysync::WorldSessionGeneration() &&
+    downedreturn::VeilWorld w;
+    w.client = enemysync::ActivationRole() == 2;
+    w.latched = g_veil.arrival.serial != 0;
+    w.attempted = g_veil.attempted;
+    w.veiled = g_veil.veiled;
+    w.sitOutOpen = g_outageDuty.Active() || g_down.outagePending;
+    w.transitionPending = warp::TransitionPending();
+    w.worldCurrent = w.latched && g_veil.arrival.generation == enemysync::WorldSessionGeneration() &&
                      g_veil.arrival.transition == transition && g_veil.arrival.load == load;
-    enemysync::SitOutBossCopy copy;
-    f.copyFound = f.latched && enemysync::FindSitOutBossCopy(g_veil.arrival.arena, copy);
-    if (g_veil.veiled) {
-        f.loadCurrent = g_veil.transition == transition && g_veil.load == load;
-        f.handleOwn = scriptmirror::VeilHandle(g_veil.actor) == g_veil.handle;
-        f.copyBound = f.copyFound && copy.actor == g_veil.actor && copy.bound;
-    } else {
-        f.copyBound = f.copyFound && copy.bound;
-        f.handleOwn = f.copyFound && scriptmirror::VeilHandle(copy.actor) != 0;
-    }
-    f.ready = scriptmirror::VeilReady();
-    const char* why = "";
-    const auto step = downedreturn::SitOutVeilStep(f, why);
-    bool ok = false;
-    uintptr_t actor = g_veil.actor;
-    switch (step) {
-    case downedreturn::VeilStep::Hide: {
-        actor = copy.actor;
-        const auto handle = scriptmirror::VeilHandle(actor);
+    w.loadCurrent = g_veil.veiled && g_veil.transition == transition && g_veil.load == load;
+    const auto run = downedreturn::RunSitOutVeil(w, g_veil.actor, g_veil.handle,
+        [] { return scriptmirror::VeilReady(); },
+        [](uintptr_t& actor, bool& bound) {
+            enemysync::SitOutBossCopy copy;
+            if (!enemysync::FindSitOutBossCopy(g_veil.arrival.arena, copy)) return false;
+            actor = copy.actor; bound = copy.bound; return true;
+        },
+        [](uintptr_t actor) { return scriptmirror::VeilHandle(actor); },
+        [](uintptr_t actor, uint32_t handle) { return scriptmirror::VeilHandleNames(actor, handle); },
+        [](uintptr_t actor) { return enemysync::SitOutCopyBound(actor); },
+        [](uintptr_t actor, uint32_t handle, bool hide) { return scriptmirror::Veil(actor, handle, hide); });
+    switch (run.step) {
+    case downedreturn::VeilStep::Hide:
         g_veil.attempted = true;
-        ok = scriptmirror::Veil(actor, handle, true);
-        if (ok) { g_veil.veiled = true; g_veil.actor = actor; g_veil.handle = handle; g_veil.transition = transition; g_veil.load = load; }
+        if (run.ok) { g_veil.veiled = true; g_veil.actor = run.actor; g_veil.handle = run.handle; g_veil.transition = transition; g_veil.load = load; }
         break;
-    }
-    case downedreturn::VeilStep::Show:
-        ok = scriptmirror::Veil(g_veil.actor, g_veil.handle, false);
-        g_veil = {};  // shown or not, once: the sit-out's arrival is spent
-        break;
+    case downedreturn::VeilStep::Show:     // shown or not, once: the sit-out's arrival is spent
     case downedreturn::VeilStep::Forget:
         g_veil = {};
         break;
     case downedreturn::VeilStep::None:
-        if (!g_veil.veiled && (!f.client || (!f.transitionPending && !f.worldCurrent))) g_veil = {};  // spent
+        if (!g_veil.veiled && (!w.client || (!w.transitionPending && !w.worldCurrent))) g_veil = {};  // spent
         return;
     }
     if (g_veilLogs < 32) {
         ++g_veilLogs;
-        Log("[downed] sit-out veil %s why=%s ok=%u actor=%llX bound=%u open=%u duty=%u load=%u transition=%u frame=%u (%u/32)",
-            step == downedreturn::VeilStep::Hide ? "hide" : step == downedreturn::VeilStep::Show ? "show" : "forget", why,
-            ok ? 1u : 0u, static_cast<unsigned long long>(actor), f.copyBound ? 1u : 0u, f.sitOutOpen ? 1u : 0u,
-            g_outageDuty.Active() ? 1u : 0u, load, transition, g_frameCounter, g_veilLogs);
+        Log("[downed] sit-out veil %s why=%s ok=%u actor=%llX handle=%08X bound=%u open=%u duty=%u load=%u transition=%u "
+            "frame=%u (%u/32)",
+            run.step == downedreturn::VeilStep::Hide ? "hide" : run.step == downedreturn::VeilStep::Show ? "show" : "forget",
+            run.why, run.ok ? 1u : 0u, static_cast<unsigned long long>(run.actor), run.handle, run.bound ? 1u : 0u,
+            w.sitOutOpen ? 1u : 0u, g_outageDuty.Active() ? 1u : 0u, load, transition, g_frameCounter, g_veilLogs);
     }
 }
 

@@ -195,14 +195,16 @@ struct SitOutArrival {
     std::uint32_t recoveryLoad = 0;                          // the recovery Bootstrap serial then: the outage's anchor
 };
 bool LatestSitOutArrival(SitOutArrival& out) noexcept;
-// VUH-2640 Leg A veil: this client's own copy of the arena's boss as its tracker holds it now: exactly one living,
-// present local spawn, the arena's boss object and type, in the arena's exact room instance; bound: it matched a
-// host enemy. Game thread (the tracker's); reads no actor memory.
+// VUH-2640 Leg A veil: this client's own copy of the arena's boss, proven on a fresh, complete native census of this
+// frame in the arena's exact room instance: the census's one living enemy, and it is a tracked spawn with the
+// tracker's own identity (downedreturn::LoneBossCopy); bound: that spawn matched a host enemy. Game thread.
 struct SitOutBossCopy {
     uintptr_t actor = 0;
     bool bound = false;
 };
 bool FindSitOutBossCopy(std::uint16_t arena, SitOutBossCopy& out) noexcept;
+// The tracker's binding of exactly this actor (its latest spawn there matched a host enemy); reads no actor memory.
+bool SitOutCopyBound(uintptr_t actor) noexcept;
 // VUH-2640: positive session-end evidence: this seat's runtime (still the bridge's writer) stopped
 // networking for good. An unavailable or expired writer lease is not evidence either way.
 bool NetworkTerminal() noexcept;
