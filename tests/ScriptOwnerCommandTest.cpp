@@ -265,5 +265,41 @@ int main() {
         h=line(false,false);
         check(reads.empty() && listedAsked.empty() && !drivenAsked,"a refused release root: nothing consulted");
     }
+    // bots05 attempt03 (run 20261022-104559): every friend release line had actorRead=0. The list walk matches a node
+    // through its predecessor's link, and the canonical player is the list head. The head is proven by the head global
+    // and the admitted handle resolving to it through the handle table; neither reads the root.
+    {
+        const std::uintptr_t player=0x10000,thorn=0x50000;
+        const std::uint32_t playerHandle=0x11,thornHandle=0x55;
+        std::uintptr_t head=player,resolvesTo=player;int walks=0,resolves=0;
+        const auto headNow=[&](){return head;};
+        const auto resolve=[&](std::uint32_t h){++resolves;return h==playerHandle?resolvesTo:std::uintptr_t{0};};
+        const auto walk=[&](std::uintptr_t at){++walks;return at==thorn?thornHandle:0u;};  // the head is never walked to
+        check(R::ListedHandle(player,playerHandle,headNow,resolve,walk)==playerHandle && !walks && resolves==1,
+              "the canonical player at the head: proven by the head global and its admitted handle, no walk");
+        check(R::ListedHandle(thorn,thornHandle,headNow,resolve,walk)==thornHandle && walks==1,
+              "a root below the head is still proven by the walk");
+        resolvesTo=0x20000;walks=0;
+        check(R::ListedHandle(player,playerHandle,headNow,resolve,walk)==0 && !walks,
+              "a head whose admitted handle resolves elsewhere (replaced actor, reused slot): unproven, no walk");
+        resolvesTo=player;
+        check(R::ListedHandle(player,0,headNow,resolve,walk)==0,"no admitted handle: unproven");
+        head=0x30000;walks=0;
+        check(R::ListedHandle(player,playerHandle,headNow,resolve,walk)==0 && walks==1,
+              "a player no longer at the head and not linked: unproven");
+        head=player;
+        std::vector<std::uintptr_t> reads;
+        const auto read=[&](std::uintptr_t at,void* out,std::size_t size){reads.push_back(at);std::memset(out,0,size);return true;};
+        const auto listed=[&](std::uintptr_t at){return R::ListedHandle(at,at==player?playerHandle:thornHandle,headNow,resolve,walk);};
+        const auto line=[&](bool cancelled){
+            reads.clear();
+            const auto roots=R::ProveLocalHoldRoots(true,cancelled,player,playerHandle,thorn,thornHandle,listed,
+                [&](){return thorn;});
+            return R::ReadLocalHold(roots.actor,player,roots.source,thorn,read,[](std::uint32_t){return std::uintptr_t{0};});};
+        auto h=line(false);
+        check(h.actorRead && h.sourceRead,"attempt03's release stage, player at the head: its fields and the source bank are read");
+        h=line(true);
+        check(reads.empty() && !h.actorRead,"post-cancel stays metadata only");
+    }
     return errors?1:0;
 }

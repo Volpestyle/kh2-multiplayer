@@ -721,7 +721,11 @@ static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outc
     if(g_smLocalReleaseLogs>=64)return;
     ++g_smLocalReleaseLogs;
     const auto roots=R::ProveLocalHoldRoots(decisionCurrent,cancelled,role.actor,role.actorHandle,role.source,
-        role.sourceHandle,[](std::uintptr_t at){return enemytarget::ListHandle(at);},
+        role.sourceHandle,[&role](std::uintptr_t at){
+            return R::ListedHandle(at,at==role.actor?role.actorHandle:role.sourceHandle,
+                [](){uintptr_t head=0;return ReadHitTrace(g_exeBase+offsets::active_entity_list::HEAD,head)?head:uintptr_t{0};},
+                [](std::uint32_t handle){return SmDecode(handle);},
+                [](std::uintptr_t walked){return enemytarget::ListHandle(walked);});},
         [&role](){return SmOwnerCameraSourceCurrent(role)?role.source:std::uintptr_t{0};}); // driven table only, no reads
     const char* stage=!decisionCurrent?"refused":cancelled?"post-cancel":"release";
     const auto h=R::ReadLocalHold(roots.actor,role.actor,roots.source,role.source,

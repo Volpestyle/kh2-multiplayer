@@ -414,6 +414,16 @@ LocalHold ReadLocalHold(bool actorProven,std::uintptr_t actor,bool sourceProven,
 // handle (`listed(pointer)` walks the list and compares pointers, reading neither root), then the source the same
 // way, and only then the mirror's driven entry for the source (`driven()`: the driven table, no reads).
 struct LocalHoldRoots { bool actor{},source{}; };
+// The list handle that proves a root, for `listed` above. The entity list is walked through each node's link to the
+// next (`walk`), so its head has no incoming link to match: the canonical player usually is the head (bots05
+// attempt03: every friend release line had actorRead=0). At the head, the proof is the head global equal to the root
+// and the admitted handle still resolving to that same pointer through the handle table (`resolve`); neither reads
+// the root. Elsewhere the walk decides, as before.
+template<class Head,class Resolve,class Walk>
+std::uint32_t ListedHandle(std::uintptr_t at,std::uint32_t admitted,Head&& head,Resolve&& resolve,Walk&& walk) {
+    if(at && head()==at)return admitted && resolve(admitted)==at?admitted:0u;
+    return walk(at);
+}
 template<class Listed,class Driven>
 LocalHoldRoots ProveLocalHoldRoots(bool decisionCurrent,bool cancelled,std::uintptr_t actor,std::uint32_t actorHandle,
                                    std::uintptr_t source,std::uint32_t sourceHandle,Listed&& listed,Driven&& driven) {
