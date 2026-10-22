@@ -435,6 +435,61 @@ check("R1: the arena anchor is saved before the host's fight pilot starts",
       next(i for i, s in enumerate(legA["steps"]) if s.get("name") == "host_thorn"))
 check("Leg A boots both games with the catalog trace",
       all(legA["steps"][i]["env"].get("KH2COOP_RESYNC_CATALOG_TRACE") == "1" for i in (0, 1)))
+# VUH-2640 option A (lead #33/#34): the post-Thorn field recovery, derived from bots05.
+import make_thorn_postfield
+post_built = make_thorn_postfield.build(json.loads(make_thorn_postfield.SOURCE.read_text(encoding="utf-8")))
+post = json.loads(make_thorn_postfield.TARGET.read_text(encoding="utf-8"))
+check("Post-field scenario is current with its generator", post == post_built)
+run.validate(post)
+for number, step in enumerate(post["steps"]):
+    for key in ("expr","argsExpr","until"):
+        if key in step:
+            tree=ast.parse(step[key],mode="eval")
+            local={node.id for node in ast.walk(tree) if isinstance(node,ast.Name) and isinstance(node.ctx,ast.Store)}
+            used={node.id for node in ast.walk(tree) if isinstance(node,ast.Name) and isinstance(node.ctx,ast.Load)}
+            check(f"Post-field expression namespace step{number}", used <= names | local)
+bots05_steps = json.loads(make_thorn_postfield.SOURCE.read_text(encoding="utf-8"))["steps"]
+p_pause = next(i for i, s in enumerate(post["steps"]) if s["do"] == "friend_heartbeat_pause")
+p_names = [s.get("name") for s in post["steps"]]
+check("Post-field keeps bots05's whole run (with the catalog env and one arena-load save) before the pause",
+      post["steps"][2:30] == bots05_steps[2:30] and post["steps"][31:101] == bots05_steps[30:100] and
+      post["steps"][30] == {"do": "save", "as": "postfield_arena_load", "expr": "last_load(0)"} and
+      all(post["steps"][i]["env"].get("KH2COOP_RESYNC_CATALOG_TRACE") == "1" for i in (0, 1)) and
+      p_pause > p_names.index("friend_onward_verified_friend") and p_names.index("host_thorn") > 30)
+check("Post-field pauses at the settled field with no owned pilot, after the field catalog is saved",
+      "not saved.get('_background_pilots',[])" in post["steps"][p_pause - 3]["expr"] and
+      post["steps"][p_pause - 1].get("as") == "vuh2674_field" and
+      not any(s["do"] == "pilot" for s in post["steps"][p_pause:]))
+check("Post-field: VUH-2628's full recovery proof, then one outage expiry boss=0 and no sit-out, then same field and HP",
+      post["steps"][p_pause + 1] == {"do": "wait_until", "expr": "recovery_proof()['ready']", "timeoutMs": 120000, "pollMs": 1000} and
+      "outage expiry boss=0" in post["steps"][p_pause + 3]["expr"] and "outage sit-out" in post["steps"][p_pause + 3]["expr"] and
+      "friend_hp" in post["steps"][p_pause + 4]["expr"])
+onward = post["steps"][p_pause + 7:-1]
+check("Post-field: both seats move on again after the recovery, under their own names",
+      len(onward) == 17 and onward[0]["as"] == "postfield_host_onward_before" and onward[-1]["name"] == "postfield_friend_onward_friend" and
+      not any("bot2617_host_onward" in json.dumps(s) or "bot2617_friend_onward" in json.dumps(s) for s in onward) and
+      [s["do"] for s in onward] == [s["do"] for s in bots05_steps[81:98]])
+check("Post-field asserts the pause's relay refusal as its final step",
+      post["steps"][-1]["expr"] == "pause_relay()['ok']" and len(post["steps"]) == 130)
+def _post_eval(expr, **extra):
+    actors = {0: [], 1: [{"address": "0x10", "hp": 12}, {"address": "0x20", "hp": 3}]}
+    ns = {"actors": lambda i=0: actors[i], "peek": lambda rva, kind="u32", i=0: "0x20", "int": int,
+          "location": lambda i=0: [2, 1, 0, 54, 54, 55], "log_count": lambda text, i=0: extra.get(text, 0),
+          "saved": extra.get("saved", {})}
+    return eval(expr, ns)
+hp_expr = post["steps"][p_pause + 4]["expr"]
+scope = [2, 1, 0, 54, 54, 55]
+check("Post-field: the friend-HP assert reads the canonical player, not the first actor (unchanged passes, changed fails)",
+      _post_eval(hp_expr, saved={"bot2617_onward_scope": scope, "heartbeat_recovery": {"proof": {"location": scope}},
+                                 "postfield_before": {"friend_hp": 3}}) is True and
+      _post_eval(hp_expr, saved={"bot2617_onward_scope": scope, "heartbeat_recovery": {"proof": {"location": scope}},
+                                 "postfield_before": {"friend_hp": 12}}) is False)
+boss_expr = post["steps"][p_pause + 3]["expr"]
+before = {"postfield_before": {"friend_expiry_boss0": 2, "friend_outage": 1}}
+check("Post-field: one new 'outage expiry boss=0' and no new sit-out pass; a sit-out or no expiry fails",
+      _post_eval(boss_expr, saved=before, **{"[downed] outage expiry boss=0": 3, "[downed] outage sit-out": 1}) is True and
+      _post_eval(boss_expr, saved=before, **{"[downed] outage expiry boss=0": 3, "[downed] outage sit-out": 2}) is False and
+      _post_eval(boss_expr, saved=before, **{"[downed] outage expiry boss=0": 2, "[downed] outage sit-out": 1}) is False)
 pause_tree = ast.parse((run.HERE/"pause.py").read_text(encoding="utf-8"))
 protected = [node for node in ast.walk(pause_tree) if isinstance(node,ast.With)
              and any(isinstance(item.context_expr,ast.Name) and item.context_expr.id=="lock" for item in node.items)
