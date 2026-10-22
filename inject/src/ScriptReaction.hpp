@@ -363,4 +363,38 @@ private:
     std::uint64_t next_{};
 };
 
+// The owner-release cleanup's existing decision (SmOwnerCleanupPlayer), unchanged, so a release can say which
+// gate it stopped at (VUH-2617: the friend left held after bots05 attempt02's seat-1 release; which gate held is
+// what the read-only release line records). Cleaned is the only outcome that runs the native detach/idle.
+struct ReleaseCleanupFacts {
+    bool current{},field{},local{},clone{};
+    bool threadRead{},threadZero{};
+    bool threadOwned{};   // +D48 is the released role's coroutine, run by the released source
+    bool captureOwned{};  // +2B0 is the released source
+    bool attachment{};    // the released role's qualified attachment
+    bool parentRead{},parentZero{};
+};
+enum class ReleaseCleanup : std::uint8_t { NotCurrent, NotField, NotLocalOrClone, Guards, ReplacementParent, Cleaned };
+inline ReleaseCleanup DecideReleaseCleanup(const ReleaseCleanupFacts& f) noexcept {
+    if(!f.current)return ReleaseCleanup::NotCurrent;
+    if(!f.field)return ReleaseCleanup::NotField;
+    if(!f.local && !f.clone)return ReleaseCleanup::NotLocalOrClone;
+    const bool cleanup=f.threadRead && (f.threadOwned || (f.threadZero && (f.captureOwned || f.attachment)));
+    if(!cleanup)return ReleaseCleanup::Guards;
+    // A replacement's attachment/state is not ours to detach or idle.
+    if(!f.parentRead || !(f.parentZero || f.attachment))return ReleaseCleanup::ReplacementParent;
+    return ReleaseCleanup::Cleaned;
+}
+inline const char* ReleaseCleanupName(ReleaseCleanup c) noexcept {
+    switch(c) {
+    case ReleaseCleanup::NotCurrent: return "not-current";
+    case ReleaseCleanup::NotField: return "not-field";
+    case ReleaseCleanup::NotLocalOrClone: return "not-local-or-clone";
+    case ReleaseCleanup::Guards: return "guards";
+    case ReleaseCleanup::ReplacementParent: return "replacement-parent";
+    case ReleaseCleanup::Cleaned: return "cleaned";
+    }
+    return "?";
+}
+
 } // namespace kh2coop::inject::scriptmirror::rules

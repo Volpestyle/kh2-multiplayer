@@ -697,35 +697,82 @@ static bool SmOwnerCameraMatches(const ScriptActorRole& role,uintptr_t context) 
         ReadHitTrace(context+0x48,metadata) && metadata && ReadHitTrace(metadata,current.kindRecord) &&
         R::SameEntityCamera(role.camera,current);
 }
+// VUH-2617: what a friend local-seat release found on its own actor, read only, for the release line: the
+// coroutine (+D48), capture source (+2B0) and bank (+2B8, against the source's), the capture bits (+6C8 0x80,
+// +18C 0x4000), the parent (+6A0), the anchor, the motion and the action at +0xC (its vtable RVA).
+struct SmLocalHold {
+    uintptr_t thread{},capture{},bank{},sourceBank{},anchor{},actionVtable{};
+    std::uint32_t flags6C8{},flags18C{},parent{},motion{UINT32_MAX},actionHandle{};
+    bool read{},sourceRead{};
+};
+static SmLocalHold SmReadLocalHold(uintptr_t actor,uintptr_t source) {
+    SmLocalHold h{};
+    if(!actor)return h;
+    h.read=ReadHitTrace(actor+0xD48,h.thread) && ReadHitTrace(actor+0x2B0,h.capture) &&
+        ReadHitTrace(actor+0x2B8,h.bank) && ReadHitTrace(actor+0x6C8,h.flags6C8) &&
+        ReadHitTrace(actor+0x18C,h.flags18C) && ReadHitTrace(actor+0x6A0,h.parent) && ReadHitTrace(actor+0x2A0,h.anchor);
+    (void)ReadHitTrace(actor+offsets::actor::ANIM_ID,h.motion);
+    if(ReadHitTrace(actor+0xC,h.actionHandle) && h.actionHandle) {
+        if(const auto action=SmDecode(h.actionHandle))(void)ReadHitTrace(action,h.actionVtable);
+    }
+    h.sourceRead=source && ReadHitTrace(source+ACTOR_MOTCTRL,h.sourceBank);
+    return h;
+}
+static unsigned g_smLocalReleaseLogs=0;
+// The friend's own actor only (client, the canonical player); the host's roles never log here.
+static bool SmOwnerFriendLocal(const ScriptActorRole& role) {
+    uintptr_t canonical=0;
+    return !g_sm.hostActive && role.actor && role.actor==g_soraActor &&
+        ReadHitTrace(g_exeBase+0x2A105D0,canonical) && canonical==role.actor;
+}
+static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outcome) {
+    if(g_smLocalReleaseLogs>=64)return;
+    ++g_smLocalReleaseLogs;
+    const auto h=SmReadLocalHold(role.actor,role.source);
+    Log("[script-owner] local release role=%u seat=%u outcome=%s read=%u d48=%llX roleThread=%llX capture=%llX "
+        "source=%llX bank=%llX sourceBank=%llX flags6C8=%X flags18C=%X parent=%X anchorOwn=%u motion=%u action=%X "
+        "actionVt=%llX frame=%u (%u/64)",role.resource,role.slot,R::ReleaseCleanupName(outcome),h.read?1u:0u,
+        static_cast<unsigned long long>(h.thread),static_cast<unsigned long long>(role.thread),
+        static_cast<unsigned long long>(h.capture),static_cast<unsigned long long>(role.source),
+        static_cast<unsigned long long>(h.bank),static_cast<unsigned long long>(h.sourceBank),h.flags6C8,h.flags18C,
+        h.parent,h.anchor==role.actor+0x80?1u:0u,h.motion,h.actionHandle,
+        static_cast<unsigned long long>(h.actionVtable?h.actionVtable-g_exeBase:0),g_frameCounter,g_smLocalReleaseLogs);
+}
+// The release's native detach/idle, decided by rules::DecideReleaseCleanup from the same reads as before.
+// A friend local-seat release then logs which gate it stopped at and what was on its actor (read only).
 static void SmOwnerCleanupPlayer(const ScriptActorRole& released) {
-    if(released.actor && SmGameThread() && !warp::TransitionPending() &&
+    const bool friendLocal=SmOwnerFriendLocal(released);
+    R::ReleaseCleanupFacts f{};
+    f.current=released.actor && SmGameThread() && !warp::TransitionPending() &&
        released.load==warp::LoadSerial() && released.transition==warp::TransitionSerial() &&
-       SmOwnerActorCurrent(released)) {
+       SmOwnerActorCurrent(released);
+    auto outcome=R::ReleaseCleanup::NotCurrent;
+    if(f.current) {
         uintptr_t event=0;std::int32_t cutscene=0;
-        const bool field=ReadHitTrace(g_exeBase+0x2A11478,event) && !event &&
+        f.field=ReadHitTrace(g_exeBase+0x2A11478,event) && !event &&
             ReadHitTrace(g_exeBase+0xB65210,cutscene) && !cutscene;
         uintptr_t canonical=0;
-        const bool local=ReadHitTrace(g_exeBase+0x2A105D0,canonical) && canonical==released.actor;
-        const bool clone=!local && released.thread && enemytarget::ListHandle(released.actor)==released.actorHandle;
-        if(field && (local || clone)) {
+        f.local=ReadHitTrace(g_exeBase+0x2A105D0,canonical) && canonical==released.actor;
+        f.clone=!f.local && released.thread && enemytarget::ListHandle(released.actor)==released.actorHandle;
+        if(f.field && (f.local || f.clone)) {
             uintptr_t currentThread=0,source=0,capture=0;
-            const bool haveThread=ReadHitTrace(released.actor+0xD48,currentThread);
-            bool cleanup=false;
-            if(haveThread && released.thread && currentThread==released.thread &&
-               ReadHitTrace(currentThread+0x60,source) && source==released.source) {
-                SmLifeCancelForCleanup(released); // same native call; diagnostic revoked-role context only
-                cleanup=true;
-            }
-            if(haveThread && !currentThread && ReadHitTrace(released.actor+0x2B0,capture) && capture==released.source)cleanup=true;
-            if(haveThread && !currentThread && SmOwnerHasAttachment(released,released.thread==0))cleanup=true;
+            f.threadRead=ReadHitTrace(released.actor+0xD48,currentThread);
+            f.threadZero=!currentThread;
+            f.threadOwned=f.threadRead && released.thread && currentThread==released.thread &&
+               ReadHitTrace(currentThread+0x60,source) && source==released.source;
+            if(f.threadOwned)SmLifeCancelForCleanup(released); // same native call; diagnostic revoked-role context only
+            f.captureOwned=ReadHitTrace(released.actor+0x2B0,capture) && capture==released.source;
+            f.attachment=SmOwnerHasAttachment(released,released.thread==0);
             std::uint32_t parent=0;
-            // A replacement's attachment/state is not ours to detach or idle.
-            if(cleanup && ReadHitTrace(released.actor+0x6A0,parent) &&
-               (!parent || SmOwnerHasAttachment(released,released.thread==0))) {
-                (void)SmOwnerNativePlayer(released.actor,0x42C5F0);
-                (void)SmOwnerNativePlayer(released.actor,0x42D0E0);
-            }
+            f.parentRead=ReadHitTrace(released.actor+0x6A0,parent);
+            f.parentZero=!parent;
         }
+        outcome=R::DecideReleaseCleanup(f);
+    }
+    if(friendLocal)SmLogLocalRelease(released,outcome); // the actor as the decision found it, before any native call
+    if(outcome==R::ReleaseCleanup::Cleaned) {
+        (void)SmOwnerNativePlayer(released.actor,0x42C5F0);
+        (void)SmOwnerNativePlayer(released.actor,0x42D0E0);
     }
 }
 static void SmOwnerPollCleanup() {

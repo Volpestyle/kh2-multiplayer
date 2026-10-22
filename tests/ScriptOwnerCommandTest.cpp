@@ -1,6 +1,7 @@
 #include "ScriptReaction.hpp"
 #include "kh2coop/Codec.hpp"
 #include <cstdio>
+#include <string>
 
 namespace R = kh2coop::inject::scriptmirror::rules;
 namespace {
@@ -149,5 +150,48 @@ int main() {
     check(!kh2coop::validScriptCallEntry(entry),"command mode extension preserves priority bounds");
     entry.args[3]=integer(100);entry.args[1]=integer(65536);
     check(!kh2coop::validScriptCallEntry(entry),"command mode extension preserves command width");
+
+    // VUH-2617: the owner-release cleanup's existing decision as a pure rule, and the gate each release names in
+    // its read-only `[script-owner] local release` line. Behavior is unchanged: Cleaned is the only native call.
+    {
+        R::ReleaseCleanupFacts captured{};
+        captured.current=true;captured.field=true;captured.local=true;captured.threadRead=true;captured.threadZero=true;
+        captured.captureOwned=true;captured.parentRead=true;captured.parentZero=true;
+        const auto is=[](R::ReleaseCleanupFacts f,R::ReleaseCleanup want){return R::DecideReleaseCleanup(f)==want;};
+        check(is(captured,R::ReleaseCleanup::Cleaned),"an intact capture by the released source: native detach/idle");
+        auto f=captured;f.current=false;
+        check(is(f,R::ReleaseCleanup::NotCurrent),"a stale actor, room or thread is never touched");
+        f=captured;f.field=false;
+        check(is(f,R::ReleaseCleanup::NotField),"inside an event or cutscene nothing runs (and nothing retries)");
+        f=captured;f.local=false;
+        check(is(f,R::ReleaseCleanup::NotLocalOrClone),"neither the canonical player nor the role's listed clone");
+        f=captured;f.local=false;f.clone=true;
+        check(is(f,R::ReleaseCleanup::Cleaned),"the role's clone is cleaned like the local actor");
+        f=captured;f.threadRead=false;
+        check(is(f,R::ReleaseCleanup::Guards),"an unreadable coroutine slot proves nothing");
+        f=captured;f.threadZero=false;
+        check(is(f,R::ReleaseCleanup::Guards),"another coroutine holds the actor: the capture is not ours");
+        f=captured;f.threadZero=false;f.threadOwned=true;f.captureOwned=false;
+        check(is(f,R::ReleaseCleanup::Cleaned),"the released role's own coroutine, run by its source");
+        f=captured;f.captureOwned=false;f.attachment=true;
+        check(is(f,R::ReleaseCleanup::Cleaned),"the released role's qualified attachment with no coroutine");
+        f=captured;f.parentZero=false;
+        check(is(f,R::ReleaseCleanup::ReplacementParent),"a parent that is not the role's attachment is a replacement's");
+        f=captured;f.parentZero=false;f.attachment=true;
+        check(is(f,R::ReleaseCleanup::Cleaned),"the role's own attachment as parent is ours to detach");
+        f=captured;f.parentRead=false;
+        check(is(f,R::ReleaseCleanup::ReplacementParent),"an unreadable parent never cleans");
+        // bots05 attempt02 (run 20261022-082316), friend seat 1: role 654 captured the friend (motion 263), the
+        // mirrored attack 1041 hit it while captured (frame 14381), 654 was released and 655 admitted and released at
+        // 14383, and the friend stayed held from 14399. Which gate held is unobserved; these are the two hypotheses
+        // the new release line will settle in attempt03, not facts:
+        f=captured;f.field=false;
+        check(is(f,R::ReleaseCleanup::NotField),"hypothesis 1: released inside the reaction's camera event");
+        f=captured;f.captureOwned=false;
+        check(is(f,R::ReleaseCleanup::Guards),"hypothesis 2: the hit left no +2B0 source, no coroutine and no attachment");
+        check(std::string(R::ReleaseCleanupName(R::ReleaseCleanup::NotField))=="not-field" &&
+              std::string(R::ReleaseCleanupName(R::ReleaseCleanup::Guards))=="guards" &&
+              std::string(R::ReleaseCleanupName(R::ReleaseCleanup::Cleaned))=="cleaned","release line names");
+    }
     return errors?1:0;
 }
