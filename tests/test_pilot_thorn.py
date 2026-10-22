@@ -48,6 +48,7 @@ class Kb:
 
     def tap(self, action, ms=90):
         self.log.append(("tap", action))
+        return True
 
 
 class PolicyTest(unittest.TestCase):
@@ -124,12 +125,12 @@ class PolicyTest(unittest.TestCase):
         self.assertIn((180, 1), self.p.hits)
 
     def test_a_reversal_is_pressed_at_once_then_not_again_for_a_beat(self):
-        self.assertTrue(self.p.reversal(own() | {"react": 432}, 1.0))
-        self.p.took_reversal(1.0)
-        self.assertFalse(self.p.reversal(own() | {"react": 432}, 1.15), "within 0.2 s")
-        self.assertTrue(self.p.reversal(own() | {"react": 345}, 1.25))
-        self.assertFalse(self.p.reversal(own() | {"react": 297}, 5.0), "event RCs stay the base's")
-        self.assertFalse(self.p.reversal(own(), 5.0))
+        never = float("-inf")
+        self.assertTrue(self.p.reversal(own() | {"react": 432}, 1.0, never))
+        self.assertFalse(self.p.reversal(own() | {"react": 432}, 1.15, 1.0), "within 0.2 s of the last press")
+        self.assertTrue(self.p.reversal(own() | {"react": 345}, 1.25, 1.0))
+        self.assertFalse(self.p.reversal(own() | {"react": 297}, 5.0, never), "event RCs stay the base's")
+        self.assertFalse(self.p.reversal(own(), 5.0, never))
 
     def test_openings_are_seeded_or_learned_from_thorn_hp_lost_in_one_visit(self):
         self.assertTrue(self.p.opening(thorn(210)))
@@ -349,8 +350,15 @@ class CombatTurnTest(NoSleep):
         pilot, stats = self.pilot(), {}
         self.assertTrue(pilot.combat_turn(own() | {"react": 432}, [thorn(202)], thorn(202), 400, 300, stats))
         self.assertEqual((pilot.kb.log, stats["reversals"], pilot.writes[0][0]), ([("tap", "react")], 1, "thorn_reversal"))
-        self.assertFalse(pilot.combat_turn(own() | {"react": 432}, [thorn(202)], thorn(202), 400, 300, stats),
-                         "pressed a beat ago: the base's own reaction branch decides")
+        pilot.kb.reversal_at = THORN.time.monotonic()  # the pad's cadence record (ReversalCadenceTest drives the real one)
+        saved, slept = THORN.time.sleep, []
+        THORN.time.sleep = slept.append
+        try:
+            self.assertTrue(pilot.combat_turn(own() | {"react": 432}, [thorn(202)], thorn(202), 400, 300, stats))
+        finally:
+            THORN.time.sleep = saved
+        self.assertTrue(slept and 0 < slept[0] <= 0.2, "pressed a beat ago: waits out the cadence, then presses")
+        self.assertEqual(stats["reversals"], 2)
 
     def test_an_opening_commits_attacks_without_dodging(self):
         pilot, stats = self.pilot(), {}
@@ -377,6 +385,85 @@ class CombatTurnTest(NoSleep):
 
     def test_the_base_pilot_never_takes_a_turn(self):
         self.assertFalse(BASE.Pilot.combat_turn(object(), own(), [thorn(202)], thorn(202), 400, 300, {}))
+
+
+class ReversalCadenceTest(unittest.TestCase):
+    """r4 (Quill r3): the real base fight loop and the Thorn hook together, with the real Thorn Pad.tap pulse
+    (180 ms) on a fake clock. Every Reversal press edge, base or child, respects the one cadence."""
+
+    class Pad(THORN.Pad):
+        def __init__(self, clock, presses):
+            self.held, self.clock, self.presses = set(), clock, presses
+
+        def hold(self, keys):
+            if "react" in keys and "react" not in self.held:
+                self.presses.append((round(self.clock[0], 5), self.react_command))
+            self.held = set(keys)
+
+    def setUp(self):
+        self.saved = BASE.time.monotonic, BASE.time.sleep, BASE.enemies
+        self.clock = [10.0]
+        BASE.time.monotonic = lambda: self.clock[0]
+        BASE.time.sleep = lambda sec: self.clock.__setitem__(0, self.clock[0] + sec)
+        boss = thorn(202, time=0) | {"position": {"x": 0.0, "y": 0.0, "z": 100.0}}
+        BASE.enemies = lambda *a, **k: [boss]
+
+    def tearDown(self):
+        BASE.time.monotonic, BASE.time.sleep, BASE.enemies = self.saved
+
+    def run_loop(self, react_at, cooperative=None, until=12.0):
+        """The real fight loop until `until`; `react_at(t)` is the command on screen at time t."""
+        presses = []
+        p = THORN.Pilot.__new__(THORN.Pilot)
+        p.kb = self.Pad(self.clock, presses)
+        p.kb.thorn_combat = True
+        p.kb.reversals, p.kb.reversal_gap = THORN.ThornPolicy(CONFIG).reversals, 0.2
+        p.cooperative, p.game, p.kite_logged_at = cooperative, SimpleNamespace(pid=1), 0.0
+        p.thorn_policy = THORN.ThornPolicy(CONFIG)
+        p.write = lambda *a, **k: None
+        def state():
+            s = own() | {"roomScope": [2, 34, 0, 157, 157, 157], "event": False, "inField": True, "menu": 255,
+                         "battle": 2, "player": 1, "react": react_at(self.clock[0]), "playerPos": [0.0, 0.0, 0.0],
+                         "pos": [0.0, 0.0, 0.0]}
+            p.kb.react_command = s["react"]
+            return s
+        p.state = state
+        try:
+            BASE.Pilot.fight(p, {"reach": 500, "lowHp": 0, "reactGapSec": 0.35}, until)
+        except BASE.Stuck:
+            pass
+        return presses
+
+    def test_a_persistent_reversal_is_pressed_at_the_one_cadence(self):
+        presses = self.run_loop(lambda t: 432)
+        starts = [t for t, _ in presses]
+        gaps = [round(b - a, 5) for a, b in zip(starts, starts[1:])]
+        self.assertGreater(len(starts), 5)
+        self.assertTrue(all(g >= 0.2 for g in gaps), gaps)
+        self.assertLess(max(gaps[1:]), 0.25, "after the first lock-on turn the child holds the turn for the cadence, "
+                        "not an attack burst")
+
+    def test_an_event_rc_right_after_a_reversal_is_not_held_back(self):
+        presses = self.run_loop(lambda t: 432 if t < 10.5 else 297, until=11.2)
+        first = min(t for t, c in presses if c == 297)
+        self.assertLessEqual(first - 10.5, 0.36 + 0.2, "297 waits only for the base's own 0.35 s gap and the pulse")
+        pad = self.Pad(self.clock, [])
+        pad.thorn_combat, pad.reversals, pad.reversal_gap = True, frozenset({432}), 0.2
+        pad.react_command = 432
+        self.assertTrue(pad.tap("react"))
+        self.assertFalse(pad.tap("react"), "a Reversal 0.18 s after the last one is dropped")
+        pad.react_command = 297
+        self.assertTrue(pad.tap("react"), "a reaction outside the Reversal list is never gated")
+        self.assertEqual([c for _, c in pad.presses], [432, 297])
+
+    def test_a_downed_peer_wins_the_next_state(self):
+        coop = SimpleNamespace(step=lambda pilot, s, rc: self.clock[0] >= 10.6,
+                               peer=SimpleNamespace(state=lambda: {"hp": 20, "maxHp": 20}),
+                               own_log=SimpleNamespace(downed=False, full_party=False, update=lambda: True),
+                               peer_log=SimpleNamespace(downed=False, full_party=False, update=lambda: True))
+        presses = self.run_loop(lambda t: 432, cooperative=coop, until=11.2)
+        self.assertTrue(presses and all(t < 10.6 for t, _ in presses),
+                        "once the cooperative revive takes the turn, no base or child Reversal press")
 
 
 class BaseHookTest(unittest.TestCase):

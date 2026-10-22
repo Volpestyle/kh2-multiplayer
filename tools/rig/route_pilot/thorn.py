@@ -52,12 +52,28 @@ class Game(OriginalGame):
 
 class Pad(OriginalPad):
     thorn_combat = False
+    # VUH-2617 r4: the one cadence owner of every Reversal press, the base reaction branch's and the Thorn
+    # policy's. The pilot's latest state read names the command on screen; a Reversal tap within `reversal_gap`
+    # of the last Reversal press is dropped. Other reactions (the owned event RCs) and held Triangle (revive,
+    # the cooperative RC) are never gated.
+    reversals = frozenset()
+    reversal_gap = 0.0
+    react_command = 0
+    reversal_at = float("-inf")
+
+    def reversal_ready(self, now):
+        return now - self.reversal_at >= self.reversal_gap - 1e-6  # a slept-out gap is not short by rounding
 
     def tap(self, action, ms=90):
         # Recording can reduce native update rate. Give a real RC press time to
         # cross input frames; native admission still decides whether it is usable.
         if self.thorn_combat and action == "react":
             ms = max(ms, 180)
+            if self.react_command in self.reversals:
+                now = time.monotonic()
+                if not self.reversal_ready(now):
+                    return False
+                self.reversal_at = now
         return super().tap(action, ms)
 
 
@@ -173,7 +189,6 @@ class ThornPolicy:
         self.last_hp = None
         self.dodged_visit = None
         self.dodge_at = float("-inf")
-        self.reversal_at = float("-inf")
         self.side = 1
         self.strafe_sign, self.strafe_at = 1, float("-inf")
         self.kiting = False
@@ -243,12 +258,12 @@ class ThornPolicy:
         keys = set(self.hits) | set(self.seed)
         return sorted(f"{m}:{b}:{kind}" for m, b in keys if (kind := self.danger(m, b)))
 
-    def reversal(self, own: dict, now: float) -> bool:
-        """A Reversal on screen, not pressed in the last `reversalGapSec`."""
-        return own.get("react") in self.reversals and now - self.reversal_at >= self.reversal_gap
+    def reversal(self, own: dict, now: float, last: float) -> bool:
+        """A Reversal on screen, and the last Reversal press (`last`, from the pad that owns the cadence) at
+        least `reversalGapSec` ago."""
+        return own.get("react") in self.reversals and now - last >= self.reversal_gap - 1e-6
 
-    def took_reversal(self, now: float) -> None:
-        self.reversal_at = now
+    def took_reversal(self) -> None:
         self.counters["reversals"] += 1
 
     def opening(self, thorn: dict | None) -> bool:
@@ -563,6 +578,7 @@ class Pilot(OriginalPilot):
 
     def state(self):
         state = super().state()
+        self.kb.react_command = state["react"]  # names the command for the pad's Reversal cadence
         now = time.monotonic()
         if (state["world"], state["room"]) == (2, 34) and now-self.observation_at >= 0.5:
             policy = self.thorn_policy
@@ -594,13 +610,23 @@ class Pilot(OriginalPilot):
                 or s["hp"] is None or s["hp"] <= 0 or not s["playerPos"]:
             return False
         now = time.monotonic()
+        # The pad owns the Reversal cadence (fight() and state() configure it; this keeps it configured on every
+        # turn too, so the base branch's next press is gated by the same record).
+        self.kb.reversals, self.kb.reversal_gap = policy.reversals, policy.reversal_gap
+        self.kb.react_command = s["react"]
         if s["react"]:
             # The base already took this reaction if its gap allowed. A Reversal is pressed again at once:
             # missed ones were Thorn's projectile hits (attempt05). Other reactions stay the base's.
-            if not policy.reversal(s, now):
+            if s["react"] not in policy.reversals:
                 return False
-            self.kb.tap("react")
-            policy.took_reversal(now)
+            # Hold the turn for the rest of the cadence (at most reversalGapSec) rather than fall into an attack
+            # burst, then press: the pad drops a press inside the gap, the base branch's included.
+            last = getattr(self.kb, "reversal_at", float("-inf"))
+            if not policy.reversal(s, now, last):
+                time.sleep(min(max(policy.reversal_gap - (now - last), 0.0), policy.reversal_gap))
+            if not self.kb.tap("react"):
+                return False
+            policy.took_reversal()
             stats["reversals"] = stats.get("reversals", 0) + 1
             self.write("thorn_reversal", command=s["react"], hp=s["hp"])
             return True
@@ -667,6 +693,8 @@ class Pilot(OriginalPilot):
         self.kb.thorn_combat = thorn
         self.fighting_room = (2, 34) if thorn else None
         self.thorn_policy = ThornPolicy(step["thornCombat"]) if thorn and step.get("thornCombat") else None
+        if self.thorn_policy is not None:
+            self.kb.reversals, self.kb.reversal_gap = self.thorn_policy.reversals, self.thorn_policy.reversal_gap
         try:
             try:
                 return super().fight({**step, "reactGapSec": 0.35} if thorn else step, deadline)
@@ -680,6 +708,7 @@ class Pilot(OriginalPilot):
             if self.thorn_policy is not None:
                 self.write("thorn_combat_summary", **self.thorn_policy.snapshot())
             self.kb.thorn_combat = False
+            self.kb.reversals, self.kb.reversal_gap = frozenset(), 0.0
             self.fighting_room = None
             self.thorn_policy = None
 

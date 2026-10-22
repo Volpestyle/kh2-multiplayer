@@ -83,8 +83,10 @@ install detector above; no old wrapper or old movie baseline is reused.
 **Behavior (the `fight` step's opt-in `thornCombat`, both Thorn fight routes).** The base `pilot.py`
 `combat_turn` hook never takes a turn. Priority order, each per seat and from its own reads:
 1. **Reversal.** A Reversal on screen is pressed at once, at most every `reversalGapSec` (0.2 s), even when
-   the base's reaction gap (0.35 s) has not elapsed. Logged as `thorn_reversal`. Other reactions, and the
-   event RCs 297/298/299, stay the base's.
+   the base's reaction gap (0.35 s) has not elapsed. Logged as `thorn_reversal`. The Thorn pad owns this one
+   cadence for every Reversal press, the base reaction branch's included: a Reversal tap within the gap of the
+   last one is dropped (r4, Quill r3). Other reactions, the event RCs 297/298/299 and held Triangle (revive,
+   the cooperative RC) stay the base's and are never gated.
 2. **Openings.** In a seeded opening (209/210/211), or a motion that has cost Thorn `openingLearn` (30) HP in
    the current visit, the seat approaches and swings a three-hit burst. There is no dodge, keep-away or
    pinned escape; a reaction or a downing breaks the burst.
