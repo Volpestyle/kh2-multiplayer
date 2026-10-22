@@ -1060,7 +1060,18 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 if(!hasCurrentWorldBinding() || m.request.key.sessionId!=avatarSessionId_ || m.request.key.hostConnectionId!=avatarConnections_[0])return;
                 bool selected=avatarLocalSlot_==0;
                 for(std::size_t i=0;i<m.targetCount;++i)if(m.targets[i].slot==avatarLocalSlot_ && m.targets[i].connectionId==worldBinding_->selfConnectionId && m.targets[i].deliverySerial==worldBinding_->deliverySerial)selected=true;
-                if(!selected)return;
+                if(!selected){
+                    // VUH-2675: a seat outside the plan is not fenced or reserialized, but it must admit the
+                    // targets' later envelopes and refuse their old serials, as the host does. Raise only, and only
+                    // for the target's current connection (a returning connection restarts at 1).
+                    for(std::size_t i=0;i<m.targetCount;++i){const auto& t=m.targets[i];
+                        if(t.slot>2||t.slot==avatarLocalSlot_||!t.connectionId||t.connectionId!=avatarConnections_[t.slot]||
+                           t.deliverySerial<=remoteDeliverySerials_[t.slot])continue;
+                        remoteDeliverySerials_[t.slot]=t.deliverySerial;
+                        if(callbacks_.onPeerDeliverySerial)callbacks_.onPeerDeliverySerial(t.slot,t.deliverySerial);
+                    }
+                    return;
+                }
                 if(!resyncPlan_&&m.request.key.requestId<=lastResyncPlanId_)return;
                 if(resyncPlan_ && m.request.key==resyncPlan_->request.key &&
                    (m.targets!=resyncPlan_->targets || m.targetCount!=resyncPlan_->targetCount || encode(m.request)!=encode(resyncPlan_->request))) {

@@ -767,7 +767,11 @@ fencing any target.
 
 One request freezes its opaque session/host/request key, full six-field room and
 epoch, original target connections and target denominator for at most 30 seconds.
-Selected targets receive new delivery serials. Each actual native producer
+Selected targets receive new delivery serials. A verified seat outside the plan (VUH-2675, a 3-seat session)
+gets the same plan as a notice. Its client records only the targets' new serials, raising only and for their
+current connections, and its runtime republishes the peer serials to the DLL. So it admits the recovered seat's
+later envelopes and refuses the old serial, as the host does, while it is never fenced or reserialized.
+Each actual native producer
 retains its observation-time context; the runtime cannot relabel queued old
 records with current headers. The host DLL supplies a nonwrapping lifetime source
 counter, distinct from the existing absolute-HP sample sequence.

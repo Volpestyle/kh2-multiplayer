@@ -74,6 +74,9 @@ void SessionHost::publishResyncPlan() {
     for(auto& peer:peers_)if(peer.status==PeerStatus::Verified){
         bool target=false;for(std::size_t i=0;i<resyncPlan_->targetCount;++i)target=target||resyncPlan_->targets[i].connectionId==peer.connectionId;
         if(target){sendBinding(peer);auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::Fenced;if(!sendTo(peer.transportPeer,encode(plan),true)){finishResync(ResyncResultReason::Overflow,"plan submission failed");return;}}
+        // VUH-2675: a seat outside the plan learns the targets' new delivery serials from the same plan. It is not
+        // fenced; a lost notice leaves it refusing the targets' traffic, as before, and doesn't fail the resync.
+        else if(!fromHost(peer)){auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::Fenced;if(!sendTo(peer.transportPeer,encode(plan),true))log("Resync plan notice to a non-target seat failed: "+peer.peerId);}
     }
     if(auto* host=hostPeer()){auto plan=*resyncPlan_;plan.stage=ResyncPlanStage::CaptureRequested;if(!sendTo(host->transportPeer,encode(plan),true))finishResync(ResyncResultReason::Overflow,"capture request submission failed");}
 }

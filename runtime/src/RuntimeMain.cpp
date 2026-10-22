@@ -1873,6 +1873,15 @@ int main(int argc, char* argv[]) {
             observeIdentity("resync-fenced");
         };
         callbacks.onResyncSnapshot = deliverNativeSnapshot;
+        // VUH-2675: another seat's resync moved its delivery serial; this seat's DLL admits its envelopes again.
+        callbacks.onPeerDeliverySerial = [&](std::uint8_t slot, std::uint64_t deliverySerial) {
+            if (slot >= worldPeerDeliverySerials.size() || slot == worldSessionSlot ||
+                deliverySerial <= worldPeerDeliverySerials[slot]) return;
+            worldPeerDeliverySerials[slot] = deliverySerial;
+            worldBridge.SetPeerDeliverySerials(worldPeerDeliverySerials);
+            std::cout << "[Runtime] peer delivery slot=" << static_cast<unsigned>(slot) << " serial=" << deliverySerial
+                      << " (another seat's resync)\n";
+        };
 #endif
         callbacks.onResyncResult = [&](const kh2coop::ResyncResult& result) {
 #ifdef _WIN32

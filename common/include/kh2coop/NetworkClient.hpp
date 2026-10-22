@@ -81,6 +81,8 @@ struct ClientCallbacks {
     std::function<void(const WorldBinding&)> onWorldBinding;
     std::function<void(const WorldEnvelope&)> onWorldEnvelope;
     std::function<void(const ResyncPlan&)> onResyncPlan;
+    // VUH-2675: a resync of another seat moved that seat's delivery serial (this seat is not a target).
+    std::function<void(std::uint8_t slot, std::uint64_t deliverySerial)> onPeerDeliverySerial;
     std::function<void(const ResyncBegin&, const ResyncSnapshot&)> onResyncSnapshot;
     std::function<void(const ResyncResult&)> onResyncResult;
     std::function<void(const std::string&)> onLog;
@@ -190,6 +192,8 @@ public:
         worldBinding_->sessionId==avatarSessionId_ && worldBinding_->hostConnectionId==avatarConnections_[0] &&
         worldBinding_->selfSlot==avatarLocalSlot_ && worldBinding_->selfConnectionId==avatarConnections_[avatarLocalSlot_]; }
     bool worldReady() const { return hasCurrentWorldBinding() && !worldQuarantined_; }
+    // The delivery serial this seat admits from another roster slot's envelopes.
+    std::uint64_t remoteDeliverySerial(std::uint8_t slot) const { return slot < 3 ? remoteDeliverySerials_[slot] : 0; }
     std::uint64_t deliverySerial() const { return worldBinding_ ? worldBinding_->deliverySerial : 0; }
     const std::optional<WorldBinding>& worldBinding() const { return worldBinding_; }
     const std::optional<ResyncPlan>& pendingResync() const { return resyncPlan_; }

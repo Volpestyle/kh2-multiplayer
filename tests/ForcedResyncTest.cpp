@@ -269,6 +269,13 @@ struct Rig {
     ResyncAck ack(std::size_t slot,ResyncAckStatus status=ResyncAckStatus::Converged){const auto& b=seen[slot].begins.back();const auto& s=seen[slot].snapshots.back();ResyncAck a;a.key=b.key;a.phase=b.phase;a.snapshotCut=b.snapshotCut;a.snapshotSha256=b.sha256;a.observedFingerprint=s.nativeFingerprint;a.status=status;for(std::size_t i=0;i<b.targetCount;++i)if(b.targets[i].slot==slot)a.target=b.targets[i];a.observedRoom=s.room;a.enemyCount=s.livingCount;a.deadCount=s.deadCount;a.loadBefore=3;a.loadAfter=4;a.observationFrame1=200;a.observationFrame2=201;a.checksMask=ResyncChecksComplete;return a;}
     bool sendAck(std::size_t slot,ResyncAckStatus status=ResyncAckStatus::Converged){return clients[slot]->sendResyncAck(ack(slot,status),clients[slot]->makeTestingWorldContext());}
     bool result(ResyncResultReason why){return wait([&]{return !seen[0].results.empty()&&seen[0].results.back().reason==why;});}
+    // A Declared SeatState from `slot` for the relay's roster, and the relay-stamped SeatStates from `owner` seat `at` admitted.
+    bool sendSeat(std::size_t slot,std::uint32_t seq){SeatState m;for(std::size_t i=0;i<3;++i)m.roster[i]=clients[i]->worldBinding()->selfConnectionId;
+        m.seq=seq;m.profile=0x5A;return clients[slot]->sendNativeWorld(encode(m),clients[slot]->makeTestingWorldContext(),true);}
+    std::size_t seats(std::size_t at,std::uint8_t owner){std::size_t n=0;
+        for(const auto& e:seen[at].envelopes)if(!e.packet.empty()&&e.packet.front()==static_cast<std::uint8_t>(PacketType::SeatState)){
+            const std::uint8_t* p;std::size_t len;decodePacketHeader(e.packet.data(),e.packet.size(),p,len);ByteReader r(p,len);SeatState m;read(r,m);n+=m.ownerSlot==owner;}
+        return n;}
 };
 void loopbackSuccess(bool empty,std::uint16_t port){
     Rig r(port);const bool primed=r.prime();check(primed,"real three-peer scoped world setup positively received");if(!primed)return;
@@ -555,13 +562,6 @@ struct SitOutRig : Rig {
     // Ordering barrier through the unfenced seat only; the fenced target must not see it at all.
     bool fencedBarrier(){const auto n=++marker;const auto before=seen[1].progress;clients[0]->sendProgressUpdate({n,false,{}});
         return wait([&]{return seen[2].progress==n;})&&seen[1].progress==before;}
-    // A Declared SeatState from `slot` for the relay's roster, and the relay-stamped SeatStates from `owner` seat `at` admitted.
-    bool sendSeat(std::size_t slot,std::uint32_t seq){SeatState m;for(std::size_t i=0;i<3;++i)m.roster[i]=clients[i]->worldBinding()->selfConnectionId;
-        m.seq=seq;m.profile=0x5A;return clients[slot]->sendNativeWorld(encode(m),clients[slot]->makeTestingWorldContext(),true);}
-    std::size_t seats(std::size_t at,std::uint8_t owner){std::size_t n=0;
-        for(const auto& e:seen[at].envelopes)if(!e.packet.empty()&&e.packet.front()==static_cast<std::uint8_t>(PacketType::SeatState)){
-            const std::uint8_t* p;std::size_t len;decodePacketHeader(e.packet.data(),e.packet.size(),p,len);ByteReader r(p,len);SeatState m;read(r,m);n+=m.ownerSlot==owner;}
-        return n;}
     // The relay's own mark for a seat (PeerState::sitOutPresence), and whether it is still quarantined.
     const PeerState* peer(std::size_t slot){for(const auto& p:relay->peers())if(p.status==PeerStatus::Verified&&static_cast<std::size_t>(p.assignedSlot)==slot)return &p;return nullptr;}
     bool presence(std::size_t slot){const auto* p=peer(slot);return p&&p->sitOutPresence&&p->worldQuarantined;}
@@ -622,6 +622,24 @@ void bossSitOutSeatState(bool fail,std::uint16_t port){
           "after convergence presence still crosses and material stays fenced");
     check(r.presence(1)&&r.begin(2)&&r.plain(1),"a new plan for the seat clears the mark until its own capture is forwarded");
 }
+// VUH-2675: a 3-seat, single-target resync. The seat outside the plan learns the target's new delivery serial
+// from the relay's plan notice, so it admits the recovered seat's envelopes after convergence (and refuses its old
+// serial), while it is never fenced, reserialized or handed the plan itself.
+void outsiderAdmitsRecoveredSeat(std::uint16_t port){
+    Rig r(port);if(!r.prime()){check(false,"outsider setup");return;}
+    const auto oldSerial=r.clients[1]->deliverySerial(),outsiderSerial=r.clients[2]->deliverySerial();
+    check(r.sendSeat(1,1)&&r.wait([&]{return r.seats(2,1)==1;})&&r.clients[2]->remoteDeliverySerial(1)==oldSerial,
+          "before the resync the outsider admits the friend's envelopes at its first serial");
+    if(!r.begin(2)){check(false,"single-target plan");return;}
+    check(r.wait([&]{return r.clients[2]->remoteDeliverySerial(1)==r.clients[1]->deliverySerial();})&&r.clients[1]->deliverySerial()>oldSerial,
+          "the outsider learns the target's new serial from the plan notice, so the old serial is refused");
+    check(r.clients[2]->deliverySerial()==outsiderSerial&&r.clients[2]->worldReady()&&!r.clients[2]->pendingResync()&&r.seen[2].plans.empty(),
+          "the outsider is not fenced, reserialized or handed the plan");
+    check(r.capture(snapshot())&&r.sendAck(1)&&r.result(ResyncResultReason::Converged),"the single-target resync converges");
+    check(r.sendSeat(1,2)&&r.wait([&]{return r.seats(2,1)==2&&r.seats(0,1)==2;}),
+          "after convergence the outsider admits the recovered seat's envelopes");
+    check(r.sendSeat(2,1)&&r.wait([&]{return r.seats(0,2)==1&&r.seats(1,2)==1;}),"the outsider's own traffic is unchanged");
+}
 void legacy(){SessionConfig cfg;cfg.bindAddress="127.0.0.1";cfg.port=17843;cfg.gameBuild="legacy";cfg.modHash="m";cfg.contentHash="c";SessionHost relay(cfg);check(relay.start(),"version10 relay gate starts");std::string reason;bool closed=false;ClientCallbacks cb;cb.onRejected=[&](const HelloReject& r){reason=r.reason;};cb.onClosed=[&](const auto&){closed=true;};NetworkClient old("127.0.0.1",cfg.port,cfg.gameBuild,cfg.modHash,"old8",SlotType::Friend1,cb,RuntimeMode::CampaignCoop,cfg.contentHash,8);old.connect();const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(4);while(!closed&&std::chrono::steady_clock::now()<until){relay.tick(0);old.tick(0);std::this_thread::sleep_for(std::chrono::milliseconds(1));}check(PROTOCOL_VERSION>8&&closed&&reason=="Protocol mismatch: client=8 server="+std::to_string(PROTOCOL_VERSION)&&relay.verifiedPeerCount()==0,"v8 cannot negotiate snapshots without native record-content witness semantics");old.disconnect();relay.stop();}
 }
-int main(){if(enet_initialize()!=0)return 2;codecAndStaging();recordContentCodec();loopbackSuccess(false,17831);loopbackSuccess(true,17832);checkpoint(false,17833);checkpoint(true,17834);for(unsigned i=0;i<7;++i)terminalControls(static_cast<std::uint16_t>(17835+i),i);conditionedRetirement();singleTargetAndOverflow(false,17845);singleTargetAndOverflow(true,17846);for(unsigned i=0;i<4;++i)wireStaging(i,static_cast<std::uint16_t>(17847+i));simulationUnavailable();completedReplayAndMixedCut(false,17852);completedReplayAndMixedCut(true,17853);expiredInboundEnd();for(unsigned i=0;i<3;++i)expiredOutbound(i,static_cast<std::uint16_t>(17855+i));initialExpiryLatePlan();bossSitOutCodec();for(unsigned i=0;i<3;++i)bossSitOutRelay(i,static_cast<std::uint16_t>(17871+i));bossSitOutSeatState(false,17874);bossSitOutSeatState(true,17875);legacy();enet_deinitialize();std::cout<<checks-failures<<" PASS, "<<failures<<" FAIL\n";return failures?1:0;}
+int main(){if(enet_initialize()!=0)return 2;codecAndStaging();recordContentCodec();loopbackSuccess(false,17831);loopbackSuccess(true,17832);checkpoint(false,17833);checkpoint(true,17834);for(unsigned i=0;i<7;++i)terminalControls(static_cast<std::uint16_t>(17835+i),i);conditionedRetirement();singleTargetAndOverflow(false,17845);singleTargetAndOverflow(true,17846);for(unsigned i=0;i<4;++i)wireStaging(i,static_cast<std::uint16_t>(17847+i));simulationUnavailable();completedReplayAndMixedCut(false,17852);completedReplayAndMixedCut(true,17853);expiredInboundEnd();for(unsigned i=0;i<3;++i)expiredOutbound(i,static_cast<std::uint16_t>(17855+i));initialExpiryLatePlan();bossSitOutCodec();for(unsigned i=0;i<3;++i)bossSitOutRelay(i,static_cast<std::uint16_t>(17871+i));bossSitOutSeatState(false,17874);bossSitOutSeatState(true,17875);outsiderAdmitsRecoveredSeat(17876);legacy();enet_deinitialize();std::cout<<checks-failures<<" PASS, "<<failures<<" FAIL\n";return failures?1:0;}
