@@ -3318,6 +3318,14 @@ void TestStruggleOrbRows() {
     so::g_testManager = 0xA000; OrbTick();
     Check(g_orbDisplay.Stats().reset == resets + 2 && g_orbDisplay.Queued() == 0,
           "friend: the frame tick sees the loss and the return with no rows queued");
+    // Quill r3: then a delayed match-1 birth arrives alone: refused, not shown in the replacement manager.
+    SpawnEmission late{}; late.kind = SpawnEmissionKind::OrbBirth; late.orbId = 1; late.orbMatch = 1; late.point = {1, 2, 3, 1};
+    const auto pre = g_orbDisplay.Stats();
+    g_orbDisplay.Receive({late});
+    g_orbDisplay.Tick(so::Manager(), &so::CreateDisplay, &so::StartFlight);
+    const auto& post = g_orbDisplay.Stats();
+    Check(g_orbDisplay.Unaligned() && post.refused == pre.refused + 1 && post.createFailed == pre.createFailed &&
+          post.created == pre.created, "friend: after a loss before any row, a delayed old birth is refused");
     so::g_testManager = 0;
     ResetSpawnEmissions();
 }

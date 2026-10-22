@@ -406,6 +406,27 @@ void ManagerReplacement() {
         o.display.Receive({rows[3]});
         o.Tick(0xA000);
         check(o.display.Showing() == 2 && o.display.Shown() == 1 && o.creates == 2, "a loss seen by Observe alone starts the next match");
+        FakeFriend u;  // Quill r3: A, 0, A before any row; then a delayed match-1 birth alone, then match 2
+        u.display.Observe(0xA000);
+        u.display.Observe(0);
+        u.display.Observe(0xA000);
+        u.display.Receive({rows[0]});
+        u.Tick(0xA000);
+        check(u.creates == 0 && u.display.Showing() == 0 && u.display.Unaligned() && u.display.Stats().refused == 1,
+              "replaced before any row: a delayed old birth is not adopted as this manager's match");
+        u.display.Receive({rows[3]});
+        u.Tick(0xA000);
+        check(u.creates == 0 && u.display.Queued() == 0 && u.display.Stats().refused == 2,
+              "unaligned: the current match's rows are refused too, never queued forever");
+        u.display.Reset();
+        u.display.Receive({rows[3]});
+        u.Tick(0xB000);
+        check(!u.display.Unaligned() && u.display.Showing() == 2 && u.creates == 1, "the room's end clears it");
+        FakeFriend first;  // a first manager with no rows yet is not a replacement
+        first.display.Observe(0xA000);
+        first.display.Receive({rows[3]});
+        first.Tick(0xA000);
+        check(!first.display.Unaligned() && first.creates == 1, "a first manager waiting for its first row stays aligned");
         FakeFriend h;  // the friend's manager replaced before the host's: late match 1 rows are dropped
         h.display.Receive({rows[0]});
         h.Tick(0x5000);

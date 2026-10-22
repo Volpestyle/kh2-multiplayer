@@ -107,7 +107,9 @@ How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`,
   manager shows the newest queued match, each replacement the next). Both games observe their manager every
   frame, rows or not: a manager seen gone ends its match and retires every record the friend holds for it,
   so the next manager is the next match even at the same address. A loss and return within one frame is not
-  seen. Whether a manager is ever replaced inside one room is not known; each Struggle match seen so far is
+  seen. A friend whose manager is replaced before any orb row has reached it cannot tell which match the new
+  manager shows, so it refuses every orb row until the room ends: it shows no orbs there, and the score
+  stays the host's. Whether a manager is ever replaced inside one room is not known; each Struggle match seen so far is
   its own battle program.
 - The friend, while it is a client in the host's room, skips its own orb drops (`FUN_140410100`,
   `FUN_140410090`) and pickups (`FUN_14040ff50`, `FUN_140410250`). It creates the host's orbs through the

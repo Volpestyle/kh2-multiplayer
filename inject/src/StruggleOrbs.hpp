@@ -113,12 +113,15 @@ public:
 // queued when it appears, each replacement the next. Rows of an earlier match are dropped (their orbs went
 // with the old manager); rows of a later match wait for this game's next manager. The manager is observed
 // every frame, rows or not: a manager seen gone retires every record receipt at once, and the next manager
-// is the next match even at the same address (A, 0, A).
+// is the next match even at the same address (A, 0, A). A manager replaced before any row assigned a match
+// leaves this game unaligned: no row says which host match the new manager shows (a delayed old row is not
+// proof), so every orb row is refused until the room ends. The score is the host's either way; this friend
+// then shows no orbs for the rest of that room.
 struct CreateRequest { std::uint16_t id; std::uint8_t type; std::array<float, 4> point; std::array<float, 3> velocity; };
 struct VanishRequest { std::uint16_t id; std::uint8_t type; std::uintptr_t record; OrbCollector collector; std::uint16_t netId; };
 // elided: born and collected before this game showed it (a late join, or a burst within one frame).
-// stale: a row of a match this game's manager no longer shows.
-struct DisplayStats { std::uint64_t created{}, vanished{}, elided{}, skipped{}, stale{}, createFailed{}, vanishFailed{}, reset{}; };
+// stale: a row of a match this game's manager no longer shows. refused: a row taken while unaligned.
+struct DisplayStats { std::uint64_t created{}, vanished{}, elided{}, skipped{}, stale{}, refused{}, createFailed{}, vanishFailed{}, reset{}; };
 
 class ClientDisplay {
     // Shown: a display orb is out. Gone: shown and collected, refused, or seen twice. Elided: born after its
@@ -127,6 +130,7 @@ class ClientDisplay {
     struct Orb { std::uint16_t id; std::uint8_t type; std::uintptr_t record; State state; };
     std::uintptr_t manager_ = 0;
     bool lost_ = false;          // a manager was seen gone since the last one
+    bool unaligned_ = false;     // replaced before any match was assigned: rows refused until the room ends
     std::uint16_t showing_ = 0;  // the host match this game's manager shows; 0 until assigned
     std::vector<SpawnEmission> queue_;
     std::vector<Orb> orbs_;
@@ -137,7 +141,10 @@ class ClientDisplay {
     }
 public:
     static constexpr std::size_t kPerTick = 64;  // native calls per game frame
-    void Reset() { manager_ = 0; lost_ = false; showing_ = 0; queue_.clear(); orbs_.clear(); ++stats_.reset; }  // the room ended
+    void Reset() {  // the room ended
+        manager_ = 0; lost_ = false; unaligned_ = false; showing_ = 0; queue_.clear(); orbs_.clear(); ++stats_.reset;
+    }
+    bool Unaligned() const { return unaligned_; }
     // Every frame, rows or not.
     void Observe(std::uintptr_t manager) {
         if (manager == manager_) return;
@@ -146,7 +153,11 @@ public:
             return;
         }
         // A different manager, or any manager after one was lost, is a different match.
-        if (manager_ || lost_) { ++stats_.reset; if (showing_ && showing_ < UINT16_MAX) ++showing_; }
+        if (manager_ || lost_) {
+            ++stats_.reset;
+            if (!showing_) unaligned_ = true;
+            else if (showing_ < UINT16_MAX) ++showing_;
+        }
         manager_ = manager; lost_ = false; orbs_.clear();
     }
     const DisplayStats& Stats() const { return stats_; }
@@ -166,6 +177,7 @@ public:
     void Tick(std::uintptr_t manager, Create&& create, Vanish&& vanish) {
         Observe(manager);
         if (!manager) return;  // rows wait for this game's match
+        if (unaligned_) { stats_.refused += queue_.size(); queue_.clear(); return; }
         if (!showing_) {
             for (const auto& row : queue_) showing_ = (std::max)(showing_, row.orbMatch);
             if (!showing_) return;
