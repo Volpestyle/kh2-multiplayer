@@ -194,6 +194,85 @@ class DetourTest(NoSleep):
         self.assertEqual(coop.approach(pilot, own(), [0.0, 0.0, 0.0], [0.0, 0.0, 60.0], 60.0, 0.0), set())
 
 
+class ReviveStepTest(unittest.TestCase):
+    """The real CooperativeFight.step: the detour is for out-of-range approaches only (Quill r1)."""
+
+    class Pad(BASE.PadInput):
+        def __init__(self):
+            self.held, self.calls = set(), []
+
+        def hold(self, keys):
+            self.held = set(keys)
+            self.calls.append(sorted(keys))
+
+    def setUp(self):
+        self.saved = THORN.time.monotonic, THORN.time.sleep
+        self.now = [0.0]
+        THORN.time.monotonic, THORN.time.sleep = (lambda: self.now[0]), (lambda _: None)
+        self.peer = {"free": True, "roomScope": [2, 34, 1], "playerPos": [0.0, 0.0, 100.0], "player": 2}
+        self.coop = THORN.CooperativeFight(SimpleNamespace(pid=1), SimpleNamespace(pid=2, state=lambda: self.peer))
+        self.coop.own_log = SimpleNamespace(update=lambda: True, downed=False, full_party=False)
+        self.coop.peer_log = SimpleNamespace(update=lambda: True, downed=True, full_party=False, actor=2)
+        self.pad = self.Pad()
+        self.writes = []
+        self.pilot = SimpleNamespace(kb=self.pad, thorn_policy=None,
+                                     write=lambda kind, **f: self.writes.append(kind))
+
+    def tearDown(self):
+        THORN.time.monotonic, THORN.time.sleep = self.saved
+
+    def own(self, progress=200, frame=10, react=0):
+        return {"world": 2, "room": 34, "free": True, "hp": 20, "player": 1, "playerPos": [0.0, 0.0, 0.0],
+                "roomScope": [2, 34, 1], "react": react, "forward": [0.0, 1.0],
+                "reactObservation": {"source": "downed-prompt-v7", "frame": frame, "reviveProgress": progress,
+                                     "promptKind": 1, "promptHide": 0}}
+
+    def tick(self, at, state):
+        self.now[0] = at
+        start = len(self.pad.calls)
+        self.assertTrue(self.coop.step(self.pilot, state))
+        return self.pad.calls[start:]
+
+    def test_a_progressing_in_range_hold_never_detours(self):
+        identity = (1, 2, (2, 34, 1))
+        c = self.coop
+        c.hold_started, c.hold_frame, c.hold_identity = 0.0, 0, identity
+        c.arm_frame, c.armed_identity, c.last_hold_hp, c.last_progress = 0, identity, 20, 200
+        self.assertEqual(self.tick(0.0, self.own(200, 10)), [["react"]])
+        for i, at in enumerate((2.1, 4.2, 6.3)):
+            self.assertEqual(self.tick(at, self.own(300 + 200 * i, 140 + 120 * i)), [["react"]],
+                             "standing still while the bar fills is not a stalled approach")
+        self.assertEqual(c.detours, 0)
+        self.assertNotIn("coop_detour", self.writes)
+
+    def test_a_stalled_out_of_range_approach_still_detours(self):
+        self.peer["playerPos"] = [0.0, 0.0, 1000.0]
+        self.assertEqual(self.tick(0.0, self.own()), [["up"]])
+        inputs = self.tick(2.1, self.own())
+        self.assertEqual(self.coop.detours, 1)
+        self.assertIn("coop_detour", self.writes)
+        self.assertTrue(any("jump" in keys for keys in inputs))
+
+    def test_entering_revive_range_restarts_the_stall_window(self):
+        self.peer["playerPos"] = [0.0, 0.0, 1000.0]
+        self.tick(0.0, self.own())
+        self.peer["playerPos"] = [0.0, 0.0, 100.0]
+        self.tick(1.5, self.own())
+        self.assertIsNone(self.coop.progress)
+        self.peer["playerPos"] = [0.0, 0.0, 1000.0]
+        self.tick(2.1, self.own())
+        self.assertEqual(self.coop.detours, 0, "the out-of-range window starts again, not from 0.0")
+        self.tick(4.2, self.own())
+        self.assertEqual(self.coop.detours, 1)
+
+    def test_no_detour_during_a_reaction(self):
+        self.peer["playerPos"] = [0.0, 0.0, 1000.0]
+        self.tick(0.0, self.own(react=5))
+        inputs = self.tick(2.1, self.own(react=5))
+        self.assertEqual(self.coop.detours, 0)
+        self.assertFalse(any("jump" in keys for keys in inputs))
+
+
 class CombatTurnTest(NoSleep):
     def pilot(self, peer=None):
         pilot = THORN.Pilot.__new__(THORN.Pilot)

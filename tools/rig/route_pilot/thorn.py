@@ -286,11 +286,17 @@ class CooperativeFight(base.CooperativeFight):
         self.detours = 0
         self.detour_side = 1
 
-    def approach(self, pilot, own, point, target, horizontal, now):
-        """The keys toward the downed peer: straight, or a bounded detour when the approach stalls."""
+    def approach(self, pilot, own, point, target, horizontal, now, detour=True):
+        """The keys toward the downed peer: straight, or a bounded detour when the approach stalls. With
+        detour False (in revive range, where standing still fills the native bar, or during an RC) no
+        detour input is sent and the stall window restarts."""
+        if not detour:
+            self.progress, self.detour_until, self.detour_point = None, 0.0, None
         if horizontal <= 80:
             self.progress = None
             return set()
+        if not detour:
+            return base.steer({**own, "pos": point}, (target[0], target[2]))
         if now < self.detour_until and self.detour_point is not None:
             return base.steer({**own, "pos": point}, self.detour_point)
         if self.progress is None:
@@ -391,7 +397,9 @@ class CooperativeFight(base.CooperativeFight):
         if self.hold_identity is not None and self.hold_identity != identity:
             return self.stop(pilot, "actor-replaced", own)
         now = time.monotonic()
-        direction = self.approach(pilot, own, point, target, horizontal, now)
+        limit = self.KEEP_3D if self.hold_started is not None else self.START_3D
+        direction = self.approach(pilot, own, point, target, horizontal, now,
+                                  detour=distance > limit and not own["react"])
         if now - self.observed_at >= 0.5:
             pilot.write("coop_approach", peerPid=self.peer.pid, own=list(point), target=list(target),
                         distance3D=round(distance, 2), horizontal=round(horizontal, 2), detours=self.detours,
@@ -409,7 +417,6 @@ class CooperativeFight(base.CooperativeFight):
                 pilot.write("coop_reaction", command=own["react"], peerPid=self.peer.pid)
             pilot.kb.hold(direction | {"react"} if now < self.rc_until else direction)
             return True
-        limit = self.KEEP_3D if self.hold_started is not None else self.START_3D
         if distance <= limit:
             info = own.get("reactObservation", {})
             qualified = info.get("source") == "downed-prompt-v7"

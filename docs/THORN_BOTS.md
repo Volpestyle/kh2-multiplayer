@@ -90,7 +90,9 @@ pilots soaked hits with no guard or dodge, and the revive approach had no fallba
   - It is logged as `thorn_kite`.
 - **Revive-approach fallback.** When the approach to a downed partner gains under 40 horizontal units in
   2 s, the seat detours to a waypoint beside the line, on the side away from Thorn's root, for 1 s with a
-  moving jump. At most 8 times per downed episode. It is logged as `coop_detour`.
+  moving jump. At most 8 times per downed episode. It is logged as `coop_detour`. It applies only out of
+  revive range and outside an RC. Standing still while the native bar fills is not a stall, and entering
+  range restarts the 2 s window.
 - **Fewer run-aways.** `pinnedDrop` 0.55: escaping now needs 11 HP lost in 2 s, where before one or two
   Thorn hits triggered a run-and-jump away.
 - **Telemetry.** `thorn_observe` adds `thornCombat`:
