@@ -765,14 +765,15 @@ static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outc
 }
 // VUH-2617: a friend local-seat release that stopped at `guards`, by a role with a positive receipt that it held this
 // actor (an own-bank install read back, or a borrowed capture it installed), runs the same native detach/idle pair a
-// cleaned release runs, once (rules::DecideHeldRelease). Facts come from the release's own copy and the proven
-// pre-native snapshot; the input-gate line is read from the same proven root before any native call; the root is
-// re-proven between detach and idle, and nothing of the actor is read after idle.
+// cleaned release runs, once (rules::DecideHeldRelease). Detach runs on facts from the release's own reads; the
+// input-gate line is read from the same proven root before any native call. Idle runs only if detach succeeded and a
+// full admission rebuilt after detach (canonical friend, session, field, list-proven root, a fresh hold read, the seat's
+// slots) still holds (rules::HeldReleaseIdleAllowed). Nothing of the actor is read after idle.
 static unsigned g_smHeldReleaseLogs=0;
-static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup outcome,const R::ReleaseCleanupFacts& f,
-                               bool cancelled,const R::LocalHoldRoots& roots,const R::LocalHold& h) {
+static R::HeldReleaseFacts SmOwnerHeldFacts(const ScriptActorRole& released,bool friendLocal,R::ReleaseCleanup outcome,
+                                            bool releaseStage,bool field,const R::LocalHoldRoots& roots,const R::LocalHold& h) {
     R::HeldReleaseFacts r{};
-    r.friendLocal=true;r.outcome=outcome;r.releaseStage=f.current && !cancelled;
+    r.friendLocal=friendLocal;r.outcome=outcome;r.releaseStage=releaseStage;r.field=field;
     enemysync::DownedScope scope;
     r.sessionCurrent=released.slot<3 && SmOwnerScope(scope) && scope.epoch==released.epoch &&
         scope.connections[released.slot]==released.connection && enemysync::ScriptCameraScopeCurrent(released.admittedScope);
@@ -780,27 +781,39 @@ static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup
     r.roleFree=released.slot<3 && !g_smRoles[released.slot].resource && !g_smOwnerCleanup[released.slot].role.resource;
     r.heldReceipt=released.ownMotion!=UINT32_MAX || released.captured;
     r.thread=h.thread;r.capture=h.capture;r.bank=h.bank;r.parent=h.parent;r.source=released.source;r.sourceBank=h.sourceBank;
+    return r;
+}
+static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup outcome,const R::ReleaseCleanupFacts& f,
+                               bool cancelled,const R::LocalHoldRoots& roots,const R::LocalHold& h) {
+    const auto r=SmOwnerHeldFacts(released,true,outcome,f.current && !cancelled,f.field,roots,h);
     const char* why="";
     const bool release=R::DecideHeldRelease(r,why);
     if(!release && !r.heldReceipt)return;  // a role that never held this actor: nothing to say
     const auto gate=R::ReadInputGate(roots.actor && r.releaseStage,released.actor,g_exeBase+0x2A10620,
         [](std::uintptr_t at,void* out,std::size_t size){return ReadHitTraceMemory(at,out,size);},
         [](std::uint32_t handle){return SmDecode(handle);});
-    bool detached=false,idled=false,reproven=false;
-    if(release) {
-        detached=SmOwnerNativePlayer(released.actor,0x42C5F0);
-        reproven=SmOwnerReleaseRootCurrent(released) && released.slot<3 && !g_smRoles[released.slot].resource &&
-            !g_smOwnerCleanup[released.slot].role.resource;
-        if(reproven)idled=SmOwnerNativePlayer(released.actor,0x42D0E0);
-    }
+    const auto pair=R::RunHeldPair(release,
+        [&](){return SmOwnerNativePlayer(released.actor,0x42C5F0);},
+        [&](){
+            // Every fact rebuilt after detach; the outcome names the guards release this belongs to.
+            const bool current=SmOwnerReleaseRootCurrent(released);
+            uintptr_t event=0;std::int32_t cutscene=0;
+            const bool field=current && ReadHitTrace(g_exeBase+0x2A11478,event) && !event &&
+                ReadHitTrace(g_exeBase+0xB65210,cutscene) && !cutscene;
+            R::LocalHoldRoots rootsNow{};
+            const auto now=SmReadReleaseHold(released,current,false,rootsNow);
+            return SmOwnerHeldFacts(released,SmOwnerFriendLocal(released),outcome,current,field,rootsNow,now);},
+        [&](){return SmOwnerNativePlayer(released.actor,0x42D0E0);});
+    const bool detached=pair.detached,idled=pair.idled;
+    const char* idleWhy=pair.idleWhy;
     if(g_smHeldReleaseLogs<32) {
         ++g_smHeldReleaseLogs;
-        Log("[script-owner] local held-release %s role=%u seat=%u why=%s ownMotion=%d captured=%u detach=%u reproven=%u "
+        Log("[script-owner] local held-release %s role=%u seat=%u why=%s ownMotion=%d captured=%u detach=%u idleWhy=%s "
             "idle=%u gateRead=%u pad=%llX padEntry0=%u command=%llX commandAux=%llX fieldCommand=%u command24=%X "
             "flags9B8=%X flags120=%X motion=%u motionTime=%.1f action=%X actionVt=%llX actionTime=%.2f frame=%u (%u/32)",
             release?"ran":"kept",released.resource,released.slot,why,
             released.ownMotion==UINT32_MAX?-1:static_cast<int>(released.ownMotion),released.captured?1u:0u,
-            detached?1u:0u,reproven?1u:0u,idled?1u:0u,gate.read?1u:0u,static_cast<unsigned long long>(gate.pad),
+            detached?1u:0u,idleWhy,idled?1u:0u,gate.read?1u:0u,static_cast<unsigned long long>(gate.pad),
             gate.pad==g_exeBase+0xBF31A0?1u:0u,static_cast<unsigned long long>(gate.command),
             static_cast<unsigned long long>(gate.commandAux),gate.command==g_exeBase+0x2A10620?1u:0u,gate.command24,
             gate.flags9B8,gate.flags120,gate.motion,gate.motionTime,gate.actionHandle,

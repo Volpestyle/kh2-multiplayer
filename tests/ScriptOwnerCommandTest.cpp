@@ -338,6 +338,7 @@ int main() {
         R::HeldReleaseFacts held{};
         held.friendLocal=true;held.outcome=R::ReleaseCleanup::Guards;held.releaseStage=true;held.sessionCurrent=true;
         held.actorProven=true;held.actorRead=true;held.roleFree=true;held.heldReceipt=ownReceipt;
+        held.field=true;
         held.source=thorn;held.sourceBank=thornBank;held.sourceProven=true;
         const char* why="";
         const auto is=[&](R::HeldReleaseFacts f,bool want,const char* reason){
@@ -377,6 +378,55 @@ int main() {
         check(is(f,false,"foreign-bank"),"another bank: not ours");
         f=held;f.bank=thornBank;f.sourceProven=false;
         check(is(f,false,"foreign-bank"),"a bank that cannot be matched to a proven source: not ours");
+        f=held;f.field=false;
+        check(is(f,false,"not-field"),"an event or cutscene running: nothing");
+
+        // Quill r1 on 18b15fa: idle follows only a successful detach and a fresh admission rebuilt after it. Each run
+        // records its calls in order; nothing may follow idle.
+        std::vector<std::string> calls;
+        const auto run=[&](bool release,bool detachOk,R::HeldReleaseFacts fresh,bool idleOk=true){
+            calls.clear();
+            return R::RunHeldPair(release,[&](){calls.push_back("detach");return detachOk;},
+                [&](){calls.push_back("rebuild");return fresh;},[&](){calls.push_back("idle");return idleOk;});};
+        const auto order=[&](std::initializer_list<const char*> want){
+            return std::vector<std::string>(want.begin(),want.end())==calls;};
+        auto p=run(true,true,held);
+        check(p.detached && p.idled && std::string(p.idleWhy)=="held-guards" && order({"detach","rebuild","idle"}),
+              "detach, a fresh admission, then idle, and idle is the last call (no read after it)");
+        p=run(false,true,held);
+        check(!p.detached && !p.idled && calls.empty(),"a refused release runs nothing");
+        p=run(true,false,held);
+        check(p.detached==false && !p.idled && std::string(p.idleWhy)=="detach-failed" && order({"detach"}),
+              "a failed detach stops: no rebuild, no idle");
+        const auto between=[&](R::HeldReleaseFacts fresh,const char* reason){
+            const auto q=run(true,true,fresh);
+            return q.detached && !q.idled && std::string(q.idleWhy)==reason && order({"detach","rebuild"});};
+        f=held;f.sessionCurrent=false;
+        check(between(f,"session"),"the session, connection or epoch revoked between the calls: no idle");
+        f=held;f.friendLocal=false;
+        check(between(f,"not-friend-local"),"the actor no longer the canonical friend after detach: no idle");
+        f=held;f.releaseStage=false;
+        check(between(f,"not-release-stage"),"the release root no longer current after detach: no idle");
+        f=held;f.field=false;
+        check(between(f,"not-field"),"an event or cutscene begun between the calls: no idle");
+        f=held;f.actorProven=false;
+        check(between(f,"unproven"),"the root no longer list-proven after detach: no idle");
+        f=held;f.actorRead=false;
+        check(between(f,"unproven"),"the fresh hold read failed: no idle");
+        f=held;f.roleFree=false;
+        check(between(f,"role-current"),"a role or camera cleanup took the seat between the calls: no idle");
+        f=held;f.thread=0x1234;
+        check(between(f,"held"),"a coroutine appeared on the actor between the calls: no idle");
+        f=held;f.parent=0x10;
+        check(between(f,"held"),"a parent (the detach did not clear it, or a new one) after detach: no idle");
+        f=held;f.capture=0x7FF600000000;
+        check(between(f,"foreign-capture"),"another source captured the actor between the calls: no idle");
+        f=held;f.bank=0x7FF6AAAA0000;
+        check(between(f,"foreign-bank"),"another bank installed between the calls: no idle");
+        f=held;f.bank=thornBank;f.sourceProven=false;
+        check(between(f,"foreign-bank"),"the source no longer proven after detach, its bank still on: no idle");
+        p=run(true,true,R::HeldReleaseFacts{});
+        check(!p.idled && std::string(p.idleWhy)=="not-friend-local","an empty rebuild admits nothing");
     }
     // The input-gate line reads only a proven root, and follows only the known FIELD_COMMAND pointer.
     {

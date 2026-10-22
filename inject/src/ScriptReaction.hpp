@@ -443,7 +443,7 @@ LocalHoldRoots ProveLocalHoldRoots(bool decisionCurrent,bool cancelled,std::uint
 // this actor (an own-bank install read back by OwnInstallQualified, or a borrowed capture it installed), the actor is
 // held by nothing else, and the role's admitted session is current. It replaces the earlier own-motion reset.
 struct HeldReleaseFacts {
-    bool friendLocal{},releaseStage{},sessionCurrent{},actorProven{},actorRead{},roleFree{},heldReceipt{};
+    bool friendLocal{},releaseStage{},sessionCurrent{},field{},actorProven{},actorRead{},roleFree{},heldReceipt{};
     bool sourceProven{};
     ReleaseCleanup outcome{ReleaseCleanup::NotCurrent};
     std::uint32_t parent{};
@@ -455,12 +455,36 @@ inline bool DecideHeldRelease(const HeldReleaseFacts& f,const char*& why) noexce
     if(!f.releaseStage){why="not-release-stage";return false;}
     if(!f.heldReceipt){why="no-receipt";return false;}
     if(!f.sessionCurrent){why="session";return false;}
+    if(!f.field){why="not-field";return false;}
     if(!f.actorProven || !f.actorRead){why="unproven";return false;}
     if(!f.roleFree){why="role-current";return false;}
     if(f.thread || f.parent){why="held";return false;}
     if(f.capture && f.capture!=f.source){why="foreign-capture";return false;}
     if(f.bank && (!f.sourceProven || f.bank!=f.sourceBank)){why="foreign-bank";return false;}
     why="held-guards";return true;
+}
+// Quill r1 on 18b15fa: idle (a gameplay mutation) follows detach only when detach itself succeeded and a fresh decision
+// from facts rebuilt after detach (session, epoch, connection, admitted scope, canonical friend, list-proven root,
+// field, a fresh hold read, the seat's role and cleanup slots) still admits it. Nothing decided before detach is reused.
+inline bool HeldReleaseIdleAllowed(bool detached,const HeldReleaseFacts& fresh,const char*& why) noexcept {
+    if(!detached){why="detach-failed";return false;}
+    return DecideHeldRelease(fresh,why);
+}
+// The pair in order: detach; on success only, rebuild every fact (the only reads between the calls); idle only on that
+// fresh decision. Idle is the last thing run: nothing reads the actor after it.
+struct HeldPairResult {
+    bool detached{},idled{};
+    const char* idleWhy{"-"};
+};
+template<class Detach,class Rebuild,class Idle>
+HeldPairResult RunHeldPair(bool release,Detach&& detach,Rebuild&& rebuild,Idle&& idle) {
+    HeldPairResult out{};
+    if(!release)return out;
+    out.detached=detach();
+    HeldReleaseFacts fresh{};
+    if(out.detached)fresh=rebuild();
+    if(HeldReleaseIdleAllowed(out.detached,fresh,out.idleWhy))out.idled=idle();
+    return out;
 }
 // Quill r1 on 06ff413: the receipt is minted from a readback of the install just made. The general own-bank
 // classifier (SmOwnerMotionState) also requires +18C without 0x4000, but +18C carries the current motion's own flags
