@@ -1,6 +1,6 @@
 {
   "name": "vuh2628_safe_field_recovery04",
-  "description": "Bounded dormant-script recovery fix: exact FM00 Script12 remains native-owned on both seats, flag40 independently1. Fixed2600ms Friend1 pause; require fresh authenticated native convergence/reset1 ACK/Arm. Single-PC loopback, same closure.",
+  "description": "Bounded dormant-script recovery fix: exact FM00 Script12 remains native-owned on both seats, flag40 independently1. Fixed4200ms Friend1 pause (VUH-2640 budget: under the relay 5000ms); require fresh authenticated native convergence/reset1 ACK/Arm. Single-PC loopback, same closure.",
   "playerDefaults": true,
   "protect": [],
   "steps": [
@@ -107,7 +107,7 @@
     {
       "do": "friend_heartbeat_pause",
       "instance": 1,
-      "pauseMs": 2600
+      "pauseMs": 4200
     },
     {
       "do": "wait_until",

@@ -96,7 +96,7 @@ def setup():
     return proc, api, owned, games
 
 
-def execute(edit=None, failure=None, overrun=False):
+def execute(edit=None, failure=None, overrun=False, late=None):
     proc, api, owned, games = setup()
     if edit:
         edit(proc, api, owned, games)
@@ -109,8 +109,10 @@ def execute(edit=None, failure=None, overrun=False):
     def sleep(seconds):
         api.now += seconds
         if overrun and api.now > 0.1:
-            api.now = 3.3
+            api.now = overrun if overrun is not True else pause.WATCHDOG_MS / 1000
             Timer.latest.callback()
+        if late and api.now >= pause.PAUSE_MS / 1000:
+            api.now = late  # the scheduler resumed this loop late; the watchdog did not fire
     try:
         result = pause.pause(run.shared._runtime_lifecycle, owned, games, proc, sys.executable, alive,
                              api=api, clock=lambda: api.now, sleep=sleep, timer_factory=Timer)
@@ -120,7 +122,21 @@ def execute(edit=None, failure=None, overrun=False):
 
 
 result, error, proc, api = execute()
-check("fixed2600 successful", error is None and result["completed"] and result["durationMs"] == 2600)
+check("fixed4200 successful", error is None and result["completed"] and result["durationMs"] == pause.PAUSE_MS == 4200)
+check("watchdog armed at the relay budget", Timer.latest.delay == pause.WATCHDOG_MS / 1000 == 4.5 and result["watchdogMs"] == 4500)
+b = result["budget"]
+check("stated budget: past the lease, under the relay with pre-age, overrun and delivery",
+      b["pauseMs"] >= b["leaseMs"] + b["expiryMarginMs"] and not b["preAgeMeasured"] and
+      b["preAgeBudgetMs"] + b["pauseMs"] + b["overrunBudgetMs"] + b["deliveryBudgetMs"] < b["relayTimeoutMs"] and
+      b["pauseMs"] + b["overrunBudgetMs"] <= b["watchdogMs"] == b["relayTimeoutMs"] - b["preAgeBudgetMs"] - b["deliveryBudgetMs"])
+import re as _re
+lease_src = (run.ROOT/"common/include/kh2coop/EventHoldControl.hpp").read_text(encoding="utf-8")
+relay_main = (run.ROOT/"server/src/ServerMain.cpp").read_text(encoding="utf-8")
+relay_cfg = (run.ROOT/"server/include/kh2coop/SessionHost.hpp").read_text(encoding="utf-8")
+check("budget constants match the sources (lease, relay default and relay main)",
+      _re.search(r"HeartbeatTimeoutMs = (\d+);", lease_src).group(1) == str(pause.LEASE_MS) and
+      _re.search(r"config\.heartbeatTimeoutMs = (\d+);", relay_main).group(1) == str(pause.RELAY_TIMEOUT_MS) and
+      _re.search(r"heartbeatTimeoutMs\{(\d+)\}", relay_cfg).group(1) == str(pause.RELAY_TIMEOUT_MS))
 check("one matching resume", api.calls == ["suspend", "resume"] and not proc.killed)
 check("creation/game identity retained", result["identity"]["creationFiletime"] == 12345 and result["identity"]["gamePid"] == 222)
 for name, edit in [
@@ -138,6 +154,15 @@ result, error, proc, api = execute(failure=2)
 check("cancel finally resumes", isinstance(error,KeyboardInterrupt) and api.calls == ["suspend","resume"] and result["resumed"])
 result, error, proc, api = execute(overrun=True)
 check("watchdog resumes independently and refuses pass", error is not None and result["watchdogFired"] and result["resumed"])
+result, error, proc, api = execute(overrun=4.8)
+check("late watchdog (fired past its 4.5 s) still refuses pass", error is not None and result["watchdogFired"] and
+      result["durationMs"] > pause.PAUSE_MS + pause.OVERRUN_BUDGET_MS)
+result, error, proc, api = execute(late=4.45)
+check("over-budget resume without the watchdog is refused (jitter past the overrun budget)",
+      error is not None and "budget" in str(error) and not result["watchdogFired"] and result["resumed"] and
+      result["durationMs"] == 4450)
+result, error, proc, api = execute(late=4.4)
+check("resume exactly at the overrun budget still qualifies", error is None and result["completed"] and result["durationMs"] == 4400)
 result, error, proc, api = execute(lambda p,a,o,g: setattr(a,"suspend_result",-1))
 check("uncertain failed suspend still resumes", error is not None and api.calls == ["suspend","resume"])
 result, error, proc, api = execute(lambda p,a,o,g: setattr(a,"resume_result",-1))
@@ -146,21 +171,27 @@ result, error, proc, api = execute(lambda p,a,o,g: setattr(a,"tick_error_after_r
 check("successful resume not repeated on metadata error", error is not None and result["resumed"] and api.calls.count("resume")==1)
 
 session = "a" * 32
-initial = f"[eventhold-control] armed generation=1 host=10 self=11 hostDelivery=20 targetDelivery=21\n[runtime-identity] identityCurrent=1 pinPresent=1 stringsComplete=1 slot=1 selfConnection=11 hostConnection=10 pinSession={session} session={session} pinHostConnection=10 pinSlot=1"
+initial = f"[eventhold-control] armed generation=1 host=10 self=11 hostDelivery=20 targetDelivery=21\n[runtime-identity] peerHex=7065657231 identityCurrent=1 pinPresent=1 stringsComplete=1 slot=1 selfConnection=11 hostConnection=10 pinSession={session} session={session} pinHostConnection=10 pinSlot=1"
 old = evidence.baseline(initial)
-friend = f"[eventhold-control] aborted reason=4 observationMs=12601\n[eventhold-recovery] expired connection=11 pinnedRejoin=1 cached baseline quarantined=1\n[runtime-identity] identityCurrent=1 pinPresent=1 stringsComplete=1 selfConnection=12 hostConnection=10 pinSession={session} session={session} pinHostConnection=10 pinSlot=1\n[eventhold-recovery] fresh baseline request=7 generation=2 self=12 epoch=3 resetAckRequired=1\n[eventhold-control] armed generation=2 host=10 self=12 hostDelivery=20 targetDelivery=22\n[eventhold-recovery] control restored generation=2 self=12 nativeResetAck=1"
+friend = f"[eventhold-control] aborted reason=4 observationMs=14201\n[eventhold-recovery] expired connection=11 pinnedRejoin=1 cached baseline quarantined=1\n[runtime-identity] identityCurrent=1 pinPresent=1 stringsComplete=1 selfConnection=12 hostConnection=10 pinSession={session} session={session} pinHostConnection=10 pinSlot=1\n[eventhold-recovery] fresh baseline request=7 generation=2 self=12 epoch=3 resetAckRequired=1\n[eventhold-control] armed generation=2 host=10 self=12 hostDelivery=20 targetDelivery=22\n[eventhold-recovery] control restored generation=2 self=12 nativeResetAck=1"
 host = "[returning-seat-resync] action=submitted reason=host-generated-request slot=1 connection=12 epoch=3 request=7"
 native = f"[resync] ack session={session} host=10 request=7 targetSlot=1 connection=12 delivery=22 phase=0 cut=8 fingerprint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa status=2 epoch=3 world=2 room=32 door=0 map=0 battle=0 event=0 loadBefore=1 loadAfter=2 frame1=101 frame2=102 serialized=1\n[event-control] recovered lifetime generation=2 self=12 delivery=22 epoch=3 resetAckRequired=1\n[event-control] resync result request=7 reason=0 recoveredLifetime=1\n[event-control] owner ack ordinal=1 source=0 epoch=3 flags=3 generation=2 delivery=22"
 relay = f"[resync-result] component=relay session={session} host=10 request=7 reason=0 targetCount=1 target0=1,12,22,2,8,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,-"
-pause_receipt = {"completed":True,"resumed":True,"terminal":False,"suspendTickMs":10000,"resumeTickMs":12600}
+pause_receipt = {"completed":True,"resumed":True,"terminal":False,"suspendTickMs":10000,"resumeTickMs":14200}
 def correlation(f=friend,h=host,n=native,r=relay,p=pause_receipt):
     return evidence.correlate(old,p,f,h,n,r)
 check("exact log chain correlates", correlation()["ready"])
+check("the friend's own retirement and a pending handshake timeout do not void the proof",
+      correlation(r=relay+"\n[SessionHost] Peer disconnected: peer1\n[SessionHost] Peer timed out: 127.0.0.1:61000")["ready"])
+check("friend peer identity is required for the relay check",
+      not evidence.correlate({**old, "identity": {k: v for k, v in old["identity"].items() if k != "peerHex"}},
+                             pause_receipt, friend, host, native, relay)["ready"])
 checkpoint = native.splitlines()[0].replace("phase=0", "phase=1").replace("cut=8", "cut=9").replace("frame1=101 frame2=102", "frame1=103 frame2=104").replace("loadBefore=1", "loadBefore=2")
 check("actual terminal checkpoint retains Bootstrap proof", correlation(n=native.replace("\n[event-control] recovered", "\n"+checkpoint+"\n[event-control] recovered"),r=relay.replace(",2,8,",",2,9,"))["ready"])
 for name, args in [
     ("wrong reason", {"f":friend.replace("reason=4","reason=8")}),
-    ("late observed expiry", {"f":friend.replace("12601","15601")}),
+    ("late observed expiry", {"f":friend.replace("14201","17201")}),
+    ("relay timed out the friend (pre-pause age or late watchdog)", {"r":relay+"\n[SessionHost] Peer timed out: peer1"}),
     ("missing pinned rejoin", {"f":friend.replace("pinnedRejoin=1","pinnedRejoin=0")}),
     ("same connection", {"f":friend.replace("self=12","self=11")}),
     ("changed pin", {"f":friend.replace("pinSession="+session,"pinSession="+"b"*32)}),

@@ -39,6 +39,15 @@ def correlate(old, pause, friend, host, native, relay):
             raise ValueError("successful retained-handle resume required")
         initial = old["arm"]
         session = old["identity"]["session"]
+        # VUH-2640 (Quill r1): lease-only expiry. The relay timing out this friend's
+        # verified peer after the pause means the pause outran the relay's silence
+        # budget (pre-pause age, jitter or a late watchdog): the expiry's order is
+        # unproven. The friend's own retirement logs "Peer disconnected", not this.
+        peer = bytes.fromhex(old["identity"].get("peerHex", "")).decode("ascii", "replace")
+        if not peer:
+            raise ValueError("friend peer identity required")
+        if any(line.rstrip().endswith("Peer timed out: " + peer) for line in relay.splitlines()):
+            raise ValueError("relay timed out the friend after the pause: lease-only expiry unproven")
         aborts = rows(friend, "[eventhold-control] aborted ")
         expired = [r for r in aborts if r.get("reason") == "4" and
                    pause["suspendTickMs"] <= int(r["observationMs"]) <= pause["resumeTickMs"] + 3000]

@@ -2,11 +2,41 @@
 
 Identity gates mirror runtime_lifecycle.pause_owned_friend_runtime; path/argv and
 native suspend/resume calls reuse that module. No process opener or PID lookup.
+
+VUH-2640 (Quill r1 on the threshold): the pause must expire the 4000 ms
+event-control lease and nothing else, and the relay's 5000 ms peer liveness
+counts silence from the last packet it received, not from the suspension. So
+the relay's silence at resume is the pre-pause age (unmeasured here) plus the
+actual pause plus the first packet's delivery. The budget below is stated, not a
+guarantee: a pause outside it is refused here, and evidence.correlate refuses a
+proof whose relay log shows a peer timeout. A Python Timer is a scheduled
+callback, not a real-time bound, so a late watchdog shows up as a refused
+duration, never as a pass.
 """
 import ctypes
 import subprocess
 import threading
 import time
+
+
+LEASE_MS = 4000            # eventhold::HeartbeatTimeoutMs (check.py reads the header)
+RELAY_TIMEOUT_MS = 5000    # the relay's default heartbeatTimeoutMs (check.py reads it)
+PAUSE_MS = 4200            # requested pause: past the lease by EXPIRY_MARGIN_MS
+EXPIRY_MARGIN_MS = 200     # the native view sees the gap pass the lease within a pump
+PRE_AGE_BUDGET_MS = 400    # relay silence already elapsed at the suspend (field avatars ~every frame; heartbeat 1 s)
+OVERRUN_BUDGET_MS = 200    # measured suspend-to-resume beyond PAUSE_MS
+DELIVERY_BUDGET_MS = 100   # resume to the relay receiving the runtime's next packet
+WATCHDOG_MS = RELAY_TIMEOUT_MS - PRE_AGE_BUDGET_MS - DELIVERY_BUDGET_MS
+assert PAUSE_MS >= LEASE_MS + EXPIRY_MARGIN_MS
+assert PRE_AGE_BUDGET_MS + PAUSE_MS + OVERRUN_BUDGET_MS + DELIVERY_BUDGET_MS < RELAY_TIMEOUT_MS
+assert PAUSE_MS + OVERRUN_BUDGET_MS <= WATCHDOG_MS
+
+
+def budget():
+    return {"leaseMs": LEASE_MS, "relayTimeoutMs": RELAY_TIMEOUT_MS, "pauseMs": PAUSE_MS,
+            "expiryMarginMs": EXPIRY_MARGIN_MS, "preAgeBudgetMs": PRE_AGE_BUDGET_MS,
+            "overrunBudgetMs": OVERRUN_BUDGET_MS, "deliveryBudgetMs": DELIVERY_BUDGET_MS,
+            "watchdogMs": WATCHDOG_MS, "preAgeMeasured": False}
 
 
 def validate(lifecycle, processes, instances, runtime, expected, api):
@@ -89,8 +119,8 @@ def api_with_metadata(lifecycle):
 
 def pause(lifecycle, processes, instances, runtime, expected, check_all, *, api=None,
           clock=time.perf_counter, sleep=time.sleep, timer_factory=threading.Timer):
-    receipt = {"kind": "friend_heartbeat_expiry", "requestedPauseMs": 2600,
-               "watchdogMs": 3300, "suspendAttempted": False, "suspendStatus": None,
+    receipt = {"kind": "friend_heartbeat_expiry", "requestedPauseMs": PAUSE_MS,
+               "watchdogMs": WATCHDOG_MS, "budget": budget(), "suspendAttempted": False, "suspendStatus": None,
                "resumed": False, "completed": False, "terminal": False,
                "resumeAttempts": [], "cleanup": [], "watchdogFired": False}
     lock = threading.RLock()
@@ -142,7 +172,7 @@ def pause(lifecycle, processes, instances, runtime, expected, check_all, *, api=
         if runtime.poll() is not None or runtime._handle is not handle:
             raise lifecycle.RuntimePauseError("runtime changed before pause")
         receipt.update(suspendQpcSeconds=clock(), suspendTickMs=api.tick())
-        timer = timer_factory(3.3, lambda: recover("watchdog"))
+        timer = timer_factory(WATCHDOG_MS / 1000, lambda: recover("watchdog"))
         timer.daemon = True
         with lock:
             # Arm under the same guard as attempt publication and suspend.
@@ -154,7 +184,7 @@ def pause(lifecycle, processes, instances, runtime, expected, check_all, *, api=
             if receipt["suspendStatus"] < 0:
                 raise lifecycle.RuntimePauseError("native suspend failed")
             receipt["suspendReturnedQpcSeconds"] = clock()
-        until = receipt["suspendReturnedQpcSeconds"] + 2.6
+        until = receipt["suspendReturnedQpcSeconds"] + PAUSE_MS / 1000
         while clock() < until and not recovered:
             check_all()
             sleep(min(0.025, max(0, until - clock())))
@@ -163,8 +193,8 @@ def pause(lifecycle, processes, instances, runtime, expected, check_all, *, api=
             raise lifecycle.RuntimePauseError("pause overrun or terminal resume failure")
         receipt["durationMs"] = 1000 * (receipt["resumeQpcSeconds"] - receipt["suspendQpcSeconds"])
         receipt["confirmedPauseMs"] = 1000 * (receipt["resumeQpcSeconds"] - receipt["suspendReturnedQpcSeconds"])
-        if not 2600 <= receipt["confirmedPauseMs"] or receipt["durationMs"] > 3300:
-            raise lifecycle.RuntimePauseError("pause outside qualified duration")
+        if not PAUSE_MS <= receipt["confirmedPauseMs"] or receipt["durationMs"] > PAUSE_MS + OVERRUN_BUDGET_MS:
+            raise lifecycle.RuntimePauseError("pause outside qualified duration (budget)")
         checked_handle, after = validate(lifecycle, processes, instances, runtime, expected, api)
         if checked_handle is not handle or after != identity:
             raise lifecycle.RuntimePauseError("retained runtime identity changed")

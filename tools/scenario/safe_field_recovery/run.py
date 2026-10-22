@@ -15,6 +15,8 @@ sys.path.insert(0, str(HERE))
 import pause
 import evidence
 
+PAUSE_MS = pause.PAUSE_MS
+
 
 def original_friend(ctx):
     candidates = [p for name, p, _ in ctx.processes if name == "runtime_1"]
@@ -30,8 +32,8 @@ def paths(ctx):
 
 
 def step_pause(ctx, step):
-    if step.get("instance") != 1 or step.get("pauseMs") != 2600 or "heartbeat_pause" in ctx.saved:
-        raise shared.StepFailed("single fixed 2600ms original Friend1 pause only")
+    if step.get("instance") != 1 or step.get("pauseMs") != PAUSE_MS or "heartbeat_pause" in ctx.saved:
+        raise shared.StepFailed(f"single fixed {PAUSE_MS}ms original Friend1 pause only")
     logs = paths(ctx)
     original = {key: path.read_bytes() for key, path in logs.items()}
     old = evidence.baseline(original["friend"].decode("utf-8", "replace"))
@@ -84,7 +86,7 @@ base_validate = shared.validate_scenario
 def validate(scenario):
     base_validate(scenario)
     pauses = [step for step in scenario["steps"] if step["do"] == "friend_heartbeat_pause"]
-    if len(pauses) != 1 or pauses[0].get("instance") != 1 or pauses[0].get("pauseMs") != 2600:
+    if len(pauses) != 1 or pauses[0].get("instance") != 1 or pauses[0].get("pauseMs") != PAUSE_MS:
         raise ValueError("exactly one fixed Friend1 heartbeat pause required")
 shared.validate_scenario = validate
 
