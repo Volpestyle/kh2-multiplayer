@@ -3498,6 +3498,7 @@ static void __fastcall HookedInputCollector(void* inputStruct) {
         __try {
             const bool held = control && eventholdnative::HoldingInput();
             if (PollMailbox() && !held) ApplyPrimaryMailboxInput(inputStruct);
+            if (control) eventholdnative::ServiceOrphanedPause(inputStruct); // VUH-2640 F2: decides; ApplyInput emits
             const bool eventHeld = control && eventholdnative::ApplyInput(inputStruct);
             if (eventHeld) {
                 // Consume held automation, retaining friends' independent input.

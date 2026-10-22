@@ -121,6 +121,7 @@ struct HostLoadCause {
     bool available = false, issued = false, arrivedLogged = false;
 };
 HostLoadCause g_hostCause;
+std::uint32_t g_recoveryBootstrapLoad = 0; // VUH-2640
 std::uint64_t g_loadEvidenceSequence = 0;
 std::uint32_t g_loadLastSealFrame = 0;
 bool g_loadSealEmitted = false;
@@ -284,7 +285,10 @@ void CompleteLoad() {
     RefreshWaitingAtExit();
     const auto location = ReadLocation();
     auto expected = g_hostCause.room; expected.epoch = location.epoch;
-    LogLoadCause("load", hostIssued && SameLoadRoom(expected, location));
+    const bool attributed = hostIssued && SameLoadRoom(expected, location);
+    if (attributed && g_hostCause.begin && g_hostCause.begin->phase == ResyncPhase::Bootstrap)
+        g_recoveryBootstrapLoad = g_loadSerial;
+    LogLoadCause("load", attributed);
     if (g_travelRequested && location.worldId != 0xFF && !TravelWorld(location.worldId)) {
         g_travelRequested = false;
         if (g_log) g_log("[travel] landed room=%02X/%02X door=%u", location.worldId, location.roomId, location.door);
@@ -632,6 +636,8 @@ std::uint32_t HostIssuedLoadEpoch(const RoomTransition& loading) {
         loading.battleProgram == g_hostTarget.battleProgram && loading.eventProgram == g_hostTarget.eventProgram;
     return same ? g_hostTarget.epoch : 0;
 }
+std::uint32_t RecoveryBootstrapLoadSerial() { return g_recoveryBootstrapLoad; }
+
 std::uint32_t LoadSerial() { return g_loadSerial; }
 
 void Shutdown() {

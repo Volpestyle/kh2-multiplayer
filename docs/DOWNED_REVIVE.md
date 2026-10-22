@@ -316,12 +316,13 @@ boss/encounter defeat or a save point.
   first frame nor a replacement that lands between the reads can import the old session's pose.
 - **A lone host.** A host downed in its room that has never seen a teammate in this session is everyone
   down by itself: after one second it takes the native game over and Continue, as the full party does.
-  VUH-2640 (the lead's #176, extending #143): so is a downed host that no teammate has been present for,
-  anywhere, for 5 s (`kTeammatesAbsentFrames` = 300): every other seat absent or quarantined. A quarantined
-  seat (its link expired, rejoining) sends no avatar, so it counts as absent; a teammate live in another
-  room keeps sending poses and is present. D17's "everyone down, game over" applied to who is actually
-  there; otherwise the host waits forever and its recovery capture (not controllable) never returns the
-  seat.
+  VUH-2640 (the lead's #176 and #178, extending #143): so is a downed host every other seat of which is
+  absent on real evidence: no connection in the host's current world roster (the relay dropped it, its
+  heartbeat expired), or a returning seat quarantined until its recovery converges (the host runtime
+  publishes its pending returning seats on the world bridge). Pose silence alone never counts: a lagging or
+  loading teammate keeps its seat. Unknown evidence counts nothing. D17's "everyone down, game over"
+  applied to who is actually there; otherwise the host waits forever and its recovery capture (not
+  controllable) never returns the seat.
   Scope limit (accepted, VUH-2632): "never seen" is not "no teammate rostered". A host downed before a
   rostered teammate's first avatar arrives takes that game over too.
   - The teammates are latched each downed frame while the old room is current. The transition erases
@@ -329,16 +330,22 @@ boss/encounter defeat or a save point.
   - The log names the case: `teammate-up`, `full-party`, `solo`, `unavailable`, or `returned` (an owed
     return, below).
 - **A link that expires in a boss fight (VUH-2640).** No mid-fight rejoin: a boss's script and AI state
-  come only from host capture. A friend whose event-control lifetime expires while its mirror had a
-  host-owned boss (Thorn) bound within two seconds sits out as a logical downing tagged `outage`
-  (`[downed] outage expiry ...`, `[downed] outage sit-out ...`): its local Thorn runs its own brain after the
-  retirement, and the hold keeps the friend from fighting or winning it, or being killed by it. If it was not
-  down yet, the downing begins on its first settled frame in that room (after an intro event); a room
-  change or a recovered lifetime first drops it. VUH-2628's recovery Bootstrap load in the host's next
-  eligible room ends it, and it resolves at 25% there (`outage`), D17's return after the boss.
-  If the expiry left the event hold's own pause open (menu 8 or 10), the input collector first closes it
-  with the hold's close sequence (`[event-control] lifetime expired with its own pause open ...`), reading
-  only the native menu; the downing waits for the menu to be closed.
+  come only from host capture. A friend whose event-control lifetime expires during a host-owned Thorn
+  fight sits out as a logical downing tagged `outage` (`[downed] outage expiry ...`, `[downed] outage sit-out
+  ...`). The proof is a retained receipt: its mirror bound Thorn to the host's authority within two seconds,
+  under the session identity and generation it last had live and in the room generation still current, and
+  its own native mission is TT34_MS304. Its local Thorn runs its own brain after the retirement; the hold
+  keeps the friend from fighting or winning it, or being killed by it. If it was not down yet, the downing
+  begins on its first settled frame in that room with the menu closed; a room change or a recovered
+  lifetime drops it first. Only this seat's recovery Bootstrap load (the completed load warp attributes to
+  it) ends the outage, at 25% in the recovered room, D17's return after the boss. Its session gone (no
+  runtime writer live), a room change resolves it solo; any other loss (an actor replaced, another room)
+  sits out again, still the outage.
+  If the expiry left the event hold's own pause open (menu 8 or 10), an owner service on the game thread
+  (run from the input collector, which keeps running while those menus are open) closes it with the hold's
+  close sequence from its own fully validated native sample, the owned menu and the event context checked at
+  every step; the raw apply only emits the prepared press. Any other menu, a partial read or a changed
+  context stops it and leaves the menu to the player. The downing waits for the menu to be closed.
 - **Encounter defeat.** On the host, a forced battle (`BATTLE_STATUS` `0x2A11404` = 2) that ends (0) in
   field play, within one room generation, returns every downed teammate in the room:
   `[downed] encounter defeated`, then `[downed] return encounter-defeat ...`.

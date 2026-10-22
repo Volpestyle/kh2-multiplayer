@@ -64,6 +64,9 @@ void SetDoorHold(DoorHoldFn fn);
 bool DoorHeldRecently();
 std::uint32_t TransitionSerial();
 std::uint32_t LoadSerial();
+// VUH-2640: the serial of the last completed load this seat's resync Bootstrap issued (its attributed cause
+// matched the arrived room); 0 if none yet.
+std::uint32_t RecoveryBootstrapLoadSerial();
 RoomTransition ReadLocation();
 // VUH-1515 spawn picks: while the client executes the load the host issued (between its issue and
 // CompleteLoad) and the native location equals that target, the host's epoch for it; else 0.

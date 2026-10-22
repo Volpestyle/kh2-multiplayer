@@ -180,6 +180,12 @@ bool CurrentHostMission(char (&file)[24]) noexcept;
 // VUH-2660: on a client, this seat's own native mission now (its mission pointer set and readable, not
 // ended): its file. The client runs the same mission script as the host.
 bool LocalNativeMission(char (&file)[24]) noexcept;
+// VUH-2640: this seat's native mission now, in any role (mission pointer set and readable, not ended).
+bool NativeMissionFile(char (&file)[24]) noexcept;
+// VUH-2640: a runtime writer is live on this seat's world bridge (its session has a runtime at all).
+bool RuntimeWriterPresent() noexcept;
+// VUH-2640 H2: the host runtime's returning (quarantined) seats, one bit per slot.
+std::uint8_t ReturningSeats() noexcept;
 // Capture once at the native observation. Retained work must send that context;
 // a newer header never grants permission to relabel an old packet.
 bool CaptureWorldContext(ProducerWorldContext& context);

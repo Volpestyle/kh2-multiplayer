@@ -22,6 +22,8 @@
 // One return per target episode. No game memory, no Windows calls.
 // ============================================================================
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "kh2coop/PuppetProvenance.hpp"
@@ -335,38 +337,68 @@ private:
 // The downed host, in its room (D17, the lead's #143): everyone is down when every teammate whose fresh
 // pose is in the room is downed too, or when it has never seen a teammate in this session (a lone player
 // down). Then the host takes the native game over and Continue. A teammate seen earlier but absent now
-// is not "everyone down", unless (VUH-2640, the lead's #176) no teammate has been present anywhere for
-// kTeammatesAbsentFrames: every other seat absent or quarantined. A quarantined seat (its link expired,
-// rejoining) sends no avatar at all (RuntimeMain), so to this host it is a seat with no fresh pose in any
-// room. A teammate live in another room keeps sending poses and is present. Otherwise a downed host with
-// nobody able to reach it would wait forever, and its capture (not controllable) could never return the
-// absent seat either.
-constexpr std::uint32_t kTeammatesAbsentFrames = 300; // 5 s at 60 fps
+// is not "everyone down", unless (VUH-2640, the lead's #176 and #178) every other seat is absent on real
+// evidence: it has no connection in the host's current world roster (the relay dropped it: its heartbeat
+// expired), or it is a returning seat quarantined until its recovery converges (the host runtime's pending
+// returning-seat hint). Pose silence alone never counts: a lagging or loading teammate keeps its seat.
+// Unknown evidence (no current roster) counts nothing. Otherwise a downed host that nobody can reach would
+// wait forever, and its capture (not controllable) could never return the absent seat either.
+struct SeatEvidence {
+    bool rosterKnown = false;                 // the host's current world roster (puppet authority, Network)
+    std::uint8_t localSlot = 0xFF;
+    std::array<bool, 3> connected {};         // a connection in that roster
+    std::array<bool, 3> returning {};         // quarantined, rejoining (the runtime's pending hint)
+};
+constexpr bool EveryOtherSeatAbsent(const SeatEvidence& e) noexcept {
+    if (!e.rosterKnown || e.localSlot >= 3) return false;
+    for (std::size_t slot = 0; slot < 3; ++slot)
+        if (slot != e.localSlot && e.connected[slot] && !e.returning[slot]) return false;
+    return true;
+}
 constexpr bool EveryoneDown(bool teammateHere, bool everyTeammateHereDowned, bool teammateSeenInSession,
-                            std::uint32_t framesSinceAnyTeammate) noexcept {
-    return !teammateSeenInSession || (teammateHere && everyTeammateHereDowned) ||
-           framesSinceAnyTeammate >= kTeammatesAbsentFrames;
+                            bool everyOtherSeatAbsent) noexcept {
+    return !teammateSeenInSession || (teammateHere && everyTeammateHereDowned) || everyOtherSeatAbsent;
 }
 
 // VUH-2640 (F1): a friend whose event-control lifetime expires (HeartbeatExpired) during a host-owned boss
 // fight sits out until the fight resolves. There is no mid-fight rejoin: a boss's script and AI state come
 // only from host capture and are never invented. After the expiry the retired world session lets the
 // friend's local copy of the boss run its own brain, so the friend is held as a D17 logical downing tagged
-// outage: it can neither fight and win that unsynced boss nor be killed by it. The friend's own mirror is
-// the proof of a host-owned boss: it bound a host-brain-only boss (Thorn) within kOutageBossFrames of the
-// expiry. VUH-2628's recovery Bootstrap load ends the downing, which resolves at 25% in the recovered room
-// (D17's return after a boss), whatever the session history or the latch say.
+// outage: it can neither fight and win that unsynced boss nor be killed by it. The proof of a host-owned
+// boss is a retained receipt (Quill r1 P1-1): the friend's mirror bound a host-brain-only boss (Thorn) to
+// the host's authority within kOutageBossFrames of the expiry, under the session identity and generation
+// this seat last had live (the lifetime that expired) and in the room generation (transition and load
+// serials) still current; and this seat's own native mission is Thorn's (TT34_MS304). A retired boss from
+// another room, load or session never qualifies. VUH-2628's recovery Bootstrap load ends the downing.
 constexpr std::uint32_t kOutageBossFrames = 120;
-constexpr bool OutageBossRecent(std::uint32_t frame, std::uint32_t hostBrainBoundFrame) noexcept {
-    return hostBrainBoundFrame != 0 && frame - hostBrainBoundFrame <= kOutageBossFrames;
+struct BossReceipt {
+    std::uint32_t frame = 0;                  // 0: none
+    std::uint64_t identity = 0;
+    std::uint32_t generation = 0, transition = 0, load = 0;
+};
+struct OutageExpiryFacts {
+    std::uint32_t frame = 0;
+    std::uint64_t lastLiveIdentity = 0;       // this seat's session identity while its lifetime was live
+    std::uint32_t lastLiveGeneration = 0;
+    std::uint32_t transition = 0, load = 0;   // now
+    bool thornMission = false;                // this seat's native mission is TT34_MS304, running
+};
+constexpr bool OutageBossQualified(const BossReceipt& r, const OutageExpiryFacts& f) noexcept {
+    return r.frame && f.frame - r.frame <= kOutageBossFrames && r.identity && r.identity == f.lastLiveIdentity &&
+           r.generation && r.generation == f.lastLiveGeneration && r.transition == f.transition && r.load == f.load &&
+           f.thornMission;
 }
 // The pending outage downing (the friend was not downed yet at the expiry): begun on the first settled
 // frame it can be (the same conditions as a sit-out re-down), only in the room of the expiry and only while
-// that lifetime is still the expired one; a room change or a recovered lifetime drops it.
-enum class OutageStart : std::uint8_t { Idle, Wait, Begin, Drop };
-constexpr OutageStart OutageStartStep(bool pending, bool sameRoom, bool lifetimeExpired, bool ready) noexcept {
+// that lifetime is still the expired one; a room change or a recovered lifetime drops it first (Quill r1:
+// a downing in another room or after a recovery is never promoted to the outage). Still pending, same room
+// and lifetime, and a lethal hit downed it meanwhile: that downing is the outage (Promote).
+enum class OutageStart : std::uint8_t { Idle, Wait, Begin, Promote, Drop };
+constexpr OutageStart OutageStartStep(bool pending, bool sameRoom, bool lifetimeExpired, bool downedNow,
+                                      bool ready) noexcept {
     if (!pending) return OutageStart::Idle;
     if (!sameRoom || !lifetimeExpired) return OutageStart::Drop;
+    if (downedNow) return OutageStart::Promote;
     return ready ? OutageStart::Begin : OutageStart::Wait;
 }
 
@@ -397,11 +429,19 @@ inline TransitionDecision AfterTransitionFor(OwedReturn& owed, const Disposition
     const auto plain = SitOutAfterTransition(old, teammateSeenInSession);
     return owed.AtTransition(plain.after) ? TransitionDecision {AfterTransition::Resolve, Disposition::Returned} : plain;
 }
-// VUH-2640 (F1): an outage downing (the link expired in a boss fight) is resolved by the room change that
-// ends it (the recovery's Bootstrap load): the D17 return after a boss, at 25%.
-inline TransitionDecision AfterTransitionWithOutage(bool outage, OwedReturn& owed, const DispositionLatch& old,
-                                                    bool teammateSeenInSession) noexcept {
-    if (outage) return {AfterTransition::Resolve, Disposition::Outage};
+// VUH-2640 (F1): an outage downing (the link expired in a boss fight) resolves only on the qualified
+// recovery: the hold was lost to a room change whose completed load is this seat's recovery Bootstrap
+// (Quill r1 P1-3); that is D17's return after a boss, at 25%. Its session gone (no runtime writer live), a
+// room change resolves it solo, as play without a session does. Any other loss (an actor, handle or
+// ObjEntry replaced in the room, another room or load) is no proof of recovery: the player sits out again,
+// still tagged outage.
+inline TransitionDecision AfterTransitionWithOutage(bool outage, bool recoveryLoad, bool sessionEnded, OwedReturn& owed,
+                                                    const DispositionLatch& old, bool teammateSeenInSession) noexcept {
+    if (outage) {
+        if (recoveryLoad) return {AfterTransition::Resolve, Disposition::Outage};
+        if (sessionEnded) return {AfterTransition::Resolve, Disposition::Solo};
+        return {AfterTransition::SitOut, Disposition::Outage};
+    }
     return AfterTransitionFor(owed, old, teammateSeenInSession);
 }
 constexpr const char* DispositionName(Disposition d) noexcept {

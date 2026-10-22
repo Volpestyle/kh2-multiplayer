@@ -1,4 +1,5 @@
 #pragma once
+#include "kh2coop/DownedState.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/NetworkClient.hpp"
 #include <array>
@@ -15,12 +16,24 @@ namespace kh2coop {
 // VUH-2640 (H1): the host's own native facts that its recovery capture refuses on, read fresh by the runtime
 // with the room it already compares. The returning-seat hint spends its one attempt per epoch only when
 // these hold, instead of on a capture that would refuse (a menu or pause, not controllable, the host downed,
-// or a boss mission running). The capture still re-checks everything itself; unread is not ready.
+// or a boss mission running). The capture still re-checks everything itself; unread is not ready, and an
+// unread downed publication counts as downed (unknown fails closed, Quill r1).
 struct HostRecoveryFacts {
     bool readable = false, menuOpen = true, uncontrollable = true, paused = true, hostDowned = true, bossMission = true;
 };
 constexpr bool ReturningSeatHostReady(const HostRecoveryFacts& f) noexcept {
     return f.readable && !f.menuOpen && !f.uncontrollable && !f.paused && !f.hostDowned && !f.bossMission;
+}
+// The host's own downed publication, projected for that check (Quill r1 P1-4): it counts as up only when it
+// was read, is fresh in the runtime's current world context, and names the very room (and epoch) the hint
+// would capture. Unread, stale, another context or another room is unknown, which counts as downed.
+inline bool HostDownedOrUnknown(bool read, const LocalDownedState& s, const ProducerWorldContext& context,
+                                std::uint64_t nowMs, const RoomTransition& room) noexcept {
+    if (!read || !freshDownedState(s, context, nowMs)) return true;
+    if (s.epoch != room.epoch || s.worldId != room.worldId || s.roomId != room.roomId || s.door != room.door ||
+        s.mapProgram != room.mapProgram || s.battleProgram != room.battleProgram || s.eventProgram != room.eventProgram)
+        return true;
+    return s.downed;
 }
 
 // Host owner-thread scheduling hints only; no snapshot/native authority, clock,
@@ -159,6 +172,13 @@ public:
     }
 
     void Shutdown() { Retire("shutdown"); }
+    // VUH-2640: the seats with a pending return (quarantined until converged), one bit per slot.
+    std::uint8_t PendingMask() const {
+        std::uint8_t mask = 0;
+        for (std::size_t i = 0; i < slots_.size(); ++i)
+            if (slots_[i].pending) mask |= static_cast<std::uint8_t>(1u << (i + 1));
+        return mask;
+    }
     std::size_t PendingCount() const {
         std::size_t count = 0;
         for (const auto& state : slots_) count += state.pending;

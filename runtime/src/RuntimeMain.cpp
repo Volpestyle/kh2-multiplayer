@@ -2105,12 +2105,16 @@ int main(int argc, char* argv[]) {
                     const auto ready = game.ReadRecoveryReadiness();
                     kh2coop::LocalDownedState hostDowned;
                     const bool downedRead = avatarBridge.ReadLocalDownedState(hostDowned);
+                    const bool downedOrUnknown = kh2coop::HostDownedOrUnknown(downedRead, hostDowned,
+                        {worldSessionGeneration, worldBridge.DeliverySerial(), 0}, GetTickCount64(), room);
                     returnField = kh2coop::ReturningSeatHostReady({ready.readable, ready.menuOpen, ready.uncontrollable,
-                        ready.paused, downedRead && hostDowned.downed, ready.bossMission});
+                        ready.paused, downedOrUnknown, ready.bossMission});
                 }
             }
             returningSeatRecovery.Pump(returnContext, returnField,
                 [&]() { return netClient->resyncBusy(); }, submitAutomaticResync);
+            // VUH-2640 H2: the host DLL's evidence of a quarantined (returning) seat.
+            worldBridge.SetReturningSeats(returningSeatRecovery.PendingMask());
             if (membershipInvalidated) {
                 membershipInvalidated = false;
                 retireNetworkState();

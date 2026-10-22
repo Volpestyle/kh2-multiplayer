@@ -6506,6 +6506,19 @@ bool CurrentHostMission(char (&file)[24]) noexcept {
     return true;
 }
 
+bool NativeMissionFile(char (&file)[24]) noexcept {
+    std::memset(file, 0, sizeof(file));
+    const auto local = ReadMission();  // unreadable: inactive
+    if (!local.active || missionmirror::rules::Ended(local) || !local.file[0]) return false;
+    std::memcpy(file, local.file, sizeof(file));
+    file[sizeof(file) - 1] = 0;
+    return true;
+}
+
+bool RuntimeWriterPresent() noexcept { return RuntimeWriterLive(); }
+
+std::uint8_t ReturningSeats() noexcept { return g_bridge.IsOpen() ? g_bridge.ReturningSeats() : 0; }
+
 bool LocalNativeMission(char (&file)[24]) noexcept {
     std::memset(file, 0, sizeof(file));
     if (CurrentRole() != Role::Client) return false;

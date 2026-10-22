@@ -30,7 +30,7 @@ int main(int argc,char** argv){
  menu=255;*reinterpret_cast<unsigned char*>(base+offsets::IN_FIELD)=1;
  SetEnvironmentVariableA("KH2COOP_EVENT_HOLD_CONTROL",mode=="off"?nullptr:"1");n::Install(base,nullptr);
  auto fresh=[&]{std::memset(data+offsets::input::RAW_SLOT0,77,6);};
- auto tick=[&]{fresh();const bool entered=n::EnterInput();if(entered){n::ApplyInput(data);n::LeaveInput();}};
+ auto tick=[&]{fresh();const bool entered=n::EnterInput();if(entered){n::ServiceOrphanedPause(data);n::ApplyInput(data);n::LeaveInput();}};
  auto buttons=[&]{return *reinterpret_cast<unsigned short*>(data+offsets::input::RAW_SLOT0);};
  {// VUH-2268: pure hold rules. A refused acquire changes nothing, a closed
   // pause waiting on the owner gives input back 10 s after the release, and a
@@ -61,19 +61,29 @@ int main(int argc,char** argv){
   // own pause (owned, 8 or 10, still showing); another menu before the first press, or a pause still open
   // after the last press, is left alone.
   {using O=n::OrphanedPause;O o;
-   check(!o.Arm(false,10,10,1000)&&!o.Arm(true,7,7,1000)&&!o.Arm(true,10,255,1000)&&!o.Arm(true,10,8,1000)&&!o.Active(),
-         "orphaned pause: only the hold's own pause, still showing");
-   check(o.Arm(true,8,8,1000)&&o.Active(),"orphaned combat pause armed");
-   auto first=o.Tick(8,1000);check(first.neutral&&first.start&&!first.buttons,"first press: Start");
-   auto rel=o.Tick(8,1001);check(rel.neutral&&!rel.start&&!rel.buttons,"then a neutral frame");
-   auto wait=o.Tick(8,1002);check(wait.neutral&&!wait.start&&!wait.buttons,"held neutral until the next step");
-   auto second=o.Tick(8,1000+S::UnwindStepMs);check(second.buttons==S::CircleButton,"then Circle");
-   o.Tick(8,1001+S::UnwindStepMs);
-   auto third=o.Tick(8,1000+2*S::UnwindStepMs);check(third.start,"then Start");
-   auto closed=o.Tick(255,1001+2*S::UnwindStepMs);check(closed.done&&!closed.neutral&&!o.Active(),"menu closed: input returned");
-   O f;f.Arm(true,10,10,5);auto foreign=f.Tick(4,6);check(foreign.gaveUp&&!foreign.neutral&&!f.Active(),"a different menu first: left alone");
-   O s2;s2.Arm(true,10,10,5);std::uint64_t t=5;unsigned presses=0;bool gaveUp=false;
-   for(int i=0;i<1000&&s2.Active();++i){auto step2=s2.Tick(10,t);presses+=step2.start||step2.buttons;gaveUp=step2.gaveUp;t+=S::UnwindStepMs;}
+   auto nat=[](unsigned m,std::int32_t ev=0,std::uintptr_t ctx=0,bool valid=true){O::Native v;v.valid=valid;v.menu=m;v.eventState=ev;v.context=ctx;return v;};
+   check(!o.Arm(false,10,nat(10),1000)&&!o.Arm(true,7,nat(7),1000)&&!o.Arm(true,10,nat(255),1000)&&!o.Arm(true,10,nat(8),1000)&&
+         !o.Arm(true,10,nat(10,0,0,false),1000)&&!o.Active(),
+         "orphaned pause: only the hold's own pause, still showing, from a complete sample");
+   check(o.Arm(true,8,nat(8),1000)&&o.Active(),"orphaned combat pause armed");
+   auto first=o.Tick(nat(8),1000);check(first.neutral&&first.start&&!first.buttons,"first press: Start");
+   auto rel=o.Tick(nat(8),1001);check(rel.neutral&&!rel.start&&!rel.buttons,"then a neutral frame");
+   auto wait=o.Tick(nat(8),1002);check(wait.neutral&&!wait.start&&!wait.buttons,"held neutral until the next step");
+   auto second=o.Tick(nat(8),1000+S::UnwindStepMs);check(second.buttons==S::CircleButton,"then Circle");
+   o.Tick(nat(8),1001+S::UnwindStepMs);
+   auto third=o.Tick(nat(8),1000+2*S::UnwindStepMs);check(third.start,"then Start");
+   auto closed=o.Tick(nat(255),1001+2*S::UnwindStepMs);check(closed.done&&!closed.neutral&&!o.Active(),"menu closed: input returned");
+   O f;f.Arm(true,10,nat(10),5);auto foreign=f.Tick(nat(4),6);check(foreign.gaveUp&&!foreign.neutral&&!f.Active(),"a different menu first: left alone");
+   // Regression (Quill r1): after a press, a changed menu (a submenu Circle or Cross could act on), a partial
+   // read, or a changed event context stops it with no press and no overlay.
+   O cm;cm.Arm(true,10,nat(10),5);cm.Tick(nat(10),5);cm.Tick(nat(10),6);auto changed=cm.Tick(nat(11),5+S::UnwindStepMs);
+   check(changed.gaveUp&&!changed.neutral&&!changed.buttons&&!changed.start&&!cm.Active(),"a changed menu after Start: stopped, nothing pressed");
+   O r;r.Arm(true,10,nat(10),5);r.Tick(nat(10),5);auto partial=r.Tick(nat(10,0,0,false),6);
+   check(partial.gaveUp&&!partial.neutral&&!r.Active(),"a partial native read: stopped, no overlay");
+   O x;x.Arm(true,10,nat(10,0,0),5);auto ctx=x.Tick(nat(10,2,0x1234),5);
+   check(ctx.gaveUp&&!ctx.neutral&&!x.Active(),"a changed event context: stopped");
+   O s2;s2.Arm(true,10,nat(10),5);std::uint64_t t=5;unsigned presses=0;bool gaveUp=false;
+   for(int i=0;i<1000&&s2.Active();++i){auto step2=s2.Tick(nat(10),t);presses+=step2.start||step2.buttons;gaveUp=step2.gaveUp;t+=S::UnwindStepMs;}
    check(gaveUp&&presses==S::UnwindPresses+1&&!s2.Active(),"a pause that never closes: bounded, then left alone");}
   // VUH-2537: a close the pause ignores unwinds with Circle, Cross, Start until the menu reads closed.
   // Simulated menu: `pages` modal pages that only Cross advances, then a submenu Circle leaves, then
@@ -232,12 +242,21 @@ int main(int argc,char** argv){
    // callback closes it (Start), holds a neutral frame, and gives the input back once the menu reads closed;
    // the abort stays HeartbeatExpired throughout.
    menu=10;tick();tick();check(n::HoldingInput()&&buttons()==0,"the hold's own pause is open when the lifetime expires");
-   runtime.Invalidate(e::Abort::HeartbeatExpired);tick();
+   runtime.Invalidate(e::Abort::HeartbeatExpired);tick();     // the hold fails in this callback's raw apply
+   check(buttons()==0x4d4d,"the failing callback emits nothing of the orphan (no decision in the raw apply)");
+   tick();                                                     // the owner service arms and prepares Start
    check(n::HoldingInput()&&buttons()==8&&runtime.Reason()==e::Abort::HeartbeatExpired,
        "an expired lifetime's own open pause is closed with Start; the abort is untouched");
    tick();check(n::HoldingInput()&&buttons()==0,"a neutral frame after the close press");
+   // Quill r1 P1-5: a failed native sample (the collector instance bookend no longer matches): the owner
+   // stops the orphan and the raw apply emits nothing; the menu stays the player's.
+   const auto saved=*reinterpret_cast<uintptr_t*>(base+offsets::INPUT_STRUCT_PTR);
+   *reinterpret_cast<uintptr_t*>(base+offsets::INPUT_STRUCT_PTR)=0;tick();
+   *reinterpret_cast<uintptr_t*>(base+offsets::INPUT_STRUCT_PTR)=saved;
+   check(!n::HoldingInput()&&buttons()==0x4d4d,"a failed native sample: the orphan stops, nothing is emitted");
+   tick();check(!n::HoldingInput()&&buttons()==0x4d4d,"and it is not re-armed for the same failure");
    menu=255;tick();
-   check(!n::HoldingInput()&&buttons()==0x4d4d,"the pause closed: input returned to the player");
+   check(!n::HoldingInput()&&buttons()==0x4d4d,"the player closes it; input stays the player's");
    runtime.Invalidate(e::Abort::HeartbeatExpired);tick();
    check(!n::HoldingInput()&&runtime.Reason()==e::Abort::HeartbeatExpired,"expired lifetime remains terminal");
    auto resumed=scope;++resumed.generation;++resumed.selfConnection;

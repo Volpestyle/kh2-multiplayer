@@ -42,6 +42,8 @@ public:
         return owned_ && (phase_ == Phase::Paused || phase_ == Phase::CloseRelease || phase_ == Phase::Closing);
     }
     unsigned PauseMenu() const noexcept { return pauseMenu_; }
+    // VUH-2640: the hold's own pause menu (8 or 10) if it was open when the hold failed, else 0.
+    unsigned FailedOwnedPauseMenu() const noexcept { return failedOwnedMenu_; }
     bool Holding() const noexcept {
         return phase_ != Phase::Idle && phase_ != Phase::Complete && phase_ != Phase::Failed;
     }
@@ -50,6 +52,7 @@ public:
     bool Acquire(const Sample& s) noexcept {
         if (Holding() || !s.healthy || !s.safeToPause || s.menu != 255 || !s.now) return false;
         phase_ = Phase::OpenRelease;
+        failedOwnedMenu_ = 0;
         deadline_ = s.now + 1000;
         releaseDeadline_ = 0;
         owned_ = false;
@@ -71,7 +74,11 @@ public:
         phase_ = Phase::Complete;
         return true;
     }
-    void Fail() noexcept { phase_ = Phase::Failed; press_ = false; }
+    void Fail() noexcept {
+        if (phase_ != Phase::Failed) failedOwnedMenu_ = OwnedPauseOpen() ? pauseMenu_ : 0;
+        phase_ = Phase::Failed;
+        press_ = false;
+    }
     Output Tick(const Sample& s) noexcept {
         if (phase_ == Phase::Idle || phase_ == Phase::Complete) return {};
         if (phase_ == Phase::Failed) return {false, false, true, false};
@@ -145,7 +152,7 @@ private:
     std::uint64_t deadline_ = 0, releaseDeadline_ = 0, lastPress_ = 0;
     unsigned unwound_ = 0;
     bool owned_ = false, wake_ = false, follow_ = false, press_ = false;
-    unsigned pauseMenu_ = 10;
+    unsigned pauseMenu_ = 10, failedOwnedMenu_ = 0;
 };
 
 // VUH-2640 (F2): the pause a hold opened, left open when its lifetime expired (HeartbeatExpired). The failed
@@ -153,28 +160,43 @@ private:
 // for good. Closed here with the hold's own close sequence: Start, then the Circle/Start/Cross unwind every
 // UnwindStepMs, a neutral frame after each press, at most UnwindPresses. It reads only the native menu: no
 // world state, and the expired lifetime stays terminal (never cleared or rebound). Armed only for the hold's
-// own pause (owned, menu 8 or 10, still showing). A different menu before the first press (the player's or
-// the game's) is left alone, as is a pause still open after the last press.
+// own pause (owned, menu 8 or 10, still showing) from a complete native sample. Every step needs a fresh
+// complete sample (a partial read stops it: no press, no overlay) and its receipt: the same owned menu and the
+// same event state and context as at the arm (Quill r1). A changed menu at any step (a submenu, the
+// player's, the game's), a changed event context, or a pause still open after the last press stops it and
+// leaves the menu to the player.
 class OrphanedPause {
 public:
+    struct Native {
+        bool valid = false;             // every native read of this sample succeeded
+        unsigned menu = 255;
+        std::int32_t eventState = -1;
+        std::uintptr_t context = 0;
+    };
     struct Output {
         bool neutral = false, start = false, done = false, gaveUp = false;
         std::uint16_t buttons = 0;
     };
-    bool Arm(bool ownedOpen, unsigned pauseMenu, unsigned menuNow, std::uint64_t now) noexcept {
-        if (armed_ || !ownedOpen || (pauseMenu != 8 && pauseMenu != 10) || menuNow != pauseMenu || !now) return false;
+    bool Arm(bool ownedOpen, unsigned pauseMenu, const Native& n, std::uint64_t now) noexcept {
+        if (armed_ || !ownedOpen || !n.valid || (pauseMenu != 8 && pauseMenu != 10) || n.menu != pauseMenu || !now)
+            return false;
         *this = {};
         armed_ = true;
         pauseMenu_ = pauseMenu;
+        eventState_ = n.eventState;
+        context_ = n.context;
         return true;
     }
     bool Active() const noexcept { return armed_; }
     unsigned Presses() const noexcept { return presses_; }
-    Output Tick(unsigned menu, std::uint64_t now) noexcept {
+    Output Tick(const Native& n, std::uint64_t now) noexcept {
         Output out;
         if (!armed_) return out;
-        if (menu == 255) { armed_ = false; out.done = true; return out; }
-        if (!presses_ && menu != pauseMenu_) { armed_ = false; out.gaveUp = true; return out; }
+        if (!n.valid) { armed_ = false; out.gaveUp = true; return out; }
+        if (n.menu == 255) { armed_ = false; out.done = true; return out; }
+        if (n.menu != pauseMenu_ || n.eventState != eventState_ || n.context != context_) {
+            armed_ = false; out.gaveUp = true; return out;
+        }
         if (release_) { release_ = false; out.neutral = true; return out; }
         if (presses_ && now < lastPress_ + InputState::UnwindStepMs) { out.neutral = true; return out; }
         if (presses_ > InputState::UnwindPresses) { armed_ = false; out.gaveUp = true; return out; }
@@ -193,5 +215,7 @@ private:
     bool armed_ = false, release_ = false;
     unsigned pauseMenu_ = 10, presses_ = 0;
     std::uint64_t lastPress_ = 0;
+    std::int32_t eventState_ = -1;
+    std::uintptr_t context_ = 0;
 };
 } // namespace kh2coop::inject::eventholdnative

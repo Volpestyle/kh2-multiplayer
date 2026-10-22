@@ -104,10 +104,26 @@ void returningSeatControls() {
     { HostRecoveryFacts ok {true, false, false, false, false, false};
       check(ReturningSeatHostReady(ok), "host recovery ready: readable, no menu, controllable, unpaused, up, no boss");
       auto with = [&](auto change) { auto f = ok; change(f); return ReturningSeatHostReady(f); };
+      // The runtime passes hostDowned = !downedRead || downed: an unread downed publication is unknown and
+      // fails closed like a downed host (Quill r1).
       check(!with([](auto& f) { f.readable = false; }) && !with([](auto& f) { f.menuOpen = true; }) &&
             !with([](auto& f) { f.uncontrollable = true; }) && !with([](auto& f) { f.paused = true; }) &&
             !with([](auto& f) { f.hostDowned = true; }) && !with([](auto& f) { f.bossMission = true; }),
             "each host refusal fact keeps the returning seat waiting");
+      // Quill r1 P1-4: the runtime's projection of the host's own downed publication. Up only when read, fresh
+      // in the current world context and naming the hint's room and epoch; else unknown, which is downed.
+      { LocalDownedState up; up.context = {4, 9, 0}; up.epoch = 3; up.worldId = 2; up.roomId = 19; up.sampledAtMs = 1000;
+        RoomTransition room; room.epoch = 3; room.worldId = 2; room.roomId = 19;
+        const ProducerWorldContext ctx {4, 9, 0};
+        check(!HostDownedOrUnknown(true, up, ctx, 1100, room), "fresh, current, same room, up: the host is up");
+        check(HostDownedOrUnknown(false, up, ctx, 1100, room), "unread downed publication: unknown, fails closed");
+        check(HostDownedOrUnknown(true, up, ctx, 1000 + DOWNED_STATE_MAX_AGE_MS + 1, room), "stale publication: unknown");
+        check(HostDownedOrUnknown(true, up, {5, 9, 0}, 1100, room), "another world context: unknown");
+        auto other = room; other.roomId = 20;
+        check(HostDownedOrUnknown(true, up, ctx, 1100, other), "another room: unknown");
+        auto downed = up; downed.downed = true; downed.episode = 7;
+        check(HostDownedOrUnknown(true, downed, ctx, 1100, room), "fresh and downed: downed"); }
+      { ReturningPolicy q; q.Return(); check(q.policy.PendingMask() == 0x2, "the pending returning seat's bit (slot 1)"); }
       ReturningPolicy p; p.Return(); p.eligible = false; p.Pump(); p.Pump();
       check(!p.sends && p.policy.PendingCount() == 1, "a host not ready (boss, pause, downed) waits without spending the epoch");
       p.eligible = true; p.Pump();

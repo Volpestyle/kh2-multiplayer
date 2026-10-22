@@ -266,6 +266,18 @@ public:
         const LONG current = InterlockedCompareExchange(word, 0, 0);
         InterlockedExchange(word, on ? (current & ~0x10000L) : (current | 0x10000L));
     }
+    // VUH-2640: the host runtime's returning seats (a rejoined seat quarantined until its recovery converges),
+    // one bit per slot in this control word (bits 20..22). A runtime that never sets them reads as none.
+    void SetReturningSeats(std::uint8_t slotMask) {
+        if (!view_) return;
+        auto* word = reinterpret_cast<volatile LONG*>(view_ + 8);
+        const LONG current = InterlockedCompareExchange(word, 0, 0);
+        InterlockedExchange(word, (current & ~0x700000L) | (static_cast<LONG>(slotMask & 7) << 20));
+    }
+    [[nodiscard]] std::uint8_t ReturningSeats() const {
+        if (!view_) return 0;
+        return static_cast<std::uint8_t>((InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 8), 0, 0) >> 20) & 7);
+    }
     [[nodiscard]] bool GetFriendlyFire() const {
         if (!view_) return true;
         return (InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 8), 0, 0) & 0x10000L) == 0;

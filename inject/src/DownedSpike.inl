@@ -138,7 +138,7 @@ struct SpikeState {
     bool sitOutPending = false; // VUH-2632 (D17): re-down in the next room, still sitting out
     // VUH-2640 (F1): the link expired in a boss fight: this downing is the outage sit-out (resolved by the
     // recovery's room change), or one is pending in the room of the expiry.
-    bool outage = false, outagePending = false;
+    bool outage = false, outagePending = false, sitOutOutage = false;
     Room outageRoom {};
     uint32_t sitOuts = 0, returnsSent = 0;
     // VUH-2656: this downing's identity (one per BeginDowned) and the host's mission running here then.
@@ -158,7 +158,9 @@ static downedreturn::SessionTeammates g_sessionTeammates;
 // A return that reached this downing during an event (applied when it ends, or 25% in the next room).
 static downedreturn::OwedReturn g_owedReturn;
 static bool g_outageExpirySeen = false;       // VUH-2640: this expired lifetime was judged
-static uint32_t g_lastTeammateFrame = 0;      // VUH-2640 H2: a teammate's fresh pose, any room
+static uint64_t g_lastLiveIdentity = 0;       // VUH-2640: this seat's session while its lifetime was live
+static downedreturn::BossReceipt g_bossReceipt {}; // VUH-2640: the last host-owned boss bind, with its scope
+static uint32_t g_lastLiveGeneration = 0;
 // Read by the input collector and the 3D2060 hit check (game thread; atomics for the record).
 static std::atomic<bool> g_logicalHeld {false};
 static std::atomic<uintptr_t> g_logicalActor {0};
@@ -1200,7 +1202,6 @@ static void Tick(uintptr_t head) {
         const auto authority = enemysync::CapturePuppetAuthority();
         for (int i = 0; i < 2; ++i) {
             const auto& d = g_puppets[i];
-            if (d.have && g_frameCounter - d.poseFrame <= 30) g_lastTeammateFrame = g_frameCounter;
             if (downedreturn::CountsForSession(d.have, g_frameCounter - d.poseFrame, d.pose.provenance,
                                                static_cast<uint8_t>(d.pose.pose.ownerSlot), i, authority))
                 ++owned;
@@ -1212,34 +1213,57 @@ static void Tick(uintptr_t head) {
         // current authority owns, under an identity unchanged across the capture (R4).
         const bool knownAfter = enemysync::SessionIdentity(identityAfter);
         g_sessionTeammates.StepBookended(knownBefore, identityBefore, owned, knownAfter, identityAfter);
+        if (enemysync::ActivationRole() == 2 && knownBefore && knownAfter && identityBefore == identityAfter && identityAfter &&
+            !eventholdnative::LifetimeHeartbeatExpired()) {
+            g_lastLiveIdentity = identityAfter;            // VUH-2640: the lifetime that may expire next
+            g_lastLiveGeneration = enemysync::WorldSessionGeneration();
+            // The mirror's newest host-owned boss bind (the previous frame's, under this same live session):
+            // retained with the session and room generation it was bound in.
+            const uint32_t bound = enemymirror::HostBrainBoundFrame();
+            if (bound && bound != g_bossReceipt.frame)
+                g_bossReceipt = {bound, identityAfter, g_lastLiveGeneration, warp::TransitionSerial(), warp::LoadSerial()};
+        }
         if (g_down.state == State::Downed) g_disposition.Observe(known, downed);
     }
     {
         // VUH-2640 (F1): this friend's event-control lifetime expired (HeartbeatExpired) in a host-owned boss
-        // fight: its mirror bound a host-brain-only boss within the last two seconds. It sits out until the
-        // recovery's room change, as a D17 logical downing tagged outage. Judged once per expired lifetime; a
-        // recovered lifetime re-arms it.
+        // fight, proven by the retained receipt (Thorn bound to the host's authority under the session this
+        // seat last had live, in the room generation still current, within two seconds) and this seat's own
+        // Thorn mission. It sits out until the recovery's Bootstrap load, as a D17 logical downing tagged
+        // outage. Judged once per expired lifetime; a recovered lifetime re-arms it.
         const bool expired = enemysync::ActivationRole() != 1 && eventholdnative::LifetimeHeartbeatExpired();
         if (expired && !g_outageExpirySeen) {
             g_outageExpirySeen = true;
-            const uint32_t bound = enemymirror::HostBrainBoundFrame();
-            const bool boss = downedreturn::OutageBossRecent(g_frameCounter, bound);
+            const auto receipt = g_bossReceipt;
+            char mission[24] {};
+            downedreturn::OutageExpiryFacts facts {};
+            facts.frame = g_frameCounter;
+            facts.lastLiveIdentity = g_lastLiveIdentity;
+            facts.lastLiveGeneration = g_lastLiveGeneration;
+            facts.transition = warp::TransitionSerial();
+            facts.load = warp::LoadSerial();
+            facts.thornMission = enemysync::NativeMissionFile(mission) && std::strncmp(mission, "TT34_MS304.bar", sizeof(mission)) == 0;
+            const bool boss = downedreturn::OutageBossQualified(receipt, facts);
             if (boss && g_down.state == State::Downed) g_down.outage = true;
             else if (boss) { g_down.outagePending = true; g_down.outageRoom = s.room; }
-            Log("[downed] outage expiry boss=%u downed=%u hostBrainBound=%u room=%u/%u frame=%u", boss ? 1u : 0u,
-                g_down.state == State::Downed ? 1u : 0u, bound, s.room.world, s.room.room, g_frameCounter);
+            Log("[downed] outage expiry boss=%u downed=%u receipt=%u/%llX/%u mission=%s room=%u/%u frame=%u", boss ? 1u : 0u,
+                g_down.state == State::Downed ? 1u : 0u, receipt.frame, static_cast<unsigned long long>(receipt.identity),
+                receipt.generation, mission[0] ? mission : "-", s.room.world, s.room.room, g_frameCounter);
         } else if (!expired) {
             g_outageExpirySeen = false;
-        }
-        if (g_down.outagePending && g_down.state == State::Downed) {
-            g_down.outagePending = false;          // a lethal hit downed it meanwhile: that downing sits out
-            g_down.outage = true;
         }
         uint8_t outageMenu = 0;
         const bool ready = g_down.state == State::Ready && s.canonical && !s.inEvent && s.status && s.objentry &&
             s.hp > 0 && s.maxHp > 0 && !(s.flags & 4U) && s.task == 0 && !warp::TransitionPending() && LogicalScope(s.objentry) &&
             ReadHitTrace(g_exeBase + offsets::OPEN_MENU, outageMenu) && outageMenu == 0xFF; // after F2 closed the pause
-        switch (downedreturn::OutageStartStep(g_down.outagePending, s.room == g_down.outageRoom, expired, ready)) {
+        switch (downedreturn::OutageStartStep(g_down.outagePending, s.room == g_down.outageRoom, expired,
+                                              g_down.state == State::Downed, ready)) {
+        case downedreturn::OutageStart::Promote:
+            g_down.outagePending = false;          // a lethal hit downed it meanwhile, here: that downing sits out
+            g_down.outage = true;
+            Log("[downed] outage sit-out episode=%llX: the pending outage is this downing frame=%u",
+                static_cast<unsigned long long>(g_down.episode), g_frameCounter);
+            break;
         case downedreturn::OutageStart::Begin:
             g_down.outagePending = false;
             BeginLogicalHold(s);
@@ -1301,10 +1325,15 @@ static void Tick(uintptr_t head) {
             // before. Decided from the old room's latched teammates; their poses are gone by now.
             // An owed return (the encounter was won during the event that ends here) is carried in its
             // receipt instead, still checked against the session when it resolves in the new room.
-            // VUH-2640 (F1): an outage downing (the link expired in a boss fight) resolves here: the recovery's
-            // Bootstrap load, D17's return after the boss.
-            const auto decision = downedreturn::AfterTransitionWithOutage(g_down.outage, g_owedReturn, g_disposition,
-                                                                          g_sessionTeammates.Seen());
+            // VUH-2640 (F1): an outage downing (the link expired in a boss fight) resolves only on this seat's
+            // qualified recovery Bootstrap load (D17's return after the boss); its session gone, solo; any other
+            // loss sits out again, still tagged outage.
+            const uint32_t recoveryLoad = warp::RecoveryBootstrapLoadSerial();
+            const bool recovered = lost == HoldLost::Room && recoveryLoad != 0 && recoveryLoad == warp::LoadSerial();
+            const auto decision = downedreturn::AfterTransitionWithOutage(g_down.outage, recovered,
+                !enemysync::RuntimeWriterPresent(), g_owedReturn, g_disposition, g_sessionTeammates.Seen());
+            g_down.sitOutOutage = g_down.outage && decision.why == downedreturn::Disposition::Outage &&
+                                  decision.after == downedreturn::AfterTransition::SitOut;
             g_down.outage = false;
             g_down.outagePending = false;
             const bool sitOut = decision.after == downedreturn::AfterTransition::SitOut;
@@ -1348,8 +1377,8 @@ static void Tick(uintptr_t head) {
                 // over and Continue retry the room from its checkpoint (no save load or write), and the
                 // friends follow that host-led reload, which resolves their downing. VUH-2632 (D17): a host
                 // that has never seen a teammate in this session is everyone down by itself. VUH-2640: so is
-                // a host no teammate has been present for in 5 s anywhere (every other seat absent or
-                // quarantined).
+                // a host every other seat of which is absent on real evidence (no roster connection, or a
+                // returning seat quarantined until its recovery); pose silence alone never counts.
                 bool any = false, all = true;
                 for (const auto& d : g_puppets) {
                     const auto& a = d.pose.pose;
@@ -1357,9 +1386,17 @@ static void Tick(uintptr_t head) {
                     any = true;
                     if (!(a.flags & kh2coop::AvatarDowned)) all = false;
                 }
-                const uint32_t sinceTeammate = g_lastTeammateFrame ? g_frameCounter - g_lastTeammateFrame : UINT32_MAX;
-                g_down.allDownFrames = downedreturn::EveryoneDown(any, all, g_sessionTeammates.Seen(), sinceTeammate)
-                    ? g_down.allDownFrames + 1 : 0;
+                downedreturn::SeatEvidence seats {};
+                const auto authority = enemysync::CapturePuppetAuthority();
+                const auto returning = enemysync::ReturningSeats();
+                seats.rosterKnown = authority.mode == kh2coop::PuppetAuthorityMode::Network;
+                seats.localSlot = authority.localSlot;
+                for (std::size_t slot = 0; slot < 3; ++slot) {
+                    seats.connected[slot] = authority.connectionIds[slot] != 0;
+                    seats.returning[slot] = (returning >> slot) & 1u;
+                }
+                g_down.allDownFrames = downedreturn::EveryoneDown(any, all, g_sessionTeammates.Seen(),
+                    downedreturn::EveryOtherSeatAbsent(seats)) ? g_down.allDownFrames + 1 : 0;
                 if (g_down.allDownFrames >= 60 && g_origApplyStatDelta) {
                     Log("[downed] full party down episode=%llX: the host takes the native game over (Continue retries the room)",
                         static_cast<unsigned long long>(g_down.episode));
@@ -1473,6 +1510,7 @@ static void Tick(uintptr_t head) {
         // HP 1, dead bit clear, the downed motion), under a new episode.
         g_down.sitOutPending = false;
         BeginLogicalHold(s);
+        if (g_down.sitOutOutage) { g_down.outage = true; g_down.sitOutOutage = false; } // VUH-2640: still the outage
         ++g_down.sitOuts;
         Log("[downed] sitting out in the new room episode=%llX actor=%llX hp=%d room=%u/%u frame=%u",
             static_cast<unsigned long long>(g_down.episode), static_cast<unsigned long long>(s.actor), s.hp,

@@ -91,7 +91,7 @@ struct Stats {
 static Driven g_driven[kMaxDriven] {};
 static BrainHook g_brains[kMaxBrains] {};
 static unsigned g_brainCount = 0;
-static std::uint32_t g_hostBrainBoundFrame = 0; // VUH-2640: a host-brain-only boss (Thorn) last bound
+static std::uint32_t g_hostBrainBoundFrame = 0; // VUH-2640: a host-brain-only boss (Thorn) last bound to the host
 std::uint32_t HostBrainBoundFrame() noexcept { return g_hostBrainBoundFrame; }
 static uintptr_t g_refusedTargets[kMaxBrains] {};
 static unsigned g_refusedCount = 0;
