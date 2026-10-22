@@ -130,6 +130,14 @@ void HostRules() {
           "a replaced manager is the next match: its orbs go, the IDs carry on");
     book.Reset();
     check(book.Birth(0x3000, 0x10).id == 1 && book.Match() == 1, "only the room's end restarts the IDs");
+    // Quill r2: the manager gone, then back at the same address, is the next match.
+    book.Observe(0x3000);
+    check(book.LiveCount() == 1 && book.Match() == 1, "observing the same manager changes nothing");
+    book.Observe(0);
+    check(book.LiveCount() == 0 && !book.Collect(0x3000, 0x10).id, "a manager seen gone takes its orbs: no late collection");
+    const auto again = book.Birth(0x3000, 0x20);
+    check(again.id == 2 && again.match == 2, "the same address after a loss is the next match, IDs carry on");
+    check(!book.Collect(0x3000, 0x10).id && book.Collect(0x3000, 0x20).id == 2, "only the new match's orb is collected");
     check(so::DescriptorType(0x140000000, 0x140000000 + so::kDescriptorsRva) == 0 &&
           so::DescriptorType(0x140000000, 0x140000000 + so::kDescriptorsRva + 0x30) == 3 &&
           so::DescriptorType(0x140000000, 0x140000000 + so::kDescriptorsRva + 0x40) == -1 &&
@@ -380,6 +388,24 @@ void ManagerReplacement() {
         g.Tick(0x6000);
         check(g.display.Showing() == 2 && g.display.Shown() == 2 && g.creates == 3 && g.display.Queued() == 0,
               "the friend's next manager shows match 2");
+        FakeFriend a;  // Quill r2: A, then gone (no rows that frame), then A again
+        a.display.Receive({rows[0], rows[1]});
+        a.Tick(0xA000);
+        check(a.display.Shown() == 2 && a.display.Showing() == 1, "A: match 1 shown");
+        a.Tick(0);
+        check(a.display.Shown() == 0 && a.display.Queued() == 0, "gone with an empty queue: every receipt retired");
+        a.display.Receive({rows[2], rows[3], rows[4]});  // a late match-1 collection, then match 2
+        a.Tick(0xA000);
+        check(a.display.Showing() == 2 && a.flights.empty() && a.display.Stats().stale == 1 && a.display.Shown() == 2 &&
+              a.creates == 4, "A again: a late old collection reaches no record; match 2 is shown");
+        FakeFriend o;  // the same, observed without ticks (production observes every frame, rows or not)
+        o.display.Receive({rows[0]});
+        o.Tick(0xA000);
+        o.display.Observe(0);
+        o.display.Observe(0xA000);
+        o.display.Receive({rows[3]});
+        o.Tick(0xA000);
+        check(o.display.Showing() == 2 && o.display.Shown() == 1 && o.creates == 2, "a loss seen by Observe alone starts the next match");
         FakeFriend h;  // the friend's manager replaced before the host's: late match 1 rows are dropped
         h.display.Receive({rows[0]});
         h.Tick(0x5000);
@@ -507,11 +533,17 @@ struct FakeOps {
     bool failApply = false;
     std::vector<int> removed;
     unsigned created = 0, queued = 0;
+    bool trampoline[5] {};  // a created hook's original trampoline; MH_RemoveHook frees it
     std::function<void()> duringApply;
-    bool Create(std::size_t i) { if (i == failCreate) return false; ++created; return true; }
+    bool Create(std::size_t i) { if (i == failCreate) return false; ++created; trampoline[i] = true; return true; }
     bool Queue(std::size_t i) { if (i == failQueue) return false; ++queued; return true; }
     bool Apply() { if (duringApply) duringApply(); return !failApply; }
-    bool Remove(std::size_t i) { removed.push_back(static_cast<int>(i)); return i != failRemove; }
+    bool Remove(std::size_t i) {
+        removed.push_back(static_cast<int>(i));
+        if (i == failRemove) return false;
+        trampoline[i] = false;
+        return true;
+    }
 };
 void AdapterInstall() {
     namespace ad = so::adapter;
@@ -530,18 +562,35 @@ void AdapterInstall() {
               "install: a failed queue " + std::to_string(at) + " removes all five; inactive");
     }
     {
-        ad::Gate g; g.gameThread.store(9); FakeOps ops; ops.failApply = true; ops.failRemove = 2;
-        unsigned originals = 0;
+        ad::Gate g; g.gameThread.store(9); FakeOps ops; ops.failApply = true;
+        unsigned originals = 0, freedCalls = 0;
         FakeNative::Clear(); FakeNative::thread = 9; FakeNative::following = true;
-        ops.duringApply = [&] {  // a partly applied set: a detour runs on the game thread
-            ad::Drop(g, env, [&] { ++originals; });
+        // Quill r2: a thread enters the drop detour while Apply runs and pauses before its original call;
+        // it resumes after Install has returned. The trampoline it calls must still exist.
+        std::function<void()> paused;
+        ops.duringApply = [&] {
+            ad::Drop(g, env, [&] { ++originals; });  // passes straight through
             ad::Pickup(g, env, [&] { ++originals; }, kRecord);
+            paused = [&] { if (ops.trampoline[1]) ++originals; else ++freedCalls; };
         };
         const auto r = ad::Install(g, 5, ops);
-        check(!r.active && !g.active && std::string(r.failedAt) == "apply" && r.rollbackFailures == 1 && ops.removed.size() == 5,
-              "install: a failed apply keeps the gate shut and counts the removal that failed");
+        check(!r.active && !g.active && std::string(r.failedAt) == "apply" && r.retained == 5 && ops.removed.empty() &&
+              r.rollbackFailures == 0, "install: a failed apply keeps every hook, inactive, and removes none");
         check(originals == 2 && g.dropsSuppressed == 0 && g.picksSuppressed == 0 && FakeNative::reads == 0 && FakeNative::follows == 0,
               "install: a detour reached while applying passes straight through");
+        paused();
+        bool all = true;
+        for (bool t : ops.trampoline) all = all && t;
+        check(originals == 3 && freedCalls == 0 && all,
+              "install: a detour paused inside a failed apply resumes into a live trampoline");
+        ad::Drop(g, env, [&] { ++originals; });
+        check(originals == 4 && g.dropsSuppressed == 0, "install: after a failed apply the kept hooks pass through for good");
+    }
+    {
+        ad::Gate g; FakeOps ops; ops.failQueue = 2; ops.failRemove = 3;
+        const auto r = ad::Install(g, 5, ops);
+        check(!r.active && r.retained == 0 && ops.removed.size() == 5 && r.rollbackFailures == 1 && ops.trampoline[3] && !ops.trampoline[0],
+              "install: hooks never applied are reclaimed, and a removal that fails is counted");
     }
     {
         ad::Gate g; g.gameThread.store(9); FakeOps ops;
@@ -551,6 +600,30 @@ void AdapterInstall() {
         check(r.active && g.active && !openDuringApply && ops.created == 5 && ops.queued == 5 && ops.removed.empty(),
               "install: the gate opens only after all five apply");
     }
+}
+
+// Both sides across A, 0, A at the same address (Quill r2), through the codec and the room's ledger.
+void SameAddressReturn() {
+    so::HostBook book;
+    SpawnEmissionLedger ledger;
+    FakeFriend f;
+    std::uint64_t seq = 0;
+    const auto send = [&](const SpawnEmission& row) { check(ledger.Add(Decode(encode(row))), "A0A: the ledger takes the row"); };
+    auto o = book.Birth(0xA000, 0x10); send(Birth(++seq, o.id, 0, o.match));
+    o = book.Birth(0xA000, 0x20); send(Birth(++seq, o.id, 0, o.match));
+    f.display.Receive(ledger.TakeOrbs());
+    f.Tick(0xA000);
+    check(f.display.Shown() == 2, "A0A: match 1 shown on the friend");
+    book.Observe(0); f.Tick(0);  // both games lose the manager
+    check(!book.Collect(0xA000, 0x10).id, "A0A: the host collects nothing of the lost match");
+    o = book.Birth(0xA000, 0x10); send(Birth(++seq, o.id, 0, o.match));  // the pool hands back the same record
+    const auto taken = book.Collect(0xA000, 0x10);
+    send(Collect(++seq, taken.id, OrbCollector::Friend, 0, taken.match));
+    o = book.Birth(0xA000, 0x30); send(Birth(++seq, o.id, 0, o.match));
+    f.display.Receive(ledger.TakeOrbs());
+    f.Tick(0xA000);
+    check(taken.match == 2 && f.display.Showing() == 2 && f.display.Shown() == 1 && f.flights.empty() && f.display.Stats().elided == 1,
+          "A0A: the friend shows only the new match, and the reused record's old orb is never flown");
 }
 
 }  // namespace
@@ -564,6 +637,7 @@ int main() {
     ManagerReplacement();
     AdapterGate();
     AdapterInstall();
+    SameAddressReturn();
     std::printf("%d/%d checks PASS\n", checks - failed, checks);
     return failed ? 1 : 0;
 }

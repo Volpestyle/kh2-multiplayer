@@ -7103,12 +7103,16 @@ void OrbHostCollect(std::uintptr_t manager, std::uintptr_t record, std::uint8_t 
     row.collectorNetId = row.collector == OrbCollector::Enemy ? netId : 0;
     QueueOrbRow(row);
 }
-void OrbClientTick() {
+void OrbTick() {
+    // Both roles observe the orb manager every frame, rows or not: a manager seen gone ends its match.
+    const std::uintptr_t manager = struggleorbs::Manager();
+    if (CurrentRole() == Role::Host) { g_orbBook.Observe(manager); return; }
+    if (CurrentRole() == Role::Client) g_orbDisplay.Observe(manager);
     if (!OrbClientFollow()) return;
     g_orbDisplay.Receive(g_emissionLedger.TakeOrbs());
     if (!g_orbDisplay.Queued()) return;
     const auto before = g_orbDisplay.Stats();
-    g_orbDisplay.Tick(struggleorbs::Manager(), &struggleorbs::CreateDisplay, &struggleorbs::StartFlight);
+    g_orbDisplay.Tick(manager, &struggleorbs::CreateDisplay, &struggleorbs::StartFlight);
     const auto& after = g_orbDisplay.Stats();
     if (g_log && g_orbLogs < 400 && (after.createFailed != before.createFailed || after.vanishFailed != before.vanishFailed ||
                                      after.created / 16 != before.created / 16)) {

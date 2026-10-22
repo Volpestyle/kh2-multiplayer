@@ -5,7 +5,10 @@
 //            (active) and it is on the noted game thread; otherwise it calls its original once and
 //            returns its answer, before any native read or callback.
 //   Install  creates, queues and applies every hook; only then publishes active. Any failure keeps the
-//            gate inactive, removes what was created and counts each removal that failed.
+//            gate inactive. A hook never applied was never reachable and is removed (each failed removal
+//            counted). Once Apply has run, any hook may be reachable and a thread may be inside its detour,
+//            about to call the original trampoline: nothing is removed then. Every hook and trampoline is
+//            kept, inactive (passing straight through), for the DLL's lifetime.
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -95,6 +98,7 @@ struct InstallResult {
     bool active = false;
     const char* failedAt = nullptr;  // "create", "queue" or "apply"
     std::size_t created = 0, rollbackFailures = 0;
+    std::size_t retained = 0;  // after a failed Apply: hooks kept, inactive, for the DLL's lifetime
 };
 // ops: bool Create(i), bool Queue(i), bool Apply(), bool Remove(i) for hooks 0..n-1.
 template <class Ops>
@@ -104,11 +108,15 @@ InstallResult Install(Gate& g, std::size_t n, Ops& ops) {
     const auto fail = [&](const char* where) {
         r.failedAt = where;
         for (std::size_t i = r.created; i-- > 0;) if (!ops.Remove(i)) ++r.rollbackFailures;
-        return r;  // the gate stays inactive: every detour left behind passes through
+        return r;  // never applied, never reachable: reclaimed; the gate stays inactive
     };
     for (; r.created < n; ++r.created) if (!ops.Create(r.created)) return fail("create");
     for (std::size_t i = 0; i < n; ++i) if (!ops.Queue(i)) return fail("queue");
-    if (!ops.Apply()) return fail("apply");
+    if (!ops.Apply()) {
+        r.failedAt = "apply";
+        r.retained = r.created;  // possibly reachable: kept, never removed (see above)
+        return r;
+    }
     g.active.store(true, std::memory_order_release);
     r.active = true;
     return r;

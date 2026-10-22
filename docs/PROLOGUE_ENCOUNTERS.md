@@ -104,8 +104,11 @@ How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`,
   the flush drops any row the codec refuses rather than leaving it at the head of the FIFO.
 - Orb IDs are unique through the room. Each orb manager the host sees in a room is a match (1, 2, ...),
   named in every orb row; the friend applies only the rows of the match its own manager shows (its first
-  manager shows the newest queued match, each replacement the next). Whether a manager is ever replaced
-  inside one room is not known; each Struggle match seen so far is its own battle program.
+  manager shows the newest queued match, each replacement the next). Both games observe their manager every
+  frame, rows or not: a manager seen gone ends its match and retires every record the friend holds for it,
+  so the next manager is the next match even at the same address. A loss and return within one frame is not
+  seen. Whether a manager is ever replaced inside one room is not known; each Struggle match seen so far is
+  its own battle program.
 - The friend, while it is a client in the host's room, skips its own orb drops (`FUN_140410100`,
   `FUN_140410090`) and pickups (`FUN_14040ff50`, `FUN_140410250`). It creates the host's orbs through the
   same allocator, puts the host's scatter on them and marks them to keep (as the native callers do), and
@@ -115,7 +118,9 @@ How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`,
   collected by the time its birth applies is never shown. At most 64 native calls a frame.
 - The five detours install all or none and act only once all five are applied (one published state)
   and only on the game thread noted each frame: before that, on any other thread, or after a failed
-  install, each calls its original once and reads nothing. A failed rollback is logged and counted.
+  install, each calls its original once and reads nothing. Hooks that were never applied are removed (a
+  failed removal is logged and counted); once the apply has run, a thread may be inside a detour about to
+  call its original, so every hook and trampoline is kept, inactive, for the DLL's lifetime.
 - The score itself is untouched: the friend's counters still follow the host's through the mission
   mirror. There is no pickup claim. The friend collects by its clone touching the host's orb on the
   host, a position latency behind; whether that misses orbs the friend brushes past is for the first live

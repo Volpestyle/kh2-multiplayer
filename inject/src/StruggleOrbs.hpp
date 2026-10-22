@@ -67,6 +67,8 @@ constexpr int DescriptorType(std::uintptr_t exeBase, std::uintptr_t descriptor) 
 
 // Host: one ID per orb, unique through the room. Each orb manager the room sees is a match (1, 2, ...): a
 // replaced manager takes its orbs with it, and the IDs carry on, so the room's ledger never sees one twice.
+// The manager is observed every frame (Observe): one seen gone ends its match, so the next manager is the
+// next match even at the same address (A, 0, A). A loss and return within one frame is not seen.
 class HostBook {
     struct Entry { std::uintptr_t record; std::uint16_t id; };
     std::uintptr_t manager_ = 0;
@@ -78,6 +80,9 @@ public:
     void Reset() { manager_ = 0; last_ = 0; match_ = 0; exhausted_ = false; live_.clear(); }  // the room ended
     std::size_t LiveCount() const { return live_.size(); }
     std::uint16_t Match() const { return match_; }
+    void Observe(std::uintptr_t manager) {
+        if (!manager && manager_) { live_.clear(); manager_ = 0; }
+    }
     // The orb's ID and match; {0, 0} without a manager or record, or once the room has used 65535 IDs.
     Orb Birth(std::uintptr_t manager, std::uintptr_t record) {
         if (!manager || !record) return {};
@@ -106,7 +111,9 @@ public:
 // ever being created. A birth whose collection is already queued is never shown. Rows wait while this game
 // has no orb manager. Each of this game's managers shows one host match: the first shows the newest match
 // queued when it appears, each replacement the next. Rows of an earlier match are dropped (their orbs went
-// with the old manager); rows of a later match wait for this game's next manager.
+// with the old manager); rows of a later match wait for this game's next manager. The manager is observed
+// every frame, rows or not: a manager seen gone retires every record receipt at once, and the next manager
+// is the next match even at the same address (A, 0, A).
 struct CreateRequest { std::uint16_t id; std::uint8_t type; std::array<float, 4> point; std::array<float, 3> velocity; };
 struct VanishRequest { std::uint16_t id; std::uint8_t type; std::uintptr_t record; OrbCollector collector; std::uint16_t netId; };
 // elided: born and collected before this game showed it (a late join, or a burst within one frame).
@@ -119,6 +126,7 @@ class ClientDisplay {
     enum class State : std::uint8_t { Shown, Gone, Elided, Early };
     struct Orb { std::uint16_t id; std::uint8_t type; std::uintptr_t record; State state; };
     std::uintptr_t manager_ = 0;
+    bool lost_ = false;          // a manager was seen gone since the last one
     std::uint16_t showing_ = 0;  // the host match this game's manager shows; 0 until assigned
     std::vector<SpawnEmission> queue_;
     std::vector<Orb> orbs_;
@@ -129,7 +137,18 @@ class ClientDisplay {
     }
 public:
     static constexpr std::size_t kPerTick = 64;  // native calls per game frame
-    void Reset() { manager_ = 0; showing_ = 0; queue_.clear(); orbs_.clear(); ++stats_.reset; }  // the room ended
+    void Reset() { manager_ = 0; lost_ = false; showing_ = 0; queue_.clear(); orbs_.clear(); ++stats_.reset; }  // the room ended
+    // Every frame, rows or not.
+    void Observe(std::uintptr_t manager) {
+        if (manager == manager_) return;
+        if (!manager) {  // gone: its orbs and their records went with it
+            orbs_.clear(); manager_ = 0; lost_ = true; ++stats_.reset;
+            return;
+        }
+        // A different manager, or any manager after one was lost, is a different match.
+        if (manager_ || lost_) { ++stats_.reset; if (showing_ && showing_ < UINT16_MAX) ++showing_; }
+        manager_ = manager; lost_ = false; orbs_.clear();
+    }
     const DisplayStats& Stats() const { return stats_; }
     std::size_t Queued() const { return queue_.size(); }
     std::uint16_t Showing() const { return showing_; }
@@ -145,12 +164,8 @@ public:
     // create(request) -> record (0: the allocator refused); vanish(request) -> ended.
     template <class Create, class Vanish>
     void Tick(std::uintptr_t manager, Create&& create, Vanish&& vanish) {
+        Observe(manager);
         if (!manager) return;  // rows wait for this game's match
-        if (manager != manager_) {
-            // A different manager is a different match: earlier display orbs went with the old one.
-            if (manager_) { ++stats_.reset; if (showing_ && showing_ < UINT16_MAX) ++showing_; }
-            manager_ = manager; orbs_.clear();
-        }
         if (!showing_) {
             for (const auto& row : queue_) showing_ = (std::max)(showing_, row.orbMatch);
             if (!showing_) return;

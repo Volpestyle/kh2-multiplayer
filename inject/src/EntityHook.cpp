@@ -3764,7 +3764,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 allyhit::Tick(g_frameCounter); // stats line (silent when off or unchanged)
                 ThornHitTraceTick();           // VUH-2617: default off
                 struggleorbs::NoteGameThread();
-                enemysync::OrbClientTick();    // VUH-2466: the friend shows the host's Struggle orbs
+                enemysync::OrbTick();          // VUH-2466: the friend shows the host's Struggle orbs
             }
         }
         NoteActorForClones(addr);

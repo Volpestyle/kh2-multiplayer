@@ -210,7 +210,8 @@ void ApplyStageEnd() noexcept {}
 }
 // VUH-2466: no orb manager in these harnesses (StruggleOrbsTest has the orb rules).
 namespace kh2coop::inject::struggleorbs {
-std::uintptr_t Manager() { return 0; }
+std::uintptr_t g_testManager = 0;  // the orb manager the production OrbTick observes
+std::uintptr_t Manager() { return g_testManager; }
 std::uintptr_t CreateDisplay(const CreateRequest&) { return 0; }
 bool StartFlight(const VanishRequest&) { return false; }
 }
@@ -3296,6 +3297,28 @@ void TestStruggleOrbRows() {
     const float nan[3] {std::numeric_limits<float>::quiet_NaN(), 0, 0};
     OrbHostBirth(0x1000, 0x6000, 0, point, nan);
     Check(g_emissionOutbox.size() == before, "an invalid birth is refused before it is queued");
+    ResetSpawnEmissions();
+    // Quill r2: the production frame tick observes the manager with no rows: A, then gone, then A again
+    // is the next match on the host, and the friend's display retires and renumbers across it.
+    namespace so = kh2coop::inject::struggleorbs;
+    g_emissionOutbox.clear();
+    so::g_testManager = 0xA000; OrbTick();
+    OrbHostBirth(0xA000, 0x2000, 0, point, velocity);
+    so::g_testManager = 0; OrbTick();
+    OrbHostCollect(0xA000, 0x2000, 1 /*Host*/, 0);  // after the loss: nothing to collect
+    so::g_testManager = 0xA000; OrbTick();
+    OrbHostBirth(0xA000, 0x2000, 0, point, velocity);
+    Check(g_emissionOutbox.size() == 2 && g_emissionOutbox[0].value.orbMatch == 1 && g_emissionOutbox[1].value.orbMatch == 2 &&
+          g_emissionOutbox[1].value.orbId == 2, "host: A, 0, A observed by the frame tick is match 2, and the lost orb is not collected");
+    ResetSpawnEmissions();
+    Reset(true); ResetSpawnEmissions();
+    const auto resets = g_orbDisplay.Stats().reset;
+    so::g_testManager = 0xA000; OrbTick();
+    so::g_testManager = 0; OrbTick();
+    so::g_testManager = 0xA000; OrbTick();
+    Check(g_orbDisplay.Stats().reset == resets + 2 && g_orbDisplay.Queued() == 0,
+          "friend: the frame tick sees the loss and the return with no rows queued");
+    so::g_testManager = 0;
     ResetSpawnEmissions();
 }
 

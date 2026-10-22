@@ -127,9 +127,9 @@ bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks) {
     MinHookOps ops{exeBase};
     const auto r = adapter::Install(g_gate, std::size(kTargets), ops);
     if (!r.active) {
-        if (log) log("[struggle-orbs] configured=1 hooked=0 reason=minhook at=%s status=%d created=%zu rollbackFailures=%zu%s",
-                     r.failedAt, static_cast<int>(ops.last), r.created, r.rollbackFailures,
-                     r.rollbackFailures ? " (those detours stay, inactive: they pass straight through)" : "");
+        if (log) log("[struggle-orbs] configured=1 hooked=0 reason=minhook at=%s status=%d created=%zu rollbackFailures=%zu retained=%zu%s",
+                     r.failedAt, static_cast<int>(ops.last), r.created, r.rollbackFailures, r.retained,
+                     r.retained || r.rollbackFailures ? " (kept inactive for the DLL's lifetime: they pass straight through)" : "");
         return false;
     }
     if (log) log("[struggle-orbs] configured=1 hooked=1 create=%llX drops=%llX/%llX picks=%llX/%llX manager=%llX",

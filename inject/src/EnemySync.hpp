@@ -227,7 +227,8 @@ bool OrbClientFollow();
 void OrbHostBirth(std::uintptr_t manager, std::uintptr_t record, std::uint8_t type, const float* point, const float* velocity);
 // collector: an OrbCollector value (Protocol.hpp stays out of this header).
 void OrbHostCollect(std::uintptr_t manager, std::uintptr_t record, std::uint8_t collector, std::uint16_t netId);
-void OrbClientTick();
+// Every frame: the host observes its orb manager; the client also shows the host's orbs.
+void OrbTick();
 std::uint16_t HostCollectorNetId(uintptr_t actor) noexcept;  // a host enemy collector's netId, or 0
 uintptr_t ClientActorForNetId(std::uint16_t netId) noexcept; // the client's living copy of a host enemy, or 0
 
