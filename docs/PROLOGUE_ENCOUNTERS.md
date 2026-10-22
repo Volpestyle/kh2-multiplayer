@@ -94,16 +94,28 @@ Native facts behind it (read-only Ghidra of the installed exe, nothing copied):
 - In btl84 (run `20261021-015611`) Hayner hit the friend's clone on the host 8 times of 13, and the
   host's counter 0 fell on those hits: the friend's losses already come off the team score.
 
-How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`, `StruggleOrbsHook.cpp`):
+How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`, `StruggleOrbsAdapter.hpp`,
+`StruggleOrbsHook.cpp`):
 - The host gives every orb born at its orb manager (`*(exe+0x2AEA190)`, through `FUN_1403dc950`) an ID
   and sends its birth (descriptor, point, scatter) and later its collection (the host's player, the
-  friend's clone, or an enemy by netId) as SpawnEmission orb rows, in the same FIFO as controller births.
-  The relay caches them per room, so a late friend gets them too.
+  friend's clone, an enemy by netId, or Unresolved when it cannot name the collector: the collection
+  still counts) as SpawnEmission orb rows, in the same FIFO as controller births. The relay caches them
+  per room, so a late friend gets them too. A row is checked against the codec before it is queued, and
+  the flush drops any row the codec refuses rather than leaving it at the head of the FIFO.
+- Orb IDs are unique through the room. Each orb manager the host sees in a room is a match (1, 2, ...),
+  named in every orb row; the friend applies only the rows of the match its own manager shows (its first
+  manager shows the newest queued match, each replacement the next). Whether a manager is ever replaced
+  inside one room is not known; each Struggle match seen so far is its own battle program.
 - The friend, while it is a client in the host's room, skips its own orb drops (`FUN_140410100`,
   `FUN_140410090`) and pickups (`FUN_14040ff50`, `FUN_140410250`). It creates the host's orbs through the
   same allocator, puts the host's scatter on them and marks them to keep (as the native callers do), and
-  starts an orb's native flight to the friend's copy of the collector only when the host collected it.
-  An orb already collected by the time its birth applies is never shown. At most 64 native calls a frame.
+  ends an orb only when the host collected it: it flies to the friend's copy of the collector, or, with
+  none (an unresolved collector, an enemy with no living copy), fades where it lies through its own life
+  timer (`+0x3C`; the resting update `LAB_140413230` is `FUN_140413a80(record, 1)`). An orb already
+  collected by the time its birth applies is never shown. At most 64 native calls a frame.
+- The five detours install all or none and act only once all five are applied (one published state)
+  and only on the game thread noted each frame: before that, on any other thread, or after a failed
+  install, each calls its original once and reads nothing. A failed rollback is logged and counted.
 - The score itself is untouched: the friend's counters still follow the host's through the mission
   mirror. There is no pickup claim. The friend collects by its clone touching the host's orb on the
   host, a position latency behind; whether that misses orbs the friend brushes past is for the first live

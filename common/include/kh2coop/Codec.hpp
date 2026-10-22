@@ -132,6 +132,8 @@ void write(ByteWriter& w, const RemoteHit& m);
 void write(ByteWriter& w, const TargetAuthority& m);
 void write(ByteWriter& w, const ScriptCall& m);
 void write(ByteWriter& w, const SpawnEmission& m);
+// VUH-2466: exactly what write() accepts, so a producer can refuse a row before it queues it.
+bool validSpawnEmission(const SpawnEmission& m);
 void write(ByteWriter& w, const HitClaim& m);
 void write(ByteWriter& w, const ProgressUpdate& m);
 void write(ByteWriter& w, const StateHash& m);

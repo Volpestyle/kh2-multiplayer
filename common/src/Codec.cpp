@@ -1107,22 +1107,28 @@ std::vector<std::uint8_t> encode(const TargetAuthority& m) {
 }
 
 // VUH-2466: a controller row carries no orb fields; an orb row carries no controller identity, a
-// birth has a descriptor and a finite velocity and no collector, a collection names its collector.
+// birth has a descriptor and a finite velocity and no collector, a collection names its collector (an
+// enemy by netId); both name their match.
 static bool validSpawnEmissionShape(const SpawnEmission& m) {
     const bool noOrb = !m.orbType && !m.orbId && m.velocity == std::array<float, 3>{} &&
-                       m.collector == OrbCollector::None && !m.collectorNetId;
+                       m.collector == OrbCollector::None && !m.collectorNetId && !m.orbMatch;
     switch (m.kind) {
     case SpawnEmissionKind::Controller: return noOrb;
     case SpawnEmissionKind::OrbBirth:
         for (float v : m.velocity) if (!std::isfinite(v)) return false;
-        return !m.controllerKey && !m.headerId && !m.recordIndex && !m.netId && m.orbId && m.orbType < ORB_TYPES &&
-               m.collector == OrbCollector::None && !m.collectorNetId;
+        return !m.controllerKey && !m.headerId && !m.recordIndex && !m.netId && m.orbId && m.orbMatch &&
+               m.orbType < ORB_TYPES && m.collector == OrbCollector::None && !m.collectorNetId;
     case SpawnEmissionKind::OrbCollect:
-        return !m.controllerKey && !m.headerId && !m.recordIndex && !m.netId && m.orbId && !m.orbType &&
+        return !m.controllerKey && !m.headerId && !m.recordIndex && !m.netId && m.orbId && m.orbMatch && !m.orbType &&
                m.velocity == std::array<float, 3>{} && m.collector != OrbCollector::None &&
-               m.collector <= OrbCollector::Enemy && (m.collector == OrbCollector::Enemy) == (m.collectorNetId != 0);
+               m.collector <= OrbCollector::Unresolved && (m.collector == OrbCollector::Enemy) == (m.collectorNetId != 0);
     }
     return false;
+}
+bool validSpawnEmission(const SpawnEmission& m) {
+    if (!m.location.epoch || !m.sequence || m.recordIndex >= 256 || !validSpawnEmissionShape(m)) return false;
+    for (float v : m.point) if (!std::isfinite(v)) return false;
+    return true;
 }
 void write(ByteWriter& w, const SpawnEmission& m) {
     if (!m.location.epoch || !m.sequence || m.recordIndex >= 256 || !validSpawnEmissionShape(m))
@@ -1135,7 +1141,7 @@ void write(ByteWriter& w, const SpawnEmission& m) {
     w.writeU16(m.netId);
     w.writeU8(static_cast<std::uint8_t>(m.kind)); w.writeU8(m.orbType); w.writeU16(m.orbId);
     for (float v : m.velocity) w.writeF32(v);
-    w.writeU8(static_cast<std::uint8_t>(m.collector)); w.writeU16(m.collectorNetId);
+    w.writeU8(static_cast<std::uint8_t>(m.collector)); w.writeU16(m.collectorNetId); w.writeU16(m.orbMatch);
 }
 void read(ByteReader& r, SpawnEmission& m) {
     if (r.remaining() != SPAWN_EMISSION_BYTES) throw std::runtime_error("SpawnEmission: wrong length");
@@ -1145,7 +1151,7 @@ void read(ByteReader& r, SpawnEmission& m) {
     out.netId = r.readU16();
     out.kind = static_cast<SpawnEmissionKind>(r.readU8()); out.orbType = r.readU8(); out.orbId = r.readU16();
     for (float& v : out.velocity) v = r.readF32();
-    out.collector = static_cast<OrbCollector>(r.readU8()); out.collectorNetId = r.readU16();
+    out.collector = static_cast<OrbCollector>(r.readU8()); out.collectorNetId = r.readU16(); out.orbMatch = r.readU16();
     ByteWriter checked; write(checked, out); m = out;
 }
 std::vector<std::uint8_t> encode(const SpawnEmission& m) {

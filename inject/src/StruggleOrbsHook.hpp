@@ -11,7 +11,8 @@ struct VanishRequest;
 
 using LogFn = void (*)(const char* fmt, ...);
 // OrbCollector's values (Protocol.hpp), checked in StruggleOrbsHook.cpp.
-inline constexpr std::uint8_t kCollectorNone = 0, kCollectorHost = 1, kCollectorFriend = 2, kCollectorEnemy = 3;
+inline constexpr std::uint8_t kCollectorNone = 0, kCollectorHost = 1, kCollectorFriend = 2, kCollectorEnemy = 3,
+                               kCollectorUnresolved = 4;
 
 // Supplied by EnemySync and EntityHook; every one runs on the game thread.
 struct Callbacks {
@@ -25,22 +26,24 @@ struct Callbacks {
     std::uintptr_t (*actorFor)(std::uint8_t collector, std::uint16_t netId) = nullptr;  // client
 };
 
-// Checks the pins and installs the five detours. Logs one "[struggle-orbs] configured=..." line.
+// Checks the pins and installs the five detours, all or none (StruggleOrbsAdapter.hpp). Logs one
+// "[struggle-orbs] configured=..." line.
 bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks);
 bool Installed();
-// EntityHook's frame start, on the game thread. A hook that runs on any other thread passes straight
-// through to the native code (and counts offThread).
+// EntityHook's frame start, on the game thread. A hook that runs on any other thread, or before every
+// hook is installed, passes straight through to the native code (and counts offThread or inactive).
 void NoteGameThread();
 
 // This game's orb manager (0 outside a match, or when not installed).
 std::uintptr_t Manager();
 // Friend: a display orb through the native allocator with the host's scatter; 0 when refused.
 std::uintptr_t CreateDisplay(const CreateRequest& request);
-// Friend: starts a display orb's flight to the host's collector, after checking the record is still that
-// orb of this manager. False when it is not, or no collector actor resolves.
+// Friend: ends a display orb the host collected, after checking the record is still that orb of this
+// manager: it flies to this game's copy of the collector, or, with none (or an unresolved collector),
+// fades where it lies through its own life timer. False when the record is not that orb.
 bool StartFlight(const VanishRequest& request);
 
-struct HookStats { std::uint64_t births{}, collects{}, dropsSuppressed{}, picksSuppressed{}, unknownCollectors{}, offThread{}; };
+struct HookStats { std::uint64_t births{}, collects{}, unresolved{}, dropsSuppressed{}, picksSuppressed{}, offThread{}, inactive{}; };
 HookStats Stats();
 
 }  // namespace kh2coop::inject::struggleorbs

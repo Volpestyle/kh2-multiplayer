@@ -7074,26 +7074,32 @@ bool OrbClientFollow() {
     return follow;
 }
 void OrbHostBirth(std::uintptr_t manager, std::uintptr_t record, std::uint8_t type, const float* point, const float* velocity) {
-    const std::uint16_t id = g_orbBook.Birth(manager, record);
-    if (!id) {
-        if (g_log && g_orbLogs < 64) { ++g_orbLogs; g_log("[struggle-orbs] host birth refused: no orb ID left in this match"); }
+    const auto orb = g_orbBook.Birth(manager, record);
+    if (!orb.id) {
+        if (g_log && g_orbLogs < 64) { ++g_orbLogs; g_log("[struggle-orbs] host birth refused: no orb ID left in this room"); }
         return;
     }
     SpawnEmission row{};
-    row.kind = SpawnEmissionKind::OrbBirth; row.orbId = id; row.orbType = type;
+    row.kind = SpawnEmissionKind::OrbBirth; row.orbId = orb.id; row.orbMatch = orb.match; row.orbType = type;
     std::copy_n(point, 4, row.point.begin()); std::copy_n(velocity, 3, row.velocity.begin());
-    for (float v : row.point) if (!std::isfinite(v)) return;
-    for (float v : row.velocity) if (!std::isfinite(v)) return;
     QueueOrbRow(row);
 }
+// The collection stands whoever took the orb: a collector the host cannot name on the wire (none, an
+// unknown value, or an enemy without a netId) is sent as Unresolved, never as someone else.
+OrbCollector OrbCollectorFor(std::uint8_t value, std::uint16_t netId) noexcept {
+    switch (static_cast<OrbCollector>(value)) {
+    case OrbCollector::Host: return OrbCollector::Host;
+    case OrbCollector::Friend: return OrbCollector::Friend;
+    case OrbCollector::Enemy: return netId ? OrbCollector::Enemy : OrbCollector::Unresolved;
+    default: return OrbCollector::Unresolved;
+    }
+}
 void OrbHostCollect(std::uintptr_t manager, std::uintptr_t record, std::uint8_t collectorValue, std::uint16_t netId) {
-    const auto collector = collectorValue <= static_cast<std::uint8_t>(OrbCollector::Enemy) ? static_cast<OrbCollector>(collectorValue)
-                                                                                           : OrbCollector::None;
-    const std::uint16_t id = g_orbBook.Collect(manager, record);
-    if (!id) return;  // born before this session was live, or not an orb of this match
+    const auto orb = g_orbBook.Collect(manager, record);
+    if (!orb.id) return;  // born before this session was live, or not an orb of this match
     SpawnEmission row{};
-    row.kind = SpawnEmissionKind::OrbCollect; row.orbId = id;
-    row.collector = collector == OrbCollector::Enemy && !netId ? OrbCollector::None : collector;
+    row.kind = SpawnEmissionKind::OrbCollect; row.orbId = orb.id; row.orbMatch = orb.match;
+    row.collector = OrbCollectorFor(collectorValue, netId);
     row.collectorNetId = row.collector == OrbCollector::Enemy ? netId : 0;
     QueueOrbRow(row);
 }

@@ -24,8 +24,8 @@ SpawnEmission decode(const std::vector<std::uint8_t>& bytes) {
 void codec() {
     auto e = sample(); auto bytes = encode(e);
     const std::uint8_t* p; std::size_t n;
-    check(PROTOCOL_VERSION==34 && decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::SpawnEmission && n==SPAWN_EMISSION_BYTES && n==69,
-          "protocol34 emission packet50 has exact 69-byte payload");
+    check(PROTOCOL_VERSION==34 && decodePacketHeader(bytes.data(),bytes.size(),p,n)==PacketType::SpawnEmission && n==SPAWN_EMISSION_BYTES && n==71,
+          "protocol34 emission packet50 has exact 71-byte payload");
     check(decode(bytes).netId==0, "existing aggregate initializer remains a helper with no combat identity");
     for (std::uint16_t id : {std::uint16_t{1},std::uint16_t{0x8000},std::uint16_t{0xFFFF}}) {
         e.netId=id; bytes=encode(e); auto out=decode(bytes);

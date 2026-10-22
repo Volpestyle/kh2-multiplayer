@@ -1,9 +1,11 @@
 // StruggleOrbsHook: detours of the Struggle orb allocator, drops and pickups (VUH-2466).
 // Host: each orb born at the orb manager, and each pickup, goes to EnemySync's emission outbox.
 // Friend, while it follows the host's room: its own drops and pickups are skipped; EnemySync creates
-// the host's orbs here and starts their flights when the host collected them.
+// the host's orbs here and ends them when the host collected them. The detour bodies and the
+// all-or-none installation are in StruggleOrbsAdapter.hpp.
 #include "StruggleOrbsHook.hpp"
 #include "StruggleOrbs.hpp"
+#include "StruggleOrbsAdapter.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -15,12 +17,14 @@
 #include <MinHook.h>
 
 #include <cstring>
+#include <iterator>
 
 namespace kh2coop::inject::struggleorbs {
 static_assert(kCollectorNone == static_cast<std::uint8_t>(OrbCollector::None) &&
               kCollectorHost == static_cast<std::uint8_t>(OrbCollector::Host) &&
               kCollectorFriend == static_cast<std::uint8_t>(OrbCollector::Friend) &&
-              kCollectorEnemy == static_cast<std::uint8_t>(OrbCollector::Enemy));
+              kCollectorEnemy == static_cast<std::uint8_t>(OrbCollector::Enemy) &&
+              kCollectorUnresolved == static_cast<std::uint8_t>(OrbCollector::Unresolved));
 namespace {
 
 using CreateFn = std::uintptr_t(__fastcall*)(std::uintptr_t manager, std::uintptr_t descriptor, const float* point);
@@ -30,12 +34,11 @@ using FlyFn = void(__fastcall*)(std::uintptr_t record, std::uintptr_t actor, int
 LogFn g_log = nullptr;
 Callbacks g_cb{};
 std::uintptr_t g_exeBase = 0;
-bool g_installed = false;
 CreateFn g_create = nullptr;
 PassFn g_hitDrop = nullptr, g_drop = nullptr, g_pickA = nullptr, g_pickB = nullptr;
 FlyFn g_fly = nullptr;
-HookStats g_stats{};
-DWORD g_gameThread = 0;  // noted each frame by EntityHook; the hooks act only there
+adapter::Gate g_gate;
+adapter::Env g_env{};
 
 bool CopyCode(std::uintptr_t address, void* out, std::size_t size) {
     __try {
@@ -45,62 +48,52 @@ bool CopyCode(std::uintptr_t address, void* out, std::size_t size) {
         return false;
     }
 }
+std::uint32_t ThreadNow() { return static_cast<std::uint32_t>(GetCurrentThreadId()); }
+bool ReadNative(std::uintptr_t address, void* out, std::size_t size) {
+    std::memcpy(out, reinterpret_cast<const void*>(address), size);
+    return true;
+}
 template <class T> T Field(std::uintptr_t address) {
     T v{};
     std::memcpy(&v, reinterpret_cast<const void*>(address), sizeof(T));
     return v;
 }
-std::uintptr_t ManagerNow() { return Field<std::uintptr_t>(g_exeBase + kManagerRva); }
-bool OnGameThread() {
-    if (g_gameThread && GetCurrentThreadId() == g_gameThread) return true;
-    ++g_stats.offThread;
-    return false;
-}
-bool Following() { return g_cb.clientFollow && OnGameThread() && g_cb.clientFollow(); }
-bool HostLive() { return g_cb.hostLive && OnGameThread() && g_cb.hostLive(); }
+bool Active() { return g_gate.active.load(std::memory_order_acquire); }
 
 std::uintptr_t __fastcall CreateDetour(std::uintptr_t manager, std::uintptr_t descriptor, const float* point) {
-    const std::uintptr_t record = g_create(manager, descriptor, point);
-    if (!record || !manager || !point || manager != ManagerNow() || !g_cb.hostBirth) return record;
-    const int type = DescriptorType(g_exeBase, descriptor);
-    if (type < 0 || !HostLive()) return record;
-    float velocity[3] {};
-    std::memcpy(velocity, reinterpret_cast<const void*>(record + kRecordVelocity), sizeof(velocity));
-    ++g_stats.births;
-    g_cb.hostBirth(manager, record, static_cast<std::uint8_t>(type), point, velocity);
-    return record;
+    return adapter::Create(g_gate, g_env, [](std::uintptr_t m, std::uintptr_t d, const float* p) { return g_create(m, d, p); },
+                           manager, descriptor, point);
 }
-
 void __fastcall HitDropDetour(void* a, void* b, void* c, void* d) {
-    if (Following()) { ++g_stats.dropsSuppressed; return; }  // the host's hit on this player drops its orbs
-    g_hitDrop(a, b, c, d);
+    adapter::Drop(g_gate, g_env, [&] { g_hitDrop(a, b, c, d); });
 }
 void __fastcall DropDetour(void* a, void* b, void* c, void* d) {
-    if (Following()) { ++g_stats.dropsSuppressed; return; }
-    g_drop(a, b, c, d);
-}
-
-// Host: a pickup changes the record's update to the flight (+0x10) and names the collector (+0x48).
-void Pickup(PassFn original, void* a, void* b, void* c, void* d, std::uintptr_t record) {
-    if (Following()) { ++g_stats.picksSuppressed; return; }  // the host decides every pickup
-    const std::uintptr_t manager = ManagerNow();
-    const bool host = record && manager && Field<std::uintptr_t>(record + kRecordManager) == manager && HostLive();
-    const std::uint32_t before = host ? Field<std::uint32_t>(record + kRecordUpdate) : 0;
-    original(a, b, c, d);
-    if (!host || Field<std::uint32_t>(record + kRecordUpdate) == before || !g_cb.hostCollect) return;
-    const std::uintptr_t actor = Field<std::uintptr_t>(record + kRecordCollector);
-    std::uint16_t netId = 0;
-    const std::uint8_t collector = actor && g_cb.collectorOf ? g_cb.collectorOf(actor, netId) : 0;
-    if (collector == static_cast<std::uint8_t>(OrbCollector::None)) ++g_stats.unknownCollectors;
-    ++g_stats.collects;
-    g_cb.hostCollect(manager, record, collector, collector == static_cast<std::uint8_t>(OrbCollector::Enemy) ? netId : 0);
+    adapter::Drop(g_gate, g_env, [&] { g_drop(a, b, c, d); });
 }
 void __fastcall PickADetour(void* a, void* b, void* c, void* d) {
-    Pickup(g_pickA, a, b, c, d, reinterpret_cast<std::uintptr_t>(c));
+    adapter::Pickup(g_gate, g_env, [&] { g_pickA(a, b, c, d); }, reinterpret_cast<std::uintptr_t>(c));
 }
 void __fastcall PickBDetour(void* a, void* b, void* c, void* d) {
-    Pickup(g_pickB, a, b, c, d, reinterpret_cast<std::uintptr_t>(b));
+    adapter::Pickup(g_gate, g_env, [&] { g_pickB(a, b, c, d); }, reinterpret_cast<std::uintptr_t>(b));
 }
+
+struct Target { std::uintptr_t rva; void* detour; void** original; };
+const Target kTargets[] = {
+    {kCreateRva, reinterpret_cast<void*>(&CreateDetour), reinterpret_cast<void**>(&g_create)},
+    {kHitDropRva, reinterpret_cast<void*>(&HitDropDetour), reinterpret_cast<void**>(&g_hitDrop)},
+    {kDropRva, reinterpret_cast<void*>(&DropDetour), reinterpret_cast<void**>(&g_drop)},
+    {kPickARva, reinterpret_cast<void*>(&PickADetour), reinterpret_cast<void**>(&g_pickA)},
+    {kPickBRva, reinterpret_cast<void*>(&PickBDetour), reinterpret_cast<void**>(&g_pickB)},
+};
+struct MinHookOps {
+    std::uintptr_t base;
+    MH_STATUS last = MH_OK;
+    void* At(std::size_t i) const { return reinterpret_cast<void*>(base + kTargets[i].rva); }
+    bool Create(std::size_t i) { return (last = MH_CreateHook(At(i), kTargets[i].detour, kTargets[i].original)) == MH_OK; }
+    bool Queue(std::size_t i) { return (last = MH_QueueEnableHook(At(i))) == MH_OK; }
+    bool Apply() { return (last = MH_ApplyQueued()) == MH_OK; }
+    bool Remove(std::size_t i) { return MH_RemoveHook(At(i)) == MH_OK; }
+};
 
 }  // namespace
 
@@ -111,8 +104,6 @@ bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks) {
         if (log) log("[struggle-orbs] configured=0 (KH2COOP_STRUGGLE_ORBS=0): each game keeps its own orbs");
         return false;
     }
-    g_exeBase = exeBase;
-    g_cb = callbacks;
     for (const auto& s : kShapes) {
         std::uint8_t bytes[sizeof(s.bytes)] {};
         if (!CopyCode(exeBase + s.rva, bytes, sizeof(bytes)) || std::memcmp(bytes, s.bytes, sizeof(bytes)) != 0) {
@@ -125,32 +116,22 @@ bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks) {
         if (log) log("[struggle-orbs] configured=1 hooked=0 reason=callbacks");
         return false;
     }
-    struct Target { std::uintptr_t rva; void* detour; void** original; };
-    const Target targets[] = {
-        {kCreateRva, reinterpret_cast<void*>(&CreateDetour), reinterpret_cast<void**>(&g_create)},
-        {kHitDropRva, reinterpret_cast<void*>(&HitDropDetour), reinterpret_cast<void**>(&g_hitDrop)},
-        {kDropRva, reinterpret_cast<void*>(&DropDetour), reinterpret_cast<void**>(&g_drop)},
-        {kPickARva, reinterpret_cast<void*>(&PickADetour), reinterpret_cast<void**>(&g_pickA)},
-        {kPickBRva, reinterpret_cast<void*>(&PickBDetour), reinterpret_cast<void**>(&g_pickB)},
-    };
-    std::size_t created = 0;
-    MH_STATUS st = MH_OK;
-    for (; created < std::size(targets) && st == MH_OK; ++created)
-        st = MH_CreateHook(reinterpret_cast<void*>(exeBase + targets[created].rva), targets[created].detour,
-                           targets[created].original);
-    if (st != MH_OK) --created;
-    // All or none: a partly hooked set could drop the friend's orbs without showing the host's.
-    if (st == MH_OK)
-        for (const auto& t : targets)
-            if ((st = MH_QueueEnableHook(reinterpret_cast<void*>(exeBase + t.rva))) != MH_OK) break;
-    if (st == MH_OK) st = MH_ApplyQueued();
-    if (st != MH_OK) {
-        for (std::size_t i = 0; i < created; ++i) MH_RemoveHook(reinterpret_cast<void*>(exeBase + targets[i].rva));
-        if (log) log("[struggle-orbs] configured=1 hooked=0 reason=minhook status=%d", static_cast<int>(st));
+    // Every prerequisite is in place before the first hook exists; the gate opens only after all five apply.
+    g_exeBase = exeBase;
+    g_cb = callbacks;
+    g_fly = reinterpret_cast<FlyFn>(exeBase + kFlyRva);
+    g_env.exeBase = exeBase;
+    g_env.thread = &ThreadNow;
+    g_env.read = &ReadNative;
+    g_env.cb = &g_cb;
+    MinHookOps ops{exeBase};
+    const auto r = adapter::Install(g_gate, std::size(kTargets), ops);
+    if (!r.active) {
+        if (log) log("[struggle-orbs] configured=1 hooked=0 reason=minhook at=%s status=%d created=%zu rollbackFailures=%zu%s",
+                     r.failedAt, static_cast<int>(ops.last), r.created, r.rollbackFailures,
+                     r.rollbackFailures ? " (those detours stay, inactive: they pass straight through)" : "");
         return false;
     }
-    g_fly = reinterpret_cast<FlyFn>(exeBase + kFlyRva);
-    g_installed = true;
     if (log) log("[struggle-orbs] configured=1 hooked=1 create=%llX drops=%llX/%llX picks=%llX/%llX manager=%llX",
                  static_cast<unsigned long long>(kCreateRva), static_cast<unsigned long long>(kHitDropRva),
                  static_cast<unsigned long long>(kDropRva), static_cast<unsigned long long>(kPickARva),
@@ -158,25 +139,27 @@ bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks) {
     return true;
 }
 
-bool Installed() { return g_installed; }
+bool Installed() { return Active(); }
+
 void NoteGameThread() {
-    g_gameThread = GetCurrentThreadId();
+    g_gate.gameThread.store(ThreadNow(), std::memory_order_release);
     // A stats line every 600 frames while anything changed (and never when nothing happened).
     static unsigned frames = 0;
     static HookStats logged{};
-    if (!g_installed || !g_log || ++frames < 600) return;
+    if (!Active() || !g_log || ++frames < 600) return;
     frames = 0;
-    const auto& n = g_stats;
+    const HookStats n = Stats();
     if (n.births == logged.births && n.collects == logged.collects && n.dropsSuppressed == logged.dropsSuppressed &&
         n.picksSuppressed == logged.picksSuppressed && n.offThread == logged.offThread)
         return;
     logged = n;
-    g_log("[struggle-orbs] stats births=%llu collects=%llu unknownCollectors=%llu dropsSuppressed=%llu picksSuppressed=%llu offThread=%llu",
+    g_log("[struggle-orbs] stats births=%llu collects=%llu unresolved=%llu dropsSuppressed=%llu picksSuppressed=%llu offThread=%llu",
           static_cast<unsigned long long>(n.births), static_cast<unsigned long long>(n.collects),
-          static_cast<unsigned long long>(n.unknownCollectors), static_cast<unsigned long long>(n.dropsSuppressed),
+          static_cast<unsigned long long>(n.unresolved), static_cast<unsigned long long>(n.dropsSuppressed),
           static_cast<unsigned long long>(n.picksSuppressed), static_cast<unsigned long long>(n.offThread));
 }
-std::uintptr_t Manager() { return g_installed ? ManagerNow() : 0; }
+
+std::uintptr_t Manager() { return Active() ? Field<std::uintptr_t>(g_exeBase + kManagerRva) : 0; }
 
 std::uintptr_t CreateDisplay(const CreateRequest& request) {
     const std::uintptr_t manager = Manager();
@@ -198,13 +181,29 @@ bool StartFlight(const VanishRequest& request) {
         Field<std::uintptr_t>(request.record + kRecordDescriptor) != descriptor ||
         Field<std::uintptr_t>(request.record + kRecordCollector) != 0)
         return false;  // not that display orb any more, or already flying
-    const std::uintptr_t actor =
-        g_cb.actorFor ? g_cb.actorFor(static_cast<std::uint8_t>(request.collector), request.netId) : 0;
-    if (!actor) return false;
+    const std::uintptr_t actor = request.collector == OrbCollector::Unresolved
+                                     ? 0 : g_cb.actorFor(static_cast<std::uint8_t>(request.collector), request.netId);
+    if (!actor) {
+        // No copy of the collector here (or the host could not name one): the orb fades out where it lies
+        // through its own life timer, rather than flying to someone who did not take it.
+        *reinterpret_cast<std::uint32_t*>(request.record + kRecordFlags) &= ~kFlagKeep;
+        *reinterpret_cast<float*>(request.record + kRecordLife) = kFadeLife;
+        return true;
+    }
     g_fly(request.record, actor, 0);
     return true;
 }
 
-HookStats Stats() { return g_stats; }
+HookStats Stats() {
+    HookStats s;
+    s.births = g_gate.births.load(std::memory_order_relaxed);
+    s.collects = g_gate.collects.load(std::memory_order_relaxed);
+    s.unresolved = g_gate.unresolved.load(std::memory_order_relaxed);
+    s.dropsSuppressed = g_gate.dropsSuppressed.load(std::memory_order_relaxed);
+    s.picksSuppressed = g_gate.picksSuppressed.load(std::memory_order_relaxed);
+    s.offThread = g_gate.offThread.load(std::memory_order_relaxed);
+    s.inactive = g_gate.inactive.load(std::memory_order_relaxed);
+    return s;
+}
 
 }  // namespace kh2coop::inject::struggleorbs

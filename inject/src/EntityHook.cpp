@@ -4343,8 +4343,8 @@ bool Initialize(uintptr_t exeBase) {
                          return n;
                      });
     // VUH-2466: the Struggle's orbs follow the host's game (on unless KH2COOP_STRUGGLE_ORBS=0). The host
-    // names who took an orb: its own player, the remote's clone (the friend's player) or an enemy; the
-    // friend's orb flies to its copy of that collector.
+    // names who took an orb: its own player, the remote's clone (the friend's player) or an enemy (else it
+    // is sent unresolved); the friend's orb flies to its copy of that collector, or fades.
     {
         struggleorbs::Callbacks orbs;
         orbs.hostLive = &enemysync::OrbHostLive;
@@ -4358,14 +4358,12 @@ bool Initialize(uintptr_t exeBase) {
             netId = enemysync::HostCollectorNetId(actor);
             return netId ? struggleorbs::kCollectorEnemy : struggleorbs::kCollectorNone;
         };
+        // No copy of the collector here: 0, and the orb fades where it lies (never a stand-in collector).
         orbs.actorFor = [](std::uint8_t collector, std::uint16_t netId) -> std::uintptr_t {
-            const std::uintptr_t host = PuppetTarget(0) ? PuppetTarget(0) : g_soraActor;
             if (collector == struggleorbs::kCollectorFriend) return g_soraActor;
-            if (collector == struggleorbs::kCollectorEnemy) {
-                const std::uintptr_t enemy = enemysync::ClientActorForNetId(netId);
-                return enemy ? enemy : host;
-            }
-            return host;  // the host's player, or an unnamed collector
+            if (collector == struggleorbs::kCollectorHost) return PuppetTarget(0);
+            if (collector == struggleorbs::kCollectorEnemy) return enemysync::ClientActorForNetId(netId);
+            return 0;
         };
         struggleorbs::Install(exeBase, &Log, orbs);
     }

@@ -281,14 +281,21 @@ void ResetSpawnEmissions() {
 void QueueOrbRow(SpawnEmission value) {
     const auto generation=WorldSessionGeneration();
     RoomTransition location;
-    if(CurrentRole()!=Role::Host || !generation || g_emissionSequence==UINT64_MAX || !ReadLocationChecked(location))return;
+    if(CurrentRole()!=Role::Host || !generation || g_emissionSequence==UINT64_MAX || !ActivationContext(Role::Host,location))return; // the room with its epoch, as the flush sends it
     std::erase_if(g_emissionOutbox,[generation](const PendingSpawnEmission& p){return p.generation!=generation ||
         p.transition!=warp::TransitionSerial() || p.load!=warp::LoadSerial();});
     if(g_emissionOutbox.size()>=SPAWN_EMISSION_CAP) {
         if(g_log && g_orbLogs<64){++g_orbLogs;g_log("[struggle-orbs] host outbox full: orb %u row dropped",value.orbId);}
         return;
     }
-    value.location=location; value.sequence=++g_emissionSequence;
+    value.location=location; value.sequence=g_emissionSequence+1;
+    // Only a row the codec takes enters the shared FIFO.
+    if(!validSpawnEmission(value)) {
+        if(g_log && g_orbLogs<64){++g_orbLogs;g_log("[struggle-orbs] host row refused before queueing: kind=%u orb=%u collector=%u netId=%u",
+            static_cast<unsigned>(value.kind),value.orbId,static_cast<unsigned>(value.collector),value.collectorNetId);}
+        return;
+    }
+    ++g_emissionSequence;
     PendingSpawnEmission row{};row.value=value;row.generation=generation;row.transition=warp::TransitionSerial();row.load=warp::LoadSerial();
     row.warmup={g_hitTraceFrame,g_hitTraceFrame};
     g_emissionOutbox.push_back(row);
@@ -344,7 +351,14 @@ void FlushSpawnEmissions(const NativeCensus& census) {
         }
         pending.value.location = room;
         ProducerWorldContext context;
-        if (!CaptureWorldContext(context) || !SendCapturedWorld(encode(pending.value), context)) return;
+        // VUH-2466 r2: a row the codec refuses is dropped, never left at the head to block every later row.
+        std::vector<std::uint8_t> bytes;
+        try { bytes = encode(pending.value); } catch (const std::exception&) {
+            if (g_log) g_log("[spawn-emission] host-refused reason=unencodable seq=%llu kind=%u",
+                static_cast<unsigned long long>(pending.value.sequence), static_cast<unsigned>(pending.value.kind));
+            g_emissionOutbox.erase(g_emissionOutbox.begin()); continue;
+        }
+        if (!CaptureWorldContext(context) || !SendCapturedWorld(bytes, context)) return;
         if(g_emissionOutbox.empty() || g_emissionOutbox.front().value.sequence!=pending.value.sequence ||
            g_emissionOutbox.front().generation!=pending.generation)return;
         if (pending.value.kind != SpawnEmissionKind::Controller) {

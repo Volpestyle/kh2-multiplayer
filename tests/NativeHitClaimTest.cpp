@@ -3238,6 +3238,67 @@ void TestMoraleBirthLifetime() {
     Check(!g_moraleBirthCapacityFault,"emission reset clears capacity fault");
 }
 
+// VUH-2466 r2 (Quill R3): the actual orb producers, queue, codec and flush. A collection whose collector the
+// host cannot name goes out Unresolved; a row the codec refuses never blocks the rows behind it.
+std::vector<SpawnEmission> SentEmissions() {
+    std::vector<SpawnEmission> out;
+    for (const auto& packet : g_bridge.outgoing) {
+        const std::uint8_t* payload = nullptr; std::size_t size = 0;
+        if (decodePacketHeader(packet.data(), packet.size(), payload, size) != PacketType::SpawnEmission) continue;
+        ByteReader reader(payload, size); SpawnEmission e; read(reader, e); out.push_back(e);
+    }
+    return out;
+}
+PendingSpawnEmission ControllerHelperRow() {
+    RoomTransition location; (void)ReadLocationChecked(location);
+    PendingSpawnEmission row{};
+    row.value = SpawnEmission{location, ++g_emissionSequence, 99, 750, 0, {1, 2, 3, 1}};
+    row.birth.helper = true;
+    row.generation = WorldSessionGeneration(); row.transition = kh2coop::inject::warp::TransitionSerial(); row.load = kh2coop::inject::warp::LoadSerial();
+    row.warmup = {g_hitTraceFrame, g_hitTraceFrame};
+    return row;
+}
+void TestStruggleOrbRows() {
+    Reset(); ResetSpawnEmissions(); g_hitTraceFrame = 200;
+    const float point[4] {-150, -90, 0, 1}, velocity[3] {0.5f, 12, -0.25f};
+    OrbHostBirth(0x1000, 0x2000, 0, point, velocity);
+    OrbHostCollect(0x1000, 0x2000, 0 /*None*/, 0);
+    OrbHostBirth(0x1000, 0x3000, 2, point, velocity);
+    OrbHostCollect(0x1000, 0x3000, 3 /*Enemy*/, 0);
+    OrbHostBirth(0x1000, 0x4000, 0, point, velocity);
+    OrbHostCollect(0x1000, 0x4000, 9 /*not a collector*/, 5);
+    g_emissionOutbox.push_back(ControllerHelperRow());
+    Check(g_emissionOutbox.size() == 7, "orb producers queue every row, unnamed collectors included");
+    FlushSpawnEmissions(CaptureNativeCensus());
+    auto sent = SentEmissions();
+    Check(sent.size() == 7 && g_emissionOutbox.empty(), "all seven rows reach the wire in order");
+    if (sent.size() == 7) {
+        Check(sent[1].kind == SpawnEmissionKind::OrbCollect && sent[1].collector == OrbCollector::Unresolved &&
+              sent[3].collector == OrbCollector::Unresolved && sent[3].collectorNetId == 0 &&
+              sent[5].collector == OrbCollector::Unresolved && sent[5].collectorNetId == 0,
+              "None, Enemy without a netId and an unknown value go out as Unresolved collections");
+        Check(sent[0].orbId == 1 && sent[2].orbId == 2 && sent[1].orbId == 1 && sent[0].orbMatch == 1 &&
+              sent[6].kind == SpawnEmissionKind::Controller && sent[6].controllerKey == 99,
+              "the controller row behind the orb rows is sent");
+    }
+    // A row the codec refuses at the head (not one the producers make) is dropped; the next goes out.
+    g_bridge.outgoing.clear();
+    auto poison = ControllerHelperRow(); poison.value.orbId = 7;  // a controller row with an orb field
+    g_emissionOutbox.push_back(poison);
+    g_emissionOutbox.push_back(ControllerHelperRow());
+    FlushSpawnEmissions(CaptureNativeCensus());
+    sent = SentEmissions();
+    Check(sent.size() == 1 && sent[0].orbId == 0 && g_emissionOutbox.empty(),
+          "an unencodable head row is dropped and the row behind it is sent");
+    // The producer refuses what the codec would: nothing invalid is queued.
+    const auto before = g_emissionOutbox.size();
+    OrbHostBirth(0x1000, 0x5000, 7 /*no such descriptor*/, point, velocity);
+    const float nan[3] {std::numeric_limits<float>::quiet_NaN(), 0, 0};
+    OrbHostBirth(0x1000, 0x6000, 0, point, nan);
+    Check(g_emissionOutbox.size() == before, "an invalid birth is refused before it is queued");
+    ResetSpawnEmissions();
+}
+
 int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
@@ -3560,6 +3621,7 @@ int main() try {
     TestBaileyMissionEndOrdering();
     TestBaileyMissionEndOrdering(true); // VUH-2352: ordinary Shadow death vs MU01 end hold
     TestMoraleBirthLifetime();
+    TestStruggleOrbRows();
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);
     return errors ? 1 : 0;

@@ -887,7 +887,7 @@ void testVersionReject() {
           "client received the reject reason: " + reason);
     check(host.verifiedPeerCount() == 0, "mismatched client never verified");
     client.disconnect();
-    for (const std::uint16_t legacyVersion : {std::uint16_t{3},std::uint16_t{14},std::uint16_t{15},std::uint16_t{17},std::uint16_t{18},std::uint16_t{19},std::uint16_t{20},std::uint16_t{21},std::uint16_t{24},std::uint16_t{25},std::uint16_t{29},std::uint16_t{30},std::uint16_t{31},std::uint16_t{32}}) {
+    for (const std::uint16_t legacyVersion : {std::uint16_t{3},std::uint16_t{14},std::uint16_t{15},std::uint16_t{17},std::uint16_t{18},std::uint16_t{19},std::uint16_t{20},std::uint16_t{21},std::uint16_t{24},std::uint16_t{25},std::uint16_t{29},std::uint16_t{30},std::uint16_t{31},std::uint16_t{32},std::uint16_t{33}}) {
     reason.clear(); disconnected = false;
     ClientCallbacks legacyCallbacks;
     legacyCallbacks.onRejected = [&](const HelloReject& r) { reason = r.reason; };

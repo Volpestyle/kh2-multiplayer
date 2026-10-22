@@ -16,7 +16,7 @@ inline constexpr std::uint16_t PROTOCOL_VERSION = 34;
 
 // ===========================================================================
 // Protocol v34 (VUH-2466): SpawnEmission carries a kind; the host's Struggle orb births and collections
-// ride it (69 bytes), so the friend shows the host's orbs.
+// ride it (71 bytes), so the friend shows the host's orbs.
 // Protocol v33 (VUH-2656, D17): a downed client owes itself the return when the host's MissionState ends its
 // mission with mission_complete (end trap 3); no wire change, a behavior every peer must share.
 // Protocol v32 (VUH-2632, D17): the host's native difficulty in the RoomTransition packet trailer, and
@@ -165,8 +165,9 @@ struct RoomTransition {
 };
 
 enum class SpawnEmissionKind : std::uint8_t { Controller = 0, OrbBirth = 1, OrbCollect = 2 };
-// Who took a host orb: the host's own player, the friend's player (its clone on the host), or an enemy.
-enum class OrbCollector : std::uint8_t { None = 0, Host = 1, Friend = 2, Enemy = 3 };
+// Who took a host orb: the host's own player, the friend's player (its clone on the host), an enemy, or
+// someone the host could not name (Unresolved: still a collection).
+enum class OrbCollector : std::uint8_t { None = 0, Host = 1, Friend = 2, Enemy = 3, Unresolved = 4 };
 
 // One successful native wrapper return, not permission to run a controller's
 // other records. Sequence is host-connection scoped; room binds replay lifetime.
@@ -180,16 +181,19 @@ struct SpawnEmission {
     // VUH-2466 (v34): a Struggle orb row instead of a controller birth. An orb row has no controller
     // identity (key, header, record and netId all zero). Birth: the host's orb `orbId` was created with
     // descriptor `orbType` (0..3) at `point`, with scatter `velocity`. Collect: `collector` took it
-    // (`collectorNetId` names an enemy collector).
+    // (`collectorNetId` names an enemy collector). `orbMatch` counts the host's orb managers in this room
+    // (1, 2, ...): orb IDs stay unique through the room, so the ledger's once-only rule holds across a
+    // replaced manager, and the friend applies only rows of the match its own manager shows.
     SpawnEmissionKind kind {SpawnEmissionKind::Controller};
     std::uint8_t orbType {0};
     std::uint16_t orbId {0};
     std::array<float, 3> velocity {};
     OrbCollector collector {OrbCollector::None};
     std::uint16_t collectorNetId {0};
+    std::uint16_t orbMatch {0};
 };
 inline constexpr std::size_t SPAWN_EMISSION_CAP = 4096;
-inline constexpr std::size_t SPAWN_EMISSION_BYTES = 69;
+inline constexpr std::size_t SPAWN_EMISSION_BYTES = 71;
 inline constexpr std::uint8_t ORB_TYPES = 4;
 
 // Ephemeral native activation challenge. The requester owns the deadline on
