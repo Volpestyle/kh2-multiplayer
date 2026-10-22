@@ -257,6 +257,7 @@ loopback ports). None launches or attaches to KH2.
 | `EnemyMirrorDriverTest.cpp` | VUH-1515 native mirror driver over fake game memory: brain skip/pass-through, motion guard, death, blend, clamp, class refusal |
 | `EnemyTargetRemoteTest.cpp` | VUH-1515 enemy targeting pure policy: allowlist, player form, nearest/hold/hysteresis/per-clone cap, clone candidacy (downed, cutscene, shared status, stale), owner apply refusals |
 | `NativeHitTraceTest.cpp` | Production hit trace/policy serializer and owned zero leaf; synthetic original/argument/return/SEH, scope/queue and outcome controls; baseline and policy-veto emitter modes |
+| `test_desk_stop.py` | VUH-2617 desk stop: `tools/rig/desk-scenario.ps1` copies in throwaway checkouts refuse any run while the stop file exists |
 | `test_trace_audit.py` | Saved-log envelope/provenance, predicate and native-hit schema, coverage, HP/delta, ambiguity and historical-limit controls |
 
 ## scripts/

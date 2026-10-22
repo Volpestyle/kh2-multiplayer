@@ -8,6 +8,18 @@
 param([string]$Scenario = '', [string]$Tag = '', [int]$WallMinutes = 40)
 $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path "$PSScriptRoot/../..").Path
+# VUH-2617 desk stop: while this file exists in the main checkout's build\rig (or this
+# checkout's), the desk is stopped and no run starts, whatever PID it names.
+$stopFiles = @("$root/build/rig/vuh2617-fileio-desk-stop.json")
+try {
+  $common = (& git -C $root rev-parse --path-format=absolute --git-common-dir 2>$null)
+  if ($LASTEXITCODE -eq 0 -and $common) { $stopFiles += "$(Split-Path -Parent $common)/build/rig/vuh2617-fileio-desk-stop.json" }
+} catch { }
+# Without git, a worktree under the main checkout's .local\ still finds it.
+if ($root -match '^(.*)[\\/]\.local[\\/][^\\/]+$') { $stopFiles += "$($Matches[1])/build/rig/vuh2617-fileio-desk-stop.json" }
+foreach ($stop in $stopFiles) {
+  if (Test-Path -LiteralPath $stop) { "desk stopped: $stop exists; no run"; return }
+}
 if (-not $Scenario -or -not (Test-Path -LiteralPath "$root/$Scenario")) { "desk-scenario: no scenario '$Scenario' under $root"; return }
 if (-not $Tag) { $Tag = Get-Date -Format 'yyyyMMdd-HHmmss' }
 $ops = "$root/build/rig/operator-logs/desk-scenario"
