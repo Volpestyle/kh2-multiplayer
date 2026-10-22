@@ -32,6 +32,9 @@ struct PeerState {
     std::uint64_t connectionId{0};
     std::uint64_t deliverySerial{1};
     bool worldQuarantined{false};
+    // VUH-2640 Leg A: quarantined as an admitted boss sit-out. Material stays fenced, but SeatState (presence and
+    // profile) crosses both ways: the arrival load into a prologue arena waits for the seats' profile agreement.
+    bool sitOutPresence{false};
     std::uint64_t hostSourceFloor{0};
     std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
     std::uint64_t lastScriptReactionCompletionSeq{};

@@ -60,6 +60,13 @@ F1, whether or not the friend's mirror has bound Thorn yet.
   EventHold, 315 or progress reaches it. Inbound host avatars are shown (they are ephemeral, so the relay
   already passes them), so the friend can watch. Outbound traffic stays at resync, TransitionAck and
   SeatState.
+- **SeatState crosses the relay's fence.** The arena is a checked prologue site, so the friend's arrival load
+  waits for the seats' profile agreement (`Warp.cpp`, VUH-1512). The new connection's roster has forgotten
+  every profile, and the agreement needs SeatState both ways. The relay marks a seat whose forwarded Bootstrap
+  is a sit-out (`PeerState::sitOutPresence`) and passes SeatState to and from it while it stays quarantined;
+  material is still fenced. Leg A live r1 (on `edd07ef`) deadlocked without this: the load never issued
+  (`waits for the seats' profile agreement`), the resync hit its deadline, and the host ended
+  `agreement=missing-profile`. A new plan, a Checkpoint or a failed result clears the mark.
 - **Downing.** On the arena's first settled frame, the friend's DLL begins F1's `OutageDuty`. It is
   anchored to *this* Bootstrap's load serial (`DownedReturn.hpp:465`, `Begin(recoveryAt)`), so the arrival
   load cannot end the duty. The qualifying receipt is the converged snapshot's declaration (request,

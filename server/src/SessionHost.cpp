@@ -32,7 +32,7 @@ void SessionHost::finishResync(ResyncResultReason reason,const std::string& erro
     ResyncResult result;result.key=resyncPlan_->request.key;result.reason=reason;result.targetCount=resyncPlan_->targetCount;
     for(std::size_t i=0;i<result.targetCount;++i){auto& t=result.targets[i];t.target=resyncPlan_->targets[i];t.error=error;
         if(resyncAcks_[i]){t.status=resyncAcks_[i]->status;t.appliedCut=resyncAcks_[i]->snapshotCut;t.fingerprint=resyncAcks_[i]->observedFingerprint;}
-        if(reason!=ResyncResultReason::Converged)for(auto& ps:peers_)if(ps.connectionId==t.target.connectionId)ps.worldQuarantined=true;
+        if(reason!=ResyncResultReason::Converged)for(auto& ps:peers_)if(ps.connectionId==t.target.connectionId){ps.worldQuarantined=true;ps.sitOutPresence=false;}
     }
     resyncPlan_.reset();resyncAssembler_.Reset();resyncBegin_.reset();resyncSnapshot_.reset();
     for(auto& q:resyncContinuation_)q.clear();
@@ -117,7 +117,7 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
         }
         if(simulationActive_){ResyncResult unavailable;unavailable.key=request.key;unavailable.reason=ResyncResultReason::CaptureUnavailable;unavailable.targetCount=plan.targetCount;for(std::size_t i=0;i<plan.targetCount;++i){unavailable.targets[i].target=plan.targets[i];--unavailable.targets[i].target.deliverySerial;unavailable.targets[i].error="legacy simulation is active";}lastResyncRequestId_=request.key.requestId;lastResyncResult_=unavailable;sendTo(ps.transportPeer,encode(unavailable),true);if(callbacks_.onResyncFinalized)callbacks_.onResyncFinalized(unavailable);return false;}
         lastResyncRequestId_=request.key.requestId;resyncPlan_=plan;resyncDeadline_=now+RESYNC_TIMEOUT_MS;resyncAcks_={};resyncMaterialChanged_=false;resyncBegin_.reset();resyncSnapshot_.reset();resyncAssembler_.Reset();
-        for(std::size_t i=0;i<plan.targetCount;++i)for(auto& peer:peers_)if(peer.connectionId==plan.targets[i].connectionId){peer.deliverySerial=plan.targets[i].deliverySerial;peer.worldQuarantined=true;peer.hasHash=false;pendingActivation_.erase(peer.transportPeer);}
+        for(std::size_t i=0;i<plan.targetCount;++i)for(auto& peer:peers_)if(peer.connectionId==plan.targets[i].connectionId){peer.deliverySerial=plan.targets[i].deliverySerial;peer.worldQuarantined=true;peer.sitOutPresence=false;peer.hasHash=false;pendingActivation_.erase(peer.transportPeer);}
         publishResyncPlan();return true;
     }
     if(!resyncPlan_){++rejectedWorld_;return false;}
@@ -152,6 +152,8 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
             sent=sent&&sendTo(target->transportPeer,encode(e),true);if(!sent){finishResync(ResyncResultReason::Overflow,"snapshot forwarding failed");return false;}
             target->hostSourceFloor=begin.snapshotCut;
             // A sit-out target stays quarantined: no continuation, no later material, until a real recovery.
+            // Only its SeatState crosses (PeerState::sitOutPresence).
+            target->sitOutPresence=sitOut;
             if(!sitOut){target->worldQuarantined=false;
             for(const auto& item:resyncContinuation_[i])if(item.scope.hostSourceSerial>begin.snapshotCut&&!sendTo(target->transportPeer,encode(item),true)){finishResync(ResyncResultReason::Overflow,"continuation forwarding failed");return false;}}
             resyncContinuation_[i].clear();resyncContinuationBytes_[i]=0;
@@ -165,7 +167,7 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
         if(a.status!=ResyncAckStatus::Converged){if(!resyncAcks_[index]||static_cast<unsigned>(a.status)>static_cast<unsigned>(resyncAcks_[index]->status))resyncAcks_[index]=a;return true;}
         if(a.observedFingerprint!=resyncSnapshot_->nativeFingerprint||!sameResyncRoom(a.observedRoom,resyncSnapshot_->room)||a.enemyCount!=resyncSnapshot_->livingCount||a.deadCount!=resyncSnapshot_->deadCount||a.checksMask!=ResyncChecksComplete||!a.observationFrame1||a.observationFrame2<=a.observationFrame1||!a.loadAfter||(a.phase==ResyncPhase::Bootstrap&&a.loadBefore==a.loadAfter)){finishResync(ResyncResultReason::NativeFailed,"invalid native convergence witness");return false;}
         resyncAcks_[index]=a;
-        if(resyncMaterialChanged_){resyncPlan_->phase=ResyncPhase::Checkpoint;resyncSnapshot_.reset();resyncAssembler_.Reset();resyncAcks_={};resyncMaterialChanged_=false;for(auto& p:peers_)for(std::size_t i=0;i<resyncPlan_->targetCount;++i)if(p.connectionId==resyncPlan_->targets[i].connectionId)p.worldQuarantined=true;publishResyncPlan();return true;}
+        if(resyncMaterialChanged_){resyncPlan_->phase=ResyncPhase::Checkpoint;resyncSnapshot_.reset();resyncAssembler_.Reset();resyncAcks_={};resyncMaterialChanged_=false;for(auto& p:peers_)for(std::size_t i=0;i<resyncPlan_->targetCount;++i)if(p.connectionId==resyncPlan_->targets[i].connectionId){p.worldQuarantined=true;p.sitOutPresence=false;}publishResyncPlan();return true;}
         for(std::size_t i=0;i<resyncPlan_->targetCount;++i){
             if(!resyncAcks_[i]||resyncAcks_[i]->status!=ResyncAckStatus::Converged)return true;
             const auto& witness=*resyncAcks_[i];
@@ -181,6 +183,11 @@ bool SessionHost::receiveResync(PeerState& ps,PacketType type,ByteReader& r) {
 }
 
 namespace {
+
+// What a quarantined seat may still send or receive: activation points, and a sit-out seat's SeatState.
+bool quarantineAdmits(const PeerState& p, PacketType t) {
+    return isEphemeralWorldPacket(t) || (p.sitOutPresence && t == PacketType::SeatState);
+}
 
 constexpr std::uint32_t disconnectCode(DisconnectReason reason) {
     return static_cast<std::uint32_t>(reason);
@@ -528,7 +535,7 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 rcHop(rcdiag::Stage::RelayEnvelope,"refused",rcWhy);++rejectedWorld_;return;
             }
             const auto inner=static_cast<PacketType>(envelope.packet.front());
-            if(ps->worldQuarantined&&!isEphemeralWorldPacket(inner)){rcHop(rcdiag::Stage::RelayEnvelope,"refused","quarantined");++rejectedWorld_;return;}
+            if(ps->worldQuarantined&&!quarantineAdmits(*ps,inner)){rcHop(rcdiag::Stage::RelayEnvelope,"refused","quarantined");++rejectedWorld_;return;}
             if(fromHost(*ps)&&scope.hostSourceSerial<=(std::max)(hostSourceCutFloor_,resyncBegin_?resyncBegin_->snapshotCut:0)){rcHop(rcdiag::Stage::RelayEnvelope,"refused","host-source-floor");++rejectedWorld_;return;}
             rcHop(rcdiag::Stage::RelayEnvelope,"admitted","before-inner-dispatch");
             const auto previous=forwardingScope_;forwardingScope_=scope;
@@ -991,7 +998,8 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 SeatState seat; read(reader,seat);
                 std::array<std::uint64_t,3> roster{};
                 for(const auto& p:peers_)if(p.status==PeerStatus::Verified)roster[static_cast<std::uint8_t>(p.assignedSlot)]=p.connectionId;
-                if(!reader.atEnd() || ps->status!=PeerStatus::Verified || ps->worldQuarantined || !admittedScope ||
+                if(!reader.atEnd() || ps->status!=PeerStatus::Verified ||
+                   (ps->worldQuarantined && !quarantineAdmits(*ps,PacketType::SeatState)) || !admittedScope ||
                    seat.roster!=roster || !seat.seq || seat.seq<=ps->lastSeatSeq || seat.ownerSlot!=0xFF){++rejectedWorld_;return;}
                 ps->lastSeatSeq=seat.seq;
                 seat.ownerSlot=static_cast<std::uint8_t>(ps->assignedSlot);
@@ -2026,7 +2034,7 @@ bool SessionHost::sendTo(TransportPeer* peer,const std::vector<std::uint8_t>& pa
                 resyncContinuation_[i].push_back(std::move(env));resyncContinuationBytes_[i]+=packet.size();return finish(true,"continuation-buffered");
             }
         }
-        if(target->worldQuarantined&&!isEphemeralWorldPacket(type))return finish(true,"quarantine-suppressed");
+        if(target->worldQuarantined&&!quarantineAdmits(*target,type))return finish(true,"quarantine-suppressed");
         const auto wire=encode(env);const bool sent=sendTo(peer,wire,reliable);
         return finish(sent,sent?"enet-submitted":"enet-submission-failed",&wire);
     }
