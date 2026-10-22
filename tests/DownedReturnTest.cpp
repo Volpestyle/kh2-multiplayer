@@ -363,6 +363,96 @@ int main() {
       CHECK(legB.act && legB.decision.after == AfterTransition::Resolve && legB.decision.why == Disposition::Outage &&
             !d.Active()); }
 
+    // VUH-2640 Leg A veil (lead #233): the friend's own unbound copy of the arena's boss is hidden while the
+    // arrival's sit-out is open and shown only if that sit-out ends with the very copy still in its load.
+    { SitOutVeilFacts v;
+      v.client = true; v.latched = true; v.sitOutOpen = true; v.worldCurrent = true; v.copyFound = true;
+      v.handleOwn = true; v.ready = true;
+      const auto step = [](SitOutVeilFacts g, VeilStep want, std::string_view reason) {
+          const char* why = ""; return SitOutVeilStep(g, why) == want && reason == why; };
+      const auto with = [&](auto change, VeilStep want, std::string_view reason) {
+          auto g = v; change(g); return step(g, want, reason); };
+      CHECK(step(v, VeilStep::Hide, "sit-out"));                               // attempt02's copy: netId 0, 300/300
+      CHECK(with([](auto& g) { g.client = false; }, VeilStep::None, "not-client"));   // a host never veils its boss
+      CHECK(with([](auto& g) { g.latched = false; }, VeilStep::None, "no-arrival"));  // F1's in-arena expiry: bound fight
+      CHECK(with([](auto& g) { g.attempted = true; }, VeilStep::None, "attempted"));  // once per arrival
+      CHECK(with([](auto& g) { g.sitOutOpen = false; }, VeilStep::None, "not-sitting-out")); // a dropped pending outage
+      CHECK(with([](auto& g) { g.worldCurrent = false; }, VeilStep::None, "stale"));  // another generation or load
+      CHECK(with([](auto& g) { g.transitionPending = true; }, VeilStep::None, "stale"));
+      CHECK(with([](auto& g) { g.copyFound = false; }, VeilStep::None, "no-copy"));   // none, two, or not the boss
+      CHECK(with([](auto& g) { g.copyBound = true; }, VeilStep::None, "bound"));      // host authority drives it
+      CHECK(with([](auto& g) { g.handleOwn = false; }, VeilStep::None, "unowned"));
+      CHECK(with([](auto& g) { g.ready = false; }, VeilStep::None, "no-traps"));
+      // Hidden: the copy's own load and handle decide whether it is still there; the sit-out decides when it shows.
+      SitOutVeilFacts h = v; h.veiled = true; h.attempted = true; h.loadCurrent = true;
+      const auto hidden = [&](auto change, VeilStep want, std::string_view reason) {
+          auto g = h; change(g); return step(g, want, reason); };
+      CHECK(step(h, VeilStep::None, "held"));
+      CHECK(hidden([](auto& g) { g.worldCurrent = false; }, VeilStep::None, "held"));  // a generation change alone: still there
+      CHECK(hidden([](auto& g) { g.copyFound = false; }, VeilStep::None, "held"));     // a tracker gap alone: still there
+      CHECK(hidden([](auto& g) { g.transitionPending = true; }, VeilStep::None, "transition-pending"));
+      CHECK(hidden([](auto& g) { g.transitionPending = true; g.sitOutOpen = false; }, VeilStep::None, "transition-pending"));
+      CHECK(hidden([](auto& g) { g.loadCurrent = false; }, VeilStep::Forget, "gone"));  // Leg B's load replaced it
+      CHECK(hidden([](auto& g) { g.loadCurrent = false; g.sitOutOpen = false; }, VeilStep::Forget, "gone"));
+      CHECK(hidden([](auto& g) { g.handleOwn = false; g.sitOutOpen = false; }, VeilStep::Forget, "gone")); // freed
+      CHECK(hidden([](auto& g) { g.ready = false; g.sitOutOpen = false; }, VeilStep::None, "no-traps"));
+      CHECK(hidden([](auto& g) { g.copyBound = true; }, VeilStep::Show, "bound"));
+      CHECK(hidden([](auto& g) { g.sitOutOpen = false; }, VeilStep::Show, "sit-out-ended"));
+      CHECK(hidden([](auto& g) { g.client = false; }, VeilStep::Show, "sit-out-ended"));
+
+      // Leg A through Leg B, the adapter's order: arrival pending (its room's first settled frame not yet), hidden
+      // at once; the duty begins and holds; Leg B's recovery Bootstrap ends it with a new load, so the hidden actor
+      // is forgotten, never shown or touched.
+      OutageDuty d;
+      SitOutVeilFacts f = v;                                                  // pending: sitOutOpen from the arrival
+      CHECK(step(f, VeilStep::Hide, "sit-out"));
+      f.veiled = f.attempted = true; f.loadCurrent = true;
+      d.Begin(30);
+      CHECK(!OutageFrame(d, 30, false, OutagePlace::Held, false).act);
+      f.sitOutOpen = d.Active(); CHECK(step(f, VeilStep::None, "held"));
+      f.transitionPending = true; CHECK(step(f, VeilStep::None, "transition-pending"));
+      const auto legB = OutageFrame(d, 41, false, OutagePlace::Held, false);
+      f.transitionPending = false; f.loadCurrent = false; f.sitOutOpen = d.Active();
+      CHECK(legB.act && legB.decision.why == Disposition::Outage && step(f, VeilStep::Forget, "gone"));
+
+      // Lead #233, the Terminal path offline: the friend sits out at HP 1 beside its hidden, hooked copy; this
+      // seat's networking stops for good. The duty's own step resolves it solo (25% on the next field frame, the
+      // existing rule), and in that same frame, after the step, the copy is shown in its unchanged load, once.
+      OutageDuty t; t.Begin(30);
+      SitOutVeilFacts u = h;
+      CHECK(!OutageFrame(t, 30, false, OutagePlace::Held, false).act && step(u, VeilStep::None, "held"));
+      const auto solo = OutageFrame(t, 30, true, OutagePlace::Held, false);
+      CHECK(solo.act && solo.decision.after == AfterTransition::Resolve && solo.decision.why == Disposition::Solo);
+      u.sitOutOpen = t.Active();
+      CHECK(step(u, VeilStep::Show, "sit-out-ended"));
+      SitOutVeilFacts spent {};                                              // the adapter cleared its latch
+      spent.client = true; spent.sitOutOpen = false; spent.worldCurrent = true; spent.copyFound = true;
+      spent.handleOwn = true; spent.ready = true;
+      CHECK(step(spent, VeilStep::None, "no-arrival"));                       // never hidden again
+      // The same end, but the hold was already lost to a load (the copy is gone): forgotten, nothing shown.
+      u.loadCurrent = false; CHECK(step(u, VeilStep::Forget, "gone"));
+      // Ended while the copy's traps were unavailable: it waits rather than forgetting a copy it hid.
+      u.loadCurrent = true; u.ready = false; CHECK(step(u, VeilStep::None, "no-traps")); }
+    // The candidate: the client tracker's lone living, present spawn, the arena's boss (307, type 12).
+    { const auto view = [](const VeilSpawn& s) { return s; };
+      const VeilSpawn thorn {0x7FF60615FD10, 307, 12, true, true, false};
+      std::uintptr_t actor = 1; bool bound = true;
+      const auto lone = [&](std::initializer_list<VeilSpawn> spawns) {
+          return LoneBossCopy(spawns, 307, 12, view, actor, bound); };
+      CHECK(lone({thorn}) && actor == thorn.actor && !bound);                  // attempt02's netId 0 copy
+      auto b = thorn; b.bound = true;
+      CHECK(lone({b}) && actor == thorn.actor && bound);                       // bound: reported, the rule refuses it
+      auto gone = thorn; gone.present = false; auto dead = thorn; dead.living = false; dead.actor = 0x10;
+      CHECK(lone({gone, thorn}) && lone({dead, thorn}) && actor == thorn.actor); // left or dead spawns don't count
+      auto second = thorn; second.actor = 0x7FF600001000; second.objectId = 318;
+      CHECK(!lone({thorn, second}) && actor == 0 && !bound);                   // a second living enemy: not a lone boss
+      auto twin = thorn; twin.actor = 0x7FF600002000;
+      CHECK(!lone({thorn, twin}) && !lone({twin, thorn}));                    // two boss copies: neither is the one
+      CHECK(!lone({}) && !lone({gone}) && !lone({dead}));
+      auto other = thorn; other.objectId = 318; CHECK(!lone({other}));        // not the arena's boss object
+      auto type = thorn; type.objectType = 3; CHECK(!lone({type}));
+      auto none = thorn; none.actor = 0; CHECK(!lone({none})); }
+
     // Regression (VUH-2640 F1, round 3), the adapter's order through a Thorn outage: the friend's mirror binds
     // Thorn to the host's authority every frame until the expiry at 3000 (the retirement stops it); the expiry
     // is judged once against that receipt; the friend is in the boss's event until 3050, so the downing waits

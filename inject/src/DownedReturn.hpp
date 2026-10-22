@@ -523,6 +523,77 @@ constexpr bool SitOutArrivalQualified(const SitOutArrivalFacts& f) noexcept {
     return f.serial && f.arena && f.load && f.generation == f.generationNow &&
            f.transition == f.transitionNow && f.load == f.loadNow && f.lifetimeExpired && f.inArena;
 }
+// VUH-2640 Leg A veil (lead #233): the arena load makes the friend its own boss copy, never bound to the host (Leg A
+// live attempt02, run 20261022-140457: netId 0, 300/300, idle at its spawn while the host fought its own). While
+// the sit-out the qualified arrival opened is open (pending or the duty), that copy is hidden with the game's own
+// obj_hide and shown again with obj_show. Presentation only: nothing is sent, and only this client's unbound local
+// copy is ever a candidate.
+//   Hide    the arrival's sit-out is open, its world (generation, transition, load) is still current, and the
+//           client's tracker holds exactly one living local spawn, the arena's boss, unbound, whose own handle
+//           names it; at most once per arrival.
+//   Show    the hidden actor's own handle still names it in the same transition and load, and the sit-out ended
+//           (the session ended and the seat resolves solo beside it, or the hold was refused) or it was bound.
+//   Forget  a load or transition replaced it (Leg B's load, any other), or its handle no longer names it: that
+//           actor is gone and is not ours to touch.
+// A pending transition waits: the copy lives until the load replaces it.
+struct SitOutVeilFacts {
+    bool client = false;             // this seat is a client
+    bool latched = false;            // a qualified Leg A arrival (F1's in-arena expiry never veils)
+    bool attempted = false;          // a hide already ran for this arrival
+    bool sitOutOpen = false;         // the outage duty is active, or still pending in the arrival's room
+    bool worldCurrent = false;       // generation, transition and load equal the arrival's; no transition pending
+    bool transitionPending = false;
+    bool loadCurrent = false;        // veiled: transition and load equal the ones it was hidden in
+    bool copyFound = false;          // the tracker's lone living local spawn is the arena's boss (object and type)
+    bool copyBound = false;          // that spawn (veiled: the hidden actor) matched a host enemy
+    bool handleOwn = false;          // its own handle names it now (veiled: the very handle hidden)
+    bool ready = false;              // the pinned native obj_hide/obj_show traps resolved, on the game thread
+    bool veiled = false;             // the veil hid a copy not yet shown or forgotten
+};
+// The client tracker's spawns, as the veil sees each: the arena's lone living boss or nothing (any second living,
+// present spawn, or a lone one that is not the boss object and type, is not a sit-out copy).
+struct VeilSpawn {
+    std::uintptr_t actor = 0;
+    std::uint32_t objectId = 0, objectType = 0;
+    bool present = false, living = false, bound = false;
+};
+template <class Spawns, class View>
+bool LoneBossCopy(const Spawns& spawns, std::uint32_t objectId, std::uint32_t objectType, View&& view,
+                  std::uintptr_t& actor, bool& bound) {
+    actor = 0; bound = false;
+    bool found = false;
+    VeilSpawn copy {};
+    for (const auto& s : spawns) {
+        const VeilSpawn v = view(s);
+        if (!v.present || !v.living) continue;
+        if (found) return false;
+        found = true; copy = v;
+    }
+    if (!found || !copy.actor || copy.objectId != objectId || copy.objectType != objectType) return false;
+    actor = copy.actor; bound = copy.bound;
+    return true;
+}
+enum class VeilStep : std::uint8_t { None, Hide, Show, Forget };
+constexpr VeilStep SitOutVeilStep(const SitOutVeilFacts& f, const char*& why) noexcept {
+    if (f.veiled) {
+        if (f.transitionPending) { why = "transition-pending"; return VeilStep::None; }
+        if (!f.loadCurrent || !f.handleOwn) { why = "gone"; return VeilStep::Forget; }
+        if (!f.ready) { why = "no-traps"; return VeilStep::None; }
+        if (f.copyBound) { why = "bound"; return VeilStep::Show; }
+        if (!f.client || !f.sitOutOpen) { why = "sit-out-ended"; return VeilStep::Show; }
+        why = "held"; return VeilStep::None;
+    }
+    if (!f.client) { why = "not-client"; return VeilStep::None; }
+    if (!f.latched) { why = "no-arrival"; return VeilStep::None; }
+    if (f.attempted) { why = "attempted"; return VeilStep::None; }
+    if (!f.sitOutOpen) { why = "not-sitting-out"; return VeilStep::None; }
+    if (f.transitionPending || !f.worldCurrent) { why = "stale"; return VeilStep::None; }
+    if (!f.copyFound) { why = "no-copy"; return VeilStep::None; }
+    if (f.copyBound) { why = "bound"; return VeilStep::None; }
+    if (!f.handleOwn) { why = "unowned"; return VeilStep::None; }
+    if (!f.ready) { why = "no-traps"; return VeilStep::None; }
+    why = "sit-out"; return VeilStep::Hide;
+}
 constexpr const char* DispositionName(Disposition d) noexcept {
     switch (d) {
     case Disposition::Solo: return "solo";

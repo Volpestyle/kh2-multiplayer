@@ -599,6 +599,12 @@ static int ApplyStatDeltaBody(void* actor, int delta, int idx, int reactFlag) {
 static void ReleaseDownedSpectate();
 // VUH-2640 (EnemyMirror.inl, included below): the last frame a host-brain-only boss was bound to the host.
 namespace enemymirror { std::uint32_t HostBrainBoundFrame() noexcept; }
+// VUH-2640 Leg A veil (ScriptMirror.inl, included below): the native obj_hide/obj_show on an actor by its own handle.
+namespace scriptmirror {
+bool VeilReady() noexcept;
+std::uint32_t VeilHandle(uintptr_t actor) noexcept;
+bool Veil(uintptr_t actor, std::uint32_t handle, bool hide) noexcept;
+}
 #include "DownedSpike.inl"
 
 static int __fastcall HookedApplyStatDelta(void* actor, int delta, int idx, int reactFlag) {
@@ -3759,6 +3765,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 downedspectate::Tick();
                 enemytarget::OnFrameStart(); // VUH-1515 (default off), after poses
                 scriptmirror::OnFrameStart(); // VUH-2252: host flush / client held calls, after enemysync
+                downedspike::VeilTick();      // VUH-2640 Leg A: after the tracker and the outage step
                 ProcessHitRequest();
                 BeginHandleFrame();
                 allyhit::SetFriendlyFire(enemysync::FriendlyFire()); // VUH-2421: host setting, synced

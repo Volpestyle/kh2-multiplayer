@@ -34,6 +34,7 @@
 #include "MissionMirror.hpp"
 #include "PartyRow.hpp"
 #include "BossLeave.hpp"
+#include "DownedReturn.hpp"
 
 #include "kh2coop/BossArenas.hpp"
 #include "kh2coop/EventScenes.hpp"
@@ -6651,6 +6652,17 @@ bool LatestSitOutArrival(SitOutArrival& out) noexcept {
     }
     out = g_sitOutArrival;
     return out.serial != 0;
+}
+
+bool FindSitOutBossCopy(std::uint16_t arenaId, SitOutBossCopy& out) noexcept {
+    out = {};
+    const auto* arena = bossarena::ById(arenaId);
+    if (!arena || CurrentRole() != Role::Client || !g_inst.live || g_inst.world != arena->location[0] ||
+        g_inst.room != arena->location[1] || g_inst.door != arena->location[2] || g_inst.map != arena->location[3] ||
+        g_inst.btl != arena->location[4] || g_inst.evt != arena->location[5]) return false;
+    return downedreturn::LoneBossCopy(g_inst.spawns, arena->bossObjectId, arena->bossObjectType, [](const Spawn& s) {
+        return downedreturn::VeilSpawn {s.actor, s.objectId, s.objectType, s.present, !s.killed && s.lastHp > 0, s.netId >= 0};
+    }, out.actor, out.bound);
 }
 
 SeatAuthority CaptureSeatAuthority() noexcept {

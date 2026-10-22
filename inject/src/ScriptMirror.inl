@@ -692,6 +692,19 @@ static std::uint32_t SmOwnHandle(uintptr_t actor) noexcept {
     return handle;
 }
 
+// VUH-2640 Leg A veil (DownedSpike's SitOutVeil): the game's own obj_hide (1/133) or obj_show (1/134) trap, the
+// client's pinned native as for a replayed call, on an actor by its own handle. B_EX100's class (vtable 0x5D2858
+// +0x80/+0x88: 0x419820/0x419830) sets +0x124 |= 0x300, or clears 0x100 and restores the 0x200 shadow bit from +0xB90.
+bool VeilReady() noexcept { return g_sm.requested && SmGameThread() && SmClientReady(); }
+std::uint32_t VeilHandle(uintptr_t actor) noexcept { return actor ? SmOwnHandle(actor) : 0; }
+bool Veil(uintptr_t actor, std::uint32_t handle, bool hide) noexcept {
+    const int i = R::FindTrap(1, hide ? 133 : 134);
+    if (i < 0 || !VeilReady() || !handle || SmOwnHandle(actor) != handle) return false;
+    const std::uint64_t none[4] {};
+    std::uint64_t result = 0;
+    return SmCallTrap(static_cast<std::size_t>(i), handle, none, result);
+}
+
 static void SmRcWindow(D::Record& r,const R::ReactionWindow& w,
                        const std::array<R::ReactionSeat,3>& seats) noexcept {
     r.facts|=D::Window;r.openedFrame=w.openedFrame;r.duration=w.duration;
