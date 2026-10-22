@@ -17,6 +17,7 @@ struct ScriptActorRole {
     uintptr_t actor{},source{},thread{};
     uintptr_t actorStatus{},actorObjentry{},sourceStatus{},sourceObjentry{};
     std::uint32_t heartbeat{},motion{UINT32_MAX};
+    std::uint32_t ownMotion{UINT32_MAX};  // VUH-2617: the own-bank motion this role installed on the local actor
     std::uint32_t actorHandle{},sourceHandle{},load{},transition{};
     std::uint32_t actorObjectId{};
     enemysync::DownedScope admittedScope{};
@@ -438,6 +439,7 @@ static bool SmOwnerInstallMotion(ScriptActorRole& role,R::OwnerCaptureSignature 
     } else {
         if(state!=ScriptOwnerMotionState::Own)return fail("not-own-bank");
         if(visual){role.visual.captured=false;role.visual.bank=0;role.visual.motion=R::BitsOf(capture.motion);}
+        else role.ownMotion=R::BitsOf(capture.motion);  // the release's continuity receipt for this exact install
         // The capture receipt remains for matching heartbeats and teardown;
         // its native state is now own-bank, so cleanup cannot reset it again.
     }
@@ -717,20 +719,21 @@ static bool SmOwnerReleaseRootCurrent(const ScriptActorRole& role) {
 // it; stage=post-cancel: after the original native coroutine cancel, metadata only; stage=refused: the release refused
 // its root, metadata only.
 static bool SmOwnerCameraSourceCurrent(const ScriptActorRole& role) noexcept;
-static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outcome,bool decisionCurrent,bool cancelled) {
-    if(g_smLocalReleaseLogs>=64)return;
-    ++g_smLocalReleaseLogs;
-    const auto roots=R::ProveLocalHoldRoots(decisionCurrent,cancelled,role.actor,role.actorHandle,role.source,
+static R::LocalHold SmReadReleaseHold(const ScriptActorRole& role,bool decisionCurrent,bool cancelled,R::LocalHoldRoots& roots) {
+    roots=R::ProveLocalHoldRoots(decisionCurrent,cancelled,role.actor,role.actorHandle,role.source,
         role.sourceHandle,[&role](std::uintptr_t at){
             return R::ListedHandle(at,at==role.actor?role.actorHandle:role.sourceHandle,
                 [](){uintptr_t head=0;return ReadHitTrace(g_exeBase+offsets::active_entity_list::HEAD,head)?head:uintptr_t{0};},
                 [](std::uint32_t handle){return SmDecode(handle);},
                 [](std::uintptr_t walked){return enemytarget::ListHandle(walked);});},
         [&role](){return SmOwnerCameraSourceCurrent(role)?role.source:std::uintptr_t{0};}); // driven table only, no reads
-    const char* stage=!decisionCurrent?"refused":cancelled?"post-cancel":"release";
-    const auto h=R::ReadLocalHold(roots.actor,role.actor,roots.source,role.source,
+    return R::ReadLocalHold(roots.actor,role.actor,roots.source,role.source,
         [](std::uintptr_t at,void* out,std::size_t size){return ReadHitTraceMemory(at,out,size);},
         [](std::uint32_t handle){return SmDecode(handle);});
+}
+static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outcome,const char* stage,const R::LocalHold& h) {
+    if(g_smLocalReleaseLogs>=64)return;
+    ++g_smLocalReleaseLogs;
     Log("[script-owner] local release stage=%s role=%u seat=%u outcome=%s actorRead=%u sourceRead=%u d48=%llX "
         "roleThread=%llX capture=%llX source=%llX bank=%llX sourceBank=%llX flags6C8=%X flags18C=%X parent=%X "
         "anchorOwn=%u motion=%u action=%X actionVt=%llX frame=%u (%u/64)",stage,role.resource,role.slot,
@@ -740,6 +743,35 @@ static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outc
         static_cast<unsigned long long>(h.bank),static_cast<unsigned long long>(h.sourceBank),h.flags6C8,h.flags18C,
         h.parent,h.actorRead && h.anchor==role.actor+0x80?1u:0u,h.motion,h.actionHandle,
         static_cast<unsigned long long>(h.actionVtable?h.actionVtable-g_exeBase:0),g_frameCounter,g_smLocalReleaseLogs);
+}
+// VUH-2617: a friend local-seat release that did not clean, and whose own-bank install is still exactly what the actor
+// shows (rules::DecideOwnMotionReset), sets the actor's own idle motion through the same pinned obj_set_motion, once.
+// Every fact comes from the release's own copy and the proven pre-native snapshot; one native call, nothing read after.
+static unsigned g_smOwnMotionResetLogs=0;
+static void SmOwnerResetOwnMotion(const ScriptActorRole& released,R::ReleaseCleanup outcome,const R::ReleaseCleanupFacts& f,
+                                  bool cancelled,const R::LocalHoldRoots& roots,const R::LocalHold& h) {
+    R::OwnMotionResetFacts r{};
+    r.friendLocal=true;r.outcome=outcome;r.releaseStage=f.current && !cancelled;r.field=f.field;
+    enemysync::DownedScope scope;
+    r.sessionCurrent=released.slot<3 && SmOwnerScope(scope) && scope.epoch==released.epoch &&
+        scope.connections[released.slot]==released.connection && enemysync::ScriptCameraScopeCurrent(released.admittedScope);
+    r.actorProven=roots.actor;r.actorRead=h.actorRead;
+    r.roleFree=released.slot<3 && !g_smRoles[released.slot].resource && !g_smOwnerCleanup[released.slot].role.resource;
+    r.installed=released.ownMotion;r.motion=h.motion;r.thread=h.thread;r.capture=h.capture;r.bank=h.bank;r.parent=h.parent;
+    r.anchorOwn=h.actorRead && h.anchor==released.actor+0x80;
+    const char* why="";
+    const bool reset=R::DecideOwnMotionReset(r,why);
+    bool ok=false;
+    if(reset) {
+        const auto handle=released.actorHandle;
+        ok=SmOwnerNativeMotion(0,handle,{R::Tagged(R::kTagInt,R::kOwnIdleMotion),SmOwnerFloat(0)},false,false);
+    }
+    if((reset || r.installed!=UINT32_MAX) && g_smOwnMotionResetLogs<32) {
+        ++g_smOwnMotionResetLogs;
+        Log("[script-owner] local own-motion %s role=%u seat=%u why=%s installed=%u motion=%u native=%u frame=%u (%u/32)",
+            reset?"reset":"kept",released.resource,released.slot,why,r.installed,r.motion,ok?1u:0u,g_frameCounter,
+            g_smOwnMotionResetLogs);
+    }
 }
 // The release's native detach/idle, decided by rules::DecideReleaseCleanup from the same reads, in the same order and
 // on the same branches as before (the coroutine cancel stays where it was). A friend local-seat release then logs.
@@ -778,7 +810,12 @@ static void SmOwnerCleanupPlayer(const ScriptActorRole& released) {
         }
         outcome=R::DecideReleaseCleanup(f);
     }
-    if(friendLocal)SmLogLocalRelease(released,outcome,f.current,cancelled);
+    if(friendLocal) {
+        R::LocalHoldRoots roots{};
+        const auto h=SmReadReleaseHold(released,f.current,cancelled,roots);
+        SmLogLocalRelease(released,outcome,!f.current?"refused":cancelled?"post-cancel":"release",h);
+        if(outcome!=R::ReleaseCleanup::Cleaned)SmOwnerResetOwnMotion(released,outcome,f,cancelled,roots,h);
+    }
     if(outcome==R::ReleaseCleanup::Cleaned) {
         (void)SmOwnerNativePlayer(released.actor,0x42C5F0);
         (void)SmOwnerNativePlayer(released.actor,0x42D0E0);

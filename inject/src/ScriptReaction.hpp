@@ -434,6 +434,35 @@ LocalHoldRoots ProveLocalHoldRoots(bool decisionCurrent,bool cancelled,std::uint
     roots.source=source && sourceHandle && listed(source)==sourceHandle && driven()==source;
     return roots;
 }
+// VUH-2617 (bots05 attempt04, run 20261022-112719, friend frame 17301): a friend local-seat role installed an own-bank
+// motion on the friend's own actor (the non-borrowed path through obj_set_motion 0x42B320, which zeroes +2B0/+2B8 and
+// restores the anchor), and its release stopped at `guards`: no coroutine, no +2B0 source, no attachment. The actor
+// kept that script motion (263, a motion the player controller does not replace) in ACTION_IDLE for the rest of the
+// fight. On the host the boss script sets the next motion; on the friend nothing did. The release now sets the actor's
+// own idle motion once, only when the actor still shows exactly the motion this role installed there, in own-bank
+// state, held by nothing else, in the role's admitted session.
+struct OwnMotionResetFacts {
+    bool friendLocal{},releaseStage{},sessionCurrent{},field{},actorProven{},actorRead{},roleFree{},anchorOwn{};
+    ReleaseCleanup outcome{ReleaseCleanup::NotCurrent};
+    std::uint32_t installed{0xFFFFFFFFu},motion{0xFFFFFFFFu},parent{};
+    std::uintptr_t thread{},capture{},bank{};
+};
+constexpr std::uint32_t kOwnIdleMotion=0;  // MotionSet IDLE
+inline bool DecideOwnMotionReset(const OwnMotionResetFacts& f,const char*& why) noexcept {
+    if(!f.friendLocal){why="not-friend-local";return false;}
+    if(f.outcome==ReleaseCleanup::Cleaned){why="cleaned";return false;}
+    if(!f.releaseStage){why="not-release-stage";return false;}
+    if(f.installed==0xFFFFFFFFu){why="no-own-install";return false;}
+    if(!f.sessionCurrent){why="session";return false;}
+    if(!f.field){why="not-field";return false;}
+    if(!f.actorProven || !f.actorRead){why="unproven";return false;}
+    if(!f.roleFree){why="role-current";return false;}
+    if(f.thread || f.parent){why="held";return false;}
+    if(f.capture || f.bank || !f.anchorOwn){why="not-own-bank";return false;}
+    if(f.motion!=f.installed){why="moved-on";return false;}
+    if(f.installed==kOwnIdleMotion){why="already-idle";return false;}
+    why="own-install-left";return true;
+}
 inline const char* ReleaseCleanupName(ReleaseCleanup c) noexcept {
     switch(c) {
     case ReleaseCleanup::NotCurrent: return "not-current";

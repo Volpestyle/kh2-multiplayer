@@ -301,5 +301,51 @@ int main() {
         h=line(true);
         check(reads.empty() && !h.actorRead,"post-cancel stays metadata only");
     }
+    // bots05 attempt04 (run 20261022-112719), friend role 2147483676 at frame 17301, from its release line:
+    // outcome=guards d48=0 capture=0 bank=0 parent=0 anchorOwn=1 motion=263 action ACTION_IDLE. The role had installed
+    // motion 263 on the friend's own actor through the own-bank path; nothing reset it.
+    {
+        R::OwnMotionResetFacts left{};
+        left.friendLocal=true;left.outcome=R::ReleaseCleanup::Guards;left.releaseStage=true;left.sessionCurrent=true;
+        left.field=true;left.actorProven=true;left.actorRead=true;left.roleFree=true;left.anchorOwn=true;
+        left.installed=263;left.motion=263;
+        const char* why="";
+        const auto is=[&](R::OwnMotionResetFacts f,bool want,const char* reason){
+            return R::DecideOwnMotionReset(f,why)==want && std::string(why)==reason;};
+        check(is(left,true,"own-install-left"),"attempt04: this role's own-bank 263 still on the actor at a guards release: reset to idle once");
+        auto f=left;f.friendLocal=false;
+        check(is(f,false,"not-friend-local"),"the host's own actor and other seats are never reset");
+        f=left;f.outcome=R::ReleaseCleanup::Cleaned;
+        check(is(f,false,"cleaned"),"a release whose native detach/idle ran is left to it");
+        f=left;f.releaseStage=false;
+        check(is(f,false,"not-release-stage"),"post-cancel or refused releases never act");
+        f=left;f.installed=0xFFFFFFFFu;
+        check(is(f,false,"no-own-install"),"a role that installed nothing on the actor proves no continuity");
+        f=left;f.sessionCurrent=false;
+        check(is(f,false,"session"),"a replaced or unknown session, connection or epoch: nothing (scope reset releases)");
+        f=left;f.field=false;
+        check(is(f,false,"not-field"),"inside an event or cutscene: nothing");
+        f=left;f.actorProven=false;
+        check(is(f,false,"unproven"),"an unproven actor root: nothing");
+        f=left;f.actorRead=false;
+        check(is(f,false,"unproven"),"an unreadable actor: nothing");
+        f=left;f.roleFree=false;
+        check(is(f,false,"role-current"),"a role current (or a camera cleanup pending) for the seat owns the actor");
+        f=left;f.thread=0x1234;
+        check(is(f,false,"held"),"a script coroutine holds the actor");
+        f=left;f.parent=0x10;
+        check(is(f,false,"held"),"an attachment holds the actor");
+        f=left;f.capture=0x7FF6F8F1FD10;
+        check(is(f,false,"not-own-bank"),"a borrowed capture is the detach/idle path's, not this one");
+        f=left;f.bank=0x7FF6F7D340C0;
+        check(is(f,false,"not-own-bank"),"another bank on the actor: not this install");
+        f=left;f.anchorOwn=false;
+        check(is(f,false,"not-own-bank"),"a foreign anchor: not this install");
+        f=left;f.motion=252;
+        check(is(f,false,"moved-on"),"the actor moved on to another motion: never overwritten");
+        f=left;f.installed=0;f.motion=0;
+        check(is(f,false,"already-idle"),"an installed idle needs no reset");
+        check(R::kOwnIdleMotion==0,"the reset motion is MotionSet IDLE");
+    }
     return errors?1:0;
 }
