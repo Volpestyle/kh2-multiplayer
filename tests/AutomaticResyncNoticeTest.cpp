@@ -145,6 +145,23 @@ void returningSeatControls() {
     { ReturningPolicy p; p.Return(); unsigned calls = 0; bool escaped = false; try { p.policy.Pump(p.current, true, [] { return false; }, [&](auto, auto*) -> bool { ++calls; throw std::runtime_error("submit failure"); }); } catch (const std::runtime_error&) { escaped = true; } p.Pump(); check(escaped && calls == 1 && !p.sends && p.policy.PendingCount() == 1, "throwing generator preserves exception and spends original epoch before call"); ++p.current.room.epoch; p.Pump(); check(p.sends == 1, "new epoch may submit after earlier generator exception"); }
     { ReturningPolicy p; p.Return(); p.eligible = false; p.Pump(); p.Pump(); check(!p.sends && p.policy.PendingCount() == 1, "unsupported native host state retains hint without submission"); p.eligible = true; p.busy = true; p.Pump(); check(!p.sends, "foreign active transaction defers rather than submits"); p.busy = false; p.Pump(); check(p.sends == 1, "fresh complete current context drains a deferred hint once"); }
     { ReturningPolicy p; p.Return(); const auto field = p.current.room; const auto& scene = eventscenes::Scenes.front(); p.current.room = {field.epoch, scene.world, scene.room, static_cast<std::uint8_t>(scene.door), scene.map, scene.battle, scene.event}; p.Pump(); check(!p.sends && p.policy.PendingCount() == 1, "known event-only scene cannot be submitted even with caller eligible"); p.current.room = field; ++p.current.room.epoch; p.Pump(); check(p.sends == 1, "later qualified field permits original returning hint"); }
+    // VUH-2617 (Quill's r1 controls): a returning seat waits, epoch unspent, in each scene of the post-Thorn
+    // chain (bot04, decoded from hex rooms), and the same epoch's later field still submits.
+    { const std::uint16_t chain[][6] {{2, 0x00, 0, 51, 51, 51}, {2, 0x04, 0, 83, 83, 83}, {2, 0x02, 0, 67, 67, 67},
+                                      {2, 0x06, 0, 168, 168, 168}, {2, 0x02, 0, 167, 167, 167}, {2, 0x15, 0, 142, 142, 142}};
+      unsigned deferred = 0, laterField = 0;
+      for (const auto& r : chain) {
+          ReturningPolicy p; p.Return();
+          const auto field = p.current.room;
+          p.current.room = {field.epoch, static_cast<std::uint8_t>(r[0]), static_cast<std::uint8_t>(r[1]),
+                            static_cast<std::uint8_t>(r[2]), r[3], r[4], r[5]};
+          p.Pump();
+          deferred += !p.sends && p.policy.PendingCount() == 1;
+          p.current.room = field; p.Pump();
+          laterField += p.sends == 1;
+      }
+      check(deferred == 6 && laterField == 6,
+            "every post-Thorn scene defers a returning seat without spending its epoch; the later field submits"); }
     for (unsigned mode = 0; mode < 7; ++mode) {
         ReturningPolicy p; p.Return(); auto mismatch = p.current;
         if (mode == 0) mismatch.binding.selfSlot = 1;

@@ -34,13 +34,15 @@ inline constexpr std::array<Scene, 13> Scenes {{
     {2, 19, 0, 3, 0, 1, "tt13-basement-entry"},
     // VUH-2617, run 20261021-192441 (bot04): the host's chain after Thorn's victory event 315, each an
     // event-only load started by the previous one's native start; the friend's own 315 exit is the first.
-    // The chain's next load, 02/01 program 54, was still in its event when the run ended: not a row yet.
+    // Logged in hex (rooms) as 02/00 51 -> 02/04 83 -> 02/02 67 -> 02/06 168 -> 02/02 167 -> 02/15 142;
+    // programs are logged decimal. Room 0x15 is 21. The chain's next load, 02/01 program 54, was still in
+    // its event when the run ended: not a row yet.
     {2, 0, 0, 51, 51, 51, "tt00-after-thorn"},
     {2, 4, 0, 83, 83, 83, "tt04-after-thorn"},
     {2, 2, 0, 67, 67, 67, "tt02-after-thorn-67"},
     {2, 6, 0, 168, 168, 168, "tt06-after-thorn"},
     {2, 2, 0, 167, 167, 167, "tt02-after-thorn-167"},
-    {2, 15, 0, 142, 142, 142, "tt15-after-thorn"},
+    {2, 21, 0, 142, 142, 142, "tt15-after-thorn"},
 }};
 
 inline const Scene* Qualified(std::uint16_t world, std::uint16_t room, std::uint16_t door, std::uint16_t map,
