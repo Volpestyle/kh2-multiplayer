@@ -1,6 +1,6 @@
 {
   "name": "net_forced_resync_outsider_seatstate",
-  "description": "VUH-2675 D14: three seats converge in empty GoA, the host forces a single-target resync of Friend1 only, then Friend2 (outside the resync) must keep admitting Friend1's SeatState. Friend2's runtime must log Friend1's new delivery serial (2: the first resync of a fresh connection) from the relay's plan notice, without being fenced itself. Friend2's DLL must log new accepted owner=1 seats after convergence, with the host as the control. The scenario is otherwise net_forced_resync_smoke's exact checks (Converged native acknowledgment, relay and host terminal, two complete statehash samples, census). It does not exercise StageEnd (no event here), and it cannot show Friend2 refusing an old-serial envelope: the relay refuses a stale source serial first (SessionHost source-delivery), so that clause stays with ForcedResyncTest outsiderAdmitsRecoveredSeat.",
+  "description": "VUH-2675 D14: three seats converge in empty GoA, the host forces a single-target resync of Friend1 only, then Friend2 (outside the resync) must keep admitting Friend1's SeatState. Friend2's runtime must log Friend1's new delivery serial (2: the first resync of a fresh connection) from the relay's plan notice, without being fenced itself. Friend2's DLL must log new accepted owner=1 seats after that notice is verified (the baselines are taken after it) and after convergence, with the host and Friend1 as controls. The exact-one and outsider-only serial checks repeat at the end of the run. The scenario is otherwise net_forced_resync_smoke's exact checks (Converged native acknowledgment, relay and host terminal, two complete statehash samples, census). It does not exercise StageEnd (no event here), and it cannot show Friend2 refusing an old-serial envelope: the relay refuses a stale source serial first (SessionHost source-delivery), so that clause stays with ForcedResyncTest outsiderAdmitsRecoveredSeat.",
   "playerDefaults": true,
   "steps": [
     {
@@ -113,21 +113,6 @@
       "message": "the resync targeted Friend1 only"
     },
     {
-      "do": "save",
-      "as": "f2_owner1_converged",
-      "expr": "log_count('[prologue] seat accepted owner=1', 2)"
-    },
-    {
-      "do": "save",
-      "as": "host_owner1_converged",
-      "expr": "log_count('[prologue] seat accepted owner=1', 0)"
-    },
-    {
-      "do": "save",
-      "as": "f1_owner2_converged",
-      "expr": "log_count('[prologue] seat accepted owner=2', 1)"
-    },
-    {
       "do": "wait_until",
       "expr": "'[Runtime] peer delivery slot=1 serial=' in runtime_log(2)",
       "timeoutMs": 10000,
@@ -142,6 +127,21 @@
       "do": "assert",
       "expr": "'peer delivery slot=' not in runtime_log(1) and 'peer delivery slot=' not in runtime_log(0)",
       "message": "the notice path ran only on the outsider (the target and host take the plan itself)"
+    },
+    {
+      "do": "save",
+      "as": "f2_owner1_notified",
+      "expr": "log_count('[prologue] seat accepted owner=1', 2)"
+    },
+    {
+      "do": "save",
+      "as": "host_owner1_notified",
+      "expr": "log_count('[prologue] seat accepted owner=1', 0)"
+    },
+    {
+      "do": "save",
+      "as": "f1_owner2_notified",
+      "expr": "log_count('[prologue] seat accepted owner=2', 1)"
     },
     {
       "do": "statehash_check",
@@ -180,19 +180,19 @@
     },
     {
       "do": "wait_until",
-      "expr": "log_count('[prologue] seat accepted owner=1', 2) >= saved['f2_owner1_converged'] + 3",
+      "expr": "log_count('[prologue] seat accepted owner=1', 2) >= saved['f2_owner1_notified'] + 3",
       "timeoutMs": 20000,
       "pollMs": 1000
     },
     {
       "do": "wait_until",
-      "expr": "log_count('[prologue] seat accepted owner=1', 0) >= saved['host_owner1_converged'] + 3",
+      "expr": "log_count('[prologue] seat accepted owner=1', 0) >= saved['host_owner1_notified'] + 3",
       "timeoutMs": 20000,
       "pollMs": 1000
     },
     {
       "do": "wait_until",
-      "expr": "log_count('[prologue] seat accepted owner=2', 1) >= saved['f1_owner2_converged'] + 3",
+      "expr": "log_count('[prologue] seat accepted owner=2', 1) >= saved['f1_owner2_notified'] + 3",
       "timeoutMs": 20000,
       "pollMs": 1000
     },
@@ -215,6 +215,16 @@
       "do": "capture",
       "instance": 2,
       "name": "outsider_resync_friend2"
+    },
+    {
+      "do": "assert",
+      "expr": "[line.split('serial=')[1].split(' ')[0] for line in runtime_log(2).splitlines() if '[Runtime] peer delivery slot=' in line] == ['2']",
+      "message": "at the end of the run Friend2 still recorded exactly one peer serial move: Friend1 to 2"
+    },
+    {
+      "do": "assert",
+      "expr": "'peer delivery slot=' not in runtime_log(1) and 'peer delivery slot=' not in runtime_log(0)",
+      "message": "at the end of the run neither the host nor Friend1 logged a peer serial move"
     }
   ]
 }

@@ -414,9 +414,13 @@ Friend2 sits outside it and must keep admitting Friend1's traffic:
   `[Runtime] peer delivery slot=1 serial=2`. Delivery serials start at 1 and only
   a resync plan moves them, so 2 is this resync. Neither the host nor Friend1
   logs one: they take the plan itself.
-- After the smoke's own convergence evidence, Friend2's DLL accepts at least three
-  more owner=1 seats. The host's owner=1 and Friend1's owner=2 seats are the
-  controls. Friend2 logs no StageEnd envelope drop.
+- The admission baselines are taken only after Friend2's notice and the
+  outsider-only check are verified. After that, and after the smoke's own
+  convergence evidence, Friend2's DLL accepts at least three more owner=1 seats.
+  The host's owner=1 and Friend1's owner=2 seats are the controls. Friend2 logs
+  no StageEnd envelope drop.
+- After the captures, the run repeats the exactly-one and outsider-only serial
+  checks, so a later raise also fails.
 
 It does not exercise StageEnd, because there is no event in this room. It cannot
 show Friend2 refusing an old-serial envelope: the relay refuses a stale source
