@@ -577,6 +577,62 @@ class ReflectStanceTest(unittest.TestCase):
         self.assertTrue(pad.tap("react"))
         self.assertEqual(pad.reflect_at, pressed, "the 432 press edge")
 
+    # r6b (Quill r6 R1): learned moves never beat the stance, inside or after the no-stick window.
+    def learned_near(self, pilot):
+        boss = thorn(202, time=420)
+        pilot.thorn_policy.observe(boss, own(20, z=400), 98.0)
+        pilot.thorn_policy.observe(boss, own(17, z=400), 98.1)
+        pilot.thorn_policy.observe(boss, own(14, z=400), 98.2)
+        self.assertEqual(pilot.thorn_policy.danger(202, 6), "near", "two near hits taught 202 band 6 as near")
+        return boss
+
+    def learned_opening(self, pilot, z):
+        boss = thorn(202, time=420, hp=300)
+        pilot.thorn_policy.observe(boss, own(5, z=z), 98.0)
+        boss = thorn(202, time=421, hp=265)
+        pilot.thorn_policy.observe(boss, own(5, z=z), 98.1)
+        self.assertTrue(pilot.thorn_policy.opening(boss), "35 HP lost in this 202 visit taught an opening")
+        return boss
+
+    def test_a_learned_near_band_never_moves_the_seat_inside_the_window(self):
+        pilot, stats = self.pilot(), {}
+        boss = self.learned_near(pilot)
+        pilot.kb.reflect_at = self.clock[0] - 0.1
+        self.assertTrue(pilot.combat_turn(own(14, z=400), [boss], boss, 400, 300, stats))
+        self.assertEqual((pilot.kb.log, stats.get("dodges")), ([()], None), "still: no sidestep, no jump")
+
+    def test_a_learned_opening_never_moves_the_seat_inside_the_window(self):
+        pilot, stats = self.pilot(), {}
+        boss = self.learned_opening(pilot, -850)
+        pilot.kb.reflect_at = self.clock[0] - 0.1
+        self.assertTrue(pilot.combat_turn(own(5, z=-850), [boss], boss, 1650, 300, stats))
+        self.assertEqual((pilot.kb.log, stats.get("commits")), ([()], None), "still: no approach toward Thorn")
+
+    def test_after_the_window_the_stance_still_beats_learned_moves(self):
+        pilot, stats = self.pilot(), {}
+        boss = self.learned_opening(pilot, -850)
+        pilot.kb.reflect_at = self.clock[0] - 0.6
+        self.assertTrue(pilot.combat_turn(own(5, z=-850), [boss], boss, 1650, 300, stats))
+        self.assertEqual((pilot.kb.log, stats.get("commits")), ([()], None), "in range: the stance holds")
+        near = self.pilot()
+        boss = self.learned_near(near)
+        near.kb.reflect_at = self.clock[0] - 0.6
+        stats = {}
+        self.assertTrue(near.combat_turn(own(14, z=400), [boss], boss, 400, 300, stats))
+        self.assertEqual((near.kb.log, stats.get("dodges")), ([("down",)], None), "out of range: straight out, no sidestep")
+
+    def test_outside_the_gate_learned_moves_are_r5s(self):
+        pilot, stats = self.pilot(), {}
+        boss = self.learned_opening(pilot, -850)
+        pilot.thorn_policy.reflect_seen_at = float("-inf")       # not targeted
+        self.assertTrue(pilot.combat_turn(own(5, z=-850), [boss], boss, 1650, 300, stats))
+        self.assertEqual((pilot.kb.log, stats.get("commits")), ([("up",)], 1), "not targeted: r5's opening approach")
+        near, stats = self.pilot(), {}
+        boss = self.learned_near(near)
+        self.assertTrue(near.combat_turn(own(14, z=400), [boss], boss, 400, 300, stats))
+        self.assertEqual(stats.get("dodges"), 1, "not targeted: r5's near-band sidestep")
+        self.assertTrue(any("jump" in e for e in near.kb.log if e and e[0] != "tap"))
+
     def test_every_other_phase_is_r5_behavior(self):
         """The same states through r6 with the stance on and with it off (r5's paths): identical inputs, results,
         stats and logs, outside the stance (every motion and band but 202's 6-7, and 6-7 for a seat not targeted)."""

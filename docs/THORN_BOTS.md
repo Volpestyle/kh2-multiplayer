@@ -130,8 +130,12 @@ install detector above; no old wrapper or old movie baseline is reused.
      out or in to get there. It presses 432 at the shared 0.2 s cadence.
    - **No stick input** while 432 is on screen, or within `reflectStillSec` (0.5 s) of a 432 press. The pad
      records that press edge, the base reaction branch's included.
-   - **Precedence.** It takes precedence over keep-away, so a low targeted seat reflects too, as bot01's
-     host did at 1–5 HP.
+   - **Precedence (r6b, Quill r6).** While the gate holds, the stance turn comes before the learned opening,
+     the near-band sidestep and keep-away, so a low targeted seat reflects too, as bot01's host did at 1–5 HP.
+     The reason is a loop: about 6 reflected orbs in one 202 visit cost Thorn the `openingLearn` 30 HP and
+     would teach 202 as an opening, pulling the seat off its stand-off toward Thorn. Two near hits would also
+     teach band 6 as near and trigger a sidestep. Outside the gate, the learned moves are r5's. Revive, event
+     and reaction handling still run first.
    - **The other seat** never takes the stance and stays on r5's behavior, healthy for revives.
    - **Elsewhere.** Every other motion and band is r5's. A grid of 232 states through the actual r5
      `thorn.py` and r6 gives identical inputs, results and logs.

@@ -678,6 +678,24 @@ class Pilot(OriginalPilot):
         if thorn is None:
             return False
         point = s["playerPos"]
+        if stance:
+            # r6 reflect stance: stand still in range (and within reflectStillSec of a press, wherever this seat
+            # stands); otherwise move straight out or in to the range, never around. r6b (Quill r6 R1): while the
+            # stance holds it comes before the learned opening and the near-band sidestep, so neither can move
+            # the seat inside the no-stick window, nor pull it off its stand-off (reflected chip would itself
+            # teach 202 as an opening). Revive, event and reaction handling all run earlier.
+            still = now - getattr(self.kb, "reflect_at", float("-inf")) < policy.reflect_still
+            goal = None if still else policy.reflect_goal(s, thorn)
+            keys = set() if goal is None else base.steer({**s, "pos": point}, goal)
+            self.kb.hold(keys)
+            time.sleep(0.1)
+            policy.counters["reflectHolds" if goal is None else "reflectMoves"] += 1
+            stats["reflect"] = stats.get("reflect", 0) + 1
+            if now - self.reflect_logged_at >= 2.0:
+                self.reflect_logged_at = now
+                self.write("thorn_reflect", hp=s["hp"], distance=round(policy.distance(s, thorn), 1),
+                           band=policy.band_of(thorn), still=still, keys=sorted(keys))
+            return True
         if policy.opening(thorn):
             # An opening: approach and swing, with no dodge, keep-away or escape (the base's pinned escape
             # would run). Reactions still break the burst.
@@ -711,21 +729,6 @@ class Pilot(OriginalPilot):
                        distance=round(policy.distance(s, thorn), 1), side=policy.side, keys=sorted(keys),
                        learned=policy.learned(), hp=s["hp"])
             policy.took_dodge(now)
-            return True
-        if stance:
-            # r6 reflect stance: stand still in range (and within reflectStillSec of a press, wherever this seat
-            # stands); otherwise move straight out or in to the range, never around.
-            still = now - getattr(self.kb, "reflect_at", float("-inf")) < policy.reflect_still
-            goal = None if still else policy.reflect_goal(s, thorn)
-            keys = set() if goal is None else base.steer({**s, "pos": point}, goal)
-            self.kb.hold(keys)
-            time.sleep(0.1)
-            policy.counters["reflectHolds" if goal is None else "reflectMoves"] += 1
-            stats["reflect"] = stats.get("reflect", 0) + 1
-            if now - self.reflect_logged_at >= 2.0:
-                self.reflect_logged_at = now
-                self.write("thorn_reflect", hp=s["hp"], distance=round(policy.distance(s, thorn), 1),
-                           band=policy.band_of(thorn), still=still, keys=sorted(keys))
             return True
         goal = policy.kite(s, thorn, self.peer_vitals(), now)
         if goal is None:
