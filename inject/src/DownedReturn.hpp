@@ -414,6 +414,10 @@ constexpr bool OutageBossQualified(const BossReceipt& r, const OutageExpiryFacts
 // a downing in another room or after a recovery is never promoted to the outage). Still pending, same room
 // and lifetime, and a lethal hit downed it meanwhile: that downing is the outage (Promote).
 enum class OutageStart : std::uint8_t { Idle, Wait, Begin, Promote, Drop };
+// A logical hold keeps engine HP at 1. The per-frame undo of a heal that bypassed the stat funnel (an HP orb)
+// is computed from the HP read now, after any hold begun earlier in the same frame: never from the frame's
+// opening snapshot, which still has the pre-hold HP (VUH-2640 L1: 20 -> 1 by the hold, then 1 - 20 -> 0).
+constexpr int HeldHpUndo(bool logical, int hpNow) noexcept { return logical && hpNow > 1 ? 1 - hpNow : 0; }
 constexpr OutageStart OutageStartStep(bool pending, bool sameRoom, bool lifetimeExpired, bool downedNow,
                                       bool ready) noexcept {
     if (!pending) return OutageStart::Idle;

@@ -1407,12 +1407,17 @@ static void Tick(uintptr_t head) {
                     __except (EXCEPTION_EXECUTE_HANDLER) { Log("[downed] full party down: native death FAULT"); }
                 }
             }
-            if (g_down.logical && s.hp > 1) {
-                // An HP orb heals outside the 3D2EB0 funnel (run 20261019-131234: 1 -> 3 with no stat call).
-                // Not a revive: put it back to 1 through the funnel itself.
+            // An HP orb heals outside the 3D2EB0 funnel (run 20261019-131234: 1 -> 3 with no stat call).
+            // Not a revive: put it back to 1 through the funnel itself, from the HP read now. VUH-2640: an outage
+            // sit-out begins its hold earlier in this frame (20 -> 1), so the frame-start s.hp is stale; undoing
+            // from it took 19 more and ran the native death (L1 live, run 20261022-085607). Unreadable: no undo.
+            int heldHp = 0;
+            const int undo = g_down.logical && s.status && ReadHitTrace(s.status, heldHp)
+                ? downedreturn::HeldHpUndo(true, heldHp) : 0;
+            if (undo) {
                 const auto apply = reinterpret_cast<PFN_ApplyStatDelta>(g_exeBase + RVA_APPLY_STAT);
                 g_down.reviving = true;
-                __try { (void)apply(reinterpret_cast<void*>(s.actor), 1 - s.hp, 0, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                __try { (void)apply(reinterpret_cast<void*>(s.actor), undo, 0, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 g_down.reviving = false;
                 ++g_down.healsUndone;
             }

@@ -296,6 +296,20 @@ int main() {
       CHECK(OutageStartStep(true, true, false, true, false) == OutageStart::Drop);
       CHECK(std::string_view(DispositionName(Disposition::Outage)) == "outage"); }
 
+    // VUH-2640 L1 live (run 20261022-085607, friend frame 13158): the frame Tick opens with a snapshot (HP 20),
+    // the outage sit-out begins its hold (BeginLogicalHold: 1 - 20, HP 1), and later in the same frame the
+    // undo of a funnel-bypassing heal runs. From the snapshot it took 1 - 20 again (HP 0, native Game Over);
+    // from the HP read now it takes nothing. A real heal while held is still undone to 1.
+    { const int snapshot = 20;
+      int engineHp = snapshot;
+      bool logical = false;
+      if (OutageStartStep(true, true, true, false, true) == OutageStart::Begin) { logical = true; engineHp += 1 - snapshot; }
+      CHECK(logical && engineHp == 1);
+      engineHp += HeldHpUndo(logical, engineHp);
+      CHECK(engineHp == 1);                         // was 0: the second -19 ran the native death
+      CHECK(HeldHpUndo(true, 3) == -2);             // an HP orb 1 -> 3 while held
+      CHECK(HeldHpUndo(true, 1) == 0 && HeldHpUndo(false, 20) == 0 && HeldHpUndo(true, 0) == 0); }
+
     // Round 3 (Quill r2 P1-1/P1-2): the outage duty ends only on positive evidence. A recovery Bootstrap
     // completed since the expiry (its serial changed from the expiry's anchor) resolves it as the outage,
     // wherever the owner stands; networking stopped for good resolves it solo; anything else holds, and a
