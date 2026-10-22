@@ -384,23 +384,42 @@ int main() {
         // Quill r1 on 18b15fa: idle follows only a successful detach and a fresh admission rebuilt after it. Each run
         // records its calls in order; nothing may follow idle.
         std::vector<std::string> calls;
-        const auto run=[&](bool release,bool detachOk,R::HeldReleaseFacts fresh,bool idleOk=true){
+        const auto run=[&](bool release,bool detachOk,R::HeldReleaseFacts fresh,bool idleOk=true,bool standOk=true){
             calls.clear();
             return R::RunHeldPair(release,[&](){calls.push_back("detach");return detachOk;},
-                [&](){calls.push_back("rebuild");return fresh;},[&](){calls.push_back("idle");return idleOk;});};
+                [&](){calls.push_back("rebuild");return fresh;},[&](){calls.push_back("idle");return idleOk;},
+                [&](std::uint32_t motion){calls.push_back("stand"+std::to_string(motion));return standOk;});};
         const auto order=[&](std::initializer_list<const char*> want){
             return std::vector<std::string>(want.begin(),want.end())==calls;};
         auto p=run(true,true,held);
-        check(p.detached && p.idled && std::string(p.idleWhy)=="held-guards" && order({"detach","rebuild","idle"}),
-              "detach, a fresh admission, then idle, and idle is the last call (no read after it)");
+        check(p.detached && p.idled && p.stood && std::string(p.idleWhy)=="held-guards" &&
+              order({"detach","rebuild","idle","stand0"}),
+              "detach, a fresh admission, idle, then the own stand motion 0 once, last (no read after idle)");
+        // bots05 attempt07 (run 20261022-150823, friend frame 15074): role 2147483663, own motion 262 left at a guards
+        // release (capture 0, bank 0, parent 0, d48 0); detach=1 idle=1 left it in 262. The held release stands it.
+        {   auto a07=held;a07.capture=0;a07.bank=0;a07.parent=0;a07.thread=0;
+            const char* w="";
+            const auto q=run(R::DecideHeldRelease(a07,w),true,a07);
+            check(std::string(w)=="held-guards" && q.stood && order({"detach","rebuild","idle","stand0"}),
+                  "attempt07's guards release in its own 262: the pair, then stand 0, once"); }
+        // The ten cleaned releases of attempt07 (capture and bank of the source, outcome cleaned): the release path runs
+        // its own pair; the held path refuses them, so they never get a stand motion.
+        {   auto cleaned=held;cleaned.outcome=R::ReleaseCleanup::Cleaned;cleaned.capture=thorn;cleaned.bank=thornBank;
+            const char* w="";
+            const auto q=run(R::DecideHeldRelease(cleaned,w),true,held);
+            check(std::string(w)=="not-guards" && !q.stood && calls.empty(),"a cleaned release: no held call, no stand"); }
+        p=run(true,true,held,false);
+        check(p.detached && !p.idled && !p.stood && order({"detach","rebuild","idle"}),"idle failed: no stand motion");
+        p=run(true,true,held,true,false);
+        check(p.idled && !p.stood && order({"detach","rebuild","idle","stand0"}),"a failed stand is reported, not retried");
         p=run(false,true,held);
-        check(!p.detached && !p.idled && calls.empty(),"a refused release runs nothing");
+        check(!p.detached && !p.idled && !p.stood && calls.empty(),"a refused release runs nothing");
         p=run(true,false,held);
-        check(p.detached==false && !p.idled && std::string(p.idleWhy)=="detach-failed" && order({"detach"}),
-              "a failed detach stops: no rebuild, no idle");
+        check(p.detached==false && !p.idled && !p.stood && std::string(p.idleWhy)=="detach-failed" && order({"detach"}),
+              "a failed detach stops: no rebuild, no idle, no stand");
         const auto between=[&](R::HeldReleaseFacts fresh,const char* reason){
             const auto q=run(true,true,fresh);
-            return q.detached && !q.idled && std::string(q.idleWhy)==reason && order({"detach","rebuild"});};
+            return q.detached && !q.idled && !q.stood && std::string(q.idleWhy)==reason && order({"detach","rebuild"});};
         f=held;f.sessionCurrent=false;
         check(between(f,"session"),"the session, connection or epoch revoked between the calls: no idle");
         f=held;f.friendLocal=false;

@@ -803,17 +803,20 @@ static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup
             R::LocalHoldRoots rootsNow{};
             const auto now=SmReadReleaseHold(released,current,false,rootsNow);
             return SmOwnerHeldFacts(released,SmOwnerFriendLocal(released),outcome,current,field,rootsNow,now);},
-        [&](){return SmOwnerNativePlayer(released.actor,0x42D0E0);});
-    const bool detached=pair.detached,idled=pair.idled;
+        [&](){return SmOwnerNativePlayer(released.actor,0x42D0E0);},
+        // The role's own-bank install path (0x42B320 -> the ordinary motion set), by the role's actor handle.
+        [&](std::uint32_t motion){return SmOwnerNativeMotion(0,released.actorHandle,
+            {R::Tagged(R::kTagInt,motion),SmOwnerFloat(0)},false,false);});
+    const bool detached=pair.detached,idled=pair.idled,stood=pair.stood;
     const char* idleWhy=pair.idleWhy;
     if(g_smHeldReleaseLogs<32) {
         ++g_smHeldReleaseLogs;
         Log("[script-owner] local held-release %s role=%u seat=%u why=%s ownMotion=%d captured=%u detach=%u idleWhy=%s "
-            "idle=%u gateRead=%u pad=%llX padEntry0=%u command=%llX commandAux=%llX fieldCommand=%u command24=%X "
+            "idle=%u stand=%u gateRead=%u pad=%llX padEntry0=%u command=%llX commandAux=%llX fieldCommand=%u command24=%X "
             "flags9B8=%X flags120=%X motion=%u motionTime=%.1f action=%X actionVt=%llX actionTime=%.2f frame=%u (%u/32)",
             release?"ran":"kept",released.resource,released.slot,why,
             released.ownMotion==UINT32_MAX?-1:static_cast<int>(released.ownMotion),released.captured?1u:0u,
-            detached?1u:0u,idleWhy,idled?1u:0u,gate.read?1u:0u,static_cast<unsigned long long>(gate.pad),
+            detached?1u:0u,idleWhy,idled?1u:0u,stood?1u:0u,gate.read?1u:0u,static_cast<unsigned long long>(gate.pad),
             gate.pad==g_exeBase+0xBF31A0?1u:0u,static_cast<unsigned long long>(gate.command),
             static_cast<unsigned long long>(gate.commandAux),gate.command==g_exeBase+0x2A10620?1u:0u,gate.command24,
             gate.flags9B8,gate.flags120,gate.motion,gate.motionTime,gate.actionHandle,

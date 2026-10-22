@@ -471,19 +471,28 @@ inline bool HeldReleaseIdleAllowed(bool detached,const HeldReleaseFacts& fresh,c
     return DecideHeldRelease(fresh,why);
 }
 // The pair in order: detach; on success only, rebuild every fact (the only reads between the calls); idle only on that
-// fresh decision. Idle is the last thing run: nothing reads the actor after it.
+// fresh decision; then, only if idle returned, the own stand motion. Nothing reads the actor after idle.
+// bots05 attempt07 (run 20261022-150823, friend frame 15074): the pair ran (detach=1 idle=1) on a guards release whose
+// actor stood in its own motion 262 (+18C 0x4002) and the friend stayed in 262 at one spot ~1170 frames while its pilot
+// drove, until a Thorn hit set a hit-reaction motion; it then moved normally. Idle switches the action only (ACTION_IDLE
+// enter/exit are empty), so the motion that holds the actor stays. The held release now also sets the actor's own
+// stand motion (kOwnIdleMotion, 0, the motion the freed friend stood in) through the ordinary own-bank motion set, in
+// the same admitted call as idle. A cleaned release never comes here.
+constexpr std::uint32_t kOwnIdleMotion=0;  // MotionSet IDLE
 struct HeldPairResult {
-    bool detached{},idled{};
+    bool detached{},idled{},stood{};
     const char* idleWhy{"-"};
 };
-template<class Detach,class Rebuild,class Idle>
-HeldPairResult RunHeldPair(bool release,Detach&& detach,Rebuild&& rebuild,Idle&& idle) {
+template<class Detach,class Rebuild,class Idle,class Stand>
+HeldPairResult RunHeldPair(bool release,Detach&& detach,Rebuild&& rebuild,Idle&& idle,Stand&& stand) {
     HeldPairResult out{};
     if(!release)return out;
     out.detached=detach();
     HeldReleaseFacts fresh{};
     if(out.detached)fresh=rebuild();
-    if(HeldReleaseIdleAllowed(out.detached,fresh,out.idleWhy))out.idled=idle();
+    if(!HeldReleaseIdleAllowed(out.detached,fresh,out.idleWhy))return out;
+    out.idled=idle();
+    if(out.idled)out.stood=stand(kOwnIdleMotion);
     return out;
 }
 // Quill r1 on 06ff413: the receipt is minted from a readback of the install just made. The general own-bank
