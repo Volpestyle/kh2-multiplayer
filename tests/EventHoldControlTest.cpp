@@ -1,5 +1,6 @@
 #include "EventHoldRuntimeProjection.hpp"
 #include "kh2coop/EventHoldRecovery.hpp"
+#include "kh2coop/SessionHost.hpp"
 #include <atomic>
 #include <iostream>
 #include <stdexcept>
@@ -314,6 +315,26 @@ int main() try {
         Sleep(80); Command c {};
         require(input.Read(GetTickCount64(),c)==ReadResult::Aborted && input.Reason()==Abort::HeartbeatExpired,"wall expiry without avatar");
         require(!runtime.Heartbeat(GetTickCount64()),"expired lease not renewed");
+    });
+    test("default lease rides out a scheduler stall and expires past 4000ms", [] {
+        static_assert(HeartbeatTimeoutMs == 4000);
+        // A nominal margin only: relay age counts from the last packet, not from a stall's start.
+        require(HeartbeatTimeoutMs < SessionConfig{}.heartbeatTimeoutMs,"lease below the relay's default peer timeout");
+        // VUH-2640 bots05: one 1625ms PC-wide stall crossed the old 1500ms lease. Each gap
+        // is one stalled pump; the native view checks first, as it keeps running meanwhile.
+        for (const std::uint64_t gap : {1625ull,2594ull,3900ull,4000ull}) {
+            Fixture f;
+            require(f.input.Healthy(f.now+gap) && f.runtime.Heartbeat(f.now+gap),"stall keeps the link");
+            require(f.input.Healthy(f.now+gap+gap) && f.runtime.Reason()==Abort::None,"renewed lifetime stays bound");
+        }
+        for (const std::uint64_t gap : {4001ull,4500ull}) {
+            Fixture f;
+            require(!f.input.Healthy(f.now+gap) && f.input.Reason()==Abort::HeartbeatExpired,"native view expires the lifetime");
+            require(!f.runtime.Heartbeat(f.now+gap+1) && f.runtime.Reason()==Abort::HeartbeatExpired,"runtime cannot renew it");
+        }
+        Fixture runtimeFirst;
+        require(!runtimeFirst.runtime.Heartbeat(runtimeFirst.now+4001) &&
+            runtimeFirst.input.Reason()==Abort::HeartbeatExpired,"runtime's own pump expires it too");
     });
     test("concurrent newer heartbeat is fresh for an older caller timestamp", [] {
         Fixture f; require(f.runtime.Heartbeat(f.now+1),"runtime new heartbeat");

@@ -19,7 +19,11 @@ namespace kh2coop::eventhold {
 inline constexpr std::uint32_t Version = 2; // 2: Command carries the host's in-field event start
 inline constexpr std::uint32_t Capacity = 32;
 inline constexpr std::size_t SourceCapacity = 128;
-inline constexpr std::uint64_t HeartbeatTimeoutMs = 1500;
+// VUH-2640: 4000ms rides out the measured 1.6-2.6s PC-wide scheduler stalls.
+// It is nominally below the relay's default 5000ms peer timeout, but that is
+// no ordering guarantee: the relay counts from the last packet it received.
+// A dead runtime holds an owned pause at most this long.
+inline constexpr std::uint64_t HeartbeatTimeoutMs = 4000;
 
 struct Scope {
     char session[32] {}; // exact lowercase hexadecimal bytes, never a hash

@@ -3042,7 +3042,7 @@ Both flags default off. In this development probe the host game had
 `KH2COOP_EVENT_HOLD_CONTROL=1` and producer0. The raw-input callback reads only
 the separate scoped control channel and overlays normal Start/neutral input;
 world delivery, arrival and progress servicing remain on the native owner path.
-The local heartbeat limit is 1500 ms and opening/closing limits are 1000 ms.
+The local heartbeat limit was 1500 ms (4000 ms since VUH-2640) and opening/closing limits are 1000 ms.
 Retirement, unsupported ownership, resync and overflow abort the one-shot interval.
 
 Acceptance is one already-bound empty-room client and one natural event, with

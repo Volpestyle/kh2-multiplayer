@@ -5,6 +5,12 @@ Maintained copy of the passing recovery04 fixture, run
 helpers and `../scenarios/net_safe_field_recovery.json` retain the exact passing
 bytes. Only the offline check's scenario/output paths are adapted.
 
+**Unqualified since VUH-2640:** the event-control lease is now 4000 ms, so this
+fixed 2600 ms pause no longer forces an expiry. A revised pause must account for
+the relay's silence since its last received packet (not the suspension), with
+controls for pre-pause age, jitter and a late watchdog. Until then, don't use
+this fixture as an expiry regression.
+
 Recovery04 preserved all539 pinned inputs before landing edits in
 `.local/thorn/recovery04-publish/source-inputs.tar` (SHA256
 `c5c6fe8cd8d374498993ffa76c879231d70e493106f1ade9d2bbf3ebf44efb3a`). The

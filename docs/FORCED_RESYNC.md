@@ -859,14 +859,14 @@ catalog with their own flag40 already1. The paired clip films the recovered
 idle field; the handshake is log evidence. Four protected saves, twelve movie
 hashes and all539 pins/products were unchanged, with clean owned teardown.
 See the [result and evidence](testing/vuh2628-recovery04/README.md). Recovery03
-remains FAIL. The1500ms lease, quarantine, budgets and no-cache-replay rule are
-unchanged. This result qualifies only empty FM00 and this dormant script.
+remains FAIL. The1500ms lease (since raised to 4000 ms by VUH-2640), quarantine,
+budgets and no-cache-replay rule are unchanged. This result qualifies only empty FM00 and this dormant script.
 
 ## Completion and limits
 
 VUH-2628 connects the existing pinned friend rejoin to
 this host-owned native transaction after an event-control HeartbeatExpired.
-The expired1500ms lifetime stays terminal. A returning seat's cached baseline
+The expired lifetime stays terminal (lease 4000 ms since VUH-2640, was 1500 ms). A returning seat's cached baseline
 remains quarantined, and only a matching successful native snapshot/result can
 create a new full-scope local control mapping. Its ordinal1 Reset still needs
 the native owner's SafeConverged and LiveEligible ACK before control arms.
