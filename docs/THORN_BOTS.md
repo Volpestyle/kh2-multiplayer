@@ -117,6 +117,30 @@ install detector above; no old wrapper or old movie baseline is reused.
    around each turn, flipping every 2 s, never holding still. The 4 HP margin decides it: at own 1 against a
    partner at 5, the lower seat keeps away; seats within 3 HP of each other both keep chipping.
    A downed partner still takes the revive first. Logged as `thorn_kite`.
+6. **Reflect stance (r6), only in 202's bands 6–7, the projectile stance.**
+   - **Why.** The co-op kill needs Thorn's *second* opening, which in bot01 came only after chip damage took
+     Thorn to 148. That chip came from the host's Reversal 432 sending Thorn's projectile back, about 5 HP
+     each, while standing about 1700 units out and mostly still (57 completions, 89 HP).
+   - **The other runs.** a06's strafing host completed 32 Reversals for 0 chip. r5's host rarely stood where
+     432 is offered.
+   - **Analysis:** `.local/review/vuh-2617-thorn-pilot/r6-analysis/`.
+   - **Who takes the stance.** The seat Thorn is shooting at: it saw 432 on screen, or pressed it, within
+     `reflectTargetSec` (4 s).
+   - **What it does.** It holds still `reflectRange` (1500–1800) from Thorn's root, and moves only straight
+     out or in to get there. It presses 432 at the shared 0.2 s cadence.
+   - **No stick input** while 432 is on screen, or within `reflectStillSec` (0.5 s) of a 432 press. The pad
+     records that press edge, the base reaction branch's included.
+   - **Precedence.** It takes precedence over keep-away, so a low targeted seat reflects too, as bot01's
+     host did at 1–5 HP.
+   - **The other seat** never takes the stance and stays on r5's behavior, healthy for revives.
+   - **Elsewhere.** Every other motion and band is r5's. A grid of 232 states through the actual r5
+     `thorn.py` and r6 gives identical inputs, results and logs.
+   - **Logged** as `thorn_reflect`, with counters `reflectHolds` and `reflectMoves`.
+   - **Caveats:**
+     - stillness → reflected damage is a 4-run correlation;
+     - the HP gate for the second opening (≈ 148–158) rests on 3 runs;
+     - the standing seat takes the hits it doesn't reverse; bot01's host lived at 1–5 HP on the friend's
+       revives.
 
 These stay from r1–r2:
 - the revive-approach detour (out of revive range and outside an RC only), logged as `coop_detour`;
@@ -127,7 +151,7 @@ These stay from r1–r2:
 - band hits (`near`/`ranged`) and visits;
 - the learned bands (`motion:band:kind`) and openings;
 - Thorn's HP lost per motion (`dealtByMotion`);
-- counters (`reversals`, `dodges`, `kites`, `commits`, `hitsNear`, `hitsRanged`).
+- counters (`reversals`, `dodges`, `kites`, `commits`, `hitsNear`, `hitsRanged`, `reflectHolds`, `reflectMoves`).
 
 **Offline only.** Tests: `python -B tests/test_pilot_thorn.py`, plus `test_pilot_fight.py` and
 `test_pilot_pad.py`.
@@ -141,6 +165,8 @@ The pilot can't see the projectile itself; it reads enemies and Thorn only. The 
 pilot, ended attempt06.
 
 **Measure on the next live run:**
+- r6: host and friend 432 completions in 202 against Thorn's HP drops in the same statehash windows, and
+  whether Thorn reaches ≤ ~150 and starts its second opening (204 after 202);
 - Thorn's HP per block, and the chip damage in 202 (`dealtByMotion`);
 - Reversal offers against completions per command and owner (`[script-rc]` offer/complete);
 - each seat's HP in 202, and `thorn_kite` time;

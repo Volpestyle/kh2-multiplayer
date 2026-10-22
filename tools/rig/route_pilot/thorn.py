@@ -60,6 +60,9 @@ class Pad(OriginalPad):
     reversal_gap = 0.0
     react_command = 0
     reversal_at = float("-inf")
+    # VUH-2617 r6: the press edge of the reflect Reversal (432 on Thorn's projectile), for the reflect stance.
+    reflect_command = None
+    reflect_at = float("-inf")
 
     def reversal_ready(self, now):
         return now - self.reversal_at >= self.reversal_gap - 1e-6  # a slept-out gap is not short by rounding
@@ -74,6 +77,8 @@ class Pad(OriginalPad):
                 if not self.reversal_ready(now):
                     return False
                 self.reversal_at = now
+                if self.react_command == self.reflect_command:
+                    self.reflect_at = now
         return super().tap(action, ms)
 
 
@@ -179,6 +184,18 @@ class ThornPolicy:
         self.kite_below = float(config.get("kiteBelow", 0.25))
         self.kite_radius = float(config.get("kiteRadius", 750))
         self.kite_margin = int(config.get("kiteMargin", 4))
+        # r6 reflect stance (off unless configured): in `reflectMotion`'s `reflectBands` (202's projectile stance),
+        # the seat Thorn is shooting at (it saw or pressed `reflectCommand` within `reflectTargetSec`) stands still
+        # `reflectRange` from Thorn's root and reverses the orb back into Thorn; no stick input while the Reversal
+        # is offered or within `reflectStillSec` of a press.
+        self.reflect = bool(config.get("reflect", False))
+        self.reflect_motion = int(config.get("reflectMotion", 202))
+        self.reflect_bands = frozenset(int(b) for b in config.get("reflectBands", (6, 7)))
+        self.reflect_command = int(config.get("reflectCommand", 432))
+        self.reflect_min, self.reflect_max = (float(v) for v in config.get("reflectRange", (1500, 1800)))
+        self.reflect_still = float(config.get("reflectStillSec", 0.5))
+        self.reflect_target = float(config.get("reflectTargetSec", 4.0))
+        self.reflect_seen_at = float("-inf")
         self.motion = self.band = None
         self.visit = 0                      # a new (motion, band) is a new visit
         self.band_at = 0.0
@@ -196,7 +213,8 @@ class ThornPolicy:
         self.thorn_hp = None
         self.dealt: dict[int, int] = {}     # motion -> Thorn HP lost
         self.dealt_visit = 0                # Thorn HP lost in the current motion instance
-        self.counters = {"dodges": 0, "kites": 0, "commits": 0, "reversals": 0, "hitsNear": 0, "hitsRanged": 0}
+        self.counters = {"dodges": 0, "kites": 0, "commits": 0, "reversals": 0, "hitsNear": 0, "hitsRanged": 0,
+                         "reflectHolds": 0, "reflectMoves": 0}
 
     @staticmethod
     def flat(entity: dict) -> tuple[float, float]:
@@ -307,6 +325,32 @@ class ThornPolicy:
             vx, vz, d = 1.0, 0.0, 1.0
         angle = math.atan2(vz, vx) + self.strafe_sign * self.strafe_step
         return tx + math.cos(angle) * radius, tz + math.sin(angle) * radius
+
+    def note_reflect(self, own: dict, now: float) -> None:
+        """This seat sees the reflect Reversal on screen: Thorn is shooting at it."""
+        if own.get("react") == self.reflect_command:
+            self.reflect_seen_at = now
+
+    def reflect_band(self, thorn: dict | None) -> bool:
+        return thorn is not None and thorn.get("motionId") == self.reflect_motion and self.band_of(thorn) in self.reflect_bands
+
+    def reflect_stance(self, thorn: dict | None, now: float, last_press: float) -> bool:
+        """r6: Thorn in its projectile stance and this seat targeted (it saw or pressed the reflect Reversal within
+        `reflectTargetSec`). The other seat never takes the stance."""
+        return self.reflect and self.reflect_band(thorn) and \
+            now - max(self.reflect_seen_at, last_press) <= self.reflect_target
+
+    def reflect_goal(self, own: dict, thorn: dict):
+        """None (hold still) inside `reflectRange` of Thorn's root; else a point straight out or in, to its middle."""
+        p, (tx, tz) = own["playerPos"], self.flat(thorn)
+        vx, vz = p[0] - tx, p[2] - tz
+        d = math.hypot(vx, vz)
+        if self.reflect_min <= d <= self.reflect_max:
+            return None
+        if d < 1:
+            vx, vz, d = 1.0, 0.0, 1.0
+        r = (self.reflect_min + self.reflect_max) / 2
+        return tx + vx / d * r, tz + vz / d * r
 
     def kite(self, own: dict, thorn: dict | None, peer: dict | None, now: float):
         """Keep away while this seat is low and the partner is alive and healthier: a strafe target on the
@@ -567,6 +611,7 @@ class Pilot(OriginalPilot):
     observation_at = 0.0
     thorn_policy = None
     kite_logged_at = 0.0
+    reflect_logged_at = 0.0
 
     def state(self):
         state = super().state()
@@ -606,11 +651,18 @@ class Pilot(OriginalPilot):
         # turn too, so the base branch's next press is gated by the same record).
         self.kb.reversals, self.kb.reversal_gap = policy.reversals, policy.reversal_gap
         self.kb.react_command = s["react"]
+        if policy.reflect:
+            self.kb.reflect_command = policy.reflect_command
+            policy.note_reflect(s, now)
+        thorn = next((f for f in foes if f.get("objectId") == 307 and f.get("objectType") == 12), None)
+        stance = policy.reflect_stance(thorn, now, getattr(self.kb, "reflect_at", float("-inf")))
         if s["react"]:
             # The base already took this reaction if its gap allowed. A Reversal is pressed again at once:
             # missed ones were Thorn's projectile hits (attempt05). Other reactions stay the base's.
             if s["react"] not in policy.reversals:
                 return False
+            if stance:
+                self.kb.hold(set())  # r6: no stick input while the Reversal is offered
             # Hold the turn for the rest of the cadence (at most reversalGapSec) rather than fall into an attack
             # burst, then press: the pad drops a press inside the gap, the base branch's included.
             last = getattr(self.kb, "reversal_at", float("-inf"))
@@ -622,7 +674,6 @@ class Pilot(OriginalPilot):
             stats["reversals"] = stats.get("reversals", 0) + 1
             self.write("thorn_reversal", command=s["react"], hp=s["hp"])
             return True
-        thorn = next((f for f in foes if f.get("objectId") == 307 and f.get("objectType") == 12), None)
         policy.observe(thorn, s, now)
         if thorn is None:
             return False
@@ -661,6 +712,21 @@ class Pilot(OriginalPilot):
                        learned=policy.learned(), hp=s["hp"])
             policy.took_dodge(now)
             return True
+        if stance:
+            # r6 reflect stance: stand still in range (and within reflectStillSec of a press, wherever this seat
+            # stands); otherwise move straight out or in to the range, never around.
+            still = now - getattr(self.kb, "reflect_at", float("-inf")) < policy.reflect_still
+            goal = None if still else policy.reflect_goal(s, thorn)
+            keys = set() if goal is None else base.steer({**s, "pos": point}, goal)
+            self.kb.hold(keys)
+            time.sleep(0.1)
+            policy.counters["reflectHolds" if goal is None else "reflectMoves"] += 1
+            stats["reflect"] = stats.get("reflect", 0) + 1
+            if now - self.reflect_logged_at >= 2.0:
+                self.reflect_logged_at = now
+                self.write("thorn_reflect", hp=s["hp"], distance=round(policy.distance(s, thorn), 1),
+                           band=policy.band_of(thorn), still=still, keys=sorted(keys))
+            return True
         goal = policy.kite(s, thorn, self.peer_vitals(), now)
         if goal is None:
             return False  # the base fight engages, ranged bands included (r5)
@@ -682,6 +748,7 @@ class Pilot(OriginalPilot):
         self.thorn_policy = ThornPolicy(step["thornCombat"]) if thorn and step.get("thornCombat") else None
         if self.thorn_policy is not None:
             self.kb.reversals, self.kb.reversal_gap = self.thorn_policy.reversals, self.thorn_policy.reversal_gap
+            self.kb.reflect_command = self.thorn_policy.reflect_command if self.thorn_policy.reflect else None
         try:
             try:
                 return super().fight({**step, "reactGapSec": 0.35} if thorn else step, deadline)
@@ -696,6 +763,7 @@ class Pilot(OriginalPilot):
                 self.write("thorn_combat_summary", **self.thorn_policy.snapshot())
             self.kb.thorn_combat = False
             self.kb.reversals, self.kb.reversal_gap = frozenset(), 0.0
+            self.kb.reflect_command = None
             self.fighting_room = None
             self.thorn_policy = None
 

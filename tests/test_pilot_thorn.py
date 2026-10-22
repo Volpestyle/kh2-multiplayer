@@ -462,6 +462,146 @@ class ReversalCadenceTest(unittest.TestCase):
                         "once the cooperative revive takes the turn, no base or child Reversal press")
 
 
+class ReflectStanceTest(unittest.TestCase):
+    """r6: the reflect stance only in 202's projectile bands 6-7, only for the seat Thorn is shooting at."""
+
+    def setUp(self):
+        self.saved = THORN.time.monotonic, THORN.time.sleep
+        self.clock = [100.0]
+        THORN.time.monotonic = lambda: self.clock[0]
+        THORN.time.sleep = lambda sec: self.clock.__setitem__(0, self.clock[0] + sec)
+
+    def tearDown(self):
+        THORN.time.monotonic, THORN.time.sleep = self.saved
+
+    def pilot(self, config=CONFIG, peer=None):
+        pilot = THORN.Pilot.__new__(THORN.Pilot)
+        pilot.kb, pilot.thorn_policy, pilot.writes = Kb(), THORN.ThornPolicy(config), []
+        pilot.cooperative, pilot.kite_logged_at, pilot.reflect_logged_at = None, 0.0, 0.0
+        pilot.write = lambda kind, **f: pilot.writes.append((kind, f))
+        pilot.peer_vitals = lambda: peer if peer is not None else {"hp": 20, "downed": False}
+        pilot.state = lambda: own()
+        return pilot
+
+    def test_the_route_turns_the_stance_on_with_the_reviewed_bounds(self):
+        p = THORN.ThornPolicy(CONFIG)
+        self.assertEqual((p.reflect, p.reflect_motion, sorted(p.reflect_bands), p.reflect_command), (True, 202, [6, 7], 432))
+        self.assertEqual((p.reflect_min, p.reflect_max, p.reflect_still, p.reflect_target), (1500, 1800, 0.5, 4.0))
+        self.assertFalse(THORN.ThornPolicy({}).reflect, "off unless configured")
+
+    def test_band_entry_and_exit(self):
+        p = THORN.ThornPolicy(CONFIG)
+        self.assertEqual([p.reflect_band(thorn(202, time=t)) for t in (383, 384, 450, 511, 512)],
+                         [False, True, True, True, False], "bands 6-7 are motionTime 384-511")
+        self.assertFalse(p.reflect_band(thorn(210, time=420)))
+        self.assertFalse(p.reflect_band(None))
+        p.note_reflect(own() | {"react": 432}, 10.0)
+        self.assertTrue(p.reflect_stance(thorn(202, time=420), 10.0, float("-inf")))
+        self.assertFalse(p.reflect_stance(thorn(202, time=300), 10.0, float("-inf")), "band 4: out")
+        self.assertFalse(p.reflect_stance(thorn(222, time=420), 10.0, float("-inf")), "Thorn left 202: out")
+        self.assertTrue(p.reflect_stance(thorn(202, time=480), 14.0, float("-inf")), "4 s target memory")
+        self.assertFalse(p.reflect_stance(thorn(202, time=480), 14.1, float("-inf")), "memory expired: not targeted")
+        self.assertTrue(p.reflect_stance(thorn(202, time=480), 20.0, 17.0), "a press keeps it targeted")
+
+    def test_the_stand_off_goal(self):
+        p, t = THORN.ThornPolicy(CONFIG), thorn(z=800)
+        self.assertIsNone(p.reflect_goal(own(z=800 - 1650), t), "in range: hold still")
+        self.assertIsNone(p.reflect_goal(own(z=800 - 1500), t))
+        self.assertEqual(p.reflect_goal(own(z=0), t), (0.0, 800 - 1650), "too close: straight out to the middle")
+        self.assertEqual(p.reflect_goal(own(z=800 - 2400), t), (0.0, 800 - 1650), "too far: straight in")
+
+    def test_the_targeted_seat_holds_still_in_range_and_only_moves_straight_out_of_it(self):
+        pilot, stats = self.pilot(), {}
+        boss = thorn(202, time=420)
+        pilot.thorn_policy.note_reflect(own() | {"react": 432}, self.clock[0])
+        self.assertTrue(pilot.combat_turn(own(z=800 - 1650), [boss], boss, 1650, 300, stats))
+        self.assertEqual(pilot.kb.log, [()], "no stick input")
+        self.assertEqual((stats["reflect"], pilot.thorn_policy.counters["reflectHolds"], pilot.writes[0][0]),
+                         (1, 1, "thorn_reflect"))
+        near = self.pilot()
+        near.thorn_policy.note_reflect(own() | {"react": 432}, self.clock[0])
+        self.assertTrue(near.combat_turn(own(z=0), [boss], boss, 800, 300, {}))
+        self.assertEqual(near.kb.log, [("down",)], "straight out, away from Thorn; no jump")
+
+    def test_a_low_targeted_seat_reflects_instead_of_keeping_away(self):
+        pilot, stats = self.pilot(peer={"hp": 20, "downed": False}), {}
+        boss = thorn(202, time=420)
+        pilot.thorn_policy.note_reflect(own() | {"react": 432}, self.clock[0])
+        self.assertTrue(pilot.combat_turn(own(5, z=800 - 1650), [boss], boss, 1650, 300, stats))
+        self.assertEqual((pilot.kb.log, stats.get("kites"), stats["reflect"]), ([()], None, 1), "the stance, not r5's keep-away")
+
+    def test_no_stick_input_within_half_a_second_of_a_press(self):
+        pilot = self.pilot()
+        boss = thorn(202, time=420)
+        pilot.kb.reflect_at = self.clock[0] - 0.4      # pressed 0.4 s ago
+        self.assertTrue(pilot.combat_turn(own(z=0), [boss], boss, 800, 300, {}))
+        self.assertEqual(pilot.kb.log, [()], "out of range, but inside the window: still")
+        later = self.pilot()
+        later.kb.reflect_at = self.clock[0] - 0.6
+        self.assertTrue(later.combat_turn(own(z=0), [boss], boss, 800, 300, {}))
+        self.assertEqual(later.kb.log, [("down",)], "after the window it may move out")
+
+    def test_the_stick_is_released_before_the_reversal_is_pressed(self):
+        pilot = self.pilot()
+        pilot.kb.held = {"up"}
+        boss = thorn(202, time=420)
+        self.assertTrue(pilot.combat_turn(own(z=-850) | {"react": 432}, [boss], boss, 1650, 300, {}))
+        self.assertEqual(pilot.kb.log, [(), ("tap", "react")])
+        outside = self.pilot()
+        self.assertTrue(outside.combat_turn(own() | {"react": 432}, [thorn(202, time=150)], thorn(202, time=150), 400, 300, {}))
+        self.assertEqual(outside.kb.log, [("tap", "react")], "outside the stance: r5's press, unchanged")
+
+    def test_the_seat_not_targeted_never_takes_the_stance(self):
+        boss = thorn(202, time=420)
+        for state in (own(z=800 - 1650), own(z=0), own(5, z=-850)):
+            pilot, stats = self.pilot(), {}
+            pilot.combat_turn(state, [boss], boss, 1650, 300, stats)
+            self.assertNotIn("reflect", stats)
+            self.assertFalse(any(k == "thorn_reflect" for k, _ in pilot.writes))
+        stale = self.pilot()
+        stale.thorn_policy.note_reflect(own() | {"react": 432}, self.clock[0] - 5.0)
+        self.assertFalse(stale.combat_turn(own(z=-850), [boss], boss, 1650, 300, {}), "5 s since its last 432: the base fight")
+
+    def test_the_pad_records_only_the_reflect_press(self):
+        class Pad(THORN.Pad):
+            def __init__(self): self.held = set()
+            def hold(self, keys): self.held = set(keys)
+        pad = Pad()
+        pad.thorn_combat, pad.reversals, pad.reversal_gap, pad.reflect_command = True, frozenset({345, 432}), 0.2, 432
+        pad.react_command = 345
+        self.assertTrue(pad.tap("react"))
+        self.assertEqual(pad.reflect_at, float("-inf"), "another Reversal is no reflect press")
+        self.clock[0] += 1.0
+        pad.react_command = 432
+        pressed = self.clock[0]
+        self.assertTrue(pad.tap("react"))
+        self.assertEqual(pad.reflect_at, pressed, "the 432 press edge")
+
+    def test_every_other_phase_is_r5_behavior(self):
+        """The same states through r6 with the stance on and with it off (r5's paths): identical inputs, results,
+        stats and logs, outside the stance (every motion and band but 202's 6-7, and 6-7 for a seat not targeted)."""
+        off = {**CONFIG, "reflect": False}
+        cases = []
+        for motion, timing in ((0, 10), (204, 10), (209, 10), (210, 30), (202, 10), (202, 150), (202, 300), (152, 20),
+                               (202, 420), (202, 480)):
+            for hp, peer in ((20, {"hp": 20, "downed": False}), (5, {"hp": 20, "downed": False}),
+                             (5, {"hp": 20, "downed": True}), (4, {"hp": 6, "downed": False})):
+                for z, react in ((400, 0), (-850, 0), (0, 0), (400, 345), (400, 297)):
+                    if motion == 202 and timing >= 384 and react == 432:
+                        continue  # a 432 on screen in bands 6-7 is the stance itself
+                    cases.append((motion, timing, hp, peer, z, react))
+        for case in cases:
+            motion, timing, hp, peer, z, react = case
+            runs = []
+            for config in (CONFIG, off):
+                self.clock[0] = 100.0
+                pilot, stats = self.pilot(config, peer), {}
+                boss = thorn(motion, time=timing)
+                result = pilot.combat_turn(own(hp, z=z) | {"react": react}, [boss], boss, abs(800 - z), 300, stats)
+                runs.append((result, pilot.kb.log, stats, [k for k, _ in pilot.writes], self.clock[0]))
+            self.assertEqual(runs[0], runs[1], case)
+        self.assertGreater(len(cases), 150)
+
 class BaseHookTest(unittest.TestCase):
     """The base fight loop asks combat_turn after choosing its target, and a taken turn skips the attack."""
 

@@ -1,7 +1,7 @@
 {
   "name": "twilight_thorn_host_fight",
   "retries": 0,
-  "description": "Single-PC loopback native Thorn combat; both seats approach at reach300. No HP/team/position writes, immunity, synthetic hits, or Continue retries. Owned camera reactions297/298/299 remain pad-only and bounded. First-hit combo tutorial dismissal and cooperative native revival stay enabled. Actual owner1 completion remains required; live05 already established ground reaction ownership without relying on a distant host. LowHp0 explicitly keeps native25%-revived seats attacking; ordinary recent-damage escape, guard, RC and peer revival priority remain. The bounded blocked-approach jump/two-Cross probe is an experiment, not a claimed head unlock. VUH-2617 pilot r5: thornCombat presses Reversals at once on one 0.2 s cadence, learns Thorn's dangerous (motion, motionTime band) from own-HP loss and sidesteps near bands, fights through ranged bands (r3's strafe is withdrawn), commits attacks into openings 209/210/211, and keeps only the lower seat at 25% away while its partner is alive and healthier; pinnedDrop 0.55 stops a single Thorn hit from triggering a run-away escape.",
+  "description": "Single-PC loopback native Thorn combat; both seats approach at reach300. No HP/team/position writes, immunity, synthetic hits, or Continue retries. Owned camera reactions297/298/299 remain pad-only and bounded. First-hit combo tutorial dismissal and cooperative native revival stay enabled. Actual owner1 completion remains required; live05 already established ground reaction ownership without relying on a distant host. LowHp0 explicitly keeps native25%-revived seats attacking; ordinary recent-damage escape, guard, RC and peer revival priority remain. The bounded blocked-approach jump/two-Cross probe is an experiment, not a claimed head unlock. VUH-2617 pilot r5: thornCombat presses Reversals at once on one 0.2 s cadence, learns Thorn's dangerous (motion, motionTime band) from own-HP loss and sidesteps near bands, fights through ranged bands (r3's strafe is withdrawn), commits attacks into openings 209/210/211, and keeps only the lower seat at 25% away while its partner is alive and healthier, and (r6) puts the seat Thorn is shooting at into a still reflect stance 1500-1800 from Thorn in 202's projectile bands 6-7; pinnedDrop 0.55 stops a single Thorn hit from triggering a run-away escape.",
   "steps": [
     {
       "do": "fight",
@@ -78,7 +78,20 @@
         "strafeFlipSec": 2.0,
         "kiteBelow": 0.25,
         "kiteRadius": 750,
-        "kiteMargin": 4
+        "kiteMargin": 4,
+        "reflect": true,
+        "reflectMotion": 202,
+        "reflectBands": [
+          6,
+          7
+        ],
+        "reflectCommand": 432,
+        "reflectRange": [
+          1500,
+          1800
+        ],
+        "reflectStillSec": 0.5,
+        "reflectTargetSec": 4.0
       }
     }
   ]
