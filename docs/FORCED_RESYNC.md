@@ -862,6 +862,14 @@ See the [result and evidence](testing/vuh2628-recovery04/README.md). Recovery03
 remains FAIL. The1500ms lease (since raised to 4000 ms by VUH-2640), quarantine,
 budgets and no-cache-replay rule are unchanged. This result qualifies only empty FM00 and this dormant script.
 
+**Field catalog trace (VUH-2674).** `KH2COOP_RESYNC_CATALOG_TRACE=1` (default off; read-only) logs the
+same `[resync-catalog] schema=1` rows (summary, scope, entry, table, controller, header) with
+`phase=field` once per native load, at the first complete census in the current room instance, on either
+role. A natural run, such as VUH-2617's Thorn clears, then records an unreviewed room's raw catalog and
+Script slots without forcing a recovery. That is the evidence a new dormant-script row needs (the FM00 row
+came from a refused recovery capture). It admits and changes nothing; `fresh=` is the existing
+qualification's verdict. Event-only scenes never reach a complete census, so they aren't traced.
+
 ## Completion and limits
 
 VUH-2628 connects the existing pinned friend rejoin to

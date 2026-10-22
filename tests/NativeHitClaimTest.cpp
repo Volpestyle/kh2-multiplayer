@@ -3518,6 +3518,54 @@ void TestBossSitOutNative() {
     Reset();
 }
 
+// VUH-2674: the default-off field catalog trace. Read-only; once per settled native load, in the same rows a
+// refused recovery capture logs, phase=field.
+std::vector<std::string> catalogTraceLogs;
+void CatalogTraceLog(const char* format, ...) {
+    char line[4096] {}; va_list args; va_start(args, format);
+    std::vsnprintf(line, sizeof(line), format, args); va_end(args);
+    catalogTraceLogs.emplace_back(line);
+}
+std::size_t FieldCatalogRows(const char* kind) {
+    const std::string prefix = std::string("[resync-catalog] schema=1 kind=") + kind + " ";
+    return static_cast<std::size_t>(std::count_if(catalogTraceLogs.begin(), catalogTraceLogs.end(), [&](const auto& line) {
+        return line.rfind(prefix, 0) == 0 && line.find(" phase=field ") != std::string::npos;
+    }));
+}
+void TestFieldCatalogTrace() {
+    Reset(); g_log = CatalogTraceLog; catalogTraceLogs.clear();
+    g_catalogTraceRequested = false; g_catalogTracedLoad = 0;
+    const auto readRecords = [] {
+        std::vector<std::uint8_t> bytes(0x240);
+        std::memcpy(bytes.data(), reinterpret_cast<const void*>(RecordData()), 0x200);
+        std::memcpy(bytes.data() + 0x200, reinterpret_cast<const void*>(RecordController()), 0x40);
+        return bytes;
+    };
+    const auto before = readRecords();
+    TraceFieldCatalog(10, CaptureNativeCensus()); OnFrameStart(10);
+    Check(catalogTraceLogs.empty() || FieldCatalogRows("summary") == 0, "default off: no field catalog rows");
+    g_catalogTraceRequested = true;
+    TraceFieldCatalog(11, CaptureNativeCensus());
+    const bool scoped = std::any_of(catalogTraceLogs.begin(), catalogTraceLogs.end(), [](const auto& line) {
+        return line.rfind("[resync-catalog] schema=1 kind=scope ", 0) == 0 && line.find(" phase=field ") != std::string::npos &&
+               line.find(" world=5 room=2 door=3 map=4 battle=6 event=8") != std::string::npos;
+    });
+    Check(FieldCatalogRows("summary") == 1 && FieldCatalogRows("entry") >= 1 && scoped,
+          "flag on: the settled field's catalog is traced once, with its exact location and entries");
+    TraceFieldCatalog(12, CaptureNativeCensus()); OnFrameStart(12);
+    Check(FieldCatalogRows("summary") == 1, "once per native load, not per frame");
+    ++load; g_seenLoad = load;
+    Put(image + offsets::OPEN_MENU, std::uint8_t{8});
+    TraceFieldCatalog(13, CaptureNativeCensus());
+    Check(FieldCatalogRows("summary") == 1, "an unsettled field (menu open, census gated) traces nothing");
+    Put(image + offsets::OPEN_MENU, std::uint8_t{0xFF});
+    OnFrameStart(14);
+    Check(FieldCatalogRows("summary") == 2, "the production frame path traces the new load once it settles");
+    Check(readRecords() == before, "the trace reads only: the spawn records are unchanged");
+    g_catalogTraceRequested = false; g_catalogTracedLoad = 0; g_log = nullptr;
+    Reset();
+}
+
 int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
@@ -3841,6 +3889,7 @@ int main() try {
     TestBaileyMissionEndOrdering(true); // VUH-2352: ordinary Shadow death vs MU01 end hold
     TestMoraleBirthLifetime();
     TestStruggleOrbRows();
+    TestFieldCatalogTrace();
     TestBossSitOutNative(); // last: enables event control and leaves this process's mapping expired
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);

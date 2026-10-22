@@ -2875,6 +2875,24 @@ void TraceCapturedRecordCatalog(std::uint32_t frame, const char* phase, bool fre
         static_cast<unsigned>(truncated));
 }
 
+// VUH-2674: KH2COOP_RESYNC_CATALOG_TRACE=1 (default off), read-only. The first complete census of each native
+// load, a settled field in the current room instance, dumps the room's raw spawn-record catalog in the rows
+// a refused recovery capture logs (phase=field). A natural run then records an unreviewed room's Script
+// slots without a forced recovery, as evidence for a reviewed dormant-script row. Nothing is admitted or
+// changed by it; the qualification it reports (fresh=) is the existing one.
+bool g_catalogTraceRequested = false;
+std::uint32_t g_catalogTracedLoad = 0;
+void TraceFieldCatalog(std::uint32_t frame, const NativeCensus& census) {
+    if (!g_catalogTraceRequested || census.state != CensusState::Complete || !census.load ||
+        census.load == g_catalogTracedLoad || !SafeNativeGameplay() || !spawncontroller::IsDiagnosticGameThread())
+        return;
+    g_catalogTracedLoad = census.load;
+    RecordCatalog catalog;
+    spawncontroller::NativeOrdinaryResyncView view;
+    const bool fresh = FreshResyncRecordCatalog(census, catalog, view);
+    TraceCapturedRecordCatalog(frame, "field", fresh, catalog, census);
+}
+
 bool SameRecordCatalogSample(const RecordCatalog& a, const RecordCatalog& b) {
     if (a.entryCount != b.entryCount || a.layoutSha256 != b.layoutSha256 ||
         a.before.location != b.before.location || a.before.load != b.before.load ||
@@ -5771,6 +5789,11 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     char recordFlag[4] {};
     g_recordBindingRequested = GetEnvironmentVariableA("KH2COOP_ENEMY_RECORD_BINDING",recordFlag,sizeof(recordFlag))==1 && recordFlag[0]=='1';
     if (g_recordBindingRequested && g_log) g_log("[record-binding] enabled schema=1 protocol=15 authority=0 families=317,76");
+    char catalogTrace[4] {};
+    g_catalogTraceRequested = GetEnvironmentVariableA("KH2COOP_RESYNC_CATALOG_TRACE", catalogTrace, sizeof(catalogTrace)) == 1 &&
+                              catalogTrace[0] == '1';
+    g_catalogTracedLoad = 0;
+    if (g_catalogTraceRequested && g_log) g_log("[resync-catalog] field-trace enabled=1 once-per-load=1 readOnly=1");
     g_mirrorRequested = GetEnvironmentVariableA("KH2COOP_ENEMY_MIRROR", mirror, sizeof(mirror)) == 1 && mirror[0] == '1';
     char authorityFlag[4]{};
     g_recordAuthorityRequested = g_recordBindingRequested && g_mirrorRequested &&
@@ -6050,6 +6073,7 @@ void OnFrameStart(std::uint32_t frame) {
         for (Spawn& spawn : g_inst.spawns) spawn.goneSinceMs = 0;
         g_censusInterrupted = false;
     }
+    TraceFieldCatalog(frame, census); // VUH-2674: default off, once per settled native load
     auto fresh = TrackSpawns(census);
     PopulationPrune(frame, census);  // VUH-1788 rev3 C1: any role, every complete census
     if (g_role == Role::Host) {
