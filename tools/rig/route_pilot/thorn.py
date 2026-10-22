@@ -144,13 +144,14 @@ class ThornPolicy:
       - a Reversal on screen is pressed at once, before any move of this policy;
       - danger is learned per (motion, motionTime band) from this seat's own HP loss: seeded from attempt05
         and learned in the fight (at least `learn` drops in at least `learnRatio` of the band's visits).
-        A near band gets one sidestep across Thorn's line on entry, within `radius`; a ranged band (a hit
-        came from beyond `radius`) gets a strafe around Thorn for as long as Thorn is in it, at any
-        distance, instead of standing or approaching;
+        A near band gets one sidestep across Thorn's line on entry, within `radius`. A ranged band (a hit
+        came from beyond `radius`) is telemetry only: r3's strafe through it dealt no damage in attempt06
+        (Thorn flat at 227 for 100 s) and did not avoid 1041, so r5 fights through it as the base does;
       - Thorn's openings (seeded 209/210/211, plus motions that cost Thorn `openingLearn` HP in one visit)
         get an attack commitment: approach and swing, with no dodge, keep-away or escape;
-      - keep-away starts at `kiteBelow` (half HP) while the partner is alive and healthier, as a strafe on
-        the `kiteRadius` ring, never a hold;
+      - keep-away at `kiteBelow` (25%), only for the lower seat (the partner alive and `kiteMargin` HP
+        healthier), as a strafe on the `kiteRadius` ring, never a hold: the other seat keeps chipping, as
+        in bot01's kill;
       - telemetry: Thorn's motion and band, band hits and visits, learned bands, openings, Thorn's HP lost
         per motion, counters.
     Pure decisions: every input is a state/entity dict, so they are tested offline."""
@@ -175,8 +176,7 @@ class ThornPolicy:
         self.step = float(config.get("dodgeStep", 400))
         self.strafe_step = float(config.get("strafeRad", 0.6))
         self.strafe_flip = float(config.get("strafeFlipSec", 2.0))
-        self.strafe_min, self.strafe_max = (float(v) for v in config.get("strafeRange", (400, 1800)))
-        self.kite_below = float(config.get("kiteBelow", 0.5))
+        self.kite_below = float(config.get("kiteBelow", 0.25))
         self.kite_radius = float(config.get("kiteRadius", 750))
         self.kite_margin = int(config.get("kiteMargin", 4))
         self.motion = self.band = None
@@ -196,8 +196,7 @@ class ThornPolicy:
         self.thorn_hp = None
         self.dealt: dict[int, int] = {}     # motion -> Thorn HP lost
         self.dealt_visit = 0                # Thorn HP lost in the current motion instance
-        self.counters = {"dodges": 0, "kites": 0, "strafes": 0, "commits": 0, "reversals": 0, "hitsNear": 0,
-                         "hitsRanged": 0}
+        self.counters = {"dodges": 0, "kites": 0, "commits": 0, "reversals": 0, "hitsNear": 0, "hitsRanged": 0}
 
     @staticmethod
     def flat(entity: dict) -> tuple[float, float]:
@@ -283,11 +282,6 @@ class ThornPolicy:
             and self.dodged_visit != self.visit and now - self.dodge_at >= self.cooldown \
             and self.distance(own, thorn) <= self.radius
 
-    def volley(self, thorn: dict | None) -> bool:
-        """Thorn is in a ranged band: keep moving around it, at any distance."""
-        return self.dodge and thorn is not None and \
-            self.danger(thorn.get("motionId"), self.band_of(thorn)) == "ranged"
-
     def dodge_target(self, own: dict, thorn: dict) -> tuple[float, float]:
         """Across Thorn's line to this seat, alternating sides, and a little outward."""
         p, (tx, tz) = own["playerPos"], self.flat(thorn)
@@ -302,9 +296,8 @@ class ThornPolicy:
         self.side = -self.side
         self.counters["dodges"] += 1
 
-    def strafe_target(self, own: dict, thorn: dict, now: float, radius: float | None = None) -> tuple[float, float]:
-        """A point `strafeRad` further around Thorn, at `radius` (default: this seat's distance, kept within
-        `strafeRange`). The direction flips every `strafeFlipSec`, so aimed shots trail behind."""
+    def strafe_target(self, own: dict, thorn: dict, now: float, radius: float) -> tuple[float, float]:
+        """A point `strafeRad` further around Thorn, at `radius`. The direction flips every `strafeFlipSec`."""
         if now - self.strafe_at >= self.strafe_flip:
             self.strafe_sign, self.strafe_at = -self.strafe_sign, now
         p, (tx, tz) = own["playerPos"], self.flat(thorn)
@@ -312,9 +305,8 @@ class ThornPolicy:
         d = math.hypot(vx, vz)
         if d < 1:
             vx, vz, d = 1.0, 0.0, 1.0
-        r = radius if radius is not None else min(max(d, self.strafe_min), self.strafe_max)
         angle = math.atan2(vz, vx) + self.strafe_sign * self.strafe_step
-        return tx + math.cos(angle) * r, tz + math.sin(angle) * r
+        return tx + math.cos(angle) * radius, tz + math.sin(angle) * radius
 
     def kite(self, own: dict, thorn: dict | None, peer: dict | None, now: float):
         """Keep away while this seat is low and the partner is alive and healthier: a strafe target on the
@@ -669,23 +661,18 @@ class Pilot(OriginalPilot):
                        learned=policy.learned(), hp=s["hp"])
             policy.took_dodge(now)
             return True
-        kite = policy.kite(s, thorn, self.peer_vitals(), now)
-        volley = kite is None and policy.volley(thorn)
-        if kite is None and not volley:
-            return False
-        goal = kite if kite is not None else policy.strafe_target(s, thorn, now)
+        goal = policy.kite(s, thorn, self.peer_vitals(), now)
+        if goal is None:
+            return False  # the base fight engages, ranged bands included (r5)
         keys = base.steer({**s, "pos": point}, goal)
         self.kb.hold(keys)
         time.sleep(0.2)
-        kind = "kites" if kite is not None else "strafes"
-        stats[kind] = stats.get(kind, 0) + 1
-        if volley:
-            policy.counters["strafes"] += 1
+        stats["kites"] = stats.get("kites", 0) + 1
         if now - self.kite_logged_at >= 2.0:
             self.kite_logged_at = now
-            self.write("thorn_kite" if kite is not None else "thorn_strafe", hp=s["hp"],
-                       distance=round(policy.distance(s, thorn), 1), motion=thorn.get("motionId"),
-                       band=policy.band_of(thorn), goal=[round(v, 1) for v in goal], keys=sorted(keys))
+            self.write("thorn_kite", hp=s["hp"], distance=round(policy.distance(s, thorn), 1),
+                       motion=thorn.get("motionId"), band=policy.band_of(thorn), goal=[round(v, 1) for v in goal],
+                       keys=sorted(keys))
         return True
 
     def fight(self, step, deadline):

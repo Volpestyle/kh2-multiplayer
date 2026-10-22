@@ -79,6 +79,19 @@ install detector above; no old wrapper or old movie baseline is reused.
     `docs/TWILIGHT_THORN.md`) were completed in 33 of about 118 offers. The host's hit rows show 432 on
     screen with nothing pressed.
   - **r1's keep-away `hold` at 1600–2000 units was still hit.**
+- **Attempt06 with r3/r4** (`9fb8bf0`) and **Leg A attempt02** (solo host). The joins are retained in
+  `.local/review/vuh-2617-thorn-pilot/r5-analysis/`.
+  - **Reversal-first didn't reduce 1041 hits:** host 6 of 9 drops, friend 6 of 9. Host-owned 432 was
+    completed 33/71, about the same rate as before.
+  - **345's windows last only about 4–30 frames, in bursts:** 0/80 completed solo, about 1–15% elsewhere.
+    That's shorter than the pilot's read-and-press latency.
+  - **r3's ranged-band strafe cost all chip damage:** Thorn sat flat at 227 for 100 s. It didn't avoid 1041
+    either; the hits landed at 1544–1983 units while strafing.
+  - **Solo, the opening dealt only 45, and nothing after.** The host died at about 124 s to 447 and to 631
+    bursts (kind 4, multi-hit) while 345 was on screen. So **a solo pilot kill isn't a realistic Leg A
+    acceptance step**; Leg A proves the carry-in and the sit-out instead.
+  - **Bot01's co-op kill** (an older aggressive pilot): opening 390 → 237, chip 237 → 128 over about two
+    minutes while the friend stayed healthy, then 128 → 0 in about 10 s.
 
 **Behavior (the `fight` step's opt-in `thornCombat`, both Thorn fight routes).** The base `pilot.py`
 `combat_turn` hook never takes a turn. Priority order, each per seat and from its own reads:
@@ -96,15 +109,13 @@ install detector above; no old wrapper or old movie baseline is reused.
      before if Thorn changed band within 0.5 s.
    - On entering a near band within `radius` (650), the seat sidesteps across Thorn's line with a moving
      jump, once per visit, with a 1.2 s cooldown. Logged as `thorn_dodge`.
-4. **Ranged bands: keep moving.** A band is ranged if any of its hits came from beyond `radius` (seeded:
-   202's bands 6–7, the projectile stance).
-   - While Thorn is in one, the seat strafes around Thorn at its current distance (kept within 400–1800),
-     `strafeRad` (0.6) further around each turn.
-   - The direction flips every 2 s.
-   - It never stands still and never approaches. Logged as `thorn_strafe`.
-5. **Keep-away from half HP.** At ≤ `kiteBelow` (50%), with the partner alive and ≥ 4 HP healthier, the seat
-   strafes on the 750 ring (or further out, if already there), never a hold. A downed partner still takes
-   the revive first. Logged as `thorn_kite`.
+4. **Ranged bands: fight through them (r5).** A band is ranged if any of its hits came from beyond `radius`
+   (seeded: 202's bands 6–7, the projectile stance). It's learned and logged, but the turn goes to the base
+   fight, which approaches and attacks. r3/r4's strafe through these bands is withdrawn (see attempt06 above).
+5. **Keep-away at 25%, for the lower seat only.** At ≤ `kiteBelow` (25%), with the partner alive and ≥ 4 HP
+   healthier, the seat strafes on the 750 ring (or further out, if already there), `strafeRad` (0.6) further
+   around each turn, flipping every 2 s, never holding still. So when both seats are low, both keep chipping.
+   A downed partner still takes the revive first. Logged as `thorn_kite`.
 
 These stay from r1–r2:
 - the revive-approach detour (out of revive range and outside an RC only), logged as `coop_detour`;
@@ -115,29 +126,24 @@ These stay from r1–r2:
 - band hits (`near`/`ranged`) and visits;
 - the learned bands (`motion:band:kind`) and openings;
 - Thorn's HP lost per motion (`dealtByMotion`);
-- counters (`reversals`, `dodges`, `strafes`, `kites`, `commits`).
+- counters (`reversals`, `dodges`, `kites`, `commits`, `hitsNear`, `hitsRanged`).
 
 **Offline only.** Tests: `python -B tests/test_pilot_thorn.py`, plus `test_pilot_fight.py` and
 `test_pilot_pad.py`.
 
-Replaying attempt05's observe rows through the policy shows decisions only, not outcomes. Every recorded
-drop falls where r3 would have been pressing a Reversal, strafing a learned ranged band, sidestepping or
-keeping away.
-
 **Unproven:**
-- whether strafing beats 1041, which may home;
-- whether earlier presses complete more Reversals: the rc-cache rows are budgeted, so the window length is
-  unmeasured;
-- whether the extra caution leaves enough damage. 202 cost Thorn only about 20 HP per seat in attempt05.
+- whether fighting through 202 again restores bot01's chip damage without losing the party sooner;
+- 345 stays out of the pilot's reach. A blind Triangle cadence could catch it, but it was deferred because
+  its native effect is unproven.
 
-The pilot can't see the projectile itself; it reads enemies and Thorn only.
+The pilot can't see the projectile itself; it reads enemies and Thorn only. The m11 friend freeze, not the
+pilot, ended attempt06.
 
 **Measure on the next live run:**
-- Reversal offers against completions per command and owner (`[script-rc]` offer/complete), and
-  `thorn_reversal` count;
-- HP lost while `thorn_strafe` against `base-fight`;
-- the learned bands;
-- Thorn's HP per block, and whether Thorn returns to its opening sequence after 202.
+- Thorn's HP per block, and the chip damage in 202 (`dealtByMotion`);
+- Reversal offers against completions per command and owner (`[script-rc]` offer/complete);
+- each seat's HP in 202, and `thorn_kite` time;
+- whether Thorn returns to an opening or a late phase after 202.
 
 A Thorn kill is the success test.
 

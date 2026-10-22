@@ -59,7 +59,7 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(self.p.seed[(202, 7)], "ranged", "projectile 1041 from motionTime ~390")
         self.assertEqual(self.p.seed[(202, 2)], "near", "melee 448 around motionTime 160")
         self.assertEqual(self.p.reversals, frozenset({345, 426, 432, 666, 667}))
-        self.assertEqual((self.p.kite_below, sorted(self.p.openings_seed)), (0.5, [209, 210, 211]))
+        self.assertEqual((self.p.kite_below, sorted(self.p.openings_seed)), (0.25, [209, 210, 211]))
         self.assertEqual(ROUTE["steps"][0]["pinnedDrop"], 0.55)
         other = json.loads((ROOT / "tools/rig/route_pilot/routes/twilight_thorn_fight.json").read_text(encoding="utf-8"))
         self.assertEqual(other["steps"][0]["thornCombat"], CONFIG)
@@ -86,12 +86,10 @@ class PolicyTest(unittest.TestCase):
         off.observe(t, own(), 1.0)
         self.assertFalse(off.threat(t, own(), 1.0))
 
-    def test_a_ranged_band_is_a_strafe_at_any_distance(self):
-        self.assertTrue(self.p.volley(thorn(202, time=420)))
-        self.assertTrue(self.p.volley(thorn(202, time=480)), "the stance holds near its last frame")
-        self.assertFalse(self.p.volley(thorn(202, time=10)), "a near band")
-        self.assertFalse(self.p.volley(thorn(0, time=420)), "not a learned or seeded band")
-        self.assertFalse(THORN.ThornPolicy({**CONFIG, "dodge": False}).volley(thorn(202, time=420)))
+    def test_a_ranged_band_is_telemetry_not_a_move(self):
+        self.assertEqual(self.p.danger(202, 7), "ranged", "still learned and logged")
+        self.assertFalse(hasattr(self.p, "volley"), "r5 withdrew the ranged-band strafe")
+        self.assertFalse(self.p.threat(thorn(202, time=420), own(), 1.0), "and a ranged band is no sidestep")
 
     def visit(self, motion, time, hp_before, hp_after, at, z=400.0):
         self.p.observe(thorn(0), own(hp_before, z=z), at)
@@ -147,25 +145,24 @@ class PolicyTest(unittest.TestCase):
 
     def test_strafe_circles_thorn_and_flips_direction(self):
         t, me = thorn(z=800), own(z=0)
-        first = self.p.strafe_target(me, t, 0.0)
-        self.assertAlmostEqual(math.hypot(first[0], first[1] - 800), 800, delta=1, msg="keeps this seat's distance")
+        first = self.p.strafe_target(me, t, 0.0, 800)
+        self.assertAlmostEqual(math.hypot(first[0], first[1] - 800), 800, delta=1, msg="on the given ring")
         self.assertAlmostEqual(abs(math.atan2(first[1] - 800, first[0]) - math.atan2(-800, 0)), 0.6, delta=0.01)
-        same = self.p.strafe_target(me, t, 1.0)
+        same = self.p.strafe_target(me, t, 1.0, 800)
         self.assertEqual(same, first, "same direction within 2 s")
-        flipped = self.p.strafe_target(me, t, 2.5)
+        flipped = self.p.strafe_target(me, t, 2.5, 800)
         self.assertLess(first[0] * flipped[0], 0, "the other way round after 2 s")
-        near = self.p.strafe_target(own(z=700), t, 2.6)
-        self.assertAlmostEqual(math.hypot(near[0], near[1] - 800), 400, delta=1, msg="not closer than 400")
 
-    def test_keep_away_from_half_hp_while_the_partner_is_alive_and_healthier(self):
+    def test_keep_away_at_a_quarter_hp_only_for_the_lower_seat(self):
         t = thorn()
-        self.assertIsNone(self.p.kite(own(11), t, {"hp": 20, "downed": False}, 0.0), "above half: fight on")
-        self.assertIsNone(self.p.kite(own(10), t, {"hp": 13, "downed": False}, 0.0), "partner not 4 HP healthier")
-        self.assertIsNone(self.p.kite(own(10), t, {"hp": 20, "downed": True}, 0.0), "partner downed: stay to revive")
-        self.assertIsNone(self.p.kite(own(10), t, None, 0.0), "no partner known (solo host): fight on")
-        goal = self.p.kite(own(10, z=400), t, {"hp": 20, "downed": False}, 0.0)
+        self.assertIsNone(self.p.kite(own(6), t, {"hp": 20, "downed": False}, 0.0), "above 25%: fight on")
+        self.assertIsNone(self.p.kite(own(5), t, {"hp": 8, "downed": False}, 0.0), "partner not 4 HP healthier")
+        self.assertIsNone(self.p.kite(own(5), t, {"hp": 5, "downed": False}, 0.0), "both low: neither stops chipping")
+        self.assertIsNone(self.p.kite(own(5), t, {"hp": 20, "downed": True}, 0.0), "partner downed: stay to revive")
+        self.assertIsNone(self.p.kite(own(5), t, None, 0.0), "no partner known (solo host): fight on")
+        goal = self.p.kite(own(5, z=400), t, {"hp": 20, "downed": False}, 0.0)
         self.assertAlmostEqual(math.hypot(goal[0], goal[1] - 800), 750, delta=1, msg="out on the 750 ring")
-        far = self.p.kite(own(10, z=-200), t, {"hp": 20, "downed": False}, 0.0)
+        far = self.p.kite(own(5, z=-200), t, {"hp": 20, "downed": False}, 0.0)
         self.assertAlmostEqual(math.hypot(far[0], far[1] - 800), 1000, delta=1, msg="already outside: keeps moving")
         self.assertTrue(self.p.kiting)
         self.assertIsNone(self.p.kite(own(0), t, {"hp": 20, "downed": False}, 0.0), "downed: never kites")
@@ -376,12 +373,11 @@ class CombatTurnTest(NoSleep):
         self.assertTrue(stop.combat_turn(own(), [boss], boss, 250, 300, {}))
         self.assertEqual([e for e in stop.kb.log if e and e[0] == "tap"], [("tap", "attack")], "a reaction breaks the burst")
 
-    def test_a_ranged_band_strafes_at_any_distance(self):
-        pilot, stats = self.pilot(), {}
+    def test_a_ranged_band_leaves_the_turn_to_the_base_fight(self):
+        pilot, stats = self.pilot(peer={"hp": 20, "downed": False}), {}
         boss = thorn(202, time=420)
-        self.assertTrue(pilot.combat_turn(own(z=-1200), [boss], boss, 2000, 300, stats))
-        self.assertEqual((stats["strafes"], pilot.writes[0][0]), (1, "thorn_strafe"))
-        self.assertTrue(pilot.kb.held and "jump" not in pilot.kb.held)
+        self.assertFalse(pilot.combat_turn(own(z=-1200), [boss], boss, 2000, 300, stats), "approach and attack (r5)")
+        self.assertEqual((stats, pilot.writes, pilot.kb.log), ({}, [], []))
 
     def test_the_base_pilot_never_takes_a_turn(self):
         self.assertFalse(BASE.Pilot.combat_turn(object(), own(), [thorn(202)], thorn(202), 400, 300, {}))
