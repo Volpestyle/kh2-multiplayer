@@ -427,3 +427,26 @@ the post-boss event began. Its cause and applicability to build26/27 are unknown
 No human14 run or baseline is claimed. Packet postvictory checks introduce no
 managed call into KH2; process-exit detection is independent of the inject crash
 filter, but no dump or recovery is guaranteed. Investigate before asking James.
+
+### After the kill: the post-Thorn scene chain (VUH-2617, bot04)
+
+Bot04 (`20261021-192441`) killed Thorn and both seats played native315, but the friend stayed in 02/34.
+After315 the host loaded seven event-only locations in a row, each started by the previous one's native
+start: 02/00 51, 02/04 83, 02/02 67, 02/06 168, 02/02 167, 02/15 142, then 02/01 54 (map, battle and
+event program equal in each). None reached field play: the gameplay gate never opened, so the host's
+census and progress samples never ran. An unqualified room is announced only from field play, so the
+host announced none of them, and the friend waited at its own blocked native exit to the first one,
+02/00 51 (the authored exit above). The first six are now qualified scenes (`EventScenes.hpp`): the host
+announces each at its load and the friend loads and plays it natively, as in the prologue's post-Axel
+chain. 02/01 54 was still in its event when the run ended, so its exit is unobserved and it stays
+unqualified; the next live run shows whether it is another scene or the field.
+A returning seat's recovery capture is refused in a qualified scene (it waits for a later field), so
+post-Thorn recovery now waits past this chain too.
+
+The same run's other failure (step69: the friend's own HP never fell during Thorn) is not explained yet.
+The friend's mirrored Thorn built no hit at all on the friend (`[enemy-mirror] hit` 0, `[hit]` attacker
+B_EX100 0, with 18 of the 60 per-room rows unused), while the host's Thorn hit the friend's clone 12 times (eleven
+attack 1014 during motion 202 at the arena edge, one 448). 1014 and 448 are not script attacks (Thorn's
+script creates 631, 1305, 1015 and 1041, which hit the host); in bot02 the friend was hit natively by
+motion attacks 1034/1035 (motions 204/226). Thorn was never retargeted at the friend (bosses keep their
+own targeting), the friend never guarded, and its ScriptMirror replay kept pace with the host.

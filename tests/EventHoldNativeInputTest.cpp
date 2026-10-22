@@ -184,7 +184,23 @@ int main(int argc,char** argv){
         kh2coop::eventscenes::Qualified(18,3,0,83,83,83)&&kh2coop::eventscenes::Qualified(2,19,0,136,136,136)&&
         !kh2coop::eventscenes::Qualified(2,19,50,1,0,2)&&!kh2coop::eventscenes::Qualified(2,13,0,135,135,135)&&
         !kh2coop::eventscenes::Qualified(2,7,0,97,97,97)&&!kh2coop::eventscenes::Qualified(2,7,1,0,0,3),
-        "qualified scenes are exact prologue event-only locations");}
+        "qualified scenes are exact prologue event-only locations");
+  // VUH-2617 (bot04, run 20261021-192441): after Thorn's victory event 315 the host loaded these
+  // event-only locations in order, never reaching field play in any (no census, no progress sample),
+  // so none was announced and the friend waited at its own blocked exit to the first, 02/00 program
+  // 51, in 02/34. Each must be a qualified scene, exactly; the last observed load, 02/01 program 54,
+  // was still in its event when the run ended and stays unqualified until its exit is observed.
+  {const std::uint16_t chain[][6]{{2,0,0,51,51,51},{2,4,0,83,83,83},{2,2,0,67,67,67},{2,6,0,168,168,168},
+                                  {2,2,0,167,167,167},{2,15,0,142,142,142}};
+   bool all=true;
+   for(const auto& r:chain)all=all&&kh2coop::eventscenes::Qualified(r[0],r[1],r[2],r[3],r[4],r[5])!=nullptr;
+   check(all,"the host's post-Thorn chain (02/00 51 to 02/15 142) is announced as scenes");
+   check(!kh2coop::eventscenes::Qualified(2,0,1,51,51,51)&&!kh2coop::eventscenes::Qualified(2,0,0,51,51,52)&&
+         !kh2coop::eventscenes::Qualified(2,2,0,67,67,167)&&!kh2coop::eventscenes::Qualified(2,1,0,54,54,54),
+         "the post-Thorn rows are exact; 02/01 54 is not yet qualified");
+   // The friend's blocked native exit after its own 315 is the first of them (3A4BD0/39FBC0 decode).
+   check(kh2coop::eventscenes::Qualified(2,0,0,0x33,0x33,0x33)!=nullptr,
+         "the friend's blocked post-315 exit (world2 room0 door0 programs 51) is the first post-Thorn scene");}}
  if(mode=="off"){fresh();check(!n::Enabled()&&!n::ApplyInput(data)&&buttons()==0x4d4d,"default off leaves fresh physical untouched");}
  else{
  e::Channel runtime;check(runtime.Open(GetCurrentProcessId()),"independent runtime view opened");
