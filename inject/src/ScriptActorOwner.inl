@@ -711,21 +711,20 @@ static bool SmOwnerReleaseRootCurrent(const ScriptActorRole& role) {
     return role.actor && SmGameThread() && !warp::TransitionPending() && role.load==warp::LoadSerial() &&
         role.transition==warp::TransitionSerial() && SmOwnerActorCurrent(role);
 }
-// The source proven on its own, without reading it first: the mirror's current driven actor for the role's netId and
-// object id, and the listed handle the role admitted.
-static bool SmOwnerReleaseSourceCurrent(const ScriptActorRole& role) {
-    return !g_sm.hostActive && role.source && role.sourceHandle &&
-        SmDrivenActor(role.netId,role.objectId)==role.source && enemytarget::ListHandle(role.source)==role.sourceHandle;
-}
 // `[script-owner] local release`: the gate the release stopped at and, through rules::ReadLocalHold, the friend's
 // actor (+D48 coroutine, +2B0 capture, +2B8 bank against the proven source's, +6C8/+18C capture bits, +6A0, anchor,
-// motion, +0xC action) read only from proven roots. stage=release: as the decision found it; stage=post-cancel: after
-// the original native coroutine cancel, re-proven first; stage=refused: the root failed, metadata only.
-static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outcome,const char* stage,bool actorProven) {
+// motion, +0xC action) read only from roots rules::ProveLocalHoldRoots proves. stage=release: as the decision found
+// it; stage=post-cancel: after the original native coroutine cancel, metadata only; stage=refused: the release refused
+// its root, metadata only.
+static bool SmOwnerCameraSourceCurrent(const ScriptActorRole& role) noexcept;
+static void SmLogLocalRelease(const ScriptActorRole& role,R::ReleaseCleanup outcome,bool decisionCurrent,bool cancelled) {
     if(g_smLocalReleaseLogs>=64)return;
     ++g_smLocalReleaseLogs;
-    const bool sourceProven=actorProven && SmOwnerReleaseSourceCurrent(role);
-    const auto h=R::ReadLocalHold(actorProven,role.actor,sourceProven,role.source,
+    const auto roots=R::ProveLocalHoldRoots(decisionCurrent,cancelled,role.actor,role.actorHandle,role.source,
+        role.sourceHandle,[](std::uintptr_t at){return enemytarget::ListHandle(at);},
+        [&role](){return SmOwnerCameraSourceCurrent(role)?role.source:std::uintptr_t{0};}); // driven table only, no reads
+    const char* stage=!decisionCurrent?"refused":cancelled?"post-cancel":"release";
+    const auto h=R::ReadLocalHold(roots.actor,role.actor,roots.source,role.source,
         [](std::uintptr_t at,void* out,std::size_t size){return ReadHitTraceMemory(at,out,size);},
         [](std::uint32_t handle){return SmDecode(handle);});
     Log("[script-owner] local release stage=%s role=%u seat=%u outcome=%s actorRead=%u sourceRead=%u d48=%llX "
@@ -775,11 +774,7 @@ static void SmOwnerCleanupPlayer(const ScriptActorRole& released) {
         }
         outcome=R::DecideReleaseCleanup(f);
     }
-    if(friendLocal) {
-        // After the cancel the earlier root proof is stale: re-prove it before reading anything of the actor.
-        const bool proven=f.current && (!cancelled || SmOwnerReleaseRootCurrent(released));
-        SmLogLocalRelease(released,outcome,!f.current?"refused":cancelled?"post-cancel":"release",proven);
-    }
+    if(friendLocal)SmLogLocalRelease(released,outcome,f.current,cancelled);
     if(outcome==R::ReleaseCleanup::Cleaned) {
         (void)SmOwnerNativePlayer(released.actor,0x42C5F0);
         (void)SmOwnerNativePlayer(released.actor,0x42D0E0);

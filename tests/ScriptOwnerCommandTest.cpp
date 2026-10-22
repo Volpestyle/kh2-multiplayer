@@ -225,5 +225,45 @@ int main() {
         h=R::ReadLocalHold(true,actor,false,source,failing,decode);
         check(!h.actorRead && reads.size()==1 && !decodes,"an unreadable actor stops at the first field: no action decode");
     }
+    // Quill r2 (bc443bc): the production boundary, proof then reader. The list lookup compares pointers; the driven
+    // entry is the mirror's table; every field read is counted. After a cancel nothing is consulted at all.
+    {
+        const std::uintptr_t actor=0x10000,source=0x50000;
+        const std::uint32_t actorHandle=0x11,sourceHandle=0x55;
+        std::vector<std::uintptr_t> reads,listedAsked;int drivenAsked=0;
+        std::uint32_t actorListed=actorHandle,sourceListed=sourceHandle;std::uintptr_t drivenNow=source;
+        const auto listed=[&](std::uintptr_t at){listedAsked.push_back(at);
+            return at==actor?actorListed:at==source?sourceListed:0u;};
+        const auto driven=[&](){++drivenAsked;return drivenNow;};
+        const auto read=[&](std::uintptr_t at,void* out,std::size_t size){reads.push_back(at);std::memset(out,0,size);return true;};
+        const auto decode=[](std::uint32_t){return std::uintptr_t{0};};
+        const auto line=[&](bool current,bool cancelled){
+            reads.clear();listedAsked.clear();drivenAsked=0;
+            const auto roots=R::ProveLocalHoldRoots(current,cancelled,actor,actorHandle,source,sourceHandle,listed,driven);
+            return R::ReadLocalHold(roots.actor,actor,roots.source,source,read,decode);};
+        const auto sourceTouched=[&](){for(auto at:reads)if(at>=source && at<source+0x1000)return true;return false;};
+        auto h=line(true,false);
+        check(h.actorRead && h.sourceRead,"release stage, both exact admitted handles listed: actor and source bank read");
+        sourceListed=0;                                             // the cancel freed the source, the player remains
+        h=line(true,true);
+        check(reads.empty() && listedAsked.empty() && !drivenAsked && !h.actorRead,
+              "post-cancel: metadata only; no list walk, driven lookup or field read for either root");
+        h=line(true,false);
+        check(h.actorRead && !h.sourceRead && !sourceTouched() && !drivenAsked,
+              "a source no longer listed: no driven lookup, no source read");
+        sourceListed=0x77;                                          // the slot reused by another object
+        h=line(true,false);
+        check(!h.sourceRead && !sourceTouched() && !drivenAsked,"a source whose list handle changed is never read");
+        sourceListed=sourceHandle;drivenNow=0x60000;                // listed, but the mirror drives another actor
+        h=line(true,false);
+        check(!h.sourceRead && !sourceTouched(),"a listed source the mirror no longer drives is never read");
+        drivenNow=source;actorListed=0x99;                          // the actor replaced at the same address
+        h=line(true,false);
+        check(reads.empty() && !h.actorRead && !drivenAsked && listedAsked.size()==1,
+              "a replaced actor: one list lookup, no source lookup, zero reads");
+        actorListed=actorHandle;
+        h=line(false,false);
+        check(reads.empty() && listedAsked.empty() && !drivenAsked,"a refused release root: nothing consulted");
+    }
     return errors?1:0;
 }

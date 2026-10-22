@@ -409,6 +409,21 @@ LocalHold ReadLocalHold(bool actorProven,std::uintptr_t actor,bool sourceProven,
     h.sourceRead=sourceProven && source && read(source+0x158,&h.sourceBank,sizeof(h.sourceBank));
     return h;
 }
+// Which roots the release line may read (Quill r2): none after the native coroutine cancel (it may free or replace
+// either root) or when the release refused its root; otherwise the exact admitted actor through the entity list's
+// handle (`listed(pointer)` walks the list and compares pointers, reading neither root), then the source the same
+// way, and only then the mirror's driven entry for the source (`driven()`: the driven table, no reads).
+struct LocalHoldRoots { bool actor{},source{}; };
+template<class Listed,class Driven>
+LocalHoldRoots ProveLocalHoldRoots(bool decisionCurrent,bool cancelled,std::uintptr_t actor,std::uint32_t actorHandle,
+                                   std::uintptr_t source,std::uint32_t sourceHandle,Listed&& listed,Driven&& driven) {
+    LocalHoldRoots roots{};
+    if(!decisionCurrent || cancelled)return roots;
+    if(!actor || !actorHandle || listed(actor)!=actorHandle)return roots;
+    roots.actor=true;
+    roots.source=source && sourceHandle && listed(source)==sourceHandle && driven()==source;
+    return roots;
+}
 inline const char* ReleaseCleanupName(ReleaseCleanup c) noexcept {
     switch(c) {
     case ReleaseCleanup::NotCurrent: return "not-current";
