@@ -1128,6 +1128,10 @@ class Pilot:
             tx, tz = target["position"]["x"], target["position"]["z"]
             gap = math.hypot(tx - p[0], tz - p[2])
             near = [f for f in foes if math.hypot(f["position"]["x"] - p[0], f["position"]["z"] - p[2]) < reach * 2]
+            # A child pilot (route_pilot/thorn.py) may spend this turn on its own combat move; the base never does.
+            if self.combat_turn(s, foes, target, gap, reach, stats):
+                blocked_approach = None
+                continue
             if want_heal(s):
                 blocked_approach = None
             if want_heal(s) and not heal_window(s, foes) and window_tries < int(heal.get("escapes", 2)):
@@ -1214,6 +1218,11 @@ class Pilot:
                     stats["guards"] = stats.get("guards", 0) + 1
                     self.kb.tap(guard, 300)
         raise Stuck("fight did not clear")
+
+    def combat_turn(self, s: dict, foes: list[dict], target: dict, gap: float, reach: float, stats: dict) -> bool:
+        """Hook for child pilots: True when this fight turn was spent on their own move (it then restarts
+        from fresh state). The base pilot never takes a turn, so its fights are unchanged."""
+        return False
 
     def thorn_attack_probe(self, scope: tuple, target_address: str, deadline: float) -> dict:
         """One bounded native jump/two-Cross experiment; no direct state writes.

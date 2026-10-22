@@ -1,7 +1,7 @@
 {
   "name": "twilight_thorn_host_fight",
   "retries": 0,
-  "description": "Single-PC loopback native Thorn combat; both seats approach at reach300. No HP/team/position writes, immunity, synthetic hits, or Continue retries. Owned camera reactions297/298/299 remain pad-only and bounded. First-hit combo tutorial dismissal and cooperative native revival stay enabled. Actual owner1 completion remains required; live05 already established ground reaction ownership without relying on a distant host. LowHp0 explicitly keeps native25%-revived seats attacking; ordinary recent-damage escape, guard, RC and peer revival priority remain. The bounded blocked-approach jump/two-Cross probe is an experiment, not a claimed head unlock.",
+  "description": "Single-PC loopback native Thorn combat; both seats approach at reach300. No HP/team/position writes, immunity, synthetic hits, or Continue retries. Owned camera reactions297/298/299 remain pad-only and bounded. First-hit combo tutorial dismissal and cooperative native revival stay enabled. Actual owner1 completion remains required; live05 already established ground reaction ownership without relying on a distant host. LowHp0 explicitly keeps native25%-revived seats attacking; ordinary recent-damage escape, guard, RC and peer revival priority remain. The bounded blocked-approach jump/two-Cross probe is an experiment, not a claimed head unlock. VUH-2617 pilot r1: thornCombat dodges Thorn's attack telegraphs (seeded 202/204/226, learned from own-HP loss), keeps a low seat away while its partner is alive and healthier, and pinnedDrop 0.55 stops a single Thorn hit from triggering a run-away escape.",
   "steps": [
     {
       "do": "fight",
@@ -18,7 +18,25 @@
         299
       ],
       "lowHp": 0,
-      "blockedThornProbe": true
+      "blockedThornProbe": true,
+      "pinnedDrop": 0.55,
+      "thornCombat": {
+        "dodge": true,
+        "seed": [
+          202,
+          204,
+          226
+        ],
+        "radius": 650,
+        "earlyFrames": 45,
+        "learn": 2,
+        "learnRatio": 0.34,
+        "dodgeCooldownSec": 1.2,
+        "dodgeStep": 400,
+        "kiteBelow": 0.25,
+        "kiteRadius": 750,
+        "kiteMargin": 4
+      }
     }
   ]
 }

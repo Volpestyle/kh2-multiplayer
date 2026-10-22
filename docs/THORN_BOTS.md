@@ -60,6 +60,62 @@ as historical evidence. The final no-game FileIO qualification passed, but its
 old live wrapper binds bots04/exact35 and that baseline. Bots05 uses the full
 install detector above; no old wrapper or old movie baseline is reused.
 
+## Combat pilot r1: dodge, keep-away and revive detour (VUH-2617)
+
+**Why.** In bots05 attempts 02–04, Thorn fell from 390 to about 220 HP inside the first minute, mostly in
+the large drops of the reaction sequences. Then it stalled (178–192 at the end) while both seats sat at 1–5
+HP, often 1000–1800 units away, until a full party down. Ivo's read of the clips and `pilot.jsonl`: the
+pilots soaked hits with no guard or dodge, and the revive approach had no fallback.
+
+**What changed.** The `fight` step's opt-in `thornCombat` block is set in both Thorn fight routes. The base
+`pilot.py` gains one hook, `combat_turn`, that never takes a turn, so every other route behaves the same.
+
+- **Dodge on telegraphs.**
+  - A Thorn motion counts as a telegraph if it is seeded: 202 (`atk_ground`, aimed at Thorn's target),
+    and 204 and 226 (the native motion attacks that hit the friend in bot02).
+  - It can also be learned during the fight: at least `learn` (2) of this seat's own HP drops while Thorn
+    was in that motion and within 1.5×`radius`, in at least `learnRatio` (0.34) of its instances.
+  - Early in such a motion (`motionTime` ≤ `earlyFrames`, 45) and within `radius` (650), the seat
+    sidesteps across Thorn's line with a moving jump. The step is `dodgeStep` (400), slightly outward,
+    alternating sides. It dodges once per motion instance, with a `dodgeCooldownSec` (1.2) cooldown.
+  - It is logged as `thorn_dodge`.
+- **Keep-away when low.** At or below `kiteBelow` (25%, 5 of Roxas's 20 HP), with the partner alive and
+  at least `kiteMargin` (4) HP healthier, the seat holds the `kiteRadius` (750) ring around Thorn instead of
+  attacking. That way one seat survives to revive the other, instead of both going down (D17's full-party
+  game over).
+  - It stops when the partner is downed (the revive takes priority), recovers, or the seat recovers.
+  - Reactions are still taken first.
+  - This changes the earlier "native 25%-revived seats keep attacking" rule only when the partner is
+    healthier.
+  - It is logged as `thorn_kite`.
+- **Revive-approach fallback.** When the approach to a downed partner gains under 40 horizontal units in
+  2 s, the seat detours to a waypoint beside the line, on the side away from Thorn's root, for 1 s with a
+  moving jump. At most 8 times per downed episode. It is logged as `coop_detour`.
+- **Fewer run-aways.** `pinnedDrop` 0.55: escaping now needs 11 HP lost in 2 s, where before one or two
+  Thorn hits triggered a run-and-jump away.
+- **Telemetry.** `thorn_observe` adds `thornCombat`:
+  - Thorn's HP, motion, motion time and root;
+  - the learned telegraphs;
+  - per-motion own-hit and instance counts;
+  - **Thorn's HP lost per motion** (`dealtByMotion`), which marks the openings worth pressing;
+  - counters.
+
+  `thorn_combat_summary` closes each fight.
+
+**Not done.** No Potion (no evidence this save has any), no direct use of openings yet (only measured), and
+no change to reactions, which already fire. Offline: `python -B tests/test_pilot_thorn.py`, along with the
+existing `test_pilot_fight.py` and `test_pilot_pad.py`.
+
+**Measure on the next live run:**
+- Thorn's HP per block against both seats' HP;
+- dodge count and the HP lost within 1 s after a dodge;
+- the learned set;
+- kite time;
+- detour count and whether the revive then landed;
+- `dealtByMotion` (which motions are worth attacking).
+
+Success is a Thorn kill, not these counts.
+
 ## Acceptance still open
 
 Bots05 is an experimental regression candidate. Shared victory, rewards,

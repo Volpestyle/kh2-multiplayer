@@ -117,8 +117,157 @@ class DownedLog(base.DownedLog):
         return self.known
 
 
+class ThornPolicy:
+    """VUH-2617 Thorn combat moves on top of the base fight, from live observations only (no memory writes).
+
+    Bots02-04 put Thorn at 390 -> ~220 HP inside the first minute, then stalled with both seats near-down
+    and spending long spells 1000+ units away. This adds, per seat and from its own reads:
+      - a dodge on Thorn's attack telegraphs: a sidestep across Thorn's line with a moving jump, once per
+        motion instance, with a cooldown. A motion is a telegraph if it is seeded (atk_ground 202 and the
+        native motion attacks 204/226 from bot02) or learned in this fight: at least `learn` own-HP drops
+        while Thorn was in it and near, in at least `learnRatio` of its instances;
+      - keeping away when this seat is low and the partner is alive and healthier, so one seat survives
+        to revive the other instead of both going down (D17's full-party game over);
+      - telemetry (Thorn's motion, the learned set, counters, and Thorn's HP lost per motion, which marks the
+        openings worth pressing) for tuning on the next live run. Openings are measured, not yet acted on.
+    Pure decisions: every input is a state/entity dict, so they are tested offline."""
+    SEED = (202, 204, 226)
+
+    def __init__(self, config: dict):
+        self.dodge = bool(config.get("dodge", True))
+        self.seed = frozenset(int(m) for m in config.get("seed", self.SEED))
+        self.radius = float(config.get("radius", 650))
+        self.early = float(config.get("earlyFrames", 45))
+        self.learn = int(config.get("learn", 2))
+        self.ratio = float(config.get("learnRatio", 0.34))
+        self.cooldown = float(config.get("dodgeCooldownSec", 1.2))
+        self.step = float(config.get("dodgeStep", 400))
+        self.kite_below = float(config.get("kiteBelow", 0.25))
+        self.kite_radius = float(config.get("kiteRadius", 750))
+        self.kite_margin = int(config.get("kiteMargin", 4))
+        self.motion = None
+        self.instance = 0
+        self.motion_at = 0.0
+        self.previous = None
+        self.seen: dict[int, int] = {}
+        self.hits: dict[int, int] = {}
+        self.last_hp = None
+        self.dodged_instance = None
+        self.dodge_at = float("-inf")
+        self.side = 1
+        self.kiting = False
+        self.thorn = None
+        self.thorn_hp = None
+        self.dealt: dict[int, int] = {}
+        self.counters = {"dodges": 0, "kites": 0, "hitsNear": 0}
+
+    @staticmethod
+    def flat(entity: dict) -> tuple[float, float]:
+        return entity["position"]["x"], entity["position"]["z"]
+
+    def observe(self, thorn: dict | None, own: dict, now: float) -> None:
+        if thorn is not None:
+            motion = thorn.get("motionId")
+            if motion != self.motion:
+                self.previous, self.motion, self.motion_at = self.motion, motion, now
+                self.instance += 1
+                self.seen[motion] = self.seen.get(motion, 0) + 1
+            self.thorn = {"hp": thorn.get("hp"), "motionId": motion, "motionTime": thorn.get("motionTime"),
+                          "position": list(self.flat(thorn))}
+            hp = thorn.get("hp")
+            if hp is not None and self.thorn_hp is not None and hp < self.thorn_hp:
+                self.dealt[motion] = self.dealt.get(motion, 0) + self.thorn_hp - hp
+            self.thorn_hp = hp
+        hp = own.get("hp")
+        if hp is not None and self.last_hp is not None and hp < self.last_hp and thorn is not None \
+                and own.get("playerPos") and self.distance(own, thorn) <= self.radius * 1.5:
+            self.counters["hitsNear"] += 1
+            for motion in {self.motion, self.previous if now - self.motion_at <= 0.5 else self.motion}:
+                if motion is not None:
+                    self.hits[motion] = self.hits.get(motion, 0) + 1
+        self.last_hp = hp
+
+    def distance(self, own: dict, thorn: dict) -> float:
+        p, (tx, tz) = own["playerPos"], self.flat(thorn)
+        return math.hypot(tx - p[0], tz - p[2])
+
+    def dangerous(self, motion) -> bool:
+        if motion is None:
+            return False
+        if motion in self.seed:
+            return True
+        hits, seen = self.hits.get(motion, 0), max(self.seen.get(motion, 0), 1)
+        return hits >= self.learn and hits / seen >= self.ratio
+
+    def learned(self) -> list[int]:
+        return sorted(m for m in set(self.hits) | set(self.seed) if self.dangerous(m))
+
+    def threat(self, thorn: dict | None, own: dict, now: float) -> bool:
+        if not self.dodge or thorn is None or not own.get("playerPos"):
+            return False
+        motion, timing = thorn.get("motionId"), thorn.get("motionTime")
+        early = timing is None or timing <= self.early
+        return self.dangerous(motion) and early and self.dodged_instance != self.instance \
+            and now - self.dodge_at >= self.cooldown and self.distance(own, thorn) <= self.radius
+
+    def dodge_target(self, own: dict, thorn: dict) -> tuple[float, float]:
+        """Across Thorn's line to this seat, alternating sides, and a little outward."""
+        p, (tx, tz) = own["playerPos"], self.flat(thorn)
+        vx, vz = p[0] - tx, p[2] - tz
+        d = math.hypot(vx, vz) or 1.0
+        vx, vz = vx / d, vz / d
+        px, pz = -vz * self.side, vx * self.side
+        return p[0] + px * self.step + vx * 150, p[2] + pz * self.step + vz * 150
+
+    def took_dodge(self, now: float) -> None:
+        self.dodged_instance, self.dodge_at = self.instance, now
+        self.side = -self.side
+        self.counters["dodges"] += 1
+
+    def kite(self, own: dict, thorn: dict | None, peer: dict | None):
+        """Keep away while this seat is low and the partner is alive and healthier: a target on the ring
+        `kiteRadius` from Thorn, "hold" when already outside it, or None to fight on."""
+        hp, top = own.get("hp"), max(own.get("maxHp") or 1, 1)
+        want = thorn is not None and own.get("playerPos") and hp is not None and hp > 0 \
+            and hp <= self.kite_below * top and peer is not None and not peer.get("downed", True) \
+            and (peer.get("hp") or 0) >= hp + self.kite_margin
+        self.kiting = bool(want)
+        if not want:
+            return None
+        self.counters["kites"] += 1
+        p, (tx, tz) = own["playerPos"], self.flat(thorn)
+        vx, vz = p[0] - tx, p[2] - tz
+        d = math.hypot(vx, vz)
+        if d >= self.kite_radius:
+            return "hold"
+        if d < 1:
+            vx, vz, d = 1.0, 0.0, 1.0
+        return tx + vx / d * self.kite_radius, tz + vz / d * self.kite_radius
+
+    def snapshot(self) -> dict:
+        return {"thorn": self.thorn, "instance": self.instance, "learned": self.learned(),
+                "hits": dict(sorted(self.hits.items())), "seen": dict(sorted(self.seen.items())),
+                "dealtByMotion": dict(sorted(self.dealt.items())),
+                "kiting": self.kiting, **self.counters}
+
+
+def detour_goal(point, target, side: int, thorn=None, offset: float = 350.0) -> tuple[float, float]:
+    """A waypoint beside the straight line from point to target. With Thorn's root known, the side away
+    from it; else the given side."""
+    dx, dz = target[0] - point[0], target[2] - point[2]
+    d = math.hypot(dx, dz) or 1.0
+    px, pz = -dz / d, dx / d
+    if thorn is not None:
+        mx, mz = (point[0] + target[0]) / 2, (point[2] + target[2]) / 2
+        side = -1 if (thorn[0] - mx) * px + (thorn[1] - mz) * pz > 0 else 1
+    return point[0] + dx * 0.5 + px * offset * side, point[2] + dz * 0.5 + pz * offset * side
+
+
 class CooperativeFight(base.CooperativeFight):
     START_3D, KEEP_3D = 110.0, 140.0  # native range remains150; stay inside it
+    # Revive-approach fallback (VUH-2617): no horizontal progress for STALL_SEC detours beside the line
+    # (around Thorn when its root is known) with a moving jump, at most MAX_DETOURS per downed episode.
+    STALL_SEC, STALL_GAIN, DETOUR_SEC, MAX_DETOURS = 2.0, 40.0, 1.0, 8
 
     def __init__(self, game, peer, hold_ms=None):
         super().__init__(game, peer, hold_ms)
@@ -131,6 +280,40 @@ class CooperativeFight(base.CooperativeFight):
         self.waiting_release = False
         self.last_progress = 0
         self.last_hold_hp = None
+        self.progress = None       # (time, horizontal) of the current approach window
+        self.detour_until = 0.0
+        self.detour_point = None
+        self.detours = 0
+        self.detour_side = 1
+
+    def approach(self, pilot, own, point, target, horizontal, now):
+        """The keys toward the downed peer: straight, or a bounded detour when the approach stalls."""
+        if horizontal <= 80:
+            self.progress = None
+            return set()
+        if now < self.detour_until and self.detour_point is not None:
+            return base.steer({**own, "pos": point}, self.detour_point)
+        if self.progress is None:
+            self.progress = (now, horizontal)
+        elif now - self.progress[0] >= self.STALL_SEC:
+            stalled = self.progress[1] - horizontal < self.STALL_GAIN
+            self.progress = (now, horizontal)
+            if stalled and self.detours < self.MAX_DETOURS:
+                policy = getattr(pilot, "thorn_policy", None)
+                thorn = tuple(policy.thorn["position"]) if policy is not None and policy.thorn else None
+                self.detour_point = detour_goal(point, target, self.detour_side, thorn)
+                self.detour_side = -self.detour_side
+                self.detour_until = now + self.DETOUR_SEC
+                self.detours += 1
+                keys = base.steer({**own, "pos": point}, self.detour_point)
+                pilot.kb.hold(keys | {"jump"})  # a moving jump over low geometry; tap() would drop the stick
+                time.sleep(0.09)
+                pilot.kb.hold(keys)
+                pilot.write("coop_detour", attempt=self.detours, horizontal=round(horizontal, 1),
+                            own=list(point), target=list(target), waypoint=list(self.detour_point),
+                            aroundThorn=thorn is not None)
+                return keys
+        return base.steer({**own, "pos": point}, (target[0], target[2]))
 
     def end_hold(self, pilot, reason, own):
         if self.hold_started is not None:
@@ -172,6 +355,7 @@ class CooperativeFight(base.CooperativeFight):
                 if self.own_log.full_party or self.peer_log.full_party else "own-logical-downed"
             return self.neutral(pilot, mode)  # original60s failure bound
         if not self.peer_log.downed:
+            self.progress, self.detour_until, self.detour_point, self.detours = None, 0.0, None, 0
             self.end_hold(pilot, "peer-recovered", own)
             self.arm_frame = self.armed_identity = None
             self.waiting_release = False
@@ -207,10 +391,10 @@ class CooperativeFight(base.CooperativeFight):
         if self.hold_identity is not None and self.hold_identity != identity:
             return self.stop(pilot, "actor-replaced", own)
         now = time.monotonic()
-        direction = base.steer({**own, "pos": point}, (target[0], target[2])) if horizontal > 80 else set()
+        direction = self.approach(pilot, own, point, target, horizontal, now)
         if now - self.observed_at >= 0.5:
             pilot.write("coop_approach", peerPid=self.peer.pid, own=list(point), target=list(target),
-                        distance3D=round(distance, 2), horizontal=round(horizontal, 2),
+                        distance3D=round(distance, 2), horizontal=round(horizontal, 2), detours=self.detours,
                         react=own["react"], forward=own["forward"], direction=sorted(direction),
                         held=sorted(pilot.kb.held), observation=own.get("reactObservation"))
             self.observed_at = now
@@ -295,12 +479,16 @@ class CooperativeFight(base.CooperativeFight):
 
 class Pilot(OriginalPilot):
     observation_at = 0.0
+    thorn_policy = None
+    kite_logged_at = 0.0
 
     def state(self):
         state = super().state()
         now = time.monotonic()
         if (state["world"], state["room"]) == (2, 34) and now-self.observation_at >= 0.5:
-            self.write("thorn_observe", state=state, held=sorted(self.kb.held))
+            policy = self.thorn_policy
+            self.write("thorn_observe", state=state, held=sorted(self.kb.held),
+                       **({"thornCombat": policy.snapshot()} if policy is not None else {}))
             self.observation_at = now
         room = getattr(self, "fighting_room", None)
         if room is not None and state["world"] != 255 and (state["world"], state["room"]) != room:
@@ -310,10 +498,62 @@ class Pilot(OriginalPilot):
             raise FightRoomExit(state)
         return state
 
+    def peer_vitals(self):
+        """The partner's HP and logical-downed state for the keep-away rule; None if unknown."""
+        cooperative = self.cooperative
+        if cooperative is None:
+            return None
+        try:
+            peer = cooperative.peer.state()
+        except (OSError, ValueError):
+            return None
+        return {"hp": peer.get("hp"), "maxHp": peer.get("maxHp"), "downed": bool(cooperative.peer_log.downed)}
+
+    def combat_turn(self, s, foes, target, gap, reach, stats):
+        policy = self.thorn_policy
+        if policy is None or (s["world"], s["room"]) != (2, 34) or not s["free"] or s["react"] \
+                or s["hp"] is None or s["hp"] <= 0 or not s["playerPos"]:
+            return False
+        thorn = next((f for f in foes if f.get("objectId") == 307 and f.get("objectType") == 12), None)
+        now = time.monotonic()
+        policy.observe(thorn, s, now)
+        if thorn is None:
+            return False
+        point = s["playerPos"]
+        if policy.threat(thorn, s, now):
+            goal = policy.dodge_target(s, thorn)
+            keys = base.steer({**s, "pos": point}, goal)
+            self.kb.hold(keys)
+            time.sleep(0.12)
+            self.kb.hold(keys | {"jump"})  # a moving jump; tap() would drop the stick
+            time.sleep(0.09)
+            self.kb.hold(keys)
+            time.sleep(0.25)
+            self.kb.hold(set())
+            stats["dodges"] = stats.get("dodges", 0) + 1
+            self.write("thorn_dodge", motion=thorn.get("motionId"), motionTime=thorn.get("motionTime"),
+                       distance=round(policy.distance(s, thorn), 1), side=policy.side, keys=sorted(keys),
+                       learned=policy.learned(), hp=s["hp"])
+            policy.took_dodge(now)
+            return True
+        goal = policy.kite(s, thorn, self.peer_vitals())
+        if goal is None:
+            return False
+        keys = set() if goal == "hold" else base.steer({**s, "pos": point}, goal)
+        self.kb.hold(keys)
+        time.sleep(0.2)
+        stats["kites"] = stats.get("kites", 0) + 1
+        if now - self.kite_logged_at >= 2.0:
+            self.kite_logged_at = now
+            self.write("thorn_kite", hp=s["hp"], distance=round(policy.distance(s, thorn), 1),
+                       goal=goal if goal == "hold" else [round(v, 1) for v in goal], keys=sorted(keys))
+        return True
+
     def fight(self, step, deadline):
         thorn = bool(step.get("eventReactions"))
         self.kb.thorn_combat = thorn
         self.fighting_room = (2, 34) if thorn else None
+        self.thorn_policy = ThornPolicy(step["thornCombat"]) if thorn and step.get("thornCombat") else None
         try:
             try:
                 return super().fight({**step, "reactGapSec": 0.35} if thorn else step, deadline)
@@ -324,8 +564,11 @@ class Pilot(OriginalPilot):
                 return {"exitRoom": [exit.state["world"], exit.state["room"]],
                         "nativeRoomExit": True}
         finally:
+            if self.thorn_policy is not None:
+                self.write("thorn_combat_summary", **self.thorn_policy.snapshot())
             self.kb.thorn_combat = False
             self.fighting_room = None
+            self.thorn_policy = None
 
 
 def main():
