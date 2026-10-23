@@ -213,6 +213,17 @@ native pool occupancy. Camera admission also now uses the exact role-owned nativ
 context, preserving story/loading/menu/frozen guards; retirement waits for the
 finite authored camera and native idle.
 
+VUH-2707's diagnostic run `20261023-123953` reached friend-owned capture257 and
+camera40, then refused registration at the scope check after the native call.
+The client identity proof indirectly required `SafeToWarp`, which rejects that
+active camera. The correction uses the existing full-tuple/epoch arrival proof
+only after the client has already arrived; first arrival and ACK remain on the
+strict warp gate. Camera registration explicitly checks native field, menu,
+frozen, load and exact owner/source/asset identity. Gameplay still requires the
+registered camera proof. The production-client regression and exact-binary
+friend299/opening replay must qualify this correction before it is considered
+proved; the diagnostic fight failed, with install and saves unchanged.
+
 Acceptance still requires a successful two-seat kill, one host mission16 and
 native315 publication, the same authored exit and onward control, qualified
 owner/clone motion and cleanup, and a captioned two-screen clip explicitly

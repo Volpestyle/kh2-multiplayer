@@ -675,6 +675,84 @@ void TestOwnedCameraGameplay() {
           "native pause blocker independently refuses dormant-script recovery");
     Reset();
 }
+
+void TestClientOwnedCameraArrival() {
+    namespace w = kh2coop::inject::recoverywarp;
+    const auto seed = []() {
+        ResetWorld();SetScriptCameraCurrent(nullptr);
+        g_host.arrived=false;g_host.ackSent=false;
+        Check(w::QueueHostTransition(arrivalTarget),"client camera fixture queues production host transition");
+        w::IssueHostTransition();
+        Check(warpCalls==1 && !w::HostTransitionArrived(9),"camera fixture has no arrival before native completion");
+        w::CompleteLoad();
+        // Keep the fixture's existing native room/census; these are the serials
+        // the ordinary frame adopts after that real Warp::CompleteLoad.
+        g_seenLoad=w::LoadSerial();g_seenTransition=w::TransitionSerial();
+        Put(image+offsets::CUTSCENE_STATE,std::int32_t{2});Put(image+offsets::EVENT_CONTEXT,image+0x71000);
+        OnFrameStart(400);
+        Check(!g_host.arrived && !g_host.ackSent && !w::HostTransitionArrived(9),
+              "active event cannot establish first client arrival or ACK");
+        Put(image+offsets::CUTSCENE_STATE,std::int32_t{0});Put(image+offsets::EVENT_CONTEXT,uintptr_t{0});
+        OnFrameStart(401);
+        Check(g_host.arrived && g_host.ackSent && w::HostTransitionArrived(9),
+              "settled native frame establishes actual client arrival and ACK");
+        Check(CaptureDownedScope(ownedCameraScope),"client captures admitted scope before the native camera");
+        Put(image+offsets::CUTSCENE_STATE,std::int32_t{2});Put(image+offsets::EVENT_CONTEXT,image+0x71000);
+    };
+    seed();
+    Check(!w::SafeToWarp() && !w::HostTransitionArrived(9) && w::MatchesArrivedHostTransition(arrivalTarget),
+          "production Warp separates current admitted arrival from permission to warp during a camera");
+    Check(ScriptCameraScopeCurrent(ownedCameraScope),
+          "client camera registration can prove existing scope while native event is active");
+    DownedScope continued{};ClientClaimScope claimScope{};
+    Check(!SafeNativeGameplay() && !CaptureDownedScope(continued),
+          "identity-only arrival never authorizes an unregistered camera");
+    SetScriptCameraCurrent(&OwnedCameraFixture);
+    Check(SafeNativeGameplay() && CaptureDownedScope(continued) && ReadClientClaimScope(claimScope) &&
+          CaptureNativeCensus().state==CensusState::Complete,
+          "registered client camera preserves real gameplay, owner scope, client scope and native census");
+    Check(!SafeRecoveryGameplay() && !w::SafeToWarp() && !w::HostTransitionArrived(9),
+          "owned client camera still grants neither recovery nor warp permission");
+    Put(image+offsets::EVENT_CONTEXT,image+0x72000);
+    Check(ScriptCameraScopeCurrent(ownedCameraScope) && !SafeNativeGameplay() && !CaptureDownedScope(continued),
+          "replacement story keeps identity separate but cannot inherit gameplay");
+    SetScriptCameraCurrent(nullptr);
+
+    for(unsigned mutation=0;mutation<5;++mutation) {
+        seed();SetScriptCameraCurrent(&OwnedCameraFixture);
+        if(mutation==0)Put(image+offsets::OPEN_MENU,std::uint8_t{0});
+        if(mutation==1)Put(image+offsets::CONTROLLABLE,std::int32_t{1});
+        if(mutation==2)Put(image+offsets::IN_FIELD,std::uint8_t{0});
+        if(mutation==3)Put(image+offsets::CUTSCENE_STATE,std::int32_t{-1});
+        if(mutation==4)Put(image+offsets::CUTSCENE_STATE,std::int32_t{5});
+        Check(!SafeNativeGameplay() && !CaptureDownedScope(continued),
+              "client camera never bypasses native menu, frozen, field or task-state fences");
+        SetScriptCameraCurrent(nullptr);
+    }
+    for(unsigned mutation=0;mutation<16;++mutation) {
+        seed();SetScriptCameraCurrent(&OwnedCameraFixture);
+        if(mutation==0)g_host.arrived=false;
+        if(mutation==1)++g_host.epoch;
+        if(mutation==2)++g_bridge.generation;
+        if(mutation==3)++g_bridge.deliverySerial;
+        if(mutation==4)++g_bridge.connections[0];
+        if(mutation==5)g_bridge.slot=0;
+        if(mutation==6)++w::g_hostGeneration;
+        if(mutation==7)w::g_hostIssued=false;
+        if(mutation==8)w::g_hostIssueLoad=w::LoadSerial();
+        if(mutation==9)w::g_transitionPending=true;
+        if(mutation==10)++w::g_loadSerial;
+        if(mutation==11)++w::g_transitionSerial;
+        if(mutation==12)Put(image+offsets::MAP_PROGRAM,std::uint16_t{99});
+        if(mutation==13)++w::g_hostTarget.epoch;
+        if(mutation==14)++w::g_hostTarget.eventProgram;
+        if(mutation==15)w::g_ready=false;
+        Check(!ScriptCameraScopeCurrent(ownedCameraScope) && !SafeNativeGameplay() && !CaptureDownedScope(continued),
+              "client camera refuses arrival, epoch, session, delivery, roster, owner, load and full-tuple drift");
+        SetScriptCameraCurrent(nullptr);
+    }
+    Reset();
+}
 ProgressUpdate FullProgress(std::uint8_t value) {
     namespace p = kh2coop::inject::progresssync;
     p::Save desired {}; desired[0x10] = value;
@@ -3843,6 +3921,7 @@ int main() try {
     TestLargeBossCensus();
     TestLargeBossDecisionOwnership();
     TestOwnedCameraGameplay();
+    TestClientOwnedCameraArrival();
     TestWorldRetirement();
     TestEnemyHpOrdering();
     TestCombatCausalBoundaries();

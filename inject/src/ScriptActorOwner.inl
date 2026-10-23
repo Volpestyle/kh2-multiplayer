@@ -1595,7 +1595,19 @@ static bool SmOwnerCameraCurrent(uintptr_t context,std::int32_t state) noexcept 
     return SmCameraTraceResult(cameraTrace,false);
 }
 static bool SmOwnerOpenedCamera(ScriptActorRole& role,uintptr_t source,std::uint32_t fourcc) noexcept {
+    if(!SmGameThread())return false; // also protects the shared diagnostic budget
     auto cameraTrace=SmCameraTraceBegin(1,&role);cameraTrace.nativeCalls=1;cameraTrace.fourcc=fourcc; // VUH2707_TRACE
+    // The arrival proof is identity-only. Preserve the raw native field fences
+    // independently, without querying gameplay before this camera is registered.
+    if(cameraTrace.Bad(warp::TransitionPending(),"transition-pending") || cameraTrace.Bad(warp::LoadPending(),"load-pending") ||
+       cameraTrace.Bad(role.load!=warp::LoadSerial(),"load") || cameraTrace.Bad(role.transition!=warp::TransitionSerial(),"transition") ||
+       cameraTrace.Bad(role.slot!=role.admittedScope.localSlot,"owner-seat") || cameraTrace.Bad(role.actor!=g_soraActor,"canonical-actor") ||
+       cameraTrace.Bad(downedspike::LogicallyDowned(),"logically-downed"))return SmCameraTraceResult(cameraTrace,false);
+    std::uint8_t field=0,menu=0;std::int32_t frozen=1,state=-1;
+    if(!cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::IN_FIELD,field),"field-read",R::CameraObservation::InField,field) || cameraTrace.Bad(!field,"not-in-field") ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::OPEN_MENU,menu),"menu-read",R::CameraObservation::Menu,menu) || cameraTrace.Bad(menu!=0xFF,"menu") ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::CONTROLLABLE,frozen),"frozen-read",R::CameraObservation::Frozen,frozen) || cameraTrace.Bad(frozen!=0,"frozen") ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::CUTSCENE_STATE,state),"state-read",R::CameraObservation::State,state) || cameraTrace.Bad(state<0 || state>4,"state"))return SmCameraTraceResult(cameraTrace,false);
     uintptr_t context=0,metadata=0,asset=0;R::EntityCameraIdentity current{};
     if(cameraTrace.Bad(source!=role.source,"source-identity") || cameraTrace.Bad(!SmOwnerActorCurrent(role),"actor-identity") ||
        cameraTrace.Bad(!enemysync::ScriptCameraScopeCurrent(role.admittedScope),"scope") ||

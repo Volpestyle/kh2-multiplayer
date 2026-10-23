@@ -1660,8 +1660,13 @@ bool ActivationIdentityContext(Role role, RoomTransition& location, bool require
         if (g_hostBeginPending || (requireGameplay && !progresssync::HostReady())) return false;
         location.epoch = g_epoch;
     } else {
-        if (!g_host.arrived || !warp::HostTransitionArrived(g_host.epoch)) return false;
         location.epoch = g_host.epoch;
+        // First arrival is established separately through HostTransitionArrived.
+        // Continuity needs that admitted load/tuple, not permission to warp now:
+        // SafeToWarp rejects the entity-camera event we are trying to identify.
+        // Gameplay callers still passed SafeNativeGameplay above; identity-only
+        // camera callers validate their raw field and exact native task separately.
+        if (!g_host.arrived || !warp::MatchesArrivedHostTransition(location)) return false;
     }
     return location.epoch != 0 && g_bridge.SessionGeneration() == g_activationGeneration;
 }
