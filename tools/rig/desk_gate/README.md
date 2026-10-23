@@ -97,3 +97,24 @@ exported definitions. To restore an exported definition:
 
 Don't run the windows-pc skill's `desk.sh install` against a PC that uses this agent: it would replace it
 with the ungated one.
+
+## Profiles
+
+| Config | Machine | Idle | Reclaim on |
+|---|---|---|---|
+| `config.bld.json` | `bld`, someone's everyday desktop | 15 min of physical idle | physical or foreign injected input; a foreign game or fullscreen app for 3 s; stop file, session or observer loss |
+| `config.pc1.json` | PC1 (`supedupsilly`), James's gaming PC | none (`idleMinutes` 0) | a foreign game or fullscreen app for 10 s; stop file, session or observer loss. Input doesn't reclaim (`reclaimOnInput` false). |
+
+**PC1 profile.** PC1 runs on pad input while James works there, but never while he games. The lead
+read the AC "the same gate guards PC1 launches" this way on 2026-10-23. Setting `idleMinutes` 15 and
+`reclaimOnInput` true switches PC1 to the bld behaviour.
+
+Two settings differ on PC1 for the same reason: other agents run tests from their own worktrees on PC1.
+- `helperSweep` is false, so the job object and `owned.txt` alone say what is ours.
+- Rig roots may use wildcards (`.local\wt-*`).
+
+The 10 s foreign window is there so `desk-scenario.ps1`'s own 5 s reclaim stops a run first, and its
+wrapper still runs its closing install and save checks.
+
+On PC1, start build and other no-launch jobs with `#gate: desk`. Launch level also needs Steam signed in
+as account A.

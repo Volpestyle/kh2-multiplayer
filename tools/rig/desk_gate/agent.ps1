@@ -25,6 +25,15 @@ $stopPath = "$gate\stop"
 $verifyPath = "$gate\needs-verify.json"
 $gameDir = [IO.Path]::GetFullPath($config.gameDirectory).TrimEnd('\') + '\'
 $kh2ctlTimeoutMs = 3000
+# PC1 runs on pad input while James works there: idleMinutes 0 and reclaimOnInput false keep that
+# practice, and a foreign game or fullscreen app still refuses admission and reclaims a running job.
+$reclaimOnInput = $config.reclaimOnInput -ne $false
+# On bld every process under a rig root's build\ is the rig's. On PC1 other agents run tests from their
+# own worktrees, so only the job object and owned.txt say what is ours (helperSweep false).
+$helperSweep = $config.helperSweep -ne $false
+# Seconds a foreign game or fullscreen app must persist before a running job is reclaimed. PC1 uses 10, so
+# desk-scenario.ps1's own 5 s reclaim stops the run first and its wrapper still runs the closing checks.
+$foreignReclaimSeconds = if ($config.foreignReclaimSeconds) { [int]$config.foreignReclaimSeconds } else { 3 }
 
 function Log([string]$Text) { "$((Get-Date).ToUniversalTime().ToString('o')) $Text" | Out-File -Append -Encoding utf8 "$root\agent.log" }
 function Write-Json($Path, $Value) {
@@ -34,10 +43,16 @@ function Write-Json($Path, $Value) {
 }
 function Expand([string]$Path) { [Environment]::ExpandEnvironmentVariables($Path) }
 
+# Checkouts whose build\ holds rig products; entries may use wildcards (PC1's .local\wt-*).
+function Get-RigRoots {
+  @($config.rigRoots | ForEach-Object {
+      if ($_ -match '[*?]') { Get-Item -Path $_ -ErrorAction SilentlyContinue | Where-Object PSIsContainer | ForEach-Object FullName } else { $_ } })
+}
+
 # Rows of each rig root's build\rig\owned.txt that are still running (pid and creation time match).
 function Get-Owned {
   $rows = @()
-  foreach ($rig in $config.rigRoots) {
+  foreach ($rig in Get-RigRoots) {
     $file = Join-Path $rig 'build\rig\owned.txt'
     if (-not (Test-Path -LiteralPath $file)) { continue }
     $lines = $null
@@ -58,6 +73,18 @@ function Get-Owned {
 # (another session, the secure desktop, a lost hook, a sleep or stall).
 function Get-IdleBase { [Math]::Max([Math]::Max([Kh2Desk.Gate]::LastHuman, [Kh2Desk.Gate]::HooksAt), [Math]::Max($script:contextResetAt, $script:foreignInjectedAt)) }
 
+# A game or fullscreen app that is neither the rig's (owned.txt) nor this job's (its job object).
+function Get-ForeignActivity($Job) {
+  $owned = @(Get-Owned)
+  $foreign = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+      $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.Id -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Id)) -and
+      ($_.ProcessName -match $config.foreignGameNames -or ($_.Path -match $config.foreignGamePaths -and $_.ProcessName -notmatch $config.foreignGameExempt)) })
+  if ($foreign.Count) { return 'foreign-game' }
+  $front = [Kh2Desk.Gate]::ForegroundPid()
+  if ([Kh2Desk.Gate]::NotificationState() -in 2, 3, 4, 7 -and $front -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $front))) { return 'fullscreen' }
+  $null
+}
+
 function Get-Refusals([string]$Level) {
   try {
     $ErrorActionPreference = 'Stop'
@@ -73,10 +100,7 @@ function Get-Refusals([string]$Level) {
     $procs = @(Get-Process -ErrorAction SilentlyContinue)
     $owned = @(Get-Owned)
     if (@($owned | Where-Object unreadable).Count) { $why += 'owned-unreadable' }
-    $foreign = @($procs | Where-Object {
-        $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.Id -notin $owned.pid -and
-        ($_.ProcessName -match $config.foreignGameNames -or ($_.Path -match $config.foreignGamePaths -and $_.ProcessName -notmatch $config.foreignGameExempt)) })
-    if ($foreign.Count) { $why += 'foreign-game' }
+    if ((Get-ForeignActivity $null) -eq 'foreign-game') { $why += 'foreign-game' }
     if ($Level -eq 'launch') {
       if (@($procs | Where-Object { $_.Path -and $_.Path.StartsWith($gameDir, [StringComparison]::OrdinalIgnoreCase) }).Count -or $owned.Count) { $why += 'kh2-running' }
       $steam = Get-ItemProperty -LiteralPath 'HKCU:\Software\Valve\Steam\ActiveProcess' -ErrorAction SilentlyContinue
@@ -117,8 +141,8 @@ function Invoke-Reclaim($Job, [string]$Reason, [long]$TriggerTick) {
   $t.inputStopped = [Kh2Desk.Gate]::Now()
   $games = @(Get-Owned)
   foreach ($rig in @($games | Select-Object -ExpandProperty rig -Unique)) { Invoke-Kh2ctlKill $rig }
-  $prefixes = @($config.rigRoots | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $_ 'build')).TrimEnd('\') + '\' })
-  $helpers = @([Kh2Desk.Gate]::Snapshot() | Where-Object { $path = $_.Path; $path -and $_.Pid -ne $me.Id -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })
+  $prefixes = @(Get-RigRoots | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $_ 'build')).TrimEnd('\') + '\' })
+  $helpers = @($(if ($helperSweep) { [Kh2Desk.Gate]::Snapshot() }) | Where-Object { $path = $_.Path; $path -and $_.Pid -ne $me.Id -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })
   foreach ($p in $helpers) { if (-not [Kh2Desk.Gate]::Terminate($p.Pid, $p.Created)) { $stuck += $p.Pid } }
   $deadline = [Kh2Desk.Gate]::Now() + 5000
   do {
@@ -191,16 +215,22 @@ while ($true) {
   if (-not $job -and $injected -gt $ownInjectionUntil) { $foreignInjectedAt = [Math]::Max($foreignInjectedAt, $injected) }
   if ($job) {
     $reason = $null
-    if ($human -gt $job.startTick) { $reason = 'physical-input' }
-    elseif ($job.level -ne 'desk' -and $injected -gt $job.startTick) { $reason = 'injected-input' }  # launch jobs send no OS input
+    if ($reclaimOnInput -and $human -gt $job.startTick) { $reason = 'physical-input' }
+    elseif ($reclaimOnInput -and $job.level -ne 'desk' -and $injected -gt $job.startTick) { $reason = 'injected-input' }  # launch jobs send no OS input
     elseif (Test-Path -LiteralPath $stopPath) { $reason = 'stopped' }
     elseif (-not [Kh2Desk.Gate]::HooksOk) { $reason = 'observer' }
     elseif ([Kh2Desk.Gate]::ActiveConsoleSession() -ne $session) { $reason = 'session' }
-    elseif ($job.level -eq 'desk' -and $now -ge $job.nextLaunchCheck) {
+    elseif ($now -ge $job.nextCheck) {
+      $job.nextCheck = $now + 1000
       # A desk job never passed the launch checks, so it must not start a game.
-      $job.nextLaunchCheck = $now + 1000
-      if (@(Get-Owned).Count -or @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($gameDir, [StringComparison]::OrdinalIgnoreCase) }).Count) {
+      if ($job.level -eq 'desk' -and (@(Get-Owned).Count -or @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($gameDir, [StringComparison]::OrdinalIgnoreCase) }).Count)) {
         $reason = 'desk-job-launched'; $job.level = 'launch'
+      } else {
+        # Someone starting a game or a fullscreen app takes the PC back, once it has persisted for
+        # $foreignReclaimSeconds, so a window briefly in front while the job launches doesn't count.
+        $activity = Get-ForeignActivity $job
+        $job.foreignSeconds = if ($activity) { $job.foreignSeconds + 1 } else { 0 }
+        if ($job.foreignSeconds -ge $foreignReclaimSeconds) { $reason = $activity }
       }
     }
     if ($reason) {
@@ -213,8 +243,8 @@ while ($true) {
       # The job's own processes may outlive its root: end the job object, then make sure no owned game or
       # rig helper is left before giving the desk back.
       $ended = [Kh2Desk.Gate]::EndJob($job.jobObject, 1500)
-      $prefixes = @($config.rigRoots | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $_ 'build')).TrimEnd('\') + '\' })
-      $strays = @([Kh2Desk.Gate]::Snapshot() | Where-Object { $path = $_.Path; $path -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })
+      $prefixes = @(Get-RigRoots | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $_ 'build')).TrimEnd('\') + '\' })
+      $strays = @($(if ($helperSweep) { [Kh2Desk.Gate]::Snapshot() }) | Where-Object { $path = $_.Path; $path -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })
       if (-not $ended -or @(Get-Owned).Count -or $strays.Count) { $r = Invoke-Reclaim $job 'leftover-after-exit' $now; $prefix = "LEFTOVER after exit; reclaim ok=$($r.ok)`r`n" }
       else {
         if ((Get-Content -Raw -LiteralPath $leasePath) -eq $job.leaseText) { Remove-Item -LiteralPath $leasePath }
@@ -263,7 +293,7 @@ while ($true) {
           $lease.childPid = $p.Id; $lease.childCreated = $p.StartTime.ToFileTimeUtc()
           Set-Content -LiteralPath $leasePath -Value ($lease | ConvertTo-Json -Compress) -Encoding UTF8 -NoNewline
           $job = [pscustomobject]@{ name = $next.Name; base = $next.BaseName; file = $next.FullName; level = $level; process = $p; pid = $p.Id
-                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextLaunchCheck = 0; stdout = $stdout; stderr = $stderr
+                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextCheck = 0; foreignSeconds = 0; stdout = $stdout; stderr = $stderr
                                     leaseText = (Get-Content -Raw -LiteralPath $leasePath) }
           Log "admitted $($next.Name) level=$level child=$($p.Id)"
         } catch {

@@ -1,0 +1,15 @@
+{
+  "machine": "supedupsilly",
+  "idleMinutes": 0,
+  "reclaimOnInput": false,
+  "helperSweep": false,
+  "foreignReclaimSeconds": 10,
+  "requireUnlocked": true,
+  "steamAccountId": 249968895,
+  "gameDirectory": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\KINGDOM HEARTS -HD 1.5+2.5 ReMIX-",
+  "rigRoots": ["C:\\Users\\volpe\\repos\\kh2-multiplayer", "C:\\Users\\volpe\\repos\\kh2-multiplayer\\.local\\wt-*", "C:\\kh2rig\\wt"],
+  "laneLocks": ["C:\\Users\\volpe\\repos\\kh2-multiplayer\\build\\rig\\rig.lock", "C:\\Users\\volpe\\repos\\kh2-multiplayer\\build\\rig\\vuh2617-fileio-desk-stop.json"],
+  "foreignGameNames": "Marvel-Win64-Shipping|KINGDOM HEARTS|r5apex|FortniteClient|VALORANT-Win64|Overwatch|eldenring",
+  "foreignGamePaths": "\\\\steamapps\\\\common\\\\|\\\\Epic Games\\\\|\\\\Riot Games\\\\|\\\\EA Games\\\\|\\\\XboxGames\\\\",
+  "foreignGameExempt": "^RiotClient|^Epic(GamesLauncher|WebHelper|OnlineServices)|^EOSOverlay"
+}

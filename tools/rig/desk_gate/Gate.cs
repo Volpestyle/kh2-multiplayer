@@ -156,6 +156,21 @@ public static class Gate {
 
     public static void CloseJob(IntPtr job) { if (job != IntPtr.Zero) CloseHandle(job); }
 
+    public static bool InJob(IntPtr job, int pid) {
+        if (job == IntPtr.Zero) return false;
+        IntPtr h = OpenProcess(0x1000, false, (uint)pid);
+        if (h == IntPtr.Zero) return false;
+        try { bool result; return IsProcessInJob(h, job, out result) && result; } finally { CloseHandle(h); }
+    }
+
+    public static int ForegroundPid() {
+        uint pid;
+        IntPtr window = GetForegroundWindow();
+        if (window == IntPtr.Zero) return 0;
+        GetWindowThreadProcessId(window, out pid);
+        return (int)pid;
+    }
+
     public static int ActiveConsoleSession() { return unchecked((int)WTSGetActiveConsoleSessionId()); }
 
     // "Default" when the user's desktop takes input; "Winlogon" (or "error:<code>" when it can't be
@@ -270,6 +285,9 @@ public static class Gate {
     [DllImport("kernel32.dll")] static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length, out uint returned);
     [DllImport("kernel32.dll")] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll")] static extern bool TerminateJobObject(IntPtr job, uint code);
+    [DllImport("kernel32.dll")] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
