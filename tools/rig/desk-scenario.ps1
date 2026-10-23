@@ -5,9 +5,12 @@
 # Never declare Mandatory parameters here: a bridge job that prompts freezes the bridge.
 # Waits for the run (holding the bridge), stops it if a foreign game starts or the
 # wall limit passes, and kills only this checkout's owned KH2 instances.
-param([string]$Scenario = '', [string]$Tag = '', [int]$WallMinutes = 40)
+# -Root, -Entry and -Python let a copy outside the checkout (bld's C:/kh2rig/ops) run another checkout's
+# entry point with another interpreter; the defaults are this checkout, run.py and PC1's Python.
+param([string]$Scenario = '', [string]$Tag = '', [int]$WallMinutes = 40, [string]$Root = '',
+      [string]$Entry = 'tools/scenario/run.py', [string]$Python = 'C:/Users/volpe/AppData/Local/Programs/Python/Python311/python.exe')
 $ErrorActionPreference = 'Continue'
-$root = (Resolve-Path "$PSScriptRoot/../..").Path
+$root = if ($Root) { (Resolve-Path -LiteralPath $Root).Path } else { (Resolve-Path "$PSScriptRoot/../..").Path }
 # VUH-2617 desk stop: while this file exists in the main checkout's build\rig (or this
 # checkout's), the desk is stopped and no run starts, whatever PID it names.
 $stopFiles = @("$root/build/rig/vuh2617-fileio-desk-stop.json")
@@ -110,8 +113,8 @@ function Stop-RunTree([int]$runnerId) {
 }
 foreach ($k in @(Get-ChildItem Env: | Where-Object { $_.Name -like 'KH2COOP_*' } | ForEach-Object Name)) { Remove-Item "Env:$k" }
 $env:PYTHONUTF8 = '1'
-$run = Start-Process -FilePath 'C:/Users/volpe/AppData/Local/Programs/Python/Python311/python.exe' `
-  -ArgumentList @('-B', 'tools/scenario/run.py', $Scenario) -WorkingDirectory $root -WindowStyle Hidden -PassThru `
+$run = Start-Process -FilePath $Python `
+  -ArgumentList @('-B', $Entry, $Scenario) -WorkingDirectory $root -WindowStyle Hidden -PassThru `
   -RedirectStandardOutput "$ops/$Tag.out" -RedirectStandardError "$ops/$Tag.err"
 $null = $run.Handle
 $deadline = (Get-Date).AddMinutes($WallMinutes)
