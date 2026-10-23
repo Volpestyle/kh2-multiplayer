@@ -890,3 +890,21 @@ else()
     target_compile_options(kh2coop_bailey_creeper_authority_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 add_test(NAME kh2coop_bailey_creeper_authority_test COMMAND kh2coop_bailey_creeper_authority_test)
+
+# The Python unit tests (tests/test_*.py) run under ctest, so a governed build catches a stale fixture. Five of them
+# sat red for days because nothing ran them. test_runtime_desync.py is a harness that needs --bin-dir and
+# --out-root, so it's left out.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    file(GLOB _kh2coop_python_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_*.py")
+    list(FILTER _kh2coop_python_tests EXCLUDE REGEX "/test_runtime_desync\\.py$")
+    foreach(_kh2coop_python_test IN LISTS _kh2coop_python_tests)
+        get_filename_component(_kh2coop_python_name "${_kh2coop_python_test}" NAME_WE)
+        add_test(NAME kh2coop_py_${_kh2coop_python_name}
+                 COMMAND Python3::Interpreter -B "${_kh2coop_python_test}"
+                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(kh2coop_py_${_kh2coop_python_name} PROPERTIES TIMEOUT 300 LABELS python)
+    endforeach()
+else()
+    message(STATUS "Python 3 not found: the tests/test_*.py ctest entries are skipped")
+endif()

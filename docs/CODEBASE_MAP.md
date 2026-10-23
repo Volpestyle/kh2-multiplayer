@@ -230,7 +230,10 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 Every `kh2coop_*_test` executable (plus each `kh2coop_resourcetrace_test`
 failure mode) is registered with CTest; after a Release build run
 `ctest --test-dir build -C Release` serially (several tests bind fixed
-loopback ports). None launches or attaches to KH2.
+loopback ports). None launches or attaches to KH2. Each Python `tests/test_*.py`
+is registered as well, as `kh2coop_py_<name>` with the label `python`. That adds
+about 2 minutes serially; `-LE python` skips them. The exception is the harness
+`test_runtime_desync.py`, which needs `--bin-dir` and `--out-root`.
 
 | File | What |
 |------|------|
