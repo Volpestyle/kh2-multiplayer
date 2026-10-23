@@ -17,3 +17,4 @@ New-Item -ItemType Directory -Force "$own/logs" | Out-Null
 $code=$LASTEXITCODE
 "exit=$code" | Set-Content "$own/logs/build-$Commit.exit"
 "VUH2339 bld build $Commit exit=$code; log=$own/logs/build-$Commit.log"
+if($code){ Get-Content "$own/logs/build-$Commit.log" -Tail 12 }   # the cause, in the desk .out too

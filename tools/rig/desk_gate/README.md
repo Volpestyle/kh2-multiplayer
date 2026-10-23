@@ -6,7 +6,8 @@ The desk driver for a PC that is also someone's everyday desktop, first on `bld`
 
 - **Admission.** A job starts only when the gate admits it. A refused job finishes at once with
   `REFUSED gate: <reasons>` in its `.out`, so nothing sits in the queue waiting for the person to leave.
-  Poll `C:\desk\gate\state.json` (it refreshes every 2 s) and queue a job once its level is clear.
+  Poll `C:\desk\gate\state.json` (it refreshes every 2 s) and queue a job once its level is clear and
+  `hold` is false.
 - **Reclaim.** The job runs as a child process in a Windows job object while the agent keeps watching.
   The job object also holds every process the job starts later. If a person touches the desk, the agent:
   1. ends the job object;
@@ -14,7 +15,7 @@ The desk driver for a PC that is also someone's everyday desktop, first on `bld`
   3. stops any leftover process running from a rig root's `build\`;
   4. verifies that all of them exited, then releases the lease.
 
-  The job's `.out` starts with `RECLAIMED gate: <reason>`. A timed receipt goes to `gate\reclaims\`, with
+  The job's `.out` says `RECLAIMED gate: <reason>` (after any warning lines, below). A timed receipt goes to `gate\reclaims\`, with
   `ms` from the input to each stage and `withinBudget` against the 2 s requirement.
 
   A launch-level job sends no OS input: its runs drive pad input through the DLL's mailbox. Any
@@ -33,6 +34,15 @@ The desk driver for a PC that is also someone's everyday desktop, first on `bld`
   reached its closing manifest and save checks, so someone has to compare the install and saves and
   then delete the file. If the cleanup can't be verified, the lease is kept, and with it every later job is
   refused until someone inspects the receipt and deletes `gate\lease.json`.
+
+**Warnings in the `.out`.** git refuses a checkout whose folder, or whose `.git\worktrees\<name>`
+folder, another account owns ("detected dubious ownership"). Folders created over an elevated SSH session
+are owned by `BUILTIN\Administrators`, which git accepts only from an elevated token, and the agent is not
+elevated. At admission the agent checks every rig root that the job, or a `.ps1` the job calls, names.
+Each such folder gets a `WARNING gate: git will refuse <folder> ... Fix: icacls ...` line at the top of the
+`.out`. If git refused anyway, a `GIT OWNERSHIP gate:` line names the folder. The job still runs. The fix
+is `icacls <folder> /setowner <desk user> /T` for the checkout and its worktree folder; never a global
+`safe.directory`. On 2026-10-23 PC1 had 105 of 113 worktrees owned this way.
 
 The first line of a job picks its level. `#gate: desk` is for desktop-only work such as a screenshot.
 Any other first line means `launch`, the default.
@@ -87,12 +97,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:\desk\gate\incoming\instal
 powershell -NoProfile -ExecutionPolicy Bypass -File C:\desk\gate\incoming\install.ps1 -Action uninstall
 ```
 
-`install` refuses while a lease is held, or if Explorer belongs to anyone but the SSH user. It then:
+`install` refuses if Explorer belongs to anyone but the SSH user, or while another install holds
+`gate\install.lock`. It then:
 1. compiles `Gate.cs` as a check;
 2. exports the existing `desk-agent` task to `gate\desk-agent-before-<utc>.xml`;
-3. stops only the `C:\desk\agent.ps1` process;
-4. registers `desk-agent` for the user: AtLogOn, Interactive, Limited (not elevated), no time limit,
-   IgnoreNew, restart on failure.
+3. creates `gate\hold` and waits up to 60 min for a running job to finish. While the hold exists, the
+   agent leaves queued jobs in `jobs\`, neither running nor refusing them, and `state.json` shows
+   `hold: true`. An agent from before 2026-10-23 17:30Z ignores the hold, so install replaces it only
+   while its queue is empty: agree on a gap with whoever queues there;
+4. stops only the `C:\desk\agent.ps1` process;
+5. registers `desk-agent` for the user: AtLogOn, Interactive, Limited (not elevated), no time limit,
+   IgnoreNew, restart on failure;
+6. starts it and removes the hold, on failure too.
+
+A restarted agent starts a new idle interval, so on an idle-gated PC (`bld`) jobs that waited through the
+hold are refused with `recent-input` once it lifts. Queue them again after 15 min.
 
 `uninstall` first creates the stop file and waits for any running job to be reclaimed, so no job is
 ever left without its watchdog. It then unregisters the task and removes the gate code. `C:\desk\gate` keeps the logs, receipts and

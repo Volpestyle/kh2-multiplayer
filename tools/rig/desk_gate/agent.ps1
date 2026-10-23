@@ -23,6 +23,7 @@ $budgetMs = 2000
 $leasePath = "$gate\lease.json"
 $stopPath = "$gate\stop"
 $verifyPath = "$gate\needs-verify.json"
+$holdPath = "$gate\hold"   # install.ps1 sets it: queued jobs wait (not refused) until it is gone
 $gameDir = [IO.Path]::GetFullPath($config.gameDirectory).TrimEnd('\') + '\'
 $kh2ctlTimeoutMs = 3000
 # PC1 runs on pad input while James works there: idleMinutes 0 and reclaimOnInput false keep that
@@ -174,9 +175,47 @@ function Invoke-Reclaim($Job, [string]$Reason, [long]$TriggerTick) {
   $receipt
 }
 
+# git refuses a checkout whose folder, or whose worktree admin folder, another account owns ("detected
+# dubious ownership"). Folders created over elevated SSH are owned by BUILTIN\Administrators, which passes
+# only with an elevated token, and this agent is not elevated. Names each such folder of a rig root the
+# job mentions, with the fix.
+function Get-OwnershipWarnings([string]$Text) {
+  $me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+  $norm = $Text.Replace('/', '\')
+  $roots = @(Get-RigRoots | ForEach-Object { $_.TrimEnd('\') })
+  foreach ($rig in $roots) {
+    # A mention counts for the most specific root only: ...\kh2-multiplayer\.local\wt-x is not the main checkout.
+    $deeper = @($roots | Where-Object { $_.Length -gt $rig.Length -and $_.StartsWith($rig + '\', [StringComparison]::OrdinalIgnoreCase) })
+    $mentioned = $false
+    for ($at = $norm.IndexOf($rig, [StringComparison]::OrdinalIgnoreCase); $at -ge 0 -and -not $mentioned; $at = $norm.IndexOf($rig, $at + 1, [StringComparison]::OrdinalIgnoreCase)) {
+      $end = $at + $rig.Length
+      $mentioned = ($end -ge $norm.Length -or [string]$norm[$end] -notmatch '[\w.-]') -and
+        -not @($deeper | Where-Object { [string]::Compare($norm, $at, $_, 0, $_.Length, [StringComparison]::OrdinalIgnoreCase) -eq 0 }).Count
+    }
+    if (-not $mentioned) { continue }
+    $dirs = @($rig)
+    $dotgit = Join-Path $rig '.git'
+    if ([IO.Directory]::Exists($dotgit)) { $dirs += $dotgit }
+    elseif ([IO.File]::Exists($dotgit) -and (Get-Content -LiteralPath $dotgit -TotalCount 1) -match '^gitdir:\s*(.+)$') {
+      $dirs += [IO.Path]::GetFullPath([IO.Path]::Combine($rig, $Matches[1].Trim().Replace('/', '\')))   # a relative gitdir is relative to the checkout
+    }
+    foreach ($d in $dirs) {
+      try { $owner = (Get-Acl -LiteralPath $d).GetOwner([Security.Principal.SecurityIdentifier]) } catch { continue }
+      if ($owner -ne $me) {
+        $name = try { $owner.Translate([Security.Principal.NTAccount]).Value } catch { $owner.Value }
+        "WARNING gate: git will refuse $d (owned by $name, not $env:USERNAME). Fix: icacls `"$d`" /setowner $env:USERNAME /T"
+      }
+    }
+  }
+}
+
 function Finish-Job($Job, [string]$Prefix) {
   $text = ''
   foreach ($f in $Job.stdout, $Job.stderr) { if ($f -and (Test-Path -LiteralPath $f)) { $text += Get-Content -Raw -LiteralPath $f; Remove-Item -LiteralPath $f } }
+  if ($text -match "detected dubious ownership in repository at '([^']+)'") {
+    $Prefix = "GIT OWNERSHIP gate: git refused $($Matches[1]): another account owns it. Fix: icacls `"$($Matches[1])`" /setowner $env:USERNAME /T (and the same for its .git\worktrees\<name> folder)`r`n" + $Prefix
+  }
+  if ($Job.warnings) { $Prefix = (@($Job.warnings) -join "`r`n") + "`r`n" + $Prefix }
   Set-Content -LiteralPath "$root\done\$($Job.base).out" -Value ($Prefix + $text) -Encoding UTF8
   if (Test-Path -LiteralPath $Job.file) { Move-Item -LiteralPath $Job.file -Destination "$root\done\$($Job.name)" -Force }
   [Kh2Desk.Gate]::CloseJob($Job.jobObject)
@@ -271,7 +310,7 @@ while ($true) {
       $ownInjectionUntil = $now + 2000
     }
   } else {
-    $next = Get-ChildItem "$root\jobs\*.ps1" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1
+    $next = if (-not [IO.File]::Exists($holdPath)) { Get-ChildItem "$root\jobs\*.ps1" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1 }
     if ($next) {
       $startTick = [Kh2Desk.Gate]::Now()   # input from here on reclaims; the checks below read the same instant's idle
       $level = if ((Get-Content -LiteralPath $next.FullName -TotalCount 1) -match '^\s*#\s*gate:\s*desk\b') { 'desk' } else { 'launch' }
@@ -289,6 +328,14 @@ while ($true) {
         Move-Item -LiteralPath $next.FullName -Destination "$root\done\$($next.Name)" -Force
         Log "refused $($next.Name): $(@($why | Select-Object -Unique) -join ',')"
       } else {
+        # Jobs are usually one line calling a wrapper (build-job.ps1, live.ps1) that names the checkout, so
+        # the scripts a job calls are read too.
+        $warnings = @(try {
+            $scan = Get-Content -Raw -LiteralPath $next.FullName
+            foreach ($m in [regex]::Matches($scan, "[A-Za-z]:[\\/][^'`"\r\n]+?\.ps1")) { if ([IO.File]::Exists($m.Value)) { $scan += "`n" + [IO.File]::ReadAllText($m.Value) } }
+            Get-OwnershipWarnings $scan
+          } catch { "WARNING gate: ownership check failed: $_" })
+        foreach ($w in $warnings) { Log "$($next.Name): $w" }
         $quoted = $next.FullName -replace "'", "''"
         $stdout = "$root\out\$($next.BaseName).stdout"; $stderr = "$root\out\$($next.BaseName).stderr"
         $jobObject = [Kh2Desk.Gate]::NewJob()
@@ -301,7 +348,7 @@ while ($true) {
           $lease.childPid = $p.Id; $lease.childCreated = $p.StartTime.ToFileTimeUtc()
           Set-Content -LiteralPath $leasePath -Value ($lease | ConvertTo-Json -Compress) -Encoding UTF8 -NoNewline
           $job = [pscustomobject]@{ name = $next.Name; base = $next.BaseName; file = $next.FullName; level = $level; process = $p; pid = $p.Id
-                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextCheck = 0; foreignSeconds = 0; stdout = $stdout; stderr = $stderr
+                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextCheck = 0; foreignSeconds = 0; stdout = $stdout; stderr = $stderr; warnings = $warnings
                                     leaseText = (Get-Content -Raw -LiteralPath $leasePath) }
           Log "admitted $($next.Name) level=$level child=$($p.Id)"
         } catch {
@@ -320,7 +367,7 @@ while ($true) {
     $state = [ordered]@{ utc = (Get-Date).ToUniversalTime().ToString('o'); agentPid = $me.Id; session = $session; hooks = [Kh2Desk.Gate]::HooksOk
                          inputDesktop = [Kh2Desk.Gate]::InputDesktop(); notification = [Kh2Desk.Gate]::NotificationState()
                          physicalIdleSeconds = $idle; injectedIdleSeconds = $(if ($injected) { [long](($now - $injected) / 1000) } else { $null })
-                         job = $(if ($job) { $job.name } else { $null }) }
+                         job = $(if ($job) { $job.name } else { $null }); hold = [IO.File]::Exists($holdPath) }
     if ($now -ge $nextMinute) {
       $nextMinute = $now + 60000
       $desk = @(if ($job) { 'job-running' } else { Get-Refusals 'desk' })
