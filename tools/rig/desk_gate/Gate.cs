@@ -15,6 +15,7 @@ using System.Threading;
 namespace Kh2Desk {
 public static class Gate {
     delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+    delegate bool EnumWindowsProc(IntPtr window, IntPtr param);
 
     static long lastPhysical, lastInjected, lastUnattributed, hooksAt;
     static volatile bool hooksOk;
@@ -192,12 +193,45 @@ public static class Gate {
         return SHQueryUserNotificationState(out state) == 0 ? state : -1;
     }
 
-    public class Proc { public int Pid; public int Parent; public long Created; public string Path; }
+    // Name is the image name without its extension, like Process.ProcessName.
+    public class Proc { public int Pid; public int Parent; public long Created; public string Path; public string Name; }
 
     public static List<Proc> Snapshot() {
+        List<Proc> rows = Entries();
+        foreach (Proc p in rows) Identity(p.Pid, out p.Created, out p.Path);
+        return rows;
+    }
+
+    // Processes that own a visible unowned top-level window (what Process.MainWindowHandle finds), from one
+    // EnumWindows pass. Only these are opened for their path: Get-Process reading MainWindowHandle and Path
+    // for every process cost PC1 (~900 processes) seconds of CPU a minute.
+    public static List<Proc> Windowed() {
+        Dictionary<int, bool> pids = new Dictionary<int, bool>();
+        EnumWindowsProc each = delegate(IntPtr w, IntPtr l) {
+            uint pid;
+            if (IsWindowVisible(w) && GetWindow(w, 4) == IntPtr.Zero && GetWindowThreadProcessId(w, out pid) != 0) pids[(int)pid] = true;  // GW_OWNER
+            return true;
+        };
+        if (!EnumWindows(each, IntPtr.Zero)) throw new InvalidOperationException("EnumWindows failed");
+        List<Proc> rows = new List<Proc>();
+        foreach (Proc p in Entries()) if (pids.ContainsKey(p.Pid)) { Identity(p.Pid, out p.Created, out p.Path); rows.Add(p); }
+        return rows;
+    }
+
+    // How many processes run an image from under the directory (the KH2 install).
+    public static int Under(string directory) {
+        string prefix = directory.TrimEnd('\\') + "\\";
+        int count = 0;
+        foreach (Proc p in Snapshot()) if (p.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) count++;
+        return count;
+    }
+
+    // Throws rather than return an empty list, which would read as "nothing running": a real snapshot
+    // always holds at least System and the agent.
+    static List<Proc> Entries() {
         List<Proc> rows = new List<Proc>();
         IntPtr snap = CreateToolhelp32Snapshot(2, 0);  // TH32CS_SNAPPROCESS
-        if (snap == new IntPtr(-1)) return rows;
+        if (snap == new IntPtr(-1)) throw new InvalidOperationException("process snapshot failed");
         try {
             PROCESSENTRY32W entry = new PROCESSENTRY32W();
             entry.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32W));
@@ -205,10 +239,12 @@ public static class Gate {
                 Proc p = new Proc();
                 p.Pid = (int)entry.th32ProcessID;
                 p.Parent = (int)entry.th32ParentProcessID;
-                Identity(p.Pid, out p.Created, out p.Path);
+                p.Name = System.IO.Path.GetFileNameWithoutExtension(entry.szExeFile);
+                p.Path = "";
                 rows.Add(p);
             }
         } finally { CloseHandle(snap); }
+        if (rows.Count < 2) throw new InvalidOperationException("process snapshot came back empty");
         return rows;
     }
 
@@ -288,6 +324,9 @@ public static class Gate {
     [DllImport("kernel32.dll")] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc proc, IntPtr param);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
     [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);

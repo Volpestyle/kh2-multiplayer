@@ -22,7 +22,11 @@ The desk driver for a PC that is also someone's everyday desktop, first on `bld`
   kill-on-close, so if the agent dies, the job's tree dies with it.
 
   A desk-level job never passed the launch checks: if an owned game or anything from the KH2 install
-  appears while it runs, it is reclaimed (`desk-job-launched`).
+  appears while it runs, it is reclaimed (`desk-job-launched`). A once-a-second check that fails (for
+  example a process snapshot that can't be taken) reclaims too (`gate-error`).
+
+  The process and window checks run natively (`Gate.Windowed`, `Gate.Under`): reading `Path` and
+  `MainWindowHandle` through `Get-Process` took 37 s per launch check on PC1's ~900 processes.
 
   After a launch-level reclaim, or after a launch job that exits non-zero, `gate\needs-verify.json`
   refuses further launches. The killed run never

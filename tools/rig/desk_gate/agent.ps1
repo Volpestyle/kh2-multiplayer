@@ -46,7 +46,8 @@ function Expand([string]$Path) { [Environment]::ExpandEnvironmentVariables($Path
 # Checkouts whose build\ holds rig products; entries may use wildcards (PC1's .local\wt-*).
 function Get-RigRoots {
   @($config.rigRoots | ForEach-Object {
-      if ($_ -match '[*?]') { Get-Item -Path $_ -ErrorAction SilentlyContinue | Where-Object PSIsContainer | ForEach-Object FullName } else { $_ } })
+      $parent = [IO.Path]::GetDirectoryName($_)
+      if ($_ -notmatch '[*?]') { $_ } elseif ([IO.Directory]::Exists($parent)) { [IO.Directory]::GetDirectories($parent, [IO.Path]::GetFileName($_)) } })
 }
 
 # Rows of each rig root's build\rig\owned.txt that are still running (pid and creation time match).
@@ -54,7 +55,7 @@ function Get-Owned {
   $rows = @()
   foreach ($rig in Get-RigRoots) {
     $file = Join-Path $rig 'build\rig\owned.txt'
-    if (-not (Test-Path -LiteralPath $file)) { continue }
+    if (-not [IO.File]::Exists($file)) { continue }
     $lines = $null
     for ($i = 0; $i -lt 20 -and $null -eq $lines; $i++) {
       try { $lines = @(Get-Content -LiteralPath $file -ErrorAction Stop) } catch { Start-Sleep -Milliseconds 25 }
@@ -76,9 +77,9 @@ function Get-IdleBase { [Math]::Max([Math]::Max([Kh2Desk.Gate]::LastHuman, [Kh2D
 # A game or fullscreen app that is neither the rig's (owned.txt) nor this job's (its job object).
 function Get-ForeignActivity($Job) {
   $owned = @(Get-Owned)
-  $foreign = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-      $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.Id -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Id)) -and
-      ($_.ProcessName -match $config.foreignGameNames -or ($_.Path -match $config.foreignGamePaths -and $_.ProcessName -notmatch $config.foreignGameExempt)) })
+  $foreign = @([Kh2Desk.Gate]::Windowed() | Where-Object {
+      $_.Pid -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Pid)) -and
+      ($_.Name -match $config.foreignGameNames -or ($_.Path -match $config.foreignGamePaths -and $_.Name -notmatch $config.foreignGameExempt)) })
   if ($foreign.Count) { return 'foreign-game' }
   $front = [Kh2Desk.Gate]::ForegroundPid()
   if ([Kh2Desk.Gate]::NotificationState() -in 2, 3, 4, 7 -and $front -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $front))) { return 'fullscreen' }
@@ -97,14 +98,13 @@ function Get-Refusals([string]$Level) {
     if ($config.requireUnlocked -and [Kh2Desk.Gate]::InputDesktop() -ne 'Default') { $why += 'locked' }
     if ($now - (Get-IdleBase) -lt $idleMs) { $why += 'recent-input' }
     if ([Kh2Desk.Gate]::NotificationState() -in 2, 3, 4, 7) { $why += 'fullscreen' }  # busy, D3D fullscreen, presentation, immersive app
-    $procs = @(Get-Process -ErrorAction SilentlyContinue)
     $owned = @(Get-Owned)
     if (@($owned | Where-Object unreadable).Count) { $why += 'owned-unreadable' }
     if ((Get-ForeignActivity $null) -eq 'foreign-game') { $why += 'foreign-game' }
     if ($Level -eq 'launch') {
-      if (@($procs | Where-Object { $_.Path -and $_.Path.StartsWith($gameDir, [StringComparison]::OrdinalIgnoreCase) }).Count -or $owned.Count) { $why += 'kh2-running' }
+      if ([Kh2Desk.Gate]::Under($gameDir) -or $owned.Count) { $why += 'kh2-running' }
       $steam = Get-ItemProperty -LiteralPath 'HKCU:\Software\Valve\Steam\ActiveProcess' -ErrorAction SilentlyContinue
-      $steamUp = $steam -and $steam.pid -and @($procs | Where-Object { $_.Id -eq $steam.pid -and $_.ProcessName -eq 'steam' }).Count
+      $steamUp = $steam -and $steam.pid -and @(Get-Process -Id $steam.pid -ErrorAction SilentlyContinue | Where-Object ProcessName -eq 'steam').Count
       if (-not $steamUp -or ([int64]$steam.ActiveUser -band 0xFFFFFFFF) -ne [int64]$config.steamAccountId) { $why += 'steam-account' }
       foreach ($lock in $config.laneLocks) { if (Test-Path -LiteralPath (Expand $lock)) { $why += 'lane-lock'; break } }
       if (Test-Path -LiteralPath $verifyPath) { $why += 'needs-verify' }
@@ -135,14 +135,16 @@ function Invoke-Reclaim($Job, [string]$Reason, [long]$TriggerTick) {
   if ($Job -and $Job.jobObject -ne [IntPtr]::Zero) {
     $treeEnded = [Kh2Desk.Gate]::EndJob($Job.jobObject, 1500)
   } elseif ($Job -and $Job.pid -gt 4) {
-    foreach ($p in [Kh2Desk.Gate]::Tree([Kh2Desk.Gate]::Snapshot(), $Job.pid, $Job.created)) { if (-not [Kh2Desk.Gate]::Terminate($p.Pid, $p.Created)) { $stuck += $p.Pid } }
+    try { foreach ($p in [Kh2Desk.Gate]::Tree([Kh2Desk.Gate]::Snapshot(), $Job.pid, $Job.created)) { if (-not [Kh2Desk.Gate]::Terminate($p.Pid, $p.Created)) { $stuck += $p.Pid } } }
+    catch { $stuck += 'snapshot' }
   }
   if (-not $treeEnded) { $stuck += 'job-object' }
   $t.inputStopped = [Kh2Desk.Gate]::Now()
   $games = @(Get-Owned)
   foreach ($rig in @($games | Select-Object -ExpandProperty rig -Unique)) { Invoke-Kh2ctlKill $rig }
   $prefixes = @(Get-RigRoots | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $_ 'build')).TrimEnd('\') + '\' })
-  $helpers = @($(if ($helperSweep) { [Kh2Desk.Gate]::Snapshot() }) | Where-Object { $path = $_.Path; $path -and $_.Pid -ne $me.Id -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })
+  try { $helpers = @($(if ($helperSweep) { [Kh2Desk.Gate]::Snapshot() }) | Where-Object { $path = $_.Path; $path -and $_.Pid -ne $me.Id -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count }) }
+  catch { $helpers = @(); $stuck += 'snapshot' }
   foreach ($p in $helpers) { if (-not [Kh2Desk.Gate]::Terminate($p.Pid, $p.Created)) { $stuck += $p.Pid } }
   $deadline = [Kh2Desk.Gate]::Now() + 5000
   do {
@@ -222,15 +224,20 @@ while ($true) {
     elseif ([Kh2Desk.Gate]::ActiveConsoleSession() -ne $session) { $reason = 'session' }
     elseif ($now -ge $job.nextCheck) {
       $job.nextCheck = $now + 1000
-      # A desk job never passed the launch checks, so it must not start a game.
-      if ($job.level -eq 'desk' -and (@(Get-Owned).Count -or @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($gameDir, [StringComparison]::OrdinalIgnoreCase) }).Count)) {
-        $reason = 'desk-job-launched'; $job.level = 'launch'
-      } else {
-        # Someone starting a game or a fullscreen app takes the PC back, once it has persisted for
-        # $foreignReclaimSeconds, so a window briefly in front while the job launches doesn't count.
-        $activity = Get-ForeignActivity $job
-        $job.foreignSeconds = if ($activity) { $job.foreignSeconds + 1 } else { 0 }
-        if ($job.foreignSeconds -ge $foreignReclaimSeconds) { $reason = $activity }
+      try {
+        # A desk job never passed the launch checks, so it must not start a game.
+        if ($job.level -eq 'desk' -and (@(Get-Owned).Count -or [Kh2Desk.Gate]::Under($gameDir))) {
+          $reason = 'desk-job-launched'; $job.level = 'launch'
+        } else {
+          # Someone starting a game or a fullscreen app takes the PC back, once it has persisted for
+          # $foreignReclaimSeconds, so a window briefly in front while the job launches doesn't count.
+          $activity = Get-ForeignActivity $job
+          $job.foreignSeconds = if ($activity) { $job.foreignSeconds + 1 } else { 0 }
+          if ($job.foreignSeconds -ge $foreignReclaimSeconds) { $reason = $activity }
+        }
+      } catch {
+        Log "gate-error during $($job.name): $_"
+        $reason = 'gate-error'   # a check that can't see the desk can't keep watching it
       }
     }
     if ($reason) {
@@ -244,7 +251,8 @@ while ($true) {
       # rig helper is left before giving the desk back.
       $ended = [Kh2Desk.Gate]::EndJob($job.jobObject, 1500)
       $prefixes = @(Get-RigRoots | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $_ 'build')).TrimEnd('\') + '\' })
-      $strays = @($(if ($helperSweep) { [Kh2Desk.Gate]::Snapshot() }) | Where-Object { $path = $_.Path; $path -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })
+      try { $strays = @($(if ($helperSweep) { [Kh2Desk.Gate]::Snapshot() }) | Where-Object { $path = $_.Path; $path -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count }) }
+      catch { $strays = @('snapshot') }
       if (-not $ended -or @(Get-Owned).Count -or $strays.Count) { $r = Invoke-Reclaim $job 'leftover-after-exit' $now; $prefix = "LEFTOVER after exit; reclaim ok=$($r.ok)`r`n" }
       else {
         if ((Get-Content -Raw -LiteralPath $leasePath) -eq $job.leaseText) { Remove-Item -LiteralPath $leasePath }
