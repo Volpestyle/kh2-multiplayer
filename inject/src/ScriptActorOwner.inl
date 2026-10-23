@@ -36,6 +36,59 @@ struct ScriptActorRole {
     R::OwnerVisualHeartbeat visualHeartbeat{};  // VUH-2610: spectator only; reset with the role
 };
 static std::array<ScriptActorRole,3> g_smRoles{};
+
+// VUH2707_TRACE_BEGIN
+// These are copies of our own metadata and already-read scalar values, never
+// native pointer follows. Every caller is on the game thread (including the
+// ready/thread refusal at CameraCurrent, which stays before observation setup).
+struct SmCameraObservation : R::CameraObservation {
+    unsigned site{},nativeCalls{};
+    std::uint32_t resource{},epoch{},load{},transition{},fourcc{};
+    std::uint16_t netId{};std::uint8_t slot{0xFF};
+    std::uint64_t connection{};uintptr_t actor{},source{},inputContext{},openedAsset{},openedAnchor{};
+    std::uint64_t openedKind{};
+};
+static bool SmCameraTraceEnabled() {
+    static const bool on=[](){char value[2]{};return GetEnvironmentVariableA("KH2COOP_SCRIPT_CAMERA_TRACE",value,sizeof(value))==1 && value[0]=='1';}();
+    return on;
+}
+static R::CameraObservationBudget g_smCameraTraceBudget;
+static void SmCameraTraceRole(SmCameraObservation& t,const ScriptActorRole& role) noexcept {
+    if(!t.enabled)return;
+    t.resource=role.resource;t.epoch=role.epoch;t.load=role.load;t.transition=role.transition;
+    t.netId=role.netId;t.slot=role.slot;t.connection=role.connection;t.actor=role.actor;t.source=role.source;
+    t.openedAsset=role.camera.asset;t.openedAnchor=role.camera.sourceAnchor;t.openedKind=role.camera.kindRecord;
+}
+static SmCameraObservation SmCameraTraceBegin(unsigned site,const ScriptActorRole* role) noexcept {
+    SmCameraObservation t{};t.enabled=SmCameraTraceEnabled();t.site=site;
+    if(role)SmCameraTraceRole(t,*role);
+    return t;
+}
+template<class T> static T SmCameraTraceResult(SmCameraObservation& t,T result,const char* fallback="no-role-match") noexcept {
+    if(!t.enabled)return result;
+    const bool accepted=result!=0;
+    const auto context=(t.observed&(1u<<R::CameraObservation::Context))?
+        t.values[R::CameraObservation::Context]:t.inputContext;
+    const auto* why=accepted?"qualified":!std::strcmp(t.reason,"complete")?fallback:t.reason;
+    const R::CameraObservationKey key{t.site,t.nativeCalls,t.resource,t.connection,context,accepted,why};
+    if(!g_smCameraTraceBudget.Take(true,key))return result;
+    const auto& v=t.values;
+    Log("[script-camera] site=%s result=%u reason=%s nativeCalls=%u role=%u source=%u seat=%u connection=%llu epoch=%u load=%u transition=%u frame=%u actor=%llX sourceActor=%llX requestedContext=%llX fourcc=%X observed=%X context=%llX asset=%llX anchor=%llX metadata=%llX kind=%llX inField=%llX menu=%llX frozen=%llX active=%llX state=%llX actorStatus=%llX sourceStatus=%llX thread=%llX vmSource=%llX residentAsset=%llX openedAsset=%llX openedAnchor=%llX openedKind=%llX (%u/64)",
+        t.site==0?"replay":t.site==1?"opened":"current",accepted?1u:0u,why,t.nativeCalls,t.resource,t.netId,
+        t.slot,static_cast<unsigned long long>(t.connection),t.epoch,t.load,t.transition,g_frameCounter,
+        static_cast<unsigned long long>(t.actor),static_cast<unsigned long long>(t.source),
+        static_cast<unsigned long long>(t.inputContext),t.fourcc,t.observed,
+        static_cast<unsigned long long>(v[0]),static_cast<unsigned long long>(v[1]),static_cast<unsigned long long>(v[2]),
+        static_cast<unsigned long long>(v[3]),static_cast<unsigned long long>(v[4]),static_cast<unsigned long long>(v[5]),
+        static_cast<unsigned long long>(v[6]),static_cast<unsigned long long>(v[7]),static_cast<unsigned long long>(v[8]),
+        static_cast<unsigned long long>(v[9]),static_cast<unsigned long long>(v[10]),static_cast<unsigned long long>(v[11]),
+        static_cast<unsigned long long>(v[12]),static_cast<unsigned long long>(v[13]),static_cast<unsigned long long>(v[14]),
+        static_cast<unsigned long long>(t.openedAsset),static_cast<unsigned long long>(t.openedAnchor),
+        static_cast<unsigned long long>(t.openedKind),g_smCameraTraceBudget.Used());
+    return result;
+}
+// VUH2707_TRACE_END
+
 // Diagnostic copies of admitted metadata, never native VM workspaces or new
 // ownership. A revoked cleanup association is explicitly distinct from active.
 struct SmLifeSnapshot {
@@ -1510,52 +1563,59 @@ static bool SmOwnerCameraSourceCurrent(const ScriptActorRole& role) noexcept {
 static bool SmOwnerCameraCurrent(uintptr_t context,std::int32_t state) noexcept {
     if(!SmOwnerReady() || !SmGameThread() || state<0 || state>4 || !context ||
        warp::TransitionPending() || warp::LoadPending())return false;
+    const ScriptActorRole* cameraTraceRole=nullptr; // VUH2707_TRACE
+    if(SmCameraTraceEnabled())for(const auto& candidate:g_smRoles)if(candidate.resource && candidate.camera.context==context){cameraTraceRole=&candidate;break;} // VUH2707_TRACE
+    auto cameraTrace=SmCameraTraceBegin(2,cameraTraceRole);cameraTrace.enabled=cameraTrace.enabled && cameraTraceRole;cameraTrace.inputContext=context; // VUH2707_TRACE
     std::uint8_t field=0,menu=0;std::int32_t frozen=1,currentState=0;uintptr_t active=0;
-    if(!ReadHitTrace(g_exeBase+offsets::IN_FIELD,field) || !field ||
-       !ReadHitTrace(g_exeBase+offsets::OPEN_MENU,menu) || menu!=0xFF ||
-       !ReadHitTrace(g_exeBase+offsets::CONTROLLABLE,frozen) || frozen!=0 ||
-       !ReadHitTrace(g_exeBase+offsets::EVENT_CONTEXT,active) || active!=context ||
-       !ReadHitTrace(g_exeBase+offsets::CUTSCENE_STATE,currentState) || currentState!=state)return false;
+    if(!cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::IN_FIELD,field),"field-read",R::CameraObservation::InField,field) || cameraTrace.Bad(!field,"not-in-field") ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::OPEN_MENU,menu),"menu-read",R::CameraObservation::Menu,menu) || cameraTrace.Bad(menu!=0xFF,"menu") ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::CONTROLLABLE,frozen),"frozen-read",R::CameraObservation::Frozen,frozen) || cameraTrace.Bad(frozen!=0,"frozen") ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::EVENT_CONTEXT,active),"active-context-read",R::CameraObservation::Active,active) || cameraTrace.Bad(active!=context,"context-replaced") ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::CUTSCENE_STATE,currentState),"state-read",R::CameraObservation::State,currentState) || cameraTrace.Bad(currentState!=state,"state-replaced"))return SmCameraTraceResult(cameraTrace,false);
     for(const auto& role:g_smRoles) {
-        if(!role.resource || role.camera.context!=context || !role.actor ||
-           role.load!=warp::LoadSerial() || role.transition!=warp::TransitionSerial() ||
-           !enemysync::ScriptCameraScopeCurrent(role.admittedScope) ||
-           !SmOwnerActorCurrent(role) ||
-           !SmOwnerCameraSourceCurrent(role) ||
-           role.slot!=role.admittedScope.localSlot || role.actor!=g_soraActor)continue;
-        if(role.admittedScope.localSlot!=0 && GetTickCount64()>=role.deadline)continue;
+        cameraTrace.watch=&role==cameraTraceRole; // VUH2707_TRACE
+        if(cameraTrace.Bad(!role.resource,"no-resource") || cameraTrace.Bad(role.camera.context!=context,"other-context") || cameraTrace.Bad(!role.actor,"no-actor") ||
+           cameraTrace.Bad(role.load!=warp::LoadSerial(),"load") || cameraTrace.Bad(role.transition!=warp::TransitionSerial(),"transition") ||
+           cameraTrace.Bad(!enemysync::ScriptCameraScopeCurrent(role.admittedScope),"scope") ||
+           cameraTrace.Bad(!SmOwnerActorCurrent(role),"actor-identity") ||
+           cameraTrace.Bad(!SmOwnerCameraSourceCurrent(role),"source-current") ||
+           cameraTrace.Bad(role.slot!=role.admittedScope.localSlot,"owner-seat") || cameraTrace.Bad(role.actor!=g_soraActor,"canonical-actor"))continue;
+        if(cameraTrace.Bad(role.admittedScope.localSlot!=0 && GetTickCount64()>=role.deadline,"lease"))continue;
         uintptr_t actorStatus=0,sourceStatus=0;
-        if(!enemytarget::ReadLive(role.actor,actorStatus) || actorStatus!=role.actorStatus ||
-           !enemytarget::ReadLive(role.source,sourceStatus) || sourceStatus!=role.sourceStatus)continue;
+        if(!cameraTrace.Read(enemytarget::ReadLive(role.actor,actorStatus),"actor-live",R::CameraObservation::ActorStatus,actorStatus) || cameraTrace.Bad(actorStatus!=role.actorStatus,"actor-status-replaced") ||
+           !cameraTrace.Read(enemytarget::ReadLive(role.source,sourceStatus),"source-live",R::CameraObservation::SourceStatus,sourceStatus) || cameraTrace.Bad(sourceStatus!=role.sourceStatus,"source-status-replaced"))continue;
         uintptr_t thread=0,vmSource=0,metadata=0;R::EntityCameraIdentity current{};current.context=context;
-        if(!ReadHitTrace(role.actor+0xD48,thread) || thread!=role.thread ||
-           (thread && (!ReadHitTrace(thread+0x60,vmSource) || vmSource!=role.source)) ||
-           !ReadHitTrace(context+0x10,current.sourceAnchor) || !ReadHitTrace(context+8,current.asset) ||
-           !ReadHitTrace(context+0x48,metadata) || !metadata ||
-           !ReadHitTrace(metadata,current.kindRecord))continue;
-        if(R::SameEntityCamera(role.camera,current))return true;
+        if(!cameraTrace.Read(ReadHitTrace(role.actor+0xD48,thread),"thread-read",R::CameraObservation::Thread,thread) || cameraTrace.Bad(thread!=role.thread,"thread-replaced") ||
+           (thread && (!cameraTrace.Read(ReadHitTrace(thread+0x60,vmSource),"vm-source-read",R::CameraObservation::VmSource,vmSource) || cameraTrace.Bad(vmSource!=role.source,"vm-source-replaced"))) ||
+           !cameraTrace.Read(ReadHitTrace(context+0x10,current.sourceAnchor),"anchor-read",R::CameraObservation::Anchor,current.sourceAnchor) || !cameraTrace.Read(ReadHitTrace(context+8,current.asset),"asset-read",R::CameraObservation::Asset,current.asset) ||
+           !cameraTrace.Read(ReadHitTrace(context+0x48,metadata),"metadata-read",R::CameraObservation::Metadata,metadata) || cameraTrace.Bad(!metadata,"no-metadata") ||
+           !cameraTrace.Read(ReadHitTrace(metadata,current.kindRecord),"kind-read",R::CameraObservation::Kind,current.kindRecord))continue;
+        if(cameraTrace.Good(R::SameEntityCamera(role.camera,current),"camera-identity"))return SmCameraTraceResult(cameraTrace,true);
     }
-    return false;
+    return SmCameraTraceResult(cameraTrace,false);
 }
 static bool SmOwnerOpenedCamera(ScriptActorRole& role,uintptr_t source,std::uint32_t fourcc) noexcept {
+    auto cameraTrace=SmCameraTraceBegin(1,&role);cameraTrace.nativeCalls=1;cameraTrace.fourcc=fourcc; // VUH2707_TRACE
     uintptr_t context=0,metadata=0,asset=0;R::EntityCameraIdentity current{};
-    if(source!=role.source || !SmOwnerActorCurrent(role) ||
-       !enemysync::ScriptCameraScopeCurrent(role.admittedScope) ||
-       !SmOwnerCameraAsset(source,fourcc,&asset) ||
-       !ReadHitTrace(g_exeBase+offsets::EVENT_CONTEXT,context) || !context ||
-       !ReadHitTrace(context+8,current.asset) || !ReadHitTrace(context+0x10,current.sourceAnchor) ||
-       !ReadHitTrace(context+0x48,metadata) || !metadata || !ReadHitTrace(metadata,current.kindRecord))return false;
+    if(cameraTrace.Bad(source!=role.source,"source-identity") || cameraTrace.Bad(!SmOwnerActorCurrent(role),"actor-identity") ||
+       cameraTrace.Bad(!enemysync::ScriptCameraScopeCurrent(role.admittedScope),"scope") ||
+       !cameraTrace.Read(SmOwnerCameraAsset(source,fourcc,&asset),"resident-asset",R::CameraObservation::ResidentAsset,asset) ||
+       !cameraTrace.Read(ReadHitTrace(g_exeBase+offsets::EVENT_CONTEXT,context),"context-read",R::CameraObservation::Context,context) || cameraTrace.Bad(!context,"no-context") ||
+       !cameraTrace.Read(ReadHitTrace(context+8,current.asset),"asset-read",R::CameraObservation::Asset,current.asset) || !cameraTrace.Read(ReadHitTrace(context+0x10,current.sourceAnchor),"anchor-read",R::CameraObservation::Anchor,current.sourceAnchor) ||
+       !cameraTrace.Read(ReadHitTrace(context+0x48,metadata),"metadata-read",R::CameraObservation::Metadata,metadata) || cameraTrace.Bad(!metadata,"no-metadata") || !cameraTrace.Read(ReadHitTrace(metadata,current.kindRecord),"kind-read",R::CameraObservation::Kind,current.kindRecord))return SmCameraTraceResult(cameraTrace,false);
     current.context=context;
     const R::EntityCameraIdentity expected{context,source+0x80,asset,0x6C000Bull};
-    if(!R::SameEntityCamera(expected,current))return false;
+    if(cameraTrace.Bad(!R::SameEntityCamera(expected,current),"camera-identity"))return SmCameraTraceResult(cameraTrace,false);
     role.camera=expected;
     Log("[script-owner] camera source=%u role=%u seat=%u context=%llX kind=11",role.netId,role.resource,
         role.slot,static_cast<unsigned long long>(context));
-    return true;
+    return SmCameraTraceResult(cameraTrace,true);
 }
 static int SmOwnerApply(const R::Call& call,uintptr_t source) {
-    if(!SmOwnerReady())return 0;
-    enemysync::DownedScope scope;if(!SmOwnerScope(scope))return 0;
+    auto cameraTrace=SmCameraTraceBegin(0,nullptr);cameraTrace.enabled=cameraTrace.enabled && SmGameThread() && call.trap==R::FindTrap(255,5); // VUH2707_TRACE
+    cameraTrace.resource=call.effect;cameraTrace.netId=call.netId;cameraTrace.source=source;cameraTrace.fourcc=R::BitsOf(call.values[0]); // VUH2707_TRACE
+    if(cameraTrace.Bad(!SmOwnerReady(),"owner-not-ready"))return SmCameraTraceResult(cameraTrace,0);
+    enemysync::DownedScope scope;if(cameraTrace.Bad(!SmOwnerScope(scope),"owner-scope"))return SmCameraTraceResult(cameraTrace,0);
     const auto operation=R::kTraps[call.trap].index;
     if(operation==2) {
         const auto slot=R::BitsOf(call.values[0]);
@@ -1586,7 +1646,8 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
         return 1;
     }
     for(auto& role:g_smRoles)if(role.resource==call.effect && role.netId==call.netId && role.objectId==call.objectId) {
-        if(!SmOwnerCurrent(role,scope))return 0;
+        SmCameraTraceRole(cameraTrace,role); // VUH2707_TRACE
+        if(cameraTrace.Bad(!SmOwnerCurrent(role,scope),"role-current"))return SmCameraTraceResult(cameraTrace,0);
         if(operation==6){SmOwnerRelease(role,true,false);return 1;}
         role.deadline=GetTickCount64()+1000;
         if(role.slot!=scope.localSlot) {
@@ -1604,7 +1665,7 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
             else if(operation==14)role.visual.wantAttachment=false;
             return 1; // camera, commands and native attacks stay actual-owner-only
         }
-        if(role.actor!=g_soraActor || !SmOwnHandle(role.actor) || downedspike::LogicallyDowned())return 0;
+        if(cameraTrace.Bad(role.actor!=g_soraActor,"canonical-actor") || cameraTrace.Bad(!SmOwnHandle(role.actor),"actor-handle") || cameraTrace.Bad(downedspike::LogicallyDowned(),"logically-downed"))return SmCameraTraceResult(cameraTrace,0);
         if(operation==3) {
             if(!source || source!=role.source || R::TagOf(call.values[0])!=R::kTagInt)return 0;
             if(R::CaptureSnapshotApplied({role.captureValues[0],role.captureValues[1]},
@@ -1626,12 +1687,13 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
             role.motion=R::BitsOf(call.values[0]);role.motionTime=R::FloatOf(call.values[1]);role.haveMotion=true;return 1;
         }
         if(operation==5) {
-            if(!source || source!=role.source || R::BitsOf(call.values[1])>1)return 0;
+            if(cameraTrace.Bad(!source,"no-source") || cameraTrace.Bad(source!=role.source,"source-identity") || cameraTrace.Bad(R::BitsOf(call.values[1])>1,"camera-argument"))return SmCameraTraceResult(cameraTrace,0);
             char name[5]{};const auto fourcc=R::BitsOf(call.values[0]);std::memcpy(name,&fourcc,4);
-            if(!SmOwnerCameraAsset(source,fourcc))return 0;
+            if(cameraTrace.Bad(!SmOwnerCameraAsset(source,fourcc),"resident-asset"))return SmCameraTraceResult(cameraTrace,0);
             using Camera=void(__fastcall*)(uintptr_t,const char*,uintptr_t);
+            cameraTrace.nativeCalls=1; // VUH2707_TRACE
             reinterpret_cast<Camera>(g_exeBase+0x3DB2F0)(source,name,R::BitsOf(call.values[1])?source:role.actor);
-            return SmOwnerOpenedCamera(role,source,fourcc)?1:0;
+            return SmCameraTraceResult(cameraTrace,SmOwnerOpenedCamera(role,source,fourcc)?1:0,"registration");
         }
         if(operation==13) {
             if(source!=role.source || R::TagOf(call.values[0])!=R::kTagInt || R::BitsOf(call.values[0])!=16386 ||
@@ -1655,7 +1717,7 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
                 static_cast<int>(R::BitsOf(call.values[3])))?1:0;
         }
     }
-    return 0;
+    return SmCameraTraceResult(cameraTrace,0);
 }
 static bool SmOwnerMirroredSource(uintptr_t actor) {
     if(!actor)return false;
