@@ -243,6 +243,22 @@ void TestInvalidDiagnosticJoins() {
     Check(receipts.size() == 1 && receipts[0].find("complete=0") != std::string::npos && w::g_hostCause.id == 0,
           "receipt sequence exhaustion explicitly invalidates completeness");
 }
+// VUH-2679: the relay's replay of a clone-layout room is queued like any accepted host room (same epoch, same
+// location). If an event or cutscene starts mid-rebuild, nothing is issued until the field settles; then one load.
+void TestReplayDuringEvent() {
+    Start(); auto context = Context(); auto scope = Scope();
+    Check(w::QueueHostTransition(arrivalTarget, context, &scope, nullptr, nullptr), "the replayed room is queued");
+    Put(image + offsets::EVENT_CONTEXT, uintptr_t{0x1234});
+    w::IssueHostTransition(); w::IssueHostTransition();
+    Check(warpCalls == 0 && w::g_hostQueued && !w::g_transitionPending, "an event mid-rebuild holds the reload");
+    Put(image + offsets::EVENT_CONTEXT, uintptr_t{0}); Put(image + offsets::CUTSCENE_STATE, std::int32_t{2});
+    w::IssueHostTransition();
+    Check(warpCalls == 0 && w::g_hostQueued, "so does a cutscene");
+    Put(image + offsets::CUTSCENE_STATE, std::int32_t{0});
+    IssueCompleteArrive();
+    w::IssueHostTransition();
+    Check(warpCalls == 1 && Count("load") == 1, "once settled: exactly one reload, then arrival");
+}
 void TestIntervalSeal() {
     Start();
     w::OnFrameStart(100, player);
@@ -281,7 +297,7 @@ int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr,0x3000000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if (!image) return 2;
-    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestBlockedExitToPrologueSite(); TestWaitingAtBlockedExit(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal();
+    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestBlockedExitToPrologueSite(); TestWaitingAtBlockedExit(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal(); TestReplayDuringEvent();
     Check(hookCalls == 0, "no hook installation occurs in owned-memory controls");
     VirtualFree(reinterpret_cast<void*>(image),0,MEM_RELEASE);
     std::cout << "ERRORS=" << errors << '\n';

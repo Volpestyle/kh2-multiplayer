@@ -180,6 +180,7 @@ ResolveObserver g_observer = nullptr;    // VUH-1519 party-native; set once befo
 ResolveObserverLog g_observerLog = nullptr;
 std::atomic<bool> g_bcRequested {false};
 std::atomic<std::uint32_t> g_bcOwned {0}; // bit per verified world; guarded writes
+std::atomic<std::uint64_t> g_bcBuilt {0};  // VUH-2679: transition << 32 | world << 8 | clone, at the last resolve
 SRWLOCK g_bcLock = SRWLOCK_INIT;
 std::atomic<bool (*)()> g_bcNeutralReady {nullptr};
 std::atomic<std::uint8_t> g_remoteRoster {0};
@@ -194,6 +195,10 @@ void HookedResolveMembers() {
     // factory consumption; a newly standard Sora waits for the next load.
     __try {
         if (*reinterpret_cast<const std::uint16_t*>(g_base + RVA_RESOLVED_MEMBERS) != SORA) UpdateBcClone(true);
+        // VUH-2679: the layout this room's factory now consumes, for this transition and world.
+        const auto world = *reinterpret_cast<const std::uint8_t*>(g_base + RVA_WORLD);
+        g_bcBuilt.store((static_cast<std::uint64_t>(warp::TransitionSerial()) << 32) | (std::uint64_t{world} << 8) |
+                        (BcCloneApplied(world) ? 1u : 0u), std::memory_order_release);
     } __except(EXCEPTION_EXECUTE_HANDLER) { ++g_stats.faults; }
     if (!g_active.load(std::memory_order_acquire)) return;
     LoadContext c;
@@ -279,6 +284,10 @@ bool MissingPartyReady() {
     const auto neutral=g_bcNeutralReady.load(std::memory_order_acquire);
     return g_bcRequested && g_active.load(std::memory_order_acquire) && privatestatus::Ready() &&
         neutral && neutral() && enemysync::TwoPlayerSessionLive();
+}
+bool BcCloneBuiltFor(std::uint32_t transition, std::uint8_t world) {
+    const auto built = g_bcBuilt.load(std::memory_order_acquire);
+    return transition != 0 && (built >> 32) == transition && ((built >> 8) & 0xFF) == world && (built & 1) != 0;
 }
 bool BcCloneApplied(std::uint8_t world) {
     return BcCloneWorld(world) && (g_bcOwned.load(std::memory_order_acquire) & (1u << world)) != 0;

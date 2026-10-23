@@ -51,6 +51,9 @@ void reviveNetworkChecks(kh2coop::SessionHost& server,
     refused("nonfinite position refused without retaining old good authority");
     avatars[2].position.x=0;publish();clients[2]->sendTransitionAck({20,5,4,false});pump();
     refused("target not arrived refused");clients[2]->sendTransitionAck({20,5,4,true});pump();
+    // VUH-2679: a seat rebuilding its clone-layout room acks arrived=false for the epoch until the replayed room loads.
+    clients[1]->sendTransitionAck({20,5,4,false});pump();
+    refused("requester not arrived (rebuilding its room) refused");clients[1]->sendTransitionAck({20,5,4,true});pump();
     clients[0]->sendEventHold({20,true,0});pump();refused("active host event hold refuses revive");
     clients[0]->sendEventHold({20,false,0});pump();
     // A refused range request cannot be retried later under the same sequence.

@@ -33,7 +33,7 @@ void codec() {
     const auto bytes = encode(m);
     const std::uint8_t* p = nullptr; std::size_t n = 0;
     check(decodePacketHeader(bytes.data(), bytes.size(), p, n) == PacketType::SeatState && n == SEAT_STATE_BYTES &&
-          static_cast<unsigned>(PacketType::SeatState) == 53 && PROTOCOL_VERSION == 35, "SeatState is type 53, 72 bytes, protocol 35");
+          static_cast<unsigned>(PacketType::SeatState) == 53 && PROTOCOL_VERSION == 36, "SeatState is type 53, 72 bytes, protocol 36");
     ByteReader r(p, n); SeatState back; read(r, back);
     check(r.atEnd() && encode(back) == bytes && back.roster == m.roster && back.seq == 7 && back.profile == 0x5A &&
           back.latched == m.latched && back.phase == SeatPhase::Bound && back.ownerSlot == 1 && back.roomId == 7 &&
@@ -61,6 +61,19 @@ void codec() {
     threw = false;
     try { auto bad = stage; bad.seq = 0; (void)encode(bad); } catch (const std::exception&) { threw = true; }
     check(threw, "StageEnd refuses sequence 0");
+    // VUH-2679: RoomReplayRequest (56), a clone-layout room's join replay asked for by its own seat.
+    RoomReplayRequest replay; replay.seq = 1; replay.epoch = 7; replay.reason = ROOM_REPLAY_CLONE_OUTGROWN;
+    const auto replayBytes = encode(replay);
+    check(decodePacketHeader(replayBytes.data(), replayBytes.size(), p, n) == PacketType::RoomReplayRequest &&
+          n == ROOM_REPLAY_REQUEST_PAYLOAD_SIZE && n == 10 && static_cast<unsigned>(PacketType::RoomReplayRequest) == 56,
+          "RoomReplayRequest is type 56, 10 bytes");
+    ByteReader rr(p, n); RoomReplayRequest replayBack; read(rr, replayBack);
+    check(rr.atEnd() && encode(replayBack) == replayBytes && replayBack.epoch == 7 && isScopedWorldPacket(PacketType::RoomReplayRequest) &&
+          !isMaterialWorldPacket(PacketType::RoomReplayRequest), "RoomReplayRequest exact roundtrip, scoped, not material");
+    for (auto bad : {RoomReplayRequest{0, 7, 1}, RoomReplayRequest{1, 0, 1}, RoomReplayRequest{1, 7, 2}}) {
+        threw = false; try { (void)encode(bad); } catch (const std::exception&) { threw = true; }
+        check(threw, "RoomReplayRequest refuses sequence 0, epoch 0 and an unknown reason");
+    }
     // The Day 1 Sandlot duel's two stage ends are host-led rows; the shop events are not.
     using namespace kh2coop::eventscenes;
     const auto* s1 = QualifiedStageEnd(2, 4, 77, 0x313131, 9, stage.params);
@@ -437,6 +450,7 @@ void network() {
     std::array<std::unique_ptr<NetworkClient>, 2> clients;
     std::array<std::vector<SeatState>, 2> received;
     std::array<std::vector<StageEnd>, 2> stages;
+    std::array<unsigned, 2> rooms{};
     for (unsigned i = 0; i < 2; ++i) {
         ClientCallbacks cb;
         cb.onWorldEnvelope = [&received, &stages, i](const WorldEnvelope& e) {
@@ -446,6 +460,7 @@ void network() {
             if (type != PacketType::SeatState) return;
             ByteReader s(p, n); SeatState m; read(s, m); received[i].push_back(m);
         };
+        cb.onRoomTransition = [&rooms, i](const RoomTransition&) { ++rooms[i]; };
         clients[i] = std::make_unique<NetworkClient>("127.0.0.1", config.port, "seat-test", "none", "seat" + std::to_string(i), static_cast<SlotType>(i), cb);
         clients[i]->connect();
     }
@@ -488,6 +503,35 @@ void network() {
     clients[0]->sendNativeWorld(encode(fromHost), {1, clients[0]->deliverySerial(), 1}, true); pump();
     check(stages[0].size() == 1 && stages[1].size() == 1,
           "a repeated sequence, another location, a pre-stamped owner and the host's own report are all refused");
+    // VUH-2679: RoomReplayRequest. The friend's clone-layout room is replayed to the friend alone (the join replay),
+    // once per epoch; the host and other seats get nothing and reload nothing.
+    const auto friendRooms = rooms[1], hostRooms = rooms[0];
+    const auto rejected = server.rejectedWorldMessages();
+    auto ask = [&](unsigned seat, std::uint32_t seq, std::uint32_t epoch) {
+        RoomReplayRequest q; q.seq = seq; q.epoch = epoch; q.reason = ROOM_REPLAY_CLONE_OUTGROWN;
+        clients[seat]->sendNativeWorld(encode(q), {1, clients[seat]->deliverySerial(), seat == 0 ? 1u : 0u}, true); pump();
+    };
+    ask(1, 1, 1);
+    check(rooms[1] == friendRooms + 1 && rooms[0] == hostRooms && server.rejectedWorldMessages() == rejected,
+          "the friend's request replays the admitted room to that friend only");
+    ask(1, 2, 1);
+    check(rooms[1] == friendRooms + 1 && server.rejectedWorldMessages() == rejected + 1, "a second request in the same epoch is refused");
+    ask(1, 3, 9);
+    check(rooms[1] == friendRooms + 1 && server.rejectedWorldMessages() == rejected + 2, "a request for another epoch is refused");
+    ask(0, 1, 1);
+    check(rooms[0] == hostRooms && rooms[1] == friendRooms + 1 && server.rejectedWorldMessages() == rejected + 3,
+          "the host's own request is refused (it is never replayed)");
+    clients[0]->sendRoomTransition(RoomTransition {2, 2, 4, 0, 77, 77, 77}); pump();
+    const auto afterEpoch2 = rooms[1];
+    ask(1, 1, 2);
+    check(rooms[1] == afterEpoch2 && server.rejectedWorldMessages() == rejected + 4,
+          "a reused (consumed) sequence is refused even in a new epoch");
+    ask(1, 3, 9);
+    check(rooms[1] == afterEpoch2 && server.rejectedWorldMessages() == rejected + 5,
+          "the first request in a new epoch still names that epoch, or it is refused");
+    ask(1, 4, 2);
+    check(rooms[1] == afterEpoch2 + 1 && rooms[0] == hostRooms && server.rejectedWorldMessages() == rejected + 5,
+          "after a new host epoch, one more request replays that epoch to the friend only");
     for (auto& c : clients) c->disconnect();
     server.stop();
 }

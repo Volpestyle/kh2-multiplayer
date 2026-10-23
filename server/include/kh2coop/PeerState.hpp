@@ -39,6 +39,7 @@ struct PeerState {
     std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
     std::uint64_t lastScriptReactionCompletionSeq{};
     std::uint32_t lastStageEndSeq{0}; // VUH-2555: accepted stage-end reports, connection-wide
+    std::uint32_t lastRoomReplaySeq{0}, roomReplayEpoch{0}; // VUH-2679: accepted replay requests; one per epoch
 
     std::uint64_t lastReviveSeq{0}, revivedEpisode{0};
     std::uint32_t lastSeatSeq{0}; // VUH-2464 SeatState: strictly increasing per verified connection

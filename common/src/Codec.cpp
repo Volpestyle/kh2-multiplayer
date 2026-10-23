@@ -259,7 +259,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(MissionState) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(StageEnd) RS_INNER(ScriptReactionCompletion) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(StageEnd) RS_INNER(RoomReplayRequest) RS_INNER(ScriptReactionCompletion) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -1107,6 +1107,21 @@ std::vector<std::uint8_t> encode(const StageEnd& m) {
     ByteWriter w; write(w, m); return encodePacket(PacketType::StageEnd, w.data());
 }
 
+void write(ByteWriter& w, const RoomReplayRequest& m) {
+    if (!m.seq || !m.epoch || m.reason != ROOM_REPLAY_CLONE_OUTGROWN) throw std::runtime_error("RoomReplayRequest: invalid seq, epoch or reason");
+    w.writeU32(m.seq); w.writeU32(m.epoch); w.writeU16(m.reason);
+}
+void read(ByteReader& r, RoomReplayRequest& out) {
+    if (r.remaining() != ROOM_REPLAY_REQUEST_PAYLOAD_SIZE) throw std::runtime_error("RoomReplayRequest: wrong payload length");
+    RoomReplayRequest m;
+    m.seq = r.readU32(); m.epoch = r.readU32(); m.reason = r.readU16();
+    if (!m.seq || !m.epoch || m.reason != ROOM_REPLAY_CLONE_OUTGROWN) throw std::runtime_error("RoomReplayRequest: invalid seq, epoch or reason");
+    out = m;
+}
+std::vector<std::uint8_t> encode(const RoomReplayRequest& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::RoomReplayRequest, w.data());
+}
+
 void write(ByteWriter& w, const RemoteHit& m) {
     write(w, m.location);
     w.writeU64(m.seq); w.writeU64(m.hostConnectionId); w.writeU64(m.targetConnectionId);
@@ -1887,6 +1902,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("ScriptReactionCompletion: wrong frame length");
     if (type == PacketType::StageEnd && (len != STAGE_END_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("StageEnd: wrong frame length");
+    if (type == PacketType::RoomReplayRequest && (len != ROOM_REPLAY_REQUEST_PAYLOAD_SIZE || size != kHeaderSize + len))
+        throw std::runtime_error("RoomReplayRequest: wrong frame length");
     if (type == PacketType::RemoteHit && (len != REMOTE_HIT_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("RemoteHit: wrong frame length");
     if (type == PacketType::TargetAuthority && (len != TARGET_AUTHORITY_PAYLOAD_SIZE || size != kHeaderSize + len))

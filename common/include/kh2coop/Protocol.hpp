@@ -12,9 +12,12 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 35;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 36;
 
 // ===========================================================================
+// Protocol v36 (VUH-2679): RoomReplayRequest (56). A client whose current room was built in the two-player clone
+// layout asks, once the roster has grown to three seats, for the relay's join replay of the admitted room, for
+// itself alone, and reloads that room natively.
 // Protocol v35 (VUH-2640 Leg A): ResyncSnapshot's optional boss sit-out trailer (16 bytes): the host attests
 // a reviewed boss arena whose boss it alone owns, and carries a fenced returning seat in sitting out.
 // Protocol v34 (VUH-2466): SpawnEmission carries a kind; the host's Struggle orb births and collections
@@ -440,6 +443,21 @@ struct StageEnd {
     std::uint8_t ownerSlot{0xFF};
 };
 inline constexpr std::size_t STAGE_END_PAYLOAD_SIZE = 52;
+
+// VUH-2679: reliable, scoped request from a client's DLL whose current room was constructed with the two-player
+// clone layout (PlayerKit's automatic Sora clone) after the roster grew to three seats: that room has no native
+// body for the third seat until it is loaded again. The relay admits it only from a verified, unquarantined client
+// for the admitted room's epoch, at most once per seat and epoch (seq strictly increasing per author connection),
+// and answers that seat alone with the join replay (sendWorldStateTo). Nothing is broadcast; no other seat reloads.
+// The request names no seat: the relay uses the sender's own. reason 1 = the clone layout was outgrown.
+// Wire order is field order: 10 payload bytes.
+struct RoomReplayRequest {
+    std::uint32_t seq{0};
+    std::uint32_t epoch{0};
+    std::uint16_t reason{0};
+};
+inline constexpr std::size_t ROOM_REPLAY_REQUEST_PAYLOAD_SIZE = 10;
+inline constexpr std::uint16_t ROOM_REPLAY_CLONE_OUTGROWN = 1;
 
 // Reliable, scoped host report (VUH-1515): an enemy on the host hit the
 // host-side native clone of targetSlot's player. The relay validates it

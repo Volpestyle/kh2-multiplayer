@@ -83,6 +83,44 @@ constexpr std::uint8_t AUTO_CLONE_WORLDS[] = {2, 4, 5}; // TT, HB (including GoA
 bool BcCloneWorld(std::uint8_t world);
 bool BcCloneApplied(std::uint8_t world);
 void UpdateBcClone(bool resolving = false); // game frame and pre-resolver
+// VUH-2679: what the party resolver last built with, for the transition and world it ran in: the clone row (the
+// two-player layout, no native third party slot) or not. True only for exactly that transition and world.
+bool BcCloneBuiltFor(std::uint32_t transition, std::uint8_t world);
+// VUH-2679: a client whose current room was built with the clone layout, once the roster has three seats, asks the
+// relay for the join replay of its admitted room (RoomReplayRequest) and reloads it natively; once per build, on a
+// settled field frame. Host and the seats built natively never ask.
+struct CloneRebuildFacts {
+    bool client = false;          // a client seat, arrived in the host's current epoch
+    bool builtWithClone = false;  // this room's own load resolved the party with the clone row (BcCloneBuiltFor)
+    bool threeSeats = false;      // the host and both friend connections are present
+    bool requested = false;       // a replay was already requested for this build (this transition)
+    bool settledField = false;    // in field: no event, no cutscene, menu closed, no transition pending, room live
+};
+enum class CloneRebuildStep : std::uint8_t { None, Request };
+inline CloneRebuildStep CloneRebuildDecide(const CloneRebuildFacts& f, const char*& why) {
+    if (!f.client) { why = "not-client"; return CloneRebuildStep::None; }
+    if (!f.builtWithClone) { why = "native-layout"; return CloneRebuildStep::None; }
+    if (!f.threeSeats) { why = "two-seats"; return CloneRebuildStep::None; }
+    if (f.requested) { why = "requested"; return CloneRebuildStep::None; }
+    if (!f.settledField) { why = "deferred"; return CloneRebuildStep::None; }
+    why = "clone-outgrown"; return CloneRebuildStep::Request;
+}
+// The replayed room is accepted at the current epoch once, for the request this seat made and only while that epoch
+// is still the host's; every other room still needs a strictly newer epoch.
+inline bool AcceptReplayedRoom(bool awaiting, std::uint32_t awaitingEpoch, std::uint32_t roomEpoch, std::uint32_t hostEpoch) {
+    return awaiting && awaitingEpoch != 0 && roomEpoch == awaitingEpoch && hostEpoch == awaitingEpoch;
+}
+// While a replay is awaited (lead #269): a lost request is retried once after REPLAY_TIMEOUT_MS; after a second
+// timeout it is abandoned (the seat re-acks arrival at its unchanged epoch, and its next host room, with three seats,
+// is built natively); a newer host epoch supersedes it. The seat never leaves its admitted epoch while waiting.
+constexpr std::uint64_t REPLAY_TIMEOUT_MS = 10000;
+constexpr unsigned REPLAY_ATTEMPTS = 2;
+enum class ReplayWait : std::uint8_t { Waiting, Retry, Abandon, Superseded };
+inline ReplayWait CloneReplayWait(std::uint32_t awaitingEpoch, std::uint32_t hostEpoch, std::uint64_t elapsedMs, unsigned attempts) {
+    if (awaitingEpoch != hostEpoch) return ReplayWait::Superseded;
+    if (elapsedMs < REPLAY_TIMEOUT_MS) return ReplayWait::Waiting;
+    return attempts < REPLAY_ATTEMPTS ? ReplayWait::Retry : ReplayWait::Abandon;
+}
 
 // Reads KH2COOP_PLAYER_KIT. Unset/0: returns true without hooking. Unknown
 // kit or mismatched 3E2EB0 bytes: logs, returns false, no hook.

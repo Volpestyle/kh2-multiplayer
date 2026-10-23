@@ -17,7 +17,86 @@ static LoadContext Ctx(std::uint8_t world, std::uint16_t resolved0) {
     LoadContext c; c.world = world; c.room = 0x1A; c.resolved0 = resolved0; return c;
 }
 
+// VUH-2679: a client whose room was built in the two-player clone layout asks once for the join replay after the
+// roster grows to three seats, on a settled field frame; the replayed room is accepted once at the same epoch.
+static void CloneRebuild() {
+    const auto step = [](CloneRebuildFacts f, CloneRebuildStep want, const char* reason) {
+        const char* why = ""; return CloneRebuildDecide(f, why) == want && std::strcmp(why, reason) == 0; };
+    CloneRebuildFacts outgrown; outgrown.client = true; outgrown.builtWithClone = true; outgrown.threeSeats = true;
+    outgrown.settledField = true;
+    CHECK("an outgrown clone room asks for its replay", step(outgrown, CloneRebuildStep::Request, "clone-outgrown"));
+    auto f = outgrown; f.client = false;
+    CHECK("the host (or a seat without a host epoch) never asks", step(f, CloneRebuildStep::None, "not-client"));
+    f = outgrown; f.builtWithClone = false;
+    CHECK("a room built natively (any non-clone world, or a 3-seat load) never asks", step(f, CloneRebuildStep::None, "native-layout"));
+    f = outgrown; f.threeSeats = false;
+    CHECK("two-player sessions keep their clone room (7331a05 unchanged)", step(f, CloneRebuildStep::None, "two-seats"));
+    f = outgrown; f.requested = true;
+    CHECK("one request per build", step(f, CloneRebuildStep::None, "requested"));
+    f = outgrown; f.settledField = false;
+    CHECK("an event, cutscene, menu or transition defers it", step(f, CloneRebuildStep::None, "deferred"));
+
+    // Sequences. A tick model: facts per frame, a latch per build (transition), one request at most per build.
+    struct Seat { std::uint32_t transition = 1, requestedFor = 0; unsigned requests = 0;
+        bool clone = false, settled = true;
+        void tick(bool client, bool threeSeats) {
+            CloneRebuildFacts x; x.client = client; x.builtWithClone = clone; x.threeSeats = threeSeats;
+            x.requested = requestedFor == transition; x.settledField = settled;
+            const char* why = "";
+            if (CloneRebuildDecide(x, why) == CloneRebuildStep::Request) { ++requests; requestedFor = transition; }
+        }
+        void load(bool threeSeats) { ++transition; clone = !threeSeats; } // a clone world: two seats build the clone
+    };
+    {   // D14: Friend1 loads with two seats; Friend2 joins; Friend1 rebuilds once; Friend2 and the host never.
+        Seat friend1, friend2, host; friend1.load(false); friend2.load(true);
+        for (int i = 0; i < 5; ++i) { friend1.tick(true, true); friend2.tick(true, true); host.tick(false, true); }
+        CHECK("2->3 in a clone room: exactly one request, on that seat only",
+              friend1.requests == 1 && friend2.requests == 0 && host.requests == 0);
+        friend1.load(true); // the replayed room, built with three seats
+        for (int i = 0; i < 5; ++i) friend1.tick(true, true);
+        CHECK("the rebuilt room never asks again", friend1.requests == 1 && !friend1.clone);
+    }
+    {   // 3->2->3 with no load in between: the room was built natively, nothing to rebuild.
+        Seat s; s.load(true);
+        for (int i = 0; i < 3; ++i) s.tick(true, true);
+        for (int i = 0; i < 3; ++i) s.tick(true, false);
+        for (int i = 0; i < 3; ++i) s.tick(true, true);
+        CHECK("3->2->3 without a load: no request", s.requests == 0);
+        s.load(false); // a load during the two-seat stretch builds the clone
+        for (int i = 0; i < 3; ++i) s.tick(true, false);
+        for (int i = 0; i < 3; ++i) s.tick(true, true);
+        CHECK("3->2 (load) ->3: one request for that growth", s.requests == 1);
+    }
+    {   // Growth during an event: deferred, then exactly one request once settled.
+        Seat s; s.load(false); s.settled = false;
+        for (int i = 0; i < 5; ++i) s.tick(true, true);
+        const bool deferred = s.requests == 0;
+        s.settled = true;
+        for (int i = 0; i < 5; ++i) s.tick(true, true);
+        CHECK("growth during an event is deferred to a settled field frame, then asked once", deferred && s.requests == 1);
+    }
+    {   // A non-clone world never builds the clone, whatever the seat count (BcCloneWorld).
+        Seat s; s.transition = 1;
+        for (int i = 0; i < 3; ++i) s.tick(true, false);
+        for (int i = 0; i < 3; ++i) s.tick(true, true);
+        CHECK("a non-clone world: no request", s.requests == 0 && !BcCloneWorld(1) && !BcCloneWorld(6) &&
+              BcCloneWorld(2) && BcCloneWorld(4) && BcCloneWorld(5));
+    }
+    // The replay is accepted once, only for this seat's request, only while that epoch is the host's.
+    CHECK("the replayed room is accepted at the same epoch for the request", AcceptReplayedRoom(true, 7, 7, 7));
+    CHECK("no request: a same-epoch room is not accepted", !AcceptReplayedRoom(false, 7, 7, 7) && !AcceptReplayedRoom(true, 0, 0, 0));
+    CHECK("another epoch's room is not the replay", !AcceptReplayedRoom(true, 7, 8, 7) && !AcceptReplayedRoom(true, 7, 6, 7));
+    CHECK("a request superseded by a newer host epoch is not accepted", !AcceptReplayedRoom(true, 7, 7, 8));
+    // A lost request: retried once, then abandoned; the seat never leaves its admitted epoch while waiting.
+    CHECK("waiting before the timeout", CloneReplayWait(7, 7, REPLAY_TIMEOUT_MS - 1, 1) == ReplayWait::Waiting);
+    CHECK("one retry after the timeout", CloneReplayWait(7, 7, REPLAY_TIMEOUT_MS, 1) == ReplayWait::Retry);
+    CHECK("abandoned after the second timeout", CloneReplayWait(7, 7, REPLAY_TIMEOUT_MS, 2) == ReplayWait::Abandon);
+    CHECK("a newer host epoch supersedes the wait at any time", CloneReplayWait(7, 8, 0, 1) == ReplayWait::Superseded &&
+          CloneReplayWait(7, 8, REPLAY_TIMEOUT_MS * 5, 2) == ReplayWait::Superseded);
+}
+
 int main() {
+    CloneRebuild();
     // Regression: ordinary BC default party acquires a private-clone selector
     // only inside the enabled live two-player scope, then restores only our row.
     {

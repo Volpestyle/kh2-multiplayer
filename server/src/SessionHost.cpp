@@ -1067,6 +1067,30 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                     std::to_string(stage.roomId) + "/" + std::to_string(stage.eventProgram));
                 break;
             }
+            case PacketType::RoomReplayRequest: {
+                // VUH-2679: a client whose current room was built in the two-player clone layout asks for the join
+                // replay after the roster grew to three seats. Only from a verified, unquarantined client through its
+                // admitted scope, for the admitted room's epoch, once per seat and epoch; the replay goes to that seat
+                // alone (no broadcast, so neither the host nor any other seat reloads).
+                RoomReplayRequest request; read(reader, request);
+                const char* refused = !reader.atEnd() ? "trailing" : ps->status != PeerStatus::Verified ? "unverified" :
+                    fromHost(*ps) ? "host" : ps->worldQuarantined ? "quarantined" : !admittedScope ? "unscoped" :
+                    !room_ || !room_->epoch ? "no-room" : request.epoch != room_->epoch ? "epoch" :
+                    request.seq <= ps->lastRoomReplaySeq ? "sequence" : ps->roomReplayEpoch == room_->epoch ? "once-per-epoch" :
+                    nullptr;
+                if (refused) {
+                    ++rejectedWorld_;
+                    log(std::string("RoomReplayRequest refused peer=") + ps->peerId + " reason=" + refused +
+                        " epoch=" + std::to_string(request.epoch));
+                    return;
+                }
+                ps->lastRoomReplaySeq = request.seq;
+                ps->roomReplayEpoch = room_->epoch;
+                sendWorldStateTo(peer);
+                log("RoomReplayRequest replayed slot=" + std::to_string(static_cast<int>(ps->assignedSlot)) + " epoch=" +
+                    std::to_string(room_->epoch) + " seq=" + std::to_string(request.seq));
+                break;
+            }
 
             case PacketType::ReviveRequest: {
                 ReviveRequest request; read(reader,request);

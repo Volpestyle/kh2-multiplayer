@@ -1115,3 +1115,37 @@ dual-wield belong to VUH-2465/2466/2467. The clone's fresh private record is
 status pool index 79, the address older tools call "unit slot 0 HP"
 (`0x2A23598`), so a reader of that fixed address sees the clone; the route
 pilot's HP reads do.
+
+## A third seat joining a clone-layout room (VUH-2679, protocol 36)
+
+In TT, HB (including GoA) and BC, PlayerKit's automatic two-player Sora clone replaces the party row while the
+session has exactly two seats (`TwoPlayerSessionLive`). A room a seat loads in that state is built in the clone
+layout, which has no native third party slot. When a third seat joins later, the row is restored, but that room
+keeps its two-player party, so it has no native body for the new seat's puppet until its next room load. D14
+d14-attempt01 (run 20261022-180848) hit this: Friend1 loaded GoA while the roster was `1/2/0`, then Friend2
+joined, and the initial transition check found Friend1's native friend slot 2 empty.
+
+The fix rebuilds only the affected seat's room, using the existing join replay:
+
+- **Receipt.** `HookedResolveMembers` records what each load's party was resolved with: the transition serial,
+  the world, and whether the clone row was used (`BcCloneBuiltFor`).
+- **Trigger** (client only; `CloneRebuildDecide`). The seat's current room was built with the clone, the roster
+  now has three connections, and no request has been made for this build yet. It waits for a settled field
+  frame: no event, cutscene, menu or transition pending.
+- **Request.** The seat acks `arrived=false` for the epoch, so revive admission treats it as not arrived while
+  it reloads. It then sends `RoomReplayRequest` (packet 56; seq, epoch, reason 1).
+- **Relay.** It admits the request only from a verified, unquarantined client, through its admitted scope, for
+  the admitted room's epoch, once per seat and epoch, with a strictly newer seq. It calls `sendWorldStateTo` for
+  that seat alone: the same replay a joining seat receives. Nothing is broadcast, so the host and the other seats
+  do not reload. Refusals are logged with a reason.
+- **Reload.** The replayed room is accepted once at the same epoch (`AcceptReplayedRoom`). The normal
+  epoch-accept reset and `QueueHostTransition` then run, so the seat performs a native same-room reload with three
+  seats, which builds the native party, and acks arrival again. An event that starts mid-rebuild only delays the
+  issue; Warp's safe-state gate holds the load.
+- **Lost request.** The seat never leaves its admitted epoch while it waits. It retries once after 10 s. After a
+  second timeout it gives up, acks `arrived=true` again, and its next host room (built with three seats) is
+  native. A newer host epoch supersedes the wait.
+
+Two-player behavior is unchanged (`7331a05`): with two seats nothing is requested. Logs: `[clone-rebuild]
+requested|waiting|retried|abandoned|superseded|replay accepted` on the seat, and `RoomReplayRequest
+replayed|refused` on the relay.
