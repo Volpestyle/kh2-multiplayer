@@ -11,12 +11,15 @@ buildid `15194255`. This qualifies the lane, not other fixtures or networking.
 
 ## D15 desktop readiness (VUH-2339)
 
-**Design only; not installed or qualified.** `bld` belongs to another person
-(`ccroc`). The lead requires James's explicit OK before installing a physical
-input observer, a persistent user task or a reclaim gate there. Until that
-decision, keep `bld` read-only: no bridge starts, queued jobs, Steam starts or
-account changes. The earlier account-B consent does not authorize monitoring
-someone's everyday desktop. James also owns the account-B access decision.
+**Installed 2026-10-23; not yet qualified.** `bld` belongs to another person
+(`ccroc`). On 2026-10-23 James OK'd the full rig: the idle gate, the `C:\desk`
+driver as a removable user-level task, git/Python installs, and account B only
+when it is already signed in. The gate and its install/removal live in
+`tools/rig/desk_gate/` and the run lane in `tools/rig/bld/`. The design below
+is what they implement. Still open: a live qualifying replay matching its
+PC1 score, the physical reclaim test, the 48-hour availability log, and the
+same gate on PC1. Agents still never start Steam, sign anyone in or change
+accounts.
 
 ### Read-only inventory, 2026-10-17 06:30–06:32 UTC
 
