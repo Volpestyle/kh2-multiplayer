@@ -350,13 +350,22 @@ int main() {
               Has("attacker=M_EX020@") && Has("(other) source=P_EX100@") && Has("atkp=1041"));
         g_thorn = thorn;
         g_nativeAnswer = 0x1234500;
-        const auto own = Attack(204, 7, 0, 1041, 2);  // owned by Thorn itself (handle 7), no other source
+        const auto own = Attack(204, 7, 0, 1015, 2);  // owned by Thorn itself (handle 7), no other source
         const unsigned ownBefore = count("[thorn-trace] victim");
         CHECK("thorn victim: Thorn's own attack refused against itself is no row",
               HookedCanHit(own, thorn) == 0x1234500 && count("[thorn-trace] victim") == ownBefore);
         g_nativeAnswer = 0x1234501;
         CHECK("thorn victim: but a native yes of it is a row",
               HookedCanHit(own, thorn) == 0x1234501 && count("[thorn-trace] victim") == ownBefore + 1);
+        // Its projectile (atkp 1041) is the exception: refused against Thorn while still Thorn's, it is a row.
+        g_nativeAnswer = 0x1234500;
+        const auto orb = Attack(206, 7, 4, 1041, 2);
+        CHECK("thorn victim: Thorn's own 1041 refused against itself is a row",
+              HookedCanHit(orb, thorn) == 0x1234500 && count("[thorn-trace] victim") == ownBefore + 2 &&
+              Has("attacker=B_EX100@") && Has("atkp=1041 kind=4") && Has("native=0 answer=0"));
+        CHECK("thorn victim: once per pair, like any refused check",
+              HookedCanHit(orb, thorn) == 0x1234500 && count("[thorn-trace] victim") == ownBefore + 2);
+        g_nativeAnswer = 0x1234501;
         const unsigned thornRows = count("[thorn-trace] victim");
         CHECK("thorn victim: other enemies are not rows",
               HookedCanHit(Attack(202, 1, 0, 141, 1), g_enemy) == 0x1234501 && count("[thorn-trace] victim") == thornRows);

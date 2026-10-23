@@ -480,7 +480,9 @@ answer=0|1`. Each row carries:
 - the native answer and the answer the hook returns.
 
 An (attack, Thorn) pointer pair gets at most two rows while it stays in the 64-entry seen table: its first
-check, and its first native yes. Thorn's own attacks refused against itself aren't rows. `pattern=0xFFFFFFFF`
+check, and its first native yes. Thorn's own attacks refused against itself aren't rows, except its 202
+projectile (atkp 1041). A refused 1041 check is a row, so a run can tell an orb that never reaches Thorn's
+check from one that reaches it while still Thorn's and is refused. `pattern=0xFFFFFFFF`
 means the pattern was unreadable, not that every bit was set. The budget is 600 rows (VUH-2617 live09:
 nothing damaged Thorn in 202).
 

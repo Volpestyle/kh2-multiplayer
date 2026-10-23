@@ -112,7 +112,8 @@ void TraceEnemyCheck(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t
 // asked again every frame it lasts and its first check is often a native no, so a (attack, Thorn) pointer pair gets
 // at most two rows while it stays in the 64-entry seen table: its first check, and its first native yes. Eviction can
 // let an old pair log again and pointer reuse can hide a new attack, so the rows are positive observations, never a
-// census. Thorn's own attacks refused against Thorn are not rows. Reads only; its own seen table and a 600-row budget.
+// census. Thorn's own attacks refused against Thorn are not rows, except its projectile (atkp 1041). Reads only; its
+// own seen table and a 600-row budget.
 // The victim's hit pattern, (+0xD10 | +0xD14) & ~+0xD18 (docs/TWILIGHT_THORN.md): bit 9 nullifies a hit after this
 // check, in the victim gate. SEH leaf; 0xFFFFFFFF is the unreadable sentinel, not a reading with every bit set.
 std::uint32_t ReadPattern(std::uintptr_t actor) {
@@ -121,6 +122,7 @@ std::uint32_t ReadPattern(std::uintptr_t actor) {
         return (f[0] | f[1]) & ~f[2];
     } __except (EXCEPTION_EXECUTE_HANDLER) { return 0xFFFFFFFFu; }
 }
+constexpr std::uint16_t THORN_ORB_ATKP = 1041;  // Thorn's 202 projectile (docs/THORN_BOTS.md)
 std::atomic<unsigned> g_thornTraced{};
 constexpr unsigned THORN_TRACE_BUDGET = 600;
 struct ThornSeen { std::uintptr_t attack, victim; std::uint8_t logged; };  // logged: bit 0 any row, bit 1 a yes
@@ -135,8 +137,10 @@ void TraceThornVictim(std::uintptr_t attack, std::uintptr_t victim, std::uint64_
     if (!ReadAttack(attack, a)) return;
     const bool yes = (native & 0xFF) != 0;
     // Thorn's own attacks asked against Thorn and natively refused would spend the budget: not rows. Its orb sent back
-    // by a Reversal names another source, so it stays traced, and so would any native yes.
-    if (!yes && a.owner == victim && (!a.source || a.source == victim)) return;
+    // by a Reversal names another source, so it stays traced, and so would any native yes. The exception is its
+    // projectile, atkp 1041: a refused check of it against Thorn is a row, so a run tells an orb that never reaches
+    // Thorn's check from one that reaches it still Thorn's and is refused.
+    if (!yes && a.owner == victim && (!a.source || a.source == victim) && a.atkp != THORN_ORB_ATKP) return;
     ThornSeen* seen = nullptr;
     for (auto& s : g_thornSeen) if (s.attack == attack && s.victim == victim) seen = &s;
     if (seen && (!yes || (seen->logged & 2))) return;
