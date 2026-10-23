@@ -33,4 +33,6 @@ bool ClientConverged(std::uint32_t generation);
 // atNativeExit: the client's own event is at an exit to the host's target
 // (VUH-2344), so its event state does not defer the apply.
 bool ApplyAtRoomBoundary(std::uint32_t generation, bool atNativeExit = false);
+// ApplyAtRoomBoundary's own admission, without the apply (VUH-2679 r3).
+bool RoomBoundaryReady(std::uint32_t generation, bool atNativeExit = false);
 } // namespace kh2coop::inject::progresssync

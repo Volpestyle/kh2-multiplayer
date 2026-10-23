@@ -259,6 +259,99 @@ void TestReplayDuringEvent() {
     w::IssueHostTransition();
     Check(warpCalls == 1 && Count("load") == 1, "once settled: exactly one reload, then arrival");
 }
+// VUH-2679 r3 (Quill r2 R4): the clone-room rebuild's replay through the production issue seam. It is issued in the
+// call that accepts it, with RebuildSafeField rechecked inside IssueHostTransition, or withdrawn with the arrived room
+// put back; it is never left queued for a later frame. Ordinary host rooms keep their own gates.
+void TestCloneRebuildIssue() {
+    namespace es = kh2coop::inject::enemysync;
+    const auto arrive = [] {
+        Start(); auto c = Context(); auto sc = Scope();
+        w::QueueHostTransition(arrivalTarget, c, &sc, nullptr, nullptr); IssueCompleteArrive();
+        return warpCalls;
+    };
+    const auto replay = [] { auto c = Context(); auto sc = Scope(); return w::QueueCloneRebuild(arrivalTarget, c, &sc); };
+    auto calls = arrive();
+    const bool queued = replay() && w::g_hostCause.cloneRebuild && w::g_hostQueued;
+    Check(queued && w::IssueCloneRebuild() && warpCalls == calls + 1 && w::g_transitionPending && !w::g_hostQueued &&
+          w::g_hostIssued && w::g_hostCause.issued, "a clone rebuild at a safe field is issued natively at once");
+    const auto withdrawn = [&](const char* label, auto perturb, auto restore) {
+        calls = arrive();
+        const auto arrivedCause = w::g_hostCause.id;
+        const bool q = replay();
+        perturb();
+        w::IssueHostTransition();  // the gate inside the native issue itself
+        const bool held = warpCalls == calls && w::g_hostQueued;
+        const bool issued = w::IssueCloneRebuild();
+        restore();
+        for (int i = 0; i < 3; ++i) w::OnFrameStart(400 + i, player);  // later frames, now safe: nothing left to issue
+        Check(q && held && !issued && warpCalls == calls && !w::g_hostQueued && w::g_hostIssued && !w::g_hostCause.cloneRebuild &&
+              w::g_hostCause.id == arrivedCause && w::MatchesArrivedHostTransition(arrivalTarget), label);
+    };
+    withdrawn("queued, then a battle (BATTLE_STATUS=2): not issued, the arrived room stays, never reloaded later",
+              [] { Put(image + offsets::BATTLE_STATUS, std::int32_t{2}); },
+              [] { Put(image + offsets::BATTLE_STATUS, std::int32_t{0}); });
+    withdrawn("queued, then this seat downed: not issued",
+              [] { es::g_localDowned.downed = true; }, [] { es::g_localDowned.downed = false; });
+    withdrawn("queued, then the host's event hold: not issued",
+              [] { es::g_host.holdActive = true; }, [] { es::g_host.holdActive = false; });
+    withdrawn("queued, then a boss population: not issued",
+              [] { es::Spawn s; s.present = true; s.objectType = 3; s.objectId = 307; es::g_inst.spawns.push_back(s); },
+              [] { es::g_inst.spawns.clear(); });
+    // An event defers nothing: the replay is withdrawn, and the event ending into combat finds nothing queued.
+    withdrawn("an event at the replay: withdrawn; the event ending into combat issues nothing",
+              [] { Put(image + offsets::EVENT_CONTEXT, uintptr_t{0x1234}); },
+              [] { Put(image + offsets::EVENT_CONTEXT, uintptr_t{0}); Put(image + offsets::BATTLE_STATUS, std::int32_t{2}); });
+    Put(image + offsets::BATTLE_STATUS, std::int32_t{0});
+    // Ordinary host rooms are unchanged: a new host room issues in combat, and needs no clone permit.
+    Start(); auto c = Context(); auto sc = Scope();
+    Put(image + offsets::BATTLE_STATUS, std::int32_t{2});
+    w::QueueHostTransition(arrivalTarget, c, &sc, nullptr, nullptr);
+    Check(!w::g_hostCause.cloneRebuild && !w::IssueCloneRebuild() && w::g_hostQueued, "an ordinary host room is not a clone rebuild");
+    w::IssueHostTransition();
+    Check(warpCalls == 1 && w::g_transitionPending, "an ordinary host room still issues during a battle");
+    Put(image + offsets::BATTLE_STATUS, std::int32_t{0});
+
+    // The issue-readiness fact the request, the accept and the issue gate share (no writes).
+    calls = arrive();
+    const char* why = "";
+    const bool ready = w::CloneIssueReady() && es::CloneRebuildIssueSafe(why);
+    Put(image + offsets::OPEN_MENU, std::uint8_t{0x0A});
+    const bool menu = !w::CloneIssueReady();
+    Put(image + offsets::OPEN_MENU, std::uint8_t{0xFF}); p::g_clientFull = false;
+    const bool progress = !w::CloneIssueReady() && !es::CloneRebuildIssueSafe(why) && std::string(why) == "issue-wait";
+    p::g_clientFull = true;
+    // An owned script camera is gameplay to progress (SafeGameplay) but not a safe warp (SafeToWarp): not ready.
+    // The camera proof is synthetic here (as in TestOwnedCameraGameplay); this exercises the readiness composition.
+    SetScriptCameraCurrent([](uintptr_t context, std::int32_t) noexcept { return context == image + 0x71000; });
+    Put(image + offsets::CUTSCENE_STATE, std::int32_t{2}); Put(image + offsets::EVENT_CONTEXT, image + 0x71000);
+    const bool camera = p::RoomBoundaryReady(1) && !w::CloneIssueReady();
+    SetScriptCameraCurrent(nullptr);
+    Put(image + offsets::CUTSCENE_STATE, std::int32_t{0}); Put(image + offsets::EVENT_CONTEXT, uintptr_t{0});
+    Check(ready && menu && progress && camera && warpCalls == calls,
+          "issue readiness: an arrived quiet field is ready; an open menu, progress not yet whole or an owned script camera is not, and nothing issues");
+
+    // The EnemySync glue: the relay's replay through the real RoomTransition admission, with this seat's request sent.
+    const auto armed = [&] {
+        const auto n = arrive();
+        es::g_cloneRebuild = {}; es::g_cloneRebuild.phase = kh2coop::inject::playerkit::RebuildPhase::Awaiting;
+        es::g_cloneRebuild.id = es::CloneRebuildIdentity(); es::g_cloneRebuild.seq = 1; es::g_cloneRebuild.attempts = 1;
+        return n;
+    };
+    calls = armed();
+    QueueHostWorld(encode(arrivalTarget)); es::ReceiveWorldPackets();
+    Check(warpCalls == calls + 1 && w::g_transitionPending && w::g_hostCause.cloneRebuild &&
+          es::g_cloneRebuild.phase == kh2coop::inject::playerkit::RebuildPhase::Idle && es::g_host.epoch == 9 && !es::g_host.arrived,
+          "glue: the replay of this seat's request is issued natively at once and consumed; the seat now awaits its reload");
+    calls = armed();
+    Put(image + offsets::BATTLE_STATUS, std::int32_t{2});
+    QueueHostWorld(encode(arrivalTarget)); es::ReceiveWorldPackets();
+    for (int i = 0; i < 3; ++i) w::OnFrameStart(500 + i, player);
+    Check(warpCalls == calls && !w::g_hostQueued && w::MatchesArrivedHostTransition(arrivalTarget) &&
+          es::g_cloneRebuild.phase == kh2coop::inject::playerkit::RebuildPhase::AckTrue && es::g_host.epoch == 9 && es::g_host.arrived,
+          "glue: a replay arriving in battle is refused, the arrived room untouched, and arrived=true is owed");
+    Put(image + offsets::BATTLE_STATUS, std::int32_t{0});
+    es::g_cloneRebuild = {};
+}
 void TestIntervalSeal() {
     Start();
     w::OnFrameStart(100, player);
@@ -297,7 +390,7 @@ int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr,0x3000000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if (!image) return 2;
-    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestBlockedExitToPrologueSite(); TestWaitingAtBlockedExit(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal(); TestReplayDuringEvent();
+    TestOrdinaryAndBootstrap(); TestBlockedNativeExitMatch(); TestBlockedExitToPrologueSite(); TestWaitingAtBlockedExit(); TestRetireSupersedeAndDrift(); TestInvalidDiagnosticJoins(); TestIntervalSeal(); TestReplayDuringEvent(); TestCloneRebuildIssue();
     Check(hookCalls == 0, "no hook installation occurs in owned-memory controls");
     VirtualFree(reinterpret_cast<void*>(image),0,MEM_RELEASE);
     std::cout << "ERRORS=" << errors << '\n';

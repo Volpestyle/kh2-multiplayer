@@ -39,6 +39,16 @@ bool QueueHostTransition(const RoomTransition& target, const ProducerWorldContex
                          const WorldScope* scope, const ResyncBegin* begin,
                          const ResyncTarget* resyncTarget = nullptr);
 bool HostTransitionArrived(std::uint32_t epoch);
+// VUH-2679 r3 (Quill r2 R4): the relay's replay of this seat's arrived room, asked for because the room was built in
+// the two-player clone layout, is a clone-rebuild cause. QueueCloneRebuild queues it like any host room and keeps the
+// arrived room's state; IssueCloneRebuild issues it at once, where IssueHostTransition rechecks
+// enemysync::CloneRebuildIssueSafe at the native issue. If it does not issue, the arrived room's state is put back and
+// it returns false. A clone-rebuild cause is never left queued.
+bool QueueCloneRebuild(const RoomTransition& target, const ProducerWorldContext& context, const WorldScope* scope);
+bool IssueCloneRebuild();
+// The client's own issue gates a same-room reload would meet now: authority, no transition pending, SafeToWarp, a
+// prologue site's settled profiles and progress ready at the room boundary. No writes.
+bool CloneIssueReady();
 // Game-thread diagnostic check over an already checked native location. Reads
 // only owned lifecycle state; caller must separately check native safe state.
 bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept;

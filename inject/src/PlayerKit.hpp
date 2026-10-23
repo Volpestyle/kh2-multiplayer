@@ -110,10 +110,13 @@ inline CloneRebuildStep CloneRebuildDecide(const CloneRebuildFacts& f, const cha
 // or cutscene, no battle, this seat not logically downed, no host event hold and no owned input hold, and an ordinary
 // living population (eventhold::RecoverySnapshotSupported's rule: types 3/4, not Thorn, no dead rows). Otherwise it
 // waits; an outgrown room that never qualifies is rebuilt natively by the next host room.
+// Quill r2 R4: it is also checked at the native issue itself (warp::IssueHostTransition), so issueReady says the
+// client's own issue gates (warp::CloneIssueReady) would let the reload go now: the replay is issued in the frame it
+// is accepted, or not at all.
 struct RebuildSafeFacts {
     bool gameplay = false;       // SafeNativeGameplay: controllable, field, menu closed, no transition pending
     bool noEvent = false, noCutscene = false, noBattle = false, notDowned = false;
-    bool noHostHold = false, noInputHold = false, ordinaryPopulation = false;
+    bool noHostHold = false, noInputHold = false, ordinaryPopulation = false, issueReady = false;
 };
 inline bool RebuildSafeField(const RebuildSafeFacts& f, const char*& why) {
     if (!f.gameplay) { why = "gameplay"; return false; }
@@ -124,16 +127,18 @@ inline bool RebuildSafeField(const RebuildSafeFacts& f, const char*& why) {
     if (!f.noHostHold) { why = "host-hold"; return false; }
     if (!f.noInputHold) { why = "input-hold"; return false; }
     if (!f.ordinaryPopulation) { why = "population"; return false; }
+    if (!f.issueReady) { why = "issue-wait"; return false; }
     why = "safe"; return true;
 }
 // While a replay is awaited (lead #269): a lost request is retried once after REPLAY_TIMEOUT_MS; after a second
-// timeout it is abandoned. The seat never leaves its admitted epoch while waiting.
+// timeout it is abandoned. The seat never leaves its admitted epoch while waiting. Quill r2 R2: a retry the bridge
+// will not take is bounded too: one that has not gone out within a further REPLAY_TIMEOUT_MS is abandoned.
 constexpr std::uint64_t REPLAY_TIMEOUT_MS = 10000;
 constexpr unsigned REPLAY_ATTEMPTS = 2;
 enum class ReplayWait : std::uint8_t { Waiting, Retry, Abandon };
 inline ReplayWait CloneReplayWait(std::uint64_t elapsedMs, unsigned attempts) {
     if (elapsedMs < REPLAY_TIMEOUT_MS) return ReplayWait::Waiting;
-    return attempts < REPLAY_ATTEMPTS ? ReplayWait::Retry : ReplayWait::Abandon;
+    return attempts < REPLAY_ATTEMPTS && elapsedMs < 2 * REPLAY_TIMEOUT_MS ? ReplayWait::Retry : ReplayWait::Abandon;
 }
 // Quill r1 R2/R3 on 07260e4: one pending rebuild, bound to the exact admitted identity it was asked for (the WorldBridge
 // session and generation, this seat's and the host's connections, the host's delivery serial, the epoch and the build's
@@ -203,16 +208,16 @@ const char* StepCloneRebuild(RebuildMachine& m, const RebuildTick& t, Ack&& ack,
     }
     return "";
 }
-// The replayed room: accepted at the same epoch only for this machine's own pending request, under the identity it was
-// asked for, and only while the field is still safe (an unsafe accept closes the obligation instead).
+// The replayed room: accepted at the same epoch only for this machine's own sent request (Awaiting), under the identity
+// it was asked for, and only while the field is still safe (an unsafe accept closes the obligation instead).
 enum class ReplayAdmission : std::uint8_t { NotOurs, Accept, RefuseUnsafe };
 inline ReplayAdmission AdmitReplay(const RebuildMachine& m, const RebuildIdentity& now, std::uint32_t roomEpoch, bool safe) {
-    if ((m.phase != RebuildPhase::Request && m.phase != RebuildPhase::Awaiting) || !(m.id == now) || !roomEpoch ||
+    if (m.phase != RebuildPhase::Awaiting || !(m.id == now) || !roomEpoch ||
         roomEpoch != m.id.epoch) return ReplayAdmission::NotOurs;
     return safe ? ReplayAdmission::Accept : ReplayAdmission::RefuseUnsafe;
 }
-// After an Accept: consumed only if the host transition was actually queued; a context or queue refusal (or an unsafe
-// accept) goes to the explicit AckTrue step that closes the arrived=false obligation.
+// After an Accept: consumed only if the reload was actually issued natively (warp::IssueCloneRebuild); a context, queue
+// or issue refusal (or an unsafe accept) goes to the explicit AckTrue step that closes the arrived=false obligation.
 inline void CommitReplay(RebuildMachine& m, bool queued) {
     if (queued) m.Reset(); else m.phase = RebuildPhase::AckTrue;
 }

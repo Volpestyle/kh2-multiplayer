@@ -40,7 +40,7 @@ static void CloneRebuild() {
 
     // R4: the positive safe-field admission, each refusal named.
     RebuildSafeFacts safe; safe.gameplay = safe.noEvent = safe.noCutscene = safe.noBattle = safe.notDowned = true;
-    safe.noHostHold = safe.noInputHold = safe.ordinaryPopulation = true;
+    safe.noHostHold = safe.noInputHold = safe.ordinaryPopulation = safe.issueReady = true;
     const auto field = [](RebuildSafeFacts s, bool want, const char* reason) {
         const char* why = ""; return RebuildSafeField(s, why) == want && std::strcmp(why, reason) == 0; };
     CHECK("a quiet ordinary field is safe", field(safe, true, "safe"));
@@ -52,6 +52,8 @@ static void CloneRebuild() {
     s = safe; s.noHostHold = false; CHECK("the host's event hold (a stage window): unsafe", field(s, false, "host-hold"));
     s = safe; s.noInputHold = false; CHECK("an owned input hold or pause: unsafe", field(s, false, "input-hold"));
     s = safe; s.ordinaryPopulation = false; CHECK("a boss, script or dead population: unsafe", field(s, false, "population"));
+    s = safe; s.issueReady = false;
+    CHECK("r3: a reload the client's issue gates would hold now (profiles, progress): not yet", field(s, false, "issue-wait"));
 
     // The machine, with counting fakes. "F"/"T" = ack arrived false/true, "Rn" = request seq n.
     struct Bench {
@@ -105,6 +107,21 @@ static void CloneRebuild() {
         const bool held = d.m.phase == RebuildPhase::AckTrue && d.out == "FR1";
         d.ackOk = true; d.tick(true, true, true, false);
         CHECK("an unsafe wait abandons; arrived=true is retried under pressure until sent", held && d.out == "FR1T");
+        // Quill r2 R2: the retry the bridge never takes. Sent R1 at 0; at +10 s and +1000 s the retry fails; the
+        // obligation is still closed with arrived=true, and no late retry goes out once the ring frees.
+        Bench e; e.tick(true, true, true, true); e.requestOk = false;
+        e.ms += REPLAY_TIMEOUT_MS; e.tick(true, true, true, true);
+        const bool pressed = e.out == "FR1" && e.m.phase == RebuildPhase::Awaiting;
+        e.ms = 1000 + 2 * REPLAY_TIMEOUT_MS - 1; e.tick(true, true, true, true);
+        const bool stillTrying = e.out == "FR1" && e.m.phase == RebuildPhase::Awaiting;  // 19.999 s: retry window open
+        e.ms = 1000 + 1000000; e.tick(true, true, true, true);
+        const bool closing = e.m.phase == RebuildPhase::AckTrue;
+        e.requestOk = true; for (int i = 0; i < 4; ++i) e.tick(true, true, true, true);
+        CHECK("retry pressure is bounded: abandoned with arrived=true, never a late retry", pressed && stillTrying && closing &&
+              e.out == "FR1T" && e.m.phase == RebuildPhase::Idle);
+        Bench g; g.tick(true, true, true, true); g.requestOk = false; g.ms += REPLAY_TIMEOUT_MS; g.tick(true, true, true, true);
+        g.requestOk = true; g.ms += REPLAY_TIMEOUT_MS - 1; g.tick(true, true, true, true);
+        CHECK("a retry that goes out inside the bound is the one retry", g.out == "FR1R2" && g.m.attempts == 2);
     }
     {   // R3: identity changes drop the pending state; nothing old is retried, acked or accepted under the new identity.
         for (int change = 0; change < 6; ++change) {
@@ -136,6 +153,9 @@ static void CloneRebuild() {
         CHECK("an unsafe field at the replay refuses it", AdmitReplay(b.m, b.id, b.id.epoch, false) == ReplayAdmission::RefuseUnsafe);
         RebuildMachine idle;
         CHECK("no request: nothing is a replay", AdmitReplay(idle, b.id, b.id.epoch, true) == ReplayAdmission::NotOurs);
+        Bench unsent; unsent.requestOk = false; unsent.tick(true, true, true, true);  // Request: acked false, nothing asked yet
+        CHECK("r3: before the request is sent, a same-identity room is not the replay",
+              unsent.m.phase == RebuildPhase::Request && AdmitReplay(unsent.m, unsent.id, unsent.id.epoch, true) == ReplayAdmission::NotOurs);
         auto closing = b; CommitReplay(closing.m, false);  // AckTrue, same identity
         Bench owing; owing.ackOk = false; owing.tick(true, true, true, true);  // AckFalse, same identity
         CHECK("once closing (AckTrue) or before the request (AckFalse), a same-identity room is not the replay",
@@ -143,10 +163,10 @@ static void CloneRebuild() {
               owing.m.phase == RebuildPhase::AckFalse && AdmitReplay(owing.m, owing.id, owing.id.epoch, true) == ReplayAdmission::NotOurs);
         auto queued = b; CommitReplay(queued.m, true);
         queued.tick(true, false, true, true);
-        CHECK("a queued replay is consumed: no ack (the load's own arrival acks), no request", queued.out == "FR1" &&
+        CHECK("an issued replay is consumed: no ack (the load's own arrival acks), no request", queued.out == "FR1" &&
               queued.m.phase == RebuildPhase::Idle);
         auto refused = b; CommitReplay(refused.m, false); refused.tick(true, true, true, true);
-        CHECK("a context or queue refusal closes the obligation with arrived=true", refused.out == "FR1T" &&
+        CHECK("a context, queue or issue refusal closes the obligation with arrived=true", refused.out == "FR1T" &&
               refused.m.phase == RebuildPhase::Idle);
         auto unsafe = b; CommitReplay(unsafe.m, false); unsafe.tick(true, true, true, false);
         CHECK("so does an unsafe replay, even on an unsafe frame", unsafe.out == "FR1T");

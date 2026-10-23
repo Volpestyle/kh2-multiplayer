@@ -147,6 +147,8 @@ bool TwoPlayerSessionLive() noexcept; // same loading-safe lease and existing ro
 // ordered reset has been consumed, or zero while retired/unavailable. Callers
 // retain and recheck this value before applying a queued native world action.
 std::uint32_t WorldSessionGeneration() noexcept;
+// VUH-2679 r3: playerkit::RebuildSafeField now, for the clone-room rebuild's native issue (warp::IssueHostTransition).
+bool CloneRebuildIssueSafe(const char*& why);
 // The relay session's identity: the hash of its session id that the runtime publishes before every
 // generation advance (WorldBridge::SpawnPickSalt, VUH-1515). Unchanged across a same-session resync,
 // changed by a replacement session, 0 once the runtime retires the session ("network-retired").

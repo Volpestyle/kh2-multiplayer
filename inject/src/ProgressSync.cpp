@@ -447,10 +447,13 @@ bool MatchesFull(const ProgressUpdate& expected, std::uint32_t& hash) {
     return true;
 }
 
+bool RoomBoundaryReady(std::uint32_t generation, bool atNativeExit) {
+    return generation && generation == g_desiredGeneration && enemysync::WorldSessionGeneration() == generation &&
+        g_role == Role::Client && g_clientFull && !g_personalFailure && SafeGameplay(atNativeExit);
+}
+
 bool ApplyAtRoomBoundary(std::uint32_t generation, bool atNativeExit) {
-    if (!generation || generation != g_desiredGeneration ||
-        enemysync::WorldSessionGeneration() != generation ||
-        g_role != Role::Client || !g_clientFull || g_personalFailure || !SafeGameplay(atNativeExit)) return false;
+    if (!RoomBoundaryReady(generation, atNativeExit)) return false;
     Save live {};
     if (!ReadSave(live)) return ApplyFailure("save-read");
     const auto spans = g_policy.diff(live.data(), g_desired.data(), live.size());

@@ -967,6 +967,7 @@ bool CloneRebuildSafe(const char*& why) {
     f.ordinaryPopulation = std::all_of(g_inst.spawns.begin(), g_inst.spawns.end(), [](const Spawn& s) {
         return !s.killed && (!s.present || ((s.objectType == 3 || s.objectType == 4) && s.objectId != 307));
     });
+    f.issueReady = warp::CloneIssueReady();
     return playerkit::RebuildSafeField(f, why);
 }
 void TickCloneRebuild(const RoomTransition& location) {
@@ -4493,7 +4494,8 @@ bool ReceiveWorldPackets() {
                 const auto advance = t.epoch - g_host.epoch;
                 // VUH-2679: the relay's replay of the admitted room this seat asked for (its room was built in the
                 // two-player clone layout) is accepted once at the same epoch, as a join is, for that request and
-                // identity only, at a still-safe field; it is consumed only once its host transition is queued.
+                // identity only, at a still-safe field. r3 (Quill r2 R4): it is issued natively here, before this
+                // room's state is reset, or not at all; it is consumed only once issued.
                 const char* replaySafeWhy = "";
                 const auto admission = playerkit::AdmitReplay(g_cloneRebuild, CloneRebuildIdentity(), t.epoch,
                                                               t.epoch == g_host.epoch && CloneRebuildSafe(replaySafeWhy));
@@ -4505,18 +4507,22 @@ bool ReceiveWorldPackets() {
                 if (t.epoch != 0 && (g_host.epoch == 0 || replay || (advance != 0 && advance < 0x80000000u))) {
                     ProducerWorldContext loadContext;
                     const bool loadContextAvailable = CaptureWorldContext(loadContext);
-                    if (!loadContextAvailable || !warp::QueueHostTransition(t, loadContext, &*scope, nullptr, nullptr)) {
+                    if (!loadContextAvailable || !(replay ? warp::QueueCloneRebuild(t, loadContext, &*scope)
+                                                          : warp::QueueHostTransition(t, loadContext, &*scope, nullptr, nullptr))) {
                         if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
                         if (replay) playerkit::CommitReplay(g_cloneRebuild, false);
                         continue;
                     }
-                    if (replay) {
-                        playerkit::CommitReplay(g_cloneRebuild, true);
-                        if (g_log) g_log("[clone-rebuild] replay accepted epoch=%u room=%02X/%02X", t.epoch, t.worldId, t.roomId);
-                    }
                     // Only an accepted transition touches save RAM. Queueing issues the load on a later
-                    // frame, so the row is in place before the resolver reads it.
+                    // frame (a replay: just below), so the row is in place before the resolver reads it.
                     ApplyHostPartyRow(t);
+                    if (replay) {
+                        const bool issued = warp::IssueCloneRebuild();
+                        playerkit::CommitReplay(g_cloneRebuild, issued);
+                        if (g_log) g_log("[clone-rebuild] replay %s epoch=%u room=%02X/%02X", issued ? "issued" : "not issued, arrival stays",
+                                         t.epoch, t.worldId, t.roomId);
+                        if (!issued) continue;  // the arrived room's state is untouched
+                    }
                     ResetOrdinaryLifecycle(); // retire old history before this batch can carry the new cut
                     g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false; g_emissionDeniedLogs = 0;
                     g_orbDisplay.Reset(); // VUH-2466: the old room's orbs are not this room's
@@ -7517,6 +7523,8 @@ bool SendScriptCalls(const ScriptCallRecord* records, std::size_t count, std::ui
 }
 void SetScriptCallApply(ScriptCallApplyFn apply) noexcept { g_scriptCallApply = apply; }
 ScriptCallStats GetScriptCallStats() noexcept { return g_scriptCallStats; }
+
+bool CloneRebuildIssueSafe(const char*& why) { return CloneRebuildSafe(why); }
 
 } // namespace enemysync
 } // namespace inject

@@ -179,6 +179,11 @@ bool QueueHostTransition(const RoomTransition& room, const ProducerWorldContext&
                          const WorldScope* scope, const ResyncBegin* begin, const ResyncTarget* target) {
     return !productionWorldMode || recoverywarp::QueueHostTransition(room, context, scope, begin, target);
 }
+bool QueueCloneRebuild(const RoomTransition& room, const ProducerWorldContext& context, const WorldScope* scope) {
+    return !productionWorldMode || recoverywarp::QueueCloneRebuild(room, context, scope);
+}
+bool IssueCloneRebuild() { return productionWorldMode && recoverywarp::IssueCloneRebuild(); }
+bool CloneIssueReady() { return productionWorldMode && recoverywarp::CloneIssueReady(); }
 bool HostTransitionArrived(std::uint32_t epoch) {
     ++mutableArrivalCalls;
     return productionWorldMode ? recoverywarp::HostTransitionArrived(epoch) : arrived;

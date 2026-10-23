@@ -119,8 +119,17 @@ struct HostLoadCause {
     RoomTransition room {};
     std::uint32_t loadBefore = 0, issueTransition = 0;
     bool available = false, issued = false, arrivedLogged = false;
+    bool cloneRebuild = false;  // VUH-2679 r3: the replay of this seat's arrived room (QueueCloneRebuild)
 };
 HostLoadCause g_hostCause;
+// VUH-2679 r3: the arrived room's queue state while a clone-rebuild cause is queued, put back if it does not issue.
+struct ArrivedHostState {
+    HostLoadCause cause;
+    RoomTransition target {};
+    std::uint32_t generation = 0;
+    bool queued = false, issued = false;
+};
+std::optional<ArrivedHostState> g_cloneRebuildArrived;
 std::uint32_t g_recoveryBootstrapLoad = 0; // VUH-2640
 // VUH-2640 Leg A r3 (Quill r2): the issued-load receipt of one admitted sit-out Bootstrap. It is copied from the
 // host cause's own issue evidence when that exact Bootstrap is issued, survives the cause's retirement (a failed
@@ -393,6 +402,15 @@ void IssueHostTransition() {
     packet.event = g_hostTarget.eventProgram;
     const auto issuedEpoch = g_hostTarget.epoch;
     if (enemysync::WorldSessionGeneration() != g_hostGeneration) return;
+    // VUH-2679 r3 (Quill r2 R4): a clone-room rebuild reloads only a still-safe field (no battle, downed seat, hold,
+    // event...), checked here at the native issue. Ordinary host rooms are unchanged.
+    if (g_hostCause.cloneRebuild) {
+        const char* why = "";
+        if (!enemysync::CloneRebuildIssueSafe(why)) {
+            if (g_log) g_log("[warp] clone-room rebuild not issued epoch=%u why=%s", issuedEpoch, why);
+            return;
+        }
+    }
     g_hostQueued = false;
     g_hostIssued = true;
     g_hostIssueLoad = g_loadSerial;
@@ -592,6 +610,36 @@ bool QueueHostTransition(const RoomTransition& target, const ProducerWorldContex
                      target.epoch, target.worldId, target.roomId, target.door,
                      target.mapProgram, target.battleProgram, target.eventProgram);
     return true;
+}
+
+bool QueueCloneRebuild(const RoomTransition& target, const ProducerWorldContext& context, const WorldScope* scope) {
+    ArrivedHostState arrived {g_hostCause, g_hostTarget, g_hostGeneration, g_hostQueued, g_hostIssued};
+    if (!QueueHostTransition(target, context, scope, nullptr, nullptr)) return false;
+    g_hostCause.cloneRebuild = true;
+    g_cloneRebuildArrived = std::move(arrived);
+    return true;
+}
+
+bool IssueCloneRebuild() {
+    if (!g_cloneRebuildArrived) return false;
+    if (g_hostQueued && g_hostCause.cloneRebuild) IssueHostTransition();
+    const bool issued = !g_hostQueued && g_hostIssued && g_hostCause.cloneRebuild && g_hostCause.issued;
+    if (!issued) {
+        auto& arrived = *g_cloneRebuildArrived;
+        g_hostCause = std::move(arrived.cause); g_hostTarget = arrived.target; g_hostGeneration = arrived.generation;
+        g_hostQueued = arrived.queued; g_hostIssued = arrived.issued;
+        if (g_log) g_log("[warp] clone-room rebuild withdrawn; the arrived room epoch=%u stays", g_hostTarget.epoch);
+    }
+    g_cloneRebuildArrived.reset();
+    return issued;
+}
+
+bool CloneIssueReady() {
+    const auto generation = enemysync::WorldSessionGeneration();
+    if (!g_channel || !g_ready || !g_clientAuthority || !generation || g_hostGeneration != generation ||
+        g_transitionPending || !SafeToWarp()) return false;
+    if (HostTargetIsPrologueSite() && !prologueparty::ProfilesSettled(generation)) return false;
+    return progresssync::RoomBoundaryReady(generation);
 }
 
 RoomTransition ReadLocation() {

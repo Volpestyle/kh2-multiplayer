@@ -1130,22 +1130,34 @@ The fix rebuilds only the affected seat's room, using the existing join replay:
 - **Receipt.** `HookedResolveMembers` records what each load's party was resolved with: the transition serial,
   the world, and whether the clone row was used (`BcCloneBuiltFor`).
 - **Trigger** (client only; `CloneRebuildDecide`). The seat's current room was built with the clone, the roster
-  now has three connections, and no request has been made for this build yet. It waits for a settled field
-  frame: no event, cutscene, menu or transition pending.
+  now has three connections, and no request has been made for this build yet.
+- **Safe field** (`RebuildSafeField`). The rebuild is a join replay, not a recovery of combat, boss or script
+  state, so it runs only at a quiet field: controllable, in field, menu closed, no transition, event or cutscene,
+  no battle (`BATTLE_STATUS`), this seat not downed, no host event hold, no owned input hold, an ordinary living
+  population (no Thorn, no dead rows), and the client's own issue gates ready (`warp::CloneIssueReady`: a prologue
+  site's settled profiles, progress whole). Otherwise it waits; a room that never qualifies is rebuilt natively by
+  the next host room.
 - **Request.** The seat acks `arrived=false` for the epoch, so revive admission treats it as not arrived while
-  it reloads. It then sends `RoomReplayRequest` (packet 56; seq, epoch, reason 1).
+  it reloads. It then sends `RoomReplayRequest` (packet 56; seq, epoch, reason 1). The pending request
+  (`playerkit::StepCloneRebuild`) is bound to one identity: the world session and generation, both connections,
+  the host's delivery serial, the epoch and the build. Any change drops it.
 - **Relay.** It admits the request only from a verified, unquarantined client, through its admitted scope, for
   the admitted room's epoch, once per seat and epoch, with a strictly newer seq. It calls `sendWorldStateTo` for
-  that seat alone: the same replay a joining seat receives. Nothing is broadcast, so the host and the other seats
-  do not reload. Refusals are logged with a reason.
-- **Reload.** The replayed room is accepted once at the same epoch (`AcceptReplayedRoom`). The normal
-  epoch-accept reset and `QueueHostTransition` then run, so the seat performs a native same-room reload with three
-  seats, which builds the native party, and acks arrival again. An event that starts mid-rebuild only delays the
-  issue; Warp's safe-state gate holds the load.
-- **Lost request.** The seat never leaves its admitted epoch while it waits. It retries once after 10 s. After a
-  second timeout it gives up, acks `arrived=true` again, and its next host room (built with three seats) is
-  native. A newer host epoch supersedes the wait.
+  that seat alone, outside the request's forwarding scope: the same host-framed replay a joining seat receives.
+  Nothing is broadcast, so the host and the other seats do not reload. Refusals are logged with a reason.
+- **Reload.** The replayed room is accepted once at the same epoch, only for the seat's sent request
+  (`AdmitReplay`) and only at a still-safe field. It is queued as a clone-rebuild cause
+  (`warp::QueueCloneRebuild`) and issued natively in the same call (`warp::IssueCloneRebuild`), where
+  `IssueHostTransition` checks `RebuildSafeField` again at the issue itself. Only then do the epoch-accept reset and
+  the reload run, building the native party with three seats; the load acks arrival again. If it does not issue,
+  the arrived room's state is put back untouched and the seat acks `arrived=true`. A clone rebuild is never left
+  queued for a later frame. Ordinary host rooms are unchanged.
+- **Lost request.** The seat never leaves its admitted epoch while it waits. It retries once after 10 s; a retry
+  the bridge will not take within another 10 s counts as lost. After that it gives up, acks `arrived=true`
+  (retried until the bridge takes it), and its next host room (built with three seats) is native. A newer host
+  epoch supersedes the wait.
 
 Two-player behavior is unchanged (`7331a05`): with two seats nothing is requested. Logs: `[clone-rebuild]
-requested|waiting|retried|abandoned|superseded|replay accepted` on the seat, and `RoomReplayRequest
-replayed|refused` on the relay.
+requested|waiting|retried|abandoning|abandoned|identity-changed|replay issued|replay not issued|replay refused` on
+the seat, `[warp] clone-room rebuild not issued|withdrawn` in Warp, and `RoomReplayRequest replayed|refused` on the
+relay.
