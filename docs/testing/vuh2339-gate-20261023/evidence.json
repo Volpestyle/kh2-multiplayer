@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "gate-proof.tar",
+      "size": 46592,
+      "sha256": "96fae656b708e6b8ccabe3c9f82aab22cd4a16658c11f5338089e51b8e0ce781",
+      "url": "clankie://evidence/sha256/96fae656b708e6b8ccabe3c9f82aab22cd4a16658c11f5338089e51b8e0ce781"
+    }
+  ]
+}
