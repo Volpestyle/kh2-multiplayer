@@ -176,7 +176,8 @@
       "do": "forced_resync_evidence",
       "from": "forced_resync",
       "statehash": "after",
-      "census": "after_census"
+      "census": "after_census",
+      "outsiders": [2]
     },
     {
       "do": "wait_until",

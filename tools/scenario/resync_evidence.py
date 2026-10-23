@@ -18,6 +18,7 @@ LIMITS = [
     'A queue receipt, Received/Arrived ACK, serialized=1 or bridgeSent=0 is not native convergence or relay acceptance.',
     'This is bounded local-rig saved evidence, not remote-machine acceptance, creation identity or general dead/nonempty bootstrap support.',
     'Checkpoint acceptance conservatively requires a complete Bootstrap Converged witness from every original target. The relay can request a checkpoint after only one target converges; missing other-target bootstrap evidence remains incomplete, never synthesized from Received/Arrived.',
+    'An outsider (a seated friend the resync did not target) is admitted to the population denominator only when the step declares it; it has no native ACK, so only an empty, fully matched outsider room is accepted.',
 ]
 
 
@@ -118,12 +119,23 @@ def _native_hash(rows):
     return value
 
 
+def _outsiders(bundle, selected):
+    """VUH-2675: the seated friends the resync did not target, as the evidence step declares them."""
+    declared = bundle.get('outsiders', [])
+    if not isinstance(declared, list) or any(isinstance(slot, bool) or not isinstance(slot, int) for slot in declared):
+        raise ValueError('invalid outsider declaration')
+    if len(set(declared)) != len(declared) or any(slot not in (1, 2) or slot in selected for slot in declared):
+        raise ValueError('an outsider must be a distinct non-target friend slot')
+    return sorted(declared)
+
+
 def _population(bundle, room, selected, acknowledgments, problems):
     """Recompute full native rows and require exact independent census joins."""
     try:
         state = bundle['statehash']
         census = bundle['census']
-        peers = ['0'] + [str(slot) for slot in selected]
+        outsiders = [str(slot) for slot in _outsiders(bundle, selected)]
+        peers = ['0'] + [str(slot) for slot in selected] + outsiders
         if not state['ready'] or state['problems'] or not census['complete']:
             raise ValueError('statehash/census incomplete')
         samples = state['matchingSamples']
@@ -149,7 +161,10 @@ def _population(bundle, room, selected, acknowledgments, problems):
                     baseline = identity
                 if identity != baseline:
                     raise ValueError('population/HP/progress changed across peers or samples')
-                if peer != '0':
+                if peer in outsiders:
+                    if row['count']:
+                        raise ValueError('outsider population is not empty (no native ACK attests it)')
+                elif peer != '0':
                     ack = acknowledgments[int(peer)]
                     if row['count'] != _number(ack, 'enemyCount') or _number(ack, 'deadCount'):
                         raise ValueError('ACK/census population mismatch or unsupported dead history')
@@ -378,6 +393,7 @@ def register(steps, *, kh2ctl, logs, step_failed, wait_for):
         evidence = ctx.saved[name]
         evidence['statehash'] = ctx.saved[step['statehash']]
         evidence['census'] = ctx.saved[step['census']]
+        evidence['outsiders'] = step.get('outsiders', [])
         evidence['audit'] = audit(evidence)
         path = ctx.run_dir / (name + '.json')
         path.write_text(json.dumps(evidence, indent=2))

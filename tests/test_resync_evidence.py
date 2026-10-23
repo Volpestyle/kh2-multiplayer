@@ -15,12 +15,12 @@ def line(prefix, row):
     return prefix + ' ' + ' '.join(f'{k}="{v}"' if k == 'error' else f'{k}={v}' for k, v in row.items()) + '\n'
 
 
-def fixture(nonempty=False):
+def fixture(nonempty=False, target_slots=(1, 2), seats=3, outsiders=None):
     host = 0x100000001
     key = dict(session='a' * 32, host=host, request=0x200000002)
-    targets = [(1, 0x300000003, 0x500000005), (2, 0x400000004, 0x600000006)]
+    targets = [t for t in [(1, 0x300000003, 0x500000005), (2, 0x400000004, 0x600000006)] if t[0] in target_slots]
     room = dict(epoch=7, world=4, room=26, door=0, map=300, battle=0, event=0)
-    plan = dict(key, phase=0, stage=0, targetCount=2, remainingMs=29900, priorGeneration=12, **room)
+    plan = dict(key, phase=0, stage=0, targetCount=len(targets), remainingMs=29900, priorGeneration=12, **room)
     for index, target in enumerate(targets):
         plan.update({f'target{index}{field}': value for field, value in zip(('Slot', 'Connection', 'Delivery'), target)})
     native = {'0': line('[resync] plan', plan)}
@@ -32,7 +32,7 @@ def fixture(nonempty=False):
                    frame1=200, frame2=201, checksMask=63, serialized=1, bridgeSent=0,
                    relayAccepted='unknown', error='')
         native[str(slot)] = line('[resync] plan', target_plan) + line('[resync] ack', ack)
-    terminal = dict(key, reason=0, targetCount=2)
+    terminal = dict(key, reason=0, targetCount=len(targets))
     for index, target in enumerate(targets):
         terminal['target' + str(index)] = ','.join(map(str, (*target, 2, 0x700000007, 'c' * 64, '-')))
     logs = {component: line('[resync-result]', dict(component=component, observerSlot=255 if component == 'relay' else 0,
@@ -43,7 +43,7 @@ def fixture(nonempty=False):
     census = []
     for ordinal, frame in enumerate((220, 230)):
         peers, hashes = {}, {}
-        for slot in range(3):
+        for slot in range(seats):
             address = 0x100000 + slot * 0x1000
             native_rows = [dict(netId=1, objectId=309, hp=73, actor=address, epoch=7, frame=frame)] if nonempty else []
             hashes[str(slot)] = dict(frame=frame, location=[4, 26, 0, 300, 0, 0], enemies=AUDIT._native_hash(live),
@@ -56,9 +56,14 @@ def fixture(nonempty=False):
                                    logsAfter=dict(nativeRows=logged, hash=h))
         samples.append(dict(epoch=7, instances=hashes))
         census.append(dict(ordinal=ordinal, peers=peers))
-    return dict(invocation=dict(processId=123,targetMask=6,slot='all'), queue=dict(ok=True, queued=True, nativeConvergence=False, processId=123, targetMask=6,
-                           generation=12, deliverySerial=0x800000008), native=native, **logs,
-                statehash=dict(ready=True, problems=[], matchingSamples=samples), census=dict(complete=True, snapshots=census))
+    mask = sum(1 << slot for slot, _, _ in targets)
+    bundle = dict(invocation=dict(processId=123,targetMask=mask,slot='all' if mask == 6 else str(targets[0][0])),
+                  queue=dict(ok=True, queued=True, nativeConvergence=False, processId=123, targetMask=mask,
+                             generation=12, deliverySerial=0x800000008), native=native, **logs,
+                  statehash=dict(ready=True, problems=[], matchingSamples=samples), census=dict(complete=True, snapshots=census))
+    if outsiders is not None:
+        bundle['outsiders'] = outsiders
+    return bundle
 
 
 class ResyncEvidenceTest(unittest.TestCase):
@@ -104,6 +109,47 @@ class ResyncEvidenceTest(unittest.TestCase):
             self.invalid(value)
         value = fixture(); value['native'].pop('2'); self.invalid(value)
         value = fixture(); value['native']['2'] = value['native']['2'].replace('connection=17179869188', 'connection=12884901891'); self.invalid(value)
+
+    # VUH-2675 D14 (d14-attempt02): a resync of Friend1 alone, sampled on every seated peer. The outsider (Friend2)
+    # belongs in the population denominator once the step declares it; an undeclared peer is still refused.
+    def test_single_target_two_seats(self):
+        self.valid(fixture(target_slots=(1,), seats=2))
+        self.valid(fixture(target_slots=(2,), seats=3, outsiders=[1]))  # the other seat as outsider works too
+        value = fixture(target_slots=(1,), seats=2, outsiders=[2]); self.invalid(value)  # declared but never sampled
+
+    def test_single_target_three_seats_needs_the_declared_outsider(self):
+        result = self.invalid(fixture(target_slots=(1,), seats=3))
+        self.assertIn('population: sample epoch/denominator mismatch', result['problems'])
+        self.valid(fixture(target_slots=(1,), seats=3, outsiders=[2]))
+
+    def test_outsider_declaration_is_exact(self):
+        slot = 'population: an outsider must be a distinct non-target friend slot'
+        declaration = 'population: invalid outsider declaration'
+        for outsiders, reason in (([1], slot), ([2, 2], slot), ([3], slot), ([0], slot),
+                                  ([True], declaration), (['2'], declaration), (2, declaration)):
+            with self.subTest(outsiders=outsiders):
+                result = self.invalid(fixture(target_slots=(1,), seats=3, outsiders=outsiders))
+                self.assertEqual(result['problems'], [reason])
+        self.invalid(fixture(outsiders=[2]))  # a resync of both friends has no outsider
+
+    def test_outsider_room_must_match_and_be_empty(self):
+        for field, data in (('location', [4, 27, 0, 300, 0, 0]), ('unmatched', 1)):
+            with self.subTest(field=field):
+                value = fixture(target_slots=(1,), seats=3, outsiders=[2])
+                value['statehash']['matchingSamples'][0]['instances']['2'][field] = data
+                self.invalid(value)
+        value = fixture(target_slots=(1,), seats=3, outsiders=[2])
+        for sample in value['statehash']['matchingSamples']: sample['epoch'] = 8
+        self.invalid(value)
+        # Nonempty: every peer agrees, but no native ACK attests the outsider's rows, so it is refused.
+        result = self.invalid(fixture(True, target_slots=(1,), seats=3, outsiders=[2]))
+        self.assertIn('population: outsider population is not empty (no native ACK attests it)', result['problems'])
+        value = fixture(target_slots=(1,), seats=3, outsiders=[2])
+        value['census']['snapshots'][0]['peers']['2']['complete'] = False
+        self.invalid(value)
+        value = fixture(target_slots=(1,), seats=3, outsiders=[2])
+        value['census']['snapshots'][1]['peers'].pop('2')
+        self.invalid(value)
 
     def test_native_missing_checks_frames_load_and_serialization(self):
         replacements = [('checksMask=63', 'checksMask=31'), ('frame2=201', 'frame2=200'), ('loadAfter=6', 'loadAfter=5'),
@@ -230,6 +276,23 @@ class ResyncEvidenceTest(unittest.TestCase):
             lines[3] = lines[3].replace(old, new)
             value['native']['1'] = ''.join(lines)
             self.invalid(value)
+
+    def test_evidence_step_carries_the_declared_outsiders(self):
+        class Failure(Exception): pass
+        class Fake:
+            def __init__(self, root): self.run_dir=root; self.saved={}; self.artifacts=[]
+        for outsiders, complete in ((None, False), ([2], True)):
+            with self.subTest(outsiders=outsiders), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp); ctx = Fake(root); steps = {}
+                value = fixture(target_slots=(1,), seats=3)
+                ctx.saved.update(after=value.pop('statehash'), after_census=value.pop('census'), forced_resync=value)
+                AUDIT.register(steps, kh2ctl=None, logs=root, step_failed=Failure, wait_for=None)
+                step = {'from': 'forced_resync', 'statehash': 'after', 'census': 'after_census'}
+                if outsiders is not None: step['outsiders'] = outsiders
+                if complete:
+                    self.assertTrue(steps['forced_resync_evidence'](ctx, step)['populationChecked'])
+                else:
+                    with self.assertRaises(Failure): steps['forced_resync_evidence'](ctx, step)
 
     def test_registration_failure_saves_exact_queue_and_incomplete_logs(self):
         class Failure(Exception): pass
