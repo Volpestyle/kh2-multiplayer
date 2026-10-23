@@ -107,6 +107,51 @@ void TraceEnemyCheck(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t
           g_frame ? g_frame() : 0u, o.name, static_cast<unsigned long long>(a.owner), a.atkp, a.kind, a.team, a.mask,
           v.name, static_cast<unsigned long long>(victim), SideName(v.side), (native & 0xFF) ? 1u : 0u);
 }
+// VUH-2617 trace, same switch: checks of any attack against Thorn (B_EX100), with the attack's owner and source,
+// Thorn's hit pattern at that check, the native answer and the answer this hook returns (they differ only where a rule below narrowed it). An attack is
+// asked again every frame it lasts and its first check is often a native no, so a (attack, Thorn) pointer pair gets
+// at most two rows while it stays in the 64-entry seen table: its first check, and its first native yes. Eviction can
+// let an old pair log again and pointer reuse can hide a new attack, so the rows are positive observations, never a
+// census. Thorn's own attacks refused against Thorn are not rows. Reads only; its own seen table and a 600-row budget.
+// The victim's hit pattern, (+0xD10 | +0xD14) & ~+0xD18 (docs/TWILIGHT_THORN.md): bit 9 nullifies a hit after this
+// check, in the victim gate. SEH leaf; 0xFFFFFFFF is the unreadable sentinel, not a reading with every bit set.
+std::uint32_t ReadPattern(std::uintptr_t actor) {
+    __try {
+        const auto* f = reinterpret_cast<const std::uint32_t*>(actor + 0xD10);
+        return (f[0] | f[1]) & ~f[2];
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return 0xFFFFFFFFu; }
+}
+std::atomic<unsigned> g_thornTraced{};
+constexpr unsigned THORN_TRACE_BUDGET = 600;
+struct ThornSeen { std::uintptr_t attack, victim; std::uint8_t logged; };  // logged: bit 0 any row, bit 1 a yes
+ThornSeen g_thornSeen[64] {};
+unsigned g_thornSeenNext = 0;
+void TraceThornVictim(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t native, std::uint64_t answer) {
+    if (g_thornTraced.load(std::memory_order_relaxed) >= THORN_TRACE_BUDGET) return;
+    const std::uintptr_t player = Player();
+    ActorFacts v {};
+    if (!ReadActor(victim, player, v) || std::strncmp(v.name, "B_EX100", 7) != 0) return;
+    AttackFacts a {};
+    if (!ReadAttack(attack, a)) return;
+    const bool yes = (native & 0xFF) != 0;
+    // Thorn's own attacks asked against Thorn and natively refused would spend the budget: not rows. Its orb sent back
+    // by a Reversal names another source, so it stays traced, and so would any native yes.
+    if (!yes && a.owner == victim && (!a.source || a.source == victim)) return;
+    ThornSeen* seen = nullptr;
+    for (auto& s : g_thornSeen) if (s.attack == attack && s.victim == victim) seen = &s;
+    if (seen && (!yes || (seen->logged & 2))) return;
+    if (!seen) { seen = &g_thornSeen[g_thornSeenNext++ % 64]; *seen = {attack, victim, 0}; }
+    seen->logged |= static_cast<std::uint8_t>(1 | (yes ? 2 : 0));
+    g_thornTraced.fetch_add(1, std::memory_order_relaxed);
+    ActorFacts o {}, s {};
+    (void)ReadActor(a.owner, player, o);
+    if (a.source) (void)ReadActor(a.source, player, s);
+    g_log("[thorn-trace] victim f=%u attacker=%s@%llX(%s) source=%s@%llX(%s) atkp=%u kind=%u atkTeam=%u mask=0x%02X victim=%s@%llX pattern=0x%X native=%u answer=%u",
+          g_frame ? g_frame() : 0u, o.name, static_cast<unsigned long long>(a.owner), SideName(o.side),
+          a.source ? s.name : "-", static_cast<unsigned long long>(a.source), a.source ? SideName(s.side) : "-",
+          a.atkp, a.kind, a.team, a.mask, v.name, static_cast<unsigned long long>(victim), ReadPattern(victim), yes ? 1u : 0u,
+          (answer & 0xFF) ? 1u : 0u);
+}
 // Puppet mode (VUH-1808 default). Only ever narrows a native yes, and only when the attacker (the
 // attack's owner, or its source, as native checks both) is a puppet actor driven right now.
 std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t native) {
@@ -152,9 +197,8 @@ std::uint64_t PuppetCanHit(std::uintptr_t attack, std::uintptr_t victim, std::ui
 }
 } // namespace
 
-std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t victim) {
-    const std::uint64_t native = g_original(attack, victim);
-    if (g_enemyTrace.load(std::memory_order_relaxed) && g_log) TraceEnemyCheck(attack, victim, native);
+// The answer this hook gives for a native one: the downed rule, then the installed mode's rules.
+static std::uint64_t CanHitAnswer(std::uintptr_t attack, std::uintptr_t victim, std::uint64_t native) {
     if (const auto downed = g_downed.load(std::memory_order_acquire); downed && victim && victim == downed()) {
         if (native & 0xFF) g_downedRefusals.fetch_add(1, std::memory_order_relaxed);
         return native & ~std::uint64_t {0xFF}; // VUH-2465: nothing hits a logically downed player
@@ -202,6 +246,15 @@ std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t vict
         TraceRow(mode == Mode::CoOp ? "coop" : "trace", o, attacker, v, victim, a, allows, verdict, viaSource);
     }
     return verdict == Verdict::Refuse ? (native & ~0xFFull) : native;
+}
+
+std::uint64_t __fastcall HookedCanHit(std::uintptr_t attack, std::uintptr_t victim) {
+    const std::uint64_t native = g_original(attack, victim);
+    const bool trace = g_enemyTrace.load(std::memory_order_relaxed) && g_log;
+    if (trace) TraceEnemyCheck(attack, victim, native);
+    const std::uint64_t answer = CanHitAnswer(attack, victim, native);
+    if (trace) TraceThornVictim(attack, victim, native, answer);
+    return answer;
 }
 
 void Tick(std::uint32_t frame) {
@@ -280,7 +333,8 @@ bool Install(std::uintptr_t exeBase, LogFn log, ResolveFn resolve, FrameFn frame
     char trace[2] {};
     g_enemyTrace.store(GetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1',
                        std::memory_order_release);
-    if (g_enemyTrace.load() && log) log("[allyhit] VUH-2617 enemy-on-player check trace on (KH2COOP_THORN_HIT_TRACE=1)");
+    if (g_enemyTrace.load() && log)
+        log("[allyhit] VUH-2617 enemy-on-player check trace on, with every check against Thorn (KH2COOP_THORN_HIT_TRACE=1)");
     if (log) log("[allyhit] installed mode=%s: %s",
                  mode == Mode::CoOp ? "coop" : mode == Mode::Puppet ? "puppet" : "trace",
                  mode == Mode::CoOp ? "ally player-to-player hits refused at 3D2060 (atkp kinds 5/6 kept); traced"

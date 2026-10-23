@@ -472,3 +472,17 @@ native=0|1`). These are positive observations only: the rows have a 400-row budg
 pointer-pair deduplication, so they are not a census of attacks (an unreadable or unclassified input, an
 upstream filter or a reused pointer also yields no row), and a native yes there precedes the later victim
 and damage gates, including the pattern gate above.
+The same hook also traces every check of an attack against Thorn (`B_EX100`), as
+`[thorn-trace] victim ... attacker=...(local|clone|other) source=... atkp=... pattern=0x... native=0|1
+answer=0|1`. Each row carries:
+- the attack's owner and source;
+- Thorn's hit pattern at that check (bit 9 nullifies the hit in the later victim gate);
+- the native answer and the answer the hook returns.
+
+An (attack, Thorn) pointer pair gets at most two rows while it stays in the 64-entry seen table: its first
+check, and its first native yes. Thorn's own attacks refused against itself aren't rows. `pattern=0xFFFFFFFF`
+means the pattern was unreadable, not that every bit was set. The budget is 600 rows (VUH-2617 live09:
+nothing damaged Thorn in 202).
+
+These are positive observations only, as with the rows above. Eviction can let an old pair log again,
+pointer reuse can hide a new attack, and a missing row doesn't prove that an attack never reached Thorn.

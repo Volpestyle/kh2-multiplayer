@@ -19,9 +19,9 @@ static void Log(const char* f, ...) { char b[512]; va_list a; va_start(a, f); st
 static bool Has(const char* s) { return g_logged.find(s) != std::string::npos; }
 
 static std::uintptr_t g_image = 0, g_heap = 0;
-static std::uintptr_t g_local = 0, g_clone = 0, g_clone2 = 0, g_enemy = 0, g_bullet = 0, g_companion = 0;
+static std::uintptr_t g_local = 0, g_clone = 0, g_clone2 = 0, g_enemy = 0, g_bullet = 0, g_companion = 0, g_thorn = 0;
 static std::uint64_t g_nativeAnswer = 1;
-static std::uintptr_t __fastcall Resolve(std::uint32_t h) { return h == 1 ? g_local : h == 2 ? g_clone : h == 3 ? g_clone2 : h == 4 ? g_enemy : h == 5 ? g_bullet : h == 6 ? g_companion : 0; }
+static std::uintptr_t __fastcall Resolve(std::uint32_t h) { return h == 1 ? g_local : h == 2 ? g_clone : h == 3 ? g_clone2 : h == 4 ? g_enemy : h == 5 ? g_bullet : h == 6 ? g_companion : h == 7 ? g_thorn : 0; }
 static unsigned g_resolveCalls = 0;
 static std::uintptr_t __fastcall CountingResolve(std::uint32_t h) { ++g_resolveCalls; return Resolve(h); }
 static std::uint32_t Frame() { return 77; }
@@ -314,6 +314,63 @@ int main() {
         SetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", nullptr);
         CHECK("thorn trace: reinstall without it turns it off", InstallMode("1") &&
               HookedCanHit(Attack(62, 4, 0, 1015, 2), g_local) == 0x1234501 && count("atkp=1015") == 0);
+
+        // VUH-2617: every check against Thorn (B_EX100), whoever attacks: its first check and its first native yes,
+        // with owner, source, native answer and the hook's answer. Never an answer change.
+        const auto thorn = Actor(8, Objentry(9, 4, "B_EX100"), 2);
+        const auto thornThing = [&](std::uintptr_t attack, std::uintptr_t victim) {
+            SetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", nullptr);
+            InstallMode("1");
+            const auto off = HookedCanHit(attack, victim);
+            SetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", "1");
+            InstallMode("1");
+            return std::make_pair(off, HookedCanHit(attack, victim));
+        };
+        g_nativeAnswer = 0x1234500;
+        const auto swing = Attack(200, 1, 0, 140, 1);
+        const auto first = thornThing(swing, thorn);
+        CHECK("thorn victim: the same answer with the trace off and on", first.first == first.second && first.second == 0x1234500);
+        CHECK("thorn victim: the first check is a row, with the native no",
+              count("[thorn-trace] victim") == 1 && Has("victim f=77 attacker=P_EX100@") && Has("(local) source=-@0(-)") &&
+              Has("atkp=140") && Has("victim=B_EX100") && Has("native=0 answer=0"));
+        CHECK("thorn victim: another native no of the same attack is no row",
+              HookedCanHit(swing, thorn) == 0x1234500 && count("[thorn-trace] victim") == 1);
+        CHECK("thorn victim: a clear hit pattern", Has("victim=B_EX100@") && Has("pattern=0x0 native=0"));
+        Put<std::uint32_t>(thorn + 0xD10, 0x200); Put<std::uint32_t>(thorn + 0xD14, 0x6); Put<std::uint32_t>(thorn + 0xD18, 0x4);
+        g_nativeAnswer = 0x1234501;
+        CHECK("thorn victim: its first native yes is a second row, with Thorn's pattern (bit 9 set) at that check",
+              HookedCanHit(swing, thorn) == 0x1234501 && count("[thorn-trace] victim") == 2 &&
+              Has("pattern=0x202 native=1 answer=1"));
+        CHECK("thorn victim: later yeses of that attack are no row",
+              HookedCanHit(swing, thorn) == 0x1234501 && HookedCanHit(swing, thorn) == 0x1234501 &&
+              count("[thorn-trace] victim") == 2);
+        const auto reflected = Attack(201, 4, 0, 1041, 2, 1);  // Thorn's own orb, its source the local player
+        CHECK("thorn victim: an attack owned by an enemy names its source",
+              HookedCanHit(reflected, thorn) == 0x1234501 && count("[thorn-trace] victim") == 3 &&
+              Has("attacker=M_EX020@") && Has("(other) source=P_EX100@") && Has("atkp=1041"));
+        g_thorn = thorn;
+        g_nativeAnswer = 0x1234500;
+        const auto own = Attack(204, 7, 0, 1041, 2);  // owned by Thorn itself (handle 7), no other source
+        const unsigned ownBefore = count("[thorn-trace] victim");
+        CHECK("thorn victim: Thorn's own attack refused against itself is no row",
+              HookedCanHit(own, thorn) == 0x1234500 && count("[thorn-trace] victim") == ownBefore);
+        g_nativeAnswer = 0x1234501;
+        CHECK("thorn victim: but a native yes of it is a row",
+              HookedCanHit(own, thorn) == 0x1234501 && count("[thorn-trace] victim") == ownBefore + 1);
+        const unsigned thornRows = count("[thorn-trace] victim");
+        CHECK("thorn victim: other enemies are not rows",
+              HookedCanHit(Attack(202, 1, 0, 141, 1), g_enemy) == 0x1234501 && count("[thorn-trace] victim") == thornRows);
+        // The returned answer is the hook's, not the native one: a rule that narrows a check against Thorn shows.
+        SetDownedVictim([]() { return g_thorn; });
+        CHECK("thorn victim: a narrowed answer is logged as the hook returned it",
+              HookedCanHit(Attack(204 + 1, 1, 0, 143, 1), thorn) == 0x1234500 && Has("atkp=143") &&
+              Has("native=1 answer=0"));
+        SetDownedVictim(nullptr);
+        const unsigned onRows = count("[thorn-trace] victim");
+        SetEnvironmentVariableA("KH2COOP_THORN_HIT_TRACE", nullptr);
+        InstallMode("1");
+        CHECK("thorn victim: off, no row", HookedCanHit(Attack(203, 1, 0, 142, 1), thorn) == 0x1234501 &&
+              count("[thorn-trace] victim") == onRows);
     }
     SetEnvironmentVariableA("KH2COOP_ALLY_HIT", nullptr);
 
